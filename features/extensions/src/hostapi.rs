@@ -37,9 +37,10 @@
 //! prompts, menus: `crate::hostui`) through its [`HostUi`]
 //! ([`Host::set_ui`]; [`crate::hostui::NoUi`] unless given), the
 //! decorations extensions set on rows and tabs in [`Host::decorations`],
-//! and the network (`fetch`, `crate::net`) with the secrets the host keeps
+//! the network (`fetch`, `crate::net`) with the secrets the host keeps
 //! for extensions in its [`Secrets`] ([`Host::set_secrets`]; in memory
-//! unless given).
+//! unless given), and MIDI ports, OSC endpoints and control surfaces
+//! (`crate::ports`; [`Host::with_ports`], [`Host::with_targets`]).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -158,6 +159,9 @@ pub(crate) struct Services {
     /// The streamed responses extensions have open.
     #[cfg(feature = "net")]
     net: crate::net::Net,
+    /// The ports extensions have open, and the control surfaces running
+    /// (`crate::ports`).
+    ports: crate::ports::PortsState,
 }
 
 /// A path a person picked for an extension.
@@ -175,6 +179,11 @@ impl Services {
         lock(&self.picked).remove(id);
         #[cfg(feature = "net")]
         self.net.forget(id);
+        self.ports.forget(id);
+    }
+
+    pub(crate) const fn ports(&self) -> &crate::ports::PortsState {
+        &self.ports
     }
 }
 
@@ -196,6 +205,7 @@ impl Default for Services {
             secrets: Mutex::new(Secrets::memory()),
             #[cfg(feature = "net")]
             net: crate::net::Net::default(),
+            ports: crate::ports::PortsState::default(),
         }
     }
 }
@@ -887,6 +897,19 @@ impl ExtensionApi {
                 .ask_secret(&host, manifest, &name)
                 .await
                 .map(Value::Bool),
+            HostRequest::Ports { kind } => host.list_ports(kind.as_deref()),
+            HostRequest::OpenPort { kind, name, listen } => {
+                host.open_port(&self.id, &kind, &name, listen)
+            }
+            HostRequest::PortSend { port, message } => host.port_send(&self.id, &port, &message),
+            HostRequest::PortReceive { port, max } => host.port_receive(&self.id, &port, max),
+            HostRequest::ClosePort { port } => Ok(Value::Bool(host.close_port(&self.id, &port))),
+            HostRequest::Targets => Ok(host.target_kinds()),
+            HostRequest::Surfaces => Ok(host.surfaces_of(&self.id)),
+            HostRequest::SurfaceBank { surface, bank } => host
+                .set_surface_bank(&self.id, &surface, bank)
+                .map(Value::from)
+                .map_err(|what| HostError::NotFound { what }),
         }
     }
 

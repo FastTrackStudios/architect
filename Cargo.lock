@@ -1010,6 +1010,7 @@ dependencies = [
  "architect-commands",
  "architect-extension-archive",
  "architect-extensions",
+ "architect-input",
  "architect-orgs",
  "architect-permissions",
  "architect-scripting",
@@ -1125,6 +1126,7 @@ dependencies = [
 name = "architect-input"
 version = "0.1.0"
 dependencies = [
+ "architect-input",
  "architect-workspace-hack",
  "dioxus",
  "facet",
@@ -1195,6 +1197,7 @@ dependencies = [
  "architect-commands",
  "architect-extensions",
  "architect-guide",
+ "architect-input",
  "architect-lab-board",
  "architect-orgs",
  "architect-pages",
@@ -1350,6 +1353,7 @@ dependencies = [
  "architect",
  "architect-a2ui",
  "architect-extensions",
+ "architect-input",
  "architect-pages",
  "architect-scripting",
  "architect-settings",

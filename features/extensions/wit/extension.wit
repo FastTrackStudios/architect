@@ -251,6 +251,28 @@ interface host {
     /// Asks the person for its secret `name` (`ask_secret`): whether they
     /// gave one.
     ask-secret: func(name: string) -> result<bool, string>;
+
+    // MIDI ports and OSC endpoints (features/extensions/src/ports.rs):
+    // those `capabilities.ports` names. What a port hears is a
+    // `port.message` event to the extension (a hook's), or waits for
+    // `port-receive`. Targets and control surfaces go through `call`.
+
+    /// The ports the app has, of kind `kind` (`midi`, `osc`; empty: every
+    /// one): `[{kind, name, direction}]` as JSON.
+    ports: func(kind: string) -> result<string, string>;
+    /// Opens a port (`open_port`: `{"kind": "midi", "name": …}` or
+    /// `{"kind": "osc", "name": "host:port", "listen"?: u16}` as JSON):
+    /// `{port, kind, name}` as JSON.
+    open-port: func(request: string) -> result<string, string>;
+    /// Sends a message out of its port `port` (`port_send`: `{bytes}` or
+    /// `{type, channel, number, value}` to MIDI, `{address, args}` to OSC,
+    /// as JSON).
+    port-send: func(port: string, message: string) -> result<_, string>;
+    /// What its port `port` heard that no hook took, at most `max` (0:
+    /// all; `port_receive`): `[message]` as JSON.
+    port-receive: func(port: string, max: u32) -> result<string, string>;
+    /// Closes its port `port` (`close_port`): whether it was open.
+    close-port: func(port: string) -> bool;
 }
 
 /// What a component does for its host.

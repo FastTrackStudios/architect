@@ -94,6 +94,8 @@ blitz-dom = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 
 [dev-dependencies]
+# tests/ports.rs: a virtual MIDI port.
+architect-input = { workspace = true }
 # A window to mount pages in, headless (`tests/pane.rs`).
 architect-extensions = { workspace = true, features = ["host", "linked", "ui", "remote", "manager", "page", "net"] }
 architect-settings = { workspace = true }

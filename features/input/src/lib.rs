@@ -5,7 +5,11 @@
 //! prefixes, held-letter tools), nested contexts (app › view › target
 //! under the pointer), mouse and scroll binding tables, MIDI and OSC
 //! bindings, a JSON keymap config with a base + user merge, vim key
-//! notation, and the which-key popup model.
+//! notation, and the which-key popup model. And the ports those messages
+//! come through (`ports`: MIDI ports and OSC endpoints, their codecs, a
+//! virtual backend and, feature `udp`, OSC over UDP) and control surfaces
+//! (`surface`: a device's controls mapped to an app's targets, with banks,
+//! feedback, touch and takeover).
 //!
 //! It binds keys to **action ids**: by default `String`s naming actions in
 //! the app's Action List, so a key runs the same action a menu, the
@@ -29,9 +33,11 @@ pub mod macros;
 pub mod mode;
 pub mod mouse;
 pub mod notation;
+pub mod ports;
 pub mod processor;
 pub mod scroll;
 pub mod sequence;
+pub mod surface;
 pub mod trie;
 pub mod which_key;
 
@@ -54,9 +60,19 @@ pub use macros::MacroRecorder;
 pub use mode::{ModeDefinition, ModeId, ModeStack};
 pub use mouse::{MouseBindingTable, MousePattern};
 pub use notation::{KeyPlatform, translate_modifiers, translate_sequence};
+#[cfg(all(feature = "udp", not(target_arch = "wasm32")))]
+pub use ports::UdpOsc;
+pub use ports::{
+    Direction, Inbox, OpenRequest, OscArg, OscMessage, Port, PortBackend, PortError, PortInfo,
+    PortKind, PortMessage, Ports, VirtualDevice, VirtualPorts,
+};
 pub use processor::{HeldTool, InputProcessor, MacroKeys, Released, SequenceTimeout};
 pub use scroll::{ScrollAxis, ScrollBindingTable, ScrollPattern, table_for_surface};
 pub use sequence::{SequenceResult, SequenceState};
+pub use surface::{
+    Address, ControlDesc, ControlKind, Surface, SurfaceDesc, Takeover, Target, TargetKind,
+    TargetSink, Targets,
+};
 pub use trie::{KeyTrie, LeafAction, TrieLookup, TrieNode};
 pub use which_key::{
     WhichKey, WhichKeyEntry, WhichKeyEntryDef, WhichKeyLabels, WhichKeyNext, WhichKeyTreeDef,

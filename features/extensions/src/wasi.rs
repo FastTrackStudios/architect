@@ -19,7 +19,10 @@
 //!   `delete-document`, `watch-documents`), the network through the host
 //!   (`fetch`, `read-body`, `close-body`, `secret-set`, `ask-secret`:
 //!   `crate::net`, every host and redirect checked against
-//!   `capabilities.hosts`), and `call` for every
+//!   `capabilities.hosts`), MIDI ports and OSC endpoints (`ports`,
+//!   `open-port`, `port-send`, `port-receive`, `close-port`:
+//!   `crate::ports`, each port checked against `capabilities.ports`), and
+//!   `call` for every
 //!   `hostcall::HostRequest`), each call answered by the extension's own
 //!   [`ExtensionApi`] — so checked against its capabilities as a person
 //!   granted them, as a process's, a script's and a linked extension's
@@ -716,6 +719,40 @@ impl wit_host::Host for State {
         self.ask(HostRequest::AskSecret { name })
             .await
             .map(|v| v.as_bool().unwrap_or(false))
+    }
+
+    async fn ports(&mut self, kind: String) -> Result<String, String> {
+        self.ask(HostRequest::Ports {
+            kind: (!kind.is_empty()).then_some(kind),
+        })
+        .await
+        .map(|v| v.to_string())
+    }
+
+    async fn open_port(&mut self, request: String) -> Result<String, String> {
+        self.ask_json("open_port", &request).await
+    }
+
+    async fn port_send(&mut self, port: String, message: String) -> Result<(), String> {
+        let message: Json = serde_json::from_str(&message).map_err(|e| e.to_string())?;
+        self.ask(HostRequest::PortSend { port, message })
+            .await
+            .map(|_| ())
+    }
+
+    async fn port_receive(&mut self, port: String, max: u32) -> Result<String, String> {
+        self.ask(HostRequest::PortReceive {
+            port,
+            max: (max > 0).then_some(max),
+        })
+        .await
+        .map(|v| v.to_string())
+    }
+
+    async fn close_port(&mut self, port: String) -> bool {
+        self.ask(HostRequest::ClosePort { port })
+            .await
+            .is_ok_and(|v| v.as_bool().unwrap_or(false))
     }
 
     async fn call(&mut self, request: String) -> String {

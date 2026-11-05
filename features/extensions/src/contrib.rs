@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 /// The hook events an app raises (`[[hooks]] on = …`), past
 /// `changed:<topic>` for any Action List topic and `app:<name>` for an
 /// event the app defines (`crate::events`).
-pub const EVENTS: [&str; 13] = [
+pub const EVENTS: [&str; 14] = [
     "startup",
     "workspace.changed",
     "doc.opened",
@@ -50,6 +50,8 @@ pub const EVENTS: [&str; 13] = [
     crate::events::DOC_DELETED,
     crate::events::APP_FOCUSED,
     crate::events::APP_BLURRED,
+    // What a port it opened heard (`crate::ports`): to it alone.
+    "port.message",
 ];
 
 /// The shell's regions, as slots a view can fill (`[[slots]]`, a layout

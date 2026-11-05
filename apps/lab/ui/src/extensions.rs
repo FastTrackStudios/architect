@@ -73,6 +73,11 @@ const METRONOME_DIR: &str = "metronome";
 /// development copy, `ARCHITECT_LAB_TIDY=1`).
 const TIDY_DIR: &str = "tidy";
 
+/// `lab.surface`'s folder beside the lab's registry (not in its index: a
+/// development copy, `ARCHITECT_LAB_SURFACE=1`): an OSC control surface
+/// on the lab's targets, and an OSC echo.
+const SURFACE_DIR: &str = "surface";
+
 /// The clicker's id, as the Vault's pane names it.
 pub const CLICKER: &str = "lab.clicker";
 
@@ -820,6 +825,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             // watch (`lab.tidy`).
             .with_documents(documents())
             .with_setting_values(values.clone());
+        // MIDI ports and OSC endpoints for extensions (`capabilities.ports`),
+        // and the targets their control surfaces move: the metronome's
+        // tempo, the theme's accent hue.
+        let (ports, _lab_surface) = crate::surfaces::lab_ports();
+        host = host
+            .with_ports(ports)
+            .with_targets(crate::surfaces::lab_targets(themes.clone()));
         let clicker = clicker(&root);
         let frame = frame_dev(&root);
         let wasi = wasi_counter(&root);
@@ -892,6 +904,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .filter(|_| std::env::var_os("ARCHITECT_LAB_TIDY").is_some_and(|v| v == "1"))
             .map(|dir| dir.join(TIDY_DIR))
             .filter(|dir| dir.join("extension.toml").is_file());
+        // `lab.surface` (MIDI, OSC and control surfaces') when
+        // `ARCHITECT_LAB_SURFACE=1`.
+        let surface_dir = found
+            .as_ref()
+            .filter(|_| std::env::var_os("ARCHITECT_LAB_SURFACE").is_some_and(|v| v == "1"))
+            .map(|dir| dir.join(SURFACE_DIR))
+            .filter(|dir| dir.join("extension.toml").is_file());
         for dir in clicker
             .into_iter()
             .chain(frame)
@@ -899,6 +918,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .chain(board_dev(&root))
             .chain(metronome_dir)
             .chain(tidy_dir)
+            .chain(surface_dir)
         {
             let _ = extensions.dev(dir);
         }

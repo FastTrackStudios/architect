@@ -849,6 +849,62 @@ pub mod host {
         wit_host::ask_secret(name).map_err(|e| HostError::from_text(&e))
     }
 
+    /// The ports the app has, of `kind` (`"midi"`, `"osc"`; `""` every
+    /// one): `[{kind, name, direction}]`.
+    ///
+    /// # Errors
+    ///
+    /// It may open no port (`capabilities.ports`), or the app has none.
+    pub fn ports(kind: &str) -> Result<Json, HostError> {
+        wit_host::ports(kind)
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Opens a port, its answer `{port, kind, name}`.
+    ///
+    /// `request` is `{"kind": "midi", "name": …}` or `{"kind": "osc",
+    /// "name": "host:port", "listen"?: …}`. What it hears is a `port.message` event to this extension,
+    /// or waits for [`port_receive`].
+    ///
+    /// # Errors
+    ///
+    /// Refused (`capabilities.ports` does not name it), or it would not
+    /// open.
+    pub fn open_port(request: &Json) -> Result<Json, HostError> {
+        wit_host::open_port(&request.to_string())
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Sends `message` (`{bytes}` or `{type, channel, number, value}` to a
+    /// MIDI port, `{address, args}` to an OSC one) out of its port `port`.
+    ///
+    /// # Errors
+    ///
+    /// Not its port, not a message of its kind, or the device is gone.
+    pub fn port_send(port: &str, message: &Json) -> Result<(), HostError> {
+        wit_host::port_send(port, &message.to_string()).map_err(|e| HostError::from_text(&e))
+    }
+
+    /// What its port `port` heard that no hook took, at most `max` (0:
+    /// all).
+    ///
+    /// # Errors
+    ///
+    /// Not its port.
+    pub fn port_receive(port: &str, max: u32) -> Result<Json, HostError> {
+        wit_host::port_receive(port, max)
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Closes its port `port`: whether it was open.
+    #[must_use]
+    pub fn close_port(port: &str) -> bool {
+        wit_host::close_port(port)
+    }
+
     /// Any host-service call (`hostcall::HostRequest`: `{"op": "selection"}`,
     /// `{"op": "read_file", "path": …}`), its answer.
     ///

@@ -44,6 +44,18 @@
 //! local s = host.fetch({ url = "https://api.example.com/feed", stream = true })
 //! repeat local part = host.read_body(s.stream) until part.done   -- {chunk, done}
 //! local known = host.secret("api_key").set; host.ask_secret("api_key")
+//! -- MIDI ports and OSC endpoints (crate::ports): those capabilities.ports
+//! -- names; what one hears is a port.message event to it (a hook's
+//! -- args.detail), or waits for port_receive.
+//! local midi = host.ports("midi")                  -- {{kind, name, direction}, …}
+//! local p = host.open_port("midi", "X-Touch").port
+//! host.port_send(p, { type = "cc", channel = 1, number = 7, value = 100 })
+//! local o = host.open_port("osc", "127.0.0.1:9000", 9001).port   -- hears on 9001
+//! host.port_send(o, { address = "/track/1/volume", args = { 0.5 } })
+//! for _, m in host.port_receive(o) do host.log(m.address) end
+//! host.close_port(p)
+//! -- Control surfaces (crate::ports): the app's targets, its own surfaces.
+//! local kinds = host.targets(); host.surface_bank("fake8", 1)
 //! ```
 //!
 //! `pick`, `prompt` and `menu` wait for the person; a cancel is `nil`.
@@ -265,6 +277,37 @@ impl Module for HostModule {
             HostRequest::Unsubscribe { key: a }
         ));
         op!("events", (), |lua, _a| Ok(HostRequest::Events));
+        op!("ports", Option<String>, |lua, a| Ok(HostRequest::Ports {
+            kind: a
+        }));
+        op!("open_port", (String, String, Option<u16>), |lua, a| Ok(
+            HostRequest::OpenPort {
+                kind: a.0,
+                name: a.1,
+                listen: a.2
+            }
+        ));
+        op!("port_send", (String, LuaValue), |lua, a| {
+            let (port, message) = a;
+            json_of(&lua, message).map(|message| HostRequest::PortSend { port, message })
+        });
+        op!("port_receive", (String, Option<u32>), |lua, a| Ok(
+            HostRequest::PortReceive {
+                port: a.0,
+                max: a.1
+            }
+        ));
+        op!("close_port", String, |lua, a| Ok(HostRequest::ClosePort {
+            port: a
+        }));
+        op!("targets", (), |lua, _a| Ok(HostRequest::Targets));
+        op!("surfaces", (), |lua, _a| Ok(HostRequest::Surfaces));
+        op!("surface_bank", (String, u32), |lua, a| Ok(
+            HostRequest::SurfaceBank {
+                surface: a.0,
+                bank: a.1
+            }
+        ));
         // `fetch(url, options?)` or `fetch({url = …, …})`.
         op!("fetch", (LuaValue, Option<LuaValue>), |lua, a| {
             let (first, options) = a;

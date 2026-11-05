@@ -1845,8 +1845,9 @@ action namespaces it may run past its own (`actions`) and the most they
 may change (`effect`: read-only, mutating, destructive), what of the
 app's state it may read (`reads`: `org`, `selection`, `documents`) and
 change (`writes`: `documents`, below), the
-app's interface it may use (`ui`: below), the folders past its own and
-the network hosts
+app's interface it may use (`ui`: below), the folders past its own,
+the network hosts, and the MIDI ports and OSC endpoints (`ports`: "MIDI,
+OSC and control surfaces", below)
 (`features/extensions/src/manifest.rs` `Capabilities`;
 `features/extensions/src/capabilities.rs` turns them into the lines a
 person reads, `Capabilities::grows_from`, and into what may run,
@@ -2338,6 +2339,159 @@ and granted), `features/extensions/tests/wasi.rs`
 (`a_component_fetches_from_its_host_and_is_refused_another`, and
 `a_component_makes_edits_lists_and_reads_a_document` for the document
 imports), `features/pages/tests/net.rs` (a TSX and a Luau page).
+
+## MIDI, OSC and control surfaces
+
+CSI, DrivenByMoss, ReaLearn, LBX Stripper and Playtime talk to devices:
+MIDI controllers, OSC apps on a tablet, motor-fader surfaces (#311). An
+extension does not open a device itself. It asks the host, and the host
+checks each port against the manifest's `capabilities.ports` as a person
+granted them; the consent screen lists them like `hosts`. The ports are the
+app's: it gives the host an `architect_input::PortBackend`
+(`Host::with_ports`). The lab gives OSC over UDP (`architect_input::UdpOsc`)
+and a virtual MIDI port (`apps/lab/ui/src/surfaces.rs` `lab_ports`). A
+system MIDI backend (`midir`, CoreMIDI) is the app's to add behind the same
+trait. The model is `features/input/src/ports.rs` and the host side is
+`features/extensions/src/ports.rs`.
+
+```toml
+[capabilities]
+ports = [
+    "midi:X-Touch*",        # MIDI ports by name; a trailing * any it begins; midi:* any
+    "osc:127.0.0.1:9000",   # an OSC endpoint it sends to; osc:<host>:* any port there; osc:* any
+    "osc:listen:9001",      # a port of this computer it hears OSC on
+]
+```
+
+| call | Luau `host.` / a page's `ports.` / a component's import | answer | needs |
+|---|---|---|---|
+| `ports {kind?}` | `ports(kind?)` / `list(kind?)` / `ports` | `[{kind, name, direction}]` (MIDI ports; OSC endpoints are not listed) | any `capabilities.ports` |
+| `open_port {kind, name, listen?}` | `open_port(kind, name, listen?)` / `open(kind, name, listen?)` / `open-port` | `{port, kind, name}` | `capabilities.ports` naming it (and `osc:listen:<listen>`) |
+| `port_send {port, message}` | `port_send(port, message)` / `send(port, message)` / `port-send` | `null` | its own port |
+| `port_receive {port, max?}` | `port_receive(port, max?)` / `receive(port, max?)` / `port-receive` | `[message]` that no hook took | its own port |
+| `close_port {port}` | `close_port(port)` / `close(port)` / `close-port` | whether it was open | its own port |
+| `targets` | `targets()` / `targets()` / `call` | `[{id, title, min, max, step?, count, values}]` | nothing |
+| `surfaces` / `surface_bank {surface, bank}` | `surfaces()`, `surface_bank(surface, bank)` / `surfaces()`, `setBank(surface, bank)` / `call` | its surfaces as they run / the bank it is on | its own surfaces |
+
+**Messages** are JSON (`PortMessage::to_json`, `from_json`). A MIDI one is
+`{bytes, type, channel, number, value}`. `type` is one of `note_on`,
+`note_off`, `cc`, `program`, `pitch_bend`, `sysex` or `other`, and channels
+are 1–16. An extension sends either `{bytes: [...]}` or `{type, channel,
+number, value}`. An OSC one is `{address, args}`. An argument that is a
+whole number is sent as an `i`, any other number as an `f`, a string as an
+`s`, `true` and `false` as `T` and `F`, and `null` as `N`. Bundles are read
+into their messages.
+
+**What a port hears** is the event `port.message`, sent only to the
+extension that opened the port. Its detail is `{port, kind, name, message}`.
+A hook on it, in the manifest or made with `subscribe`, runs for each
+message. So a background extension (`[background]`) sleeps until its device
+says something and is started by the first message after it went idle.
+Its ports stay open while it sleeps. A message that started no hook waits
+for `port_receive`: there was no hook, or a run of it had not ended. The
+last `ports::INBOX` (1024) messages are kept. When the extension unloads,
+every port it opened closes.
+
+```toml
+[background]
+idle = "5m"
+
+[[hooks]]
+on = "port.message"
+script = "echo.luau"
+function = "heard"
+```
+
+```lua
+-- echo.luau
+return { heard = function(event)
+    local d = event.detail          -- {port, kind, name, message}
+    if d.kind == "midi" and d.message.type == "note_on" then
+        host.port_send(d.port, { type = "note_on", channel = d.message.channel,
+                                 number = d.message.number + 12, value = d.message.value })
+    end
+end }
+```
+
+### Control surfaces
+
+A control surface is a contribution, not code. The app offers **targets**
+(`Host::with_targets`, an `architect_input::Targets`). Each kind is an
+`architect_input::Target` with a `TargetKind` (an id, a range and how many
+instances there are) and implements read, write, an optional label (a
+track's name, for a scribble strip), touch and observe. Studio offers track
+volumes, FX parameters and the transport (studio#381); the lab offers its
+metronome's tempo and the theme's accent hue (`apps/lab/ui/src/surfaces.rs`
+`lab_targets`). Offering targets declares the point `control.surfaces`. An
+extension contributes a surface to it as an `architect_input::SurfaceDesc`:
+
+```toml
+[[contribute."control.surfaces"]]
+id = "osc"
+title = "Lab OSC surface"
+port = "osc:127.0.0.1:9000"   # or midi:<port name>; within capabilities.ports
+listen = 9001                 # OSC: where the device sends (osc:listen:9001)
+bank_size = 8                 # strips a bank is (none: the highest strip + 1)
+controls = [
+    { id = "fader1", kind = "fader", strip = 0, input = "PB ch1", touch = "Note104 ch1", target = "track.volume" },
+    { id = "strip1", kind = "display", strip = 0, feedback = "sysex:F0 00 00 66 14 12 00 {text} F7", target = "track.volume" },
+    { id = "tempo", kind = "knob", input = "/lab/tempo", target = "lab.metronome.tempo", takeover = "pickup" },
+    { id = "pan1", kind = "encoder", strip = 0, input = "CC16 ch1", target = "track.pan" },
+    { id = "bank+", kind = "button", input = "Note47 ch1", target = "bank.next" },
+    { id = "bank-", kind = "button", input = "Note46 ch1", target = "bank.prev" },
+]
+```
+
+The host opens the surface's port (one its contributor's
+`capabilities.ports` names) and runs it (`architect_input::Surface`):
+
+- A control's `input` is a MIDI message (`CC7 ch1`, `PB ch1`, `Note16
+  ch1`) or an OSC address whose first argument is the value (0–1).
+  `feedback` is what it is sent back: by default its input for a fader,
+  knob, encoder or button. A display takes `sysex:… {text} …` or an OSC
+  address. Kinds are `fader`, `knob`, `button`, `encoder`, `display` and
+  `led`.
+- **Banks**: a strip control moves instance `bank × bank_size + strip`. A
+  `bank.next` or `bank.prev` button, or `surface_bank`, switches the bank.
+  The device is then sent every control's feedback: motor faders move,
+  scribble strips are renamed.
+- **Feedback**: a target that changes elsewhere (its `observe`, or the
+  app's `Targets::changed`) moves the controls on it.
+- **Touch**: a touched fader is not moved under the finger, and when it
+  is let go it goes to where the target is. The target hears `touch`, for
+  automation.
+- **Takeover**: `jump` (the default) writes at once. With `pickup`, a
+  knob writes nothing until it reaches the target's value or crosses it.
+- An encoder's message is detents, signed (CC 1–63 up, 65–127 down; an
+  OSC argument ±n), each one the kind's `step`.
+
+`Host::surfaces` (and the `surfaces` call) say how each surface is: its
+bank, how many banks there are, and why it is not running (a bad
+description, a port it may not open, or one that would not open). That
+reason is also a line in its log. When the item goes, its surface stops
+and its port closes.
+
+**The lab**: `lab.surface` (`apps/lab/extensions/surface`, loaded with
+`ARCHITECT_LAB_SURFACE=1`) is an OSC surface. A device at `127.0.0.1:9000`
+that sends `/lab/tempo` and `/lab/hue` (0–1) to port 9001 moves the
+tempo and the accent's hue, and is sent both back. It is also an OSC
+echo on `127.0.0.1:9010` that hears on 9011.
+
+**Where it runs**: only on the native host. In a browser (`web::WebHost`)
+the port calls answer `unsupported`: a browser has no UDP, and Web MIDI is
+not wired yet. Each call is the `ext.host_call` span with `perm.capability`
+`ports`, and a refusal names what it lacked (`ports.midi:Other`).
+
+Tests, with no hardware: `features/extensions/tests/ports.rs`. A
+background extension hears a virtual MIDI port and an OSC endpoint over
+localhost UDP, is started again by a message, and answers through both.
+What no hook takes waits for `port_receive`. A port outside its
+capabilities is refused, and so are another extension's port, `ports`
+with none, a bad entry and a surface on a port it may not open. A fake
+eight-fader surface moves lab targets with feedback, banks and pickup.
+`features/input/tests/surface.rs` tests the engine: banks, feedback,
+touch, pickup and an encoder. `features/input/tests/ports.rs` tests OSC
+over UDP. `features/pages/tests/ports.rs` has a TSX and a Luau page.
 
 ## The extensions manager
 

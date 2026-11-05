@@ -121,10 +121,26 @@ pub struct MidiEvent {
 /// The MIDI messages a binding can name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MidiMessage {
-    NoteOn { note: u8, velocity: u8 },
-    NoteOff { note: u8, velocity: u8 },
-    ControlChange { control: u8, value: u8 },
-    ProgramChange { program: u8 },
+    NoteOn {
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        note: u8,
+        velocity: u8,
+    },
+    ControlChange {
+        control: u8,
+        value: u8,
+    },
+    ProgramChange {
+        program: u8,
+    },
+    /// A pitch bend, `0..=16383` (8192 the centre): a Mackie Control
+    /// fader's position.
+    PitchBend {
+        value: u16,
+    },
 }
 
 /// An OSC message: its address and its numeric arguments.

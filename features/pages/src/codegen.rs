@@ -392,6 +392,38 @@ export const net: {
   askSecret(name: string): Promise<boolean>;
 };
 
+/** A message through a port: MIDI `{bytes}` or `{type, channel, number?, value?}`, OSC `{address, args}`. */
+export type PortMessage = {
+  bytes?: number[];
+  type?: string;
+  channel?: number;
+  number?: number;
+  value?: number;
+  address?: string;
+  args?: (number | string | boolean | null)[];
+};
+/**
+ * MIDI ports and OSC endpoints, as the page's extension: those its
+ * `capabilities.ports` names. What a port hears is a `port.message` event
+ * to the extension (`events.subscribe({ on: "port.message", action })`), or
+ * waits for `receive`.
+ */
+export const ports: {
+  list(kind?: "midi" | "osc"): Promise<{ kind: string; name: string; direction: string }[]>;
+  /** A MIDI port by name, or an OSC endpoint `host:port` hearing on `listen`. */
+  open(kind: "midi" | "osc", name: string, listen?: number): Promise<{ port: string; kind: string; name: string }>;
+  send(port: string, message: PortMessage): Promise<null>;
+  /** What it heard that no hook took, at most `max`. */
+  receive(port: string, max?: number): Promise<PortMessage[]>;
+  close(port: string): Promise<boolean>;
+  /** The kinds of target the app offers control surfaces. */
+  targets(): Promise<{ id: string; title: string; min: number; max: number; step?: number; count: number }[]>;
+  /** Its control surfaces as they run. */
+  surfaces(): Promise<{ id: string; from: string; title: string; port: string; bank: number; banks: number; error?: string }[]>;
+  /** One of its control surfaces on bank `bank`: the bank it is on. */
+  setBank(surface: string, bank: number): Promise<number>;
+};
+
 /** A worker: a script of the page's folder in a runtime of its own, spoken to by messages. */
 export interface Worker {
   readonly id: number;
@@ -499,6 +531,10 @@ export type Builder = {
 --   net.read(stream, max?) ({chunk, done}), net.close(stream), net.secret(name), net.ask_secret(name):
 --   the network, as the page's extension (capabilities.hosts; a header may name a secret,
 --   "{{secret:api_key}}", the host puts it in)
+--   ports.list(kind?), ports.open(kind, name, listen?) ({port, kind, name}), ports.send(port, message),
+--   ports.receive(port, max?), ports.close(port), ports.targets(), ports.surfaces(), ports.set_bank(surface, bank):
+--   MIDI ports and OSC endpoints, as the page's extension (capabilities.ports; what a port hears is
+--   a port.message event to it, or waits for ports.receive)
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }
