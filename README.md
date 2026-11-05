@@ -100,8 +100,8 @@ stopped. It starts on the lab's first launch and from ⌘K › Take the
 tour.
 
 ```sh
-devenv shell
-cargo run -p architect-desktop
+devenv up    # the lab under dx serve, plus Teley and its collector
+just lab     # or the lab alone, without dx
 ```
 
 ![The Architect tour over the lab: a popover per chapter, ringing the title-row tabs, the sidebar toggle and the Lab menu](https://raw.githubusercontent.com/FastTrackStudios/architect/media/architect-tour-intro.gif)
