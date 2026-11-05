@@ -29,18 +29,24 @@
 //!
 //! # Which files are markers
 //!
-//! The vault itself declares none: which file makes a directory a root of
-//! its own is the app's layout (Task's is `project.md`, a directory that
-//! declares itself a project). An app names its markers once, at start,
-//! with [`set_shelf_markers`]; until it does, no directory is a nested
-//! shelf and a walk covers the whole tree.
+//! A project's page, [`PROJECT_PAGE`] (`project.md`): a directory that
+//! holds one is a project, and a project is a root of its own. That is the
+//! default, so no app has to name it. An app with another layout names its
+//! markers once, at start, with [`set_shelf_markers`] (`&[]` for none, so
+//! a walk covers the whole tree).
 
 use std::path::Path;
 use std::sync::OnceLock;
 
+pub use vault_proto::consts::PROJECT_PAGE;
+
 static MARKERS: OnceLock<&'static [&'static str]> = OnceLock::new();
 
-/// Names the files that declare a directory a registered root of its own.
+/// The markers until an app names its own: a project's page.
+pub const DEFAULT_SHELF_MARKERS: &[&str] = &[PROJECT_PAGE];
+
+/// Names the files that declare a directory a registered root of its own,
+/// in place of [`DEFAULT_SHELF_MARKERS`].
 ///
 /// Such a directory is not part of its parent's. Call it once, before the
 /// first walk; the first call wins (the answer must not change under a
@@ -50,10 +56,10 @@ pub fn set_shelf_markers(markers: &'static [&'static str]) -> bool {
 }
 
 /// The files that declare a directory a shelf of its own: what
-/// [`set_shelf_markers`] named, else none.
+/// [`set_shelf_markers`] named, else [`DEFAULT_SHELF_MARKERS`].
 #[must_use]
 pub fn shelf_markers() -> &'static [&'static str] {
-    MARKERS.get().copied().unwrap_or(&[])
+    MARKERS.get().copied().unwrap_or(DEFAULT_SHELF_MARKERS)
 }
 
 /// Whether `dir` is a shelf nested inside the root being walked.
@@ -79,7 +85,7 @@ pub fn is_nested_shelf_with(markers: &[&str], root: &Path, dir: &Path) -> bool {
 mod tests {
     use super::*;
 
-    const MARKERS: &[&str] = &["project.md"];
+    const MARKERS: &[&str] = DEFAULT_SHELF_MARKERS;
 
     fn shelf(dir: &Path) {
         std::fs::create_dir_all(dir).unwrap();
@@ -114,5 +120,17 @@ mod tests {
         );
         // With no markers named, nothing is a boundary.
         assert!(!is_nested_shelf_with(&[], &root, &song));
+    }
+
+    #[test]
+    fn a_project_page_is_the_default_marker() {
+        // No test in this crate names markers, so the default stands.
+        assert_eq!(shelf_markers(), &["project.md"]);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("album");
+        shelf(&root);
+        let song = root.join("track-two");
+        shelf(&song);
+        assert!(is_nested_shelf(&root, &song));
     }
 }

@@ -18,6 +18,11 @@ pub const STORE_DIR: &str = ".fts-files";
 /// skipped at every walk depth and never ingested as ordinary content.
 pub const GIT_DIR: &str = ".git";
 
+/// The page that makes the directory holding it a project: the
+/// project's own note, and the marker of a nested root (`vault-live`'s
+/// `shelf_boundary`). A song, a session, a client job or a codebase alike.
+pub const PROJECT_PAGE: &str = "project.md";
+
 /// Marker file that makes the directory holding it **node-private**.
 ///
 /// It stays on this machine's disk and nowhere else. A private
