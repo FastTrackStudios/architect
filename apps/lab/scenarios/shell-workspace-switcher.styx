@@ -1,4 +1,4 @@
-// The organization switcher, opened in the sidebar.
+// The organization switcher, opened from its mark in the ribbon.
 id shell-workspace-switcher
 title "The organization switcher"
 view {width 1440, height 860}
@@ -6,7 +6,7 @@ capture {fps 20, width 1280, outputs (png)}
 steps (
     {
         id open
-        target @css"[aria-label=\"Switch Organization\"]"
+        target @css"[aria-label^=\"Switch Organization\"]"
         do @click{}
         hold 0.4
     }

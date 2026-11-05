@@ -275,7 +275,7 @@ fn vault_note(path: &str) -> Pane {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let mut pane = Pane::new(format!("vault-{n}"), VAULT_NOTE, title_of(path));
-    pane.state = path.to_owned();
+    path.clone_into(&mut pane.state);
     pane
 }
 
@@ -510,23 +510,29 @@ pub fn VaultPage() -> Element {
         architect_commands::Opener::new(
             "note",
             "Notes",
-            move |_| match lab.disk.cloned() {
-                // Go to file: every note of the vault on disk, by its path.
-                Some(disk) => disk.vault().with(|v| {
-                    v.pages
-                        .iter()
-                        .map(|p| {
-                            architect_commands::OpenItem::new("note", p.rel_path.clone(), p.basename.clone())
-                                .detail(p.folder.clone())
+            move |_| {
+                lab.disk.cloned().map_or_else(
+                    || {
+                        NOTES
+                            .iter()
+                            .map(|(id, title)| {
+                                architect_commands::OpenItem::new("note", *id, *title).detail("Vault")
+                            })
+                            .collect()
+                    },
+                    // Go to file: every note of the vault on disk, by its path.
+                    |disk| {
+                        disk.vault().with(|v| {
+                            v.pages
+                                .iter()
+                                .map(|p| {
+                                    architect_commands::OpenItem::new("note", p.rel_path.clone(), p.basename.clone())
+                                        .detail(p.folder.clone())
+                                })
+                                .collect()
                         })
-                        .collect()
-                }),
-                None => NOTES
-                    .iter()
-                    .map(|(id, title)| {
-                        architect_commands::OpenItem::new("note", *id, *title).detail("Vault")
-                    })
-                    .collect(),
+                    },
+                )
             },
             move |item, open_in| {
                 let target = match open_in {
@@ -1105,8 +1111,8 @@ const SAVE_AFTER_MS: u64 = 400;
 #[component]
 fn VaultNoteView() -> Element {
     let pane = use_pane();
-    let path = pane.state();
     let id = pane.id.0.clone();
+    let path = pane.state();
     if use_lab_vault().disk.peek().is_none() || path.is_empty() {
         return rsx! { Stand { what: "No vault is open", next: "Open the lab on a folder of notes (just lab)." } };
     }
@@ -1265,7 +1271,7 @@ fn VaultNote(path: String) -> Element {
             }
             crate::note_editor::NoteEditor {
                 id: here.clone(),
-                text: first.clone(),
+                text: first,
                 incoming: incoming(),
                 on_change: move |value: String| {
                     let mut ours = ours;

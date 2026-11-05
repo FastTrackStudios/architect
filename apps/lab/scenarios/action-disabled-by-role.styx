@@ -6,7 +6,7 @@ capture {fps 20, width 960}
 steps (
     {
         id open
-        target @css"[aria-label=\"Switch Organization\"]"
+        target @css"[aria-label^=\"Switch Organization\"]"
         do @click{}
         hide true
     }

@@ -6,8 +6,9 @@
 //! lab` and `devenv up` name a scratch one under devenv's state, seeded
 //! from `apps/lab/demo-vault`, which `$ARCHITECT_LAB_SEED` names, when it
 //! is missing), else `<the lab's folder>/vault`, seeded on first run from
-//! the sample in `apps/lab/vault`. Only a lab with files has one: a
-//! film's headless run keeps nothing, and its Vault is in memory.
+//! the sample in `apps/lab/vault`, which backs the actions only (the
+//! Vault's own notes are in memory then, as tests and films expect). Only
+//! a lab with files has one: a film's headless run keeps nothing.
 //! `APP_STATUS`'s `vault` section says which folder is open.
 
 use std::path::{Path, PathBuf};
@@ -116,8 +117,12 @@ fn folder() -> Option<PathBuf> {
 /// The vault the lab opened, for the Vault's navigator and editor.
 static OPEN: OnceLock<vault::actions::OpenVault> = OnceLock::new();
 
-/// The vault on disk the lab opened ([`register`]), if it has one.
+/// The vault on disk the Vault's navigator and editor show: the one
+/// `$ARCHITECT_LAB_VAULT` names (`just lab`, `devenv up`). The lab's own
+/// sample (`<its folder>/vault`) backs the `VAULT_*` actions only, so a
+/// test run or film keeps its notes in memory and looks as it always did.
 pub fn open_vault() -> Option<vault::actions::OpenVault> {
+    std::env::var_os("ARCHITECT_LAB_VAULT")?;
     OPEN.get().cloned()
 }
 

@@ -1,5 +1,6 @@
 //! The vault as the navigator's source: what it lists, what it derives per
 //! note, and the events of the app's own changes and of edits outside it.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

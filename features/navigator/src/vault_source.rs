@@ -1,5 +1,6 @@
-//! Architect's vault as a [`NavigatorSource`] (feature `vault`): its
-//! folders and files, each note's properties, tags, preview, feature image
+//! Architect's vault as a [`NavigatorSource`] (feature `vault`).
+//!
+//! Its folders and files, each note's properties, tags, preview, feature image
 //! and tasks (what Notebook Navigator derives per file, `FileData`), and
 //! the changes as they come: the app's own (a save, a new note, a rename)
 //! at once, edits made outside the app as the vault's watcher hears them
@@ -384,8 +385,8 @@ fn unlink(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut rest = line;
     while let Some(i) = rest.find(['[', '!']) {
-        out.push_str(&rest[..i]);
-        let at = &rest[i..];
+        let (before, at) = rest.split_at_checked(i).unwrap_or((rest, ""));
+        out.push_str(before);
         if let Some(inner) = at.strip_prefix("![[").and_then(|r| r.split_once("]]")) {
             rest = inner.1;
         } else if let Some((target, after)) = at.strip_prefix("[[").and_then(|r| r.split_once("]]")) {
@@ -407,8 +408,11 @@ fn unlink(line: &str) -> String {
             out.push_str(text);
             rest = after;
         } else {
-            out.push_str(&at[..1]);
-            rest = &at[1..];
+            let mut chars = at.chars();
+            if let Some(c) = chars.next() {
+                out.push(c);
+            }
+            rest = chars.as_str();
         }
     }
     out.push_str(rest);
@@ -440,11 +444,11 @@ fn feature_image(v: &Vault, page: &VaultPage) -> Option<std::path::PathBuf> {
 /// The targets of a text's image embeds: `![[x.png]]`, `![](x.png)`.
 fn embeds(text: &str) -> impl Iterator<Item = String> + '_ {
     let wiki = text.match_indices("![[").filter_map(move |(i, _)| {
-        let rest = text.get(i + 3..)?;
+        let rest = text.get(i.saturating_add(3)..)?;
         rest.split_once("]]").map(|(t, _)| t.to_owned())
     });
     let md = text.match_indices("![").filter_map(move |(i, _)| {
-        let rest = text.get(i + 2..)?;
+        let rest = text.get(i.saturating_add(2)..)?;
         let (_, after) = rest.split_once("](")?;
         after.split_once(')').map(|(t, _)| t.to_owned())
     });

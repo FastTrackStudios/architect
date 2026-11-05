@@ -505,8 +505,10 @@ pub fn use_shell_slots(left: Option<Element>, rail: Option<Element>) {
 }
 
 /// A desk's left side: the rail alone, or the rail and a sidebar of one or
-/// two columns (Notebook Navigator's single and dual pane: notes, or
-/// folders beside notes). Every page may be shown in any of the three
+/// two columns.
+///
+/// One and two are Notebook Navigator's single and dual pane: notes, or
+/// folders beside notes. Every page may be shown in any of the three
 /// (the sidebar's button, ⌘K's "Sidebar: …"); a page says which it
 /// prefers ([`use_sidebar_layout`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

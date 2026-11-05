@@ -1,5 +1,6 @@
 //! Editing an open vault as an app does: saving a note, making one,
 //! renaming and moving one (its links follow), and hearing outside edits.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::time::Duration;
 
@@ -91,18 +92,36 @@ fn the_watcher_hears_an_outside_edit_and_not_the_apps_own() {
     v.save("Ionian.md", "Saved by the app.\n").unwrap();
     std::thread::sleep(Duration::from_millis(100));
     std::fs::write(tmp.path().join("Notes/Other.md"), "From another editor.\n").unwrap();
-    let heard = rx.recv_timeout(Duration::from_secs(10)).expect("heard");
-    assert_eq!(heard.modified, ["Notes/Other.md"]);
-    // An outside edit just after the app saved the same note is heard
-    // too (someone typing while a `git pull` lands).
-    v.save("Ionian.md", "Saved again.\n").unwrap();
-    std::fs::write(tmp.path().join("Ionian.md"), "Pulled.\n").unwrap();
-    let heard = rx.recv_timeout(Duration::from_secs(10)).expect("heard");
-    assert_eq!(heard.modified, ["Ionian.md"]);
-    assert_eq!(v.text("Ionian.md").as_deref(), Some("Pulled.\n"));
+    // What the watcher hears, until `path` is among what changed (a busy
+    // machine may split or join the debounced events).
+    let until = |path: &str| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut all = Vec::new();
+        while std::time::Instant::now() < deadline {
+            if let Ok(c) = rx.recv_timeout(Duration::from_millis(200)) {
+                let found = c.modified.iter().any(|p| p == path);
+                all.push(c);
+                if found {
+                    return all;
+                }
+            }
+        }
+        panic!("never heard {path}: {all:?}");
+    };
+    let heard = until("Notes/Other.md");
+    assert!(
+        heard.iter().all(|c| !c.modified.contains(&"Ionian.md".to_owned())),
+        "the app's own save is no change: {heard:?}"
+    );
     assert_eq!(
         v.text("Notes/Other.md").as_deref(),
         Some("From another editor.\n")
     );
+    // An outside edit just after the app saved the same note is heard
+    // too (someone typing while a `git pull` lands).
+    v.save("Ionian.md", "Saved again.\n").unwrap();
+    std::fs::write(tmp.path().join("Ionian.md"), "Pulled.\n").unwrap();
+    until("Ionian.md");
+    assert_eq!(v.text("Ionian.md").as_deref(), Some("Pulled.\n"));
     drop(watch);
 }

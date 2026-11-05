@@ -265,30 +265,29 @@ pub fn replace_spec(old: &str, new: &str) -> Option<TransactionSpec> {
     if old == new {
         return None;
     }
-    let mut start = old
-        .bytes()
-        .zip(new.bytes())
-        .take_while(|(a, b)| a == b)
-        .count();
-    while !old.is_char_boundary(start) || !new.is_char_boundary(start) {
-        start -= 1;
-    }
-    let max_tail = old.len().min(new.len()) - start;
-    let mut tail = old
-        .bytes()
+    // Compared a character at a time, so neither end is inside one.
+    let same = |(a, b): &(char, char)| a == b;
+    let start: usize = old
+        .chars()
+        .zip(new.chars())
+        .take_while(same)
+        .map(|(c, _)| c.len_utf8())
+        .sum();
+    let (old_rest, new_rest) = (old.get(start..)?, new.get(start..)?);
+    let tail: usize = old_rest
+        .chars()
         .rev()
-        .zip(new.bytes().rev())
-        .take(max_tail)
-        .take_while(|(a, b)| a == b)
-        .count();
-    while !old.is_char_boundary(old.len() - tail) || !new.is_char_boundary(new.len() - tail) {
-        tail -= 1;
-    }
-    let inserted = &new[start..new.len() - tail];
+        .zip(new_rest.chars().rev())
+        .take_while(same)
+        .map(|(c, _)| c.len_utf8())
+        .sum();
+    let old_end = old.len().saturating_sub(tail).max(start);
+    let new_end = new.len().saturating_sub(tail).max(start);
+    let inserted = new.get(start..new_end)?;
     Some(
         TransactionSpec::new()
             .changes(editor_view::editor_state::Changes::replace(
-                start..old.len() - tail,
+                start..old_end,
                 inserted,
             ))
             .user_event("reload"),
@@ -723,7 +722,10 @@ mod reload_tests {
     fn a_reload_replaces_only_what_differs() {
         let spec = replace_spec("One two three", "One 2 three").unwrap();
         let c = &spec.changes;
-        assert_eq!(format!("{c:?}").contains("from: 4"), true, "{c:?}");
+        assert!(format!("{c:?}").contains("from: 4"), "{c:?}");
+        // A run of the same character: the edit is one character, not two.
+        let spec = replace_spec("aaa", "aa").unwrap();
+        assert!(format!("{:?}", spec.changes).contains("inserted: \"\""));
         assert!(replace_spec("same", "same").is_none());
         // Never inside a character.
         assert!(replace_spec("café", "cafè").is_some());

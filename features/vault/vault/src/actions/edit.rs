@@ -27,7 +27,7 @@ pub struct Changes {
 impl Changes {
     /// Nothing changed.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.created.is_empty()
             && self.modified.is_empty()
             && self.removed.is_empty()
@@ -45,15 +45,20 @@ pub struct Renamed {
     pub relinked: Vec<String>,
 }
 
+/// A length as a file's size.
+fn size(len: usize) -> u64 {
+    u64::try_from(len).unwrap_or(u64::MAX)
+}
+
 /// Every file the snapshot holds, by path: when it last changed and its
 /// size (an attachment has no text to compare).
 fn stamps(v: &Vault) -> BTreeMap<String, (SystemTime, u64)> {
     let mut out = BTreeMap::new();
     for p in &v.pages {
-        out.insert(p.rel_path.clone(), (p.mtime, p.raw.len() as u64));
+        out.insert(p.rel_path.clone(), (p.mtime, size(p.raw.len())));
     }
     for b in &v.bases {
-        out.insert(b.rel_path.clone(), (b.mtime, b.raw.len() as u64));
+        out.insert(b.rel_path.clone(), (b.mtime, size(b.raw.len())));
     }
     for a in &v.attachments {
         let meta = std::fs::metadata(v.root.join(&a.rel_path)).ok();
@@ -99,7 +104,9 @@ fn check_note_path(to: &str) -> Result<(), String> {
     let bad = to.is_empty()
         || to.starts_with('/')
         || to.split('/').any(|s| s.is_empty() || s == "." || s == "..")
-        || !to.ends_with(".md");
+        || !Path::new(to)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
     if bad {
         return Err(format!("{to:?} is not a note's path (a vault path ending in .md)"));
     }
@@ -133,6 +140,7 @@ impl OpenVault {
             known.insert(up.to_owned());
             at = up;
         }
+        drop(known);
     }
 
     /// Writes `text` as the note at `path` (marked as the app's own write,
@@ -227,6 +235,7 @@ impl OpenVault {
                 .map_err(|e| e.to_string())?;
             relinked.push(path);
         }
+        drop(v);
         Ok(Renamed {
             from: from.to_owned(),
             to: to.to_owned(),
@@ -268,6 +277,7 @@ impl OpenVault {
         changes.folders_created = after_folders.difference(&known).cloned().collect();
         changes.folders_removed = known.difference(&after_folders).cloned().collect();
         *known = after_folders;
+        drop(known);
         Ok(changes)
     }
 
