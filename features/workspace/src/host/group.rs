@@ -95,9 +95,6 @@ impl Edges {
     }
 }
 
-/// Room either side of a bar's tabs for the current tab's curved corners.
-const FLARE: f32 = 8.0;
-
 /// A split or a group.
 #[component]
 pub(super) fn NodeView(node: Node, #[props(default)] edges: Edges) -> Element {
@@ -348,7 +345,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
             // tabs, and a press on one missed it). The current tab covers
             // the rule and opens into its pane; the others show it.
             div { style: "flex:0 1 auto; min-width:0; display:flex; align-items:flex-end; overflow:hidden; \
-                          padding:{lift}px {FLARE}px 0; gap:1px; position:relative;",
+                          padding-top:{lift}px; gap:1px; position:relative;",
                 "data-tab-bar": "{names}",
                 onmounted: move |e| host.mount(Mount::Bar(group.id), e.data()),
                 for (index, (pane, title, pinned, icon)) in tabs.into_iter().enumerate() {
@@ -363,7 +360,6 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                         icon,
                         icons,
                         rule_bar: ruled,
-                        bar: bar.to_owned(),
                     }
                 }
             }
@@ -487,8 +483,6 @@ fn Tab(
     icons: bool,
     /// The bar draws a rule along its foot.
     rule_bar: bool,
-    /// The bar's colour, which the current tab's corners curve out into.
-    bar: String,
 ) -> Element {
     let tab_id = pane.0.clone();
     let mut host = use_host();
@@ -538,13 +532,11 @@ fn Tab(
     let shrink = if on { 0.2 } else { 1.0 };
     let hairline = if rule { &*t.rule } else { "transparent" };
     // The current tab is outlined on three sides and open into its pane
-    // below, its corners curving out into the bar's rule (Obsidian's). The
-    // curves are drawn in its own box (it clips: Blitz sizes a tab that
-    // does not by its content): it reaches FLARE past each side over its
-    // neighbours, its plate inset by as much.
+    // below (Obsidian's). Its curved corners are not drawn on a workspace
+    // tab yet: drawn in its box they change the bar's layout, which the
+    // drag's hit-testing reads (a split drag and a reorder missed). The
+    // page's tab has them.
     let flared = on && rule_bar;
-    let (margin, inset) = if flared { (-FLARE, FLARE) } else { (0.0, 0.0) };
-    let (pad_l, pad_r) = (pad_l + inset, pad_r + inset);
     let plain_fill = if flared { "transparent" } else { fill };
     let tab_h = s.tabs - 6.0;
     let press = pane.clone();
@@ -568,7 +560,7 @@ fn Tab(
         div {
             style: "flex:{grow} {shrink} {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
                     box-sizing:border-box; display:flex; align-items:center; gap:6px; \
-                    padding:0 {pad_r}px 0 {pad_l}px; margin:0 {margin}px; overflow:hidden; \
+                    padding:0 {pad_r}px 0 {pad_l}px; overflow:hidden; \
                     border-radius:8px 8px 0 0; white-space:nowrap; touch-action:none; \
                     user-select:none; color:{ink}; background:{plain_fill}; \
                     position:relative; z-index:{lift}; cursor:pointer; opacity:{shown}; left:{dx}px;",
@@ -597,9 +589,8 @@ fn Tab(
             // The current tab's plate, outlined and open below, with its
             // curved corners either side; what it shows is drawn over it.
             if flared {
-                div { style: "position:absolute; top:0; bottom:0; left:{inset}px; right:{inset}px; box-sizing:border-box; \
+                div { style: "position:absolute; top:0; bottom:0; left:0; right:0; box-sizing:border-box; \
                               background:{fill}; border:1px solid {t.rule}; border-bottom:none; border-radius:8px 8px 0 0;",
-                    architect_shell::TabFlares { fill: t.sheet.to_string(), bar, rule: t.rule.to_string() }
                 }
             }
             // Obsidian's divider: a short line between two tabs that are not
