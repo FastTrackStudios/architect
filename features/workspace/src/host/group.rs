@@ -13,6 +13,10 @@ use crate::model::{Axis, Chrome, Group, Node, PaneId, Split};
 
 /// How far a named tab gives way before the bar clips, points.
 const TAB_MIN: f32 = 72.0;
+/// How much wider a badged tab stays (its badges), points.
+const BADGE_ROOM: f32 = 36.0;
+/// How much of a badged tab's name always shows, points.
+const NAME_LEAST: f32 = 20.0;
 /// A split's child's box, filling its share.
 const FILL: &str = "flex:1 1 0; min-width:0; min-height:0; display:flex;";
 /// How wide a named tab grows, points (Obsidian's).
@@ -500,7 +504,24 @@ fn Tab(
     let ink = if on { &*t.ink } else { &*t.ink_3 };
     let fill = if on { &*t.sheet } else { "transparent" };
     let pad = if icons { "0 8px" } else { "0 6px 0 12px" };
-    let least = if icons { 0.0 } else { TAB_MIN };
+    // What extensions put on it (`TabBadges`), after its name.
+    let badges = try_use_context::<super::TabBadges>().and_then(|b| {
+        let kind = host
+            .workspace
+            .peek()
+            .pane(&pane)
+            .map(|p| p.view.0.clone())?;
+        (b.0)(&kind, &pane.0)
+    });
+    let badged = badges.is_some() && !icons;
+    let least = if icons {
+        0.0
+    } else if badged {
+        TAB_MIN + BADGE_ROOM
+    } else {
+        TAB_MIN
+    };
+    let name_least = if badged { NAME_LEAST } else { 0.0 };
     let (grow, most) = if icons { (0, 48.0) } else { (1, TAB_MAX) };
     // The current tab gives up its room last, so its name reads whole
     // while the others narrow.
@@ -519,15 +540,6 @@ fn Tab(
     let fade_from = transparent_of(&fade_to);
     let key_open = menu.clone();
     let mounted = menu.clone();
-    // What extensions put on it (`TabBadges`), after its name.
-    let badges = try_use_context::<super::TabBadges>().and_then(|b| {
-        let kind = host
-            .workspace
-            .peek()
-            .pane(&menu)
-            .map(|p| p.view.0.clone())?;
-        Some((b.0)(&kind, &menu.0))
-    });
     let label = if pinned {
         format!("{title}, pinned")
     } else {
@@ -572,7 +584,7 @@ fn Tab(
             }
             if !icons || icon.is_none() {
                 // A long name fades out at its end (Blitz has no ellipsis).
-                span { style: "position:relative; flex:1 1 0; min-width:0; overflow:hidden;",
+                span { "data-tab-name": "{tab_id}", style: "position:relative; flex:1 1 0; min-width:{name_least}px; overflow:hidden;",
                     "{title}"
                     span { style: "position:absolute; top:0; right:0; bottom:0; width:16px; \
                                    background:linear-gradient(to right, {fade_from}, {fade_to});" }

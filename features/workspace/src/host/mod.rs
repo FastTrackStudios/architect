@@ -537,6 +537,17 @@ pub fn use_pane() -> PaneHandle {
     }
 }
 
+/// Pane `id`'s handle, from anywhere in the workspace (its header, a
+/// toolbar in it): what [`use_pane`] gives inside its view.
+#[must_use]
+pub fn use_pane_of(id: PaneId) -> PaneHandle {
+    PaneHandle {
+        id,
+        host: use_host(),
+        preview: false,
+    }
+}
+
 /// A pane, from inside it.
 #[derive(Clone)]
 pub struct PaneHandle {
@@ -1199,12 +1210,14 @@ impl ContextEntries {
 ///
 /// Asked for by its pane's view kind and id each time it draws
 /// (`architect-extensions` gives it, for what extensions set on tabs):
-/// provide it above the workspace.
+/// `None` when it has none. A badged tab keeps room for them and a few of
+/// its name's letters, its name fading where it is cut: the badge is never
+/// what is pushed out. Provide it above the workspace.
 #[derive(Clone)]
-pub struct TabBadges(pub Rc<dyn Fn(&str, &str) -> Element>);
+pub struct TabBadges(pub Rc<dyn Fn(&str, &str) -> Option<Element>>);
 
 impl TabBadges {
-    pub fn new(f: impl Fn(&str, &str) -> Element + 'static) -> Self {
+    pub fn new(f: impl Fn(&str, &str) -> Option<Element> + 'static) -> Self {
         Self(Rc::new(f))
     }
 }

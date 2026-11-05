@@ -513,24 +513,15 @@ pub(super) fn WorkspaceCommands() -> Element {
         );
     }
 
-    // Views: one "Open …" each. The views are fixed for a host's life, so
-    // the number of commands (hooks) is too.
+    // Views: one "Open …" each, a component of its own, so views that
+    // come and go (an extension's, a person's new toolbar) add and take
+    // away their commands without changing this one's hooks.
     let views: Vec<(String, String)> = host
         .views
         .read()
         .iter()
         .map(|v| (v.kind.0.clone(), v.title.clone()))
         .collect();
-    for (kind, title) in views {
-        let id = format!(
-            "WORKSPACE_OPEN_{}",
-            kind.to_uppercase().replace(['.', '-', ' '], "_")
-        );
-        use_command(
-            Command::new(id, format!("Open {title}")).group("Views"),
-            move || open_view(host, &kind, None),
-        );
-    }
 
     // ⌘O: the open panes, and the views.
     use_opener(move || {
@@ -599,7 +590,25 @@ pub(super) fn WorkspaceCommands() -> Element {
     });
     rsx! {
         super::screens::ScreensetCommands {}
+        for (kind, title) in views {
+            OpenViewCommand { key: "{kind}", kind, title }
+        }
     }
+}
+
+/// A view's "Open …" command, while it is one of the host's.
+#[component]
+fn OpenViewCommand(kind: String, title: String) -> Element {
+    let host = use_host();
+    let id = format!(
+        "WORKSPACE_OPEN_{}",
+        kind.to_uppercase().replace(['.', '-', ' '], "_")
+    );
+    use_command(
+        Command::new(id, format!("Open {title}")).group("Views"),
+        move || open_view(host, &kind, None),
+    );
+    rsx! {}
 }
 
 /// The active pane, the target a command acts for.

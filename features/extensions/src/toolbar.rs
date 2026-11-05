@@ -38,9 +38,20 @@
 //! view = "meter"                # its own view, or <extension>/<view>
 //! width = 120
 //! newline = true                # starts a new row
+//!
+//! [[items]]                     # an image file for its icon
+//! action = "E"
+//! image = "icons/star.svg"      # beside the file (a person's), or in the package
+//!
+//! [style]                       # how it is drawn, all optional
+//! size = 28                     # a button's height, points
+//! spacing = 4                   # between items
+//! rounding = 6                  # a button's corners
+//! preset = "accent"             # colours every button starts from (PRESETS)
 //! ```
 //!
-//! The model is pure data, wasm-clean.
+//! The model is pure data, wasm-clean; `crate::toolbar_edit` edits it by
+//! item ([`ToolItem`] at a place, `3` or `2.1`).
 
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +60,78 @@ pub const DOCKS: [&str; 3] = ["left", "right", "bottom"];
 
 /// What a right-click on a button does when it says nothing: nothing.
 pub const RIGHT_CLICKS: [&str; 3] = ["menu", "arm", "none"];
+
+/// The context-menu targets toolbars own (`[[context]] target = …`):
+/// a toolbar's empty space (`toolbar`, its key the id) and an item while
+/// editing (`toolbar-item`, `<key>#<place>` the id: `user/mine#2.1`).
+pub const CONTEXT_TARGETS: [(&str, &str); 2] = [
+    (
+        "toolbar",
+        "a toolbar's empty space; its id the toolbar's key",
+    ),
+    (
+        "toolbar-item",
+        "an item of a toolbar being edited; its id `<key>#<place>` (`user/mine#2.1`)",
+    ),
+];
+
+/// A toolbar's colour presets (`style.preset`): what every button's
+/// colours start from, each a theme token. `theme` is the theme's own.
+pub const PRESETS: [&str; 5] = ["theme", "accent", "soft", "contrast", "danger"];
+
+/// The colours preset `name` gives (none for `theme` or one there is not).
+#[must_use]
+pub fn preset(name: &str) -> ToolColors {
+    let c = |fill: &str, ink: &str, on_fill: &str, on_ink: &str| ToolColors {
+        fill: fill.to_owned(),
+        ink: ink.to_owned(),
+        on_fill: on_fill.to_owned(),
+        on_ink: on_ink.to_owned(),
+        ..ToolColors::default()
+    };
+    match name {
+        "accent" => c(
+            "primary",
+            "primary-foreground",
+            "accent",
+            "accent-foreground",
+        ),
+        "soft" => c(
+            "secondary",
+            "secondary-foreground",
+            "primary",
+            "primary-foreground",
+        ),
+        "contrast" => c("foreground", "background", "primary", "primary-foreground"),
+        "danger" => c(
+            "destructive",
+            "destructive-foreground",
+            "foreground",
+            "background",
+        ),
+        _ => ToolColors::default(),
+    }
+}
+
+/// The image files an item's `image` may be, by extension.
+pub const IMAGE_TYPES: [(&str, &str); 6] = [
+    ("png", "image/png"),
+    ("svg", "image/svg+xml"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+];
+
+/// The media type of image file `path`, by its extension.
+#[must_use]
+pub fn image_type(path: &str) -> Option<&'static str> {
+    let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    IMAGE_TYPES
+        .iter()
+        .find(|(e, _)| *e == ext)
+        .map(|(_, mime)| *mime)
+}
 
 /// Where a toolbar goes (its `where`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +148,8 @@ pub enum ToolbarPlace {
     /// The headers of one view kind's panes (`view:<kind>`, the
     /// workspace's kind: `note`, `lab.board/board`).
     View(String),
+    /// Nowhere (`hidden`): kept, not shown (another shows in its place).
+    Hidden,
 }
 
 impl ToolbarPlace {
@@ -87,13 +172,80 @@ pub struct ToolbarDecl {
     /// screen reader.
     pub title: String,
     /// `dock:left`, `dock:right`, `dock:bottom`, `float`, `window`,
-    /// `pane` or `view:<kind>`.
+    /// `pane`, `view:<kind>` or `hidden`.
     #[serde(rename = "where")]
     pub at: String,
     /// Every button's label hidden (an icon alone where it has one).
     #[serde(skip_serializing_if = "is_false")]
     pub hide_labels: bool,
+    /// The context it is for: a view kind (`view:note`), an editor's
+    /// context (`editor:markdown`); empty, every one ([`Self::applies_to`]).
+    /// A place that follows what has the focus shows the toolbars whose
+    /// context it is in.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub when: String,
+    /// How it is drawn: sizes, spacing, rounding, a colour preset.
+    #[serde(skip_serializing_if = "ToolbarStyle::is_empty")]
+    pub style: ToolbarStyle,
     pub items: Vec<ToolItem>,
+}
+
+/// How a toolbar is drawn; unset, the app's own.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ToolbarStyle {
+    /// A button's height (and an icon button's width), points:
+    /// [`SIZES`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u32>,
+    /// The space between items, points (`0..=24`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spacing: Option<u32>,
+    /// A button's corner radius, points (`0..=20`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rounding: Option<u32>,
+    /// What every button's colours start from: one of [`PRESETS`].
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub preset: String,
+}
+
+/// The button sizes a toolbar may have, points.
+pub const SIZES: std::ops::RangeInclusive<u32> = 16..=64;
+
+impl ToolbarStyle {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+
+    /// Checks it: sizes in range, a preset there is.
+    ///
+    /// # Errors
+    ///
+    /// The first thing it gets wrong.
+    pub fn check(&self) -> Result<(), String> {
+        if self.size.is_some_and(|s| !SIZES.contains(&s)) {
+            return Err(format!(
+                "style.size is {}..={} points",
+                SIZES.start(),
+                SIZES.end()
+            ));
+        }
+        if self.spacing.is_some_and(|s| s > 24) {
+            return Err("style.spacing is 0..=24 points".to_owned());
+        }
+        if self.rounding.is_some_and(|s| s > 20) {
+            return Err("style.rounding is 0..=20 points".to_owned());
+        }
+        if !self.preset.is_empty() && !PRESETS.contains(&self.preset.as_str()) {
+            return Err(format!(
+                "style.preset {:?} is not one ({})",
+                self.preset,
+                PRESETS.join(", ")
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// What an item is.
@@ -128,6 +280,11 @@ pub struct ToolItem {
     /// A Lucide icon's name (`timer`).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub icon: String,
+    /// An image file drawn as its icon, in place of `icon` (a PNG, SVG,
+    /// JPEG, GIF or WebP: [`IMAGE_TYPES`]): absolute, or relative to the
+    /// person's toolbar folder (an extension's: its package).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub image: String,
     /// Its label hidden (its icon alone, the label its tooltip).
     #[serde(skip_serializing_if = "is_false")]
     pub hide_label: bool,
@@ -181,6 +338,21 @@ impl ToolColors {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// Each of its colours, or `under`'s where it sets none (a button's
+    /// over its toolbar's preset).
+    #[must_use]
+    pub fn over(&self, under: &Self) -> Self {
+        let pick = |a: &String, b: &String| if a.is_empty() { b.clone() } else { a.clone() };
+        Self {
+            fill: pick(&self.fill, &under.fill),
+            ink: pick(&self.ink, &under.ink),
+            on_fill: pick(&self.on_fill, &under.on_fill),
+            on_ink: pick(&self.on_ink, &under.on_ink),
+            armed_fill: pick(&self.armed_fill, &under.armed_fill),
+            armed_ink: pick(&self.armed_ink, &under.armed_ink),
+        }
     }
 }
 
@@ -256,6 +428,7 @@ impl ToolbarDecl {
     pub fn place(&self) -> Option<ToolbarPlace> {
         match self.at.as_str() {
             "pane" => return Some(ToolbarPlace::Pane),
+            "hidden" => return Some(ToolbarPlace::Hidden),
             "float" => return Some(ToolbarPlace::Float),
             "window" => return Some(ToolbarPlace::Window),
             _ => {}
@@ -269,6 +442,18 @@ impl ToolbarDecl {
             .strip_prefix("view:")
             .filter(|kind| !kind.is_empty())
             .map(|kind| ToolbarPlace::View(kind.to_owned()))
+    }
+
+    /// Whether it is for context `context` (`view:note`, `editor:markdown`):
+    /// its `when` is empty, or that context, or the kind of it (`editor`
+    /// for `editor:markdown`).
+    #[must_use]
+    pub fn applies_to(&self, context: &str) -> bool {
+        self.when.is_empty()
+            || self.when == context
+            || context
+                .split_once(':')
+                .is_some_and(|(kind, _)| kind == self.when)
     }
 
     /// Whether it is in the header of a pane of view kind `kind`.
@@ -323,24 +508,56 @@ impl ToolbarDecl {
         action: impl Fn(&str) -> Result<(), String>,
         view: impl Fn(&str) -> Result<(), String>,
     ) -> Result<(), String> {
+        if self.items.is_empty() {
+            return Err("it has no items ([[toolbars.items]])".to_owned());
+        }
+        self.check_draft(action, view)
+    }
+
+    /// [`Self::check`], an empty toolbar allowed: a person's, built from
+    /// nothing in the editor.
+    ///
+    /// # Errors
+    ///
+    /// The first thing it gets wrong.
+    pub fn check_draft(
+        &self,
+        action: impl Fn(&str) -> Result<(), String>,
+        view: impl Fn(&str) -> Result<(), String>,
+    ) -> Result<(), String> {
         if self.id.is_empty() || self.title.is_empty() {
             return Err("it needs an id and a title".to_owned());
         }
         if self.place().is_none() {
             return Err(format!(
-                "{:?} is not a place (dock:{}, float, window, pane, view:<kind>)",
+                "{:?} is not a place (dock:{}, float, window, pane, view:<kind>, hidden)",
                 self.at,
                 DOCKS.join(" | dock:")
             ));
         }
-        if self.items.is_empty() {
-            return Err("it has no items ([[toolbars.items]])".to_owned());
+        self.style.check()?;
+        if !self.when.is_empty() && !good_context(&self.when) {
+            return Err(format!(
+                "when {:?} is not a context (`view:note`, `editor:markdown`, `editor`)",
+                self.when
+            ));
         }
         for (n, item) in self.items.iter().enumerate() {
             check_item(item, false, &action, &view).map_err(|why| format!("item {n}: {why}"))?;
         }
         Ok(())
     }
+}
+
+/// A context's name: a kind (lower case words joined by `-`), or
+/// `<kind>:<which>`.
+fn good_context(c: &str) -> bool {
+    let (kind, which) = c.split_once(':').map_or((c, None), |(k, w)| (k, Some(w)));
+    !kind.is_empty()
+        && kind
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        && which.is_none_or(|w| !w.is_empty())
 }
 
 fn check_item(
@@ -357,7 +574,11 @@ fn check_item(
             if !item.action.is_empty() {
                 action(&item.action)?;
             }
-            if item.action.is_empty() && item.label.is_empty() && item.icon.is_empty() {
+            if item.action.is_empty()
+                && item.label.is_empty()
+                && item.icon.is_empty()
+                && item.image.is_empty()
+            {
                 return Err("a dropdown needs a label or an icon".to_owned());
             }
             match item.right_click.as_str() {
@@ -371,6 +592,13 @@ fn check_item(
                 other => action(other)?,
             }
             check_menu(&item.menu, 0, action)?;
+            if !item.image.is_empty() && image_type(&item.image).is_none() {
+                return Err(format!(
+                    "image {:?} is not an image file ({})",
+                    item.image,
+                    IMAGE_TYPES.map(|(e, _)| e).join(", ")
+                ));
+            }
             if !item.items.is_empty() || !item.view.is_empty() {
                 return Err("a button has no items or view".to_owned());
             }
@@ -497,6 +725,54 @@ newline = true
     }
 
     #[test]
+    fn a_draft_may_be_empty_and_styled_and_a_preset_is_under_a_buttons_colours() {
+        let mut t = ToolbarDecl {
+            id: "mine".into(),
+            title: "Mine".into(),
+            at: "hidden".into(),
+            ..ToolbarDecl::default()
+        };
+        assert_eq!(t.place(), Some(ToolbarPlace::Hidden));
+        assert!(t.check(ok, ok).unwrap_err().contains("no items"));
+        assert!(t.check_draft(ok, ok).is_ok());
+        t.style = ToolbarStyle {
+            size: Some(32),
+            rounding: Some(10),
+            preset: "accent".into(),
+            ..ToolbarStyle::default()
+        };
+        t.items.push(ToolItem {
+            action: "A".into(),
+            image: "icons/Star.SVG".into(),
+            colors: ToolColors {
+                fill: "#e11d48".into(),
+                ..ToolColors::default()
+            },
+            ..ToolItem::default()
+        });
+        assert!(t.check(ok, ok).is_ok());
+        assert_eq!(image_type(&t.items[0].image), Some("image/svg+xml"));
+        let drawn = t.items[0].colors.over(&preset(&t.style.preset));
+        assert_eq!(
+            (drawn.fill.as_str(), drawn.ink.as_str()),
+            ("#e11d48", "primary-foreground")
+        );
+        assert!(preset("theme").is_empty());
+        // Scoped to a context: its kind, or one of it.
+        assert!(t.applies_to("view:note"));
+        t.when = "editor".into();
+        assert!(t.applies_to("editor:markdown") && !t.applies_to("view:note"));
+        t.when = "editor:markdown".into();
+        assert!(t.applies_to("editor:markdown") && !t.applies_to("editor:code"));
+        assert!(t.check(ok, ok).is_ok());
+        t.when = "Editor:".into();
+        assert!(t.check(ok, ok).unwrap_err().contains("not a context"));
+        t.when = "editor:markdown".into();
+        let again = ToolbarDecl::parse(&t.to_toml().unwrap()).unwrap();
+        assert_eq!(again, t);
+    }
+
+    #[test]
     fn a_toolbar_is_somewhere_there_is() {
         let at = |w: &str| {
             ToolbarDecl {
@@ -534,6 +810,9 @@ newline = true
         assert!(bad(&|t| t.items[3].menu[0].label.clear()).contains("heading with no label"));
         assert!(bad(&|t| t.items[4].view.clear()).contains("names its view"));
         assert!(bad(&|t| t.items[3].right_click = "arm".into()).contains("no action to arm"));
+        assert!(bad(&|t| t.items[0].image = "star.txt".into()).contains("not an image file"));
+        assert!(bad(&|t| t.style.size = Some(200)).contains("style.size"));
+        assert!(bad(&|t| t.style.preset = "neon".into()).contains("style.preset"));
         // An action the owner may not run is refused by its rule.
         let t = base.clone();
         let refuse = |id: &str| {

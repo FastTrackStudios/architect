@@ -1207,9 +1207,16 @@ calls it on a row's right-click with `file` and the file's path, and a
 `file:<ext>` row is on files of that extension. The row runs with
 `architect_workspace::context_invocation`: source `context_menu`, the
 target and its id, the pane and its view, and for a file its path. A row
-whose action is a toggle shows its tick. The targets are a fixed list
-(`contrib::TARGETS`, past `view:`, `file:` and `doc:`), not points a
-feature declares; an editor's own menu is not wired yet.
+whose action is a toggle shows its tick. A target is a contribution
+point its feature declares (`Host::declare_context_targets`; point
+`context.<kind>`, `features/extensions/src/contrib.rs` `context_point`,
+`context_target_point`): the workspace's `pane`, `tab` and `view`
+(`architect_workspace::CONTEXT_TARGETS`), the toolbars' `toolbar` and
+`toolbar-item` (`features/extensions/src/toolbar.rs` `CONTEXT_TARGETS`),
+the lab's file tree its `file`. Each `[[context]]` row is an item of its
+target's point, so `EXT_POINTS` lists them by target, and rows for a
+target nobody declared wait there; a manifest's target need only be a
+target's name (`contrib::known_target`).
 
 **Toolbars.** A toolbar is a document (`features/extensions/src/toolbar.rs`
 `ToolbarDecl`): an id, a title, `where` it goes, and its items, one flat
@@ -1268,8 +1275,16 @@ action does next, to what is clicked, is the app's.
 | `TOOLBAR_ARM` / `TOOLBAR_DISARM` | arms `{action}`, or disarms |
 
 `Extensions::install_contribution_actions` puts them on the host's list
-(`features/extensions/src/toolbar_actions.rs`). The visual editor (an
-edit mode, insert chips, drag and drop, pickers) is #313.
+(`features/extensions/src/toolbar_actions.rs`), with the editor's
+fine-grained edits (`TOOLBAR_INSERT`, `TOOLBAR_MOVE`, `TOOLBAR_SET` and
+the rest). The visual editor — edit mode, + chips, drag and drop, the
+action and widget pickers, item and toolbar settings, debounced writes
+with backups — is `toolbars.md`.
+
+A toolbar may also have a `style` (`ToolbarStyle`: `size`, `spacing`,
+`rounding`, a colour `preset`), a `when` (the context it is for), and a
+button an `image` file in place of its `icon`; `where = "hidden"` keeps
+one without showing it.
 
 **Toggles.** An action can say whether it is on: the Action List's
 `ActionList::set_checked`, read into `ActionInfo::checked`. An

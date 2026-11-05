@@ -48,6 +48,7 @@ pub mod package;
 pub mod project;
 pub mod reapack;
 pub mod toolbar;
+pub mod toolbar_edit;
 
 #[cfg(feature = "host")]
 pub mod actions;
@@ -115,6 +116,8 @@ pub mod remote;
 pub mod source;
 #[cfg(feature = "host")]
 pub mod toolbar_actions;
+#[cfg(feature = "ui")]
+pub mod toolbar_editor;
 #[cfg(feature = "ui")]
 pub mod toolbar_ui;
 #[cfg(feature = "host")]

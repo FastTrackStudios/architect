@@ -280,9 +280,16 @@ fn a_points_items_are_checked_and_delivered_live() {
     );
     assert!(ext.host().get("lab.giver").is_some());
     let points = run(&list, "EXT_POINTS", Value::Null).unwrap();
-    // The app's own point (icons and badges, #306) sorts first.
+    // The app's own point (icons and badges, #306) sorts first; the
+    // features' context-menu targets (`context.*`, #313) are points too.
     assert_eq!(points["points"][0]["id"], "app.decorations", "{points}");
-    assert_eq!(points["points"][1]["owner"], "lab.owner", "{points}");
+    let owner = points["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "lab.owner.cards")
+        .unwrap_or_else(|| panic!("{points}"));
+    assert_eq!(owner["owner"], "lab.owner", "{points}");
     assert_eq!(points["rejected"][0]["index"], 1, "{points}");
 
     // The app's own come first.

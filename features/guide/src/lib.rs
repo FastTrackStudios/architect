@@ -301,7 +301,8 @@ steps (
                 edge: Some(Edge::Right),
                 dx: 0.0,
                 dy: 0.0,
-                seconds: 1.2
+                seconds: 1.2,
+                key: None
             })
         );
         assert_eq!(
@@ -311,7 +312,8 @@ steps (
                 edge: None,
                 dx: 120.0,
                 dy: 0.0,
-                seconds: 0.8
+                seconds: 0.8,
+                key: None
             })
         );
         assert_eq!(

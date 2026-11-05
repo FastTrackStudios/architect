@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use architect::action::{ActionList, Invocation, InvocationSource};
 use architect_shell::{ShellTheme, named_icon};
-use architect_workspace::{HeaderTools, PaneId, Side, Target, View};
+use architect_workspace::{ContextEntry, HeaderTools, PaneId, Side, Target, View, use_pane_of};
 use dioxus::prelude::*;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
@@ -20,7 +20,9 @@ use serde_json::json;
 
 use crate::host::Host;
 use crate::interface::{ExtensionUi, ExtensionView};
-use crate::toolbar::{MenuItem, MenuKind, ToolItem, ToolKind, ToolbarPlace};
+use crate::toolbar::{MenuItem, MenuKind, ToolColors, ToolItem, ToolKind, ToolbarPlace, preset};
+use crate::toolbar_edit::At;
+use crate::toolbar_editor::{Editor, InsertMenu, Kept, Press, item_name, keep_in};
 use crate::toolbars::Toolbar;
 
 /// A pane toolbar's workspace kind (and its pane's id): `toolbar:<key>`.
@@ -109,6 +111,15 @@ pub(crate) fn use_pane_toolbars(ui: ExtensionUi, app: Arc<ActionList>) {
             .into_iter()
             .map(|(t, place)| (pane_kind(&t.key), (t.decl.title, place)))
             .collect();
+        // The app's views follow the set (a new toolbar of the person's).
+        let listed: Vec<(String, String, String)> = now
+            .iter()
+            .map(|(k, (title, place))| (k.clone(), title.clone(), format!("{place:?}")))
+            .collect();
+        let mut panes = ui.toolbar_panes;
+        if *panes.peek() != listed {
+            panes.set(listed);
+        }
         let gone: Vec<String> = placed
             .borrow()
             .iter()
@@ -158,6 +169,50 @@ pub(crate) fn use_pane_toolbars(ui: ExtensionUi, app: Arc<ActionList>) {
             });
         }
     });
+}
+
+/// The toolbars' own rows of a context menu: on a toolbar (`toolbar`,
+/// its key), Edit toolbars and its settings; on an item while editing
+/// (`toolbar-item`, `<key>#<at>`), its settings, grouping, removing. Each
+/// is a `TOOLBAR_*` action, run told the target.
+pub(crate) fn context_rows(host: &Host, target: &str, id: &str) -> Vec<ContextEntry> {
+    let row = |label: &str, command: &str| ContextEntry {
+        label: label.to_owned(),
+        command: command.to_owned(),
+        checked: None,
+    };
+    let bars = host.toolbars();
+    match target {
+        "toolbar" => vec![
+            ContextEntry {
+                checked: Some(bars.editing()),
+                ..row("Edit toolbars", "TOOLBAR_EDIT")
+            },
+            row("Toolbar settings…", "TOOLBAR_SELECT"),
+        ],
+        "toolbar-item" => {
+            let Some((key, at)) = id.split_once('#') else {
+                return Vec::new();
+            };
+            let Ok(at) = At::parse(at) else {
+                return Vec::new();
+            };
+            let item = bars
+                .get(host.contributions(), key)
+                .and_then(|t| crate::toolbar_edit::get(&t.decl, at).cloned());
+            let mut out = vec![row("Settings…", "TOOLBAR_SELECT")];
+            match (item.map(|i| i.kind), at.inner) {
+                (Some(ToolKind::Group), _) => out.push(row("Ungroup", "TOOLBAR_UNGROUP")),
+                (Some(ToolKind::Button), None) => {
+                    out.push(row("Group with the next", "TOOLBAR_GROUP"));
+                }
+                _ => {}
+            }
+            out.push(row("Remove", "TOOLBAR_REMOVE"));
+            out
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// A signal that moves when anything happens on the host's list (an
@@ -269,6 +324,19 @@ struct Ctx {
     view: Option<String>,
     header: bool,
     hide_labels: bool,
+    /// A button's height, its corners, the space between items, points.
+    size: u32,
+    rounding: u32,
+    gap: u32,
+    /// An icon's size, points.
+    glyph: usize,
+    /// The colours every button starts from (its preset's).
+    preset: ToolColors,
+    /// Where its relative image files are: the person's folder, or its
+    /// extension's package.
+    images: Option<std::path::PathBuf>,
+    /// The editor is on.
+    editing: bool,
     /// The dropdown open now, by its item's path (`3`, `2.1`).
     open: Signal<Option<String>>,
 }
@@ -287,12 +355,22 @@ impl Ctx {
             let _ = c.run_invoked(action, None, self.invocation());
         }
     }
+
+    /// The pane it is in: the header's, or its own.
+    fn pane_id(&self) -> PaneId {
+        PaneId(self.pane.clone().unwrap_or_else(|| pane_kind(&self.key)))
+    }
 }
 
 /// A toolbar, by its key: its items in rows (a `newline` item starts
 /// another), each button running its action told where it was pressed
 /// (source `toolbar`, target its place, id its key, the pane), a toggle's
 /// showing on (`aria-pressed`), an armed one armed (`data-armed`).
+///
+/// While the toolbars are edited (`Toolbars::editing`) it shows a **+**
+/// chip between its items and at its end, its items pressed open their
+/// settings and dragged move (`crate::toolbar_editor`).
+#[allow(clippy::too_many_lines)]
 #[component]
 pub fn ToolbarStrip(
     ui: ExtensionUi,
@@ -312,6 +390,8 @@ pub fn ToolbarStrip(
     let open = use_signal(|| None::<String>);
     let t = crate::window_ui::shell_theme();
     let host = ui.host();
+    let editor = try_use_context::<Editor>();
+    let handle = use_pane_of(PaneId(pane.clone().unwrap_or_else(|| pane_kind(&toolbar))));
     let Some(bar) = host.toolbars().get(host.contributions(), &toolbar) else {
         return rsx! {};
     };
@@ -320,6 +400,13 @@ pub fn ToolbarStrip(
             .map_or_else(|| bar.decl.at.clone(), |v| format!("view:{v}"))
     } else {
         bar.decl.at.clone()
+    };
+    let style = &bar.decl.style;
+    let editing = editor.is_some() && host.toolbars().editing();
+    let images = if bar.file.is_some() || bar.owner == crate::toolbars::PERSON {
+        host.toolbars().dir()
+    } else {
+        host.get(&bar.owner).and_then(|l| l.dir)
     };
     let cx = Ctx {
         ui,
@@ -330,6 +417,15 @@ pub fn ToolbarStrip(
         view,
         header,
         hide_labels: bar.decl.hide_labels,
+        size: style.size.unwrap_or(if header { 24 } else { 28 }),
+        rounding: style.rounding.unwrap_or(6),
+        gap: style.spacing.unwrap_or(4),
+        glyph: style.size.map_or(16, |s| {
+            usize::try_from(s.saturating_mul(4) / 7).unwrap_or(16)
+        }),
+        preset: preset(&style.preset),
+        images,
+        editing,
         open,
     };
     // Rows: a `newline` item starts the next.
@@ -342,28 +438,219 @@ pub fn ToolbarStrip(
             row.push((n, item.clone()));
         }
     }
+    let count = bar.decl.items.len();
+    let last_row = rows.len().saturating_sub(1);
     let outer = if header {
         "display:flex; flex-direction:column; gap:2px; flex:0 0 auto;".to_owned()
     } else {
         format!(
-            "flex:1 1 0; display:flex; flex-direction:column; gap:4px; padding:8px; \
+            "flex:1 1 0; display:flex; flex-direction:column; gap:{}px; padding:8px; \
              background:{}; overflow:visible;",
-            t.sheet
+            cx.gap, t.sheet
         )
     };
+    let key = bar.key.clone();
+    let (mount_key, menu_key) = (key.clone(), key.clone());
+    let empty = count == 0 && !editing && !header;
+    let title = bar.decl.title.clone();
+    let settings_host = host;
+    let settings_key = key.clone();
     rsx! {
         div {
             role: "toolbar",
             "aria-label": "{bar.decl.title}",
             "data-toolbar": "{bar.key}",
+            "data-editing": editing.then_some("true"),
             style: "{outer}",
+            onmounted: move |e| {
+                if let Some(ed) = editor {
+                    ed.mount(&mount_key, "", e.data());
+                }
+            },
+            onpointermove: move |e: PointerEvent| {
+                if let Some(ed) = editor {
+                    let p = e.data().client_coordinates();
+                    ed.moved(narrow(p.x), narrow(p.y));
+                }
+            },
+            // Its empty space: the `toolbar` target's menu (Edit toolbars,
+            // its settings, what extensions add).
+            oncontextmenu: move |e: MouseEvent| handle.context_menu("toolbar", menu_key.clone(), &e),
+            if empty {
+                span { style: "font-size:11px; color:{t.ink_3};", "An empty toolbar: Edit toolbars to fill it." }
+            }
             for (r, row) in rows.into_iter().enumerate() {
-                div { key: "{r}", style: "display:flex; flex-wrap:wrap; align-items:center; gap:4px;",
+                div { key: "{r}", style: "display:flex; flex-wrap:wrap; align-items:center; gap:{cx.gap}px;",
+                    if editing && r == 0 {
+                        button {
+                            "data-toolbar-settings": "{key}",
+                            title: "{title}: its settings",
+                            style: "flex:0 0 auto; height:{cx.size.min(24)}px; padding:0 6px; border-radius:6px; \
+                                    border:1px solid {t.rule}; background:transparent; color:{t.ink_3}; font-size:11px; cursor:pointer;",
+                            onclick: {
+                                let (h, k) = (settings_host.clone(), settings_key.clone());
+                                move |_| h.toolbars().select(Some((k.clone(), None)))
+                            },
+                            "⚙ {title}"
+                        }
+                    }
                     for (n, item) in row {
-                        ToolItemView { key: "{n}", cx: cx.clone(), item, path: n.to_string() }
+                        if editing {
+                            EditableItem { key: "{n}-{item.kind:?}", cx: cx.clone(), item, path: n.to_string(), chip: true }
+                        } else {
+                            ToolItemView { key: "{n}", cx: cx.clone(), item, path: n.to_string() }
+                        }
+                    }
+                    if editing && r == last_row {
+                        InsertChip { key: "c{count}", cx: cx.clone(), at: count.to_string() }
                     }
                 }
             }
+        }
+    }
+}
+
+/// A measured length, as points.
+#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+const fn narrow(v: f64) -> f32 {
+    v as f32
+}
+
+/// A **+** between items while editing: its menu puts an action, a
+/// separator, a widget or a dropdown there.
+#[component]
+fn InsertChip(cx: Ctx, at: String) -> Element {
+    let t = crate::window_ui::shell_theme();
+    let Some(editor) = try_use_context::<Editor>() else {
+        return rsx! {};
+    };
+    let mut adding = editor.adding;
+    let here = (cx.key.clone(), at.clone());
+    let is_open = adding().as_ref() == Some(&here);
+    let h = cx.size.min(24);
+    rsx! {
+        div { style: "position:relative; flex:0 0 auto; display:flex;",
+            button {
+                "data-insert-at": "{cx.key}#{at}",
+                "aria-label": "Insert here",
+                "aria-expanded": "{is_open}",
+                style: "width:16px; height:{h}px; padding:0; border-radius:5px; border:1px dashed {t.rule}; \
+                        background:transparent; color:{t.ink_3}; font-size:12px; line-height:1; cursor:pointer;",
+                onclick: move |_| {
+                    let now = adding.peek().as_ref() == Some(&here);
+                    adding.set((!now).then(|| here.clone()));
+                },
+                "+"
+            }
+            if is_open {
+                InsertMenu { ui: cx.ui, toolbar: cx.key.clone(), at: at.clone() }
+            }
+        }
+    }
+}
+
+/// An item while editing: pressed, its settings; dragged, it moves;
+/// right-clicked, the `toolbar-item` context menu. A group's buttons are
+/// each one too.
+#[component]
+fn EditableItem(
+    cx: Ctx,
+    item: ToolItem,
+    path: String,
+    /// A + chip before it (a top-level item's).
+    #[props(default)]
+    chip: bool,
+) -> Element {
+    let t = crate::window_ui::shell_theme();
+    let Some(editor) = try_use_context::<Editor>() else {
+        return rsx! {};
+    };
+    let handle = use_pane_of(cx.pane_id());
+    let Ok(at) = At::parse(&path) else {
+        return rsx! {};
+    };
+    let host = cx.ui.host();
+    let group = item.kind == ToolKind::Group;
+    let label = item_name(&host, &item);
+    let selected = host
+        .toolbars()
+        .selected()
+        .is_some_and(|(k, a)| k == cx.key && a.as_deref() == Some(path.as_str()));
+    let ring = if selected {
+        t.accent.to_string()
+    } else {
+        t.rule.to_string()
+    };
+    let mount_at = if group {
+        format!("g{path}")
+    } else {
+        path.clone()
+    };
+    // Measured while it is here: forgotten as it goes.
+    let mut mounted_as = use_hook(|| CopyValue::new((cx.key.clone(), mount_at.clone())));
+    mounted_as.set((cx.key.clone(), mount_at.clone()));
+    use_drop(move || {
+        let (key, at) = mounted_as.cloned();
+        let mut mounts = editor.mounts;
+        if let Ok(mut m) = mounts.try_write() {
+            m.remove(&(key, at));
+        }
+    });
+    let (mk, pk, ck) = (cx.key.clone(), cx.key.clone(), cx.key.clone());
+    let menu_id = format!("{ck}#{path}");
+    let up_host = host;
+    let inner = if group {
+        let label = item.label.clone();
+        let buttons = item.items;
+        rsx! {
+            div { role: "group", "aria-label": "{label}", "data-group": "{label}",
+                style: "flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:2px; padding:2px;",
+                div { style: "display:flex; gap:2px; border:1px solid {t.rule}; border-radius:7px;",
+                    for (n, b) in buttons.into_iter().enumerate() {
+                        EditableItem { key: "{n}", cx: cx.clone(), item: b, path: format!("{path}.{n}") }
+                    }
+                }
+                // Its grip: pressed here, the whole group moves.
+                span { "data-group-grip": "{path}", style: "font-size:10px; color:{t.ink_3}; padding:0 6px; cursor:grab;",
+                    if label.is_empty() { "Group" } else { "{label}" }
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div { style: "pointer-events:none; display:flex;",
+                ToolItemView { cx: cx.clone(), item, path: path.clone() }
+            }
+        }
+    };
+    rsx! {
+        if chip {
+            InsertChip { cx: cx, at: path }
+        }
+        div {
+            "data-edit-item": "{menu_id}",
+            "aria-selected": "{selected}",
+            style: "position:relative; flex:0 0 auto; display:flex; border-radius:7px; cursor:grab; \
+                    outline:1px dashed {ring}; outline-offset:1px; touch-action:none;",
+            onmounted: move |e| editor.mount(&mk, &mount_at, e.data()),
+            onpointerdown: move |e: PointerEvent| {
+                // A right-press is its context menu's.
+                if e.data().trigger_button().is_some_and(|b| b != dioxus::html::input_data::MouseButton::Primary) {
+                    return;
+                }
+                e.stop_propagation();
+                let p = e.data().client_coordinates();
+                editor.pressed(Press { key: pk.clone(), at, x: narrow(p.x), y: narrow(p.y), label: label.clone(), group });
+            },
+            onpointerup: move |e: PointerEvent| {
+                e.stop_propagation();
+                editor.released(&up_host);
+            },
+            oncontextmenu: move |e: MouseEvent| {
+                e.stop_propagation();
+                handle.context_menu("toolbar-item", menu_id.clone(), &e);
+            },
+            {inner}
         }
     }
 }
@@ -381,7 +668,7 @@ fn ToolItemView(cx: Ctx, item: ToolItem, path: String) -> Element {
             rsx! {
                 div { role: "group", "aria-label": "{label}", "data-group": "{label}",
                     style: "flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:2px;",
-                    div { style: "display:flex; border:1px solid {t.rule}; border-radius:7px; overflow:visible;",
+                    div { style: "display:flex; border:1px solid {t.rule}; border-radius:{cx.rounding + 1}px; overflow:visible;",
                         for (n, b) in item.items.into_iter().enumerate() {
                             ToolButton { key: "{n}", cx: cx.clone(), item: b, path: format!("{path}.{n}"), joined: true }
                         }
@@ -398,11 +685,11 @@ fn ToolItemView(cx: Ctx, item: ToolItem, path: String) -> Element {
                 |(e, v)| (e.to_owned(), v.to_owned()),
             );
             let w = item.width.unwrap_or(120);
-            let h = item.height.unwrap_or(if cx.header { 24 } else { 32 });
+            let h = item.height.unwrap_or_else(|| cx.size.saturating_add(4));
             let name = format!("{extension}/{view}");
             rsx! {
                 div { "data-widget": "{name}",
-                    style: "flex:0 0 auto; width:{w}px; height:{h}px; display:flex; overflow:hidden; border-radius:6px;",
+                    style: "flex:0 0 auto; width:{w}px; height:{h}px; display:flex; overflow:hidden; border-radius:{cx.rounding}px;",
                     ExtensionView { ui: cx.ui, extension, view, fill: true }
                 }
             }
@@ -410,11 +697,14 @@ fn ToolItemView(cx: Ctx, item: ToolItem, path: String) -> Element {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 #[component]
 fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
     // Its action's state may have moved: read again with every change.
     let (_, _) = (cx.ui.revision(), cx.ui.ticks());
     let t: ShellTheme = crate::window_ui::shell_theme();
+    let viewport = try_use_context::<Editor>().map(|e| e.viewport);
+    let kept = use_signal(Kept::default);
     let host = cx.ui.host();
     let info = (!item.action.is_empty())
         .then(|| host.list().info(&item.action))
@@ -430,7 +720,7 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
         item.label.clone()
     };
     let dropdown = item.action.is_empty();
-    let c = &item.colors;
+    let c = item.colors.over(&cx.preset);
     let (fill, ink) = if armed {
         (
             colour(&c.armed_fill, "transparent"),
@@ -449,16 +739,19 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
     } else {
         String::new()
     };
-    let iconic = !item.icon.is_empty();
+    let image = (!item.image.is_empty())
+        .then(|| host.toolbars().image(&item.image, cx.images.as_deref()))
+        .flatten();
+    let iconic = !item.icon.is_empty() || image.is_some();
     let show_label = !(iconic && (item.hide_label || cx.hide_labels || cx.header));
-    let size = if cx.header { 24 } else { 28 };
+    let (size, glyph) = (cx.size, cx.glyph);
     let width = if iconic && !show_label {
         format!("width:{size}px;")
     } else {
         String::new()
     };
     let pad = if iconic && !show_label { "0" } else { "0 8px" };
-    let radius = if joined { "0" } else { "6px" };
+    let radius = if joined { 0 } else { cx.rounding };
     let mut open = cx.open;
     let is_open = open().as_deref() == Some(path.as_str());
     let tool = if dropdown {
@@ -469,6 +762,9 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
     let (press, right) = (cx.clone(), cx.clone());
     let (action, rc, here) = (item.action.clone(), item.right_click.clone(), path.clone());
     let has_menu = !item.menu.is_empty();
+    let editing = cx.editing;
+    let place = kept().css();
+    let mark = kept().mark();
     rsx! {
         div { style: "position:relative; flex:0 0 auto; display:flex;",
             button {
@@ -481,9 +777,12 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                 "data-armed": armed.then_some("true"),
                 disabled: !enabled,
                 style: "{width} height:{size}px; padding:{pad}; display:flex; align-items:center; \
-                        justify-content:center; gap:6px; border:none; border-radius:{radius}; cursor:pointer; \
+                        justify-content:center; gap:6px; border:none; border-radius:{radius}px; cursor:pointer; \
                         background:{fill}; color:{ink}; font-size:12px; {ring}",
                 onclick: move |_| {
+                    if editing {
+                        return;
+                    }
                     if action.is_empty() {
                         let now = open.peek().as_deref() == Some(here.as_str());
                         open.set((!now).then(|| here.clone()));
@@ -492,8 +791,11 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                     }
                 },
                 oncontextmenu: {
-                    let (action, here) = (item.action.clone(), path);
+                    let (action, here) = (item.action, path);
                     move |e: MouseEvent| {
+                        if editing {
+                            return;
+                        }
                         match rc.as_str() {
                             "" | "none" => return,
                             "menu" => open.set(Some(here.clone())),
@@ -508,10 +810,13 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                             other => right.run(other),
                         }
                         e.prevent_default();
+                        e.stop_propagation();
                     }
                 },
-                if iconic {
-                    {named_icon(&item.icon)(architect_shell::Icon { size: 16, color: ink.clone().into() })}
+                if let Some(src) = image {
+                    img { src: "{src}", alt: "", style: "width:{glyph}px; height:{glyph}px; object-fit:contain;" }
+                } else if iconic {
+                    {named_icon(&item.icon)(architect_shell::Icon { size: glyph, color: ink.clone().into() })}
                 }
                 if show_label {
                     span { "{label}" }
@@ -520,13 +825,18 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                     span { style: "font-size:9px; opacity:0.7;", "▾" }
                 }
             }
-            if is_open && has_menu {
+            if is_open && has_menu && !editing {
                 div {
                     role: "menu",
                     "data-menu": "{path}",
-                    style: "position:absolute; top:calc(100% + 4px); left:0; z-index:60; min-width:180px; \
+                    "data-kept": mark,
+                    style: "position:absolute; {place} z-index:60; min-width:180px; \
                             display:flex; flex-direction:column; padding:4px; border-radius:8px; \
                             background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float};",
+                    // Kept in the window: past its right edge (a toolbar in
+                    // the right dock) it moves left; past its bottom it
+                    // opens upward.
+                    onmounted: move |e| keep_in(e.data(), viewport, kept),
                     ToolMenu { cx, rows: item.menu, depth: 0 }
                 }
             }

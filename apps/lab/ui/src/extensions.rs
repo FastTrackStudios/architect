@@ -635,6 +635,21 @@ const FORWARDED: &[&str] = &[
     "TOOLBAR_RESET",
     "TOOLBAR_ARM",
     "TOOLBAR_DISARM",
+    // The toolbar editor's edits (#313), item by item.
+    "TOOLBAR_EDIT",
+    "TOOLBAR_SELECT",
+    "TOOLBAR_NEW",
+    "TOOLBAR_RENAME",
+    "TOOLBAR_DUPLICATE",
+    "TOOLBAR_DELETE",
+    "TOOLBAR_SHOW",
+    "TOOLBAR_INSERT",
+    "TOOLBAR_REMOVE",
+    "TOOLBAR_MOVE",
+    "TOOLBAR_SET",
+    "TOOLBAR_GROUP",
+    "TOOLBAR_UNGROUP",
+    "TOOLBAR_BACKUPS",
     "EXT_LIST",
     "EXT_VIEWS",
     "EXT_SEARCH",
@@ -770,6 +785,14 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // A person's toolbar files (`toolbars/*.toml`): theirs, and their
         // copies of the extensions', read again as they change.
         host.toolbars().set_dir(root.join("toolbars"));
+        // The Vault's file tree has a context menu of its own: a file's.
+        host.declare_context_targets(
+            "lab.vault",
+            &[(
+                "file",
+                "a file-tree row; its id the file's path, `file:<ext>` one extension's",
+            )],
+        );
         // The host service: consent kept on this device (an installed
         // extension runs with what the person granted), each one's data
         // and files, the selection, the settings page's values.

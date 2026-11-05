@@ -376,3 +376,204 @@ fn a_persons_copy_is_used_in_its_place_and_an_action_arms() {
         .unwrap();
     assert_eq!(t.decl.title, "Transport");
 }
+
+/// The visual editor's edits, through `TOOLBAR_*` alone (#313): a toolbar
+/// from nothing (an action, a dropdown, a widget), regrouped, restyled,
+/// read back after a restart; an edit from an item's context menu needs no
+/// arguments; every write keeps the file it replaced.
+#[test]
+fn a_toolbar_is_built_from_empty_through_its_actions_and_survives_a_restart() {
+    use serde_json::json;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("tools");
+    write(&dir, MANIFEST);
+    let (list, ext) = extensions(tmp.path());
+    ext.install_contribution_actions().unwrap();
+    let folder = tmp.path().join("toolbars");
+    ext.host().toolbars().set_dir(&folder);
+    let _ = ext.dev(&dir);
+    let run = |id: &str, args: Value| -> Value {
+        let out = block_on(list.run_json_async(id, args.to_string().as_bytes()))
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
+        serde_json::from_slice(&out).unwrap()
+    };
+    let refused = |id: &str, args: Value| {
+        block_on(list.run_json_async(id, args.to_string().as_bytes())).unwrap_err()
+    };
+
+    assert_eq!(run("TOOLBAR_EDIT", json!({}))["editing"], true);
+    assert_eq!(checked(&list, "TOOLBAR_EDIT"), Some(true));
+    let key = run(
+        "TOOLBAR_NEW",
+        json!({ "title": "My tools", "where": "float" }),
+    )["key"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(key, "user/my-tools");
+    let id = |more: Value| {
+        let mut v = json!({ "id": key });
+        v.as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
+        v
+    };
+    // An action, a dropdown, a widget, another action.
+    run(
+        "TOOLBAR_INSERT",
+        id(json!({ "item": { "action": "LAB_TOOLS_LOOP" } })),
+    );
+    run(
+        "TOOLBAR_INSERT",
+        id(
+            json!({ "item": { "label": "More", "menu": [{ "kind": "heading", "label": "Here" }] } }),
+        ),
+    );
+    run(
+        "TOOLBAR_INSERT",
+        id(json!({ "item": { "kind": "widget", "view": "lab.tools/meter", "width": 90 } })),
+    );
+    let at = run(
+        "TOOLBAR_INSERT",
+        id(json!({ "at": "0", "item": { "action": "LAB_TOOLS_WHERE" } })),
+    );
+    assert_eq!(at["at"], "0");
+    // A row in the dropdown; the two buttons as one group, the dropdown
+    // dragged into it.
+    run(
+        "TOOLBAR_SET",
+        id(
+            json!({ "at": "2", "set": { "menu": [{ "kind": "heading", "label": "Here" }, { "action": "LAB_TOOLS_WHERE" }] } }),
+        ),
+    );
+    run(
+        "TOOLBAR_GROUP",
+        id(json!({ "at": "0", "count": 2, "label": "Both" })),
+    );
+    let moved = run("TOOLBAR_MOVE", id(json!({ "from": "1", "to": "0.2" })));
+    assert_eq!(moved["at"], "0.2");
+    // Restyled: a button's label and colour, the toolbar's corners and preset.
+    run(
+        "TOOLBAR_SET",
+        id(json!({ "at": "0.1", "set": { "label": "Loop it", "colors": { "fill": "primary" } } })),
+    );
+    run(
+        "TOOLBAR_SET",
+        id(
+            json!({ "set": { "style": { "rounding": 10, "preset": "soft" }, "hide_labels": true } }),
+        ),
+    );
+    run("TOOLBAR_RENAME", id(json!({ "title": "Mine" })));
+    // What a refused edit says, and that it changed nothing.
+    let bad = refused(
+        "TOOLBAR_SET",
+        id(json!({ "set": { "style": { "size": 500 } } })),
+    );
+    assert!(bad.to_string().contains("style.size"), "{bad}");
+    assert!(
+        refused("TOOLBAR_MOVE", id(json!({ "from": "0", "to": "0.1" })))
+            .to_string()
+            .contains("group")
+    );
+
+    let want = |t: &Value| {
+        assert_eq!(t["title"], "Mine");
+        assert_eq!(t["style"]["preset"], "soft");
+        assert_eq!(t["items"][0]["kind"], "group");
+        assert_eq!(t["items"][0]["items"][1]["label"], "Loop it");
+        assert_eq!(
+            t["items"][0]["items"][2]["menu"][1]["action"],
+            "LAB_TOOLS_WHERE"
+        );
+        assert_eq!(t["items"][1]["view"], "lab.tools/meter");
+    };
+    want(&run("TOOLBAR_GET", id(json!({})))["toolbar"]);
+
+    // From the item's context menu: no arguments, the item it was opened on.
+    let caller = ActionCaller::app().with_invocation(
+        Invocation::new(InvocationSource::ContextMenu).on("toolbar-item", format!("{key}#1")),
+    );
+    block_on(list.run_json_async_with(&caller, "TOOLBAR_SELECT", b"")).unwrap();
+    assert_eq!(
+        ext.host().toolbars().selected(),
+        Some((key.clone(), Some("1".to_owned())))
+    );
+    // Every write kept the one it replaced.
+    let kept = run("TOOLBAR_BACKUPS", id(json!({})))["backups"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert!(kept >= 8, "{kept} backups");
+
+    // A restart: the same folder, read again.
+    let (list2, ext2) = extensions(tmp.path());
+    ext2.install_contribution_actions().unwrap();
+    ext2.host().toolbars().set_dir(&folder);
+    let _ = ext2.dev(&dir);
+    let out = block_on(list2.run_json_async("TOOLBAR_GET", id(json!({})).to_string().as_bytes()))
+        .unwrap();
+    let again: Value = serde_json::from_slice(&out).unwrap();
+    want(&again["toolbar"]);
+
+    // Duplicated and shown in its place; the original deleted.
+    let copy = run("TOOLBAR_DUPLICATE", id(json!({ "title": "Second" })))["key"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let shown = run("TOOLBAR_SHOW", json!({ "id": copy, "where": "float" }));
+    assert_eq!(shown["hidden"], json!([key]));
+    run("TOOLBAR_DELETE", id(json!({})));
+    let all = run("TOOLBAR_LIST", json!({}));
+    let keys: Vec<&str> = all["toolbars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["key"].as_str())
+        .collect();
+    assert!(
+        keys.contains(&copy.as_str()) && !keys.contains(&key.as_str()),
+        "{keys:?}"
+    );
+    assert!(
+        refused("TOOLBAR_DELETE", json!({ "id": "lab.tools/transport" }))
+            .to_string()
+            .contains("extension")
+    );
+    run("TOOLBAR_EDIT", json!({ "on": false }));
+    assert_eq!(checked(&list, "TOOLBAR_EDIT"), Some(false));
+}
+
+/// Context-menu targets are points the features that own them declare
+/// (#313): the workspace's and the toolbars' are there with the host; an
+/// extension's rows are items of their target's point; rows for a target
+/// no feature declared wait until one does.
+#[test]
+fn context_targets_are_points_their_features_declare() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("tools");
+    write(&dir, MANIFEST);
+    let (_list, ext) = extensions(tmp.path());
+    let host = ext.host();
+    let _ = ext.dev(&dir);
+    let points = host.points();
+    for p in [
+        "context.tab",
+        "context.pane",
+        "context.view",
+        "context.toolbar",
+        "context.toolbar-item",
+    ] {
+        assert!(points.declared(p).is_some(), "{p}");
+    }
+    let tab = points.items("context.tab");
+    assert_eq!(tab.len(), 1);
+    assert_eq!(tab[0].from, ID);
+    assert_eq!(tab[0].value["action"], "LAB_TOOLS_WHERE");
+    // `file:md` is `context.file`'s: nobody here owns files, so it waits.
+    assert!(points.declared("context.file").is_none());
+    assert!(points.waiting().contains_key("context.file"));
+    host.declare_context_targets("lab.files", &[("file", "a file-tree row")]);
+    assert_eq!(points.items("context.file").len(), 1);
+    assert!(!points.waiting().contains_key("context.file"));
+    assert!(points.rejected().is_empty(), "{:?}", points.rejected());
+}

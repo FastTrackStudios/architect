@@ -681,6 +681,7 @@ impl Runner<'_, '_> {
                         dx,
                         dy,
                         seconds,
+                        key,
                     } => {
                         self.travel(x, y, APPROACH_SECONDS)?;
                         self.press(x, y);
@@ -705,6 +706,10 @@ impl Runner<'_, '_> {
                             let p = ease(to_f64(n) / to_f64(frames));
                             let (px, py) = (lerp(x, end.0, p), lerp(y, end.1, p));
                             self.move_to(px, py);
+                            self.tick()?;
+                        }
+                        if let Some(key) = key {
+                            self.key(&parse_key(key), Modifiers::empty(), None);
                             self.tick()?;
                         }
                         let (ex, ey) = (self.pointer.x, self.pointer.y);

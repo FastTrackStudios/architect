@@ -104,6 +104,9 @@ pub struct ExtensionUi {
     /// Moves when anything happens on the host's Action List (an action
     /// ran, the app's state changed): what a toggle's button re-reads.
     ticks: Signal<u64>,
+    /// The toolbars that are panes of their own, by kind, with their
+    /// title and place: what the views follow (a person's new toolbar).
+    pub(crate) toolbar_panes: Signal<Vec<(String, String, String)>>,
 }
 
 impl ExtensionUi {
@@ -240,6 +243,7 @@ impl ExtensionUi {
     #[must_use]
     pub fn views(&self) -> Vec<View> {
         let _ = (self.revision)();
+        let _ = (self.toolbar_panes)();
         let me = *self;
         let mut all = self.seen.peek().clone();
         all.extend(declared(&self.host()));
@@ -397,6 +401,7 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     let held = use_signal(|| host.clone());
     let windows = crate::window_ui::use_open_windows(&host);
     let ticks = crate::toolbar_ui::use_ticks(&host);
+    let toolbar_panes = use_signal(Vec::new);
     let ui = ExtensionUi {
         host: held,
         revision,
@@ -404,6 +409,7 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
         seen,
         windows,
         ticks,
+        toolbar_panes,
     };
     // The settings page is the settings extension's window: the app's
     // sections and values to it, `SettingsHandle::show` opening it.
@@ -434,26 +440,29 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     // a toggle's ticked when on.
     let reg = host.contributions().clone();
     let list = host.list().clone();
+    let bars_host = host.clone();
     use_context_provider(move || {
         ContextEntries::new(move |target, id| {
-            reg.context(target, id)
-                .into_iter()
-                .filter_map(|by| {
-                    let info = list.info(&by.item.action)?;
-                    let label = if by.item.title.is_empty() {
-                        info.display_name
-                    } else {
-                        by.item.title.clone()
-                    };
-                    Some(ContextEntry {
-                        label,
-                        command: by.item.action,
-                        checked: info.checked,
-                    })
+            // The toolbars' own rows first (`toolbar`, `toolbar-item`).
+            let mut rows = crate::toolbar_ui::context_rows(&bars_host, target, id);
+            rows.extend(reg.context(target, id).into_iter().filter_map(|by| {
+                let info = list.info(&by.item.action)?;
+                let label = if by.item.title.is_empty() {
+                    info.display_name
+                } else {
+                    by.item.title.clone()
+                };
+                Some(ContextEntry {
+                    label,
+                    command: by.item.action,
+                    checked: info.checked,
                 })
-                .collect()
+            }));
+            rows
         })
     });
+    // The toolbar editor's state, shared by the window's toolbars.
+    let _ = crate::toolbar_editor::provide_editor();
     // A pane's header: the toolbars on every pane, and on its view's.
     crate::toolbar_ui::provide_header_tools(ui);
     // A toolbar that is a pane of its own (a dock's, a float, a window)
@@ -717,6 +726,7 @@ pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
     let layers = (ui.layers)();
     rsx! {
         crate::window_ui::ExtensionWindows { ui }
+        crate::toolbar_editor::ToolbarEditorLayer { ui }
         crate::host_ui_view::HostUiLayer { host: ui.host() }
         for layer in layers {
             {

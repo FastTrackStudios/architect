@@ -1448,3 +1448,19 @@ fn NativeMenus(bar: architect_commands::MenuBar, windowed: bool) -> Element {
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "ios")))]
     rsx! { architect_commands::InWindowMenus { bar } }
 }
+
+#[cfg(test)]
+mod layers {
+    /// The app's root stacks extensions' overlays and the tour as
+    /// siblings: an extension's prompt, dialog or menu is over the tour's
+    /// card, so a step that brings one up can be answered (#314).
+    #[test]
+    fn prompts_are_over_the_tour() {
+        const {
+            assert!(
+                architect_extensions::host_ui_view::PROMPT_LAYER
+                    > architect_guide::tour::TOUR_LAYER
+            );
+        }
+    }
+}
