@@ -109,10 +109,12 @@ function link(name, role, from) {
   const key = role + ":" + name;
   if (linked.has(key)) return linked.get(key);
   let code;
-  if (name === "architect" || name === "architect/worker") {
-    if (name !== ours)
+  if (name === "architect" || name === "architect/worker" || name === "architect/dom") {
+    if (name !== ours && !(name === "architect/dom" && role === "page"))
       throw new Error(`${from}: a ${role} imports "${ours}" and files of its own folder ("./x.tsx"), nothing else`);
     code = name === "architect" ? start.architect : start.architectWorker;
+    // The DOM imports the page's runtime: the same module the page has.
+    if (name === "architect/dom") code = start.architectDom.split('"architect"').join(JSON.stringify(link("architect", role, name)));
   } else {
     const m = start.modules[name];
     if (!m) throw new Error(`${name}: no such file in the page's folder`);

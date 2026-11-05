@@ -5,7 +5,8 @@
 //! [`prepare`] does here what the `QuickJS` loader (`crate::js`) does as
 //! each module loads: every script of the folder is transpiled (oxc,
 //! [`crate::tsx`]) and its imports are resolved by the same rules —
-//! `"architect"` (`"architect/worker"` in a worker's script) and files of
+//! `"architect"` and `"architect/dom"` (`"architect/worker"` in a
+//! worker's script) and files of
 //! the page's own folder (`./list.tsx`, `../shared/ui.ts`), nothing else.
 //! Each resolved import's specifier is rewritten to [`LINK`] and the
 //! module's name, which the worker swaps for that module's URL as it
@@ -32,6 +33,10 @@ pub const ARCHITECT: &str = "const a = globalThis.__architect.api;\n\
 export const { h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate, \
 theme, actions, settings, state, notify, ui, clipboard, events, documents, editor, net, ports, worker, Overlay, host } = a;\nexport default a;\n";
 
+/// `import … from "architect/dom"`: a DOM in the page's runtime, for a
+/// framework that renders to one (`js/dom.js`); a page's only.
+pub const ARCHITECT_DOM: &str = include_str!("js/dom.js");
+
 /// `import … from "architect/worker"`: a worker's.
 pub const ARCHITECT_WORKER: &str = "const w = globalThis.__worker.api;\n\
 export const { args, post, onMessage } = w;\nexport default w;\n";
@@ -48,7 +53,8 @@ pub struct Module {
     /// It as JavaScript, its imports rewritten to [`LINK`]s.
     pub code: String,
     /// What it imports: each specifier as written, and the module it
-    /// names (`architect`, `architect/worker` or a file's name), or why
+    /// names (`architect`, `architect/dom`, `architect/worker` or a
+    /// file's name), or why
     /// it names none.
     pub imports: Vec<Import>,
     /// Why it cannot run (it does not parse), with its line and column.
@@ -166,7 +172,7 @@ fn specifiers(name: &str, code: &str) -> Result<Vec<(usize, usize, String)>, Str
 }
 
 /// What `specifier`, imported by module `from`, names: `architect`,
-/// `architect/worker`, or a file of the folder — the `QuickJS` loader's
+/// `architect/dom`, `architect/worker`, or a file of the folder — the `QuickJS` loader's
 /// rules (`crate::js`), over the folder's names.
 ///
 /// # Errors
@@ -177,7 +183,7 @@ pub fn resolve(
     specifier: &str,
     files: &BTreeMap<String, String>,
 ) -> Result<String, String> {
-    if specifier == "architect" || specifier == "architect/worker" {
+    if specifier == "architect" || specifier == "architect/worker" || specifier == "architect/dom" {
         return Ok(specifier.to_owned());
     }
     if !(specifier.starts_with("./") || specifier.starts_with("../")) {
