@@ -250,6 +250,11 @@ architect-permissions = { workspace = true }
 architect-workspace = { workspace = true, features = ["home"] }
 # tests/host_ui_view.rs: a badged file-tree row and the interface's layer, as HTML.
 dioxus-ssr = { workspace = true }
+# tests/host_gate.rs: a vox-served server behind a `PermissionsGate`, called
+# on an extension's behalf.
+architect = { workspace = true, features = ["action-list", "host", "connect"] }
+vox = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 
 # iOS forbids JIT: Wasmtime interprets there (Pulley).
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]

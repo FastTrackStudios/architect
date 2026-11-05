@@ -16,7 +16,7 @@ serde_json = { workspace = true }
 # its ImGui window drawn in the theme; and EXT_CHECK on the clicker's own
 # folder: its program started, its view rendered once (tests/check.rs).
 architect = { workspace = true, features = ["action-list"] }
-architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote"] }
+architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote", "page"] }
 architect-theme = { workspace = true, features = ["actions"] }
 architect-canvas = { workspace = true, features = ["luau"] }
 architect-scripting = { workspace = true, features = ["luau"] }
@@ -25,6 +25,10 @@ futures = "0.3"
 architect-permissions = { workspace = true }
 architect-settings = { workspace = true }
 tempfile = "3"
+# tests/manager_page.rs: the extensions page, clicked on Blitz.
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
 
 [lints]
 workspace = true

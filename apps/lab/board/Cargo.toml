@@ -25,13 +25,16 @@ futures-timer = { workspace = true }
 [dev-dependencies]
 # Both ways: linked into a host, and its program run by one.
 architect = { workspace = true, features = ["action-list"] }
-architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process", "ui", "remote"] }
 architect-settings = { workspace = true }
 futures = "0.3"
 tempfile = "3"
 # Its tab as a page file (tests/page.rs): drawn by architect-pages.
 architect-pages = { workspace = true, features = ["js", "ui"] }
 blitz-dom = { workspace = true }
+# tests/kf_fence.rs: a note's ```kf fence on Blitz, drawn by its embed.
+blitz-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
 
 [lints]
 workspace = true
