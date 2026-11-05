@@ -235,7 +235,7 @@ fn Seen() -> Element {
 /// A page with no use for the sidebar.
 #[component]
 fn Folding() -> Element {
-    use_sidebar_default(SidebarDefault::Collapsed);
+    use_sidebar_layout(SidebarLayout::Rail);
     rsx! { Seen {} }
 }
 
@@ -332,13 +332,15 @@ fn a_desk_page_with_nothing_for_the_sidebar_folds_it_into_the_ribbon() {
     );
     assert!(html.contains("\"Toggle the sidebar\""));
 
-    // Opened, they go back to the sidebar's foot.
+    // Opened, they stay in the ribbon: a desk's account, switcher and
+    // foot buttons never move into the sidebar (#353).
     dom.in_runtime(|| shell.toggle(Side::Left));
+    assert!(!dom.in_runtime(|| shell.folded()), "opened");
     let mut out = Record::default();
     dom.render_immediate(&mut out);
     assert!(
-        out.0.contains("attr aria-label None \"Account\"\n"),
-        "the account row"
+        !out.0.contains("attr aria-label None \"Account\"\n"),
+        "no account row in the sidebar"
     );
 }
 
@@ -362,4 +364,51 @@ fn lab_outline_s_indent_icons_are_known_not_a_puzzle_piece() {
         assert_ne!(drawn_icon(name), puzzle, "{name}");
     }
     assert_ne!(drawn_icon("indent-increase"), drawn_icon("indent-decrease"));
+}
+
+/// A page that prefers two columns.
+#[component]
+fn TwoColumns() -> Element {
+    use_sidebar_layout(SidebarLayout::Two);
+    rsx! { Seen {} }
+}
+
+fn two_desk() -> Element {
+    rsx! {
+        AppShell {
+            screen: DESK,
+            tabs: vec![Tab::new("vault", "Vault", crate::icon!(Check))],
+            current: Some("vault"),
+            on_tab: |_| (),
+            left: rsx! { div { "the navigator" } },
+            TwoColumns {}
+        }
+    }
+}
+
+#[test]
+fn a_page_prefers_a_layout_and_every_layout_stays_a_press_away() {
+    let mut dom = VirtualDom::new(two_desk);
+    dom.rebuild_in_place();
+    let layout = |dom: &mut VirtualDom| {
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        let shell = SEEN_SHELL.with(|s| s.borrow().clone()).unwrap();
+        dom.in_runtime(|| shell.sidebar_layout())
+    };
+    let set = |dom: &mut VirtualDom, to: SidebarLayout| {
+        let shell = SEEN_SHELL.with(|s| s.borrow().clone()).unwrap();
+        dom.in_runtime(|| shell.set_sidebar_layout(to));
+    };
+    assert_eq!(layout(&mut dom), SidebarLayout::Two, "as the page prefers");
+    for to in SidebarLayout::ALL {
+        set(&mut dom, to);
+        assert_eq!(layout(&mut dom), to);
+    }
+    set(&mut dom, SidebarLayout::Rail);
+    assert_eq!(layout(&mut dom), SidebarLayout::Rail);
+    // The toggle opens it as the page prefers.
+    let shell = SEEN_SHELL.with(|s| s.borrow().clone()).unwrap();
+    dom.in_runtime(|| shell.toggle(Side::Left));
+    assert_eq!(layout(&mut dom), SidebarLayout::Two);
+    assert_eq!(SidebarLayout::Two.columns(), 2);
 }

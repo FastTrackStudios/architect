@@ -40,6 +40,8 @@ mod palette;
 pub mod params;
 mod recent;
 #[cfg(feature = "ui")]
+mod sidebar;
+#[cfg(feature = "ui")]
 mod ui;
 
 #[cfg(feature = "ui")]
@@ -74,6 +76,8 @@ pub use native_menu::NativeMenus;
 pub use opener::{Found, OpenIn, OpenItem, Opener, Openers};
 pub use palette::{Command, Effect, Query, Ranked, Scope, rank};
 pub use recent::Recents;
+#[cfg(feature = "ui")]
+pub use sidebar::{sidebar_command, use_sidebar_commands};
 #[cfg(feature = "ui")]
 pub use ui::*;
 

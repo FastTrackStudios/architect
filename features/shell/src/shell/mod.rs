@@ -446,12 +446,12 @@ pub struct Shell {
     has_content: bool,
     /// The current tab: the page kind a desk's sidebar toggle is kept for.
     current: Option<&'static str>,
-    /// A desk's sidebar folded or open by the person's own toggle, per page
-    /// kind (the current tab's id; `""` under none).
-    desk_folds: Signal<BTreeMap<&'static str, bool>>,
-    /// How the page wants a desk's sidebar when nobody has toggled it:
-    /// [`use_sidebar_default`].
-    page_sidebar: Claim<SidebarDefault>,
+    /// A desk's sidebar layout as the person last chose it, per page kind
+    /// (the current tab's id; `""` under none).
+    desk_layouts: Signal<BTreeMap<&'static str, SidebarLayout>>,
+    /// The layout the page prefers when nobody has chosen one:
+    /// [`use_sidebar_layout`].
+    page_sidebar: Claim<SidebarLayout>,
     /// The page draws a desk's title row itself, its top edge in it:
     /// [`use_title_row`].
     page_title: Claim<()>,
@@ -504,15 +504,45 @@ pub fn use_shell_slots(left: Option<Element>, rail: Option<Element>) {
     });
 }
 
-/// How a page wants a desk's left sidebar while nobody has toggled it on
-/// this page kind.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum SidebarDefault {
-    /// Open beside the page (a wide enough window).
-    Open,
-    /// Folded to the ribbon: the workspace switcher and the account move to
-    /// the ribbon's foot.
-    Collapsed,
+/// A desk's left side: the rail alone, or the rail and a sidebar of one or
+/// two columns (Notebook Navigator's single and dual pane: notes, or
+/// folders beside notes). Every page may be shown in any of the three
+/// (the sidebar's button, ⌘K's "Sidebar: …"); a page says which it
+/// prefers ([`use_sidebar_layout`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SidebarLayout {
+    /// The rail (the ribbon) alone: the sidebar folded away.
+    Rail,
+    /// The rail and a sidebar of one column.
+    #[default]
+    One,
+    /// The rail and a sidebar of two columns, as wide as both need.
+    Two,
+}
+
+impl SidebarLayout {
+    /// All three, rail first.
+    pub const ALL: [Self; 3] = [Self::Rail, Self::One, Self::Two];
+
+    /// How many columns the sidebar has: 0 for the rail alone.
+    #[must_use]
+    pub const fn columns(self) -> u8 {
+        match self {
+            Self::Rail => 0,
+            Self::One => 1,
+            Self::Two => 2,
+        }
+    }
+
+    /// Its name, as a menu says it.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Rail => "Rail",
+            Self::One => "One column",
+            Self::Two => "Two columns",
+        }
+    }
 }
 
 /// A page's hold on a part of the shell: the hook's own number and what it
@@ -549,15 +579,16 @@ fn use_claim<T: Clone + PartialEq + 'static>(pick: fn(&Shell) -> Claim<T>, value
     });
 }
 
-/// How the page wants a desk's left sidebar: open, or folded to the ribbon
-/// (a page with no use for a sidebar).
+/// The layout the page prefers for a desk's left side
+/// ([`SidebarLayout`]): the rail alone (a page with no use for a sidebar),
+/// or a sidebar of one or two columns. The others stay a press away.
 ///
-/// The person's own toggle wins, and is
-/// kept per page kind (the current tab). A page that says nothing gets an
-/// open sidebar when it has something in it and the window is wide enough
-/// (1000pt), else a folded one. Phones and tablets keep their own.
-pub fn use_sidebar_default(default: SidebarDefault) {
-    use_claim(|s| s.page_sidebar, Some(default));
+/// The person's own choice wins, and is kept per page kind (the current
+/// tab). A page that says nothing gets one column when it has something
+/// for the sidebar and the window is wide enough (1000pt), else the rail.
+/// Phones and tablets keep their own.
+pub fn use_sidebar_layout(preferred: SidebarLayout) {
+    use_claim(|s| s.page_sidebar, Some(preferred));
 }
 
 /// The page's top edge is a desk's title row (a workspace's top tab bars,
@@ -637,21 +668,56 @@ impl Shell {
     }
 
     /// Whether the docked left sidebar is folded to a rail (on a desk, to
-    /// the ribbon): on a desk as the person last left it on this page kind,
-    /// else as the page asks ([`use_sidebar_default`]), else open when it
-    /// has something in it and the window is wide enough.
+    /// the ribbon): [`Self::sidebar_layout`] is [`SidebarLayout::Rail`].
     #[must_use]
     pub fn folded(&self) -> bool {
+        self.sidebar_layout() == SidebarLayout::Rail
+    }
+
+    /// A desk's left side now: as the person last chose it on this page
+    /// kind, else as the page prefers ([`use_sidebar_layout`]), else one
+    /// column when it has something for it and the window is wide enough.
+    /// Off a desk, the rail or one column.
+    #[must_use]
+    pub fn sidebar_layout(&self) -> SidebarLayout {
         if self.desk() {
-            if let Some(folded) = self.desk_folds.read().get(self.page_kind()) {
-                return *folded;
+            if let Some(chosen) = self.desk_layouts.read().get(self.page_kind()) {
+                return *chosen;
             }
-            if let Some((_, default)) = *self.page_sidebar.read() {
-                return default == SidebarDefault::Collapsed;
-            }
-            return !self.has_content || self.screen.width < FOLD_BELOW;
+            return self.preferred_sidebar();
         }
-        (self.fold)().unwrap_or(self.screen.width < FOLD_BELOW)
+        if (self.fold)().unwrap_or(self.screen.width < FOLD_BELOW) {
+            SidebarLayout::Rail
+        } else {
+            SidebarLayout::One
+        }
+    }
+
+    /// The layout the page prefers ([`use_sidebar_layout`]), else one
+    /// column when it has something for the sidebar and the window is wide
+    /// enough, else the rail.
+    #[must_use]
+    pub fn preferred_sidebar(&self) -> SidebarLayout {
+        if let Some((_, preferred)) = *self.page_sidebar.read() {
+            return preferred;
+        }
+        if !self.has_content || self.screen.width < FOLD_BELOW {
+            SidebarLayout::Rail
+        } else {
+            SidebarLayout::One
+        }
+    }
+
+    /// Show a desk's left side as `layout`, kept for this page kind (off a
+    /// desk, one or two columns open the sidebar).
+    pub fn set_sidebar_layout(&self, layout: SidebarLayout) {
+        if self.desk() {
+            let mut layouts = self.desk_layouts;
+            layouts.write().insert(self.page_kind(), layout);
+        } else {
+            let mut fold = self.fold;
+            fold.set(Some(layout == SidebarLayout::Rail));
+        }
     }
 
     /// The page kind a desk's sidebar toggle is kept for: the current tab.
@@ -659,16 +725,15 @@ impl Shell {
         self.current.unwrap_or("")
     }
 
-    /// Fold the docked left sidebar (`true`) or open it: on a desk, kept for
-    /// this page kind.
+    /// Fold the docked left sidebar (`true`) or open it: open, as the page
+    /// prefers when that is a sidebar, else one column.
     fn set_folded(&self, folded: bool) {
-        if self.desk() {
-            let mut folds = self.desk_folds;
-            folds.write().insert(self.page_kind(), folded);
-        } else {
-            let mut fold = self.fold;
-            fold.set(Some(folded));
-        }
+        let layout = match (folded, self.preferred_sidebar()) {
+            (true, _) => SidebarLayout::Rail,
+            (false, SidebarLayout::Rail) => SidebarLayout::One,
+            (false, preferred) => preferred,
+        };
+        self.set_sidebar_layout(layout);
     }
 
     /// Whether the page draws a desk's title row itself ([`use_title_row`]).
@@ -850,6 +915,9 @@ const LIGHT_GAP: f64 = 8.0;
 const PARALLAX: f64 = 0.22;
 /// The docked sidebars' widths: the start, and the range a drag keeps to.
 const LEFT_WIDTH: f64 = 264.0;
+/// A two-column sidebar's width to start with: Notebook Navigator's
+/// folders (200) and a list beside them.
+const TWO_WIDTH: f64 = 480.0;
 /// The shell's stacking order, for the shell and what it hosts (a
 /// workspace's floats and sheets, the command palette): one scale, so two
 /// layers never meet at the same number.
@@ -912,7 +980,10 @@ fn shell_css(t: &ShellTheme) -> String {
 pub const RIBBON: f64 = 44.0;
 const RIGHT_WIDTH: f64 = 320.0;
 const MIN_WIDTH: f64 = 200.0;
-const MAX_WIDTH: f64 = 440.0;
+/// What a sidebar dragged wider leaves the page between them: no fixed
+/// maximum (Notebook Navigator's sidebar has none), only the main area's
+/// room (#353).
+const PAGE_ROOM: f64 = 240.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Stroke {
@@ -1020,8 +1091,8 @@ pub fn AppShell(
     let left_w = use_signal(|| LEFT_WIDTH);
     let right_w = use_signal(|| RIGHT_WIDTH);
     let page_left = use_signal(|| None::<Element>);
-    let desk_folds = use_signal(BTreeMap::<&'static str, bool>::new);
-    let page_sidebar = use_signal(|| None::<(u64, SidebarDefault)>);
+    let desk_layouts = use_signal(BTreeMap::<&'static str, SidebarLayout>::new);
+    let page_sidebar = use_signal(|| None::<(u64, SidebarLayout)>);
     let page_title = use_signal(|| None::<(u64, ())>);
     let desk_tab = use_signal(|| None::<String>);
     let page_status = use_signal(Vec::<StatusItem>::new);
@@ -1039,8 +1110,9 @@ pub fn AppShell(
     let left = slot_content(&chrome, Slot::Left, left);
     let right = slot_content(&chrome, Slot::Right, right);
     let has_content = left.is_some();
-    // A desk's sidebar also holds the switcher and the account, so it has
-    // its button with them alone.
+    // A sidebar's button with the switcher or the account alone: a tablet's
+    // sidebar holds them; on a desk, where they stay in the ribbon, every
+    // page keeps its three layouts a press away (`SidebarLayout`).
     let has_left = has_content
         || (screen.form() == FormFactor::Desk && (account.is_some() || workspaces.is_some()));
     let has_right = right.is_some();
@@ -1065,7 +1137,7 @@ pub fn AppShell(
         page_left,
         has_content,
         current,
-        desk_folds,
+        desk_layouts,
         page_sidebar,
         page_title,
         desk_tab,
@@ -1107,6 +1179,30 @@ pub fn AppShell(
         let (left, right) = docked_now;
         left_open.to(f64::from(u8::from(left)));
         right_open.to(f64::from(u8::from(right)));
+    }));
+    // Two columns start as wide as both need; back to one, the width one
+    // column had.
+    let layout_now = shell.sidebar_layout();
+    let one_w = use_hook(|| CopyValue::new(LEFT_WIDTH));
+    // As if one column before: a page that starts on two gets their width.
+    let last_layout = use_hook(|| CopyValue::new(SidebarLayout::One));
+    use_effect(use_reactive!(|layout_now| {
+        let (mut one_w, mut last_layout, mut left_w) = (one_w, last_layout, left_w);
+        let was = *last_layout.peek();
+        if was == layout_now {
+            return;
+        }
+        let w = *left_w.peek();
+        match (was, layout_now) {
+            (SidebarLayout::One, SidebarLayout::Two) => {
+                one_w.set(w);
+                left_w.set(w.max(TWO_WIDTH));
+            }
+            (_, SidebarLayout::Two) => left_w.set(w.max(TWO_WIDTH)),
+            (SidebarLayout::Two, SidebarLayout::One) => left_w.set(*one_w.peek()),
+            _ => {}
+        }
+        last_layout.set(layout_now);
     }));
     // Pages read the sidebar's fold as it moves (the title row's clearance).
     let shell = Shell {
@@ -1156,11 +1252,12 @@ pub fn AppShell(
         let c = e.client_coordinates();
         if let Some(r) = resize_mv.get() {
             let dx = c.x - r.x0;
-            let (mut w, grow) = match r.side {
-                Side::Left => (left_w, dx),
-                Side::Right => (right_w, -dx),
+            let (mut w, grow, other) = match r.side {
+                Side::Left => (left_w, dx, if docked_now.1 { *right_w.peek() } else { 0.0 }),
+                Side::Right => (right_w, -dx, if docked_now.0 { *left_w.peek() } else { 0.0 }),
             };
-            w.set((r.w0 + grow).clamp(MIN_WIDTH, MAX_WIDTH));
+            let room = (screen.width - RIBBON - PAGE_ROOM - other).max(MIN_WIDTH);
+            w.set((r.w0 + grow).clamp(MIN_WIDTH, room));
             return;
         }
         let Some(mut s) = touch_mv.get() else { return };
@@ -1382,7 +1479,7 @@ pub fn AppShell(
             div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
             if frame == Frame::Sidebar && desk {
                 SlotView { slot: Slot::Ribbon,
-                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick, folded: !docked_now.0, title_row: page_title }
+                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick, title_row: page_title }
                 }
             }
             match frame {
@@ -1429,22 +1526,12 @@ pub fn AppShell(
                         } else {
                             span { style: "flex: 1;" }
                         }
-                        if desk && !foot.is_empty() {
-                            div { style: "display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-top: 1px solid {t.rule};",
-                                for action in foot.iter().cloned() {
-                                    FootRow { key: "{action.label}", action }
-                                }
+                        // A desk's account, switcher and foot buttons are the
+                        // ribbon's (`DeskRibbon`); a tablet's are here.
+                        if !desk {
+                            if let Some(account) = account.clone() {
+                                AccountRow { account, bottom: screen.insets.bottom }
                             }
-                        }
-                        if desk {
-                            if let Some(workspaces) = workspaces.clone() {
-                                div { style: "display: flex; align-items: center; padding: 6px 10px; border-top: 1px solid {t.rule};",
-                                    Switcher { workspaces, place: Place::Foot }
-                                }
-                            }
-                        }
-                        if let Some(account) = account.clone() {
-                            AccountRow { account, bottom: screen.insets.bottom }
                         }
                         if resizable {
                             ResizeEdge { side: Side::Left, on_start: move |e| start_left(Side::Left, e) }
@@ -2176,14 +2263,14 @@ mod tests {
 
 /// A desk's ribbon: the window's left edge in the middle row, under the
 /// title bar, the app's sections as icons, then what the page adds (a
-/// workspace's views and pinned commands). While the sidebar is folded the
-/// workspace switcher and the account fold into its foot, as marks.
+/// workspace's views and pinned commands). Its foot is the app's foot
+/// buttons (Theme, Settings), the workspace switcher and the account, as
+/// marks, open sidebar or not: they never move into the sidebar (#353).
 #[component]
 fn DeskRibbon(
     tabs: Vec<Tab>,
     current: Option<&'static str>,
     on_tab: EventHandler<&'static str>,
-    folded: bool,
     /// The page draws the title row: the ribbon starts at the window's top
     /// with its piece of the row.
     title_row: bool,
@@ -2191,11 +2278,7 @@ fn DeskRibbon(
     let shell = use_shell();
     let t = shell.theme.clone();
     let extra = (shell.rail_extra)();
-    let (workspaces, account, foot) = if folded {
-        (shell.workspaces, shell.account, shell.foot)
-    } else {
-        (None, None, Vec::new())
-    };
+    let (workspaces, account, foot) = (shell.workspaces, shell.account, shell.foot);
     rsx! {
         div {
             style: "width: {RIBBON}px; flex-shrink: 0; display: flex; flex-direction: column; background: {t.desk};",

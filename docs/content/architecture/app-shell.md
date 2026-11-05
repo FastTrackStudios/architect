@@ -327,16 +327,22 @@ app on the shell gets it:
   leaves the ribbon.
 - **One sidebar** beside it: the app's `left`, or what the page claims
   with `use_shell_slots` (a workspace's left dock, its tabs in the title
-  row). The workspace switcher sits at its foot, over the account, with
-  either, so it does not move when a page claims the sidebar.
-  A page says how the sidebar opens (`SidebarDefault`:
-  `use_sidebar_default`, or `Page`'s `sidebar`); a page that says
-  nothing gets it open when there is something in it and the window is
-  1000pt wide, folded otherwise. The person's own toggle wins and is
-  kept per page kind (the current tab), so the Vault can open folded
-  while the Inbox keeps its list. Folded, the switcher and the account
-  fold into the ribbon's foot as their marks (the workspace's initial,
-  the person's avatar), each opening the same menu as in the sidebar.
+  row). The app's foot buttons (Theme, Settings), the workspace
+  switcher and the account stay in the ribbon's foot as their marks
+  (the workspace's initial, the person's avatar), the sidebar open or
+  not: they never move into it.
+  The left side has three layouts (`SidebarLayout`): the rail alone,
+  a sidebar of one column, or of two (Notebook Navigator's single and
+  dual pane). Every page can be shown in any of them (the sidebar's
+  button, ⌘K's "Sidebar: …" from `architect_commands`'
+  `use_sidebar_commands`); a page says which it prefers
+  (`use_sidebar_layout`, or `Page`'s `sidebar`); a page that says
+  nothing gets one column when there is something in it and the window
+  is 1000pt wide, the rail otherwise. The person's own choice wins and
+  is kept per page kind (the current tab). Two columns start 480pt
+  wide; back to one, the sidebar has one column's width again. A
+  sidebar has no maximum width: dragged wider, it stops where the page
+  would have less than 240pt.
   Phones and tablets keep their own drawers and rails.
 - **The status line**: `StatusItem`s (a fact or a switch: text, icon, a
   dot, a chip, a press), the app's on `AppShell` and the page's from

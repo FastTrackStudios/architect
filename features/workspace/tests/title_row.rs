@@ -6,8 +6,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use architect_shell::{
-    Account, AppShell, Insets, Menu, Page, Screen, SidebarDefault, Tab, use_shell,
-    use_sidebar_default,
+    Account, AppShell, Insets, Menu, Page, Screen, SidebarLayout, Tab, use_shell,
+    use_sidebar_layout,
 };
 use architect_workspace::{
     Dest, Pane, PaneId, Popout, Side, Target, TitleRow, View, Views, WindowId, WindowSystem,
@@ -38,7 +38,7 @@ const fn narrow(v: f64) -> f32 {
 
 #[component]
 fn Board() -> Element {
-    use_sidebar_default(SidebarDefault::Collapsed);
+    use_sidebar_layout(SidebarLayout::Rail);
     let workspace = use_signal(|| {
         let mut w = Workspace::new();
         let _ = w.open(Pane::new("editor", "note", "Editor"), Target::Tab);
@@ -200,8 +200,13 @@ fn a_page_with_one_tab_keeps_it_in_the_shells_row() {
     let (_, y, _, h) = tab[0];
     assert!(y >= 0.0 && y + h <= 52.5, "in the title row: {tab:?}");
     assert!(rects(&doc, "[data-tab-bar]").is_empty());
-    // The app's sidebar is open beside it, its account a row.
-    assert_eq!(rects(&doc, "[aria-label=\"Account\"]").len(), 1);
+    // The app's sidebar is open beside it; the account stays a mark on
+    // the ribbon, not a row in it.
+    assert!(rects(&doc, "[aria-label=\"Account\"]").is_empty());
+    assert_eq!(
+        rects(&doc, "[aria-label=\"Account: Cody Wright\"]").len(),
+        1
+    );
 }
 
 // A pop-out window draws its own title bar too (a Mac's): its launcher
