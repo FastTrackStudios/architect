@@ -1,0 +1,558 @@
+//! The navigator on architect's shell (feature `ui`): [`use_navigator`]
+//! keeps it, [`NavigatorView`] draws it.
+//!
+//! Notebook Navigator's view (`src/components/NotebookNavigatorComponent.tsx`):
+//! a split container holding the navigation pane and the list pane, side by
+//! side, stacked, or one at a time sliding over the other
+//! (`styles/sections/layout-panes.css`). Mapped onto architect: the app
+//! mounts the view as its left sidebar's content and opens what
+//! [`NavigatorView`]'s `on_open` asks for in its workspace; the commands
+//! are on the palette (`NAVIGATOR_*`), the settings a section of the
+//! settings page, the colours theme roles ([`theme`]).
+
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
+
+use architect_commands::{Command, use_command};
+use architect_settings::{UseSettings, use_settings};
+use dioxus::prelude::*;
+use futures_util::StreamExt as _;
+
+use crate::index::VaultIndex;
+use crate::layout::{self, Pane, PaneLayout};
+use crate::list::Clock;
+use crate::settings::{NavigatorSettings, Orientation};
+use crate::source::{NavigatorSource, SourceEvent, Subscription};
+use crate::state::{Key as NavKey, Mods, NavigatorState, OpenIn, Outcome};
+
+mod panes;
+pub mod theme;
+mod virtual_pane;
+
+pub use theme::{NavigatorColours, TOKENS, with_tokens};
+
+/// Notebook Navigator's `DEBOUNCE_KEYBOARD_FILE_OPEN`: a note the keyboard
+/// moved to opens once the keys rest this long.
+pub const KEY_OPEN_SETTLE: Duration = Duration::from_millis(500);
+
+/// A note to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Open {
+    pub path: String,
+    pub how: OpenIn,
+}
+
+/// The navigator, kept by the component that called [`use_navigator`]:
+/// pass it to [`NavigatorView`], or read and drive it.
+#[derive(Clone, Copy)]
+pub struct Navigator {
+    pub state: Signal<NavigatorState>,
+    pub settings: UseSettings<NavigatorSettings>,
+    source: CopyValue<Arc<dyn NavigatorSource>>,
+    /// The view's width, once measured.
+    width: Signal<Option<f64>>,
+    /// Bumped by each key that moves to a note: an older wait to open is
+    /// stale.
+    settle: CopyValue<u64>,
+    /// A finger dragged the pane pressed: its release is not a tap.
+    pub(crate) dragged: CopyValue<bool>,
+}
+
+/// The navigator over `source`, kept while the caller is mounted: its
+/// settings from the settings page (registered on first use), the source's
+/// changes taken in as they come.
+pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navigator {
+    let settings = use_settings::<NavigatorSettings>();
+    let source = use_hook(|| CopyValue::new(source()));
+    let state = use_signal(|| {
+        let s = source.read();
+        NavigatorState::new(
+            VaultIndex::read(s.as_ref()),
+            settings.value.peek().clone(),
+            clock_now(),
+        )
+    });
+    let nav = Navigator {
+        state,
+        settings,
+        source,
+        width: use_signal(|| None),
+        settle: use_hook(|| CopyValue::new(0)),
+        dragged: use_hook(|| CopyValue::new(false)),
+    };
+    // The settings page's changes.
+    use_effect(move || {
+        let s = settings.read();
+        let mut state = state;
+        state.write().set_settings(s);
+    });
+    // The source's changes: heard on its thread, applied here in batches.
+    let events = use_hook(move || {
+        let (tx, rx) = futures_channel::mpsc::unbounded::<SourceEvent>();
+        let sub = source.read().subscribe(Box::new(move |e| {
+            let _ = tx.unbounded_send(e.clone());
+        }));
+        (Rc::new(sub), CopyValue::new(Some(rx)))
+    });
+    let _kept: &Rc<Subscription> = &events.0;
+    let rx = events.1;
+    use_future(move || async move {
+        let Some(mut rx) = rx.write_unchecked().take() else {
+            return;
+        };
+        while let Some(first) = rx.next().await {
+            let mut batch = vec![first];
+            while let Ok(e) = rx.try_recv() {
+                batch.push(e);
+            }
+            let mut state = state;
+            if batch.iter().any(|e| matches!(e, SourceEvent::Reset)) {
+                let index = VaultIndex::read(source.read().as_ref());
+                state.write().replace_index(index);
+            } else {
+                let mut s = state.write();
+                for e in &batch {
+                    s.apply(e);
+                }
+            }
+        }
+    });
+    // The day turns over: the date groups follow.
+    use_future(move || async move {
+        loop {
+            futures_timer::Delay::new(Duration::from_secs(60)).await;
+            let mut state = state;
+            state.write().set_clock(clock_now());
+        }
+    });
+    nav
+}
+
+/// Now, in the person's time zone.
+fn clock_now() -> Clock {
+    let now = chrono::Local::now();
+    Clock {
+        now: now.timestamp_millis(),
+        offset: i64::from(now.offset().local_minus_utc()).saturating_mul(1000),
+    }
+}
+
+impl PartialEq for Navigator {
+    fn eq(&self, other: &Self) -> bool {
+        self.state == other.state
+    }
+}
+
+impl Navigator {
+    /// The note open in the workspace (lit, and revealed when the
+    /// settings say so).
+    pub fn set_active(&self, path: Option<&str>) {
+        if self.state.peek().active() != path {
+            let mut state = self.state;
+            state.write().set_active(path);
+        }
+    }
+
+    /// The view's [`crate::ViewState`], to keep between runs.
+    #[must_use]
+    pub fn view_state(&self) -> crate::ViewState {
+        self.state.peek().view_state()
+    }
+
+    pub fn restore(&self, view: &crate::ViewState) {
+        let mut state = self.state;
+        state.write().restore(view);
+    }
+
+    /// The source it reads.
+    #[must_use]
+    pub fn source(&self) -> Arc<dyn NavigatorSource> {
+        Arc::clone(&self.source.read())
+    }
+
+    /// The panes' layout now.
+    #[must_use]
+    pub fn layout(&self, phone: bool) -> PaneLayout {
+        let s = self.state.read();
+        layout::resolve(s.settings(), phone, *self.width.read(), s.nav_width)
+    }
+
+    fn update(&self, f: impl FnOnce(&mut NavigatorState)) {
+        let mut state = self.state;
+        f(&mut state.write());
+    }
+
+    /// Does what an input asked of the app.
+    fn outcome(
+        &self,
+        out: Option<Outcome>,
+        on_open: EventHandler<Open>,
+        on_editor: Option<EventHandler<()>>,
+    ) {
+        match out {
+            Some(Outcome::Open {
+                path,
+                how,
+                settle: false,
+            }) => {
+                let mut settle = self.settle;
+                settle.set(settle.cloned().wrapping_add(1));
+                on_open.call(Open { path, how });
+            }
+            Some(Outcome::Open {
+                path,
+                how,
+                settle: true,
+            }) => {
+                let mut settle = self.settle;
+                let n = settle.cloned().wrapping_add(1);
+                settle.set(n);
+                spawn(async move {
+                    futures_timer::Delay::new(KEY_OPEN_SETTLE).await;
+                    if settle.cloned() == n {
+                        on_open.call(Open { path, how });
+                    }
+                });
+            }
+            Some(Outcome::FocusEditor) => {
+                if let Some(e) = on_editor {
+                    e.call(());
+                }
+            }
+            None => {}
+        }
+    }
+}
+
+/// The key a keyboard event is to the navigator.
+fn nav_key(e: &KeyboardEvent) -> Option<(NavKey, Mods)> {
+    let m = e.modifiers();
+    let command = if cfg!(target_os = "macos") {
+        m.meta()
+    } else {
+        m.ctrl()
+    };
+    let key = match e.key() {
+        Key::Named(NamedKey::ArrowUp) => NavKey::Up,
+        Key::Named(NamedKey::ArrowDown) => NavKey::Down,
+        Key::Named(NamedKey::ArrowLeft) => NavKey::Left,
+        Key::Named(NamedKey::ArrowRight) => NavKey::Right,
+        Key::Named(NamedKey::Home) => NavKey::Home,
+        Key::Named(NamedKey::End) => NavKey::End,
+        Key::Named(NamedKey::PageUp) => NavKey::PageUp,
+        Key::Named(NamedKey::PageDown) => NavKey::PageDown,
+        Key::Named(NamedKey::Enter) => NavKey::Enter,
+        Key::Named(NamedKey::Tab) => NavKey::Tab,
+        Key::Named(NamedKey::Escape) => NavKey::Escape,
+        Key::Character(c) if c.eq_ignore_ascii_case("a") && command => NavKey::A,
+        _ => return None,
+    };
+    Some((
+        key,
+        Mods {
+            shift: m.shift(),
+            command,
+        },
+    ))
+}
+
+/// `command`, or not now (`why`).
+fn when(command: Command, ok: bool, why: &str) -> Command {
+    if ok { command } else { command.disabled(why) }
+}
+
+/// The palette's `NAVIGATOR_*` commands, while the view is mounted.
+fn use_commands(nav: &Navigator) {
+    let nav = *nav;
+    let group = "Navigator";
+    let s = nav.state.read();
+    use_command(
+        when(
+            Command::new("NAVIGATOR_REVEAL", "Reveal the open note").group(group),
+            s.active().is_some(),
+            "No note is open",
+        ),
+        move || nav.update(NavigatorState::reveal_active),
+    );
+    let any = s.any_expanded();
+    use_command(
+        Command::new(
+            "NAVIGATOR_COLLAPSE_OR_EXPAND",
+            if any {
+                "Collapse all folders"
+            } else {
+                "Expand all folders"
+            },
+        )
+        .group(group),
+        move || nav.update(NavigatorState::collapse_or_expand_all),
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_BACK", "Back to the folder before").group(group),
+            s.selection().can_go_back(),
+            "No folder before this one",
+        ),
+        move || nav.update(NavigatorState::back),
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_FORWARD", "Forward to the next folder").group(group),
+            s.selection().can_go_forward(),
+            "No folder after this one",
+        ),
+        move || nav.update(NavigatorState::forward),
+    );
+    use_command(
+        Command::new("NAVIGATOR_FOCUS_FOLDERS", "Go to the folders").group(group),
+        move || nav.update(|s| s.focus_pane(Pane::Navigation)),
+    );
+    use_command(
+        Command::new("NAVIGATOR_FOCUS_NOTES", "Go to the notes").group(group),
+        move || nav.update(|s| s.focus_pane(Pane::Files)),
+    );
+    use_command(
+        Command::new("NAVIGATOR_SELECT_ALL", "Select every note in the list").group(group),
+        move || nav.update(NavigatorState::select_all),
+    );
+    let settings = s.settings().clone();
+    use_command(
+        Command::new("NAVIGATOR_TOGGLE_DUAL_PANE", "Two panes")
+            .group(group)
+            .checked(settings.dual_pane),
+        move || nav.settings.update(|s| s.dual_pane = !s.dual_pane),
+    );
+    use_command(
+        Command::new("NAVIGATOR_TOGGLE_ORIENTATION", "Stack the panes")
+            .group(group)
+            .checked(settings.orientation == Orientation::Vertical),
+        move || {
+            nav.settings.update(|s| {
+                s.orientation = match s.orientation {
+                    Orientation::Horizontal => Orientation::Vertical,
+                    Orientation::Vertical => Orientation::Horizontal,
+                };
+            });
+        },
+    );
+    use_command(
+        Command::new("NAVIGATOR_TOGGLE_DESCENDANTS", "Notes from folders below")
+            .group(group)
+            .checked(settings.include_descendants),
+        move || {
+            nav.settings
+                .update(|s| s.include_descendants = !s.include_descendants);
+        },
+    );
+    use_command(
+        Command::new("NAVIGATOR_REORDER_ROOTS", "Reorder the top folders")
+            .group(group)
+            .checked(s.reordering),
+        move || nav.update(|s| s.reordering = !s.reordering),
+    );
+}
+
+/// The navigator drawn: both panes, in the layout its settings and the
+/// room give. Mount it as a sidebar's content (it fills its parent).
+///
+/// `on_open` opens a note in the app's workspace; `on_context_menu` is a
+/// right-click on a note (its path); `on_focus_editor` gives the keyboard
+/// to the note on show (→ from the list); `phone` is one pane at a time,
+/// with a phone's measures.
+#[component]
+pub fn NavigatorView(
+    navigator: Navigator,
+    on_open: EventHandler<Open>,
+    #[props(default)] on_context_menu: Option<EventHandler<(String, MouseEvent)>>,
+    #[props(default)] on_focus_editor: Option<EventHandler<()>>,
+    #[props(default)] phone: bool,
+) -> Element {
+    let nav = navigator;
+    use_commands(&nav);
+    let colours = architect_theme::use_themed::<NavigatorColours>();
+    let mut root: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
+    // A phone's taller rows.
+    use_effect(move || {
+        let mut state = nav.state;
+        if state.peek().settings().dual_pane || phone {
+            state.write().set_touch(phone);
+        }
+    });
+    // The width, measured again while mounted (Blitz fires no resize).
+    use_future(move || async move {
+        loop {
+            if let Some(m) = root.peek().clone()
+                && let Ok(r) = m.get_client_rect().await
+            {
+                let w = r.size.width;
+                if w > 0.0 && nav.width.peek().is_none_or(|old| (old - w).abs() > 0.5) {
+                    let mut width = nav.width;
+                    width.set(Some(w));
+                }
+            }
+            futures_timer::Delay::new(Duration::from_millis(250)).await;
+        }
+    });
+    let layout = nav.layout(phone);
+    let (focus, single, transition_ms, nav_width, nav_height) = {
+        let s = nav.state.read();
+        (
+            s.focus,
+            s.single,
+            s.settings().transition_ms,
+            s.nav_width,
+            s.nav_height,
+        )
+    };
+    let slide = use_slide(single, transition_ms);
+    let mut drag: Signal<Option<(f64, f64)>> = use_signal(|| None);
+    let vars = colours.read().vars();
+    let focus_attr = match focus {
+        Pane::Navigation => "navigation",
+        Pane::Files => "files",
+    };
+    let on_key = move |e: KeyboardEvent| {
+        if let Some((key, mods)) = nav_key(&e) {
+            e.prevent_default();
+            let out = nav.state.clone().write().key(key, mods);
+            nav.outcome(out, on_open, on_focus_editor);
+        }
+    };
+    let nav_pane = rsx! {
+        panes::NavPane { nav, on_open }
+    };
+    let list_pane = rsx! {
+        panes::ListPane { nav, on_open, on_context_menu, single: layout == PaneLayout::Single }
+    };
+    let body = match layout {
+        PaneLayout::Single => {
+            // 0: the folders on show; 1: the notes.
+            let p = slide();
+            let nav_left = -p * 100.0;
+            let list_left = (1.0 - p) * 100.0;
+            rsx! {
+                div { class: "nv-split nv-single", "data-pane": if single == Pane::Navigation { "navigation" } else { "files" },
+                    style: "position:absolute; inset:0; overflow:hidden;",
+                    div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{nav_left}%;", {nav_pane} }
+                    div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{list_left}%;", {list_pane} }
+                }
+            }
+        }
+        PaneLayout::Dual(orientation) => {
+            let horizontal = orientation == Orientation::Horizontal;
+            let size = if horizontal { nav_width } else { nav_height };
+            let (dir, nav_style, handle_style) = if horizontal {
+                (
+                    "row",
+                    format!("flex:0 0 {size}px; min-width:0; position:relative;"),
+                    "flex:0 0 5px; margin:0 -2px; cursor:col-resize; z-index:3; position:relative;",
+                )
+            } else {
+                (
+                    "column",
+                    format!("flex:0 0 {size}px; min-height:0; position:relative;"),
+                    "flex:0 0 5px; margin:-2px 0; cursor:row-resize; z-index:3; position:relative;",
+                )
+            };
+            let room = nav.width.read().filter(|_| horizontal);
+            rsx! {
+                div { class: "nv-split nv-dual", "data-orientation": if horizontal { "horizontal" } else { "vertical" },
+                    style: "position:absolute; inset:0; display:flex; flex-direction:{dir};",
+                    div { class: "nv-slot", style: "{nav_style}", {nav_pane} }
+                    div {
+                        class: "nv-resize",
+                        role: "separator",
+                        "aria-label": "Resize the folders",
+                        style: "{handle_style} touch-action:none;",
+                        onpointerdown: move |e: PointerEvent| {
+                            e.stop_propagation();
+                            let p = e.data().client_coordinates();
+                            let at = if horizontal { p.x } else { p.y };
+                            drag.set(Some((at, size)));
+                        },
+                        // Blitz sends the moves and the release to the
+                        // element pressed.
+                        onpointermove: move |e: PointerEvent| {
+                            let Some((start, from)) = *drag.peek() else { return };
+                            let p = e.data().client_coordinates();
+                            let at = if horizontal { p.x } else { p.y };
+                            let to = layout::clamp_size(orientation, from + at - start, room);
+                            nav.update(|s| if horizontal { s.nav_width = to } else { s.nav_height = to });
+                        },
+                        onpointerup: move |_| drag.set(None),
+                        div { class: "nv-resize-line", style: if horizontal { "position:absolute; top:0; bottom:0; left:2px; width:1px;" } else { "position:absolute; left:0; right:0; top:2px; height:1px;" } }
+                    }
+                    div { class: "nv-slot", style: "flex:1 1 0; min-width:0; min-height:0; position:relative;", {list_pane} }
+                }
+            }
+        }
+    };
+    rsx! {
+        document::Style { {CSS} }
+        div {
+            class: "nv-root",
+            "data-navigator": "",
+            "data-focus-pane": "{focus_attr}",
+            style: "{vars} position:absolute; inset:0; overflow:hidden; background:var(--nv-background); color:var(--nv-text); font-size:13px;",
+            onmounted: move |e| root.set(Some(e.data())),
+            onkeydown: on_key,
+            {body}
+        }
+    }
+}
+
+/// The single pane's slide, 0 (the folders) to 1 (the notes), eased over
+/// `ms` each time `single` changes (Notebook Navigator's
+/// `paneTransitionDuration`, ease-in-out); at once with reduced motion.
+fn use_slide(single: Pane, ms: u32) -> Signal<f64> {
+    let target: f64 = if single == Pane::Files { 1.0 } else { 0.0 };
+    let mut at = use_signal(|| target);
+    let mut aim = use_signal(|| target);
+    if (*aim.peek() - target).abs() > f64::EPSILON {
+        aim.set(target);
+        let from = *at.peek();
+        let length = f64::from(ms.max(1)) / 1000.0;
+        if architect_shell::motion::reduced_motion() {
+            at.set(target);
+        } else {
+            spawn(async move {
+                let start = architect_shell::motion::now();
+                loop {
+                    architect_shell::motion::next_frame().await;
+                    if (*aim.peek() - target).abs() > f64::EPSILON {
+                        return;
+                    }
+                    let t = ((architect_shell::motion::now() - start) / length).clamp(0.0, 1.0);
+                    at.set((target - from).mul_add(ease_in_out(t), from));
+                    if t >= 1.0 {
+                        return;
+                    }
+                }
+            });
+        }
+    }
+    at
+}
+
+/// CSS's `ease-in-out`, near enough: a smoothstep.
+fn ease_in_out(t: f64) -> f64 {
+    t * t * 2.0f64.mul_add(-t, 3.0)
+}
+
+/// The navigator's sheet: rows read the theme's roles from the root.
+const CSS: &str = "
+.nv-root .nv-row { cursor: default; }
+.nv-root .nv-row:hover { background: var(--nv-hover); }
+.nv-root .nv-row.nv-selected { background: var(--nv-selected-inactive); }
+.nv-root[data-focus-pane=navigation] .nv-nav .nv-row.nv-selected { background: var(--nv-selected); }
+.nv-root[data-focus-pane=files] .nv-list .nv-row.nv-selected { background: var(--nv-selected); }
+.nv-root .nv-resize:hover .nv-resize-line { background: var(--nv-handle); }
+.nv-root .nv-resize-line { background: var(--nv-divider); }
+.nv-root .nv-tool { display:flex; align-items:center; justify-content:center; width:26px; height:26px; border:none; border-radius:6px; background:transparent; color:var(--nv-faint); cursor:pointer; padding:0; }
+.nv-root .nv-tool:hover { background: var(--nv-hover); color: var(--nv-text); }
+.nv-root .nv-tool.nv-on { color: var(--nv-open); }
+.nv-root .nv-menu-row:hover { background: var(--nv-hover); }
+.nv-root .nv-thumb { background: var(--nv-faint); opacity: 0.35; }
+.nv-root .nv-thumb:hover { opacity: 0.6; }
+";

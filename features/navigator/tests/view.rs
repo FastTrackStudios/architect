@@ -1,0 +1,217 @@
+//! The navigator in a headless Blitz document: 100,000 notes draw a
+//! screenful of rows and keep drawing one as the list jumps to its end; a
+//! wide sidebar has two panes, a narrow one (or a phone) one at a time; a
+//! click on a folder lists its notes and a click on a note opens it.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+
+use std::cell::RefCell;
+use std::sync::Arc;
+use std::time::Duration;
+
+use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
+use architect_navigator::{Key, MemorySource, Mods, NavigatorSource, NoteFile, Pane};
+use blitz_dom::Document as _;
+use blitz_traits::events::{
+    BlitzPointerEvent, BlitzPointerId, Modifiers, MouseEventButton, MouseEventButtons, Point,
+    PointerCoords, PointerDetails, UiEvent,
+};
+use blitz_traits::shell::{ColorScheme, Viewport};
+use dioxus::prelude::*;
+use dioxus_native::{DioxusDocument, DocumentConfig};
+
+const NOW: i64 = 1_793_880_000_000;
+
+thread_local! {
+    static SOURCE: RefCell<Option<Arc<dyn NavigatorSource>>> = const { RefCell::new(None) };
+    static NAV: RefCell<Option<Navigator>> = const { RefCell::new(None) };
+    static OPENED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static PHONE: RefCell<bool> = const { RefCell::new(false) };
+}
+
+#[component]
+fn App() -> Element {
+    let nav = use_navigator(|| SOURCE.with(|s| s.borrow().clone().unwrap()));
+    NAV.with(|n| *n.borrow_mut() = Some(nav));
+    let phone = PHONE.with(|p| *p.borrow());
+    rsx! {
+        div { style: "position:absolute; inset:0;",
+            NavigatorView {
+                navigator: nav,
+                phone,
+                on_open: move |o: Open| OPENED.with(|v| v.borrow_mut().push(o.path)),
+            }
+        }
+    }
+}
+
+fn mount(source: Arc<dyn NavigatorSource>, width: u32, phone: bool) -> DioxusDocument {
+    architect_shell::motion::set_reduced_motion(Some(true));
+    SOURCE.with(|s| *s.borrow_mut() = Some(source));
+    PHONE.with(|p| *p.borrow_mut() = phone);
+    OPENED.with(|v| v.borrow_mut().clear());
+    let mut doc = DioxusDocument::new(
+        VirtualDom::new(App),
+        DocumentConfig {
+            viewport: Some(Viewport::new(width, 700, 1.0, ColorScheme::Dark)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    settle(&mut doc);
+    doc
+}
+
+/// Polls and lays out, with time for the views to be measured.
+fn settle(doc: &mut DioxusDocument) {
+    for _ in 0..3 {
+        for _ in 0..3 {
+            doc.poll(None);
+            doc.inner.borrow_mut().resolve(0.0);
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    doc.poll(None);
+    doc.inner.borrow_mut().resolve(0.0);
+}
+
+fn nav() -> Navigator {
+    NAV.with(|n| n.borrow().unwrap())
+}
+
+fn count(doc: &DioxusDocument, selector: &str) -> usize {
+    doc.inner
+        .borrow()
+        .query_selector_all(selector)
+        .unwrap()
+        .len()
+}
+
+fn rect(doc: &DioxusDocument, selector: &str) -> (f64, f64, f64, f64) {
+    let d = doc.inner.borrow();
+    let id = d
+        .query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"));
+    let r = d.get_client_bounding_rect(id).unwrap();
+    (r.x, r.y, r.width, r.height)
+}
+
+fn pointer(x: f32, y: f32, buttons: MouseEventButtons) -> BlitzPointerEvent {
+    BlitzPointerEvent {
+        id: BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: PointerCoords {
+            page_x: x,
+            page_y: y,
+            screen_x: x,
+            screen_y: y,
+            client_x: x,
+            client_y: y,
+        },
+        button: MouseEventButton::Main,
+        buttons,
+        mods: Modifiers::empty(),
+        details: PointerDetails::default(),
+        element: Point { x: 0.0, y: 0.0 },
+        active_pointers: std::sync::Arc::default(),
+    }
+}
+
+/// A click on the middle of the first element matching `selector`.
+#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+fn click(doc: &mut DioxusDocument, selector: &str) {
+    let (x, y, w, h) = rect(doc, selector);
+    let (x, y) = ((x + w / 2.0) as f32, (y + h / 2.0) as f32);
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(x, y, MouseEventButtons::None)));
+    doc.handle_ui_event(UiEvent::PointerDown(pointer(
+        x,
+        y,
+        MouseEventButtons::Primary,
+    )));
+    doc.handle_ui_event(UiEvent::PointerUp(pointer(x, y, MouseEventButtons::None)));
+    settle(doc);
+}
+
+#[test]
+fn a_hundred_thousand_notes_draw_a_screenful() {
+    let source = MemorySource::synthetic("Big", 20, 100_000, NOW);
+    let mut doc = mount(Arc::new(source), 900, false);
+    // Every note, from the folders below the root.
+    doc.vdom.in_runtime(|| {
+        nav().settings.update(|s| s.include_descendants = true);
+    });
+    settle(&mut doc);
+    let order_len = doc
+        .vdom
+        .in_runtime(|| nav().state.peek().list_order().len());
+    assert_eq!(order_len, 100_000);
+    let drawn = count(&doc, "[data-file]");
+    assert!(drawn > 5 && drawn < 60, "{drawn} rows drawn");
+    // The end: the last note drawn, in view, and still only a screenful.
+    let last = doc.vdom.in_runtime(|| {
+        let mut state = nav().state;
+        let mut s = state.write();
+        s.focus_pane(Pane::Files);
+        s.key(Key::End, Mods::NONE);
+        s.selection().cursor().unwrap().to_owned()
+    });
+    settle(&mut doc);
+    let (_, y, _, h) = rect(&doc, &format!("[data-file=\"{last}\"]"));
+    assert!(y >= 0.0 && y + h <= 700.5, "the last note at {y}+{h}");
+    let drawn = count(&doc, "[data-file]");
+    assert!(drawn < 60, "{drawn} rows drawn at the end");
+}
+
+#[test]
+fn wide_is_two_panes_narrow_is_one_and_a_phone_is_one() {
+    let lab = || {
+        Arc::new(
+            MemorySource::new("Lab")
+                .with_file(NoteFile::new("Welcome.md", NOW, NOW).preview("Hello"))
+                .with_file(NoteFile::new("Guides/Shell.md", NOW, NOW).preview("The shell")),
+        )
+    };
+    let doc = mount(lab(), 700, false);
+    assert_eq!(count(&doc, ".nv-dual"), 1);
+    let (_, _, w, _) = rect(&doc, ".nv-nav");
+    assert!((w - 200.0).abs() < 2.0, "the folders 200 wide: {w}");
+    // Narrower than the folders + 150: one pane, the notes first.
+    let mut doc = mount(lab(), 320, false);
+    assert_eq!(count(&doc, ".nv-single"), 1);
+    let (x, ..) = rect(&doc, ".nv-list");
+    assert!(x.abs() < 1.0, "the notes on show: {x}");
+    // Back to the folders: they slide in (at once, with reduced motion).
+    click(&mut doc, "[aria-label=\"Back to the folders\"]");
+    let (x, ..) = rect(&doc, ".nv-nav");
+    assert!(x.abs() < 1.0, "the folders on show: {x}");
+    // A phone: one pane whatever the width.
+    let doc = mount(lab(), 900, true);
+    assert_eq!(count(&doc, ".nv-single"), 1);
+}
+
+#[test]
+fn a_click_on_a_folder_lists_it_and_a_click_on_a_note_opens_it() {
+    let source = MemorySource::new("Lab")
+        .with_file(NoteFile::new("Welcome.md", NOW, NOW).preview("Hello"))
+        .with_file(NoteFile::new("Guides/Shell.md", NOW, NOW).preview("The shell"))
+        .with_file(NoteFile::new("Guides/Workspace.md", NOW - 1, NOW - 1));
+    let mut doc = mount(Arc::new(source), 700, false);
+    assert_eq!(count(&doc, "[data-file=\"Welcome.md\"]"), 1);
+    click(&mut doc, "[data-folder=\"Guides\"]");
+    assert_eq!(count(&doc, "[data-file=\"Welcome.md\"]"), 0);
+    assert_eq!(count(&doc, "[data-file]"), 2);
+    click(&mut doc, "[data-file=\"Guides/Workspace.md\"]");
+    assert_eq!(OPENED.with(|v| v.borrow().clone()), ["Guides/Workspace.md"]);
+    assert_eq!(
+        count(
+            &doc,
+            "[data-file=\"Guides/Workspace.md\"][aria-selected=true]"
+        ),
+        1
+    );
+}

@@ -1,0 +1,48 @@
+//! The navigator: a port of [Notebook Navigator] (an Obsidian plugin by
+//! Johan Sanneblad, GPL-3.0) as architect's sidebar.
+//!
+//! **Licence.** This crate is GPL-3.0-or-later, the one GPL crate in
+//! architect: it carries Notebook Navigator's design and code. An app that
+//! links it ships under the GPL. Nothing else in architect depends on it.
+//!
+//! A navigation pane (the folder tree) beside a list pane (the selected
+//! folder's notes), side by side, stacked, or one at a time with a slide
+//! between them; both virtualized, so a vault of 100,000 notes draws as
+//! fast as one of ten. It reads a vault through [`NavigatorSource`]
+//! ([`MemorySource`] keeps one in memory); the app opens the notes it is
+//! asked to (`ui::NavigatorView`'s `on_open`), in its workspace.
+//!
+//! The model is plain data and wasm-clean ([`NavigatorState`]: the index,
+//! the rows, the selection and history, the keys, the scroll). Feature
+//! `ui` is the Dioxus view on architect's shell: its commands on the
+//! palette (`NAVIGATOR_*`), its section on the settings page
+//! ([`NavigatorSettings`]), its colours as theme tokens (`navigator.*`).
+//!
+//! [Notebook Navigator]: https://github.com/johansan/notebook-navigator
+
+pub mod index;
+pub mod layout;
+pub mod list;
+pub mod selection;
+pub mod settings;
+pub mod source;
+pub mod state;
+pub mod tree;
+pub mod virtualize;
+
+#[cfg(feature = "ui")]
+pub mod ui;
+
+pub use index::{NoteCount, VaultIndex};
+pub use layout::{Pane, PaneLayout};
+pub use list::{Clock, ListRow, ListRowKind};
+pub use selection::{NavTarget, Selection};
+pub use settings::{
+    Grouping, ListMode, NarrowLayout, NavigatorSettings, Orientation, SortOption, StartPane,
+};
+pub use source::{
+    Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
+    Subscription, TaskCounts,
+};
+pub use state::{Key, Mods, NavigatorState, OpenIn, Outcome, ViewState};
+pub use tree::{NavRow, NavRowKind};

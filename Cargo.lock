@@ -1205,6 +1205,7 @@ dependencies = [
  "architect-guide",
  "architect-input",
  "architect-lab-board",
+ "architect-navigator",
  "architect-orgs",
  "architect-pages",
  "architect-presence",
@@ -1335,6 +1336,28 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-ui-kit",
  "tracing",
+]
+
+[[package]]
+name = "architect-navigator"
+version = "0.1.0"
+dependencies = [
+ "architect-commands",
+ "architect-navigator",
+ "architect-settings",
+ "architect-shell",
+ "architect-theme",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-traits",
+ "chrono",
+ "dioxus",
+ "dioxus-native",
+ "facet",
+ "futures-channel",
+ "futures-timer",
+ "futures-util",
+ "lucide-dioxus",
 ]
 
 [[package]]
