@@ -49,8 +49,11 @@ A vault is a folder of markdown: notes, their properties (YAML frontmatter), the
 | `VAULT_SET_PROPERTY {path, key, value}` | mutating | one property; `value` JSON, else text |
 | `VAULT_REMOVE_PROPERTY {path, key}` | mutating | removes one property |
 | `VAULT_APPEND {path, text}` | mutating | text at the end, on its own line |
+| `VAULT_RENAME {from, to}` | mutating | renames or moves a note; every wikilink that named it is rewritten (by path when it was named by path); answers the notes relinked |
 | `VAULT_DELETE {path}` | destructive | deletes the note (an agent's call waits for a yes) |
 | `VAULT_RELOAD` | mutating | reads the folder again |
+
+An app edits through the same `OpenVault` (`features/vault/vault/src/actions/edit.rs`): `text`, `save` (a note's text, marked as the app's own write), `create`, `untitled` (Obsidian's next `Untitled N.md`), `rename` (relinks, `Renamed`), `folders` (empty ones too), `refresh` (what changed on disk since it was read: `Changes`) and `watch` (an edit outside the app, another editor or a `git pull`, refreshes it and hands over the `Changes`; the app's own saves are no change; dropping the `Watch` stops it). An open note's typing and an outside edit become one text with `features/vault/vault-doc/src/doc.rs` `merge3` (two forks of one Loro document, each side's changes kept). Tests: `features/vault/vault/tests/edit.rs`.
 
 Links and tags, over the same `OpenVault` (`links::actions::register`, `tag::actions::register`):
 
@@ -67,7 +70,7 @@ Tests: `features/vault/vault/tests/actions.rs`, `features/links/links/tests/acti
 
 ## In the lab
 
-The lab opens `<its folder>/vault` (`ARCHITECT_LAB_CONFIG_DIR` moves its folder; `ARCHITECT_LAB_VAULT` names another vault), seeded on first run from `apps/lab/vault` (five notes with properties, links and tags, one unresolved link, a `.base`); `apps/lab/ui/src/notes.rs`. With a lab running: `lab-session.sh act <name> <worktree> run VAULT_READ --arg path=Welcome.md`.
+`just lab` and `devenv up` open a scratch copy of the demo vault (`apps/lab/demo-vault`, made by `apps/lab/demo-vault.py`: nested folders, an empty one, 300 notes for scroll tests, every property type, nested tags, links, tasks, daily to yearly notes, projects, images and a PDF, bases, inbox captures) at `ARCHITECT_LAB_VAULT` under devenv's state, seeded from `ARCHITECT_LAB_SEED` when missing; `just lab-vault-reset` seeds it again; `APP_STATUS`'s `vault` says which folder is open. Without them the lab opens `<its folder>/vault` (`ARCHITECT_LAB_CONFIG_DIR` moves its folder), seeded on first run from `apps/lab/vault` (five notes); `apps/lab/ui/src/notes.rs`. Its notes open in the editor and save to their files (`apps/lab/ui/src/vault.rs` `VaultNote`). With a lab running: `lab-session.sh act <name> <worktree> run VAULT_READ --arg path=Welcome.md`.
 
 ## Still in Task
 

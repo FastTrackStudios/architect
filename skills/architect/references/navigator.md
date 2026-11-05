@@ -54,6 +54,14 @@ pub trait NavigatorSource: Send + Sync {
   `FileRenamed` and `Reset` (read everything again).
 - `MemorySource` keeps a vault in memory. `MemorySource::synthetic` makes
   a large one for load tests.
+- `VaultSource` (feature `vault`, native; `features/navigator/src/vault_source.rs`)
+  is architect's vault (`vault::actions::OpenVault`): folders (empty ones
+  too), notes with their properties, tags, preview, feature image (the
+  first of `FEATURE_IMAGE_PROPERTIES` naming an image, else the first image
+  embedded; a `file:` URL the desk loads) and task counts, bases and
+  attachments. Its `save`, `create_note` and `rename` (backlinks follow)
+  say what changed at once; `watch` hears edits made outside the app.
+  Tests: `features/navigator/tests/vault_source.rs`.
 
 ## Recipe: Navigator, the extension, as a sidebar
 
@@ -100,13 +108,19 @@ rsx! { NavigatorView {
     phone,
     on_open: move |o: Open| { /* workspace.open(note for o.path, o.how) */ },
     on_context_menu: move |(path, e)| pane.context_menu("file", path, &e),
+    // Optional: the shell sidebar's columns (`SidebarLayout::columns`):
+    // one is one pane at a time, two is folders beside notes.
+    columns: Some(shell.sidebar_layout().columns()),
+    // Optional: New note in the list's header, given the folder on show.
+    on_new_note: move |folder: String| { /* make a note there, open it */ },
 } }
 // When the note on show changes:
 nav.set_active(Some(path));
 ```
 
 The lab's Vault tab does exactly this (`apps/lab/ui/src/vault.rs`
-`FilesView`, `lab_vault`).
+`FilesView`: a `VaultSource` over the demo vault, `lab_vault` for a
+film's in-memory one).
 
 ## What it does
 
