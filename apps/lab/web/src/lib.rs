@@ -171,9 +171,9 @@ fn open_page(pages: &WebPages, list: &ActionList) -> Result<(), String> {
     let manifest = Manifest::parse(manifest).map_err(|e| e.to_string())?;
     let host = WebHost::new(manifest, list.clone());
     let pane = by_id("pane").ok_or("no #pane")?;
-    let page = pages.open(&folder, host, &pane);
-    page.on_log(|level, text| log_line(&format!("{level} [page] {text}")));
-    OPEN.with(|open| *open.borrow_mut() = Some((name, page)));
+    let opened = pages.open(&folder, host, &pane);
+    opened.on_log(|level, text| log_line(&format!("{level} [page] {text}")));
+    OPEN.with(|open| *open.borrow_mut() = Some((name, opened)));
     Ok(())
 }
 

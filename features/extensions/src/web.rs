@@ -1186,8 +1186,10 @@ fn value_from(v: &Json) -> Value {
 const DIOXUS_ID: &str = "data-dioxus-id";
 
 /// One mounted view: the wire's stack machine over the page's DOM, under
-/// its element (id 0) — the checked applier every view in a browser is
-/// drawn by (a WASI component's, [`WebComponent::mount`]; a page's,
+/// its element (id 0).
+///
+/// It is the checked applier every view in a browser is drawn by (a WASI
+/// component's, [`WebComponent::mount`]; a page's,
 /// `architect_pages::web`). An edit never reaches outside its element,
 /// and none sets an `on*` handler or `dangerous_inner_html`; the events
 /// on its elements go to its `on_event`, as the wire's.

@@ -581,10 +581,18 @@ impl PageInner {
             .iter()
             .map(|(k, v)| json!([k, v]))
             .collect();
-        start["shared"] = Json::Array(shared);
-        start["embed"] = json!("null");
-        start["theme"] = json!(serde_json::to_string(&*app.theme.borrow()).unwrap_or_default());
-        start["workerTime"] = json!(self.limits().worker_time.as_millis());
+        if let Some(fields) = start.as_object_mut() {
+            fields.insert("shared".to_owned(), Json::Array(shared));
+            fields.insert("embed".to_owned(), json!("null"));
+            fields.insert(
+                "theme".to_owned(),
+                json!(serde_json::to_string(&*app.theme.borrow()).unwrap_or_default()),
+            );
+            fields.insert(
+                "workerTime".to_owned(),
+                json!(self.limits().worker_time.as_millis()),
+            );
+        }
         run.post(&start);
         Ok(run)
     }
