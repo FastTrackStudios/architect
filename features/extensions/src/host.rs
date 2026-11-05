@@ -818,6 +818,9 @@ struct Inner {
     reserved: Mutex<BTreeMap<String, BTreeSet<String>>>,
     /// Each point's deliveries so far: an owner keeps the newest.
     delivered: std::sync::atomic::AtomicU64,
+    /// The clock, app-defined events, hooks made at run time, schedules
+    /// and background extensions (`crate::host_events`).
+    events: crate::host_events::EventState,
 }
 
 /// A [`Host`] held weakly: what an extension's session keeps, so an
@@ -884,6 +887,7 @@ impl Host {
                 windows: crate::windows::Windows::default(),
                 reserved: Mutex::new(BTreeMap::new()),
                 delivered: std::sync::atomic::AtomicU64::new(0),
+                events: crate::host_events::EventState::default(),
             }),
         };
         // Icons and badges on rows and tabs (`crate::hostui`).
@@ -914,6 +918,10 @@ impl Host {
             .map(|(kind, what)| contrib::context_target_point(kind, what))
             .collect();
         let _ = self.inner.points.declare(owner, &points);
+    }
+
+    pub(crate) fn event_state(&self) -> &crate::host_events::EventState {
+        &self.inner.events
     }
 
     pub(crate) fn downgrade(&self) -> WeakHost {
@@ -1362,8 +1370,10 @@ impl Host {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(id.clone());
+            // Its scheduled hooks' first times, from now.
+            let _ = self.schedule(false);
             if first {
-                self.emit_to(Some(id), "startup", id);
+                self.emit_to(Some(id), "startup", &Value::String(id.clone()));
             }
             self.emit("extension.loaded", id);
         }
@@ -1415,19 +1425,47 @@ impl Host {
         let reloaded = old.is_some();
         // 1–2: start the new one with the old one's state, and build
         // everything it adds, before anything is swapped.
-        let instance = runner
-            .start(
-                package,
-                Context {
-                    list,
-                    gate: self.live_gate(manifest, origin),
-                    state: old.and_then(|o| o.instance.save_state()),
-                    contributions: &self.inner.contributions,
-                    api: self.api(&manifest.id),
-                    logs: self.logs().clone(),
-                },
+        let state = old.and_then(|o| o.instance.save_state());
+        let instance = if let Some(background) = &manifest.background {
+            // Started on its first event (`crate::host_events`).
+            let idle = background.idle().map_err(LoadError::Start)?;
+            let weak = self.downgrade();
+            let (package, runner) = (package.clone(), Arc::clone(&runner));
+            self.lazy(
+                &manifest.id,
+                idle,
+                state,
+                Box::new(move |state| {
+                    let host = weak.upgrade().ok_or("the app is closing")?;
+                    let m = &package.manifest;
+                    runner.start(
+                        &package,
+                        Context {
+                            list: &host.inner.list,
+                            gate: host.live_gate(m, origin),
+                            state,
+                            contributions: &host.inner.contributions,
+                            api: host.api(&m.id),
+                            logs: host.logs().clone(),
+                        },
+                    )
+                }),
             )
-            .map_err(LoadError::Start)?;
+        } else {
+            runner
+                .start(
+                    package,
+                    Context {
+                        list,
+                        gate: self.live_gate(manifest, origin),
+                        state,
+                        contributions: &self.inner.contributions,
+                        api: self.api(&manifest.id),
+                        logs: self.logs().clone(),
+                    },
+                )
+                .map_err(LoadError::Start)?
+        };
         let mut actions = Vec::with_capacity(manifest.actions.len());
         for decl in &manifest.actions {
             let handler = match (&decl.preset, manifest.window_opened_by(&decl.id)) {
@@ -1588,20 +1626,70 @@ impl Host {
     // How many is for whoever wants it.
     #[allow(clippy::must_use_candidate)]
     pub fn emit(&self, on: &str, detail: &str) -> usize {
+        self.emit_to(None, on, &Value::String(detail.to_owned()))
+    }
+
+    /// [`Self::emit`] with a detail that is JSON (`{path}` for a document
+    /// event): the hooks' `args.detail` is it, their invocation's `detail`
+    /// its text.
+    // How many is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
+    pub fn emit_value(&self, on: &str, detail: &Value) -> usize {
         self.emit_to(None, on, detail)
     }
 
-    /// [`Self::emit`] to `only` one extension's hooks.
-    fn emit_to(&self, only: Option<&str>, on: &str, detail: &str) -> usize {
-        let hooks: Vec<_> = self
-            .inner
+    /// [`Self::emit`] to `only` one extension's hooks: those its
+    /// contributions declare and those it made at run time.
+    fn emit_to(&self, only: Option<&str>, on: &str, detail: &Value) -> usize {
+        self.inner
             .contributions
             .hooks(on)
             .into_iter()
-            .filter(|h| only.is_none_or(|o| o == h.owner))
-            .collect();
-        if hooks.is_empty() {
-            return 0;
+            .map(|by| (by.owner, by.item))
+            .chain(self.subscribed(on))
+            .filter(|(owner, _)| only.is_none_or(|o| o == owner))
+            .filter(|(owner, hook)| self.fire(owner, hook, on, detail))
+            .count()
+    }
+
+    /// Starts `owner`'s hook `hook` for event `on` with `detail`, unless a
+    /// run of it has not ended, or it may not hear `on` (an `app:` event
+    /// its grant lacks: a line in its log). Whether it started.
+    pub(crate) fn fire(&self, owner: &str, hook: &HookDecl, on: &str, detail: &Value) -> bool {
+        if let Some(name) = crate::events::app_event(on)
+            && !self.capabilities(owner).is_some_and(|c| c.may_hear(name))
+        {
+            tracing::warn!(ext.id = %owner, ext.hook = %on, "a hook on an app event it may not hear was refused");
+            self.logs().push(
+                owner,
+                crate::logs::Level::Warn,
+                "hook",
+                format!("{on}: refused: it may not hear {name} (capabilities.events)"),
+            );
+            return false;
+        }
+        let key = format!("{owner}/{}", hook.key());
+        let text = match detail {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        let caller = ActionCaller::app().with_invocation(Invocation {
+            event: Some(on.to_owned()),
+            detail: Some(text),
+            ..Invocation::new(InvocationSource::Hook)
+        });
+        let args = serde_json::json!({ "event": on, "detail": detail });
+        let Some(work) = self.hook_work(owner, hook, &caller, args) else {
+            return false;
+        };
+        if !self
+            .inner
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.clone())
+        {
+            return false;
         }
         let spawn = self
             .inner
@@ -1609,67 +1697,34 @@ impl Host {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        let mut started = 0_usize;
-        for by in hooks {
-            let key = format!(
-                "{}/{}/{}",
-                by.owner,
-                by.item.on,
-                by.item
-                    .action
-                    .as_deref()
-                    .or(by.item.script.as_deref())
-                    .unwrap_or_default()
-            );
-            let caller = ActionCaller::app().with_invocation(Invocation {
-                event: Some(on.to_owned()),
-                detail: Some(detail.to_owned()),
-                ..Invocation::new(InvocationSource::Hook)
-            });
-            let args = serde_json::json!({ "event": on, "detail": detail });
-            let Some(work) = self.hook_work(&by.owner, &by.item, &caller, args) else {
-                continue;
-            };
-            {
-                let mut running = self
-                    .inner
-                    .running
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                if !running.insert(key.clone()) {
-                    continue;
-                }
+        let running = Arc::clone(&self.inner.running);
+        let (owner, hook) = (owner.to_owned(), on.to_owned());
+        let logs = self.logs().clone();
+        spawn(Box::pin(async move {
+            let out = work.await;
+            if let Err(e) = &out {
+                logs.push(
+                    &owner,
+                    crate::logs::Level::Error,
+                    "hook",
+                    format!("{hook}: {e}"),
+                );
             }
-            let running = Arc::clone(&self.inner.running);
-            let (owner, hook) = (by.owner.clone(), on.to_owned());
-            let logs = self.logs().clone();
-            spawn(Box::pin(async move {
-                let out = work.await;
-                if let Err(e) = &out {
-                    logs.push(
-                        &owner,
-                        crate::logs::Level::Error,
-                        "hook",
-                        format!("{hook}: {e}"),
-                    );
-                }
-                let _span = tracing::info_span!(
-                    "ext.hook",
-                    ext.id = %owner,
-                    ext.hook = %hook,
-                    ext.outcome = if out.is_ok() { "ran" } else { "failed" },
-                    ext.error = out.as_ref().err().map(ToString::to_string),
-                )
-                .entered();
-                running
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(&key);
-                out
-            }));
-            started = started.saturating_add(1);
-        }
-        started
+            let _span = tracing::info_span!(
+                "ext.hook",
+                ext.id = %owner,
+                ext.hook = %hook,
+                ext.outcome = if out.is_ok() { "ran" } else { "failed" },
+                ext.error = out.as_ref().err().map(ToString::to_string),
+            )
+            .entered();
+            running
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&key);
+            out
+        }));
+        true
     }
 
     /// A hook's work: its action through the list (inside its extension's
@@ -1701,7 +1756,7 @@ impl Host {
                 owner,
                 crate::logs::Level::Warn,
                 "hook",
-                format!("{} ran {action}: refused: {why}", decl.on),
+                format!("{} ran {action}: refused: {why}", decl.when()),
             );
             return None;
         }
@@ -1748,6 +1803,16 @@ impl Host {
     // How many is for whoever wants it.
     #[allow(clippy::must_use_candidate)]
     pub fn emit_changed(&self, topic: &str, detail: &str) -> usize {
+        // A document or focus event raised on the list (`DocEvent::raise_on`):
+        // its topic is its name, its detail JSON.
+        if crate::contrib::EVENTS.contains(&topic)
+            && (topic.starts_with("doc.") || topic.starts_with("app."))
+        {
+            let n = self.emit(&format!("changed:{topic}"), detail);
+            let value =
+                serde_json::from_str(detail).unwrap_or_else(|_| Value::String(detail.to_owned()));
+            return n.saturating_add(self.emit_value(topic, &value));
+        }
         let named = match topic {
             "workspace" => Some("workspace.changed"),
             "theme" => Some("theme.changed"),
@@ -1784,6 +1849,7 @@ impl Host {
         self.inner.contributions.withdraw(id);
         self.inner.windows.close_all(id);
         self.services().forget(id);
+        self.forget_events(id);
         let points = self.inner.points.withdraw(id);
         self.deliver(&points);
         running.instance.stop();

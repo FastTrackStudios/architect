@@ -34,8 +34,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde::{Deserialize, Serialize};
 
 /// The hook events an app raises (`[[hooks]] on = …`), past
-/// `changed:<topic>` for any Action List topic.
-pub const EVENTS: [&str; 7] = [
+/// `changed:<topic>` for any Action List topic and `app:<name>` for an
+/// event the app defines (`crate::events`).
+pub const EVENTS: [&str; 13] = [
     "startup",
     "workspace.changed",
     "doc.opened",
@@ -43,6 +44,12 @@ pub const EVENTS: [&str; 7] = [
     "selection.changed",
     "extension.loaded",
     "extension.unloaded",
+    crate::events::DOC_CREATED,
+    crate::events::DOC_SAVED,
+    crate::events::DOC_RENAMED,
+    crate::events::DOC_DELETED,
+    crate::events::APP_FOCUSED,
+    crate::events::APP_BLURRED,
 ];
 
 /// The shell's regions, as slots a view can fill (`[[slots]]`, a layout
@@ -99,6 +106,7 @@ pub fn known_event(on: &str) -> bool {
         || on
             .strip_prefix("changed:")
             .is_some_and(|topic| !topic.is_empty())
+        || crate::events::app_event(on).is_some_and(crate::events::valid_name)
 }
 
 /// Whether `target` is a context-menu target's name.
@@ -310,8 +318,12 @@ pub use crate::toolbar::{
     DOCKS, MenuItem, MenuKind, ToolColors, ToolItem, ToolKind, ToolbarDecl, ToolbarPlace,
 };
 
-/// A hook: on an app event (`startup`, `workspace.changed`, `doc.opened`,
-/// `theme.changed`, `selection.changed`, `changed:<topic>`).
+/// A hook: on an app event, or on a schedule.
+///
+/// An event: `startup`, `workspace.changed`, `doc.saved`, `app.focused`,
+/// `changed:<topic>`, `app:<name>` ([`EVENTS`]). A schedule, with no
+/// `on`: `every = "5m"`, `at = "09:30"` or five cron fields
+/// (`crate::events::Schedule`).
 ///
 /// It runs one of its actions, or a Luau script of its package (the whole
 /// file, or `function` of the table it returns), with the event in its
@@ -323,6 +335,34 @@ pub struct HookDecl {
     pub action: Option<String>,
     pub script: Option<String>,
     pub function: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub every: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+impl HookDecl {
+    /// Whether it runs on a schedule (`every`, `at`), not an event.
+    #[must_use]
+    pub const fn scheduled(&self) -> bool {
+        self.every.is_some() || self.at.is_some()
+    }
+
+    /// What it is on, in words: its event, `every 5m`, `at 09:30`.
+    #[must_use]
+    pub fn when(&self) -> String {
+        match (&self.every, &self.at) {
+            (Some(e), _) => format!("every {e}"),
+            (None, Some(a)) => format!("at {a}"),
+            (None, None) => self.on.clone(),
+        }
+    }
+
+    /// Its key among its owner's hooks: what it is on and what it runs.
+    #[must_use]
+    pub fn key(&self) -> String {
+        hook_key(self)
+    }
 }
 
 /// A shell region it fills with one of its views (`status`: the status
@@ -530,6 +570,8 @@ pub struct Rules<'a> {
     pub views: &'a [String],
     /// Whether it runs Luau (a hook's script).
     pub luau: bool,
+    /// The app-defined events it asks to hear (`capabilities.events`).
+    pub events: &'a [String],
 }
 
 /// Why a contribution was refused.
@@ -768,11 +810,31 @@ impl Contribution {
             })?;
         }
         for h in &self.hooks {
-            let what = format!("hook {}", h.on);
-            if !known_event(&h.on) {
+            let what = format!("hook {}", h.when());
+            if let Some(schedule) = crate::events::Schedule::of(h.every.as_deref(), h.at.as_deref())
+            {
+                if !h.on.is_empty() {
+                    return refuse(what, "on an event or a schedule, not both".to_owned());
+                }
+                schedule.map_err(|why| Refused {
+                    what: what.clone(),
+                    why,
+                })?;
+            } else if !known_event(&h.on) {
                 return refuse(
                     what,
-                    format!("not an event ({}, changed:<topic>)", EVENTS.join(", ")),
+                    format!(
+                        "not an event ({}, changed:<topic>, app:<name>)",
+                        EVENTS.join(", ")
+                    ),
+                );
+            }
+            if let Some(name) = crate::events::app_event(&h.on)
+                && !rules.events.iter().any(|p| crate::events::covers(p, name))
+            {
+                return refuse(
+                    what,
+                    format!("it does not ask to hear {name} (capabilities.events)"),
                 );
             }
             match (&h.action, &h.script) {
@@ -829,7 +891,7 @@ impl Contribution {
 fn hook_key(h: &HookDecl) -> String {
     format!(
         "{}/{}",
-        h.on,
+        h.when(),
         h.action
             .clone()
             .or_else(|| {
@@ -1289,7 +1351,16 @@ impl Contributions {
     pub fn hooks(&self, on: &str) -> Vec<By<HookDecl>> {
         self.all(|c| c.hooks.clone())
             .into_iter()
-            .filter(|h| h.item.on == on)
+            .filter(|h| h.item.on == on && !h.item.scheduled())
+            .collect()
+    }
+
+    /// Every hook on a schedule (`every`, `at`).
+    #[must_use]
+    pub fn scheduled(&self) -> Vec<By<HookDecl>> {
+        self.all(|c| c.hooks.clone())
+            .into_iter()
+            .filter(|h| h.item.scheduled())
             .collect()
     }
 
@@ -1510,6 +1581,7 @@ mod tests {
             reach,
             views,
             luau: false,
+            events: &[],
         }
     }
 

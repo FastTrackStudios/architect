@@ -31,6 +31,9 @@
 //! | `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text, a yes or no, or one of a list: the answer, `null` when cancelled | `ui = ["prompts"]` |
 //! | `menu {items, x?, y?}` | a context menu of its own items at a point: the id chosen, `null` when dismissed | `ui = ["menus"]` |
 //! | `decorate {target, decoration?}` | an icon or badge on a file-tree row or a tab (none: takes it off) | `ui = ["badges"]` |
+//! | `subscribe {on \| every \| at, action \| script, function?}` | a hook made at run time: one of its actions (a Luau script) on an event or a schedule, as a manifest's `[[hooks]]`; its key | `capabilities.events` for an `app:<name>` event |
+//! | `unsubscribe {key}` | takes a hook it made off: whether it had it | nothing |
+//! | `events` | the events it can hear: the app's (`{name, title?}`), the app-defined ones it may hear, the hooks it made | nothing |
 //!
 //! `pick`, `prompt` and `menu` wait for the person: the call answers when
 //! they do. A host with no way to ask (a headless one, a platform without
@@ -140,6 +143,16 @@ pub enum HostRequest {
         #[serde(default)]
         decoration: Option<Decoration>,
     },
+    /// A hook made at run time (`crate::contrib::HookDecl`): one of its
+    /// actions, or a Luau script, on an event or a schedule. Its answer is
+    /// the hook's key.
+    Subscribe(crate::contrib::HookDecl),
+    /// Takes the hook it made with key `key` off.
+    Unsubscribe {
+        key: String,
+    },
+    /// The events it can hear, and the hooks it made.
+    Events,
 }
 
 /// What a picker picks.
@@ -329,6 +342,9 @@ impl HostRequest {
             Self::Prompt(_) => "prompt",
             Self::Menu(_) => "menu",
             Self::Decorate { .. } => "decorate",
+            Self::Subscribe(_) => "subscribe",
+            Self::Unsubscribe { .. } => "unsubscribe",
+            Self::Events => "events",
         }
     }
 }
@@ -502,6 +518,19 @@ pub fn check(
         HostRequest::Prompt(_) => ("ui", uses(PROMPTS)),
         HostRequest::Menu(_) => ("ui", uses(MENUS)),
         HostRequest::Decorate { .. } => ("ui", uses(BADGES)),
+        HostRequest::Subscribe(hook) => (
+            "events",
+            match crate::events::app_event(&hook.on) {
+                Some(name) if !may.may_hear(name) => Err((
+                    format!("events.{name}"),
+                    format!(
+                        "this extension may not hear the app's {name} events (capabilities.events)"
+                    ),
+                )),
+                _ => Ok(()),
+            },
+        ),
+        HostRequest::Unsubscribe { .. } | HostRequest::Events => ("events", Ok(())),
     }
 }
 
@@ -550,6 +579,12 @@ mod tests {
         };
         assert_eq!((*kind, choices.len()), (PromptKind::PickOne, 1));
         assert_eq!(r.op(), "prompt");
+        let r: HostRequest =
+            serde_json::from_str(r#"{"op":"subscribe","every":"5m","action":"X_TICK"}"#).unwrap();
+        let HostRequest::Subscribe(hook) = &r else {
+            panic!("{r:?}")
+        };
+        assert_eq!((hook.every.as_deref(), r.op()), (Some("5m"), "subscribe"));
         let r: HostRequest = serde_json::from_str(r#"{"op":"clipboard_read"}"#).unwrap();
         assert_eq!(r, HostRequest::ClipboardRead);
         let r: HostRequest = serde_json::from_str(

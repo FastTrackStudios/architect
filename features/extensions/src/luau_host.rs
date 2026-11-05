@@ -19,6 +19,11 @@
 //! local ok = host.prompt({ kind = "confirm", title = "Replace it?" })
 //! local id = host.menu({ x = 120, y = 80, items = {{ id = "copy", label = "Copy" }} })
 //! host.decorate({ kind = "file", id = "notes/a.md" }, { icon = "star", badge = "3" })
+//! -- Hooks made at run time (crate::host_events): one of its actions on an
+//! -- event or a schedule; the key takes it off again.
+//! local key = host.subscribe({ on = "doc.saved", action = "ACME_LINT" })
+//! host.subscribe({ every = "5m", action = "ACME_SYNC" })
+//! host.unsubscribe(key); local heard = host.events()
 //! ```
 //!
 //! `pick`, `prompt` and `menu` wait for the person; a cancel is `nil`.
@@ -192,6 +197,15 @@ impl Module for HostModule {
             Some(a)
         ));
         op!("menu", LuaValue, |lua, a| request_of(&lua, "menu", Some(a)));
+        op!("subscribe", LuaValue, |lua, a| request_of(
+            &lua,
+            "subscribe",
+            Some(a)
+        ));
+        op!("unsubscribe", String, |lua, a| Ok(
+            HostRequest::Unsubscribe { key: a }
+        ));
+        op!("events", (), |lua, _a| Ok(HostRequest::Events));
         op!("decorate", (LuaValue, Option<LuaValue>), |lua, a| {
             let (target, decoration) = a;
             json_of(&lua, target).and_then(|target| {

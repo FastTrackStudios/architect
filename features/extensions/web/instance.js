@@ -259,6 +259,18 @@ function world() {
       menu: (request) => fields('menu', request),
       decorate: (kind, id, decoration) =>
         unit({ op: 'decorate', target: { kind, id }, decoration: decoration == null ? null : jsonArg(decoration) }),
+      // Time and events: the page's clock; hooks made at run time, the
+      // browser's host answers (`WebHost`: not in the browser yet).
+      now: () => BigInt(Date.now()),
+      subscribe: async (hook) => {
+        const r = await fields('subscribe', hook);
+        return r.tag === 'ok' ? ok(JSON.parse(r.val)) : r;
+      },
+      unsubscribe: async (key) => {
+        if (worker) return err(WORKER_REFUSAL);
+        const r = await service({ op: 'unsubscribe', key });
+        return r.tag === 'ok' ? ok(Boolean(JSON.parse(r.val))) : r;
+      },
     },
     'architect:extension/worker': {
       spawn: async (name, args) => {

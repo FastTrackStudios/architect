@@ -1,0 +1,7 @@
+---
+"architect-extensions" = "minor"
+"architect-extension-wasi" = "minor"
+"architect-pages" = "minor"
+---
+
+Added timers, events and background extensions (#308). Hooks can run on a schedule (`[[hooks]] every = "5m"`, `at = "09:30"` or five cron fields), on document events (`doc.created`, `doc.saved`, `doc.renamed`, `doc.deleted`: Host::raise_doc, or events::DocEvent::raise_on an Action List the host watches), on the window's focus (`app.focused`, `app.blurred`), and on events the app defines and raises typed (Host::define_event / Host::define::<E: TypedEvent>, Host::raise; heard as `app:<name>` with the new `capabilities.events`). The host reads time on an injectable clock (Host::with_clock, events::FakeClock) and runs what is due in Host::tick (Host::run_clock in the app). Hooks can be made at run time through the host service (`subscribe`, `unsubscribe`, `events`), from Luau (`host.subscribe`), the WIT world (`subscribe`, `unsubscribe` imports) and pages (`events.subscribe`). WASI views get timers: the world's `now` import and `tick` export, the guest's `timers::set_interval`, `set_timeout` and `use_interval`. `[background] idle = "5m"` starts an extension on its first event and stops it when idle, its state in EXT_LOGS and APP_STATUS's `background`. API breaks: `Capabilities` has an `events` field, `HookDecl` has `every` and `at`, `contrib::Rules` has `events`, `Manifest` has `background`, `HostRequest` has `Subscribe`, `Unsubscribe` and `Events`, and the WIT guest must export `tick` (rebuild components against this world).

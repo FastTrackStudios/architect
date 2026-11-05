@@ -187,6 +187,19 @@ interface host {
     /// path, `tab` and its id), `hostcall::Decoration` as JSON; none takes
     /// it off.
     decorate: func(kind: string, id: string, decoration: option<string>) -> result<_, string>;
+
+    // Time and events (features/extensions/src/host_events.rs).
+
+    /// The time on the host's clock, ms since the epoch: what its views'
+    /// timers run on (a test's clock is one it moves by hand).
+    now: func() -> u64;
+    /// A hook made at run time (`subscribe`: `contrib::HookDecl` as JSON,
+    /// `{"on": "doc.saved", "action": …}` or `{"every": "5m", …}`): its
+    /// key.
+    subscribe: func(hook: string) -> result<string, string>;
+    /// Takes the hook it made with key `key` off (`unsubscribe`): whether
+    /// it had it.
+    unsubscribe: func(key: string) -> result<bool, string>;
 }
 
 /// What a component does for its host.
@@ -212,6 +225,10 @@ interface guest {
     close: func(pane: u64);
     /// Its state, for the copy that replaces it on a reload.
     save-state: func() -> option<list<u8>>;
+    /// Runs its timers that are due on the host's clock (`now`): what
+    /// they change in its views the host asks for next (`pending`). How
+    /// many ms until the next is due; none when it has none.
+    tick: func() -> option<u32>;
 }
 
 /// A component's workers (features/extensions/src/wasi/workers.rs): its

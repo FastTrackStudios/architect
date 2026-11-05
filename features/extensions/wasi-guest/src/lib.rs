@@ -29,6 +29,20 @@
 //! action that changes what a view shows calls [`refresh`]; the host asks
 //! for the views' changes after every action and event.
 //!
+//! A view's timers ([`timers`]: `set_interval`, `set_timeout`, and the
+//! hook [`timers::use_interval`]) run on the host's clock (`host::now`):
+//! the host calls the component's `tick` when the next is due, each runs
+//! inside its view's `VirtualDom` (so it writes its signals), and what they
+//! changed goes to the host as the view's edits.
+//!
+//! ```ignore
+//! fn Clock() -> Element {
+//!     let mut seconds = use_signal(|| 0);
+//!     architect_extension_wasi::timers::use_interval(1000, move || seconds += 1);
+//!     rsx! { "{seconds} s" }
+//! }
+//! ```
+//!
 //! Heavy work goes to a worker ([`worker`]): another instance of the
 //! component on a thread of the host's pool, spoken to by messages only.
 //! A handler starts it ([`worker::spawn`]) and returns; the worker's
@@ -169,6 +183,9 @@ thread_local! {
     static EXTENSION: RefCell<Option<Rc<Extension>>> = const { RefCell::new(None) };
     static PANES: RefCell<BTreeMap<u64, VirtualDom>> = const { RefCell::new(BTreeMap::new()) };
     static REFRESH: Cell<bool> = const { Cell::new(false) };
+    /// The pane whose code runs now (a render, an event, a timer): where a
+    /// timer it sets runs.
+    static CURRENT: Cell<Option<u64>> = const { Cell::new(None) };
     /// Its workers, as their owner hears them.
     static WORK: RefCell<BTreeMap<u64, WorkState>> = const { RefCell::new(BTreeMap::new()) };
 }
@@ -657,6 +674,33 @@ pub mod host {
         wit_host::decorate(kind, id, decoration.as_deref()).map_err(|e| HostError::from_text(&e))
     }
 
+    /// The time on the host's clock, ms since the epoch: what timers run
+    /// on.
+    #[must_use]
+    pub fn now() -> u64 {
+        wit_host::now()
+    }
+
+    /// A hook made at run time (`contrib::HookDecl`: `{"on": "doc.saved",
+    /// "action": "ACME_LINT"}`, `{"every": "5m", "action": …}`): one of its
+    /// actions on an event or a schedule. Its key, for [`unsubscribe`].
+    ///
+    /// # Errors
+    ///
+    /// Refused (an `app:` event it may not hear, an action not its own).
+    pub fn subscribe(hook: &Json) -> Result<String, HostError> {
+        wit_host::subscribe(&hook.to_string()).map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Takes the hook it made with key `key` off: whether it had it.
+    ///
+    /// # Errors
+    ///
+    /// The host failed.
+    pub fn unsubscribe(key: &str) -> Result<bool, HostError> {
+        wit_host::unsubscribe(key).map_err(|e| HostError::from_text(&e))
+    }
+
     /// Any host-service call (`hostcall::HostRequest`: `{"op": "selection"}`,
     /// `{"op": "read_file", "path": …}`), its answer.
     ///
@@ -673,6 +717,136 @@ pub mod host {
                 "message": "the host's answer is not one",
             }))),
         }
+    }
+}
+
+/// A view's timers, on the host's clock (`host::now`).
+///
+/// The same as a page's `setTimeout` / `setInterval` (#302). One set while a view
+/// renders or handles an event is that view's: it runs inside its
+/// `VirtualDom` and goes when the view closes. One set by an action is
+/// the component's.
+pub mod timers {
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+
+    use super::{CURRENT, PANES, refresh};
+    use crate::bindings::architect::extension::host as wit_host;
+
+    struct Timer {
+        pane: Option<u64>,
+        at: u64,
+        /// 0: once.
+        every: u64,
+        run: Box<dyn FnMut()>,
+    }
+
+    thread_local! {
+        static TIMERS: RefCell<BTreeMap<u64, Timer>> = const { RefCell::new(BTreeMap::new()) };
+        static NEXT: Cell<u64> = const { Cell::new(1) };
+        /// The timer running now, and whether it cleared itself.
+        static RUNNING: Cell<Option<u64>> = const { Cell::new(None) };
+        static CLEARED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    fn add(ms: u32, every: bool, run: Box<dyn FnMut()>) -> u64 {
+        let id = NEXT.with(|n| {
+            let id = n.get();
+            n.set(id.saturating_add(1));
+            id
+        });
+        let wait = u64::from(ms);
+        let timer = Timer {
+            pane: CURRENT.with(Cell::get),
+            at: wit_host::now().saturating_add(wait),
+            every: if every { wait.max(1) } else { 0 },
+            run,
+        };
+        TIMERS.with(|t| t.borrow_mut().insert(id, timer));
+        id
+    }
+
+    /// Runs `run` once, `ms` from now: its id.
+    pub fn set_timeout(ms: u32, run: impl FnOnce() + 'static) -> u64 {
+        let mut once = Some(run);
+        add(
+            ms,
+            false,
+            Box::new(move || {
+                if let Some(run) = once.take() {
+                    run();
+                }
+            }),
+        )
+    }
+
+    /// Runs `run` every `ms` (at least 1), the first `ms` from now: its id.
+    pub fn set_interval(ms: u32, run: impl FnMut() + 'static) -> u64 {
+        add(ms, true, Box::new(run))
+    }
+
+    /// Stops timer `id` (one that ended, or none: nothing).
+    pub fn clear(id: u64) {
+        if RUNNING.with(Cell::get) == Some(id) {
+            CLEARED.with(|c| c.set(true));
+        }
+        TIMERS.with(|t| t.borrow_mut().remove(&id));
+    }
+
+    /// A component's interval for as long as it is mounted: `run` every
+    /// `ms`, set on its first render and cleared when it goes.
+    pub fn use_interval(ms: u32, run: impl FnMut() + 'static) {
+        let id = dioxus::prelude::use_hook(move || set_interval(ms, run));
+        dioxus::prelude::use_drop(move || clear(id));
+    }
+
+    /// Pane `pane` closed: its timers go.
+    pub(super) fn closed(pane: u64) {
+        TIMERS.with(|t| t.borrow_mut().retain(|_, timer| timer.pane != Some(pane)));
+    }
+
+    /// Runs the timers due now; how many ms until the next (none: none).
+    pub(super) fn tick() -> Option<u32> {
+        let now = wit_host::now();
+        let mut due: Vec<(u64, u64)> = TIMERS.with(|t| {
+            t.borrow()
+                .iter()
+                .filter(|(_, timer)| timer.at <= now)
+                .map(|(id, timer)| (timer.at, *id))
+                .collect()
+        });
+        due.sort_unstable();
+        for (_, id) in due {
+            // Out while it runs: it may set and clear timers.
+            let Some(mut timer) = TIMERS.with(|t| t.borrow_mut().remove(&id)) else {
+                continue;
+            };
+            RUNNING.with(|r| r.set(Some(id)));
+            CLEARED.with(|c| c.set(false));
+            let before = CURRENT.with(|c| c.replace(timer.pane));
+            let open = timer.pane.and_then(|pane| {
+                PANES
+                    .with(|p| p.borrow_mut().remove(&pane))
+                    .map(|v| (pane, v))
+            });
+            if let Some((pane, vdom)) = open {
+                vdom.in_runtime(|| (timer.run)());
+                PANES.with(|p| p.borrow_mut().insert(pane, vdom));
+            } else {
+                // A component's own (or its view went): it changes what
+                // every view shows, as an action does.
+                (timer.run)();
+                refresh();
+            }
+            CURRENT.with(|c| c.set(before));
+            RUNNING.with(|r| r.set(None));
+            if timer.every > 0 && !CLEARED.with(Cell::get) {
+                timer.at = now.saturating_add(timer.every);
+                TIMERS.with(|t| t.borrow_mut().insert(id, timer));
+            }
+        }
+        let next = TIMERS.with(|t| t.borrow().values().map(|timer| timer.at).min())?;
+        Some(u32::try_from(next.saturating_sub(wit_host::now())).unwrap_or(u32::MAX))
     }
 }
 
@@ -728,7 +902,9 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
             .ok_or_else(|| format!("no view {view}"))?;
         let mut vdom = VirtualDom::new(root);
         let mut writer = Writer::default();
+        let before = CURRENT.with(|c| c.replace(Some(pane)));
         vdom.rebuild(&mut writer);
+        CURRENT.with(|c| c.set(before));
         PANES.with(|p| p.borrow_mut().insert(pane, vdom));
         Ok(writer.edits)
     }
@@ -739,8 +915,10 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
         let mut vdom = PANES
             .with(|p| p.borrow_mut().remove(&pane))
             .ok_or_else(|| format!("no view open in pane {pane}"))?;
+        let before = CURRENT.with(|c| c.replace(Some(pane)));
         dispatch(&vdom, event);
         let edits = settle(&mut vdom);
+        CURRENT.with(|c| c.set(before));
         PANES.with(|p| p.borrow_mut().insert(pane, vdom));
         Ok(edits)
     }
@@ -752,7 +930,9 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
             let Some(mut vdom) = PANES.with(|p| p.borrow_mut().remove(&pane)) else {
                 continue;
             };
+            let before = CURRENT.with(|c| c.replace(Some(pane)));
             let edits = settle(&mut vdom);
+            CURRENT.with(|c| c.set(before));
             PANES.with(|p| p.borrow_mut().insert(pane, vdom));
             if !edits.is_empty() {
                 out.push(wit::PaneEdits { pane, edits });
@@ -763,11 +943,18 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
     }
 
     fn close(pane: u64) {
-        PANES.with(|p| p.borrow_mut().remove(&pane));
+        // Its hooks' drops (a `use_interval`'s clear) run as it goes.
+        let vdom = PANES.with(|p| p.borrow_mut().remove(&pane));
+        drop(vdom);
+        timers::closed(pane);
     }
 
     fn save_state() -> Option<Vec<u8>> {
         extension().ok()?.save.as_ref().map(|save| save())
+    }
+
+    fn tick() -> Option<u32> {
+        timers::tick()
     }
 }
 

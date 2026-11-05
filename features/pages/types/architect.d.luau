@@ -112,6 +112,8 @@ export type Builder = {
 --   ui.pick(options), ui.prompt(options), ui.menu(items, at?), ui.decorate(target, decoration?),
 --   ui.call(request), clipboard.read(), clipboard.write(text): the app's interface, as the
 --   page's extension (capabilities.ui); each waits for its answer, a cancel is nil
+--   events.subscribe({ on | every | at, action }): a hook made at run time, its key;
+--   events.unsubscribe(key), events.list(): the events it can hear
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }

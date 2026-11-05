@@ -207,8 +207,15 @@ fn the_host_interface_is_the_host_service() {
             "decorate",
             Some(op(r#"{"op":"decorate","target":{"kind":"file","id":"a"}}"#)),
         ),
+        (
+            "subscribe",
+            Some(op(r#"{"op":"subscribe","on":"doc.saved","action":"X"}"#)),
+        ),
+        ("unsubscribe", Some(op(r#"{"op":"unsubscribe","key":"k"}"#))),
         // The theme is the host's to send, no request (a process is sent it).
         ("theme", None),
+        // The host's clock: a process reads its own.
+        ("now", None),
         // Any request at all.
         ("call", None),
     ];
@@ -231,7 +238,9 @@ fn the_host_interface_is_the_host_service() {
             "pick",
             "prompt",
             "menu",
-            "decorate"
+            "decorate",
+            "subscribe",
+            "unsubscribe"
         ]
     );
 }

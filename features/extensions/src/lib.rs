@@ -40,6 +40,7 @@
 pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
+pub mod events;
 pub mod hostcall;
 pub mod index;
 pub mod interop;
@@ -76,6 +77,8 @@ mod forward;
 pub mod guest;
 #[cfg(feature = "host")]
 pub mod host;
+#[cfg(feature = "host")]
+pub mod host_events;
 #[cfg(feature = "vox")]
 pub mod host_proto;
 #[cfg(feature = "ui")]

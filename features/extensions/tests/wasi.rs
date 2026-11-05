@@ -225,6 +225,20 @@ params = '{"type":"object","properties":{"ms":{"type":"integer"}}}'
 [[actions]]
 id = "TEST_HAZARDS_ASK"
 name = "Use the app's interface"
+[[actions]]
+id = "TEST_HAZARDS_SUBSCRIBE"
+name = "Make a hook"
+params = '{"type":"object"}'
+[[actions]]
+id = "TEST_HAZARDS_HEARD"
+name = "Hear an event"
+params = '{"type":"object"}'
+[[actions]]
+id = "TEST_HAZARDS_NOW"
+name = "The host's clock"
+[[views]]
+id = "ticker"
+title = "Ticker"
 [[workers]]
 id = "forever"
 entry = "forever"
@@ -621,6 +635,84 @@ fn a_component_notifies_copies_asks_and_gets_the_answers_back() {
     let why = failed(run(&app, "TEST_HAZARDS_ASK", &Value::Null).unwrap_err());
     assert!(why.contains("refused") && why.contains("notify"), "{why}");
     assert!(ui.notices().is_empty());
+}
+
+/// Timers and events (#308): a view's interval runs on the host's clock
+/// (a fake one here, moved by hand), and a hook the component made at run
+/// time runs on a document's save.
+#[test]
+fn a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let clock = architect_extensions::events::FakeClock::at(1_000_000);
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    app.host.set_clock(std::sync::Arc::new(clock.clone()));
+    load(
+        &app,
+        &package(tmp.path(), "hazards", HAZARDS_MANIFEST, HAZARDS_WASM),
+    );
+    assert_eq!(
+        run(&app, "TEST_HAZARDS_NOW", &Value::Null).unwrap(),
+        json!(1_000_000)
+    );
+
+    let process = app.processes.get(HAZARDS).expect("a local process");
+    let mut session = process.open("ticker").unwrap();
+    let (events, _) = futures::channel::mpsc::unbounded();
+    let mut doc = RemoteDocument::new(events);
+    doc.apply(next(&mut session.frames)).unwrap();
+    assert!(text(&doc).contains("ticks: 0"), "{}", text(&doc));
+    let stats = app.components.get(HAZARDS).unwrap();
+    // Not due on the host's clock: nothing changes.
+    stats.tick();
+    assert!(
+        session.frames.try_recv().is_err(),
+        "nothing is due before its second"
+    );
+    for n in 1..=3 {
+        clock.advance(Duration::from_secs(1));
+        stats.tick();
+        doc.apply(next(&mut session.frames)).unwrap();
+        assert!(
+            text(&doc).contains(&format!("ticks: {n}")),
+            "{}",
+            text(&doc)
+        );
+    }
+
+    // A hook it makes through the world's `subscribe`, run on a save.
+    let key = run(
+        &app,
+        "TEST_HAZARDS_SUBSCRIBE",
+        &json!({ "on": "doc.saved", "action": "TEST_HAZARDS_HEARD" }),
+    )
+    .unwrap();
+    assert_eq!(key, json!("doc.saved/TEST_HAZARDS_HEARD"));
+    let saved = architect_extensions::events::DocEvent::Saved {
+        path: "notes/a.md".into(),
+    };
+    assert_eq!(app.host.raise_doc(&saved), 1);
+    wait_for(
+        "the hook's echo",
+        || logs(&app, HAZARDS),
+        |lines| {
+            lines
+                .iter()
+                .any(|l| l.contains("heard") && l.contains("notes/a.md"))
+        },
+    );
+    // One on an app event it does not ask for is refused.
+    let why = failed(
+        run(
+            &app,
+            "TEST_HAZARDS_SUBSCRIBE",
+            &json!({ "on": "app:transport.changed", "action": "TEST_HAZARDS_HEARD" }),
+        )
+        .unwrap_err(),
+    );
+    assert!(why.contains("transport.changed"), "{why}");
 }
 
 #[test]

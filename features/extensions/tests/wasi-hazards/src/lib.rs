@@ -12,7 +12,8 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use architect_extension_wasi::{Extension, Worker, host, worker};
+use architect_extension_wasi::{Extension, Worker, host, timers, worker};
+use dioxus::prelude::*;
 use serde_json::{Value, json};
 
 thread_local! {
@@ -36,8 +37,29 @@ fn id(args: &Value) -> u64 {
     args.get("id").and_then(Value::as_u64).unwrap_or(0)
 }
 
+/// A view that counts the seconds on the host's clock (#308).
+#[allow(non_snake_case)]
+fn Ticker() -> Element {
+    let mut ticks = use_signal(|| 0_u32);
+    timers::use_interval(1000, move || ticks += 1);
+    rsx! { p { "ticks: {ticks}" } }
+}
+
 fn build() -> Extension {
     Extension::new()
+        .view("ticker", Ticker)
+        // A hook made at run time: `hook` as the host service's `subscribe`.
+        .action("TEST_HAZARDS_SUBSCRIBE", |args: Value| {
+            let key = host::subscribe(&args).map_err(|e| e.to_string())?;
+            Ok(json!(key))
+        })
+        // What a hook it made hears.
+        .action("TEST_HAZARDS_HEARD", |args: Value| {
+            println!("heard {args}");
+            Ok(Value::Null)
+        })
+        // The host's clock, through the world's `now`.
+        .action("TEST_HAZARDS_NOW", |_| Ok(json!(host::now())))
         // A call that never ends.
         .action("TEST_HAZARDS_SPIN", |_| spin())
         // Memory, a megabyte at a time, kept.

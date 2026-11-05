@@ -776,6 +776,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // Hooks hear the lab's own events (workspace.changed, …); the host
         // service runs the lab's actions on its list.
         host.watch(&lab);
+        // Scheduled hooks (`every`, `at`) and idle background extensions'
+        // stops, on the system's clock (`crate::host_events`).
+        host.run_clock(std::time::Duration::from_secs(1));
         host.set_app_list((*lab).clone());
         // Every extension's actions on the lab's list too, as they come
         // and go: what its control socket, CLI and MCP run.

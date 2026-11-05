@@ -384,7 +384,7 @@ export class Component {
       try {
         return await this.on((i) => i.call('guest', 'invoke', [action, args, invocation]));
       } finally {
-        await this.flush();
+        await this.timers();
       }
     });
   }
@@ -399,6 +399,8 @@ export class Component {
       } catch (e) {
         this.opts.frame?.(pane, { failed: e.message });
       }
+      // What it rendered may have set a timer.
+      await this.timers();
     });
   }
 
@@ -412,7 +414,7 @@ export class Component {
       } catch (e) {
         if (this.panes.delete(pane)) this.opts.frame?.(pane, { failed: e.message });
       }
-      await this.flush();
+      await this.timers();
     });
   }
 
@@ -425,6 +427,23 @@ export class Component {
 
   saveState() {
     return this.job(() => (this.live ? this.on((i) => i.call('guest', 'saveState')).catch(() => null) : null));
+  }
+
+  /// Its views' timers that are due (the world's `tick`), then what they
+  /// changed; the next, on a timer of the page's.
+  async timers() {
+    clearTimeout(this.timer);
+    this.timer = null;
+    if (!this.live) return;
+    try {
+      const next = await this.on((i) => i.call('guest', 'tick'));
+      if (next != null && !this.stopped) {
+        this.timer = setTimeout(() => this.job(() => this.timers()), Math.max(4, Number(next)));
+      }
+    } catch {
+      return; // trapped: started again
+    }
+    await this.flush();
   }
 
   /// What its views changed by themselves, to their panes.
@@ -448,6 +467,8 @@ export class Component {
   }
 
   async restart(why) {
+    clearTimeout(this.timer);
+    this.timer = null;
     this.live?.kill(why);
     this.live = null;
     this.stats.alive = false;
@@ -469,6 +490,7 @@ export class Component {
   stop() {
     this.stopped = true;
     clearTimeout(this.newsTimer);
+    clearTimeout(this.timer);
     this.cancelAll();
     this.live?.kill('it was unloaded');
     this.live = null;

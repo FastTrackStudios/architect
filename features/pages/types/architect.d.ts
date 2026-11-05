@@ -308,6 +308,24 @@ declare module "architect" {
     write(text: string): Promise<void>;
   };
 
+  /** A hook made at run time: one of its extension's actions on an app event or a schedule. */
+  export type Hook =
+    | { on: string; action: string }
+    | { every: string; action: string }
+    | { at: string; action: string };
+  /**
+   * Hooks made at run time, as the page's extension: `on` an app event
+   * (`doc.saved`, `app.focused`, `app:<name>` with `capabilities.events`),
+   * `every` an interval (`5m`), `at` a time of day (`09:30`) or cron fields.
+   */
+  export const events: {
+    /** Its key, for `unsubscribe`. */
+    subscribe(hook: Hook): Promise<string>;
+    unsubscribe(key: string): Promise<boolean>;
+    /** The events it can hear and the hooks it made. */
+    list(): Promise<{ events: string[]; app: { name: string; title: string }[]; subscribed: string[] }>;
+  };
+
   /** A worker: a script of the page's folder in a runtime of its own, spoken to by messages. */
   export interface Worker {
     readonly id: number;

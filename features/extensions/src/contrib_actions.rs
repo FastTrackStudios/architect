@@ -81,9 +81,10 @@ static STATE_CLEAR: ActionMeta = meta(
 static EMIT: ActionMeta = meta(
     "EXT_EMIT",
     "Raise an app event",
-    "Raises app event `event` (startup, workspace.changed, doc.opened, theme.changed, \
-     selection.changed, changed:<topic>) with `detail`: every loaded extension's hooks on it \
-     run. Answers how many started.",
+    "Raises app event `event` (startup, workspace.changed, doc.opened, doc.saved, doc.created, \
+     doc.renamed, doc.deleted, app.focused, app.blurred, theme.changed, selection.changed, \
+     changed:<topic>, app:<name>) with `detail` (text, or JSON for a document event's \
+     `{path}`): every loaded extension's hooks on it run. Answers how many started.",
 );
 static EMBEDS: ActionMeta = meta(
     "EXT_EMBEDS",
@@ -323,14 +324,19 @@ impl Extensions {
             move |_: &ActionCaller, a: EmitArgs| {
                 if !crate::contrib::known_event(&a.event) {
                     return Err(format!(
-                        "{:?} is not an event ({}, changed:<topic>)",
+                        "{:?} is not an event ({}, changed:<topic>, app:<name>)",
                         a.event,
                         crate::contrib::EVENTS.join(", ")
                     ));
                 }
-                let started = me
-                    .host()
-                    .emit(&a.event, a.detail.as_deref().unwrap_or_default());
+                // A JSON object or list is the hooks' detail as it is
+                // (`{"path": …}` for a document event); else, text.
+                let text = a.detail.unwrap_or_default();
+                let detail = serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .filter(|v| v.is_object() || v.is_array())
+                    .unwrap_or(Value::String(text));
+                let started = me.host().emit_value(&a.event, &detail);
                 Ok::<_, String>(RawJson::from(json!({ "started": started }).to_string()))
             },
         )?;
