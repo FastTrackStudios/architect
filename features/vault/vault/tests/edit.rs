@@ -132,6 +132,14 @@ fn the_watcher_hears_an_outside_edit_and_not_the_apps_own() {
     v.save("Ionian.md", "Saved again.\n").unwrap();
     std::fs::write(tmp.path().join("Ionian.md"), "Pulled.\n").unwrap();
     until("Ionian.md");
+    // `fs::write` truncates, then writes: a busy machine can hear the
+    // empty file first and the text a moment later. Wait for the text.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while v.text("Ionian.md").as_deref() != Some("Pulled.\n")
+        && std::time::Instant::now() < deadline
+    {
+        let _ = rx.recv_timeout(Duration::from_millis(200));
+    }
     assert_eq!(v.text("Ionian.md").as_deref(), Some("Pulled.\n"));
     drop(watch);
 }
