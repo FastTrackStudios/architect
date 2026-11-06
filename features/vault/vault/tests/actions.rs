@@ -1,4 +1,4 @@
-//! The `VAULT_*` actions over the lab's sample vault (`apps/lab/vault`),
+//! The `VAULT_*` actions over the lab's sample vault (`apps/sandbox/vault`),
 //! copied to a temporary folder so the writes land there.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -9,7 +9,7 @@ use serde_json::Value;
 use vault::actions::{OpenVault, register};
 
 fn sample() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/lab/vault")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/sandbox/vault")
 }
 
 fn copy_dir(from: &Path, to: &Path) {

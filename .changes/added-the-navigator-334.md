@@ -1,6 +1,6 @@
 ---
 "architect-navigator" = "minor"
-"architect-lab-ui" = "none"
+"architect-app" = "none"
 "architect-settings" = "patch"
 "architect-commands" = "patch"
 ---

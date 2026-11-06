@@ -1,7 +1,7 @@
 ---
 "architect-commands" = "minor"
 "architect-desktop" = "minor"
-"architect-lab-ui" = "minor"
+"architect-app" = "minor"
 "architect-mcp" = "minor"
 ---
 

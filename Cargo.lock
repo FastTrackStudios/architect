@@ -777,6 +777,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-app"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-a2ui",
+ "architect-bases",
+ "architect-canvas",
+ "architect-commands",
+ "architect-extensions",
+ "architect-guide",
+ "architect-input",
+ "architect-navigator",
+ "architect-navigator-extension",
+ "architect-orgs",
+ "architect-pages",
+ "architect-presence",
+ "architect-sandbox-board",
+ "architect-scripting",
+ "architect-settings",
+ "architect-settings-sheet",
+ "architect-shell",
+ "architect-theme",
+ "architect-theme-picker",
+ "architect-ui",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "base64 0.22.1",
+ "blitz-dom",
+ "blitz-traits",
+ "crdt",
+ "dioxus",
+ "dioxus-native",
+ "editor-keyflow",
+ "editor-view",
+ "facet",
+ "futures-channel",
+ "futures-timer",
+ "futures-util",
+ "include_dir",
+ "keyflow",
+ "keyflow-ui",
+ "links",
+ "loro",
+ "lucide-dioxus",
+ "rfd",
+ "serde_json",
+ "tag",
+ "tempfile",
+ "tracing",
+ "vault",
+ "vault-doc",
+]
+
+[[package]]
 name = "architect-atom"
 version = "0.1.0"
 dependencies = [
@@ -948,10 +1002,10 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-a2ui",
+ "architect-app",
  "architect-control",
  "architect-extensions",
  "architect-guide",
- "architect-lab-ui",
  "architect-mcp",
  "architect-presence",
  "architect-settings",
@@ -1174,137 +1228,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "architect-lab-board"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-extensions",
- "architect-pages",
- "architect-settings",
- "architect-workspace-hack",
- "blitz-dom",
- "blitz-traits",
- "dioxus",
- "dioxus-native-dom",
- "futures",
- "futures-timer",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "architect-lab-clicker"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-canvas",
- "architect-extensions",
- "architect-permissions",
- "architect-scripting",
- "architect-settings",
- "architect-theme",
- "architect-workspace-hack",
- "blitz-dom",
- "blitz-traits",
- "dioxus",
- "dioxus-native-dom",
- "futures",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "architect-lab-media"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-guide",
- "architect-lab-ui",
- "architect-shell",
- "architect-workspace-hack",
- "dioxus",
- "facet",
- "futures-util",
- "tempfile",
-]
-
-[[package]]
-name = "architect-lab-ui"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-a2ui",
- "architect-bases",
- "architect-canvas",
- "architect-commands",
- "architect-extensions",
- "architect-guide",
- "architect-input",
- "architect-lab-board",
- "architect-navigator",
- "architect-navigator-extension",
- "architect-orgs",
- "architect-pages",
- "architect-presence",
- "architect-scripting",
- "architect-settings",
- "architect-settings-sheet",
- "architect-shell",
- "architect-theme",
- "architect-theme-picker",
- "architect-ui",
- "architect-workspace",
- "architect-workspace-hack",
- "base64 0.22.1",
- "blitz-dom",
- "blitz-traits",
- "crdt",
- "dioxus",
- "dioxus-native",
- "editor-keyflow",
- "editor-view",
- "facet",
- "futures-channel",
- "futures-timer",
- "futures-util",
- "keyflow",
- "keyflow-ui",
- "links",
- "loro",
- "lucide-dioxus",
- "serde_json",
- "tag",
- "tempfile",
- "tracing",
- "vault",
- "vault-doc",
-]
-
-[[package]]
-name = "architect-lab-wasi-counter"
-version = "0.1.0"
-dependencies = [
- "architect-extension-wasi",
- "dioxus",
- "serde_json",
-]
-
-[[package]]
-name = "architect-lab-web"
-version = "0.1.0"
-dependencies = [
- "architect",
- "architect-extensions",
- "architect-pages",
- "architect-workspace-hack",
- "js-sys",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "architect-launcher-core"
 version = "0.1.0"
 dependencies = [
@@ -1367,8 +1290,8 @@ name = "architect-mobile"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-app",
  "architect-control",
- "architect-lab-ui",
  "architect-shell",
  "architect-workspace-hack",
  "dioxus",
@@ -1548,6 +1471,79 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "vox",
+]
+
+[[package]]
+name = "architect-sandbox"
+version = "0.1.0"
+dependencies = [
+ "architect-app",
+ "architect-desktop",
+ "architect-workspace-hack",
+]
+
+[[package]]
+name = "architect-sandbox-board"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-pages",
+ "architect-settings",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
+ "futures-timer",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "architect-sandbox-clicker"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-canvas",
+ "architect-extensions",
+ "architect-permissions",
+ "architect-scripting",
+ "architect-settings",
+ "architect-theme",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "architect-sandbox-media"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-app",
+ "architect-guide",
+ "architect-shell",
+ "architect-workspace-hack",
+ "dioxus",
+ "facet",
+ "futures-util",
+ "tempfile",
+]
+
+[[package]]
+name = "architect-sandbox-wasi-counter"
+version = "0.1.0"
+dependencies = [
+ "architect-extension-wasi",
+ "dioxus",
+ "serde_json",
 ]
 
 [[package]]
@@ -1860,6 +1856,21 @@ dependencies = [
  "architect-workspace-hack",
  "chrono",
  "dioxus",
+]
+
+[[package]]
+name = "architect-web"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-pages",
+ "architect-workspace-hack",
+ "js-sys",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

@@ -20,7 +20,7 @@ tool windows from scripts, without the view knowing about them. Design:
 [Extensions](@/architecture/extensions.md), sections on immediate-mode UI for
 scripts and on overlays; panes are [Workspace](@/architecture/workspace.md).
 
-<!-- media: canvas-marker-lane — the lab's arrangement with the marker lane drawn over it: dragging the Opacity slider in the tool window, then clicking a flag to seek -->
+<!-- media: canvas-marker-lane — the sandbox's arrangement with the marker lane drawn over it: dragging the Opacity slider in the tool window, then clicking a flag to seek -->
 <!-- media: canvas-tool-window-pane — a script's ImGui window as a floating pane, docked into a group, then closed and the script stopping -->
 
 ## A minimal example
@@ -54,8 +54,8 @@ end
 defer(loop)
 ```
 
-The app, `architect-canvas` with `ui` and `luau`, after `apps/lab/ui/src/arrange.rs`
-and `apps/lab/ui/src/vault.rs`:
+The app, `architect-canvas` with `ui` and `luau`, after `apps/ui/src/arrange.rs`
+and `apps/ui/src/vault.rs`:
 
 ```rust
 // The page: the canvases, the tool windows as panes, the script
@@ -111,7 +111,7 @@ draws the layers for its view and plane as positioned boxes, and
 ## Status
 
 Done in architect, with an ImGui subset (text, buttons, checkbox, sliders,
-progress bar, `SameLine`, ids, next-window size and position); the lab runs
+progress bar, `SameLine`, ids, next-window size and position); the sandbox runs
 its marker lane. Not yet: drawing through egui or Dear ImGui behind the same
 API (layers are boxes, as Blitz has no texture widget); images and fonts;
 layers from Dioxus views; the extension host starting `[[overlays]]` itself.

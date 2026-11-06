@@ -1,0 +1,29 @@
+[package]
+name = "architect-sandbox-media"
+description = "The sandbox's guide scenarios (apps/sandbox/scenarios), filmed headlessly into GIF / WebM / MP4 and a poster (`sandbox-media`), and played as tests."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "sandbox-media"
+path = "src/main.rs"
+
+[dependencies]
+architect-guide = { workspace = true, features = ["capture"] }
+architect-app = { workspace = true }
+architect-shell = { workspace = true }
+architect = { workspace = true, features = ["action-list"] }
+dioxus = { workspace = true }
+facet = { workspace = true }
+futures-util = { version = "0.3", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

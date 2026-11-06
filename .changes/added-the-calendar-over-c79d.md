@@ -1,5 +1,5 @@
 ---
-"architect-lab-ui" = "patch"
+"architect-app" = "patch"
 "architect-navigator" = "patch"
 ---
 

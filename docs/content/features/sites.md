@@ -41,7 +41,7 @@ drawn as marked text. A `--strict` build fails on it.
 **Extensions draw their blocks.** A fenced block an extension claims is
 drawn by that extension at build time, as static HTML. The Board's
 `[[embeds]]` entry claims ```` ```kf ```` fences
-(`apps/lab/board/extension.toml`), and its page `apps/lab/board/pages/kf.tsx`
+(`apps/sandbox/board/extension.toml`), and its page `apps/sandbox/board/pages/kf.tsx`
 draws this one. The page runs once per block, and the element tree it draws
 is written out as HTML, the same tree a page draws in a pane:
 
@@ -101,7 +101,7 @@ use architect_sites::{Blocks, Drawn, FnBlock, Options, PageBlocks};
 
 let blocks = Blocks::new()
     // An extension's embed pages, for the fences they claim.
-    .with(PageBlocks::load("apps/lab/board".as_ref())?)
+    .with(PageBlocks::load("apps/sandbox/board".as_ref())?)
     // Or a Rust function, for a fence of your own.
     .with(FnBlock::new("my.app", &["shout"], |block| {
         Ok(Drawn::Html(format!("<p>{}</p>", block.source.to_uppercase())))

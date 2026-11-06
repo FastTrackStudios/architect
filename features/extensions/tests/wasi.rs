@@ -1,5 +1,5 @@
 //! WASI component extensions (feature `wasi`), on real components built
-//! for `wasm32-wasip2` here: the lab's counter (`apps/lab/wasi-counter`)
+//! for `wasm32-wasip2` here: the lab's counter (`apps/sandbox/wasi-counter`)
 //! and a component that misbehaves on purpose
 //! (`tests/wasi-hazards`).
 //!
@@ -83,7 +83,7 @@ fn guests() -> Option<&'static Path> {
             let build = [
                 "build",
                 "-p",
-                "architect-lab-wasi-counter",
+                "architect-sandbox-wasi-counter",
                 "-p",
                 "architect-extension-wasi-hazards",
                 "--target",
@@ -183,10 +183,10 @@ fn package(tmp: &Path, name: &str, manifest: &str, component: &str) -> PathBuf {
 }
 
 fn counter_manifest() -> String {
-    std::fs::read_to_string(root().join("apps/lab/wasi-counter/extension.toml")).unwrap()
+    std::fs::read_to_string(root().join("apps/sandbox/wasi-counter/extension.toml")).unwrap()
 }
 
-const COUNTER_WASM: &str = "architect_lab_wasi_counter.wasm";
+const COUNTER_WASM: &str = "architect_sandbox_wasi_counter.wasm";
 const HAZARDS_WASM: &str = "architect_extension_wasi_hazards.wasm";
 
 const HAZARDS_MANIFEST: &str = r#"

@@ -1,28 +1,32 @@
 +++
 title = "The Architect tour"
-description = "A guided tour of every system, in the lab: one chapter each, over the live app, built from a guide scenario."
+description = "A guided tour of every system, in the sandbox: one chapter each, over the live app, built from a guide scenario."
 weight = 15
 +++
 
-The lab (`apps/lab`) is a made-up app assembled from architect's parts.
-Its tour walks through every system the framework has, one chapter at a
+The tour (`apps/ui/tours/architect-tour.styx`) is the Architect app's.
+It was written over the sandbox (`apps/sandbox`): the app on made-up data,
+assembled from architect's parts. It walks through every system the framework has, one chapter at a
 time, over the running app: each chapter moves the app to the right
 place, rings the control it is about, and says in a few lines what it is,
-why it matters and the one thing to try. Nothing in the lab is anyone's
+why it matters and the one thing to try. Nothing in the sandbox is anyone's
 real data, so every control is live.
 
 ```sh
-devenv up    # the lab under dx serve, plus Teley and its collector
-just lab     # or the lab alone, without dx
+devenv up sandbox   # the sandbox under dx serve, plus Teley and its collector
+just sandbox        # or the sandbox alone, without dx
+just app            # the Architect app: its first run offers the tour
 ```
 
-The tour starts on the lab's first launch. After that, ⌘K › **Take the
+The tour starts on the sandbox's first launch, and in the Architect app
+once its first run has opened a vault (a chapter about a part the app
+does not have yet, the Inbox or the Board, shows its text without a ring). After that, ⌘K › **Take the
 tour** goes on where you stopped (or from the start, once you finished
 it); Next and Back move between chapters, Skip leaves. An agent starts it
 like anything else, over the Action List:
-`architect-desktop actions run GUIDE_TOUR_START --arg id=architect-tour`.
+`architect-sandbox actions run GUIDE_TOUR_START --arg id=architect-tour`.
 
-![The Architect tour over the lab](https://raw.githubusercontent.com/FastTrackStudios/architect/media/architect-tour-intro.gif)
+![The Architect tour over the sandbox](https://raw.githubusercontent.com/FastTrackStudios/architect/media/architect-tour-intro.gif)
 
 ## The chapters
 
@@ -42,15 +46,15 @@ like anything else, over the Action List:
 | Pages | TSX, Luau and A2UI pages, live on save, the `.error` loop | [Pages](@/architecture/pages.md) |
 | Embedded views | Dioxus, Luau ImGui, a Frame surface, A2UI, the GPU `paint` view, CRDT documents | [Embedded views](@/architecture/embedded-views.md) |
 
-What the lab cannot show, the chapter says: the Clicker (a process over
-vox) and the WASI counter need their programs built beside the lab (WASI
+What the sandbox cannot show, the chapter says: the Clicker (a process over
+vox) and the WASI counter need their programs built beside the sandbox (WASI
 with `--features wasi`), Keyflow's editor and chart need `--features
-keyflow-lab`, the lab ships no `.archext` archive, and no lab extension
+keyflow-lab`, the sandbox ships no `.archext` archive, and no lab extension
 declares a service for another to use.
 
 ## How it is built
 
-The tour is one guide scenario, `apps/lab/scenarios/architect-tour.styx`,
+The tour is one guide scenario, `apps/ui/tours/architect-tour.styx`,
 played live by `architect-guide`'s tour (`features/guide/src/tour.rs`;
 [Guide media](@/architecture/guide-media.md)). A chapter is its setup,
 hidden steps that run Action List actions (`LAB_GO`, `WORKSPACES_LOAD`,
@@ -60,11 +64,11 @@ it needs it, because the tour runs it again on Back
 (`features/guide/src/tour.rs` `setup_of`) and when it resumes at a step
 (`GUIDE_TOUR_START {id, step}`, `Tours::start_at`).
 
-The lab remembers the place through `TourSet::on_move`
-(`apps/lab/ui/src/guide.rs` `tours`): every chapter shown is written to
-`tour-place` in the lab's folder, and `done` once the last one is.
+The sandbox remembers the place through `TourSet::on_move`
+(`apps/ui/src/guide.rs` `tours`): every chapter shown is written to
+`tour-place` in the sandbox's folder, and `done` once the last one is.
 
-`apps/lab/media/tests/tour.rs` plays it as a person would, started from
+`apps/sandbox/media/tests/tour.rs` plays it as a person would, started from
 the Action List and moved on with Next, and checks that every chapter
 comes up with its target on screen; it also resumes it at a chapter and
 goes Back. The scenario itself runs in `just media-test` with the others.

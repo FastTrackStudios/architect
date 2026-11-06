@@ -29,7 +29,7 @@ fn fmt(pattern: &str, date: &str, weeks: WeekRules) -> String {
     Pattern::new(pattern).format(day(date), weeks)
 }
 
-/// The demo vault's layout (`apps/lab/demo-vault`): `Journal/Daily/…`.
+/// The demo vault's layout (`apps/ui/demo-vault`): `Journal/Daily/…`.
 fn journal_settings() -> NavigatorSettings {
     NavigatorSettings {
         periodic_folder: "Journal".to_owned(),

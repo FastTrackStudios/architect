@@ -32,7 +32,7 @@ const ID: &str = "fts.metronome";
 const STATUS: &str = "FTS_METRONOME_STATUS";
 
 fn lab_registry() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/lab/extensions")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions")
 }
 
 fn copy(from: &Path, to: &Path) {
@@ -369,19 +369,19 @@ fn the_page_finds_extensions_by_name_kind_and_what_they_add() {
     let tmp = tempfile::tempdir().unwrap();
     let (_, _, host) = app(tmp.path());
     let builtin = architect_extensions::Package::embedded(
-        include_str!("../../../apps/lab/extensions/metronome/extension.toml"),
+        include_str!("../../../apps/sandbox/extensions/metronome/extension.toml"),
         &[
             (
                 "count_in.luau",
-                include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/count_in.luau"),
             ),
             (
                 "click.luau",
-                include_str!("../../../apps/lab/extensions/metronome/click.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/click.luau"),
             ),
             (
                 "status.luau",
-                include_str!("../../../apps/lab/extensions/metronome/status.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/status.luau"),
             ),
         ],
     )

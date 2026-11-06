@@ -19,9 +19,9 @@ You will:
 4. let a script draw over a view and open tool windows with an ImGui-shaped
    API.
 
-The lab runs all four: its metronome (`apps/lab/extensions/metronome`), its
-clicker (`apps/lab/clicker`), and a marker lane over its arrangement
-(`apps/lab/ui/src/marker_lane.luau`).
+The sandbox runs all four: its metronome (`apps/sandbox/extensions/metronome`), its
+clicker (`apps/sandbox/clicker`), and a marker lane over its arrangement
+(`apps/ui/src/marker_lane.luau`).
 
 ## 1. Scripts: `architect-scripting`
 
@@ -101,7 +101,7 @@ Example: `examples/scripting`, a task board scripted from Luau, saved scripts as
 
 An extension is a package: an `extension.toml` manifest and its files. It
 adds what the app's own features add (actions, settings sections, views,
-openers, keys, overlays, document data) without a rebuild. The lab's
+openers, keys, overlays, document data) without a rebuild. The sandbox's
 metronome:
 
 ```toml
@@ -129,7 +129,7 @@ control = "switch"
 default = true
 ```
 
-(`apps/lab/extensions/metronome/extension.toml`, shortened.)
+(`apps/sandbox/extensions/metronome/extension.toml`, shortened.)
 
 - **Kinds.** `data` (settings, presets, keys; runs nothing) and `luau`
   (scripts on the scripting runtime) run built in. `process` (a program
@@ -144,7 +144,7 @@ default = true
 
 ### Load them
 
-The lab's root component, `apps/lab/ui/src/extensions.rs` `LabExtensions`,
+The sandbox's root component, `apps/ui/src/extensions.rs` `LabExtensions`,
 trimmed:
 
 ```rust
@@ -174,7 +174,7 @@ let extensions = use_hook(|| {
   to `git`), `ReaPackSource` (a ReaPack `index.xml`). `install(id, &VersionReq::STAR)`
   installs from the sources; `EXT_SEARCH` and `EXT_INSTALL` do the same from
   ⌘K or MCP.
-- **Hot reload.** Call `reload_changed()` on a timer (the lab polls every
+- **Hot reload.** Call `reload_changed()` on a timer (the sandbox polls every
   500 ms). A reload is a diff: kept actions keep their ids, settings keep
   their values, and on any failure nothing is swapped and the last good copy
   keeps running.
@@ -187,14 +187,14 @@ let extensions = use_hook(|| {
 the metronome.
 
 ![the metronome switched on: its section on the settings page and its action in ⌘K](https://raw.githubusercontent.com/FastTrackStudios/architect/media/extension-metronome-load.gif)
-<!-- media: extension-hot-reload — the metronome's extension.toml edited and saved while the lab runs, its settings section changing without a restart -->
+<!-- media: extension-hot-reload — the metronome's extension.toml edited and saved while the sandbox runs, its settings section changing without a restart -->
 
 Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
 
 ### Process extensions and remote views
 
 A `process` extension is a program of its own. It declares its views and
-actions in its manifest (`apps/lab/clicker/extension.toml`: `kind = "process"`,
+actions in its manifest (`apps/sandbox/clicker/extension.toml`: `kind = "process"`,
 `[entry] path`, `[[views]] id = "counter"`), and its `main` serves them
 (`features/extensions/src/guest.rs` `Guest`, feature `guest`):
 
@@ -212,7 +212,7 @@ fn main() -> Result<(), GuestError> {
 The app adds the runner to its host
 (`Host::new(…).with_runner(ProcessRunner::new()?.with_processes(processes()))`,
 feature `process`) and shows a view in a pane with `RemoteView` (feature
-`remote`), as the lab's Vault does:
+`remote`), as the sandbox's Vault does:
 
 ```rust
 View::new("clicker", "Clicker", |_| rsx! {
@@ -242,7 +242,7 @@ as a transport, state handed over on a reload, Windows.
 
 A script or an extension can draw **over** another view (markers over an
 arrangement, a guide over a chart) and open its own tool windows, in the
-shape REAPER's ReaImGui made familiar. The lab's marker lane draws flags
+shape REAPER's ReaImGui made familiar. The sandbox's marker lane draws flags
 over its arrangement and opens a window of sliders that tune them:
 
 ```lua
@@ -267,7 +267,7 @@ end
 defer(loop)
 ```
 
-(`apps/lab/ui/src/marker_lane.luau`, shortened.)
+(`apps/ui/src/marker_lane.luau`, shortened.)
 
 - **Spaces.** The view publishes its coordinate spaces (`Spaces`: time
   across, lanes down, already scrolled and zoomed). A layer draws in those,
@@ -279,8 +279,8 @@ defer(loop)
   false` once.
 - **Frames come on change**, not on a timer: a press, a release, a resize.
 
-On Blitz the app wires it in four places (`apps/lab/ui/src/arrange.rs`,
-`apps/lab/ui/src/vault.rs`):
+On Blitz the app wires it in four places (`apps/ui/src/arrange.rs`,
+`apps/ui/src/vault.rs`):
 
 ```rust
 let _canvases = architect_canvas::ui::use_canvases();          // once, at the page
@@ -309,7 +309,7 @@ egui or `<canvas>` behind the API.
 ## Where Task and Studio are
 
 Scripting, the extensions runtime, process extensions and canvases are
-architect-side and running in the lab. Studio's arrangement publishing its
+architect-side and running in the sandbox. Studio's arrangement publishing its
 spaces (so scripts can draw over the real one), Studio's JSFX, a `wasm`
 runner and the WIT interface, and Task and Studio installing extensions
 are still to come.

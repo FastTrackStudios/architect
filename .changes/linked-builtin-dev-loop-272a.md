@@ -1,7 +1,7 @@
 ---
 "architect-extensions" = "minor"
-"architect-lab-board" = "none"
-"architect-lab-ui" = "none"
+"architect-sandbox-board" = "none"
+"architect-app" = "none"
 "xtask" = "none"
 ---
 

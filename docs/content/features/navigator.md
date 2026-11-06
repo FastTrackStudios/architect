@@ -10,7 +10,7 @@ Navigator is the sidebar of an app that keeps notes in a vault: a folder
 tree beside a list of the selected folder's notes. It is a port of
 [Notebook Navigator](https://github.com/johansan/notebook-navigator), the
 Obsidian plugin by Johan Sanneblad, ported spec for spec. Use it when an
-app shows a vault in a sidebar (Task, the lab's Vault tab).
+app shows a vault in a sidebar (Task, the sandbox's Vault tab).
 
 It comes in two parts:
 

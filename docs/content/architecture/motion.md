@@ -71,8 +71,8 @@ motion reads:
 the OS's preference, read on macOS from `NSWorkspace`); `reduced_motion`
 is what holds. Reduced, every `to` jumps to its end (and calls its
 `to_then`), and every coast stops where it is. A virtual clock ignores the
-OS, so a film is the same on every machine. The lab's Settings ›
-Appearance › Reduce motion is the setting (`apps/lab/ui/src/lib.rs`).
+OS, so a film is the same on every machine. The sandbox's Settings ›
+Appearance › Reduce motion is the setting (`apps/ui/src/lib.rs`).
 
 ## What moves
 
@@ -105,12 +105,12 @@ and then acts sees the close).
 `opacity` changes nothing in the layout, and a relatively placed box's
 `left` moves only that box: the tabs slide by `left`, in points (a
 `translate` moves by device pixels, half as far on a 2x screen;
-`apps/lab/media/tests/tab_slide.rs` drags a tab at 2x). A clipped box's
+`apps/sandbox/media/tests/tab_slide.rs` drags a tab at 2x). A clipped box's
 `width` lays out only that box's row (the tree inside keeps its size). A
 paragraph keeps the lines of its own width while its neighbours move
 (the FTS Blitz fork's `fts-measure-2026-11`; before it a note drew the
 lines of the zero width a parent measured it at, a word per line, #152;
-`apps/lab/media/tests/reflow.rs` checks the films' every frame). A stacked pane is placed by `left` in an
+`apps/sandbox/media/tests/reflow.rs` checks the films' every frame). A stacked pane is placed by `left` in an
 absolutely positioned strip. Blitz has no `requestAnimationFrame`; the
 wall clock's `FRAME` wakes the motions, and `FTS_FPS_LOG=1` (the FTS Blitz
 fork's `blitz-shell`) logs frames and their cost each second.
@@ -123,7 +123,7 @@ while any motion runs it runs an invisible 1 px CSS animation, and it
 stops it when they rest. The element stays mounted: a node made just
 after it went drew under its animation's opacity (blank)
 (`skills/architect/references/blitz-quirks.md`). `AppShell` mounts it, and so do the
-workspace's host (outside a shell) and its pop-outs. Measured in the lab
+workspace's host (outside a shell) and its pop-outs. Measured in the sandbox
 on an M4 Mac mini: a sidebar fold went from 32 to 140 frames a second,
 6.8 ms a frame on average, 12.5 ms at worst.
 
@@ -132,9 +132,9 @@ from a component that is going, a tab dropped into another bar); they end
 once the component that made it goes, and every method on a motion whose
 component has gone does nothing.
 
-## Measured in the lab
+## Measured in the sandbox
 
-The lab (`apps/lab/desktop`) driven with real pointer and wheel events,
+The sandbox (`apps/desktop`) driven with real pointer and wheel events,
 recorded at the display's capture rate (about 29 fps):
 
 | Interaction | What was seen |
@@ -146,7 +146,7 @@ recorded at the display's capture rate (about 29 fps):
 | Stacked tabs, two wheel notches | the next pane slides part of the way over the one before it and stays there: a small scroll is a small move |
 
 Those were filmed before the springs were timed to Obsidian (below).
-The lab's films (`lab-media … --keep-frames`, 20 fps on the virtual
+The sandbox's films (`sandbox-media … --keep-frames`, 20 fps on the virtual
 clock), their raw frames compared before and after the tuning, against
 Obsidian's (about 29 fps):
 
@@ -167,11 +167,11 @@ the same (a negative `dx` brings what is to the right into view).
 ## In the films
 
 `architect-guide`'s `@scroll` is a trackpad's flick (quick, coasting to a
-stop) in pixel deltas, as macOS sends them. The lab's scenarios film the
-motion: `apps/lab/scenarios/stacked-tabs.styx` (a small scroll, a long
-one, a spine pressed), `apps/lab/scenarios/tab-reorder.styx` (the tabs
-making room), `apps/lab/scenarios/workspace-docks-ribbon.styx` (the
-sidebar folding and opening), `apps/lab/scenarios/workspace-split-drag.styx`
+stop) in pixel deltas, as macOS sends them. The sandbox's scenarios film the
+motion: `apps/sandbox/scenarios/stacked-tabs.styx` (a small scroll, a long
+one, a spine pressed), `apps/sandbox/scenarios/tab-reorder.styx` (the tabs
+making room), `apps/sandbox/scenarios/workspace-docks-ribbon.styx` (the
+sidebar folding and opening), `apps/sandbox/scenarios/workspace-split-drag.styx`
 (the highlight following, the split growing in, the divider, the close
 folding back).
 

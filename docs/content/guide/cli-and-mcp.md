@@ -17,7 +17,7 @@ a person, a script or CI reaches the same list from the command line
 5. read the exit codes;
 6. prove parity with one test, which `cargo xtask surfaces` requires.
 
-The lab wires all of it: `apps/lab/desktop/src/lib.rs`, run as
+The sandbox wires all of it: `apps/desktop/src/lib.rs`, run as
 `architect-desktop actions …`.
 
 ## 1. One shape, two renderings
@@ -85,8 +85,8 @@ let serving = Control::new("task", surface)?.serve_if_wanted()?; // keep it aliv
 A desk app that serves MCP for a model running elsewhere gets it from the
 socket: `architect_mcp::bridge::serve_stdio_via(&socket)` is MCP on stdio
 whose every tool call is a request to the running app
-(`architect-desktop mcp`; `--app <socket>` for another running lab's, as
-the iOS lab's, which has no stdio of its own).
+(`architect-desktop mcp`; `--app <socket>` for another running sandbox's, as
+the iOS sandbox's, which has no stdio of its own).
 
 ## 3. The `actions` command
 
@@ -133,8 +133,8 @@ chain steps with `batch`. An app whose actions live in its components
 (registered by hooks, answered on the window's thread) mounts its root in
 a headless document: `architect_guide::run::Headless`
 (`features/guide/src/run.rs`), pumped while the request runs
-(`architect_control::cli::Headless::pump`). The lab is that:
-`apps/lab/desktop/src/lib.rs` `HeadlessLab`, and
+(`architect_control::cli::Headless::pump`). The sandbox is that:
+`apps/desktop/src/lib.rs` `HeadlessLab`, and
 `architect-desktop --headless` keeps it running, serving its socket.
 
 ## 4. Who the caller is
@@ -159,7 +159,7 @@ sheet (`features/commands/src/confirm.rs` `ConfirmSheet`), and once the
 person allows it the same command with `--ticket <T>` runs it, once. A
 `batch` step takes `ticket` too. The sheet names the CLI's principal as
 the caller, so give the surface one a person recognises
-(`service:cli` in the lab).
+(`service:cli` in the sandbox).
 
 ## 5. Exit codes
 
@@ -202,7 +202,7 @@ things: the tool set against the protocol's methods, the listing and both
 resources, every action's `describe`, a run of every read-only action,
 the runs you add, an unknown action, a stray parameter, and `watch`.
 Copies to read: `examples/scripting/tests/mcp.rs` `mcp_and_the_cli_agree`,
-`apps/lab/desktop/tests/actions.rs` (the headless lab, pumped while the
+`apps/desktop/tests/actions.rs` (the headless lab, pumped while the
 check runs) and `features/mcp/tests/parity.rs` (every failure kind, the
 CLI's exit codes, headless mode and the MCP bridge).
 
@@ -220,9 +220,9 @@ window, every architect app can give through its list (#268):
   list: the app's own opening (a template), architect's rules (inspect
   first, change safely, themes, workspaces, extensions, the dev loop),
   then every action by area with its effect and arguments. `keep_written`
-  writes it again whenever an action comes or goes. The lab's:
-  `apps/lab/desktop/src/lib.rs` `keep_guide_written`, its opening
-  `apps/lab/desktop/src/AGENTS.preamble.md`.
+  writes it again whenever an action comes or goes. The sandbox's:
+  `apps/desktop/src/lib.rs` `keep_guide_written`, its opening
+  `apps/desktop/src/AGENTS.preamble.md`.
 - **`APP_STATUS`**: one read of what is on screen and what is wrong. Its
   parts are the list's `StatusBoard` sections (the workspace host's, the
   theme's) and its `Problems` (the theme files', the extensions', each

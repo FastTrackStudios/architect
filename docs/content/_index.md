@@ -17,7 +17,9 @@ as a working **reference monorepo**: the facade crate lives in
 `features/`, and `examples/greeter` is the reference feature (an entity,
 a service, its error, a backend and a server, tested over every wire)
 that a real project copies. `apps/auth-server` is the full-size server
-built the same way, and `apps/lab` the app the UI is designed in.
+built the same way. `apps/desktop` and `apps/mobile` are the Architect app
+(its UI in `apps/ui`), and `apps/sandbox` the same app on made-up data,
+where the UI is designed.
 
 ## Where to start
 

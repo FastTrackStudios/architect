@@ -2,7 +2,7 @@
 "architect-extensions" = "minor"
 "architect-pages" = "minor"
 "architect-control" = "minor"
-"architect-lab-ui" = "minor"
+"architect-app" = "minor"
 "architect-desktop" = "minor"
 ---
 

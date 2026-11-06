@@ -1,0 +1,37 @@
+[package]
+name = "architect-sandbox-clicker"
+description = "The sandbox's process extension: a Dioxus view in a process of its own, shown in a workspace pane over vox (apps/sandbox/clicker/extension.toml). Kill it and the app runs on."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Its package, as the lab loads it: its theme in THEME_LIST, its tokens,
+# its ImGui window drawn in the theme; and EXT_CHECK on the clicker's own
+# folder: its program started, its view rendered once (tests/check.rs).
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote", "page"] }
+architect-theme = { workspace = true, features = ["actions"] }
+architect-canvas = { workspace = true, features = ["luau"] }
+architect-scripting = { workspace = true, features = ["luau"] }
+futures = "0.3"
+# tests/host.rs: the host service over the clicker's connection.
+architect-permissions = { workspace = true }
+architect-settings = { workspace = true }
+tempfile = "3"
+# tests/manager_page.rs: the extensions page, clicked on Blitz.
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

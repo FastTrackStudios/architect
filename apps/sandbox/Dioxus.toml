@@ -1,0 +1,7 @@
+# dx config: `dx serve --platform desktop --renderer native` from this
+# folder (see README.md).
+[application]
+
+[bundle]
+identifier = "app.fasttrackstudio.architect-sandbox"
+publisher = "FastTrackStudio"

@@ -65,15 +65,15 @@ Rules:
 
 1. Give its root the Action List the runner puts in context
    (`Arc<ActionList>`), and leave out what needs a window when there is
-   none (the lab: `apps/lab/ui/src/lib.rs` `LabApp`).
+   none (the sandbox: `apps/ui/src/lib.rs` `LabApp`).
 2. Put what checks read on that list: `WorkspaceView`'s `actions` prop
    (`architect_workspace::WorkspaceActions`: `WORKSPACE_LAYOUT` and every
    workspace action, `workspace` events), `architect_commands::use_command_actions`
    (`COMMANDS_RUN`, `COMMANDS_STATE`, `commands` events), and the app's own
-   (`apps/lab/ui/src/guide.rs` `use_lab_actions`).
+   (`apps/ui/src/guide.rs` `use_lab_actions`).
 3. A media crate: `features/guide/src/run.rs` `App` (root, list, fonts,
    resolvers) and a `main` over `features/guide/src/cli.rs` `main`; a test
-   over `features/guide/src/run.rs` `test_dir` (`apps/lab/media`).
+   over `features/guide/src/run.rs` `test_dir` (`apps/sandbox/media`).
 4. An app's own targets: `App::resolver`, a `fn(kind, name) -> Option<String>`
    CSS selector.
 
@@ -94,21 +94,21 @@ Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
    conditionally (Blitz: a layer inserted over panes collapses them).
 3. Offer them: `GUIDE_TOUR_START {id}` is on the list (MCP, scenarios);
    give ⌘K a row per tour with `architect_commands::use_command(…, move ||
-   { let _ = tours.start(&id); })` (the lab: `apps/lab/ui/src/lib.rs`
-   `LabApp`, `apps/lab/ui/src/guide.rs` `tours`).
+   { let _ = tours.start(&id); })` (the sandbox: `apps/ui/src/lib.rs`
+   `LabApp`, `apps/ui/src/guide.rs` `tours`).
 4. Safety: a scenario without `safe true` starts only through
    `TourSet::playground` (set up sample data, or refuse with a reason).
-5. A tour of chapters (`apps/lab/scenarios/architect-tour.styx`): each
+5. A tour of chapters (`apps/ui/tours/architect-tour.styx`): each
    chapter is hidden `@run` setup steps then one shown step with `text`
    and a `target`. Back and `GUIDE_TOUR_START {id, step}` rerun the setup
    right before a step, so each chapter's setup must stand alone (go to
    the page, load the layout, close what the last chapter opened:
    `COMMANDS_SHOW {overlay none}`, `EXT_WINDOW_CLOSE`). Remember the
    place with `TourSet::on_move` and resume with `Tours::start_at`
-   (`apps/lab/ui/src/guide.rs` `tours`). Test it live with a generated
-   walk (`apps/lab/media/tests/tour.rs`).
-6. Films: `FILM_CAPTION`, `FILM_TERMINAL` and `FILM_WRITE` (the lab's
-   media crate, `apps/lab/media/src/lib.rs`) caption a GIF, show CLI
+   (`apps/ui/src/guide.rs` `tours`). Test it live with a generated
+   walk (`apps/sandbox/media/tests/tour.rs`).
+6. Films: `FILM_CAPTION`, `FILM_TERMINAL` and `FILM_WRITE` (the sandbox's
+   media crate, `apps/sandbox/media/src/lib.rs`) caption a GIF, show CLI
    lines, and save a file in the run's fresh lab folder (theme files,
    pages, dev copies reload live headless: `LabFiles`). A page draws in
    a document of its own, so `@text` cannot find its text: wait with
@@ -127,7 +127,7 @@ Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
 
 To film or test a tour, write a scenario that starts it and follows it,
 checking `GUIDE_TOUR_STATE` after each step:
-`apps/lab/scenarios/tour-palette-run.styx`.
+`apps/sandbox/scenarios/tour-palette-run.styx`.
 
 ## A story's scenarios (feature `story`)
 
@@ -146,9 +146,9 @@ checking `GUIDE_TOUR_STATE` after each step:
 
 ## Run it
 
-- `just media [ids]` films the lab's scenarios; `just media-test` plays
+- `just media [ids]` films the sandbox's scenarios; `just media-test` plays
   them as tests; `cargo test --workspace -- every_lab_scenario` is the test
-  in CI (`apps/lab/media/tests/scenarios.rs`).
+  in CI (`apps/sandbox/media/tests/scenarios.rs`).
 - ffmpeg and gifski come from the dev shell (`devenv.nix`).
 - Media never go on `main`: `just media-publish` commits them to the orphan
   `media` branch; docs embed `raw.githubusercontent.com/FastTrackStudios/architect/media/<id>.gif`.

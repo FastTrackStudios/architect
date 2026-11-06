@@ -1,0 +1,111 @@
+[package]
+name = "architect-app"
+description = "The Architect app's UI on architect_shell, mounted by apps/desktop, apps/mobile and the dev sandbox (apps/sandbox, its made-up data), with hot reload."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
+# WASI component extensions (Wasmtime): the WASI Counter
+# (`apps/sandbox/wasi-counter`) when its component was built.
+wasi = ["architect-extensions/wasi"]
+
+[dependencies]
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["text", "paint"], default-features = false, optional = true }
+keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native-chart-editor"], default-features = false, optional = true }
+# The source editor on its own, for the Editor tab (src/keyflow.rs).
+editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native"], optional = true }
+architect-shell = { workspace = true, features = ["ui"] }
+# The note editor (src/note_editor.rs): the FastTrackStudios editor on
+# Blitz, worked by extensions through architect_extensions::editor.
+editor-view = { workspace = true, features = ["native"] }
+# Runtime themes: the store, its files and watcher, THEME_* (src/theme.rs).
+architect-theme = { workspace = true, features = ["fs", "actions", "dioxus"] }
+# architect-ui's root: its CSS variables follow the store.
+architect-ui = { workspace = true }
+# The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
+architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home", "native"] }
+# The Vault tab's sidebar: the navigator (a port of Notebook Navigator) over
+# the lab's notes (src/vault.rs). GPL-3.0-or-later: linking it makes the
+# lab's binaries GPL (features/navigator/README.md).
+architect-navigator = { workspace = true, features = ["ui", "vault"] }
+architect-commands = { workspace = true, features = ["native"] }
+# The settings page; the Appearance section, its layers kept (the
+# person's in a synced document, here a file).
+architect-settings = { workspace = true, features = ["ui", "store", "synced", "appearance"] }
+loro = { workspace = true }
+architect-orgs = { workspace = true, features = ["ui"] }
+# `crdt`: the lab's spaces as documents extensions reach (src/extensions.rs).
+architect-extensions = { workspace = true, features = ["ui", "remote", "page", "pickers", "crdt"] }
+# Extensions' ports and the targets of their control surfaces (#311).
+architect-input = { workspace = true, features = ["udp"] }
+# The lab's example extension, linked in (apps/sandbox/board).
+architect-sandbox-board = { path = "../sandbox/board" }
+# The theme picker, architect's built-in extension.
+architect-theme-picker = { workspace = true }
+architect-settings-sheet = { workspace = true }
+# Navigator, the sidebar's navigator as a built-in extension (GPL-3.0, as
+# architect-navigator: the lab already ships under it).
+architect-navigator-extension = { workspace = true }
+# Pages as files (apps/sandbox/board/pages/board.tsx, overrides under the
+# lab's folder `pages/`): TSX on QuickJS, drawn in a pane, live on save.
+architect-pages = { workspace = true, features = ["js", "luau", "a2ui", "ui", "codegen", "manager"] }
+architect-canvas = { workspace = true, features = ["ui", "luau"] }
+architect-scripting = { workspace = true, features = ["luau"] }
+# A slow or busy extension view, to the log (`extensions::LogSlowViews`).
+tracing = { workspace = true }
+# Guided tours of the lab's scenarios, live in the window.
+architect-guide = { workspace = true, features = ["ui"] }
+serde_json = { workspace = true }
+# An agent's generated UI (src/vault.rs, the "Agent UI" view), its
+# surfaces on a Loro document.
+architect-a2ui = { workspace = true, features = ["ui"] }
+crdt = { workspace = true }
+# The lab's vault: a folder of markdown and its VAULT_* actions
+# (src/notes.rs, the sample in apps/sandbox/vault).
+vault = { workspace = true, features = ["actions"] }
+# An outside edit merged into an open note's typing (`vault_doc::merge3`).
+vault-doc = { workspace = true }
+# The demo vault's sample images as data URLs for the in-memory vault.
+base64 = { workspace = true }
+links = { workspace = true, features = ["actions"] }
+tag = { workspace = true, features = ["actions"] }
+# Bases: a .base as a workspace view, a note's ```base fence, the
+# BASES_* actions (src/notes.rs, src/vault.rs).
+architect-bases = { workspace = true, features = ["ui"] }
+architect = { workspace = true, features = ["action-list", "settings"] }
+dioxus = { workspace = true }
+facet = { workspace = true }
+dioxus-native = { workspace = true }
+# The Dock icon and its badge, the menu-bar item, background mode, opening
+# at login (src/presence.rs): the model everywhere, the platforms' side on
+# a desk.
+architect-presence = { workspace = true }
+lucide-dioxus = { workspace = true }
+futures-timer = { workspace = true }
+# A vault note hears the vault's changes on its own task (src/vault.rs).
+futures-channel = "0.3"
+# `LAB_GO` hears its asks on the window's thread (src/guide.rs).
+futures-util = { version = "0.3", default-features = false }
+include_dir = { workspace = true }
+
+[dev-dependencies]
+# The lab vault's seed test (src/notes.rs) writes to a temporary folder.
+tempfile = "3"
+# The Keyflow editor's tests (src/keyflow.rs): its layout and computed
+# colours in a Blitz document.
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
+architect-presence = { workspace = true, features = ["native"] }
+# The first run's folder picker (`src/first_run.rs`).
+rfd = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

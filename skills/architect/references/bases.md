@@ -12,7 +12,7 @@ A base is Obsidian's `.base` file: filters and formulas over a vault's notes, an
 | one base anywhere | `features/bases/src/ui.rs` `BaseView` (`path` or `source`, `view`, `embedded`); it reads `Arc<ActionList>` from context and redraws on any `BASES_*`/`VAULT_*` write on it |
 | a note's ```` ```base ```` fence | `features/bases/src/ui.rs` `Bases` (linked extension `architect.bases`, `features/bases/extension.toml`): `Extensions::with_linked(&Bases)`; the fence is a base's YAML, or one line naming a `.base` |
 
-The lab does all of it: `apps/lab/ui/src/notes.rs` `register`, `view_types`; `apps/lab/ui/src/extensions.rs`; `apps/lab/ui/src/vault.rs` (the Files pane opens `Bases/Notes by status.base`; the note "A base in a note").
+The sandbox does all of it: `apps/ui/src/notes.rs` `register`, `view_types`; `apps/ui/src/extensions.rs`; `apps/ui/src/vault.rs` (the Files pane opens `Bases/Notes by status.base`; the note "A base in a note").
 
 ## The actions
 
@@ -35,7 +35,7 @@ ext.base_view("board", BoardView); // in Extension::build; drawn as view `base.b
 //   .base (path), .view (type, name, order, sort, groupBy, filters, limit, options), .rows ({columns, groups})
 ```
 
-Symbols: `features/extensions/src/contrib.rs` `BaseViewDecl` (`view_name`), `BaseViewOption`, `BaseViewInput`, `BUILTIN_BASE_VIEWS`, `Contributions::base_views`, `Contributions::base_view`; `features/extensions/src/linked.rs` `Builder::base_view`, `use_base_view`, `BASE_VIEW_CLAIM`; `features/extensions/src/manifest.rs` `Manifest::draws`; `features/extensions/src/embeds.rs` `Embeds::base_view`, `BaseViewEmbed`. Turned off, its type leaves the picker and `BASES_VIEW_TYPES`, and its views say no extension draws them. Example: `apps/lab/board/src/lib.rs` `BaseBoard`; tests `apps/lab/board/tests/both_ways.rs`.
+Symbols: `features/extensions/src/contrib.rs` `BaseViewDecl` (`view_name`), `BaseViewOption`, `BaseViewInput`, `BUILTIN_BASE_VIEWS`, `Contributions::base_views`, `Contributions::base_view`; `features/extensions/src/linked.rs` `Builder::base_view`, `use_base_view`, `BASE_VIEW_CLAIM`; `features/extensions/src/manifest.rs` `Manifest::draws`; `features/extensions/src/embeds.rs` `Embeds::base_view`, `BaseViewEmbed`. Turned off, its type leaves the picker and `BASES_VIEW_TYPES`, and its views say no extension draws them. Example: `apps/sandbox/board/src/lib.rs` `BaseBoard`; tests `apps/sandbox/board/tests/both_ways.rs`.
 
 ## Grouping, shared
 
@@ -44,4 +44,4 @@ Symbols: `features/extensions/src/contrib.rs` `BaseViewDecl` (`view_name`), `Bas
 ## Gotchas
 
 - Blitz fires no `change` on an `<input>`: the toolbar's and cells' fields commit on Enter or blur (`features/bases/src/ui.rs` `Field`).
-- `BASES_OPEN` opens only where `WORKSPACE_OPEN` is on the list (the lab: while the Vault tab shows); elsewhere it answers `opened: false` with the base.
+- `BASES_OPEN` opens only where `WORKSPACE_OPEN` is on the list (the sandbox: while the Vault tab shows); elsewhere it answers `opened: false` with the base.

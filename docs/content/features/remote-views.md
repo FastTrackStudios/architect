@@ -23,12 +23,12 @@ on views rendered remotely; the manifest side is
 
 Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
 
-<!-- media: remote-view-clicker — the lab's Clicker in a Vault pane: clicking it, then kill -9 on its process, the placeholder with the reason, Start again and the counter back -->
+<!-- media: remote-view-clicker — the sandbox's Clicker in a Vault pane: clicking it, then kill -9 on its process, the placeholder with the reason, Start again and the counter back -->
 
 ## A minimal example
 
 The extension, `architect-extensions` with `guest`, from
-`apps/lab/clicker/src/main.rs`:
+`apps/sandbox/clicker/src/main.rs`:
 
 ```rust
 use architect_extensions::guest::{Guest, GuestError};
@@ -41,12 +41,12 @@ fn main() -> Result<(), GuestError> {
 }
 ```
 
-Its manifest, `apps/lab/clicker/extension.toml`, has `kind = "process"`, an
+Its manifest, `apps/sandbox/clicker/extension.toml`, has `kind = "process"`, an
 `[entry]` with the program's path, its `[[actions]]` and a `[[views]]` entry
 with `id = "counter"`.
 
-The app, with `ui` and `remote` (desk only), after `apps/lab/ui/src/extensions.rs`
-and `apps/lab/ui/src/vault.rs`:
+The app, with `ui` and `remote` (desk only), after `apps/ui/src/extensions.rs`
+and `apps/ui/src/vault.rs`:
 
 ```rust
 use architect_extensions::process::{ProcessRunner, Processes};
@@ -106,7 +106,7 @@ placeholder, and follows the process when it restarts.
 
 ## Status
 
-Done in architect on Unix desks; the lab runs the clicker. Not yet: a stdio
+Done in architect on Unix desks; the sandbox runs the clicker. Not yet: a stdio
 transport, starting lazily and stopping when idle, handing state over on a
 reload, a host service extensions call back into, Windows; pointer, touch,
 wheel and scroll events, IME, and an element and CSS allowlist (only raw HTML

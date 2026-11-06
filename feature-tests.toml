@@ -11,8 +11,8 @@
 # alone would resolve everything under it differently from the workspace
 # run and so build it all a second time.
 #
-# No pass turns on `architect-lab-ui/wasi` (or uses `--all-features`): the
-# lab-media goldens (apps/lab/media/tests/builtins.rs) are the default lab,
+# No pass turns on `architect-app/wasi` (or uses `--all-features`): the
+# sandbox-media goldens (apps/sandbox/media/tests/builtins.rs) are the default sandbox,
 # and that feature adds the manager's Components kind to the extensions
 # page on purpose. No test is gated on it, so the check needs no pass.
 
@@ -41,10 +41,10 @@ features = [
     "architect-orgs/commands",
 ]
 
-# The lab's Keyflow editor tab (apps/lab/ui/src/keyflow.rs): it fills its
+# The sandbox's Keyflow editor tab (apps/ui/src/keyflow.rs): it fills its
 # pane, in the app's theme.
 [[pass]]
 name = "lab-keyflow"
 workspace = true
-packages = ["architect-lab-ui"]
-features = ["architect-lab-ui/keyflow-lab"]
+packages = ["architect-app"]
+features = ["architect-app/keyflow-lab"]

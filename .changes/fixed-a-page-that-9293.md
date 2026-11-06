@@ -1,5 +1,5 @@
 ---
-"architect-lab-media" = "patch"
+"architect-sandbox-media" = "patch"
 "architect-shell" = "patch"
 "architect-workspace" = "patch"
 ---

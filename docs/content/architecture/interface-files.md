@@ -7,8 +7,8 @@ weight = 70
 > **Status: landed (2026-11-03).** The shell's slots:
 > `features/shell/src/shell/chrome.rs` `Chrome`, `Slot`, `Filler`. The
 > files: `features/workspace/src/home.rs` `Home` (feature `home`), its
-> actions (`home::actions`) and its window glue (`home::ui`). The lab
-> uses both (`apps/lab/ui/src/lib.rs` `LabApp`). Not yet: the `.state/`
+> actions (`home::actions`) and its window glue (`home::ui`). The sandbox
+> uses both (`apps/ui/src/lib.rs` `LabApp`). Not yet: the `.state/`
 > of sidebar widths and folds (the shell keeps them in memory), a
 > `layout.switch` key, a generated guide (#268 H2), the escape-hatch key
 > (H7), cloning a built-in (`WORKSPACES_CLONE`, on its own branch).
@@ -56,7 +56,7 @@ both.
 
 ## The files
 
-Under the app's folder (the lab's: `architect::settings::app_dir`):
+Under the app's folder (the sandbox's: `architect::settings::app_dir`):
 
 | file | what it decides | applied |
 |---|---|---|
@@ -89,7 +89,7 @@ A layout:
   `WORKSPACE_APPLY` when the layout shows or the tree changes.
 - Unknown fields are refused.
 
-`Home::poll` reads what changed (the lab every 400 ms). A file that does
+`Home::poll` reads what changed (the sandbox every 400 ms). A file that does
 not read keeps its last good version and gets `<name>.error` beside it;
 each such error is a `home::Problem`. `home::actions::register` makes the
 files a source of the list's problems, so `APP_STATUS` lists a broken
@@ -97,7 +97,7 @@ layout (source `layout`) or `keys.json` (source `keymap`) with the file's
 full path beside every other problem the app has; `HOME_PROBLEMS` answers
 the same entries for the files alone (`features/workspace/src/home.rs`
 `Home::app_problems`). The app's own layouts (`Home::open`'s
-built-ins; the lab's `main` is the shell as it is) are written read-only
+built-ins; the sandbox's `main` is the shell as it is) are written read-only
 on every start: an edit to one is a problem saying to clone it, and an
 edited copy found at start is kept as `<name>-edited.json`.
 

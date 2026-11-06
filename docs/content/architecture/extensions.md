@@ -30,8 +30,8 @@ weight = 67
 > workspace pane (`features/canvas/src/ui.rs` `CanvasLayers`,
 > `window_view`, `use_tool_windows`); an extension declares an overlay
 > in its manifest (`[[overlays]]`, `features/extensions/src/manifest.rs`
-> `OverlayDecl`). The lab's arrangement has a marker lane over it
-> (`apps/lab/ui/src/marker_lane.luau`). Drawn as boxes, not through
+> `OverlayDecl`). The sandbox's arrangement has a marker lane over it
+> (`apps/ui/src/marker_lane.luau`). Drawn as boxes, not through
 > egui: Blitz has no texture widget yet. Not yet: egui (or Dear ImGui)
 > behind the same API, `gfx` images and fonts, the WIT interface,
 > layers from Dioxus views or frame documents, the extension host
@@ -47,8 +47,8 @@ weight = 67
 > (`features/extensions/src/catalog.rs` `choose`), hot reload by polling
 > (`features/extensions/src/watch.rs` `Watch`), a project's requirements
 > and an organization's approved list (`features/extensions/src/project.rs`
-> `plan`), and the `EXT_*` actions. The lab's metronome is one
-> (`apps/lab/extensions`). Not yet: overlays, signed
+> `plan`), and the `EXT_*` actions. The sandbox's metronome is one
+> (`apps/sandbox/extensions`). Not yet: overlays, signed
 > archives, `architect ext dev` as a command.
 >
 > **Processes and remote views landed (2026-11-01)** in the same crate:
@@ -64,8 +64,8 @@ weight = 67
 > (`features/extensions/src/remote.rs` `RemoteView`, a Blitz sub-document
 > filled by `RemoteDocument`, which checks every edit, and a placeholder
 > when the process is gone). The wire is architect's own, versioned
-> (`features/extensions/src/wire.rs` `WIRE`). The lab's clicker is one
-> (`apps/lab/clicker`); `features/extensions/tests/remote_view.rs` clicks
+> (`features/extensions/src/wire.rs` `WIRE`). The sandbox's clicker is one
+> (`apps/sandbox/clicker`); `features/extensions/tests/remote_view.rs` clicks
 > through a real child process and kills it. Not yet: stdio, lazy start
 > and idle stop, state handed over on a reload, the host service an
 > extension calls back into, pointer, wheel and IME events, the
@@ -83,7 +83,7 @@ weight = 67
 > (`crates/architect/src/action_list.rs` `Invocation`). One Rust value
 > runs linked in or as a process (`features/extensions/src/linked.rs`
 > `Extension`). The window side is `features/extensions/src/interface.rs`
-> `use_extension_ui`. The lab's Board is one (`apps/lab/board`). See
+> `use_extension_ui`. The sandbox's Board is one (`apps/sandbox/board`). See
 > "Contributions" and "One trait, three ways to run it" below. Not yet:
 > WASM, a process view told its pane's state, hooks on a phone.
 >
@@ -395,10 +395,10 @@ architect_extension_wasi::export!(build);
 The crate is a `cdylib` built with
 `cargo build --target wasm32-wasip2` in `devenv --profile wasi shell`
 (the fleet toolchain plus that target: a profile, as an extra target
-changes the rustc path kache shares). The lab's WASI Counter
-(`apps/lab/wasi-counter`) is one: a counter view and an action that asks
-the app for its themes. With the lab's `wasi` feature
-(`cargo run -p architect-desktop --features wasi`) and the component
+changes the rustc path kache shares). The sandbox's WASI Counter
+(`apps/sandbox/wasi-counter`) is one: a counter view and an action that asks
+the app for its themes. With the sandbox's `wasi` feature
+(`cargo run -p architect-sandbox --features wasi`) and the component
 built into `target/wasi-guest`, it runs as a development copy and its
 view is the Vault's "WASI Counter" pane.
 `features/extensions/tests/wasi.rs` builds it and a component that
@@ -476,7 +476,7 @@ Extension::new()
     })
 ```
 
-The lab's WASI Counter counts primes in a worker (`LAB_WASI_COUNTER_PRIMES`,
+The sandbox's WASI Counter counts primes in a worker (`LAB_WASI_COUNTER_PRIMES`,
 `LAB_WASI_COUNTER_JOB`, its "Count primes" button) with a progress bar,
 while the counter answers clicks. `features/extensions/tests/wasi.rs`
 measures that (`a_worker_job_keeps_the_view_within_its_frame_budget`:
@@ -490,8 +490,8 @@ actions on its list (the extensions' own, which ⌘K reads among the
 app's lists). An app whose control socket, CLI and MCP serve another
 list forwards them there with `Host::forward_actions_to`
 (`features/extensions/src/forward.rs`), as extensions load, reload and
-unload; each runs on the host's list as whoever ran it. The lab does,
-so `architect-desktop actions run LAB_WASI_COUNTER_ADD` reaches the
+unload; each runs on the host's list as whoever ran it. The sandbox does,
+so `architect-sandbox actions run LAB_WASI_COUNTER_ADD` reaches the
 counter.
 
 **iOS: Pulley, no JIT.** iOS lets no app make memory executable, so
@@ -537,12 +537,12 @@ About three times a native call, and still far inside a frame:
 an extension's action or a view's event is not where the time goes. A
 component doing real work in a loop pays more (an interpreter is
 typically several times slower on hot code); that is what workers are
-for, and they run on the same engine: on the Simulator, the lab's
+for, and they run on the same engine: on the Simulator, the sandbox's
 "Count primes" worker counts the 148933 primes below two million in
 about 13 s while its view answers each click.
 
-The lab runs it on the Simulator: `architect-mobile --features wasi`
-(`apps/lab/mobile`, built and bundled by `apps/lab/mobile/ios/build-app.sh`) finds the WASI Counter's component beside its
+The sandbox runs it on the Simulator: `architect-mobile --features wasi`
+(`apps/mobile`, built and bundled by `apps/mobile/ios/build-app.sh`) finds the WASI Counter's component beside its
 executable in its app bundle (or at `ARCHITECT_LAB_WASI_COUNTER`) and
 serves its Action List on a control socket as the desk lab does
 (`FTS_CONTROL_DIR` puts it in a folder on the Mac), so
@@ -639,8 +639,8 @@ rest waiting. The messages are the same:
   terminate the worker's Web Worker at once, whether it looks at
   `cancelled()` or not (natively: at its next epoch tick).
 
-**The lab.** `just lab-web` builds the WASI Counter for `wasm32-wasip2`,
-transpiles it, builds `apps/lab/web` (a page that puts the component's
+**The sandbox.** `just web` builds the WASI Counter for `wasm32-wasip2`,
+transpiles it, builds `apps/web` (a page that puts the component's
 actions on its own list beside a `THEME_LIST`, mounts its view and shows
 each animation frame's gap) and serves it on :8090. In Firefox the
 counter answers clicks and "Ask the app" reaches the page's list through
@@ -825,11 +825,11 @@ shell's tokens.
 | `Separator` | `imgui.separator` | `$rule` |
 | `PlotHistogram` (a progress bar) | `imgui.plot-histogram` | `$chart-1` |
 
-**The lab's example** is the clicker (`apps/lab/clicker`): it contributes
+**The sandbox's example** is the clicker (`apps/sandbox/clicker`): it contributes
 Clicker Neon and `clicker.*` tokens, its process view styles itself with
 `var(--clicker-face)` and works out a ramp from the theme as data, and
-its `ImGui` window (`apps/lab/clicker/window.luau`, the Vault's "Clicker
-window" pane) reads `theme`. `apps/lab/clicker/tests/themed.rs` checks
+its `ImGui` window (`apps/sandbox/clicker/window.luau`, the Vault's "Clicker
+window" pane) reads `theme`. `apps/sandbox/clicker/tests/themed.rs` checks
 all of it headless.
 
 ## Immediate-mode UI for scripts (ReaImGui's)
@@ -1076,7 +1076,7 @@ an extension has its views' p50, p99 and slow count ("Frame health",
 `health_lines`; `ExtensionKind::with_meters`). Linked extensions' views
 are Dioxus components in the app's own document and are not metered.
 
-The lab shows all of it with the clicker (`apps/lab/clicker`): its
+The sandbox shows all of it with the clicker (`apps/sandbox/clicker`): its
 "Heavy job" pane counts primes in a worker with a live progress bar and
 a spinner that keeps turning; its "Naughty view" spins 300 ms a frame on
 its own thread and is marked busy while every other pane answers; its
@@ -1205,7 +1205,7 @@ workspace asks `architect_workspace::ContextEntries` (which
 `use_extension_ui` provides) each time a menu opens. A tab's menu (its
 right-click, its header's ⋯) asks for `view:<kind>` and `tab`, with the
 pane's id; a view's own targets open through
-`architect_workspace::PaneHandle::context_menu` — the lab's file tree
+`architect_workspace::PaneHandle::context_menu` — the sandbox's file tree
 calls it on a row's right-click with `file` and the file's path, and a
 `file:<ext>` row is on files of that extension. The row runs with
 `architect_workspace::context_invocation`: source `context_menu`, the
@@ -1216,7 +1216,7 @@ point its feature declares (`Host::declare_context_targets`; point
 `context_target_point`): the workspace's `pane`, `tab` and `view`
 (`architect_workspace::CONTEXT_TARGETS`), the toolbars' `toolbar` and
 `toolbar-item` (`features/extensions/src/toolbar.rs` `CONTEXT_TARGETS`),
-the lab's file tree its `file`. Each `[[context]]` row is an item of its
+the sandbox's file tree its `file`. Each `[[context]]` row is an item of its
 target's point, so `EXT_POINTS` lists them by target, and rows for a
 target nobody declared wait there; a manifest's target need only be a
 target's name (`contrib::known_target`).
@@ -1240,7 +1240,7 @@ and in `TOOLBAR_GET`'s answer, so a visual editor reads and writes it as
 it is.
 
 A person's toolbar files are `*.toml` in a folder the app names
-(`features/extensions/src/toolbars.rs` `Toolbars::set_dir`; the lab's
+(`features/extensions/src/toolbars.rs` `Toolbars::set_dir`; the sandbox's
 `toolbars/`), read again as they change (`Toolbars::poll`, once a
 second). A file whose `id` is an extension toolbar's key
 (`fts.metronome/transport`) is the person's copy, used in its place until
@@ -1309,10 +1309,10 @@ key = "…", text = "on"}` in Luau, `guest::set_state`, a WASI guest's
 contributed rows, a context menu's row, and a toolbar's button
 (`aria-pressed`, the accent), and follows the state live: a toolbar
 redraws when the contributions change and when anything happens on the
-host's list. The lab's metronome (`apps/lab/extensions/metronome`) has
+host's list. The sandbox's metronome (`apps/sandbox/extensions/metronome`) has
 one, `FTS_METRONOME_CLICK`, on a toolbar in the right dock, one in every
 note's header, and in a tab's and a Markdown file's context menus
-(`apps/lab/scenarios/extension-toolbars.styx`).
+(`apps/sandbox/scenarios/extension-toolbars.styx`).
 
 **Opening.** `Host::open` takes a file's path, a link or a document
 kind to the first opener that claims it: its view opens through the
@@ -1570,11 +1570,11 @@ process embed runs on its own thread, its frames timed into the same
 with `BusyBadge` past the budget, while the document around it answers
 as ever. Nothing on the host's UI thread waits for an embed.
 
-**In the lab** (`apps/lab/ui/src/note.rs` `NoteBody`): the Vault's
+**In the sandbox** (`apps/ui/src/note.rs` `NoteBody`): the Vault's
 "A chart in a note" has a ```` ```kf ```` fence the Board draws as a chart
-(`apps/lab/board/pages/kf.tsx`, a page embed), and "Amazing Grace" is a
+(`apps/sandbox/board/pages/kf.tsx`, a page embed), and "Amazing Grace" is a
 `type: song` note the Board gives its song card
-(`apps/lab/board/src/lib.rs` `SongCard`, a linked embed). Edit a note
+(`apps/sandbox/board/src/lib.rs` `SongCard`, a linked embed). Edit a note
 ("Edit") and the chart is drawn again and resized; turn the Board off
 (`EXT_DISABLE {"id":"lab.board"}`) and the plain fence comes back.
 `features/pages/tests/embed.rs` and
@@ -1589,7 +1589,7 @@ widget decoration that mounts a Dioxus element (or names a node the
 host attaches a sub-document to) at the fence, a height it is told back
 for its line layout, and the fence's text as it is edited. With that,
 the editor's fence languages are `Embeds::fences`, and each widget an
-`EmbedView`. Until then the lab draws its notes itself.
+`EmbedView`. Until then the sandbox draws its notes itself.
 
 **The web host** has no Blitz sub-documents: there an embed's view
 would be drawn by the extension's own Dioxus tree into an element of the
@@ -1646,8 +1646,8 @@ linked view in the app's document, a page or a process view as a
 sub-document, given a `BaseViewInput` under the claim
 `embed_type:base_view` (`linked::BASE_VIEW_CLAIM`), drawn again when the
 rows or the view change. A page reads it with `useEmbed()` (its `props`).
-The lab's Board adds `board` (`apps/lab/board/extension.toml`,
-`apps/lab/board/src/lib.rs` `BaseBoard`).
+The sandbox's Board adds `board` (`apps/sandbox/board/extension.toml`,
+`apps/sandbox/board/src/lib.rs` `BaseBoard`).
 
 ## One trait, three ways to run it
 
@@ -1674,7 +1674,7 @@ time, the same linked in or not.
   "WASI components" below); a `linked::Extension` built to
   `wasm32-wasip2` is a later step.
 
-`apps/lab/board/tests/both_ways.rs` runs the lab's Board both ways and
+`apps/sandbox/board/tests/both_ways.rs` runs the sandbox's Board both ways and
 checks they add the same things, run the same hook and read the same
 context menu's target. `cargo xtask builtins` (CI) builds every built-in
 extension crate (an `extension.toml` with a `[source]` beside a
@@ -1682,7 +1682,7 @@ extension crate (an `extension.toml` with a `[source]` beside a
 process. WASI is not a third way for these crates yet: the WASI runner
 runs components built against `architect-extension-wasi`, and a
 `linked::Extension` exported as a component is the step still to come
-(#272). `apps/lab/board/tests/bench.rs` measures the lab's WASI
+(#272). `apps/sandbox/board/tests/bench.rs` measures the sandbox's WASI
 component beside the Board's linked and process rows.
 
 ### A built-in's development copy, from its source
@@ -1695,8 +1695,8 @@ built-in says where its crate is:
 [source]
 git = "https://github.com/FastTrackStudios/architect"
 rev = "main"
-path = "apps/lab/board"
-# bin = "architect-lab-board"   # its [entry] path's file name unless given
+path = "apps/sandbox/board"
+# bin = "architect-sandbox-board"   # its [entry] path's file name unless given
 ```
 
 `EXT_CLONE {"id": "lab.board"}` (no `as`) then does what
@@ -1732,7 +1732,7 @@ path = "apps/lab/board"
    "failed: …" on the page. `EXT_INFO` and `EXT_CLONE` answer the build
    (`build`: `building`, `built` with `took_ms`, `failed` with `error`).
 
-`apps/lab/board/tests/dev_loop.rs` (ignored: it builds the crate) runs
+`apps/sandbox/board/tests/dev_loop.rs` (ignored: it builds the crate) runs
 the whole loop: clone, first build, an edit swapped in, a break kept on
 the last good build, back to the built-in.
 
@@ -1740,7 +1740,7 @@ the last good build, back to the built-in.
 
 The Board's `LAB_BOARD_STATE` action and its `board` view's frame, and
 the nearest equivalents on the scripted runners
-(`apps/lab/board/tests/bench.rs`, ignored: run it with `--ignored
+(`apps/sandbox/board/tests/bench.rs`, ignored: run it with `--ignored
 --nocapture`):
 
 | runner | what | n | p50 | p99 |
@@ -1786,7 +1786,7 @@ for as long as it runs, so its host opens at most `MAX_VIEWS` of its views
 over its connection's life, closed ones counted, then says to restart or
 rebuild it. Before this, the 65th view at once waited forever, and a
 process stopped showing views after 64 opens: the benchmark
-(`apps/lab/board/tests/bench.rs`) started it again every 50; it no longer
+(`apps/sandbox/board/tests/bench.rs`) started it again every 50; it no longer
 does. `features/extensions/tests/process_views.rs` shows 100 views at once,
 400 more opened and closed, 256 at once, the 257th refused, and the
 place a closed one leaves taken again.
@@ -1818,13 +1818,13 @@ host kernels.
 |---|---|---|---|
 | `theme.picker` | `features/theme/picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | `EXT_CLONE` (`features/theme/picker/tests/dev_loop.rs`); both ways in `features/theme/picker/tests/both_ways.rs` |
 | `manager` (the extensions page) | `features/extensions/src/manager` | `MANAGER_*`, its views, its settings section, ⌘O's `ext:` | none yet: its kinds are the app's Rust values (below) |
-| `lab.board` | `apps/lab/board` | the lab's example: a tab, a status item, openers, hooks | `EXT_CLONE` (`apps/lab/board/tests/dev_loop.rs`) |
+| `lab.board` | `apps/sandbox/board` | the sandbox's example: a tab, a status item, openers, hooks | `EXT_CLONE` (`apps/sandbox/board/tests/dev_loop.rs`) |
 | `settings` (the settings page) | `features/settings/sheet` | the window ⌘, opens (`APP_SETTINGS`, reserved), the point `settings.sections` | `EXT_CLONE` (`features/settings/sheet/tests/dev_loop.rs`); both ways in `features/settings/sheet/tests/both_ways.rs` |
 
-`apps/lab/media/tests/builtins.rs` checks that the default lab looks
+`apps/sandbox/media/tests/builtins.rs` checks that the default lab looks
 the same as before these moved: the main window's document at the end of
 four scenarios (the Inbox, settings on Appearance and on Extensions, ⌘O's
-`ext:`) against `apps/lab/media/tests/golden/`, recorded from the base
+`ext:`) against `apps/sandbox/media/tests/golden/`, recorded from the base
 (each element's mount-order id, `data-dioxus-id`, aside). The only
 differences are the theme picker's and the settings page's own rows in
 the extensions list and in ⌘O's `ext:`.
@@ -1853,13 +1853,13 @@ not drawn (a remote document cannot hold another view yet).
   copy has nothing to list. Its `MANAGER_*` would move to the host (the
   core already owns what they read) and its page would read them through
   the host service; the page is then the built-in.
-- **The lab's pages** (Inbox, Tasks, Schedule, Vault and their item,
+- **The sandbox's pages** (Inbox, Tasks, Schedule, Vault and their item,
   capture and help routes). Their state (`Lab`: the route, the lists,
-  undo and redo, the selection) is the lab's root's, and every lab
+  undo and redo, the selection) is the sandbox's root's, and every lab
   command reads it. Linked, a page could read it from context; a dev copy
   could not, so it needs that state to move into the extension (the lists
   as a document of its own, the route as the workspace's), which is the
-  lab's rewrite, not a move.
+  sandbox's rewrite, not a move.
 - **The Appearance section** stays the app's: its rows are the theme
   store's layers kept as settings (`appearance.*`, in no extension's
   namespace), contributed to `settings.sections` as `app` and drawn by
@@ -2025,7 +2025,7 @@ reaches the same toasts when it is an extension's page.
   the host its `WindowUi` unless the app gave a `HostUi` of its own
   (`WindowUi::lend`). The clipboard is the system's
   (`hostui::system_clipboard_read`: `wl-paste`, `xclip`, `pbpaste`); the
-  pickers are rfd's (feature `pickers`, on in the lab), the same the
+  pickers are rfd's (feature `pickers`, on in the sandbox), the same the
   shell's file inputs use — the portal on Linux, the system's panels on
   macOS and Windows. Without the feature, on a phone, or in a browser
   (`features/extensions/src/web.rs` `WebHost`), a pick is
@@ -2068,7 +2068,7 @@ and work that runs only while it is wanted. The model is
 times of day `utc_offset_min` east of UTC, which the app sets), or in a
 test `events::FakeClock`, moved by hand (`advance`, `set`).
 `Host::tick` runs what is due on it, and the app calls it from a thread
-(`Host::run_clock`, every second in the lab), so a timer, a schedule
+(`Host::run_clock`, every second in the sandbox), so a timer, a schedule
 and an idle timeout are tested by moving the clock, never by waiting.
 
 **Scheduled hooks.** A hook with no `on` runs on a schedule:
@@ -2101,7 +2101,7 @@ host asleep past several runs runs a hook once, then on from then.
 |---|---|---|
 | `doc.created`, `doc.saved`, `doc.deleted` | `{path}` | the layer that did it: `Host::raise_doc`, or `events::DocEvent::raise_on` the app's Action List (a `Changed` event the host hears through `Host::watch`; the document store raises them there without depending on extensions) |
 | `doc.renamed` | `{from, to}` | the same |
-| `app.focused`, `app.blurred` | `{window}` | `Host::focus`, or the list topic of the same name (the lab's window does: `apps/lab/ui/src/screen.rs` `use_window_chrome`) |
+| `app.focused`, `app.blurred` | `{window}` | `Host::focus`, or the list topic of the same name (the sandbox's window does: `apps/ui/src/screen.rs` `use_window_chrome`) |
 
 The detail is JSON, so a Luau hook reads `event.detail.path`; an
 action's invocation has it as text (`ctx.detail`). `EXT_EMIT {event,
@@ -2264,19 +2264,19 @@ whose documents are `crdt` documents uses
 `CrdtDocuments::TEXT`, its document there for the app's editor and sync
 (`CrdtDocuments::doc`), its undo (`undo`, `redo`, `steps`) and who
 changed it (`authors`). Task's vault implements `Documents` over its
-notes; the lab gives its spaces, `notes` and `archive`
-(`apps/lab/ui/src/extensions.rs` `documents`). With no documents given,
+notes; the sandbox gives its spaces, `notes` and `archive`
+(`apps/ui/src/extensions.rs` `documents`). With no documents given,
 the calls answer `unsupported`; `read_document` falls back to
 `AppContext::document`. In a browser they are not there yet.
 
-The lab's `lab.tidy` (`apps/lab/extensions/tidy`, beside its registry; the
+The sandbox's `lab.tidy` (`apps/sandbox/extensions/tidy`, beside its registry; the
 lab runs it as a development copy with `ARCHITECT_LAB_TIDY=1`) makes,
 tidies, renames, files away and watches notes: `LAB_TIDY_NEW`,
 `LAB_TIDY_TIDY` (one transaction), `LAB_TIDY_RENAME`, `LAB_TIDY_FILE`,
 `LAB_TIDY_WATCH`, `LAB_TIDY_LIST`.
 
 Tests: `features/extensions/tests/documents.rs` (`lab.tidy` in the
-lab's spaces: creates, tidies as one undo step, renames, files and
+sandbox's spaces: creates, tidies as one undo step, renames, files and
 hears each; the person's concurrent typing merges with its transaction;
 refused without `reads` / `writes`), `features/pages/tests/documents.rs`
 (a TSX and a Luau page on an app's own `Documents`),
@@ -2381,12 +2381,12 @@ headless host and for tests. With the FastTrackStudios editor
 - registers the slash rows with `palette::register_actions` and runs
   them from `on_action`.
 
-`apps/lab/ui/src/note_editor.rs` does all of it for a Vault note's Edit
+`apps/ui/src/note_editor.rs` does all of it for a Vault note's Edit
 mode. A Blitz document may have no HTML parser (a headless one has
 none), so the native renderer draws gutter markers and mounted widgets
 itself, never from HTML.
 
-**The lab.** `apps/lab/extensions/outline` (`lab.outline`, Luau, loaded
+**The sandbox.** `apps/sandbox/extensions/outline` (`lab.outline`, Luau, loaded
 with `ARCHITECT_LAB_OUTLINE=1`): Tab and Shift-Tab indent and outdent a
 list item and move between a table's cells (past the last, a new row),
 `LAB_OUTLINE_MARK` marks each TODO, numbers the list items in the gutter
@@ -2401,7 +2401,7 @@ typing, decorations that follow edits and go when it unloads, a widget
 naming its own embed, refusals without `reads` / `writes`, of a stale or
 out-of-bounds edit, of a key without `writes`),
 `features/pages/tests/editor.rs` (a TSX and a Luau page),
-`apps/lab/media/tests/note_editor.rs` (the lab's note editor: Tab and
+`apps/sandbox/media/tests/note_editor.rs` (the sandbox's note editor: Tab and
 Shift-Tab in a table and a list, Ctrl-Z of one indent, the marked-up
 note's golden, `note-editor-marked.html`),
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
@@ -2466,7 +2466,7 @@ manifest declares them; the person enters each once, when the extension
 first uses it (or asks, `ask_secret`): the host asks through the app's
 prompt (`hostui::HostUi::prompt`, a `PromptKind::Secret` prompt, typed
 hidden), and keeps it in `net::Secrets` — `<app dir>/extension-secrets.json`
-in the lab, written `0600`, never in the extension's folder, and refused
+in the sandbox, written `0600`, never in the extension's folder, and refused
 to its `read_file`. A request names it in a header's value; the host puts
 it in, only on a request to one of the secret's hosts, and leaves it off
 a redirect anywhere else. No call answers its value: `secret` says
@@ -2497,7 +2497,7 @@ its store (in memory for the run otherwise).
 own (two threads, `ext-net`), so a fetch works from whichever executor
 asks — a component's thread, a script's, a page's. The client is
 `architect-extensions`' feature `net` (reqwest), which the app turns on
-(`apps/lab/desktop/Cargo.toml`), not its UI crates: reqwest reaches
+(`apps/desktop/Cargo.toml`), not its UI crates: reqwest reaches
 tower-http, which `cargo xtask boundaries` keeps out of them. A build
 without it keeps secrets and answers a fetch `unsupported`. In a browser
 (`web::WebHost`) the browser's own `fetch` sends it, where CORS lets it;
@@ -2532,8 +2532,8 @@ extension does not open a device itself. It asks the host, and the host
 checks each port against the manifest's `capabilities.ports` as a person
 granted them; the consent screen lists them like `hosts`. The ports are the
 app's: it gives the host an `architect_input::PortBackend`
-(`Host::with_ports`). The lab gives OSC over UDP (`architect_input::UdpOsc`)
-and a virtual MIDI port (`apps/lab/ui/src/surfaces.rs` `lab_ports`). A
+(`Host::with_ports`). The sandbox gives OSC over UDP (`architect_input::UdpOsc`)
+and a virtual MIDI port (`apps/ui/src/surfaces.rs` `lab_ports`). A
 system MIDI backend (`midir`, CoreMIDI) is the app's to add behind the same
 trait. The model is `features/input/src/ports.rs` and the host side is
 `features/extensions/src/ports.rs`.
@@ -2604,8 +2604,8 @@ A control surface is a contribution, not code. The app offers **targets**
 `architect_input::Target` with a `TargetKind` (an id, a range and how many
 instances there are) and implements read, write, an optional label (a
 track's name, for a scribble strip), touch and observe. Studio offers track
-volumes, FX parameters and the transport (studio#381); the lab offers its
-metronome's tempo and the theme's accent hue (`apps/lab/ui/src/surfaces.rs`
+volumes, FX parameters and the transport (studio#381); the sandbox offers its
+metronome's tempo and the theme's accent hue (`apps/ui/src/surfaces.rs`
 `lab_targets`). Offering targets declares the point `control.surfaces`. An
 extension contributes a surface to it as an `architect_input::SurfaceDesc`:
 
@@ -2655,7 +2655,7 @@ description, a port it may not open, or one that would not open). That
 reason is also a line in its log. When the item goes, its surface stops
 and its port closes.
 
-**The lab**: `lab.surface` (`apps/lab/extensions/surface`, loaded with
+**The sandbox**: `lab.surface` (`apps/sandbox/extensions/surface`, loaded with
 `ARCHITECT_LAB_SURFACE=1`) is an OSC surface. A device at `127.0.0.1:9000`
 that sends `/lab/tempo` and `/lab/hue` (0–1) to port 9001 moves the
 tempo and the accent's hue, and is sent both back. It is also an OSC

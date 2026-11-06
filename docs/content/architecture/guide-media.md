@@ -16,7 +16,7 @@ steps over an app. The same steps are
   text in a popover, moving on when `done` holds.
 
 A story (`architect-story`) carries scenarios too, toured in the story
-shell and filmed and tested as the lab's are.
+shell and filmed and tested as the sandbox's are.
 
 The design generalises Studio's proposal (`studio:docs/design/guide-media.md`,
 studio#330) to any architect app: no DAW and no `.session`. The "app" is
@@ -129,8 +129,8 @@ What a check reads, an app puts on its list: `WORKSPACE_LAYOUT`
 (`features/workspace/src/host/actions.rs` `use_workspace_actions`: every
 window's groups, tabs, splits and docks, and a `workspace` change event
 on each change), `COMMANDS_STATE` (the overlay on show and the palette's
-field), and the app's own (the lab's `LAB_STATE`,
-`apps/lab/ui/src/guide.rs`).
+field), and the app's own (the sandbox's `LAB_STATE`,
+`apps/ui/src/guide.rs`).
 
 ## The film
 
@@ -145,8 +145,8 @@ run as programs; the dev shell has them (`devenv.nix`). A still is a
 scenario of one step.
 
 An app's media binary is three lines over `features/guide/src/cli.rs`
-`main`. The lab's is `apps/lab/media` (`lab-media`), its scenarios in
-`apps/lab/scenarios`:
+`main`. The sandbox's is `apps/sandbox/media` (`sandbox-media`), its scenarios in
+`apps/sandbox/scenarios`:
 
 ```sh
 just media                     # every scenario, into target/media
@@ -165,7 +165,7 @@ tab-reorder: step "drag": check WORKSPACE_LAYOUT wants {"windows":[…]} (in 5s)
   it gave: {"active":"note-welcome","windows":[…]}
 ```
 
-`apps/lab/media/tests/scenarios.rs` runs the lab's under `cargo test`.
+`apps/sandbox/media/tests/scenarios.rs` runs the sandbox's under `cargo test`.
 
 ## The tour
 
@@ -179,7 +179,7 @@ inserted over panes as they mount collapses them; see
 
 - **Starting one** is an action: `GUIDE_TOUR_START {id}` on the app's
   Action List, so a model over MCP, a scenario and a palette that lists
-  the list can; `GUIDE_TOUR_LIST` lists them. The lab also gives each a
+  the list can; `GUIDE_TOUR_LIST` lists them. The sandbox also gives each a
   ⌘K row (Help › Tour: …) that calls `Tours::start`.
 - **The overlay** dims the window around a cutout over the step's target
   (four dim pieces, so the target shows through untouched) and rings it;
@@ -214,25 +214,25 @@ inserted over panes as they mount collapses them; see
   each chapter's setup for the whole app it needs, not for where the
   chapter before left it.
 - **Remembering the place**: `TourSet::on_move` hears every move
-  (`Moved::At`, `Left`, `Finished`); the lab keeps the Architect tour's
+  (`Moved::At`, `Left`, `Finished`); the sandbox keeps the Architect tour's
   place in its folder and resumes it from ⌘K › Take the tour
-  (`apps/lab/ui/src/guide.rs` `tours`,
+  (`apps/ui/src/guide.rs` `tours`,
   [The Architect tour](@/getting-started/tour.md)).
 - **Safety**: a scenario not marked `safe` never plays over the person's
   own data. `TourSet::playground` sets up the app's playground first (a
   sample document, a scratch session); an app with none cannot start
-  it. The lab's data is all made up, so it is its own playground.
+  it. The sandbox's data is all made up, so it is its own playground.
 
-A film can carry a caption and a terminal of its own, drawn over the lab
-by the media crate and never by the lab: `FILM_CAPTION {text}`,
+A film can carry a caption and a terminal of its own, drawn over the sandbox
+by the media crate and never by the sandbox: `FILM_CAPTION {text}`,
 `FILM_TERMINAL {line, clear?, title?}`, and `FILM_WRITE {path, text}`, a
 file saved in the run's own lab folder as an editor would
-(`apps/lab/media/src/lib.rs`; each run gets a fresh, empty folder, read
+(`apps/sandbox/media/src/lib.rs`; each run gets a fresh, empty folder, read
 and watched as a window's lab reads it: `LabFiles`). The README's gallery
 is filmed that way: a theme file or a page saved live, the CLI commands an
 agent ran.
 
-`apps/lab/scenarios/tour-palette-run.styx` films the tour itself: it
+`apps/sandbox/scenarios/tour-palette-run.styx` films the tour itself: it
 starts the `palette-run` tour from the Action List and follows it, each
 step done as a person would, checking the tour moved on after each.
 
@@ -265,14 +265,14 @@ scenario and commits the outputs to that branch in a temporary worktree,
 never touching the checkout it is run from; `just media-publish 1` pushes
 it too.
 
-## The lab's scenarios
+## The sandbox's scenarios
 
 | Scenario | Shows |
 |---|---|
-| `apps/lab/scenarios/palette-run.styx` | ⌘K opened, a command found by typing, picked |
-| `apps/lab/scenarios/tab-reorder.styx` | a tab dragged along its bar |
-| `apps/lab/scenarios/stacked-tabs.styx` | a group stacked, its strip scrolled |
-| `apps/lab/scenarios/showcase-layout.styx` | the README's showcase: notes opened, a split by dragging a tab to a group's side, a vertical one, two dividers pulled, a group stacked and filled, the sidebar dragged out by its grip into a window of its own |
+| `apps/sandbox/scenarios/palette-run.styx` | ⌘K opened, a command found by typing, picked |
+| `apps/sandbox/scenarios/tab-reorder.styx` | a tab dragged along its bar |
+| `apps/sandbox/scenarios/stacked-tabs.styx` | a group stacked, its strip scrolled |
+| `apps/sandbox/scenarios/showcase-layout.styx` | the README's showcase: notes opened, a split by dragging a tab to a group's side, a vertical one, two dividers pulled, a group stacked and filled, the sidebar dragged out by its grip into a window of its own |
 
 The rest are the guide's pictures, one per thing a page shows, each named
 for the picture it makes (`workspace-split-groups`, `menu-bar-in-window`,
@@ -285,7 +285,7 @@ extension's view, and headless its program is not running.
 Built: the model and its loader (wasm-clean), the runner with multiple
 windows, the film and its encoders, the CLI and recipes, the test mode,
 the workspace's and the commands' resolvers and actions, the text target,
-the lab's scenarios, the in-app tour and its live target path, a story's
+the sandbox's scenarios, the in-app tour and its live target path, a story's
 scenarios (toured in the story shell, filmed and tested by the runner).
 
 Next:

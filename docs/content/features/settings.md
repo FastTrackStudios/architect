@@ -107,7 +107,7 @@ that uses it re-renders.
 
 ## Status
 
-Done in architect; the lab uses it (`apps/lab/ui/src/settings.rs`). Not yet:
+Done in architect; the sandbox uses it (`apps/ui/src/settings.rs`). Not yet:
 `Option<T>` and key-chord fields (the derive takes booleans, numbers,
 strings, unit enums and one level of nested struct; other fields keep their
 default); which org's settings apply in All; an admin page.

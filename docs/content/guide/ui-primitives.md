@@ -7,7 +7,7 @@ weight = 85
 The [previous chapter](@/guide/ui.md) put an app in architect's frame. This
 one is the parts catalogue: every primitive architect ships for drawing an
 app, what it is for, and a minimal `rsx!` for each, taken from real code
-(the lab, `apps/lab`, the components' own stories, and the crates' docs).
+(the sandbox, `apps/sandbox`, the components' own stories, and the crates' docs).
 Reach for these before writing your own; each already renders in Blitz.
 
 There are two families, styled two ways:
@@ -165,7 +165,7 @@ Page {
 When a page has more to say, a `Toolbar` groups its buttons: `separate`
 for a tool on its own, `joined` for tools in one pill; `Tool::menu` opens a
 `Menu`, `Tool::more` is the ⋯. On a desk, `crumbs` is the breadcrumb before
-the title. From the lab's item page (`apps/lab/ui/src/pages.rs` `ItemPage`):
+the title. From the sandbox's item page (`apps/ui/src/pages.rs` `ItemPage`):
 
 ```rust
 Page {
@@ -219,7 +219,7 @@ organization switcher is a `Workspaces` passed to `AppShell` (the
 
 <!-- media: shell-phone-drawers — on a phone, a swipe right opens the left drawer, a swipe left the right one -->
 <!-- media: shell-styles — one app in FloatingPill, TabBar and RailOnly -->
-<!-- media: shell-form-factors — the lab resized from a desk window to a tablet and a phone -->
+<!-- media: shell-form-factors — the sandbox resized from a desk window to a tablet and a phone -->
 ![the organization switcher opened at the sidebar's head](https://raw.githubusercontent.com/FastTrackStudios/architect/media/shell-workspace-switcher.png)
 
 ## The workspace's primitives: every kind of tab
@@ -264,7 +264,7 @@ if let Some(g) = w.active_group() {
 }
 ```
 
-That is the lab's "Mix" screenset (`apps/lab/ui/src/vault.rs` `mix_workspace`).
+That is the sandbox's "Mix" screenset (`apps/ui/src/vault.rs` `mix_workspace`).
 
 ![a stacked group scrolled sideways, panes sliding over each other and leaving their spines](https://raw.githubusercontent.com/FastTrackStudios/architect/media/stacked-tabs.gif)
 
@@ -428,7 +428,7 @@ What is honest to say about it today (`features/story/README.md`):
 about 40 stories, all `architect-ui`'s own; no app mounts `Lookbook`; the
 snapshot and parity harnesses work but nothing runs them as a gate. The
 frame's primitives (shell, workspace, commands, settings) have no stories
-yet: browse those in the lab, and check them at phone, tablet and desk size
+yet: browse those in the sandbox, and check them at phone, tablet and desk size
 in `features/ui/ui-snapshot` (`features/ui/ui-snapshot/src/scenes.rs`, with
 pixel probes in `features/ui/ui-snapshot/tests/pixel_probes.rs`).
 

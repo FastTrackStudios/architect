@@ -1,7 +1,7 @@
 //! A page's own DOM (`architect/dom`, `js/dom.js`) on `QuickJS`: a
 //! framework renders to it in the page's runtime, and what it did reaches
 //! the pane as edits — Preact itself (the lab Board's vendored copy,
-//! `apps/lab/board/pages/vendor/`), and the DOM by hand.
+//! `apps/sandbox/board/pages/vendor/`), and the DOM by hand.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -15,8 +15,8 @@ use architect_pages::files::{Origin, PageFile};
 use architect_pages::host::AppHost;
 use architect_pages::runner::{PageSession, Pages};
 
-const PREACT: &str = include_str!("../../../apps/lab/board/pages/vendor/preact.js");
-const HOOKS: &str = include_str!("../../../apps/lab/board/pages/vendor/hooks.js");
+const PREACT: &str = include_str!("../../../apps/sandbox/board/pages/vendor/preact.js");
+const HOOKS: &str = include_str!("../../../apps/sandbox/board/pages/vendor/hooks.js");
 
 struct Pane {
     session: PageSession,

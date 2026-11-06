@@ -20,4 +20,4 @@ not depend on them; a tool or server that leaves them out stays permissive.
   and its settings section, linked into an app or run as a process (`EXT_CLONE`).
 
 How to use it: `skills/architect/references/navigator.md` and `docs/content/features/navigator.md`. The lab's Vault tab shows it over the
-lab's notes (`apps/lab/ui/src/vault.rs`).
+lab's notes (`apps/ui/src/vault.rs`).

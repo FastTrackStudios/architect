@@ -1,0 +1,44 @@
+[package]
+name = "architect-sandbox-board"
+description = "The sandbox's example extension: one linked::Extension that the sandbox links in and that also runs as its own process (apps/sandbox/board/extension.toml) — a tab, a status item in the shell's status bar, a context-menu entry, a .kf opener, a URL opener, and a startup hook."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-sandbox-board"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); the lab adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+# Its views look again when the board changes (in the app's document or
+# its own process's).
+futures-timer = { workspace = true }
+
+[dev-dependencies]
+# Both ways: linked into a host, and its program run by one.
+architect = { workspace = true, features = ["action-list"] }
+# `wasi`: the benchmark's WASI row (tests/bench.rs), the lab's counter.
+architect-extensions = { workspace = true, features = ["host", "linked", "process", "ui", "remote", "wasi"] }
+architect-settings = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+# Its tab as a page file (tests/page.rs): drawn by architect-pages.
+architect-pages = { workspace = true, features = ["js", "ui"] }
+blitz-dom = { workspace = true }
+# tests/kf_fence.rs: a note's ```kf fence on Blitz, drawn by its embed.
+blitz-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

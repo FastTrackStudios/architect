@@ -1,0 +1,32 @@
+[package]
+name = "architect-mobile"
+description = "The Architect app on an iPhone or iPad (Blitz on UIKit); ARCHITECT_SANDBOX=1 runs the dev sandbox. `dx serve --ios` it for hot reload on the simulator."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# WASI component extensions: Wasmtime in the app, on Pulley (iOS has no
+# JIT), the lab's WASI Counter when its component is found.
+wasi = ["architect-app/wasi"]
+
+[dependencies]
+architect-app = { workspace = true }
+# Its Action List on its control socket (src/main.rs `serve_control`).
+architect = { workspace = true, features = ["action-list"] }
+architect-control = { workspace = true, features = ["server"] }
+architect-shell = { workspace = true, features = ["ui"] }
+dioxus = { workspace = true }
+dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true }
+objc2-ui-kit = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

@@ -1,0 +1,220 @@
+// The Architect tour: every system of the framework, one chapter each,
+// over the live app. ⌘K "Take the tour" starts it where the person left it
+// (apps/ui/src/guide.rs `tours`); the sandbox offers it on its first start,
+// the Architect app once its first run has opened a vault. Its chapters
+// were written over the sandbox's made-up data: in the Architect app a
+// chapter whose part is not there (the Inbox, the Board) shows its text
+// without a ring. A chapter is its setup (hidden steps the tour runs, and runs
+// again on Back or a resume, so each sets up all the app it needs) and one
+// step to read and try, ringed on the control it is about. Played as a test
+// by apps/sandbox/media/tests/scenarios.rs (each chapter's setup runs and its
+// target must be on screen) and as a live tour by apps/sandbox/media/tests/tour.rs.
+id architect-tour
+title "Architect tour"
+view {width 1440, height 860}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    // Welcome.
+    {id welcome-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id welcome-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id welcome-3, hide true, do @run{id LAB_GO, args {tab inbox}}, done {check ({id LAB_STATE, has {tab inbox}})}}
+    {
+        id welcome
+        text "This is Architect, built from architect's parts. Each chapter moves the app to one system and rings the control to try. Next and Back move between chapters, Skip leaves, and ⌘K › Take the tour picks up where you stopped."
+    }
+    // The shell.
+    {id shell-tabs-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id shell-tabs-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id shell-tabs-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id shell-tabs-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id shell-tabs
+        text "The shell is the app's frame. On a desk, a page's own tabs sit in the window's title row: the Vault's notes are tabs up there, not in a second bar. Try: click another tab, or drag one along the row."
+        target @tabs"note-welcome"
+    }
+    {id shell-rail-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id shell-rail-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id shell-rail-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id shell-rail-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id shell-rail
+        text "Each page picks how its sidebar starts: the Inbox opens it, the Vault starts folded to a rail. Under 1000 points wide the sidebar folds to a rail on its own, and the account and workspace switcher move to its foot. Try: toggle the sidebar."
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+    }
+    {id shell-devices-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id shell-devices-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id shell-devices-3, hide true, do @run{id LAB_GO, args {tab inbox}}, done {check ({id LAB_STATE, has {tab inbox}})}}
+    {
+        id shell-devices
+        text "Phone, tablet and desk are one app at three sizes: a phone gets a tab bar, a bottom action bar and sheets, a tablet the desk's layout with touch. Try: the Lab menu (the flask) › Device › iPad, then iPhone, then This window."
+        target @css"[aria-label=\"Lab\"]"
+    }
+    // The workspace.
+    {id workspace-splits-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id workspace-splits-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id workspace-splits-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id workspace-splits-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id workspace-splits
+        text "The Vault is a workspace: tab groups in splits, docks on three sides, floating panes and windows of their own. Drag a tab to a group's edge to split it, to its middle to join it; ⋯ › Stack tabs folds a group into stacked tabs. Try: drag a tab to the right edge of this group."
+        target @group"note-welcome"
+    }
+    {id workspace-windows-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id workspace-windows-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id workspace-windows-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id workspace-windows-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id workspace-windows
+        text "Panes can live outside the grid too. Drag a tab out of the window and it becomes a pop-out window; the tab's menu floats it over the window or sends it to a dock. The left dock holds the files and search, the right one the outline and backlinks. Try: right-click a tab."
+        target @tab"note-welcome"
+    }
+    {id workspace-screensets-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id workspace-screensets-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id workspace-screensets-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id workspace-screensets-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id workspace-screensets
+        text "A screenset is a saved arrangement: ⌘1, ⌘2 and ⌘3 recall Write, Mix and Embedded views, and the window's whole look is a layout file (layouts/<name>.json in the lab's folder) applied live when saved. Try: press ⌘2, then ⌘1."
+        target @tabs"note-welcome"
+    }
+    // Runtime theming.
+    {id theme-switch-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id theme-switch-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id theme-switch-3, hide true, do @run{id APP_SETTINGS}}
+    {
+        id theme-switch
+        text "One theme store styles everything: the shell, every pane, pop-out windows, painted views and the editor. THEME_SET switches it live from anywhere, and a light and a dark theme can be paired so Appearance flips between them. Try: open Appearance (ringed) and switch light and dark, or ⌘K › Choose a theme…"
+        target @text"Appearance"
+    }
+    {id theme-files-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id theme-files-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id theme-files-3, hide true, do @run{id APP_SETTINGS}}
+    {
+        id theme-files
+        text "Themes are JSON files in the lab's themes folder, read again on save. A token can name another ($border) or mix two (mix($border, $foreground, 0.2)); a broken one draws magenta and shows in THEME_PROBLEMS. Choices stack in layers, app < org < person < device < workspace, so a layout can carry its own look. Try: edit themes/lab-amber-dark.json and save."
+        target @text"Appearance"
+    }
+    // The Action List and agents.
+    {id actions-list-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id actions-list-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id actions-list-3, hide true, do @run{id LAB_GO, args {tab inbox}}, done {check ({id LAB_STATE, has {tab inbox}})}}
+    {id actions-list-4, hide true, do @run{id LAB_SHOW_COMMANDS}, done {check ({id COMMANDS_STATE, has {overlay palette}})}}
+    {
+        id actions-list
+        text "Every capability is an action on one Action List, by id with a JSON schema. ⌘K, the menus, the keys, the CLI (architect-desktop actions run …), MCP and the control socket all run the same list. Try: type “sched” and press ↵."
+        target @palette-row"LAB_GO_SCHEDULE"
+    }
+    {id agents-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id agents-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id agents-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id agents-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {id agents-5, hide true, do @run{id WORKSPACE_OPEN, args {view actions, id actions, at {split {pane note-welcome, side right}}}}}
+    {
+        id agents
+        text "Agents use the same list. APP_STATUS says what is on screen and what is broken in one call; APP_SHOT draws the window to a PNG. An agent changes the window by writing layouts/<name>.json or keys.json: a bad save changes nothing and leaves a .error file beside it, and a built-in layout is cloned before it is edited. Try: filter this list for “status”."
+        target @css"[aria-label=\"Filter actions\"]"
+    }
+    // Extensions.
+    {id manager-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id manager-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id manager-3, hide true, do @run{id MANAGER_SHOW, args {kind extension, id lab.board}}}
+    {
+        id manager
+        text "The extensions manager is one place for everything that customises the app: extensions, Luau scripts, workers, themes, layouts and keys, pages. Each operation is an action (MANAGER_RUN), so an agent can do what you do. Try: disable the Board here, watch its tab and status go, then enable it."
+        target @css".manager-list"
+    }
+    {id runners-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id runners-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id runners-3, hide true, do @run{id MANAGER_SHOW, args {kind extension, id lab.board}}}
+    {
+        id runners
+        text "Extensions run several ways behind one manifest: linked Rust (the Board), Luau (the metronome), a process over vox (the Clicker), TSX and A2UI pages, and WASI components (Wasmtime on a desk, Pulley on iOS, jco on the web). The Clicker and the WASI counter need their programs built beside the lab (WASI with --features wasi); without them their panes say so."
+        target @css".manager-item"
+    }
+    {id clone-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id clone-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id clone-3, hide true, do @run{id MANAGER_SHOW, args {kind extension, id lab.board}}}
+    {
+        id clone
+        text "EXT_CLONE copies a built-in into the lab's dev folder. With its id kept it overrides the built-in, rebuilt and swapped in on every save; a failed build keeps the last good one and says why. “Use the built-in” ends it. Distributed extensions are signed .archext archives, checked before install; the lab ships none."
+        target @css".manager-item"
+    }
+    {id contributions-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id contributions-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id contributions-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id contributions-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id contributions
+        text "An extension adds to the interface from its manifest: tabs, openers, status items, menus, context menus, phone bar buttons, hooks, shell slots and settings sections. The pin count in the status bar is the Board's status item, and the Board tab in the sidebar is the Board's too. Try: right-click inside a note › Pin to the board, and watch the count."
+        target @text"Board ready: nothing pinned"
+    }
+    {id embeds-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id embeds-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id embeds-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id embeds-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {id embeds-5, hide true, do @run{id WORKSPACE_OPEN, args {view note, id note-chart, title "A chart in a note", at {beside {pane note-welcome}}}}}
+    {id embeds-6, hide true, do @run{id WORKSPACE_FOCUS, args {pane note-chart}}, done {check ({id WORKSPACE_LAYOUT, has {active note-chart}}), timeout 3}}
+    {
+        id embeds
+        text "Inline embeds: an extension claims a fenced block by its language or a note by its type, and draws it inside the note. This ```kf fence is a chart drawn by the Board's page; the ```rust fence below stays plain. Disable the Board and the plain fence comes back."
+        target @css"[data-embed]"
+    }
+    {id workers-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id workers-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id workers-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id workers-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {id workers-5, hide true, do @run{id WORKSPACE_OPEN, args {view clicker.heavy, id clicker.heavy, at {split {pane note-welcome, side right}}}}}
+    {id workers-6, hide true, do @run{id WORKSPACE_OPEN, args {view clicker.naughty, id clicker.naughty, at {split {pane clicker.heavy, side bottom}}}}}
+    {
+        id workers
+        text "An extension's view never blocks the app. Heavy job counts primes in a worker while its spinner keeps turning; Naughty view spends 300 ms a frame, so the host keeps its last good frame and marks it busy while every other pane answers. Each view is timed against its frame budget (EXT_VIEWS). Try: click around the app while both run."
+        target @pane"clicker.naughty"
+    }
+    {id settings-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id settings-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id settings-3, hide true, do @run{id APP_SETTINGS}}
+    {
+        id settings
+        text "Settings is itself a built-in extension: it owns APP_SETTINGS and opens as an extension window. Sections arrive through a contribution point, settings.sections, from the lab and from extensions. Try: turn on Metronome and watch its section arrive. (Services one extension provides another are in the framework; the lab declares none.)"
+        target @css"[id=\"setting-workspace.metronome\"] [role=\"switch\"]"
+    }
+    // Pages.
+    {id pages-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id pages-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id pages-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id pages-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {id pages-5, hide true, do @run{id EXT_VIEW_OPEN, args {extension lab.board, view board}}, done {check ({id WORKSPACE_LAYOUT, has {active "lab.board/board"}}), timeout 3}}
+    {
+        id pages
+        text "Pages are views written as files: TSX run in QuickJS, Luau with workers and timers, or A2UI JSON. PAGES_CLONE copies one to pages/lab.board/ in the lab's folder and a save shows at once. A broken save keeps the last good page and writes a .error file with the line, mapped back to the .tsx source. Try: Count primes."
+        target @pane"lab.board/board"
+    }
+    // The editor, Keyflow, Frame, paint, documents.
+    {id embedded-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id embedded-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id embedded-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id embedded-4, hide true, do @run{id WORKSPACES_LOAD, args {name "Embedded views"}}}
+    {
+        id embedded
+        text "Panes can hold other UI kits: a Dioxus component, a Luau ImGui window, a Frame surface from a Frame document and an agent's A2UI surface, all in the theme. Keyflow's editor and chart fill their panes the same way in a build with --features keyflow-lab. Try: turn the Frame knob."
+        target @pane"embed-frame"
+    }
+    {id paint-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id paint-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id paint-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id paint-4, hide true, do @run{id WORKSPACES_LOAD, args {name "Embedded views"}}}
+    {
+        id paint
+        text "The paint view is drawn straight onto the window's GPU scene, no DOM: here a 100 × 100 grid of rectangles, with hover, picking and typing (LAB_PAINT_STATE has its frame times). Try: move the pointer over it."
+        target @pane"embed-paint"
+    }
+    {id documents-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
+    {id documents-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
+    {id documents-3, hide true, do @run{id LAB_GO, args {tab vault}}, done {check ({id LAB_STATE, has {tab vault}})}}
+    {id documents-4, hide true, do @run{id WORKSPACES_LOAD, args {name "Embedded views"}}}
+    {
+        id documents
+        text "Behind it all, documents are CRDTs (Loro): the agent's A2UI surfaces live on one, and your own theme choice is kept in one (person.loro in the lab's folder). Two people or an agent editing one merge without conflicts. That's the tour. ⌘K › Take the tour starts it again."
+        target @pane"embed-a2ui"
+    }
+)

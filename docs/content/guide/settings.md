@@ -19,8 +19,8 @@ the declaration. In this chapter you will:
 Everything here is `architect-settings` (`features/settings`). The default
 build is the model (wasm-clean); feature `store` keeps device and project
 values on disk, `synced` keeps the person's in a CRDT document, `ui` draws
-the page and gives the hooks. The lab registers four sections
-(`apps/lab/ui/src/settings.rs`); the derive's full behaviour is pinned by
+the page and gives the hooks. The sandbox registers four sections
+(`apps/ui/src/settings.rs`); the derive's full behaviour is pinned by
 `features/settings/tests/derive.rs`.
 
 Device-only key/value storage without a page is architect's own
@@ -55,7 +55,7 @@ pub struct Editor {
 }
 ```
 
-That is the lab's `Editor` (with a hand-written `Default`). The rules:
+That is the sandbox's `Editor` (with a hand-written `Default`). The rules:
 
 - **Words.** A field's doc comment: the first line is its title, the rest
   its description. A field with no doc comment is its name in words
@@ -78,7 +78,7 @@ That is the lab's `Editor` (with a hand-written `Default`). The rules:
 
 A section can also be written as data, which is what an extension does at
 run time: `Section::new("workspace", "Workspace").block(Some("Layout"), vec![Setting::new(key, title, Control::Switch, Value::Bool(true)).describe(…)])`
-(the lab's `appearance`, `workspace` and `keyboard` sections).
+(the sandbox's `appearance`, `workspace` and `keyboard` sections).
 
 ## 2. Read and change it
 
@@ -116,7 +116,7 @@ let audio = Audio::read(&registry, &values);
 `ScopedValues` holds all three plus the org's settings. You put it in
 context with `use_settings_provider`, and every change comes back to you as
 a `SettingsChange` (the scope, its values, the keys that changed) for that
-scope's store. The lab keeps only device values:
+scope's store. The sandbox keeps only device values:
 
 ```rust
 let store = use_hook(|| architect_settings::DeviceValues::open("architect-lab").ok().map(Rc::new));
@@ -206,7 +206,7 @@ It registers two things itself:
   row and pulses it (`SettingsHandle::show_setting`).
 
 Open it from code with `settings.show(None)` or `settings.show(Some("editor"))`
-(the lab's account menu does).
+(the sandbox's account menu does).
 
 ![the settings modal on a desk: sections on the left, a changed row's dot, its reset arrow, Restore defaults](https://raw.githubusercontent.com/FastTrackStudios/architect/media/settings-page-desk.gif)
 !["# dark" typed in the palette, the Appearance section opened, the Theme row pulsing](https://raw.githubusercontent.com/FastTrackStudios/architect/media/settings-search-to-row.gif)

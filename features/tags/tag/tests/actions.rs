@@ -20,10 +20,10 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// The lab's sample vault (`apps/lab/vault`), copied to a temporary folder.
+/// The lab's sample vault (`apps/sandbox/vault`), copied to a temporary folder.
 fn sample() -> (tempfile::TempDir, OpenVault) {
     let tmp = tempfile::tempdir().unwrap();
-    let from = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/lab/vault");
+    let from = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/sandbox/vault");
     copy_dir(&from, tmp.path());
     let open = OpenVault::open(tmp.path()).unwrap();
     (tmp, open)

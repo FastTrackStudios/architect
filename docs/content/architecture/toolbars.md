@@ -47,8 +47,8 @@ right-click.
 
 The **widget picker** lists every loaded extension's views by extension,
 the category; picking one draws it live at a widget's size
-(`ExtensionView`) before **Insert** puts it in. The lab's Board has a
-small one for this, its tempo (`apps/lab/board/src/lib.rs`
+(`ExtensionView`) before **Insert** puts it in. The sandbox's Board has a
+small one for this, its tempo (`apps/sandbox/board/src/lib.rs`
 `TempoWidget`, view `lab.board/tempo`).
 
 ## Settings
@@ -130,14 +130,14 @@ A position (`at`, `from`, `to`) may be a number as well as `"2.1"`.
 
 ## Tests
 
-- `apps/lab/media/tests/toolbar_editor.rs`: a toolbar built from empty
+- `apps/sandbox/media/tests/toolbar_editor.rs`: a toolbar built from empty
   through the UI (an action found by search, a second, a dropdown with a
   row, the tempo widget previewed; grouped from the context menu, a
   button dragged into the group, a drag cancelled with Escape, the group
   dragged past the widget; restyled: label, image icon, fill, rounding,
   preset), the same after a restart, its dropdown kept in the window, and
   edit mode, each against a golden.
-- `apps/lab/media/tests/typing_toolbar.rs`: the Typing Toolbar on a
+- `apps/sandbox/media/tests/typing_toolbar.rs`: the Typing Toolbar on a
   phone's screen, each against a golden: the capture field's own items
   (unchanged from the bar before), the Board's chart's chord line (its sharps
   toggle on, the field keeping the focus through each press, the bar

@@ -30,8 +30,8 @@ let
     # needs it at run time.
     fontconfig
     # What a Blitz window (winit, wgpu) dlopens at run time: without them the
-    # lab panics "Error creating DeviceHandle" (no GPU adapter) under
-    # `devenv up` / `just lab`. Studio's shell carries the same.
+    # app panics "Error creating DeviceHandle" (no GPU adapter) under
+    # `devenv up` / `just app`. Studio's shell carries the same.
     wayland
     libxkbcommon
     vulkan-loader
@@ -61,33 +61,33 @@ in
   # libstdc++ at run time on NixOS.
   env.LD_LIBRARY_PATH = lib.makeLibraryPath (common ++ linux ++ [ pkgs.stdenv.cc.cc.lib ]);
 
-  # `devenv up`: the desktop lab (apps/lab/desktop) under the fleet's dx,
+  # `devenv up`: the Architect app (apps/desktop) under the fleet's dx,
   # plus the telemetry module's Teley (:8787) and collector (:4318), which
-  # the lab's spans go to. `just lab` runs the lab
-  # alone, without dx.
-  # The lab's build as a task the lab process waits on, so `devenv up`'s TUI
-  # shows the lab waiting (as auth-dev waits on mock-oauth) while it
+  # the app's spans go to. `just app` runs the app alone, without dx, as a
+  # person runs it (its first run asks for a vault).
+  # The app's build as a task the app process waits on, so `devenv up`'s TUI
+  # shows the app waiting (as auth-dev waits on mock-oauth) while it
   # compiles, with the build's own log. The same flags as `dx serve` below,
   # so its build after this is a quick up-to-date check. A failed build
-  # fails the task and the lab does not start.
-  tasks."lab:build" = {
-    exec = "cd apps/lab/desktop && dx build --platform desktop --renderer native";
-    before = [ "devenv:processes:lab" ];
+  # fails the task and the app does not start.
+  tasks."app:build" = {
+    exec = "cd apps/desktop && dx build --platform desktop --renderer native";
+    before = [ "devenv:processes:app" ];
   };
   # Without Rust hot-patching: it builds a different ("fat") binary from
   # `dx build`, so the task's build was thrown away (86s twice), and dx's
   # own help calls it experimental and segfault-prone. rsx hot reload stays.
-  # The lab opens a scratch copy of the demo vault (apps/lab/demo-vault),
+  # The app opens a scratch copy of the demo vault (apps/ui/demo-vault),
   # seeded under devenv's state when it is missing, so a run never edits the
-  # repo's copy; `just lab-vault-reset` seeds it again.
-  processes.lab = {
-    exec = "cd apps/lab/desktop && exec dx serve --platform desktop --renderer native --hot-patch false";
+  # repo's copy or a vault of the person's; `just vault-reset` seeds it again.
+  processes.app = {
+    exec = "cd apps/desktop && exec dx serve --platform desktop --renderer native --hot-patch false";
     env = config.fleet.telemetry.processEnv // {
-      ARCHITECT_LAB_VAULT = "${config.devenv.state}/lab-vault";
-      ARCHITECT_LAB_SEED = "${config.devenv.root}/apps/lab/demo-vault";
+      ARCHITECT_VAULT = "${config.devenv.state}/demo-vault";
+      ARCHITECT_VAULT_SEED = "${config.devenv.root}/apps/ui/demo-vault";
     };
-    # Ready only while the built lab itself runs, not while dx is still
-    # compiling it: the TUI shows the lab waiting during the build, running
+    # Ready only while the built app itself runs, not while dx is still
+    # compiling it: the TUI shows the app waiting during the build, running
     # once its window is up, and unhealthy if the app dies under dx. dx
     # launches it from target/dx/architect-desktop/… (the [p] keeps pgrep
     # from matching this probe's own command line).
@@ -96,6 +96,16 @@ in
       period = 2;
       failure_threshold = 2;
     };
+  };
+  # The dev sandbox (apps/sandbox, made-up data and the example
+  # extensions) the same way, off by default: `devenv up sandbox`.
+  processes.sandbox = {
+    exec = "cd apps/sandbox && exec dx serve --platform desktop --renderer native --hot-patch false";
+    env = config.fleet.telemetry.processEnv // {
+      ARCHITECT_VAULT = "${config.devenv.state}/demo-vault";
+      ARCHITECT_VAULT_SEED = "${config.devenv.root}/apps/ui/demo-vault";
+    };
+    start.enable = false;
   };
 
   # The justfile's auth demo as processes, off by default:
@@ -113,12 +123,12 @@ in
   };
 
   # `devenv --profile wasi shell`: the fleet toolchain plus `wasm32-wasip2`,
-  # what a WASI extension (`features/extensions/wasi-guest`, the lab's
-  # `apps/lab/wasi-counter`) builds for. A profile, not the default shell:
+  # what a WASI extension (`features/extensions/wasi-guest`, the sandbox's
+  # `apps/sandbox/wasi-counter`) builds for. A profile, not the default shell:
   # an extra target changes the rustc store path, so kache shares nothing
   # with the other repos' builds in it (devenv-fleet `fleet.rust.extraTargets`).
   # Node too: jco transpiles a component for the browser
-  # (features/extensions/web, `just lab-web`) and its tests run under node.
+  # (features/extensions/web, `just web`) and its tests run under node.
   # The current release, not 24: the transpiled components suspend through
   # JSPI (`WebAssembly.Suspending`), which nixpkgs' node 24 lacks
   # (features/extensions/tests/wasi_web.rs runs node from here).
