@@ -34,6 +34,8 @@ use vault_obsidian::{LinkIndex, SelfWriteGuard, Vault, VaultPage, mutate};
 
 mod edit;
 pub use edit::{Changes, Renamed, Watch, folders_in};
+/// A change to a note's tags ([`OpenVault::edit_tags`], [`OpenVault::edit_tags_everywhere`]).
+pub use vault_obsidian::tag_edit::TagEdit;
 
 /// The action ids, to name them from code.
 pub mod ids {

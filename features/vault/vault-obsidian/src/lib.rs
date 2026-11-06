@@ -90,10 +90,12 @@ pub use base_query::{
 };
 
 pub mod mutate;
+pub mod tag_edit;
 pub use mutate::{
     MutateError, append_to_page, create_page, delete_page, edit_frontmatter, move_page,
     prepend_to_page, remove_property, save_base, set_property,
 };
+pub use tag_edit::{TagEdit, edit_tags, note_tags, tag_key, valid_tag};
 
 /// "Open an Obsidian vault as a vault" translation tool —
 /// produces a `vault::Vault` snapshot or a single-vault

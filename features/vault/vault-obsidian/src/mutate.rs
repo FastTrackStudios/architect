@@ -284,7 +284,7 @@ pub fn edit_frontmatter(
 /// Whether a `---`-fenced block carries anything but the fences,
 /// blank lines and comments — i.e. whether an empty parse of it lost
 /// something.
-fn has_yaml_content(block: &str) -> bool {
+pub(crate) fn has_yaml_content(block: &str) -> bool {
     block.lines().any(|l| {
         let t = l.trim();
         !t.is_empty() && t != "---" && !t.starts_with('#')

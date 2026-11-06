@@ -55,3 +55,29 @@ fn the_sample_vaults_tags_and_their_notes() {
     let agents = run(&list, "TAGS_NOTES", r#"{"tag":"agents"}"#);
     assert_eq!(agents[0]["path"], "Notes/Actions everywhere.md", "{agents}");
 }
+
+#[test]
+fn the_tag_writes_change_the_markdown() {
+    let (tmp, vault) = sample();
+    let list = ActionList::new();
+    tag::actions::register(&list, &vault).unwrap();
+    let read = |p: &str| std::fs::read_to_string(tmp.path().join(p)).unwrap();
+    let welcome = "Welcome.md";
+    let out = run(
+        &list,
+        "TAGS_ADD",
+        r#"{"paths":["Welcome.md"],"tag":"tour/start"}"#,
+    );
+    assert_eq!(out["changed"][0], welcome, "{out}");
+    assert!(read(welcome).contains("tour/start"), "{}", read(welcome));
+    let out = run(&list, "TAGS_RENAME", r#"{"from":"tour","to":"guide"}"#);
+    assert_eq!(out["changed"][0], welcome, "{out}");
+    assert!(read(welcome).contains("guide/start"), "{}", read(welcome));
+    assert!(!read(welcome).contains("tour/start"));
+    let notes = run(&list, "TAGS_NOTES", r#"{"tag":"guide"}"#);
+    assert_eq!(notes[0]["path"], welcome, "{notes}");
+    run(&list, "TAGS_DELETE", r#"{"tag":"guide"}"#);
+    assert!(!read(welcome).contains("guide"), "{}", read(welcome));
+    let bad = list.run_json("TAGS_RENAME", br#"{"from":"lab","to":"lab/inner"}"#);
+    assert!(bad.is_err(), "a tag cannot move inside itself");
+}
