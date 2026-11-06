@@ -8,7 +8,9 @@ Navigator, the built-in extension that makes it a feature, is
 **Licence.** `architect-navigator` is GPL-3.0-or-later. With Navigator,
 the extension that links it, it is the only GPL code in architect (`features/navigator/README.md`, `features/navigator/LICENSE`).
 An app that links it ships under the GPL. Nothing else in architect depends
-on it. Never move its code into another crate. A headless tool or a server
+on it but the app that draws it. Never move its code into another crate.
+Pages and extensions fill it through the MIT `architect-navigator-api`
+(below, "Providers"). A headless tool or a server
 that does not link it stays MIT OR Apache-2.0.
 
 ## Rules
@@ -136,6 +138,42 @@ nav.set_active(Some(path));
 The sandbox's Vault tab does exactly this (`apps/ui/src/vault.rs`
 `FilesView`: a `VaultSource` over the demo vault, `lab_vault` for a
 film's in-memory one).
+
+## Providers: what fills the panes (#356)
+
+The navigator is the app's only left sidebar. The vault fills it by
+default; a page or an extension fills it while its view is on show.
+
+- **The API is MIT.** `architect-navigator-api` (`features/navigator-api`,
+  MIT OR Apache-2.0) holds `NavigatorProvider`, `Snapshot`, `Node`, `Item`,
+  `Open`, `Method`, `serve`, `ActionProvider` and `date_millis`. A provider
+  implements it and never depends on `architect-navigator` (GPL). Keep
+  anything an MIT crate needs in the API crate, never in the GPL one.
+- **The trait** (`features/navigator-api/src/lib.rs` `NavigatorProvider`):
+  `snapshot()` answers the title, the `Node` tree (id, title, icon, colour,
+  children) and every `Item` (id, container, title, preview, dates, icon,
+  thumbnail, tags, `progress`, badges, properties, `open`). `open(item)`,
+  `move_items(items, to)` and `create(container, title)` default to nothing
+  or an error. Every method is async (`ProviderFuture`).
+- **Serving it:** declare `[[navigator_providers]] id, title, icon, views,
+  actions` and the actions it answers (`<actions>_SNAPSHOT`, `_OPEN`,
+  `_MOVE`, `_CREATE`); in `build`, `ext.navigator("<ACTIONS>", provider)`
+  (`features/extensions/src/linked.rs` `Builder::navigator`). A process,
+  Luau or page extension answers those actions itself.
+- **The app** reads every provider through its actions
+  (`ActionProvider` over the host's Action List) and draws it with a
+  `ProviderSource` (`features/navigator/src/provider_source.rs`): nodes as
+  folders, items as notes in their container's folder, titles made unique.
+  `ProviderSource::item_at` reads an opened path back as its item; a drag
+  onto a folder and New come back as `ProviderRequest`s. `apps/ui/src/vault.rs`
+  `FilesView` switches with the page, keeps each provider's view state, and
+  `ProviderFiles` polls the snapshot every three seconds and after each
+  request.
+- **Examples:** `extensions/projects/src/nav.rs` `ProjectsNav` (projects
+  under their state, their tasks; a drag moves a task to a project) and
+  `extensions/tasks/src/nav.rs` `TasksNav` (status groups; a drag sets the
+  status). Tests: `features/navigator/tests/provider.rs`,
+  `features/navigator-api/src/lib.rs` `tests`.
 
 ## What it does
 

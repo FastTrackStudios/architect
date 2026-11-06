@@ -1736,6 +1736,13 @@ options = [{ key = "columnBy", name = "Columns", kind = "property" }]
 id = "timeline"
 name = "Timeline"
 view = "chart"
+
+[[navigator_providers]]
+id = "songs"
+title = "Setlists"
+icon = "list-music"
+views = ["chart"]
+actions = "LAB_CONTRIB_NAV"
 "#;
 
     #[test]
@@ -1760,6 +1767,11 @@ view = "chart"
         assert_eq!(c.base_views[0].view_name(), "base.board");
         assert!(m.draws("base.board") && !m.draws("base.timeline"));
         assert_eq!(c.base_views[1].view_name(), "chart");
+        assert_eq!(c.navigator_providers[0].views, ["chart"]);
+        assert_eq!(
+            c.navigator_providers[0].snapshot_action(),
+            "LAB_CONTRIB_NAV_SNAPSHOT"
+        );
         assert_eq!(c.embeds[0].max_height, Some(320));
         assert_eq!(m.views[0].placement, ViewPlacement::Split);
         assert_eq!(m.views[0].on_unload, OnUnload::Close);
@@ -1769,6 +1781,15 @@ view = "chart"
         let bad = |from: &str, to: &str| Manifest::parse(&CONTRIB.replacen(from, to, 1));
         assert!(matches!(
             bad("view = \"board\"", "view = \"nope\""),
+            Err(ManifestError::Contribution(_))
+        ));
+        // A provider goes with views it has, and its actions are its own.
+        assert!(matches!(
+            bad("views = [\"chart\"]", "views = [\"nope\"]"),
+            Err(ManifestError::Contribution(_))
+        ));
+        assert!(matches!(
+            bad("actions = \"LAB_CONTRIB_NAV\"", "actions = \"VAULT_NAV\""),
             Err(ManifestError::Contribution(_))
         ));
         assert!(matches!(

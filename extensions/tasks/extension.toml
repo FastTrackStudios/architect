@@ -123,6 +123,37 @@ description = "Its startup hook: reads the tasks, so its status item says what i
 group = "Tasks"
 effect = "read_only"
 
+[[actions]]
+id = "TASKS_NAV_SNAPSHOT"
+name = "Tasks: the navigator's tree"
+description = "Its navigator provider's snapshot (architect-navigator-api `Snapshot`): the status groups, and every task in its own."
+group = "Tasks"
+effect = "read_only"
+
+[[actions]]
+id = "TASKS_NAV_MOVE"
+name = "Tasks: move tasks to a status"
+description = "Tasks `items` (their paths), dragged onto status group `to` (`group:doing`): they take its status."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
+
+[[actions]]
+id = "TASKS_NAV_CREATE"
+name = "Tasks: new task with a status"
+description = "A task `title` in status group `container`, from the navigator's New button."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
+
+# The sidebar while its views show: statuses, then their tasks (src/nav.rs).
+[[navigator_providers]]
+id = "tasks"
+title = "Tasks"
+icon = "check"
+views = ["list", "today", "mine"]
+actions = "TASKS_NAV"
+
 [[views]]
 id = "list"
 title = "Tasks"

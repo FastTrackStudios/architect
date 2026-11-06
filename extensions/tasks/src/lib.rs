@@ -13,11 +13,15 @@
 //! - **Views:** the task list, Today and My tasks (one component, three
 //!   filters), and a kanban view type for Bases (`[[base_views]] id =
 //!   "kanban"`) that `TASKS_BOARD` opens over `Tasks/Board.base`.
+//! - **Navigator:** while its views show, the sidebar's navigator shows
+//!   the status groups and the selected one's tasks ([`nav`],
+//!   `[[navigator_providers]]`, #356).
 //! - **Service:** it provides `architect.tasks` (each method its `TASKS_<METHOD>`
 //!   action) and uses `architect.projects` when it is there: a task's project is a
 //!   link to a `project.md`, resolved by the Projects extension.
 
 pub mod model;
+pub mod nav;
 pub mod quick;
 pub mod vault;
 
@@ -507,6 +511,8 @@ impl Extension for Tasks {
 
     fn build(&self, ext: &mut Builder) {
         vault::connect(ext.handle());
+        // Its navigator provider: status groups, then their tasks (`nav`).
+        ext.navigator(nav::ACTIONS, nav::TasksNav);
         ext.view("list", ListView)
             .view("today", TodayView)
             .view("mine", MineView)

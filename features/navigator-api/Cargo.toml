@@ -1,0 +1,26 @@
+[package]
+name = "architect-navigator-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# MIT OR Apache-2.0, as the rest of architect: the navigator itself
+# (`architect-navigator`) is GPL, this crate is the boundary a page or an
+# extension implements without linking it (README.md).
+license.workspace = true
+description = "The navigator's provider API (MIT OR Apache-2.0): what fills the sidebar's two panes, a tree of containers and the items in them, as a Rust trait (NavigatorProvider) and as JSON actions (`[[navigator_providers]]`), so a page or an extension drives the GPL navigator without linking it"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

@@ -153,6 +153,8 @@ editor-ext = { workspace = true }
 # theme into a process view's document (`remote`).
 architect-theme = { workspace = true }
 architect-settings = { workspace = true }
+# The navigator's provider API (MIT): `linked::Builder::navigator`.
+architect-navigator-api = { workspace = true }
 architect-orgs = { workspace = true }
 architect-commands = { workspace = true }
 # MIDI ports, OSC endpoints and control surfaces (`ports`, feature

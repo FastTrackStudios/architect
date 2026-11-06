@@ -150,6 +150,45 @@ description = "Its startup hook: reads the projects, so its status item counts t
 group = "Projects"
 effect = "read_only"
 
+[[actions]]
+id = "PROJECTS_NAV_SNAPSHOT"
+name = "Projects: the navigator's tree"
+description = "Its navigator provider's snapshot (architect-navigator-api `Snapshot`): the projects under their state, and every project's tasks as its items."
+group = "Projects"
+effect = "read_only"
+
+[[actions]]
+id = "PROJECTS_NAV_OPEN"
+name = "Projects: open from the navigator"
+description = "What opening navigator item `item` (`<project.md>|<task path>`) does: the task's note."
+group = "Projects"
+effect = "read_only"
+params = '{"type":"object","properties":{"item":{"type":"string"}},"required":["item"]}'
+
+[[actions]]
+id = "PROJECTS_NAV_MOVE"
+name = "Projects: move tasks to a project"
+description = "Tasks `items` (`<project.md>|<task path>`), dragged onto project `to` (its project.md): their project becomes it, and a task kept in the old project's folder moves into the new one's."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
+
+[[actions]]
+id = "PROJECTS_NAV_CREATE"
+name = "Projects: new task in a project"
+description = "A task `title` in project `container` (its project.md), from the navigator's New button."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
+
+# The sidebar while its views show: projects, then their tasks (src/nav.rs).
+[[navigator_providers]]
+id = "projects"
+title = "Projects"
+icon = "folder-kanban"
+views = ["list", "page"]
+actions = "PROJECTS_NAV"
+
 [[views]]
 id = "list"
 title = "Projects"

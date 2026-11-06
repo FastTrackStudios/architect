@@ -39,6 +39,8 @@ vault = ["dep:vault", "dep:serde_json"]
 
 [dependencies]
 architect-settings = { workspace = true }
+# What pages and extensions fill the panes with (MIT): `ProviderSource`.
+architect-navigator-api = { workspace = true }
 facet = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }

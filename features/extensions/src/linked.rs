@@ -269,6 +269,27 @@ impl Builder {
         self
     }
 
+    /// Serves `provider` as the navigator provider whose actions start
+    /// with `actions` (its manifest's `[[navigator_providers]] actions`):
+    /// each of `architect_navigator_api::Method`'s actions
+    /// (`<actions>_SNAPSHOT`, `_OPEN`, `_MOVE`, `_CREATE`) answers from it,
+    /// linked in or as a process. Declare the ones it answers in its
+    /// `[[actions]]`.
+    pub fn navigator(
+        &mut self,
+        actions: &str,
+        provider: impl architect_navigator_api::NavigatorProvider,
+    ) -> &mut Self {
+        let provider: Arc<dyn architect_navigator_api::NavigatorProvider> = Arc::new(provider);
+        for method in architect_navigator_api::Method::ALL {
+            let provider = Arc::clone(&provider);
+            self.action(method.action(actions), move |args| {
+                architect_navigator_api::serve(Arc::clone(&provider), method, args)
+            });
+        }
+        self
+    }
+
     /// What it adds to the interface past its manifest's tables (an id in
     /// both is the builder's).
     // By value, so a literal reads as `contribute(Contribution { … })`.

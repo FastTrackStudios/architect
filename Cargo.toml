@@ -63,6 +63,7 @@ members = [
     "features/files",
     "features/navigator",
     "features/navigator/extension",
+    "features/navigator-api",
     "features/attachments",
     "features/spaces",
     "features/ui/showcase",
@@ -327,6 +328,9 @@ architect-files = { path = "features/files" }
 # crate (features/navigator/README.md): an app that links it ships under the GPL.
 architect-navigator = { path = "features/navigator" }
 architect-navigator-extension = { path = "features/navigator/extension" }
+# The navigator's provider API: MIT OR Apache-2.0, what MIT pages and
+# extensions implement without linking the GPL navigator.
+architect-navigator-api = { path = "features/navigator-api" }
 architect-attachments = { path = "features/attachments" }
 architect-devices = { path = "features/devices" }
 architect-spaces = { path = "features/spaces" }
