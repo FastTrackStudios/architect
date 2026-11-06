@@ -295,6 +295,13 @@ fn as_a_process() {
         dev.join("extension.toml"),
     )
     .unwrap();
+    // Its tour: the manifest names it, so its package has it.
+    std::fs::create_dir_all(dev.join("tours")).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tours/tasks-tour.styx"),
+        dev.join("tours/tasks-tour.styx"),
+    )
+    .unwrap();
     std::os::unix::fs::symlink(
         env!("CARGO_BIN_EXE_architect-tasks"),
         dev.join("architect-tasks"),

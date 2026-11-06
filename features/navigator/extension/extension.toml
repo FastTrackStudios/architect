@@ -26,6 +26,12 @@ git = "https://github.com/FastTrackStudios/architect"
 rev = "main"
 path = "features/navigator/extension"
 
+# Its tour shows the Vault with a note in front first (LAB_GO,
+# WORKSPACES_LOAD): the app's tab it lives in.
+[capabilities]
+actions = ["LAB_GO", "WORKSPACES_LOAD"]
+effect = "mutating"
+
 [[views]]
 id = "files"
 title = "Navigator"
@@ -2389,3 +2395,11 @@ placeholder = ""
 choices = []
 aliases = []
 scope = "synced"
+
+# Its tour (#379): offered once after it is turned on, on its page in the
+# extensions manager, and through TOURS_LIST / TOUR_START.
+[[tours]]
+id = "navigator-tour"
+title = "Navigator"
+description = "The Vault's sidebar: folders and notes side by side, search, the calendar and a new note."
+scenario = "tours/navigator-tour.styx"

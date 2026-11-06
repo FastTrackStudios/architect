@@ -326,3 +326,10 @@ name = "Board"
 icon = "kanban"
 options = [{ key = "columnBy", name = "Columns", kind = "property" }]
 
+# Its tour (#379): on its page in the extensions manager, offered once after
+# it is turned on, and through TOURS_LIST / TOUR_START.
+[[tours]]
+id = "board-tour"
+title = "Board"
+description = "Its status item, pinning a note and clearing the board."
+scenario = "tours/board-tour.styx"

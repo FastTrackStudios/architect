@@ -1,0 +1,42 @@
+// The Tasks tour (extension.toml [[tours]]): the list, quick add, Today and
+// My tasks, the sidebar by status and its status item. Played as the
+// extension: each setup step runs one of its own actions. It only opens
+// views (it adds no task: you do, if you like), so it may play over your
+// own vault. Played as a test by apps/sandbox/media/tests/extension_tours.rs.
+id tasks-tour
+title "Tasks"
+safe true
+view {width 1280, height 800}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    {id list-1, hide true, do @run{id TASKS_OPEN, args {view list}}}
+    {
+        id list
+        text "A task is a note in your vault, its fields in the frontmatter in TaskNotes' shape, so a TaskNotes vault reads as it is. This list is every one: open work first, then by due date and priority."
+        target @css".tasks-list"
+    }
+    {id add-1, hide true, do @run{id TASKS_OPEN, args {view list}}}
+    {
+        id add
+        text "Add one as you would say it: [[Project]], #tag, @context, !high, tomorrow or a weekday, every week. The rest is its title. Try: “Call the venue tomorrow !high” and ↵."
+        target @css".tasks-new"
+    }
+    {id today-1, hide true, do @run{id TASKS_OPEN, args {view today}}}
+    {
+        id today
+        text "Today: what is in progress, or due or planned by today. My tasks is what is assigned to the name in Settings › Tasks."
+        target @css".tasks-list[data-filter=\"today\"]"
+    }
+    {id sidebar-1, hide true, do @run{id TASKS_OPEN, args {view list}}}
+    {
+        id sidebar
+        text "While a Tasks view shows, the sidebar holds your tasks by status. Drag one to another status to move it; New there adds one with that status."
+        target @css".nv-nav"
+    }
+    {id status-1, hide true, do @run{id TASKS_OPEN, args {view list}}}
+    {
+        id status
+        text "Its status item says what is due today. TASKS_BOARD opens the kanban board (a Bases view this extension adds), and with Projects on a task belongs to a project. Every part is an action: TASKS_* on ⌘K, MCP and the CLI."
+        target @css"[title=\"What is due today\"]"
+    }
+)

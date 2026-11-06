@@ -188,6 +188,13 @@ impl Extension for Board {
         include_str!("../extension.toml")
     }
 
+    fn files(&self) -> &'static [(&'static str, &'static str)] {
+        &[(
+            "tours/board-tour.styx",
+            include_str!("../tours/board-tour.styx"),
+        )]
+    }
+
     fn build(&self, ext: &mut Builder) {
         *HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = Some(ext.handle());
         // A new copy's sharps start off: a toggle's state is the host's,

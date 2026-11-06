@@ -246,3 +246,11 @@ properties = [
 template = "templates/client.md"
 folders = ["Meetings", "Deliverables"]
 views = ["page"]
+
+# Its tour (#379): offered once after it is installed or turned on, on its
+# page in the extensions manager, and through TOURS_LIST / TOUR_START.
+[[tours]]
+id = "projects-tour"
+title = "Projects"
+description = "The projects list, a new project, the navigator's tree and a project's page: state, roadmap and tasks."
+scenario = "tours/projects-tour.styx"

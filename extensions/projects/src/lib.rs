@@ -622,6 +622,10 @@ impl Extension for Projects {
                 "templates/client.md",
                 include_str!("../templates/client.md"),
             ),
+            (
+                "tours/projects-tour.styx",
+                include_str!("../tours/projects-tour.styx"),
+            ),
         ]
     }
 
