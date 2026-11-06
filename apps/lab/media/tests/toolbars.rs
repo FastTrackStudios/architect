@@ -71,18 +71,21 @@ fn golden(name: &str) -> PathBuf {
 }
 
 /// `html` with each measured `left:`/`top:` offset (`left: 412.5px`) masked
-/// as `left: _px`: a popup is placed from text widths, which differ between
-/// Linux and macOS font rendering, so the goldens compare what is drawn,
-/// not where a font put it.
+/// as `left: _px`, and the shift a kept menu reports (`data-kept="left 49"`)
+/// as `data-kept="left _"`: a popup is placed from text widths, which differ
+/// between Linux and macOS font rendering, so the goldens compare what is
+/// drawn, not where a font put it. Whether a menu was kept, and which way,
+/// still counts.
 fn without_offsets(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut rest = html;
     loop {
-        let next = ["left:", "top:"]
+        // Each key with the unit its number must end in to be masked.
+        let next = [("left:", "px"), ("top:", "px"), ("data-kept=\"left ", "")]
             .iter()
-            .filter_map(|k| rest.find(k).map(|at| (at, k.len())))
+            .filter_map(|(k, unit)| rest.find(k).map(|at| (at, k.len(), *unit)))
             .min();
-        let Some((at, len)) = next else { break };
+        let Some((at, len, unit)) = next else { break };
         let (head, tail) = rest.split_at(at.saturating_add(len));
         out.push_str(head);
         let spaces = tail.len().saturating_sub(tail.trim_start().len());
@@ -93,7 +96,7 @@ fn without_offsets(html: &str) -> String {
             .map(|(i, c)| i.saturating_add(c.len_utf8()))
             .last()
             .unwrap_or(0);
-        if number > 0 && body.get(number..).is_some_and(|r| r.starts_with("px")) {
+        if number > 0 && body.get(number..).is_some_and(|r| r.starts_with(unit)) {
             out.push_str(tail.get(..spaces).unwrap_or(""));
             out.push('_');
             rest = body.get(number..).unwrap_or("");
