@@ -72,7 +72,7 @@ fn build(&self, ext: &mut Builder) {
 - A contributed type is drawn by `features/extensions/src/embeds.rs`
   `BaseViewEmbed` (from `Embeds::base_view`), given a
   `features/extensions/src/contrib.rs` `BaseViewInput`.
-- Grouping: `features/vault/vault-live/src/grouping.rs` `group_by` (with
+- Grouping: `features/vault/vault-proto/src/grouping.rs` `group_by` (with
   `label` and `Order`) is what a view's `groupBy` runs on, and what the
   navigator's list pane (`features/navigator`, #335) groups notes with.
 - Filters as text: `features/vault/vault-live/src/bases.rs`

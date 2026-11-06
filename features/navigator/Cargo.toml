@@ -54,8 +54,8 @@ futures-util = { version = "0.3", default-features = false, optional = true }
 chrono = { workspace = true }
 vault = { workspace = true, optional = true, features = ["actions"] }
 # Grouping the list by a property: Bases' `group_by` (MIT), the one
-# grouping in architect. Native only, so the model is too.
-vault-live = { workspace = true }
+# grouping in architect. In the wire crate, so the model builds for wasm.
+vault-proto = { workspace = true }
 serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]

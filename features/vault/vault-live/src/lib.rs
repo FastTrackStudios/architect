@@ -76,7 +76,9 @@
 pub mod bases;
 pub mod blocks;
 pub mod cook;
-pub mod grouping;
+/// Grouping rows by a value, `vault_proto::grouping` (wasm-clean, so the
+/// navigator's model can use it on every target).
+pub use vault_proto::grouping;
 pub mod lexorank;
 pub mod lookup;
 pub mod mutate;

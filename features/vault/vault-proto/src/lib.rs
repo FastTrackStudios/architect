@@ -41,6 +41,7 @@ mod error;
 mod event;
 mod file;
 mod graph;
+pub mod grouping;
 mod manifest;
 mod page;
 mod page_meta;

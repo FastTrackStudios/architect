@@ -13,7 +13,7 @@
 //!   ```` ```base ```` fence.
 //!
 //! The grouping a view's `groupBy` does is `vault::bases`' over the shared
-//! `vault_live::grouping`, which the navigator's list pane uses too.
+//! `vault_proto::grouping` (re-exported as `vault_live::grouping`), which the navigator's list pane uses too.
 
 pub mod model;
 

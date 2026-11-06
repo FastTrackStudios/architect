@@ -39,7 +39,7 @@ Symbols: `features/extensions/src/contrib.rs` `BaseViewDecl` (`view_name`), `Bas
 
 ## Grouping, shared
 
-`features/vault/vault-live/src/grouping.rs` `group_by` (`label`, `Order`: first seen, ascending, descending, the empty group last) is what a base's `groupBy` runs on and what the navigator's list pane uses to group notes by a property. Filters read and written as text: `features/vault/vault-live/src/bases.rs` `filter_clauses`, `filter_of_clauses`.
+`features/vault/vault-proto/src/grouping.rs` `group_by` (`label`, `Order`: first seen, ascending, descending, the empty group last) is what a base's `groupBy` runs on and what the navigator's list pane uses to group notes by a property. Filters read and written as text: `features/vault/vault-live/src/bases.rs` `filter_clauses`, `filter_of_clauses`.
 
 ## Gotchas
 

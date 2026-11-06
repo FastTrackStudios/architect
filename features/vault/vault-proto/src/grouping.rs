@@ -1,5 +1,5 @@
 //! Grouping rows by a value: what a base's `groupBy` does
-//! ([`crate::bases::execute_view`]), and what the navigator's list pane
+//! (`vault_live::bases::execute_view`), and what the navigator's list pane
 //! (`features/navigator`) groups notes by a property with. One
 //! implementation for both.
 //!

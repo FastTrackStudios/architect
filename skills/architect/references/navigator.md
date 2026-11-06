@@ -163,7 +163,7 @@ film's in-memory one).
     writes them (`NavigatorSource::write`).
   - Grouping: `Grouping` (none, date, folder, property). Property groups
     come from `features/navigator/src/list.rs` `property_groups`, over
-    Bases' `group_by` (`features/vault/vault-live/src/grouping.rs`, MIT, the
+    Bases' `group_by` (`features/vault/vault-proto/src/grouping.rs`, MIT, the
     one grouping in architect). Notes without the value go last, under
     "None". A heading folds (`toggle_group`, keyed by `collapse_key`).
   - Pinned (`toggle_pin`, ⌘⇧P) is a section on top, per kind of place
