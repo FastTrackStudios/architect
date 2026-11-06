@@ -308,6 +308,8 @@ pub struct NavigatorState {
     property_value_order: BTreeMap<String, Vec<String>>,
     /// The navigation rainbow's colour of each row it colours, by row key.
     rainbow: BTreeMap<String, String>,
+    /// The rows pinned over the tree (`pinShortcuts`).
+    pinned_rows: Vec<NavRow>,
     property_order: Vec<String>,
     /// The search box's search (⌘/Ctrl-clicks write to it too); the list
     /// shows what it matches.
@@ -404,6 +406,7 @@ impl NavigatorState {
             tag_child_order: BTreeMap::new(),
             property_value_order: BTreeMap::new(),
             rainbow: BTreeMap::new(),
+            pinned_rows: Vec::new(),
             property_order: Vec::new(),
         };
         s.index = s.visible();
@@ -720,7 +723,23 @@ impl NavigatorState {
             expanded.insert(String::new());
         }
         self.nav_rows = tree::flatten(&self.index, &expanded, &self.tree_options());
-        let top = self.top_rows();
+        let mut top = self.top_rows();
+        // Pinned shortcuts (`pinShortcuts`), and the recent notes with
+        // them (`pinRecentNotesWithShortcuts`): over the tree, not in it.
+        self.pinned_rows.clear();
+        if self.settings.pin_shortcuts {
+            let pin = |r: &NavRow| match &r.kind {
+                NavRowKind::Shortcut { .. } => true,
+                NavRowKind::Section { id, .. } => {
+                    id == SHORTCUTS || (id == RECENT && self.settings.pin_recent)
+                }
+                NavRowKind::Recent { .. } => self.settings.pin_recent,
+                _ => false,
+            };
+            let (pinned, rest): (Vec<NavRow>, Vec<NavRow>) = top.into_iter().partition(|r| pin(r));
+            self.pinned_rows = pinned;
+            top = rest;
+        }
         if !top.is_empty() {
             let at = usize::from(!self.nav_rows.is_empty());
             self.nav_rows.splice(at..at, top);
@@ -1365,6 +1384,13 @@ impl NavigatorState {
     pub fn rainbow(&self, key: &str) -> Option<(&str, bool)> {
         let c = self.rainbow.get(key)?;
         Some((c.as_str(), self.settings.rainbow == RainbowMode::Background))
+    }
+
+    /// The shortcut (and recent) rows pinned over the tree, when the
+    /// settings pin them.
+    #[must_use]
+    pub fn pinned_rows(&self) -> &[NavRow] {
+        &self.pinned_rows
     }
 
     /// Whether the navigator is on a phone.
@@ -2906,6 +2932,45 @@ impl NavigatorState {
         Ok(Outcome::Write {
             ops: vec![FileOp::Move { from: note, to }],
             open: None,
+        })
+    }
+
+    /// What "Create folder note" makes for `folder` (`createFolderNote`): a
+    /// note of the settings' type named for the folder, from the folder
+    /// note template when there is one.
+    ///
+    /// # Errors
+    ///
+    /// Folder notes are off, the vault's root, or it has one already.
+    pub fn folder_note_request(&self, folder: &str) -> Result<NewNote, String> {
+        if !self.settings.folder_notes {
+            return Err("Folder notes are off in Navigator's settings".to_owned());
+        }
+        if folder.is_empty() {
+            return Err("The vault has no folder note".to_owned());
+        }
+        if let Some(n) = self.folder_note(folder) {
+            return Err(format!("{folder} has a folder note already: {n}"));
+        }
+        let kind = match self.settings.folder_note_type {
+            crate::settings::FolderNoteType::Markdown => NewKind::Note,
+            crate::settings::FolderNoteType::Canvas => NewKind::Canvas,
+            crate::settings::FolderNoteType::Base => NewKind::Base,
+        };
+        let template = Some(self.settings.folder_note_template.trim().to_owned())
+            .filter(|t| !t.is_empty() && kind == NewKind::Note);
+        Ok(NewNote {
+            folder: folder.to_owned(),
+            kind,
+            no_template: template.is_none(),
+            template,
+            name: Some(list::folder_note_name(&self.settings, folder)),
+            how: if self.settings.folder_note_open == FolderNoteOpen::NewTab {
+                OpenIn::Tab
+            } else {
+                OpenIn::Here
+            },
+            ..NewNote::default()
         })
     }
 

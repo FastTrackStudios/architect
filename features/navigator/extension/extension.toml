@@ -1977,6 +1977,32 @@ label = "A new tab"
 detail = ""
 
 [[sections.settings]]
+key = "navigator.folder_note_type"
+title = "New folder notes are"
+description = "What \"Create folder note\" makes."
+control = "segmented"
+default = "Markdown"
+unit = ""
+placeholder = ""
+aliases = []
+scope = "synced"
+
+[[sections.settings.choices]]
+value = "Markdown"
+label = "A note"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Canvas"
+label = "A canvas"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Base"
+label = "A base"
+detail = ""
+
+[[sections.settings]]
 key = "navigator.calendar"
 title = "Calendar"
 description = "Days under the folders, the calendar button in their header shows them: a click opens a day's note, or makes it."

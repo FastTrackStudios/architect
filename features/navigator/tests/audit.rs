@@ -237,3 +237,71 @@ fn the_list_s_groups_fold_and_unfold_together() {
     assert!(s.fold_all_groups());
     assert!(!s.fold_all_groups());
 }
+
+/// Pinned shortcuts (`pinShortcuts`) leave the tree for a block over it;
+/// the recent notes join them when the settings say.
+#[test]
+fn shortcuts_and_recent_notes_are_pinned_over_the_tree() {
+    let mut s = state(NavigatorSettings {
+        pin_shortcuts: true,
+        pin_recent: true,
+        show_recent_notes: true,
+        ..settings()
+    });
+    s.add_shortcut(architect_navigator::Shortcut::note("Gamma/d.md"), None);
+    s.set_active(Some("Home.md"));
+    let in_tree = |s: &NavigatorState| {
+        s.nav_rows().iter().any(|r| {
+            matches!(
+                r.kind,
+                NavRowKind::Shortcut { .. } | NavRowKind::Recent { .. }
+            )
+        })
+    };
+    assert!(!in_tree(&s));
+    let pinned: Vec<&str> = s.pinned_rows().iter().map(|r| r.key.as_str()).collect();
+    assert!(
+        pinned.iter().any(|k| k.starts_with("shortcut:"))
+            && pinned.iter().any(|k| k.starts_with("recent")),
+        "{pinned:?}"
+    );
+    let mut loose = state(NavigatorSettings {
+        show_recent_notes: true,
+        ..settings()
+    });
+    loose.add_shortcut(architect_navigator::Shortcut::note("Gamma/d.md"), None);
+    assert!(loose.pinned_rows().is_empty() && in_tree(&loose));
+}
+
+/// "Create folder note" (`createFolderNote`): named for its folder, of the
+/// settings' type, from the folder note template.
+#[test]
+fn a_folder_note_is_made_of_its_type_from_its_template() {
+    use architect_navigator::settings::FolderNoteType;
+    let s = state(NavigatorSettings {
+        folder_notes: true,
+        folder_note_template: "Templates/Folder.md".into(),
+        ..settings()
+    });
+    let req = s.folder_note_request("Alpha").unwrap();
+    assert_eq!(
+        (
+            req.folder.as_str(),
+            req.name.as_deref(),
+            req.template.as_deref()
+        ),
+        ("Alpha", Some("Alpha"), Some("Templates/Folder.md"))
+    );
+    assert!(s.folder_note_request("").is_err());
+    let canvas = state(NavigatorSettings {
+        folder_notes: true,
+        folder_note_type: FolderNoteType::Canvas,
+        ..settings()
+    });
+    assert_eq!(
+        canvas.folder_note_request("Beta").unwrap().kind,
+        architect_navigator::state::NewKind::Canvas
+    );
+    let off = state(settings());
+    assert!(off.folder_note_request("Alpha").is_err());
+}

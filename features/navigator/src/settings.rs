@@ -366,6 +366,19 @@ pub enum CalendarPlacement {
     Below,
 }
 
+/// What a new folder note is (`folderNoteType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum FolderNoteType {
+    /// A note
+    #[default]
+    Markdown,
+    /// A canvas
+    Canvas,
+    /// A base
+    Base,
+}
+
 /// What collapse all folds (`collapseBehavior`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
 #[repr(u8)]
@@ -706,6 +719,10 @@ pub struct NavigatorSettings {
     /// Folder notes open in
     #[setting(control = segmented)]
     pub folder_note_open: FolderNoteOpen,
+    /// New folder notes are
+    /// What "Create folder note" makes.
+    #[setting(control = segmented)]
+    pub folder_note_type: FolderNoteType,
     /// Calendar
     /// Days under the folders, the calendar button in their header shows
     /// them: a click opens a day's note, or makes it.
@@ -1100,6 +1117,7 @@ impl Default for NavigatorSettings {
             vim_keys: false,
             zoom: 100,
             zoom_phone: 100,
+            folder_note_type: FolderNoteType::Markdown,
             collapse_scope: CollapseScope::All,
             collapse_keeps_root: true,
             accordion: false,

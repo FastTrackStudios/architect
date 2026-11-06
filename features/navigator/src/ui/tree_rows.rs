@@ -679,6 +679,26 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 .to_owned(),
                 MenuAct::FolderTemplate(f.clone()),
             ));
+            // `buildFolderMenu`'s folder note rows.
+            if !f.is_empty() && s.settings().folder_notes {
+                if s.folder_note(&f).is_some() {
+                    items.push((
+                        "Detach folder note".to_owned(),
+                        MenuAct::DetachFolderNote(f.clone()),
+                    ));
+                    if let Some(n) = s.folder_note(&f) {
+                        items.push((
+                            "Delete folder note".to_owned(),
+                            MenuAct::Trash(vec![n.to_owned()]),
+                        ));
+                    }
+                } else {
+                    items.push((
+                        "Create folder note".to_owned(),
+                        MenuAct::CreateFolderNote(f.clone()),
+                    ));
+                }
+            }
             if !f.is_empty() {
                 items.push(("Rename…".to_owned(), MenuAct::RenameFolder(f.clone())));
                 items.push((
@@ -817,6 +837,8 @@ enum MenuAct {
     SetValue(Vec<String>, String),
     RenameKey(String),
     DeleteKey(String),
+    CreateFolderNote(String),
+    DetachFolderNote(String),
     /// A nested tag (`tag:<t>`) or a value (`property:<k>=<v>`) moved.
     MoveChild(String, isize),
     ResetChildOrder(String),
@@ -894,6 +916,14 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             }));
             return;
         }
+        MenuAct::CreateFolderNote(folder) => {
+            match nav.state.peek().folder_note_request(&folder) {
+                Ok(req) => nav.new_note(req, on_open),
+                Err(e) => nav.say(e),
+            }
+            return;
+        }
+        MenuAct::DetachFolderNote(folder) => nav.update(|s| s.detach_folder_note(&folder, None)),
         MenuAct::MoveChild(id, by) => {
             nav.update(|s| s.move_nested(&id, by));
             return;

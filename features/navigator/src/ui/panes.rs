@@ -20,7 +20,7 @@ use crate::selection::NavTarget;
 use crate::settings::{CountPlacement, Grouping, ListMode, NavigatorSettings, SortOption};
 use crate::source::Millis;
 use crate::state::{Mods, NavigatorState};
-use crate::tree::NavRowKind;
+use crate::tree::{NavRow, NavRowKind};
 
 /// A pane's header: the tools along its top.
 const HEADER: f64 = 36.0;
@@ -119,6 +119,7 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                     Columns2 { size: 16 }
                 }
             }
+            PinnedRows { nav, on_open }
             div { style: "flex:1 1 0; min-height:0; position:relative;",
                 VirtualPane { nav, pane: Pane::Navigation, label: "Folders", NavRows { nav, on_open } }
                 if let Some(menu) = row_menu {
@@ -127,6 +128,43 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
             }
             if calendar {
                 Calendar { nav, on_open }
+            }
+        }
+    }
+}
+
+/// The shortcuts (and recent notes) pinned over the tree (`pinShortcuts`):
+/// they stay as the tree scrolls.
+#[component]
+fn PinnedRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
+    let s = nav.state.read();
+    let rows: Vec<NavRow> = s.pinned_rows().to_vec();
+    if rows.is_empty() {
+        return rsx! {};
+    }
+    let h = s.nav_item_height();
+    let active = s.active().map(str::to_owned);
+    let reordering = s.reordering;
+    drop(s);
+    let total = h * rows.len() as f64 + 6.0;
+    rsx! {
+        div { class: "nv-pinned", style: "flex:0 0 auto; position:relative; height:{total}px; border-bottom:1px solid var(--nv-divider);",
+            for (i, row) in rows.into_iter().enumerate() {
+                {
+                    let top = h * i as f64 + 3.0;
+                    match row.kind.clone() {
+                        NavRowKind::Section { id, name, expanded, count } => rsx! {
+                            tree_rows::SectionRow { key: "{row.key}", nav, id, name, expanded, count, top, height: h, drop_here: false }
+                        },
+                        NavRowKind::Shortcut { at, shortcut, name, missing } => rsx! {
+                            tree_rows::ShortcutRow { key: "{row.key}", nav, on_open, at, shortcut, name, missing, reorder: reordering, top, height: h, drop_here: false }
+                        },
+                        NavRowKind::Recent { path, name } => rsx! {
+                            tree_rows::RecentRow { key: "{row.key}", nav, on_open, active: active.as_deref() == Some(path.as_str()), path, name, top, height: h }
+                        },
+                        _ => rsx! {},
+                    }
+                }
             }
         }
     }
