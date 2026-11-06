@@ -241,6 +241,16 @@ impl Navigator {
         state.write().set_full_text(hits);
     }
 
+    /// Selects the vault's root with the notes of every folder below (the
+    /// setting, on the settings page too) and opens the search box
+    /// (`search-vault`).
+    pub fn search_vault(&self) {
+        if !self.settings.value.peek().include_descendants {
+            self.settings.update(|s| s.include_descendants = true);
+        }
+        self.update(NavigatorState::search_vault);
+    }
+
     /// Sets the search box's text (the full text asked, with that
     /// provider).
     pub fn set_search(&self, text: &str) {
@@ -717,7 +727,7 @@ fn use_commands(nav: &Navigator) {
     );
     use_command(
         Command::new("NAVIGATOR_SEARCH_VAULT", "Search the whole vault").group(group),
-        move || nav.update(NavigatorState::search_vault),
+        move || nav.search_vault(),
     );
     use_command(
         Command::new("NAVIGATOR_TOGGLE_HIDDEN", "Show hidden items")

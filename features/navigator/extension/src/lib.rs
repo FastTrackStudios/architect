@@ -631,7 +631,7 @@ fn run(
             Ok(search_state(&nav.state.peek()))
         }
         "NAVIGATOR_SEARCH_VAULT" => {
-            nav.update(NavigatorState::search_vault);
+            nav.search_vault();
             if let Some(q) = args.get("query").and_then(Value::as_str) {
                 nav.set_search(q);
             }

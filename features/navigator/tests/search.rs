@@ -316,3 +316,29 @@ fn the_full_text_provider_takes_the_words_to_the_source() {
     s.set_full_text(Some(hits.into_iter().collect()));
     assert!(listed(&s).is_empty());
 }
+
+#[test]
+fn dates_come_from_frontmatter_when_the_settings_say_so() {
+    let src = MemorySource::new("fm")
+        .with_file(
+            NoteFile::new("Old.md", NOW, NOW)
+                .property("created", text("2025-03-14"))
+                .property("updated", text("2025-04-01T09:00:00")),
+        )
+        .with_file(NoteFile::new("New.md", NOW, NOW));
+    let mut s = state(
+        &src,
+        NavigatorSettings {
+            use_frontmatter: true,
+            frontmatter_created_field: "created".to_owned(),
+            frontmatter_modified_field: "updated".to_owned(),
+            ..NavigatorSettings::default()
+        },
+    );
+    s.set_search("@c:2025-03");
+    assert_eq!(listed(&s), ["Old.md"]);
+    s.set_search("@m:2025-04-01");
+    assert_eq!(listed(&s), ["Old.md"]);
+    s.set_search("@today");
+    assert_eq!(listed(&s), ["New.md"]);
+}

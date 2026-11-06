@@ -283,6 +283,7 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
             name_fields: &fields,
             by_created,
             offset: cx.clock.offset,
+            dates: Some((s, cx.clock)),
         };
         match cx.full_text {
             Some(hits) => {

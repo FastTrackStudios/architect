@@ -34,10 +34,11 @@
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::list::value_parts;
+use crate::list::{self, Clock, value_parts};
 use crate::period::{DateField, DateFilter, DayMonthOrder};
 use crate::properties::value_display;
 use crate::query::Join;
+use crate::settings::NavigatorSettings;
 use crate::source::{Millis, NoteFile};
 
 /// A property clause (`PropertySearchToken`).
@@ -133,6 +134,10 @@ pub struct SearchContext<'a> {
     pub by_created: bool,
     /// The time zone's offset from UTC.
     pub offset: Millis,
+    /// The settings and clock a note's dates are read with, from its
+    /// frontmatter when they say so (`list::created`, `list::modified`);
+    /// `None`, its file's times.
+    pub dates: Option<(&'a NavigatorSettings, Clock)>,
 }
 
 impl FilterSearch {
@@ -279,10 +284,15 @@ impl FilterSearch {
             return false;
         }
         // `fileMatchesDateFilterTokens`.
+        let created = || cx.dates.map_or(f.created, |(s, c)| list::created(f, s, c));
+        let modified = || {
+            cx.dates
+                .map_or(f.modified, |(s, c)| list::modified(f, s, c))
+        };
         let at = |d: &DateFilter| match d.field {
-            DateField::Created => f.created,
-            DateField::Default if cx.by_created => f.created,
-            DateField::Modified | DateField::Default => f.modified,
+            DateField::Created => created(),
+            DateField::Default if cx.by_created => created(),
+            DateField::Modified | DateField::Default => modified(),
         };
         self.dates.iter().all(|d| d.matches(at(d), cx.offset))
             && !self.not_dates.iter().any(|d| d.matches(at(d), cx.offset))
