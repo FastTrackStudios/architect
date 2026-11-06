@@ -87,6 +87,9 @@ use std::task::{Context, Poll, Waker};
 // monotonic on both native and wasm.
 pub use std::time::Duration;
 pub use web_time::Instant;
+/// The wall clock, on both targets (`web_time`): what a peer stamps a
+/// last-write-wins value with.
+pub use web_time::{SystemTime, UNIX_EPOCH};
 
 // ── Send / wasm cfg-split ───────────────────────────────────────────────
 //
