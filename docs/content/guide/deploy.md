@@ -35,7 +35,7 @@ and no GPU libraries in the image. The desktop build is unchanged.
 | **On the account** | With an issuer and a session it registers itself in the account's address book as a `server` device at its iroh endpoint, offers its org (`ARCHITECT_ORG`) if the account shares none yet, and lets the account's other devices in (`architect_devices::account::pass`). It runs again every five minutes, and on every sweep until another device is on the account. |
 | **In an issuer org** | With `ARCHITECT_HOST_ORG` it hosts the org's enrolments (below); with `ARCHITECT_ENROL_AT` it enrols itself in an org another node hosts. Its vaults are that org's. |
 | **Its lanes over iroh** | The node's documents (`crdt::p2p::node_router`: `DocSync` and `DocPeer`), served to the devices its `Admission` lets in. A revoked device's connections close (`architect_devices::serve`). |
-| **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. Every `ARCHITECT_SWEEP_SECS` the node pulls from and pushes to each peer it can dial (`crdt::peer::pull`), so an edit on one device reaches another through it. |
+| **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. With each peer it dials, the node keeps a live `DocSync` bridge per note (below), so an edit reaches the others within a second. Every `ARCHITECT_SWEEP_SECS` it also sweeps each peer (`crdt::peer::pull_with`), the fallback for what a bridge missed. |
 | **Sites** | Each vault in `ARCHITECT_SITES` is built as a Site ([sites](@/features/sites.md)) and rebuilt when the vault changes. |
 | **The HTTP face and vox** | `apps/desktop/src/node/service.rs` `Node` (`status`) over same-origin vox at `/vox`, its HTTP face (`POST /node/status`) and the Action List (`NODE_STATUS`). |
 | **MCP** | `/mcp`, only when `ARCHITECT_MCP_TOKEN_FILE` holds a bearer: `NODE_STATUS` and the `NOTES_LIST`, `NOTES_READ` and `NOTES_WRITE` actions (`apps/desktop/src/node/service.rs` `Notes`). An agent writes a note on the always-on node, and every device that syncs with it gets the note. |
@@ -65,7 +65,8 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_IROH` | `n0` | `n0` (relays and lookup) or `local` (loopback only, for tests) |
 | `ARCHITECT_IROH_BIND` | any port (`0.0.0.0:7777` in the image) | the iroh UDP socket |
 | `ARCHITECT_MCP_TOKEN_FILE` | none | `/mcp` is served only with this bearer |
-| `ARCHITECT_SWEEP_SECS` | `30` | how often it exchanges documents with its peers |
+| `ARCHITECT_SWEEP_SECS` | `30` | how often it sweeps its peers, the fallback for what a live bridge missed |
+| `ARCHITECT_LIVE_MAX` | `256` | how many notes it keeps live with each peer; `0` sweeps only |
 
 ```toml
 name = "fasttrackstudio"
@@ -79,6 +80,41 @@ docs = "vaults/docs"
 [sites]
 "/" = "docs"
 ```
+
+## Live sync
+
+`apps/desktop/src/node/live.rs`: for each peer it dials, the node holds one
+iroh connection and on it one `crdt::peer::bridge` per note either side
+holds, up to `ARCHITECT_LIVE_MAX`. A bridge is two ordinary `DocSync`
+sessions, one on this node's registry and one on the peer's, through an
+in-memory pipe: what either side publishes goes to the other as soon as it
+arrives, and every editor attached to either registry sees it. The node
+re-lists the peer's notes every few seconds, so a new note gets a bridge; a
+note the peer holds and this node does not is made here.
+
+It bridges the peers it is configured with (`ARCHITECT_PEERS`) and, of those
+the lookup finds, the ones whose endpoint id is higher than its own, so two
+nodes that each know the other open one set of bridges. The sweep reaches
+the rest, and catches up whatever a dropped connection missed.
+
+A file edited on disk reaches the note's document at once (`vault_collab`
+merges it in), and the peer writes its file after the write-behind (about a
+second). `apps/desktop/tests/node.rs`
+`an_edit_reaches_the_other_node_live_within_a_second` measures the document,
+with sweeps an hour apart.
+
+**A vault seeded on two nodes.** Two nodes that each made a note from their
+own copy of the file hold two documents of one id
+(`crdt::peer::FOREIGN_LINEAGE`), and syncing them as they are would put every
+line in twice. The bridge or sweep that meets them settles it
+(`crdt::peer::adopt_lineage`): the second seed adopts the first's lineage.
+Both histories are merged and reverted to the first seed's text in one
+change, so the note is one document again and reads as the first seed did.
+"First" is the history with the oldest first change, then the lower peer id,
+so every node picks the same one, and two nodes settling at once write the
+same change. If the two copies said the same thing (one vault copied twice),
+nothing is lost. If they differed, the second copy's text is kept only in the
+history.
 
 ## An org's devices
 
@@ -167,8 +203,9 @@ pod needs:
 - **Signed-in web clients on `/vox`.** The vox and HTTP lanes carry only the
   public `Node` service. The vaults reach a browser through a Site, not live.
   A web app editing a vault needs an issuer-bearer identity on those lanes.
-- **Live sessions.** Peers converge by sweeps (`ARCHITECT_SWEEP_SECS`), not by
-  a live `DocSync` session per open note.
-- **A vault's first copy.** Two nodes that each made "the same" note on their
-  own hold two documents of one id (`crdt::peer::FOREIGN_LINEAGE`). Seed a
-  vault on one node and let the others pull it.
+- **Live bridges per note, not per vault.** A node keeps a session per note
+  with each peer, up to `ARCHITECT_LIVE_MAX`; a large vault's other notes wait
+  for the sweep. One multiplexed session per vault would lift the cap.
+- **A second seed's own text.** When two seeds of a note differ, the second's
+  text is in the history but not the note. A three-way merge needs a base the
+  two copies never shared.

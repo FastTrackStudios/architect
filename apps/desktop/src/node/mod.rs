@@ -23,9 +23,13 @@
 //! - **A sync peer for the vaults.** Each vault's notes are documents
 //!   (`vault_collab::VaultCollab`: a file is a Loro document, written
 //!   behind to the file, an outside edit merged in). [`catalog`] names
-//!   them on the peer lane; every [`Config::sweep_secs`] the node pulls
-//!   from and pushes to each peer it can dial (`crdt::peer::pull`), so an
-//!   edit on one device reaches another through it.
+//!   them on the peer lane. With each peer it dials it keeps a live
+//!   `DocSync` bridge per note ([`live`], `crdt::peer::bridge`), so an
+//!   edit reaches the others within a round trip; every
+//!   [`Config::sweep_secs`] it also pulls from and pushes to each peer
+//!   (`crdt::peer::pull_with`), the fallback for whatever a bridge missed.
+//!   A note seeded on two nodes separately is settled: the second seed
+//!   adopts the first's lineage (`crdt::peer::adopt_lineage`).
 //! - **In an issuer org** ([`org`]). With [`Config::host_org`] it serves
 //!   the org's enrolment lane (`/org/{slug}/vox`): a member enrols a
 //!   device with a role, lists and revokes; an enrolled device syncs the
@@ -39,6 +43,7 @@
 
 pub mod catalog;
 pub mod config;
+mod live;
 pub mod org;
 pub mod service;
 
@@ -61,7 +66,7 @@ use architect_devices::account::{self, AccountNode, ThisDevice};
 use architect_permissions::Principal;
 use auth_proto::{AccountOrg, PeerDevice};
 use crdt::p2p::{NodeAccess, Shares, node_router};
-use crdt::peer::{DocAt, DocPeerClient, SelfLane};
+use crdt::peer::{DocAt, DocPeerClient, Foreign, SelfLane};
 use tokio::task::JoinHandle;
 use vault_live::Backend;
 
@@ -77,6 +82,8 @@ const PER_DOC: Duration = Duration::from_secs(20);
 const PER_PEER: Duration = Duration::from_secs(120);
 /// How often the account pass runs once the account's devices are known.
 const ACCOUNT_EVERY: Duration = Duration::from_secs(300);
+/// How often the account pass runs while the node is alone on it.
+const ACCOUNT_ALONE: Duration = Duration::from_secs(2);
 /// How long the vault is left to settle before a Site is rebuilt.
 const SITE_SETTLE: Duration = Duration::from_millis(750);
 
@@ -108,6 +115,7 @@ pub struct Running {
     /// What its services answer from.
     pub state: NodeState,
     tasks: Vec<JoinHandle<()>>,
+    registry: crdt::DocRegistry,
     _watching: Option<vault_live::sync::WatcherHandle>,
     _self_lane: Arc<SelfLane>,
 }
@@ -128,6 +136,25 @@ impl Running {
             .into_iter()
             .next()
             .map(|sock| format!("{}@{sock}", self.endpoint.id()))
+    }
+
+    /// The body of note `path` in vault `vault`, as its live document
+    /// holds it now (the file follows after the write-behind).
+    pub fn note_text(
+        &self,
+        vault: &str,
+        path: &str,
+    ) -> impl Future<Output = Option<String>> + Send + 'static {
+        let registry = self.registry.clone();
+        let doc_id = vault_proto::collab_doc_id(vault, path);
+        async move {
+            let doc = registry.doc(doc_id).await.ok()?;
+            Some(
+                doc.loro()
+                    .get_text(vault_proto::COLLAB_BODY_CONTAINER)
+                    .to_string(),
+            )
+        }
     }
 
     /// Stop it: its tasks, then its endpoint.
@@ -307,6 +334,16 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         .map_err(StartError::Other)?,
     );
     let dials = parse_peers(&config.peers);
+    tasks.push(tokio::spawn(live::live_forever(live::Live {
+        endpoint: endpoint.clone(),
+        lane: Arc::clone(&self_lane),
+        catalog: catalog.clone(),
+        admission: admission.clone(),
+        configured: dials.clone(),
+        mode: config.iroh,
+        every,
+        max: config.live_max,
+    })));
     tasks.push(tokio::spawn(sweep_forever(
         endpoint.clone(),
         Arc::clone(&self_lane),
@@ -395,6 +432,7 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         endpoint,
         state,
         tasks,
+        registry,
         _watching: watching,
         _self_lane: self_lane,
     })
@@ -682,7 +720,11 @@ async fn keep_on_account(
                     view.signed_in = true;
                 }
                 tracing::debug!(admitted = report.admitted.len(), "account pass");
-                if alone { retry } else { ACCOUNT_EVERY }
+                if alone {
+                    retry.min(ACCOUNT_ALONE)
+                } else {
+                    ACCOUNT_EVERY
+                }
             }
             Err(why) => {
                 pool.evict(&target);
@@ -768,6 +810,7 @@ async fn sweep_forever(
                     listed = report.listed,
                     exchanged = report.exchanged,
                     pulled = report.pulled,
+                    adopted = report.adopted,
                     failed = report.failed,
                     "swept a peer"
                 ),
@@ -804,9 +847,15 @@ async fn sweep(
             tracing::debug!(name = %held.name, "a peer's document of a vault this node does not hold");
         }
     }
-    crdt::peer::pull(lane, &client, &catalog.digests(), PER_DOC)
-        .await
-        .map_err(|e| format!("{e:?}"))
+    crdt::peer::pull_with(
+        lane,
+        &client,
+        &catalog.digests(),
+        PER_DOC,
+        Foreign::AdoptFirst,
+    )
+    .await
+    .map_err(|e| format!("{e:?}"))
 }
 
 /// Build `vault`'s Site into `out` now, and again whenever it changes.

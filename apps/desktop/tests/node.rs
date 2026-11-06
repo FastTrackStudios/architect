@@ -15,6 +15,11 @@
 //! - the always-on node answers `/health`, its HTTP face, and serves the
 //!   vault as a Site.
 //!
+//! Live, with sweeps an hour apart so only the live bridges can carry it:
+//! an edit reaches the other node's document within a second, both ways;
+//! and a vault seeded on both nodes separately becomes one document per
+//! note (the second seed adopts the first's lineage), its text once.
+//!
 //! And in an issuer org (`indie`: Grace its owner, Alan a member), with
 //! nodes on two accounts: Grace's node hosts the org's enrolment lane,
 //! Alan's enrols itself there and syncs the vault; Alan enrols a device
@@ -423,4 +428,150 @@ async fn a_member_enrols_in_an_org_and_a_revoke_refuses_the_next_call() {
 
     alan.stop().await;
     host.stop().await;
+}
+
+/// Two nodes on Ada's account, the laptop dialling the always-on one,
+/// with sweeps an hour apart: whatever moves between them moves live.
+async fn live_pair(tmp: &Path, origin: &str, seed_laptop: Option<&str>) -> (Running, Running) {
+    let always_dir = tmp.join("always-on");
+    std::fs::create_dir_all(always_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        always_dir.join("data/vaults/notes/hello.md"),
+        "# Hello\n\nSeeded on the always-on node.\n",
+    )
+    .unwrap();
+    let mut always = config(
+        "always-on",
+        &always_dir,
+        origin,
+        session(origin, &always_dir).await,
+    );
+    always.sweep_secs = 3600;
+    let always = node::start(always).await.unwrap();
+
+    let laptop_dir = tmp.join("laptop");
+    if let Some(text) = seed_laptop {
+        std::fs::create_dir_all(laptop_dir.join("data/vaults/notes")).unwrap();
+        std::fs::write(laptop_dir.join("data/vaults/notes/hello.md"), text).unwrap();
+    }
+    let mut laptop = config(
+        "laptop",
+        &laptop_dir,
+        origin,
+        session(origin, &laptop_dir).await,
+    );
+    laptop.sweep_secs = 3600;
+    laptop.peers = vec![always.dial().unwrap()];
+    let laptop = node::start(laptop).await.unwrap();
+    let (a, l) = (always.endpoint_id(), laptop.endpoint_id());
+    until("each node lets the other in", || {
+        always.state.admits(&l) && laptop.state.admits(&a)
+    })
+    .await;
+    (always, laptop)
+}
+
+/// Until `node`'s live document of `hello.md` holds `want`; how long it took.
+async fn live_text(node: &Running, want: &str) -> Duration {
+    let started = std::time::Instant::now();
+    for _ in 0..600 {
+        if node
+            .note_text("notes", "hello.md")
+            .await
+            .is_some_and(|t| t.contains(want))
+        {
+            return started.elapsed();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out: {want:?} never reached {}", node.endpoint_id());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_reaches_the_other_node_live_within_a_second() {
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (always, laptop) = live_pair(tmp.path(), &origin, None).await;
+    live_text(&laptop, "Seeded on the always-on node.").await;
+
+    let body = "# Hello\n\nSeeded on the always-on node.\n\nLive from the always-on node.\n";
+    always
+        .state
+        .write("notes".into(), "hello.md".into(), body.into())
+        .await
+        .unwrap();
+    let there = live_text(&laptop, "Live from the always-on node.").await;
+
+    let body = format!("{body}\nLive from the laptop.\n");
+    laptop
+        .state
+        .write("notes".into(), "hello.md".into(), body)
+        .await
+        .unwrap();
+    let back = live_text(&always, "Live from the laptop.").await;
+    assert!(
+        there < Duration::from_secs(1) && back < Duration::from_secs(1),
+        "live sync took {there:?} there and {back:?} back"
+    );
+    // And the file follows, after the write-behind.
+    until("the laptop's file has the edit", || {
+        reads(&note(&laptop), "Live from the always-on node.")
+    })
+    .await;
+
+    laptop.stop().await;
+    always.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_vault_seeded_on_two_nodes_becomes_one_document() {
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (always, laptop) = live_pair(
+        tmp.path(),
+        &origin,
+        Some("# Hello\n\nSeeded on the always-on node.\n"),
+    )
+    .await;
+
+    // After the second seed adopts the first's lineage, an edit on one
+    // reaches the other merged into one copy of the text, not two.
+    let body = "# Hello\n\nSeeded on the always-on node.\n\nAfter both seeds.\n";
+    let mut arrived = false;
+    for _ in 0..20 {
+        always
+            .state
+            .write("notes".into(), "hello.md".into(), body.into())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        if laptop
+            .note_text("notes", "hello.md")
+            .await
+            .is_some_and(|t| t.contains("After both seeds."))
+        {
+            arrived = true;
+            break;
+        }
+    }
+    assert!(arrived, "the edit never reached the second seed");
+    for node in [&always, &laptop] {
+        let text = node.note_text("notes", "hello.md").await.unwrap();
+        assert_eq!(
+            text.matches("Seeded on the always-on node.").count(),
+            1,
+            "one document, the text once: {text:?}"
+        );
+        assert_eq!(text.matches("After both seeds.").count(), 1, "{text:?}");
+    }
+    until("the laptop's file has one copy", || {
+        std::fs::read_to_string(note(&laptop)).is_ok_and(|t| {
+            t.contains("After both seeds.")
+                && t.matches("Seeded on the always-on node.").count() == 1
+        })
+    })
+    .await;
+
+    laptop.stop().await;
+    always.stop().await;
 }

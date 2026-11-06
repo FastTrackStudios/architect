@@ -28,6 +28,7 @@ use crdt::peer::{
     DocCatalog, DocPeerClient, DocPeerDispatcher, DocPeerHost, Exchanged, OpenDocs, PeerLane,
     SelfLane, SessionEnd, doc_peer_service_descriptor, exchange, pull,
 };
+use crdt::peer::{Foreign, bridge, pull_with};
 use crdt::registry::DocRegistry;
 use proptest::prelude::*;
 use uuid::Uuid;
@@ -314,6 +315,124 @@ async fn a_foreign_lineage_is_refused() {
     assert_eq!((r.exchanged, r.foreign, r.pulled), (1, 1, 0));
     assert_eq!(value(&b, doc_id, "k").await.as_deref(), Some("b's"));
     assert_eq!(value(&a, doc_id, "k").await.as_deref(), Some("a's"));
+}
+
+async fn seed(node: &Node, doc_id: Uuid, text: &str) {
+    let doc = node.registry.doc(doc_id).await.expect("open doc");
+    doc.loro().get_text("body").insert(0, text).unwrap();
+    doc.loro().commit();
+}
+
+async fn body(node: &Node, doc_id: Uuid) -> String {
+    let doc = node.registry.doc(doc_id).await.expect("open doc");
+    doc.loro().get_text("body").to_string()
+}
+
+async fn until_value(node: &Node, doc_id: Uuid, key: &str, want: &str) -> Duration {
+    let started = std::time::Instant::now();
+    for _ in 0..400 {
+        if value(node, doc_id, key).await.as_deref() == Some(want) {
+            return started.elapsed();
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("{key} never became {want} on {}", node.name);
+}
+
+// A live bridge: each edit reaches the other registry without a sweep,
+// both ways, and a third edit after the first proves it stays up.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bridge_keeps_a_document_live_both_ways() {
+    let doc_id = Uuid::new_v4();
+    let a = node("a", &["b"], &[]);
+    let b = node("b", &["a"], &[]);
+    edit(&a, doc_id, "k", "seeded on a").await;
+    let local = self_lane(&b).await;
+    let (peer, server) = dial(&a, host("b")).await;
+    let lane = PeerLane {
+        client: &peer,
+        name: "k",
+    };
+    let live = bridge(doc_id, &local, &lane);
+    let check = async {
+        until_value(&b, doc_id, "k", "seeded on a").await;
+        edit(&a, doc_id, "k", "edited on a").await;
+        let there = until_value(&b, doc_id, "k", "edited on a").await;
+        edit(&b, doc_id, "k", "edited on b").await;
+        let back = until_value(&a, doc_id, "k", "edited on b").await;
+        edit(&a, doc_id, "other", "still live").await;
+        until_value(&b, doc_id, "other", "still live").await;
+        (there, back)
+    };
+    let (there, back) = tokio::select! {
+        end = live => panic!("the bridge ended: {end:?}"),
+        took = check => took,
+    };
+    assert!(
+        there < Duration::from_secs(1) && back < Duration::from_secs(1),
+        "{there:?} {back:?}"
+    );
+    server.abort();
+}
+
+// Two nodes seeded one document separately: a pull that adopts makes the
+// second seed take the first's lineage, the text once, and they converge.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_seed_adopts_the_first_lineage() {
+    let doc_id = Uuid::new_v4();
+    let a = node("a", &["b"], &[]);
+    let b = node("b", &["a"], &[]);
+    seed(&a, doc_id, "one vault, copied twice\n").await;
+    seed(&b, doc_id, "one vault, copied twice\n").await;
+
+    let local = self_lane(&b).await;
+    let (peer, server) = dial(&a, host("b")).await;
+    let ours = digests(&b).await;
+    let r = pull_with(&local, &peer, &ours, PER_DOC, Foreign::AdoptFirst)
+        .await
+        .unwrap();
+    assert_eq!((r.exchanged, r.adopted, r.foreign), (1, 1, 0), "{r:?}");
+    assert_eq!(body(&a, doc_id).await, "one vault, copied twice\n");
+    assert_eq!(body(&b, doc_id).await, "one vault, copied twice\n");
+
+    // One document now: an edit on either side merges, nothing doubled.
+    let doc = b.registry.doc(doc_id).await.unwrap();
+    doc.loro().get_text("body").insert(0, "edited: ").unwrap();
+    doc.loro().commit();
+    let r = sweep(&b, &a).await;
+    assert_eq!((r.foreign, r.adopted), (0, 0), "{r:?}");
+    assert_eq!(body(&a, doc_id).await, "edited: one vault, copied twice\n");
+    server.abort();
+}
+
+// Both nodes adopt at once (each pulls the other): they still converge on
+// one copy of the first seed's text.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_nodes_adopting_at_once_converge_on_one_copy() {
+    let doc_id = Uuid::new_v4();
+    let a = node("a", &["b"], &[]);
+    let b = node("b", &["a"], &[]);
+    seed(&a, doc_id, "first\n").await;
+    seed(&b, doc_id, "second\n").await;
+    let (la, lb) = (self_lane(&a).await, self_lane(&b).await);
+    let (to_a, sa) = dial(&a, host("b")).await;
+    let (to_b, sb) = dial(&b, host("a")).await;
+    let (oa, ob) = (digests(&a).await, digests(&b).await);
+    let (ra, rb) = tokio::join!(
+        pull_with(&lb, &to_a, &ob, PER_DOC, Foreign::AdoptFirst),
+        pull_with(&la, &to_b, &oa, PER_DOC, Foreign::AdoptFirst),
+    );
+    assert_eq!(ra.unwrap().foreign + rb.unwrap().foreign, 0);
+    sweep(&a, &b).await;
+    sweep(&b, &a).await;
+    let (ta, tb) = (body(&a, doc_id).await, body(&b, doc_id).await);
+    assert_eq!(ta, tb);
+    assert!(
+        ta == "first\n" || ta == "second\n",
+        "one seed's text, once: {ta:?}"
+    );
+    sa.abort();
+    sb.abort();
 }
 
 #[derive(Debug, Clone)]
