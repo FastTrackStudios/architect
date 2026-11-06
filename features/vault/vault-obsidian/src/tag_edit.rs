@@ -21,8 +21,9 @@
 //! A frontmatter value that is a list stays a list; one written as text
 //! (`tags: a, b`) is split on commas and spaces, and written back as text
 //! when one tag is left, as a list when more are. A property left empty
-//! goes. The frontmatter is written again only when it changed, and the
-//! body only where a tag was.
+//! goes. The frontmatter is written again only when it changed, and then
+//! only the changed keys' lines, in their style (a flow list stays one:
+//! [`crate::frontmatter_write`]); the body only where a tag was.
 
 use std::ops::Range;
 use std::sync::OnceLock;
@@ -31,7 +32,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::mutate::{MutateError, has_yaml_content};
-use crate::obsidian_parse::{TAG_REGEX, parse_frontmatter, serialize_frontmatter};
+use crate::obsidian_parse::{TAG_REGEX, parse_frontmatter};
 
 /// A change to a note's tags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -388,7 +389,7 @@ pub fn edit_tags(raw: &str, edit: &TagEdit<'_>) -> Result<Option<String>, Mutate
         return Ok(None);
     }
     let head = if fm_changed {
-        serialize_frontmatter(&fm)
+        crate::frontmatter_write::write_frontmatter(raw, offset, &before, &fm)
     } else {
         raw[..offset].to_owned()
     };
@@ -422,10 +423,7 @@ mod tests {
         );
         let raw = "---\ntitle: x\ntags: [a, project/alpha]\n---\nText #project/beta here\n";
         let out = edit(raw, TagEdit::Add("Project"));
-        assert_eq!(
-            out,
-            "---\ntitle: x\ntags:\n- a\n- Project\n---\nText here\n"
-        );
+        assert_eq!(out, "---\ntitle: x\ntags: [a, Project]\n---\nText here\n");
         assert!(
             edit_tags(&out, &TagEdit::Add("project/gamma"))
                 .unwrap()
@@ -444,7 +442,7 @@ mod tests {
         let out = edit(raw, TagEdit::Remove("work"));
         assert_eq!(
             out,
-            "---\ntags:\n- work/meeting\naliases:\n- Other\n---\nA b #work/meeting\n"
+            "---\ntags: [work/meeting]\naliases: [Other]\n---\nA b #work/meeting\n"
         );
     }
 
@@ -469,7 +467,7 @@ mod tests {
         );
         assert_eq!(
             out,
-            "---\ntags:\n- x\n- x/Child\n- other\n---\nSee #x/Child and #a/bc and #x.\n"
+            "---\ntags: [x, x/Child, other]\n---\nSee #x/Child and #a/bc and #x.\n"
         );
         // Text frontmatter untouched when only the body has the tag.
         let raw = "---\ntags: [keep]\n---\n#old here\n";
@@ -496,7 +494,7 @@ mod tests {
         let raw = "---\ntags: [music, music/guitar, musical]\n---\nPlay #music/theory now\n";
         assert_eq!(
             edit(raw, TagEdit::Delete("music")),
-            "---\ntags:\n- musical\n---\nPlay now\n"
+            "---\ntags: [musical]\n---\nPlay now\n"
         );
     }
 

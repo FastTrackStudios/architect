@@ -44,6 +44,7 @@
 )]
 
 pub mod config;
+pub mod frontmatter_write;
 pub mod guard;
 pub mod links;
 // Migrated out of the deleted `knowledge-proto` crate. Holds

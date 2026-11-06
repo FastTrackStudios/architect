@@ -72,7 +72,7 @@ Links and tags, over the same `OpenVault` (`links::actions::register`, `tag::act
 | `TAGS_RENAME {from, to}` | mutating | renames a tag and the tags below it in every note |
 | `TAGS_DELETE {tag}` | destructive | takes a tag and the tags below it off every note |
 
-The tag writes edit the markdown (`features/vault/vault-obsidian/src/tag_edit.rs` `edit_tags`, `TagEdit`): the frontmatter's `tags`/`tag` (and `#` aliases) and inline `#tags` as the parser reads them, not in code or links. `OpenVault::edit_tags` and `edit_tags_everywhere` do them from an app (the navigator's `VaultSource`); `OpenVault::remove_property` removes a property.
+The tag writes edit the markdown (`features/vault/vault-obsidian/src/tag_edit.rs` `edit_tags`, `TagEdit`): the frontmatter's `tags`/`tag` (and `#` aliases) and inline `#tags` as the parser reads them, not in code or links. `OpenVault::edit_tags` and `edit_tags_everywhere` do them from an app (the navigator's `VaultSource`); `OpenVault::remove_property` removes a property. Every frontmatter write (`edit_frontmatter`, `edit_tags`, `VAULT_SET_PROPERTY`) edits the block in place (`features/vault/vault-obsidian/src/frontmatter_write.rs` `write_frontmatter`): only the changed keys' lines are written again, a flow list stays a flow list, quotes stay, and the untouched lines are kept byte for byte.
 
 Tests: `features/vault/vault/tests/actions.rs`, `features/links/links/tests/actions.rs`, `features/tags/tag/tests/actions.rs` (over the sandbox's sample), `features/vault/vault-entity/tests/index.rs` (the index rules).
 
