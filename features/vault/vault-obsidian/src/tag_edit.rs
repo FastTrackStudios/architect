@@ -70,7 +70,8 @@ pub fn under(key: &str, want: &str) -> bool {
 /// `hasValidTagCharacters`).
 #[must_use]
 pub fn valid_tag(tag: &str) -> bool {
-    let t = tag.trim().strip_prefix('#').unwrap_or(tag.trim());
+    let t = tag.trim();
+    let t = t.strip_prefix('#').unwrap_or(t);
     !t.is_empty()
         && !t.starts_with('/')
         && !t.ends_with('/')

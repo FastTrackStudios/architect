@@ -6,14 +6,22 @@
 //! shown it is level 0 and its folders level 1, else the top folders are
 //! level 0. Siblings in a parent's manual order first, the rest A to Z
 //! (`sortFolderSiblings`, natural order). Spacers at the top and bottom
-//! (`TOP_SPACER` 8, `BOTTOM_SPACER` 20). Later layers add their own rows
-//! (tags, properties, shortcuts, recent notes) as more [`NavRowKind`]s.
+//! (`TOP_SPACER` 8, `BOTTOM_SPACER` 20).
+//!
+//! Under the folders, the tags ([`tag_rows`], `flattenTagTree`): the
+//! "Tags" row over them (its tags one level in) or the tags at the top,
+//! Untagged among the roots; then the property browser
+//! ([`property_rows`]): the "Properties" row, its keys, each key's values.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::index::{NoteCount, VaultIndex};
+use crate::properties::{PropertyTree, ROOT, key_id, value_id};
+use crate::selection::NavTarget;
+use crate::settings::TreeSort;
 use crate::source::file_name;
+use crate::tags::{TAGGED, TagTree, UNTAGGED};
 
 /// Notebook Navigator's `NAVPANE_MEASUREMENTS`: the spacers' heights.
 pub const TOP_SPACER: f64 = 8.0;
@@ -28,6 +36,30 @@ pub enum NavRowKind {
         path: String,
         name: String,
         /// It holds folders: it has a chevron.
+        has_children: bool,
+        expanded: bool,
+        count: NoteCount,
+    },
+    /// A tag, or the "Tags" ([`crate::tags::TAGGED`]) or "Untagged"
+    /// ([`crate::tags::UNTAGGED`]) row.
+    Tag {
+        /// Its path as written (what selecting it lists), or the row's id.
+        tag: String,
+        /// Its key ([`crate::tags::tag_key`]), or the row's id.
+        key: String,
+        name: String,
+        has_children: bool,
+        expanded: bool,
+        count: NoteCount,
+    },
+    /// A property's key or one of its values, or the "Properties" row
+    /// (key [`crate::properties::ROOT`]).
+    Property {
+        /// Folded.
+        key: String,
+        /// Its path, for a value.
+        value: Option<String>,
+        name: String,
         has_children: bool,
         expanded: bool,
         count: NoteCount,
@@ -59,8 +91,238 @@ impl NavRow {
     /// Whether the keyboard and a click can select it.
     #[must_use]
     pub const fn selectable(&self) -> bool {
-        matches!(self.kind, NavRowKind::Folder { .. })
+        matches!(
+            self.kind,
+            NavRowKind::Folder { .. } | NavRowKind::Tag { .. } | NavRowKind::Property { .. }
+        )
     }
+
+    /// What selecting it selects.
+    #[must_use]
+    pub fn target(&self) -> Option<NavTarget> {
+        match &self.kind {
+            NavRowKind::Folder { path, .. } => Some(NavTarget::Folder(path.clone())),
+            NavRowKind::Tag { tag, .. } => Some(NavTarget::Tag(tag.clone())),
+            NavRowKind::Property { key, value, .. } => Some(NavTarget::Property {
+                key: key.clone(),
+                value: value.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Whether it has rows below it, and they show.
+    #[must_use]
+    pub const fn expansion(&self) -> Option<bool> {
+        match &self.kind {
+            NavRowKind::Folder {
+                has_children: true,
+                expanded,
+                ..
+            }
+            | NavRowKind::Tag {
+                has_children: true,
+                expanded,
+                ..
+            }
+            | NavRowKind::Property {
+                has_children: true,
+                expanded,
+                ..
+            } => Some(*expanded),
+            _ => None,
+        }
+    }
+}
+
+/// How the tags are drawn.
+#[derive(Debug, Clone, Copy)]
+pub struct TagRowOptions<'a> {
+    /// The "Tags" row over them (`showAllTagsFolder`).
+    pub all_row: bool,
+    /// The "Untagged" row (`showUntagged`), when a note has no tag.
+    pub untagged: bool,
+    pub sort: TreeSort,
+    /// Notes from below count (`includeDescendantNotes`).
+    pub below: bool,
+    /// The roots as a person ordered them (`rootTagOrder`).
+    pub order: &'a [String],
+}
+
+/// The tag rows: the "Tags" row and the tags below it when it is open (or
+/// the tags at the top), each open one's children; `expanded` holds the
+/// open tags' keys (and [`TAGGED`]).
+#[must_use]
+pub fn tag_rows(tree: &TagTree, expanded: &BTreeSet<String>, o: &TagRowOptions<'_>) -> Vec<NavRow> {
+    let mut rows = Vec::new();
+    let untagged = o.untagged && tree.untagged > 0;
+    if tree.is_empty() && !untagged {
+        return rows;
+    }
+    let level = if o.all_row {
+        let open = expanded.contains(TAGGED);
+        rows.push(NavRow {
+            key: format!("tag:{TAGGED}"),
+            level: 0,
+            kind: NavRowKind::Tag {
+                tag: TAGGED.to_owned(),
+                key: TAGGED.to_owned(),
+                name: "Tags".to_owned(),
+                has_children: true,
+                expanded: open,
+                count: NoteCount {
+                    current: if o.below { tree.tagged } else { 0 },
+                    descendants: 0,
+                },
+            },
+        });
+        if !open {
+            return rows;
+        }
+        1
+    } else {
+        0
+    };
+    for root in tree.roots(o.order, o.sort, o.below, untagged) {
+        if root == UNTAGGED {
+            rows.push(NavRow {
+                key: format!("tag:{UNTAGGED}"),
+                level,
+                kind: NavRowKind::Tag {
+                    tag: UNTAGGED.to_owned(),
+                    key: UNTAGGED.to_owned(),
+                    name: "Untagged".to_owned(),
+                    has_children: false,
+                    expanded: false,
+                    count: NoteCount {
+                        current: tree.untagged,
+                        descendants: 0,
+                    },
+                },
+            });
+        } else {
+            walk_tag(tree, &root, level, expanded, o, &mut rows);
+        }
+    }
+    rows
+}
+
+fn walk_tag(
+    tree: &TagTree,
+    key: &str,
+    level: u16,
+    expanded: &BTreeSet<String>,
+    o: &TagRowOptions<'_>,
+    rows: &mut Vec<NavRow>,
+) {
+    let Some(node) = tree.get(key) else {
+        return;
+    };
+    let open = expanded.contains(key);
+    let has_children = !node.children.is_empty();
+    let mut count = node.count();
+    if !o.below {
+        count.descendants = 0;
+    }
+    rows.push(NavRow {
+        key: format!("tag:{key}"),
+        level,
+        kind: NavRowKind::Tag {
+            tag: node.display.clone(),
+            key: key.to_owned(),
+            name: node.name.clone(),
+            has_children,
+            expanded: open && has_children,
+            count,
+        },
+    });
+    if open {
+        for c in tree.children(key, o.sort, o.below) {
+            walk_tag(tree, &c, level.saturating_add(1), expanded, o, rows);
+        }
+    }
+}
+
+/// The property browser's rows: the "Properties" row, its keys when it is
+/// open, an open key's values; `expanded` holds [`ROOT`] and the open
+/// keys' ids ([`crate::properties::key_id`]).
+#[must_use]
+pub fn property_rows(
+    tree: &PropertyTree,
+    expanded: &BTreeSet<String>,
+    sort: TreeSort,
+    below: bool,
+    order: &[String],
+) -> Vec<NavRow> {
+    let mut rows = Vec::new();
+    if tree.is_empty() {
+        return rows;
+    }
+    let open = expanded.contains(ROOT);
+    rows.push(NavRow {
+        key: format!("property:{ROOT}"),
+        level: 0,
+        kind: NavRowKind::Property {
+            key: ROOT.to_owned(),
+            value: None,
+            name: "Properties".to_owned(),
+            has_children: true,
+            expanded: open,
+            count: NoteCount {
+                current: if below { tree.notes.len() } else { 0 },
+                descendants: 0,
+            },
+        },
+    });
+    if !open {
+        return rows;
+    }
+    for key in tree.roots(order, sort, below) {
+        let Some(k) = tree.key(&key) else { continue };
+        let id = key_id(&key);
+        let values = tree.values(&key, sort);
+        let open = expanded.contains(&id) && !values.is_empty();
+        let mut count = k.count();
+        if !below {
+            count.descendants = 0;
+        }
+        rows.push(NavRow {
+            key: format!("property:{id}"),
+            level: 1,
+            kind: NavRowKind::Property {
+                key: key.clone(),
+                value: None,
+                name: k.name.clone(),
+                has_children: !values.is_empty(),
+                expanded: open,
+                count,
+            },
+        });
+        if !open {
+            continue;
+        }
+        for v in values {
+            let Some(node) = k.values.get(&v) else {
+                continue;
+            };
+            rows.push(NavRow {
+                key: format!("property:{}", value_id(&key, &v)),
+                level: 2,
+                kind: NavRowKind::Property {
+                    key: key.clone(),
+                    value: Some(v.clone()),
+                    name: node.name.clone(),
+                    has_children: false,
+                    expanded: false,
+                    count: NoteCount {
+                        current: node.notes.len(),
+                        descendants: 0,
+                    },
+                },
+            });
+        }
+    }
+    rows
 }
 
 /// What the tree is drawn with.

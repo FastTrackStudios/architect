@@ -30,6 +30,7 @@ use crate::state::{Key as NavKey, Mods, NavigatorState, OpenIn, Outcome};
 mod calendar;
 mod panes;
 pub mod theme;
+mod tree_rows;
 mod virtual_pane;
 
 pub use theme::{NavigatorColours, TOKENS, with_tokens};
@@ -71,6 +72,18 @@ pub struct Navigator {
     /// A periodic note waiting to be made, and its path: the person is
     /// asked first (`calendarConfirmBeforeCreate`).
     pub confirm: Signal<Option<(Outcome, String)>>,
+    /// A write that changes many notes (a tag renamed or deleted), and
+    /// what the person is asked before it.
+    pub ask: Signal<Option<(String, Outcome)>>,
+    /// A name asked for (a tag's new name, a property's value).
+    pub prompt: Signal<Option<tree_rows::Prompt>>,
+    /// A tag's or a property's menu, open.
+    pub menu: Signal<Option<tree_rows::RowMenu>>,
+    /// Notes or a tag being dragged.
+    pub drag: Signal<Option<tree_rows::DragNow>>,
+    /// The navigation pane's place on screen (x, y, width, height): where
+    /// a drag finds the row under it.
+    pub(crate) nav_box: CopyValue<Option<(f64, f64, f64, f64)>>,
 }
 
 /// The navigator over `source`, kept while the caller is mounted: its
@@ -97,6 +110,11 @@ pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navig
         notice: use_signal(|| None),
         own: use_signal(|| false),
         confirm: use_signal(|| None),
+        ask: use_signal(|| None),
+        prompt: use_signal(|| None),
+        menu: use_signal(|| None),
+        drag: use_signal(|| None),
+        nav_box: use_hook(|| CopyValue::new(None)),
     };
     // The settings page's changes.
     use_effect(move || {
@@ -317,6 +335,9 @@ impl Navigator {
             }
             Some(Outcome::Write { ops, open }) => match self.source.read().write(&ops) {
                 Ok(()) => {
+                    // A tag renamed or deleted: its colours, order and
+                    // selection follow.
+                    self.update(|s| s.after_write(&ops));
                     if let Some((path, how)) = open {
                         on_open.call(Open {
                             path,
@@ -839,6 +860,8 @@ pub fn NavigatorView(
         }
     };
     let confirm = nav.confirm.read().clone();
+    let ask = nav.ask.read().clone();
+    let prompt = nav.prompt.read().clone();
     rsx! {
         document::Style { {CSS} }
         document::Style { {calendar::CSS} }
@@ -852,6 +875,12 @@ pub fn NavigatorView(
             {body}
             if let Some((out, path)) = confirm {
                 ConfirmCreate { nav, on_open, out, path }
+            }
+            if let Some((text, out)) = ask {
+                tree_rows::AskBar { nav, on_open, text, out }
+            }
+            if let Some(prompt) = prompt {
+                tree_rows::PromptBar { key: "{prompt.title}", nav, on_open, prompt }
             }
         }
     }

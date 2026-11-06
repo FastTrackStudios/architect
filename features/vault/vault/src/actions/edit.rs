@@ -356,6 +356,7 @@ impl OpenVault {
                 changed.push(path.clone());
             }
         }
+        drop(v);
         Ok(changed)
     }
 

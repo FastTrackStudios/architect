@@ -17,11 +17,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::index::VaultIndex;
+use crate::properties;
+use crate::query::Query;
 use crate::selection::NavTarget;
 use crate::settings::{
     CountPlacement, Grouping, ListMode, NavigatorSettings, SortOption, TextCount,
 };
 use crate::source::{Millis, NoteFile, PropertyValue, file_name, parent};
+use crate::tags::{self, TAGGED, UNTAGGED};
 use crate::tree::{TreeOptions, natural_cmp, ordered_children};
 use vault_live::grouping::{Order, group_by};
 
@@ -156,10 +159,13 @@ pub struct ListContext<'a> {
     pub collapsed: &'a BTreeSet<String>,
     /// The tree's order, for folder groups.
     pub tree: &'a TreeOptions,
+    /// The search a ⌘/Ctrl-click built: the notes it matches.
+    pub query: &'a Query,
 }
 
 /// The notes of a folder (and the folders below it when the settings say
-/// so) or a tag, as `rows` lists them: what is hidden left out, unsorted.
+/// so), a tag or a property, as `rows` lists them: what is hidden left
+/// out, unsorted.
 #[must_use]
 pub fn files_of<'a>(
     index: &'a VaultIndex,
@@ -169,7 +175,30 @@ pub fn files_of<'a>(
 ) -> Vec<&'a NoteFile> {
     let files = match target {
         NavTarget::Folder(folder) => index.files_in(folder, settings.include_descendants),
+        NavTarget::Tag(tag) if tag == TAGGED => index
+            .files()
+            .filter(|f| f.is_markdown() && !f.tags.is_empty())
+            .collect(),
+        NavTarget::Tag(tag) if tag == UNTAGGED => index
+            .files()
+            .filter(|f| f.is_markdown() && f.tags.is_empty())
+            .collect(),
         NavTarget::Tag(tag) => index.files().filter(|f| has_tag(f, tag)).collect(),
+        NavTarget::Property { key, value } => {
+            let below = settings.include_descendants;
+            let keys = NavigatorSettings::list(&settings.property_keys);
+            index
+                .files()
+                .filter(|f| f.is_markdown())
+                .filter(|f| {
+                    if key == properties::ROOT {
+                        below && keys.iter().any(|k| properties::lists(f, k, None, true))
+                    } else {
+                        properties::lists(f, key, value.as_deref(), below)
+                    }
+                })
+                .collect()
+        }
     };
     let pinned = |p: &str| pins.get(p).is_some_and(|w| w.folder || w.tag);
     files
@@ -198,12 +227,23 @@ pub fn has_tag(f: &NoteFile, tag: &str) -> bool {
     })
 }
 
-/// The scope a collapse key starts with: `folder:<path>`, `tag:<tag>`.
+/// The scope a collapse key starts with: `folder:<path>`, `tag:<tag>`,
+/// `property:key:<key>[=<value>]`.
 #[must_use]
 pub fn scope_of(target: &NavTarget) -> String {
     match target {
         NavTarget::Folder(f) => format!("folder:{f}"),
         NavTarget::Tag(t) => format!("tag:{t}"),
+        NavTarget::Property { key, value: None } if key == properties::ROOT => {
+            format!("property:{}", properties::ROOT)
+        }
+        NavTarget::Property { key, value: None } => {
+            format!("property:{}", properties::key_id(key))
+        }
+        NavTarget::Property {
+            key,
+            value: Some(v),
+        } => format!("property:{}", properties::value_id(key, v)),
     }
 }
 
@@ -219,6 +259,9 @@ pub fn collapse_key(scope: &str, mode: &str, id: &str) -> String {
 pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
     let s = cx.settings;
     let mut files = files_of(index, cx.target, s, cx.pins);
+    if !cx.query.is_empty() {
+        files.retain(|f| cx.query.matches(f));
+    }
     sort(&mut files, s, cx.clock);
     let scope = scope_of(cx.target);
     let folder = cx.target.folder();
@@ -373,7 +416,7 @@ fn shown_parent(f: &NoteFile, target: &NavTarget, s: &NavigatorSettings) -> Opti
         NavTarget::Folder(folder) => {
             (s.include_descendants && p != folder && !p.is_empty()).then(|| p.to_owned())
         }
-        NavTarget::Tag(_) => (!p.is_empty()).then(|| p.to_owned()),
+        _ => (!p.is_empty()).then(|| p.to_owned()),
     }
 }
 
@@ -386,7 +429,7 @@ fn is_pinned(f: &NoteFile, cx: &ListContext<'_>) -> bool {
         NavTarget::Folder(folder) => {
             at.folder && (!cx.settings.filter_pinned_by_folder || f.folder() == folder)
         }
-        NavTarget::Tag(_) => at.tag,
+        _ => at.tag,
     }
 }
 
@@ -506,8 +549,8 @@ fn lines(
 #[must_use]
 pub fn shown_tags<'a>(f: &'a NoteFile, cx: &ListContext<'_>) -> Vec<(&'a str, &'a str)> {
     let selected = match cx.target {
-        NavTarget::Tag(t) => Some(t.trim_start_matches('#')),
-        NavTarget::Folder(_) => None,
+        NavTarget::Tag(t) if !tags::is_virtual(t) => Some(t.trim_start_matches('#')),
+        _ => None,
     };
     f.tags
         .iter()
@@ -554,8 +597,10 @@ pub struct PropertyGroup<T> {
 }
 
 /// `items` grouped by the property `value` reads from each, as Bases
-/// groups rows (`vault_live::grouping::group_by`, the one grouping in
-/// architect): a group per whole value, shown as [`value_label`]; numbers
+/// groups rows.
+///
+/// Through `vault_live::grouping::group_by`, the one grouping in
+/// architect: a group per whole value, shown as [`value_label`]; numbers
 /// first, then text in natural order; those with none last, under "None"
 /// (`getPropertyGroupingValueFromRecord`, `src/utils/sortUtils.ts`).
 pub fn property_groups<T>(

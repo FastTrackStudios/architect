@@ -39,6 +39,13 @@ pub(super) fn VirtualPane(
                 && let Ok(r) = m.get_client_rect().await
             {
                 let h = r.size.height;
+                if pane == Pane::Navigation {
+                    let at = Some((r.origin.x, r.origin.y, r.size.width, h));
+                    if *nav.nav_box.peek() != at {
+                        let mut nav_box = nav.nav_box;
+                        nav_box.set(at);
+                    }
+                }
                 if h > 0.0 && (nav.state.peek().scroll(pane).view - h).abs() > 0.5 {
                     let mut state = nav.state;
                     state.write().set_view(pane, h);

@@ -292,3 +292,69 @@ fn a_periodic_note_the_calendar_makes_lands_on_disk_with_its_folders() {
     // A second time, it is there already.
     assert!(s.write(&ops).is_err());
 }
+
+#[test]
+fn tag_writes_change_the_markdown_and_say_which_notes_changed() {
+    let (tmp, s) = source();
+    let (events, _sub) = heard(&s);
+    let read = |p: &str| std::fs::read_to_string(tmp.path().join(p)).unwrap();
+    // A tag renamed, with the tags below it: frontmatter and inline.
+    s.write(&[FileOp::AddTag {
+        paths: vec!["Notes/Deep/Deeper/Ideas.md".to_owned()],
+        tag: "work/ideas".to_owned(),
+    }])
+    .unwrap();
+    assert!(read("Notes/Deep/Deeper/Ideas.md").contains("- work/ideas"));
+    events.lock().unwrap().clear();
+    s.write(&[FileOp::RenameTag {
+        from: "work".to_owned(),
+        to: "job".to_owned(),
+    }])
+    .unwrap();
+    let plan = read("Notes/Plan.md");
+    assert!(
+        plan.contains("job/plan") && !plan.contains("work/plan"),
+        "{plan}"
+    );
+    assert!(read("Notes/Deep/Deeper/Ideas.md").contains("job/ideas"));
+    let modified: Vec<String> = events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|e| match e {
+            SourceEvent::FileModified(f) => Some(f.path.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(modified, ["Notes/Deep/Deeper/Ideas.md", "Notes/Plan.md"]);
+    assert_eq!(s.file("Notes/Plan.md").unwrap().tags, ["job/plan"]);
+    // Removed, cleared, deleted.
+    s.write(&[FileOp::RemoveTag {
+        paths: vec!["Notes/Deep/Deeper/Ideas.md".to_owned()],
+        tag: "IDEA".to_owned(),
+    }])
+    .unwrap();
+    assert_eq!(
+        read("Notes/Deep/Deeper/Ideas.md").matches("#idea").count(),
+        0
+    );
+    s.write(&[FileOp::DeleteTag("job".to_owned())]).unwrap();
+    assert!(s.file("Notes/Plan.md").unwrap().tags.is_empty());
+    assert!(
+        !read("Notes/Plan.md").contains("tags:"),
+        "{}",
+        read("Notes/Plan.md")
+    );
+    // A property's key alone is written empty (`null`).
+    s.write(&[FileOp::SetProperty {
+        path: "Notes/Plan.md".to_owned(),
+        key: "status".to_owned(),
+        value: PropertyValue::Text(String::new()),
+    }])
+    .unwrap();
+    assert!(
+        read("Notes/Plan.md").contains("status: null"),
+        "{}",
+        read("Notes/Plan.md")
+    );
+}

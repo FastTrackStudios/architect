@@ -11,14 +11,23 @@
 
 use std::collections::BTreeSet;
 
-/// What the navigation pane selects: a folder, or a tag (a tag on a note's
-/// row goes to it). Properties join it.
+/// What the navigation pane selects: a folder, a tag (a tag on a note's
+/// row goes to it), or a property's key or value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum NavTarget {
     Folder(String),
     /// A tag without `#`; its list holds the tags below it too.
+    /// [`crate::tags::TAGGED`] is every tagged note,
+    /// [`crate::tags::UNTAGGED`] the notes with none.
     Tag(String),
+    /// A property's key, and one of its values or none for the key
+    /// (both folded, [`crate::properties::fold`]);
+    /// [`crate::properties::ROOT`] with none is the "Properties" row.
+    Property {
+        key: String,
+        value: Option<String>,
+    },
 }
 
 impl NavTarget {
@@ -26,7 +35,7 @@ impl NavTarget {
     pub fn folder(&self) -> Option<&str> {
         match self {
             Self::Folder(p) => Some(p),
-            Self::Tag(_) => None,
+            _ => None,
         }
     }
 
@@ -34,7 +43,16 @@ impl NavTarget {
     pub fn tag(&self) -> Option<&str> {
         match self {
             Self::Tag(t) => Some(t),
-            Self::Folder(_) => None,
+            _ => None,
+        }
+    }
+
+    /// The key and value, if a property is what it is.
+    #[must_use]
+    pub fn property(&self) -> Option<(&str, Option<&str>)> {
+        match self {
+            Self::Property { key, value } => Some((key, value.as_deref())),
+            _ => None,
         }
     }
 }

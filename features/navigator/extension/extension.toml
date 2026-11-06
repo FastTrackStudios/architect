@@ -1315,3 +1315,140 @@ unit = ""
 placeholder = "YYYY"
 choices = []
 aliases = []
+
+[[sections.settings]]
+key = "navigator.tag_tree"
+title = "Tags"
+description = "The vault's tags under the folders, nested by `/`."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.all_tags_row"
+title = "\"Tags\" row"
+description = "The tags under one row that lists every tagged note."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_untagged"
+title = "Untagged"
+description = "A row for the notes with no tag."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.scope_tags"
+title = "Only the selection's tags"
+description = "With a folder or a property selected, the tags its notes have."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.tag_sort"
+title = "Sort tags"
+description = ""
+control = "select"
+default = "AlphaAsc"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "AlphaAsc"
+label = "A to Z"
+detail = ""
+
+[[sections.settings.choices]]
+value = "AlphaDesc"
+label = "Z to A"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyAsc"
+label = "Fewest notes first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyDesc"
+label = "Most notes first"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.property_tree"
+title = "Property browser"
+description = "The keys named below under the tags, each with its values."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.property_keys"
+title = "Property keys"
+description = "Frontmatter keys the property browser shows."
+control = "text"
+default = ""
+unit = ""
+placeholder = "status, type"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.scope_properties"
+title = "Only the selection's properties"
+description = "With a folder or a tag selected, the values its notes have."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.property_sort"
+title = "Sort properties"
+description = ""
+control = "select"
+default = "AlphaAsc"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "AlphaAsc"
+label = "A to Z"
+detail = ""
+
+[[sections.settings.choices]]
+value = "AlphaDesc"
+label = "Z to A"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyAsc"
+label = "Fewest notes first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyDesc"
+label = "Most notes first"
+detail = ""
