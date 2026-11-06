@@ -588,10 +588,10 @@ pub fn Page(
     /// Anything else the app keeps at the bar's end.
     trailing: Option<Element>,
     #[props(default = true)] scroll: bool,
-    /// How the page wants a desk's left sidebar while nobody has toggled it
-    /// here ([`use_sidebar_default`](super::use_sidebar_default)); left
-    /// out, as the shell has it.
-    sidebar: Option<super::SidebarDefault>,
+    /// The layout the page prefers for a desk's left side while nobody has
+    /// chosen one here ([`use_sidebar_layout`](super::use_sidebar_layout));
+    /// left out, as the shell has it.
+    sidebar: Option<super::SidebarLayout>,
     children: Element,
 ) -> Element {
     super::use_claim(|s| s.page_sidebar, sidebar);

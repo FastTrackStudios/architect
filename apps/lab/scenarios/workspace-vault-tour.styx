@@ -36,7 +36,7 @@ steps (
         done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
         hide true
     }
-    // The Vault opens with its sidebar folded (`SidebarDefault::Collapsed`):
+    // The Vault opens with its sidebar folded (`SidebarLayout::Rail`):
     // show it, as a person would, for the files in the left dock.
     {
         id sidebar

@@ -10,8 +10,12 @@
 //! The arrangement tab has a script's marker lane over it, and the
 //! script's tool window floats.
 
+use std::sync::Arc;
+
 use architect_navigator::ui::{NavigatorView, Open, use_navigator};
-use architect_navigator::{MemorySource, Millis, NoteFile, OpenIn, ViewState};
+use architect_navigator::{
+    MemorySource, Millis, NavigatorSource, NoteFile, OpenIn, SourceEvent, VaultSource, ViewState,
+};
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
 use architect_workspace::{
     Command, FormClass, MemoryStore, Pane, Ribbon, Screenset, Screensets, Side, Target, TitleRow,
@@ -101,6 +105,13 @@ fn views(extra: Vec<View>) -> Views {
         .view(architect_canvas::ui::window_view().icon(icon!(SlidersHorizontal)).still())
         .view(
             View::new("note", "Untitled", |_| rsx! { NoteView {} })
+                .icon(icon!(FileText))
+                .many(),
+        )
+        // A note of the vault on disk, in the editor; its path is the
+        // pane's state (a rename keeps the pane).
+        .view(
+            View::new(VAULT_NOTE, "Untitled", |_| rsx! { VaultNoteView {} })
                 .icon(icon!(FileText))
                 .many(),
         )
@@ -254,12 +265,86 @@ fn note(id: &str, title: &str) -> Pane {
     Pane::new(id, "note", title)
 }
 
-/// Where the lab starts.
+/// The view a note of the vault on disk is.
+const VAULT_NOTE: &str = "vault.note";
+
+/// A pane for the vault's note at `path`: a new id each time (a note
+/// renamed keeps its pane, and a new note may take its old name).
+fn vault_note(path: &str) -> Pane {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut pane = Pane::new(format!("vault-{n}"), VAULT_NOTE, title_of(path));
+    path.clone_into(&mut pane.state);
+    pane
+}
+
+/// The pane showing the vault's note at `path`, if one does.
+fn vault_pane_of(w: &Workspace, path: &str) -> Option<architect_workspace::PaneId> {
+    w.panes
+        .iter()
+        .find(|p| p.view.0 == VAULT_NOTE && p.state == path)
+        .map(|p| p.id.clone())
+}
+
+/// The vault's note at `path` on show: its pane forward when one is open,
+/// else a new one at `target`, in the main area (beside the note on show;
+/// never in the dock the navigator is in, even with no note open).
+fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
+    let mut workspace = workspace;
+    let mut w = workspace.write();
+    if let Some(id) = vault_pane_of(&w, path) {
+        let _ = w.activate(&id);
+        return;
+    }
+    if let Some(doc) = w.current_document().cloned() {
+        let _ = w.activate(&doc);
+    }
+    let Ok(id) = w.open(vault_note(path), target) else {
+        return;
+    };
+    let docked = w
+        .locate(&id)
+        .is_some_and(|l| l.window != 0 || matches!(l.area, architect_workspace::Area::Dock(_)));
+    let main = w
+        .windows
+        .first()
+        .and_then(|m| m.center.as_ref())
+        .and_then(architect_workspace::Node::first_group)
+        .map(|g| g.id);
+    if docked && let Some(group) = main {
+        let _ = w.move_pane(&id, architect_workspace::Dest::Group { group, index: None });
+        let _ = w.activate(&id);
+    }
+}
+
+/// A new note in `folder` of the vault on disk, opened (⌘N, the ribbon's
+/// and the empty main area's New note, the navigator's).
+fn new_vault_note(workspace: Signal<Workspace>, disk: &VaultSource, folder: &str) {
+    match disk.create_note(folder) {
+        Ok(path) => show_vault_note(workspace, &path, Target::Tab),
+        Err(e) => tracing::warn!(folder, error = %e, "lab.vault.new_note_failed"),
+    }
+}
+
+/// Where the lab starts: on a vault on disk, its Welcome note.
 fn first_workspace() -> Workspace {
+    let on_disk = crate::notes::open_vault().is_some();
     let mut w = Workspace::new();
+    let (first, second) = if on_disk {
+        (
+            (vault_note("Welcome.md"), Target::Tab),
+            (note("note-shell", "The app shell"), Target::Tab),
+        )
+    } else {
+        (
+            (note("note-welcome", "Welcome"), Target::Tab),
+            (note("note-shell", "The app shell"), Target::Tab),
+        )
+    };
     let opens = [
-        (note("note-welcome", "Welcome"), Target::Tab),
-        (note("note-shell", "The app shell"), Target::Tab),
+        first,
+        second,
         (Pane::new("arrange", "arrange", "Arrangement"), Target::Tab),
         (
             Pane::new("graph", "graph", "Graph"),
@@ -287,7 +372,9 @@ fn first_workspace() -> Workspace {
         let _ = w.open(pane, target);
     }
     let _ = w.activate(&architect_workspace::PaneId::new("files"));
-    let _ = w.activate(&architect_workspace::PaneId::new("note-welcome"));
+    if let Some(welcome) = w.panes.first().map(|p| p.id.clone()) {
+        let _ = w.activate(&welcome);
+    }
     if let Some(main) = w.windows.first_mut() {
         main.docks.left.ribbon = Some(Ribbon {
             views: vec![ViewKind::new("files"), ViewKind::new("search")],
@@ -356,10 +443,15 @@ pub fn VaultPage() -> Element {
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
     // The vault the navigator shows (the ribbon's "New note" adds to it).
-    let vault = use_lab_vault().source;
-    // The Vault's panes are its sidebar: a desk opens it folded, the
-    // switcher and the account on the ribbon.
-    architect_shell::use_sidebar_default(architect_shell::SidebarDefault::Collapsed);
+    let lab = use_lab_vault();
+    // The Vault's panes are its sidebar: on a vault on disk, two columns
+    // (the navigator's folders beside its notes); a film's in-memory one
+    // opens it folded to the rail. Every layout stays a press away.
+    architect_shell::use_sidebar_layout(if lab.disk.peek().is_some() {
+        architect_shell::SidebarLayout::Two
+    } else {
+        architect_shell::SidebarLayout::Rail
+    });
     // The lab's views, and every view a loaded extension adds (made again
     // when one loads or unloads).
     let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
@@ -385,12 +477,18 @@ pub fn VaultPage() -> Element {
     let on_command = move |id: String| {
         let (pane_id, title) = if id == "daily" {
             ("note-daily".to_owned(), "2026-10-31".to_owned())
+        } else if let Some(disk) = lab.disk.cloned() {
+            // A note on disk: a file in the vault, opened in the editor.
+            new_vault_note(workspace, &disk, "");
+            return;
         } else {
             // A new note is a file in the vault: the navigator lists it.
             made.with_mut(|n| *n = n.saturating_add(1));
             let path = format!("Untitled {}.md", made());
             let now = chrono_now();
-            vault.read().put(NoteFile::new(path, now, now));
+            if let Some(memory) = lab.memory.cloned() {
+                memory.put(NoteFile::new(path, now, now));
+            }
             (format!("note-new-{}", made()), "Untitled".to_owned())
         };
         let mut workspace = workspace;
@@ -398,7 +496,9 @@ pub fn VaultPage() -> Element {
     };
     let new_note = on_command.clone();
     architect_commands::use_command(
-        architect_commands::Command::new("LAB_NEW_NOTE", "New note").group("Vault"),
+        architect_commands::Command::new("LAB_NEW_NOTE", "New note")
+            .group("Vault")
+            .shortcut("⌘N"),
         move || {
             // A copy of the handler (its signals are shared): `Fn`.
             let mut open = new_note;
@@ -410,13 +510,34 @@ pub fn VaultPage() -> Element {
         architect_commands::Opener::new(
             "note",
             "Notes",
-            |_| {
-                NOTES
-                    .iter()
-                    .map(|(id, title)| {
-                        architect_commands::OpenItem::new("note", *id, *title).detail("Vault")
-                    })
-                    .collect()
+            move |_| {
+                lab.disk.cloned().map_or_else(
+                    || {
+                        NOTES
+                            .iter()
+                            .map(|(id, title)| {
+                                architect_commands::OpenItem::new("note", *id, *title)
+                                    .detail("Vault")
+                            })
+                            .collect()
+                    },
+                    // Go to file: every note of the vault on disk, by its path.
+                    |disk| {
+                        disk.vault().with(|v| {
+                            v.pages
+                                .iter()
+                                .map(|p| {
+                                    architect_commands::OpenItem::new(
+                                        "note",
+                                        p.rel_path.clone(),
+                                        p.basename.clone(),
+                                    )
+                                    .detail(p.folder.clone())
+                                })
+                                .collect()
+                        })
+                    },
+                )
             },
             move |item, open_in| {
                 let target = match open_in {
@@ -424,6 +545,10 @@ pub fn VaultPage() -> Element {
                     architect_commands::OpenIn::Tab => Target::Tab,
                     architect_commands::OpenIn::Split => Target::Split(Side::Right),
                 };
+                if lab.disk.peek().is_some() {
+                    show_vault_note(workspace, &item.id, target);
+                    return;
+                }
                 let mut w = workspace;
                 let _ = w.write().open(note(&item.id, &item.title), target);
             },
@@ -488,6 +613,8 @@ pub fn VaultPage() -> Element {
                 views,
                 commands,
                 on_command,
+                // With nothing open, the main area offers a new note.
+                empty: vec!["new-note".to_owned()],
                 phone: screen.form() == FormFactor::Phone,
                 coarse: screen.touch,
                 title_row,
@@ -509,15 +636,37 @@ pub fn VaultPage() -> Element {
 /// root, as the sidebar that shows them comes and goes.
 #[derive(Clone, Copy)]
 struct LabVault {
-    /// A `CopyValue`, so the ribbon's handler stays `Copy`.
-    source: CopyValue<MemorySource>,
+    /// What the navigator reads: the vault on disk, else the in-memory one.
+    /// `CopyValue`s, so the ribbon's handler stays `Copy`.
+    source: CopyValue<Arc<dyn NavigatorSource>>,
+    /// The vault on disk (`crate::notes`), live, when the lab has one.
+    disk: CopyValue<Option<VaultSource>>,
+    /// The in-memory vault a film's run shows instead.
+    memory: CopyValue<Option<MemorySource>>,
     kept: Signal<Option<ViewState>>,
 }
 
 fn use_lab_vault() -> LabVault {
-    use_root_context(|| LabVault {
-        source: CopyValue::new_in_scope(lab_vault(), ScopeId::ROOT),
-        kept: Signal::new_in_scope(None, ScopeId::ROOT),
+    use_root_context(|| {
+        let disk = crate::notes::open_vault().map(|open| {
+            let source = VaultSource::named(open, "Demo vault");
+            if let Err(e) = source.watch() {
+                tracing::warn!(error = %e, "lab.vault.watch_failed");
+            }
+            source
+        });
+        let memory = disk.is_none().then(lab_vault);
+        let source: Arc<dyn NavigatorSource> = match (&disk, &memory) {
+            (Some(d), _) => Arc::new(d.clone()),
+            (None, Some(m)) => Arc::new(m.clone()),
+            (None, None) => Arc::new(MemorySource::new("Lab")),
+        };
+        LabVault {
+            source: CopyValue::new_in_scope(source, ScopeId::ROOT),
+            disk: CopyValue::new_in_scope(disk, ScopeId::ROOT),
+            memory: CopyValue::new_in_scope(memory, ScopeId::ROOT),
+            kept: Signal::new_in_scope(None, ScopeId::ROOT),
+        }
     })
 }
 
@@ -547,54 +696,70 @@ fn lab_vault() -> MemorySource {
 }
 
 /// What shows the list pane in full (#335): an SVG, a PDF, a drawing and
-/// its preview, a canvas, and notes with tags, a status and tasks.
+/// its preview, a canvas, and notes with tags, a status and tasks. The
+/// demo vault's own files (`apps/lab/demo-vault`, made by
+/// `apps/lab/demo-vault.py`'s `navigator_samples`), read in as the vault on
+/// disk reads them (`architect_navigator::vault_source::note_from_text`):
+/// one source for both.
 fn navigator_samples(source: MemorySource, now: Millis) -> MemorySource {
+    use architect_navigator::vault_source::note_from_text;
+    use base64::Engine as _;
     let day: Millis = 86_400_000;
     let ago = |d: i64| now.saturating_sub(day.saturating_mul(d));
-    let text = |t: &str| architect_navigator::PropertyValue::Text(t.to_owned());
-    let logo = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>\
-        <rect width='64' height='64' rx='12' fill='%234f7cff'/><circle cx='32' cy='32' r='16' fill='white'/></svg>";
-    let sketch = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>\
-        <rect width='64' height='64' fill='%23fff7e0'/><path d='M8 48 L24 20 L36 40 L44 28 L56 48 Z' fill='none' stroke='%23d9822b' stroke-width='3'/></svg>";
-    source
-        .with_resource("Attachments/Logo.svg", logo)
-        .with_resource("Attachments/Sketch.excalidraw.png", sketch)
-        .with_file(NoteFile::new("Attachments/Logo.svg", ago(3), ago(3)))
-        .with_file(NoteFile::new("Attachments/Brief.pdf", ago(12), ago(12)))
-        .with_file(NoteFile::new(
+    let logo = include_str!("../../demo-vault/Attachments/Launch logo.svg");
+    let sketch = include_bytes!("../../demo-vault/Attachments/Sketch.excalidraw.png");
+    let svg_url = format!(
+        "data:image/svg+xml;utf8,{}",
+        logo.trim().replace('#', "%23")
+    );
+    let png_url = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(sketch)
+    );
+    // (path, text, made and last changed, days ago)
+    let notes: [(&str, &str, i64, i64); 4] = [
+        (
+            "Projects/Launch plan.md",
+            include_str!("../../demo-vault/Projects/Launch plan.md"),
+            9,
+            0,
+        ),
+        (
+            "Projects/Retro.md",
+            include_str!("../../demo-vault/Projects/Retro.md"),
+            30,
+            4,
+        ),
+        (
+            "Projects/Vault/Vault.md",
+            include_str!("../../demo-vault/Projects/Vault/Vault.md"),
+            40,
+            6,
+        ),
+        (
             "Attachments/Sketch.excalidraw.md",
-            ago(1),
-            ago(1),
-        ))
-        .with_file(NoteFile::new(
-            "Attachments/Sketch.excalidraw.png",
-            ago(1),
-            ago(1),
-        ))
-        .with_file(NoteFile::new("Attachments/Board.canvas", ago(20), ago(20)))
-        .with_file(
-            NoteFile::new("Projects/Launch plan.md", ago(9), ago(0))
-                .preview("What ships, in what order, and who signs it off.")
-                .tag("work")
-                .tag("projects/launch")
-                .property("status", text("doing"))
-                .feature_image("Attachments/Logo.svg")
-                .tasks(6, 2)
-                .words(1840),
-        )
-        .with_file(
-            NoteFile::new("Projects/Retro.md", ago(30), ago(4))
-                .preview("What went well, what to change next time.")
-                .tag("work")
-                .property("status", text("done"))
-                .tasks(3, 0)
-                .words(620),
-        )
-        .with_file(
-            NoteFile::new("Projects/Vault/Vault.md", ago(40), ago(6))
-                .preview("The Vault folder's own note: what lives here.")
-                .tag("projects/vault"),
-        )
+            include_str!("../../demo-vault/Attachments/Sketch.excalidraw.md"),
+            1,
+            1,
+        ),
+    ];
+    let files = [
+        ("Attachments/Launch logo.svg", 3),
+        ("Attachments/Brief.pdf", 12),
+        ("Attachments/Sketch.excalidraw.png", 1),
+        ("Attachments/Board.canvas", 20),
+    ];
+    let source = source
+        .with_resource("Attachments/Launch logo.svg", svg_url)
+        .with_resource("Attachments/Sketch.excalidraw.png", png_url);
+    let source = files.into_iter().fold(source, |s, (path, days)| {
+        s.with_file(NoteFile::new(path, ago(days), ago(days)))
+    });
+    notes
+        .into_iter()
+        .fold(source, |s, (path, text, made, changed)| {
+            s.with_file(note_from_text(path, text, ago(made), ago(changed)))
+        })
 }
 
 /// Now, in milliseconds since the epoch.
@@ -690,8 +855,10 @@ fn FilesView() -> Element {
     let pane = use_pane();
     // The dock is drawn by the shell, above the page: the vault and what
     // the navigator had open are the app's, kept at its root.
-    let LabVault { source, kept } = use_lab_vault();
-    let nav = use_navigator(move || std::sync::Arc::new(source.cloned()));
+    let LabVault {
+        source, kept, disk, ..
+    } = use_lab_vault();
+    let nav = use_navigator(move || source.cloned());
     use_hook(move || {
         if let Some(v) = kept.peek().as_ref() {
             nav.restore(v);
@@ -705,24 +872,51 @@ fn FilesView() -> Element {
     let phone =
         try_use_context::<Signal<Screen>>().is_some_and(|s| s().form() == FormFactor::Phone);
     // The note on show, lit and revealed.
-    let open_now = pane
+    let open_now = {
+        let workspace = pane.workspace();
+        let w = workspace.read();
+        w.current_document().and_then(|p| {
+            w.pane(p)
+                .filter(|p| p.view.0 == VAULT_NOTE)
+                .map(|p| p.state.clone())
+                .or_else(|| path_of(&p.0))
+        })
+    };
+    // In the shell's sidebar on a desk, as many columns as it has. A memo
+    // of that alone: reading the shell itself here would draw the view
+    // again each time the shell draws, and the shell again with it.
+    let shell = try_use_context::<Signal<architect_shell::Shell>>();
+    let sidebar_columns = use_memo(move || {
+        shell.and_then(|s| {
+            let s = s.read();
+            s.desk().then(|| s.sidebar_layout().columns())
+        })
+    });
+    let in_main = pane
         .workspace()
         .read()
-        .current_document()
-        .and_then(|p| path_of(&p.0));
+        .locate(&pane.id)
+        .is_some_and(|l| l.window == 0);
+    let columns = sidebar_columns().filter(|_| in_main);
+    let new_pane = pane.clone();
     use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
     let open_pane = pane.clone();
     let menu_pane = pane;
     let on_open = EventHandler::new(move |o: Open| {
-        if let Some((id, title)) = note_of(&o.path) {
-            // A click opens a tab in the group of the note on
-            // show; the arrow keys show each note in its place.
-            let target = match (o.how, o.browsing) {
-                (OpenIn::Split, _) => Target::Split(Side::Right),
-                (_, true) => Target::Here,
-                (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
-            };
+        let markdown = std::path::Path::new(&o.path)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+        let target = match (o.how, o.browsing) {
+            (OpenIn::Split, _) => Target::Split(Side::Right),
+            (_, true) => Target::Here,
+            (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
+        };
+        if markdown && disk.peek().is_some() {
             // Beside the note on show, not in the dock pressed.
+            show_vault_note(open_pane.workspace(), &o.path, target);
+        } else if let Some((id, title)) = note_of(&o.path).filter(|_| disk.peek().is_none()) {
+            // A click opens a tab in the group of the note on show; the
+            // arrow keys show each note in its place.
             let mut workspace = open_pane.workspace();
             let mut w = workspace.write();
             if let Some(doc) = w.current_document().cloned() {
@@ -738,6 +932,14 @@ fn FilesView() -> Element {
     let on_context_menu = EventHandler::new(move |(path, e): (String, MouseEvent)| {
         menu_pane.context_menu("file", path, &e);
     });
+    // New note in the list's header, for a vault on disk.
+    let on_new_note = disk.peek().is_some().then(|| {
+        EventHandler::new(move |folder: String| {
+            if let Some(disk) = disk.cloned() {
+                new_vault_note(new_pane.workspace(), &disk, &folder);
+            }
+        })
+    });
     // Navigator, the built-in extension, draws it: its view over this
     // navigator (or a development copy's, `EXT_CLONE {"id":"navigator"}`).
     let mut mount = use_context_provider(|| {
@@ -747,13 +949,21 @@ fn FilesView() -> Element {
             on_context_menu: Some(on_context_menu),
             on_focus_editor: None,
             phone,
+            columns,
+            on_new_note,
         })
     });
-    if mount.peek().phone != phone {
-        mount.write().phone = phone;
+    if mount.peek().phone != phone || mount.peek().columns != columns {
+        let mut m = mount.write();
+        m.phone = phone;
+        m.columns = columns;
     }
     try_use_context::<architect_extensions::interface::ExtensionUi>().map_or_else(
-        || rsx! { NavigatorView { navigator: nav, phone, on_open, on_context_menu } },
+        || {
+            rsx! {
+                NavigatorView { navigator: nav, phone, on_open, on_context_menu, columns, on_new_note }
+            }
+        },
         |ui| {
             rsx! {
                 architect_extensions::interface::ExtensionView {
@@ -911,4 +1121,267 @@ fn Stand(what: &'static str, next: &'static str) -> Element {
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
 const fn narrow(v: f64) -> f32 {
     v as f32
+}
+
+/// How long typing rests before it is saved.
+const SAVE_AFTER_MS: u64 = 400;
+
+/// A note of the vault on disk, its path the pane's state: its title (a
+/// rename) over the note in the editor (`crate::note_editor`), saved to its
+/// file as it is typed, an outside change merged in.
+#[component]
+fn VaultNoteView() -> Element {
+    let pane = use_pane();
+    let id = pane.id.0.clone();
+    let path = pane.state();
+    if use_lab_vault().disk.peek().is_none() || path.is_empty() {
+        return rsx! { Stand { what: "No vault is open", next: "Open the lab on a folder of notes (just lab)." } };
+    }
+    // Keyed by the pane (in a list, where keys count: a lone root's key
+    // does not remount it, and the next note would get this one's
+    // editor): a rename keeps the editor and its typing.
+    rsx! {
+        for id in [id] {
+            VaultNote { key: "{id}", path: path.clone() }
+        }
+    }
+}
+
+#[component]
+fn VaultNote(path: String) -> Element {
+    let pane = use_pane();
+    let t = use_shell().theme;
+    let disk = use_lab_vault().disk;
+    // The note's path now (a rename moves it).
+    let mut at = use_signal(|| path.clone());
+    use_effect(use_reactive!(|path| {
+        if *at.peek() != path {
+            at.set(path);
+        }
+    }));
+    let first = use_hook(|| {
+        disk.peek()
+            .as_ref()
+            .and_then(|d| d.vault().text(&path))
+            .unwrap_or_default()
+    });
+    // What the file held when last read or saved, and what is typed.
+    let base = use_hook(|| CopyValue::new(first.clone()));
+    let ours = use_hook(|| CopyValue::new(first.clone()));
+    let mut incoming = use_signal(|| None::<(u64, String)>);
+    let mut gone = use_signal(|| false);
+    let serial = use_hook(|| CopyValue::new(0_u64));
+    // The typing written to the file, when it differs from what is there.
+    let save = move || {
+        let (mut base, ours) = (base, ours);
+        let text = ours.cloned();
+        if text == *base.peek() {
+            return;
+        }
+        let Some(d) = disk.peek().clone() else { return };
+        let p = at.peek().clone();
+        match d.save(&p, &text) {
+            Ok(()) => base.set(text),
+            Err(e) => tracing::warn!(path = %p, error = %e, "lab.vault.save_failed"),
+        }
+    };
+    let later = move || {
+        let mut serial = serial;
+        let n = serial.cloned().wrapping_add(1);
+        serial.set(n);
+        spawn(async move {
+            futures_timer::Delay::new(std::time::Duration::from_millis(SAVE_AFTER_MS)).await;
+            if serial.cloned() == n {
+                save();
+            }
+        });
+    };
+    // Never lose a keystroke: what is typed is written as the note goes.
+    use_drop(save);
+    // The vault's changes: an outside edit merged into the typing, a
+    // rename followed, a delete said.
+    let sub = use_hook(|| {
+        let (tx, mut rx) = futures_channel::mpsc::unbounded::<SourceEvent>();
+        let sub = disk.peek().as_ref().map(|d| {
+            d.subscribe(Box::new(move |e| {
+                let _ = tx.unbounded_send(e.clone());
+            }))
+        });
+        let pane = pane.clone();
+        spawn(async move {
+            use futures_util::StreamExt as _;
+            let mut n = 0_u64;
+            while let Some(event) = rx.next().await {
+                let here = at.peek().clone();
+                match event {
+                    SourceEvent::FileModified(f) if f.path == here => {
+                        let Some(theirs) = disk.peek().as_ref().and_then(|d| d.vault().text(&here))
+                        else {
+                            continue;
+                        };
+                        let (mut base, mut ours) = (base, ours);
+                        if theirs == *base.peek() {
+                            continue; // its own save
+                        }
+                        let merged = vault_doc::merge3(&base.peek(), &ours.peek(), &theirs);
+                        base.set(theirs.clone());
+                        if merged != *ours.peek() {
+                            ours.set(merged.clone());
+                            n = n.wrapping_add(1);
+                            incoming.set(Some((n, merged.clone())));
+                        }
+                        if merged != theirs {
+                            later();
+                        }
+                    }
+                    SourceEvent::FileRenamed { from, file } if from == here => {
+                        at.set(file.path.clone());
+                        pane.set_state(file.path.clone());
+                        pane.set_title(title_of(&file.path));
+                    }
+                    SourceEvent::FileDeleted(p) if p == here => gone.set(true),
+                    _ => {}
+                }
+            }
+        });
+        std::rc::Rc::new(sub)
+    });
+    let _ = &sub;
+    let here = at();
+    let title = title_of(&here);
+    let mut draft = use_signal(|| None::<String>);
+    let rename = move || {
+        let mut draft = draft;
+        let Some(name) = draft.take() else { return };
+        let name = name.trim().replace('/', " ");
+        let from = at.peek().clone();
+        if name.is_empty() || name == title_of(&from) {
+            return;
+        }
+        save();
+        let folder = from.rsplit_once('/').map(|(f, _)| f.to_owned());
+        let to = folder.map_or_else(|| format!("{name}.md"), |f| format!("{f}/{name}.md"));
+        if let Some(d) = disk.peek().as_ref()
+            && let Err(e) = d.rename(&from, &to)
+        {
+            tracing::warn!(from = %from, to = %to, error = %e, "lab.vault.rename_failed");
+        }
+    };
+    let words = ours.cloned().split_whitespace().count();
+    use_pane_status(vec![
+        StatusItem::new("words", crate::count(words, "word")).left(),
+    ]);
+    let shown = draft().unwrap_or_else(|| title.clone());
+    rsx! {
+        div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 24px 36px; overflow-y: scroll;",
+            "data-vault-note": "{here}",
+            input {
+                "data-testid": "vault-note-title",
+                "aria-label": "Note title",
+                style: "font-size: 26px; font-weight: 750; color: {t.ink}; background: transparent; border: none; outline: none; padding: 0;",
+                value: "{shown}",
+                oninput: move |e| draft.set(Some(e.value())),
+                onkeydown: move |e: KeyboardEvent| {
+                    if e.key().to_string() == "Enter" {
+                        rename();
+                    }
+                },
+                onblur: move |_| rename(),
+            }
+            if gone() {
+                div { style: "color: {t.ink_3}; font-size: 13px;", "This note's file was deleted." }
+            }
+            crate::note_editor::NoteEditor {
+                id: here.clone(),
+                text: first,
+                incoming: incoming(),
+                on_change: move |value: String| {
+                    let mut ours = ours;
+                    ours.set(value);
+                    later();
+                },
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod start_tests {
+    use architect_workspace::Docks;
+
+    /// The Vault starts with every dock in the main window: no layout it
+    /// ships pops one out (#353: the sidebar came up as a window of its
+    /// own), and none does once the workspace repairs it.
+    #[test]
+    fn the_vault_starts_with_every_dock_in_the_main_window() {
+        let mut checked = 0;
+        for set in super::screensets().sets {
+            for layout in set.layouts {
+                let mut w = layout.workspace;
+                w.repair();
+                assert_eq!(w.windows.len(), 1, "{}: one window", set.name);
+                for side in Docks::SIDES {
+                    assert!(
+                        w.dock_window(side).is_none(),
+                        "{}: {side:?} dock at home",
+                        set.name
+                    );
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked >= 3, "Write, Mix and Embedded views");
+        let first = super::first_workspace();
+        assert_eq!(first.windows.len(), 1);
+        assert!(
+            first.windows[0].docks.left.root.is_some(),
+            "the navigator's dock is the main window's"
+        );
+    }
+
+    /// The film's in-memory vault shows the list pane's samples from the
+    /// demo vault's own files: one source of sample content.
+    #[test]
+    fn the_in_memory_samples_are_the_demo_vaults_files() {
+        use architect_navigator::{NavigatorSource, TaskCounts};
+        let s = super::navigator_samples(architect_navigator::MemorySource::new("Lab"), 0);
+        let plan = s.file("Projects/Launch plan.md").expect("the launch plan");
+        assert_eq!(
+            plan.tasks,
+            Some(TaskCounts {
+                total: 6,
+                unfinished: 2
+            })
+        );
+        assert!(
+            plan.tags.contains(&"projects/launch".to_owned()),
+            "{:?}",
+            plan.tags
+        );
+        assert!(plan.words.is_some_and(|w| w > 1000), "{:?}", plan.words);
+        let image = plan.feature_image.expect("a feature image");
+        assert!(image.contains("Attachments/Launch logo.svg"), "{image}");
+        assert!(
+            s.resource_url("Attachments/Launch logo.svg")
+                .is_some_and(|u| u.starts_with("data:image/svg+xml"))
+        );
+        assert!(
+            s.resource_url("Attachments/Sketch.excalidraw.png")
+                .is_some_and(|u| u.starts_with("data:image/png;base64,"))
+        );
+        for path in [
+            "Attachments/Brief.pdf",
+            "Attachments/Board.canvas",
+            "Projects/Vault/Vault.md",
+        ] {
+            assert!(s.file(path).is_some(), "{path}");
+            assert!(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../demo-vault")
+                    .join(path)
+                    .is_file(),
+                "{path} is a demo vault file"
+            );
+        }
+    }
 }

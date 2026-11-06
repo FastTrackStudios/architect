@@ -694,10 +694,11 @@ fn screensets_by_action() {
         m.run(ids::WORKSPACES_SAVE, json!({}))["reason"],
         "no_screenset"
     );
-    assert_eq!(
-        m.run(ids::WORKSPACES_RESET, json!({}))["reason"],
-        "no_screenset"
-    );
+    // With none active, a reset goes back to the first built-in, which is
+    // active after (#353: an app that starts on it can always reset).
+    let reset = m.run(ids::WORKSPACES_RESET, json!({}));
+    assert_eq!(reset["screenset"], "write", "{reset}");
+    assert_eq!(m.run(ids::WORKSPACES_LIST, json!({}))["active"], "write");
 
     let recalled = m.run(ids::WORKSPACES_LOAD, json!({"slot": 1}));
     assert_eq!(recalled["screenset"], "write");

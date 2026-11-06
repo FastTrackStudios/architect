@@ -64,6 +64,12 @@ pub struct NavigatorMount {
     pub on_context_menu: Option<EventHandler<(String, MouseEvent)>>,
     pub on_focus_editor: Option<EventHandler<()>>,
     pub phone: bool,
+    /// The shell sidebar's columns, when the app's shell sets it
+    /// (`NavigatorView`'s `columns`: one pane, or folders beside notes).
+    pub columns: Option<u8>,
+    /// New note in the list's header, given the folder on show
+    /// (`NavigatorView`'s `on_new_note`).
+    pub on_new_note: Option<EventHandler<String>>,
 }
 
 /// Every action it declares (`extension.toml`), in its order.
@@ -150,6 +156,8 @@ fn Standalone() -> Element {
                 on_context_menu: None,
                 on_focus_editor: None,
                 phone: false,
+                columns: None,
+                on_new_note: None,
             }
         }
     }
@@ -176,6 +184,8 @@ fn Drive(mount: NavigatorMount) -> Element {
             on_context_menu: mount.on_context_menu,
             on_focus_editor: mount.on_focus_editor,
             phone: mount.phone,
+            columns: mount.columns,
+            on_new_note: mount.on_new_note,
             commands: false,
         }
     }

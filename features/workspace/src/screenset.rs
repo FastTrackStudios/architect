@@ -332,10 +332,36 @@ impl Screensets {
     }
 
     /// Throw away the live changes for `class`: back to the active set's
-    /// saved layout, which is returned to show.
+    /// saved layout, or, with none active (an app that starts on its first
+    /// built-in without recalling it), the first built-in's; that set is
+    /// active after. The layout is returned to show: one main window, so
+    /// every pop-out closes and its docks and panes come home.
     pub fn reset(&mut self, class: FormClass) -> Option<Workspace> {
-        let id = self.active.clone()?;
+        let id = self.reset_target()?.to_owned();
         self.recall(&id, class)
+    }
+
+    /// The set [`Self::reset`] goes back to: the active one, else the
+    /// first built-in.
+    #[must_use]
+    pub fn reset_target(&self) -> Option<&str> {
+        self.active
+            .as_deref()
+            .or_else(|| self.sets.iter().find(|s| s.builtin).map(|s| s.id.as_str()))
+    }
+
+    /// Whether the live layout for `class` differs from what
+    /// [`Self::reset`] would bring back.
+    #[must_use]
+    pub fn is_resettable(&self, class: FormClass) -> bool {
+        let saved = self
+            .reset_target()
+            .and_then(|id| self.get(id))
+            .and_then(|s| s.layout_for(class));
+        match (saved, self.working(class)) {
+            (Some(saved), Some(working)) => !saved.same_arrangement(working),
+            _ => false,
+        }
     }
 
     /// The set named `name` (case aside), as a person types it.

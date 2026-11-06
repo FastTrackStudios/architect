@@ -48,11 +48,12 @@ pub fn watch(
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|e| WatchError::Notify(e.to_string()))?;
 
+    let base = root.clone();
     let pump = tokio::spawn(async move {
         while let Some(paths) = raw_rx.recv().await {
             let filtered: Vec<PathBuf> = paths
                 .into_iter()
-                .filter(|p| !guard.is_recent(p) && !is_hidden(p))
+                .filter(|p| !guard.is_recent(p) && !is_hidden(p.strip_prefix(&base).unwrap_or(p)))
                 .collect();
             if filtered.is_empty() {
                 continue;
@@ -69,6 +70,10 @@ pub fn watch(
     })
 }
 
+/// Whether `p` (a path inside the vault, from its root) is in a hidden
+/// folder or is a hidden file (`.obsidian`, `.git`, `.trash`). Only the
+/// path inside the vault counts: a vault kept under a hidden folder
+/// (`.devenv/state/…`, a `.tmp…` directory) is heard like any other.
 fn is_hidden(p: &Path) -> bool {
     p.components().any(|c| {
         c.as_os_str().to_string_lossy().starts_with('.')

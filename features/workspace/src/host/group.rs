@@ -9,7 +9,7 @@ use lucide_dioxus::{ArrowLeft, ArrowRight, ChevronDown, Ellipsis, Pin, Plus, X};
 use super::{Drag, Host, LONG_PRESS_MS, Menu, Mount, Op, ThisPane, point, use_host};
 use crate::kinds::ViewHost;
 use crate::layout::{scroll_to, slides};
-use crate::model::{Axis, Chrome, Group, Node, PaneId, Split};
+use crate::model::{Axis, Chrome, Group, GroupId, Node, PaneId, Split, Workspace};
 
 /// How far a named tab gives way before the bar clips, points.
 const TAB_MIN: f32 = 72.0;
@@ -245,7 +245,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
     let host = use_host();
     let t = host.theme.read().clone();
     let Some(current) = group.current_tab().cloned() else {
-        return rsx! {};
+        return rsx! { EmptyGroup { group: group.id } };
     };
     let id = group.id;
     let names = tab_names(&group);
@@ -1064,5 +1064,74 @@ fn transparent_of(hex: &str) -> String {
         format!("{hex}00")
     } else {
         "transparent".to_owned()
+    }
+}
+
+/// A group with no tab: the main area with nothing open (Obsidian's "No
+/// file is open"), what the app offers (`WorkspaceView`'s `empty`), Go to
+/// file (⌘O), and Close for a group that is not the main area's last.
+#[component]
+fn EmptyGroup(group: GroupId) -> Element {
+    let host = use_host();
+    let t = host.theme.read().clone();
+    let s = (host.sizes)();
+    let offered: Vec<(String, String)> = {
+        let commands = host.commands.read();
+        host.empty
+            .read()
+            .iter()
+            .filter_map(|id| commands.iter().find(|c| &c.id == id))
+            .map(|c| (c.id.clone(), c.label.clone()))
+            .collect()
+    };
+    let quick = architect_commands::try_use_commands();
+    // The main area's last group stays (`Workspace::repair`): Close only
+    // when there is another.
+    let closable = {
+        let w = host.workspace.read();
+        let mut groups = Vec::new();
+        for window in &w.windows {
+            if let Some(c) = &window.center {
+                c.groups(&mut groups);
+            }
+        }
+        groups.iter().any(|g| g.id == group) && groups.len() > 1
+    };
+    let link = format!(
+        "border:none; background:transparent; color:{}; font-size:14px; cursor:pointer; padding:4px 8px; min-height:{}px;",
+        t.accent, s.button
+    );
+    rsx! {
+        div {
+            "data-empty-group": "{group.0}",
+            style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column; align-items:center; \
+                    justify-content:center; gap:6px; background:{t.sheet}; color:{t.ink_3};",
+            div { style: "font-size:18px; font-weight:600; color:{t.ink_2}; margin-bottom:8px;", "No file is open" }
+            for (id, label) in offered {
+                button {
+                    key: "{id}",
+                    "data-empty-command": "{id}",
+                    style: "{link}",
+                    onclick: move |_| host.press_command(id.clone()),
+                    "{label}"
+                }
+            }
+            if let Some(commands) = quick {
+                button {
+                    "data-empty-command": "go-to-file",
+                    style: "{link}",
+                    onclick: move |_| commands.show_quick_open(""),
+                    "Go to file"
+                }
+            }
+            if closable {
+                button {
+                    "data-empty-command": "close",
+                    style: "{link}",
+                    onclick: move |_| host.edit(Workspace::repair),
+                    "Close"
+                }
+            }
+        }
     }
 }

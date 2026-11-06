@@ -451,6 +451,16 @@ pub(super) fn WorkspaceCommands() -> Element {
         });
     }
 
+    // Back to the saved layout (the manage sheet's Reset layout): every
+    // pop-out docked back, every dock at its saved size.
+    let resettable = host.screensets.read().is_resettable(*host.form.read());
+    use_command(
+        Command::new("WORKSPACE_RESET_LAYOUT", "Reset layout")
+            .group("Workspaces")
+            .enabled_if(resettable, "the layout is as it was saved"),
+        move || host.write(control::reset, control::RevisionArgs::default()),
+    );
+
     // A dock into a window of its own, and back: one pair per side. Which
     // of the two is enabled says where the dock is (for a scenario to
     // check, as for a person).

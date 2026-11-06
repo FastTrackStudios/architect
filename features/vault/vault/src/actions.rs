@@ -14,6 +14,7 @@
 //! | `VAULT_SET_PROPERTY {path, key, value}` | sets one property; `value` is JSON (`3`, `["a","b"]`, `true`) or else text |
 //! | `VAULT_REMOVE_PROPERTY {path, key}` | removes one property |
 //! | `VAULT_APPEND {path, text}` | adds text to the end of a note |
+//! | `VAULT_RENAME {from, to}` | renames or moves a note, rewriting the links that named it |
 //! | `VAULT_DELETE {path}` | deletes a note (destructive: an agent's call waits for a person's yes) |
 //! | `VAULT_RELOAD` | reads the folder again (after edits made outside the app) |
 //!
@@ -31,6 +32,9 @@ use vault_live::refs::Ref;
 use vault_obsidian::obsidian_parse::{FrontmatterEntry, parse_frontmatter};
 use vault_obsidian::{LinkIndex, SelfWriteGuard, Vault, VaultPage, mutate};
 
+mod edit;
+pub use edit::{Changes, Renamed, Watch, folders_in};
+
 /// The action ids, to name them from code.
 pub mod ids {
     pub const STATUS: &str = "VAULT_STATUS";
@@ -43,6 +47,7 @@ pub mod ids {
     pub const REMOVE_PROPERTY: &str = "VAULT_REMOVE_PROPERTY";
     pub const APPEND: &str = "VAULT_APPEND";
     pub const DELETE: &str = "VAULT_DELETE";
+    pub const RENAME: &str = "VAULT_RENAME";
     pub const RELOAD: &str = "VAULT_RELOAD";
 }
 
@@ -52,6 +57,9 @@ pub mod ids {
 pub struct OpenVault {
     vault: Arc<RwLock<Vault>>,
     guard: Arc<SelfWriteGuard>,
+    /// Its folders as last read ([`Self::refresh`] says which came and
+    /// went).
+    folders: Arc<RwLock<BTreeSet<String>>>,
 }
 
 impl std::fmt::Debug for OpenVault {
@@ -73,6 +81,7 @@ impl OpenVault {
         Ok(Self {
             vault: Arc::new(RwLock::new(Vault::open(root)?)),
             guard: Arc::new(SelfWriteGuard::new()),
+            folders: Arc::new(RwLock::new(edit::folders_in(root))),
         })
     }
 
@@ -189,6 +198,12 @@ static APPEND: ActionMeta = meta(
     "Adds `text` to the end of a note, on a line of its own.",
 );
 static DELETE: ActionMeta = meta(ids::DELETE, "Delete a note", "Deletes a note from disk.");
+static RENAME: ActionMeta = meta(
+    ids::RENAME,
+    "Rename a note",
+    "Renames or moves the note at `from` to `to` (a vault path ending in .md) and rewrites every \
+wikilink that named it, in every note, to name it there. Answers the notes whose links changed.",
+);
 static RELOAD: ActionMeta = meta(
     ids::RELOAD,
     "Reload the vault",
@@ -206,6 +221,14 @@ struct ListArgs {
 struct PathArgs {
     /// A note's vault path (`Notes/Welcome.md`).
     path: String,
+}
+
+#[derive(Facet)]
+struct RenameArgs {
+    /// The note's vault path now.
+    from: String,
+    /// Its vault path after (`Notes/New name.md`; another folder moves it).
+    to: String,
 }
 
 #[derive(Facet)]
@@ -538,6 +561,17 @@ pub fn register(list: &ActionList, vault: &OpenVault) -> Result<(), ActionError>
         move |_: &ActionCaller, a: PathArgs| {
             mutate::delete_page(&mut v.write(), &a.path, &v.guard).map_err(|e| e.to_string())?;
             Ok::<_, String>(raw(&json!({ "path": a.path })))
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &RENAME,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: RenameArgs| {
+            let r = v.rename(&a.from, &a.to)?;
+            Ok::<_, String>(raw(
+                &json!({ "from": r.from, "to": r.to, "relinked": r.relinked }),
+            ))
         },
     )?;
     let v = vault.clone();

@@ -8,7 +8,7 @@ steps (
     {
         id open
         text "The switcher lists your organizations."
-        target @css"[aria-label=\"Switch Organization\"]"
+        target @css"[aria-label^=\"Switch Organization\"]"
         do @click{}
         hold 0.8
     }
@@ -21,7 +21,7 @@ steps (
     }
     {
         id reopen
-        target @css"[aria-label=\"Switch Organization\"]"
+        target @css"[aria-label^=\"Switch Organization\"]"
         do @click{}
         hold 0.6
     }

@@ -30,7 +30,7 @@ architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home", 
 # The Vault tab's sidebar: the navigator (a port of Notebook Navigator) over
 # the lab's notes (src/vault.rs). GPL-3.0-or-later: linking it makes the
 # lab's binaries GPL (features/navigator/README.md).
-architect-navigator = { workspace = true, features = ["ui"] }
+architect-navigator = { workspace = true, features = ["ui", "vault"] }
 architect-commands = { workspace = true, features = ["native"] }
 # The settings page; the Appearance section, its layers kept (the
 # person's in a synced document, here a file).
@@ -66,6 +66,10 @@ crdt = { workspace = true }
 # The lab's vault: a folder of markdown and its VAULT_* actions
 # (src/notes.rs, the sample in apps/lab/vault).
 vault = { workspace = true, features = ["actions"] }
+# An outside edit merged into an open note's typing (`vault_doc::merge3`).
+vault-doc = { workspace = true }
+# The demo vault's sample images as data URLs for the in-memory vault.
+base64 = { workspace = true }
 links = { workspace = true, features = ["actions"] }
 tag = { workspace = true, features = ["actions"] }
 architect = { workspace = true, features = ["action-list", "settings"] }
@@ -78,6 +82,8 @@ dioxus-native = { workspace = true }
 architect-presence = { workspace = true }
 lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true }
+# A vault note hears the vault's changes on its own task (src/vault.rs).
+futures-channel = "0.3"
 # `LAB_GO` hears its asks on the window's thread (src/guide.rs).
 futures-util = { version = "0.3", default-features = false }
 

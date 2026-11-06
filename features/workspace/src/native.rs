@@ -109,6 +109,7 @@ pub fn launch_with_fonts(
         inner: DioxusNativeApplication::new(proxy, queue, config),
         desk,
         popouts: HashMap::new(),
+        devices: Vec::new(),
         own,
         own_queue,
         fonts,
@@ -163,7 +164,9 @@ fn font_context(fonts: &[&[u8]]) -> dioxus_native::FontContext {
     ctx
 }
 
-/// Fetches `dioxus:` assets from the bundle, the rest as `data:` URIs.
+/// Fetches `dioxus:` assets from the bundle, `file:` URLs from disk (a
+/// vault's images: the navigator's feature images, a note's embeds), the
+/// rest as `data:` URIs.
 struct Assets {
     data: Arc<dyn NetProvider>,
 }
@@ -173,6 +176,12 @@ impl NetProvider for Assets {
         if request.url.scheme() == "dioxus" {
             if let Ok(found) = dioxus_asset_resolver::native::serve_asset(request.url.path()) {
                 handler.bytes(request.url.to_string(), found.into_body().into());
+            }
+        } else if request.url.scheme() == "file" {
+            if let Ok(path) = request.url.to_file_path()
+                && let Ok(bytes) = std::fs::read(&path)
+            {
+                handler.bytes(request.url.to_string(), bytes.into());
             }
         } else {
             self.data.fetch(doc_id, request, handler);
@@ -459,6 +468,12 @@ struct App {
     inner: DioxusNativeApplication,
     desk: Rc<Desk>,
     popouts: HashMap<OsId, Open>,
+    /// Closed pop-outs' GPU devices (each renderer's own wgpu device, and
+    /// through it its instance), kept until the app ends. Destroying one
+    /// while the main window renders crashed NVIDIA's Wayland driver: a
+    /// jump to address 0 in the main window's next swapchain acquire
+    /// (#353). The renderer, its surface and the window still go.
+    devices: Vec<Box<dyn std::any::Any>>,
     own: BlitzShellProxy,
     own_queue: Receiver<BlitzShellEvent>,
     /// The app's faces, for each pop-out's document.
@@ -558,12 +573,18 @@ impl App {
         close.is_some_and(|close| close())
     }
 
-    /// Drop the pop-out's window (its document goes with it).
+    /// Drop the pop-out's window (its document goes with it). Its GPU
+    /// device is kept ([`Self::devices`]).
     fn forget(&mut self, os: OsId) {
         if let Some(open) = self.popouts.remove(&os) {
             let id = open.popout.id().clone();
             self.desk.open.borrow_mut().retain(|(w, _)| *w != id);
             self.desk.releases.borrow_mut().retain(|(w, _)| *w != id);
+            if let Some(device) =
+                anyrender::RenderContext::renderer_specific_context(&open.view.renderer)
+            {
+                self.devices.push(device);
+            }
             drop(open);
         }
     }

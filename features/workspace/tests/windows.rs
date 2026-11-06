@@ -550,3 +550,95 @@ fn a_panes_state_is_kept_and_read_as_its_type() {
     });
     assert_eq!(raw.as_deref(), Some(r#"{"top":12.5,"zoom":3}"#));
 }
+
+// Reset layout: whatever a person did to the windows (a dock popped out,
+// a dock widened), the screenset's built-in layout comes back, in the
+// main window, its pop-out closed (#353).
+
+fn dock_default() -> Workspace {
+    let mut w = Workspace::new();
+    w.open(note("doc"), Target::Tab).unwrap();
+    w.open(note("files"), Target::Dock(architect_workspace::Side::Left))
+        .unwrap();
+    w.activate(&PaneId::new("doc")).unwrap();
+    w.windows[0].docks.left.ribbon = Some(architect_workspace::Ribbon::default());
+    w
+}
+
+fn reset_app() -> Element {
+    let fake = FAKE.with(|f| f.borrow().clone().expect("a fake platform"));
+    use_context_provider(|| Windows::new(Platform(fake)));
+    let commands = architect_commands::use_commands_provider();
+    COMMANDS.with(|c| *c.borrow_mut() = Some(commands));
+    let workspace = use_signal(dock_default);
+    // Built in, never recalled: the app starts on it with no set active.
+    let sets = use_signal(|| {
+        Screensets::default()
+            .with_builtins([Screenset::new("Write").layout(FormClass::Desk, dock_default())])
+    });
+    WORKSPACE.with(|s| *s.borrow_mut() = Some(workspace));
+    SETS.with(|s| *s.borrow_mut() = Some(sets));
+    let views = use_hook(views);
+    rsx! { WorkspaceView { workspace, views, screensets: sets, form: FormClass::Desk } }
+}
+
+/// The redraws, then the effects (the host keeps the live layout in one).
+fn settle(main: &mut VirtualDom) {
+    for _ in 0..3 {
+        main.render_immediate(&mut NoOpMutations);
+        main.process_events();
+    }
+}
+
+#[test]
+fn reset_layout_docks_a_popped_out_sidebar_back_at_its_saved_width() {
+    use architect_workspace::Side;
+    FAKE.with(|f| *f.borrow_mut() = Some(Rc::new(Fake::default())));
+    let fake = FAKE.with(|f| f.borrow().clone().unwrap());
+    let mut main = VirtualDom::new(reset_app);
+    main.rebuild_in_place();
+    settle(&mut main);
+    let mut workspace = WORKSPACE.with(|s| s.borrow().unwrap());
+    let commands = COMMANDS.with(|c| c.borrow().unwrap());
+    let width = dock_default().windows[0].docks.left.size;
+    assert!(
+        !enabled(&main, "WORKSPACE_RESET_LAYOUT"),
+        "nothing to reset yet"
+    );
+
+    // Out, and wider.
+    assert!(main.in_runtime(|| commands.run("WORKSPACE_POP_OUT_LEFT_DOCK")));
+    settle(&mut main);
+    main.in_runtime(|| {
+        let mut w = workspace.write();
+        for window in &mut w.windows {
+            window.docks.left.size = width + 300.0;
+        }
+    });
+    settle(&mut main);
+    assert_eq!(
+        main.in_runtime(|| workspace.peek().dock_window(Side::Left)),
+        Some(1)
+    );
+    assert!(enabled(&main, "WORKSPACE_RESET_LAYOUT"));
+
+    // Reset: one window, the sidebar home at its width, the pop-out closed.
+    assert!(main.in_runtime(|| commands.run("WORKSPACE_RESET_LAYOUT")));
+    settle(&mut main);
+    let (windows, out, size, same) = main.in_runtime(|| {
+        let w = workspace.peek();
+        (
+            w.windows.len(),
+            w.dock_window(Side::Left),
+            w.windows[0].docks.left.size,
+            w.same_arrangement(&dock_default()),
+        )
+    });
+    assert_eq!((windows, out), (1, None));
+    assert!((size - width).abs() < f32::EPSILON, "{size} != {width}");
+    assert!(same, "the layout is the default again");
+    assert_eq!(*fake.closed.borrow(), [WindowId::dock(Side::Left)]);
+    let sets = SETS.with(|s| s.borrow().unwrap());
+    assert!(main.in_runtime(|| sets.peek().active.is_some()));
+    assert!(!enabled(&main, "WORKSPACE_RESET_LAYOUT"));
+}

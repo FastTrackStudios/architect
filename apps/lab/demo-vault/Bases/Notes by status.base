@@ -1,0 +1,12 @@
+filters:
+  and:
+    - 'status != null'
+views:
+  - type: table
+    name: By status
+    order:
+      - file.name
+      - status
+    groupBy:
+      property: status
+      direction: ASC

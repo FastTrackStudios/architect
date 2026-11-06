@@ -141,6 +141,10 @@ name = "popout_theme"
 required-features = ["native"]
 
 [[test]]
+name = "empty_center"
+required-features = ["native"]
+
+[[test]]
 name = "title_row"
 required-features = ["native"]
 

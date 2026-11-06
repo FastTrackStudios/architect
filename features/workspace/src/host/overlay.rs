@@ -549,11 +549,15 @@ fn cover(groups: &[(crate::GroupId, Rect)]) -> Option<Rect> {
 /// The platform saw the pointer let go at `(x, y)`, outside the window: a
 /// tab being dragged ends there (in another window, or a new one).
 pub(super) fn release_outside(mut host: Host, (x, y): (f32, f32)) {
-    // A dock's grip let go outside: it pops out there, or docks back.
+    // A dock's grip dragged and let go outside: it pops out there, or
+    // docks back. A press that never moved past the slop is the grip's
+    // click (or nothing), however far off the platform says it ended:
+    // a framed window's own move (its title row dragged) ends with a
+    // release outside, and once took a pressed grip's dock out with it.
     let drag = host.drag.peek().clone();
-    if let Some(Drag::DockGrip { side, .. }) = drag {
+    if let Some(Drag::DockGrip { side, moved, .. }) = drag {
         host.drag.set(None);
-        if let Some(op) = super::windows::dock_outside(host, side, (x, y)) {
+        if moved && let Some(op) = super::windows::dock_outside(host, side, (x, y)) {
             host.run(op);
         }
         return;

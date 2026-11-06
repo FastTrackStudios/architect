@@ -1,0 +1,14 @@
+filters:
+  and:
+    - 'type == "project"'
+views:
+  - type: table
+    name: All projects
+    order:
+      - file.name
+      - status
+      - due
+      - area
+    sort:
+      - property: due
+        direction: ASC

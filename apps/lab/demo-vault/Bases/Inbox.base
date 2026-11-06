@@ -1,0 +1,14 @@
+filters:
+  and:
+    - file.inFolder("Inbox")
+    - 'type == "capture"'
+views:
+  - type: table
+    name: By source
+    order:
+      - file.name
+      - captured
+      - source
+    groupBy:
+      property: source
+      direction: ASC
