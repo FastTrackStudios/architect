@@ -110,7 +110,7 @@ fn count(n: usize) -> f32 {
 
 /// `text` with the characters at `positions` lit.
 #[component]
-fn Lit(text: String, positions: Vec<usize>, ink: String, lit: String) -> Element {
+pub fn Lit(text: String, positions: Vec<usize>, ink: String, lit: String) -> Element {
     // Runs of lit and unlit characters, so a row is a few spans, not one
     // per character.
     let mut runs: Vec<(bool, String)> = Vec::new();

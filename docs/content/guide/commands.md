@@ -238,7 +238,7 @@ enabled state and ticks come from the commands. From the sandbox:
 ```rust
 let menus = architect_commands::MenuBar::standard("Architect Lab")
     .menu("File", |m| {
-        m.commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
+        m.commands(["LAB_CAPTURE", "COMMAND_PALETTE_OPEN_ANYTHING"])
             .separator()
             .commands(["WORKSPACE_CLOSE_TAB", "WORKSPACE_REOPEN_TAB"])
     })
@@ -252,7 +252,7 @@ let menus = architect_commands::MenuBar::standard("Architect Lab")
                 .collect()
         })
     })
-    .menu("Help", |m| m.command("LAB_SHOW_COMMANDS"));
+    .menu("Help", |m| m.command("COMMAND_PALETTE_OPEN"));
 ```
 
 - `MenuBar::standard` lays out the app menu, File, Edit, View, Window and

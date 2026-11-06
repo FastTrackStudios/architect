@@ -817,6 +817,7 @@ dependencies = [
  "architect-bases",
  "architect-canvas",
  "architect-capture",
+ "architect-command-palette",
  "architect-commands",
  "architect-extensions",
  "architect-guide",
@@ -1002,6 +1003,23 @@ dependencies = [
  "futures",
  "notify",
  "tokio",
+]
+
+[[package]]
+name = "architect-command-palette"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-commands",
+ "architect-extensions",
+ "architect-palette",
+ "architect-settings",
+ "architect-workspace-hack",
+ "dioxus",
+ "facet",
+ "futures",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

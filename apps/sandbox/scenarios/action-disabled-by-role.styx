@@ -19,7 +19,7 @@ steps (
     {
         id palette
         text "In an org where you are a viewer, ⌘K still lists Invite people,"
-        do @run{id LAB_SHOW_COMMANDS}
+        do @run{id COMMAND_PALETTE_OPEN}
         done {on (@changed"commands"), check ({id COMMANDS_STATE, has {overlay palette}})}
         hold 0.4
     }

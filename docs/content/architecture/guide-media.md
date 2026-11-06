@@ -37,7 +37,7 @@ steps (
     {
         id open
         text "⌘K opens the palette: every command the app has."
-        do @run{id LAB_SHOW_COMMANDS}
+        do @run{id COMMAND_PALETTE_OPEN}
         done {
             on (@changed"commands")
             check ({id COMMANDS_STATE, has {overlay palette}})
@@ -294,4 +294,4 @@ Next:
   build needs the same over the DOM (`getBoundingClientRect`).
 - **Keys through the window**: a headless document has no window, so
   window-level chords (`WindowKeys`) do not fire; a scenario runs the
-  command (`@run{id LAB_SHOW_COMMANDS}`) where a person presses ⌘K.
+  command (`@run{id COMMAND_PALETTE_OPEN}`) where a person presses ⌘K.

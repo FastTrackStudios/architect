@@ -1,0 +1,40 @@
+[package]
+name = "architect-command-palette"
+description = "The Command Palette: ⌘K and ⌘O as a built-in extension (extension.toml), drawn in the shell's palette slot and ranked by the palette engine. Linked into an app, or run as its own process (EXT_CLONE {\"id\":\"command-palette\"})."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# MIT, as the engine: a launcher of anyone's can start from it.
+license = "MIT"
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-command-palette"
+path = "src/main.rs"
+
+[dependencies]
+# The engine it ranks with.
+architect-palette = { workspace = true }
+# The app's commands and the palette kit it draws with.
+architect-commands = { workspace = true, features = ["ui"] }
+# The trait and the guest (its process copy); an app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+facet = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

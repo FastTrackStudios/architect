@@ -297,8 +297,21 @@ impl Keymap {
     #[must_use]
     pub fn shortcuts(&self) -> HashMap<String, String> {
         let mut out: HashMap<String, String> = HashMap::new();
-        // Everywhere sorts first: its binding is the one shown.
-        for b in self.bindings() {
+        let bindings = self.bindings();
+        // A command's declared shortcut, the first of several (an
+        // extension's `[[keys]]`: ⌘K before ⌃K), when it is still bound
+        // everywhere.
+        for (id, keys) in &self.shortcuts {
+            if !out.contains_key(id)
+                && bindings
+                    .iter()
+                    .any(|b| b.action == *id && b.keys == *keys && b.context == EVERYWHERE)
+            {
+                out.insert(id.clone(), display_keys(keys));
+            }
+        }
+        // Else everywhere sorts first: its binding is the one shown.
+        for b in bindings {
             out.entry(b.action).or_insert_with(|| display_keys(&b.keys));
         }
         out

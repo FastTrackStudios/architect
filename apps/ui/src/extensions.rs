@@ -892,6 +892,15 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         {
             extensions = with;
         }
+        // The Command Palette: ⌘K and ⌘O, drawn in the shell's palette
+        // slot (#381). Off, the app has neither; a development copy
+        // (EXT_CLONE {"id":"command-palette"}) draws them in its place.
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&architect_command_palette::CommandPalette)
+        {
+            extensions = with;
+        }
         // Navigator: the Vault's sidebar (src/vault.rs `FilesView` mounts
         // its view over the lab's vault), its NAVIGATOR_* and its section.
         if let Ok(with) = extensions
