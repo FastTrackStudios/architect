@@ -801,7 +801,7 @@ impl NavigatorState {
                 _ => h,
             })
             .collect();
-        self.nav_offsets = Offsets::new(spaced.into_iter());
+        self.nav_offsets = Offsets::new(spaced);
         self.rainbow = crate::rainbow::colours(&self.nav_rows, &self.settings);
         self.clamp_scroll(Pane::Navigation);
         self.settle(Pane::Navigation);
@@ -2130,14 +2130,14 @@ impl NavigatorState {
             return Err(format!("{name} is called that already"));
         }
         let (from_k, to_k) = (properties::fold(&name), properties::fold(to));
-        let mut having = 0;
-        let mut both = 0;
+        let mut having = 0_usize;
+        let mut both = 0_usize;
         for f in self.index.files() {
             let has = |k: &str| f.properties.iter().any(|(x, _)| properties::fold(x) == k);
             if has(&from_k) {
-                having += 1;
+                having = having.saturating_add(1_usize);
                 if from_k != to_k && has(&to_k) {
-                    both += 1;
+                    both = both.saturating_add(1_usize);
                 }
             }
         }
@@ -2529,12 +2529,12 @@ impl NavigatorState {
             if !is_value {
                 self.property_order = std::mem::take(&mut self.property_order)
                     .into_iter()
-                    .filter_map(|k| match moved(&properties::key_id(&k)) {
-                        Some(new) => new
-                            .as_deref()
-                            .and_then(properties::parse_id)
-                            .map(|(k, _)| k),
-                        None => Some(k),
+                    .filter_map(|k| {
+                        moved(&properties::key_id(&k)).map_or(Some(k), |new| {
+                            new.as_deref()
+                                .and_then(properties::parse_id)
+                                .map(|(k, _)| k)
+                        })
                     })
                     .collect();
             }
@@ -3965,11 +3965,11 @@ fn orders_of(map: &BTreeMap<String, Vec<String>>) -> Vec<ChildOrder> {
 
 /// `settings` with `profile`'s periodic notes folder, when it has one.
 fn periodic_settings(settings: &NavigatorSettings, profile: &VaultProfile) -> NavigatorSettings {
-    match &profile.periodic_folder {
-        Some(f) => NavigatorSettings {
+    profile.periodic_folder.as_ref().map_or_else(
+        || settings.clone(),
+        |f| NavigatorSettings {
             periodic_folder: f.clone(),
             ..settings.clone()
         },
-        None => settings.clone(),
-    }
+    )
 }

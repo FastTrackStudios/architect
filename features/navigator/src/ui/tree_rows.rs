@@ -1744,7 +1744,9 @@ pub(super) fn tooltip(nav: Navigator, path: &str) -> Option<String> {
 }
 
 /// Rows others add to the navigator's menus (Notebook Navigator's
-/// `MenusAPI`), given by the app over its extensions' `[[context]]` on
+/// `MenusAPI`).
+///
+/// Given by the app over its extensions' `[[context]]` on
 /// `navigator:folder`, `navigator:tag` and `navigator:property`; each is
 /// a label and the command it runs, told the target and its id (a
 /// folder's path, a tag, `key` or `key=value`).

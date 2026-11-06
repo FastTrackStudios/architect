@@ -377,7 +377,7 @@ pub fn property_rows(
             };
             rows.push(NavRow {
                 key: format!("property:{}", value_id(&key, &v)),
-                level: top + 1,
+                level: top.saturating_add(1),
                 kind: NavRowKind::Property {
                     key: key.clone(),
                     value: Some(v.clone()),

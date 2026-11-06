@@ -45,6 +45,8 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
     let reordering = s.reordering;
     let dual = s.settings().dual_pane;
     let calendar_on = s.settings().calendar;
+    // Collected, so the state is let go before the header is drawn.
+    #[allow(clippy::needless_collect)]
     let header_commands: Vec<crate::template::TemplateCommand> = s
         .templates()
         .commands
@@ -115,7 +117,7 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                 }
                 // "Create note" commands placed in the header
                 // (`templateCommands[].placement`).
-                for c in header_commands.clone() {
+                for c in header_commands {
                     {
                         let id = c.id.clone();
                         let icon = crate::Icon::parse(if c.icon.is_empty() { "file-plus" } else { &c.icon });
@@ -167,12 +169,14 @@ fn PinnedRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     let active = s.active().map(str::to_owned);
     let reordering = s.reordering;
     drop(s);
-    let total = h * rows.len() as f64 + 6.0;
+    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+    let total = h.mul_add(rows.len() as f64, 6.0);
     rsx! {
         div { class: "nv-pinned", style: "flex:0 0 auto; position:relative; height:{total}px; border-bottom:1px solid var(--nv-divider);",
             for (i, row) in rows.into_iter().enumerate() {
                 {
-                    let top = h * i as f64 + 3.0;
+                    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+                    let top = h.mul_add(i as f64, 3.0);
                     match row.kind.clone() {
                         NavRowKind::Section { id, name, expanded, count } => rsx! {
                             tree_rows::SectionRow { key: "{row.key}", nav, id, name, expanded, count, top, height: h, drop_here: false }

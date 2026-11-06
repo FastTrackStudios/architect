@@ -272,10 +272,9 @@ Notebook Navigator's parts are ported in layers (#332):
     dropped.
   - ⌘/Ctrl-click puts a tag or property into the search with AND, with ⇧
     with OR (`Query`).
-  - Not ported: tag and property icons
-    chosen by a person and the shortcuts pane (#339), a key's or value's
-    rename, child orders by hand (`tagChildOrder`, `propertyChildOrder`).
-    Spring-loaded folders came with layer 6.
+  - Since ported: a property key's rename and delete (and, ours, a value's
+    rename), nested tags' and values' orders by hand (`tagChildOrder`,
+    `propertyChildOrder`), and tags that spring open under a drag (layer 7).
 - **Layer 5, done (#338): search, shortcuts, recents, profiles and
   hiding.**
   - The filter search in a box over the list: names and aliases, tags,
@@ -292,11 +291,11 @@ Notebook Navigator's parts are ported in layers (#332):
   - Hiding folders, tags, notes and files by pattern, frontmatter or tag,
     with a show-hidden toggle; folders kept out of the lists above them
     and still browsed.
-  - Not ported: Omnisearch (the full text is architect's), a profile's
-    own property keys and periodic notes folder, the profile editor in
-    the settings (profiles are edited with `NAVIGATOR_PROFILE`), pinning
-    recent notes with the shortcuts, and the navigation rainbow. The
-    search's highlighting and dragging shortcuts came with layer 6.
+  - Since ported: the full text shows each match's line with its words
+    marked (Omnisearch's excerpts; the index is architect's), a profile's
+    own property keys and periodic notes folder, pinned shortcuts with the
+    recent notes, and the navigation rainbow (layer 7); the profile editor,
+    the search's highlighting and dragging shortcuts came with layer 6.
 - **Layer 6 (#339): file operations and templates, done.**
   - New notes, folders, canvases and bases from a folder's menu, the
     list's header and the palette; inline rename with warnings for names
@@ -316,9 +315,10 @@ Notebook Navigator's parts are ported in layers (#332):
   - Icons and colours for folders, tags, properties and notes: Lucide,
     emoji or vault SVGs, from and to frontmatter, by a note's name or type,
     inherited; backgrounds.
-  - Not ported: Templater (`<%` commands are left as written), a template
-    picker (the template is typed as a vault path), the ribbon and tab-bar
-    buttons of create-note commands, Excalidraw drawings made from the
+  - Since ported (layer 7): Templater's common commands, a template
+    picker, and create-note commands' buttons in the header. Not ported:
+    Templater's scripts (`<%* %>`), ribbon buttons for create-note commands
+    (the ribbon holds app sections), Excalidraw drawings made from the
     menu, version history and "reveal in Finder". A new base is
     Obsidian's YAML, not Notebook Navigator's legacy database JSON. The
     app does not yet place the editor's cursor at `Open::cursor`. Icon
@@ -333,10 +333,40 @@ Notebook Navigator's parts are ported in layers (#332):
   - The API for extensions: the `NAVIGATOR_*` actions (navigation,
     selection, metadata) and the events it raises, `nav-item-changed`,
     `selection-changed`, `pinned-files-changed`, `metadata-changed`.
-    Not ported: Notebook Navigator's menu extension API
-    (`MenusAPI`: an extension adding rows to the navigator's own menus),
-    `storage-ready`, and a phone's separate zoom (`mobileScale`). The
-    synced scope is kept on the device until the app has a synced store.
+    Since ported (layer 7): the menu extension API (`MenusAPI`: an
+    extension's `[[context]]` on `navigator:folder`, `navigator:tag` or
+    `navigator:property`), `storage-ready`, and a phone's own zoom
+    (`mobileScale`). The synced scope is kept on the device until the app
+    has a synced store.
+- **Layer 7: what Notebook Navigator still had.** From comparing its
+  settings and features spec for spec:
+  - Properties: a key renamed or deleted in every note (its colours, order,
+    selection and the settings that list it follow); a value renamed.
+  - Orders and drags: nested tags and a key's values in a hand-made order,
+    tags that spring open under a drag.
+  - The tree: collapse all's scope (`collapseBehavior`), one branch open
+    (`collapseOtherBranchesOnExpand`), opening on select
+    (`autoExpandNavItems`), the first note opened
+    (`autoSelectFirstFileOnFocusChange`), folders Z to A, indent guides,
+    leaders between a name and its count, space between top rows, the
+    Properties row off, tooltips with path, tags and words.
+  - The navigation rainbow: rows coloured along their siblings, through
+    the hue, at the top, the level below or every level, children taking
+    their ancestor's.
+  - Pinned shortcuts, and the recent notes with them.
+  - A homepage (a note or a periodic note) at start and on
+    `NAVIGATOR_OPEN_HOMEPAGE`; new notes in a new tab.
+  - Folder notes: Create (of `folderNoteType`, from `folderNoteTemplate`),
+    Detach and Delete from a folder's menu.
+  - Templates: a picker over the template folder; Templater's common
+    commands; a create-note command's button in the header.
+  - The commands toggle-tag-sort, toggle-tags-by-selection,
+    toggle-properties-by-selection and collapse-expand-list-groups.
+  - Profiles: their own property keys and periodic notes folder.
+  - Left out: icon packs (NN downloads the fonts of six packs at run time;
+    their names are read and kept, drawn as a box), and the right sidebar's
+    views (the calendar's year panel, the folder note view). See the PR
+    for the rest of the audit's list.
 - **Still to come.**
   - Rendered PDF covers. A source gives a cover as the note's
     `feature_image`; without one, a PDF shows its badge.

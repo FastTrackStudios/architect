@@ -9,6 +9,9 @@
 //! colours do. The gradient runs through the hue, the shorter way round
 //! (`transitionStyle` `hue`).
 
+// Colour math: channels in 0..=1, hues in degrees, a few rows' counts.
+#![allow(clippy::many_single_char_names, clippy::arithmetic_side_effects)]
+
 use std::collections::BTreeMap;
 
 use crate::settings::{NavigatorSettings, RainbowMode, RainbowScope};
@@ -112,10 +115,10 @@ fn place(row: &NavRow) -> Option<(&'static str, String, String)> {
             Some(("tag", parent(key), key.clone()))
         }
         NavRowKind::Property { key, value, .. } if key != crate::properties::ROOT => {
-            Some(match value {
-                None => ("property", String::new(), key.clone()),
-                Some(v) => ("property", key.clone(), format!("{key}={v}")),
-            })
+            Some(value.as_ref().map_or_else(
+                || ("property", String::new(), key.clone()),
+                |v| ("property", key.clone(), format!("{key}={v}")),
+            ))
         }
         _ => None,
     }

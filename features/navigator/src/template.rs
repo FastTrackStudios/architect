@@ -361,9 +361,7 @@ fn tp_date(base: &str, format: Option<&str>, days: i64) -> String {
         d if d > 0 => format!("+{d}d"),
         d => format!("{d}d"),
     };
-    let fmt = format
-        .map(|f| format!(":{f}"))
-        .unwrap_or_else(|| ":YYYY-MM-DD".to_owned());
+    let fmt = format.map_or_else(|| ":YYYY-MM-DD".to_owned(), |f| format!(":{f}"));
     format!("{{{{{base}{off}{fmt}}}}}")
 }
 
@@ -407,18 +405,18 @@ fn tp_command(cmd: &str) -> Option<String> {
                     "{{{{now:{}}}}}",
                     f.unwrap_or_else(|| "YYYY-MM-DD HH:mm".to_owned())
                 )
-            } else if let Some(a) = call("tp.system.prompt") {
+            } else {
+                let a = call("tp.system.prompt")?;
                 let label = a.split(',').next()?.trim().trim_matches(['"', '\'']);
                 format!("{{{{prompt:{label}}}}}")
-            } else {
-                return None;
             }
         }
     })
 }
 
-/// Templater's common commands (`<% tp.… %>`) as this engine's tokens
-/// (`templateEngine` automatic): `tp.file.title`, `folder`, `path`,
+/// Templater's common commands (`<% tp.… %>`) as this engine's tokens.
+///
+/// With `templateEngine` automatic: `tp.file.title`, `folder`, `path`,
 /// `cursor`; `tp.date.now`, `tomorrow`, `yesterday`, `weekday` with a
 /// format and an offset in days; `tp.file.creation_date`;
 /// `tp.system.prompt`. Scripts (`<%* … %>`) and commands this does not
@@ -428,13 +426,13 @@ pub fn templater(template: &str) -> String {
     let mut out = String::new();
     let mut rest = template;
     while let Some(at) = rest.find("<%") {
-        out.push_str(&rest[..at]);
-        let after = &rest[at..];
+        let (before, after) = rest.split_at(at);
+        out.push_str(before);
         let Some(end) = after.find("%>") else {
             out.push_str(after);
             return out;
         };
-        let whole = &after[..end + 2];
+        let (whole, next) = after.split_at(end.saturating_add(2));
         let inner = whole.trim_start_matches("<%").trim_end_matches("%>");
         let inner = inner
             .trim_start_matches(['-', '_'])
@@ -443,7 +441,7 @@ pub fn templater(template: &str) -> String {
             (false, Some(token)) => out.push_str(&token),
             _ => out.push_str(whole),
         }
-        rest = &after[end + 2..];
+        rest = next;
     }
     out.push_str(rest);
     out

@@ -1568,13 +1568,13 @@ fn set_profile(p: &mut VaultProfile, set: &Value) -> Result<(), String> {
                 p.property_keys = v
                     .as_str()
                     .filter(|b| !b.trim().is_empty())
-                    .map(str::to_owned)
+                    .map(str::to_owned);
             }
             "periodic_folder" => {
                 p.periodic_folder = v
                     .as_str()
                     .filter(|b| !b.trim().is_empty())
-                    .map(str::to_owned)
+                    .map(str::to_owned);
             }
             "file_visibility" => {
                 let id = v.as_str().unwrap_or_default();
