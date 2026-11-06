@@ -292,7 +292,7 @@ fn drag(doc: &mut DioxusDocument, from: &str, to: &str) {
     )));
     for i in 1..=8 {
         let t = f64::from(i) / 8.0;
-        let (x, y) = (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+        let (x, y) = ((x1 - x0).mul_add(t, x0), (y1 - y0).mul_add(t, y0));
         doc.handle_ui_event(UiEvent::PointerMove(pointer(
             x as f32,
             y as f32,

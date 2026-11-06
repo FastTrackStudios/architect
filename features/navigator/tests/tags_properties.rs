@@ -322,7 +322,7 @@ fn a_new_note_in_a_tag_is_tagged_beside_the_note_selected() {
 #[test]
 fn drops_tag_notes_clear_them_and_move_tags() {
     let src = vault();
-    let mut s = state(&src, settings());
+    let s = state(&src, settings());
     let notes = Drag::Notes(vec!["Home/Loose.md".to_owned()]);
     let tag = |t: &str| NavTarget::Tag(t.to_owned());
     let op = |out: Outcome| match out {

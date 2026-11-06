@@ -533,18 +533,18 @@ fn run(
                     _ => s.clear_tags(&paths),
                 }
             }?;
-            write(nav, on_open, out)
+            write(&nav, on_open, out)
         }
         "NAVIGATOR_TAG_RENAME" => {
             let from = text(args, "from").ok_or("`from`: the tag to rename")?;
             let to = text(args, "to").ok_or("`to`: its new name")?;
             let out = nav.state.peek().rename_tag(from, to)?;
-            write(nav, on_open, out)
+            write(&nav, on_open, out)
         }
         "NAVIGATOR_TAG_DELETE" => {
             let tag = text(args, "tag").ok_or("`tag`: the tag to delete")?;
             let out = nav.state.peek().delete_tag(tag)?;
-            write(nav, on_open, out)
+            write(&nav, on_open, out)
         }
         "NAVIGATOR_TAG_NEW_NOTE" => {
             let tag = text(args, "tag").ok_or("`tag`: the tag for the new note")?;
@@ -565,16 +565,16 @@ fn run(
                 .state
                 .peek()
                 .set_property(&paths, key, text(args, "value"))?;
-            write(nav, on_open, out)
+            write(&nav, on_open, out)
         }
         "NAVIGATOR_DROP" => {
-            let drag = match text(args, "drag_tag") {
-                Some(t) => Drag::Tag(t.to_owned()),
-                None => Drag::Notes(paths_of(args, &nav.state.peek())),
-            };
+            let drag = text(args, "drag_tag").map_or_else(
+                || Drag::Notes(paths_of(args, &nav.state.peek())),
+                |t| Drag::Tag(t.to_owned()),
+            );
             let on = target_of(args)?;
             let out = nav.state.peek().drop_on(&drag, &on)?;
-            write(nav, on_open, out)
+            write(&nav, on_open, out)
         }
         "NAVIGATOR_SEARCH" => {
             if flag(args, "clear") == Some(true) {
@@ -625,7 +625,7 @@ fn target_of(args: &Value) -> Result<NavTarget, String> {
 }
 
 /// Does a write and says what changed: the outcome's ops, and the list.
-fn write(nav: Navigator, on_open: EventHandler<Open>, out: Outcome) -> Result<Value, String> {
+fn write(nav: &Navigator, on_open: EventHandler<Open>, out: Outcome) -> Result<Value, String> {
     let ops = match &out {
         Outcome::Write { ops, .. } => format!("{ops:?}"),
         _ => String::new(),
