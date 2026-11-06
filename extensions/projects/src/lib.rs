@@ -23,7 +23,9 @@
 //! - **Service:** it provides `architect.projects` and uses `architect.tasks` when it is
 //!   there: the page's tasks are the Tasks extension's
 //!   (`architect.tasks` `for_project`), and a task's project is resolved here
-//!   (`architect.projects` `resolve`).
+//!   (`architect.projects` `resolve`). With the Time Tracker, the page
+//!   shows the project's time and starts timers (`architect.time`
+//!   `for_project`, `start`, `stop`).
 
 // Its views read the JSON its actions answer with `value["key"]`:
 // serde_json's index answers `Null` for what is missing, never a panic.
@@ -52,6 +54,9 @@ pub const SERVICE: &str = "architect.projects";
 
 /// The Tasks extension's service, which it uses when it is there.
 const TASKS: &str = "architect.tasks";
+
+/// The Time Tracker's service, which it uses when it is there.
+const TIME: &str = "architect.time";
 
 /// Where new projects go (`projects.folder`).
 pub const FOLDER: &str = "Projects";
@@ -461,6 +466,16 @@ async fn tasks_of(project: &Project) -> Value {
     }
 }
 
+/// A project's time, from the Time Tracker when it is loaded: `null`
+/// when it is not.
+async fn time_of(project: &Project) -> Value {
+    match vault::service(TIME, "for_project", json!({ "project": project.path })).await {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => json!({ "error": e }),
+        None => Value::Null,
+    }
+}
+
 /// A project's milestones, each with its tasks' progress.
 fn roadmap(book: &Book, p: &Project, tasks: &Value) -> Vec<Value> {
     book.milestones
@@ -490,12 +505,13 @@ fn roadmap(book: &Book, p: &Project, tasks: &Value) -> Vec<Value> {
 }
 
 /// `PROJECTS_READ {path}`: the project, its type, roadmap, goals, tasks
-/// (when Tasks is there) and notes.
+/// (when Tasks is there), time (when the Time Tracker is) and notes.
 async fn read(args: Value) -> Result<Value, String> {
     let link = arg(&args, "path").ok_or("give `path`")?;
     let p = project_at(link).await?;
     let book = cache().book.clone();
     let tasks = tasks_of(&p).await;
+    let time = time_of(&p).await;
     let goals: Vec<&Goal> = book
         .goals
         .iter()
@@ -539,6 +555,7 @@ async fn read(args: Value) -> Result<Value, String> {
         "roadmap": roadmap(&book, &p, &tasks),
         "goals": goals,
         "tasks": tasks,
+        "time": time,
         "notes": notes,
     }))
 }
@@ -876,6 +893,8 @@ fn ProjectPage(project: Project, data: Value) -> Element {
         tasks["done"].as_u64().unwrap_or(0),
         tasks["total"].as_u64().unwrap_or(0),
     );
+    let time = data["time"].clone();
+    let has_time = !time.is_null() && time.get("error").is_none();
     let path = p.path.clone();
     let set = move |s: State| {
         let path = path.clone();
@@ -968,6 +987,11 @@ fn ProjectPage(project: Project, data: Value) -> Element {
                     if has_tasks && total > 0 {
                         span { style: "font-size: 12px; {MUTED}", "{done}/{total} tasks done" }
                     }
+                    if has_time && time["seconds"].as_i64().unwrap_or(0) > 0 {
+                        span { class: "projects-time-total", style: "font-size: 12px; {MUTED}",
+                            {format!("{} tracked", duration_words(time["seconds"].as_i64().unwrap_or(0)))}
+                        }
+                    }
                 }
                 div { class: "projects-state", style: "display: flex; gap: 6px; flex-wrap: wrap;",
                     for s in [State::Planning, State::Active, State::OnHold, State::Done] {
@@ -1034,6 +1058,10 @@ fn ProjectPage(project: Project, data: Value) -> Element {
                     }
                 }
             }
+            // Time, from the Time Tracker.
+            if has_time {
+                TimeSection { project: p.path.clone(), time: time.clone() }
+            }
             // Tasks, from the Tasks extension.
             div { class: "projects-tasks", style: section,
                 div { style: HEADING, "Tasks" }
@@ -1049,7 +1077,12 @@ fn ProjectPage(project: Project, data: Value) -> Element {
                         div { style: MUTED, "No tasks yet." }
                     }
                     for t in task_rows {
-                        TaskLine { key: "{t[\"path\"]}", task: t }
+                        TaskLine {
+                            key: "{t[\"path\"]}",
+                            time: if has_time { time["by_task"][t["path"].as_str().unwrap_or_default()].clone() } else { Value::Null },
+                            timed: has_time,
+                            task: t,
+                        }
                     }
                     input {
                         r#type: "text", "aria-label": "New task in this project", placeholder: "New task — e.g. Draft the brief tomorrow !high",
@@ -1111,13 +1144,99 @@ fn MilestoneLine(milestone: Value) -> Element {
     }
 }
 
-/// A task's line on the page: its box runs Tasks' `set_status`.
+/// Seconds in words, short: `1h 5m`, `45m`.
+fn duration_words(seconds: i64) -> String {
+    let minutes = seconds.max(0) / 60;
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m}m"),
+        (h, 0) => format!("{h}h"),
+        (h, m) => format!("{h}h {m}m"),
+    }
+}
+
+/// Starts a timer (`architect.time` `start`) on what `args` names, or
+/// stops the running one; the page reads again.
+fn time_call(method: &'static str, args: Value) {
+    spawn(async move {
+        let _ = vault::service(TIME, method, args).await;
+        changed();
+    });
+}
+
+/// The project's time (the Time Tracker's `for_project`): in all, this
+/// week, today, billable and what it comes to; the running timer, or a
+/// button to start one on the project.
 #[component]
-fn TaskLine(task: Value) -> Element {
+fn TimeSection(project: String, time: Value) -> Element {
+    let secs = |k: &str| duration_words(time[k].as_i64().unwrap_or(0));
+    let running = &time["running"];
+    let running_title = running["title"].as_str().map(str::to_owned);
+    let since = running["since"].as_str().unwrap_or_default().to_owned();
+    let stat = "display: flex; flex-direction: column; gap: 2px; min-width: 80px;";
+    let button =
+        "padding: 4px 12px; border-radius: 8px; border: none; cursor: pointer; font-size: 12px;";
+    rsx! {
+        div { class: "projects-time", style: "display: flex; flex-direction: column; gap: 6px;",
+            div { style: HEADING, "Time" }
+            div { style: "display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-end;",
+                div { style: stat,
+                    span { style: "font-size: 11px; {MUTED}", "In all" }
+                    span { class: "projects-time-all", style: "font-size: 18px; font-weight: 700;", {secs("seconds")} }
+                }
+                div { style: stat,
+                    span { style: "font-size: 11px; {MUTED}", "This week" }
+                    span { style: "font-size: 18px; font-weight: 700;", {secs("week")} }
+                }
+                div { style: stat,
+                    span { style: "font-size: 11px; {MUTED}", "Today" }
+                    span { style: "font-size: 18px; font-weight: 700;", {secs("today")} }
+                }
+                if time["billable_seconds"].as_i64().unwrap_or(0) > 0 {
+                    div { style: stat,
+                        span { style: "font-size: 11px; {MUTED}", "Billable" }
+                        span { style: "font-size: 18px; font-weight: 700;",
+                            {time["amount"].as_str().map_or_else(|| secs("billable_seconds"), |a| format!("{} · {a}", secs("billable_seconds")))}
+                        }
+                    }
+                }
+                span { style: "flex: 1;" }
+                if let Some(title) = running_title {
+                    span { class: "projects-time-running", style: "font-size: 12px;",
+                        {format!("{title} · since {since}")}
+                    }
+                    button {
+                        style: "{button} background: var(--destructive); color: var(--destructive-foreground, white);",
+                        onclick: move |_| time_call("stop", json!({})),
+                        "Stop"
+                    }
+                } else {
+                    button {
+                        class: "projects-time-start",
+                        style: "{button} background: var(--primary); color: var(--primary-foreground);",
+                        onclick: move |_| time_call("start", json!({ "project": project })),
+                        "▶ Start a timer"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A task's line on the page: its box runs Tasks' `set_status`; with the
+/// Time Tracker, its time and a button that times it.
+#[component]
+fn TaskLine(task: Value, time: Value, timed: bool) -> Element {
     let open = task["open"].as_bool().unwrap_or(true);
     let path = task["path"].as_str().unwrap_or_default().to_owned();
     let doing = task["group"].as_str() == Some("doing");
     let status = task["status"].as_str().unwrap_or_default().to_owned();
+    let ticking = time["running"].as_bool().unwrap_or(false);
+    let timer_path = path.clone();
+    let (timer_bg, timer_fg) = if ticking {
+        ("var(--destructive)", "var(--destructive-foreground, white)")
+    } else {
+        ("var(--secondary)", "var(--secondary-foreground)")
+    };
     let fill = if open {
         "transparent"
     } else {
@@ -1153,6 +1272,27 @@ fn TaskLine(task: Value) -> Element {
             }
             span { style: "font-size: 12px; font-variant-numeric: tabular-nums; {MUTED}",
                 {task["due"].as_str().map(|d| d.get(..10).unwrap_or(d).to_owned()).unwrap_or_default()}
+            }
+            if timed {
+                if time["seconds"].as_i64().unwrap_or(0) > 0 {
+                    span { class: "projects-task-time", style: "font-size: 12px; font-variant-numeric: tabular-nums; {MUTED}",
+                        {duration_words(time["seconds"].as_i64().unwrap_or(0))}
+                    }
+                }
+                button {
+                    class: "projects-task-timer",
+                    "aria-label": if ticking { "Stop the timer" } else { "Start a timer" },
+                    style: "width: 22px; height: 22px; padding: 0; border: none; border-radius: 5px; cursor: pointer; font-size: 10px; \
+                            background: {timer_bg}; color: {timer_fg};",
+                    onclick: move |_| {
+                        if ticking {
+                            time_call("stop", json!({}));
+                        } else {
+                            time_call("start", json!({ "task": timer_path }));
+                        }
+                    },
+                    if ticking { "■" } else { "▶" }
+                }
             }
         }
     }

@@ -18,7 +18,9 @@
 //!   `[[navigator_providers]]`, #356).
 //! - **Service:** it provides `architect.tasks` (each method its `TASKS_<METHOD>`
 //!   action) and uses `architect.projects` when it is there: a task's project is a
-//!   link to a `project.md`, resolved by the Projects extension.
+//!   link to a `project.md`, resolved by the Projects extension. With the
+//!   Time Tracker (`architect.time` `totals`), a task carries its time and
+//!   its row a timer.
 
 pub mod model;
 pub mod nav;
@@ -45,6 +47,9 @@ pub const SERVICE: &str = "architect.tasks";
 
 /// The Projects extension's service, which it uses when it is there.
 const PROJECTS: &str = "architect.projects";
+
+/// The Time Tracker's service, which it uses when it is there.
+const TIME: &str = "architect.time";
 
 /// Its status item.
 const DUE: &str = "due";
@@ -77,12 +82,16 @@ pub fn board_base() -> String {
 #[derive(Debug, Default)]
 struct Cache {
     tasks: Vec<Task>,
+    /// Each task's time by path (the Time Tracker's `totals`); `None`
+    /// when it is not there.
+    time: Option<Map<String, Value>>,
     error: Option<String>,
     read: bool,
 }
 
 static CACHE: Mutex<Cache> = Mutex::new(Cache {
     tasks: Vec::new(),
+    time: None,
     error: None,
     read: false,
 });
@@ -134,6 +143,38 @@ async fn refresh() -> Result<Vec<Task>, String> {
         );
     }
     read
+}
+
+/// Reads each task's time again, from the Time Tracker when it is there.
+async fn refresh_time() {
+    let time = match vault::service(TIME, "totals", Value::Null).await {
+        Some(Ok(v)) => Some(
+            v.get("notes")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default(),
+        ),
+        _ => None,
+    };
+    let changed = {
+        let mut c = cache();
+        let changed = c.time != time;
+        c.time = time;
+        changed
+    };
+    if changed {
+        REVISION.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Task `path`'s time, as last read: `null` without the Time Tracker,
+/// zeroes for a task with none.
+fn time_of(path: &str) -> Value {
+    cache().time.as_ref().map_or(Value::Null, |t| {
+        t.get(path)
+            .cloned()
+            .unwrap_or_else(|| json!({ "seconds": 0, "today": 0, "week": 0, "running": false }))
+    })
 }
 
 /// Which tasks a list shows.
@@ -192,6 +233,10 @@ fn task_json(t: &Task) -> Value {
     if let Some(m) = v.as_object_mut() {
         m.insert("open".to_owned(), json!(t.is_open()));
         m.insert("group".to_owned(), json!(t.group()));
+        let time = time_of(&t.path);
+        if !time.is_null() {
+            m.insert("time".to_owned(), time);
+        }
     }
     v
 }
@@ -400,6 +445,7 @@ async fn me() -> String {
 async fn list(args: Value) -> Result<Value, String> {
     let filter = Filter::parse(arg(&args, "view"))?;
     let tasks = refresh().await?;
+    refresh_time().await;
     let tasks: Vec<Task> = match arg(&args, "project") {
         Some(p) => {
             let path = resolve_project(p)
@@ -420,6 +466,7 @@ async fn list(args: Value) -> Result<Value, String> {
 async fn for_project(args: Value) -> Result<Value, String> {
     let project = arg(&args, "project").ok_or("give `project`: its project.md's path")?;
     let tasks = refresh().await?;
+    refresh_time().await;
     let mine: Vec<Task> = select(
         &tasks
             .into_iter()
@@ -458,6 +505,7 @@ async fn for_project(args: Value) -> Result<Value, String> {
 async fn read(args: Value) -> Result<Value, String> {
     let path = arg(&args, "path").ok_or("give `path`")?;
     let tasks = refresh().await?;
+    refresh_time().await;
     let task = tasks
         .iter()
         .find(|t| t.path == path || link_names(path, &t.path))
@@ -556,12 +604,14 @@ fn use_tasks() -> u64 {
     let mut seen = use_signal(|| REVISION.load(Ordering::Relaxed));
     use_future(move || async move {
         let _ = refresh().await;
+        refresh_time().await;
         let mut ticks = 0_u32;
         loop {
             futures_timer::Delay::new(Duration::from_millis(250)).await;
             ticks = ticks.wrapping_add(1);
             if ticks.is_multiple_of(12) {
                 let _ = refresh().await;
+                refresh_time().await;
             }
             let now = REVISION.load(Ordering::Relaxed);
             if *seen.peek() != now {
@@ -684,7 +734,7 @@ fn TaskList(filter: String) -> Element {
                         "{group.label()} · {list.len()}"
                     }
                     for t in list {
-                        TaskRow { key: "{t.path}", task: t, today: today_s.clone() }
+                        TaskRow { key: "{t.path}", time: time_of(&t.path), task: t, today: today_s.clone() }
                     }
                 }
             }
@@ -693,9 +743,10 @@ fn TaskList(filter: String) -> Element {
 }
 
 /// One task's row: its box (done or open again), title, due date,
-/// priority and project.
+/// priority and project; with the Time Tracker (`time` not `null`), its
+/// time and a button that starts or stops a timer on it.
 #[component]
-pub fn TaskRow(task: Task, today: String) -> Element {
+pub fn TaskRow(task: Task, today: String, time: Value) -> Element {
     let open = task.is_open();
     let path = task.path.clone();
     let overdue = open
@@ -744,6 +795,36 @@ pub fn TaskRow(task: Task, today: String) -> Element {
         }
     };
     let doing = task.group() == Group::Doing;
+    let timed = !time.is_null();
+    let ticking = time
+        .get("running")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let spent = time.get("seconds").and_then(Value::as_i64).unwrap_or(0);
+    let spent_text = {
+        let m = spent.max(0) / 60;
+        format!("{}:{:02}", m / 60, m % 60)
+    };
+    let timer = {
+        let path = task.path.clone();
+        move |_| {
+            let path = path.clone();
+            spawn(async move {
+                let (method, args) = if ticking {
+                    ("stop", json!({}))
+                } else {
+                    ("start", json!({ "task": path }))
+                };
+                let _ = vault::service(TIME, method, args).await;
+                refresh_time().await;
+            });
+        }
+    };
+    let (timer_bg, timer_fg) = if ticking {
+        ("var(--destructive)", "var(--destructive-foreground, white)")
+    } else {
+        ("var(--secondary)", "var(--secondary-foreground)")
+    };
     let fill = if open {
         "transparent"
     } else {
@@ -792,6 +873,19 @@ pub fn TaskRow(task: Task, today: String) -> Element {
                 span { style: "font-size: 12px; font-variant-numeric: tabular-nums; \
                                color: {due_color};",
                     "{d}"
+                }
+            }
+            if timed {
+                if spent > 0 {
+                    span { class: "tasks-time", style: "font-size: 12px; font-variant-numeric: tabular-nums; {MUTED}", "{spent_text}" }
+                }
+                button {
+                    class: "tasks-timer",
+                    "aria-label": if ticking { "Stop the timer" } else { "Start a timer" },
+                    style: "width: 22px; height: 22px; flex-shrink: 0; padding: 0; border: none; border-radius: 5px; cursor: pointer; \
+                            font-size: 10px; background: {timer_bg}; color: {timer_fg};",
+                    onclick: timer,
+                    if ticking { "■" } else { "▶" }
                 }
             }
         }
