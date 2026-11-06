@@ -1,6 +1,7 @@
-//! The Command Palette's two views, drawn in the shell's palette slot
-//! with the commands' kit (`architect_commands::kit`): ⌘K's
-//! [`PaletteView`] and ⌘O's [`QuickOpenView`]. Linked in, they read the
+//! The Command Palette's two views, linked in.
+//!
+//! Drawn in the shell's palette slot with the commands' kit
+//! (`architect_commands::kit`): ⌘K's [`PaletteView`] and ⌘O's [`QuickOpenView`]. Linked in, they read the
 //! app's `Commands`; a process copy draws [`crate::remote`]'s.
 
 use std::rc::Rc;

@@ -446,7 +446,7 @@ impl Extensions {
             &PALETTE,
             Effect::ReadOnly,
             move |_: &ActionCaller, (): ()| {
-                fn from<T: serde::Serialize>(by: crate::contrib::By<T>) -> Value {
+                fn from<T: serde::Serialize>(by: &crate::contrib::By<T>) -> Value {
                     let mut v = serde_json::to_value(&by.item).unwrap_or(Value::Null);
                     v.as_object_mut()
                         .map(|map| map.insert("from".to_owned(), json!(by.owner)));
@@ -454,9 +454,9 @@ impl Extensions {
                 }
                 let reg = me.host().contributions();
                 let answer = json!({
-                    "views": reg.palette_views().into_iter().map(from).collect::<Vec<_>>(),
-                    "keys": reg.key_bindings().into_iter().map(from).collect::<Vec<_>>(),
-                    "sources": reg.palette_sources().into_iter().map(from).collect::<Vec<_>>(),
+                    "views": reg.palette_views().iter().map(from).collect::<Vec<_>>(),
+                    "keys": reg.key_bindings().iter().map(from).collect::<Vec<_>>(),
+                    "sources": reg.palette_sources().iter().map(from).collect::<Vec<_>>(),
                 });
                 Ok::<_, String>(RawJson::from(answer.to_string()))
             },

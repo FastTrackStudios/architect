@@ -779,6 +779,7 @@ impl Commands {
     }
 
     /// What ⌘O was asked to show ([`Self::show_quick_open`]), once.
+    #[must_use = "what ⌘O was asked to show, taken"]
     pub fn take_seed(&self) -> Option<String> {
         let mut seed = self.seed;
         let q = seed();

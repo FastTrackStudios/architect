@@ -1,8 +1,10 @@
-//! The Command Palette's views as a process draws them (a development
-//! copy, `EXT_CLONE {"id":"command-palette"}`): no `Commands` here, so a
-//! palette of its own over the app's actions — `COMMANDS_LIST` for the
-//! rows, ranked by the same engine as the built-in, `COMMANDS_RUN` to run
-//! one, `COMMANDS_SHOW {overlay: none}` to close. The shell's slot draws
+//! The Command Palette's views as a process draws them.
+//!
+//! A development copy (`EXT_CLONE {"id":"command-palette"}`) has no
+//! `Commands`, so it draws a palette of its own over the app's actions:
+//! `COMMANDS_LIST` for the rows, ranked by the same engine as the
+//! built-in, `COMMANDS_RUN` to run one, `COMMANDS_SHOW {overlay: none}`
+//! to close. The shell's slot draws
 //! it where the built-in's goes. Edit this file in the copy and the
 //! palette the app shows changes as it rebuilds.
 

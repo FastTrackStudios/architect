@@ -238,11 +238,13 @@ pub fn use_command_actions(list: Arc<ActionList>) {
                 // The shell keeps only the slot: an overlay shows when a
                 // palette extension's view draws it.
                 {
-                    let now = shown.lock().unwrap_or_else(PoisonError::into_inner);
-                    let drawn = match ask.overlay.as_str() {
-                        "palette" => !now.palette.is_empty(),
-                        "quick-open" => !now.quick_open.is_empty(),
-                        _ => true,
+                    let drawn = {
+                        let now = shown.lock().unwrap_or_else(PoisonError::into_inner);
+                        match ask.overlay.as_str() {
+                            "palette" => !now.palette.is_empty(),
+                            "quick-open" => !now.quick_open.is_empty(),
+                            _ => true,
+                        }
                     };
                     if !drawn {
                         return Err(format!(

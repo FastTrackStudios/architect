@@ -64,7 +64,7 @@ impl FnSource {
 
     /// Ranked as `ranking` ([`Ranking::Open`] unless it says).
     #[must_use]
-    pub fn ranking(mut self, ranking: Ranking) -> Self {
+    pub const fn ranking(mut self, ranking: Ranking) -> Self {
         self.ranking = ranking;
         self
     }
@@ -166,7 +166,7 @@ impl Engine {
                 .iter()
                 .map(|s| s.id())
                 .find(|id| *id == k.trim())
-                .map_or((None, input.trim()), |id| (Some(id), rest.trim())),
+                .map_or_else(|| (None, input.trim()), |id| (Some(id), rest.trim())),
             None => (None, input.trim()),
         }
     }

@@ -15,6 +15,7 @@ pub struct ProviderSource {
 }
 
 impl ProviderSource {
+    #[must_use]
     pub fn new(provider: Box<dyn Provider>) -> Self {
         let title = provider.config().name.clone();
         Self { provider, title }
@@ -72,7 +73,7 @@ mod tests {
     struct Apps(ProviderConfig);
 
     impl Provider for Apps {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "apps"
         }
         fn config(&self) -> &ProviderConfig {

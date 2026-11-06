@@ -1,7 +1,8 @@
-//! The palette kit (feature `ui`): the pieces a palette extension draws
-//! with — the overlay's [`Frame`], a [`CommandRow`], [`Lit`] text, a
-//! [`Kbd`] chip, the [`AskPalette`] that asks an action's arguments a
-//! step at a time, and a row's [`Pick`]. The Command Palette
+//! The palette kit (feature `ui`): what a palette extension draws with.
+//!
+//! The overlay's [`Frame`], a [`CommandRow`], [`Lit`] text, a [`Kbd`]
+//! chip, the [`AskPalette`] that asks an action's arguments a step at a
+//! time, and a row's [`Pick`]. The Command Palette
 //! (`features/palette/extension`) is drawn with them; a replacement may
 //! use them or draw its own.
 
@@ -15,16 +16,19 @@ use architect_palette::Ranked;
 pub use crate::keys_ui::{AskPalette, Pick};
 
 /// A row's fill: lit when picked.
+#[must_use]
 pub fn fill(on: bool, t: &ShellTheme) -> &str {
     if on { &t.active } else { "transparent" }
 }
 
 /// A row's quiet ink: a step up on the picked row, where `ink_3` falls
 /// under 4.5:1 on `fill`.
+#[must_use]
 pub fn quiet(on: bool, t: &ShellTheme) -> &str {
     if on { &t.ink_2 } else { &t.ink_3 }
 }
 
+#[must_use]
 pub fn theme() -> ShellTheme {
     try_use_shell().map(|s| s.theme).unwrap_or_default()
 }
@@ -110,6 +114,8 @@ fn count(n: usize) -> f32 {
 
 /// `text` with the characters at `positions` lit.
 #[component]
+// The runs are drawn by `rsx!`, which takes them owned.
+#[allow(clippy::needless_collect)]
 pub fn Lit(text: String, positions: Vec<usize>, ink: String, lit: String) -> Element {
     // Runs of lit and unlit characters, so a row is a few spans, not one
     // per character.

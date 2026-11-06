@@ -819,10 +819,11 @@ pub struct PaletteViewDecl {
 /// The palette slot's overlays (`[[palette_views]] overlay`).
 pub const PALETTE_OVERLAYS: &[&str] = &["palette", "quick-open"];
 
-/// A source of the palette's rows (`[[palette_sources]]`, #381): what it
-/// finds is listed with the commands once something is typed, ranked by
-/// the palette's engine (`architect-palette`), and its prefix (`id:`)
-/// asks only it.
+/// A source of the palette's rows (`[[palette_sources]]`, #381).
+///
+/// What it finds is listed with the commands once something is typed,
+/// ranked by the palette's engine (`architect-palette`), and its prefix
+/// (`id:`) asks only it.
 ///
 /// ```toml
 /// [[palette_sources]]

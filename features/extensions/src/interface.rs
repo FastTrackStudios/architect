@@ -677,7 +677,7 @@ fn use_palette(ui: ExtensionUi, host: Host, revision: Signal<u64>) {
             let id = decl.id.clone();
             let items = asked(
                 host.list().clone(),
-                commands,
+                &commands,
                 decl.action.clone(),
                 move |out| palette_items(&id, out),
             );
@@ -770,7 +770,7 @@ fn palette_items(source: &str, out: Option<Vec<u8>>) -> Vec<architect_commands::
 /// again (`Commands::refresh`), the last answer shown meanwhile.
 fn asked<T: Clone + 'static>(
     list: ActionList,
-    commands: architect_commands::Commands,
+    commands: &architect_commands::Commands,
     action: String,
     parse: impl Fn(Option<Vec<u8>>) -> Vec<T> + 'static,
 ) -> impl Fn(&str) -> Vec<T> + 'static {
@@ -779,6 +779,7 @@ fn asked<T: Clone + 'static>(
     let pending: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>> = Rc::default();
     let shown_last: Rc<std::cell::RefCell<Vec<T>>> = Rc::default();
     let parse = Rc::new(parse);
+    let commands = *commands;
     move |query: &str| -> Vec<T> {
         if let Some((at, items)) = answers.borrow().get(query)
             && at.elapsed() < ASKED_AGAIN
@@ -842,7 +843,7 @@ fn quick_opener(
 ) -> Opener {
     let kind = decl.kind.clone();
     let parse_kind = kind.clone();
-    let items = asked(list.clone(), *commands, decl.action.clone(), move |out| {
+    let items = asked(list.clone(), commands, decl.action.clone(), move |out| {
         open_items(&parse_kind, out)
     });
     let (open, by_id) = if decl.open.is_empty() {

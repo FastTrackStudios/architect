@@ -178,10 +178,12 @@ impl Extension for CommandPalette {
                     .and_then(Value::as_str)
                     .unwrap_or("palette")
                     .to_owned();
-                let mut ask = json!({ "overlay": overlay });
+                let mut ask = serde_json::Map::new();
+                ask.insert("overlay".to_owned(), json!(overlay));
                 if let Some(q) = args.get("query").and_then(Value::as_str) {
-                    ask["query"] = json!(q);
+                    ask.insert("query".to_owned(), json!(q));
                 }
+                let ask = Value::Object(ask);
                 run(&h, "COMMANDS_SHOW", ask).await
             }
         });
