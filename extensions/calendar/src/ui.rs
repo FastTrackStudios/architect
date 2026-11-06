@@ -48,6 +48,10 @@ const MUTED: &str = "color: var(--muted-foreground);";
 
 /// Re-renders the calling view when what it knows changes, and reads
 /// again every few seconds while it shows.
+pub(crate) fn use_calendar_revision() -> u64 {
+    use_calendar()
+}
+
 fn use_calendar() -> u64 {
     let mut seen = use_signal(crate::revision);
     use_future(move || async move {
@@ -240,6 +244,9 @@ async fn commit(
             crate::move_task(args).await.map(|_| ())
         }
         Source::Time { .. } => Err("tracked time is moved in the Time Tracker".to_owned()),
+        Source::Booking { .. } => {
+            Err("a booking keeps the time agreed: cancel it, and book again".to_owned())
+        }
     }
 }
 
@@ -613,6 +620,7 @@ fn TimedBlock(
         Source::Event { .. } => ("event", false),
         Source::Task { done, .. } => ("task", *done),
         Source::Time { .. } => ("time", false),
+        Source::Booking { .. } => ("booking", false),
     };
     let movable = block.movable();
     let style = match kind {
@@ -694,6 +702,7 @@ fn BlockChip(block: Block, picked: Signal<Option<Picked>>) -> Element {
         Source::Event { .. } => ("event", false),
         Source::Task { done, .. } => ("task", *done),
         Source::Time { .. } => ("time", false),
+        Source::Booking { .. } => ("booking", false),
     };
     let label = match kind {
         "task" => block.title.clone(),
@@ -1093,7 +1102,7 @@ async fn save(p: Picked, f: Form, scope: Scope) -> Result<(), String> {
                 }
                 crate::move_task(args).await.map(|_| ())
             }
-            Source::Time { .. } => Ok(()),
+            Source::Time { .. } | Source::Booking { .. } => Ok(()),
         },
     }
 }
@@ -1128,12 +1137,14 @@ fn Editor(picked: Signal<Option<Picked>>, problem: Signal<Option<String>>) -> El
             ),
             Source::Task { path, .. } => ("task", Some(path.clone()), false, None),
             Source::Time { path, .. } => ("time", Some(path.clone()), false, None),
+            Source::Booking { path, .. } => ("booking", Some(path.clone()), false, None),
         },
     };
     let heading = match kind {
         "new" => "New event",
         "task" => "Task",
         "time" => "Tracked time",
+        "booking" => "Booking",
         _ if occurrence => "Event in a series",
         _ => "Event",
     };
@@ -1165,7 +1176,9 @@ fn Editor(picked: Signal<Option<Picked>>, problem: Signal<Option<String>>) -> El
                 span { style: "flex: 1; font-weight: 700; font-size: 15px;", "{heading}" }
                 button { class: "cal-editor-close", style: TOOL, onclick: move |_| close(), "×" }
             }
-            if kind == "time" {
+            if kind == "booking" {
+                div { style: MUTED, "A booking of an event type. Cancel it in Bookings (CALENDAR_BOOKINGS_OPEN)." }
+            } else if kind == "time" {
                 div { style: MUTED, "Time tracked on this note. Change it in the Time Tracker." }
             } else {
                 input { class: "cal-title", r#type: "text", "aria-label": "Title", placeholder: "Title", value: "{f.title}",

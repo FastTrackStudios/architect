@@ -11,7 +11,8 @@
     clippy::panic,
     clippy::indexing_slicing,
     clippy::needless_pass_by_value,
-    clippy::arithmetic_side_effects
+    clippy::arithmetic_side_effects,
+    clippy::string_slice
 )]
 
 use std::path::Path;
@@ -594,4 +595,112 @@ fn calendar_with_tasks_and_time() {
         json!({ "from": day(0), "to": day(7), "tasks": false, "time": false }),
     );
     assert!(only["blocks"].as_array().unwrap().is_empty(), "{only}");
+}
+
+/// Booking: hours, an event type, its open slots (less the calendar's
+/// events), a booking checked again, on the calendar, and cancelled.
+#[test]
+fn booking_slots() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = vault_in(tmp.path());
+    let app = app_list(&dir);
+    let (_ext, list) = extensions(tmp.path(), &app, None, false);
+    run(
+        &list,
+        "CALENDAR_SCHEDULE",
+        json!({ "id": "work", "name": "Work hours", "rules": ["mon-fri 09:00-11:00"] }),
+    );
+    assert!(read(&dir, "Calendar/Schedules/work.md").contains("type: scheduling-schedule"));
+    let t = run(
+        &list,
+        "CALENDAR_EVENT_TYPE",
+        json!({ "title": "Intro call", "duration_min": 30, "schedule_id": "work", "location": { "kind": "phone" } }),
+    );
+    assert_eq!(t["id"], "intro-call", "{t}");
+    let text = read(&dir, "Calendar/Event types/intro-call.md");
+    assert!(
+        text.contains("type: scheduling-event-type") && text.contains("duration_min: 30"),
+        "{text}"
+    );
+    assert!(
+        try_run(
+            &list,
+            "CALENDAR_EVENT_TYPE",
+            json!({ "title": "Nope", "schedule_id": "none" })
+        )
+        .is_err()
+    );
+
+    // Monday: four slots; an event at 10:00 takes one.
+    let slots = |list: &ActionList| -> Vec<String> {
+        run(
+            list,
+            "CALENDAR_OPEN_SLOTS",
+            json!({ "event_type": "intro-call", "from": day(0), "to": day(1) }),
+        )["slots"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["start"].as_str().unwrap()[11..16].to_owned())
+            .collect()
+    };
+    assert_eq!(slots(&list), ["09:00", "09:30", "10:00", "10:30"]);
+    run(
+        &list,
+        "CALENDAR_CREATE",
+        json!({ "title": "Dentist", "start": format!("{}T10:00", day(0)), "minutes": 30 }),
+    );
+    assert_eq!(slots(&list), ["09:00", "09:30", "10:30"]);
+
+    // Booked: a note, gone from the slots, on the calendar; twice is refused.
+    let b = run(
+        &list,
+        "CALENDAR_BOOK",
+        json!({ "event_type": "intro-call", "start": format!("{}T09:30", day(0)), "attendee_name": "Sam", "attendee_email": "sam@example.com" }),
+    );
+    let path = b["path"].as_str().unwrap().to_owned();
+    let text = read(&dir, &path);
+    for line in [
+        "type: scheduling-booking",
+        "event_type_id: intro-call",
+        "attendee_name: Sam",
+        "status: confirmed",
+        "start_utc:",
+    ] {
+        assert!(text.contains(line), "{line:?} in\n{text}");
+    }
+    assert_eq!(slots(&list), ["09:00", "10:30"]);
+    let again = try_run(
+        &list,
+        "CALENDAR_BOOK",
+        json!({ "event_type": "intro-call", "start": format!("{}T09:30", day(0)), "attendee_name": "Alex" }),
+    );
+    assert!(again.unwrap_err().contains("not open"));
+    let on = week(&list)
+        .into_iter()
+        .find(|b| b["source"]["kind"] == "booking")
+        .unwrap();
+    assert_eq!(on["title"], "Intro call — Sam");
+    assert_eq!(on["start"], format!("{}T09:30", day(0)));
+
+    // Cancelled: its slot is open again, and it leaves the calendar.
+    let s = run(
+        &list,
+        "CALENDAR_BOOKING_STATUS",
+        json!({ "path": path, "status": "cancelled" }),
+    );
+    assert_eq!(
+        (s["was"].clone(), s["status"].clone()),
+        (json!("confirmed"), json!("cancelled"))
+    );
+    assert_eq!(slots(&list), ["09:00", "09:30", "10:30"]);
+    assert!(!week(&list).iter().any(|b| b["source"]["kind"] == "booking"));
+    assert_eq!(
+        run(&list, "CALENDAR_BOOKINGS", json!({ "status": "cancelled" }))["count"],
+        1
+    );
+    assert_eq!(
+        run(&list, "CALENDAR_EVENT_TYPES", json!({}))["event_types"][0]["schedule"],
+        "Work hours"
+    );
 }

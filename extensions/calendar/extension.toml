@@ -154,6 +154,68 @@ effect = "mutating"
 params = '{"type":"object","properties":{"view":{"type":"string","enum":["calendar","timeline"]}}}'
 
 [[actions]]
+id = "CALENDAR_EVENT_TYPES"
+name = "Booking: event types"
+description = "The event types that can be booked (each with its length, buffer, notice, horizon, schedule and where), the schedules (their weekly hours), and how many bookings hold time."
+group = "Calendar"
+effect = "read_only"
+
+[[actions]]
+id = "CALENDAR_EVENT_TYPE"
+name = "Booking: make or change an event type"
+description = "An event type in Calendar/Event types (Task's scheduling-event-type): `title`, `duration_min`, `buffer_min` (padding around it, and between slots), `schedule_id` (its hours), `notice_min` (how soon before), `days_ahead` (how far ahead), `location` ({kind: phone | in_person, address | link, url | tbd}), `published`, `description`. With the `id` of one, changes it."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"slug":{"type":"string"},"duration_min":{"type":"integer"},"buffer_min":{"type":"integer"},"schedule_id":{"type":"string"},"notice_min":{"type":"integer"},"days_ahead":{"type":"integer"},"location":{"type":"object"},"published":{"type":"boolean"},"description":{"type":"string"}}}'
+
+[[actions]]
+id = "CALENDAR_SCHEDULE"
+name = "Booking: make or change a schedule"
+description = "Weekly hours in Calendar/Schedules (Task's scheduling-schedule): `name`, `rules` (lines such as \"mon-fri 09:00-17:00\", \"sat 10:00-14:00\", or Task's {days, start, end}), `timezone` (kept; the hours are your time zone's). With the `id` of one, changes it."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"rules":{"type":"array"},"timezone":{"type":"string"}},"required":["rules"]}'
+
+[[actions]]
+id = "CALENDAR_OPEN_SLOTS"
+name = "Booking: open slots"
+description = "Task's list_open_slots: event type `event_type`'s open slots over `from`..`to` (YYYY-MM-DD; today and the next six days by default): its schedule's hours stepped by its length plus buffer, less bookings and the calendar's events (each padded by the buffer), from `notice_min` on and up to `days_ahead`."
+group = "Calendar"
+effect = "read_only"
+params = '{"type":"object","properties":{"event_type":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}},"required":["event_type"]}'
+
+[[actions]]
+id = "CALENDAR_BOOK"
+name = "Booking: book a slot"
+description = "Task's book_slot: books `event_type` at `start` (a slot's start) for `attendee_name` (`attendee_email`, `note`): a booking note in Calendar/Bookings, confirmed, on the calendar. Refused when the slot is not open now."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"event_type":{"type":"string"},"start":{"type":"string"},"attendee_name":{"type":"string"},"attendee_email":{"type":"string"},"note":{"type":"string"}},"required":["event_type","start","attendee_name"]}'
+
+[[actions]]
+id = "CALENDAR_BOOKINGS"
+name = "Booking: bookings"
+description = "The bookings, by start: `status` (pending, confirmed, cancelled, no_show, completed), `from`..`to` (YYYY-MM-DD) narrow them."
+group = "Calendar"
+effect = "read_only"
+params = '{"type":"object","properties":{"status":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "CALENDAR_BOOKING_STATUS"
+name = "Booking: set a booking's status"
+description = "Task's update_booking_status: booking `path` (or `id`) to `status` (pending, confirmed, cancelled, no_show, completed); cancelled frees its slot."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"id":{"type":"string"},"status":{"type":"string"}},"required":["status"]}'
+
+[[actions]]
+id = "CALENDAR_BOOKINGS_OPEN"
+name = "Open bookings"
+description = "Opens Bookings: each event type's open slots this week (a click books one) and the bookings."
+group = "Calendar"
+effect = "mutating"
+
+[[actions]]
 id = "CALENDAR_STARTED"
 name = "Calendar: started"
 description = "Its startup hook: reads the vault's events."
@@ -196,6 +258,11 @@ id = "calendar"
 title = "Calendar"
 icon = "calendar"
 
+[[views]]
+id = "bookings"
+title = "Bookings"
+icon = "calendar-clock"
+
 [[menus]]
 menu = "View"
 action = "CALENDAR_OPEN"
@@ -203,6 +270,10 @@ action = "CALENDAR_OPEN"
 [[menus]]
 menu = "View"
 action = "CALENDAR_DAILY"
+
+[[menus]]
+menu = "View"
+action = "CALENDAR_BOOKINGS_OPEN"
 
 [[bar]]
 action = "CALENDAR_OPEN"

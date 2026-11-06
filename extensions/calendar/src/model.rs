@@ -480,6 +480,8 @@ pub enum Source {
     },
     /// Time tracked (the Time Tracker's): the note it is on.
     Time { path: String, running: bool },
+    /// A booking of an event type ([`crate::booking`]).
+    Booking { path: String, status: String },
 }
 
 impl Source {
@@ -487,7 +489,10 @@ impl Source {
     #[must_use]
     pub fn path(&self) -> &str {
         match self {
-            Self::Event { path, .. } | Self::Task { path, .. } | Self::Time { path, .. } => path,
+            Self::Event { path, .. }
+            | Self::Task { path, .. }
+            | Self::Time { path, .. }
+            | Self::Booking { path, .. } => path,
         }
     }
 }
@@ -528,7 +533,7 @@ impl Block {
     /// Whether it can be moved here: an event's, or a task's.
     #[must_use]
     pub const fn movable(&self) -> bool {
-        !matches!(self.source, Source::Time { .. })
+        !matches!(self.source, Source::Time { .. } | Source::Booking { .. })
     }
 }
 
