@@ -40,7 +40,7 @@ pub mod actions;
 #[cfg(all(feature = "ui", not(target_arch = "wasm32")))]
 pub mod ui;
 
-pub use model::{Account, AccountsFile, Device};
+pub use model::{Account, AccountsFile, DEVICE_ORG, Device, device_org, with_device_org};
 pub use secrets::{MemorySecrets, SecretError, SecretStore};
 pub use store::{AccountStore, ActiveSession, StoreError};
 

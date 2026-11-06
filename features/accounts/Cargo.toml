@@ -19,12 +19,14 @@ description = "Accounts on an issuer: who is signed in, their sessions in the pl
 [features]
 default = []
 keychain = ["dep:keyring"]
-http = ["dep:auth-proto", "dep:architect", "architect/http-client", "dep:tokio", "dep:uuid", "dep:webbrowser"]
+http = ["architect-orgs/auth", "dep:auth-proto", "dep:architect", "architect/http-client", "dep:tokio", "dep:uuid", "dep:webbrowser"]
 actions = ["http", "architect/action-list"]
 ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:lucide-dioxus", "dep:futures-channel", "dep:futures-util"]
 
 [dependencies]
 auth-client = { workspace = true }
+# Each account's orgs and the current one (the model, wasm-clean).
+architect-orgs = { workspace = true }
 facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
 serde_json = { workspace = true }

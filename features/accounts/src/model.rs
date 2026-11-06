@@ -1,7 +1,31 @@
 //! The accounts and the active one: what a switcher shows, with no secret
 //! in it.
 
+use architect_orgs::{Org, Orgs, Role, Selection};
 use facet::Facet;
+
+/// The id of the org that is the person's own on this device (their
+/// vault, their notes): what the app is in signed out, and kept first in
+/// an account's orgs while the issuer has no personal org for it.
+pub const DEVICE_ORG: &str = "me";
+
+/// The person's own org on this device ([`DEVICE_ORG`]).
+#[must_use]
+pub fn device_org() -> Org {
+    Org::new(DEVICE_ORG, "Personal", Role::Owner)
+        .personal()
+        .color("#047857")
+}
+
+/// The orgs an account shows: the issuer's, with [`device_org`] first
+/// when none of them is the person's own.
+#[must_use]
+pub fn with_device_org(mut orgs: Vec<Org>) -> Vec<Org> {
+    if !orgs.iter().any(|o| o.personal) {
+        orgs.insert(0, device_org());
+    }
+    orgs
+}
 
 /// One account at an issuer, as this device knows it.
 #[derive(Clone, Debug, PartialEq, Eq, Facet)]
@@ -17,6 +41,12 @@ pub struct Account {
     /// The issuer refused its session (expired, revoked elsewhere): listed
     /// still, and signing in again brings it back.
     pub needs_sign_in: bool,
+    /// The orgs it is in, as last fetched from the issuer, and the one it
+    /// is in now: kept per account, so switching accounts brings back
+    /// the org each was in, and the switcher works offline. `None` until
+    /// the first fetch.
+    #[facet(default)]
+    pub orgs: Option<Orgs>,
 }
 
 impl Account {
@@ -35,6 +65,15 @@ impl Account {
             .filter(|n| !n.trim().is_empty())
             .or_else(|| self.email.clone())
             .unwrap_or_else(|| self.id.clone())
+    }
+
+    /// Its orgs and the current one: as last fetched, else only
+    /// [`device_org`].
+    #[must_use]
+    pub fn orgs(&self) -> Orgs {
+        self.orgs
+            .clone()
+            .unwrap_or_else(|| Orgs::new(vec![device_org()]))
     }
 
     /// Whether `who` names it: its key, id or email (any case).
@@ -89,6 +128,11 @@ impl AccountsFile {
     pub fn upsert_active(&mut self, account: Account) {
         let key = account.key();
         if let Some(had) = self.accounts.iter_mut().find(|a| a.key() == key) {
+            let mut account = account;
+            // Signing in again keeps the org it was in.
+            if account.orgs.is_none() {
+                account.orgs = had.orgs.take();
+            }
             *had = account;
         } else {
             self.accounts.push(account);
@@ -109,6 +153,43 @@ impl AccountsFile {
                 .map(Account::key);
         }
         Some(gone)
+    }
+
+    /// The orgs the active account is in and its current one; signed
+    /// out, only [`device_org`].
+    #[must_use]
+    pub fn orgs(&self) -> Orgs {
+        self.active()
+            .map_or_else(|| Orgs::new(vec![device_org()]), Account::orgs)
+    }
+
+    /// Keeps `fresh` (the issuer's list) as `key`'s orgs; the org it was
+    /// in stays current unless it is gone. `None` when no account is
+    /// `key`.
+    pub fn set_orgs(&mut self, key: &str, fresh: Vec<Org>) -> Option<Orgs> {
+        let account = self.accounts.iter_mut().find(|a| a.key() == key)?;
+        let fresh = with_device_org(fresh);
+        let orgs = match account.orgs.take() {
+            Some(mut had) => {
+                had.refresh(fresh);
+                had
+            }
+            None => Orgs::new(fresh),
+        };
+        account.orgs = Some(orgs.clone());
+        Some(orgs)
+    }
+
+    /// Moves `key` to `selection`. `None` when no account is `key` or the
+    /// selection names an org it is not in.
+    pub fn switch_org(&mut self, key: &str, selection: Selection) -> Option<Orgs> {
+        let account = self.accounts.iter_mut().find(|a| a.key() == key)?;
+        let mut orgs = account.orgs();
+        if !orgs.switch(selection) {
+            return None;
+        }
+        account.orgs = Some(orgs.clone());
+        Some(orgs)
     }
 
     /// As JSON.
@@ -156,6 +237,7 @@ mod tests {
             name: None,
             image: None,
             needs_sign_in: false,
+            orgs: None,
         }
     }
 
@@ -189,5 +271,55 @@ mod tests {
         let json = file.to_json().unwrap_or_default();
         assert!(!json.contains("token"), "{json}");
         assert_eq!(AccountsFile::from_json(&json).ok(), Some(file));
+    }
+
+    #[test]
+    fn each_account_keeps_its_own_org() {
+        let mut file = AccountsFile::default();
+        assert_eq!(
+            file.orgs().current().map(|o| o.id.0.clone()),
+            Some(DEVICE_ORG.to_owned())
+        );
+        file.upsert_active(account("u1", "ada@example.test"));
+        file.upsert_active(account("u2", "grace@example.test"));
+        let acme = Org::new("o-acme", "Acme Records", Role::Admin);
+        let indie = Org::new("o-indie", "Indie Collective", Role::Owner);
+        file.set_orgs("u1@auth.example.test", vec![acme.clone()]);
+        file.set_orgs("u2@auth.example.test", vec![acme.clone(), indie.clone()]);
+        // No personal org at the issuer: the device's comes first.
+        assert_eq!(file.orgs().orgs.len(), 3);
+        assert!(
+            file.switch_org("u2@auth.example.test", Selection::One(indie.id.clone()))
+                .is_some()
+        );
+        assert!(
+            file.switch_org("u1@auth.example.test", Selection::One(indie.id.clone()))
+                .is_none()
+        );
+        file.active = Some("u1@auth.example.test".to_owned());
+        assert_eq!(
+            file.orgs().current().map(|o| o.id.0.clone()),
+            Some(DEVICE_ORG.to_owned())
+        );
+        file.active = Some("u2@auth.example.test".to_owned());
+        assert_eq!(file.orgs().current(), Some(&indie));
+        // A fresh list keeps the current org; signing in again keeps both.
+        file.set_orgs("u2@auth.example.test", vec![indie.clone(), acme]);
+        file.upsert_active(account("u2", "grace@example.test"));
+        assert_eq!(file.orgs().current(), Some(&indie));
+        // Removed from it: back to the person's own.
+        file.set_orgs("u2@auth.example.test", vec![]);
+        assert_eq!(
+            file.orgs().current().map(|o| o.id.0.clone()),
+            Some(DEVICE_ORG.to_owned())
+        );
+        let json = file.to_json().unwrap_or_default();
+        assert_eq!(AccountsFile::from_json(&json).ok(), Some(file));
+        // A file from before orgs were kept still reads.
+        let old = r#"{"active":null,"accounts":[{"id":"u1","issuer":"https://a.test","email":null,"name":null,"image":null,"needs_sign_in":false}]}"#;
+        assert!(
+            AccountsFile::from_json(old)
+                .is_ok_and(|f| f.accounts.first().is_some_and(|a| a.orgs.is_none()))
+        );
     }
 }

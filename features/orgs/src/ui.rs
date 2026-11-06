@@ -117,6 +117,17 @@ impl OrgHandle {
         }
     }
 
+    /// Puts `orgs` (the list and the selection) in the window as they are,
+    /// `on_change` not told: where another owner keeps them (the active
+    /// account's, `architect_accounts`) and the window follows it. Nothing
+    /// is written when they are the same.
+    pub fn replace(&self, orgs: Orgs) {
+        let mut shown = self.orgs;
+        if *shown.peek() != orgs {
+            shown.set(orgs);
+        }
+    }
+
     /// The identity server's fresh list.
     pub fn refresh(&self, list: Vec<Org>) {
         let mut orgs = self.orgs;

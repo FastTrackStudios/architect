@@ -771,6 +771,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-auth",
+ "architect-orgs",
  "architect-shell",
  "architect-workspace-hack",
  "auth-client",

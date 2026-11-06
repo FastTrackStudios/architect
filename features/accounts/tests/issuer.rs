@@ -222,3 +222,87 @@ async fn the_actions_list_switch_and_sign_out_and_never_answer_a_token() {
     );
     assert_eq!(secrets.len(), 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_account_has_its_orgs_and_keeps_the_one_it_is_in() {
+    let (origin, _) = issuer().await;
+    let secrets = Arc::new(MemorySecrets::new());
+    let a = accounts(&origin, secrets);
+    let list = Arc::new(ActionList::new());
+    architect_accounts::actions::register(&list, &a).unwrap();
+
+    // Signed out: the person's own on this device, nothing to switch.
+    assert_eq!(
+        a.orgs().current().map(|o| o.id.0.clone()).as_deref(),
+        Some(architect_accounts::DEVICE_ORG)
+    );
+    assert!(list.run_json("ORG_SWITCH", br#"{"org":"acme"}"#).is_err());
+
+    // Grace is in both seeded orgs; the issuer has no personal org, so the
+    // device's comes first.
+    a.sign_in_password("grace@local.test", PASSWORD)
+        .await
+        .unwrap();
+    until("grace's orgs", || a.orgs().orgs.len() == 3).await;
+    let listed =
+        String::from_utf8(list.run_json_async("ORG_LIST", b"null").await.unwrap()).unwrap();
+    assert!(
+        listed.contains("\"slug\":\"acme\"") && listed.contains("\"slug\":\"indie\""),
+        "{listed}"
+    );
+    assert!(listed.contains("\"stale\":null"), "{listed}");
+    assert!(
+        !listed.contains(&a.store().active_session().unwrap().unwrap().token),
+        "{listed}"
+    );
+
+    let switched =
+        String::from_utf8(list.run_json("ORG_SWITCH", br#"{"org":"indie"}"#).unwrap()).unwrap();
+    let indie = a.orgs().current().cloned().unwrap();
+    assert_eq!(indie.slug, "indie");
+    assert_eq!(indie.role, architect_orgs::Role::Owner);
+    assert!(
+        switched.contains(&format!("\"current\":\"{}\"", indie.id.0)),
+        "{switched}"
+    );
+    // The session and the org, where a vox client reads them.
+    let active = a.active_session();
+    assert_eq!(active.org().map(|o| o.slug), Some("indie".to_owned()));
+    // The issuer hears it as the session's active org.
+    let token = a.store().active_session().unwrap().unwrap().token;
+    let auth = auth_proto::AuthServiceHttpClient::at(origin.clone());
+    let mut told = None;
+    for _ in 0..200 {
+        told = auth
+            .current_session(token.clone())
+            .await
+            .unwrap()
+            .session
+            .active_organization_id;
+        if told.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(told.map(|u| u.to_string()), Some(indie.id.0.clone()));
+    assert!(
+        list.run_json("ORG_SWITCH", br#"{"org":"nowhere"}"#)
+            .is_err()
+    );
+
+    // Another account has its own orgs and its own current one.
+    a.sign_in_password("alan@local.test", PASSWORD)
+        .await
+        .unwrap();
+    until("alan's orgs", || a.orgs().orgs.len() == 2).await;
+    assert_eq!(a.orgs().current().map(|o| o.personal), Some(true));
+    a.switch("grace@local.test").unwrap();
+    assert_eq!(
+        a.orgs().current().map(|o| o.slug.clone()).as_deref(),
+        Some("indie")
+    );
+
+    // All, kept too.
+    list.run_json("ORG_SWITCH", br#"{"org":"all"}"#).unwrap();
+    assert!(a.orgs().current().is_none() && a.active_session().scope().is_all());
+}

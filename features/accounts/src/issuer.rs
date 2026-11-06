@@ -11,10 +11,11 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use architect::ClientError;
+use architect_orgs::Org;
 use auth_client::StoredSession;
 use auth_proto::{
     AuthFlowError, AuthServiceHttpClient, AuthSessionBundle, DeviceRegistration,
-    DeviceServiceHttpClient, SignInEmailPassword,
+    DeviceServiceHttpClient, OrganizationServiceHttpClient, SignInEmailPassword,
 };
 
 use crate::model::{Account, Device};
@@ -144,6 +145,10 @@ impl Issuer {
         DeviceServiceHttpClient::at(self.origin.clone())
     }
 
+    fn orgs_client(&self) -> OrganizationServiceHttpClient {
+        OrganizationServiceHttpClient::at(self.origin.clone())
+    }
+
     fn error(&self, e: ClientError<AuthFlowError>) -> IssuerError {
         match e {
             ClientError::App(AuthFlowError::InvalidCredentials) => IssuerError::InvalidCredentials,
@@ -180,6 +185,7 @@ impl Issuer {
                 name: user.name.or(user.display_username),
                 image: user.image,
                 needs_sign_in: false,
+                orgs: None,
             },
             session,
         }
@@ -405,6 +411,54 @@ impl Issuer {
         self.run(async move {
             client
                 .forget_device(token, device)
+                .await
+                .map_err(|e| me.error(e))
+        })
+        .await
+    }
+}
+
+impl Issuer {
+    /// The orgs `session`'s account is in, with its role in each
+    /// (`OrganizationService::list_organizations`). Its own org is the one
+    /// whose slug is its id (fts-auth's convention).
+    ///
+    /// # Errors
+    ///
+    /// [`IssuerError::SessionExpired`]; the issuer's.
+    pub async fn organizations(&self, session: &StoredSession) -> Result<Vec<Org>, IssuerError> {
+        let (me, client, token) = (self.clone(), self.orgs_client(), session.token.clone());
+        let personal = session.user_id.clone();
+        self.run(async move {
+            let bundles = client
+                .list_organizations(token)
+                .await
+                .map_err(|e| me.error(e))?;
+            Ok(architect_orgs::from_bundles(&bundles, personal.as_deref()))
+        })
+        .await
+    }
+
+    /// Makes `org` (an issuer org's id) `session`'s active org at the
+    /// issuer (`OrganizationService::set_active_organization`), so a server
+    /// that reads the session's org sees the one the app is in. An id that
+    /// is not the issuer's (the device's own org) is not sent.
+    ///
+    /// # Errors
+    ///
+    /// The issuer's.
+    pub async fn set_active_org(
+        &self,
+        session: &StoredSession,
+        org: &str,
+    ) -> Result<(), IssuerError> {
+        let Ok(id) = org.trim().parse::<uuid::Uuid>() else {
+            return Ok(());
+        };
+        let (me, client, token) = (self.clone(), self.orgs_client(), session.token.clone());
+        self.run(async move {
+            client
+                .set_active_organization(token, id)
                 .await
                 .map_err(|e| me.error(e))
         })

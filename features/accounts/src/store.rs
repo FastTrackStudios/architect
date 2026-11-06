@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use architect_orgs::{Org, Orgs, Scope, Selection};
 use auth_client::{StoredSession, TokenStore, TokenStoreError};
 
 use crate::model::{Account, AccountsFile};
@@ -21,6 +22,10 @@ pub enum StoreError {
     File(String),
     #[error("no account {0}")]
     NoAccount(String),
+    #[error("no account is signed in")]
+    SignedOut,
+    #[error("the account is not in an org {0}")]
+    NoOrg(String),
 }
 
 /// Every account on this device: the file and the sessions.
@@ -211,6 +216,53 @@ impl AccountStore {
         self.save(&file)
     }
 
+    /// The active account's orgs and its current one; signed out, only
+    /// the person's own on this device (`device_org`).
+    #[must_use]
+    pub fn orgs(&self) -> Orgs {
+        self.file().orgs()
+    }
+
+    /// Keeps the issuer's fresh list as `key`'s orgs (the current one
+    /// stays unless it is gone).
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::NoAccount`]; the file's.
+    pub fn set_orgs(&self, key: &str, fresh: Vec<Org>) -> Result<Orgs, StoreError> {
+        let mut file = self.file();
+        let orgs = file
+            .set_orgs(key, fresh)
+            .ok_or_else(|| StoreError::NoAccount(key.to_owned()))?;
+        self.save(&file)?;
+        Ok(orgs)
+    }
+
+    /// Moves the active account to `who`: an org's id, slug or name, or
+    /// `all` for every org.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::SignedOut`], [`StoreError::NoOrg`]; the file's.
+    pub fn switch_org(&self, who: &str) -> Result<Orgs, StoreError> {
+        let mut file = self.file();
+        let key = file.active.clone().ok_or(StoreError::SignedOut)?;
+        let selection = if who.trim().eq_ignore_ascii_case("all") {
+            Selection::All
+        } else {
+            let orgs = file.orgs();
+            let org = orgs
+                .find(who)
+                .ok_or_else(|| StoreError::NoOrg(who.trim().to_owned()))?;
+            Selection::One(org.id.clone())
+        };
+        let orgs = file
+            .switch_org(&key, selection)
+            .ok_or_else(|| StoreError::NoOrg(who.trim().to_owned()))?;
+        self.save(&file)?;
+        Ok(orgs)
+    }
+
     /// Adds `account` without making it active (an update of its name or
     /// picture from the issuer).
     ///
@@ -229,11 +281,44 @@ impl AccountStore {
     }
 }
 
-/// The active account's session as an [`auth_client::TokenStore`]: what an
-/// org list (`architect_orgs::auth::fetch`) or a vox client
-/// (`auth_client::TokenStoreMiddleware`) takes. It follows switches.
+/// The active account's session as an [`auth_client::TokenStore`], and the
+/// org it is in now.
+///
+/// It is what a vox client takes (the bearer from the store,
+/// `auth_client::TokenStoreMiddleware`; the org's lane from [`Self::org`])
+/// and what a vault, a space or a sync keys its data by
+/// ([`architect_orgs::OrgId::path`] of [`Self::org`], [`Self::scope`] for
+/// a read). It follows account and org switches: read it at the moment of
+/// use, never keep what it said.
 #[derive(Clone, Debug)]
 pub struct ActiveSession(pub Arc<AccountStore>);
+
+impl ActiveSession {
+    /// The active account, `None` signed out.
+    #[must_use]
+    pub fn account(&self) -> Option<Account> {
+        self.0.active()
+    }
+
+    /// The active account's orgs and its current one.
+    #[must_use]
+    pub fn orgs(&self) -> Orgs {
+        self.0.orgs()
+    }
+
+    /// The org the active account is in now (signed out, the person's own
+    /// on this device); `None` in All, where a write picks one first.
+    #[must_use]
+    pub fn org(&self) -> Option<Org> {
+        self.0.orgs().current().cloned()
+    }
+
+    /// What a read covers: the current org, or every org in All.
+    #[must_use]
+    pub fn scope(&self) -> Scope {
+        self.0.orgs().scope()
+    }
+}
 
 impl TokenStore for ActiveSession {
     fn save(&self, session: &StoredSession) -> Result<(), TokenStoreError> {
@@ -276,6 +361,7 @@ mod tests {
             name: None,
             image: None,
             needs_sign_in: false,
+            orgs: None,
         }
     }
 
@@ -330,5 +416,39 @@ mod tests {
             .unwrap_or_else(|e| panic!("{e}"));
         assert!(secrets.is_empty());
         assert!(store.active().is_some_and(|a| a.needs_sign_in));
+    }
+
+    #[test]
+    fn the_active_session_follows_the_account_and_its_org() {
+        let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));
+        let active = ActiveSession(store.clone());
+        assert_eq!(
+            active.org().map(|o| o.id.0),
+            Some(crate::DEVICE_ORG.to_owned())
+        );
+        assert!(matches!(
+            store.switch_org("all"),
+            Err(StoreError::SignedOut)
+        ));
+        store
+            .sign_in(account("grace"), &StoredSession::new("g"))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let key = account("grace").key();
+        let indie = Org::new("o-indie", "Indie Collective", architect_orgs::Role::Owner);
+        store
+            .set_orgs(&key, vec![indie.clone()])
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert!(matches!(
+            store.switch_org("nowhere"),
+            Err(StoreError::NoOrg(_))
+        ));
+        store
+            .switch_org("indie-collective")
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(active.org(), Some(indie.clone()));
+        assert_eq!(active.scope(), Scope::One(indie.id));
+        store.switch_org("All").unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(active.org(), None);
+        assert!(active.scope().is_all());
     }
 }

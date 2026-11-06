@@ -211,6 +211,16 @@ impl Orgs {
         self.orgs.iter().find(|o| &o.id == id)
     }
 
+    /// The org `who` names: its id, its slug, or its name (any case).
+    #[must_use]
+    pub fn find(&self, who: &str) -> Option<&Org> {
+        let who = who.trim();
+        self.orgs
+            .iter()
+            .find(|o| o.id.0 == who || o.slug == who)
+            .or_else(|| self.orgs.iter().find(|o| o.name.eq_ignore_ascii_case(who)))
+    }
+
     /// The org the window is in, unless it is in All.
     #[must_use]
     pub fn current(&self) -> Option<&Org> {
