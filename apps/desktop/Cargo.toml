@@ -1,6 +1,6 @@
 [package]
 name = "architect-desktop"
-description = "The Architect app on a desk (Blitz): the person's vault, the shell, the workspace and extensions; its library runs the sandbox too (apps/sandbox). `dx serve` it for hot reload."
+description = "The Architect app on a desk (Blitz): the person's vault, the shell, the workspace and extensions; its library runs the sandbox too (apps/sandbox). `dx serve` it for hot reload. `architect-desktop serve` is the same app headless, the always-on node; `--no-default-features` builds it without the window."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,34 +14,85 @@ name = "architect-desktop"
 path = "src/main.rs"
 
 [features]
-keyflow-lab = ["architect-app/keyflow-lab"]
+# The window: Blitz, the shell, the workspace, extensions. Without it
+# (`--no-default-features --features vox`), the binary is the node alone,
+# `architect-desktop serve`: no Blitz, wgpu or wayland, for the server
+# image (flake.nix `architect-image`).
+default = ["gui", "vox"]
+# The node's services' vox and HTTP faces: `#[architect::service]` emits
+# them under the calling crate's `vox`. Every build of the app has it.
+vox = []
+gui = [
+    "dep:architect-app",
+    "dep:architect-control",
+    "dep:architect-guide",
+    "dep:architect-shell",
+    "dep:architect-presence",
+    "dep:architect-workspace",
+    "dep:architect-extensions",
+    "dep:dioxus",
+    "dep:dioxus-native",
+    "architect-mcp/bridge",
+]
+keyflow-lab = ["gui", "architect-app/keyflow-lab"]
 # WASI component extensions: Wasmtime and Cranelift in the binary.
-wasi = ["architect-app/wasi"]
+wasi = ["gui", "architect-app/wasi"]
 
 [dependencies]
-architect-app = { workspace = true }
+architect-app = { workspace = true, optional = true }
 # Its Action List from the command line (`architect-desktop actions …`) and
 # its control socket; MCP on stdio, bridged onto that socket or headless.
-architect = { workspace = true, features = ["action-list"] }
-architect-control = { workspace = true, features = ["server", "cli"] }
-architect-mcp = { workspace = true, features = ["bridge", "http"] }
+architect-control = { workspace = true, features = ["server", "cli"], optional = true }
 # `--headless`: the lab's root in a document with no window.
-architect-guide = { workspace = true, features = ["run"] }
-architect-shell = { workspace = true }
+architect-guide = { workspace = true, features = ["run"], optional = true }
+architect-shell = { workspace = true, optional = true }
 # One instance, and a `--background` launch starting with no window.
-architect-presence = { workspace = true, features = ["native"] }
-architect-workspace = { workspace = true, features = ["native", "hot-reload"] }
+architect-presence = { workspace = true, features = ["native"], optional = true }
+architect-workspace = { workspace = true, features = ["native", "hot-reload"], optional = true }
 # `extensions check <folder>` (EXT_CHECK with no window), its report as JSON;
 # `net`, extensions' fetches (#310): the app turns the client on, not its UI crates.
-architect-extensions = { workspace = true, features = ["host", "process", "remote", "net"] }
+architect-extensions = { workspace = true, features = ["host", "process", "remote", "net"], optional = true }
+dioxus = { workspace = true, optional = true }
+dioxus-native = { workspace = true, features = ["vello", "hot-reload"], optional = true }
 facet-json = { version = "0.50.0-rc.5" }
-dioxus = { workspace = true }
-dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
-# The lab's Action List over MCP on loopback, when asked (src/mcp.rs).
-tokio = { workspace = true }
+# The lab's Action List over MCP on loopback, when asked (src/mcp_port.rs),
+# and the node's runtime.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "net", "signal"] }
 tracing = { workspace = true }
+# ── The node (`src/node/`): `serve`, with or without the window ────────
+# A host: the HTTP face, same-origin vox, Sites and `/health`; iroh for
+# the node's lanes; a vox client of the issuer for the account pass. An
+# app, so it may (boundaries.toml `host-dirs`).
+architect = { workspace = true, features = ["action-list", "host", "http", "iroh", "connect"] }
+architect-mcp = { workspace = true, features = ["http"] }
+architect-permissions = { workspace = true }
+# Who the node lets in (the account's devices), and its account pass.
+architect-devices = { workspace = true, features = ["account", "iroh"] }
+auth-proto = { workspace = true, features = ["vox"] }
+# The vaults it holds: the files, their per-file documents, and the
+# lanes that move those between nodes.
+crdt = { workspace = true, features = ["vox"] }
+vault-live = { workspace = true }
+vault-proto = { workspace = true, features = ["vox"] }
+vault-collab = { workspace = true }
+# Sites (#364): a vault published, rebuilt when it changes.
+architect-sites = { workspace = true }
+facet = { workspace = true }
+iroh = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+uuid = { workspace = true }
+vox = { workspace = true }
 
 [dev-dependencies]
+# tests/node.rs: the issuer in process, as features/accounts/tests/issuer.rs.
+auth-server = { workspace = true }
+architect-auth = { workspace = true, features = ["full"] }
+architect-accounts = { workspace = true, features = ["http"] }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # The A2UI surface the parity test renders (tests/actions.rs).
 architect-a2ui = { workspace = true }
 architect-mcp = { workspace = true, features = ["parity"] }
@@ -59,3 +110,12 @@ workspace = true
 
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+# The window's tests need the window's crates.
+[[test]]
+name = "actions"
+required-features = ["gui"]
+
+[[test]]
+name = "agent_tools"
+required-features = ["gui"]
