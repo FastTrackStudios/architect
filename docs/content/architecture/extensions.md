@@ -1192,6 +1192,39 @@ shown meanwhile). An item picked runs `open` with `{id}`. `COMMANDS_SHOW
 {"overlay": "quick-open", "query": "theme:"}` opens ⌘O on one source
 alone, under its title.
 
+**The palette, its keys and its sources (#381).** ⌘K and ⌘O are an
+extension's: the shell keeps the slot (`architect_commands::CommandLayer`)
+and `COMMANDS_SHOW`, and the Command Palette (`features/palette/extension`,
+id `command-palette`) fills it. Three points, withdrawn when their
+extension is off and read with `EXT_PALETTE`
+(`features/extensions/src/interface.rs` `use_palette` keeps the shell
+in step):
+
+```toml
+[[palette_views]]            # which of its views draws an overlay
+overlay = "palette"          # or "quick-open"
+view = "palette"
+
+[[keys]]                     # a key in the app's keymap, to its action
+chord = "⌘K"
+action = "COMMAND_PALETTE_OPEN"
+
+[[palette_sources]]          # rows for ⌘K, ranked by the engine
+id = "tours"                 # and its prefix: tours: asks only it
+title = "Tours"
+action = "TOURS_PALETTE_FIND"   # {query} in, {items: [{id, label, detail?, group?}]} out
+run = "TOURS_START"             # a row picked, given {id}
+ranking = "open"                # or "commands"
+```
+
+The first loaded extension that draws an overlay draws it; a
+development copy of the palette (`EXT_CLONE {"id":"command-palette"}`)
+draws it in the built-in's place. A view named in `[[palette_views]]` is
+not offered as a pane. With no palette, ⌘K and ⌘O do nothing and
+`COMMANDS_SHOW` fails. The engine is `architect-palette`
+(`features/palette/src/source.rs` `Engine`), the one the launcher ranks
+with.
+
 **A settings section drawn by a view.** `[[sections]] view = "section"`
 puts one of its views on the settings page as a section of its own (the
 extensions manager's); `group = ""` puts it in the first, untitled group.

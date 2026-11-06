@@ -105,6 +105,11 @@ package = "architect-commands"
 layer = "L0"
 
 [[row]]
+package = "architect-palette"
+layer = "L0"
+note = "the palette and launcher engine: sources, items, ranking, recents; MIT, no UI"
+
+[[row]]
 package = "architect-settings"
 layer = "L0"
 
@@ -389,6 +394,11 @@ note = "Tasks, a first-party extension (#375): tasks as vault notes, its list, T
 package = "architect-theme-picker"
 layer = "L4"
 note = "the theme picker, a built-in extension: linked in, or its own process (guest)"
+
+[[row]]
+package = "architect-command-palette"
+layer = "L4"
+note = "the Command Palette, a built-in extension: ⌘K and ⌘O in the shell's palette slot; linked in, or its own process (guest). MIT"
 
 [[row]]
 package = "architect-ui"

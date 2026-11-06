@@ -697,6 +697,7 @@ const FORWARDED: &[&str] = &[
     "EXT_EMBEDS",
     "EXT_PROJECT_TYPES",
     "EXT_CAPTURE_TARGETS",
+    "EXT_PALETTE",
     "EXT_OPEN",
     "EXT_VIEW_OPEN",
     "EXT_STATE_SET",

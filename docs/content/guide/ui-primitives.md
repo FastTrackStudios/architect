@@ -363,9 +363,11 @@ commands.show(architect_commands::Overlay::Palette);
 commands.show(architect_commands::Overlay::QuickOpen);
 ```
 
-- `CommandPalette`: every command; arguments asked a step at a time;
-  `@`, `#`, `?` prefixes.
-- `QuickOpen`: every opener at once.
+- `CommandLayer`: the palette slot. The Command Palette extension
+  (`architect-command-palette`, `features/palette/extension`) draws ⌘K
+  (every command; arguments asked a step at a time; `@`, `#`, `?`
+  prefixes) and ⌘O (every opener at once) in it; with no palette
+  installed, nothing shows.
 - `ActionListView`: the action list window with its `BindingEditor` and
   `KeymapTools`; mount it as a workspace view
   (`View::new("actions", "Action list", |_| rsx! { architect_commands::ActionListView {} })`).

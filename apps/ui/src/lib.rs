@@ -1373,6 +1373,13 @@ pub fn LabApp() -> Element {
     if !Mode::current().is_sandbox() {
         status.retain(|s| s.id == "commands");
     }
+    // ⌘K is the Command Palette extension's: off, no hint for it.
+    if commands
+        .palette_owner(architect_commands::Overlay::Palette)
+        .is_none()
+    {
+        status.retain(|s| s.id != "commands");
+    }
     // Done, Delete and Move keep their way back on the status line,
     // where the notice over their list is not on show.
     let said_here = (lab.notice)()

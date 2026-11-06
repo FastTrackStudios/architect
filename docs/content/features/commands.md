@@ -89,8 +89,9 @@ rsx! { CommandLayer {} }          // ⌘K and ⌘O; ActionListView {} is the win
 7. `features/commands/src/ui.rs` `use_commands_provider`, `use_action_list`,
    `use_command` (a view's own command), `use_opener`, `Commands::run`,
    `CommandLayer`, `ActionListView`.
-8. `features/commands/src/palette.rs` `rank`, `features/commands/src/opener.rs`
-   `Openers`, `features/commands/src/custom.rs` `CustomAction`.
+8. The engine, `architect-palette`: `features/palette/src/rank.rs` `rank`,
+   `features/palette/src/open.rs` `Openers`, `features/palette/src/source.rs`
+   `Engine`; `features/commands/src/custom.rs` `CustomAction`.
 
 A model's `tools/call greet` reaches `Server::handle_async`, which maps the
 tool name to `GREETER_GREET` and runs it through `run_json_async_as`. Inside

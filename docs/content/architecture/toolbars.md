@@ -40,7 +40,7 @@ mounts; the toolbars in one window share `toolbar_editor.rs` `Editor`.
 ## The pickers
 
 The **action picker** searches the Action List with the palette's own
-search (`features/commands/src/palette.rs` `rank`, over
+search (`features/palette/src/rank.rs` `rank`, over
 `architect_commands::Commands::all`), so an action is found as ⌘K finds
 it. It fills a new button, a dropdown's next row, or a button's
 right-click.

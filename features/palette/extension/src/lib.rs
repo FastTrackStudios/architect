@@ -194,9 +194,10 @@ impl Extension for CommandPalette {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
+                // A number, or one written as text (the CLI's `--arg`).
                 let limit = args
                     .get("limit")
-                    .and_then(Value::as_u64)
+                    .and_then(|l| l.as_u64().or_else(|| l.as_str()?.parse().ok()))
                     .and_then(|n| usize::try_from(n).ok())
                     .unwrap_or(LIMIT);
                 let list = run(&h, "COMMANDS_LIST", json!({})).await?;

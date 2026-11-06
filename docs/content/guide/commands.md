@@ -107,7 +107,7 @@ heard at the window to work after a click on empty space.
 
 What you get:
 
-- **⌘K, the palette** (`CommandPalette`): every enabled command, the most
+- **⌘K, the palette** (the Command Palette extension's `PaletteView`, #381): every enabled command, the most
   specific first, recent first when the field is empty, disabled ones dimmed
   with why. An action with arguments asks for them a step at a time from its
   params schema (`features/commands/src/params.rs`). Prefixes narrow it:
@@ -116,7 +116,7 @@ What you get:
 
 ![⌘K opened, "done" typed, Mark done run from the palette](https://raw.githubusercontent.com/FastTrackStudios/architect/media/palette-run.gif)
 
-- **⌘O, quick open** (`QuickOpen`): every opener at once. A feature
+- **⌘O, quick open** (its `QuickOpenView`): every opener at once. A feature
   registers one with `use_opener`; the sandbox's Vault registers its notes and
   opens the picked one where the person asked (here, a new tab, a split):
 
