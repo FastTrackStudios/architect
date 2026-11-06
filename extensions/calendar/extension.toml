@@ -1,0 +1,324 @@
+# The Calendar (extensions/calendar/src/lib.rs): events as vault notes,
+# Task's calendar (task:features/scheduling, task:features/view/view-calendar)
+# as an extension. One Rust value (`Calendar`, a linked::Extension) runs it
+# two ways: the app links it in as a built-in, and its program
+# (src/main.rs) serves the same value as a process, this manifest's
+# [entry], when a development copy runs (EXT_CLONE {"id":"calendar"}).
+# Turn it off (EXT_DISABLE {"id":"calendar"}) and everything below goes.
+id = "calendar"
+name = "Calendar"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Events as notes: one-off and repeating, with exceptions; day, week, month and agenda views where you drag to move and resize; your tasks on their due and scheduled days and your tracked time beside them; calendar and timeline views for Bases; a day's daily note a click away."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-calendar"
+
+# EXT_CLONE writes this crate to the development folder and builds its
+# program, which then overrides the linked copy under the same id.
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "extensions/calendar"
+
+# Its API for others (`services.call("architect.calendar", "list", …)`,
+# Handle::service): method `m` is its action CALENDAR_<M>.
+[provides]
+"architect.calendar" = "0.1.0"
+
+# Tasks and the Time Tracker, when they are installed: tasks on their
+# days, tracked time as blocks. Not [requires]: the Calendar runs alone.
+[uses]
+"architect.tasks" = "^0.1"
+"architect.time" = "^0.1"
+
+# It reaches notes only through the app's actions: vault reads, writes
+# and deletes, base queries, opening its view, and the navigator's daily
+# notes.
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "NAVIGATOR_OPEN_DAILY_NOTE"]
+# Destructive: deleting an event deletes its note (VAULT_DELETE).
+effect = "destructive"
+
+[[actions]]
+id = "CALENDAR_LIST"
+name = "Calendar: events"
+description = "The event notes (a series once, not its occurrences): with an occurrence in `from`..`to` (YYYY-MM-DD, `to` exclusive) when given, linked to note `linked_to`, by `external_ref`; tombstoned ones only with `include_tombstoned`. Each: path, id, title, start, end (RFC 3339, or dates all day), all_day, color, recurrence and its words, exdates, location, links, external_ref. At most `limit` (50; 200 at most)."
+group = "Calendar"
+effect = "read_only"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"linked_to":{"type":"string"},"external_ref":{"type":"string"},"include_tombstoned":{"type":"boolean"},"limit":{"type":"integer"}}}'
+
+[[actions]]
+id = "CALENDAR_AGENDA"
+name = "Calendar: what is on"
+description = "What the calendar shows over `from`..`to` (today and six days after by default): each occurrence of an event, each task on its scheduled or due day (with the Tasks extension), each span of tracked time (with the Time Tracker), in order. `tasks` or `time` false leaves them out."
+group = "Calendar"
+effect = "read_only"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"},"tasks":{"type":"boolean"},"time":{"type":"boolean"}}}'
+
+[[actions]]
+id = "CALENDAR_CREATE"
+name = "New event"
+description = "An event note in the calendar folder: `title`, `start` (RFC 3339, a local YYYY-MM-DDTHH:MM, or a date for all day), `end` or `minutes` (the default length otherwise), `all_day`, `color` (primary, success, warning, danger, info, muted), `recurrence` (an RRULE: FREQ=WEEKLY;BYDAY=MO,TH), `location`, `description`, `links` ([{relation, target}]: a note it is for), `external_ref` (system:id; one already used answers that event, existing true), `folder`."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"minutes":{"type":"integer"},"all_day":{"type":"boolean"},"color":{"type":"string"},"recurrence":{"type":"string"},"location":{"type":"string"},"description":{"type":"string"},"links":{"type":"array","items":{"type":"object","properties":{"relation":{"type":"string"},"target":{"type":"string"}}}},"external_ref":{"type":["string","object"]},"folder":{"type":"string"}},"required":["title","start"]}'
+
+[[actions]]
+id = "CALENDAR_UPDATE"
+name = "Change an event"
+description = "Changes event `path` (or `id`) without moving it: `title`, `description`, `location` (empty clears them), `color`, `recurrence` (empty: no more repeats), `links` (the whole set), `tombstone` (true marks it gone, false brings it back). Says what changed."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"location":{"type":"string"},"color":{"type":"string"},"recurrence":{"type":"string"},"links":{"type":"array"},"tombstone":{"type":"boolean"}}}'
+
+[[actions]]
+id = "CALENDAR_RESCHEDULE"
+name = "Move an event"
+description = "Moves event `path` (or `id`) to `start`, and `end` (its length kept otherwise). For one occurrence of a series give `occurrence` (its day, YYYY-MM-DD) and `scope`: this (the default: it alone, as an override), following (the series ends there and a new one starts) or series (all of them, by as much). Says where it was."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"id":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"all_day":{"type":"boolean"},"occurrence":{"type":"string"},"scope":{"type":"string","enum":["this","following","series"]}},"required":["start"]}'
+
+[[actions]]
+id = "CALENDAR_SKIP"
+name = "Skip one occurrence"
+description = "One occurrence of series `path` (or `id`) is no more: `occurrence` (its day) joins the series' exdates. Given an override, it goes and its day is skipped."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"id":{"type":"string"},"occurrence":{"type":"string"}}}'
+
+[[actions]]
+id = "CALENDAR_CANCEL"
+name = "Delete an event"
+description = "Deletes event `path` (or `id`): its note, and a series' overrides. With `occurrence`, that one alone (CALENDAR_SKIP)."
+group = "Calendar"
+effect = "destructive"
+params = '{"type":"object","properties":{"path":{"type":"string"},"id":{"type":"string"},"occurrence":{"type":"string"}}}'
+
+[[actions]]
+id = "CALENDAR_QUICK"
+name = "Calendar: quick add"
+description = "An event from a line, as you would say it: `text` (Lunch with Sam tomorrow 1pm for 90m, Standup 9:30-9:45 every weekday, Gig 8pm [[Album]]): its day from a date word (or `date`, else today), its time and length from the text (all day without a time), a repeat from `every …`, links from [[…]]."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"text":{"type":"string"},"date":{"type":"string"}},"required":["text"]}'
+
+[[actions]]
+id = "CALENDAR_CAPTURE"
+name = "Calendar: from a capture"
+description = "The `event` capture target's action (\"Event\"): an event from a capture in architect's composer or inbox: its day from properties.due, its time and length from the title (1pm, 2-3pm) or `at:` and `for:`, its repeat from properties.recurrence, links from properties.projects, notes from the body. Run by CAPTURE_ADD and INBOX_PROCESS with `target` event."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"properties":{"type":"object"},"source":{"type":"string"},"inbox":{"type":["string","null"]}},"required":["title"]}'
+
+[[actions]]
+id = "CALENDAR_MOVE_TASK"
+name = "Calendar: move a task"
+description = "Task `path` to day `date` (and `time`, HH:MM): its scheduled date moves, or its due one when that is the one it has, through the Tasks extension. What dragging a task on the calendar does."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"date":{"type":"string"},"time":{"type":"string"}},"required":["path","date"]}'
+
+[[actions]]
+id = "CALENDAR_OPEN"
+name = "Open the calendar"
+description = "Opens the calendar: `view` day, week (the default), month or agenda, around `date` (YYYY-MM-DD, today); `move` pages it by as many days, weeks or months. Says what shows, as CALENDAR_SHOWN."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["day","week","month","agenda"]},"date":{"type":"string"},"move":{"type":"integer"}}}'
+
+[[actions]]
+id = "CALENDAR_SHOWN"
+name = "Calendar: what shows"
+description = "The calendar view's mode, day and range, and the blocks on it (events' occurrences, tasks, tracked time), each with its start and end."
+group = "Calendar"
+effect = "read_only"
+
+[[actions]]
+id = "CALENDAR_DAILY"
+name = "Calendar: open the daily note"
+description = "Opens the daily note of `date` (YYYY-MM-DD, today when left out), made when missing, as the navigator's periodic notes say (NAVIGATOR_OPEN_DAILY_NOTE). What a day's heading does."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"}}}'
+
+[[actions]]
+id = "CALENDAR_BASE"
+name = "Calendar: open as a base"
+description = "Opens Calendar/Calendar.base (`view` calendar, the default) or Calendar/Timeline.base (`view` timeline) — the events drawn by this extension's view types for Bases — writing it first when it is not there."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["calendar","timeline"]}}}'
+
+[[actions]]
+id = "CALENDAR_STARTED"
+name = "Calendar: started"
+description = "Its startup hook: reads the vault's events."
+group = "Calendar"
+effect = "read_only"
+
+[[actions]]
+id = "CALENDAR_NAV_SNAPSHOT"
+name = "Calendar: the navigator's tree"
+description = "Its navigator provider's snapshot (architect-navigator-api `Snapshot`): Today, Tomorrow, This week, Later, Repeating and Past, each event in the one it next falls in."
+group = "Calendar"
+effect = "read_only"
+
+[[actions]]
+id = "CALENDAR_NAV_MOVE"
+name = "Calendar: move by dragging"
+description = "Events `items` (their paths) dropped on `to`: on today or tomorrow, each moves there, its time kept (a series' next occurrence alone)."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
+
+[[actions]]
+id = "CALENDAR_NAV_CREATE"
+name = "Calendar: new event in the sidebar"
+description = "An all-day event titled `title` on node `container`'s first day (today, tomorrow, …)."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
+
+# The sidebar while the calendar shows (src/nav.rs).
+[[navigator_providers]]
+id = "calendar"
+title = "Calendar"
+icon = "calendar"
+views = ["calendar"]
+actions = "CALENDAR_NAV"
+
+[[views]]
+id = "calendar"
+title = "Calendar"
+icon = "calendar"
+
+[[menus]]
+menu = "View"
+action = "CALENDAR_OPEN"
+
+[[menus]]
+menu = "View"
+action = "CALENDAR_DAILY"
+
+[[bar]]
+action = "CALENDAR_OPEN"
+title = "Calendar"
+icon = "calendar"
+
+[[hooks]]
+on = "startup"
+action = "CALENDAR_STARTED"
+
+# What a capture can become (architect's capture, #352): "Event", its day
+# and links as chips, `at:3pm` its time and `for:1h30` its length.
+[[capture_targets]]
+id = "event"
+name = "Event"
+icon = "calendar-plus"
+description = "Something at a time: a day (tomorrow, fri), a time in the title (1pm, 2-3pm) or `at:`, `for:1h30` its length, `every week` a repeat, `[[Project]]` what it is for."
+action = "CALENDAR_CAPTURE"
+chips = ["due", "time", "duration", "recurrence", "projects"]
+tokens = [{ prefix = "at:", key = "time" }, { prefix = "for:", key = "duration" }]
+
+# View types for Bases: a base's view of `type: calendar` or `type:
+# timeline` is drawn by this extension's code (`Builder::base_view`). Off,
+# they leave Bases' view picker.
+[[base_views]]
+id = "calendar"
+name = "Calendar"
+icon = "calendar"
+options = [
+  { key = "startBy", name = "Date", kind = "property", default = '"start"' },
+  { key = "endBy", name = "End date", kind = "property", default = '"end"' },
+]
+
+[[base_views]]
+id = "timeline"
+name = "Timeline"
+icon = "gantt-chart"
+options = [
+  { key = "startBy", name = "Start", kind = "property", default = '"start"' },
+  { key = "endBy", name = "End", kind = "property", default = '"end"' },
+]
+
+[[sections]]
+id = "calendar"
+title = "Calendar"
+icon = "calendar"
+
+[[sections.settings]]
+key = "calendar.folder"
+title = "Folder for new events"
+description = "Where new events are written. Events are read wherever they are, by their type (Task's scheduling-cal-event, or event)."
+control = "text"
+default = "Calendar"
+
+[[sections.settings]]
+key = "calendar.week_start"
+title = "Week starts on"
+description = "The first day of the week and month views."
+control = "select"
+default = "Monday"
+
+[[sections.settings.choices]]
+value = "Monday"
+label = "Monday"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Sunday"
+label = "Sunday"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Saturday"
+label = "Saturday"
+detail = ""
+
+[[sections.settings]]
+key = "calendar.event_minutes"
+title = "New event length"
+description = "How long an event made with no end lasts."
+control = "stepper"
+default = 60
+min = 15.0
+max = 240.0
+step = 15.0
+unit = "min"
+
+[[sections.settings]]
+key = "calendar.day_starts"
+title = "Day starts at"
+description = "The first hour the day and week views show (an earlier event shows anyway)."
+control = "stepper"
+default = 7
+min = 0.0
+max = 12.0
+step = 1.0
+unit = ":00"
+
+[[sections.settings]]
+key = "calendar.show_tasks"
+title = "Show tasks"
+description = "Tasks on their scheduled or due day, from the Tasks extension."
+control = "switch"
+default = true
+
+[[sections.settings]]
+key = "calendar.show_time"
+title = "Show tracked time"
+description = "Time tracked with the Time Tracker, as blocks."
+control = "switch"
+default = true
+
+# Its tour (#379): offered once after it is installed or turned on, on its
+# page in the extensions manager, and through TOURS_LIST / TOUR_START.
+[[tours]]
+id = "calendar-tour"
+title = "Calendar"
+description = "The week, quick add, dragging, the month, the agenda, daily notes and the sidebar."
+scenario = "tours/calendar-tour.styx"

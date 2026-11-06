@@ -1,0 +1,48 @@
+[package]
+name = "architect-calendar"
+description = "The Calendar, a first-party architect extension: events as vault notes (Task's shape) with repeats and their exceptions, day, week, month and agenda views with drag to move and resize, tasks' dates and tracked time on it, calendar and timeline base views, linked in or run as a process; it provides `calendar` (extensions/calendar/extension.toml)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-calendar"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); the app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+# Its navigator provider (MIT; never the GPL navigator itself).
+architect-navigator-api = { workspace = true }
+# A capture's shape and its parser (the model only).
+architect-capture = { workspace = true }
+chrono = { workspace = true }
+dioxus = { workspace = true }
+futures-timer = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+# The app's side in a test: a vault's actions and Bases' over a folder.
+architect-bases = { workspace = true, features = ["actions"] }
+vault = { workspace = true, features = ["actions"] }
+architect-capture = { workspace = true, features = ["actions"] }
+# The bundle it shows on the calendar, to test it together.
+architect-tasks = { workspace = true }
+architect-time-tracker = { workspace = true }
+futures = "0.3"
+serde_yaml = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

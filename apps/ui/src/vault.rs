@@ -1351,6 +1351,12 @@ fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
             phone,
             columns,
             on_new_note: Some(on_new_note),
+            // A periodic note is the vault's: asked here, the sidebar
+            // shows the vault, whose navigator makes or opens it.
+            on_vault: Some(EventHandler::new(move |()| {
+                let mut c = np.current;
+                c.set(None);
+            })),
         })
     });
     if mount.peek().phone != phone || mount.peek().columns != columns {
@@ -1519,6 +1525,7 @@ fn VaultFiles() -> Element {
             phone,
             columns,
             on_new_note,
+            on_vault: None,
         })
     });
     if mount.peek().phone != phone || mount.peek().columns != columns {

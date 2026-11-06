@@ -61,6 +61,8 @@ struct Mapped {
     loaded: bool,
     folders: Vec<String>,
     files: Vec<NoteFile>,
+    /// The nodes' order by parent folder, when the snapshot keeps it.
+    order: std::collections::BTreeMap<String, Vec<String>>,
     /// Node id → folder path, and back.
     folder_of: HashMap<String, String>,
     node_at: HashMap<String, String>,
@@ -113,6 +115,10 @@ impl Mapped {
             let path = unique(&mut taken, &dir, &segment(&node.title), "");
             m.folder_of.insert(node.id.clone(), path.clone());
             m.node_at.insert(path.clone(), node.id.clone());
+            if snapshot.ordered {
+                let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                m.order.entry(dir.clone()).or_default().push(name);
+            }
             m.folders.push(path);
         }
         for (i, item) in snapshot.items.iter().enumerate() {
@@ -296,6 +302,10 @@ impl NavigatorSource for ProviderSource {
 
     fn folders(&self) -> Vec<String> {
         self.map().folders.clone()
+    }
+
+    fn child_order(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        self.map().order.clone()
     }
 
     fn files(&self) -> Vec<NoteFile> {

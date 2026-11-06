@@ -27,6 +27,7 @@ the app's features and the showcase of how an extension is built
 | Projects (`extensions/projects`) | a page on architect's built-in `project` kind, project types, goals and milestones | [Projects](@/extensions/projects.md) |
 | Tasks (`extensions/tasks`) | tasks as vault notes in TaskNotes' shape: list, Today, My tasks, a kanban base view | [Tasks](@/extensions/tasks.md) |
 | Time Tracker (`extensions/time-tracker`) | timers and time entries in a note's `timeEntries`, totals per task, project, day and week, a timesheet base view, a report | [Time Tracker](@/extensions/time-tracker.md) |
+| Calendar (`extensions/calendar`) | events as notes (Task's shape) with repeats and exceptions, day, week, month and agenda views with drag, tasks and tracked time on it, calendar and timeline base views | [Calendar](@/extensions/calendar.md) |
 
 Projects, Tasks and the Time Tracker are the Project Management bundle
 (#375): each runs alone, and together a project's page shows its tasks

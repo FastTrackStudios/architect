@@ -261,6 +261,9 @@ pub struct Snapshot {
     pub title: String,
     pub tree: Vec<Node>,
     pub items: Vec<Item>,
+    /// The nodes show in the order given (Today, Tomorrow, Later), not by
+    /// name, until the person orders them by hand.
+    pub ordered: bool,
 }
 
 impl Snapshot {
@@ -281,6 +284,13 @@ impl Snapshot {
     #[must_use]
     pub fn item(mut self, item: Item) -> Self {
         self.items.push(item);
+        self
+    }
+
+    /// Its nodes keep the order given ([`Self::ordered`]).
+    #[must_use]
+    pub const fn ordered(mut self) -> Self {
+        self.ordered = true;
         self
     }
 
@@ -497,6 +507,7 @@ mod tests {
                         Node::new("b", "Beta").child(Node::new("b1", "Beta one")),
                     ],
                     items,
+                    ordered: false,
                 })
             })
         }

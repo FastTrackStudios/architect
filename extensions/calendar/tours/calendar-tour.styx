@@ -1,0 +1,49 @@
+// The Calendar's tour (extension.toml [[tours]]): the week, quick add,
+// dragging, the month, the agenda, a day's daily note and the sidebar.
+// Played as the extension: each setup step runs its own CALENDAR_OPEN. It
+// only opens views (it makes no event and no daily note: you do, if you
+// like), so it may play over your own vault. Played as a test by
+// apps/sandbox/media/tests/architect_tours.rs.
+id calendar-tour
+title "Calendar"
+safe true
+view {width 1280, height 800}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    {id week-1, hide true, do @run{id CALENDAR_OPEN, args {view week}}}
+    {
+        id week
+        text "Your week. Events are notes with a start and an end; your tasks sit on their scheduled or due day, and time you tracked shows striped beside them."
+        target @css".cal-grid"
+    }
+    {id quick-1, hide true, do @run{id CALENDAR_OPEN, args {view week}}}
+    {
+        id quick
+        text "Add one as you'd say it: “Lunch with Sam tomorrow 1pm for 90m”, “Standup 9:30-9:45 every weekday”. Or sweep over free time in the grid. ⇧⌘N's Event does the same from anywhere."
+        target @css".cal-quick"
+    }
+    {id drag-1, hide true, do @run{id CALENDAR_OPEN, args {view week}}}
+    {
+        id drag
+        text "Drag an event to move it, by fifteen minutes and across days; drag its top or bottom edge to change how long it is. In a series, the one you drag moves alone; the editor can change them all."
+        target @css".cal-columns"
+    }
+    {id month-1, hide true, do @run{id CALENDAR_OPEN, args {view month}}}
+    {
+        id month
+        text "The month: drag an event to another day. A day's number opens its daily note, made when missing, in the navigator's periodic notes."
+        target @css".cal-month-grid"
+    }
+    {id agenda-1, hide true, do @run{id CALENDAR_OPEN, args {view agenda}}}
+    {
+        id agenda
+        text "The agenda lists the next thirty days. The views are the toolbar's, or 1 to 4; t is today, n a new event, ← and → page."
+        target @css".cal-modes"
+    }
+    {id sidebar-1, hide true, do @run{id CALENDAR_OPEN, args {view week}}}
+    {
+        id sidebar
+        text "While the calendar shows, the sidebar is your events by when they come; drop one on Today or Tomorrow to move it. Every part is an action: CALENDAR_CREATE, CALENDAR_RESCHEDULE, CALENDAR_AGENDA on ⌘K, MCP and the CLI."
+        target @css".nv-nav"
+    }
+)

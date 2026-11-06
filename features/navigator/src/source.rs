@@ -316,6 +316,12 @@ pub trait NavigatorSource: Send + Sync {
     fn name(&self) -> String;
     /// Every folder, the root left out.
     fn folders(&self) -> Vec<String>;
+    /// Folders' children in the order the source gives them, by parent
+    /// (`""` the root), for those not by name: what shows until the
+    /// person orders them by hand.
+    fn child_order(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        std::collections::BTreeMap::new()
+    }
     /// Every file.
     fn files(&self) -> Vec<NoteFile>;
     /// Calls `listener` with each change from now on, until the

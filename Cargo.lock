@@ -816,6 +816,7 @@ dependencies = [
  "architect-a2ui",
  "architect-accounts",
  "architect-bases",
+ "architect-calendar",
  "architect-canvas",
  "architect-capture",
  "architect-command-palette",
@@ -945,6 +946,30 @@ dependencies = [
  "tempfile",
  "vault",
  "vault-obsidian",
+]
+
+[[package]]
+name = "architect-calendar"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-bases",
+ "architect-capture",
+ "architect-extensions",
+ "architect-navigator-api",
+ "architect-settings",
+ "architect-tasks",
+ "architect-time-tracker",
+ "architect-workspace-hack",
+ "chrono",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "vault",
 ]
 
 [[package]]

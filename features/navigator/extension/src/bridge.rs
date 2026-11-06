@@ -89,6 +89,11 @@ pub fn take() -> Vec<Ask> {
     asks().drain(..).collect()
 }
 
+/// Puts `ask` back first, for the next view to take.
+pub fn put_back(ask: Ask) {
+    asks().push_front(ask);
+}
+
 /// Held while a view is mounted.
 pub struct Mounted;
 

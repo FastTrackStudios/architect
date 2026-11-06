@@ -18,6 +18,7 @@ fn every_architect_tour_plays_as_a_scenario() {
         "projects-tour",
         "tasks-tour",
         "time-tour",
+        "calendar-tour",
         "navigator-tour",
     ] {
         assert!(

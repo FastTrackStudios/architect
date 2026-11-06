@@ -83,7 +83,7 @@ pub fn note_item(n: &Tracked, now: DateTime<Utc>, today: NaiveDate) -> Item {
 /// The nodes, and every note with time on it in its own.
 #[must_use]
 pub fn snapshot_of(notes: &[Tracked], now: DateTime<Utc>, today: NaiveDate) -> Snapshot {
-    let mut snap = Snapshot::new("Time");
+    let mut snap = Snapshot::new("Time").ordered();
     for (id, title, icon) in NODES {
         snap = snap.node(Node::new(id, title).icon(icon));
     }

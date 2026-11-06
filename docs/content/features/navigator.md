@@ -53,6 +53,7 @@ use_context_provider(|| Signal::new(architect_navigator_extension::NavigatorMoun
     phone,
     columns,            // the shell sidebar's: one pane, or folders beside notes
     on_new_note,        // New note in the list's header, given the folder on show
+    on_vault: None,     // a provider's mount: shows the vault's navigator instead
 }));
 rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), bare: true } }
 ```
@@ -81,7 +82,11 @@ containers are folders and its items notes, so the two panes, the phone's
 single pane, the keys, multi-select, grouping, sorting, pins and the
 search work for every provider. Opening an item does what the provider
 says (a note, a view, an action); dragging items onto a container moves
-them there; New makes one in the selected container.
+them there; New makes one in the selected container. A provider whose
+containers have an order of their own (Today, Tomorrow, Later) says so
+(`Snapshot::ordered`), and they show in it until you order them by hand.
+A periodic note asked for while a provider shows (the Calendar's day
+heading) switches the sidebar back to the vault and opens there.
 
 ## Code tour
 
