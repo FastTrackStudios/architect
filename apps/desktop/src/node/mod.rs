@@ -61,6 +61,7 @@ use architect::Services as _;
 use architect::action::ActionList;
 use architect::host::EngineHost;
 use architect::iroh_link::{self, PeerLookup, VOX_ALPN};
+use architect::layer::Layer as _;
 use architect_devices::Admission;
 use architect_devices::account::{self, AccountNode, ThisDevice};
 use architect_permissions::Principal;
@@ -233,10 +234,11 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         access = access.org_docs(lane.org.id.0.clone(), engine);
     }
     let registry = collab.registry().clone().with_authorizer({
-        let access = access.clone();
+        let (access, lane) = (access.clone(), lane.clone());
         move |who, doc_id| {
             access.admits(who, doc_id)
                 || matches!(who, Some(Principal::Service { name }) if name == SELF)
+                || matches!((who, &lane), (Some(who), Some(lane)) if lane.opens(who, doc_id))
         }
     });
     let catalog = VaultCatalog::new(backend.clone());
@@ -385,7 +387,11 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         host = host.site(mount, out);
     }
     if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
-        host = lane.mount(host);
+        let notes = architect::layers![service::notes::NotesService].provide(state.clone());
+        host = lane
+            .clone()
+            .with_vaults(registry.clone(), catalog.clone(), notes)
+            .mount(host);
     }
     if let Some(file) = &config.mcp_token_file {
         match read_secret(file) {
