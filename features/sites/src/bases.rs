@@ -62,6 +62,14 @@ impl BaseBlocks {
         }
     }
 
+    /// Only the rows of published notes: a scoped site's bases never
+    /// list, count or group a note outside its scope.
+    #[must_use]
+    pub fn published_only(mut self) -> Self {
+        self.rows.retain(|row| self.pages.contains_key(&row.path));
+        self
+    }
+
     /// The base a fence names: its YAML, or a `.base` file.
     fn base_of(&self, source: &str) -> Result<ParsedBase, String> {
         let body = source.trim();

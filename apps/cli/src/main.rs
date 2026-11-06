@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use architect_sites::{Blocks, Options, PageBlocks, Report};
+use architect_sites::{Blocks, Options, PageBlocks, Report, Scope};
 use axum::Router;
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -84,6 +84,18 @@ struct SiteArgs {
     /// Fail on a broken link or a block that could not be drawn.
     #[arg(long)]
     strict: bool,
+    /// Publish one folder of the vault, rooted there (a share's scope).
+    #[arg(long, conflicts_with_all = ["tag", "notes", "base_scope"])]
+    folder: Option<String>,
+    /// Publish the notes with this tag.
+    #[arg(long, conflicts_with_all = ["notes", "base_scope"])]
+    tag: Option<String>,
+    /// Publish these notes (vault paths). Repeatable.
+    #[arg(long = "note", conflicts_with = "base_scope")]
+    notes: Vec<String>,
+    /// Publish the notes a `.base` file's views select.
+    #[arg(long = "base-scope")]
+    base_scope: Option<String>,
 }
 
 #[derive(Args)]
@@ -123,7 +135,20 @@ impl SiteArgs {
         opts.url.clone_from(&self.url);
         opts.strict = self.strict;
         opts.static_dirs.clone_from(&self.static_dirs);
+        opts.scope = self.scope();
         opts
+    }
+
+    /// The part of the vault published: a link to a note outside it is
+    /// plain text.
+    fn scope(&self) -> Scope {
+        self.folder
+            .clone()
+            .map(Scope::Folder)
+            .or_else(|| self.tag.clone().map(Scope::Tag))
+            .or_else(|| (!self.notes.is_empty()).then(|| Scope::Notes(self.notes.clone())))
+            .or_else(|| self.base_scope.clone().map(Scope::Base))
+            .unwrap_or(Scope::Vault)
     }
 
     fn blocks(&self) -> Result<Blocks, String> {
