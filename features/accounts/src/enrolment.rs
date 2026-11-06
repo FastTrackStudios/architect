@@ -14,7 +14,7 @@ use crate::controller::Accounts;
 
 /// The `/org/{slug}/vox` lane of the node at `host` (`https://x` →
 /// `wss://x/org/{slug}/vox`).
-fn lane(host: &str, slug: &str) -> String {
+pub fn lane(host: &str, slug: &str) -> String {
     let host = host.trim().trim_end_matches('/');
     let ws = host
         .strip_prefix("https://")
@@ -30,7 +30,7 @@ fn lane(host: &str, slug: &str) -> String {
 impl Accounts {
     /// The account's current org and the node hosting it: `host` when
     /// given (and kept for the org), else the one kept.
-    fn org_and_host(&self, host: Option<&str>) -> Result<(Org, String), String> {
+    pub(crate) fn org_and_host(&self, host: Option<&str>) -> Result<(Org, String), String> {
         let account = self
             .active()
             .ok_or_else(|| "no account is signed in".to_owned())?;

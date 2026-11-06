@@ -198,8 +198,19 @@ app over the org lane is held at once. Comments go in a note beside it,
 serves `architect_spaces::ShareLinks` on its org lane (`/org/<slug>/vox`,
 the issuer session as the bearer): `create`, `shares`, `update`, `revoke` and
 `comments`. Any member lists shares. A member or above makes, changes and
-revokes them (`SHARE_PERMITS`). The app's `SHARE_*` and `PUBLISH_*` actions
-call it.
+revokes them (`SHARE_PERMITS`). The app's `SHARE_*` and `PUBLISH_DOMAIN`
+actions call it (`features/accounts/src/share_actions.rs` `register`), and so
+does its Share sheet, which `SHARE_SHEET` opens. The Organization menu has
+"Share links…"; run from a file's context menu, `SHARE_SHEET` shares that
+note or folder. The sheet
+picks the audience, access and expiry, makes the link and shows it to copy,
+and lists the org's shares, each with Revoke.
+
+```sh
+architect-desktop actions run SHARE_CREATE --arg folder=Album --arg audience=org --arg expires=7d --arg host=https://architect.fasttrackstudio.app
+architect-desktop actions run SHARE_LIST
+architect-desktop actions run SHARE_REVOKE --arg code=<code>
+```
 
 **Served** (`apps/desktop/src/node/shares.rs` `gate`, the node's outermost
 layer, ahead of a Site mounted at `/`):

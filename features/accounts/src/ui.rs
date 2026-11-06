@@ -12,7 +12,7 @@ use architect::action::ActionList;
 use architect_shell::{self as shell, ShellTheme, icon};
 use dioxus::prelude::*;
 use futures_util::StreamExt as _;
-use lucide_dioxus::{Globe, LogIn, LogOut, MonitorSmartphone, UserPlus, Users};
+use lucide_dioxus::{Globe, LogIn, LogOut, MonitorSmartphone, Share2, UserPlus, Users};
 
 use crate::controller::{Accounts, Sheet, Status};
 use crate::model::{Account, AccountsFile};
@@ -205,6 +205,13 @@ impl AccountsUi {
                 icon!(MonitorSmartphone),
                 move |()| me.open(Sheet::OrgDevices),
             );
+            let share = self.clone();
+            menu = menu.item("Share links…", icon!(Share2), move |()| {
+                share.accounts().open_share_sheet(crate::ShareDraft {
+                    vault: String::new(),
+                    scope: architect_spaces::ShareScope::Vault,
+                });
+            });
         }
         menu.divider()
     }
@@ -256,7 +263,7 @@ pub fn AccountSheet() -> Element {
     let esc = accounts;
     rsx! {
         div {
-            "data-account-sheet": match page { Sheet::SignIn => "sign-in", Sheet::Accounts => "accounts", Sheet::OrgDevices => "org-devices" },
+            "data-account-sheet": match page { Sheet::SignIn => "sign-in", Sheet::Accounts => "accounts", Sheet::OrgDevices => "org-devices", Sheet::Share => "share" },
             style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {LAYER}; background: {t.scrim}; \
                     display: flex; justify-content: center; align-items: center; font-family: {t.font};",
             onclick: move |_| close.close_sheet(),
@@ -267,7 +274,7 @@ pub fn AccountSheet() -> Element {
             },
             div {
                 role: "dialog",
-                "aria-label": match page { Sheet::SignIn => "Sign in", Sheet::Accounts => "Accounts and devices", Sheet::OrgDevices => "Org devices" },
+                "aria-label": match page { Sheet::SignIn => "Sign in", Sheet::Accounts => "Accounts and devices", Sheet::OrgDevices => "Org devices", Sheet::Share => "Share" },
                 style: "width: 420px; max-width: 92%; max-height: 88%; overflow-y: auto; display: flex; flex-direction: column; \
                         gap: 16px; padding: 22px; border-radius: 14px; background: {t.pill}; border: 1px solid {t.rule}; \
                         box-shadow: {t.shadow_float}; color: {t.ink};",
@@ -276,6 +283,7 @@ pub fn AccountSheet() -> Element {
                     Sheet::SignIn => rsx! { SignInPage {} },
                     Sheet::Accounts => rsx! { AccountsPage {} },
                     Sheet::OrgDevices => rsx! { OrgDevicesPage {} },
+                    Sheet::Share => rsx! { SharePage {} },
                 }
             }
         }
@@ -759,6 +767,208 @@ fn OrgDeviceRowView(peer: architect_devices::Peer) -> Element {
                     spawn(async move { let _ = a.org_revoke(None, &e).await; });
                 },
                 "Revoke"
+            }
+        }
+    }
+}
+
+/// The Share sheet (#374): share a note, folder, tag or vault from the
+/// node that hosts the org, with an audience, an access and an expiry;
+/// the org's shares listed, each with its link and Revoke (`SHARE_*` do
+/// the same from the Action List).
+#[component]
+fn SharePage() -> Element {
+    let Some(ui) = try_use_accounts() else {
+        return rsx! {};
+    };
+    let _ = (ui.rev)();
+    let accounts = ui.accounts();
+    let t = theme();
+    let field = field_style(&t);
+    let (draft, made) = accounts.share_draft();
+    let draft = draft.unwrap_or(crate::ShareDraft {
+        vault: String::new(),
+        scope: architect_spaces::ShareScope::Vault,
+    });
+    let what = draft.scope.describe();
+    let known = accounts.org_host();
+    let mut host = use_signal(|| known.clone().unwrap_or_default());
+    let mut audience = use_signal(|| "link".to_owned());
+    let mut emails = use_signal(String::new);
+    let mut access = use_signal(|| "read".to_owned());
+    let mut expires = use_signal(|| "never".to_owned());
+    let mut problem = use_signal(|| None::<String>);
+    let seen = accounts.shares_seen();
+    let made_url = made.as_ref().and_then(|s| accounts.share_url(s));
+    let (ask, make, done) = (accounts.clone(), accounts.clone(), accounts);
+    let draft_make = draft;
+    rsx! {
+        div { style: "font-size: 18px; font-weight: 650;", "Share {what}" }
+        div { style: "font-size: 13px; color: {t.ink_2};",
+            "The node that hosts the org serves these notes, and only these, on a link of their own. Links to other notes show as plain text."
+        }
+        if known.is_none() {
+            input { id: "share-host", placeholder: "Host node (https://…)", value: "{host}", style: "{field}",
+                oninput: move |e: FormEvent| host.set(e.value()) }
+        }
+        label { style: "display: flex; flex-direction: column; gap: 4px; font-size: 13px;", "Who can open it"
+            Chips { id: "share-audience", options: vec![("link", "Anyone with the link"), ("public", "Public"), ("org", "Org members"), ("invited", "Invited people")].into_iter().map(|(v, l): (&str, &str)| (v.to_owned(), l.to_owned())).collect(), now: audience(), onpick: move |v: String| audience.set(v) }
+        }
+        if audience() == "invited" {
+            input { id: "share-emails", placeholder: "Their emails, separated by commas", value: "{emails}", style: "{field}",
+                oninput: move |e: FormEvent| emails.set(e.value()) }
+        }
+        div { style: "display: flex; gap: 8px;",
+            label { style: "flex: 1 1 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px;", "They can"
+                Chips { id: "share-access", options: vec![("read", "Read"), ("comment", "Read and comment")].into_iter().map(|(v, l): (&str, &str)| (v.to_owned(), l.to_owned())).collect(), now: access(), onpick: move |v: String| access.set(v) }
+            }
+            label { style: "flex: 1 1 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px;", "Open until"
+                Chips { id: "share-expires", options: vec![("never", "Until revoked"), ("24h", "A day"), ("7d", "A week"), ("30d", "30 days")].into_iter().map(|(v, l): (&str, &str)| (v.to_owned(), l.to_owned())).collect(), now: expires(), onpick: move |v: String| expires.set(v) }
+            }
+        }
+        if let Some(why) = problem() {
+            div { role: "alert", style: "font-size: 13px; color: {t.danger};", "{why}" }
+        }
+        button { id: "share-create", style: button_style(&t, true),
+            onclick: move |_| {
+                let a = make.clone();
+                let draft = draft_make.clone();
+                let (h, who, list, acc, exp) = (host.peek().clone(), audience.peek().clone(), emails.peek().clone(), access.peek().clone(), expires.peek().clone());
+                spawn(async move {
+                    let who = if who == "invited" { format!("invited:{list}") } else { who };
+                    let made = async {
+                        let audience = architect_spaces::Audience::parse(&who)?;
+                        let access = crate::share_actions::parse_access(&acc)?;
+                        let expires_at = crate::share_actions::parse_expiry(&exp, now_secs())?;
+                        let host = Some(h.as_str()).filter(|h| !h.trim().is_empty());
+                        a.share_create(host, architect_spaces::NewShare {
+                            vault: draft.vault.clone(),
+                            scope: draft.scope.clone(),
+                            title: None,
+                            audience,
+                            access,
+                            expires_at,
+                            domain: None,
+                        }).await
+                    }.await;
+                    match made {
+                        Ok(_) => problem.set(None),
+                        Err(why) => problem.set(Some(why)),
+                    }
+                });
+            },
+            "Create link"
+        }
+        if let Some(url) = made_url {
+            div { "data-share-made": "{url}", style: "display: flex; flex-direction: column; gap: 4px;",
+                div { style: "font-size: 13px; color: {t.ink_2};", "The link: select it and copy." }
+                input { id: "share-url", readonly: true, value: "{url}", style: "{field}" }
+            }
+        }
+        div { style: "display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid {t.rule};",
+            div { style: "display: flex; align-items: center; gap: 8px; padding-top: 8px;",
+                div { style: "flex: 1 1 0; font-size: 14px; font-weight: 600;", "Share links" }
+                button { style: button_style(&t, false),
+                    onclick: move |_| {
+                        let (a, h) = (ask.clone(), host.peek().clone());
+                        spawn(async move { let _ = a.shares(Some(h.as_str()).filter(|h| !h.trim().is_empty())).await; });
+                    },
+                    "Refresh"
+                }
+            }
+            match seen {
+                None if known.is_none() => rsx! { div { style: "font-size: 13px; color: {t.ink_3};", "Give the address of the node that hosts the org." } },
+                None => rsx! { div { style: "font-size: 13px; color: {t.ink_3};", "Fetching the shares…" } },
+                Some(Err(why)) => rsx! { div { role: "alert", style: "font-size: 13px; color: {t.danger};", "{why}" } },
+                Some(Ok(list)) if list.is_empty() => rsx! { div { style: "font-size: 13px; color: {t.ink_3};", "Nothing is shared yet." } },
+                Some(Ok(list)) => rsx! {
+                    for share in list.into_iter().rev() {
+                        ShareRowView { key: "{share.code}", share }
+                    }
+                },
+            }
+        }
+        div { style: "display: flex; justify-content: flex-end;",
+            button { style: button_style(&t, false), onclick: move |_| done.close_sheet(), "Done" }
+        }
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
+#[component]
+fn ShareRowView(share: architect_spaces::Share) -> Element {
+    let Some(ui) = try_use_accounts() else {
+        return rsx! {};
+    };
+    let t = theme();
+    let field = field_style(&t);
+    let accounts = ui.accounts();
+    let url = accounts.share_url(&share).unwrap_or_default();
+    let state = match share.state(now_secs()) {
+        architect_spaces::ShareState::Live => "live",
+        architect_spaces::ShareState::Expired => "expired",
+        architect_spaces::ShareState::Revoked => "revoked",
+    };
+    let live = state == "live";
+    let dim = if live { "1" } else { "0.55" };
+    let title = share
+        .title
+        .clone()
+        .unwrap_or_else(|| share.scope.describe());
+    let audience = share.audience.label();
+    let access = crate::share_actions::access_label(share.access);
+    let code = share.code.clone();
+    rsx! {
+        div { "data-share": "{share.code}", "data-share-state": "{state}",
+            style: "display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; opacity: {dim};",
+            div { style: "display: flex; align-items: center; gap: 10px;",
+                Share2 { size: 16, color: t.ink_2.to_string() }
+                div { style: "flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;",
+                    div { style: "font-size: 13px;", "{title}" }
+                    div { style: "font-size: 12px; color: {t.ink_3};", "{audience} · {access} · {state}" }
+                }
+                if live {
+                    button { style: button_style(&t, false), "aria-label": "Revoke {title}",
+                        onclick: move |_| {
+                            let (a, c) = (ui.accounts(), code.clone());
+                            spawn(async move { let _ = a.share_revoke(None, &c).await; });
+                        },
+                        "Revoke"
+                    }
+                }
+            }
+            if live {
+                input { readonly: true, value: "{url}", style: "{field} font-size: 12px;" }
+            }
+        }
+    }
+}
+
+/// One choice of a few, as a row of buttons (Blitz draws no `select`).
+#[component]
+fn Chips(
+    id: String,
+    options: Vec<(String, String)>,
+    now: String,
+    onpick: EventHandler<String>,
+) -> Element {
+    let t = theme();
+    rsx! {
+        div { id: "{id}", role: "radiogroup", style: "display: flex; flex-wrap: wrap; gap: 6px;",
+            for (value, label) in options {
+                button {
+                    key: "{value}",
+                    role: "radio",
+                    "aria-checked": if value == now { "true" } else { "false" },
+                    style: format!("{} height: 32px; font-size: 13px;", button_style(&t, value == now)),
+                    onclick: move |_| onpick.call(value.clone()),
+                    "{label}"
+                }
             }
         }
     }

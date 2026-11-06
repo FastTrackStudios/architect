@@ -345,8 +345,14 @@ impl Shares {
     ///
     /// An invalid share, a vault this node does not hold, or its note
     /// could not be written.
-    pub async fn create(&self, new: NewShare, by: &str) -> Result<Share, ShareFault> {
+    pub async fn create(&self, mut new: NewShare, by: &str) -> Result<Share, ShareFault> {
         let at = now();
+        // No vault named: this node's only one.
+        if new.vault.trim().is_empty() {
+            if let [only] = self.0.backend.vault_ids().as_slice() {
+                new.vault.clone_from(only);
+            }
+        }
         validate(&new, at)?;
         if self.0.backend.root(&new.vault).is_err() {
             return Err(ShareFault::Invalid(format!(

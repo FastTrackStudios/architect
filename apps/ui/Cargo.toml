@@ -78,6 +78,8 @@ crdt = { workspace = true }
 # The lab's vault: a folder of markdown and its VAULT_* actions
 # (src/notes.rs, the sample in apps/sandbox/vault).
 vault = { workspace = true, features = ["actions"] }
+# `PUBLISH_EXPORT` (src/publish.rs): a part of the vault as a static site (#374).
+architect-sites = { workspace = true }
 # An outside edit merged into an open note's typing (`vault_doc::merge3`).
 vault-doc = { workspace = true }
 # The demo vault's sample images as data URLs for the in-memory vault.
