@@ -55,6 +55,8 @@ architect-settings-sheet = { workspace = true }
 # Navigator, the sidebar's navigator as a built-in extension (GPL-3.0, as
 # architect-navigator: the lab already ships under it).
 architect-navigator-extension = { workspace = true }
+# What pages and extensions fill the navigator with (#356).
+architect-navigator-api = { workspace = true }
 # Pages as files (apps/sandbox/board/pages/board.tsx, overrides under the
 # lab's folder `pages/`): TSX on QuickJS, drawn in a pane, live on save.
 architect-pages = { workspace = true, features = ["js", "luau", "a2ui", "ui", "codegen", "manager"] }
