@@ -205,7 +205,7 @@ impl Pattern {
                     && !rest.get(1..=end).unwrap_or("").contains('[')
                 {
                     push_lit(&mut parts, rest.get(1..=end).unwrap_or(""));
-                    rest = rest.get(end + 2..).unwrap_or("");
+                    rest = rest.get(end.saturating_add(2)..).unwrap_or("");
                     continue;
                 }
             }
@@ -213,7 +213,7 @@ impl Pattern {
                 let next = rest.get(1..).and_then(|r| r.chars().next());
                 if let Some(n) = next {
                     push_lit(&mut parts, &n.to_string());
-                    rest = rest.get(1 + n.len_utf8()..).unwrap_or("");
+                    rest = rest.get(n.len_utf8().saturating_add(1)..).unwrap_or("");
                     continue;
                 }
             }
@@ -383,7 +383,7 @@ fn token(t: T, d: NaiveDate, weeks: WeekRules) -> String {
         T::MonthName { short } => month_name(d.month0(), short).to_owned(),
         T::MonthOrd => ordinal(d.month()),
         T::Quarter { ord } => {
-            let q = d.month0() / 3 + 1;
+            let q = crate::period::quarter_of(d);
             if ord { ordinal(q) } else { q.to_string() }
         }
         T::Day(n) => pad(i64::from(d.day()), usize::from(n)),
@@ -393,7 +393,8 @@ fn token(t: T, d: NaiveDate, weeks: WeekRules) -> String {
         T::Weekday => d.weekday().num_days_from_sunday().to_string(),
         T::WeekdayOrd => ordinal(d.weekday().num_days_from_sunday()),
         T::LocaleWeekday => {
-            ((d.weekday().num_days_from_sunday() + 7 - u32::from(weeks.dow) % 7) % 7).to_string()
+            let from_sunday = d.weekday().num_days_from_sunday();
+            (from_sunday.saturating_add(7).saturating_sub(u32::from(weeks.dow) % 7) % 7).to_string()
         }
         T::IsoWeekday => d.weekday().number_from_monday().to_string(),
         T::WeekdayName(n) => {
@@ -449,7 +450,7 @@ fn names<'a>(text: &'a str, list: &[String]) -> Vec<(u32, &'a str)> {
         .collect()
 }
 
-fn set(slot: &mut Option<u32>, v: u32) -> bool {
+const fn set(slot: &mut Option<u32>, v: u32) -> bool {
     match *slot {
         Some(old) if old != v => false,
         _ => {
@@ -514,7 +515,8 @@ fn read(parts: &[Part], text: &str, f: Fields) -> Option<Fields> {
         let ok = match t {
             T::Year(2) => {
                 // Moment: 69–99 are the 1900s.
-                let y = if n > 68 { 1900 } else { 2000 } + i32::try_from(n).ok()?;
+                let century = if n > 68 { 1900 } else { 2000 };
+                let y = i32::try_from(n).ok()?.saturating_add(century);
                 f.year.is_none_or(|old| old == y) && {
                     f.year = Some(y);
                     true
@@ -530,7 +532,7 @@ fn read(parts: &[Part], text: &str, f: Fields) -> Option<Fields> {
             T::WeekYear { len, .. } => {
                 let mut y = i32::try_from(n).ok()?;
                 if len == 2 {
-                    y += if n > 68 { 1900 } else { 2000 };
+                    y = y.saturating_add(if n > 68 { 1900 } else { 2000 });
                 }
                 f.week_year.is_none_or(|old| old == y) && {
                     f.week_year = Some(y);
@@ -538,7 +540,7 @@ fn read(parts: &[Part], text: &str, f: Fields) -> Option<Fields> {
                 }
             }
             T::Month(_) | T::MonthOrd => set(&mut f.month, n),
-            T::MonthName { .. } => set(&mut f.month, n + 1),
+            T::MonthName { .. } => set(&mut f.month, n.saturating_add(1)),
             T::Quarter { .. } => (1..=4).contains(&n) && set(&mut f.quarter, n),
             T::Day(_) | T::DayOrd => set(&mut f.day, n),
             T::DayOfYear(_) | T::DayOfYearOrd => set(&mut f.day_of_year, n),

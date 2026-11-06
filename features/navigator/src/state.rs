@@ -1527,13 +1527,13 @@ impl NavigatorState {
             self.settings.calendar_weeks,
             self.periodic.week_rules(),
         );
-        let end = crate::period::add_days(start, i64::from(rows) * 7);
+        let end = crate::period::add_days(start, i64::from(rows).saturating_mul(7));
         start <= date && date < end
     }
 
     /// Shows or hides the calendar (`toggle-calendar`); it is not shown
     /// with the calendar off in the settings.
-    pub fn toggle_calendar(&mut self) {
+    pub const fn toggle_calendar(&mut self) {
         self.calendar_open = !self.calendar_open;
     }
 
@@ -1554,7 +1554,7 @@ impl NavigatorState {
     }
 
     /// The calendar around `date`.
-    pub fn calendar_go(&mut self, date: NaiveDate) {
+    pub const fn calendar_go(&mut self, date: NaiveDate) {
         self.calendar_cursor = Some(date);
     }
 
@@ -1565,7 +1565,7 @@ impl NavigatorState {
         self.calendar_cursor = Some(today);
         let period = self.periodic.period(PeriodKind::Day, today);
         let path = self.periodic.path(period)?;
-        self.index.file(&path).is_some().then(|| Outcome::Open {
+        self.index.file(&path).is_some().then_some(Outcome::Open {
             path,
             how: OpenIn::Here,
             settle: false,
