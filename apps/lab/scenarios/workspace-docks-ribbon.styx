@@ -48,7 +48,7 @@ steps (
     {
         id command
         text "A command pinned to the ribbon runs from it: a new note."
-        target @css"button[aria-label=\"New note\"]"
+        target @css"button[aria-label=\"New note\"]:not(.nv-tool)"
         do @click{}
         done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-1}})}
         hold 1.0
