@@ -682,12 +682,12 @@ fn demo_vault_periodic_notes(s: &mut architect_navigator::NavigatorSettings) {
         && s.quarterly_pattern == defaults.quarterly_pattern
         && s.yearly_pattern == defaults.yearly_pattern;
     if untouched {
-        s.periodic_folder = "Journal".to_owned();
-        s.daily_pattern = "[Daily]/YYYY-MM-DD".to_owned();
-        s.weekly_pattern = "[Weekly]/GGGG-[W]WW".to_owned();
-        s.monthly_pattern = "[Monthly]/YYYY-MM".to_owned();
-        s.quarterly_pattern = "[Quarterly]/YYYY-[Q]Q".to_owned();
-        s.yearly_pattern = "[Yearly]/YYYY".to_owned();
+        "Journal".clone_into(&mut s.periodic_folder);
+        "[Daily]/YYYY-MM-DD".clone_into(&mut s.daily_pattern);
+        "[Weekly]/GGGG-[W]WW".clone_into(&mut s.weekly_pattern);
+        "[Monthly]/YYYY-MM".clone_into(&mut s.monthly_pattern);
+        "[Quarterly]/YYYY-[Q]Q".clone_into(&mut s.quarterly_pattern);
+        "[Yearly]/YYYY".clone_into(&mut s.yearly_pattern);
     }
 }
 

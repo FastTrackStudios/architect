@@ -280,7 +280,7 @@ fn a_periodic_note_the_calendar_makes_lands_on_disk_with_its_folders() {
     let text = std::fs::read_to_string(tmp.path().join("Journal/Daily/2026-11-06.md")).unwrap();
     assert_eq!(text, "# 2026-11-06\n");
     assert!(s.folders().contains(&"Journal/Daily".to_owned()));
-    let events = events.lock().unwrap();
+    let events = events.lock().unwrap().clone();
     assert!(events.iter().any(
         |e| matches!(e, SourceEvent::FileCreated(f) if f.path == "Journal/Daily/2026-11-06.md")
     ));
