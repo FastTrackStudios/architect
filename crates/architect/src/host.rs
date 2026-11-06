@@ -40,6 +40,8 @@ use crate::permissions_gate::PermissionsGate;
 
 mod mount;
 pub use mount::{BEARER_SUBPROTOCOL_PREFIX, DavRequest, IntoLane, Lane, RequestHead};
+mod site;
+pub use site::{CACHE_FILE, CACHE_IMMUTABLE, CACHE_PAGE, SITE_ASSETS, cache_policy, site_router};
 #[cfg(feature = "otlp-forward")]
 mod otlp;
 #[cfg(feature = "otlp-forward")]
@@ -213,6 +215,8 @@ pub struct EngineHost {
     gate: LaneGate,
     addr: String,
     web: Option<WebBundle>,
+    /// A built static site at `/`, in place of `web`: [`EngineHost::site`].
+    site_root: Option<PathBuf>,
     build: BuildInfo,
     extra: Option<Router>,
     /// Routes merged after the `finish` layers (WebDAV): see [`EngineHost::dav`].
@@ -293,6 +297,7 @@ impl EngineHost {
             addr,
             cross_origin_isolated: false,
             web: None,
+            site_root: None,
             build: BuildInfo::default(),
             extra: None,
             outside: None,
@@ -432,6 +437,7 @@ impl EngineHost {
     #[must_use]
     pub fn web(mut self, bundle: Option<WebBundle>) -> Self {
         self.web = bundle;
+        self.site_root = None;
         self
     }
 
@@ -494,6 +500,7 @@ impl EngineHost {
             assemble_app(
                 (!self.root_vox_resolved).then_some(lane),
                 self.web,
+                self.site_root,
                 self.build,
                 self.extra,
                 self.outside,
@@ -515,6 +522,7 @@ impl EngineHost {
             assemble_app(
                 (!self.root_vox_resolved).then_some(lane),
                 self.web,
+                self.site_root,
                 self.build,
                 self.extra,
                 self.outside,
@@ -587,6 +595,7 @@ impl VoxLane {
 fn assemble_app(
     lane: Option<VoxLane>,
     web: Option<WebBundle>,
+    site_root: Option<PathBuf>,
     build: BuildInfo,
     extra: Option<Router>,
     outside: Option<Router>,
@@ -614,6 +623,10 @@ fn assemble_app(
         app = app.merge(extra);
     }
 
+    if let Some(dir) = site_root {
+        tracing::info!("static site fallback: dir {}", dir.display());
+        app = app.fallback_service(site_router(dir));
+    }
     match web {
         Some(WebBundle::Dir(dir)) => {
             use tower_http::services::{ServeDir, ServeFile};
