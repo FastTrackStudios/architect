@@ -471,6 +471,8 @@ pub enum Source {
         /// The series it belongs to, for an override.
         master: Option<String>,
         date: NaiveDate,
+        /// From a subscription or an import: changed there, not here.
+        readonly: bool,
     },
     /// A task's due or scheduled date (the Tasks extension's).
     Task {
@@ -533,7 +535,10 @@ impl Block {
     /// Whether it can be moved here: an event's, or a task's.
     #[must_use]
     pub const fn movable(&self) -> bool {
-        !matches!(self.source, Source::Time { .. } | Source::Booking { .. })
+        !matches!(
+            self.source,
+            Source::Time { .. } | Source::Booking { .. } | Source::Event { readonly: true, .. }
+        )
     }
 }
 
@@ -576,6 +581,10 @@ pub fn occurrences<Tz: TimeZone>(
                 series,
                 master: e.recurrence_id.clone(),
                 date: e.recurrence_date.unwrap_or_else(|| at.date()),
+                readonly: e
+                    .external_ref
+                    .as_deref()
+                    .is_some_and(|r| r.starts_with("ics:")),
             },
         };
         match e.recurrence.as_deref().and_then(Rule::parse) {

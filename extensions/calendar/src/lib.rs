@@ -27,6 +27,8 @@
 //!   `update_event`, `reschedule_event` and `cancel_event`, and more.
 //! - **Booking** ([`booking`]): event types, the hours they are open,
 //!   open slots and bookings, Task's `list_open_slots` and `book_slot`.
+//! - **Subscriptions** ([`sync`], [`ics`]): iCalendar feeds, read only,
+//!   their events notes synced by `external_ref`.
 //! - **Also:** a capture target (`event`), a navigator provider ([`nav`])
 //!   and a tour.
 
@@ -36,11 +38,13 @@
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 pub mod booking;
+pub mod ics;
 pub mod layout;
 pub mod model;
 pub mod nav;
 pub mod quick;
 pub mod recur;
+pub mod sync;
 pub mod ui;
 pub mod vault;
 
@@ -1354,10 +1358,17 @@ impl Extension for Calendar {
             .action("CALENDAR_BOOKINGS", booking::list_bookings)
             .action("CALENDAR_BOOKING_STATUS", booking::set_status)
             .action("CALENDAR_BOOKINGS_OPEN", booking::open_view)
+            .action("CALENDAR_SUBSCRIBE", sync::subscribe)
+            .action("CALENDAR_SYNC", sync::sync)
+            .action("CALENDAR_IMPORT", sync::import_text)
+            .action("CALENDAR_SUBSCRIPTIONS", sync::list)
+            .action("CALENDAR_UNSUBSCRIBE", sync::unsubscribe)
             .action("CALENDAR_BASE", base)
             .action("CALENDAR_STARTED", |_| async {
                 let _ = refresh().await;
-                Ok(json!("ready"))
+                // Subscribed calendars are fetched again at each start.
+                let synced = sync::sync(Value::Null).await.ok();
+                Ok(json!({ "ready": true, "synced": synced }))
             });
     }
 }

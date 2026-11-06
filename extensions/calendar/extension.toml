@@ -41,6 +41,9 @@ path = "extensions/calendar"
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "NAVIGATOR_OPEN_DAILY_NOTE"]
 # Destructive: deleting an event deletes its note (VAULT_DELETE).
 effect = "destructive"
+# Subscribed calendars are fetched from whatever address the person
+# gives (CALENDAR_SUBSCRIBE): any host, read only (GET).
+hosts = ["*"]
 
 [[actions]]
 id = "CALENDAR_LIST"
@@ -216,9 +219,48 @@ group = "Calendar"
 effect = "mutating"
 
 [[actions]]
+id = "CALENDAR_SUBSCRIBE"
+name = "Subscribe to a calendar"
+description = "Subscribes to an iCalendar feed, read only: `url` (https:// or webcal://: a CalDAV calendar's export, Google's or iCloud's secret address), `name` (its folder, Calendar/<name>; the host by default), `color`. Syncs it at once and at each start; its events are notes keyed by external_ref ics:<UID>."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"url":{"type":"string"},"name":{"type":"string"},"color":{"type":"string"}},"required":["url"]}'
+
+[[actions]]
+id = "CALENDAR_SYNC"
+name = "Sync subscribed calendars"
+description = "Fetches each subscribed calendar (or `name`'s) and updates its events: new ones made, changed ones changed key by key, dropped or cancelled ones tombstoned. Never writes back."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"name":{"type":"string"}}}'
+
+[[actions]]
+id = "CALENDAR_IMPORT"
+name = "Import a calendar file"
+description = "Imports an .ics file's `text` into Calendar/<name> (Imported by default), as a sync does: repeats with their EXDATEs, moved occurrences (RECURRENCE-ID) as overrides, cancelled ones tombstoned. Run again with the same name to update."
+group = "Calendar"
+effect = "mutating"
+params = '{"type":"object","properties":{"text":{"type":"string"},"name":{"type":"string"},"color":{"type":"string"}},"required":["text"]}'
+
+[[actions]]
+id = "CALENDAR_SUBSCRIPTIONS"
+name = "Calendar: subscriptions"
+description = "Each subscribed calendar: its name, feed, colour, last sync and how many events it has."
+group = "Calendar"
+effect = "read_only"
+
+[[actions]]
+id = "CALENDAR_UNSUBSCRIBE"
+name = "Unsubscribe from a calendar"
+description = "Removes subscription `name` and its events' notes."
+group = "Calendar"
+effect = "destructive"
+params = '{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}'
+
+[[actions]]
 id = "CALENDAR_STARTED"
 name = "Calendar: started"
-description = "Its startup hook: reads the vault's events."
+description = "Its startup hook: reads the vault's events and syncs the subscribed calendars."
 group = "Calendar"
 effect = "read_only"
 
