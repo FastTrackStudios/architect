@@ -9,7 +9,7 @@ authors.workspace = true
 license = "GPL-3.0-or-later"
 description = "The navigator: a port of Notebook Navigator (an Obsidian plugin) as architect's sidebar — a folder tree and a list of notes over a NavigatorSource, dual or single pane, virtualized, keyboard-driven"
 
-# The default set is the model, wasm-clean: the source a vault is seen
+# The default set is the model (native: the list groups with vault-live): the source a vault is seen
 # through (`NavigatorSource`, `MemorySource`), the folder index, the tree
 # and list rows, sorting, selection and history, expansion, the virtual
 # window, the keys and the pane layout; the calendar, the periodic notes'
@@ -53,6 +53,9 @@ futures-util = { version = "0.3", default-features = false, optional = true }
 # the periodic notes' periods.
 chrono = { workspace = true }
 vault = { workspace = true, optional = true, features = ["actions"] }
+# Grouping the list by a property: Bases' `group_by` (MIT), the one
+# grouping in architect. Native only, so the model is too.
+vault-live = { workspace = true }
 serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]

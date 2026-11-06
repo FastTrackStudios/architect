@@ -15,7 +15,7 @@
 //! `VaultSource` is architect's vault, live); the app opens the notes it is
 //! asked to (`ui::NavigatorView`'s `on_open`), in its workspace.
 //!
-//! The model is plain data and wasm-clean ([`NavigatorState`]: the index,
+//! The model is plain data, native only ([`NavigatorState`]: the index,
 //! the rows, the selection and history, the keys, the scroll). Feature
 //! `ui` is the Dioxus view on architect's shell: its commands on the
 //! palette (`NAVIGATOR_*`), its section on the settings page
@@ -31,7 +31,6 @@
 
 pub mod appearance;
 pub mod calendar;
-pub mod grouping;
 pub mod index;
 pub mod layout;
 pub mod list;

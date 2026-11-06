@@ -1,11 +1,14 @@
 //! Grouping rows by a value: what a base's `groupBy` does
 //! ([`crate::bases::execute_view`]), and what the navigator's list pane
-//! (`features/navigator`, #335) uses when it groups notes by a property.
+//! (`features/navigator`) groups notes by a property with. One
+//! implementation for both.
 //!
 //! A group's label is its value as text ([`label`]): a string as it is,
 //! a number or a boolean written out, `null` as `""`, a list or an object
 //! as its JSON. Groups keep the order their first item came in
-//! ([`Order::FirstSeen`], a base's), or are sorted by label.
+//! ([`Order::FirstSeen`], a base's), or are sorted by label
+//! ([`compare_labels`]: numbers by value and before text, text in natural
+//! order, `Item 2` before `Item 10`).
 
 use std::cmp::Ordering;
 
@@ -73,12 +76,54 @@ pub fn group_by<T>(
     out
 }
 
-/// Two labels compared: as numbers when both are, else as text (any case).
-fn compare_labels(a: &str, b: &str) -> Ordering {
-    match (a.parse::<f64>(), b.parse::<f64>()) {
+/// Two labels compared: as numbers when both are, a number before text,
+/// else as text in natural order (any case, runs of digits by value); the
+/// same text in another case by its bytes, so the order is total.
+#[must_use]
+pub fn compare_labels(a: &str, b: &str) -> Ordering {
+    match (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
         (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(Ordering::Equal),
-        _ => a.to_lowercase().cmp(&b.to_lowercase()),
+        (Ok(_), Err(_)) => Ordering::Less,
+        (Err(_), Ok(_)) => Ordering::Greater,
+        (Err(_), Err(_)) => natural(a, b),
     }
+    .then_with(|| a.cmp(b))
+}
+
+/// `a` and `b` as text a person reads: letters in any case, each run of
+/// digits as the number it writes.
+fn natural(a: &str, b: &str) -> Ordering {
+    let (mut a, mut b) = (a, b);
+    loop {
+        let (Some(x), Some(y)) = (a.chars().next(), b.chars().next()) else {
+            return a.is_empty().cmp(&b.is_empty()).reverse();
+        };
+        if x.is_ascii_digit() && y.is_ascii_digit() {
+            let (na, ra) = split_digits(a);
+            let (nb, rb) = split_digits(b);
+            let (ta, tb) = (na.trim_start_matches('0'), nb.trim_start_matches('0'));
+            let by = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
+            if by != Ordering::Equal {
+                return by;
+            }
+            (a, b) = (ra, rb);
+        } else {
+            let by = x.to_lowercase().cmp(y.to_lowercase());
+            if by != Ordering::Equal {
+                return by;
+            }
+            (a, b) = (
+                a.get(x.len_utf8()..).unwrap_or_default(),
+                b.get(y.len_utf8()..).unwrap_or_default(),
+            );
+        }
+    }
+}
+
+/// The digits `s` starts with, and the rest.
+fn split_digits(s: &str) -> (&str, &str) {
+    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    s.split_at(end)
 }
 
 #[cfg(test)]
@@ -104,6 +149,17 @@ mod tests {
         let desc = group_by(rows.iter(), |r| label(&r.1), Order::Desc);
         let labels: Vec<_> = desc.iter().map(|g| g.label.as_str()).collect();
         assert_eq!(labels, ["todo", "done", ""]);
+    }
+
+    #[test]
+    fn text_sorts_naturally_after_the_numbers() {
+        let g = group_by(
+            ["Item 10", "item 2", "3", "Alpha", "Item 2"],
+            |s| (*s).to_owned(),
+            Order::Asc,
+        );
+        let labels: Vec<_> = g.iter().map(|g| g.label.as_str()).collect();
+        assert_eq!(labels, ["3", "Alpha", "Item 2", "item 2", "Item 10"]);
     }
 
     #[test]

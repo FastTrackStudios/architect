@@ -16,7 +16,6 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::grouping;
 use crate::index::VaultIndex;
 use crate::selection::NavTarget;
 use crate::settings::{
@@ -24,6 +23,7 @@ use crate::settings::{
 };
 use crate::source::{Millis, NoteFile, PropertyValue, file_name, parent};
 use crate::tree::{TreeOptions, natural_cmp, ordered_children};
+use vault_live::grouping::{Order, group_by};
 
 /// What a list row is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -301,7 +301,7 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
         Grouping::Property => {
             let property = s.group_property.trim();
             let mode = format!("property:{property}");
-            for g in grouping::by_value(rest, |f| f.get(property), false) {
+            for g in property_groups(rest, |f| f.get(property)) {
                 let key = collapse_key(&scope, &mode, &g.id);
                 out.group(&key, &g.id, &g.label, false, &g.items);
             }
@@ -531,13 +531,112 @@ pub fn shown_properties(f: &NoteFile, s: &NavigatorSettings) -> Vec<(String, Str
         .into_iter()
         .filter_map(|k| {
             let v = f.get(k)?;
-            let parts = grouping::parts(v);
-            (!parts.is_empty()).then(|| {
-                let shown: Vec<&str> = parts.iter().map(|p| grouping::display(p)).collect();
-                (k.to_owned(), shown.join(", "))
-            })
+            let shown = value_label(v);
+            (!shown.is_empty()).then(|| (k.to_owned(), shown))
         })
         .collect()
+}
+
+// ── Property values ────────────────────────────────────────────────────
+
+/// The group of notes with no value (`property-none`,
+/// `strings.listPane.propertyGroupNoValue`).
+pub const NONE_GROUP: &str = "property-none";
+pub const NONE_LABEL: &str = "None";
+
+/// One group of the list grouped by a property.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyGroup<T> {
+    /// `property-value:<label>`, or [`NONE_GROUP`].
+    pub id: String,
+    pub label: String,
+    pub items: Vec<T>,
+}
+
+/// `items` grouped by the property `value` reads from each, as Bases
+/// groups rows (`vault_live::grouping::group_by`, the one grouping in
+/// architect): a group per whole value, shown as [`value_label`]; numbers
+/// first, then text in natural order; those with none last, under "None"
+/// (`getPropertyGroupingValueFromRecord`, `src/utils/sortUtils.ts`).
+pub fn property_groups<T>(
+    items: impl IntoIterator<Item = T>,
+    value: impl Fn(&T) -> Option<&PropertyValue>,
+) -> Vec<PropertyGroup<T>> {
+    group_by(
+        items,
+        |i| value(i).map(value_label).unwrap_or_default(),
+        Order::Asc,
+    )
+    .into_iter()
+    .map(|g| {
+        if g.label.is_empty() {
+            PropertyGroup {
+                id: NONE_GROUP.to_owned(),
+                label: NONE_LABEL.to_owned(),
+                items: g.items,
+            }
+        } else {
+            PropertyGroup {
+                id: format!("property-value:{}", g.label),
+                label: g.label,
+                items: g.items,
+            }
+        }
+    })
+    .collect()
+}
+
+/// A value's parts: text trimmed, a number written out, `true` or `false`,
+/// a list's items each; none when it is blank.
+#[must_use]
+pub fn value_parts(value: &PropertyValue) -> Vec<String> {
+    match value {
+        PropertyValue::Text(t) => Some(t.trim().to_owned())
+            .filter(|t| !t.is_empty())
+            .into_iter()
+            .collect(),
+        PropertyValue::Number(n) => vec![number(*n)],
+        PropertyValue::Bool(b) => vec![b.to_string()],
+        PropertyValue::List(items) => items
+            .iter()
+            .map(|i| i.trim())
+            .filter(|i| !i.is_empty())
+            .map(str::to_owned)
+            .collect(),
+    }
+}
+
+/// A value as a row and a group heading show it: its parts joined with
+/// `", "`, a `[[link]]` as its name; `""` when it is blank.
+#[must_use]
+pub fn value_label(value: &PropertyValue) -> String {
+    value_parts(value)
+        .iter()
+        .map(|p| shown_part(p))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A number as text: whole numbers without a point.
+#[must_use]
+pub fn number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{n:.0}")
+    } else {
+        n.to_string()
+    }
+}
+
+/// A part as it shows: `[[Note]]` and `[[Note|Shown]]` as their names.
+#[must_use]
+pub fn shown_part(part: &str) -> &str {
+    let Some(inner) = part.strip_prefix("[[").and_then(|p| p.strip_suffix("]]")) else {
+        return part;
+    };
+    match inner.split_once('|') {
+        Some((_, shown)) => shown,
+        None => inner.rsplit_once('/').map_or(inner, |(_, n)| n),
+    }
 }
 
 // ── Images ─────────────────────────────────────────────────────────────
