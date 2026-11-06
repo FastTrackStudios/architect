@@ -24,8 +24,11 @@ pub mod ids {
     pub const FORGET_DEVICE: &str = "ACCOUNT_FORGET_DEVICE";
     pub const ORG_LIST: &str = "ORG_LIST";
     pub const ORG_SWITCH: &str = "ORG_SWITCH";
+    pub const ORG_DEVICES: &str = "ORG_DEVICES";
+    pub const ORG_ENROL: &str = "ORG_ENROL";
+    pub const ORG_REVOKE: &str = "ORG_REVOKE";
     /// Every id, in menu order.
-    pub const ALL: [&str; 8] = [
+    pub const ALL: [&str; 11] = [
         LIST,
         SIGN_IN,
         SWITCH,
@@ -34,6 +37,9 @@ pub mod ids {
         FORGET_DEVICE,
         ORG_LIST,
         ORG_SWITCH,
+        ORG_DEVICES,
+        ORG_ENROL,
+        ORG_REVOKE,
     ];
 }
 
@@ -69,6 +75,9 @@ metas! {
 metas! { @in "Organization";
     ORG_LIST = ORG_LIST, "Organizations", "The orgs the active account is in (id, name, slug, role, whether it is the person's own) and the one it is in now; fetched fresh from the issuer, else the device's cached list with `stale` saying why. Signed out, only the person's own org on this device.";
     ORG_SWITCH = ORG_SWITCH, "Switch organization…", "Makes `org` (its id, slug or name from ORG_LIST, or `all` for every org) the one the active account is in. Kept per account; the issuer is told it is the session's active org.";
+    ORG_DEVICES = ORG_DEVICES, "Org devices", "The devices enrolled in the current org (endpoint, name, platform, role, who enrolled it): all of them for an owner or admin, the person's own otherwise. Asked of the node that hosts the org: `host` (its HTTP origin, kept for the org) or the one given before.";
+    ORG_ENROL = ORG_ENROL, "Enrol a device…", "Enrols device `endpoint` (its iroh endpoint id) as `name` in the current org with `role` (viewer, member, admin; default member; at most the person's own), at the node that hosts the org (`host`, or the one given before). It can then sync the org's vaults with that node as its role allows. Enrolling again changes its role.";
+    ORG_REVOKE = ORG_REVOKE, "Revoke a device", "Withdraws device `endpoint`'s enrolment in the current org (the person who enrolled it, or an owner or admin): its next call to the hosting node is refused and its connections close.";
 }
 
 /// One account, as [`ids::LIST`] lists it.
@@ -144,6 +153,7 @@ fn sheet_name(sheet: Option<Sheet>) -> String {
     match sheet {
         Some(Sheet::SignIn) => "sign-in",
         Some(Sheet::Accounts) => "accounts",
+        Some(Sheet::OrgDevices) => "org-devices",
         None => "closed",
     }
     .to_owned()
@@ -292,6 +302,82 @@ impl OrgsOut {
     }
 }
 
+/// One enrolled device, as [`ids::ORG_DEVICES`] lists it.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgDeviceRow {
+    /// Its iroh endpoint id: what `ORG_REVOKE` takes.
+    pub endpoint: String,
+    pub name: String,
+    pub platform: String,
+    /// Its role in the org.
+    pub role: String,
+    /// Who enrolled it.
+    pub by: String,
+}
+
+impl OrgDeviceRow {
+    fn of(peer: &architect_devices::Peer) -> Self {
+        let grant = peer.grants.iter().find_map(|g| match g {
+            architect_devices::Grant::Org { role, by, .. } => Some((role.label(), by.clone())),
+            _ => None,
+        });
+        let (role, by) = grant.unwrap_or_default();
+        Self {
+            endpoint: peer.endpoint.clone(),
+            name: peer.name.clone(),
+            platform: peer.platform.clone(),
+            role,
+            by,
+        }
+    }
+}
+
+/// What [`ids::ORG_DEVICES`] answers.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgDevicesOut {
+    /// The node asked.
+    pub host: Option<String>,
+    pub devices: Vec<OrgDeviceRow>,
+}
+
+/// What [`ids::ORG_DEVICES`] takes.
+#[derive(Debug, Clone, Default, Facet)]
+pub struct OrgHostArgs {
+    /// The hosting node's HTTP origin; kept for the org. Unset: the one
+    /// given before.
+    #[facet(default)]
+    pub host: Option<String>,
+}
+
+/// What [`ids::ORG_ENROL`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgEnrolArgs {
+    #[facet(default)]
+    pub host: Option<String>,
+    /// The device's iroh endpoint id.
+    pub endpoint: String,
+    pub name: String,
+    #[facet(default)]
+    pub platform: Option<String>,
+    /// `viewer`, `member` (default) or `admin`.
+    #[facet(default)]
+    pub role: Option<String>,
+}
+
+/// What [`ids::ORG_ENROL`] answers.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgEnrolOut {
+    pub device: OrgDeviceRow,
+}
+
+/// What [`ids::ORG_REVOKE`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgRevokeArgs {
+    #[facet(default)]
+    pub host: Option<String>,
+    pub endpoint: String,
+}
+
 /// What [`ids::ORG_SWITCH`] takes.
 #[derive(Debug, Clone, Facet)]
 pub struct OrgArgs {
@@ -316,6 +402,51 @@ fn register_orgs(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Acti
     list.register(&ORG_SWITCH, Effect::Mutating, move |args: OrgArgs| {
         a.switch_org(&args.org)?;
         Ok(OrgsOut::of(&a, a.orgs_stale()))
+    })?;
+    let a = accounts.clone();
+    list.register_async(&ORG_DEVICES, Effect::ReadOnly, move |args: OrgHostArgs| {
+        let a = a.clone();
+        async move {
+            let devices = a.org_devices(args.host.as_deref()).await?;
+            Ok(OrgDevicesOut {
+                host: a.org_host(),
+                devices: devices.iter().map(OrgDeviceRow::of).collect(),
+            })
+        }
+    })?;
+    let a = accounts.clone();
+    list.register_async(&ORG_ENROL, Effect::Mutating, move |args: OrgEnrolArgs| {
+        let a = a.clone();
+        async move {
+            let role = architect_orgs::Role::parse(args.role.as_deref().unwrap_or("member"));
+            let peer = a
+                .org_enrol(
+                    args.host.as_deref(),
+                    &args.endpoint,
+                    &args.name,
+                    args.platform.as_deref().unwrap_or("unknown"),
+                    role,
+                )
+                .await?;
+            Ok(OrgEnrolOut {
+                device: OrgDeviceRow::of(&peer),
+            })
+        }
+    })?;
+    let a = accounts.clone();
+    list.register_async(&ORG_REVOKE, Effect::Mutating, move |args: OrgRevokeArgs| {
+        let a = a.clone();
+        async move {
+            a.org_revoke(args.host.as_deref(), &args.endpoint).await?;
+            let devices = a
+                .org_devices_seen()
+                .and_then(Result::ok)
+                .unwrap_or_default();
+            Ok(OrgDevicesOut {
+                host: a.org_host(),
+                devices: devices.iter().map(OrgDeviceRow::of).collect(),
+            })
+        }
     })?;
     Ok(())
 }

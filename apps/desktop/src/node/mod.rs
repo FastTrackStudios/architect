@@ -26,6 +26,11 @@
 //!   them on the peer lane; every [`Config::sweep_secs`] the node pulls
 //!   from and pushes to each peer it can dial (`crdt::peer::pull`), so an
 //!   edit on one device reaches another through it.
+//! - **In an issuer org** ([`org`]). With [`Config::host_org`] it serves
+//!   the org's enrolment lane (`/org/{slug}/vox`): a member enrols a
+//!   device with a role, lists and revokes; an enrolled device syncs the
+//!   vaults as its role allows. With [`Config::enrol_at`] it enrols itself
+//!   at another node's lane, once, and syncs with that node.
 //! - **Over HTTP** ([`Config::bind`]): `/health` and `/version.json`; the
 //!   vaults in [`Config::sites`] as Sites (#364, rebuilt when the vault
 //!   changes); [`service::Node`] over same-origin vox (`/vox`) and its
@@ -34,6 +39,7 @@
 
 pub mod catalog;
 pub mod config;
+pub mod org;
 pub mod service;
 
 use std::collections::BTreeMap;
@@ -183,7 +189,22 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
 
     // ── Who it lets in, and its lanes over iroh ───────────────────────
     let admission = Admission::new();
-    let access = NodeAccess::new(admission.clone(), Shares::new());
+    keep_devices(data, &admission);
+    let token = config.session_file.as_deref().and_then(read_secret);
+    let node_org = match (config.vault_org(), &config.issuer, &token) {
+        (Some(slug), Some(issuer), Some(token)) => node_org(data, issuer, token, slug).await,
+        (Some(slug), _, _) => org::remembered(data, slug),
+        _ => None,
+    };
+    let lane = match (&node_org, &config.issuer) {
+        (Some(org), Some(issuer)) => Some(org::OrgLane::new(org.clone(), &admission, issuer)),
+        _ => None,
+    };
+    let mut access = NodeAccess::new(admission.clone(), Shares::new());
+    if let Some(lane) = &lane {
+        let engine: Arc<dyn architect_permissions::PermissionEngine> = lane.engine.clone();
+        access = access.org_docs(lane.org.id.0.clone(), engine);
+    }
     let registry = collab.registry().clone().with_authorizer({
         let access = access.clone();
         move |who, doc_id| {
@@ -251,6 +272,29 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         tracing::info!("no issuer or session: the node is on no account, and lets nobody in");
     }
 
+    // ── Enrolling itself in an org another node hosts ────────────────
+    if let (Some(at), Some(lane), Some(session)) = (&config.enrol_at, &lane, &config.session_file) {
+        let marker = org::enrolled_marker(data);
+        if marker.exists() {
+            tracing::debug!("enrolled before: not enrolling again");
+        } else {
+            let enrol = org::EnrolAt {
+                at: at.clone(),
+                org: lane.org.clone(),
+                role: architect_orgs::Role::parse(&config.enrol_role),
+                endpoint: endpoint_id.clone(),
+                name: config.name.clone(),
+            };
+            tasks.push(tokio::spawn(enrol_until_done(
+                enrol,
+                session.clone(),
+                marker,
+                admission.clone(),
+                every,
+            )));
+        }
+    }
+
     // ── Sweeps ───────────────────────────────────────────────────────
     let self_lane = Arc::new(
         SelfLane::open(
@@ -302,6 +346,9 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         .plugin(state.clone().into_http_router());
     for (mount, out) in &sites {
         host = host.site(mount, out);
+    }
+    if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
+        host = lane.mount(host);
     }
     if let Some(file) = &config.mcp_token_file {
         match read_secret(file) {
@@ -461,6 +508,77 @@ async fn bind_iroh(config: &Config) -> Result<iroh::Endpoint, StartError> {
         .bind()
         .await
         .map_err(|e| StartError::Iroh(e.to_string()))
+}
+
+/// The node's org: asked of the issuer and kept, else as kept.
+async fn node_org(data: &Path, issuer: &str, token: &str, slug: &str) -> Option<org::NodeOrg> {
+    match tokio::time::timeout(Duration::from_secs(15), org::resolve(issuer, token, slug)).await {
+        Ok(Ok(found)) => {
+            org::remember(data, &found);
+            Some(found)
+        }
+        Ok(Err(why)) => {
+            tracing::warn!(%slug, %why, "the org is not the session's: no org lane");
+            org::remembered(data, slug)
+        }
+        Err(_) => {
+            tracing::warn!(%slug, "the issuer did not answer for the org: using the one kept");
+            org::remembered(data, slug)
+        }
+    }
+}
+
+/// The devices the node lets in, from `devices.json` and kept there
+/// after every change, so it starts offline with the devices it knew
+/// (an org's enrolments above all: no issuer holds them).
+fn keep_devices(data: &Path, admission: &Admission) {
+    let file = data.join("devices.json");
+    if let Ok(json) = std::fs::read_to_string(&file)
+        && let Err(why) = admission.restore_json(&json)
+    {
+        tracing::warn!(%why, "devices.json is not a device table: starting with none");
+    }
+    let mut changes = admission.changes();
+    let admission = admission.clone();
+    tokio::spawn(async move {
+        while changes.changed().await.is_ok() {
+            match admission.to_json() {
+                Ok(json) => {
+                    if let Err(error) = std::fs::write(&file, json) {
+                        tracing::warn!(%error, "devices.json is not written");
+                    }
+                }
+                Err(why) => tracing::warn!(%why, "the device table did not encode"),
+            }
+        }
+    });
+}
+
+/// Enrol at the hosting node until it answers, then leave the marker.
+async fn enrol_until_done(
+    enrol: org::EnrolAt,
+    session: PathBuf,
+    marker: PathBuf,
+    admission: Admission,
+    retry: Duration,
+) {
+    loop {
+        let outcome = match read_secret(&session) {
+            Some(token) => org::enrol_once(&enrol, &token, &admission).await,
+            None => Err("no session in the session file".to_owned()),
+        };
+        match outcome {
+            Ok(peer) => {
+                tracing::info!(at = %enrol.at, org = %enrol.org.slug, endpoint = %peer.endpoint, "enrolled in the org");
+                if let Err(error) = std::fs::write(&marker, &enrol.at) {
+                    tracing::warn!(%error, "the enrolment marker is not written");
+                }
+                return;
+            }
+            Err(why) => tracing::warn!(at = %enrol.at, %why, "enrolling in the org; trying again"),
+        }
+        tokio::time::sleep(retry).await;
+    }
 }
 
 /// The install's id on the account, kept in the data dir.

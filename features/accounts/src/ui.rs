@@ -199,6 +199,13 @@ impl AccountsUi {
                 let _ = me.accounts().switch_org("all");
             });
         }
+        if let Some(org) = orgs.current().filter(|o| o.id.0 != crate::DEVICE_ORG) {
+            menu = menu.item(
+                format!("Devices in {}…", org.name),
+                icon!(MonitorSmartphone),
+                move |()| me.open(Sheet::OrgDevices),
+            );
+        }
         menu.divider()
     }
 }
@@ -249,7 +256,7 @@ pub fn AccountSheet() -> Element {
     let esc = accounts;
     rsx! {
         div {
-            "data-account-sheet": if page == Sheet::SignIn { "sign-in" } else { "accounts" },
+            "data-account-sheet": match page { Sheet::SignIn => "sign-in", Sheet::Accounts => "accounts", Sheet::OrgDevices => "org-devices" },
             style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {LAYER}; background: {t.scrim}; \
                     display: flex; justify-content: center; align-items: center; font-family: {t.font};",
             onclick: move |_| close.close_sheet(),
@@ -260,15 +267,15 @@ pub fn AccountSheet() -> Element {
             },
             div {
                 role: "dialog",
-                "aria-label": if page == Sheet::SignIn { "Sign in" } else { "Accounts and devices" },
+                "aria-label": match page { Sheet::SignIn => "Sign in", Sheet::Accounts => "Accounts and devices", Sheet::OrgDevices => "Org devices" },
                 style: "width: 420px; max-width: 92%; max-height: 88%; overflow-y: auto; display: flex; flex-direction: column; \
                         gap: 16px; padding: 22px; border-radius: 14px; background: {t.pill}; border: 1px solid {t.rule}; \
                         box-shadow: {t.shadow_float}; color: {t.ink};",
                 onclick: move |e| e.stop_propagation(),
-                if page == Sheet::SignIn {
-                    SignInPage {}
-                } else {
-                    AccountsPage {}
+                match page {
+                    Sheet::SignIn => rsx! { SignInPage {} },
+                    Sheet::Accounts => rsx! { AccountsPage {} },
+                    Sheet::OrgDevices => rsx! { OrgDevicesPage {} },
                 }
             }
         }
@@ -634,6 +641,124 @@ fn DeviceRowView(device: crate::model::Device) -> Element {
                     },
                     "Forget"
                 }
+            }
+        }
+    }
+}
+
+/// The current org's enrolled devices, at the node hosting the org:
+/// each with Revoke, and a form to enrol one (`ORG_DEVICES`,
+/// `ORG_ENROL`, `ORG_REVOKE` do the same from the Action List).
+#[component]
+fn OrgDevicesPage() -> Element {
+    let Some(ui) = try_use_accounts() else {
+        return rsx! {};
+    };
+    let _ = (ui.rev)();
+    let accounts = ui.accounts();
+    let t = theme();
+    let field = field_style(&t);
+    let org = accounts
+        .orgs()
+        .current()
+        .map_or_else(|| "this org".to_owned(), |o| o.name.clone());
+    let known = accounts.org_host();
+    let mut host = use_signal(|| known.clone().unwrap_or_default());
+    let mut endpoint = use_signal(String::new);
+    let mut name = use_signal(String::new);
+    let mut role = use_signal(|| "member".to_owned());
+    let mut problem = use_signal(|| None::<String>);
+    let seen = accounts.org_devices_seen();
+    let (ask, enrol, done) = (accounts.clone(), accounts.clone(), accounts);
+    rsx! {
+        div { style: "font-size: 18px; font-weight: 650;", "Devices in {org}" }
+        div { style: "font-size: 13px; color: {t.ink_2};",
+            "Enrolled at the node that hosts the org. An enrolled device syncs the org's vaults as its role allows; revoking it refuses its next call."
+        }
+        div { style: "display: flex; gap: 8px; align-items: center;",
+            input { id: "org-host", placeholder: "Host node (https://…)", value: "{host}", style: "{field} flex: 1 1 0;",
+                oninput: move |e: FormEvent| host.set(e.value()) }
+            button { style: button_style(&t, false),
+                onclick: move |_| {
+                    let (a, h) = (ask.clone(), host.peek().clone());
+                    spawn(async move { let _ = a.org_devices(Some(&h)).await; });
+                },
+                "Refresh"
+            }
+        }
+        match seen {
+            None if known.is_none() => rsx! { div { style: "font-size: 13px; color: {t.ink_3};", "Give the address of the node that hosts the org." } },
+            None => rsx! { div { style: "font-size: 13px; color: {t.ink_3};", "Fetching the devices…" } },
+            Some(Err(why)) => rsx! { div { role: "alert", style: "font-size: 13px; color: {t.danger};", "{why}" } },
+            Some(Ok(list)) if list.is_empty() => rsx! { div { style: "font-size: 13px; color: {t.ink_3};", "No device is enrolled yet." } },
+            Some(Ok(list)) => rsx! {
+                for peer in list {
+                    OrgDeviceRowView { key: "{peer.endpoint}", peer }
+                }
+            },
+        }
+        div { style: "display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid {t.rule};",
+            div { style: "font-size: 14px; font-weight: 600; padding-top: 8px;", "Enrol a device" }
+            input { id: "org-enrol-endpoint", placeholder: "Its endpoint id", value: "{endpoint}", style: "{field}",
+                oninput: move |e: FormEvent| endpoint.set(e.value()) }
+            input { id: "org-enrol-name", placeholder: "Its name", value: "{name}", style: "{field}",
+                oninput: move |e: FormEvent| name.set(e.value()) }
+            select { id: "org-enrol-role", style: "{field}", value: "{role}",
+                onchange: move |e: FormEvent| role.set(e.value()),
+                option { value: "viewer", "Viewer" }
+                option { value: "member", "Member" }
+                option { value: "admin", "Admin" }
+            }
+            if let Some(why) = problem() {
+                div { role: "alert", style: "font-size: 13px; color: {t.danger};", "{why}" }
+            }
+            button { style: button_style(&t, true),
+                onclick: move |_| {
+                    let a = enrol.clone();
+                    let (h, e, n, r) = (host.peek().clone(), endpoint.peek().clone(), name.peek().clone(), role.peek().clone());
+                    spawn(async move {
+                        let host = Some(h.as_str()).filter(|h| !h.trim().is_empty());
+                        match a.org_enrol(host, &e, &n, "unknown", architect_orgs::Role::parse(&r)).await {
+                            Ok(_) => { problem.set(None); endpoint.set(String::new()); name.set(String::new()); }
+                            Err(why) => problem.set(Some(why)),
+                        }
+                    });
+                },
+                "Enrol"
+            }
+        }
+        div { style: "display: flex; justify-content: flex-end;",
+            button { style: button_style(&t, false), onclick: move |_| done.close_sheet(), "Done" }
+        }
+    }
+}
+
+#[component]
+fn OrgDeviceRowView(peer: architect_devices::Peer) -> Element {
+    let Some(ui) = try_use_accounts() else {
+        return rsx! {};
+    };
+    let t = theme();
+    let role = peer
+        .orgs()
+        .first()
+        .map_or_else(String::new, |(_, role)| role.label());
+    let endpoint = peer.endpoint.clone();
+    let short: String = peer.endpoint.chars().take(12).collect();
+    rsx! {
+        div { "data-org-device": "{peer.name}",
+            style: "display: flex; align-items: center; gap: 10px; padding: 6px 8px;",
+            MonitorSmartphone { size: 16, color: t.ink_2.to_string() }
+            div { style: "flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;",
+                div { style: "font-size: 13px;", "{peer.name}" }
+                div { style: "font-size: 12px; color: {t.ink_3};", "{role} · {peer.platform} · {short}…" }
+            }
+            button { style: button_style(&t, false), "aria-label": "Revoke {peer.name}",
+                onclick: move |_| {
+                    let (a, e) = (ui.accounts(), endpoint.clone());
+                    spawn(async move { let _ = a.org_revoke(None, &e).await; });
+                },
+                "Revoke"
             }
         }
     }

@@ -37,6 +37,7 @@
 //! | Caller | May call | May open |
 //! |---|---|---|
 //! | one of the owner's devices (`Host`, `Grant::Account`) | `DocSync`, `DocPeer` | whatever the registry's authorizer allows ([`NodeAccess::admits`]: every document) |
+//! | a device enrolled in the node's org (`Host`, `Grant::Org`, [`NodeAccess::org_docs`]) | `DocSync`, `DocPeer` when its role may write `docs/**` | what the org's engine gives its role there (`org/<org>/docs/<id>`) |
 //! | a paired device (`Host`, `Grant::Paired`) | `DocSync` | the documents its scopes name (`docs/<id>`) |
 //! | a link's guest (`Guest`, a live key) | `DocSync` | the link's document only |
 //! | any other endpoint | nothing | nothing |
@@ -179,6 +180,29 @@ pub struct NodeAccess {
     /// same `devices`): when set, [`node_router`] also serves
     /// `DevicePairing`, which any endpoint may call.
     pub pairings: Option<Pairings>,
+    /// The org whose documents these are, for its enrolled devices
+    /// ([`Self::org_docs`]).
+    pub org: Option<OrgDocs>,
+}
+
+/// The org a node's documents are, and the engine that says what each
+/// role there may do ([`NodeAccess::org_docs`]).
+#[derive(Clone)]
+pub struct OrgDocs {
+    /// The org's id (`architect_orgs::OrgId`'s string).
+    pub org: String,
+    /// The org's engine: `architect_orgs::server::ConfinedEngine`, with
+    /// the org's enrolled devices as `Principal::Host` members
+    /// (`architect_devices::server::project_members`).
+    pub engine: Arc<dyn PermissionEngine>,
+}
+
+impl std::fmt::Debug for OrgDocs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OrgDocs")
+            .field("org", &self.org)
+            .finish_non_exhaustive()
+    }
 }
 
 impl NodeAccess {
@@ -188,7 +212,54 @@ impl NodeAccess {
             devices,
             shares,
             pairings: None,
+            org: None,
         }
+    }
+
+    /// The node's documents are org `org`'s: a device enrolled there
+    /// (`Grant::Org`) opens a document when `engine` lets it `write`
+    /// `org/<org>/docs/<id>`, and sweeps (`DocPeer`) when it may write
+    /// `org/<org>/docs/**`. With the org's `ConfinedEngine` that is what
+    /// its role there may do, as for a person with that role; revoking
+    /// its enrolment refuses its next call.
+    #[must_use]
+    pub fn org_docs(mut self, org: impl Into<String>, engine: Arc<dyn PermissionEngine>) -> Self {
+        self.org = Some(OrgDocs {
+            org: org.into(),
+            engine,
+        });
+        self
+    }
+
+    /// Whether `endpoint`, enrolled in the node's org, may `action` the
+    /// org-relative `what`.
+    fn org_allows(&self, endpoint: &str, what: &str, action: &Action) -> bool {
+        let Some(docs) = &self.org else {
+            return false;
+        };
+        let enrolled = self
+            .devices
+            .get(endpoint)
+            .is_some_and(|peer| peer.orgs().iter().any(|(org, _)| org.0 == docs.org));
+        enrolled
+            && docs
+                .engine
+                .check(
+                    &Principal::Host {
+                        endpoint: endpoint.to_owned(),
+                    },
+                    &Resource::new(format!("org/{}/{what}", docs.org)),
+                    action,
+                )
+                .allowed()
+    }
+
+    /// Whether `endpoint` may sweep this node (`DocPeer`, which lists
+    /// every document): one of the owner's devices, or one enrolled in
+    /// the node's org whose role may write all its documents.
+    #[must_use]
+    pub fn sweeps(&self, endpoint: &str) -> bool {
+        self.devices.is_account(endpoint) || self.org_allows(endpoint, "docs/**", &Action::write())
     }
 
     /// Take pairings: a device that redeems one of `pairings`' offers
@@ -220,11 +291,13 @@ impl NodeAccess {
     #[must_use]
     pub fn admits(&self, who: Option<&Principal>, doc_id: Uuid) -> bool {
         match who {
-            Some(Principal::Host { endpoint }) => self.devices.allows(
-                endpoint,
-                &architect_devices::doc_resource(doc_id),
-                &Action::write(),
-            ),
+            Some(Principal::Host { endpoint }) => {
+                self.devices.allows(
+                    endpoint,
+                    &architect_devices::doc_resource(doc_id),
+                    &Action::write(),
+                ) || self.org_allows(endpoint, &format!("docs/{doc_id}"), &Action::write())
+            }
             Some(Principal::Guest { link_id, .. }) => self.shares.opens(link_id, doc_id),
             _ => false,
         }
@@ -353,9 +426,9 @@ pub fn node_router<C: DocCatalog + Clone>(
     access: NodeAccess,
     remote: &str,
 ) -> PermissionedRouter {
-    let devices = access.devices.clone();
+    let sweepers = access.clone();
     let host = DocPeerHost::new(registry.clone(), catalog, move |endpoint| {
-        devices.is_account(endpoint)
+        sweepers.sweeps(endpoint)
     });
     let router = LayerRouter::new()
         .with(
@@ -433,6 +506,49 @@ mod tests {
         let any = Resource::new("docs/**");
         assert!(access.check(&paired, &any, &Action::write()).allowed());
         assert!(!access.devices.is_account(STRANGER), "no sweeps");
+    }
+
+    #[test]
+    fn an_org_device_opens_what_its_role_may_write_until_revoked() {
+        use architect_orgs::server::{ConfinedEngine, Members};
+        use architect_orgs::{OrgId, Role};
+        let members = Members::new();
+        let engine = ConfinedEngine::new(members.clone())
+            .role(
+                &Role::Viewer,
+                vec![architect_permissions::Rule::new("**", &["read"])],
+            )
+            .role(
+                &Role::Member,
+                vec![architect_permissions::Rule::new("**", &["read", "write"])],
+            );
+        let access = access().org_docs("acme", Arc::new(engine));
+        architect_devices::server::project_members(&access.devices, &members);
+        let org = |role| architect_devices::Grant::Org {
+            org: OrgId::new("acme"),
+            role,
+            by: "user:ada".into(),
+        };
+        let doc = Uuid::from_u128(1);
+        access.devices.admit(
+            architect_devices::Peer::new(STRANGER, "server", "server").granted(org(Role::Member)),
+        );
+        let device = access.caller(STRANGER, None);
+        assert!(access.admits(Some(&device), doc));
+        assert!(access.sweeps(STRANGER));
+
+        access.devices.admit(
+            architect_devices::Peer::new(STRANGER, "server", "server").granted(org(Role::Viewer)),
+        );
+        assert!(
+            !access.admits(Some(&device), doc),
+            "a viewer does not write"
+        );
+        assert!(!access.sweeps(STRANGER));
+
+        access.devices.revoke_org(STRANGER, &OrgId::new("acme"));
+        assert!(!access.admits(Some(&device), doc));
+        assert!(!access.devices.admits(STRANGER));
     }
 
     #[test]

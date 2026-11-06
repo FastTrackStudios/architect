@@ -771,6 +771,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-auth",
+ "architect-devices",
  "architect-orgs",
  "architect-shell",
  "architect-workspace-hack",
@@ -1073,6 +1074,7 @@ dependencies = [
  "architect-extensions",
  "architect-guide",
  "architect-mcp",
+ "architect-orgs",
  "architect-permissions",
  "architect-presence",
  "architect-settings",

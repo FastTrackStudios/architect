@@ -33,6 +33,8 @@ mod keychain;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 mod controller;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+mod enrolment;
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 mod issuer;
 
 #[cfg(all(feature = "actions", not(target_arch = "wasm32")))]
@@ -40,7 +42,7 @@ pub mod actions;
 #[cfg(all(feature = "ui", not(target_arch = "wasm32")))]
 pub mod ui;
 
-pub use model::{Account, AccountsFile, DEVICE_ORG, Device, device_org, with_device_org};
+pub use model::{Account, AccountsFile, DEVICE_ORG, Device, OrgHost, device_org, with_device_org};
 pub use secrets::{MemorySecrets, SecretError, SecretStore};
 pub use store::{AccountStore, ActiveSession, StoreError};
 

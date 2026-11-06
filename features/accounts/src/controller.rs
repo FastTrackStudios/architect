@@ -24,6 +24,8 @@ pub enum Sheet {
     SignIn,
     /// The accounts on this device, and the active one's devices.
     Accounts,
+    /// The devices enrolled in the current org, at the node hosting it.
+    OrgDevices,
 }
 
 /// The last thing a flow said.
@@ -52,7 +54,9 @@ pub struct BrowserWait {
 }
 
 #[derive(Default)]
-struct State {
+pub struct State {
+    /// The current org's enrolled devices, as last fetched from its host.
+    pub org_devices: Option<Result<Vec<architect_devices::Peer>, String>>,
     sheet: Option<Sheet>,
     status: Status,
     browser: Option<BrowserWait>,
@@ -127,7 +131,7 @@ impl Accounts {
         }
     }
 
-    fn state(&self) -> MutexGuard<'_, State> {
+    pub(crate) fn state(&self) -> MutexGuard<'_, State> {
         self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -165,7 +169,7 @@ impl Accounts {
             .push(Box::new(listener));
     }
 
-    fn changed(&self) {
+    pub(crate) fn changed(&self) {
         self.0.rev.fetch_add(1, Ordering::SeqCst);
         for listener in self
             .0
@@ -231,6 +235,12 @@ impl Accounts {
             let me = self.clone();
             issuer::spawn(async move {
                 let _ = me.refresh_devices().await;
+            });
+        }
+        if page == Sheet::OrgDevices && self.org_host().is_some() {
+            let me = self.clone();
+            issuer::spawn(async move {
+                let _ = me.org_devices(None).await;
             });
         }
     }
@@ -498,7 +508,7 @@ impl Accounts {
     }
 
     /// Runs `call` with the active account's session, no renewal under way.
-    async fn with_active<T, F, Fut>(&self, call: F) -> Result<T, String>
+    pub(crate) async fn with_active<T, F, Fut>(&self, call: F) -> Result<T, String>
     where
         F: FnOnce(StoredSession) -> Fut,
         Fut: Future<Output = Result<T, IssuerError>>,

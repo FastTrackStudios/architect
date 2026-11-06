@@ -186,6 +186,7 @@ impl Issuer {
                 image: user.image,
                 needs_sign_in: false,
                 orgs: None,
+                org_hosts: Vec::new(),
             },
             session,
         }

@@ -67,7 +67,9 @@ architect = { workspace = true, features = ["action-list", "host", "http", "iroh
 architect-mcp = { workspace = true, features = ["http"] }
 architect-permissions = { workspace = true }
 # Who the node lets in (the account's devices), and its account pass.
-architect-devices = { workspace = true, features = ["account", "iroh"] }
+architect-devices = { workspace = true, features = ["account", "iroh", "server"] }
+# `serve`'s org: its enrolment lane's gate (members, roles, the issuer's orgs).
+architect-orgs = { workspace = true, features = ["server", "auth"] }
 auth-proto = { workspace = true, features = ["vox"] }
 # The vaults it holds: the files, their per-file documents, and the
 # lanes that move those between nodes.
@@ -89,7 +91,7 @@ vox = { workspace = true }
 # tests/node.rs: the issuer in process, as features/accounts/tests/issuer.rs.
 auth-server = { workspace = true }
 architect-auth = { workspace = true, features = ["full"] }
-architect-accounts = { workspace = true, features = ["http"] }
+architect-accounts = { workspace = true, features = ["actions"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

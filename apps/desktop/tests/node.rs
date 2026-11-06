@@ -14,6 +14,13 @@
 //! - an agent's edit over the always-on node's `/mcp` reaches the other;
 //! - the always-on node answers `/health`, its HTTP face, and serves the
 //!   vault as a Site.
+//!
+//! And in an issuer org (`indie`: Grace its owner, Alan a member), with
+//! nodes on two accounts: Grace's node hosts the org's enrolment lane,
+//! Alan's enrols itself there and syncs the vault; Alan enrols a device
+//! from the app (`ORG_ENROL`), never above his role; Grace sees both
+//! (`ORG_DEVICES`) and revokes Alan's node (`ORG_REVOKE`), whose next
+//! call is refused.
 
 #![allow(
     clippy::unwrap_used,
@@ -26,13 +33,18 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use architect_accounts::Issuer;
+use std::sync::Arc;
+
+use architect::action::ActionList;
+use architect::iroh_link;
+use architect_accounts::{AccountStore, Accounts, Issuer, MemorySecrets};
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use architect_desktop::node::service::Notes as _;
 use architect_desktop::node::service::node::NodeHttpClient;
 use architect_desktop::node::service::{Node as _, NodeStatus};
 use architect_desktop::node::{self, Config, IrohMode, Running};
 use auth_server::{ServerConfig, server};
+use crdt::peer::DocPeerClient;
 use sea_orm::Database;
 use sea_orm_migration::MigratorTrait;
 use serde_json::{Value, json};
@@ -68,8 +80,14 @@ async fn axum_serve(listener: tokio::net::TcpListener, app: architect::http::Rou
 
 /// A session of Ada's, written where a node reads it.
 async fn session(origin: &str, dir: &Path) -> PathBuf {
+    session_of(origin, dir, "ada@local.test").await
+}
+
+/// A session of `email`'s, written where a node reads it.
+async fn session_of(origin: &str, dir: &Path, email: &str) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
     let signed_in = Issuer::new(origin)
-        .sign_in_password("ada@local.test", auth_server::dev::DEV_PASSWORD)
+        .sign_in_password(email, auth_server::dev::DEV_PASSWORD)
         .await
         .unwrap();
     let file = dir.join("session");
@@ -259,4 +277,150 @@ async fn a_note_syncs_between_two_headless_nodes_through_the_always_on_one() {
 
     laptop.stop().await;
     always.stop().await;
+}
+
+/// The app signed in as `email`, in org `indie`, with its Action List.
+async fn app(origin: &str, email: &str) -> (Accounts, Arc<ActionList>) {
+    let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));
+    let accounts = Accounts::new(store, Issuer::new(origin), "architect-test").without_browser();
+    let list = Arc::new(ActionList::new());
+    architect_accounts::actions::register(&list, &accounts).unwrap();
+    accounts
+        .sign_in_password(email, auth_server::dev::DEV_PASSWORD)
+        .await
+        .unwrap();
+    accounts.refresh_orgs().await.unwrap();
+    list.run_json("ORG_SWITCH", br#"{"org":"indie"}"#).unwrap();
+    (accounts, list)
+}
+
+async fn run(list: &ActionList, id: &str, args: Value) -> Result<Value, String> {
+    list.run_json_async(id, args.to_string().as_bytes())
+        .await
+        .map(|out| serde_json::from_slice(&out).unwrap())
+        .map_err(|e| format!("{e:?}"))
+}
+
+/// `from`'s endpoint asks `to` for its documents over the peer lane.
+async fn lists(from: &Running, to: &Running) -> Result<usize, String> {
+    let link = iroh_link::connect(&from.endpoint, dial_addr(to))
+        .await
+        .map_err(|e| e.to_string())?;
+    let client = vox::initiator_on(link)
+        .establish::<DocPeerClient>()
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    client
+        .list()
+        .await
+        .map(|l| l.len())
+        .map_err(|e| format!("{e:?}"))
+}
+
+fn dial_addr(node: &Running) -> iroh::EndpointAddr {
+    let sock = node.endpoint.bound_sockets().into_iter().next().unwrap();
+    iroh::EndpointAddr::from_parts(node.endpoint.id(), [iroh::TransportAddr::Ip(sock)])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_enrols_in_an_org_and_a_revoke_refuses_the_next_call() {
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+
+    // ── Grace's node hosts `indie` ────────────────────────────────────
+    let host_dir = tmp.path().join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        host_dir.join("data/vaults/notes/hello.md"),
+        "# Hello\n\nThe org's note.\n",
+    )
+    .unwrap();
+    let mut host = config(
+        "indie-host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    let host = node::start(host).await.unwrap();
+    let at = format!("http://{}", host.http);
+
+    // ── Alan's node enrols itself there ──────────────────────────────
+    let alan_dir = tmp.path().join("alan");
+    let mut alan = config(
+        "alans-node",
+        &alan_dir,
+        &origin,
+        session_of(&origin, &alan_dir, "alan@local.test").await,
+    );
+    alan.enrol_at = Some(at.clone());
+    alan.enrol_org = Some("indie".to_owned());
+    alan.peers = vec![host.dial().unwrap()];
+    let alan = node::start(alan).await.unwrap();
+    let (h, a) = (host.endpoint_id(), alan.endpoint_id());
+    until("Alan's node is enrolled, and lets the host in", || {
+        host.state.admits(&a) && alan.state.admits(&h)
+    })
+    .await;
+    until("the org's note reaches Alan's node", || {
+        reads(&note(&alan), "The org's note.")
+    })
+    .await;
+    assert!(lists(&alan, &host).await.unwrap() >= 1);
+
+    // ── A member enrols a device from the app, never above his role ──
+    let (_alan_app, alan_list) = app(&origin, "alan@local.test").await;
+    let laptop = "a1b2c3d4e5f6";
+    let above = run(
+        &alan_list,
+        "ORG_ENROL",
+        json!({"host": at, "endpoint": laptop, "name": "Alan's laptop", "role": "admin"}),
+    )
+    .await;
+    assert!(
+        above.unwrap_err().contains("at most"),
+        "a member enrols as admin"
+    );
+    let enrolled = run(
+        &alan_list,
+        "ORG_ENROL",
+        json!({"host": at, "endpoint": laptop, "name": "Alan's laptop", "platform": "macos"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(enrolled["device"]["role"], "Member", "{enrolled}");
+    let alans = run(&alan_list, "ORG_DEVICES", json!({})).await.unwrap();
+    assert_eq!(
+        alans["devices"].as_array().unwrap().len(),
+        2,
+        "his own: {alans}"
+    );
+
+    // The owner sees every enrolment.
+    let (_grace_app, grace_list) = app(&origin, "grace@local.test").await;
+    let devices = run(&grace_list, "ORG_DEVICES", json!({"host": at}))
+        .await
+        .unwrap();
+    let endpoints: Vec<&str> = devices["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["endpoint"].as_str().unwrap())
+        .collect();
+    assert!(
+        endpoints.contains(&a.as_str()) && endpoints.contains(&laptop),
+        "{devices}"
+    );
+
+    // ── The owner revokes Alan's node: its next call is refused ──────
+    let revoked = run(&grace_list, "ORG_REVOKE", json!({"endpoint": a}))
+        .await
+        .unwrap();
+    assert_eq!(revoked["devices"].as_array().unwrap().len(), 1, "{revoked}");
+    assert!(!host.state.admits(&a));
+    let refused = lists(&alan, &host).await;
+    assert!(refused.is_err(), "a revoked device listed {refused:?}");
+
+    alan.stop().await;
+    host.stop().await;
 }

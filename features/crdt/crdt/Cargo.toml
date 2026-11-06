@@ -132,6 +132,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net"]
 tempfile = "3"
 # `crdt::peer`'s convergence property over random edit orders.
 proptest.workspace = true
+# An org's devices: the engine `NodeAccess::org_docs` asks, with enrolments as members.
+architect-orgs = { workspace = true, features = ["server"] }
+architect-devices = { workspace = true, features = ["server"] }
 
 [lints]
 workspace = true

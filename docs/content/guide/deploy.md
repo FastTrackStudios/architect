@@ -33,6 +33,7 @@ and no GPU libraries in the image. The desktop build is unchanged.
 | | |
 | --- | --- |
 | **On the account** | With an issuer and a session it registers itself in the account's address book as a `server` device at its iroh endpoint, offers its org (`ARCHITECT_ORG`) if the account shares none yet, and lets the account's other devices in (`architect_devices::account::pass`). It runs again every five minutes, and on every sweep until another device is on the account. |
+| **In an issuer org** | With `ARCHITECT_HOST_ORG` it hosts the org's enrolments (below); with `ARCHITECT_ENROL_AT` it enrols itself in an org another node hosts. Its vaults are that org's. |
 | **Its lanes over iroh** | The node's documents (`crdt::p2p::node_router`: `DocSync` and `DocPeer`), served to the devices its `Admission` lets in. A revoked device's connections close (`architect_devices::serve`). |
 | **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. Every `ARCHITECT_SWEEP_SECS` the node pulls from and pushes to each peer it can dial (`crdt::peer::pull`), so an edit on one device reaches another through it. |
 | **Sites** | Each vault in `ARCHITECT_SITES` is built as a Site ([sites](@/features/sites.md)) and rebuilt when the vault changes. |
@@ -56,6 +57,10 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_ISSUER` | none | the account server, `https://auth.fasttrackstudio.app` |
 | `ARCHITECT_SESSION_FILE` | none | a file holding the account's session token |
 | `ARCHITECT_ORG` | none | the org it offers the account while the account shares none |
+| `ARCHITECT_HOST_ORG` | none | an issuer org (slug) the session is in: the node serves its enrolment lane at `/org/{slug}/vox` |
+| `ARCHITECT_ENROL_AT` | none | another node's HTTP origin: this node enrols itself there, once |
+| `ARCHITECT_ENROL_ORG` | none | the issuer org (slug) it enrols in at `ARCHITECT_ENROL_AT` |
+| `ARCHITECT_ENROL_ROLE` | `member` | the role it asks for, at most the session's own in the org |
 | `ARCHITECT_PEERS` | none | `endpoint@host:port,…`: nodes it dials directly |
 | `ARCHITECT_IROH` | `n0` | `n0` (relays and lookup) or `local` (loopback only, for tests) |
 | `ARCHITECT_IROH_BIND` | any port (`0.0.0.0:7777` in the image) | the iroh UDP socket |
@@ -73,6 +78,49 @@ docs = "vaults/docs"
 
 [sites]
 "/" = "docs"
+```
+
+## An org's devices
+
+The account's own devices find each other through the issuer's address book.
+An org's other members' devices are enrolled at the node that hosts the org
+(`apps/desktop/src/node/org.rs`):
+
+- **Hosting.** With `ARCHITECT_HOST_ORG = "<slug>"` the node asks the issuer
+  for that org's id (and keeps it in its data dir, so it starts with the issuer
+  down) and serves `architect_devices::server::EnrolmentHost` at
+  `/org/<slug>/vox`. A caller presents an issuer session as its bearer: the node
+  resolves it with the issuer's `whoami` (`apps/desktop/src/node/org.rs`
+  `IssuerSessions`) and learns the person's orgs and role from the issuer
+  (`architect_orgs::server::MembersResolver`). A member enrols a device with a
+  role no higher than their own, an owner or admin lists them all and anyone
+  lists their own, and the one who enrolled it or an owner or admin revokes it.
+- **What an enrolled device may do.** An enrolment is a `Grant::Org` in the
+  node's `Admission`, kept in `devices.json` in the data dir. Its iroh calls
+  are let in, and it opens and sweeps the vaults' notes when its role may
+  write them (`crdt::p2p::NodeAccess::org_docs` over the org's
+  `ConfinedEngine`, `apps/desktop/src/node/org.rs` `engine`): a viewer
+  connects but opens nothing, a member or above syncs. A revoke refuses the
+  device's next call and closes its connections.
+- **Enrolling a node.** With `ARCHITECT_ENROL_AT = "https://<host node>"` and
+  `ARCHITECT_ENROL_ORG = "<slug>"`, a node signed in as a member enrols its own
+  endpoint there as a `server` device with `ARCHITECT_ENROL_ROLE`. It learns the
+  host's endpoint from its `/node/status`, lets the host in as the org's, and
+  syncs with it like any peer. It enrols once (it leaves an `enrolled` marker
+  in its data dir), so a revoke holds.
+- **From the app.** `ORG_DEVICES`, `ORG_ENROL` and `ORG_REVOKE`
+  (`features/accounts/src/actions.rs` `register`) do the same as the signed-in
+  account, in its current org, at the host given as `host` (kept per org in
+  `accounts.json`). The Account menu's Organization section opens the same
+  page ("Devices in <org>…").
+
+```toml
+# the org's always-on node
+host_org = "fasttrackstudio"
+
+# a member's node elsewhere
+enrol_at = "https://architect.fasttrackstudio.app"
+enrol_org = "fasttrackstudio"
 ```
 
 ## The image
@@ -113,9 +161,9 @@ pod needs:
 
 ## Not yet
 
-- **Org enrolment.** The node joins the account (`Grant::Account`). It does
-  not yet serve `architect_devices::server::EnrolmentHost` on org lanes, so
-  another member's devices cannot be enrolled with it (`Grant::Org`).
+- **An org's enrolments live on its host.** The issuer keeps the account's
+  devices but not an org's: two nodes hosting one org hold two tables, and the
+  app is told which node to ask (`host`).
 - **Signed-in web clients on `/vox`.** The vox and HTTP lanes carry only the
   public `Node` service. The vaults reach a browser through a Site, not live.
   A web app editing a vault needs an issuer-bearer identity on those lanes.

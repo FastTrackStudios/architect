@@ -45,7 +45,10 @@ architect-server = ["server-seaorm"]
 # 2026-11-05 (+1, #188): architect-accounts' `ui` signs in over the
 # issuer's HTTP face, and reqwest 0.12 (architect/http-client) depends on
 # tower-http client-side; no server stack is reached.
-ui-reach = 12
+# 2026-11-06 (+1, #400): architect-accounts' `http` dials the node hosting
+# an org over vox WebSocket for ORG_DEVICES/ORG_ENROL/ORG_REVOKE
+# (architect/connect, tokio-tungstenite client-side); still no server stack.
+ui-reach = 13
 transport-host = 4
 lints = 1
 
