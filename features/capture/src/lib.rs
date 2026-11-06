@@ -32,3 +32,8 @@ pub mod shortcut;
 
 pub use parse::{Draft, Repeat, TokenRule, merge, parse, parse_with};
 pub use target::{Capture, Target};
+
+/// The capture tour (`tours/capture-tour.styx`): the composer, quick add,
+/// what a capture can become and the inbox deck, a guide scenario an app
+/// with capture offers beside its own tours (`architect-guide`).
+pub const TOUR: &str = include_str!("../tours/capture-tour.styx");
