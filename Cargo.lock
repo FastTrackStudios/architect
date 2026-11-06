@@ -1324,6 +1324,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vault",
+ "vault-live",
 ]
 
 [[package]]

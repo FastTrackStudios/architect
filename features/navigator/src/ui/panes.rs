@@ -10,6 +10,7 @@ use lucide_dioxus::{
 };
 
 use super::calendar::Calendar;
+use super::tree_rows::{self, ItemRow, RowIcon};
 use super::virtual_pane::VirtualPane;
 use super::{Navigator, Open};
 use crate::index::NoteCount;
@@ -25,7 +26,7 @@ use crate::tree::NavRowKind;
 const HEADER: f64 = 36.0;
 
 /// The modifiers of a click, ⌘ on a Mac and Ctrl elsewhere as the command.
-fn mods(m: Modifiers) -> Mods {
+pub(super) fn mods(m: Modifiers) -> Mods {
     Mods {
         shift: m.shift(),
         command: if cfg!(target_os = "macos") {
@@ -46,6 +47,7 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
     let calendar_on = s.settings().calendar;
     let calendar_open = s.calendar_open;
     drop(s);
+    let row_menu = nav.menu.read().clone();
     rsx! {
         div { class: "nv-nav", "data-pane": "navigation",
             style: "position:absolute; inset:0; display:flex; flex-direction:column; background:var(--nv-background);",
@@ -75,6 +77,9 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
             }
             div { style: "flex:1 1 0; min-height:0; position:relative;",
                 VirtualPane { nav, pane: Pane::Navigation, label: "Folders", NavRows { nav, on_open } }
+                if let Some(menu) = row_menu {
+                    tree_rows::Menu { nav, on_open, menu }
+                }
             }
             if calendar {
                 Calendar { nav, on_open }
@@ -92,8 +97,11 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     let show_count = s.settings().show_note_count;
     let separate = s.settings().separate_note_counts;
     let selected = s.selection().folder().map(str::to_owned);
+    let target = s.target();
     let reordering = s.reordering;
     let root_level = u16::from(s.settings().show_root);
+    let tag_root_level = u16::from(s.settings().all_tags_row);
+    let over = nav.drag.read().as_ref().and_then(|d| d.over.clone());
     // Collected, so the state is let go before the rows are drawn.
     #[allow(clippy::needless_collect)]
     let rows: Vec<_> = window
@@ -105,13 +113,80 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                 NavRowKind::Folder { path, .. } => s.folder_note(path).is_some(),
                 _ => false,
             };
-            Some((row.clone(), top, h, note))
+            let colour = match &row.kind {
+                NavRowKind::Tag { key, .. } => s.colour(&format!("tag:{key}")).map(str::to_owned),
+                NavRowKind::Property {
+                    key,
+                    value: Some(v),
+                    ..
+                } => s
+                    .colour(&format!("property:{key}={v}"))
+                    .or_else(|| s.colour(&format!("property:{key}")))
+                    .map(str::to_owned),
+                NavRowKind::Property {
+                    key, value: None, ..
+                } => s.colour(&format!("property:{key}")).map(str::to_owned),
+                _ => None,
+            };
+            Some((row.clone(), top, h, note, colour))
         })
         .collect();
     drop(s);
     rsx! {
-        for (row, top, h, note) in rows {
-            if let NavRowKind::Folder { path, name, has_children, expanded, count } = row.kind {
+        for (row, top, h, note, colour) in rows {
+            if let NavRowKind::Tag { tag, key, name, has_children, expanded, count } = row.kind.clone() {
+                ItemRow {
+                    key: "{row.key}",
+                    nav,
+                    on_open,
+                    selected: target == NavTarget::Tag(tag.clone()),
+                    drop_here: over.as_deref() == Some(row.key.as_str()),
+                    target: NavTarget::Tag(tag),
+                    row_key: row.key.clone(),
+                    name,
+                    level: row.level,
+                    has_children,
+                    expanded,
+                    count: count_label(count, show_count, separate),
+                    icon: match key.as_str() {
+                        crate::tags::TAGGED => RowIcon::AllTags,
+                        crate::tags::UNTAGGED => RowIcon::Untagged,
+                        _ => RowIcon::Tag,
+                    },
+                    colour,
+                    top,
+                    height: h,
+                    indent,
+                    reorder: reordering && row.level == tag_root_level && key != crate::tags::TAGGED,
+                }
+            } else if let NavRowKind::Property { key, value, name, has_children, expanded, count } = row.kind.clone() {
+                ItemRow {
+                    key: "{row.key}",
+                    nav,
+                    on_open,
+                    selected: target == NavTarget::Property { key: key.clone(), value: value.clone() },
+                    drop_here: over.as_deref() == Some(row.key.as_str()),
+                    icon: if key == crate::properties::ROOT {
+                        RowIcon::AllProperties
+                    } else if value.is_some() {
+                        RowIcon::Value
+                    } else {
+                        RowIcon::Key
+                    },
+                    reorder: reordering && row.level == 1 && value.is_none(),
+                    target: NavTarget::Property { key, value },
+                    row_key: row.key.clone(),
+                    name,
+                    level: row.level,
+                    has_children,
+                    expanded,
+                    count: count_label(count, show_count, separate),
+                    colour,
+                    top,
+                    height: h,
+                    indent,
+                }
+            } else if let NavRowKind::Folder { path, name, has_children, expanded, count } = row.kind {
                 FolderRow {
                     key: "{row.key}",
                     nav,
@@ -253,15 +328,36 @@ pub(super) fn ListPane(
     let s = nav.state.read();
     let target = s.target();
     let title = match &target {
+        NavTarget::Tag(t) if t == crate::tags::TAGGED => "Tags".to_owned(),
+        NavTarget::Tag(t) if t == crate::tags::UNTAGGED => "Untagged".to_owned(),
         NavTarget::Tag(t) => format!("#{t}"),
         NavTarget::Folder(f) => s.index().folder_name(f).to_owned(),
+        NavTarget::Property { key, .. } if key == crate::properties::ROOT => {
+            "Properties".to_owned()
+        }
+        NavTarget::Property { key, value } => {
+            let name = s
+                .property_tree()
+                .key(key)
+                .map_or_else(|| key.clone(), |k| k.name.clone());
+            match value {
+                Some(v) => {
+                    let shown = s
+                        .property_tree()
+                        .value(key, v)
+                        .map_or_else(|| v.clone(), |n| n.name.clone());
+                    format!("{name}: {shown}")
+                }
+                None => name,
+            }
+        }
     };
     let shown = s.effective().clone();
     let has_own = s.appearance(&target).is_some();
     // New note goes in the folder on show (the root for a tag).
     let new_in = match &target {
         NavTarget::Folder(f) => f.clone(),
-        NavTarget::Tag(_) => String::new(),
+        _ => String::new(),
     };
     let empty = s.list_order().is_empty();
     drop(s);
@@ -269,6 +365,7 @@ pub(super) fn ListPane(
     let place = match &target {
         NavTarget::Tag(_) => "this tag",
         NavTarget::Folder(_) => "this folder",
+        NavTarget::Property { .. } => "this property",
     };
     let notice = nav.notice.read().clone();
     let mut menu = use_signal(|| false);
@@ -338,6 +435,7 @@ pub(super) fn ListPane(
                     }
                 }
             }
+            tree_rows::QueryBar { nav }
             if let Some(text) = notice {
                 div { class: "nv-notice", role: "status",
                     style: "flex:0 0 auto; display:flex; align-items:center; gap:6px; padding:4px 10px; font-size:12px; color:var(--nv-muted); border-bottom:1px solid var(--nv-divider);",
@@ -646,7 +744,7 @@ fn FileRow(
     } else {
         "nv-row nv-file"
     };
-    let (p1, p2) = (path.clone(), path.clone());
+    let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
     let title_h = f64::from(lines.title) * 20.0;
     let preview_h = f64::from(lines.preview) * 18.0;
     let weight = if open { 700 } else { 600 };
@@ -688,6 +786,21 @@ fn FileRow(
                     menu.call((p2.clone(), e));
                 }
             },
+            // Dragged onto a tag or a property: the selected notes when it
+            // is one of them, else it alone.
+            onpointerdown: move |e: PointerEvent| {
+                let paths: Vec<String> = {
+                    let s = nav.state.peek();
+                    if s.selection().is_selected(&p3) {
+                        s.selection().files().iter().cloned().collect()
+                    } else {
+                        vec![p3.clone()]
+                    }
+                };
+                tree_rows::start_drag(nav, crate::state::Drag::Notes(paths), &e);
+            },
+            onpointermove: move |e: PointerEvent| tree_rows::drag_move(nav, &e),
+            onpointerup: move |_| tree_rows::drag_end(nav, on_open),
             div { class: "nv-file-body", style: "flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:{justify};",
                 div { class: "nv-file-title", style: "flex:0 0 auto; display:flex; align-items:baseline; gap:6px; min-width:0;",
                     div { class: "nv-file-name",
@@ -735,10 +848,7 @@ fn FileRow(
                 if !properties.is_empty() {
                     div { class: "nv-file-properties", style: "flex:0 0 26px; display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap;",
                         for p in properties {
-                            span { key: "{p.key}", class: "nv-pill nv-property", "data-property": "{p.key}",
-                                style: pill_style(p.colour.as_deref()),
-                                "{p.text}"
-                            }
+                            PropertyPill { key: "{p.key}", nav, pill: p }
                         }
                     }
                 }
@@ -785,9 +895,44 @@ fn TagPill(nav: Navigator, pill: Pill) -> Element {
             style: pill_style(pill.colour.as_deref()),
             onclick: move |e: MouseEvent| {
                 e.stop_propagation();
-                nav.update(|s| s.select_tag(&tag));
+                let m = tree_rows::click_mods(&e);
+                if m.command {
+                    nav.update(|s| s.click_tag(&tag, m));
+                } else {
+                    nav.update(|s| s.select_tag(&tag));
+                }
             },
             Tag { size: 10 }
+            "{pill.text}"
+        }
+    }
+}
+
+/// A property on a row: a click lists the notes with that value; with
+/// ⌘/Ctrl, it goes into the search (`useFileItemPills`).
+#[component]
+fn PropertyPill(nav: Navigator, pill: Pill) -> Element {
+    let (key, value) = (pill.key.clone(), pill.text.clone());
+    // A note's count shown with its properties is not one.
+    let is_property = !key.starts_with("words");
+    rsx! {
+        span { class: "nv-pill nv-property", "data-property": "{pill.key}", role: if is_property { "link" } else { "" },
+            style: pill_style(pill.colour.as_deref()),
+            onclick: move |e: MouseEvent| {
+                if !is_property {
+                    return;
+                }
+                e.stop_propagation();
+                let m = tree_rows::click_mods(&e);
+                if m.command {
+                    nav.update(|s| s.click_property(&key, Some(&value), m));
+                } else {
+                    nav.update(|s| {
+                        s.select_property(&key, Some(&value));
+                        s.focus = Pane::Files;
+                    });
+                }
+            },
             "{pill.text}"
         }
     }

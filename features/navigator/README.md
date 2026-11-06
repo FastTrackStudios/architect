@@ -11,7 +11,8 @@ Notebook Navigator's design and code, and so is Navigator, the built-in extensio
 app that links either ships under the GPL. The rest of architect is MIT OR Apache-2.0 and does
 not depend on them; a tool or server that leaves them out stays permissive.
 
-- The model (default features, wasm-clean): `NavigatorSource` and `MemorySource`, the folder
+- The model (default features; native, as the list groups with Bases' `group_by` from
+  `vault-live`): `NavigatorSource` and `MemorySource`, the folder
   index, the tree and list rows, selection and history, the virtual window, the keys, the
   pane layout, `NavigatorSettings`; the calendar's grid, the periodic notes' Moment patterns,
   periods and date filters.

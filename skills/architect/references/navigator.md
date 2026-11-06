@@ -162,9 +162,10 @@ film's in-memory one).
     `Outcome::Write` with `FileOp::SetProperty` ranks. The app's source
     writes them (`NavigatorSource::write`).
   - Grouping: `Grouping` (none, date, folder, property). Property groups
-    come from `features/navigator/src/grouping.rs` `by_value`, which Bases
-    can share. Notes without the value go last, under "None". A heading
-    folds (`toggle_group`, keyed by `collapse_key`).
+    come from `features/navigator/src/list.rs` `property_groups`, over
+    Bases' `group_by` (`features/vault/vault-live/src/grouping.rs`, MIT, the
+    one grouping in architect). Notes without the value go last, under
+    "None". A heading folds (`toggle_group`, keyed by `collapse_key`).
   - Pinned (`toggle_pin`, ⌘⇧P) is a section on top, per kind of place
     (folders, tags). Pinned rows have one line of preview and no date.
   - Images (`thumb`): a property (`feature_image_properties`), the source's
@@ -182,10 +183,50 @@ film's in-memory one).
     `set_appearance` or `edit_appearance`. `NavigatorState::effective` is
     the settings the list is drawn with.
   - Multi-select: Cmd/Ctrl-click, Shift-click, select all.
+- **Tags** (`features/navigator/src/tags.rs` `TagTree`, rows from
+  `features/navigator/src/tree.rs` `tag_rows`), under the folders.
+  - Nested by `/`, keyed in lower case (`tag_key`), shown as first
+    written. A "Tags" row (`TAGGED`, `all_tags_row`) lists every tagged
+    note, with the tags one level in; "Untagged" (`UNTAGGED`,
+    `show_untagged`) the notes with none.
+  - Counts: a tag's own notes, and those below it once each (with
+    `include_descendants`).
+  - Roots in a hand-made order (`move_tag_root`, `ViewState::tag_order`,
+    the reorder arrows), the rest by `tag_sort` (`TreeSort`: A to Z, Z to A,
+    by frequency). `scope_tags` limits them to a folder's or a property's
+    notes.
+  - Operations return `Outcome::Write` with a `FileOp`: `add_tag` (a note
+    with the tag or one above it is left; the tags below go),
+    `remove_tag` (the tag itself), `clear_tags`, `rename_tag` (with the
+    tags below; not into itself), `delete_tag`, `new_note_in_tag`. Once the
+    source has done it, `NavigatorState::after_write` moves the tag's
+    colour, order, open state, the selection and the search with it.
+  - Drops (`drop_on`, `Drag`): notes on a tag tag them, on Untagged clear
+    them; a tag on a tag moves under it (`a/b` on `c` is `c/b`), on the
+    Tags row to the top. The view asks before a tag moves.
+  - Colours are keyed `tag:<key>`; a tag without one takes the nearest
+    tag above it's (`NavigatorState::colour`).
+- **Properties** (`features/navigator/src/properties.rs` `PropertyTree`,
+  rows from `features/navigator/src/tree.rs` `property_rows`): the keys
+  named in `property_keys` (none by default), each with its values and
+  counts. A value is matched by its path (`value_path`: a link as its alias
+  or target, any case) and shown unwrapped (`value_display`). Ids are
+  `key:<key>` and `key:<key>=<value>` (`key_id`, `value_id`). A key lists
+  its notes with it empty, or all with it with `include_descendants`;
+  `NavTarget::Property`. `set_property` writes a value row's value as
+  first written (or the key alone, empty) on the notes selected or
+  dropped.
+- **The search a ⌘/Ctrl-click builds** (`features/navigator/src/query.rs`
+  `Query`): `click_tag` and `click_property` with ⌘/Ctrl add the tag or
+  property with AND, with ⇧ too with OR, or take it out. `Query::text`
+  writes `#tag`, `.key`, `.key=value` (quoted where needed) joined by
+  `AND`/`OR`; `Query::parse` reads it back; `Query::matches` filters the
+  list (AND binds tighter). The search pane (#338) reads and writes the
+  same `Query` (`NavigatorState::query`, `set_query`).
 - **Keys** (`NavigatorState::key`): ↑ ↓ Home End PageUp PageDown in both
-  panes.
-  - Folders: → expands, then moves to the list. ← collapses, then goes to
-    the parent.
+  panes, through the folders, the tags and the properties.
+  - Folders, tags, keys: → expands, then moves to the list. ← collapses,
+    then goes to the parent.
   - Notes: ⇧↑/⇧↓ and ⇧Home/⇧End extend the selection. ⌘A selects every
     note.
   - Return opens a note: ⇧ in a tab, ⌘ beside.
@@ -244,24 +285,30 @@ film's in-memory one).
   `date`, `move`, `today`), `NAVIGATOR_OPEN_DAILY_NOTE`, `…_WEEKLY_…`,
   `…_MONTHLY_…`, `…_QUARTERLY_…`, `…_YEARLY_NOTE` (`date`, `confirm`,
   `tab`), and `NAVIGATOR_NEXT_PERIOD` (⌃⌥→), `NAVIGATOR_PREVIOUS_PERIOD`
-  (⌃⌥←) and `NAVIGATOR_PARENT_PERIOD` (⌃⌥↑).
+  (⌃⌥←) and `NAVIGATOR_PARENT_PERIOD` (⌃⌥↑); the tags and properties:
+  `NAVIGATOR_TAGS`, `NAVIGATOR_PROPERTIES`, `NAVIGATOR_TOGGLE`,
+  `NAVIGATOR_TAG_ADD`, `NAVIGATOR_TAG_REMOVE`, `NAVIGATOR_TAG_CLEAR`,
+  `NAVIGATOR_TAG_RENAME`, `NAVIGATOR_TAG_DELETE`, `NAVIGATOR_TAG_NEW_NOTE`,
+  `NAVIGATOR_PROPERTY_SET`, `NAVIGATOR_DROP` and `NAVIGATOR_SEARCH` (as a
+  ⌘/Ctrl-click, `or` as with ⇧; or a whole `query`); `NAVIGATOR_SELECT`
+  takes `property` and `value` too.
   Without the extension, `NavigatorView` puts its own on the palette.
 - **Settings.** One section, `navigator` (`NavigatorSettings`, a
   `#[derive(Settings)]` struct).
 - **Kept between runs.** `ViewState` (`Navigator::view_state`, `restore`):
   the open folders, the manual order, the selected folder, the panes'
-  sizes, the pins, the folded groups, each place's own list and the
-  colours. It is a facet struct, so the app stores it where it keeps its
+  sizes, the pins, the folded groups, each place's own list, the
+  colours, the open tags and properties, and their hand-made orders. It is a facet struct, so the app stores it where it keeps its
   settings.
 
 ## Later layers
 
-These are tracked in #332 (the list in full, #335, and the calendar and
-periodic notes, #336, are done):
+These are tracked in #332 (the list in full, #335, the calendar and
+periodic notes, #336, and tags and properties, #337, are done):
 
 - the real vault as a source (#353);
-- tags and properties;
-- search, shortcuts, recents, profiles and hiding;
+- search, shortcuts, recents, profiles and hiding (#338: its search pane
+  reads and writes `Query`);
 - file operations, templates, icons and colours.
 
 Each adds variants to `NavRowKind` and `ListRowKind`, and adds `NavTarget`

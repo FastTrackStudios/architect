@@ -269,6 +269,10 @@ fn the_open_note_is_revealed_and_collapse_all_keeps_it_in_view() {
 #[test]
 fn keys_move_through_both_panes() {
     let s = &mut state(&vault());
+    // The folders alone (the tags' keys: tests/tags_properties.rs).
+    let mut settings = NavigatorSettings::default();
+    settings.tag_tree = false;
+    s.set_settings(settings);
     s.focus = Pane::Navigation;
     s.key(Key::Down, Mods::NONE);
     assert_eq!(s.selection().folder(), Some("Archive"));

@@ -33,6 +33,12 @@
 //! `gggg/[W]ww`, `YYYY/YYYYMM`, `YYYY/[Q]Q` and `YYYY`. Its
 //! `calendarLocale` (system default, Obsidian's `en`: weeks from Sunday)
 //! is [`WeekStart`]; month and day names are English.
+//! The tags and the property browser: `showTags` true, `showAllTagsFolder`
+//! true, `showUntagged` true, `scopeTagsToCurrentContext` false,
+//! `tagSortOrder` alpha-asc; `showProperties` true, the profile's
+//! `propertyKeys` none (so no keys show until some are named),
+//! `scopePropertiesToCurrentContext` false, `propertySortOrder`
+//! alpha-asc.
 //!
 //! What a person sets for one folder or tag (its sort, grouping, rows,
 //! mode, notes from below) is not here but in [`crate::Appearance`],
@@ -325,6 +331,47 @@ pub enum CalendarPlacement {
     Below,
 }
 
+/// How tags or property keys are ordered (`tagSortOrder`,
+/// `propertySortOrder`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum TreeSort {
+    /// A to Z
+    #[default]
+    AlphaAsc,
+    /// Z to A
+    AlphaDesc,
+    /// Fewest notes first
+    FrequencyAsc,
+    /// Most notes first
+    FrequencyDesc,
+}
+
+impl TreeSort {
+    pub const ALL: [Self; 4] = [
+        Self::AlphaAsc,
+        Self::AlphaDesc,
+        Self::FrequencyAsc,
+        Self::FrequencyDesc,
+    ];
+
+    /// Notebook Navigator's name for it: `alpha-asc`, …
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::AlphaAsc => "alpha-asc",
+            Self::AlphaDesc => "alpha-desc",
+            Self::FrequencyAsc => "frequency-asc",
+            Self::FrequencyDesc => "frequency-desc",
+        }
+    }
+
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.id() == id)
+    }
+}
+
 /// Navigator
 /// The sidebar's folders and notes.
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Settings)]
@@ -548,6 +595,32 @@ pub struct NavigatorSettings {
     /// Yearly notes
     #[setting(placeholder = "YYYY")]
     pub yearly_pattern: String,
+    /// Tags
+    /// The vault's tags under the folders, nested by `/`.
+    pub tag_tree: bool,
+    /// "Tags" row
+    /// The tags under one row that lists every tagged note.
+    pub all_tags_row: bool,
+    /// Untagged
+    /// A row for the notes with no tag.
+    pub show_untagged: bool,
+    /// Only the selection's tags
+    /// With a folder or a property selected, the tags its notes have.
+    pub scope_tags: bool,
+    /// Sort tags
+    pub tag_sort: TreeSort,
+    /// Property browser
+    /// The keys named below under the tags, each with its values.
+    pub property_tree: bool,
+    /// Property keys
+    /// Frontmatter keys the property browser shows.
+    #[setting(placeholder = "status, type")]
+    pub property_keys: String,
+    /// Only the selection's properties
+    /// With a folder or a tag selected, the values its notes have.
+    pub scope_properties: bool,
+    /// Sort properties
+    pub property_sort: TreeSort,
 }
 
 impl NavigatorSettings {
@@ -650,6 +723,15 @@ impl Default for NavigatorSettings {
             monthly_pattern: crate::calendar::DEFAULT_MONTHLY.to_owned(),
             quarterly_pattern: crate::calendar::DEFAULT_QUARTERLY.to_owned(),
             yearly_pattern: crate::calendar::DEFAULT_YEARLY.to_owned(),
+            tag_tree: true,
+            all_tags_row: true,
+            show_untagged: true,
+            scope_tags: false,
+            tag_sort: TreeSort::AlphaAsc,
+            property_tree: true,
+            property_keys: String::new(),
+            scope_properties: false,
+            property_sort: TreeSort::AlphaAsc,
         }
     }
 }

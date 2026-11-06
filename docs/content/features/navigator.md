@@ -15,7 +15,8 @@ app shows a vault in a sidebar (Task, the sandbox's Vault tab).
 It comes in two parts:
 
 - **The navigator**, `architect-navigator` (`features/navigator`). It holds
-  the model, which is plain data and builds for wasm. Its `ui` feature adds
+  the model, which is plain data (native: the list groups with Bases'
+  `group_by` from `vault-live`). Its `ui` feature adds
   the Dioxus view. It reads a vault through `NavigatorSource`.
 - **Navigator**, the built-in extension, `architect-navigator-extension`
   (`features/navigator/extension`). It packages the navigator as a feature,
@@ -72,14 +73,25 @@ directly. Its palette commands are then the view's own.
   drawings' previews, sorts them (`sort`), puts the pinned ones first, and
   groups them. Each row carries its `Lines` and its `Thumb`, so `height` is
   known before it is drawn.
-- `features/navigator/src/grouping.rs`: `by_value`, grouping by a
-  property's value as Bases does, with "None" last. It knows nothing of
-  notes.
+- `features/navigator/src/list.rs` `property_groups`: grouping by a
+  property's value with Bases' `group_by`
+  (`features/vault/vault-live/src/grouping.rs`, MIT, the one grouping in
+  architect), with "None" last.
+- `features/navigator/src/tags.rs`: `TagTree`, the tags nested by `/` with
+  their counts, sort and hand-made root order; `features/navigator/src/properties.rs`:
+  `PropertyTree`, the keys named in the settings and their values;
+  `features/navigator/src/tree.rs` `tag_rows` and `property_rows` draw them
+  under the folders. `features/navigator/src/query.rs`: `Query`, the
+  search a ⌘/Ctrl-click builds (tags and properties, AND and OR).
 - `features/navigator/src/appearance.rs`: `Appearance`, a folder's or a
   tag's own list. `Appearance::over` applies it to the settings.
 - `features/navigator/src/state.rs`: `NavigatorState` holds everything.
   Pins: `toggle_pin`, `pin_folder_notes`. Groups: `toggle_group`. Own
-  lists: `set_appearance`, `edit_appearance`. Tags: `select_tag`. Folder
+  lists: `set_appearance`, `edit_appearance`. Tags: `select_tag`,
+  `click_tag`, `add_tag`, `remove_tag`, `clear_tags`, `rename_tag`,
+  `delete_tag`, `new_note_in_tag`, `move_tag_root`. Properties:
+  `click_property`, `set_property`. Drops: `drop_on`. The search:
+  `query`, `toggle_query`, `set_query`. Folder
   notes: `convert_to_folder_note`, `set_as_folder_note`,
   `detach_folder_note`, `open_folder_note`. The manual order:
   `move_in_order`. `ViewState` keeps pins, folded groups, own lists and
@@ -111,6 +123,13 @@ directly. Its palette commands are then the view's own.
   view on show and brings back its answer.
 
 ## Tests to read
+
+- `features/navigator/tests/tags_properties.rs`: the tag tree and the
+  property browser, their counts, sorts and orders, the tag operations and
+  drops, a rename's colour and selection following it, and the search a
+  ⌘/Ctrl-click builds. `features/navigator/tests/vault_source.rs` writes
+  tags to markdown on disk; `features/navigator/tests/view.rs` drags a note
+  onto a tag.
 
 - `features/navigator/tests/calendar.rs`: the calendar and the periodic
   notes. It covers Moment's tokens and weeks, the default and the demo
@@ -163,10 +182,24 @@ Notebook Navigator's parts are ported in layers (#332):
     plug-in as a source, month highlights, hover previews, and locales
     other than English (weeks start on Sunday, Monday or Saturday).
     Templates come with #339: until then a new note gets a heading.
+- **Layer 4, done (#337): tags and properties.**
+  - The tag tree under the folders: nested tags, a "Tags" row and
+    "Untagged", A to Z or by frequency, a hand-made root order, optionally
+    the selection's tags alone.
+  - Add, remove and clear tags on the notes selected; rename and delete a
+    tag, with the tags below it; a new note in a tag; notes dragged onto a
+    tag (or Untagged) and a tag onto a tag (or the Tags row). The vault's
+    markdown changes, frontmatter and inline `#tags`.
+  - The property browser: the keys named in the settings, their values
+    and counts, colours and icons; a property set on the notes selected or
+    dropped.
+  - ⌘/Ctrl-click puts a tag or property into the search with AND, with ⇧
+    with OR (`Query`, which the search pane, #338, takes over).
+  - Not ported: hidden tags and profiles (#338), tag and property icons
+    chosen by a person and the shortcuts pane (#339), a key's or value's
+    rename, child orders by hand (`tagChildOrder`, `propertyChildOrder`),
+    spring-loaded folders while dragging.
 - **Still to come.**
-  - The real vault as a source, with real editing (#353).
-  - Tags and properties in the navigation pane. A tag is selected today
-    from a row.
   - Search, and the shortcuts pane.
   - Rendered PDF covers. A source gives a cover as the note's
     `feature_image`; without one, a PDF shows its badge.

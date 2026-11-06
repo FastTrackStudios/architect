@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::SystemTime;
 
 use serde_json::Value;
-use vault::actions::{Changes, OpenVault, Renamed, Watch, page_tags};
+use vault::actions::{Changes, OpenVault, Renamed, TagEdit, Watch, page_tags};
 use vault::obsidian::{Vault, VaultPage, page_tasks, page_wordcount};
 
 use crate::source::{
@@ -262,8 +262,39 @@ impl VaultSource {
                     self.emit(&SourceEvent::FileModified(f));
                 }
             }
+            // The tags, through the vault's (`OpenVault::edit_tags`): the
+            // markdown changes, frontmatter and inline `#tags`.
+            FileOp::AddTag { paths, tag } => {
+                let changed = vault.edit_tags(paths, &TagEdit::Add(tag))?;
+                self.modified(&changed);
+            }
+            FileOp::RemoveTag { paths, tag } => {
+                let changed = vault.edit_tags(paths, &TagEdit::Remove(tag))?;
+                self.modified(&changed);
+            }
+            FileOp::ClearTags { paths } => {
+                let changed = vault.edit_tags(paths, &TagEdit::Clear)?;
+                self.modified(&changed);
+            }
+            FileOp::RenameTag { from, to } => {
+                let changed = vault.edit_tags_everywhere(&TagEdit::Rename { from, to })?;
+                self.modified(&changed);
+            }
+            FileOp::DeleteTag(tag) => {
+                let changed = vault.edit_tags_everywhere(&TagEdit::Delete(tag))?;
+                self.modified(&changed);
+            }
         }
         Ok(())
+    }
+
+    /// Says that the notes at `paths` changed.
+    fn modified(&self, paths: &[String]) {
+        for p in paths {
+            if let Some(f) = self.file(p) {
+                self.emit(&SourceEvent::FileModified(f));
+            }
+        }
     }
 
     fn emit(&self, event: &SourceEvent) {
@@ -646,6 +677,8 @@ fn resolve_resource(v: &Vault, raw: &str) -> Option<std::path::PathBuf> {
 /// A property's value as frontmatter holds it.
 fn json_of(value: &PropertyValue) -> Value {
     match value {
+        // The key alone: `key:` (`null`).
+        PropertyValue::Text(t) if t.is_empty() => Value::Null,
         PropertyValue::Text(t) => Value::String(t.clone()),
         PropertyValue::Number(n) => {
             serde_json::Number::from_f64(*n).map_or(Value::Null, Value::Number)

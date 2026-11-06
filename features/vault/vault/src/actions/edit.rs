@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use vault_live::relink::{PageName, relink};
+use vault_obsidian::tag_edit::{TagEdit, edit_tags, is_or_under, tag_key, valid_tag};
 use vault_obsidian::{Vault, mutate};
 
 use super::OpenVault;
@@ -320,6 +321,65 @@ impl OpenVault {
         mutate::set_property(&mut self.write(), path, key, value, &guard).map_err(|e| e.to_string())
     }
 
+    /// Removes one frontmatter property of the note at `path`.
+    ///
+    /// # Errors
+    ///
+    /// No such note, or it cannot be written.
+    pub fn remove_property(&self, path: &str, key: &str) -> Result<(), String> {
+        let guard = Arc::clone(&self.guard);
+        mutate::remove_property(&mut self.write(), path, key, &guard).map_err(|e| e.to_string())
+    }
+
+    /// Does `edit` to the tags of the notes at `paths`
+    /// (`vault_obsidian::tag_edit`), and says which notes changed: a tag
+    /// added or removed, or every tag cleared.
+    ///
+    /// # Errors
+    ///
+    /// A tag that cannot be one ([`valid_tag`]), a path that is no note,
+    /// or a note that cannot be written; the notes before it stay done.
+    pub fn edit_tags(&self, paths: &[String], edit: &TagEdit<'_>) -> Result<Vec<String>, String> {
+        check_tag_edit(edit)?;
+        let guard = Arc::clone(&self.guard);
+        let mut v = self.write();
+        let mut changed = Vec::new();
+        for path in paths {
+            let raw = v
+                .page(path)
+                .ok_or_else(|| format!("no note at {path}"))?
+                .raw
+                .clone();
+            if let Some(text) = edit_tags(&raw, edit).map_err(|e| format!("{path}: {e}"))? {
+                v.save_page(path, &text, &guard)
+                    .map_err(|e| format!("{path}: {e}"))?;
+                changed.push(path.clone());
+            }
+        }
+        drop(v);
+        Ok(changed)
+    }
+
+    /// Does `edit` to every note that has the tag: a tag renamed (and the
+    /// tags below it) or deleted. Says which notes changed.
+    ///
+    /// # Errors
+    ///
+    /// A rename to a name that cannot be a tag, to the same name, or into
+    /// the tag itself or below it; or a note that cannot be written (the
+    /// notes before it stay done).
+    pub fn edit_tags_everywhere(&self, edit: &TagEdit<'_>) -> Result<Vec<String>, String> {
+        check_tag_edit(edit)?;
+        let paths: Vec<String> = self.with(|v| {
+            v.pages
+                .iter()
+                .filter(|p| p.rel_path.to_ascii_lowercase().ends_with(".md"))
+                .map(|p| p.rel_path.clone())
+                .collect()
+        });
+        self.edit_tags(&paths, edit)
+    }
+
     /// Reads the folder again and says what changed since the vault was
     /// last read.
     ///
@@ -448,5 +508,27 @@ impl Drop for Watch {
 impl std::fmt::Debug for Watch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Watch")
+    }
+}
+
+/// Whether `edit` can be done: the tag it writes can be one, and a rename
+/// goes somewhere else, not into the tag itself or below it.
+fn check_tag_edit(edit: &TagEdit<'_>) -> Result<(), String> {
+    match *edit {
+        TagEdit::Add(tag) if !valid_tag(tag) => Err(format!("{tag:?} cannot be a tag")),
+        TagEdit::Rename { from, to } => {
+            if !valid_tag(to) {
+                return Err(format!("{to:?} cannot be a tag"));
+            }
+            let (from_key, to_key) = (tag_key(from), tag_key(to));
+            if from.trim().trim_start_matches('#') == to.trim().trim_start_matches('#') {
+                return Err(format!("#{from} is called that already"));
+            }
+            if to_key != from_key && is_or_under(&to_key, &from_key) {
+                return Err(format!("#{from} cannot move inside itself"));
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }

@@ -228,7 +228,8 @@ pub enum SourceEvent {
 }
 
 /// A change the navigator asks of a source: a folder note made or let
-/// go, a note's place in a manual order, a periodic note made.
+/// go, a note's place in a manual order, a periodic note made, tags and
+/// properties set (`crate::tags`, `crate::properties`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileOp {
     /// Make a folder (and the folders it is in).
@@ -238,12 +239,24 @@ pub enum FileOp {
     CreateFile { path: String, text: String },
     /// Move (or rename) a file.
     Move { from: String, to: String },
-    /// Set a frontmatter property on a note.
+    /// Set a frontmatter property on a note (empty text: the key alone,
+    /// `null`).
     SetProperty {
         path: String,
         key: String,
         value: PropertyValue,
     },
+    /// Tag notes: one that has the tag or a tag above it is left; the tags
+    /// below it go (`crate::tags::added`).
+    AddTag { paths: Vec<String>, tag: String },
+    /// Take a tag itself (any case; not the tags below it) off notes.
+    RemoveTag { paths: Vec<String>, tag: String },
+    /// Take every tag off notes.
+    ClearTags { paths: Vec<String> },
+    /// Rename a tag, and the tags below it, in every note.
+    RenameTag { from: String, to: String },
+    /// Take a tag, and the tags below it, off every note.
+    DeleteTag(String),
 }
 
 /// Kept while the subscriber wants events; dropping it stops them.
@@ -597,11 +610,29 @@ impl MemorySource {
                     self.create_folder(folder);
                 }
                 let now = chrono::Utc::now().timestamp_millis();
-                let body: Vec<&str> = text
+                // Its frontmatter's `tags` list, and its text.
+                let (tags, body) = match text
+                    .strip_prefix("---\n")
+                    .and_then(|t| t.split_once("\n---\n"))
+                {
+                    Some((fm, body)) => (
+                        fm.lines()
+                            .skip_while(|l| l.trim() != "tags:")
+                            .skip(1)
+                            .map_while(|l| l.trim().strip_prefix("- "))
+                            .map(str::to_owned)
+                            .collect(),
+                        body,
+                    ),
+                    None => (Vec::new(), text.as_str()),
+                };
+                let body: Vec<&str> = body
                     .lines()
                     .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
                     .collect();
-                self.put(NoteFile::new(path.clone(), now, now).preview(body.join(" ")));
+                let mut file = NoteFile::new(path.clone(), now, now).preview(body.join(" "));
+                file.tags = tags;
+                self.put(file);
             }
             FileOp::Move { from, to } => {
                 if self.file(to).is_some() {
@@ -622,6 +653,59 @@ impl MemorySource {
                     Some((_, v)) => *v = value.clone(),
                     None => file.properties.push((key.clone(), value.clone())),
                 }
+                self.put(file);
+            }
+            FileOp::AddTag { paths, tag } => self.retag(paths, |t| crate::tags::added(t, tag))?,
+            FileOp::RemoveTag { paths, tag } => self.retag(paths, |t| {
+                let key = crate::tags::tag_key(tag);
+                let kept: Vec<String> = t
+                    .iter()
+                    .filter(|x| crate::tags::tag_key(x) != key)
+                    .cloned()
+                    .collect();
+                (kept.len() != t.len()).then_some(kept)
+            })?,
+            FileOp::ClearTags { paths } => {
+                self.retag(paths, |t| (!t.is_empty()).then(Vec::new))?;
+            }
+            FileOp::RenameTag { from, to } => self.retag_everywhere(from, Some(to))?,
+            FileOp::DeleteTag(tag) => self.retag_everywhere(tag, None)?,
+        }
+        Ok(())
+    }
+
+    /// `tag` and the tags below it renamed to `to` (or taken off) in every
+    /// note.
+    fn retag_everywhere(&self, tag: &str, to: Option<&str>) -> Result<(), String> {
+        use crate::tags::{is_or_below, renamed, tag_key};
+        let paths: Vec<String> = self.files().into_iter().map(|f| f.path).collect();
+        let key = tag_key(tag);
+        self.retag(&paths, |t| {
+            if !t.iter().any(|x| is_or_below(&tag_key(x), &key)) {
+                return None;
+            }
+            Some(to.map_or_else(
+                || {
+                    t.iter()
+                        .filter(|x| !is_or_below(&tag_key(x), &key))
+                        .cloned()
+                        .collect()
+                },
+                |to| renamed(t, tag, to),
+            ))
+        })
+    }
+
+    /// Each note of `paths` with its tags as `f` makes them (none: left).
+    fn retag(
+        &self,
+        paths: &[String],
+        f: impl Fn(&[String]) -> Option<Vec<String>>,
+    ) -> Result<(), String> {
+        for p in paths {
+            let mut file = self.file(p).ok_or_else(|| format!("no {p}"))?;
+            if let Some(tags) = f(&file.tags) {
+                file.tags = tags;
                 self.put(file);
             }
         }

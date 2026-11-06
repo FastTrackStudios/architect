@@ -11,8 +11,8 @@
     clippy::indexing_slicing
 )]
 
-use architect_navigator::grouping;
 use architect_navigator::list::{Clock, Thumb, parse_date};
+use architect_navigator::list::{NONE_GROUP, property_groups};
 use architect_navigator::{
     Appearance, FileOp, Grouping, Key, ListMode, ListRowKind, MemorySource, Mods,
     NavigatorSettings, NavigatorSource, NavigatorState, NoteFile, OpenIn, Outcome, Pane,
@@ -168,7 +168,7 @@ fn by_property_one_group_per_value_and_none_last() {
 }
 
 #[test]
-fn the_grouping_function_is_bases_shaped() {
+fn grouping_by_a_property_is_bases_grouping() {
     let rows = vec![
         ("a", Some(PropertyValue::Number(10.0))),
         ("b", Some(text("Item 10"))),
@@ -185,7 +185,7 @@ fn the_grouping_function_is_bases_shaped() {
         ),
         ("h", Some(text("  "))),
     ];
-    let groups = grouping::by_value(rows, |r| r.1.as_ref(), false);
+    let groups = property_groups(rows, |r| r.1.as_ref());
     let labels: Vec<_> = groups.iter().map(|g| g.label.as_str()).collect();
     // Numbers first, in order; text in natural order; a list one group,
     // its links shown as names; no value (or blank) last, under None.
@@ -194,13 +194,14 @@ fn the_grouping_function_is_bases_shaped() {
         groups[4].items.iter().map(|r| r.0).collect::<Vec<_>>(),
         ["c", "g"]
     );
-    assert_eq!(groups[5].id, grouping::NONE_ID);
+    assert_eq!(groups[4].id, "property-value:x, Y");
+    assert_eq!(groups[5].id, NONE_GROUP);
     assert_eq!(
         groups[5].items.iter().map(|r| r.0).collect::<Vec<_>>(),
         ["d", "h"]
     );
-    let down = grouping::by_value(vec![1.0, 3.0, 2.0], |_| None, true);
-    assert_eq!(down.len(), 1, "every item without a value: one None group");
+    let none = property_groups(vec![1.0, 3.0, 2.0], |_| None);
+    assert_eq!(none.len(), 1, "every item without a value: one None group");
 }
 
 #[test]

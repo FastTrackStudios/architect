@@ -1,7 +1,9 @@
 //! The navigator in a headless Blitz document: 100,000 notes draw a
 //! screenful of rows and keep drawing one as the list jumps to its end; a
 //! wide sidebar has two panes, a narrow one (or a phone) one at a time; a
-//! click on a folder lists its notes and a click on a note opens it.
+//! click on a folder lists its notes and a click on a note opens it; the
+//! tag rows draw, a ⌘/Ctrl-click on one builds the search, and a note
+//! dragged onto a tag is tagged.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -269,4 +271,97 @@ fn the_calendar_draws_days_and_a_click_opens_or_makes_their_notes() {
     assert_eq!(count(&doc, ".nv-confirm"), 1);
     click(&mut doc, "[data-testid=nv-confirm-cancel]");
     assert_eq!(count(&doc, ".nv-confirm"), 0);
+}
+
+/// A press at one point, moved to another in steps, let go there.
+#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+fn drag(doc: &mut DioxusDocument, from: &str, to: &str) {
+    let (fx, fy, fw, fh) = rect(doc, from);
+    let (tx, ty, tw, th) = rect(doc, to);
+    let (x0, y0) = (fx + fw / 2.0, fy + fh / 2.0);
+    let (x1, y1) = (tx + tw / 2.0, ty + th / 2.0);
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(
+        x0 as f32,
+        y0 as f32,
+        MouseEventButtons::None,
+    )));
+    doc.handle_ui_event(UiEvent::PointerDown(pointer(
+        x0 as f32,
+        y0 as f32,
+        MouseEventButtons::Primary,
+    )));
+    for i in 1..=8 {
+        let t = f64::from(i) / 8.0;
+        let (x, y) = ((x1 - x0).mul_add(t, x0), (y1 - y0).mul_add(t, y0));
+        doc.handle_ui_event(UiEvent::PointerMove(pointer(
+            x as f32,
+            y as f32,
+            MouseEventButtons::Primary,
+        )));
+        doc.poll(None);
+    }
+    doc.handle_ui_event(UiEvent::PointerUp(pointer(
+        x1 as f32,
+        y1 as f32,
+        MouseEventButtons::None,
+    )));
+    settle(doc);
+}
+
+#[test]
+fn tag_rows_draw_a_command_click_searches_and_a_note_dropped_on_a_tag_is_tagged() {
+    let source = MemorySource::new("Tags")
+        .with_file(NoteFile::new("Plan.md", NOW, NOW).tag("work"))
+        .with_file(NoteFile::new("Loose.md", NOW - 1000, NOW - 1000));
+    let mut doc = mount(Arc::new(source.clone()), 900, false);
+    assert_eq!(
+        count(&doc, "[role=\"treeitem\"][data-tag=\"__tagged__\"]"),
+        1
+    );
+    assert_eq!(count(&doc, "[role=\"treeitem\"][data-tag=\"work\"]"), 1);
+    assert_eq!(
+        count(&doc, "[role=\"treeitem\"][data-tag=\"__untagged__\"]"),
+        1
+    );
+    // ⌘ (Ctrl elsewhere) and a click: into the search, over the list.
+    let (x, y, w, h) = rect(&doc, "[role=\"treeitem\"][data-tag=\"work\"]");
+    #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+    let (x, y) = ((x + w / 2.0) as f32, (y + h / 2.0) as f32);
+    let command = if cfg!(target_os = "macos") {
+        Modifiers::META
+    } else {
+        Modifiers::CONTROL
+    };
+    let with = |mut e: BlitzPointerEvent| {
+        e.mods = command;
+        e
+    };
+    doc.handle_ui_event(UiEvent::PointerDown(with(pointer(
+        x,
+        y,
+        MouseEventButtons::Primary,
+    ))));
+    doc.handle_ui_event(UiEvent::PointerUp(with(pointer(
+        x,
+        y,
+        MouseEventButtons::None,
+    ))));
+    settle(&mut doc);
+    assert_eq!(nav().state.peek().query().text(), "#work");
+    assert_eq!(count(&doc, "[data-query=\"#work\"]"), 1);
+    click(&mut doc, "[aria-label=\"Clear the search\"]");
+    assert!(nav().state.peek().query().is_empty());
+    // A note dragged onto the tag: tagged.
+    drag(
+        &mut doc,
+        "[data-file=\"Loose.md\"]",
+        "[role=\"treeitem\"][data-tag=\"work\"]",
+    );
+    let tags = source
+        .files()
+        .into_iter()
+        .find(|f| f.path == "Loose.md")
+        .unwrap()
+        .tags;
+    assert_eq!(tags, ["work"]);
 }

@@ -15,7 +15,7 @@
 //! `VaultSource` is architect's vault, live); the app opens the notes it is
 //! asked to (`ui::NavigatorView`'s `on_open`), in its workspace.
 //!
-//! The model is plain data and wasm-clean ([`NavigatorState`]: the index,
+//! The model is plain data, native only ([`NavigatorState`]: the index,
 //! the rows, the selection and history, the keys, the scroll). Feature
 //! `ui` is the Dioxus view on architect's shell: its commands on the
 //! palette (`NAVIGATOR_*`), its section on the settings page
@@ -31,16 +31,18 @@
 
 pub mod appearance;
 pub mod calendar;
-pub mod grouping;
 pub mod index;
 pub mod layout;
 pub mod list;
 pub mod pattern;
 pub mod period;
+pub mod properties;
+pub mod query;
 pub mod selection;
 pub mod settings;
 pub mod source;
 pub mod state;
+pub mod tags;
 pub mod tree;
 pub mod virtualize;
 
@@ -56,17 +58,20 @@ pub use layout::{Pane, PaneLayout};
 pub use list::{Clock, Lines, ListContext, ListRow, ListRowKind, PinIn, Thumb};
 pub use pattern::Pattern;
 pub use period::{DateField, DateFilter, DayMonthOrder, Period, PeriodKind, WeekRules};
+pub use properties::PropertyTree;
+pub use query::{Join, Operand, Query};
 pub use selection::{NavTarget, Selection};
 pub use settings::{
     CalendarPlacement, CountPlacement, FolderNoteOpen, Grouping, ListMode, MonthFormat,
-    NarrowLayout, NavigatorSettings, Orientation, SortOption, StartPane, TextCount, WeekStart,
-    WeekendDays,
+    NarrowLayout, NavigatorSettings, Orientation, SortOption, StartPane, TextCount, TreeSort,
+    WeekStart, WeekendDays,
 };
 pub use source::{
     FileOp, Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
     Subscription, TaskCounts,
 };
 pub use state::{Colour, Key, Mods, NavigatorState, OpenIn, Outcome, Pin, ViewState};
+pub use tags::TagTree;
 pub use tree::{NavRow, NavRowKind};
 #[cfg(feature = "vault")]
 pub use vault_source::VaultSource;

@@ -23,11 +23,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use architect_extensions::linked::{Builder, Extension, Handle};
+use architect_navigator::state::Drag;
 use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
 use architect_navigator::{
-    CalendarGrid, Grouping, HeaderPeriod, ListMode, ListRowKind, MemorySource, NavTarget,
-    NavigatorSource, NavigatorState, NoteFile, OpenIn, Orientation, Outcome, Pane, PeriodKind,
-    PropertyValue, SortOption,
+    CalendarGrid, Grouping, HeaderPeriod, Join, ListMode, ListRowKind, MemorySource, Mods,
+    NavRowKind, NavTarget, NavigatorSource, NavigatorState, NoteFile, OpenIn, Orientation, Outcome,
+    Pane, PeriodKind, PropertyValue, Query, SortOption,
 };
 use dioxus::prelude::*;
 use serde_json::{Value, json};
@@ -111,6 +112,18 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_NEXT_PERIOD",
     "NAVIGATOR_PREVIOUS_PERIOD",
     "NAVIGATOR_PARENT_PERIOD",
+    "NAVIGATOR_TAGS",
+    "NAVIGATOR_PROPERTIES",
+    "NAVIGATOR_TOGGLE",
+    "NAVIGATOR_TAG_ADD",
+    "NAVIGATOR_TAG_REMOVE",
+    "NAVIGATOR_TAG_CLEAR",
+    "NAVIGATOR_TAG_RENAME",
+    "NAVIGATOR_TAG_DELETE",
+    "NAVIGATOR_TAG_NEW_NOTE",
+    "NAVIGATOR_PROPERTY_SET",
+    "NAVIGATOR_DROP",
+    "NAVIGATOR_SEARCH",
 ];
 
 impl Extension for NavigatorExtension {
@@ -253,7 +266,9 @@ fn run(
         "NAVIGATOR_STATE" => ok(nav),
         "NAVIGATOR_SELECT" => {
             if let Some(tag) = text(args, "tag") {
-                nav.update(|s| s.select_tag(tag));
+                nav.update(|s| s.click_tag(tag, Mods::NONE));
+            } else if let Some(key) = text(args, "property") {
+                nav.update(|s| s.click_property(key, text(args, "value"), Mods::NONE));
             } else {
                 let folder = text(args, "folder").unwrap_or("");
                 if !nav.state.peek().index().has_folder(folder) {
@@ -501,8 +516,171 @@ fn run(
             };
             periodic(&nav, on_open, out, args)
         }
+        "NAVIGATOR_TAGS" | "NAVIGATOR_PROPERTIES" => Ok(trees(&nav.state.peek())),
+        "NAVIGATOR_TOGGLE" => {
+            let target = target_of(args)?;
+            nav.update(|s| s.toggle_nav(&target));
+            Ok(trees(&nav.state.peek()))
+        }
+        "NAVIGATOR_TAG_ADD" | "NAVIGATOR_TAG_REMOVE" | "NAVIGATOR_TAG_CLEAR" => {
+            let paths = paths_of(args, &nav.state.peek());
+            let tag = text(args, "tag").unwrap_or_default();
+            let out = {
+                let s = nav.state.peek();
+                match id {
+                    "NAVIGATOR_TAG_ADD" => s.add_tag(&paths, tag),
+                    "NAVIGATOR_TAG_REMOVE" => s.remove_tag(&paths, tag),
+                    _ => s.clear_tags(&paths),
+                }
+            }?;
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_TAG_RENAME" => {
+            let from = text(args, "from").ok_or("`from`: the tag to rename")?;
+            let to = text(args, "to").ok_or("`to`: its new name")?;
+            let out = nav.state.peek().rename_tag(from, to)?;
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_TAG_DELETE" => {
+            let tag = text(args, "tag").ok_or("`tag`: the tag to delete")?;
+            let out = nav.state.peek().delete_tag(tag)?;
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_TAG_NEW_NOTE" => {
+            let tag = text(args, "tag").ok_or("`tag`: the tag for the new note")?;
+            let out = nav.state.peek().new_note_in_tag(tag)?;
+            let path = match &out {
+                Outcome::Write {
+                    open: Some((p, _)), ..
+                } => p.clone(),
+                _ => String::new(),
+            };
+            nav.act(Some(out), on_open);
+            Ok(json!({ "path": path }))
+        }
+        "NAVIGATOR_PROPERTY_SET" => {
+            let key = text(args, "key").ok_or("`key`: the property to set")?;
+            let paths = paths_of(args, &nav.state.peek());
+            let out = nav
+                .state
+                .peek()
+                .set_property(&paths, key, text(args, "value"))?;
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_DROP" => {
+            let drag = text(args, "drag_tag").map_or_else(
+                || Drag::Notes(paths_of(args, &nav.state.peek())),
+                |t| Drag::Tag(t.to_owned()),
+            );
+            let on = target_of(args)?;
+            let out = nav.state.peek().drop_on(&drag, &on)?;
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_SEARCH" => {
+            if flag(args, "clear") == Some(true) {
+                nav.update(|s| s.set_query(Query::default()));
+            } else if let Some(q) = text(args, "query") {
+                let query = Query::parse(q).ok_or(
+                    "`query` is tags and properties joined by AND or OR (#tag .key .key=value)",
+                )?;
+                nav.update(|s| s.set_query(query));
+            } else if text(args, "tag").is_some() || text(args, "property").is_some() {
+                // As a ⌘/Ctrl-click (⇧ too with `or`).
+                let mods = Mods {
+                    command: true,
+                    shift: flag(args, "or") == Some(true),
+                };
+                match target_of(args)? {
+                    NavTarget::Tag(t) => nav.update(|s| s.click_tag(&t, mods)),
+                    NavTarget::Property { key, value } => {
+                        nav.update(|s| s.click_property(&key, value.as_deref(), mods));
+                    }
+                    _ => {}
+                }
+            }
+            let s = nav.state.peek();
+            Ok(json!({
+                "query": s.query().text(),
+                "join": s.query().terms.iter().map(|(j, _)| match j { Join::And => "and", Join::Or => "or" }).collect::<Vec<_>>(),
+                "files": s.list_order(),
+            }))
+        }
         other => Err(format!("Navigator has no action {other}")),
     }
+}
+
+/// A tag (`tag`) or a property (`property`, and `value`) an action is
+/// about.
+fn target_of(args: &Value) -> Result<NavTarget, String> {
+    if let Some(t) = text(args, "tag") {
+        return Ok(NavTarget::Tag(t.to_owned()));
+    }
+    if let Some(k) = text(args, "property") {
+        return Ok(NavTarget::Property {
+            key: architect_navigator::properties::fold(k),
+            value: text(args, "value").map(architect_navigator::properties::value_path),
+        });
+    }
+    Err("which? (`tag`, or `property` and `value`)".to_owned())
+}
+
+/// Does a write and says what changed: the outcome's ops, and the list.
+fn write(nav: &Navigator, on_open: EventHandler<Open>, out: Outcome) -> Result<Value, String> {
+    let ops = match &out {
+        Outcome::Write { ops, .. } => format!("{ops:?}"),
+        _ => String::new(),
+    };
+    let before = nav.notice.peek().clone();
+    nav.act(Some(out), on_open);
+    let after = nav.notice.peek().clone();
+    if after != before
+        && let Some(e) = after
+    {
+        return Err(e);
+    }
+    Ok(json!({ "done": ops, "state": state(&nav.state.peek()) }))
+}
+
+/// What `NAVIGATOR_TAGS` and `NAVIGATOR_PROPERTIES` say: the tag rows and
+/// the property rows on show, with their counts.
+#[must_use]
+pub fn trees(s: &NavigatorState) -> Value {
+    let mut tags = Vec::new();
+    let mut properties = Vec::new();
+    for r in s.nav_rows() {
+        match &r.kind {
+            NavRowKind::Tag {
+                tag,
+                name,
+                expanded,
+                has_children,
+                count,
+                ..
+            } => tags.push(json!({
+                "tag": tag, "name": name, "level": r.level, "open": expanded,
+                "children": has_children, "notes": count.current, "below": count.descendants,
+            })),
+            NavRowKind::Property {
+                key,
+                value,
+                name,
+                expanded,
+                has_children,
+                count,
+            } => properties.push(json!({
+                "key": key, "value": value, "name": name, "level": r.level, "open": expanded,
+                "children": has_children, "notes": count.current, "below": count.descendants,
+            })),
+            _ => {}
+        }
+    }
+    json!({
+        "tags": tags,
+        "tagged": s.tag_tree().tagged,
+        "untagged": s.tag_tree().untagged,
+        "properties": properties,
+        "search": s.query().text(),
+    })
 }
 
 /// A day as `YYYY-MM-DD`.
@@ -617,6 +795,7 @@ pub fn state(s: &NavigatorState) -> Value {
     let target = match s.target() {
         NavTarget::Folder(f) => json!({ "folder": f }),
         NavTarget::Tag(t) => json!({ "tag": t }),
+        NavTarget::Property { key, value } => json!({ "property": key, "value": value }),
         _ => Value::Null,
     };
     let e = s.effective();
@@ -654,6 +833,7 @@ pub fn state(s: &NavigatorState) -> Value {
         "descendants": e.include_descendants,
         "selected": s.selection().files(),
         "active": s.active(),
+        "search": s.query().text(),
         "rows": rows,
     })
 }

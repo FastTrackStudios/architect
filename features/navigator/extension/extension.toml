@@ -15,7 +15,7 @@ name = "Navigator"
 version = "0.1.0"
 kind = "process"
 api = "0.1"
-description = "Folders beside notes in the sidebar: a port of Notebook Navigator (GPL-3.0). Groups, pins, images, tags, folder notes, a manual order, and each folder's and tag's own list."
+description = "Folders beside notes in the sidebar: a port of Notebook Navigator (GPL-3.0). Groups, pins, images, the tag tree and the property browser, folder notes, a manual order, and each folder's and tag's own list."
 authors = ["FastTrackStudio"]
 
 [entry]
@@ -42,10 +42,10 @@ effect = "read_only"
 [[actions]]
 id = "NAVIGATOR_SELECT"
 name = "Navigator: go to"
-description = "Selects folder `folder` (\"\" the vault) or tag `tag`, as a click would; a folder's note opens with it when folder notes are on."
+description = "Selects folder `folder` (\"\" the vault), tag `tag` (__tagged__ every tagged note, __untagged__ those with none) or property `property` (and `value`; properties-root the Properties row), as a click would; a folder's note opens with it when folder notes are on."
 group = "Navigator"
 effect = "mutating"
-params = '{"type":"object","properties":{"folder":{"type":"string"},"tag":{"type":"string"}}}'
+params = '{"type":"object","properties":{"folder":{"type":"string"},"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"}}}'
 
 [[actions]]
 id = "NAVIGATOR_REVEAL"
@@ -303,6 +303,100 @@ group = "Navigator"
 effect = "mutating"
 shortcut = "⌃⌥↑"
 params = '{"type":"object","properties":{"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_TAGS"
+name = "Navigator: the tag tree"
+description = "The tag rows on show (the Tags row, each tag, Untagged): name, level, open, how many notes have it and below it; how many notes are tagged and untagged; the search."
+group = "Navigator"
+effect = "read_only"
+
+[[actions]]
+id = "NAVIGATOR_PROPERTIES"
+name = "Navigator: the property browser"
+description = "The property rows on show (the Properties row, each key named in the settings, an open key's values) with their counts. As NAVIGATOR_TAGS."
+group = "Navigator"
+effect = "read_only"
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE"
+name = "Navigator: open or close a tag or property"
+description = "Opens or closes tag `tag` (__tagged__ the Tags row) or property `property` (properties-root the Properties row)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"tag":{"type":"string"},"property":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_TAG_ADD"
+name = "Add a tag to notes"
+description = "Adds `tag` to note `path` (or `paths`, or the selected ones), in their frontmatter: a note with the tag or one above it is left; the tags below it go."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"tag":{"type":"string"},"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}},"required":["tag"]}'
+
+[[actions]]
+id = "NAVIGATOR_TAG_REMOVE"
+name = "Remove a tag from notes"
+description = "Takes `tag` itself (not the tags below it) off note `path` (or `paths`, or the selected ones): frontmatter and text."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"tag":{"type":"string"},"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}},"required":["tag"]}'
+
+[[actions]]
+id = "NAVIGATOR_TAG_CLEAR"
+name = "Remove all tags from notes"
+description = "Takes every tag off note `path` (or `paths`, or the selected ones)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}}}'
+
+[[actions]]
+id = "NAVIGATOR_TAG_RENAME"
+name = "Rename a tag"
+description = "Renames tag `from` to `to` in every note, and the tags below it (a/b to x makes a/b/c x/c); its colour, order and the selection follow."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"}},"required":["from","to"]}'
+
+[[actions]]
+id = "NAVIGATOR_TAG_DELETE"
+name = "Delete a tag"
+description = "Takes `tag` and the tags below it off every note."
+group = "Navigator"
+effect = "destructive"
+params = '{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}'
+
+[[actions]]
+id = "NAVIGATOR_TAG_NEW_NOTE"
+name = "New note in a tag"
+description = "Makes a note tagged `tag` beside the selected note (or the one open, or at the root), and opens it."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}'
+
+[[actions]]
+id = "NAVIGATOR_PROPERTY_SET"
+name = "Set a property on notes"
+description = "Sets property `key` to `value` (or empty, the key alone) on note `path` (or `paths`, or the selected ones); a value replaces what each had."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"},"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}},"required":["key"]}'
+
+[[actions]]
+id = "NAVIGATOR_DROP"
+name = "Navigator: drop on a tag or property"
+description = "Drops notes (`path`, `paths`, or the selected ones) or tag `drag_tag` on tag `tag` or property `property` (and `value`), as a drag would: notes are tagged (cleared on __untagged__) or get the property; a tag moves under the tag (to the top on __tagged__)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"drag_tag":{"type":"string"},"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_SEARCH"
+name = "Navigator: the search"
+description = "Adds tag `tag` or property `property` (and `value`) to the search as a Cmd/Ctrl-click does (with AND; `or` true, OR as with Shift), or takes it out; or sets the whole `query` (#tag .key .key=value, AND, OR); `clear` empties it. Answers the search and the notes it lists."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"},"or":{"type":"boolean"},"query":{"type":"string"},"clear":{"type":"boolean"}}}'
 
 # A note's context menu (the app's file menu): pin, and folder notes.
 [[context]]
@@ -1315,3 +1409,140 @@ unit = ""
 placeholder = "YYYY"
 choices = []
 aliases = []
+
+[[sections.settings]]
+key = "navigator.tag_tree"
+title = "Tags"
+description = "The vault's tags under the folders, nested by `/`."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.all_tags_row"
+title = "\"Tags\" row"
+description = "The tags under one row that lists every tagged note."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_untagged"
+title = "Untagged"
+description = "A row for the notes with no tag."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.scope_tags"
+title = "Only the selection's tags"
+description = "With a folder or a property selected, the tags its notes have."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.tag_sort"
+title = "Sort tags"
+description = ""
+control = "select"
+default = "AlphaAsc"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "AlphaAsc"
+label = "A to Z"
+detail = ""
+
+[[sections.settings.choices]]
+value = "AlphaDesc"
+label = "Z to A"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyAsc"
+label = "Fewest notes first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyDesc"
+label = "Most notes first"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.property_tree"
+title = "Property browser"
+description = "The keys named below under the tags, each with its values."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.property_keys"
+title = "Property keys"
+description = "Frontmatter keys the property browser shows."
+control = "text"
+default = ""
+unit = ""
+placeholder = "status, type"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.scope_properties"
+title = "Only the selection's properties"
+description = "With a folder or a tag selected, the values its notes have."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.property_sort"
+title = "Sort properties"
+description = ""
+control = "select"
+default = "AlphaAsc"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "AlphaAsc"
+label = "A to Z"
+detail = ""
+
+[[sections.settings.choices]]
+value = "AlphaDesc"
+label = "Z to A"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyAsc"
+label = "Fewest notes first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FrequencyDesc"
+label = "Most notes first"
+detail = ""
