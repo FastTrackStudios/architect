@@ -830,12 +830,16 @@ impl ExtensionApi {
                     _ => Level::Info,
                 };
                 host.logs().push(&self.id, level, "notify", text.clone());
+                let kept = serde_json::json!({
+                    "from": self.id, "text": text, "kind": kind, "title": title,
+                });
                 host.ui().notify(Notification {
                     from: Self::asker(manifest),
                     text,
                     kind,
                     title,
                 })?;
+                keep_toast(&host, &self.id, &kept).await;
                 Ok(Value::Null)
             }
             HostRequest::ClipboardRead => Ok(host
@@ -1510,4 +1514,33 @@ fn default_of(manifest: &Manifest, key: &str) -> Option<Value> {
         .flat_map(|s| &s.settings)
         .find(|s| s.key == key)
         .map(|s| serde_json::to_value(&s.default).unwrap_or(Value::Null))
+}
+
+/// The service a notification centre provides: a toast shown is kept
+/// there too (its `toasted` method), so the centre lists the session's
+/// toasts beside the persistent notifications.
+pub const NOTIFY_SERVICE: &str = "architect.notify";
+
+/// Hands a toast extension `from` showed to the provider of
+/// [`NOTIFY_SERVICE`] (its `<PREFIX>_TOASTED` action), unless it is the
+/// one that showed it. Nothing provides it: nothing to do.
+async fn keep_toast(host: &Host, from: &str, toast: &Value) {
+    let Some((provider, _)) = host.provider(NOTIFY_SERVICE, &semver::VersionReq::STAR) else {
+        return;
+    };
+    if provider == from {
+        return;
+    }
+    let Some(loaded) = host.get(&provider) else {
+        return;
+    };
+    let action = crate::interop::method_action(&loaded.manifest.action_prefix(), "toasted");
+    if !loaded.actions.contains(&action) {
+        return;
+    }
+    let caller = ActionCaller::app().with_invocation(Invocation::new(InvocationSource::App));
+    let _ = host
+        .list_of(&action)
+        .run_json_async_with(&caller, &action, toast.to_string().as_bytes())
+        .await;
 }

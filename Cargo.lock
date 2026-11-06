@@ -827,6 +827,7 @@ dependencies = [
  "architect-navigator",
  "architect-navigator-api",
  "architect-navigator-extension",
+ "architect-notify",
  "architect-orgs",
  "architect-pages",
  "architect-presence",
@@ -1491,6 +1492,26 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml 0.8.2",
+]
+
+[[package]]
+name = "architect-notify"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-bases",
+ "architect-extensions",
+ "architect-settings",
+ "architect-workspace-hack",
+ "chrono",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "vault",
 ]
 
 [[package]]

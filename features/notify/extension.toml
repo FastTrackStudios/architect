@@ -1,0 +1,193 @@
+# Notify (features/notify/src/lib.rs, #348): persistent notifications
+# with a typed source and the notification centre in the shell. Ported
+# from Task's features/notify. Each person's notifications are a note,
+# Notifications/<name>.md, so a notification written on one device
+# reaches the person's others as notes sync. One Rust value (`Notify`, a
+# linked::Extension): linked in as a built-in, or its program (src/main.rs)
+# as a development copy (EXT_CLONE {"id":"notify"}).
+id = "notify"
+name = "Notifications"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "A notification centre: mentions in comments, tasks assigned to you, shared links opened, devices enrolled. A bell with the unread count, a toast when one arrives, and \"go to\" on each. Synced through the vault."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-notify"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/notify"
+
+# Its API for others (`services.call("architect.notify", "post", …)`):
+# method `m` is its action NOTIFY_<M>. The host hands it every toast an
+# extension shows (`toasted`), for the centre.
+[provides]
+"architect.notify" = "0.1.0"
+
+# "Go to" asks a notification's source to reveal it (`reveal`) when it is
+# one of these; the push relay (#200) gets each new row (`send`) once an
+# extension provides it. None is required.
+[uses]
+"architect.threads" = "^0.1"
+"architect.tasks" = "^0.1"
+"architect.push" = "^0.1"
+
+[capabilities]
+actions = ["VAULT_", "EXT_VIEW_OPEN", "EXT_VIEW_CLOSE"]
+effect = "mutating"
+reads = ["documents"]
+ui = ["notify"]
+
+[[actions]]
+id = "NOTIFY_POST"
+name = "Notify: send"
+description = "A notification for each person `to` names (a name, a comma list or a list), added to their note in Notifications/: `kind` (mention, thread-reply, task-assigned, task-due, task-completed, share-opened, device-enrolled, other), `title`, `body`, `actor` (who caused it; not notified of their own action unless `self`), `source` {service, entity, href, comment} for \"go to\". It reaches their devices as notes sync, and the push relay when one is installed."
+group = "Notifications"
+effect = "mutating"
+params = '{"type":"object","properties":{"to":{},"kind":{"type":"string"},"title":{"type":"string"},"body":{"type":"string"},"actor":{"type":"string"},"self":{"type":"boolean"},"source":{"type":"object","properties":{"service":{"type":"string"},"entity":{"type":"string"},"href":{"type":"string"},"comment":{"type":"string"}}}},"required":["to","title"]}'
+
+[[actions]]
+id = "NOTIFY_LIST"
+name = "Notify: list"
+description = "Your notifications (or `who`'s), newest first: `unread_only`, `limit` (100). With the unread count and the toasts shown this session."
+group = "Notifications"
+effect = "read_only"
+params = '{"type":"object","properties":{"who":{"type":"string"},"unread_only":{"type":"boolean"},"limit":{"type":"integer"}}}'
+
+[[actions]]
+id = "NOTIFY_UNREAD"
+name = "Notify: unread count"
+description = "How many of your notifications (or `who`'s) are unread."
+group = "Notifications"
+effect = "read_only"
+params = '{"type":"object","properties":{"who":{"type":"string"}}}'
+
+[[actions]]
+id = "NOTIFY_READ"
+name = "Notify: mark read"
+description = "Marks notification `id` read (`read: false`: unread again)."
+group = "Notifications"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"},"read":{"type":"boolean"},"who":{"type":"string"}},"required":["id"]}'
+
+[[actions]]
+id = "NOTIFY_READ_ALL"
+name = "Mark all notifications read"
+description = "Marks every unread notification of yours read; answers how many."
+group = "Notifications"
+effect = "mutating"
+params = '{"type":"object","properties":{"who":{"type":"string"}}}'
+
+[[actions]]
+id = "NOTIFY_DELETE"
+name = "Notify: delete"
+description = "Takes notification `id` away."
+group = "Notifications"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"},"who":{"type":"string"}},"required":["id"]}'
+
+[[actions]]
+id = "NOTIFY_CLEAR"
+name = "Clear read notifications"
+description = "Takes every read notification away, and the session's toasts."
+group = "Notifications"
+effect = "mutating"
+params = '{"type":"object","properties":{"who":{"type":"string"}}}'
+
+[[actions]]
+id = "NOTIFY_OPEN"
+name = "Notify: go to"
+description = "Goes to notification `id`: marks it read, asks its source's service to reveal it (Threads opens the note and its comments on the thread), else opens its href; the centre closes."
+group = "Notifications"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}'
+
+[[actions]]
+id = "NOTIFY_CENTRE"
+name = "Show notifications"
+description = "Opens the notification centre under the bell."
+group = "Notifications"
+effect = "read_only"
+
+[[actions]]
+id = "NOTIFY_ME"
+name = "Notify: your name"
+description = "The name you go by (people @mention you by it; your notifications are its note). `name` sets it first (Settings → Notifications)."
+group = "Notifications"
+effect = "mutating"
+params = '{"type":"object","properties":{"name":{"type":"string"}}}'
+
+[[actions]]
+id = "NOTIFY_KINDS"
+name = "Notify: kinds"
+description = "The kinds of notification, by name."
+group = "Notifications"
+effect = "read_only"
+
+[[actions]]
+id = "NOTIFY_TOASTED"
+name = "Notify: keep a toast"
+description = "A toast an extension showed (`from`, `text`, `kind`, `title`), kept in the centre for the session. The host calls it for every extension's toast."
+group = "Notifications"
+effect = "read_only"
+params = '{"type":"object","properties":{"from":{"type":"string"},"text":{"type":"string"},"kind":{"type":"string"},"title":{"type":"string"}}}'
+
+[[actions]]
+id = "NOTIFY_POLL"
+name = "Notify: read again"
+description = "Reads your notifications again: the bell's count, and a toast for each that arrived (synced from another device). Its schedule runs it every few seconds."
+group = "Notifications"
+effect = "read_only"
+
+[[views]]
+id = "centre"
+title = "Notifications"
+icon = "bell"
+placement = "overlay"
+width = 380.0
+height = 480.0
+
+# The bell: the unread count; a press opens the centre.
+[[status]]
+id = "bell"
+text = ""
+icon = "bell"
+hint = "Notifications"
+side = "right"
+action = "NOTIFY_CENTRE"
+
+[[menus]]
+menu = "View"
+action = "NOTIFY_CENTRE"
+
+[[hooks]]
+on = "startup"
+action = "NOTIFY_POLL"
+
+# A notification another device wrote reaches this one as its note syncs;
+# reading it every few seconds puts it on the bell and in a toast.
+[[hooks]]
+every = "4s"
+action = "NOTIFY_POLL"
+
+[[sections]]
+id = "notify"
+title = "Notifications"
+icon = "bell"
+
+[[sections.settings]]
+key = "notify.me"
+title = "Your name"
+description = "The name people @mention you by; your notifications are kept under it (Notifications/<name>.md). Empty: the account's user name."
+control = "text"
+default = ""
+
+[[sections.settings]]
+key = "notify.toasts"
+title = "Show a toast"
+description = "When a notification arrives while the app is open, show it as a toast as well."
+control = "switch"
+default = true
