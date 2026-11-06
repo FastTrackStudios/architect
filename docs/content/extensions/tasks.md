@@ -134,6 +134,7 @@ A status item counts what is due today; a startup hook fills it.
 ## Status and what's next
 
 Done: the model, quick add, the views, the board, the service, the `task`
-capture target. Next: a navigator provider (projects on
-the left, a project's tasks on the right) when #356's API lands, a tour
-when `[[tours]]` (#379) lands, and timers from the Time Tracker (#375).
+capture target, the navigator provider, and timers from the
+[Time Tracker](@/extensions/time-tracker.md) (each row's time and ▶,
+each task's `time`, through `architect.time`). Next: a tour when
+`[[tours]]` (#379) lands.

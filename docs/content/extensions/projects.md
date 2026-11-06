@@ -66,7 +66,7 @@ project's other notes. Its actions are its API (`[provides]
 | action | does |
 |---|---|
 | `PROJECTS_LIST {state?, type?}` | the projects |
-| `PROJECTS_READ {path}` | a project's page data: its type, roadmap, goals, tasks and notes |
+| `PROJECTS_READ {path}` | a project's page data: its type, roadmap, goals, tasks, time and notes |
 | `PROJECTS_CREATE {title, type?, …}` | a new project |
 | `PROJECTS_SET_STATE {path, state}` | planning, active, on hold, done |
 | `PROJECTS_ADD_MEMBER`, `PROJECTS_SET_MEMBERS` | its members |
@@ -78,7 +78,11 @@ project's other notes. Its actions are its API (`[provides]
 
 It `[uses] "architect.tasks"`: with Tasks on, the page lists the
 project's tasks (`for_project`), adds one (`add`) and finishes one
-(`set_status`); with it off, the page says so and the rest works.
+(`set_status`); with it off, the page says so and the rest works. It
+`[uses] "architect.time"` the same way: with the
+[Time Tracker](@/extensions/time-tracker.md) on, `PROJECTS_READ` carries
+the project's `time` (`for_project`), and the page shows it and starts
+timers; with it off, the page has no Time section.
 
 ## 4. Views
 
@@ -86,8 +90,10 @@ project's tasks (`for_project`), adds one (`add`) and finishes one
   a type.
 - `page` (`PageView`, `ProjectPage`): the project's state (a click sets
   it), members, its type's details, the roadmap (`MilestoneLine`: each
-  milestone's progress and due date; a field adds one), goals, tasks
-  (`TaskLine`) and its other notes. A linked view is given no pane state,
+  milestone's progress and due date; a field adds one), goals, its time
+  (`TimeSection`: in all, this week, today, billable and its amount, the
+  running timer or a Start button), tasks (`TaskLine`, each with its time
+  and a ▶ that times it) and its other notes. A linked view is given no pane state,
   so `PROJECTS_OPEN` sets the project the page shows before it opens it.
 
 ## 5. Tests
@@ -103,5 +109,5 @@ project's tasks (`for_project`), adds one (`add`) and finishes one
 Done: the page, project types, goals and milestones, the service. Next: a
 navigator provider (projects or areas on the left, a project's contents on
 the right) when #356's API lands, a tour when `[[tours]]` (#379) lands,
-the project's time from the Time Tracker, and `PROJECTS_*` as architect's
-own actions when #344 adds them.
+and `PROJECTS_*` as architect's own actions when #344 adds them. The
+project's time comes from the Time Tracker.
