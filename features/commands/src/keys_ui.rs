@@ -21,13 +21,13 @@ use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::custom::{Condition, CustomAction, Runner, Step};
-use crate::fuzzy::fuzzy;
+use architect_palette::fuzzy;
 use crate::keymap::{
     Binding, Clash, EVERYWHERE, Keymap, Layer, PersonKeymap, display_chord, display_keys,
     normalize_keys,
 };
-use crate::opener::{OpenIn, OpenItem, Opener};
-use crate::palette::{Command, Query, Ranked, Scope};
+use architect_palette::{OpenIn, OpenItem, Opener};
+use architect_palette::{Command, Query, Ranked, Scope};
 use crate::params::{Param, args_json, to_ask};
 use crate::ui::{Commands, Frame, Kbd, fill, theme, try_use_commands};
 
@@ -446,7 +446,7 @@ pub(crate) fn scope_rows(commands: &Commands, q: &Query) -> Vec<(Ranked, Pick)> 
                 .map(|f| {
                     let group = finder.title(&f.item.kind).unwrap_or_default().to_owned();
                     let row = Ranked {
-                        command: Command::new(
+                        item: Command::new(
                             format!("{}:{}", f.item.kind, f.item.id),
                             f.item.title.clone(),
                         )
@@ -487,7 +487,7 @@ fn help_rows(commands: &Commands, text: &str) -> Vec<(Ranked, Pick)> {
                 command = command.disabled(c.disabled_reason.clone().unwrap_or_default());
             }
             let row = Ranked {
-                command,
+                item: command,
                 positions: Vec::new(),
                 score: 0,
             };

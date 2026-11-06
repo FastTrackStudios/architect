@@ -56,11 +56,11 @@ fn commands() -> Vec<Command> {
 #[test]
 fn ranking_puts_the_best_enabled_match_first() {
     let rows = rank(&commands(), "close", &Recents::default());
-    assert_eq!(rows[0].command.id, "WORKSPACE_CLOSE_TAB");
-    assert!(rows.iter().all(|r| r.command.id != "WORKSPACE_SPLIT_RIGHT"));
+    assert_eq!(rows[0].item.id, "WORKSPACE_CLOSE_TAB");
+    assert!(rows.iter().all(|r| r.item.id != "WORKSPACE_SPLIT_RIGHT"));
     // The group and the id match too, less than the label.
     let by_group = rank(&commands(), "panes", &Recents::default());
-    assert_eq!(by_group[0].command.id, "WORKSPACE_SPLIT_RIGHT");
+    assert_eq!(by_group[0].item.id, "WORKSPACE_SPLIT_RIGHT");
 }
 
 #[test]
@@ -69,8 +69,8 @@ fn an_empty_query_lists_recent_first_and_disabled_last() {
     recents.touch("WORKSPACE_SPLIT_RIGHT");
     recents.touch("WORKSPACE_REOPEN");
     let rows = rank(&commands(), "", &recents);
-    assert_eq!(rows[0].command.id, "WORKSPACE_SPLIT_RIGHT");
-    assert_eq!(rows.last().unwrap().command.id, "WORKSPACE_REOPEN");
+    assert_eq!(rows[0].item.id, "WORKSPACE_SPLIT_RIGHT");
+    assert_eq!(rows.last().unwrap().item.id, "WORKSPACE_REOPEN");
 }
 
 #[test]

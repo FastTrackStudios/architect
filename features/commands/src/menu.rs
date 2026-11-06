@@ -12,7 +12,7 @@
 
 use std::rc::Rc;
 
-use crate::palette::Command;
+use architect_palette::Command;
 
 /// What the platform does itself: the edit commands a text field answers,
 /// the window's, the app's.

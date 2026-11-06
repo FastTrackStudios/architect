@@ -31,13 +31,13 @@ use architect_shell::{ShellTheme, try_use_shell};
 use dioxus::prelude::*;
 use lucide_dioxus::{Command as CommandIcon, Search};
 
-use crate::fuzzy::fuzzy;
+use architect_palette::fuzzy;
 use crate::keymap::{Keymap, PersonKeymap};
 use crate::keys_ui::{Asking, Pick, Recording};
 use crate::menu::Pick as MenuPick;
-use crate::opener::{Found, OpenIn, Opener, Openers};
-use crate::palette::{Command, Query, Ranked, Scope, rank};
-use crate::recent::Recents;
+use architect_palette::{Found, OpenIn, Opener, Openers};
+use architect_palette::{Command, Query, Ranked, Scope, rank};
+use architect_palette::Recents;
 
 /// A command a view registered, with what it runs.
 struct Scoped {
@@ -864,7 +864,7 @@ pub fn CommandPalette() -> Element {
                 command.group.clear();
                 let pick = Pick::Run(command.id.clone());
                 let row = Ranked {
-                    command,
+                    item: command,
                     positions: Vec::new(),
                     score: 0,
                 };
@@ -876,9 +876,9 @@ pub fn CommandPalette() -> Element {
             .map(|mut r| {
                 // On one group, its prompt names it: the rows need not.
                 if only.is_some() {
-                    r.command.group.clear();
+                    r.item.group.clear();
                 }
-                let pick = Pick::Run(r.command.id.clone());
+                let pick = Pick::Run(r.item.id.clone());
                 (r, pick)
             })
             .unzip(),
@@ -895,7 +895,7 @@ pub fn CommandPalette() -> Element {
     if commands.asking.read().is_some() {
         return rsx! { crate::keys_ui::AskPalette {} };
     }
-    let enabled: Vec<bool> = rows.iter().map(|r| r.command.enabled).collect();
+    let enabled: Vec<bool> = rows.iter().map(|r| r.item.enabled).collect();
     let pick = selected().min(count.saturating_sub(1));
     let run_at = move |i: usize| {
         if let (Some(p), Some(true)) = (picks.get(i), enabled.get(i)) {
@@ -935,7 +935,7 @@ pub fn CommandPalette() -> Element {
             }
             for (i, row) in rows.into_iter().enumerate() {
                 CommandRow {
-                    key: "{row.command.id}",
+                    key: "{row.item.id}",
                     row,
                     on: i == pick,
                     onpress: {
@@ -951,7 +951,7 @@ pub fn CommandPalette() -> Element {
 #[component]
 pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
     let t = theme();
-    let c = row.command;
+    let c = row.item;
     let fill = if on { &*t.active } else { "transparent" };
     let quiet = quiet(on, &t);
     let ink = if c.enabled { &*t.ink } else { quiet };

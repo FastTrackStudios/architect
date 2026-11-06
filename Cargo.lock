@@ -1010,6 +1010,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-input",
+ "architect-palette",
  "architect-permissions",
  "architect-shell",
  "architect-workspace-hack",
@@ -1509,6 +1510,14 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "architect-palette"
+version = "0.1.0"
+dependencies = [
+ "architect-workspace-hack",
+ "facet",
 ]
 
 [[package]]

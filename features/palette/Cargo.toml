@@ -1,0 +1,26 @@
+[package]
+name = "architect-palette"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# MIT on its own, so any launcher can take the engine (the palette's UI is
+# an extension over it, features/palette/extension).
+license = "MIT"
+description = "The palette and launcher engine: sources, items, fuzzy matching and ranking, recents, open-anything. No UI; the ⌘K Command Palette and the OS-wide launcher both rank through it."
+
+# docs/content/architecture/actions-everywhere.md. Pure data, wasm-clean:
+# an app's palette (the Command Palette extension), the launcher
+# (features/launcher) and an extension's contributed sources
+# ([[palette_sources]]) all go through `Engine`.
+
+[dependencies]
+facet = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

@@ -2,9 +2,9 @@
 //! the ⌘K palette, ⌘O open-anything, the action list window, and custom
 //! actions.
 //!
-//! The default build is the model: [`fuzzy`] matching, the palette's
-//! [`Query`] and [`rank`], [`Recents`], the [`Openers`] registry,
-//! [`CustomAction`]s, the [`Keymap`] (the app's bindings with a person's
+//! The default build is the model: the engine's [`fuzzy`] matching,
+//! [`Query`], [`rank`], [`Recents`] and [`Openers`] (`architect-palette`,
+//! re-exported), [`CustomAction`]s, the [`Keymap`] (the app's bindings with a person's
 //! [`PersonKeymap`] over them) and an action's [`params`] asked step by
 //! step — pure data, wasm-clean. Feature `ui` draws them in the shell:
 //! [`CommandPalette`], [`QuickOpen`] and [`ActionListView`] (with its
@@ -20,7 +20,6 @@ mod confirm;
 mod custom;
 #[cfg(any(test, all(feature = "native", target_os = "linux")))]
 mod dbusmenu;
-mod fuzzy;
 #[cfg(all(feature = "native", target_os = "ios"))]
 mod ios_menu;
 mod keymap;
@@ -35,10 +34,7 @@ mod menu_view;
 mod native;
 #[cfg(all(feature = "native", target_os = "macos"))]
 mod native_menu;
-mod opener;
-mod palette;
 pub mod params;
-mod recent;
 #[cfg(feature = "ui")]
 mod sidebar;
 #[cfg(feature = "ui")]
@@ -51,7 +47,6 @@ pub use bridge::{
 #[cfg(feature = "ui")]
 pub use confirm::ConfirmSheet;
 pub use custom::{Condition, CustomAction, Runner, Step, StepFailed};
-pub use fuzzy::{Match, fuzzy};
 #[cfg(all(feature = "native", target_os = "ios"))]
 pub use ios_menu::NativeMenus;
 pub use keymap::{
@@ -73,9 +68,13 @@ pub use menu_view::InWindowMenus;
 pub use native::WindowKeys;
 #[cfg(all(feature = "native", target_os = "macos"))]
 pub use native_menu::NativeMenus;
-pub use opener::{Found, OpenIn, OpenItem, Opener, Openers};
-pub use palette::{Command, Effect, Query, Ranked, Scope, rank};
-pub use recent::Recents;
+/// The engine the palette ranks through (`architect-palette`): its
+/// model, re-exported where the palette's callers have always found it.
+pub use architect_palette as engine;
+pub use architect_palette::{
+    Command, Effect, Engine, FnSource, Found, Match, OpenIn, OpenItem, Opener, Openers,
+    Query, Ranked, Ranking, Recents, Scope, Source, fuzzy, rank,
+};
 #[cfg(feature = "ui")]
 pub use sidebar::{sidebar_command, use_sidebar_commands};
 #[cfg(feature = "ui")]

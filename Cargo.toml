@@ -65,6 +65,7 @@ members = [
     "features/navigator",
     "features/navigator/extension",
     "features/navigator-api",
+    "features/palette",
     "features/attachments",
     "features/spaces",
     "features/ui/showcase",
@@ -312,6 +313,8 @@ linkme = "0.3"
 architect-shell = { path = "features/shell", default-features = false }
 architect-workspace = { path = "features/workspace" }
 architect-commands = { path = "features/commands" }
+# The palette and launcher engine (MIT): sources, items, ranking.
+architect-palette = { path = "features/palette" }
 architect-settings = { path = "features/settings" }
 architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }

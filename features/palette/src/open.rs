@@ -1,8 +1,9 @@
-//! ⌘O: open anything. Each feature registers an [`Opener`] for what it
+//! Open anything (⌘O). Each feature registers an [`Opener`] for what it
 //! can open (notes, songs, workspace views, screensets); a query asks them
 //! all at once, or one by its prefix (`song:`).
 
-use crate::fuzzy::fuzzy;
+use crate::item::Item;
+use crate::rank::score_open;
 
 /// Something that can be opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,23 @@ impl OpenItem {
     pub const fn recency(mut self, recency: u64) -> Self {
         self.recency = recency;
         self
+    }
+}
+
+impl From<OpenItem> for Item {
+    fn from(o: OpenItem) -> Self {
+        Self::new(o.id, o.title)
+            .source(o.kind)
+            .detail(o.detail)
+            .recency(o.recency)
+    }
+}
+
+impl From<&Item> for OpenItem {
+    fn from(i: &Item) -> Self {
+        Self::new(i.source.clone(), i.id.clone(), i.label.clone())
+            .detail(i.detail.clone())
+            .recency(i.recency)
     }
 }
 
@@ -133,13 +151,7 @@ impl Openers {
             .filter(|o| only.is_none_or(|k| k == o.kind))
             .flat_map(|o| (o.items)(text))
             .filter_map(|item| {
-                let m = fuzzy(text, &item.title).or_else(|| {
-                    fuzzy(text, &item.detail).map(|mut m| {
-                        m.positions.clear();
-                        m.score /= 2;
-                        m
-                    })
-                })?;
+                let m = score_open(text, &item.title, &item.detail)?;
                 Some(Found {
                     item,
                     positions: m.positions,
