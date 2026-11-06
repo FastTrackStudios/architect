@@ -488,7 +488,7 @@ fn run(
                 None => nav.state.peek().today(),
             };
             let out = nav.state.peek().open_periodic(kind, day, how(args));
-            periodic(nav, on_open, out, args)
+            periodic(&nav, on_open, out, args)
         }
         "NAVIGATOR_NEXT_PERIOD" | "NAVIGATOR_PREVIOUS_PERIOD" | "NAVIGATOR_PARENT_PERIOD" => {
             let out = {
@@ -499,7 +499,7 @@ fn run(
                     _ => s.open_parent_period(how(args)),
                 }
             };
-            periodic(nav, on_open, out, args)
+            periodic(&nav, on_open, out, args)
         }
         other => Err(format!("Navigator has no action {other}")),
     }
@@ -524,7 +524,7 @@ fn how(args: &Value) -> OpenIn {
 /// is `new`, and whether the person is `asked` first (`confirm` false
 /// does not ask).
 fn periodic(
-    nav: Navigator,
+    nav: &Navigator,
     on_open: EventHandler<Open>,
     out: Result<Outcome, String>,
     args: &Value,
