@@ -202,6 +202,13 @@ pub fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
+/// `n` days after today (today again past the calendar's end).
+#[must_use]
+pub fn day_after(n: i64) -> NaiveDate {
+    let today = today();
+    today.checked_add_signed(Duration::days(n)).unwrap_or(today)
+}
+
 /// What `CAPTURE_ADD` is given (and the composer captures).
 #[derive(Clone, Debug, Default, Facet)]
 pub struct AddArgs {
@@ -379,7 +386,9 @@ impl Capturer {
             Some(target::NOTE) => {
                 let props = inbox::carried(&note.properties);
                 let path = self.create(caller, &note.path, &props, &note.body).await?;
-                Ok(json!({ "path": path, "title": note.title, "target": "note", "properties": props }))
+                Ok(
+                    json!({ "path": path, "title": note.title, "target": "note", "properties": props }),
+                )
             }
             Some(id) => {
                 let t = find(&targets, id)?;
@@ -454,7 +463,11 @@ impl Capturer {
     /// The vault cannot be listed (none is open).
     pub async fn inbox(&self, caller: &ActionCaller, all: bool) -> Result<Vec<Item>, String> {
         let notes = self
-            .run(caller, "VAULT_LIST", json!({ "folder": self.config.folder }))
+            .run(
+                caller,
+                "VAULT_LIST",
+                json!({ "folder": self.config.folder }),
+            )
             .await?;
         let today = today();
         let mut items = Vec::new();
@@ -466,12 +479,14 @@ impl Capturer {
             // Directly in the folder: `Inbox/Processed/…` is not waiting.
             let inside = path
                 .strip_prefix(folder)
-                .map(|r| r.trim_start_matches('/'))
-                .unwrap_or(path);
+                .map_or(path, |r| r.trim_start_matches('/'));
             if inside.contains('/') {
                 continue;
             }
-            let Ok(note) = self.run(caller, "VAULT_READ", json!({ "path": path })).await else {
+            let Ok(note) = self
+                .run(caller, "VAULT_READ", json!({ "path": path }))
+                .await
+            else {
                 continue;
             };
             if let Some(item) = Item::from_note(&note)
@@ -491,7 +506,9 @@ impl Capturer {
         if !folder.is_empty() && !path.starts_with(&format!("{folder}/")) {
             return Err(format!("{path} is not in the inbox ({folder}/)"));
         }
-        let note = self.run(caller, "VAULT_READ", json!({ "path": path })).await?;
+        let note = self
+            .run(caller, "VAULT_READ", json!({ "path": path }))
+            .await?;
         Item::from_note(&note).ok_or_else(|| format!("{path} is not a capture in the inbox"))
     }
 
@@ -519,7 +536,7 @@ impl Capturer {
         let capture = Capture {
             title: title
                 .filter(|t| !t.trim().is_empty())
-                .unwrap_or(item.label())
+                .unwrap_or_else(|| item.label())
                 .to_owned(),
             body: item.body.clone(),
             properties: parse::merge(item.properties.clone(), chips),
@@ -531,8 +548,12 @@ impl Capturer {
         // the move's other half, not a deletion the caller asked for (the
         // app's door, so an agent's process is not stopped half done to
         // ask about a note whose words now live in what was made).
-        self.run(&ActionCaller::app(), "VAULT_DELETE", json!({ "path": path }))
-            .await?;
+        self.run(
+            &ActionCaller::app(),
+            "VAULT_DELETE",
+            json!({ "path": path }),
+        )
+        .await?;
         self.changed(path);
         Ok(made)
     }
@@ -617,7 +638,7 @@ impl Capturer {
     ) -> Result<Value, String> {
         let today = today();
         let day = match until.map(str::trim).filter(|u| !u.is_empty()) {
-            None => today + Duration::days(1),
+            None => day_after(1),
             Some(u) => NaiveDate::parse_from_str(u, "%Y-%m-%d")
                 .ok()
                 .or_else(|| parse::parse(u, today).due)
@@ -680,10 +701,14 @@ pub fn register(
         Ok(())
     })?;
     let c = cap.clone();
-    list.register_async_with(&ADD, Effect::Mutating, move |cx: &ActionCaller, a: AddArgs| {
-        let (c, cx) = (c.clone(), cx.clone());
-        async move { c.capture(&cx, a).await.map(|v| raw(&v)) }
-    })?;
+    list.register_async_with(
+        &ADD,
+        Effect::Mutating,
+        move |cx: &ActionCaller, a: AddArgs| {
+            let (c, cx) = (c.clone(), cx.clone());
+            async move { c.capture(&cx, a).await.map(|v| raw(&v)) }
+        },
+    )?;
     let c = cap.clone();
     list.register_async_with(
         &PARSE,
@@ -694,13 +719,12 @@ pub fn register(
                 let targets = c.targets(&cx).await;
                 let draft = Capturer::parse(&a.text, &targets);
                 let props = draft.properties();
-                let suggests = if inbox::suggests_task(&props)
-                    && targets.iter().any(|t| t.id == "task")
-                {
-                    "task"
-                } else {
-                    target::NOTE
-                };
+                let suggests =
+                    if inbox::suggests_task(&props) && targets.iter().any(|t| t.id == "task") {
+                        "task"
+                    } else {
+                        target::NOTE
+                    };
                 Ok(raw(
                     &json!({ "title": draft.title, "properties": props, "suggests": suggests }),
                 ))
@@ -708,15 +732,19 @@ pub fn register(
         },
     )?;
     let c = cap.clone();
-    list.register_async_with(&TARGETS, Effect::ReadOnly, move |cx: &ActionCaller, (): ()| {
-        let (c, cx) = (c.clone(), cx.clone());
-        async move {
-            let all = c.targets(&cx).await;
-            serde_json::to_value(all)
-                .map(|v| raw(&v))
-                .map_err(|e| e.to_string())
-        }
-    })?;
+    list.register_async_with(
+        &TARGETS,
+        Effect::ReadOnly,
+        move |cx: &ActionCaller, (): ()| {
+            let (c, cx) = (c.clone(), cx.clone());
+            async move {
+                let all = c.targets(&cx).await;
+                serde_json::to_value(all)
+                    .map(|v| raw(&v))
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )?;
     let o = opener;
     list.register(&INBOX_OPEN, Effect::Mutating, move |(): ()| {
         let open = o.as_ref().ok_or("no window to open the inbox in")?;

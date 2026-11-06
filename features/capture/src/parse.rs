@@ -1,6 +1,7 @@
-//! The quick-add parser: a line as typed read into a [`Draft`], the one
-//! parser every capture surface and target shares (the composer, the
-//! global window, `CAPTURE_ADD`, Tasks' `TASKS_ADD`). Ported from Task's
+//! The quick-add parser: a line as typed read into a [`Draft`].
+//!
+//! The one parser every capture surface and target shares (the composer,
+//! the global window, `CAPTURE_ADD`, Tasks' `TASKS_ADD`). Ported from Task's
 //! capture (`task:features/task/task-proto/src/capture.rs` `capture`),
 //! with the same rules.
 //!
@@ -143,7 +144,7 @@ pub fn parse_with(input: &str, today: NaiveDate, rules: &[TokenRule]) -> Draft {
         rule: r.rule,
         anchor: r.anchor.to_owned(),
     });
-    draft.title = title.join(" ").trim().to_owned();
+    title.join(" ").trim().clone_into(&mut draft.title);
     draft
 }
 
@@ -495,7 +496,10 @@ mod tests {
         assert_eq!(d.title, "Bridge idea");
         assert_eq!(d.extra.get("key").map(String::as_str), Some("D"));
         assert_eq!(d.properties()["key"], json!("D"));
-        assert_eq!(parse("Bridge idea key:D", today()).title, "Bridge idea key:D");
+        assert_eq!(
+            parse("Bridge idea key:D", today()).title,
+            "Bridge idea key:D"
+        );
     }
 
     #[test]
@@ -504,7 +508,10 @@ mod tests {
         let hand = json!({ "priority": "critical", "projects": null, "status": "waiting" });
         let out = merge(text, hand.as_object().unwrap());
         assert_eq!(out["priority"], json!("critical"));
-        assert!(!out.contains_key("projects"), "a hand-set null takes it away");
+        assert!(
+            !out.contains_key("projects"),
+            "a hand-set null takes it away"
+        );
         assert_eq!(out["status"], json!("waiting"));
     }
 }

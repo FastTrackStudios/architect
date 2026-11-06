@@ -70,6 +70,7 @@ its JSON schema) and built in `Tasks::build`:
 | `TASKS_LIST {view?, project?}` | all, open, today or mine (assigned to Settings → Tasks → Your name) |
 | `TASKS_READ {path}` | one task and its relations |
 | `TASKS_ADD {text, project?}` | quick add (below) |
+| `TASKS_CAPTURE {title, body, properties, …}` | the `task` capture target's action (below) |
 | `TASKS_CREATE {title, …}` | a task with the properties given |
 | `TASKS_UPDATE {path, …}` | sets properties (`null` removes one) |
 | `TASKS_SET_STATUS {path, status}` | a status; done stamps `completedDate`, a repeat moves on |
@@ -84,13 +85,18 @@ lists a project's tasks.
 
 ## 4. Quick add
 
-`extensions/tasks/src/quick.rs` `parse` is Task's capture parser
-(`task:features/task/task-proto/src/capture.rs`), the same rules:
-`Call the venue tomorrow [[Album]] #gigs @phone !high every week` becomes
-a title, a project link, a tag, a context, a priority, a due date and a
-repeat. When architect's capture (#352) lands, these become the `task`
-capture target's tokens; until then the list's "New task" field and
-`TASKS_ADD` read them.
+Quick add reads words through architect's one parser
+(`features/capture/src/parse.rs` `parse`, Task's capture parser with the
+same rules). `Call the venue tomorrow [[Album]] #gigs @phone !high every week`
+becomes a title, a project link, a tag, a context, a priority, a due date and
+a repeat. The list's "New task" field and `TASKS_ADD` go through
+`extensions/tasks/src/quick.rs` `parse`.
+
+Tasks is a capture target too (`[[capture_targets]] id = "task"`,
+[Capture](@/features/capture.md)). The composer and the inbox deck offer
+"Task", and `TASKS_CAPTURE` makes one from a capture
+(`extensions/tasks/src/quick.rs` `from_capture`): its properties become the
+task's, and its body becomes the task's details.
 
 ## 5. Belonging to a project
 
@@ -127,7 +133,7 @@ A status item counts what is due today; a startup hook fills it.
 
 ## Status and what's next
 
-Done: the model, quick add, the views, the board, the service. Next: the
-`task` capture target when #352 lands, a navigator provider (projects on
+Done: the model, quick add, the views, the board, the service, the `task`
+capture target. Next: a navigator provider (projects on
 the left, a project's tasks on the right) when #356's API lands, a tour
 when `[[tours]]` (#379) lands, and timers from the Time Tracker (#375).

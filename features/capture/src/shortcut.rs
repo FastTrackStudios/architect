@@ -25,10 +25,13 @@ use crate::ui::WINDOW_SIZE;
 /// ⌃Space and ⌥⌘Space for itself).
 pub const DEFAULT: &str = "control+alt+KeyN";
 
-/// Registers `spec` (`"control+alt+KeyN"`, `"shift+super+Space"`: the
-/// modifiers and a key code) system-wide for as long as the calling
-/// component lives; `on_press` runs on each press. The registration's
-/// failure, if any (a key another app holds, a Wayland session).
+/// Registers `spec` system-wide for as long as the calling component
+/// lives; `on_press` runs on each press.
+///
+/// `spec` is the modifiers and a key code (`"control+alt+KeyN"`,
+/// `"shift+super+Space"`). Answers the registration's failure, if any (a
+/// key another app holds, a Wayland session).
+#[must_use]
 pub fn use_global_shortcut(spec: &str, on_press: Callback<()>) -> Option<String> {
     let pressed = use_coroutine(move |mut rx: UnboundedReceiver<()>| async move {
         while rx.next().await.is_some() {
@@ -89,7 +92,7 @@ pub fn use_float_window() {
             let scale = screen.scale_factor();
             let size = mode.size();
             let (sw, sh) = (f64::from(size.width), f64::from(size.height));
-            let x = f64::from(at.x) + (sw - width * scale) / 2.0;
+            let x = f64::from(at.x) + (-width).mul_add(scale, sw) / 2.0;
             let y = f64::from(at.y) + sh / 4.0;
             // Screen pixels fit an i32.
             #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]

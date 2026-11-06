@@ -247,13 +247,15 @@ fn forward(to: &ActionList, from: &ActionList, id: &str) {
     let (list, id) = (from.clone(), id.to_owned());
     to.register_forwarded_with(
         &info,
-        Arc::new(move |caller: &architect::action::ActionCaller, args: &[u8]| {
-            let (list, caller, id, args) =
-                (list.clone(), caller.clone(), id.clone(), args.to_vec());
-            let run: architect::action::ActionFuture =
-                Box::pin(async move { list.run_json_async_with(&caller, &id, &args).await });
-            Ok(run)
-        }),
+        Arc::new(
+            move |caller: &architect::action::ActionCaller, args: &[u8]| {
+                let (list, caller, id, args) =
+                    (list.clone(), caller.clone(), id.clone(), args.to_vec());
+                let run: architect::action::ActionFuture =
+                    Box::pin(async move { list.run_json_async_with(&caller, &id, &args).await });
+                Ok(run)
+            },
+        ),
     )
     .unwrap();
 }

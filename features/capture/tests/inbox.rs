@@ -158,7 +158,10 @@ fn a_capture_lands_in_the_inbox_as_markdown() {
     assert_eq!(inbox[0]["title"], "Sketch the toolbar");
     assert_eq!(inbox[0]["body"], "Three ideas");
     assert_eq!(inbox[0]["properties"]["priority"], "critical");
-    assert!(inbox[0]["properties"].get("status").is_none(), "the inbox's own keys stay home");
+    assert!(
+        inbox[0]["properties"].get("status").is_none(),
+        "the inbox's own keys stay home"
+    );
     assert!(run(&list, ids::ADD, &json!({ "text": "  " })).is_err());
 }
 
@@ -174,7 +177,12 @@ fn parse_and_targets_read_extensions_tokens() {
         .map(|t| t["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids_, ["note", "task"]);
-    let parsed = run(&list, ids::PARSE, &json!({ "text": "Bridge key:D [[Song]]" })).unwrap();
+    let parsed = run(
+        &list,
+        ids::PARSE,
+        &json!({ "text": "Bridge key:D [[Song]]" }),
+    )
+    .unwrap();
     assert_eq!(parsed["title"], "Bridge");
     assert_eq!(parsed["properties"]["key"], "D");
     assert_eq!(parsed["suggests"], "task");
@@ -216,7 +224,11 @@ fn processing_makes_the_target_s_thing_and_the_capture_leaves() {
             .unwrap()
             .is_empty()
     );
-    let err = run(&list, ids::INBOX_PROCESS, &json!({ "path": "Inbox/Gone.md", "target": "nope" }));
+    let err = run(
+        &list,
+        ids::INBOX_PROCESS,
+        &json!({ "path": "Inbox/Gone.md", "target": "nope" }),
+    );
     assert!(err.unwrap_err().contains("no capture target"));
 }
 
@@ -236,7 +248,10 @@ fn file_defer_and_discard() {
     assert_eq!(filed["path"], "Notes/An idea.md");
     let md = read(dir.path(), "Notes/An idea.md");
     assert!(md.contains("music"), "its tag kept:\n{md}");
-    assert!(!md.contains("inbox-item") && !md.contains("source:"), "{md}");
+    assert!(
+        !md.contains("inbox-item") && !md.contains("source:"),
+        "{md}"
+    );
 
     let put_off = run(
         &list,
@@ -256,13 +271,29 @@ fn file_defer_and_discard() {
     let all = run(&list, ids::INBOX_LIST, &json!({ "all": true })).unwrap();
     assert_eq!(all.as_array().unwrap().len(), 2);
 
-    run(&list, ids::INBOX_DISCARD, &json!({ "path": "Inbox/Junk.md" })).unwrap();
+    run(
+        &list,
+        ids::INBOX_DISCARD,
+        &json!({ "path": "Inbox/Junk.md" }),
+    )
+    .unwrap();
     assert!(!dir.path().join("Inbox/Junk.md").exists());
-    assert!(run(&list, ids::INBOX_DISCARD, &json!({ "path": "Notes/An idea.md" })).is_err());
     assert!(
-        run(&list, ids::INBOX_DEFER, &json!({ "path": "Inbox/Later thing.md", "until": "soonish" }))
-            .unwrap_err()
-            .contains("not a day")
+        run(
+            &list,
+            ids::INBOX_DISCARD,
+            &json!({ "path": "Notes/An idea.md" })
+        )
+        .is_err()
+    );
+    assert!(
+        run(
+            &list,
+            ids::INBOX_DEFER,
+            &json!({ "path": "Inbox/Later thing.md", "until": "soonish" })
+        )
+        .unwrap_err()
+        .contains("not a day")
     );
 }
 
@@ -277,9 +308,24 @@ fn straight_into_a_target_skips_the_inbox() {
     )
     .unwrap();
     assert_eq!(out["path"], "Tasks/Pay rent.md");
-    let note = run(&list, ids::ADD, &json!({ "text": "Quote #x", "target": "note" })).unwrap();
+    let note = run(
+        &list,
+        ids::ADD,
+        &json!({ "text": "Quote #x", "target": "note" }),
+    )
+    .unwrap();
     assert_eq!(note["path"], "Quote.md");
     assert!(!read(dir.path(), "Quote.md").contains("inbox-item"));
-    assert!(!dir.path().join("Inbox").exists() || std::fs::read_dir(dir.path().join("Inbox")).unwrap().next().is_none());
-    assert!(run(&list, ids::OPEN, &json!({})).unwrap_err().contains("no window"));
+    assert!(
+        !dir.path().join("Inbox").exists()
+            || std::fs::read_dir(dir.path().join("Inbox"))
+                .unwrap()
+                .next()
+                .is_none()
+    );
+    assert!(
+        run(&list, ids::OPEN, &json!({}))
+            .unwrap_err()
+            .contains("no window")
+    );
 }

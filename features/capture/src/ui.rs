@@ -41,7 +41,7 @@ pub const WINDOW_SIZE: (f64, f64) = (560.0, 300.0);
 /// The composer, the deck and the capture window: what is open, and the
 /// [`Capturer`] they write through. Copy; in context below
 /// [`use_capture`].
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CaptureUi {
     /// The composer over the window: its text and target.
     sheet: Signal<Option<(String, Option<String>)>>,
@@ -99,6 +99,7 @@ impl CaptureUi {
 
 /// Puts `CAPTURE_*` and `INBOX_*` on `list` (once) and gives back the
 /// window's handle on them, in context for everything below.
+#[must_use]
 pub fn use_capture(list: &Arc<ActionList>, config: Config) -> CaptureUi {
     let mut sheet = use_signal(|| None);
     let mut deck = use_signal(|| false);
@@ -389,10 +390,7 @@ fn repeat_label(rule: &str) -> String {
 
 /// The hand-set presets the ⋯ row offers: (label, key, value).
 fn presets() -> Vec<(&'static str, &'static str, Value)> {
-    let day = |n: i64| {
-        let d = actions::today() + chrono::Duration::days(n);
-        json!(d.format("%Y-%m-%d").to_string())
-    };
+    let day = |n: i64| json!(actions::day_after(n).format("%Y-%m-%d").to_string());
     vec![
         ("Today", k::DUE, day(0)),
         ("Tomorrow", k::DUE, day(1)),
@@ -442,7 +440,11 @@ pub fn Composer(
     let looks_task = inbox::suggests_task(&props) && all.iter().any(|t| t.id == "task");
     let chips: Vec<(String, String)> = props
         .iter()
-        .flat_map(|(key, v)| chip_label(key, v).into_iter().map(move |l| (key.clone(), l)))
+        .flat_map(|(key, v)| {
+            chip_label(key, v)
+                .into_iter()
+                .map(move |l| (key.clone(), l))
+        })
         .collect();
     let empty = title.read().trim().is_empty();
     let mut go = move || {
@@ -696,8 +698,7 @@ pub fn InboxDeck(capture: CaptureUi, on_close: EventHandler<()>) -> Element {
                 let out = match &what {
                     Deal::Into(id) => cap.process(&app, &item.path, id, None, &Map::new()).await,
                     Deal::Later(days) => {
-                        let day = actions::today() + chrono::Duration::days(*days);
-                        let day = day.format("%Y-%m-%d").to_string();
+                        let day = actions::day_after(*days).format("%Y-%m-%d").to_string();
                         cap.defer(&app, &item.path, Some(&day)).await
                     }
                     Deal::Discard => cap.discard(&app, &item.path).await,
@@ -730,7 +731,7 @@ pub fn InboxDeck(capture: CaptureUi, on_close: EventHandler<()>) -> Element {
             )
         }
     };
-    let card = current.clone().map(|item| {
+    let card = current.map(|item| {
         let chips: Vec<String> = item
             .properties
             .iter()
@@ -824,10 +825,7 @@ pub fn InboxDeck(capture: CaptureUi, on_close: EventHandler<()>) -> Element {
                     }
                     button {
                         style: "{button(false)} color: {t.danger};",
-                        onclick: {
-                            let act = act.clone();
-                            move |_| act(Deal::Discard)
-                        },
+                        onclick: move |_| act(Deal::Discard),
                         "Discard"
                     }
                 }

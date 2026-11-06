@@ -38,11 +38,13 @@ pub fn declare(lab: Lab, inbox: usize, capture: bool) -> Presence {
         .separator()
         .command(TOGGLE_BACKGROUND);
     let mode = Mode::current();
-    let tray = Menu::new(mode.name()).command(SHOW_WINDOW).command(if capture {
-        crate::capture::WINDOW_COMMAND
-    } else {
-        "LAB_CAPTURE"
-    });
+    let tray = Menu::new(mode.name())
+        .command(SHOW_WINDOW)
+        .command(if capture {
+            crate::capture::WINDOW_COMMAND
+        } else {
+            "LAB_CAPTURE"
+        });
     let tray = tray
         .separator()
         .section("Tabs", tabs)

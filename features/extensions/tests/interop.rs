@@ -729,7 +729,10 @@ fn capture_targets_are_registered_while_loaded() {
     assert_eq!(targets[0]["id"], "song-idea");
     assert_eq!(targets[0]["from"], "lab.ideas");
     assert_eq!(targets[0]["action"], "LAB_IDEAS_CAPTURE");
-    assert_eq!(targets[0]["tokens"], json!([{ "prefix": "key:", "key": "key" }]));
+    assert_eq!(
+        targets[0]["tokens"],
+        json!([{ "prefix": "key:", "key": "key" }])
+    );
     // Off: its targets go with it.
     let _ = ext.disable("lab.ideas");
     assert_eq!(

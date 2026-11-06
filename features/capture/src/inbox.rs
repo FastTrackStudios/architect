@@ -173,7 +173,9 @@ pub fn carried(props: &Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// The note `text` captures as: its first line read by the quick-add
+/// The note `text` captures as.
+///
+/// Its first line read by the quick-add
 /// parser (its tokens properties, the rest the title), the lines after it
 /// the body, the hand-set `chips` over the parsed properties. `None` when
 /// it says nothing.
@@ -298,7 +300,11 @@ mod tests {
 
     #[test]
     fn a_capture_is_an_inbox_note_its_tokens_its_properties() {
-        let n = note("Call the venue [[Album]] tomorrow\nAsk about load-in", &json!({})).unwrap();
+        let n = note(
+            "Call the venue [[Album]] tomorrow\nAsk about load-in",
+            &json!({}),
+        )
+        .unwrap();
         assert_eq!(n.path, "Inbox/Call the venue.md");
         assert_eq!(n.body, "Ask about load-in");
         assert_eq!(n.properties["type"], json!("inbox-item"));
@@ -308,7 +314,9 @@ mod tests {
         assert_eq!(n.properties["due"], json!("2026-11-06"));
         assert!(note("   ", &json!({})).is_none());
         assert!(suggests_task(&n.properties));
-        assert!(!suggests_task(&note("A thought", &json!({})).unwrap().properties));
+        assert!(!suggests_task(
+            &note("A thought", &json!({})).unwrap().properties
+        ));
     }
 
     #[test]
@@ -331,7 +339,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(item.body, "more");
-        assert_eq!(item.properties, *json!({ "tags": ["x"] }).as_object().unwrap());
+        assert_eq!(
+            item.properties,
+            *json!({ "tags": ["x"] }).as_object().unwrap()
+        );
         assert!(!item.is_due(today()), "put off until the 9th");
         assert!(read(json!({})).is_some(), "a note dropped in by hand");
         assert!(read(json!({ "type": "task" })).is_none());
@@ -343,7 +354,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(alt.created, "2026-11-01T17:30:00");
-        assert_eq!(alt.properties, *json!({ "title": "Gift idea" }).as_object().unwrap());
+        assert_eq!(
+            alt.properties,
+            *json!({ "title": "Gift idea" }).as_object().unwrap()
+        );
         assert!(read(json!({ "type": "capture", "processed": true })).is_none());
     }
 

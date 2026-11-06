@@ -1284,7 +1284,10 @@ impl Contribution {
                 return refuse(what, "the app has that target itself".to_owned());
             }
             action(&what, &c.action)?;
-            if c.tokens.iter().any(|t| t.prefix.trim().is_empty() || t.key.trim().is_empty()) {
+            if c.tokens
+                .iter()
+                .any(|t| t.prefix.trim().is_empty() || t.key.trim().is_empty())
+            {
                 return refuse(what, "a token needs a prefix and a key".to_owned());
             }
         }

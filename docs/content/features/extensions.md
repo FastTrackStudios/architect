@@ -101,6 +101,7 @@ extension's namespace, capabilities and views when it loads
 | `[[embeds]]` | an inline block of a document drawn by one of its views: a fenced block by language, a note by its `type:`, an embed by what it points at | `EmbedDecl` |
 | `[[base_views]]` | a view type for Bases (`type:` of a base's view), drawn by one of its views, a page or its code | `BaseViewDecl` |
 | `[[project_types]]` | a type of architect's `project` kind: properties on top of the kind's, a `project.md` template, folders and views; the registry `EXT_PROJECT_TYPES` reads | `ProjectTypeDecl` |
+| `[[capture_targets]]` | what a capture can become: a choice in the composer and the inbox deck, its chips, its quick-add tokens and the action that makes one; the registry `EXT_CAPTURE_TARGETS` reads | `CaptureTargetDecl` |
 | `[[keymaps]]` | keys in the live editor that run its actions (needs `writes = ["editor"]`) | `editor_ext::KeymapEntry` |
 | `[[slash]]` | rows of the editor's slash menu that run its actions (needs `writes = ["editor"]`) | `editor_ext::SlashEntry` |
 
