@@ -1,0 +1,32 @@
+[package]
+name = "architect-cli"
+description = "The `architect` command: `architect site build` publishes a vault as a static site, `architect site serve` serves it with live reload (#364)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "architect"
+path = "src/main.rs"
+
+[dependencies]
+# The engine, with extensions' embed pages drawing their blocks.
+architect-sites = { workspace = true, features = ["pages"] }
+# `site serve`: the server's own static-site router (cache headers, 404).
+architect = { workspace = true, features = ["host"] }
+axum = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+# `site serve`: a save in the vault rebuilds it.
+notify = "8"
+clap = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
