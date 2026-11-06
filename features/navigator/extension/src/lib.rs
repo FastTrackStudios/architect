@@ -31,7 +31,7 @@ use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
 use architect_navigator::{
     CalendarGrid, Grouping, HeaderPeriod, Join, ListMode, ListRowKind, MemorySource, Mods,
     NavRowKind, NavTarget, NavigatorSource, NavigatorState, NoteFile, OpenIn, Orientation, Outcome,
-    Pane, PeriodKind, PropertyValue, SortOption,
+    Pane, PeriodKind, PropertyValue, SortOption, TreeSort,
 };
 use architect_navigator::{FileVisibility, HideTarget, Shortcut, ShortcutKind, VaultProfile};
 use architect_navigator::{Hotkey, KeyAction, KeyScope};
@@ -51,6 +51,9 @@ pub const MANIFEST: &str = include_str!("../extension.toml");
 pub struct NavigatorExtension;
 
 static HANDLE: Mutex<Option<Handle>> = Mutex::new(None);
+
+/// The homepage was opened this run.
+static HOME_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The navigator has read its vault (`storage-ready` was raised).
 static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -154,6 +157,11 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_TAG_NEW_NOTE",
     "NAVIGATOR_PROPERTY_SET",
     "NAVIGATOR_PROPERTY_RENAME",
+    "NAVIGATOR_OPEN_HOMEPAGE",
+    "NAVIGATOR_TOGGLE_TAG_SORT",
+    "NAVIGATOR_TOGGLE_TAGS_BY_SELECTION",
+    "NAVIGATOR_TOGGLE_PROPERTIES_BY_SELECTION",
+    "NAVIGATOR_FOLD_GROUPS",
     "NAVIGATOR_MOVE_CHILD",
     "NAVIGATOR_PROPERTY_DELETE",
     "NAVIGATOR_DROP",
@@ -284,6 +292,21 @@ fn Drive(mount: NavigatorMount) -> Element {
     let _mounted = use_hook(|| std::rc::Rc::new(bridge::Mounted::new()));
     // The API's events: raised as what they say changes.
     let last = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<Raised>)));
+    // The homepage (`homepage`), once a run, when the vault's navigator
+    // has read its vault.
+    use_effect(move || {
+        let ready = nav.state.read().index().file_count() > 0;
+        if ready
+            && mount.on_vault.is_none()
+            && !HOME_DONE.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            match nav.state.peek().homepage() {
+                Ok(Some(out)) => nav.open_or_create(Ok(out), mount.on_open),
+                Ok(None) => {}
+                Err(e) => nav.say(e),
+            }
+        }
+    });
     // `storage-ready` (`isStorageReady`, `whenReady`): once, when the
     // navigator has read its vault.
     let ready = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(false)));
@@ -720,6 +743,38 @@ fn run(
                 }
             }
             Ok(trees(&nav.state.peek()))
+        }
+        "NAVIGATOR_OPEN_HOMEPAGE" => {
+            let out = nav
+                .state
+                .peek()
+                .homepage()?
+                .ok_or("no homepage: set Homepage in Navigator's settings")?;
+            periodic(&nav, on_open, Ok(out), &json!({ "confirm": false }))
+        }
+        // `toggle-tag-sort`: A to Z, or most notes first.
+        "NAVIGATOR_TOGGLE_TAG_SORT" => {
+            nav.settings.update(|s| {
+                s.tag_sort = if s.tag_sort == TreeSort::FrequencyDesc {
+                    TreeSort::AlphaAsc
+                } else {
+                    TreeSort::FrequencyDesc
+                };
+            });
+            Ok(json!({ "tag_sort": format!("{:?}", nav.settings.read().tag_sort) }))
+        }
+        "NAVIGATOR_TOGGLE_TAGS_BY_SELECTION" => {
+            nav.settings.update(|s| s.scope_tags = !s.scope_tags);
+            Ok(json!({ "scope_tags": nav.settings.read().scope_tags }))
+        }
+        "NAVIGATOR_TOGGLE_PROPERTIES_BY_SELECTION" => {
+            nav.settings
+                .update(|s| s.scope_properties = !s.scope_properties);
+            Ok(json!({ "scope_properties": nav.settings.read().scope_properties }))
+        }
+        "NAVIGATOR_FOLD_GROUPS" => {
+            let folded = nav.update(NavigatorState::fold_all_groups);
+            Ok(json!({ "folded": folded }))
         }
         "NAVIGATOR_PROPERTY_DELETE" => {
             let key = text(args, "key").ok_or("`key`: the property to delete")?;

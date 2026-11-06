@@ -317,27 +317,33 @@ pub fn property_rows(
     below: bool,
     order: &[String],
     value_order: &BTreeMap<String, Vec<String>>,
+    with_row: bool,
 ) -> Vec<NavRow> {
     let mut rows = Vec::new();
     if tree.is_empty() {
         return rows;
     }
-    let open = expanded.contains(ROOT);
-    rows.push(NavRow {
-        key: format!("property:{ROOT}"),
-        level: 0,
-        kind: NavRowKind::Property {
-            key: ROOT.to_owned(),
-            value: None,
-            name: "Properties".to_owned(),
-            has_children: true,
-            expanded: open,
-            count: NoteCount {
-                current: if below { tree.notes.len() } else { 0 },
-                descendants: 0,
+    // Without its row (`showAllPropertiesFolder` off) the keys are the top
+    // level, always on show.
+    let open = !with_row || expanded.contains(ROOT);
+    let top = u16::from(with_row);
+    if with_row {
+        rows.push(NavRow {
+            key: format!("property:{ROOT}"),
+            level: 0,
+            kind: NavRowKind::Property {
+                key: ROOT.to_owned(),
+                value: None,
+                name: "Properties".to_owned(),
+                has_children: true,
+                expanded: open,
+                count: NoteCount {
+                    current: if below { tree.notes.len() } else { 0 },
+                    descendants: 0,
+                },
             },
-        },
-    });
+        });
+    }
     if !open {
         return rows;
     }
@@ -352,7 +358,7 @@ pub fn property_rows(
         }
         rows.push(NavRow {
             key: format!("property:{id}"),
-            level: 1,
+            level: top,
             kind: NavRowKind::Property {
                 key: key.clone(),
                 value: None,
@@ -371,7 +377,7 @@ pub fn property_rows(
             };
             rows.push(NavRow {
                 key: format!("property:{}", value_id(&key, &v)),
-                level: 2,
+                level: top + 1,
                 kind: NavRowKind::Property {
                     key: key.clone(),
                     value: Some(v.clone()),
@@ -397,6 +403,8 @@ pub struct TreeOptions {
     /// Each parent's children by name, in the order a person gave them
     /// (Notebook Navigator's `folderChildOrder`, the root's under `""`).
     pub child_order: BTreeMap<String, Vec<String>>,
+    /// Folders Z to A (`folderSortOrder` `alpha-desc`).
+    pub descending: bool,
 }
 
 /// The rows of the tree, with `expanded` folders open.
@@ -473,7 +481,14 @@ pub fn ordered_children(index: &VaultIndex, parent: &str, opts: &TreeOptions) ->
         (Some(x), Some(y)) => x.cmp(&y),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        (None, None) => natural_cmp(file_name(a), file_name(b)).then_with(|| a.cmp(b)),
+        (None, None) => {
+            let by_name = natural_cmp(file_name(a), file_name(b)).then_with(|| a.cmp(b));
+            if opts.descending {
+                by_name.reverse()
+            } else {
+                by_name
+            }
+        }
     });
     children
 }

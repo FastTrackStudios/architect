@@ -195,11 +195,34 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                 }
                 _ => (None, None),
             };
-            let colour = match &row.kind {
+            let mut colour = match &row.kind {
                 NavRowKind::Folder { path, .. } => {
                     s.colour(&format!("folder:{path}")).map(str::to_owned)
                 }
                 _ => colour,
+            };
+            let mut background = background;
+            // The rainbow where the row has no colour of its own
+            // (`applyRainbowOverlay`).
+            match s.rainbow(&row.key) {
+                Some((c, false)) if colour.is_none() => colour = Some(c.to_owned()),
+                Some((c, true)) if background.is_none() => {
+                    background = Some(format!("color-mix(in srgb, {c} 22%, transparent)"));
+                }
+                _ => {}
+            }
+            // A top row's gap (`rootLevelSpacing`) above it, not in it.
+            let base = s.nav_item_height();
+            let (top, h) = if h > base + 0.5
+                && matches!(
+                    row.kind,
+                    NavRowKind::Folder { .. }
+                        | NavRowKind::Tag { .. }
+                        | NavRowKind::Property { .. }
+                ) {
+                (top + h - base, base)
+            } else {
+                (top, h)
             };
             Some((row.clone(), top, h, note, colour, icon, background))
         })
@@ -374,7 +397,8 @@ fn FolderRow(
     };
     let name_weight = if root { 600 } else { 400 };
     let (p1, p2, p3, p4) = (path.clone(), path.clone(), name.clone(), name.clone());
-    let (p5, p6, p7) = (path.clone(), path.clone(), path.clone());
+    let (p5, p6, p7, p8) = (path.clone(), path.clone(), path.clone(), path.clone());
+    let name_flex = tree_rows::name_flex(nav, !count.is_empty() && !reorder);
     rsx! {
         div {
             class,
@@ -391,6 +415,9 @@ fn FolderRow(
                     return;
                 }
                 let out = nav.update(|s| s.click_folder(&p1));
+                // The folder note, else (`autoSelectFirstFileOnFocusChange`)
+                // its first note.
+                let out = out.or_else(|| nav.state.peek().first_note());
                 nav.act(out, on_open);
             },
             // Add to shortcuts, hide (`buildFolderMenu`'s).
@@ -432,7 +459,8 @@ fn FolderRow(
             } else {
                 span { class: if note { "nv-name nv-has-note" } else { "nv-name" },
                     "data-folder-note": if note { "true" } else { "false" },
-                    style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight}; {name_colour}",
+                    title: tree_rows::tooltip(nav, &p8),
+                    style: "flex:{name_flex}; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight}; {name_colour}",
                     "{name}"
                 }
             }
@@ -449,8 +477,10 @@ fn FolderRow(
                     ArrowDown { size: 13 }
                 }
             } else if !count.is_empty() {
+                tree_rows::Leader { nav }
                 span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
+            tree_rows::Guides { nav, level, indent }
         }
     }
 }
@@ -1009,6 +1039,7 @@ fn FileRow(
                         tree_rows::InlineRename { nav, on_open, what: Renaming::File(p4), value: name }
                     } else {
                         div { class: "nv-file-name",
+                            title: tree_rows::tooltip(nav, &path),
                             style: "flex:1 1 auto; min-width:0; max-height:{title_h}px; line-height:20px; overflow:hidden; text-overflow:ellipsis; \
                                     white-space:{wrap}; font-weight:{weight}; color:{name_colour};",
                             if marks.is_empty() {

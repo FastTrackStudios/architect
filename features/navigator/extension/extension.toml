@@ -389,6 +389,41 @@ effect = "mutating"
 params = '{"type":"object","properties":{"target":{"type":"string"},"by":{"type":"integer"},"reset":{"type":"boolean"}},"required":["target"]}'
 
 [[actions]]
+id = "NAVIGATOR_OPEN_HOMEPAGE"
+name = "Open the homepage"
+description = "Opens the homepage Navigator's settings name (open-homepage): a periodic note (daily, weekly, monthly, quarterly, yearly), made when missing, or a note by its path. It opens by itself when the app starts."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_TAG_SORT"
+name = "Sort tags A to Z or by count"
+description = "Switches the tag tree between A to Z and most notes first (toggle-tag-sort)."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_TAGS_BY_SELECTION"
+name = "Tags of the selection only"
+description = "Switches the tag tree between every tag and the tags of the folder or property selected (toggle-tags-by-selection)."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_PROPERTIES_BY_SELECTION"
+name = "Properties of the selection only"
+description = "Switches the property browser between every value and the values of the folder or tag selected (toggle-properties-by-selection)."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_FOLD_GROUPS"
+name = "Fold or unfold the list's groups"
+description = "Folds every group of the list (by date, by folder, by property), or unfolds them all when every one is folded (collapse-expand-list-groups)."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
 id = "NAVIGATOR_PROPERTY_DELETE"
 name = "Delete a property"
 description = "Takes property key `key` off every note, and out of the settings that list it."
@@ -948,6 +983,384 @@ title = "Smart collapse"
 description = "Collapse all keeps the selected folder in view."
 control = "switch"
 default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.collapse_scope"
+title = "Collapse all folds"
+description = "What the collapse all button folds."
+control = "segmented"
+default = "All"
+unit = ""
+placeholder = ""
+aliases = []
+scope = "synced"
+
+[[sections.settings.choices]]
+value = "All"
+label = "Everything"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Folders"
+label = "Folders"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Tags"
+label = "Tags"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Properties"
+label = "Properties"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.collapse_keeps_root"
+title = "Keep the vault open"
+description = "Collapse all leaves the vault's row open."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.accordion"
+title = "One branch open"
+description = "Opening a folder, tag or key folds the others beside it and above."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.expand_on_select"
+title = "Open what is selected"
+description = "Selecting a folder, tag or key opens it."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.open_first_note"
+title = "Open its first note"
+description = "Selecting a folder, tag or property opens the first note in it."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.folder_sort"
+title = "Folder order"
+description = ""
+control = "segmented"
+default = "AToZ"
+unit = ""
+placeholder = ""
+aliases = []
+scope = "synced"
+
+[[sections.settings.choices]]
+value = "AToZ"
+label = "A to Z"
+detail = ""
+
+[[sections.settings.choices]]
+value = "ZToA"
+label = "Z to A"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.indent_guides"
+title = "Indent guides"
+description = "Lines down the levels of the tree."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.count_leader"
+title = "Between a name and its count"
+description = ""
+control = "segmented"
+default = "None"
+unit = ""
+placeholder = ""
+aliases = []
+scope = "synced"
+
+[[sections.settings.choices]]
+value = "None"
+label = "Nothing"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Dots"
+label = "Dots"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Dashes"
+label = "Dashes"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Line"
+label = "A line"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.root_spacing"
+title = "Space between top rows"
+description = ""
+control = "slider"
+default = 0.0
+min = 0.0
+max = 16.0
+step = 2.0
+unit = " pt"
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.properties_row"
+title = "Properties row"
+description = "The \"Properties\" row over the property keys."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.tooltips"
+title = "Tooltips"
+description = "A note's or folder's name in full when the pointer rests on it."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.tooltip_path"
+title = "Path in tooltips"
+description = ""
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.tooltip_tags"
+title = "Tags in tooltips"
+description = ""
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.tooltip_words"
+title = "Word count in tooltips"
+description = ""
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.rainbow"
+title = "Navigation rainbow"
+description = "Rows coloured along their siblings, where they have no colour of their own."
+control = "segmented"
+default = "Off"
+unit = ""
+placeholder = ""
+aliases = []
+scope = "synced"
+
+[[sections.settings.choices]]
+value = "Off"
+label = "Off"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Text"
+label = "The text"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Background"
+label = "The background"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.rainbow_scope"
+title = "Rainbow levels"
+description = ""
+control = "segmented"
+default = "Root"
+unit = ""
+placeholder = ""
+aliases = []
+scope = "synced"
+
+[[sections.settings.choices]]
+value = "Root"
+label = "The top, its rows' children after it"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Child"
+label = "From the level below the top"
+detail = ""
+
+[[sections.settings.choices]]
+value = "All"
+label = "Every level its own"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.rainbow_first"
+title = "Rainbow first colour"
+description = ""
+control = "text"
+default = "#ef4444"
+unit = ""
+placeholder = "#ef4444"
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.rainbow_last"
+title = "Rainbow last colour"
+description = ""
+control = "text"
+default = "#8b5cf6"
+unit = ""
+placeholder = "#8b5cf6"
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.rainbow_folders"
+title = "Rainbow on folders"
+description = ""
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.rainbow_tags"
+title = "Rainbow on tags"
+description = ""
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.rainbow_properties"
+title = "Rainbow on properties"
+description = ""
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.pin_shortcuts"
+title = "Pin shortcuts"
+description = "The shortcuts stay over the folders as they scroll."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.pin_recent"
+title = "Pin recent notes too"
+description = "With the shortcuts pinned, the recent notes are pinned with them."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.homepage"
+title = "Homepage"
+description = "What opens when the app starts: a note's path, or daily, weekly, monthly for that periodic note. Empty: nothing."
+control = "text"
+default = ""
+unit = ""
+placeholder = "daily, or Home.md"
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.new_note_in_tab"
+title = "New notes in a new tab"
+description = ""
+control = "switch"
+default = false
 unit = ""
 placeholder = ""
 choices = []
@@ -2397,6 +2810,21 @@ scope = "synced"
 key = "navigator.zoom"
 title = "Zoom"
 description = "The navigator's own size, apart from the app's (`desktopScale`)."
+control = "slider"
+default = 100.0
+min = 50.0
+max = 200.0
+step = 5.0
+unit = "%"
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.zoom_phone"
+title = "Zoom on a phone"
+description = "The navigator's size on a phone (`mobileScale`)."
 control = "slider"
 default = 100.0
 min = 50.0

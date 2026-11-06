@@ -174,6 +174,7 @@ pub(super) fn ItemRow(
     icon_only: bool,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
+    let name_flex = name_flex(nav, !count.is_empty() && !reorder);
     let class = match (selected, drop_here) {
         (_, true) => "nv-row nv-drop-target",
         (true, false) => "nv-row nv-selected",
@@ -239,9 +240,17 @@ pub(super) fn ItemRow(
                 }
                 let m = super::panes::mods(e.modifiers());
                 match &t1 {
-                    NavTarget::Tag(t) => nav.update(|s| s.click_tag(t, m)),
+                    NavTarget::Tag(t) => {
+                        nav.update(|s| s.click_tag(t, m));
+                        if !m.command {
+                            nav.act(nav.state.peek().first_note(), on_open);
+                        }
+                    }
                     NavTarget::Property { key, value } => {
                         nav.update(|s| s.click_property(key, value.as_deref(), m));
+                        if !m.command {
+                            nav.act(nav.state.peek().first_note(), on_open);
+                        }
                     }
                     NavTarget::Folder(f) => {
                         let out = nav.update(|s| s.click_folder(f));
@@ -283,7 +292,7 @@ pub(super) fn ItemRow(
                 }
             }
             span { class: name_class,
-                style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{weight}; {name_colour}",
+                style: "flex:{name_flex}; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{weight}; {name_colour}",
                 "{name}"
             }
             if reorder {
@@ -296,8 +305,10 @@ pub(super) fn ItemRow(
                     ArrowDown { size: 13 }
                 }
             } else if !count.is_empty() {
+                Leader { nav }
                 span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
+            Guides { nav, level, indent }
         }
     }
 }
@@ -1569,4 +1580,82 @@ pub(super) fn RecentRow(
 /// The modifiers as the model takes them, for a click on a pill.
 pub(super) fn click_mods(e: &MouseEvent) -> Mods {
     super::panes::mods(e.modifiers())
+}
+
+/// The name's `flex`: it takes the room, or (a count leader drawn) only
+/// its own.
+pub(super) fn name_flex(nav: Navigator, counted: bool) -> &'static str {
+    let leader = nav.state.peek().settings().count_leader;
+    if counted && leader != crate::settings::CountLeader::None {
+        "0 1 auto"
+    } else {
+        "1 1 auto"
+    }
+}
+
+/// Between a name and its count (`navCountLeaderStyle`): dots, dashes or
+/// a line.
+#[component]
+pub(super) fn Leader(nav: Navigator) -> Element {
+    let style = match nav.state.peek().settings().count_leader {
+        crate::settings::CountLeader::None => return rsx! {},
+        crate::settings::CountLeader::Dots => "dotted",
+        crate::settings::CountLeader::Dashes => "dashed",
+        crate::settings::CountLeader::Line => "solid",
+    };
+    rsx! {
+        span { class: "nv-count-leader",
+            style: "flex:1 1 auto; min-width:8px; align-self:center; margin:0 4px; height:0; border-bottom:1px {style} var(--nv-faint); opacity:0.6;" }
+    }
+}
+
+/// Lines down the levels (`showIndentGuides`), under a row's chevron.
+#[component]
+pub(super) fn Guides(nav: Navigator, level: u16, indent: f64) -> Element {
+    if !nav.state.peek().settings().indent_guides || level == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        for l in 0..level {
+            span { key: "{l}", class: "nv-indent-guide",
+                style: "position:absolute; top:0; bottom:0; width:1px; left:{f64::from(l).mul_add(indent, 13.0)}px; background:var(--nv-divider); pointer-events:none;" }
+        }
+    }
+}
+
+/// A folder's or note's tooltip (`showTooltips`): its path, tags and
+/// words, as the settings say; `None` with them off.
+pub(super) fn tooltip(nav: Navigator, path: &str) -> Option<String> {
+    let s = nav.state.peek();
+    let st = s.settings();
+    if !st.tooltips {
+        return None;
+    }
+    let mut out = vec![
+        path.rsplit('/')
+            .next()
+            .unwrap_or(path)
+            .trim_end_matches(".md")
+            .to_owned(),
+    ];
+    if st.tooltip_path && path.contains('/') {
+        out.push(path.to_owned());
+    }
+    if let Some(f) = s.index().file(path) {
+        if st.tooltip_tags && !f.tags.is_empty() {
+            out.push(
+                f.tags
+                    .iter()
+                    .map(|t| format!("#{t}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+        if st.tooltip_words
+            && let Some(w) = f.words.filter(|w| *w > 0)
+        {
+            out.push(format!("{w} words"));
+        }
+    }
+    Some(out.join("\n"))
 }

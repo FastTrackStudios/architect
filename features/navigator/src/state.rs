@@ -24,7 +24,9 @@ use crate::properties::{self, PropertyTree, ROOT};
 use crate::query::{Join, Operand, Query};
 use crate::search::{FilterSearch, toggle_term};
 use crate::selection::{NavTarget, Selection};
-use crate::settings::{FolderNoteOpen, NavigatorSettings, SearchProvider, SortOption};
+use crate::settings::{
+    CollapseScope, FolderNoteOpen, NavigatorSettings, RainbowMode, SearchProvider, SortOption,
+};
 use crate::source::{FileOp, NoteFile, PropertyValue, SourceEvent, ancestors, is_within, parent};
 use crate::tags::{self, TAGGED, TagTree, UNTAGGED, is_or_below, tag_key};
 use crate::template::Templates;
@@ -304,6 +306,8 @@ pub struct NavigatorState {
     tag_order: Vec<String>,
     tag_child_order: BTreeMap<String, Vec<String>>,
     property_value_order: BTreeMap<String, Vec<String>>,
+    /// The navigation rainbow's colour of each row it colours, by row key.
+    rainbow: BTreeMap<String, String>,
     property_order: Vec<String>,
     /// The search box's search (⌘/Ctrl-clicks write to it too); the list
     /// shows what it matches.
@@ -399,6 +403,7 @@ impl NavigatorState {
             tag_order: Vec::new(),
             tag_child_order: BTreeMap::new(),
             property_value_order: BTreeMap::new(),
+            rainbow: BTreeMap::new(),
             property_order: Vec::new(),
         };
         s.index = s.visible();
@@ -641,6 +646,7 @@ impl NavigatorState {
         TreeOptions {
             show_root: self.settings.show_root,
             child_order: self.child_order.clone(),
+            descending: self.settings.folder_sort == crate::settings::FolderSort::ZToA,
         }
     }
 
@@ -658,6 +664,7 @@ impl NavigatorState {
         self.tree = TreeOptions {
             show_root: self.settings.show_root,
             child_order: self.child_order.clone(),
+            descending: self.settings.folder_sort == crate::settings::FolderSort::ZToA,
         };
         self.rebuild_trees();
         self.rebuild_nav();
@@ -743,16 +750,37 @@ impl NavigatorState {
                 below,
                 &self.property_order,
                 &self.property_value_order,
+                self.settings.properties_row,
             ));
         }
         self.nav_rows.extend(bottom);
         let h = self.nav_item_height();
-        self.nav_offsets = Offsets::new(self.nav_rows.iter().map(|r| match r.kind {
-            NavRowKind::TopSpacer => tree::TOP_SPACER,
-            NavRowKind::BottomSpacer => tree::BOTTOM_SPACER,
-            NavRowKind::Banner { .. } => tree::BANNER_HEIGHT,
-            _ => h,
-        }));
+        // Space between top rows (`rootLevelSpacing`), the first left be.
+        let gap = f64::from(self.settings.root_spacing.min(16));
+        let mut first_top = true;
+        let spaced: Vec<f64> = self
+            .nav_rows
+            .iter()
+            .map(|r| match r.kind {
+                NavRowKind::TopSpacer => tree::TOP_SPACER,
+                NavRowKind::BottomSpacer => tree::BOTTOM_SPACER,
+                NavRowKind::Banner { .. } => tree::BANNER_HEIGHT,
+                NavRowKind::Folder { .. }
+                | NavRowKind::Tag { .. }
+                | NavRowKind::Property { .. }
+                    if r.level == 0 =>
+                {
+                    if std::mem::take(&mut first_top) {
+                        h
+                    } else {
+                        h + gap
+                    }
+                }
+                _ => h,
+            })
+            .collect();
+        self.nav_offsets = Offsets::new(spaced.into_iter());
+        self.rainbow = crate::rainbow::colours(&self.nav_rows, &self.settings);
         self.clamp_scroll(Pane::Navigation);
         self.settle(Pane::Navigation);
     }
@@ -928,6 +956,22 @@ impl NavigatorState {
     }
 
     pub fn set_expanded(&mut self, folder: &str, open: bool) {
+        // One branch open (`collapseOtherBranchesOnExpand`): what is not on
+        // its chain, nor below it, folds.
+        if open && self.settings.accordion {
+            let before = self.expanded.len();
+            self.expanded.retain(|p| {
+                p.is_empty()
+                    || p == folder
+                    || folder.starts_with(&format!("{p}/"))
+                    || p.starts_with(&format!("{folder}/"))
+            });
+            if self.expanded.len() != before {
+                self.expanded.insert(folder.to_owned());
+                self.rebuild_nav();
+                return;
+            }
+        }
         let changed = if open {
             self.expanded.insert(folder.to_owned())
         } else {
@@ -956,12 +1000,62 @@ impl NavigatorState {
         } else {
             std::iter::once(String::new()).collect()
         };
-        let collapsed = self.expanded == keep || !self.any_expanded();
+        let mut keep = keep;
+        // `excludeVaultRootFromCollapse` off: with its row on show, the
+        // vault folds too.
+        if !self.settings.collapse_keeps_root
+            && self.settings.show_root
+            && self.selection.folder().is_none()
+        {
+            keep.remove("");
+        }
+        let scope = self.settings.collapse_scope;
+        let (folders, tags_on, props) = (
+            matches!(scope, CollapseScope::All | CollapseScope::Folders),
+            matches!(scope, CollapseScope::All | CollapseScope::Tags),
+            matches!(scope, CollapseScope::All | CollapseScope::Properties),
+        );
+        let tags_folded = self.expanded_tags.iter().all(|t| t == tags::TAGGED);
+        let props_folded = self.expanded_props.iter().all(|p| p == ROOT);
+        let folders_folded = self.expanded == keep || !self.any_expanded();
+        let collapsed =
+            (!folders || folders_folded) && (!tags_on || tags_folded) && (!props || props_folded);
         if collapsed {
-            self.expanded = self.index.expandable().into_iter().collect();
-            self.expanded.insert(String::new());
+            if folders {
+                self.expanded = self.index.expandable().into_iter().collect();
+                self.expanded.insert(String::new());
+            }
+            if tags_on {
+                self.expanded_tags = self
+                    .tag_tree
+                    .nodes()
+                    .filter(|n| !n.children.is_empty())
+                    .map(|n| n.key.clone())
+                    .chain(std::iter::once(tags::TAGGED.to_owned()))
+                    .collect();
+            }
+            if props {
+                let keys = self.property_tree.roots(
+                    &self.property_order,
+                    self.settings.property_sort,
+                    true,
+                );
+                self.expanded_props = keys
+                    .iter()
+                    .map(|k| properties::key_id(k))
+                    .chain(std::iter::once(ROOT.to_owned()))
+                    .collect();
+            }
         } else {
-            self.expanded = keep;
+            if folders {
+                self.expanded = keep;
+            }
+            if tags_on {
+                self.expanded_tags.retain(|t| t == tags::TAGGED);
+            }
+            if props {
+                self.expanded_props.retain(|p| p == ROOT);
+            }
         }
         self.rebuild_nav();
         if let Some(f) = self.selection.folder().map(folder_key) {
@@ -1147,6 +1241,9 @@ impl NavigatorState {
     pub fn click_folder(&mut self, folder: &str) -> Option<Outcome> {
         self.focus = Pane::Navigation;
         self.select_folder(folder);
+        if self.settings.expand_on_select {
+            self.set_expanded(folder, true);
+        }
         if self.single == Pane::Navigation {
             self.single = Pane::Files;
         }
@@ -1242,6 +1339,38 @@ impl NavigatorState {
         if self.pick_tag(tag) && self.single == Pane::Navigation {
             self.single = Pane::Files;
         }
+        if self.settings.expand_on_select && !tags::is_virtual(tag) {
+            self.set_nav_expanded(&NavTarget::Tag(tag.to_owned()), true);
+        }
+    }
+
+    /// The first note of the list, opened (`autoSelectFirstFileOnFocusChange`),
+    /// when the settings say so.
+    #[must_use]
+    pub fn first_note(&self) -> Option<Outcome> {
+        if !self.settings.open_first_note {
+            return None;
+        }
+        let path = self.list_order().into_iter().next()?.to_owned();
+        Some(Outcome::Open {
+            path,
+            how: OpenIn::Here,
+            settle: false,
+        })
+    }
+
+    /// The navigation rainbow's colour for row `key`, and whether it is
+    /// the background's (else the text's).
+    #[must_use]
+    pub fn rainbow(&self, key: &str) -> Option<(&str, bool)> {
+        let c = self.rainbow.get(key)?;
+        Some((c.as_str(), self.settings.rainbow == RainbowMode::Background))
+    }
+
+    /// Whether the navigator is on a phone.
+    #[must_use]
+    pub const fn touch(&self) -> bool {
+        self.touch
     }
 
     /// Selects a property's `key` (and `value`), or the "Properties" row
@@ -1275,6 +1404,15 @@ impl NavigatorState {
         if self.single == Pane::Navigation {
             self.single = Pane::Files;
         }
+        if self.settings.expand_on_select && value.is_none() {
+            self.set_nav_expanded(
+                &NavTarget::Property {
+                    key: key.to_owned(),
+                    value: None,
+                },
+                true,
+            );
+        }
     }
 
     /// Selects what a navigation row selects.
@@ -1304,11 +1442,23 @@ impl NavigatorState {
     }
 
     pub fn set_nav_expanded(&mut self, target: &NavTarget, open: bool) {
+        let accordion = open && self.settings.accordion;
         let (set, key) = match target {
             NavTarget::Folder(f) => return self.set_expanded(f, open),
             NavTarget::Tag(t) => (&mut self.expanded_tags, expansion_key(t)),
             NavTarget::Property { key, .. } => (&mut self.expanded_props, prop_expansion(key)),
         };
+        if accordion {
+            // Its chain, what is below it, and the section rows stay.
+            let k = key.clone();
+            set.retain(|x| {
+                x == tags::TAGGED
+                    || x == ROOT
+                    || *x == k
+                    || k.starts_with(&format!("{x}/"))
+                    || x.starts_with(&format!("{k}/"))
+            });
+        }
         let changed = if open {
             set.insert(key)
         } else {
@@ -2534,6 +2684,69 @@ impl NavigatorState {
             self.collapsed.insert(key.to_owned());
         }
         self.rebuild_list();
+    }
+
+    /// Folds every group of the list, or unfolds them all when every one
+    /// is folded (`collapse-expand-list-groups`). Whether they are folded now.
+    pub fn fold_all_groups(&mut self) -> bool {
+        let groups: Vec<String> = self
+            .list_rows
+            .iter()
+            .filter_map(|r| match &r.kind {
+                crate::list::ListRowKind::Header { group, .. } => Some(group.clone()),
+                _ => None,
+            })
+            .collect();
+        let folded = !groups.is_empty() && groups.iter().all(|g| self.collapsed.contains(g));
+        for g in groups {
+            if folded {
+                self.collapsed.remove(&g);
+            } else {
+                self.collapsed.insert(g);
+            }
+        }
+        self.rebuild_list();
+        !folded
+    }
+
+    /// What opens as the homepage (`homepage`): a periodic note (`daily`,
+    /// `weekly`, `monthly`, `quarterly`, `yearly`), made when missing, or a
+    /// note by its path. `None` when there is none.
+    ///
+    /// # Errors
+    ///
+    /// The note is not there, or its kind of periodic note is off.
+    pub fn homepage(&self) -> Result<Option<Outcome>, String> {
+        let h = self.settings.homepage.trim();
+        if h.is_empty() {
+            return Ok(None);
+        }
+        let kind = match h.to_ascii_lowercase().as_str() {
+            "daily" | "today" => Some(PeriodKind::Day),
+            "weekly" => Some(PeriodKind::Week),
+            "monthly" => Some(PeriodKind::Month),
+            "quarterly" => Some(PeriodKind::Quarter),
+            "yearly" => Some(PeriodKind::Year),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            return self
+                .open_periodic(kind, self.today(), OpenIn::Here)
+                .map(Some);
+        }
+        let path = if h.contains('.') {
+            h.to_owned()
+        } else {
+            format!("{h}.md")
+        };
+        if self.index.file(&path).is_none() {
+            return Err(format!("the homepage {path} is not in the vault"));
+        }
+        Ok(Some(Outcome::Open {
+            path,
+            how: OpenIn::Here,
+            settle: false,
+        }))
     }
 
     /// Gives `target` its own list (an empty one lets it go); fields equal

@@ -43,6 +43,7 @@ pub mod profiles;
 pub mod properties;
 pub mod provider_source;
 pub mod query;
+pub mod rainbow;
 pub mod search;
 pub mod selection;
 pub mod settings;

@@ -244,7 +244,14 @@ impl Navigator {
     /// view's layout (pointer and measured sizes are on screen).
     #[must_use]
     pub fn zoom(&self) -> f64 {
-        f64::from(self.state.peek().settings().zoom.clamp(50, 200)) / 100.0
+        let s = self.state.peek();
+        // A phone's own (`mobileScale`).
+        let z = if s.touch() {
+            s.settings().zoom_phone
+        } else {
+            s.settings().zoom
+        };
+        f64::from(z.clamp(50, 200)) / 100.0
     }
 
     /// The source it reads.
@@ -445,6 +452,11 @@ impl Navigator {
     /// Makes a note as `req` asks: its prompts asked one by one first,
     /// then written and opened with the cursor where the template put it.
     pub fn new_note(&self, req: NewNote, on_open: EventHandler<Open>) {
+        let mut req = req;
+        // `createNewNotesInNewTab`.
+        if req.how == OpenIn::Here && self.state.peek().settings().new_note_in_tab {
+            req.how = OpenIn::Tab;
+        }
         let made = self.state.peek().new_note(&req);
         self.made(made, req, on_open);
     }
@@ -1271,7 +1283,8 @@ pub fn NavigatorView(
     let mut drag: Signal<Option<(f64, f64)>> = use_signal(|| None);
     let vars = colours.read().vars();
     // Its own zoom (`zoom`, Notebook Navigator's `desktopScale`).
-    let zoom = f64::from(nav.state.read().settings().zoom.clamp(50, 200)) / 100.0;
+    let _ = nav.state.read();
+    let zoom = nav.zoom();
     let zoom_style = if (zoom - 1.0).abs() < f64::EPSILON {
         String::new()
     } else {
