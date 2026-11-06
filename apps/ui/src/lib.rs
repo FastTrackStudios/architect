@@ -1244,36 +1244,37 @@ pub fn LabApp() -> Element {
     // Which workspace the lab shows; `None` is all of them.
     // The person's organizations (the identity server's, here made up):
     // the switcher, and what each role may do.
-    let orgs = architect_orgs::use_orgs_provider(
-        || {
-            // The Architect app has the person's own until sign-in (#188).
-            if !Mode::current().is_sandbox() {
-                return Orgs::new(vec![
+    let caps = Capabilities::new()
+        .allow(&Role::Viewer, ["notes.read"])
+        .allow(&Role::Member, ["notes.write"])
+        .allow(&Role::Admin, ["members.invite"])
+        .allow(&Role::Owner, ["org.delete"])
+        .inherit();
+    // The Architect app's are the active account's (#349): signed out,
+    // the person's own on this device. The sandbox's are made up.
+    let orgs = match accounts {
+        Some(accounts) => accounts::use_account_orgs(accounts, caps),
+        None => architect_orgs::use_orgs_provider(
+            || {
+                if !Mode::current().is_sandbox() {
+                    return Orgs::new(vec![architect_accounts::device_org()]);
+                }
+                Orgs::new(vec![
                     Org::new("me", "Personal", Role::Owner)
                         .personal()
                         .color("#047857"),
-                ]);
-            }
-            Orgs::new(vec![
-                Org::new("me", "Personal", Role::Owner)
-                    .personal()
-                    .color("#047857"),
-                Org::new("fts", "FastTrackStudio", Role::Admin)
-                    .members(12)
-                    .color("#1d4ed8"),
-                Org::new("hp", "Harbor & Pine", Role::Viewer)
-                    .members(4)
-                    .color("#b45309"),
-            ])
-        },
-        Capabilities::new()
-            .allow(&Role::Viewer, ["notes.read"])
-            .allow(&Role::Member, ["notes.write"])
-            .allow(&Role::Admin, ["members.invite"])
-            .allow(&Role::Owner, ["org.delete"])
-            .inherit(),
-        None,
-    );
+                    Org::new("fts", "FastTrackStudio", Role::Admin)
+                        .members(12)
+                        .color("#1d4ed8"),
+                    Org::new("hp", "Harbor & Pine", Role::Viewer)
+                        .members(4)
+                        .color("#b45309"),
+                ])
+            },
+            caps,
+            None,
+        ),
+    };
     // The org's default look, under the person's: its settings, when the
     // window's org changes.
     {
