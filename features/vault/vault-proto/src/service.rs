@@ -15,6 +15,8 @@
 //! `TokioBlockingDispatcher` for the server, `CurrentThread`
 //! for tests / in-process callers.
 
+// `VaultChange` is used by `changes`, which only exists with `vox`.
+#[cfg_attr(not(feature = "vox"), allow(unused_imports))]
 use crate::{
     BaseView, CollabAck, FileBytes, FolderIndex, IfMatch, Manifest, MoveAck, PutAck, TextHit,
     VaultChange, VaultSyncError,
