@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-nucleo-matcher = { workspace = true }
+# The engine it ranks with, and its sources (src/source.rs).
+architect-palette = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

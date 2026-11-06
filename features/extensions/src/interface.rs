@@ -433,6 +433,9 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     });
     // ⌘O: every extension's quick-open openers, the palette's own.
     use_quick_open(host.clone(), revision);
+    // The palette slot's views, the keys extensions bind and their
+    // palette sources (#381): ⌘K is the Command Palette extension's.
+    use_palette(ui, host.clone(), revision);
     // A tab's icons and badges (`decorate` on a `tab`): by its view kind
     // and by its pane.
     crate::host_ui_view::use_tab_badges(&host);
@@ -598,34 +601,174 @@ fn use_quick_open(host: Host, revision: Signal<u64>) {
     });
 }
 
-/// How long an answer an extension's opener gave later is shown before it
-/// is asked again.
-const ASKED_AGAIN: std::time::Duration = std::time::Duration::from_secs(1);
+/// Keeps the shell's palette slot what the loaded extensions say, as they
+/// load and go (#381): which view draws each overlay (`[[palette_views]]`;
+/// the Command Palette's, a development copy's in its place), the keys
+/// they bind (`[[keys]]`: its ⌘K and ⌘O), and their sources of the
+/// palette's rows (`[[palette_sources]]`), ranked by the engine.
+fn use_palette(ui: ExtensionUi, host: Host, revision: Signal<u64>) {
+    let Some(commands) = try_use_context::<architect_commands::Commands>() else {
+        return;
+    };
+    let mine = use_hook(|| Rc::new(std::cell::RefCell::new(Vec::<String>::new())));
+    // What a row picked runs, here: the palette closes as it runs.
+    let runs = use_coroutine(
+        move |mut asks: mpsc::UnboundedReceiver<(ActionList, String, String)>| async move {
+            while let Some((list, run, args)) = asks.next().await {
+                let caller = architect::action::ActionCaller::app()
+                    .with_invocation(Invocation::new(InvocationSource::Palette));
+                if let Err(e) = list
+                    .run_json_async_with(&caller, &run, args.as_bytes())
+                    .await
+                {
+                    tracing::warn!(ext.action = %run, error = %e, "an extension's palette row did not run");
+                }
+            }
+        },
+    );
+    use_effect(move || {
+        let _ = revision();
+        let contributions = host.contributions();
+        let views = contributions
+            .palette_views()
+            .into_iter()
+            .filter_map(|by| {
+                let overlay = architect_commands::Overlay::parse(&by.item.overlay)?;
+                let (extension, view) = (by.owner.clone(), by.item.view.clone());
+                let draw: Rc<dyn Fn() -> Element> =
+                    Rc::new(move || palette_view(ui, extension.clone(), view.clone()));
+                Some(architect_commands::PaletteView {
+                    overlay,
+                    owner: by.owner,
+                    draw,
+                })
+            })
+            .collect();
+        commands.set_palette_views(views);
+        commands.set_bound_keys(
+            contributions
+                .key_bindings()
+                .into_iter()
+                .map(|by| (by.item.action, by.item.chord))
+                .collect(),
+        );
+        let now = contributions.palette_sources();
+        let ids: Vec<String> = now.iter().map(|p| p.item.id.clone()).collect();
+        for gone in mine.borrow().iter().filter(|id| !ids.contains(id)) {
+            commands.remove_source(gone);
+        }
+        for by in now {
+            let decl = by.item;
+            let ranking = if decl.ranking == "commands" {
+                architect_commands::Ranking::Commands
+            } else {
+                architect_commands::Ranking::Open
+            };
+            let id = decl.id.clone();
+            let items = asked(
+                host.list().clone(),
+                commands,
+                decl.action.clone(),
+                move |out| palette_items(&id, out),
+            );
+            let source = architect_commands::FnSource::new(decl.id.clone(), decl.title.clone(), items)
+                .ranking(ranking);
+            let (run, by_id) = if decl.run.is_empty() {
+                (decl.action.clone(), false)
+            } else {
+                (decl.run.clone(), true)
+            };
+            let (list, tx) = (host.list().clone(), runs.tx());
+            commands.register_source(source, move |item: &architect_commands::engine::Item| {
+                let key = if by_id { "id" } else { "run" };
+                let args = json!({ key: item.id }).to_string();
+                let _ = tx.unbounded_send((list.clone(), run.clone(), args));
+            });
+        }
+        *mine.borrow_mut() = ids;
+    });
+}
 
-/// What an opener answered for a query, and when.
-type Answers = Rc<std::cell::RefCell<BTreeMap<String, (std::time::Instant, Vec<OpenItem>)>>>;
+/// Extension `extension`'s view `view` in the palette slot: a linked one's
+/// component as it is (it draws its own scrim and panel, the Command
+/// Palette's `Frame`); a process's (a development copy) in a panel where
+/// the palette's goes.
+fn palette_view(ui: ExtensionUi, extension: String, view: String) -> Element {
+    if ui.host().linked_view(&extension, &view).is_some() {
+        return rsx! {
+            ExtensionView { ui, extension, view, bare: true }
+        };
+    }
+    let commands = try_use_context::<architect_commands::Commands>();
+    rsx! {
+        div {
+            style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 90; background: rgba(0,0,0,0.45); \
+                    display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh;",
+            onclick: move |_| {
+                if let Some(c) = commands {
+                    c.close();
+                }
+            },
+            div {
+                style: "width: 620px; max-width: 92%; height: 60vh; display: flex; flex-direction: column; \
+                        border-radius: 12px; overflow: hidden; background: var(--card); border: 1px solid var(--border); \
+                        box-shadow: 0 24px 64px rgba(0,0,0,0.6);",
+                onclick: move |e| e.stop_propagation(),
+                ExtensionView { ui, extension, view }
+            }
+        }
+    }
+}
 
-use architect_commands::{OpenIn, OpenItem, Opener};
+/// A palette source action's answer (`{items: [{id, label, detail?,
+/// group?, shortcut?, recency?}]}`; `title` for `label` too) as the
+/// engine's items of source `source`.
+fn palette_items(source: &str, out: Option<Vec<u8>>) -> Vec<architect_commands::engine::Item> {
+    let answer: Value = out
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or(Value::Null);
+    let list = answer
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    list.iter()
+        .filter_map(|v| {
+            let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default();
+            let id = text("id");
+            let label = [text("label"), text("title"), id]
+                .into_iter()
+                .find(|s| !s.is_empty())?;
+            (!id.is_empty()).then(|| {
+                architect_commands::engine::Item::new(id, label)
+                    .source(source)
+                    .group(text("group"))
+                    .detail(text("detail"))
+                    .shortcut(text("shortcut"))
+                    .recency(v.get("recency").and_then(Value::as_u64).unwrap_or(0))
+            })
+        })
+        .collect()
+}
 
-/// ⌘O's opener for an extension's `decl`: a query runs its `action`
-/// (`{query}` in, `{items}` out); an item picked runs its `open`.
+/// What an extension's finding action (`{query}` in) answers for a
+/// query, as `parse` reads it, synchronously for the engine.
 ///
 /// A linked extension's action answers at once; a process's later, its
 /// answer kept a moment ([`ASKED_AGAIN`]) and the palette told to look
 /// again (`Commands::refresh`), the last answer shown meanwhile.
-fn quick_opener(
+fn asked<T: Clone + 'static>(
     list: ActionList,
-    commands: &architect_commands::Commands,
-    opens: mpsc::UnboundedSender<(ActionList, String, String)>,
-    decl: &contrib::OpenerDecl,
-) -> Opener {
-    let commands = *commands;
-    let answers: Answers = Rc::default();
+    commands: architect_commands::Commands,
+    action: String,
+    parse: impl Fn(Option<Vec<u8>>) -> Vec<T> + 'static,
+) -> impl Fn(&str) -> Vec<T> + 'static {
+    type Kept<T> = Rc<std::cell::RefCell<BTreeMap<String, (std::time::Instant, Vec<T>)>>>;
+    let answers: Kept<T> = Rc::default();
     let pending: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>> = Rc::default();
-    let shown_last: Rc<std::cell::RefCell<Vec<OpenItem>>> = Rc::default();
-    let (kind, action) = (decl.kind.clone(), decl.action.clone());
-    let (ask_list, ask_kind) = (list.clone(), kind.clone());
-    let items = move |query: &str| -> Vec<OpenItem> {
+    let shown_last: Rc<std::cell::RefCell<Vec<T>>> = Rc::default();
+    let parse = Rc::new(parse);
+    move |query: &str| -> Vec<T> {
         if let Some((at, items)) = answers.borrow().get(query)
             && at.elapsed() < ASKED_AGAIN
         {
@@ -635,7 +778,7 @@ fn quick_opener(
             return shown_last.borrow().clone();
         }
         let (list, action, args) = (
-            ask_list.clone(),
+            list.clone(),
             action.clone(),
             json!({ "query": query }).to_string(),
         );
@@ -647,20 +790,20 @@ fn quick_opener(
         });
         let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
         if let std::task::Poll::Ready(out) = run.as_mut().poll(&mut cx) {
-            let items = open_items(&ask_kind, out.ok());
+            let items = parse(out.ok());
             shown_last.borrow_mut().clone_from(&items);
             return items;
         }
         pending.borrow_mut().insert(query.to_owned());
-        let (kept, asked, shown, kind, query) = (
+        let (kept, asked, shown, parse, query) = (
             Rc::clone(&answers),
             Rc::clone(&pending),
             Rc::clone(&shown_last),
-            ask_kind.clone(),
+            Rc::clone(&parse),
             query.to_owned(),
         );
         spawn(async move {
-            let items = open_items(&kind, run.await.ok());
+            let items = parse(run.await.ok());
             asked.borrow_mut().remove(&query);
             shown.borrow_mut().clone_from(&items);
             kept.borrow_mut()
@@ -668,7 +811,29 @@ fn quick_opener(
             commands.refresh();
         });
         shown_last.borrow().clone()
-    };
+    }
+}
+
+/// How long an answer an extension's opener gave later is shown before it
+/// is asked again.
+const ASKED_AGAIN: std::time::Duration = std::time::Duration::from_secs(1);
+
+use architect_commands::{OpenIn, OpenItem, Opener};
+
+/// ⌘O's opener for an extension's `decl`: a query runs its `action`
+/// (`{query}` in, `{items}` out, as [`asked`] gets it); an item picked
+/// runs its `open`.
+fn quick_opener(
+    list: ActionList,
+    commands: &architect_commands::Commands,
+    opens: mpsc::UnboundedSender<(ActionList, String, String)>,
+    decl: &contrib::OpenerDecl,
+) -> Opener {
+    let kind = decl.kind.clone();
+    let parse_kind = kind.clone();
+    let items = asked(list.clone(), *commands, decl.action.clone(), move |out| {
+        open_items(&parse_kind, out)
+    });
     let (open, by_id) = if decl.open.is_empty() {
         (decl.action.clone(), false)
     } else {

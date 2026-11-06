@@ -1317,11 +1317,11 @@ dependencies = [
 name = "architect-launcher-core"
 version = "0.1.0"
 dependencies = [
+ "architect-palette",
  "architect-workspace-hack",
  "chrono",
  "facet",
  "facet-styx",
- "nucleo-matcher",
  "serde",
  "serde_json",
  "tokio",

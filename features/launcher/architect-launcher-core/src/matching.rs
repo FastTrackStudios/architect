@@ -1,18 +1,14 @@
-//! Fuzzy matching engine using nucleo (same algorithm Walker uses).
-//!
-//! Ported from Elephant's fzf-based scoring, but using nucleo which is
-//! a pure-Rust implementation of fzf's V2 algorithm.
-
-use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
+//! Fuzzy matching: the palette's engine (`architect-palette`), the one
+//! the ⌘K Command Palette ranks with, over each item's search fields.
 
 use crate::provider::Item;
 
 /// Score and annotate a list of items against a query string.
 ///
-/// Items are scored across all their `search_fields`, with earlier fields
-/// weighted higher (matching on `label` scores more than matching on a
-/// secondary field). This mirrors Elephant's field-position penalty.
+/// Items are scored across all their `search_fields` with the engine's
+/// [`architect_palette::fuzzy`], earlier fields weighted higher (matching
+/// on `label` scores more than matching on a secondary field): field 0
+/// full, each later one 20% less, down to 20%.
 ///
 /// Returns items with `score` and `match_positions` populated.
 /// Items that don't match at all are filtered out.
@@ -23,46 +19,28 @@ pub fn score_items(items: Vec<Item>, query: &str) -> Vec<Item> {
         return items;
     }
 
-    let mut matcher = Matcher::new(Config::DEFAULT);
-    let atom = Atom::new(
-        query,
-        CaseMatching::Ignore,
-        Normalization::Smart,
-        AtomKind::Fuzzy,
-        false,
-    );
-
     let mut scored: Vec<Item> = items
         .into_iter()
         .filter_map(|mut item| {
-            let mut best_score: Option<u32> = None;
-            let mut best_positions = Vec::new();
-
+            let mut best: Option<(f64, Vec<usize>)> = None;
             for (field_idx, field) in item.search_fields.iter().enumerate() {
-                let mut buf = Vec::new();
-                let haystack = Utf32Str::new(field, &mut buf);
-
-                let mut indices = Vec::new();
-                if let Some(score) = atom.indices(haystack, &mut matcher, &mut indices) {
-                    // Field position penalty: later fields score lower.
-                    // Field 0 = full score, field 1 = -20%, field 2 = -40%, etc.
-                    let penalty = 1.0 - (idx_as_f64(field_idx) * 0.2).min(0.8);
-                    let adjusted = clamp_to_u32(f64::from(score) * penalty);
-
-                    if best_score.is_none_or(|s| adjusted > s) {
-                        best_score = Some(adjusted);
-                        best_positions.clone_from(&indices);
-                    }
+                let Some(m) = architect_palette::fuzzy(query, field) else {
+                    continue;
+                };
+                // Field position penalty: later fields score lower.
+                let penalty = 1.0 - (idx_as_f64(field_idx) * 0.2).min(0.8);
+                let adjusted = score_as_f64(m.score) * penalty;
+                if best.as_ref().is_none_or(|(s, _)| adjusted > *s) {
+                    best = Some((adjusted, m.positions));
                 }
             }
-
-            if let Some(score) = best_score {
-                item.score = f64::from(score);
-                item.match_positions = best_positions;
-                Some(item)
-            } else {
-                None
-            }
+            let (score, positions) = best?;
+            item.score = score;
+            item.match_positions = positions
+                .into_iter()
+                .map(|p| u32::try_from(p).unwrap_or(u32::MAX))
+                .collect();
+            Some(item)
         })
         .collect();
 
@@ -119,17 +97,9 @@ const fn idx_as_f64(n: usize) -> f64 {
     n as f64
 }
 
-/// A computed score clamped into `u32`.
-// f64 -> u32 has no total conversion in std; the guards make the cast exact.
-#[allow(
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
-fn clamp_to_u32(score: f64) -> u32 {
-    if score.is_finite() && score > 0.0 {
-        score.min(f64::from(u32::MAX)) as u32
-    } else {
-        0
-    }
+/// An engine score as an `f64` score input.
+// Scores are small (a few hundred); i64 -> f64 is exact well past them.
+#[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+const fn score_as_f64(n: i64) -> f64 {
+    n as f64
 }

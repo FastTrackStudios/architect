@@ -17,7 +17,7 @@ use architect::action::{ActionList, Confirmation, Effect};
 use dioxus::prelude::*;
 use lucide_dioxus::{Bot, ShieldAlert};
 
-use crate::ui::theme;
+use crate::kit::theme;
 
 /// How often the sheet looks for calls waiting: also its countdown's tick.
 const POLL: Duration = Duration::from_millis(250);

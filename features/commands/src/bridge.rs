@@ -83,6 +83,11 @@ pub struct CommandsState {
     /// `palette`, `quick-open`, or empty when neither is open.
     pub overlay: String,
     pub query: String,
+    /// The extension whose view draws the palette (`command-palette`);
+    /// empty when none is installed.
+    pub palette: String,
+    /// The extension whose view draws ⌘O; empty when none is.
+    pub quick_open: String,
 }
 
 static RUN_META: ActionMeta = ActionMeta {
@@ -103,7 +108,7 @@ static SHOW_META: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Show the palette",
-    description: "Opens the command palette (`overlay: palette`) or ⌘O (`quick-open`), its field set to `query` when given: `theme:` asks only ⌘O's theme opener. `none` closes whichever is open.",
+    description: "Opens the command palette (`overlay: palette`) or ⌘O (`quick-open`), its field set to `query` when given: `theme:` asks only ⌘O's theme opener. `none` closes whichever is open. Fails when no palette extension draws the overlay.",
     category: "Commands",
     group: "Commands",
     shortcut: "",
@@ -129,7 +134,7 @@ static STATE_META: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Command palette state",
-    description: "Which overlay is open (palette, quick-open or none) and what the palette's field says.",
+    description: "Which overlay is open (palette, quick-open or none), what the palette's field says, and which extension draws each overlay (`palette`, `quick_open`; empty when none is installed).",
     category: "Commands",
     group: "Commands",
     shortcut: "",
@@ -171,7 +176,7 @@ pub fn use_command_actions(list: Arc<ActionList>) {
                     (_, q) => {
                         c.show(Overlay::Palette);
                         if let Some(q) = q {
-                            let mut query = c.query;
+                            let mut query = c.palette_query();
                             query.set(q);
                         }
                     }
@@ -218,6 +223,7 @@ pub fn use_command_actions(list: Arc<ActionList>) {
                     .unwrap_or_else(PoisonError::into_inner)
                     .clone())
             });
+            let shown = state.clone();
             let read = list.register(&STATE_META, Effect::ReadOnly, move |(): ()| {
                 Ok(state.lock().unwrap_or_else(PoisonError::into_inner).clone())
             });
@@ -228,6 +234,22 @@ pub fn use_command_actions(list: Arc<ActionList>) {
                         "overlay {:?}: it is `palette`, `quick-open` or `none`",
                         ask.overlay
                     ));
+                }
+                // The shell keeps only the slot: an overlay shows when a
+                // palette extension's view draws it.
+                {
+                    let now = shown.lock().unwrap_or_else(PoisonError::into_inner);
+                    let drawn = match ask.overlay.as_str() {
+                        "palette" => !now.palette.is_empty(),
+                        "quick-open" => !now.quick_open.is_empty(),
+                        _ => true,
+                    };
+                    if !drawn {
+                        return Err(format!(
+                            "no palette draws {:?}: enable the Command Palette extension (`command-palette`), or one whose `[[palette_views]]` does",
+                            ask.overlay
+                        ));
+                    }
                 }
                 show_tx
                     .unbounded_send(ask)
@@ -271,6 +293,8 @@ pub fn use_command_actions(list: Arc<ActionList>) {
                 None => String::new(),
             },
             query: (c.query)(),
+            palette: c.palette_owner(Overlay::Palette).unwrap_or_default(),
+            quick_open: c.palette_owner(Overlay::QuickOpen).unwrap_or_default(),
         };
         let mut kept = state.lock().unwrap_or_else(PoisonError::into_inner);
         if *kept != now {

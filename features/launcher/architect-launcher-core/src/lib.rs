@@ -10,6 +10,7 @@ pub mod matching;
 pub mod pack;
 pub mod provider;
 pub mod query;
+pub mod source;
 pub mod tags;
 pub mod userdata;
 
@@ -23,5 +24,6 @@ pub use icons::IconResolver;
 pub use pack::{LoadedPack, PackDef};
 pub use provider::{ActionModifier, ActivationResult, Item, ItemAction, Provider, ProviderConfig};
 pub use query::{QueryEngine, QueryEngineBuilder};
+pub use source::ProviderSource;
 pub use tags::{Tag, TagInfo, TagRegistry, TagSet};
 pub use userdata::UserDataStore;

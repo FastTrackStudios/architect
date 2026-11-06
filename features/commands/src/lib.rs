@@ -25,6 +25,8 @@ mod ios_menu;
 mod keymap;
 #[cfg(feature = "ui")]
 mod keys_ui;
+#[cfg(feature = "ui")]
+pub mod kit;
 #[cfg(all(feature = "native", target_os = "linux"))]
 mod linux_menu;
 mod menu;

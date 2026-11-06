@@ -775,6 +775,86 @@ pub struct CaptureTargetDecl {
     pub tokens: Vec<CaptureTokenDecl>,
 }
 
+/// A key it binds to one of its actions (`[[keys]]`), in the app's
+/// keymap while it is loaded: the Command Palette binds ⌘K and ⌘O so.
+///
+/// ```toml
+/// [[keys]]
+/// chord = "⌘K"
+/// action = "COMMAND_PALETTE_OPEN"
+/// ```
+///
+/// After the commands' own shortcuts and the app's keymap, under the
+/// person's rebinds; withdrawn when the extension is turned off.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct KeyDecl {
+    /// As commands show theirs (`⌘K`, `⇧⌘P`, `⌃O`).
+    pub chord: String,
+    /// Its own action, or one its capabilities reach.
+    pub action: String,
+}
+
+/// An overlay of the shell's palette slot it draws with one of its views
+/// (`[[palette_views]]`, #381): the Command Palette's `palette` (⌘K) and
+/// `quick-open` (⌘O).
+///
+/// ```toml
+/// [[palette_views]]
+/// overlay = "palette"
+/// view = "palette"     # one of its [[views]]
+/// ```
+///
+/// The shell keeps the slot and `COMMANDS_SHOW`; the first loaded
+/// extension that draws an overlay draws it (a development copy in place
+/// of the built-in, by its id). With none, the overlay does not show.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PaletteViewDecl {
+    /// `palette` or `quick-open`.
+    pub overlay: String,
+    pub view: String,
+}
+
+/// The palette slot's overlays (`[[palette_views]] overlay`).
+pub const PALETTE_OVERLAYS: &[&str] = &["palette", "quick-open"];
+
+/// A source of the palette's rows (`[[palette_sources]]`, #381): what it
+/// finds is listed with the commands once something is typed, ranked by
+/// the palette's engine (`architect-palette`), and its prefix (`id:`)
+/// asks only it.
+///
+/// ```toml
+/// [[palette_sources]]
+/// id = "tours"
+/// title = "Tours"
+/// action = "TOURS_PALETTE_FIND"   # {query} in, {items: [{id, label, detail?, group?}]} out
+/// run = "TOURS_START"             # given {id}
+/// ranking = "open"                # or "commands"
+/// ```
+///
+/// Any extension's, in any runtime (linked Rust, a process, Luau, a JS
+/// page's actions): the source is its actions. Withdrawn when the
+/// extension is turned off. The app's registry is
+/// [`Contributions::palette_sources`] (`EXT_PALETTE_SOURCES`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PaletteSourceDecl {
+    /// Unique among the loaded sources, and its prefix: lowercase
+    /// letters, digits, `-` and `_`.
+    pub id: String,
+    /// Shown beside its rows (`Tours`).
+    pub title: String,
+    /// Its action that finds rows for a query.
+    pub action: String,
+    /// Its action that a row picked runs, given `{id}`; unset, `action`
+    /// is, given `{run: id}`.
+    pub run: String,
+    /// How its rows are ranked: `open` (by label, then detail, then
+    /// recency; the default) or `commands` (as the palette's commands).
+    pub ranking: String,
+}
+
 /// The capture targets the app has itself: no extension may take their
 /// ids.
 pub const BUILTIN_CAPTURE_TARGETS: &[&str] = &["note", "inbox"];
@@ -804,6 +884,13 @@ pub struct Contribution {
     pub navigator_providers: Vec<NavigatorProviderDecl>,
     /// What a capture can become (`[[capture_targets]]`).
     pub capture_targets: Vec<CaptureTargetDecl>,
+    /// Keys it binds to its actions in the app's keymap (`[[keys]]`).
+    #[serde(rename = "keys")]
+    pub key_bindings: Vec<KeyDecl>,
+    /// The palette slot's overlays its views draw (`[[palette_views]]`).
+    pub palette_views: Vec<PaletteViewDecl>,
+    /// Sources of the palette's rows (`[[palette_sources]]`).
+    pub palette_sources: Vec<PaletteSourceDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
     pub keymaps: Vec<editor_ext::KeymapEntry>,
@@ -893,6 +980,13 @@ impl Contribution {
             capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
                 c.id.clone()
             }),
+            key_bindings: join(&self.key_bindings, &other.key_bindings, |k| k.chord.clone()),
+            palette_views: join(&self.palette_views, &other.palette_views, |p| {
+                p.overlay.clone()
+            }),
+            palette_sources: join(&self.palette_sources, &other.palette_sources, |p| {
+                p.id.clone()
+            }),
             keymaps: join(&self.keymaps, &other.keymaps, keymap_key),
             slash: join(&self.slash, &other.slash, |s| s.action.clone()),
         }
@@ -941,6 +1035,17 @@ impl Contribution {
             self.capture_targets
                 .iter()
                 .map(|c| format!("capture_target:{}", c.id)),
+        );
+        out.extend(self.key_bindings.iter().map(|k| format!("key:{}", k.chord)));
+        out.extend(
+            self.palette_views
+                .iter()
+                .map(|p| format!("palette_view:{}", p.overlay)),
+        );
+        out.extend(
+            self.palette_sources
+                .iter()
+                .map(|p| format!("palette_source:{}", p.id)),
         );
         out.extend(
             self.keymaps
@@ -1008,6 +1113,9 @@ impl Contribution {
             self.project_types.len(),
             self.navigator_providers.len(),
             self.capture_targets.len(),
+            self.key_bindings.len(),
+            self.palette_views.len(),
+            self.palette_sources.len(),
             self.keymaps.len(),
             self.slash.len(),
         ]
@@ -1265,6 +1373,45 @@ impl Contribution {
             action(&what, &n.snapshot_action())?;
             for v in &n.views {
                 view(&what, v)?;
+            }
+        }
+        for k in &self.key_bindings {
+            let what = format!("key {}", k.chord);
+            if architect_commands::parse_shortcut(&k.chord).is_none() {
+                return refuse(what, "its chord is not one (`⌘K`, `⇧⌘P`)".to_owned());
+            }
+            action(&what, &k.action)?;
+        }
+        let mut drawn = BTreeSet::new();
+        for p in &self.palette_views {
+            let what = format!("palette view {}", p.overlay);
+            if !PALETTE_OVERLAYS.contains(&p.overlay.as_str()) {
+                return refuse(what, "its overlay is `palette` or `quick-open`".to_owned());
+            }
+            if !drawn.insert(p.overlay.as_str()) {
+                return refuse(what, "it draws that overlay twice".to_owned());
+            }
+            view(&what, &p.view)?;
+        }
+        for p in &self.palette_sources {
+            let what = format!("palette source {}", p.id);
+            if p.id.is_empty()
+                || !p
+                    .id
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || "-_".contains(ch))
+            {
+                return refuse(
+                    what,
+                    "its id is lowercase letters, digits, - and _".to_owned(),
+                );
+            }
+            if !matches!(p.ranking.as_str(), "" | "open" | "commands") {
+                return refuse(what, "its ranking is `open` or `commands`".to_owned());
+            }
+            action(&what, &p.action)?;
+            if !p.run.is_empty() {
+                action(&what, &p.run)?;
             }
         }
         for c in &self.capture_targets {
@@ -1930,6 +2077,39 @@ impl Contributions {
         self.all(|c| c.capture_targets.clone())
             .into_iter()
             .filter(|t| seen.insert(t.item.id.clone()))
+            .collect()
+    }
+
+    /// Every key the loaded extensions bind (`[[keys]]`), the first
+    /// loaded winning a chord.
+    #[must_use]
+    pub fn key_bindings(&self) -> Vec<By<KeyDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.key_bindings.clone())
+            .into_iter()
+            .filter(|k| seen.insert(k.item.chord.clone()))
+            .collect()
+    }
+
+    /// Which view draws each overlay of the palette slot
+    /// (`[[palette_views]]`), the first loaded winning an overlay.
+    #[must_use]
+    pub fn palette_views(&self) -> Vec<By<PaletteViewDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.palette_views.clone())
+            .into_iter()
+            .filter(|p| seen.insert(p.item.overlay.clone()))
+            .collect()
+    }
+
+    /// Every source of the palette's rows (`[[palette_sources]]`), the
+    /// first loaded winning an id.
+    #[must_use]
+    pub fn palette_sources(&self) -> Vec<By<PaletteSourceDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.palette_sources.clone())
+            .into_iter()
+            .filter(|p| seen.insert(p.item.id.clone()))
             .collect()
     }
 

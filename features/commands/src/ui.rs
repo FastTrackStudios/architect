@@ -27,15 +27,15 @@ use architect::action::ActionList;
 use architect_input::dioxus::{InputHandle, use_input_processor};
 use architect_input::{InputContext, InputProcessor, KeymapConfig, MacroKeys};
 
-use architect_shell::{ShellTheme, try_use_shell};
 use dioxus::prelude::*;
-use lucide_dioxus::{Command as CommandIcon, Search};
+use lucide_dioxus::Command as CommandIcon;
 
 use architect_palette::fuzzy;
 use crate::keymap::{Keymap, PersonKeymap};
-use crate::keys_ui::{Asking, Pick, Recording};
+use crate::keys_ui::{Asking, Recording};
+use crate::kit::{fill, theme};
 use crate::menu::Pick as MenuPick;
-use architect_palette::{Found, OpenIn, Opener, Openers};
+use architect_palette::{Engine, Found, OpenIn, Opener, Openers};
 use architect_palette::{Command, Query, Ranked, Scope, rank};
 use architect_palette::Recents;
 
@@ -52,6 +52,68 @@ struct Scoped {
 pub enum Overlay {
     Palette,
     QuickOpen,
+}
+
+impl Overlay {
+    /// Its name, as `COMMANDS_SHOW` and `[[palette_views]]` write it
+    /// (`palette`, `quick-open`).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Palette => "palette",
+            Self::QuickOpen => "quick-open",
+        }
+    }
+
+    /// The overlay named `name`.
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "palette" => Some(Self::Palette),
+            "quick-open" => Some(Self::QuickOpen),
+            _ => None,
+        }
+    }
+}
+
+/// The view that draws an overlay in the shell's palette slot
+/// ([`CommandLayer`]): an extension's (`[[palette_views]]`), or an app's
+/// own.
+#[derive(Clone)]
+pub struct PaletteView {
+    pub overlay: Overlay,
+    /// The extension that fills it (`command-palette`).
+    pub owner: String,
+    /// Draws the overlay.
+    pub draw: Rc<dyn Fn() -> Element>,
+}
+
+impl std::fmt::Debug for PaletteView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaletteView")
+            .field("overlay", &self.overlay)
+            .field("owner", &self.owner)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for PaletteView {
+    fn eq(&self, other: &Self) -> bool {
+        self.overlay == other.overlay
+            && self.owner == other.owner
+            && Rc::ptr_eq(&self.draw, &other.draw)
+    }
+}
+
+/// What picking a contributed source's row does.
+type RunItem = Rc<dyn Fn(&architect_palette::Item)>;
+
+/// The extensions' contributed palette sources (`[[palette_sources]]`),
+/// searched by the engine, and what picking each one's row runs.
+#[derive(Default)]
+pub(crate) struct Contributed {
+    pub(crate) engine: Engine,
+    pub(crate) runs: std::collections::HashMap<String, RunItem>,
 }
 
 /// The commands context: [`use_commands_provider`] at the root.
@@ -97,6 +159,12 @@ pub struct Commands {
     pub(crate) settings: CopyValue<Rc<RefCell<Openers>>>,
     /// The keymap in force, at the `version` it was computed for.
     pub(crate) cache: CopyValue<Option<(u64, Rc<crate::keys_ui::Effective>)>>,
+    /// The views that draw the overlays (the palette extension's).
+    pub(crate) views: Signal<Vec<PaletteView>>,
+    /// Keys the extensions bind (`[[keys]]`): `(action, chord)`.
+    pub(crate) bound: Signal<Vec<(String, String)>>,
+    /// The extensions' contributed sources.
+    pub(crate) sources: CopyValue<Rc<RefCell<Contributed>>>,
 }
 
 /// Puts a [`Commands`] in context for everything below, and the
@@ -129,6 +197,9 @@ pub fn use_commands_provider() -> Commands {
         targets: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         settings: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         cache: CopyValue::new(None),
+        views: Signal::new(Vec::new()),
+        bound: Signal::new(Vec::new()),
+        sources: CopyValue::new(Rc::new(RefCell::new(Contributed::default()))),
     });
     // A phone's bar buttons run what the palette and the keys run.
     use_context_provider(|| architect_shell::CommandRunner {
@@ -303,11 +374,14 @@ impl Commands {
     /// The keymap with `commands`' declared shortcuts in it.
     pub(crate) fn keymap_for(&self, commands: &[Command]) -> Keymap {
         let mut keymap = self.keymap.read().clone();
+        // A command's own shortcut first, then the keys extensions bind
+        // (the Command Palette's ⌘K and ⌘O).
         keymap.set_shortcuts(
             commands
                 .iter()
                 .filter(|c| !c.shortcut.is_empty())
-                .map(|c| (c.id.clone(), c.shortcut.clone())),
+                .map(|c| (c.id.clone(), c.shortcut.clone()))
+                .chain(self.bound.read().iter().cloned()),
         );
         keymap
     }
@@ -587,8 +661,239 @@ impl Commands {
         only.set(None);
     }
 
-    /// A key at the app's root: ⌘K (or ⌘⇧P) the palette, ⌘O quick open,
-    /// Esc closes; any other chord runs the command whose shortcut it is.
+    /// The views that draw the overlays from now on: what the
+    /// extensions' `[[palette_views]]` say as they load and go (or an
+    /// app's own). An overlay no view draws does not show.
+    pub fn set_palette_views(&self, views: Vec<PaletteView>) {
+        let same = {
+            let now = self.views.peek();
+            now.len() == views.len()
+                && now
+                    .iter()
+                    .zip(&views)
+                    .all(|(a, b)| a.overlay == b.overlay && a.owner == b.owner)
+        };
+        if !same {
+            let mut v = self.views;
+            v.set(views);
+            // An overlay with no view left closes.
+            let open = *self.overlay.peek();
+            if open.is_some_and(|o| !self.has_palette(o)) {
+                self.close();
+            }
+        }
+    }
+
+    /// Whether a view draws `overlay` (a palette is installed).
+    #[must_use]
+    pub fn has_palette(&self, overlay: Overlay) -> bool {
+        self.views.peek().iter().any(|v| v.overlay == overlay)
+    }
+
+    /// The extension whose view draws `overlay`, if any.
+    #[must_use]
+    pub fn palette_owner(&self, overlay: Overlay) -> Option<String> {
+        self.views
+            .read()
+            .iter()
+            .find(|v| v.overlay == overlay)
+            .map(|v| v.owner.clone())
+    }
+
+    /// The keys the extensions bind (`[[keys]]`, `(action, chord)`) from
+    /// now on, in the keymap after the commands' own shortcuts.
+    pub fn set_bound_keys(&self, keys: Vec<(String, String)>) {
+        if *self.bound.peek() != keys {
+            let mut b = self.bound;
+            b.set(keys);
+            self.bump();
+        }
+    }
+
+    /// The keys the extensions bind, `(action, chord)`.
+    #[must_use]
+    pub fn bound_keys(&self) -> Vec<(String, String)> {
+        self.bound.read().clone()
+    }
+
+    /// A source of the palette's rows (an extension's `[[palette_sources]]`)
+    /// from now on, in place of one with its id: its rows are listed with
+    /// the commands once something is typed (or its prefix, `tours:`, is),
+    /// and picking one runs `run`.
+    pub fn register_source(
+        &self,
+        source: impl architect_palette::Source + 'static,
+        run: impl Fn(&architect_palette::Item) + 'static,
+    ) {
+        {
+            let sources = self.sources.read();
+            let mut sources = sources.borrow_mut();
+            sources.runs.insert(source.id().to_owned(), Rc::new(run));
+            sources.engine.register(source);
+        }
+        self.bump();
+    }
+
+    /// Source `id`, gone from the palette.
+    pub fn remove_source(&self, id: &str) {
+        {
+            let sources = self.sources.read();
+            let mut sources = sources.borrow_mut();
+            sources.runs.remove(id);
+            sources.engine.remove(id);
+        }
+        self.bump();
+    }
+
+    /// The contributed sources' ids.
+    #[must_use]
+    pub fn source_ids(&self) -> Vec<String> {
+        self.sources
+            .read()
+            .borrow()
+            .engine
+            .ids()
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The palette's field.
+    #[must_use]
+    pub const fn palette_query(&self) -> Signal<String> {
+        self.query
+    }
+
+    /// The one group the palette is on, and its field's prompt, while a
+    /// command asks where or which ([`Self::show_group`]).
+    #[must_use]
+    pub fn choice(&self) -> Option<(String, String)> {
+        (self.only)()
+    }
+
+    /// Whether the palette is asking an action's arguments
+    /// ([`crate::kit::AskPalette`] draws that).
+    #[must_use]
+    pub fn is_asking(&self) -> bool {
+        self.asking.read().is_some()
+    }
+
+    /// What ⌘O was asked to show ([`Self::show_quick_open`]), once.
+    pub fn take_seed(&self) -> Option<String> {
+        let mut seed = self.seed;
+        let q = seed();
+        if q.is_some() {
+            seed.set(None);
+        }
+        q
+    }
+
+    /// The palette's rows for `q`, in order, with what picking each does
+    /// ([`Self::pick`]): the commands ranked by the engine (only the
+    /// group's while on one, in the app's own order when nothing is
+    /// typed), the contributed sources' rows merged in once something is
+    /// typed, or the `@`, `#` and `?` finders'.
+    #[must_use]
+    pub fn palette_rows(&self, q: &Query) -> Vec<(Ranked, crate::kit::Pick)> {
+        use crate::kit::Pick;
+        let only = (self.only)();
+        let mut all = self.all();
+        // A choice lists only what can be chosen.
+        if let Some((group, _)) = &only {
+            all.retain(|c| c.group == *group && c.enabled);
+        }
+        match q.scope {
+            // On one group with nothing typed, the app's own order (a
+            // list's, as its side shows it), not the alphabet.
+            Scope::Commands if only.is_some() && q.text.is_empty() => all
+                .into_iter()
+                .map(|mut command| {
+                    command.group.clear();
+                    let pick = Pick::Run(command.id.clone());
+                    let row = Ranked {
+                        item: command,
+                        positions: Vec::new(),
+                        score: 0,
+                    };
+                    (row, pick)
+                })
+                .collect(),
+            Scope::Commands => {
+                let recents = self.recents.read();
+                let sources = self.sources.read();
+                let sources = sources.borrow();
+                let (narrowed, _) = sources.engine.narrow(&q.text);
+                let mut rows: Vec<(Ranked, Pick)> = if narrowed.is_some() {
+                    Vec::new()
+                } else {
+                    rank(&all, &q.text, &recents)
+                        .into_iter()
+                        .map(|mut r| {
+                            // On one group, its prompt names it: the rows
+                            // need not.
+                            if only.is_some() {
+                                r.item.group.clear();
+                            }
+                            let pick = Pick::Run(r.item.id.clone());
+                            (r, pick)
+                        })
+                        .collect()
+                };
+                // The extensions' sources, once something is typed: an
+                // empty palette is the commands and the recent ones.
+                if only.is_none() && !q.text.is_empty() {
+                    let found = sources.engine.search(&q.text, &recents);
+                    rows.extend(found.into_iter().map(|mut r| {
+                        if r.item.group.is_empty() {
+                            r.item.group = sources
+                                .engine
+                                .title(&r.item.source)
+                                .unwrap_or_default()
+                                .to_owned();
+                        }
+                        let pick = Pick::Item(r.item.clone());
+                        (r, pick)
+                    }));
+                    if narrowed.is_none() {
+                        rows.sort_by(|(a, _), (b, _)| {
+                            b.item.enabled.cmp(&a.item.enabled).then(b.score.cmp(&a.score))
+                        });
+                    }
+                }
+                rows
+            }
+            _ => crate::keys_ui::scope_rows(self, q),
+        }
+    }
+
+    /// What ⌘O finds for `query` (`kind:` narrows to one opener), best
+    /// first.
+    #[must_use]
+    pub fn open_rows(&self, query: &str) -> Vec<Found> {
+        let _ = (self.version)();
+        self.openers.read().borrow().search(query)
+    }
+
+    /// ⌘O's opener `kind`'s title (`Themes`), when there is one.
+    #[must_use]
+    pub fn open_title(&self, kind: &str) -> Option<String> {
+        self.openers.peek().borrow().title(kind).map(str::to_owned)
+    }
+
+    /// Opens what ⌘O found, `open_in` where: the overlay closes, and it is
+    /// the most recent.
+    pub fn open_found(&self, found: &Found, open_in: OpenIn) {
+        self.close();
+        let mut recents = self.recents;
+        recents
+            .write()
+            .touch(&format!("{}:{}", found.item.kind, found.item.id));
+        let _ = self.openers.read().borrow().open(&found.item, open_in);
+    }
+
+    /// A key at the app's root: Esc closes the overlay; any other chord
+    /// runs the command whose shortcut it is (⌘K and ⌘O the palette
+    /// extension's, bound with `[[keys]]`).
     /// True when it was used (the caller then stops it going further).
     #[must_use = "true when the key was used: stop it going further"]
     pub fn handle_key(&self, e: &KeyboardEvent) -> bool {
@@ -623,20 +928,11 @@ impl Commands {
             query.set(format!("?{chord}"));
             return true;
         }
-        match chord {
-            "⌘K" | "⌃K" | "⇧⌘P" | "⌃⇧P" => {
-                self.show(Overlay::Palette);
-                return true;
-            }
-            "⌘O" | "⌃O" => {
-                self.show(Overlay::QuickOpen);
-                return true;
-            }
-            "Esc" if self.overlay.peek().is_some() => {
-                self.close();
-                return true;
-            }
-            _ => {}
+        // ⌘K and ⌘O are the palette extension's keys (`[[keys]]`), in
+        // the keymap with the rest; Esc closes whichever overlay is open.
+        if chord == "Esc" && self.overlay.peek().is_some() {
+            self.close();
+            return true;
         }
         self.key_chord(chord)
     }
@@ -678,441 +974,6 @@ pub(crate) fn chord(e: &KeyboardEvent) -> Option<String> {
     }
     out.push_str(&key);
     Some(out)
-}
-
-/// A row's fill: lit when picked.
-pub(crate) fn fill(on: bool, t: &ShellTheme) -> &str {
-    if on { &t.active } else { "transparent" }
-}
-
-/// A row's quiet ink: a step up on the picked row, where `ink_3` falls
-/// under 4.5:1 on `fill`.
-pub(crate) fn quiet(on: bool, t: &ShellTheme) -> &str {
-    if on { &t.ink_2 } else { &t.ink_3 }
-}
-
-pub(crate) fn theme() -> ShellTheme {
-    try_use_shell().map(|s| s.theme).unwrap_or_default()
-}
-
-/// The overlays, mounted once inside the app (over everything, absolute
-/// against the app's root).
-#[component]
-pub fn CommandLayer() -> Element {
-    let commands = try_use_commands();
-    let Some(commands) = commands else {
-        return rsx! {};
-    };
-    let overlay = match (commands.overlay)() {
-        Some(Overlay::Palette) => rsx! { CommandPalette {} },
-        Some(Overlay::QuickOpen) => rsx! { QuickOpen {} },
-        None => rsx! {},
-    };
-    rsx! {
-        {overlay}
-        crate::WhichKeyPanel {}
-    }
-}
-
-/// The overlay's frame: a scrim, and a panel near the top with a field.
-#[component]
-pub(crate) fn Frame(
-    placeholder: String,
-    query: Signal<String>,
-    on_key: EventHandler<KeyboardEvent>,
-    children: Element,
-) -> Element {
-    let commands = try_use_commands();
-    let t = theme();
-    let mut query = query;
-    rsx! {
-        div {
-            style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 90; background: rgba(0,0,0,0.45); \
-                    display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh;",
-            onclick: move |_| {
-                if let Some(c) = commands {
-                    c.close();
-                }
-            },
-            div {
-                style: "width: 620px; max-width: 92%; max-height: 70vh; display: flex; flex-direction: column; \
-                        border-radius: 12px; background: {t.pill}; border: 1px solid {t.rule}; \
-                        box-shadow: 0 24px 64px rgba(0,0,0,0.6); overflow: hidden; font-family: {t.font};",
-                onclick: move |e| e.stop_propagation(),
-                div { style: "flex-shrink: 0; height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; \
-                              border-bottom: 1px solid {t.rule};",
-                    Search { size: 16, color: t.ink_3.to_string() }
-                    input {
-                        r#type: "text",
-                        value: "{query}",
-                        style: "flex: 1; min-width: 0; height: 32px; border: none; outline: none; background: transparent; \
-                                color: {t.ink}; font-family: {t.font}; font-size: 15px;",
-                        "aria-label": placeholder,
-                        oninput: move |e| query.set(e.value()),
-                        onkeydown: move |e| on_key.call(e),
-                        onmounted: move |e| {
-                            spawn(async move {
-                                let _ = e.data().set_focus(true).await;
-                            });
-                        },
-                    }
-                    if query.read().is_empty() {
-                        span { style: "position: absolute; margin-left: 26px; color: {t.ink_3}; font-size: 15px; pointer-events: none;",
-                            "{placeholder}"
-                        }
-                    }
-                    Kbd { text: "esc" }
-                }
-                div { style: "flex: 1; min-height: 0; overflow-y: scroll; padding: 6px;",
-                    {children}
-                }
-            }
-        }
-    }
-}
-
-/// A key, as a chip; `on` on a picked row (the quiet ink a step up, for
-/// 4.5:1 on its fill).
-#[component]
-pub(crate) fn Kbd(text: String, #[props(default)] on: bool) -> Element {
-    let t = theme();
-    let ink = if on { &*t.ink_2 } else { &*t.ink_3 };
-    rsx! {
-        span { style: "flex-shrink: 0; padding: 1px 6px; border-radius: 4px; border: 1px solid {t.rule}; \
-                       color: {ink}; font-size: 11px; font-family: {t.font};",
-            "{text}"
-        }
-    }
-}
-
-/// A space's width, in ems.
-const WORD_SPACE: f32 = 0.27;
-
-/// `n` as a count of word spaces.
-fn count(n: usize) -> f32 {
-    f32::from(u16::try_from(n).unwrap_or(u16::MAX))
-}
-
-/// `text` with the characters at `positions` lit.
-#[component]
-fn Lit(text: String, positions: Vec<usize>, ink: String, lit: String) -> Element {
-    // Runs of lit and unlit characters, so a row is a few spans, not one
-    // per character.
-    let mut runs: Vec<(bool, String)> = Vec::new();
-    for (i, c) in text.chars().enumerate() {
-        let on = positions.contains(&i);
-        match runs.last_mut() {
-            Some((was, s)) if *was == on => s.push(c),
-            _ => runs.push((on, c.to_string())),
-        }
-    }
-    // Blitz drops a space where two spans meet: a run's edge spaces become
-    // margin, a word space each.
-    let runs: Vec<(bool, String, f32, f32)> = runs
-        .into_iter()
-        .map(|(on, s)| {
-            let lead = s.chars().take_while(|c| *c == ' ').count();
-            let trail = s.chars().rev().take_while(|c| *c == ' ').count();
-            let word = WORD_SPACE;
-            (
-                on,
-                s.trim().to_owned(),
-                word * count(lead),
-                word * count(trail),
-            )
-        })
-        .collect();
-    rsx! {
-        span { style: "white-space: nowrap; overflow: hidden;",
-            for (i, (on, s, before, after)) in runs.into_iter().enumerate() {
-                span {
-                    key: "{i}",
-                    style: if on {
-                        format!("display: inline-block; color: {lit}; font-weight: 650; margin-left: {before}em; margin-right: {after}em;")
-                    } else {
-                        format!("display: inline-block; color: {ink}; margin-left: {before}em; margin-right: {after}em;")
-                    },
-                    "{s}"
-                }
-            }
-        }
-    }
-}
-
-/// ⌘K: every command, matched as typed; ↑↓ to pick, ↵ to run.
-#[component]
-pub fn CommandPalette() -> Element {
-    let Some(commands) = try_use_commands() else {
-        return rsx! {};
-    };
-    let t = theme();
-    let query = commands.query;
-    let mut selected = use_signal(|| 0usize);
-    let q = Query::parse(&query.read());
-    let only = (commands.only)();
-    let mut all = commands.all();
-    // A choice lists only what can be chosen.
-    if let Some((group, _)) = &only {
-        all.retain(|c| c.group == *group && c.enabled);
-    }
-    let (rows, picks): (Vec<Ranked>, Vec<Pick>) = match q.scope {
-        // On one group with nothing typed, the app's own order (a list's,
-        // as its side shows it), not the alphabet.
-        Scope::Commands if only.is_some() && q.text.is_empty() => all
-            .into_iter()
-            .map(|mut command| {
-                command.group.clear();
-                let pick = Pick::Run(command.id.clone());
-                let row = Ranked {
-                    item: command,
-                    positions: Vec::new(),
-                    score: 0,
-                };
-                (row, pick)
-            })
-            .unzip(),
-        Scope::Commands => rank(&all, &q.text, &commands.recents.read())
-            .into_iter()
-            .map(|mut r| {
-                // On one group, its prompt names it: the rows need not.
-                if only.is_some() {
-                    r.item.group.clear();
-                }
-                let pick = Pick::Run(r.item.id.clone());
-                (r, pick)
-            })
-            .unzip(),
-        _ => crate::keys_ui::scope_rows(&commands, &q)
-            .into_iter()
-            .unzip(),
-    };
-    let count = rows.len();
-    // A new query starts at the top.
-    use_effect(move || {
-        let _ = query();
-        selected.set(0);
-    });
-    if commands.asking.read().is_some() {
-        return rsx! { crate::keys_ui::AskPalette {} };
-    }
-    let enabled: Vec<bool> = rows.iter().map(|r| r.item.enabled).collect();
-    let pick = selected().min(count.saturating_sub(1));
-    let run_at = move |i: usize| {
-        if let (Some(p), Some(true)) = (picks.get(i), enabled.get(i)) {
-            commands.pick(p);
-        }
-    };
-    let run_key = run_at.clone();
-    let on_key = move |e: KeyboardEvent| match e.key() {
-        Key::Named(NamedKey::ArrowDown) => {
-            e.prevent_default();
-            selected.set((pick.saturating_add(1)).min(count.saturating_sub(1)));
-        }
-        Key::Named(NamedKey::ArrowUp) => {
-            e.prevent_default();
-            selected.set(pick.saturating_sub(1));
-        }
-        Key::Named(NamedKey::Enter) => run_key(pick),
-        Key::Named(NamedKey::Escape) => commands.close(),
-        _ => {}
-    };
-    let empty = match q.scope {
-        Scope::Commands if q.text.is_empty() => "No commands yet",
-        Scope::Commands => "No command matches",
-        Scope::Targets => "Nothing on this page matches",
-        Scope::Settings => "No setting matches",
-        Scope::Help if q.text.is_empty() => "Press a key to see what it does",
-        Scope::Help => "Nothing is bound to that",
-    };
-    rsx! {
-        Frame { placeholder: only.clone().map_or_else(|| "Type a command…".to_owned(), |(_, prompt)| prompt), query, on_key,
-            // The prompt stays in sight once the field has text.
-            if let Some((_, prompt)) = only.filter(|_| !q.text.is_empty()) {
-                div { style: "padding: 6px 10px 8px; color: {t.ink_3}; font-size: 12px;", "{prompt}" }
-            }
-            if rows.is_empty() {
-                div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "{empty}" }
-            }
-            for (i, row) in rows.into_iter().enumerate() {
-                CommandRow {
-                    key: "{row.item.id}",
-                    row,
-                    on: i == pick,
-                    onpress: {
-                        let run_at = run_at.clone();
-                        move |()| run_at(i)
-                    },
-                }
-            }
-        }
-    }
-}
-
-#[component]
-pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
-    let t = theme();
-    let c = row.item;
-    let fill = if on { &*t.active } else { "transparent" };
-    let quiet = quiet(on, &t);
-    let ink = if c.enabled { &*t.ink } else { quiet };
-    rsx! {
-        div {
-            class: "lp",
-            "data-command": "{c.id}",
-            style: "height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; \
-                    background: {fill}; font-size: 13px; cursor: pointer;",
-            onclick: move |_| onpress.call(()),
-            span { style: "flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden;",
-                if !c.group.is_empty() {
-                    span { style: "flex-shrink: 0; color: {quiet};", "{c.group}:" }
-                }
-                Lit { text: c.label.clone(), positions: row.positions, ink: ink.to_owned(), lit: t.ink.to_string() }
-                if let Some(why) = c.disabled_reason.clone() {
-                    span { style: "color: {quiet}; font-size: 12px; white-space: nowrap;", "— {why}" }
-                }
-            }
-            if !c.shortcut.is_empty() {
-                Kbd { text: c.shortcut, on }
-            }
-        }
-    }
-}
-
-/// ⌘O: open anything every opener knows; ↵ here, ⌘↵ in a new tab.
-#[component]
-pub fn QuickOpen() -> Element {
-    let Some(commands) = try_use_commands() else {
-        return rsx! {};
-    };
-    let t = theme();
-    let mut query = use_signal(String::new);
-    let mut selected = use_signal(|| 0usize);
-    // Asked from outside (`COMMANDS_SHOW`, an extension's picker): one
-    // opener's items (`theme:`), the field empty for the person to narrow;
-    // or the field set.
-    let mut only = use_signal(|| None::<String>);
-    use_effect(move || {
-        let mut seed = commands.seed;
-        let Some(q) = seed() else { return };
-        seed.set(None);
-        let kind = q
-            .strip_suffix(':')
-            .map(str::trim)
-            .filter(|k| commands.openers.peek().borrow().title(k).is_some());
-        if let Some(k) = kind {
-            only.set(Some(k.to_owned()));
-            query.set(String::new());
-        } else {
-            only.set(None);
-            query.set(q);
-        }
-    });
-    // An opener that answers later (an extension's) bumps the version.
-    let _ = (commands.version)();
-    let asked = only().map_or_else(
-        || query.read().clone(),
-        |kind| format!("{kind}:{}", query.read()),
-    );
-    let found: Vec<Found> = commands.openers.read().borrow().search(&asked);
-    let placeholder = only()
-        .and_then(|k| {
-            commands
-                .openers
-                .peek()
-                .borrow()
-                .title(&k)
-                .map(|t| format!("{t}…"))
-        })
-        .unwrap_or_else(|| "Open…  (note: to look in one place)".to_owned());
-    let count = found.len();
-    use_effect(move || {
-        let _ = query();
-        selected.set(0);
-    });
-    let pick = selected().min(count.saturating_sub(1));
-    let items: Rc<Vec<Found>> = Rc::new(found);
-    let open_at = {
-        let items = items.clone();
-        move |i: usize, open_in: OpenIn| {
-            if let Some(f) = items.get(i) {
-                commands.close();
-                let mut recents = commands.recents;
-                recents
-                    .write()
-                    .touch(&format!("{}:{}", f.item.kind, f.item.id));
-                let _ = commands.openers.read().borrow().open(&f.item, open_in);
-            }
-        }
-    };
-    let open_key = open_at.clone();
-    let on_key = move |e: KeyboardEvent| match e.key() {
-        Key::Named(NamedKey::ArrowDown) => {
-            e.prevent_default();
-            selected.set((pick.saturating_add(1)).min(count.saturating_sub(1)));
-        }
-        Key::Named(NamedKey::ArrowUp) => {
-            e.prevent_default();
-            selected.set(pick.saturating_sub(1));
-        }
-        Key::Named(NamedKey::Enter) => {
-            let m = e.modifiers();
-            let open_in = if m.meta() && m.alt() {
-                OpenIn::Split
-            } else if m.meta() || m.ctrl() {
-                OpenIn::Tab
-            } else {
-                OpenIn::Here
-            };
-            open_key(pick, open_in);
-        }
-        Key::Named(NamedKey::Escape) => commands.close(),
-        _ => {}
-    };
-    let titles: Vec<String> = items
-        .iter()
-        .map(|f| {
-            commands
-                .openers
-                .read()
-                .borrow()
-                .title(&f.item.kind)
-                .unwrap_or_default()
-                .to_owned()
-        })
-        .collect();
-    rsx! {
-        Frame { placeholder, query, on_key,
-            if items.is_empty() {
-                div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "Nothing to open matches" }
-            }
-            for (i, f) in items.iter().cloned().enumerate() {
-                div {
-                    key: "{f.item.kind}:{f.item.id}",
-                    class: "lp",
-                    style: "height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; \
-                            background: {fill(i == pick, &t)}; font-size: 13px; cursor: pointer;",
-                    onclick: {
-                        let open_at = open_at.clone();
-                        move |_| open_at(i, OpenIn::Here)
-                    },
-                    span { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;",
-                        Lit { text: f.item.title.clone(), positions: f.positions.clone(), ink: t.ink_2.to_string(), lit: t.ink.to_string() }
-                        if !f.item.detail.is_empty() {
-                            span { style: "color: {quiet(i == pick, &t)}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
-                        }
-                    }
-                    span { style: "flex-shrink: 0; color: {quiet(i == pick, &t)}; font-size: 11px;",
-                        "{titles.get(i).cloned().unwrap_or_default()}"
-                    }
-                }
-            }
-            div { style: "display: flex; gap: 14px; padding: 8px 10px 4px; color: {t.ink_3}; font-size: 11px;",
-                span { "Return  open" }
-                span { "⌘ Return  new tab" }
-                span { "⌘⌥ Return  split" }
-            }
-        }
-    }
 }
 
 /// The action list window (REAPER's): every command, searchable, with its
