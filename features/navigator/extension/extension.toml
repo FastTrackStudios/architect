@@ -221,6 +221,89 @@ group = "Navigator"
 effect = "mutating"
 params = '{"type":"object","properties":{"folder":{"type":"string"},"path":{"type":"string"}}}'
 
+[[actions]]
+id = "NAVIGATOR_TOGGLE_CALENDAR"
+name = "Calendar"
+description = "Shows or hides the calendar under the folders (with two panes stacked, under the notes)."
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_CALENDAR"
+name = "Navigator: the calendar"
+description = "The calendar's month: its weeks and days, each day's daily note, image and tasks left, the week, month, quarter and year notes, and each period's search token (@2026-11). `date` (YYYY-MM-DD) goes to that day, `move` pages by the weeks on show (a month with the whole month), `today` back to today."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"move":{"type":"integer"},"today":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_DAILY_NOTE"
+name = "Open the daily note"
+description = "Opens the daily note of `date` (YYYY-MM-DD, today when left out), or makes it, under the periodic notes folder by the daily pattern. It asks first when the settings say to, unless `confirm` is false."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_WEEKLY_NOTE"
+name = "Open the weekly note"
+description = "Opens the note of the week holding `date` (today when left out), or makes it. As NAVIGATOR_OPEN_DAILY_NOTE."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_MONTHLY_NOTE"
+name = "Open the monthly note"
+description = "Opens the note of the month holding `date` (today when left out), or makes it. As NAVIGATOR_OPEN_DAILY_NOTE."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_QUARTERLY_NOTE"
+name = "Open the quarterly note"
+description = "Opens the note of the quarter holding `date` (today when left out), or makes it. As NAVIGATOR_OPEN_DAILY_NOTE."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_YEARLY_NOTE"
+name = "Open the yearly note"
+description = "Opens the note of the year holding `date` (today when left out), or makes it. As NAVIGATOR_OPEN_DAILY_NOTE."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_NEXT_PERIOD"
+name = "Open the next periodic note"
+description = "From the periodic note open: the next day's, week's, month's, quarter's or year's note, made when missing. As NAVIGATOR_OPEN_DAILY_NOTE."
+group = "Navigator"
+effect = "mutating"
+shortcut = "⌃⌥→"
+params = '{"type":"object","properties":{"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_PREVIOUS_PERIOD"
+name = "Open the previous periodic note"
+description = "From the periodic note open: the one before. As NAVIGATOR_NEXT_PERIOD."
+group = "Navigator"
+effect = "mutating"
+shortcut = "⌃⌥←"
+params = '{"type":"object","properties":{"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_PARENT_PERIOD"
+name = "Open the parent periodic note"
+description = "From the periodic note open: the note of the period it is in (a day's week, a week's month by its first day, a month's quarter, a quarter's year), skipping kinds that are off. As NAVIGATOR_NEXT_PERIOD."
+group = "Navigator"
+effect = "mutating"
+shortcut = "⌃⌥↑"
+params = '{"type":"object","properties":{"confirm":{"type":"boolean"},"tab":{"type":"boolean"}}}'
+
 # A note's context menu (the app's file menu): pin, and folder notes.
 [[context]]
 target = "file:md"
@@ -969,3 +1052,266 @@ detail = ""
 value = "NewTab"
 label = "A new tab"
 detail = ""
+
+[[sections.settings]]
+key = "navigator.calendar"
+title = "Calendar"
+description = "Days under the folders, the calendar button in their header shows them: a click opens a day's note, or makes it."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_confirm_create"
+title = "Confirm before creating a note"
+description = "Ask before a click makes a periodic note that is not there yet."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_weeks"
+title = "Weeks to show"
+description = "6 is the whole month."
+control = "stepper"
+default = 1
+min = 1.0
+max = 6.0
+step = 1.0
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_placement"
+title = "Calendar in one pane"
+description = "Where the calendar goes when one pane shows at a time."
+control = "segmented"
+default = "Navigation"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Navigation"
+label = "Under the folders"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Below"
+label = "Under both panes"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.week_start"
+title = "Week starts on"
+description = "And so how weeks are numbered."
+control = "select"
+default = "Sunday"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Sunday"
+label = "Sunday (week 1 holds January 1, as in the United States)"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Monday"
+label = "Monday (ISO 8601: week 1 holds January 4)"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Saturday"
+label = "Saturday (week 1 holds January 1)"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.weekend_days"
+title = "Weekend days"
+description = "Shaded in the calendar."
+control = "select"
+default = "SatSun"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "None"
+label = "None"
+detail = ""
+
+[[sections.settings.choices]]
+value = "SatSun"
+label = "Saturday and Sunday"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FriSat"
+label = "Friday and Saturday"
+detail = ""
+
+[[sections.settings.choices]]
+value = "ThuFri"
+label = "Thursday and Friday"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.month_format"
+title = "Month name"
+description = ""
+control = "segmented"
+default = "Full"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Full"
+label = "January"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Short"
+label = "Jan"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.calendar_highlight_today"
+title = "Highlight today"
+description = ""
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_outside_days"
+title = "Days from other months"
+description = "With the whole month on show, the days before and after it."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_feature_images"
+title = "Feature images on days"
+description = "A daily note's image fills its day."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_tasks"
+title = "Tasks on days"
+description = "A ring on days, weeks and months whose notes have tasks left."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_week_numbers"
+title = "Week numbers"
+description = "A column of them; a click opens the week's note."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.calendar_quarter"
+title = "Quarter"
+description = "The quarter beside the month; a click opens its note."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.periodic_folder"
+title = "Periodic notes folder"
+description = "Where periodic notes go; their patterns can add folders under it."
+control = "text"
+default = ""
+unit = ""
+placeholder = "Journal"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.daily_pattern"
+title = "Daily notes"
+description = "A Moment date pattern: `YYYY/YYYYMMDD`. Wrap words in brackets, `[Daily]/YYYY-MM-DD`."
+control = "text"
+default = "YYYY/YYYYMMDD"
+unit = ""
+placeholder = "YYYY/YYYYMMDD"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.weekly_pattern"
+title = "Weekly notes"
+description = "`gggg/[W]ww` (the locale's weeks), `GGGG-[W]WW` (ISO); empty, none."
+control = "text"
+default = "gggg/[W]ww"
+unit = ""
+placeholder = "gggg/[W]ww"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.monthly_pattern"
+title = "Monthly notes"
+description = ""
+control = "text"
+default = "YYYY/YYYYMM"
+unit = ""
+placeholder = "YYYY/YYYYMM"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.quarterly_pattern"
+title = "Quarterly notes"
+description = ""
+control = "text"
+default = "YYYY/[Q]Q"
+unit = ""
+placeholder = "YYYY/[Q]Q"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.yearly_pattern"
+title = "Yearly notes"
+description = ""
+control = "text"
+default = "YYYY"
+unit = ""
+placeholder = "YYYY"
+choices = []
+aliases = []

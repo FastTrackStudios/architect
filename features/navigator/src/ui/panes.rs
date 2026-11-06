@@ -4,11 +4,12 @@
 
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, Check, ChevronDown,
+    ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, CalendarDays, Check, ChevronDown,
     ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder, FolderOpen, ListTree,
     Pin, Rows3, SquarePen, Tag, Vault,
 };
 
+use super::calendar::Calendar;
 use super::virtual_pane::VirtualPane;
 use super::{Navigator, Open};
 use crate::index::NoteCount;
@@ -35,12 +36,15 @@ fn mods(m: Modifiers) -> Mods {
     }
 }
 
+/// The folders' pane; `calendar` draws the calendar at its foot.
 #[component]
-pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>) -> Element {
+pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: bool) -> Element {
     let s = nav.state.read();
     let any = s.any_expanded();
     let reordering = s.reordering;
     let dual = s.settings().dual_pane;
+    let calendar_on = s.settings().calendar;
+    let calendar_open = s.calendar_open;
     drop(s);
     rsx! {
         div { class: "nv-nav", "data-pane": "navigation",
@@ -56,6 +60,14 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     ArrowUpDown { size: 16 }
                 }
                 div { style: "flex:1;" }
+                if calendar_on {
+                    button { class: if calendar_open { "nv-tool nv-on" } else { "nv-tool" },
+                        "aria-label": if calendar_open { "Hide calendar" } else { "Show calendar" },
+                        "data-testid": "nv-calendar-toggle",
+                        onclick: move |_| nav.update(NavigatorState::toggle_calendar),
+                        CalendarDays { size: 16 }
+                    }
+                }
                 button { class: if dual { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Two panes",
                     onclick: move |_| nav.settings.update(|s| s.dual_pane = !s.dual_pane),
                     Columns2 { size: 16 }
@@ -63,6 +75,9 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>) -> Element {
             }
             div { style: "flex:1 1 0; min-height:0; position:relative;",
                 VirtualPane { nav, pane: Pane::Navigation, label: "Folders", NavRows { nav, on_open } }
+            }
+            if calendar {
+                Calendar { nav, on_open }
             }
         }
     }
@@ -232,6 +247,8 @@ pub(super) fn ListPane(
     on_context_menu: Option<EventHandler<(String, MouseEvent)>>,
     single: bool,
     on_new_note: Option<EventHandler<String>>,
+    /// The calendar at its foot: the panes are stacked.
+    calendar: bool,
 ) -> Element {
     let s = nav.state.read();
     let target = s.target();
@@ -337,6 +354,9 @@ pub(super) fn ListPane(
                 } else {
                     VirtualPane { nav, pane: Pane::Files, label: "Notes", ListRows { nav, on_open, on_context_menu } }
                 }
+            }
+            if calendar {
+                Calendar { nav, on_open }
             }
         }
     }

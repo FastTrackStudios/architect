@@ -31,7 +31,6 @@ ui = [
     "dep:futures-timer",
     "dep:futures-channel",
     "dep:futures-util",
-    "dep:chrono",
 ]
 # `VaultSource`: architect's vault (`features/vault`, its `actions`
 # feature's `OpenVault`) as a source, live. Native only.
@@ -49,8 +48,9 @@ futures-timer = { workspace = true, optional = true }
 # A source's change events, from any thread, to the window's.
 futures-channel = { version = "0.3", optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
-# The list's dates in the person's time zone.
-chrono = { workspace = true, optional = true }
+# Dates: the list's in the person's time zone, the calendar's days and
+# the periodic notes' periods.
+chrono = { workspace = true }
 vault = { workspace = true, optional = true, features = ["actions"] }
 serde_json = { workspace = true, optional = true }
 

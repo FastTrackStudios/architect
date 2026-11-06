@@ -228,11 +228,14 @@ pub enum SourceEvent {
 }
 
 /// A change the navigator asks of a source: a folder note made or let
-/// go, a note's place in a manual order.
+/// go, a note's place in a manual order, a periodic note made.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileOp {
     /// Make a folder (and the folders it is in).
     CreateFolder(String),
+    /// Make a file holding `text`, and the folders it is in; an error when
+    /// one is there already.
+    CreateFile { path: String, text: String },
     /// Move (or rename) a file.
     Move { from: String, to: String },
     /// Set a frontmatter property on a note.
@@ -584,6 +587,21 @@ impl MemorySource {
                     return Err(format!("{f} is there already"));
                 }
                 self.create_folder(f.clone());
+            }
+            FileOp::CreateFile { path, text } => {
+                if self.file(path).is_some() {
+                    return Err(format!("{path} is there already"));
+                }
+                let folders: Vec<&str> = ancestors(path).filter(|f| !f.is_empty()).collect();
+                for folder in folders.into_iter().rev() {
+                    self.create_folder(folder);
+                }
+                let now = chrono::Utc::now().timestamp_millis();
+                let body: Vec<&str> = text
+                    .lines()
+                    .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+                    .collect();
+                self.put(NoteFile::new(path.clone(), now, now).preview(body.join(" ")));
             }
             FileOp::Move { from, to } => {
                 if self.file(to).is_some() {

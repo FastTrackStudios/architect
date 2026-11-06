@@ -22,10 +22,12 @@ use futures_util::StreamExt as _;
 use crate::index::VaultIndex;
 use crate::layout::{self, Pane, PaneLayout};
 use crate::list::Clock;
-use crate::settings::{Grouping, ListMode, NavigatorSettings, Orientation};
+use crate::period::PeriodKind;
+use crate::settings::{CalendarPlacement, Grouping, ListMode, NavigatorSettings, Orientation};
 use crate::source::{NavigatorSource, SourceEvent, Subscription};
 use crate::state::{Key as NavKey, Mods, NavigatorState, OpenIn, Outcome};
 
+mod calendar;
 mod panes;
 pub mod theme;
 mod virtual_pane;
@@ -66,6 +68,9 @@ pub struct Navigator {
     /// The list's menu edits the selected place's own list, not the
     /// settings.
     pub own: Signal<bool>,
+    /// A periodic note waiting to be made, and its path: the person is
+    /// asked first (`calendarConfirmBeforeCreate`).
+    pub confirm: Signal<Option<(Outcome, String)>>,
 }
 
 /// The navigator over `source`, kept while the caller is mounted: its
@@ -91,6 +96,7 @@ pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navig
         dragged: use_hook(|| CopyValue::new(false)),
         notice: use_signal(|| None),
         own: use_signal(|| false),
+        confirm: use_signal(|| None),
     };
     // The settings page's changes.
     use_effect(move || {
@@ -239,6 +245,29 @@ impl Navigator {
     /// model): opens a note through `on_open`, or writes to the source.
     pub fn act(&self, out: Option<Outcome>, on_open: EventHandler<Open>) {
         self.outcome(out, on_open, None);
+    }
+
+    /// Opens a periodic note, or makes it: asking first when it is new
+    /// and the settings say to (`calendarConfirmBeforeCreate`), saying why
+    /// not when it cannot be.
+    pub fn open_or_create(&self, out: Result<Outcome, String>, on_open: EventHandler<Open>) {
+        match out {
+            Ok(Outcome::Write {
+                ops,
+                open: Some((path, how)),
+            }) if self.state.peek().settings().calendar_confirm_create => {
+                let mut confirm = self.confirm;
+                confirm.set(Some((
+                    Outcome::Write {
+                        ops,
+                        open: Some((path.clone(), how)),
+                    },
+                    path,
+                )));
+            }
+            Ok(out) => self.act(Some(out), on_open),
+            Err(e) => self.say(e),
+        }
     }
 
     /// Does what an input asked of the app.
@@ -552,6 +581,56 @@ fn use_commands(nav: &Navigator) {
             nav.outcome(out, nav_open(), None);
         },
     );
+    let calendar_on = s.settings().calendar;
+    use_command(
+        when(
+            Command::new("NAVIGATOR_TOGGLE_CALENDAR", "Calendar")
+                .group(group)
+                .checked(s.calendar_open),
+            calendar_on,
+            "The calendar is off in Navigator's settings",
+        ),
+        move || nav.update(NavigatorState::toggle_calendar),
+    );
+    for kind in PeriodKind::ALL {
+        let adjective = kind.adjective();
+        use_command(
+            Command::new(
+                format!("NAVIGATOR_OPEN_{}_NOTE", adjective.to_uppercase()),
+                format!("Open the {adjective} note"),
+            )
+            .group(group),
+            move || {
+                let today = nav.state.peek().today();
+                let out = nav.state.peek().open_periodic(kind, today, OpenIn::Here);
+                nav.open_or_create(out, nav_open());
+            },
+        );
+    }
+    let periodic = s.active_period().is_some();
+    for (id, label, keys, by) in [
+        ("NAVIGATOR_NEXT_PERIOD", "Open the next periodic note", "⌃⌥→", 1),
+        ("NAVIGATOR_PREVIOUS_PERIOD", "Open the previous periodic note", "⌃⌥←", -1),
+        ("NAVIGATOR_PARENT_PERIOD", "Open the parent periodic note", "⌃⌥↑", 0),
+    ] {
+        use_command(
+            when(
+                Command::new(id, label).group(group).shortcut(keys),
+                periodic,
+                "The note open is not a periodic note",
+            ),
+            move || {
+                let s = nav.state.peek();
+                let out = if by == 0 {
+                    s.open_parent_period(OpenIn::Here)
+                } else {
+                    s.open_adjacent_period(by, OpenIn::Here)
+                };
+                drop(s);
+                nav.open_or_create(out, nav_open());
+            },
+        );
+    }
 }
 
 /// The `on_open` the mounted view gave (commands run outside its props).
@@ -648,11 +727,27 @@ pub fn NavigatorView(
             nav.outcome(out, on_open, on_focus_editor);
         }
     };
+    // The calendar's place (Notebook Navigator's `calendarLeftPlacement`
+    // and its vertical split): under the folders side by side, under the
+    // notes stacked, and with one pane at a time under the folders or
+    // under both.
+    let (cal_nav, cal_list, cal_below) = {
+        let s = nav.state.read();
+        let on = s.calendar_visible();
+        match layout {
+            PaneLayout::Dual(Orientation::Horizontal) => (on, false, false),
+            PaneLayout::Dual(Orientation::Vertical) => (false, on, false),
+            PaneLayout::Single => match s.settings().calendar_placement {
+                CalendarPlacement::Navigation => (on, false, false),
+                CalendarPlacement::Below => (false, false, on),
+            },
+        }
+    };
     let nav_pane = rsx! {
-        panes::NavPane { nav, on_open }
+        panes::NavPane { nav, on_open, calendar: cal_nav }
     };
     let list_pane = rsx! {
-        panes::ListPane { nav, on_open, on_context_menu, single: layout == PaneLayout::Single, on_new_note }
+        panes::ListPane { nav, on_open, on_context_menu, single: layout == PaneLayout::Single, on_new_note, calendar: cal_list }
     };
     let body = match layout {
         PaneLayout::Single => {
@@ -661,10 +756,15 @@ pub fn NavigatorView(
             let nav_left = -p * 100.0;
             let list_left = (1.0 - p) * 100.0;
             rsx! {
-                div { class: "nv-split nv-single", "data-pane": if single == Pane::Navigation { "navigation" } else { "files" },
-                    style: "position:absolute; inset:0; overflow:hidden;",
-                    div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{nav_left}%;", {nav_pane} }
-                    div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{list_left}%;", {list_pane} }
+                div { style: "position:absolute; inset:0; display:flex; flex-direction:column;",
+                    div { class: "nv-split nv-single", "data-pane": if single == Pane::Navigation { "navigation" } else { "files" },
+                        style: "flex:1 1 0; min-height:0; position:relative; overflow:hidden;",
+                        div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{nav_left}%;", {nav_pane} }
+                        div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{list_left}%;", {list_pane} }
+                    }
+                    if cal_below {
+                        calendar::Calendar { nav, on_open }
+                    }
                 }
             }
         }
@@ -717,8 +817,10 @@ pub fn NavigatorView(
             }
         }
     };
+    let confirm = nav.confirm.read().clone();
     rsx! {
         document::Style { {CSS} }
+        document::Style { {calendar::CSS} }
         div {
             class: "nv-root",
             "data-navigator": "",
@@ -727,6 +829,41 @@ pub fn NavigatorView(
             onmounted: move |e| root.set(Some(e.data())),
             onkeydown: on_key,
             {body}
+            if let Some((out, path)) = confirm {
+                ConfirmCreate { nav, on_open, out, path }
+            }
+        }
+    }
+}
+
+/// Notebook Navigator's "New daily note" dialog, as a bar over the
+/// navigator's foot: the note's path, Cancel and Create.
+#[component]
+fn ConfirmCreate(nav: Navigator, on_open: EventHandler<Open>, out: Outcome, path: String) -> Element {
+    let mut confirm = nav.confirm;
+    rsx! {
+        div { class: "nv-confirm", role: "alertdialog", "aria-label": "New note",
+            style: "position:absolute; left:8px; right:8px; bottom:8px; z-index:20; padding:10px; border-radius:10px; \
+                    background:var(--nv-background); border:1px solid var(--nv-divider); display:flex; flex-direction:column; gap:8px;",
+            div { style: "font-weight:600;", "New note" }
+            div { style: "color:var(--nv-muted); font-size:12px; overflow-wrap:anywhere;",
+                "File {path} does not exist. Would you like to create it?"
+            }
+            div { style: "display:flex; justify-content:flex-end; gap:6px;",
+                button { class: "nv-confirm-cancel", "data-testid": "nv-confirm-cancel",
+                    style: "height:26px; padding:0 10px; border-radius:6px; border:1px solid var(--nv-divider); background:transparent; color:var(--nv-text); cursor:pointer;",
+                    onclick: move |_| confirm.set(None),
+                    "Cancel"
+                }
+                button { class: "nv-confirm-create", "data-testid": "nv-confirm-create",
+                    style: "height:26px; padding:0 10px; border-radius:6px; border:none; background:var(--nv-open); color:var(--nv-background); cursor:pointer; font-weight:600;",
+                    onclick: move |_| {
+                        confirm.set(None);
+                        nav.act(Some(out.clone()), on_open);
+                    },
+                    "Create"
+                }
+            }
         }
     }
 }

@@ -21,13 +21,22 @@
 //! palette (`NAVIGATOR_*`), its section on the settings page
 //! ([`NavigatorSettings`]), its colours as theme tokens (`navigator.*`).
 //!
+//! Under the folders, a calendar of daily notes ([`calendar`]), and the
+//! periodic notes, daily to yearly, each a Moment pattern under one folder
+//! ([`PeriodicNotes`], [`pattern`]). A [`Period`] is a day, a week, a
+//! month, a quarter or a year; a search's [`DateFilter`] is made from the
+//! same days.
+//!
 //! [Notebook Navigator]: https://github.com/johansan/notebook-navigator
 
 pub mod appearance;
+pub mod calendar;
 pub mod grouping;
 pub mod index;
 pub mod layout;
 pub mod list;
+pub mod pattern;
+pub mod period;
 pub mod selection;
 pub mod settings;
 pub mod source;
@@ -41,13 +50,17 @@ pub mod ui;
 pub mod vault_source;
 
 pub use appearance::Appearance;
+pub use calendar::{CalendarDay, CalendarGrid, CalendarWeek, HeaderPeriod, PeriodicNotes};
 pub use index::{NoteCount, VaultIndex};
 pub use layout::{Pane, PaneLayout};
 pub use list::{Clock, Lines, ListContext, ListRow, ListRowKind, PinIn, Thumb};
+pub use pattern::Pattern;
+pub use period::{DateField, DateFilter, DayMonthOrder, Period, PeriodKind, WeekRules};
 pub use selection::{NavTarget, Selection};
 pub use settings::{
-    CountPlacement, FolderNoteOpen, Grouping, ListMode, NarrowLayout, NavigatorSettings,
-    Orientation, SortOption, StartPane, TextCount,
+    CalendarPlacement, CountPlacement, FolderNoteOpen, Grouping, ListMode, MonthFormat,
+    NarrowLayout, NavigatorSettings, Orientation, SortOption, StartPane, TextCount, WeekStart,
+    WeekendDays,
 };
 pub use source::{
     FileOp, Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
