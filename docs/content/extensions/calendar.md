@@ -150,9 +150,45 @@ a process against a real vault, then with Tasks and the Time Tracker.
 Run them with `cargo nextest`, one process per test: the extension keeps
 its state in process-wide statics.
 
+## 7. Booking
+
+Task's scheduling also books time (`task:features/scheduling/scheduling/src/slots.rs`).
+`extensions/calendar/src/booking.rs` ports it with three kinds of note,
+each in Task's shape:
+
+- **An event type** (`scheduling-event-type`, `Calendar/Event types`): its
+  length, its buffer, the schedule it is booked in, where it happens, and
+  two keys Task's notes don't have, `notice_min` and `days_ahead`.
+- **A schedule** (`scheduling-schedule`, `Calendar/Schedules`): its weekly
+  hours, written as lines (`mon-fri 09:00-17:00`) or as Task's `{days,
+  start, end}`.
+- **A booking** (`scheduling-booking`, `Calendar/Bookings`): its start and
+  end in UTC, the attendee, and a status.
+
+`open_slots` steps through a schedule's hours by the length plus the
+buffer, as Task's does. It also goes past Task's first cut in four ways:
+
+- Bookings that hold their time block a slot, and so do the calendar's
+  own events, each padded by the buffer.
+- `notice_min` and `days_ahead` clamp the window.
+- `CALENDAR_BOOK` refuses a slot that is no longer open.
+- Bookings show on the calendar.
+
+| action | what |
+|---|---|
+| `CALENDAR_SCHEDULE`, `CALENDAR_EVENT_TYPE` | make or change one |
+| `CALENDAR_EVENT_TYPES` | the event types and schedules |
+| `CALENDAR_OPEN_SLOTS` | Task's `list_open_slots` |
+| `CALENDAR_BOOK` | Task's `book_slot` |
+| `CALENDAR_BOOKINGS`, `CALENDAR_BOOKING_STATUS` | list them; Task's `update_booking_status` |
+| `CALENDAR_BOOKINGS_OPEN` | the Bookings view: each type's slots this week, a click books one |
+
+A schedule's `timezone` is kept, but not converted: its hours are the
+person's time zone's. Task's audit log of booking changes
+(`Records/audit/booking-events.jsonl`) is not ported.
+
 ## Not yet
 
-- Slots and bookings (Task's `list_open_slots` and `book_slot`) and
-  read-only ICS import are in their own pull requests.
+- Read-only ICS import is in its own pull request.
 - Day-plan templates (`task:features/scheduling/scheduling-proto/src/resolve.rs`)
   are not ported.

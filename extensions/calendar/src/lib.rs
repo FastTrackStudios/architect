@@ -25,6 +25,8 @@
 //! - **Service:** it provides `architect.calendar`, each method its
 //!   `CALENDAR_<METHOD>` action: Task's `list_events`, `create_event`,
 //!   `update_event`, `reschedule_event` and `cancel_event`, and more.
+//! - **Booking** ([`booking`]): event types, the hours they are open,
+//!   open slots and bookings, Task's `list_open_slots` and `book_slot`.
 //! - **Also:** a capture target (`event`), a navigator provider ([`nav`])
 //!   and a tour.
 
@@ -33,6 +35,7 @@
 // minutes and days stay far inside i64 and chrono's range.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
+pub mod booking;
 pub mod layout;
 pub mod model;
 pub mod nav;
@@ -107,6 +110,10 @@ struct Cache {
     events: Vec<Event>,
     tasks: Vec<Block>,
     time: Vec<Block>,
+    /// Booking's notes ([`booking`]).
+    event_types: Vec<booking::EventType>,
+    schedules: Vec<booking::Schedule>,
+    bookings: Vec<booking::Booking>,
     /// Properties the vault has besides an event's own: read too, as a
     /// link can be under any key.
     extra_keys: Vec<String>,
@@ -122,6 +129,9 @@ static CACHE: Mutex<Cache> = Mutex::new(Cache {
     events: Vec::new(),
     tasks: Vec::new(),
     time: Vec::new(),
+    event_types: Vec::new(),
+    schedules: Vec::new(),
+    bookings: Vec::new(),
     extra_keys: Vec::new(),
     tasks_found: false,
     time_found: false,
@@ -143,7 +153,7 @@ static SHOWN: Mutex<Option<Shown>> = Mutex::new(None);
 /// Moves on with every read and write, for the views.
 static REVISION: AtomicU64 = AtomicU64::new(0);
 
-fn cache() -> std::sync::MutexGuard<'static, Cache> {
+pub(crate) fn cache() -> std::sync::MutexGuard<'static, Cache> {
     CACHE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -367,6 +377,7 @@ pub async fn refresh() -> Result<Vec<Event>, String> {
     } else {
         (Vec::new(), false)
     };
+    let booked = booking::read().await.ok();
     {
         let mut c = cache();
         c.settings = Some(settings);
@@ -374,6 +385,11 @@ pub async fn refresh() -> Result<Vec<Event>, String> {
         c.time = time;
         c.tasks_found = tasks_found;
         c.time_found = time_found;
+        if let Some((types, schedules, bookings)) = booked {
+            c.event_types = types;
+            c.schedules = schedules;
+            c.bookings = bookings;
+        }
         c.read = true;
         match &read {
             Ok(events) => {
@@ -391,11 +407,17 @@ pub async fn refresh() -> Result<Vec<Event>, String> {
 /// and the tasks' and tracked time's blocks when they show.
 #[must_use]
 pub fn blocks(from: NaiveDateTime, to: NaiveDateTime) -> Vec<Block> {
-    let (events, tasks, time) = {
+    let (events, tasks, time, booked) = {
         let c = cache();
-        (c.events.clone(), c.tasks.clone(), c.time.clone())
+        (
+            c.events.clone(),
+            c.tasks.clone(),
+            c.time.clone(),
+            booking::blocks(&c.bookings, &c.event_types),
+        )
     };
     let mut out = model::occurrences(&events, from, to, &Local);
+    out.extend(booked.into_iter().filter(|b| b.overlaps(from, to)));
     out.extend(tasks.into_iter().filter(|b| b.overlaps(from, to)));
     out.extend(time.into_iter().filter(|b| b.overlaps(from, to)));
     model::sort(&mut out);
@@ -1039,7 +1061,7 @@ pub async fn agenda(args: Value) -> Result<Value, String> {
         .filter(|b| match b.source {
             model::Source::Task { .. } => want_tasks,
             model::Source::Time { .. } => want_time,
-            model::Source::Event { .. } => true,
+            model::Source::Event { .. } | model::Source::Booking { .. } => true,
         })
         .map(block_json)
         .collect();
@@ -1303,6 +1325,7 @@ impl Extension for Calendar {
         vault::connect(ext.handle());
         ext.navigator(nav::ACTIONS, nav::CalendarNav);
         ext.view(VIEW, ui::CalendarView)
+            .view("bookings", booking::BookingsView)
             .base_view("calendar", ui::MonthBase)
             .base_view("timeline", ui::TimelineBase)
             .action("CALENDAR_LIST", list)
@@ -1323,6 +1346,14 @@ impl Extension for Calendar {
                 Ok(shown_json())
             })
             .action("CALENDAR_DAILY", daily)
+            .action("CALENDAR_EVENT_TYPES", booking::list_types)
+            .action("CALENDAR_EVENT_TYPE", booking::save_type)
+            .action("CALENDAR_SCHEDULE", booking::save_schedule)
+            .action("CALENDAR_OPEN_SLOTS", booking::list_slots)
+            .action("CALENDAR_BOOK", booking::book)
+            .action("CALENDAR_BOOKINGS", booking::list_bookings)
+            .action("CALENDAR_BOOKING_STATUS", booking::set_status)
+            .action("CALENDAR_BOOKINGS_OPEN", booking::open_view)
             .action("CALENDAR_BASE", base)
             .action("CALENDAR_STARTED", |_| async {
                 let _ = refresh().await;
