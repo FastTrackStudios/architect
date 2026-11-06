@@ -98,7 +98,7 @@ steps (
     {id actions-list-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
     {id actions-list-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}
     {id actions-list-3, hide true, do @run{id LAB_GO, args {tab inbox}}, done {check ({id LAB_STATE, has {tab inbox}})}}
-    {id actions-list-4, hide true, do @run{id LAB_SHOW_COMMANDS}, done {check ({id COMMANDS_STATE, has {overlay palette}})}}
+    {id actions-list-4, hide true, do @run{id COMMAND_PALETTE_OPEN}, done {check ({id COMMANDS_STATE, has {overlay palette}})}}
     {
         id actions-list
         text "Every capability is an action on one Action List, by id with a JSON schema. ⌘K, the menus, the keys, the CLI (architect-desktop actions run …), MCP and the control socket all run the same list. Try: type “sched” and press ↵."

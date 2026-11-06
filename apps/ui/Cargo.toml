@@ -52,6 +52,8 @@ architect-tasks = { workspace = true }
 architect-time-tracker = { workspace = true }
 # The theme picker, architect's built-in extension.
 architect-theme-picker = { workspace = true }
+# ⌘K and ⌘O: the Command Palette, a linked extension (#381).
+architect-command-palette = { workspace = true }
 architect-settings-sheet = { workspace = true }
 # Navigator, the sidebar's navigator as a built-in extension (GPL-3.0, as
 # architect-navigator: the lab already ships under it).

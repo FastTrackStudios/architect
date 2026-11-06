@@ -1,0 +1,113 @@
+# The Command Palette (features/palette/extension/src/lib.rs, #381): ⌘K
+# and ⌘O as an extension. The shell keeps only the palette slot and
+# COMMANDS_SHOW; this draws both overlays with its views
+# ([[palette_views]]), binds their keys ([[keys]]) and ranks through the
+# palette engine (architect-palette). One Rust value (`CommandPalette`, a
+# linked::Extension): an app links it in as a built-in, and its program
+# (src/main.rs) serves the same value as a process when a development copy
+# runs (EXT_CLONE {"id":"command-palette"}), drawing its own palette over
+# COMMANDS_LIST and COMMANDS_RUN in the built-in's place. Turn it off and
+# ⌘K and ⌘O are gone; another extension that draws the same overlays and
+# binds the same keys replaces it.
+id = "command-palette"
+name = "Command Palette"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "⌘K: every command, matched as you type, the extensions' sources with them; ⌘O: open anything. Replace it with your own: clone it, or install one that draws the palette's overlays."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-command-palette"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/palette/extension"
+
+# The commands' own actions: open an overlay, list the commands, run one
+# (a development copy's palette).
+[capabilities]
+actions = ["COMMANDS_SHOW", "COMMANDS_LIST", "COMMANDS_RUN"]
+effect = "mutating"
+
+# Other extensions reach the palette as a service: `palette.show` and
+# `palette.search` (COMMAND_PALETTE_SHOW, COMMAND_PALETTE_SEARCH).
+[provides]
+"architect.palette" = "0.1.0"
+
+[[views]]
+id = "palette"
+title = "Command Palette"
+icon = "command"
+placement = "overlay"
+
+[[views]]
+id = "quick-open"
+title = "Open Anything"
+icon = "search"
+placement = "overlay"
+
+# The shell's palette slot: which of its views draws each overlay.
+[[palette_views]]
+overlay = "palette"
+view = "palette"
+
+[[palette_views]]
+overlay = "quick-open"
+view = "quick-open"
+
+# ⌘K (and ⇧⌘P), ⌘O, with the Control forms another platform sends.
+[[keys]]
+chord = "⌘K"
+action = "COMMAND_PALETTE_OPEN"
+
+[[keys]]
+chord = "⌃K"
+action = "COMMAND_PALETTE_OPEN"
+
+[[keys]]
+chord = "⇧⌘P"
+action = "COMMAND_PALETTE_OPEN"
+
+[[keys]]
+chord = "⌃⇧P"
+action = "COMMAND_PALETTE_OPEN"
+
+[[keys]]
+chord = "⌘O"
+action = "COMMAND_PALETTE_OPEN_ANYTHING"
+
+[[keys]]
+chord = "⌃O"
+action = "COMMAND_PALETTE_OPEN_ANYTHING"
+
+[[actions]]
+id = "COMMAND_PALETTE_OPEN"
+name = "Show every command"
+description = "Opens the command palette: every command, matched as you type, with what the extensions' sources (`[[palette_sources]]`) find."
+group = "Help"
+effect = "read_only"
+
+[[actions]]
+id = "COMMAND_PALETTE_OPEN_ANYTHING"
+name = "Open…"
+description = "Opens ⌘O: notes, views, themes — everything an opener knows; `kind:` looks in one place."
+group = "File"
+effect = "read_only"
+
+[[actions]]
+id = "COMMAND_PALETTE_SHOW"
+name = "Command Palette: show"
+description = "`palette.show`: opens `overlay` (`palette`, `quick-open`; `none` closes), its field set to `query` when given."
+group = "Help"
+effect = "read_only"
+params = '{"type":"object","properties":{"overlay":{"type":"string"},"query":{"type":"string"}}}'
+
+[[actions]]
+id = "COMMAND_PALETTE_SEARCH"
+name = "Command Palette: search"
+description = "`palette.search`: the commands matching `query`, best first, as the palette ranks them (the engine, architect-palette): `{items: [{id, label, group, enabled, positions}]}`, at most `limit` (20)."
+group = "Help"
+effect = "read_only"
+params = '{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}}}'

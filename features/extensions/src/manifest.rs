@@ -381,13 +381,6 @@ pub struct DataDecl {
     pub scope: DataScope,
 }
 
-/// A key it binds to an action.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-pub struct KeyDecl {
-    pub chord: String,
-    pub action: String,
-}
-
 /// A settings section it adds, there while it is loaded: an item of the
 /// settings page's point (`settings.sections`), in the shape that point's
 /// items have.
@@ -544,8 +537,6 @@ pub struct Manifest {
     pub workers: Vec<WorkerDecl>,
     #[serde(default)]
     pub data: Vec<DataDecl>,
-    #[serde(default)]
-    pub keys: Vec<KeyDecl>,
     #[serde(default)]
     pub themes: Vec<ThemeDecl>,
     /// Its own theme tokens' defaults, by name: literals or expressions

@@ -697,6 +697,7 @@ const FORWARDED: &[&str] = &[
     "EXT_EMBEDS",
     "EXT_PROJECT_TYPES",
     "EXT_CAPTURE_TARGETS",
+    "EXT_PALETTE",
     "EXT_OPEN",
     "EXT_VIEW_OPEN",
     "EXT_STATE_SET",
@@ -893,6 +894,15 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if let Ok(with) = extensions
             .clone()
             .with_linked(&architect_theme_picker::ThemePicker)
+        {
+            extensions = with;
+        }
+        // The Command Palette: ⌘K and ⌘O, drawn in the shell's palette
+        // slot (#381). Off, the app has neither; a development copy
+        // (EXT_CLONE {"id":"command-palette"}) draws them in its place.
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&architect_command_palette::CommandPalette)
         {
             extensions = with;
         }

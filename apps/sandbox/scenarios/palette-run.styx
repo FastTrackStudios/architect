@@ -9,7 +9,7 @@ steps (
     {
         id open
         text "⌘K opens the palette: every command the app has, a view's own too."
-        do @run{id LAB_SHOW_COMMANDS}
+        do @run{id COMMAND_PALETTE_OPEN}
         done {
             on (@changed"commands")
             check ({id COMMANDS_STATE, has {overlay palette}})

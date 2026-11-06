@@ -910,9 +910,9 @@ fn ActionPicker(ui: ExtensionUi, purpose: For) -> Element {
     let all = commands(&host);
     let found = rank(&all, &query(), &Recents::default())
         .into_iter()
-        .filter(|r| r.command.enabled)
+        .filter(|r| r.item.enabled)
         .take(40)
-        .map(|r| r.command);
+        .map(|r| r.item);
     let input = input_style(&t);
     rsx! {
         div { role: "dialog", "aria-label": "Pick an action", "data-testid": "toolbar-action-picker",

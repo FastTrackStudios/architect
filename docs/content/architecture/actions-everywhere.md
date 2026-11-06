@@ -6,8 +6,9 @@ weight = 66
 
 > **Status: palette, quick open and the action list window landed
 > (2026-11-01)** in `architect-commands` (`features/commands`): the model
-> (`features/commands/src/fuzzy.rs`, `palette.rs` `rank`, `opener.rs`
-> `Openers`, `custom.rs` `CustomAction`) wasm-clean; behind `ui` the
+> (the engine, `architect-palette`: `features/palette/src/fuzzy.rs`,
+> `rank.rs` `rank`, `open.rs` `Openers`; and
+> `features/commands/src/custom.rs` `CustomAction`) wasm-clean; behind `ui` the
 > palette, quick open and `ActionListView` over an app's Action Lists and
 > the commands a view registers (`use_command`, `use_opener`); behind
 > `native` the window's chords (`WindowKeys`). The workspace's own
@@ -58,7 +59,7 @@ element with no action.
 A view's own command (`architect_commands::Command`, registered with
 `use_command`) says what running it does, as an action's `Effect` does:
 read-only, mutating (the default) or destructive (`Command::destructive`,
-`Command::read_only`; `features/commands/src/palette.rs` `Effect`). A model
+`Command::read_only`; `features/palette/src/item.rs` `Effect`). A model
 reaches commands through `COMMANDS_RUN`, and runs each one with that
 command's own effect, not as a blanket write
 (`features/commands/src/bridge.rs` `use_command_actions`):

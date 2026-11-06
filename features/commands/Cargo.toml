@@ -42,6 +42,8 @@ ui = [
 ]
 
 [dependencies]
+# The engine: items, sources, matching, ranking, recents, openers.
+architect-palette = { workspace = true }
 facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
 # The keymap engine: a command's keys, sequences, contexts and held tools.

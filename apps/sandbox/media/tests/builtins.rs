@@ -151,7 +151,7 @@ fn quick_open_extensions() {
         "quick-open-ext",
         r#"    {
         id open
-        do @run{id LAB_OPEN_ANYTHING}
+        do @run{id COMMAND_PALETTE_OPEN_ANYTHING}
         done {
             on (@changed"commands")
             check ({id COMMANDS_STATE, has {overlay quick-open}})

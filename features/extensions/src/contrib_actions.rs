@@ -18,6 +18,7 @@
 //! | `EXT_EMBEDS` | every inline embed and what it claims, or `{claim}`'s (`fence:kf`): which extension draws it, and how |
 //! | `EXT_PROJECT_TYPES` | every project type loaded extensions add (`[[project_types]]`), or `{id}`'s: its properties, template, folders, views and owner |
 //! | `EXT_CAPTURE_TARGETS` | every capture target loaded extensions add (`[[capture_targets]]`): its chips, tokens, action and owner |
+//! | `EXT_PALETTE` | the palette slot (#381): which extension's view draws each overlay (`[[palette_views]]`), the keys extensions bind (`[[keys]]`) and the palette's sources (`[[palette_sources]]`) |
 
 use architect::action::{
     ActionCaller, ActionError, ActionMeta, Effect, Invocation, InvocationSource, RawJson,
@@ -111,6 +112,15 @@ static CAPTURE_TARGETS: ActionMeta = meta(
      id, name, icon, description, the action that makes one from a capture, the chips it \
      offers, the quick-add tokens it adds and the extension it is from (`from`). Architect's \
      capture (CAPTURE_TARGETS) offers them after its own note.",
+);
+static PALETTE: ActionMeta = meta(
+    "EXT_PALETTE",
+    "The palette slot",
+    "What the loaded extensions put in the palette (#381): `views`, which extension's view draws \
+     each overlay of the shell's slot (`[[palette_views]]`: `palette` is ⌘K, `quick-open` ⌘O; \
+     none, and it does not show); `keys`, the keys they bind to their actions (`[[keys]]`); \
+     `sources`, the sources of the palette's rows (`[[palette_sources]]`). Each with the \
+     extension it is from (`from`).",
 );
 static ENABLE: ActionMeta = meta(
     "EXT_ENABLE",
@@ -429,6 +439,26 @@ impl Extensions {
                     })
                     .collect();
                 Ok::<_, String>(RawJson::from(Value::Array(all).to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &PALETTE,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, (): ()| {
+                fn from<T: serde::Serialize>(by: &crate::contrib::By<T>) -> Value {
+                    let mut v = serde_json::to_value(&by.item).unwrap_or(Value::Null);
+                    v.as_object_mut()
+                        .map(|map| map.insert("from".to_owned(), json!(by.owner)));
+                    v
+                }
+                let reg = me.host().contributions();
+                let answer = json!({
+                    "views": reg.palette_views().iter().map(from).collect::<Vec<_>>(),
+                    "keys": reg.key_bindings().iter().map(from).collect::<Vec<_>>(),
+                    "sources": reg.palette_sources().iter().map(from).collect::<Vec<_>>(),
+                });
+                Ok::<_, String>(RawJson::from(answer.to_string()))
             },
         )?;
         for (meta, on) in [(&ENABLE, true), (&DISABLE, false)] {

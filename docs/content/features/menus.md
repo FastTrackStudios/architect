@@ -28,14 +28,14 @@ The model is in the default build of `architect-commands`; `ui` adds
 ```rust
 let menus = architect_commands::MenuBar::standard("Architect Lab")
     .menu("File", |m| m
-        .commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
+        .commands(["LAB_CAPTURE", "COMMAND_PALETTE_OPEN_ANYTHING"])
         .separator()
         .command("WORKSPACE_CLOSE_TAB"))
     .menu("View", |m| m
         .command("LAB_TOGGLE_DETAILS")
         .separator()
         .section("Screensets", move || sets.read().menu_rows("VIEW_RECALL_SCREENSET")))
-    .menu("Help", |m| m.command("LAB_SHOW_COMMANDS"));
+    .menu("Help", |m| m.command("COMMAND_PALETTE_OPEN"));
 
 rsx! {
     architect_commands::NativeMenus { bar: menus.clone() }   // macOS, Linux, iPadOS

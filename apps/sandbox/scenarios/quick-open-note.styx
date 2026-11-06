@@ -39,7 +39,7 @@ steps (
     {
         id open
         text "⌘O opens anything: notes, files, views, by a few of their letters."
-        do @run{id LAB_OPEN_ANYTHING}
+        do @run{id COMMAND_PALETTE_OPEN_ANYTHING}
         done {
             on (@changed"commands")
             check ({id COMMANDS_STATE, has {overlay quick-open}})

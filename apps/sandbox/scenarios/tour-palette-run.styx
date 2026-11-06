@@ -18,7 +18,7 @@ steps (
     }
     {
         id open
-        do @run{id LAB_SHOW_COMMANDS}
+        do @run{id COMMAND_PALETTE_OPEN}
         done {
             on (@changed"guide")
             check ({id GUIDE_TOUR_STATE, has {step find, index 2}})

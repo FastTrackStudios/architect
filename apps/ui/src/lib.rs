@@ -1177,18 +1177,9 @@ pub fn LabApp() -> Element {
             .shortcut("⌘/"),
         move || lab.help(),
     );
-    architect_commands::use_command(
-        architect_commands::Command::new("LAB_SHOW_COMMANDS", "Show every command")
-            .group("Help")
-            .shortcut("⌘K"),
-        move || commands.show(architect_commands::Overlay::Palette),
-    );
-    architect_commands::use_command(
-        architect_commands::Command::new("LAB_OPEN_ANYTHING", "Open…")
-            .group("File")
-            .shortcut("⌘O"),
-        move || commands.show(architect_commands::Overlay::QuickOpen),
-    );
+    // "Show every command" (⌘K) and "Open…" (⌘O) are the Command
+    // Palette extension's (COMMAND_PALETTE_OPEN, _OPEN_ANYTHING; #381):
+    // turned off, they are gone from the menus and the keys.
     // The menu bar: a view of the commands, labels and keys and all.
     let menus = architect_commands::MenuBar::standard(Mode::current().name())
         .menu("File", |m| {
@@ -1202,11 +1193,14 @@ pub fn LabApp() -> Element {
             } else {
                 m
             };
-            let m = m.command("LAB_OPEN_ANYTHING").separator().commands([
-                "WORKSPACE_CLOSE_TAB",
-                "WORKSPACE_REOPEN_TAB",
-                "WORKSPACE_CLOSE_OTHER_TABS",
-            ]);
+            let m = m
+                .command("COMMAND_PALETTE_OPEN_ANYTHING")
+                .separator()
+                .commands([
+                    "WORKSPACE_CLOSE_TAB",
+                    "WORKSPACE_REOPEN_TAB",
+                    "WORKSPACE_CLOSE_OTHER_TABS",
+                ]);
             // The account's, where the app has accounts.
             if accounts.is_some() {
                 m.separator().commands([
@@ -1255,7 +1249,7 @@ pub fn LabApp() -> Element {
                 "WORKSPACE_GO_FORWARD",
             ])
         })
-        .menu("Help", |m| m.commands(["LAB_HELP", "LAB_SHOW_COMMANDS"]))
+        .menu("Help", |m| m.commands(["LAB_HELP", "COMMAND_PALETTE_OPEN"]))
         // What extensions add to each menu.
         .contributed(move |menu| ext_ui.menu_rows(menu));
     let route = (lab.route)();
@@ -1379,6 +1373,13 @@ pub fn LabApp() -> Element {
     if !Mode::current().is_sandbox() {
         status.retain(|s| s.id == "commands");
     }
+    // ⌘K is the Command Palette extension's: off, no hint for it.
+    if commands
+        .palette_owner(architect_commands::Overlay::Palette)
+        .is_none()
+    {
+        status.retain(|s| s.id != "commands");
+    }
     // Done, Delete and Move keep their way back on the status line,
     // where the notice over their list is not on show.
     let said_here = (lab.notice)()
@@ -1496,9 +1497,9 @@ pub fn LabApp() -> Element {
                         // Vault, its tabs).
                         actions: vec![
                             shell::BarAction::new("LAB_GO_BACK", "Go back", icon!(ArrowLeft)),
-                            shell::BarAction::new("LAB_OPEN_ANYTHING", "Open…", icon!(Search)),
+                            shell::BarAction::new("COMMAND_PALETTE_OPEN_ANYTHING", "Open…", icon!(Search)),
                             shell::BarAction::new("LAB_UNDO", "Undo", icon!(Undo2)),
-                            shell::BarAction::new("LAB_SHOW_COMMANDS", "Commands", icon!(CommandIcon)),
+                            shell::BarAction::new("COMMAND_PALETTE_OPEN", "Commands", icon!(CommandIcon)),
                             shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
                             shell::BarAction::new("LAB_HELP", "Help", icon!(CircleQuestionMark)),
                         ],

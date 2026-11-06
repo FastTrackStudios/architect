@@ -113,7 +113,7 @@ fn function_key(key: &str) -> Option<String> {
 mod tests {
     use super::{Prop, keys, props};
     use crate::menu::{Item, Resolved, Tree};
-    use crate::palette::Command;
+    use architect_palette::Command;
 
     #[test]
     fn a_shortcut_is_named_as_dbusmenu_names_keys() {

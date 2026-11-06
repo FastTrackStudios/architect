@@ -107,7 +107,7 @@ heard at the window to work after a click on empty space.
 
 What you get:
 
-- **⌘K, the palette** (`CommandPalette`): every enabled command, the most
+- **⌘K, the palette** (the Command Palette extension's `PaletteView`, #381): every enabled command, the most
   specific first, recent first when the field is empty, disabled ones dimmed
   with why. An action with arguments asks for them a step at a time from its
   params schema (`features/commands/src/params.rs`). Prefixes narrow it:
@@ -116,7 +116,7 @@ What you get:
 
 ![⌘K opened, "done" typed, Mark done run from the palette](https://raw.githubusercontent.com/FastTrackStudios/architect/media/palette-run.gif)
 
-- **⌘O, quick open** (`QuickOpen`): every opener at once. A feature
+- **⌘O, quick open** (its `QuickOpenView`): every opener at once. A feature
   registers one with `use_opener`; the sandbox's Vault registers its notes and
   opens the picked one where the person asked (here, a new tab, a split):
 
@@ -238,7 +238,7 @@ enabled state and ticks come from the commands. From the sandbox:
 ```rust
 let menus = architect_commands::MenuBar::standard("Architect Lab")
     .menu("File", |m| {
-        m.commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
+        m.commands(["LAB_CAPTURE", "COMMAND_PALETTE_OPEN_ANYTHING"])
             .separator()
             .commands(["WORKSPACE_CLOSE_TAB", "WORKSPACE_REOPEN_TAB"])
     })
@@ -252,7 +252,7 @@ let menus = architect_commands::MenuBar::standard("Architect Lab")
                 .collect()
         })
     })
-    .menu("Help", |m| m.command("LAB_SHOW_COMMANDS"));
+    .menu("Help", |m| m.command("COMMAND_PALETTE_OPEN"));
 ```
 
 - `MenuBar::standard` lays out the app menu, File, Edit, View, Window and

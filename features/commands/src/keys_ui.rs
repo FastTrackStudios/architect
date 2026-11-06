@@ -21,15 +21,16 @@ use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::custom::{Condition, CustomAction, Runner, Step};
-use crate::fuzzy::fuzzy;
 use crate::keymap::{
     Binding, Clash, EVERYWHERE, Keymap, Layer, PersonKeymap, display_chord, display_keys,
     normalize_keys,
 };
-use crate::opener::{OpenIn, OpenItem, Opener};
-use crate::palette::{Command, Query, Ranked, Scope};
+use crate::kit::{Frame, Kbd, fill, theme};
 use crate::params::{Param, args_json, to_ask};
-use crate::ui::{Commands, Frame, Kbd, fill, theme, try_use_commands};
+use crate::ui::{Commands, try_use_commands};
+use architect_palette::fuzzy;
+use architect_palette::{Command, Query, Ranked, Scope};
+use architect_palette::{OpenIn, OpenItem, Opener};
 
 /// What a palette row does when picked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +39,9 @@ pub enum Pick {
     Run(String),
     /// Open what an `@` or `#` finder found.
     Open(Scope, OpenItem),
+    /// Run what a contributed source's row does (its `[[palette_sources]]`
+    /// `run`, given the row's id).
+    Item(Command),
 }
 
 /// An action's arguments being asked in the palette, a step at a time.
@@ -327,8 +331,10 @@ impl Commands {
         (used, rest)
     }
 
-    /// A palette row was picked.
-    pub(crate) fn pick(&self, pick: &Pick) {
+    /// A palette row was picked: its command runs (or first asks its
+    /// arguments), what a finder found opens, a contributed row runs its
+    /// source's action.
+    pub fn pick(&self, pick: &Pick) {
         match pick {
             Pick::Run(id) => {
                 let ask = to_ask(self.params_schema(id).as_deref());
@@ -361,6 +367,17 @@ impl Commands {
                     _ => self.targets,
                 };
                 let _ = finder.peek().borrow().open(item, OpenIn::Here);
+            }
+            Pick::Item(item) => {
+                self.close();
+                let mut recents = self.recents;
+                recents
+                    .write()
+                    .touch(&format!("{}:{}", item.source, item.id));
+                let run = self.sources.peek().borrow().runs.get(&item.source).cloned();
+                if let Some(run) = run {
+                    run(item);
+                }
             }
         }
     }
@@ -446,7 +463,7 @@ pub(crate) fn scope_rows(commands: &Commands, q: &Query) -> Vec<(Ranked, Pick)> 
                 .map(|f| {
                     let group = finder.title(&f.item.kind).unwrap_or_default().to_owned();
                     let row = Ranked {
-                        command: Command::new(
+                        item: Command::new(
                             format!("{}:{}", f.item.kind, f.item.id),
                             f.item.title.clone(),
                         )
@@ -487,7 +504,7 @@ fn help_rows(commands: &Commands, text: &str) -> Vec<(Ranked, Pick)> {
                 command = command.disabled(c.disabled_reason.clone().unwrap_or_default());
             }
             let row = Ranked {
-                command,
+                item: command,
                 positions: Vec::new(),
                 score: 0,
             };
@@ -571,7 +588,7 @@ pub fn WhichKeyPanel() -> Element {
 /// choice from a list, anything else typed. ↵ takes the answer; the last
 /// one runs the action.
 #[component]
-pub(crate) fn AskPalette() -> Element {
+pub fn AskPalette() -> Element {
     let mut selected = use_signal(|| 0usize);
     let Some(commands) = try_use_commands() else {
         return rsx! {};
