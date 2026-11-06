@@ -38,6 +38,7 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | Who is here, cursors, selections | presence (`EphemeralStore`): never in the doc; expires. Publish with `Here`, read with `Roster`; pointers are `Place`s in a view's space |
 | Text two people type into at once (a note, lyrics, a chart) | a `LoroText` + `TextBinding`; the caret goes in `PeerState::caret` |
 | Devices share docs with no hub | `crdt::peer` over `DocRegistry` plus Host admission; served with `crdt::p2p::node_router` (Recipe E) |
+| A vault kept on an always-on device (a deployed "server") | the app headless, `architect-desktop serve`: a `vault_collab::VaultCollab` registry served with `crdt::p2p::node_router`, its notes named by `apps/desktop/src/node/catalog.rs` `VaultCatalog`, swept with `crdt::peer::pull` (`docs/content/guide/deploy.md`) |
 | Someone across the room joins one document live | a `crdt::link::DocLink` from `crdt::p2p::Shares::share` (Recipe E) |
 | A device that is not signed in (a guest's iPad, an engine) syncs some documents, until revoked | pair it: `architect_devices::Pairings` offer by code or QR, `Grant::Paired` scopes (Recipe I) |
 | An org's server lets a member's device in with a role | `architect_devices::server::EnrolmentHost` + `project_members` (Recipe I) |

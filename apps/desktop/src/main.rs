@@ -19,12 +19,25 @@
 //! architect-desktop mcp --app <socket>         # MCP over another running app (the iOS app)
 //! architect-desktop actions shot /tmp/app.png  # the window, drawn by the app (APP_SHOT)
 //! architect-desktop extensions check <folder>  # EXT_CHECK with no window; nonzero when it fails
+//! architect-desktop serve [--config <file>]    # the always-on node, no window (src/node/)
 //! ```
 //!
 //! In a window it keeps `<app dir>/AGENTS.md` and `actions.schema.json`
 //! written from its live list (`architect_control::guide`). The dev
 //! sandbox, on made-up data, is `architect-sandbox` (`apps/sandbox`).
 
+#[cfg(feature = "gui")]
 fn main() -> std::process::ExitCode {
     architect_desktop::run(architect_app::Mode::Architect)
+}
+
+/// Built without the window (`--no-default-features`), the binary is the
+/// node: `architect-desktop serve`, or the same with `serve` left out.
+#[cfg(not(feature = "gui"))]
+fn main() -> std::process::ExitCode {
+    let mut args = std::env::args_os().skip(1).peekable();
+    if args.peek().is_some_and(|a| a == "serve") {
+        args.next();
+    }
+    architect_desktop::node::main(args)
 }

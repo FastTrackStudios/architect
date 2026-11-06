@@ -2,7 +2,8 @@ name: release
 
 # Consumers (task, fasttrackstudio) pin architect by tag, so a tag is the
 # unit of release. Push `vX.Y.Z` and this publishes the GitHub release the
-# downstream bump refers to.
+# downstream bump refers to, and (job `node`) the headless app's image on
+# GHCR with its binary attached to that release.
 on:
   push:
     tags: ["v*"]
@@ -29,3 +30,100 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           body_path: ${{ runner.temp }}/notes.md
+
+  # The Architect app, headless: `architect-desktop serve`, the always-on
+  # node (apps/desktop/src/node). A tag publishes its image to GHCR and
+  # attaches its binary to the release above.
+  #
+  #   ghcr.io/fasttrackstudios/architect:<X.Y.Z>   (the tag without its `v`)
+  #   ghcr.io/fasttrackstudios/architect:sha-<short>
+  #   ghcr.io/fasttrackstudios/architect:latest    (the highest release only)
+  #
+  # The binary is built in the dev shell (the runner's warm target dir);
+  # Nix only assembles the image around it (flake.nix
+  # `architect-image-prebuilt`, the same contents as the pure
+  # `architect-image`), and skopeo pushes it: no Docker. Packages pushed
+  # with GITHUB_TOKEN start PRIVATE: make `architect` public once in the
+  # org's package settings, or the cluster cannot pull it.
+  node:
+    needs: release
+    runs-on: [self-hosted, thebattleship-release]
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      packages: write
+    env:
+      # Newer skopeo rejects some hosts' v1 registries.conf; the registry
+      # is named explicitly everywhere.
+      CONTAINERS_REGISTRIES_CONF: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Plan the tags
+        id: plan
+        run: |
+          set -euo pipefail
+          git fetch --quiet --tags --force origin
+          tag="${GITHUB_REF_NAME}"
+          v="${tag#v}"
+          tags="$v sha-$(git rev-parse --short HEAD)"
+          highest="$(git -c versionsort.suffix=- tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+          [ "$tag" != "$highest" ] || tags="$tags latest"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "### architect image: \`$tags\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Without the window (no Blitz, wgpu or wayland), and without the
+      # workspace-hack, which would pull the GUI stack's features back in.
+      - name: Build the node
+        id: build
+        run: |
+          set -euo pipefail
+          dir="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-node/$RUNNER_NAME/target"
+          mkdir -p "$dir"
+          devenv shell -- cargo build --release -p architect-desktop --bin architect-desktop \
+            --no-default-features --features vox --target-dir "$dir" \
+            --config 'target.x86_64-unknown-linux-gnu.rustflags=["--cfg","no_workspace_hack"]'
+          bin="$dir/release/architect-desktop"
+          "$bin" serve --help > /dev/null
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+        env:
+          ARCHITECT_BUILD_REV: ${{ github.sha }}
+
+      - name: Push the image
+        env:
+          ARCHITECT_PREBUILT_BIN: ${{ steps.build.outputs.bin }}
+          ARCHITECT_BUILD_REV: ${{ github.sha }}
+          ARCHITECT_RELEASE_VERSION: ${{ steps.plan.outputs.version }}
+          TAGS: ${{ steps.plan.outputs.tags }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export REGISTRY_AUTH_FILE="$RUNNER_TEMP/ghcr-auth.json"
+          skopeo() { nix run nixpkgs#skopeo -- "$@"; }
+          printf '%s' "$GHCR_TOKEN" | skopeo login ghcr.io -u "$GHCR_USER" --password-stdin
+          read -r -a tags <<<"$TAGS"
+          dest="docker://ghcr.io/fasttrackstudios/architect"
+          streamer="$(nix build --impure .#architect-image-prebuilt --no-link --print-out-paths)"
+          "$streamer" | skopeo --insecure-policy copy docker-archive:/dev/stdin "$dest:${tags[0]}"
+          for tag in "${tags[@]:1}"; do
+            skopeo --insecure-policy copy "$dest:${tags[0]}" "$dest:$tag"
+          done
+          rm -f "$REGISTRY_AUTH_FILE"
+
+      - name: Attach the binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BIN: ${{ steps.build.outputs.bin }}
+        run: |
+          set -euo pipefail
+          name="architect-node-${GITHUB_REF_NAME}-x86_64-linux"
+          mkdir -p "$RUNNER_TEMP/$name"
+          cp "$BIN" "$RUNNER_TEMP/$name/architect-desktop"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$name.tar.gz" "$name"
+          (cd "$RUNNER_TEMP" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$name.tar.gz" "$RUNNER_TEMP/$name.tar.gz.sha256" --clobber

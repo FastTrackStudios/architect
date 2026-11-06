@@ -665,3 +665,19 @@ package = "architect-sites"
 features = ["pages"]
 layer = "L3"
 note = "with extensions' embed pages (QuickJS) drawing the blocks they claim"
+
+# ── apps ──────────────────────────────────────────────────────────────────
+# The Architect app. An app (`host-dirs`), so it may enable the server
+# transports, and both builds do: `serve`, the always-on node, is in each
+# (architect `host`, `http`, `iroh`; apps/desktop/src/node).
+[[row]]
+package = "architect-desktop"
+layer = "L3"
+note = "the window (feature `gui`) plus `serve`, the headless node: the transport host and the GUI stack"
+
+[[row]]
+package = "architect-desktop"
+no-default-features = true
+features = ["vox"]
+layer = "L3"
+note = "the app headless (`architect-desktop serve`, the server image): the transport host, no Blitz, wgpu or wayland"
