@@ -86,6 +86,16 @@ org.switch(OrgSelection::One(id));   // the shell's switcher calls this
 ```
 <!-- doc-check: on -->
 
+In the Architect app the orgs are the signed-in account's: the issuer's
+list, the current one kept per account (`features/accounts/src/store.rs`
+`AccountStore::switch_org`), switched from the Account menu, the
+sidebar or `ORG_SWITCH`. Signed out, or while the issuer has no personal
+org, the person's own org on this device comes first
+(`features/accounts/src/model.rs` `device_org`).
+`features/accounts/src/store.rs` `ActiveSession` carries the session and
+the current org together, so a vault, a space or a vox client reads both
+from one place.
+
 An architect feature takes the org from the call's identity on the
 server and from `use_org()` on the client; an app passes it nowhere. A
 server mounting architect's features gets tenancy with them: every

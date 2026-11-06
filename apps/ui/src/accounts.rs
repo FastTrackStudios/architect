@@ -1,7 +1,11 @@
 //! Sign-in in the Architect app (#188): the person's accounts at the issuer
 //! (`architect_accounts`), their sessions in the platform keychain, the
 //! Account item's switcher, the sign-in sheet, and `ACCOUNT_*` on the
-//! app's Action List (MCP, the File menu, ⌘K).
+//! app's Action List (MCP, the File menu, ⌘K). The window's orgs
+//! (`architect_orgs::use_org`) are the active account's
+//! ([`use_account_orgs`]): the issuer's list, the current org kept per
+//! account, switched from the Account menu, the sidebar's switcher or
+//! `ORG_SWITCH`.
 //!
 //! The issuer is FTS's (`auth.fasttrackstudio.app`) unless
 //! `ARCHITECT_AUTH_ISSUER` names another; the keychain's entries are the
@@ -15,6 +19,8 @@ use std::sync::Arc;
 use architect::action::ActionList;
 use architect_accounts::ui::{AccountsUi, use_accounts};
 use architect_accounts::{AccountStore, Accounts, Issuer, Keychain};
+use architect_orgs::{Capabilities, OrgHandle, Orgs, Selection};
+use dioxus::prelude::*;
 
 use crate::mode::{Mode, app_dir_or_temp};
 
@@ -38,4 +44,22 @@ pub fn use_app_accounts(list: &Arc<ActionList>, files: bool) -> Option<AccountsU
             CLIENT_ID,
         )
     }))
+}
+
+/// The window's orgs as the active account's: provided from its cached
+/// list (signed out, the person's own on this device), a switch in the
+/// window kept for the account, and the window following every change
+/// the account's orgs see (a fetch, a switch from the menu or an action,
+/// another account).
+pub fn use_account_orgs(accounts: AccountsUi, caps: Capabilities) -> OrgHandle {
+    let on_change = use_callback(move |orgs: Orgs| {
+        let who = match &orgs.selection {
+            Selection::One(id) => id.0.clone(),
+            Selection::All => "all".to_owned(),
+        };
+        let _ = accounts.accounts().switch_org(&who);
+    });
+    let handle = architect_orgs::use_orgs_provider(|| accounts.orgs(), caps, Some(on_change));
+    use_effect(move || handle.replace(accounts.orgs()));
+    handle
 }

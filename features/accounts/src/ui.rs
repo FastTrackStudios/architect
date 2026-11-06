@@ -2,7 +2,7 @@
 //!
 //! [`use_accounts`] is the handle, hearing the controller's changes;
 //! [`AccountsUi::shell_account`] the shell's Account item (who is signed
-//! in, and the switcher in its menu); [`AccountSheet`] signing in, the
+//! in, the org switcher and the account switcher in its menu); [`AccountSheet`] signing in, the
 //! accounts on this device and the active one's devices. Mount the sheet
 //! once, over the app.
 
@@ -78,14 +78,23 @@ impl AccountsUi {
         self.accounts.read().snapshot()
     }
 
+    /// The active account's orgs and the current one; reading it redraws
+    /// on a change.
+    #[must_use]
+    pub fn orgs(&self) -> architect_orgs::Orgs {
+        let _ = (self.rev)();
+        self.accounts.read().orgs()
+    }
+
     /// Opens the sheet on `page`.
     pub fn open(&self, page: Sheet) {
         self.accounts.read().open_sheet(page);
     }
 
     /// The shell's Account item: the active account, or "Not signed in",
-    /// its menu `base` (the app's own rows) after the switcher's: the other
-    /// accounts, add one, the accounts and devices, sign out.
+    /// its menu `base` (the app's own rows) after the switchers': the
+    /// account's orgs (the current one ticked, All where it has several),
+    /// the other accounts, add one, the accounts and devices, sign out.
     #[must_use]
     pub fn shell_account(&self, base: shell::Menu) -> shell::Account {
         let file = self.snapshot();
@@ -103,7 +112,7 @@ impl AccountsUi {
                 .color("#52525b")
                 .menu(append(menu.divider(), base));
         };
-        let mut menu = shell::Menu::new();
+        let mut menu = self.org_rows(shell::Menu::new());
         let others: Vec<Account> = file
             .accounts
             .iter()
@@ -158,6 +167,39 @@ impl AccountsUi {
             item = item.image(image);
         }
         item
+    }
+}
+
+impl AccountsUi {
+    /// The org switcher's rows: a heading, each org (its role noted), and
+    /// All when there are several.
+    fn org_rows(&self, mut menu: shell::Menu) -> shell::Menu {
+        let orgs = self.orgs();
+        let me = *self;
+        menu = menu.heading("Organization");
+        let current = orgs.current().map(|o| o.id.clone());
+        for org in &orgs.orgs {
+            let id = org.id.0.clone();
+            menu = menu
+                .check(
+                    org.name.clone(),
+                    current.as_ref() == Some(&org.id),
+                    move |()| {
+                        let _ = me.accounts().switch_org(&id);
+                    },
+                )
+                .note(if org.personal {
+                    "Yours".to_owned()
+                } else {
+                    org.role.label()
+                });
+        }
+        if orgs.orgs.len() > 1 {
+            menu = menu.check("All organizations", current.is_none(), move |()| {
+                let _ = me.accounts().switch_org("all");
+            });
+        }
+        menu.divider()
     }
 }
 

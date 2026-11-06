@@ -1,5 +1,6 @@
-//! `ACCOUNT_*` on an Action List (feature `actions`): MCP, the menus and ⌘K
-//! reach sign-in, switching, signing out and the devices through them.
+//! `ACCOUNT_*` and `ORG_*` on an Action List (feature `actions`): MCP, the
+//! menus and ⌘K reach sign-in, switching, signing out, the devices, and the
+//! active account's orgs through them.
 //!
 //! No action takes or answers a secret: a password is typed in the sheet
 //! (`ACCOUNT_SIGN_IN` opens it), and no session token leaves the keychain
@@ -21,20 +22,34 @@ pub mod ids {
     pub const SIGN_OUT: &str = "ACCOUNT_SIGN_OUT";
     pub const DEVICES: &str = "ACCOUNT_DEVICES";
     pub const FORGET_DEVICE: &str = "ACCOUNT_FORGET_DEVICE";
+    pub const ORG_LIST: &str = "ORG_LIST";
+    pub const ORG_SWITCH: &str = "ORG_SWITCH";
     /// Every id, in menu order.
-    pub const ALL: [&str; 6] = [LIST, SIGN_IN, SWITCH, SIGN_OUT, DEVICES, FORGET_DEVICE];
+    pub const ALL: [&str; 8] = [
+        LIST,
+        SIGN_IN,
+        SWITCH,
+        SIGN_OUT,
+        DEVICES,
+        FORGET_DEVICE,
+        ORG_LIST,
+        ORG_SWITCH,
+    ];
 }
 
 macro_rules! metas {
     ($($name:ident = $id:ident, $display:literal, $desc:literal;)*) => {
+        metas! { @in "Account"; $($name = $id, $display, $desc;)* }
+    };
+    (@in $group:literal; $($name:ident = $id:ident, $display:literal, $desc:literal;)*) => {
         $(static $name: ActionMeta = ActionMeta {
             id: ids::$id,
             trait_name: "",
             method_name: "",
             display_name: $display,
             description: $desc,
-            category: "Account",
-            group: "Account",
+            category: $group,
+            group: $group,
             shortcut: "",
             toggleable: false,
             undo: false,
@@ -49,6 +64,11 @@ metas! {
     SIGN_OUT = SIGN_OUT, "Sign out", "Signs `account` (the active one when unset) out of this device: its session ends at the issuer and leaves the keychain.";
     DEVICES = DEVICES, "Devices", "The active account's devices at the issuer (id, name, platform, last seen, which one is this device).";
     FORGET_DEVICE = FORGET_DEVICE, "Forget a device", "Takes device `id` (from ACCOUNT_DEVICES) off the active account: a lost phone, an old laptop.";
+}
+
+metas! { @in "Organization";
+    ORG_LIST = ORG_LIST, "Organizations", "The orgs the active account is in (id, name, slug, role, whether it is the person's own) and the one it is in now; fetched fresh from the issuer, else the device's cached list with `stale` saying why. Signed out, only the person's own org on this device.";
+    ORG_SWITCH = ORG_SWITCH, "Switch organization…", "Makes `org` (its id, slug or name from ORG_LIST, or `all` for every org) the one the active account is in. Kept per account; the issuer is told it is the session's active org.";
 }
 
 /// One account, as [`ids::LIST`] lists it.
@@ -129,8 +149,8 @@ fn sheet_name(sheet: Option<Sheet>) -> String {
     .to_owned()
 }
 
-/// Registers `ACCOUNT_*` on `list`, over `accounts`. Each change is a
-/// `Changed { topic: "accounts" }` on the list.
+/// Registers `ACCOUNT_*` and `ORG_*` on `list`, over `accounts`. Each
+/// change is a `Changed { topic: "accounts" }` on the list.
 ///
 /// # Errors
 ///
@@ -212,11 +232,90 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
             }
         },
     )?;
-    Ok(())
+    register_orgs(list, accounts)
 }
 
 /// What [`ids::DEVICES`] answers.
 #[derive(Debug, Clone, Facet)]
 pub struct DevicesOut {
     pub devices: Vec<Device>,
+}
+
+/// One org, as [`ids::ORG_LIST`] lists it.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgRow {
+    /// What `ORG_SWITCH` takes (so do `slug` and `name`).
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    /// The person's role there (`Owner`, `Admin`, `Member`, `Viewer`).
+    pub role: String,
+    /// The person's own.
+    pub personal: bool,
+    /// The one the account is in now.
+    pub current: bool,
+}
+
+/// What [`ids::ORG_LIST`] and [`ids::ORG_SWITCH`] answer.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgsOut {
+    /// The active account's key; `None` signed out.
+    pub account: Option<String>,
+    /// The current org's id; `None` in All.
+    pub current: Option<String>,
+    pub orgs: Vec<OrgRow>,
+    /// Why this is the cached list: the issuer's answer, when it failed.
+    pub stale: Option<String>,
+}
+
+impl OrgsOut {
+    fn of(accounts: &Accounts, stale: Option<String>) -> Self {
+        let orgs = accounts.orgs();
+        let current = orgs.current().map(|o| o.id.0.clone());
+        Self {
+            account: accounts.active().map(|a| a.key()),
+            orgs: orgs
+                .orgs
+                .iter()
+                .map(|o| OrgRow {
+                    id: o.id.0.clone(),
+                    name: o.name.clone(),
+                    slug: o.slug.clone(),
+                    role: o.role.label(),
+                    personal: o.personal,
+                    current: current.as_ref() == Some(&o.id.0),
+                })
+                .collect(),
+            current,
+            stale,
+        }
+    }
+}
+
+/// What [`ids::ORG_SWITCH`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct OrgArgs {
+    /// An org's id, slug or name, or `all`.
+    pub org: String,
+}
+
+fn register_orgs(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), ActionError> {
+    let a = accounts.clone();
+    list.register_async(&ORG_LIST, Effect::ReadOnly, move |(): ()| {
+        let a = a.clone();
+        async move {
+            let stale = if a.active().is_some() {
+                a.refresh_orgs().await.err()
+            } else {
+                None
+            };
+            Ok(OrgsOut::of(&a, stale))
+        }
+    })?;
+    let a = accounts.clone();
+    list.register(&ORG_SWITCH, Effect::Mutating, move |args: OrgArgs| {
+        a.switch_org(&args.org)?;
+        Ok(OrgsOut::of(&a, a.orgs_stale()))
+    })?;
+    Ok(())
 }

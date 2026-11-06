@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use architect_orgs::Orgs;
 use auth_client::StoredSession;
 
 use crate::issuer::{self, Issuer, IssuerError, Polled, SignedIn};
@@ -56,6 +57,8 @@ struct State {
     status: Status,
     browser: Option<BrowserWait>,
     devices: Option<Result<Vec<Device>, String>>,
+    /// Why the orgs shown are the cached list: the last fetch's failure.
+    orgs_stale: Option<String>,
     attempt: u64,
 }
 
@@ -284,6 +287,7 @@ impl Accounts {
         issuer::spawn(async move {
             let _ = issuer.register_this_device(&session).await;
         });
+        self.orgs_follow();
         Ok(account)
     }
 
@@ -395,6 +399,7 @@ impl Accounts {
         {
             let mut state = self.state();
             state.devices = None;
+            state.orgs_stale = None;
             state.status = Status::Done(format!("Switched to {}", account.label()));
         }
         self.changed();
@@ -409,7 +414,7 @@ impl Accounts {
     /// updates the profile, and marks an account the issuer refused as
     /// needing to sign in again. Unreachable is fine (offline).
     async fn check(&self, key: &str) {
-        let _held = self.0.sessions.lock().await;
+        let held = self.0.sessions.lock().await;
         let Ok(Some(session)) = self.0.store.session(key) else {
             return;
         };
@@ -426,6 +431,10 @@ impl Accounts {
                 }
                 let _ = self.0.store.refresh_profile(&signed.account);
                 self.changed();
+                drop(held);
+                if self.active().is_some_and(|a| a.key() == key) {
+                    let _ = self.refresh_orgs().await;
+                }
             }
             Err(e) if e.ends_session() => {
                 let _ = self.0.store.expire(key);
@@ -520,6 +529,80 @@ impl Accounts {
         self.state().devices = Some(answer.clone());
         self.changed();
         answer
+    }
+
+    /// The active account's orgs and the one it is in now, as last
+    /// fetched; signed out, only the person's own on this device.
+    #[must_use]
+    pub fn orgs(&self) -> Orgs {
+        self.0.store.orgs()
+    }
+
+    /// Why the orgs shown are the cached list, if the last fetch failed.
+    #[must_use]
+    pub fn orgs_stale(&self) -> Option<String> {
+        self.state().orgs_stale.clone()
+    }
+
+    /// Fetches the active account's orgs again in the background.
+    fn orgs_follow(&self) {
+        let me = self.clone();
+        issuer::spawn(async move {
+            let _ = me.refresh_orgs().await;
+        });
+    }
+
+    /// Fetches the active account's orgs from the issuer and keeps them;
+    /// the org it is in stays current unless it was taken away. A failure
+    /// keeps the cached list ([`Self::orgs_stale`] says why).
+    ///
+    /// # Errors
+    ///
+    /// Signed out; the issuer's.
+    pub async fn refresh_orgs(&self) -> Result<Orgs, String> {
+        let Some(key) = self.active().map(|a| a.key()) else {
+            return Err("no account is signed in".to_owned());
+        };
+        let issuer = self.0.issuer.clone();
+        let answer = self
+            .with_active(|session| {
+                let issuer = issuer.clone();
+                async move { issuer.organizations(&session).await }
+            })
+            .await;
+        let kept = answer.and_then(|fresh| {
+            self.0
+                .store
+                .set_orgs(&key, fresh)
+                .map_err(|e| e.to_string())
+        });
+        self.state().orgs_stale = kept.as_ref().err().cloned();
+        self.changed();
+        kept
+    }
+
+    /// Moves the active account to org `who` (its id, slug or name, or
+    /// `all`); kept for the account, and told to the issuer in the
+    /// background as the session's active org.
+    ///
+    /// # Errors
+    ///
+    /// Signed out; no such org.
+    pub fn switch_org(&self, who: &str) -> Result<Orgs, String> {
+        let orgs = self.0.store.switch_org(who).map_err(|e| e.to_string())?;
+        self.changed();
+        if let Some(org) = orgs.current().map(|o| o.id.0.clone()) {
+            let me = self.clone();
+            issuer::spawn(async move {
+                let issuer = me.0.issuer.clone();
+                let _ = me
+                    .with_active(
+                        |session| async move { issuer.set_active_org(&session, &org).await },
+                    )
+                    .await;
+            });
+        }
+        Ok(orgs)
     }
 
     /// Takes device `id` off the active account.
