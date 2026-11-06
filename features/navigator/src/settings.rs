@@ -42,6 +42,12 @@
 //! `timeFormat` `h:mm a`, `calendarTemplateFolder` empty, and no folder
 //! note or periodic note templates (`folderNoteTemplate`,
 //! `calendarCustomFileTemplate` and the week's to the year's).
+//! Icons and colours: `showFolderIcons`, `inheritFolderColors`,
+//! `showTagIcons`, `inheritTagColors`, `showPropertyIcons`,
+//! `inheritPropertyColors` and `showFileIcons` true; `colorIconOnly`,
+//! `showFilenameMatchIcons` and `showCategoryIcons` false with empty maps;
+//! `frontmatterIconField` `icon`, `frontmatterColorField` `color`,
+//! `frontmatterBackgroundField` `background`.
 //! The tags and the property browser: `showTags` true, `showAllTagsFolder`
 //! true, `showUntagged` true, `scopeTagsToCurrentContext` false,
 //! `tagSortOrder` alpha-asc; `showProperties` true, the profile's
@@ -702,6 +708,53 @@ pub struct NavigatorSettings {
     /// Yearly note template
     #[setting(placeholder = "Templates/Yearly.md")]
     pub yearly_template: String,
+    /// Folder icons
+    /// A folder's own icon in place of the folder.
+    pub show_folder_icons: bool,
+    /// Folders take the colour above
+    /// A folder with no colour of its own takes the nearest above's.
+    pub inherit_folder_colors: bool,
+    /// Tag icons
+    pub show_tag_icons: bool,
+    /// Tags take the colour above
+    pub inherit_tag_colors: bool,
+    /// Property icons
+    pub show_property_icons: bool,
+    /// Values take their key's colour
+    pub inherit_property_colors: bool,
+    /// Colour the icon only
+    /// A colour paints the icon, not the name.
+    pub color_icon_only: bool,
+    /// File icons
+    /// An icon beside a note's name: its own, its name's or its type's.
+    pub show_file_icons: bool,
+    /// Icons by name
+    /// A note whose name holds a word below takes its icon.
+    pub file_name_icons: bool,
+    /// Name icons
+    #[setting(placeholder = "meeting=users, todo=list-todo")]
+    pub file_name_icon_map: String,
+    /// Icons by type
+    /// A file takes its type's icon (`md`, `pdf`, `canvas`, images, …).
+    pub file_type_icons: bool,
+    /// Type icons
+    #[setting(placeholder = "pdf=book, csv=sheet")]
+    pub file_type_icon_map: String,
+    /// Icon property
+    /// The frontmatter key a note's icon is read from and written to
+    /// (with names and dates from frontmatter).
+    #[setting(placeholder = "icon")]
+    pub frontmatter_icon_field: String,
+    /// Colour property
+    #[setting(placeholder = "color")]
+    pub frontmatter_color_field: String,
+    /// Background property
+    #[setting(placeholder = "background")]
+    pub frontmatter_background_field: String,
+    /// Vim keys
+    /// `h` `j` `k` `l` move through the panes too, `g` and ⇧G to the top
+    /// and the end.
+    pub vim_keys: bool,
 }
 
 impl NavigatorSettings {
@@ -830,6 +883,22 @@ impl Default for NavigatorSettings {
             monthly_template: String::new(),
             quarterly_template: String::new(),
             yearly_template: String::new(),
+            show_folder_icons: true,
+            inherit_folder_colors: true,
+            show_tag_icons: true,
+            inherit_tag_colors: true,
+            show_property_icons: true,
+            inherit_property_colors: true,
+            color_icon_only: false,
+            show_file_icons: true,
+            file_name_icons: false,
+            file_name_icon_map: String::new(),
+            file_type_icons: false,
+            file_type_icon_map: String::new(),
+            frontmatter_icon_field: "icon".to_owned(),
+            frontmatter_color_field: "color".to_owned(),
+            frontmatter_background_field: "background".to_owned(),
+            vim_keys: false,
         }
     }
 }

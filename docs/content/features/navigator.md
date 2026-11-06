@@ -101,6 +101,14 @@ directly. Its palette commands are then the view's own.
   `duplicate`, `trash`, `merge`, `open_all`) and `check_name`. On disk
   they go through `OpenVault`'s `copy_file`, `move_folder`, `copy_folder`
   and `trash` (`features/vault/vault/src/actions/edit.rs`, MIT).
+- `features/navigator/src/keys.rs`: the keyboard map, `KeyMap`, its
+  `KeyAction`s by stable id and their `Hotkey`s; `NavigatorState::run_key`
+  does one.
+- `features/navigator/src/icons.rs`: `Icon`, read and written as Notebook
+  Navigator writes them, and a file's icon from its name or type;
+  `features/navigator/src/state/looks.rs`: `NavigatorState::paint` and the
+  icons, colours and backgrounds it keeps or writes to frontmatter.
+  `features/shell/src/lucide.rs` draws any Lucide icon by name (MIT).
 - `features/navigator/src/appearance.rs`: `Appearance`, a folder's or a
   tag's own list. `Appearance::over` applies it to the settings.
 - `features/navigator/src/state.rs`: `NavigatorState` holds everything.
@@ -146,6 +154,9 @@ directly. Its palette commands are then the view's own.
 
 ## Tests to read
 
+- `features/navigator/tests/keys_icons.rs`: keys through the map, Vim's
+  and a person's own kept; icons and colours set, inherited, read from and
+  written to frontmatter, following a folder moved.
 - `features/navigator/tests/files.rs`: notes, canvases and bases made,
   numbered, from folder templates and create-note commands with prompts;
   periodic notes from templates; renames, moves, copies, duplicates, the
@@ -269,12 +280,21 @@ Notebook Navigator's parts are ported in layers (#332):
     templates inherited by subfolders; create-note commands with a name
     format, a template and a location; periodic note templates.
   - The search's words marked in names, and its tags in the tree.
+  - The keyboard map: every pane key an action with a stable id,
+    remappable (`NAVIGATOR_KEYS`), with Vim's keys as a setting.
+  - Icons and colours for folders, tags, properties and notes: Lucide,
+    emoji or vault SVGs, from and to frontmatter, by a note's name or type,
+    inherited; backgrounds.
   - Not ported: Templater (`<%` commands are left as written), a template
     picker (the template is typed as a vault path), the ribbon and tab-bar
     buttons of create-note commands, Excalidraw drawings made from the
     menu, version history and "reveal in Finder". A new base is
     Obsidian's YAML, not Notebook Navigator's legacy database JSON. The
-    app does not yet place the editor's cursor at `Open::cursor`.
+    app does not yet place the editor's cursor at `Open::cursor`. Icon
+    packs (Phosphor, Font Awesome, …) are read and kept but drawn as a
+    box: none is downloaded. No icon picker (an icon is typed by name), no
+    colour palette, and no recent icons. Rename is F2 everywhere (Return
+    opens a note).
 - **Still to come.**
   - Rendered PDF covers. A source gives a cover as the note's
     `feature_image`; without one, a PDF shows its badge.

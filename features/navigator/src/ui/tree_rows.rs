@@ -24,7 +24,9 @@ use super::{Ask, AskThen, Navigator, Open, Renaming};
 use crate::profiles::{Shortcut, ShortcutKind};
 use crate::properties::ROOT;
 use crate::selection::NavTarget;
-use crate::state::{Drag, HideTarget, MergeSeparator, Mods, NewKind, NewNote, Outcome, check_name};
+use crate::state::{
+    Drag, HideTarget, MergeSeparator, Mods, NewKind, NewNote, Outcome, Paint, check_name,
+};
 use crate::tags::{TAGGED, UNTAGGED};
 use crate::tree::{NavRowKind, SHORTCUTS};
 
@@ -78,6 +80,9 @@ pub enum PromptKind {
     Merge(Vec<String>),
     /// A template's prompt, `label`, for this request.
     Template { req: Box<NewNote>, label: String },
+    /// An icon, a colour or a background for a target (`folder:…`,
+    /// `tag:…`, `property:…`, `file:…`); empty takes it off.
+    Paint { what: Paint, target: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +93,16 @@ pub struct Prompt {
 }
 
 impl Prompt {
+    /// Asks `target`'s icon, colour or background.
+    #[must_use]
+    pub fn paint(what: Paint, target: String) -> Self {
+        Self {
+            title: paint_title(what).to_owned(),
+            value: String::new(),
+            kind: PromptKind::Paint { what, target },
+        }
+    }
+
     /// Asks the folder `paths` move to.
     #[must_use]
     pub fn move_to(paths: Vec<String>) -> Self {
@@ -108,6 +123,20 @@ pub enum RowIcon {
     AllProperties,
     Key,
     Value,
+}
+
+/// A tag's or a property's own kind of icon.
+fn row_icon(icon: RowIcon) -> Element {
+    match icon {
+        RowIcon::AllTags => rsx! { Tags { size: 15 } },
+        RowIcon::Tag => rsx! { Tag { size: 14 } },
+        RowIcon::Untagged => {
+            rsx! { span { style: "display:flex; opacity:0.5;", Tag { size: 14 } } }
+        }
+        RowIcon::AllProperties => rsx! { FileCode { size: 15 } },
+        RowIcon::Key => rsx! { TextAlignStart { size: 14 } },
+        RowIcon::Value => rsx! { Equal { size: 14 } },
+    }
 }
 
 /// One tag or property row.
@@ -134,6 +163,11 @@ pub(super) fn ItemRow(
     drop_here: bool,
     /// A tag the search takes in or leaves out.
     search: Option<crate::SearchMatch>,
+    /// Its own icon (`tagIcons`, `propertyIcons`) and background.
+    custom_icon: Option<crate::Icon>,
+    background: Option<String>,
+    /// The colour paints the icon alone.
+    icon_only: bool,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
     let class = match (selected, drop_here) {
@@ -153,7 +187,14 @@ pub(super) fn ItemRow(
     };
     let name_colour = colour
         .as_deref()
+        .filter(|_| !icon_only)
         .map_or_else(String::new, |c| format!("color:{c};"));
+    let bg = background
+        .filter(|_| !selected && !drop_here)
+        .map_or_else(String::new, |b| format!("background:{b};"));
+    let icon_colour = colour
+        .clone()
+        .unwrap_or_else(|| "var(--nv-faint)".to_owned());
     let (kind_attr, id_attr) = match &target {
         NavTarget::Tag(t) => ("tag", t.clone()),
         NavTarget::Property { key, value } => (
@@ -187,7 +228,7 @@ pub(super) fn ItemRow(
             "aria-expanded": if has_children { if expanded { "true" } else { "false" } } else { "" },
             "aria-level": "{level}",
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; \
-                    gap:4px; padding-left:{pad}px; padding-right:8px; border-radius:6px; white-space:nowrap;",
+                    gap:4px; padding-left:{pad}px; padding-right:8px; border-radius:6px; white-space:nowrap; {bg}",
             onclick: move |e: MouseEvent| {
                 if nav.dragged.cloned() {
                     return;
@@ -230,14 +271,11 @@ pub(super) fn ItemRow(
                     if expanded { ChevronDown { size: 14 } } else { ChevronRight { size: 14 } }
                 }
             }
-            span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint); {name_colour}",
-                match icon {
-                    RowIcon::AllTags => rsx! { Tags { size: 15 } },
-                    RowIcon::Tag => rsx! { Tag { size: 14 } },
-                    RowIcon::Untagged => rsx! { span { style: "display:flex; opacity:0.5;", Tag { size: 14 } } },
-                    RowIcon::AllProperties => rsx! { FileCode { size: 15 } },
-                    RowIcon::Key => rsx! { TextAlignStart { size: 14 } },
-                    RowIcon::Value => rsx! { Equal { size: 14 } },
+            span { style: "flex:0 0 auto; display:flex; color:{icon_colour};",
+                if let Some(i) = custom_icon {
+                    super::icon::IconView { nav, icon: i, size: 14, colour }
+                } else {
+                    {row_icon(icon)}
                 }
             }
             span { class: name_class,
@@ -610,6 +648,42 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 MenuAct::Shortcut(shortcut, true),
             )
         });
+        // An icon, a colour, a background (`buildFolderMenu`'s style
+        // items, `styleMenuBuilder`).
+        let at = paint_target(&menu.target);
+        let has_icon = s.own_icon(&at).is_some();
+        let has_colour = s.colour(&at).is_some();
+        let has_bg = s.background(&at).is_some();
+        items.push((
+            "Set icon…".to_owned(),
+            MenuAct::Paint(Paint::Icon, at.clone(), true),
+        ));
+        if has_icon {
+            items.push((
+                "Remove icon".to_owned(),
+                MenuAct::Paint(Paint::Icon, at.clone(), false),
+            ));
+        }
+        items.push((
+            "Set colour…".to_owned(),
+            MenuAct::Paint(Paint::Colour, at.clone(), true),
+        ));
+        if has_colour {
+            items.push((
+                "Remove colour".to_owned(),
+                MenuAct::Paint(Paint::Colour, at.clone(), false),
+            ));
+        }
+        items.push((
+            "Set background…".to_owned(),
+            MenuAct::Paint(Paint::Background, at.clone(), true),
+        ));
+        if has_bg {
+            items.push((
+                "Remove background".to_owned(),
+                MenuAct::Paint(Paint::Background, at, false),
+            ));
+        }
         match &menu.target {
             NavTarget::Folder(f) if !f.is_empty() => {
                 items.push((
@@ -695,7 +769,31 @@ enum MenuAct {
     DuplicateFolder(String),
     MoveFolder(String),
     Trash(Vec<String>),
+    /// Painted (asked for a value), or (`false`) the paint taken off.
+    Paint(Paint, String, bool),
     Nothing,
+}
+
+/// A row's target as icons and colours key it.
+fn paint_target(t: &NavTarget) -> String {
+    match t {
+        NavTarget::Folder(f) => format!("folder:{f}"),
+        NavTarget::Tag(t) => format!("tag:{t}"),
+        NavTarget::Property { key, value: None } => format!("property:{key}"),
+        NavTarget::Property {
+            key,
+            value: Some(v),
+        } => format!("property:{key}={v}"),
+    }
+}
+
+/// What a paint prompt asks.
+pub(super) const fn paint_title(what: Paint) -> &'static str {
+    match what {
+        Paint::Icon => "Icon: a Lucide name (folder), an emoji, ph:house, or a vault .svg",
+        Paint::Colour => "Colour (CSS: #e5484d, tomato, rgb(…))",
+        Paint::Background => "Background (CSS colour)",
+    }
 }
 
 fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
@@ -818,6 +916,29 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             nav.trash(&paths, on_open);
             return;
         }
+        MenuAct::Paint(what, target, true) => {
+            let now = {
+                let s = nav.state.peek();
+                match what {
+                    Paint::Icon => s.own_icon(&target).map(|i| i.id()),
+                    Paint::Colour => s.colour(&target).map(str::to_owned),
+                    Paint::Background => s.background(&target).map(str::to_owned),
+                }
+                .unwrap_or_default()
+            };
+            ask_for(
+                nav,
+                paint_title(what),
+                &now,
+                PromptKind::Paint { what, target },
+            );
+            return;
+        }
+        MenuAct::Paint(what, target, false) => match nav.update(|s| s.paint(what, &target, None)) {
+            Ok(Some(out)) => Ok(out),
+            Ok(None) => return,
+            Err(e) => Err(e),
+        },
         MenuAct::ResetTagOrder => {
             nav.update(crate::NavigatorState::reset_tag_order);
             return;
@@ -885,6 +1006,11 @@ fn submit_prompt(
         PromptKind::MoveTo(paths) => s.move_files(paths, text.trim_matches('/')),
         PromptKind::MoveFolderTo(folder) => s.move_folder(folder, text.trim_matches('/')),
         PromptKind::Merge(paths) => s.merge(paths, text, None, MergeSeparator::BlankLine, false),
+        PromptKind::Paint { what, target } => {
+            drop(s);
+            let value = Some(text).filter(|t| !t.trim().is_empty());
+            return nav.update(|s| s.paint(*what, target, value));
+        }
         PromptKind::FolderTemplate(folder) => {
             drop(s);
             let (folder, template) = (folder.clone(), text.to_owned());
@@ -1113,10 +1239,19 @@ pub(super) fn SearchBar(nav: Navigator) -> Element {
                 autofocus: true,
                 style: "flex:1 1 auto; min-width:0; height:22px; padding:0 4px; border:none; outline:none; background:transparent; color:var(--nv-text); font-size:12px;",
                 oninput: move |e| nav.set_search(&e.value()),
+                // The search box's keys (`search:close`, `search:focus-list`,
+                // `search:focus-navigation`).
                 onkeydown: move |e: KeyboardEvent| {
                     e.stop_propagation();
-                    if e.key() == Key::Named(NamedKey::Escape) {
-                        nav.update(crate::NavigatorState::toggle_search);
+                    let ev = super::key_event(&e);
+                    let action = nav.state.peek().keymap().action(crate::KeyScope::Search, &ev, super::MAC);
+                    match action {
+                        Some(crate::KeyAction::SearchClose) => nav.update(crate::NavigatorState::toggle_search),
+                        Some(a) => {
+                            e.prevent_default();
+                            nav.update(|s| s.run_key(a));
+                        }
+                        None => {}
                     }
                 },
             }

@@ -15,6 +15,7 @@ use crate::appearance::{Appearance, target_key};
 use crate::calendar::{self, CalendarContext, CalendarGrid, PeriodicNotes};
 use crate::hidden::Hidden;
 use crate::index::VaultIndex;
+use crate::keys::{KeyAction, KeyBinding, KeyMap};
 use crate::layout::{NAV_HEIGHT, NAV_WIDTH, Pane};
 use crate::list::{self, Clock, ListContext, ListMetrics, ListRow, ListRowKind, PinIn};
 use crate::period::{DayMonthOrder, Period, PeriodKind, day_of};
@@ -31,10 +32,12 @@ use crate::tree::{self, NavRow, NavRowKind, RECENT, SHORTCUTS, TagRowOptions, Tr
 use crate::virtualize::{Align, OVERSCAN, Offsets};
 
 mod files;
+mod looks;
 
 pub use files::{
     Made, MergeSeparator, NameCheck, NewKind, NewNote, OPEN_ALL_WARNING, Reader, check_name,
 };
+pub use looks::Paint;
 
 /// A key the navigator answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +186,25 @@ pub struct ViewState {
     /// (`folderTemplates`, `templateCommands`).
     #[facet(default)]
     pub templates: Templates,
+    /// Folders', tags', properties' and notes' icons (`folderIcons`,
+    /// `tagIcons`, `propertyIcons`, `fileIcons`), by target.
+    #[facet(default)]
+    pub icons: Vec<IconAt>,
+    /// Their rows' backgrounds (`…BackgroundColors`).
+    #[facet(default)]
+    pub backgrounds: Vec<Colour>,
+    /// A person's own keys (`keyboardShortcuts`), over the defaults.
+    #[facet(default)]
+    pub keys: Vec<KeyBinding>,
+}
+
+/// An icon for a target (`folder:<path>`, `tag:<tag>`,
+/// `property:<key>[=<value>]`, `file:<path>`): its id
+/// ([`crate::Icon::id`]).
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct IconAt {
+    pub target: String,
+    pub icon: String,
 }
 
 /// What is dragged onto a folder, a tag, a property or the "Tags" row:
@@ -204,8 +226,9 @@ pub struct Pin {
     pub tag: bool,
 }
 
-/// A colour for a tag (`tag:<tag>`), a property (`property:<key>`) or one
-/// value of it (`property:<key>=<value>`): a CSS colour.
+/// A colour for a folder (`folder:<path>`), a tag (`tag:<tag>`), a
+/// property (`property:<key>`) or one value of it
+/// (`property:<key>=<value>`), or a note (`file:<path>`): a CSS colour.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct Colour {
     pub target: String,
@@ -291,6 +314,11 @@ pub struct NavigatorState {
     shortcuts_folded: bool,
     recent_folded: bool,
     templates: Templates,
+    icons: BTreeMap<String, String>,
+    backgrounds: BTreeMap<String, String>,
+    /// A person's own keys, and the map they make with the settings'.
+    key_bindings: Vec<KeyBinding>,
+    keymap: KeyMap,
     /// Reads a file's text (a template, notes merged); the source's.
     reader: Reader,
 }
@@ -318,6 +346,10 @@ impl NavigatorState {
             shortcuts_folded: false,
             recent_folded: false,
             templates: Templates::default(),
+            icons: BTreeMap::new(),
+            backgrounds: BTreeMap::new(),
+            key_bindings: Vec::new(),
+            keymap: KeyMap::new(settings.vim_keys, &[]),
             reader: Reader::none(),
             periodic: PeriodicNotes::from_settings(&settings),
             calendar_open: false,
@@ -420,14 +452,10 @@ impl NavigatorState {
     #[must_use]
     pub fn colour(&self, target: &str) -> Option<&str> {
         let key = colour_key(target);
-        if let Some(c) = self.colours.get(&key) {
+        if let Some(c) = self.frontmatter_colour(&key) {
             return Some(c);
         }
-        let tag = key.strip_prefix("tag:")?;
-        ancestors(tag)
-            .filter(|a| !a.is_empty())
-            .find_map(|a| self.colours.get(&format!("tag:{a}")))
-            .map(String::as_str)
+        self.inherited(&self.colours, &key)
     }
 
     /// The tag tree on show.
@@ -750,6 +778,7 @@ impl NavigatorState {
                 self.full_text = None;
                 self.full_text_for = None;
             }
+            self.keymap = KeyMap::new(settings.vim_keys, &self.key_bindings);
             self.settings = settings;
             self.rebuild();
         }
@@ -791,14 +820,17 @@ impl NavigatorState {
             SourceEvent::FileDeleted(p) | SourceEvent::FolderDeleted(p) => {
                 self.profiles.follow(p, None);
                 self.templates.follow(p, None);
+                self.follow_looks(p, None);
             }
             SourceEvent::FolderRenamed { from, to } => {
                 self.profiles.follow(from, Some(to));
                 self.templates.follow(from, Some(to));
+                self.follow_looks(from, Some(to));
             }
             SourceEvent::FileRenamed { from, file } => {
                 self.profiles.follow(from, Some(&file.path));
                 self.templates.follow(from, Some(&file.path));
+                self.follow_looks(from, Some(&file.path));
             }
             _ => {}
         }
@@ -2003,14 +2035,18 @@ impl NavigatorState {
                     })
                 })
             };
-            self.colours = std::mem::take(&mut self.colours)
-                .into_iter()
-                .filter_map(|(k, c)| match k.strip_prefix("tag:").map(moved) {
-                    Some(Some(Some(new))) => Some((format!("tag:{new}"), c)),
-                    Some(Some(None)) => None,
-                    _ => Some((k, c)),
-                })
-                .collect();
+            let retag = |map: BTreeMap<String, String>| -> BTreeMap<String, String> {
+                map.into_iter()
+                    .filter_map(|(k, c)| match k.strip_prefix("tag:").map(moved) {
+                        Some(Some(Some(new))) => Some((format!("tag:{new}"), c)),
+                        Some(Some(None)) => None,
+                        _ => Some((k, c)),
+                    })
+                    .collect()
+            };
+            self.colours = retag(std::mem::take(&mut self.colours));
+            self.icons = retag(std::mem::take(&mut self.icons));
+            self.backgrounds = retag(std::mem::take(&mut self.backgrounds));
             self.appearances = std::mem::take(&mut self.appearances)
                 .into_iter()
                 .filter_map(
@@ -2527,6 +2563,78 @@ impl NavigatorState {
 
     // ── Keys ───────────────────────────────────────────────────────────
 
+    /// The keyboard map: the settings' (`vim_keys`) with a person's own
+    /// over them.
+    #[must_use]
+    pub const fn keymap(&self) -> &KeyMap {
+        &self.keymap
+    }
+
+    /// A person's own keys.
+    #[must_use]
+    pub fn key_bindings(&self) -> &[KeyBinding] {
+        &self.key_bindings
+    }
+
+    /// Binds `action` to `keys` (hotkeys as text, `Mod+Shift+P`; none
+    /// turns it off), or with `None` back to its default.
+    pub fn bind_keys(&mut self, action: KeyAction, keys: Option<Vec<String>>) {
+        self.key_bindings.retain(|b| b.action != action.id());
+        if let Some(keys) = keys {
+            self.key_bindings.push(KeyBinding {
+                action: action.id().to_owned(),
+                keys,
+            });
+        }
+        self.keymap = KeyMap::new(self.settings.vim_keys, &self.key_bindings);
+    }
+
+    /// Does key action `action` (what the keyboard map read a key as):
+    /// in the pane with the keyboard for `pane:` actions, else in its own
+    /// pane. The ones the view does (rename, delete, the search box's)
+    /// do nothing here.
+    pub fn run_key(&mut self, action: KeyAction) -> Option<Outcome> {
+        use KeyAction as A;
+        let (key, mods) = match action {
+            A::PaneMoveUp => (Key::Up, Mods::NONE),
+            A::PaneMoveDown => (Key::Down, Mods::NONE),
+            A::PanePageUp => (Key::PageUp, Mods::NONE),
+            A::PanePageDown => (Key::PageDown, Mods::NONE),
+            A::PaneHome => (Key::Home, Mods::NONE),
+            A::PaneEnd => (Key::End, Mods::NONE),
+            A::NavCollapseOrParent => {
+                self.nav_key(Key::Left, Mods::NONE);
+                return None;
+            }
+            A::NavExpandOrFocusList => {
+                self.nav_key(Key::Right, Mods::NONE);
+                return None;
+            }
+            A::NavFocusList | A::SearchFocusList => {
+                self.focus_pane(Pane::Files);
+                return None;
+            }
+            A::ListFocusNavigation | A::SearchFocusNavigation => {
+                self.focus_pane(Pane::Navigation);
+                return None;
+            }
+            A::ListFocusEditor => return Some(Outcome::FocusEditor),
+            A::ListSelectAll => return self.list_key(Key::A, Mods::COMMAND),
+            A::ListExtendSelectionUp => return self.list_key(Key::Up, Mods::SHIFT),
+            A::ListExtendSelectionDown => return self.list_key(Key::Down, Mods::SHIFT),
+            A::ListRangeToStart => return self.list_key(Key::Home, Mods::SHIFT),
+            A::ListRangeToEnd => return self.list_key(Key::End, Mods::SHIFT),
+            A::ListManualSortUp => return self.move_in_order(-1),
+            A::ListManualSortDown => return self.move_in_order(1),
+            A::ListOpen => return self.list_key(Key::Enter, Mods::NONE),
+            A::ListOpenTab => return self.list_key(Key::Enter, Mods::SHIFT),
+            A::ListOpenSplit => return self.list_key(Key::Enter, Mods::COMMAND),
+            A::ListPin => return self.list_key(Key::Pin, Mods::COMMAND),
+            A::PaneRename | A::DeleteSelected | A::SearchClose => return None,
+        };
+        self.key(key, mods)
+    }
+
     /// A key, in the pane with the keyboard (`focus`). Returns what the app
     /// should do, if anything.
     pub fn key(&mut self, key: Key, mods: Mods) -> Option<Outcome> {
@@ -2966,6 +3074,23 @@ impl NavigatorState {
             shortcuts_folded: self.shortcuts_folded,
             recent_folded: self.recent_folded,
             templates: self.templates.clone(),
+            icons: self
+                .icons
+                .iter()
+                .map(|(target, icon)| IconAt {
+                    target: target.clone(),
+                    icon: icon.clone(),
+                })
+                .collect(),
+            backgrounds: self
+                .backgrounds
+                .iter()
+                .map(|(target, colour)| Colour {
+                    target: target.clone(),
+                    colour: colour.clone(),
+                })
+                .collect(),
+            keys: self.key_bindings.clone(),
         }
     }
 
@@ -2977,6 +3102,18 @@ impl NavigatorState {
         self.shortcuts_folded = state.shortcuts_folded;
         self.recent_folded = state.recent_folded;
         self.templates = state.templates.clone();
+        self.icons = state
+            .icons
+            .iter()
+            .map(|i| (i.target.clone(), i.icon.clone()))
+            .collect();
+        self.backgrounds = state
+            .backgrounds
+            .iter()
+            .map(|c| (c.target.clone(), c.colour.clone()))
+            .collect();
+        self.key_bindings.clone_from(&state.keys);
+        self.keymap = KeyMap::new(self.settings.vim_keys, &self.key_bindings);
         self.search_open = state.search_open || !state.search.is_empty();
         self.search = FilterSearch::parse(&state.search, self.today(), DayMonthOrder::default());
         self.hidden = Hidden::new(&self.profiles.active().rules(), self.show_hidden);

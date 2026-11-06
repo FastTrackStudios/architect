@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use architect_extensions::linked::{Builder, Extension, Handle};
 use architect_navigator::state::Drag;
-use architect_navigator::state::{Made, MergeSeparator, NewKind, NewNote};
+use architect_navigator::state::{Made, MergeSeparator, NewKind, NewNote, Paint};
 use architect_navigator::template::{CommandLocation, TemplateCommand};
 use architect_navigator::ui::Renaming;
 use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
@@ -34,6 +34,7 @@ use architect_navigator::{
     Pane, PeriodKind, PropertyValue, SortOption,
 };
 use architect_navigator::{FileVisibility, HideTarget, Shortcut, ShortcutKind, VaultProfile};
+use architect_navigator::{Hotkey, KeyAction, KeyScope};
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
@@ -161,6 +162,9 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_FOLDER_TEMPLATE",
     "NAVIGATOR_TEMPLATE_COMMANDS",
     "NAVIGATOR_TEMPLATE_COMMAND",
+    "NAVIGATOR_ICON",
+    "NAVIGATOR_KEYS",
+    "NAVIGATOR_KEY",
 ];
 
 impl Extension for NavigatorExtension {
@@ -431,11 +435,26 @@ fn run(
             }
             ok(nav)
         }
-        "NAVIGATOR_COLOUR" => {
-            let target =
-                text(args, "target").ok_or("`target`: tag:<tag> or property:<key>[=<value>]")?;
-            nav.update(|s| s.set_colour(target, text(args, "colour")));
-            ok(nav)
+        "NAVIGATOR_COLOUR" | "NAVIGATOR_ICON" => {
+            let target = paint_target(args)?;
+            let (what, value) = if id == "NAVIGATOR_ICON" {
+                (Paint::Icon, args.get("icon"))
+            } else if flag(args, "background") == Some(true) {
+                (Paint::Background, args.get("colour"))
+            } else {
+                (Paint::Colour, args.get("colour"))
+            };
+            let Some(value) = value.map(|v| v.as_str().unwrap_or("").to_owned()) else {
+                // None given: asked for, as the menus do.
+                let mut prompt = nav.prompt;
+                prompt.set(Some(architect_navigator::ui::Prompt::paint(what, target)));
+                return ok(nav);
+            };
+            let out = nav.update(|s| s.paint(what, &target, Some(value.as_str())))?;
+            if let Some(out) = out {
+                nav.write(out, on_open, None)?;
+            }
+            Ok(looks_state(&nav.state.peek(), &target))
         }
         "NAVIGATOR_PIN" => {
             let paths = paths_of(args, &nav.state.peek());
@@ -1036,8 +1055,104 @@ fn files(
             let m = nav.state.peek().new_note(&req)?;
             made(&nav, on_open, m)
         }
+        "NAVIGATOR_KEYS" => {
+            if let Some(a) = text(args, "action") {
+                let action = KeyAction::from_id(a).ok_or_else(|| format!("no key action {a:?}"))?;
+                let keys = if flag(args, "reset") == Some(true) {
+                    None
+                } else {
+                    let keys: Vec<String> = args
+                        .get("keys")
+                        .and_then(Value::as_array)
+                        .map(|l| {
+                            l.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_owned)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if let Some(bad) = keys.iter().find(|k| Hotkey::parse(k).is_none()) {
+                        return Err(format!("{bad:?} is no hotkey (Mod+Shift+P, ArrowUp, k)"));
+                    }
+                    Some(keys)
+                };
+                nav.update(|s| s.bind_keys(action, keys));
+            }
+            Ok(keys_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_KEY" => {
+            let a =
+                text(args, "action").ok_or("which? (`action`: pane:move-down, list:open, …)")?;
+            let action = KeyAction::from_id(a).ok_or_else(|| format!("no key action {a:?}"))?;
+            let scope = if nav.state.peek().focus == Pane::Navigation {
+                KeyScope::Navigation
+            } else {
+                KeyScope::List
+            };
+            match action {
+                KeyAction::PaneRename => nav.rename_selected(scope),
+                KeyAction::DeleteSelected => nav.delete_selected(scope, on_open),
+                _ => {
+                    let out = nav.update(|s| s.run_key(action));
+                    nav.act(out, on_open);
+                }
+            }
+            ok(nav)
+        }
         other => Err(format!("Navigator has no action {other}")),
     }
+}
+
+/// The target an icon or a colour is for: `target` as written
+/// (`folder:<path>`, `tag:<tag>`, `property:<key>[=<value>]`,
+/// `file:<path>`), else `path`, `folder`, `tag`, or `property` (and
+/// `value`).
+fn paint_target(args: &Value) -> Result<String, String> {
+    if let Some(t) = text(args, "target") {
+        return Ok(t.to_owned());
+    }
+    if let Some(p) = text(args, "path") {
+        return Ok(format!("file:{p}"));
+    }
+    if let Some(f) = args.get("folder").and_then(Value::as_str) {
+        return Ok(format!("folder:{}", f.trim_matches('/')));
+    }
+    if let Some(t) = text(args, "tag") {
+        return Ok(format!("tag:{t}"));
+    }
+    if let Some(k) = text(args, "property") {
+        return Ok(text(args, "value")
+            .map_or_else(|| format!("property:{k}"), |v| format!("property:{k}={v}")));
+    }
+    Err("which? (`target`, or `path`, `folder`, `tag`, `property`)".to_owned())
+}
+
+/// A target's icon, colour and background, as `NAVIGATOR_ICON` and
+/// `NAVIGATOR_COLOUR` answer.
+fn looks_state(s: &NavigatorState, target: &str) -> Value {
+    let icon = target
+        .strip_prefix("file:")
+        .map_or_else(|| s.own_icon(target), |p| s.file_icon(p));
+    json!({
+        "target": target,
+        "icon": icon.map(|i| i.id()),
+        "colour": s.colour(target),
+        "background": s.background(target),
+    })
+}
+
+/// The keyboard map as `NAVIGATOR_KEYS` answers it: each action's id and
+/// hotkeys, and which a person set.
+fn keys_state(s: &NavigatorState) -> Value {
+    let own: Vec<&str> = s.key_bindings().iter().map(|b| b.action.as_str()).collect();
+    json!({
+        "vim": s.settings().vim_keys,
+        "actions": KeyAction::ALL.iter().map(|a| json!({
+            "action": a.id(),
+            "keys": s.keymap().keys(*a).iter().map(Hotkey::text).collect::<Vec<_>>(),
+            "own": own.contains(&a.id()),
+        })).collect::<Vec<_>>(),
+    })
 }
 
 /// The templates as `NAVIGATOR_FOLDER_TEMPLATE` and

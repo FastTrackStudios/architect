@@ -39,6 +39,7 @@
 // "differs" only redraws a bar.
 #![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
+pub mod lucide;
 mod screen;
 pub use screen::{FormFactor, Insets, Screen, ShellStyle};
 
