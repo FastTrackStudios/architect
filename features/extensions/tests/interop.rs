@@ -755,6 +755,79 @@ fn capture_targets_are_registered_while_loaded() {
     }
 }
 
+// ---- the palette slot, keys and sources (#381) --------------------------
+
+const TOURS: &str = r#"
+id = "lab.tours"
+name = "Tours"
+version = "0.1.0"
+kind = "data"
+
+[[views]]
+id = "launcher"
+title = "Tours"
+placement = "overlay"
+
+[[keys]]
+chord = "⌘T"
+action = "LAB_TOURS_OPEN"
+
+[[palette_views]]
+overlay = "palette"
+view = "launcher"
+
+[[palette_sources]]
+id = "tours"
+title = "Tours"
+action = "LAB_TOURS_FIND"
+run = "LAB_TOURS_START"
+ranking = "commands"
+"#;
+
+#[test]
+fn palette_views_keys_and_sources_are_registered_while_loaded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let ext = Extensions::new(host(&list), Installs::new(tmp.path().join("i")));
+    ext.install_contribution_actions().unwrap();
+    let dir = tmp.path().join("tours");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("extension.toml"), TOURS).unwrap();
+    let _ = ext.dev(&dir);
+    let palette = run(&list, "EXT_PALETTE", Value::Null).unwrap();
+    assert_eq!(
+        palette["views"],
+        json!([{ "overlay": "palette", "view": "launcher", "from": "lab.tours" }])
+    );
+    assert_eq!(
+        palette["keys"],
+        json!([{ "chord": "⌘T", "action": "LAB_TOURS_OPEN", "from": "lab.tours" }])
+    );
+    assert_eq!(palette["sources"][0]["id"], "tours");
+    assert_eq!(palette["sources"][0]["run"], "LAB_TOURS_START");
+    assert_eq!(palette["sources"][0]["ranking"], "commands");
+    // Off: its slot, keys and sources go with it.
+    let _ = ext.disable("lab.tours");
+    assert_eq!(
+        run(&list, "EXT_PALETTE", Value::Null).unwrap(),
+        json!({ "views": [], "keys": [], "sources": [] })
+    );
+    // Checked at parse: a chord, its own action, an overlay there is, its
+    // own view, an id it can have, a ranking there is.
+    for (bad, why) in [
+        ("chord = \"⌘T\"", "chord = \"nonsense key\""),
+        ("action = \"LAB_TOURS_OPEN\"", "action = \"VAULT_DELETE\""),
+        ("overlay = \"palette\"", "overlay = \"sidebar\""),
+        ("view = \"launcher\"", "view = \"nope\""),
+        ("id = \"tours\"", "id = \"Tours!\""),
+        ("ranking = \"commands\"", "ranking = \"best\""),
+        ("run = \"LAB_TOURS_START\"", "run = \"VAULT_DELETE\""),
+    ] {
+        let text = TOURS.replacen(bad, why, 1);
+        assert!(Manifest::parse(&text).is_err(), "{why}");
+    }
+}
+
 // ---- windows ------------------------------------------------------------
 
 thread_local! {
