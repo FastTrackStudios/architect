@@ -140,17 +140,21 @@ impl Running {
 
     /// The body of note `path` in vault `vault`, as its live document
     /// holds it now (the file follows after the write-behind).
-    pub async fn note_text(&self, vault: &str, path: &str) -> Option<String> {
-        let doc = self
-            .registry
-            .doc(vault_proto::collab_doc_id(vault, path))
-            .await
-            .ok()?;
-        Some(
-            doc.loro()
-                .get_text(vault_proto::COLLAB_BODY_CONTAINER)
-                .to_string(),
-        )
+    pub fn note_text(
+        &self,
+        vault: &str,
+        path: &str,
+    ) -> impl Future<Output = Option<String>> + Send + 'static {
+        let registry = self.registry.clone();
+        let doc_id = vault_proto::collab_doc_id(vault, path);
+        async move {
+            let doc = registry.doc(doc_id).await.ok()?;
+            Some(
+                doc.loro()
+                    .get_text(vault_proto::COLLAB_BODY_CONTAINER)
+                    .to_string(),
+            )
+        }
     }
 
     /// Stop it: its tasks, then its endpoint.
