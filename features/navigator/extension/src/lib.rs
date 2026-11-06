@@ -52,6 +52,15 @@ pub struct NavigatorExtension;
 
 static HANDLE: Mutex<Option<Handle>> = Mutex::new(None);
 
+/// The navigator has read its vault (`storage-ready` was raised).
+static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether `storage-ready` has been raised (`isStorageReady`).
+#[must_use]
+pub fn is_ready() -> bool {
+    READY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn handle() -> Option<Handle> {
     HANDLE
         .lock()
@@ -192,6 +201,7 @@ pub const ACTIONS: &[&str] = &[
 /// may (`capabilities.events = ["navigator.*"]`) as `app:navigator.<name>`
 /// (Notebook Navigator's API events).
 pub const EVENTS: &[&str] = &[
+    "storage-ready",
     "nav-item-changed",
     "selection-changed",
     "pinned-files-changed",
@@ -274,6 +284,25 @@ fn Drive(mount: NavigatorMount) -> Element {
     let _mounted = use_hook(|| std::rc::Rc::new(bridge::Mounted::new()));
     // The API's events: raised as what they say changes.
     let last = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<Raised>)));
+    // `storage-ready` (`isStorageReady`, `whenReady`): once, when the
+    // navigator has read its vault.
+    let ready = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(false)));
+    use_effect(move || {
+        let s = nav.state.read();
+        if !ready.get() && s.index().file_count() > 0 {
+            ready.set(true);
+            READY.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(h) = handle() {
+                let ask = h.host(architect_extensions::hostcall::HostRequest::Raise {
+                    name: "storage-ready".to_owned(),
+                    detail: json!({ "files": s.index().file_count() }),
+                });
+                spawn(async move {
+                    let _ = ask.await;
+                });
+            }
+        }
+    });
     use_effect(move || {
         let now = Raised::of(&nav.state.read());
         let mut last = last.borrow_mut();
@@ -1395,6 +1424,8 @@ fn profile_state(s: &NavigatorState) -> Value {
         "hidden_file_names": p.hidden_file_names,
         "hidden_file_properties": p.hidden_file_properties,
         "banner": p.banner,
+        "property_keys": p.property_keys,
+        "periodic_folder": p.periodic_folder,
         "shortcuts": p.shortcuts.iter().enumerate().map(|(i, sc)| shortcut_json(i, sc)).collect::<Vec<_>>(),
         "recent": p.recent.iter().filter(|r| s.index().file(r).is_some()).collect::<Vec<_>>(),
     })
@@ -1469,6 +1500,20 @@ fn set_profile(p: &mut VaultProfile, set: &Value) -> Result<(), String> {
                     .as_str()
                     .filter(|b| !b.trim().is_empty())
                     .map(str::to_owned);
+            }
+            // Over the settings' (`propertyKeys`, `periodicNotesFolder`);
+            // empty or null: the settings'.
+            "property_keys" => {
+                p.property_keys = v
+                    .as_str()
+                    .filter(|b| !b.trim().is_empty())
+                    .map(str::to_owned)
+            }
+            "periodic_folder" => {
+                p.periodic_folder = v
+                    .as_str()
+                    .filter(|b| !b.trim().is_empty())
+                    .map(str::to_owned)
             }
             "file_visibility" => {
                 let id = v.as_str().unwrap_or_default();
@@ -1699,6 +1744,8 @@ pub fn state(s: &NavigatorState) -> Value {
         .collect();
     json!({
         "target": target,
+        // `isStorageReady`: its vault is read.
+        "ready": is_ready() || s.index().file_count() > 0,
         "own_list": s.appearance(&s.target()).is_some(),
         "sort": e.sort.id(),
         "grouping": e.grouping.under(e.sort).id(),

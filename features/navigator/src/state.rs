@@ -680,6 +680,13 @@ impl NavigatorState {
             on.then(|| list::files_of(&self.index, &target, &effective, &self.pins, &self.hidden))
         };
         let s = &self.settings;
+        // The profile's keys, else the setting's.
+        let property_keys = self
+            .profiles
+            .active()
+            .property_keys
+            .clone()
+            .unwrap_or_else(|| s.property_keys.clone());
         self.tag_tree = if !s.tag_tree {
             TagTree::default()
         } else if let Some(files) = selected(s.scope_tags && !matches!(target, NavTarget::Tag(_))) {
@@ -687,7 +694,7 @@ impl NavigatorState {
         } else {
             TagTree::build(self.index.files())
         };
-        let keys = NavigatorSettings::list(&s.property_keys);
+        let keys = NavigatorSettings::list(&property_keys);
         self.property_tree = if !s.property_tree || keys.is_empty() {
             PropertyTree::default()
         } else if let Some(files) =
@@ -787,7 +794,8 @@ impl NavigatorState {
     /// New settings.
     pub fn set_settings(&mut self, settings: NavigatorSettings) {
         if settings != self.settings {
-            self.periodic = PeriodicNotes::from_settings(&settings);
+            self.periodic =
+                PeriodicNotes::from_settings(&periodic_settings(&settings, self.profiles.active()));
             if settings.search_provider != SearchProvider::FullText {
                 self.full_text = None;
                 self.full_text_for = None;
@@ -1459,6 +1467,11 @@ impl NavigatorState {
     /// The hiding compiled again and the vault shown anew: a profile
     /// switched or edited, hidden items shown or not.
     fn rehide(&mut self) {
+        // The profile's periodic notes folder, if it has one.
+        self.periodic = PeriodicNotes::from_settings(&periodic_settings(
+            &self.settings,
+            self.profiles.active(),
+        ));
         self.hidden = Hidden::new(&self.profiles.active().rules(), self.show_hidden);
         self.index = self.visible();
         let index = &self.index;
@@ -3632,4 +3645,15 @@ fn orders_of(map: &BTreeMap<String, Vec<String>>) -> Vec<ChildOrder> {
             names: names.clone(),
         })
         .collect()
+}
+
+/// `settings` with `profile`'s periodic notes folder, when it has one.
+fn periodic_settings(settings: &NavigatorSettings, profile: &VaultProfile) -> NavigatorSettings {
+    match &profile.periodic_folder {
+        Some(f) => NavigatorSettings {
+            periodic_folder: f.clone(),
+            ..settings.clone()
+        },
+        None => settings.clone(),
+    }
 }
