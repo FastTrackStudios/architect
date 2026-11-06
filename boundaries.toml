@@ -178,6 +178,11 @@ layer = "L0"
 note = "GPL-3.0-or-later, with its extension the only GPL crates (a port of Notebook Navigator)"
 
 [[row]]
+package = "architect-navigator-api"
+layer = "L0"
+note = "the navigator's provider API, MIT OR Apache-2.0: what pages and extensions implement without linking the GPL navigator (#356)"
+
+[[row]]
 package = "architect-files"
 features = ["vox"]
 layer = "L0"

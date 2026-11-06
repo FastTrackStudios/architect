@@ -680,6 +680,53 @@ pub struct ProjectTypeDecl {
     pub views: Vec<String>,
 }
 
+/// A provider of the navigator's two panes (`[[navigator_providers]]`,
+/// #356).
+///
+/// While one of its `views` shows, the app's one left sidebar, the
+/// navigator, shows its tree of containers and the items in the selected
+/// one in place of the vault's folders and notes.
+///
+/// ```toml
+/// [[navigator_providers]]
+/// id = "projects"
+/// title = "Projects"
+/// icon = "folder-kanban"
+/// views = ["list", "page"]   # its own [[views]] it goes with
+/// actions = "PROJECTS_NAV"   # PROJECTS_NAV_SNAPSHOT, _OPEN, _MOVE, _CREATE
+/// ```
+///
+/// Its requests are actions of its own, `<actions>_SNAPSHOT` (declared in
+/// its `[[actions]]`) and `_OPEN`, `_MOVE`, `_CREATE` when it answers
+/// them: `architect_navigator_api::Method`. Linked Rust code serves an
+/// `architect_navigator_api::NavigatorProvider` as those actions with
+/// `linked::Builder::navigator`; a process, Luau or page extension answers
+/// them itself. The API is MIT OR Apache-2.0 (`architect-navigator-api`):
+/// a provider never links the GPL navigator.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct NavigatorProviderDecl {
+    /// Unique among its providers.
+    pub id: String,
+    /// The root's row and its switcher button.
+    pub title: String,
+    /// A Lucide icon's name, for its switcher button.
+    pub icon: String,
+    /// Its own views the provider goes with: one of them showing switches
+    /// the navigator to it.
+    pub views: Vec<String>,
+    /// Its actions' prefix (`PROJECTS_NAV`).
+    pub actions: String,
+}
+
+impl NavigatorProviderDecl {
+    /// Its snapshot action (`<actions>_SNAPSHOT`), the one it must have.
+    #[must_use]
+    pub fn snapshot_action(&self) -> String {
+        format!("{}_SNAPSHOT", self.actions)
+    }
+}
+
 /// Everything an extension adds to the interface past actions, settings,
 /// views and themes: a manifest's tables, or the same sent at run time.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -700,6 +747,9 @@ pub struct Contribution {
     pub base_views: Vec<BaseViewDecl>,
     /// Types of architect's `project` kind (`[[project_types]]`).
     pub project_types: Vec<ProjectTypeDecl>,
+    /// What fills the navigator's panes while its views show
+    /// (`[[navigator_providers]]`).
+    pub navigator_providers: Vec<NavigatorProviderDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
     pub keymaps: Vec<editor_ext::KeymapEntry>,
@@ -783,6 +833,9 @@ impl Contribution {
             embeds: join(&self.embeds, &other.embeds, |e| e.id.clone()),
             base_views: join(&self.base_views, &other.base_views, |b| b.id.clone()),
             project_types: join(&self.project_types, &other.project_types, |p| p.id.clone()),
+            navigator_providers: join(&self.navigator_providers, &other.navigator_providers, |n| {
+                n.id.clone()
+            }),
             keymaps: join(&self.keymaps, &other.keymaps, keymap_key),
             slash: join(&self.slash, &other.slash, |s| s.action.clone()),
         }
@@ -821,6 +874,11 @@ impl Contribution {
             self.project_types
                 .iter()
                 .map(|p| format!("project_type:{}", p.id)),
+        );
+        out.extend(
+            self.navigator_providers
+                .iter()
+                .map(|n| format!("navigator_provider:{}", n.id)),
         );
         out.extend(
             self.keymaps
@@ -886,6 +944,7 @@ impl Contribution {
             self.embeds.len(),
             self.base_views.len(),
             self.project_types.len(),
+            self.navigator_providers.len(),
             self.keymaps.len(),
             self.slash.len(),
         ]
@@ -1129,6 +1188,19 @@ impl Contribution {
                 }
             }
             for v in &p.views {
+                view(&what, v)?;
+            }
+        }
+        for n in &self.navigator_providers {
+            let what = format!("navigator provider {}", n.id);
+            if n.id.is_empty() {
+                return refuse(what, "it needs an id".to_owned());
+            }
+            if n.actions.is_empty() {
+                return refuse(what, "it needs `actions`, its actions' prefix".to_owned());
+            }
+            action(&what, &n.snapshot_action())?;
+            for v in &n.views {
                 view(&what, v)?;
             }
         }
@@ -1766,6 +1838,26 @@ impl Contributions {
     #[must_use]
     pub fn project_type(&self, id: &str) -> Option<By<ProjectTypeDecl>> {
         self.project_types().into_iter().find(|p| p.item.id == id)
+    }
+
+    /// Every navigator provider (`[[navigator_providers]]`), in the order
+    /// its owner came.
+    #[must_use]
+    pub fn navigator_providers(&self) -> Vec<By<NavigatorProviderDecl>> {
+        self.all(|c| c.navigator_providers.clone())
+    }
+
+    /// The navigator provider that goes with view `view` of extension
+    /// `extension`: the first it declares that lists the view.
+    #[must_use]
+    pub fn navigator_provider_for(
+        &self,
+        extension: &str,
+        view: &str,
+    ) -> Option<By<NavigatorProviderDecl>> {
+        self.navigator_providers()
+            .into_iter()
+            .find(|n| n.owner == extension && n.item.views.iter().any(|v| v == view))
     }
 
     /// The embed that draws `claim`: the first loaded that claims it.
