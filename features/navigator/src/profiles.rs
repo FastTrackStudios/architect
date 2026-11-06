@@ -371,6 +371,15 @@ impl Profiles {
             })
     }
 
+    /// The profile `which` names (as [`find`](Self::find)), to change.
+    pub fn find_mut(&mut self, which: &str) -> Option<&mut VaultProfile> {
+        let id = self.find(which)?.id.clone();
+        if self.default.id == id {
+            return Some(&mut self.default);
+        }
+        self.others.iter_mut().find(|p| p.id == id)
+    }
+
     /// Uses the profile `which` names; returns whether it changed.
     pub fn select(&mut self, which: &str) -> Result<bool, String> {
         let id = self

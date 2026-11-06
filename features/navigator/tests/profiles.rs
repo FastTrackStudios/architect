@@ -266,3 +266,22 @@ fn a_banner_row_sits_over_the_rest() {
         NavRowKind::Banner { src } if src == "Home/Photo.png"
     ));
 }
+
+#[test]
+fn the_profile_editor_changes_a_profile_in_use_or_not() {
+    let src = vault();
+    let mut s = state(&src);
+    s.expand_all();
+    let work = s.add_profile("Work", false).unwrap();
+    assert!(s.select_profile("Default").unwrap());
+    // Not in use: nothing on show changes.
+    s.edit_profile_in(&work, |p| p.hidden_folders = vec!["Home".to_owned()])
+        .unwrap();
+    assert!(folders(&s).contains(&"Home".to_owned()));
+    assert_eq!(s.profiles().find("Work").unwrap().hidden_folders, ["Home"]);
+    // In use: hidden at once.
+    s.edit_profile_in("default", |p| p.hidden_folders = vec!["Journal".to_owned()])
+        .unwrap();
+    assert!(!folders(&s).contains(&"Journal".to_owned()));
+    assert!(s.edit_profile_in("nobody", |_| {}).is_err());
+}

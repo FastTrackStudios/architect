@@ -288,6 +288,44 @@ fn each_setting_lives_in_its_scope() {
 }
 
 #[test]
+fn a_synced_setting_can_be_kept_on_one_device() {
+    let mut r = Registry::new();
+    r.register(Audio::section()).unwrap();
+    r.register(EditingPrefs::section()).unwrap();
+    let mut v = ScopedValues::new();
+    v.set(&r, "editing.tab_width", Value::Int(2)).unwrap();
+    // Kept here: it starts from the person's value, and is written here.
+    assert_eq!(v.set_local(&r, "editing.tab_width", true), Ok(true));
+    assert!(v.is_local("editing.tab_width"));
+    assert_eq!(
+        v.set(&r, "editing.tab_width", Value::Int(8)),
+        Ok(Scope::Device)
+    );
+    assert_eq!(EditingPrefs::read(&r, &v).tab_width, 8);
+    assert_eq!(v.synced.set.get("editing.tab_width"), Some(&Value::Int(2)));
+    // Another device changes the person's: this one keeps its own.
+    let mut theirs = Values::new();
+    theirs.set.insert("editing.tab_width".into(), Value::Int(3));
+    v.replace(Scope::Synced, theirs);
+    assert_eq!(EditingPrefs::read(&r, &v).tab_width, 8);
+    // Kept with the device's values, through a save and a load.
+    let json = v.device.to_json().unwrap();
+    let back = Values::from_json(&json).unwrap();
+    assert!(back.local.contains("editing.tab_width"));
+    // Given back to every device: the person's value again.
+    assert_eq!(v.set_local(&r, "editing.tab_width", false), Ok(true));
+    assert_eq!(EditingPrefs::read(&r, &v).tab_width, 3);
+    assert!(!v.device.set.contains_key("editing.tab_width"));
+    assert_eq!(v.set_local(&r, "editing.tab_width", false), Ok(false));
+    assert!(
+        v.set_local(&r, "audio.tracks", true).is_err(),
+        "a device setting"
+    );
+    // An older file, with no `local`, still loads.
+    assert!(Values::from_json(r#"{"set":{}}"#).is_ok());
+}
+
+#[test]
 fn an_org_sets_defaults_and_locks() {
     let mut r = Registry::new();
     r.register(Audio::section()).unwrap();

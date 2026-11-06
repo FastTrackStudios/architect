@@ -25,6 +25,11 @@ pub enum ValueError {
 #[derive(Debug, Clone, Default, PartialEq, Facet)]
 pub struct Values {
     pub set: BTreeMap<String, Value>,
+    /// In this device's values: the synced settings it keeps its own
+    /// value for (Notebook Navigator's per-setting sync mode), read and
+    /// written here, not in the person's.
+    #[facet(default)]
+    pub local: BTreeSet<String>,
 }
 
 impl Values {
@@ -224,6 +229,62 @@ impl ScopedValues {
         )
     }
 
+    /// The scope `setting`'s value is kept in: its own, or this device's
+    /// for a synced setting the device keeps its own
+    /// ([`set_local`](Self::set_local)).
+    #[must_use]
+    pub fn scope_of(&self, setting: &Setting) -> Scope {
+        if setting.scope == Scope::Synced && self.device.local.contains(&setting.key) {
+            Scope::Device
+        } else {
+            setting.scope
+        }
+    }
+
+    /// Whether this device keeps its own value for synced setting `key`.
+    #[must_use]
+    pub fn is_local(&self, key: &str) -> bool {
+        self.device.local.contains(key)
+    }
+
+    /// Keeps synced setting `key` on this device (`local`), or gives it
+    /// back to every device: going local, the device starts from the
+    /// person's value; going back, the device's is let go. Whether it
+    /// changed.
+    ///
+    /// # Errors
+    ///
+    /// No such setting, or it is not a synced one.
+    pub fn set_local(
+        &mut self,
+        registry: &Registry,
+        key: &str,
+        local: bool,
+    ) -> Result<bool, ValueError> {
+        let (_, setting) = registry
+            .setting(key)
+            .ok_or_else(|| ValueError::UnknownKey(key.to_owned()))?;
+        if setting.scope != Scope::Synced {
+            return Err(ValueError::Refused {
+                key: key.to_owned(),
+                why: "only a synced setting can be kept on one device".to_owned(),
+            });
+        }
+        if local == self.is_local(key) {
+            return Ok(false);
+        }
+        if local {
+            if let Some(v) = self.synced.set.get(key).cloned() {
+                self.device.set.insert(key.to_owned(), v);
+            }
+            self.device.local.insert(key.to_owned());
+        } else {
+            self.device.set.remove(key);
+            self.device.local.remove(key);
+        }
+        Ok(true)
+    }
+
     /// `key`'s value: the org's when it is locked; else what its scope
     /// holds (if still valid); else its default.
     #[must_use]
@@ -232,7 +293,7 @@ impl ScopedValues {
         if self.org.is_locked(key) {
             return self.default_of(registry, key);
         }
-        self.of(setting.scope)
+        self.of(self.scope_of(setting))
             .set
             .get(key)
             .filter(|v| check(setting, v).is_ok())
@@ -262,7 +323,7 @@ impl ScopedValues {
             return Err(ValueError::Locked(key.to_owned()));
         }
         let value = check(setting, &value)?;
-        let scope = setting.scope;
+        let scope = self.scope_of(setting);
         if Some(&value) == self.default_of(registry, key).as_ref() {
             self.of_mut(scope).set.remove(key);
         } else {
@@ -274,10 +335,8 @@ impl ScopedValues {
     /// Puts `key` back to its default; the scope it was in.
     pub fn reset(&mut self, registry: &Registry, key: &str) -> Option<Scope> {
         let (_, setting) = registry.setting(key)?;
-        self.of_mut(setting.scope)
-            .set
-            .remove(key)
-            .map(|_| setting.scope)
+        let scope = self.scope_of(setting);
+        self.of_mut(scope).set.remove(key).map(|_| scope)
     }
 
     /// Whether `key` differs from its default (a locked one never does:
@@ -287,7 +346,7 @@ impl ScopedValues {
         !self.org.is_locked(key)
             && registry
                 .setting(key)
-                .is_some_and(|(_, s)| self.of(s.scope).set.contains_key(key))
+                .is_some_and(|(_, s)| self.of(self.scope_of(s)).set.contains_key(key))
     }
 
     #[must_use]

@@ -526,7 +526,8 @@ impl WebHost {
             | HostRequest::Decorate { .. }
             | HostRequest::Subscribe(_)
             | HostRequest::Unsubscribe { .. }
-            | HostRequest::Events => Err(HostError::Unsupported {
+            | HostRequest::Events
+            | HostRequest::Raise { .. } => Err(HostError::Unsupported {
                 what: format!("{request_op} is not in the browser yet"),
             }),
             HostRequest::Fetch(fetch) => self.fetch(fetch).await,

@@ -423,8 +423,9 @@ fn drop_row(nav: Navigator, what: &Drag, x: f64, y: f64) -> Option<String> {
     if x < bx || x > bx + bw || y < by || y > by + bh {
         return None;
     }
+    let zoom = nav.zoom();
     let s = nav.state.peek();
-    let row = s.nav_row_at(y - by)?;
+    let row = s.nav_row_at((y - by) / zoom)?;
     let takes = match (&row.kind, what) {
         (NavRowKind::Section { id, .. }, _) => id == SHORTCUTS,
         (NavRowKind::Shortcut { .. }, _)

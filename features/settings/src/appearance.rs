@@ -325,6 +325,12 @@ pub fn only_appearance(values: &Values) -> Values {
             .filter(|(k, _)| is_appearance_key(k))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
+        local: values
+            .local
+            .iter()
+            .filter(|k| is_appearance_key(k))
+            .cloned()
+            .collect(),
     }
 }
 

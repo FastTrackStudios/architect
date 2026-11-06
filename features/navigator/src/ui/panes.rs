@@ -97,6 +97,13 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                                     profile_menu.set(false);
                                 } }
                         }
+                        MenuRow { data: "profiles:edit".to_owned(), label: "Edit profiles…".to_owned(), checked: false,
+                            on_pick: move |()| {
+                                profile_menu.set(false);
+                                if !super::profiles_page::open_profiles_page() {
+                                    nav.say("No settings page to edit the profiles on");
+                                }
+                            } }
                     }
                 }
                 if calendar_on {

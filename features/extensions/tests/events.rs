@@ -411,3 +411,32 @@ fn a_background_extension_starts_on_its_first_event_and_stops_when_idle() {
     assert!(host.unload(ID));
     assert!(host.background().is_empty());
 }
+
+#[test]
+fn an_extension_raises_its_own_events_under_its_id_and_others_hear_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let clock = FakeClock::at(WED_8);
+    let host = host(&clock);
+    // A hearer of navigator's events (`HostRequest::Raise`'s).
+    let hearer = MANIFEST
+        .replace("events = [\"transport.*\"]", "events = [\"navigator.*\"]")
+        .replace("app:transport.changed", "app:navigator.selection-changed");
+    load(&host, &tmp.path().join("pulse"), &hearer).unwrap();
+    let detail = serde_json::json!({ "playing": true, "bar": 3 });
+    assert_eq!(
+        host.raise_own("navigator", "selection-changed", &detail),
+        Ok(1)
+    );
+    assert_eq!(state(&host, "transport").as_deref(), Some("true at 3"));
+    assert!(
+        host.app_events()
+            .iter()
+            .any(|e| e.name == "navigator.selection-changed"),
+        "defined as it is first raised"
+    );
+    assert_eq!(
+        host.raise_own("navigator", "nav-item-changed", &detail),
+        Ok(0)
+    );
+    assert!(host.raise_own("navigator", "Not A Name", &detail).is_err());
+}

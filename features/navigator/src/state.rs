@@ -1504,6 +1504,28 @@ impl NavigatorState {
         }
     }
 
+    /// Changes profile `which` (its id, name or number; the profile
+    /// editor's), in use or not.
+    ///
+    /// # Errors
+    ///
+    /// No such profile.
+    pub fn edit_profile_in(
+        &mut self,
+        which: &str,
+        f: impl FnOnce(&mut VaultProfile),
+    ) -> Result<(), String> {
+        let before = self.profiles.active().clone();
+        f(self
+            .profiles
+            .find_mut(which)
+            .ok_or_else(|| format!("no vault profile {which:?}"))?);
+        if *self.profiles.active() != before {
+            self.rehide();
+        }
+        Ok(())
+    }
+
     /// Hides a folder (`/path`), a tag, or a note (`/path`) in the profile
     /// in use, or shows it again (`unhide`).
     pub fn hide(&mut self, what: &HideTarget, unhide: bool) {

@@ -55,6 +55,12 @@
 //! `scopePropertiesToCurrentContext` false, `propertySortOrder`
 //! alpha-asc.
 //!
+//! Settings: the section is the person's, on every device (`Synced`,
+//! Notebook Navigator's settings in its synced `data.json`); each one can
+//! be kept on one device instead (its sync toggle on the settings page,
+//! `architect_settings::ScopedValues::set_local`). `zoom` (100%,
+//! `desktopScale`) sizes the navigator apart from the app.
+//!
 //! What a person sets for one folder or tag (its sort, grouping, rows,
 //! mode, notes from below) is not here but in [`crate::Appearance`],
 //! kept with the view's state.
@@ -404,7 +410,7 @@ impl TreeSort {
 /// Navigator
 /// The sidebar's folders and notes.
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Settings)]
-#[settings(id = "navigator", icon = "folder-tree")]
+#[settings(id = "navigator", icon = "folder-tree", scope = Synced)]
 pub struct NavigatorSettings {
     /// Two panes
     /// Folders and notes side by side (or stacked); off, one at a time.
@@ -751,6 +757,10 @@ pub struct NavigatorSettings {
     /// Background property
     #[setting(placeholder = "background")]
     pub frontmatter_background_field: String,
+    /// Zoom
+    /// The navigator's own size, apart from the app's (`desktopScale`).
+    #[setting(control = slider(50..=200, step = 5), unit = "%")]
+    pub zoom: u32,
     /// Vim keys
     /// `h` `j` `k` `l` move through the panes too, `g` and ⇧G to the top
     /// and the end.
@@ -899,6 +909,7 @@ impl Default for NavigatorSettings {
             frontmatter_color_field: "color".to_owned(),
             frontmatter_background_field: "background".to_owned(),
             vim_keys: false,
+            zoom: 100,
         }
     }
 }

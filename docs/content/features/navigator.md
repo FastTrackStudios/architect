@@ -109,6 +109,9 @@ directly. Its palette commands are then the view's own.
   `features/navigator/src/state/looks.rs`: `NavigatorState::paint` and the
   icons, colours and backgrounds it keeps or writes to frontmatter.
   `features/shell/src/lucide.rs` draws any Lucide icon by name (MIT).
+- `features/navigator/src/ui/profiles_page.rs`: the vault profiles'
+  editor on the settings page. `features/settings/src/values.rs`
+  `ScopedValues::set_local` keeps a synced setting on one device.
 - `features/navigator/src/appearance.rs`: `Appearance`, a folder's or a
   tag's own list. `Appearance::over` applies it to the settings.
 - `features/navigator/src/state.rs`: `NavigatorState` holds everything.
@@ -295,6 +298,17 @@ Notebook Navigator's parts are ported in layers (#332):
     box: none is downloaded. No icon picker (an icon is typed by name), no
     colour palette, and no recent icons. Rename is F2 everywhere (Return
     opens a note).
+  - Settings: the section is synced, each setting can be kept on one
+    device (Notebook Navigator's sync toggle), and the navigator has its
+    own zoom. The vault profiles have an editor on the settings page
+    ("Edit profiles…" in the profile menu).
+  - The API for extensions: the `NAVIGATOR_*` actions (navigation,
+    selection, metadata) and the events it raises, `nav-item-changed`,
+    `selection-changed`, `pinned-files-changed`, `metadata-changed`.
+    Not ported: Notebook Navigator's menu extension API
+    (`MenusAPI`: an extension adding rows to the navigator's own menus),
+    `storage-ready`, and a phone's separate zoom (`mobileScale`). The
+    synced scope is kept on the device until the app has a synced store.
 - **Still to come.**
   - Rendered PDF covers. A source gives a cover as the note's
     `feature_image`; without one, a PDF shows its badge.

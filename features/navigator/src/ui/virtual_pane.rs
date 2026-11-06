@@ -46,6 +46,8 @@ pub(super) fn VirtualPane(
                         nav_box.set(at);
                     }
                 }
+                // In the layout's lengths, the zoom taken off.
+                let h = h / nav.zoom();
                 if h > 0.0 && (nav.state.peek().scroll(pane).view - h).abs() > 0.5 {
                     let mut state = nav.state;
                     state.write().set_view(pane, h);
@@ -97,7 +99,7 @@ pub(super) fn VirtualPane(
                 if dy != 0.0 {
                     e.prevent_default();
                     let mut state = nav.state;
-                    state.write().scroll_by(pane, dy);
+                    state.write().scroll_by(pane, dy / nav.zoom());
                 }
             },
             // The pane pressed has the keyboard; a finger drags it.
@@ -113,7 +115,7 @@ pub(super) fn VirtualPane(
             },
             onpointermove: move |e: PointerEvent| {
                 let Some((y0, from)) = *press.peek() else { return };
-                let dy = e.data().client_coordinates().y - y0;
+                let dy = (e.data().client_coordinates().y - y0) / nav.zoom();
                 if nav.dragged.cloned() || dy.abs() > SLOP {
                     nav.dragged.set(true);
                     let mut state = nav.state;
@@ -132,7 +134,7 @@ pub(super) fn VirtualPane(
                     },
                     onpointermove: move |e: PointerEvent| {
                         let Some((y0, from)) = *thumb_drag.peek() else { return };
-                        let dy = e.data().client_coordinates().y - y0;
+                        let dy = (e.data().client_coordinates().y - y0) / nav.zoom();
                         let mut state = nav.state;
                         state.write().scroll_to(pane, from + dy * most / track);
                     },

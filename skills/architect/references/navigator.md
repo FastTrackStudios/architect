@@ -445,14 +445,36 @@ film's in-memory one).
   takes `drag_folder`, `to` (a folder) and `copy`; the icons, colours and
   keys: `NAVIGATOR_ICON`, `NAVIGATOR_COLOUR` (any target, `background`;
   no value asks), `NAVIGATOR_KEYS` (the map; `action` with `keys` or
-  `reset`) and `NAVIGATOR_KEY` (does a key action by its id). A note's context menu
+  `reset`), `NAVIGATOR_KEY` (does a key action by its id) and
+  `NAVIGATOR_METADATA` (a target's icon, colour, background and pins;
+  `pinned` for all). A note's context menu
   has "Add to shortcuts", "Hide note", "Rename…", "Duplicate", "Move to…",
   "Open the selected in new tabs", "Merge the selected notes",
   "Delete", "Set icon…" and "Set colour…"; a folder's, tag's or property's row menu, "Add to shortcuts"
   and "Hide", and a folder's the file operations.
   Without the extension, `NavigatorView` puts its own on the palette.
 - **Settings.** One section, `navigator` (`NavigatorSettings`, a
-  `#[derive(Settings)]` struct).
+  `#[derive(Settings)]` struct), synced (`scope = Synced`): each setting
+  can be kept on one device (its row's toggle;
+  `architect_settings::ScopedValues::set_local`). The Architect app keeps
+  the synced scope in `settings-synced.json` until a synced store holds it,
+  and moved the values it kept per device there once
+  (`apps/ui/src/settings.rs` `adopt_synced`). `zoom` (50 to 200%) sizes the
+  navigator apart from the app (CSS `zoom` on its root; `Navigator::zoom`
+  takes it off pointer and measured lengths). The vault profiles have an
+  editor on the settings page, opened from the profile menu's "Edit
+  profiles…", the palette's `NAVIGATOR_EDIT_PROFILES` or
+  `NAVIGATOR_PROFILE`'s `edit` (`features/navigator/src/ui/profiles_page.rs`
+  `open_profiles_page`, section `navigator-profiles`, there from the first
+  time it opens; `NavigatorState::edit_profile_in`).
+- **API for extensions.** The `NAVIGATOR_*` actions are its API
+  (navigation: `NAVIGATOR_SELECT`, `NAVIGATOR_REVEAL`; selection:
+  `NAVIGATOR_STATE`; metadata: `NAVIGATOR_METADATA`, `NAVIGATOR_ICON`,
+  `NAVIGATOR_COLOUR`, `NAVIGATOR_PIN`), and it raises events as they
+  change (`HostRequest::Raise`, `features/navigator/extension/src/lib.rs`
+  `EVENTS`): `app:navigator.nav-item-changed`, `selection-changed`,
+  `pinned-files-changed` and `metadata-changed`, heard by an extension
+  whose `capabilities.events` has `navigator.*`.
 - **Kept between runs.** `ViewState` (`Navigator::view_state`, `restore`):
   the open folders, the manual order, the selected folder, the panes'
   sizes, the pins, the folded groups, each place's own list, the
@@ -471,9 +493,8 @@ periodic notes, #336, tags and properties, #337, and search, shortcuts,
 recents, profiles and hiding, #338, are done):
 
 - the real vault as a source (#353);
-- #339's settings (synced or device-local per setting, its own zoom) and
-  the API (file operations, templates, the keyboard map, icons and
-  colours are done).
+- what #339 left: a template picker, icon packs, Templater, and the
+  ribbon buttons of create-note commands (see the docs page's status).
 
 Each adds variants to `NavRowKind` and `ListRowKind`, and adds `NavTarget`
 (both `#[non_exhaustive]`).
