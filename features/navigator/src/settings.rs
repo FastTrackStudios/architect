@@ -366,6 +366,98 @@ pub enum CalendarPlacement {
     Below,
 }
 
+/// Which engine writes templates (`templateEngine`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum TemplateEngine {
+    /// Built-in, Templater's common commands too
+    #[default]
+    Automatic,
+    /// Built-in only
+    BuiltIn,
+}
+
+/// What a new folder note is (`folderNoteType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum FolderNoteType {
+    /// A note
+    #[default]
+    Markdown,
+    /// A canvas
+    Canvas,
+    /// A base
+    Base,
+}
+
+/// What collapse all folds (`collapseBehavior`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum CollapseScope {
+    /// Everything
+    #[default]
+    All,
+    /// Folders
+    Folders,
+    /// Tags
+    Tags,
+    /// Properties
+    Properties,
+}
+
+/// Between a row's name and its count (`navCountLeaderStyle`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum CountLeader {
+    /// Nothing
+    #[default]
+    None,
+    /// Dots
+    Dots,
+    /// Dashes
+    Dashes,
+    /// A line
+    Line,
+}
+
+/// The folders' order (`folderSortOrder`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum FolderSort {
+    /// A to Z
+    #[default]
+    AToZ,
+    /// Z to A
+    ZToA,
+}
+
+/// The navigation rainbow (`navRainbow.mode`): rows coloured along their
+/// siblings, where they have no colour of their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum RainbowMode {
+    /// Off
+    #[default]
+    Off,
+    /// The text
+    Text,
+    /// The background
+    Background,
+}
+
+/// Which levels the rainbow colours (`navRainbow.*.scope`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum RainbowScope {
+    /// The top, its rows' children after it
+    #[default]
+    Root,
+    /// From the level below the top
+    Child,
+    /// Every level its own
+    All,
+}
+
 /// How tags or property keys are ordered (`tagSortOrder`,
 /// `propertySortOrder`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
@@ -446,6 +538,77 @@ pub struct NavigatorSettings {
     /// Smart collapse
     /// Collapse all keeps the selected folder in view.
     pub smart_collapse: bool,
+    /// Collapse all folds
+    /// What the collapse all button folds.
+    #[setting(control = segmented)]
+    pub collapse_scope: CollapseScope,
+    /// Keep the vault open
+    /// Collapse all leaves the vault's row open.
+    pub collapse_keeps_root: bool,
+    /// One branch open
+    /// Opening a folder, tag or key folds the others beside it and above.
+    pub accordion: bool,
+    /// Open what is selected
+    /// Selecting a folder, tag or key opens it.
+    pub expand_on_select: bool,
+    /// Open its first note
+    /// Selecting a folder, tag or property opens the first note in it.
+    pub open_first_note: bool,
+    /// Folder order
+    #[setting(control = segmented)]
+    pub folder_sort: FolderSort,
+    /// Indent guides
+    /// Lines down the levels of the tree.
+    pub indent_guides: bool,
+    /// Between a name and its count
+    #[setting(control = segmented)]
+    pub count_leader: CountLeader,
+    /// Space between top rows
+    #[setting(control = slider(0..=16, step = 2), unit = " pt")]
+    pub root_spacing: u32,
+    /// Properties row
+    /// The "Properties" row over the property keys.
+    pub properties_row: bool,
+    /// Tooltips
+    /// A note's or folder's name in full when the pointer rests on it.
+    pub tooltips: bool,
+    /// Path in tooltips
+    pub tooltip_path: bool,
+    /// Tags in tooltips
+    pub tooltip_tags: bool,
+    /// Word count in tooltips
+    pub tooltip_words: bool,
+    /// Navigation rainbow
+    /// Rows coloured along their siblings, where they have no colour of their own.
+    #[setting(control = segmented)]
+    pub rainbow: RainbowMode,
+    /// Rainbow levels
+    #[setting(control = segmented)]
+    pub rainbow_scope: RainbowScope,
+    /// Rainbow first colour
+    #[setting(placeholder = "#ef4444")]
+    pub rainbow_first: String,
+    /// Rainbow last colour
+    #[setting(placeholder = "#8b5cf6")]
+    pub rainbow_last: String,
+    /// Rainbow on folders
+    pub rainbow_folders: bool,
+    /// Rainbow on tags
+    pub rainbow_tags: bool,
+    /// Rainbow on properties
+    pub rainbow_properties: bool,
+    /// Pin shortcuts
+    /// The shortcuts stay over the folders as they scroll.
+    pub pin_shortcuts: bool,
+    /// Pin recent notes too
+    /// With the shortcuts pinned, the recent notes are pinned with them.
+    pub pin_recent: bool,
+    /// Homepage
+    /// What opens when the app starts: a note's path, or daily, weekly, monthly for that periodic note. Empty: nothing.
+    #[setting(placeholder = "daily, or Home.md")]
+    pub homepage: String,
+    /// New notes in a new tab
+    pub new_note_in_tab: bool,
     /// Folder row height
     #[setting(control = slider(20..=40, step = 1), unit = " pt")]
     pub item_height: u32,
@@ -567,6 +730,10 @@ pub struct NavigatorSettings {
     /// Folder notes open in
     #[setting(control = segmented)]
     pub folder_note_open: FolderNoteOpen,
+    /// New folder notes are
+    /// What "Create folder note" makes.
+    #[setting(control = segmented)]
+    pub folder_note_type: FolderNoteType,
     /// Calendar
     /// Days under the folders, the calendar button in their header shows
     /// them: a click opens a day's note, or makes it.
@@ -695,6 +862,10 @@ pub struct NavigatorSettings {
     /// Where the template picker looks; empty, the whole vault.
     #[setting(placeholder = "Templates")]
     pub template_folder: String,
+    /// Template engine
+    /// Automatic reads Templater's common commands (`<% tp.date.now("YYYY-MM-DD") %>`, `tp.file.title`, `tp.file.cursor()`, `tp.system.prompt`) too; its scripts (`<%* %>`) are left as written.
+    #[setting(control = segmented)]
+    pub template_engine: TemplateEngine,
     /// Folder note template
     /// The template a new folder note is made from (a vault path).
     #[setting(placeholder = "Templates/Folder.md")]
@@ -761,6 +932,10 @@ pub struct NavigatorSettings {
     /// The navigator's own size, apart from the app's (`desktopScale`).
     #[setting(control = slider(50..=200, step = 5), unit = "%")]
     pub zoom: u32,
+    /// Zoom on a phone
+    /// The navigator's size on a phone (`mobileScale`).
+    #[setting(control = slider(50..=200, step = 5), unit = "%")]
+    pub zoom_phone: u32,
     /// Vim keys
     /// `h` `j` `k` `l` move through the panes too, `g` and ⇧G to the top
     /// and the end.
@@ -790,6 +965,52 @@ impl NavigatorSettings {
         } else {
             fields
         }
+    }
+}
+
+impl NavigatorSettings {
+    /// The keys its lists name moved as a property key was renamed or
+    /// deleted (`updateSettingsAfterRename`, `updateSettingsAfterDelete`):
+    /// `property_keys`, `list_properties` and `feature_image_properties`.
+    /// Whether any changed.
+    pub fn after_property_ops(&mut self, ops: &[crate::source::FileOp]) -> bool {
+        use crate::source::FileOp;
+        let mut changed = false;
+        for op in ops {
+            let (from, to) = match op {
+                FileOp::RenamePropertyKey { from, to } => (from.as_str(), Some(to.as_str())),
+                FileOp::DeletePropertyKey(key) => (key.as_str(), None),
+                _ => continue,
+            };
+            let from = crate::properties::fold(from);
+            for list in [
+                &mut self.property_keys,
+                &mut self.list_properties,
+                &mut self.feature_image_properties,
+            ] {
+                let mut out: Vec<String> = Vec::new();
+                let mut moved = false;
+                for k in list.split(',').map(str::trim).filter(|k| !k.is_empty()) {
+                    if crate::properties::fold(k) == from {
+                        moved = true;
+                        if let Some(to) = to
+                            && !out
+                                .iter()
+                                .any(|o| crate::properties::fold(o) == crate::properties::fold(to))
+                        {
+                            out.push(to.to_owned());
+                        }
+                    } else {
+                        out.push(k.to_owned());
+                    }
+                }
+                if moved {
+                    *list = out.join(", ");
+                    changed = true;
+                }
+            }
+        }
+        changed
     }
 }
 
@@ -910,6 +1131,34 @@ impl Default for NavigatorSettings {
             frontmatter_background_field: "background".to_owned(),
             vim_keys: false,
             zoom: 100,
+            zoom_phone: 100,
+            folder_note_type: FolderNoteType::Markdown,
+            template_engine: TemplateEngine::Automatic,
+            collapse_scope: CollapseScope::All,
+            collapse_keeps_root: true,
+            accordion: false,
+            expand_on_select: false,
+            open_first_note: false,
+            folder_sort: FolderSort::AToZ,
+            indent_guides: false,
+            count_leader: CountLeader::None,
+            root_spacing: 0,
+            properties_row: true,
+            tooltips: false,
+            tooltip_path: true,
+            tooltip_tags: false,
+            tooltip_words: false,
+            rainbow: RainbowMode::Off,
+            rainbow_scope: RainbowScope::Root,
+            rainbow_first: "#ef4444".to_owned(),
+            rainbow_last: "#8b5cf6".to_owned(),
+            rainbow_folders: true,
+            rainbow_tags: false,
+            rainbow_properties: false,
+            pin_shortcuts: false,
+            pin_recent: false,
+            homepage: String::new(),
+            new_note_in_tab: false,
         }
     }
 }

@@ -285,3 +285,49 @@ fn the_profile_editor_changes_a_profile_in_use_or_not() {
     assert!(!folders(&s).contains(&"Journal".to_owned()));
     assert!(s.edit_profile_in("nobody", |_| {}).is_err());
 }
+
+/// A profile's own property keys and periodic notes folder, over the
+/// settings' (`propertyKeys`, `periodicNotesFolder`).
+#[test]
+fn a_profile_has_its_own_property_keys_and_periodic_folder() {
+    use architect_navigator::period::PeriodKind;
+    let src = architect_navigator::MemorySource::new("Lab").with_file(
+        architect_navigator::NoteFile::new("Work/Plan.md", 1, 1)
+            .property(
+                "status",
+                architect_navigator::PropertyValue::Text("doing".into()),
+            )
+            .property(
+                "area",
+                architect_navigator::PropertyValue::Text("work".into()),
+            ),
+    );
+    let settings = architect_navigator::NavigatorSettings {
+        property_keys: "status".into(),
+        periodic_folder: "Journal".into(),
+        ..architect_navigator::NavigatorSettings::default()
+    };
+    let mut s = architect_navigator::NavigatorState::new(
+        architect_navigator::VaultIndex::read(&src),
+        settings,
+        architect_navigator::list::Clock { now: 1, offset: 0 },
+    );
+    let keys = |s: &architect_navigator::NavigatorState| -> Vec<String> {
+        s.property_tree()
+            .roots(&[], architect_navigator::TreeSort::default(), true)
+    };
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 6).unwrap();
+    let daily = |s: &architect_navigator::NavigatorState| {
+        s.periodic()
+            .path(s.periodic().period(PeriodKind::Day, day))
+            .unwrap()
+    };
+    assert_eq!(keys(&s), ["status"]);
+    assert!(daily(&s).starts_with("Journal/"));
+    s.edit_profile(|p| {
+        p.property_keys = Some("area".into());
+        p.periodic_folder = Some("Work/Log".into());
+    });
+    assert_eq!(keys(&s), ["area"]);
+    assert!(daily(&s).starts_with("Work/Log/"), "{}", daily(&s));
+}

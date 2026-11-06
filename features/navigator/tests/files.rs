@@ -209,6 +209,8 @@ fn prompts_are_asked_first_and_a_command_numbers_its_notes() {
             name_format: "Meeting {{number:00}}".to_owned(),
             location: architect_navigator::template::CommandLocation::Folder,
             folder: "Inbox".to_owned(),
+            icon: String::new(),
+            placement: architect_navigator::template::CommandPlacement::None,
         });
     });
     let asked =
@@ -446,6 +448,9 @@ fn new_folders_open_all_and_drops_among_the_shortcuts() {
     assert!(!r.s.drop_on_shortcuts(&Drag::Shortcut(1), 1), "where it is");
     // A folder held under a drag opens.
     r.s.collapse_all();
-    assert!(r.s.spring_open("Projects"));
-    assert!(!r.s.spring_open("Projects"), "open already");
+    assert!(r.s.spring_open(&architect_navigator::NavTarget::Folder("Projects".into())));
+    assert!(
+        !r.s.spring_open(&architect_navigator::NavTarget::Folder("Projects".into())),
+        "open already"
+    );
 }

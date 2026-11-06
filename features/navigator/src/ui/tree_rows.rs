@@ -64,6 +64,10 @@ pub enum PromptKind {
     AddTag(Vec<String>),
     /// A value of `key` for these notes.
     SetValue { key: String, paths: Vec<String> },
+    /// A property key's new name.
+    RenameKey(String),
+    /// A value's new name, of a key.
+    RenameValue { key: String, value: String },
     /// A new folder's name, in this one.
     NewFolder(String),
     /// A new note's name, in this folder, of this kind.
@@ -170,6 +174,7 @@ pub(super) fn ItemRow(
     icon_only: bool,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
+    let name_flex = name_flex(nav, !count.is_empty() && !reorder);
     let class = match (selected, drop_here) {
         (_, true) => "nv-row nv-drop-target",
         (true, false) => "nv-row nv-selected",
@@ -235,9 +240,17 @@ pub(super) fn ItemRow(
                 }
                 let m = super::panes::mods(e.modifiers());
                 match &t1 {
-                    NavTarget::Tag(t) => nav.update(|s| s.click_tag(t, m)),
+                    NavTarget::Tag(t) => {
+                        nav.update(|s| s.click_tag(t, m));
+                        if !m.command {
+                            nav.act(nav.state.peek().first_note(), on_open);
+                        }
+                    }
                     NavTarget::Property { key, value } => {
                         nav.update(|s| s.click_property(key, value.as_deref(), m));
+                        if !m.command {
+                            nav.act(nav.state.peek().first_note(), on_open);
+                        }
                     }
                     NavTarget::Folder(f) => {
                         let out = nav.update(|s| s.click_folder(f));
@@ -279,7 +292,7 @@ pub(super) fn ItemRow(
                 }
             }
             span { class: name_class,
-                style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{weight}; {name_colour}",
+                style: "flex:{name_flex}; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{weight}; {name_colour}",
                 "{name}"
             }
             if reorder {
@@ -292,8 +305,10 @@ pub(super) fn ItemRow(
                     ArrowDown { size: 13 }
                 }
             } else if !count.is_empty() {
+                Leader { nav }
                 span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
+            Guides { nav, level, indent }
         }
     }
 }
@@ -380,7 +395,8 @@ fn spring(nav: Navigator, key: String, springs: u32) {
             st.spring_loaded_next_delay_ms,
         )
     };
-    let folder = nav
+    // A collapsed folder, or (`scheduleTagAutoExpand`) a collapsed tag.
+    let target = nav
         .state
         .peek()
         .nav_rows()
@@ -392,10 +408,16 @@ fn spring(nav: Navigator, key: String, springs: u32) {
                 has_children: true,
                 expanded: false,
                 ..
-            } => Some(path.clone()),
+            } => Some(NavTarget::Folder(path.clone())),
+            NavRowKind::Tag {
+                tag,
+                has_children: true,
+                expanded: false,
+                ..
+            } => Some(NavTarget::Tag(tag.clone())),
             _ => None,
         });
-    let Some(folder) = folder.filter(|_| on) else {
+    let Some(target) = target.filter(|_| on) else {
         return;
     };
     let wait = if springs == 0 { first } else { next };
@@ -406,7 +428,7 @@ fn spring(nav: Navigator, key: String, springs: u32) {
             .peek()
             .as_ref()
             .is_some_and(|d| d.active && d.over.as_deref() == Some(key.as_str()));
-        if still && nav.update(|s| s.spring_open(&folder)) {
+        if still && nav.update(|s| s.spring_open(&target)) {
             let mut drag = nav.drag;
             if let Some(d) = drag.write().as_mut() {
                 d.springs = d.springs.saturating_add(1);
@@ -534,6 +556,21 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     MenuAct::Remove(paths, t.clone()),
                 ));
             }
+            // A nested tag moves among its siblings (`tagChildOrder`).
+            if t.contains('/') {
+                items.push((
+                    "Move up".to_owned(),
+                    MenuAct::MoveChild(format!("tag:{t}"), -1),
+                ));
+                items.push((
+                    "Move down".to_owned(),
+                    MenuAct::MoveChild(format!("tag:{t}"), 1),
+                ));
+            }
+            items.push((
+                "Reset order of tags below".to_owned(),
+                MenuAct::ResetChildOrder(format!("tag:{t}")),
+            ));
             items.push(("Rename tag…".to_owned(), MenuAct::Rename(t.clone())));
             items.push((format!("Delete #{t}"), MenuAct::Delete(t)));
         }
@@ -562,6 +599,31 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     format!("Set {name} on {n} selected to…"),
                     MenuAct::SetValue(paths, key.clone()),
                 ));
+            }
+            // `buildPropertyMenu`: the key's rename and delete, and (ours)
+            // a value's rename.
+            match value {
+                None => {
+                    items.push((
+                        "Reset order of values".to_owned(),
+                        MenuAct::ResetChildOrder(format!("property:{key}")),
+                    ));
+                    items.push((format!("Rename {name}…"), MenuAct::RenameKey(key.clone())));
+                    items.push((
+                        format!("Delete {name} from every note"),
+                        MenuAct::DeleteKey(key.clone()),
+                    ));
+                }
+                Some(v) => {
+                    // A value moves among the key's (`propertyChildOrder`).
+                    let id = format!("property:{key}={v}");
+                    items.push(("Move up".to_owned(), MenuAct::MoveChild(id.clone(), -1)));
+                    items.push(("Move down".to_owned(), MenuAct::MoveChild(id, 1)));
+                    items.push((
+                        "Rename value…".to_owned(),
+                        MenuAct::RenameValue(key.clone(), v.clone()),
+                    ));
+                }
             }
         }
         NavTarget::Folder(f) => {
@@ -617,6 +679,26 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 .to_owned(),
                 MenuAct::FolderTemplate(f.clone()),
             ));
+            // `buildFolderMenu`'s folder note rows.
+            if !f.is_empty() && s.settings().folder_notes {
+                if s.folder_note(&f).is_some() {
+                    items.push((
+                        "Detach folder note".to_owned(),
+                        MenuAct::DetachFolderNote(f.clone()),
+                    ));
+                    if let Some(n) = s.folder_note(&f) {
+                        items.push((
+                            "Delete folder note".to_owned(),
+                            MenuAct::Trash(vec![n.to_owned()]),
+                        ));
+                    }
+                } else {
+                    items.push((
+                        "Create folder note".to_owned(),
+                        MenuAct::CreateFolderNote(f.clone()),
+                    ));
+                }
+            }
             if !f.is_empty() {
                 items.push(("Rename…".to_owned(), MenuAct::RenameFolder(f.clone())));
                 items.push((
@@ -708,6 +790,18 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
         ));
     }
     drop(s);
+    // Extensions' rows (NN's MenusAPI `registerFolderMenu`,
+    // `registerTagMenu`, `registerPropertyMenu`): their `[[context]]` on
+    // `navigator:folder`, `navigator:tag`, `navigator:property`.
+    if let Some(extra) = try_use_context::<MenuExtra>() {
+        let (kind, id) = menu_extra_target(&menu.target);
+        for (label, command) in (extra.rows)(kind, &id) {
+            items.push((
+                label,
+                MenuAct::Extension(command, kind.to_owned(), id.clone()),
+            ));
+        }
+    }
     let top = menu.top;
     // Kept inside the pane, scrolled when longer (a folder's menu).
     let room = (nav
@@ -733,6 +827,12 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     style: "text-align:left; height:26px; padding:0 8px; border:none; border-radius:5px; background:transparent; color:var(--nv-text); cursor:pointer; font-size:12px;",
                     onclick: move |_| {
                         open.set(None);
+                        if let MenuAct::Extension(command, kind, id) = &act {
+                            if let Some(extra) = try_consume_context::<MenuExtra>() {
+                                (extra.run)(command, kind, id);
+                            }
+                            return;
+                        }
                         menu_act(nav, on_open, act.clone());
                     },
                     "{label}"
@@ -753,6 +853,16 @@ enum MenuAct {
     ResetTagOrder,
     SetProperty(Vec<String>, String, Option<String>),
     SetValue(Vec<String>, String),
+    RenameKey(String),
+    DeleteKey(String),
+    CreateFolderNote(String),
+    DetachFolderNote(String),
+    /// An extension's row: its command, run on the target and its id.
+    Extension(String, String, String),
+    /// A nested tag (`tag:<t>`) or a value (`property:<k>=<v>`) moved.
+    MoveChild(String, isize),
+    ResetChildOrder(String),
+    RenameValue(String, String),
     /// A shortcut added (`true`) or taken out.
     Shortcut(Shortcut, bool),
     Hide(HideTarget),
@@ -826,6 +936,66 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             }));
             return;
         }
+        MenuAct::CreateFolderNote(folder) => {
+            match nav.state.peek().folder_note_request(&folder) {
+                Ok(req) => nav.new_note(req, on_open),
+                Err(e) => nav.say(e),
+            }
+            return;
+        }
+        MenuAct::DetachFolderNote(folder) => nav.update(|s| s.detach_folder_note(&folder, None)),
+        MenuAct::MoveChild(id, by) => {
+            nav.update(|s| s.move_nested(&id, by));
+            return;
+        }
+        MenuAct::ResetChildOrder(id) => {
+            nav.update(|s| s.reset_child_order(&id));
+            return;
+        }
+        MenuAct::RenameKey(key) => {
+            let name = nav
+                .state
+                .peek()
+                .property_tree()
+                .key(&key)
+                .map_or_else(|| key.clone(), |k| k.name.clone());
+            let mut prompt = nav.prompt;
+            prompt.set(Some(Prompt {
+                title: format!("Rename property {name}"),
+                value: name,
+                kind: PromptKind::RenameKey(key),
+            }));
+            return;
+        }
+        MenuAct::RenameValue(key, value) => {
+            let shown = nav
+                .state
+                .peek()
+                .property_tree()
+                .value(&key, &value)
+                .map_or_else(|| value.clone(), |n| n.written.clone());
+            let mut prompt = nav.prompt;
+            prompt.set(Some(Prompt {
+                title: format!("Rename {shown}"),
+                value: shown,
+                kind: PromptKind::RenameValue { key, value },
+            }));
+            return;
+        }
+        MenuAct::DeleteKey(key) => match nav.state.peek().delete_property_key(&key) {
+            Ok((out, n)) => {
+                nav.ask(
+                    format!(
+                        "Delete {key} from {n} note{}?",
+                        if n == 1 { "" } else { "s" }
+                    ),
+                    "Delete",
+                    AskThen::Act(out),
+                );
+                return;
+            }
+            Err(e) => Err(e),
+        },
         MenuAct::Delete(t) => match nav.state.peek().delete_tag(&t) {
             Ok(out) => {
                 nav.ask(
@@ -849,11 +1019,12 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             return;
         }
         MenuAct::FromTemplate(folder) => {
-            let hint = nav.state.peek().settings().template_folder.clone();
+            // The picker (`TemplateFileModal`): the template folder's notes
+            // under the field, narrowed as one types.
             ask_for(
                 nav,
-                "Template (a vault path)",
-                &hint,
+                "New note from a template",
+                "",
                 PromptKind::TemplateFor(folder),
             );
             return;
@@ -959,7 +1130,7 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             nav.say("Hidden: show hidden items to see it again");
             return;
         }
-        MenuAct::Nothing => return,
+        MenuAct::Nothing | MenuAct::Extension(..) => return,
     };
     match out {
         Ok(out) => nav.act(Some(out), on_open),
@@ -1001,6 +1172,25 @@ fn submit_prompt(
     let s = nav.state.peek();
     let out = match kind {
         PromptKind::RenameTag(from) => s.rename_tag(from, text),
+        PromptKind::RenameKey(key) => {
+            let (out, both) = s.rename_property_key(key, text)?;
+            if both > 0 {
+                drop(s);
+                // `confirmRenameConflicts`: theirs is replaced.
+                nav.ask(
+                    format!(
+                        "{both} note{} have {} already: their value is replaced by {key}'s. Rename?",
+                        if both == 1 { "" } else { "s" },
+                        text.trim()
+                    ),
+                    "Rename",
+                    AskThen::Act(out),
+                );
+                return Ok(None);
+            }
+            Ok(out)
+        }
+        PromptKind::RenameValue { key, value } => s.rename_property_value(key, value, text),
         PromptKind::AddTag(paths) => s.add_tag(paths, text),
         PromptKind::SetValue { key, paths } => s.set_property(paths, key, Some(text)),
         PromptKind::NewFolder(parent) => s.new_folder(parent, text),
@@ -1079,7 +1269,21 @@ pub(super) fn PromptBar(nav: Navigator, on_open: EventHandler<Open>, prompt: Pro
         }
     };
     let mut on_enter = submit.clone();
-    let mut on_ok = submit;
+    let mut on_ok = submit.clone();
+    let on_pick = submit;
+    let choices: Vec<String> = match &prompt.kind {
+        PromptKind::TemplateFor(_) => {
+            let want = value.read().trim().to_lowercase();
+            nav.state
+                .peek()
+                .template_notes()
+                .into_iter()
+                .filter(|t| want.is_empty() || t.to_lowercase().contains(&want))
+                .take(8)
+                .collect()
+        }
+        _ => Vec::new(),
+    };
     rsx! {
         div { class: "nv-confirm nv-prompt", role: "dialog", "aria-label": "{prompt.title}",
             style: "position:absolute; left:8px; right:8px; bottom:8px; z-index:20; padding:10px; border-radius:10px; \
@@ -1097,6 +1301,24 @@ pub(super) fn PromptBar(nav: Navigator, on_open: EventHandler<Open>, prompt: Pro
                         open.set(None);
                     }
                 },
+            }
+            if !choices.is_empty() {
+                div { class: "nv-prompt-choices", role: "listbox", style: "display:flex; flex-direction:column; gap:2px; max-height:200px; overflow-y:auto;",
+                    for c in choices {
+                        {
+                            let pick = c.clone();
+                            let mut on_pick = on_pick.clone();
+                            let shown = c.trim_end_matches(".md").to_owned();
+                            rsx! {
+                                button { key: "{c}", class: "nv-prompt-choice", role: "option",
+                                    style: "text-align:left; height:24px; padding:0 8px; border:none; border-radius:6px; background:transparent; color:var(--nv-text); cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",
+                                    onclick: move |_| { value.set(pick.clone()); on_pick(); },
+                                    "{shown}"
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if let Some(w) = warning {
                 div { class: "nv-name-warning", "data-testid": "nv-name-warning", role: "status",
@@ -1441,4 +1663,110 @@ pub(super) fn RecentRow(
 /// The modifiers as the model takes them, for a click on a pill.
 pub(super) fn click_mods(e: &MouseEvent) -> Mods {
     super::panes::mods(e.modifiers())
+}
+
+/// The name's `flex`: it takes the room, or (a count leader drawn) only
+/// its own.
+pub(super) fn name_flex(nav: Navigator, counted: bool) -> &'static str {
+    let leader = nav.state.peek().settings().count_leader;
+    if counted && leader != crate::settings::CountLeader::None {
+        "0 1 auto"
+    } else {
+        "1 1 auto"
+    }
+}
+
+/// Between a name and its count (`navCountLeaderStyle`): dots, dashes or
+/// a line.
+#[component]
+pub(super) fn Leader(nav: Navigator) -> Element {
+    let style = match nav.state.peek().settings().count_leader {
+        crate::settings::CountLeader::None => return rsx! {},
+        crate::settings::CountLeader::Dots => "dotted",
+        crate::settings::CountLeader::Dashes => "dashed",
+        crate::settings::CountLeader::Line => "solid",
+    };
+    rsx! {
+        span { class: "nv-count-leader",
+            style: "flex:1 1 auto; min-width:8px; align-self:center; margin:0 4px; height:0; border-bottom:1px {style} var(--nv-faint); opacity:0.6;" }
+    }
+}
+
+/// Lines down the levels (`showIndentGuides`), under a row's chevron.
+#[component]
+pub(super) fn Guides(nav: Navigator, level: u16, indent: f64) -> Element {
+    if !nav.state.peek().settings().indent_guides || level == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        for l in 0..level {
+            span { key: "{l}", class: "nv-indent-guide",
+                style: "position:absolute; top:0; bottom:0; width:1px; left:{f64::from(l).mul_add(indent, 13.0)}px; background:var(--nv-divider); pointer-events:none;" }
+        }
+    }
+}
+
+/// A folder's or note's tooltip (`showTooltips`): its path, tags and
+/// words, as the settings say; `None` with them off.
+pub(super) fn tooltip(nav: Navigator, path: &str) -> Option<String> {
+    let s = nav.state.peek();
+    let st = s.settings();
+    if !st.tooltips {
+        return None;
+    }
+    let mut out = vec![
+        path.rsplit('/')
+            .next()
+            .unwrap_or(path)
+            .trim_end_matches(".md")
+            .to_owned(),
+    ];
+    if st.tooltip_path && path.contains('/') {
+        out.push(path.to_owned());
+    }
+    if let Some(f) = s.index().file(path) {
+        if st.tooltip_tags && !f.tags.is_empty() {
+            out.push(
+                f.tags
+                    .iter()
+                    .map(|t| format!("#{t}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+        if st.tooltip_words
+            && let Some(w) = f.words.filter(|w| *w > 0)
+        {
+            out.push(format!("{w} words"));
+        }
+    }
+    Some(out.join("\n"))
+}
+
+/// Rows others add to the navigator's menus (Notebook Navigator's
+/// `MenusAPI`).
+///
+/// Given by the app over its extensions' `[[context]]` on
+/// `navigator:folder`, `navigator:tag` and `navigator:property`; each is
+/// a label and the command it runs, told the target and its id (a
+/// folder's path, a tag, `key` or `key=value`).
+#[derive(Clone)]
+pub struct MenuExtra {
+    pub rows: std::rc::Rc<dyn Fn(&str, &str) -> Vec<(String, String)>>,
+    pub run: std::rc::Rc<dyn Fn(&str, &str, &str)>,
+}
+
+/// A menu's target as others' rows name it: `navigator:<kind>` and its id.
+#[must_use]
+pub fn menu_extra_target(target: &NavTarget) -> (&'static str, String) {
+    match target {
+        NavTarget::Folder(f) => ("navigator:folder", f.clone()),
+        NavTarget::Tag(t) => ("navigator:tag", t.clone()),
+        NavTarget::Property { key, value } => (
+            "navigator:property",
+            value
+                .as_ref()
+                .map_or_else(|| key.clone(), |v| format!("{key}={v}")),
+        ),
+    }
 }

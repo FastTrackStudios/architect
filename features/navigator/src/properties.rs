@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::index::NoteCount;
 use crate::list::value_parts;
 use crate::settings::TreeSort;
-use crate::source::{NoteFile, PropertyValue};
+use crate::source::{FileOp, NoteFile, PropertyValue};
 use crate::tree::natural_cmp;
 
 /// The "Properties" row's id (`properties-root`).
@@ -86,6 +86,85 @@ fn escape(s: &str) -> String {
 
 fn unescape(s: &str) -> String {
     s.replace("%3D", "=").replace("%25", "%")
+}
+
+/// The note-by-note ops a vault-wide property op makes
+/// ([`FileOp::RenamePropertyKey`], [`FileOp::DeletePropertyKey`],
+/// [`FileOp::RenamePropertyValue`]); any other op, none.
+#[must_use]
+pub fn expand(op: &FileOp, files: &[NoteFile]) -> Vec<FileOp> {
+    let mut out = Vec::new();
+    for f in files.iter().filter(|f| f.is_markdown()) {
+        match op {
+            FileOp::RenamePropertyKey { from, to } => {
+                let (from_k, to_k) = (fold(from), fold(to));
+                let source = f
+                    .properties
+                    .iter()
+                    .filter(|(k, _)| fold(k) == from_k)
+                    .min_by_key(|(k, _)| (k != from, k.clone()));
+                let Some((_, value)) = source else { continue };
+                out.push(FileOp::SetProperty {
+                    path: f.path.clone(),
+                    key: to.trim().to_owned(),
+                    value: value.clone(),
+                });
+                for (k, _) in &f.properties {
+                    if (fold(k) == from_k || fold(k) == to_k) && k != to.trim() {
+                        out.push(FileOp::RemoveProperty {
+                            path: f.path.clone(),
+                            key: k.clone(),
+                        });
+                    }
+                }
+            }
+            FileOp::DeletePropertyKey(key) => {
+                for (k, _) in f.properties.iter().filter(|(k, _)| fold(k) == fold(key)) {
+                    out.push(FileOp::RemoveProperty {
+                        path: f.path.clone(),
+                        key: k.clone(),
+                    });
+                }
+            }
+            FileOp::RenamePropertyValue { key, from, to } => {
+                let want = value_path(from);
+                for (k, v) in f.properties.iter().filter(|(k, _)| fold(k) == fold(key)) {
+                    let next = match v {
+                        PropertyValue::Text(t) if value_path(t) == want => {
+                            Some(PropertyValue::Text(to.clone()))
+                        }
+                        PropertyValue::List(l) if l.iter().any(|x| value_path(x) == want) => {
+                            let mut seen = Vec::new();
+                            for x in l {
+                                let y = if value_path(x) == want {
+                                    to.clone()
+                                } else {
+                                    x.clone()
+                                };
+                                if !seen
+                                    .iter()
+                                    .any(|s: &String| value_path(s) == value_path(&y))
+                                {
+                                    seen.push(y);
+                                }
+                            }
+                            Some(PropertyValue::List(seen))
+                        }
+                        _ => None,
+                    };
+                    if let Some(value) = next {
+                        out.push(FileOp::SetProperty {
+                            path: f.path.clone(),
+                            key: k.clone(),
+                            value,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// A key's id: `key:<key>`.

@@ -181,6 +181,35 @@ pub struct TagRowOptions<'a> {
     pub below: bool,
     /// The roots as a person ordered them (`rootTagOrder`).
     pub order: &'a [String],
+    /// Nested tags as a person ordered them, by parent (`tagChildOrder`).
+    pub child_order: &'a BTreeMap<String, Vec<String>>,
+}
+
+/// `list` with those `order` names first, in its order, then the rest
+/// as they were (a child new since is appended, `useChildOrderAppend`).
+#[must_use]
+pub fn hand_ordered(list: Vec<String>, order: Option<&Vec<String>>) -> Vec<String> {
+    let Some(order) = order else { return list };
+    let mut out: Vec<String> = order.iter().filter(|o| list.contains(o)).cloned().collect();
+    out.extend(list.into_iter().filter(|x| !order.contains(x)));
+    out
+}
+
+/// `list` with `item` moved `by` places; `None` when it is not there or
+/// cannot move.
+#[must_use]
+pub fn moved_in(list: &[String], item: &str, by: isize) -> Option<Vec<String>> {
+    let at = list.iter().position(|x| x == item)?;
+    let to = at
+        .saturating_add_signed(by)
+        .min(list.len().saturating_sub(1));
+    if to == at {
+        return None;
+    }
+    let mut out = list.to_vec();
+    let x = out.remove(at);
+    out.insert(to, x);
+    Some(out)
 }
 
 /// The tag rows: the "Tags" row and the tags below it when it is open (or
@@ -271,7 +300,7 @@ fn walk_tag(
         },
     });
     if open {
-        for c in tree.children(key, o.sort, o.below) {
+        for c in hand_ordered(tree.children(key, o.sort, o.below), o.child_order.get(key)) {
             walk_tag(tree, &c, level.saturating_add(1), expanded, o, rows);
         }
     }
@@ -287,34 +316,41 @@ pub fn property_rows(
     sort: TreeSort,
     below: bool,
     order: &[String],
+    value_order: &BTreeMap<String, Vec<String>>,
+    with_row: bool,
 ) -> Vec<NavRow> {
     let mut rows = Vec::new();
     if tree.is_empty() {
         return rows;
     }
-    let open = expanded.contains(ROOT);
-    rows.push(NavRow {
-        key: format!("property:{ROOT}"),
-        level: 0,
-        kind: NavRowKind::Property {
-            key: ROOT.to_owned(),
-            value: None,
-            name: "Properties".to_owned(),
-            has_children: true,
-            expanded: open,
-            count: NoteCount {
-                current: if below { tree.notes.len() } else { 0 },
-                descendants: 0,
+    // Without its row (`showAllPropertiesFolder` off) the keys are the top
+    // level, always on show.
+    let open = !with_row || expanded.contains(ROOT);
+    let top = u16::from(with_row);
+    if with_row {
+        rows.push(NavRow {
+            key: format!("property:{ROOT}"),
+            level: 0,
+            kind: NavRowKind::Property {
+                key: ROOT.to_owned(),
+                value: None,
+                name: "Properties".to_owned(),
+                has_children: true,
+                expanded: open,
+                count: NoteCount {
+                    current: if below { tree.notes.len() } else { 0 },
+                    descendants: 0,
+                },
             },
-        },
-    });
+        });
+    }
     if !open {
         return rows;
     }
     for key in tree.roots(order, sort, below) {
         let Some(k) = tree.key(&key) else { continue };
         let id = key_id(&key);
-        let values = tree.values(&key, sort);
+        let values = hand_ordered(tree.values(&key, sort), value_order.get(&key));
         let open = expanded.contains(&id) && !values.is_empty();
         let mut count = k.count();
         if !below {
@@ -322,7 +358,7 @@ pub fn property_rows(
         }
         rows.push(NavRow {
             key: format!("property:{id}"),
-            level: 1,
+            level: top,
             kind: NavRowKind::Property {
                 key: key.clone(),
                 value: None,
@@ -341,7 +377,7 @@ pub fn property_rows(
             };
             rows.push(NavRow {
                 key: format!("property:{}", value_id(&key, &v)),
-                level: 2,
+                level: top.saturating_add(1),
                 kind: NavRowKind::Property {
                     key: key.clone(),
                     value: Some(v.clone()),
@@ -367,6 +403,8 @@ pub struct TreeOptions {
     /// Each parent's children by name, in the order a person gave them
     /// (Notebook Navigator's `folderChildOrder`, the root's under `""`).
     pub child_order: BTreeMap<String, Vec<String>>,
+    /// Folders Z to A (`folderSortOrder` `alpha-desc`).
+    pub descending: bool,
 }
 
 /// The rows of the tree, with `expanded` folders open.
@@ -443,7 +481,14 @@ pub fn ordered_children(index: &VaultIndex, parent: &str, opts: &TreeOptions) ->
         (Some(x), Some(y)) => x.cmp(&y),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        (None, None) => natural_cmp(file_name(a), file_name(b)).then_with(|| a.cmp(b)),
+        (None, None) => {
+            let by_name = natural_cmp(file_name(a), file_name(b)).then_with(|| a.cmp(b));
+            if opts.descending {
+                by_name.reverse()
+            } else {
+                by_name
+            }
+        }
     });
     children
 }

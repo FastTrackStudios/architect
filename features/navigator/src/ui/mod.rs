@@ -37,7 +37,7 @@ mod tree_rows;
 mod virtual_pane;
 
 pub use theme::{NavigatorColours, TOKENS, with_tokens};
-pub use tree_rows::{Prompt, PromptKind};
+pub use tree_rows::{MenuExtra, Prompt, PromptKind, menu_extra_target};
 
 /// Notebook Navigator's `DEBOUNCE_KEYBOARD_FILE_OPEN`: a note the keyboard
 /// moved to opens once the keys rest this long.
@@ -244,7 +244,14 @@ impl Navigator {
     /// view's layout (pointer and measured sizes are on screen).
     #[must_use]
     pub fn zoom(&self) -> f64 {
-        f64::from(self.state.peek().settings().zoom.clamp(50, 200)) / 100.0
+        let s = self.state.peek();
+        // A phone's own (`mobileScale`).
+        let z = if s.touch() {
+            s.settings().zoom_phone
+        } else {
+            s.settings().zoom
+        };
+        f64::from(z.clamp(50, 200)) / 100.0
     }
 
     /// The source it reads.
@@ -279,12 +286,9 @@ impl Navigator {
             }
             s.full_text_words()
         };
-        let hits = self
-            .source()
-            .search_text(&words)
-            .map(|paths| paths.into_iter().collect());
+        let hits = self.source().search_excerpts(&words);
         let mut state = self.state;
-        state.write().set_full_text(hits);
+        state.write().set_full_text_hits(hits);
     }
 
     /// Selects the vault's root with the notes of every folder below (the
@@ -445,6 +449,11 @@ impl Navigator {
     /// Makes a note as `req` asks: its prompts asked one by one first,
     /// then written and opened with the cursor where the template put it.
     pub fn new_note(&self, req: NewNote, on_open: EventHandler<Open>) {
+        let mut req = req;
+        // `createNewNotesInNewTab`.
+        if req.how == OpenIn::Here && self.state.peek().settings().new_note_in_tab {
+            req.how = OpenIn::Tab;
+        }
         let made = self.state.peek().new_note(&req);
         self.made(made, req, on_open);
     }
@@ -596,6 +605,11 @@ impl Navigator {
         // A tag renamed or deleted: its colours, order and selection
         // follow.
         self.update(|s| s.after_write(&ops));
+        // A property key renamed or deleted: the settings that list it.
+        let mut next = self.settings.read();
+        if next.after_property_ops(&ops) {
+            self.settings.update(move |s| *s = next);
+        }
         if let Some((path, how)) = open {
             on_open.call(Open {
                 path,
@@ -1266,7 +1280,8 @@ pub fn NavigatorView(
     let mut drag: Signal<Option<(f64, f64)>> = use_signal(|| None);
     let vars = colours.read().vars();
     // Its own zoom (`zoom`, Notebook Navigator's `desktopScale`).
-    let zoom = f64::from(nav.state.read().settings().zoom.clamp(50, 200)) / 100.0;
+    let _ = nav.state.read();
+    let zoom = nav.zoom();
     let zoom_style = if (zoom - 1.0).abs() < f64::EPSILON {
         String::new()
     } else {

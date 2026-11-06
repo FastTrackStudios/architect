@@ -203,6 +203,14 @@ pub struct VaultProfile {
     pub shortcuts: Vec<Shortcut>,
     /// The notes opened last, newest first.
     pub recent: Vec<String>,
+    /// The property keys the browser shows in this profile, over the
+    /// setting's (`propertyKeys`); `None` is the setting's.
+    #[facet(default)]
+    pub property_keys: Option<String>,
+    /// Where this profile's periodic notes go, over the setting's
+    /// (`periodicNotesFolder`); `None` is the setting's.
+    #[facet(default)]
+    pub periodic_folder: Option<String>,
 }
 
 impl VaultProfile {
@@ -222,6 +230,8 @@ impl VaultProfile {
             banner: None,
             shortcuts: Vec::new(),
             recent: Vec::new(),
+            property_keys: None,
+            periodic_folder: None,
         }
     }
 

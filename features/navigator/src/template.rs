@@ -327,6 +327,126 @@ pub fn prompts(template: &str) -> Vec<String> {
     labels
 }
 
+/// A Moment format and a day offset from Templater's arguments
+/// (`"YYYY-MM-DD", 7`): `None` when they are not plain ones.
+fn tp_args(args: &str) -> Option<(Option<String>, i64)> {
+    let args = args.trim();
+    if args.is_empty() {
+        return Some((None, 0));
+    }
+    let mut parts = args.splitn(2, ',');
+    let first = parts.next()?.trim();
+    let format = if first.is_empty() || first == "undefined" {
+        None
+    } else {
+        Some(
+            first
+                .strip_prefix(['"', '\''])
+                .and_then(|f| f.strip_suffix(['"', '\'']))
+                .filter(|f| !f.contains(['{', '}']))?
+                .to_owned(),
+        )
+    };
+    let offset = match parts.next().map(str::trim) {
+        None | Some("") => 0,
+        Some(n) => n.parse().ok()?,
+    };
+    Some((format, offset))
+}
+
+/// A date token for an offset (`today+7d`) and a format.
+fn tp_date(base: &str, format: Option<&str>, days: i64) -> String {
+    let off = match days {
+        0 => String::new(),
+        d if d > 0 => format!("+{d}d"),
+        d => format!("{d}d"),
+    };
+    let fmt = format.map_or_else(|| ":YYYY-MM-DD".to_owned(), |f| format!(":{f}"));
+    format!("{{{{{base}{off}{fmt}}}}}")
+}
+
+/// One Templater command's token, when it is one this reads.
+fn tp_command(cmd: &str) -> Option<String> {
+    let c = cmd.trim();
+    let call = |name: &str| -> Option<&str> {
+        c.strip_prefix(name)?
+            .trim()
+            .strip_prefix('(')?
+            .strip_suffix(')')
+    };
+    Some(match c {
+        "tp.file.title" => "{{title}}".to_owned(),
+        _ if call("tp.file.folder").is_some() => {
+            if call("tp.file.folder").is_some_and(|a| a.trim() == "true") {
+                "{{path}}".to_owned()
+            } else {
+                "{{folder}}".to_owned()
+            }
+        }
+        _ if call("tp.file.path").is_some() => "{{path}}".to_owned(),
+        _ if call("tp.file.cursor").is_some() => "{{cursor}}".to_owned(),
+        _ => {
+            if let Some(a) = call("tp.date.now") {
+                let (f, d) = tp_args(a)?;
+                tp_date("today", f.as_deref(), d)
+            } else if let Some(a) = call("tp.date.tomorrow") {
+                tp_date("today", tp_args(a)?.0.as_deref(), 1)
+            } else if let Some(a) = call("tp.date.yesterday") {
+                tp_date("today", tp_args(a)?.0.as_deref(), -1)
+            } else if let Some(a) = call("tp.date.weekday") {
+                // Days from this week's Monday.
+                let (f, d) = tp_args(a)?;
+                tp_date("monday", f.as_deref(), d)
+            } else if let Some(a) =
+                call("tp.file.creation_date").or_else(|| call("tp.file.last_modified_date"))
+            {
+                let (f, _) = tp_args(a)?;
+                format!(
+                    "{{{{now:{}}}}}",
+                    f.unwrap_or_else(|| "YYYY-MM-DD HH:mm".to_owned())
+                )
+            } else {
+                let a = call("tp.system.prompt")?;
+                let label = a.split(',').next()?.trim().trim_matches(['"', '\'']);
+                format!("{{{{prompt:{label}}}}}")
+            }
+        }
+    })
+}
+
+/// Templater's common commands (`<% tp.… %>`) as this engine's tokens.
+///
+/// With `templateEngine` automatic: `tp.file.title`, `folder`, `path`,
+/// `cursor`; `tp.date.now`, `tomorrow`, `yesterday`, `weekday` with a
+/// format and an offset in days; `tp.file.creation_date`;
+/// `tp.system.prompt`. Scripts (`<%* … %>`) and commands this does not
+/// read are left as written.
+#[must_use]
+pub fn templater(template: &str) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(at) = rest.find("<%") {
+        let (before, after) = rest.split_at(at);
+        out.push_str(before);
+        let Some(end) = after.find("%>") else {
+            out.push_str(after);
+            return out;
+        };
+        let (whole, next) = after.split_at(end.saturating_add(2));
+        let inner = whole.trim_start_matches("<%").trim_end_matches("%>");
+        let inner = inner
+            .trim_start_matches(['-', '_'])
+            .trim_end_matches(['-', '_']);
+        match (inner.starts_with('*'), tp_command(inner)) {
+            (false, Some(token)) => out.push_str(&token),
+            _ => out.push_str(whole),
+        }
+        rest = next;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Whether a template has Templater's commands (`<%`), which architect
 /// does not run.
 #[must_use]
@@ -919,6 +1039,25 @@ pub struct TemplateCommand {
     pub name_format: String,
     pub location: CommandLocation,
     pub folder: String,
+    /// Its button's icon (`templateCommands[].icon`): a Lucide name, an
+    /// emoji, … as an item's icon is written; `file-plus` when empty.
+    #[facet(default)]
+    pub icon: String,
+    /// Where its button is (`templateCommands[].placement`): none, or the
+    /// navigator's header (NN's tab bar).
+    #[facet(default)]
+    pub placement: CommandPlacement,
+}
+
+/// Where a "create note" command's button is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum CommandPlacement {
+    /// Nowhere: the palette and the menus only
+    #[default]
+    None,
+    /// The navigator's header
+    Header,
 }
 
 /// What a person keeps for templates (Notebook Navigator's
@@ -1002,6 +1141,20 @@ impl Templates {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn templater_s_common_commands_are_tokens() {
+        assert_eq!(
+            templater(
+                "# <% tp.file.title %>\n<% tp.date.now(\"YYYY-MM-DD\") %> <% tp.date.now(\"ddd\", 7) %> <%- tp.date.yesterday() -%>\n<% tp.file.cursor() %> <% tp.system.prompt(\"Who\") %>"
+            ),
+            "# {{title}}\n{{today:YYYY-MM-DD}} {{today+7d:ddd}} {{today-1d:YYYY-MM-DD}}\n{{cursor}} {{prompt:Who}}"
+        );
+        // Scripts, and commands it does not read, stay as written.
+        let script = "<%* tR += \"x\" %> <% tp.web.daily_quote() %>";
+        assert_eq!(templater(script), script);
+        assert_eq!(templater("no commands"), "no commands");
+    }
+
     use super::*;
 
     fn cx(prompts: &BTreeMap<String, String>) -> Context<'_> {

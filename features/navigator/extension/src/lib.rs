@@ -31,7 +31,7 @@ use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
 use architect_navigator::{
     CalendarGrid, Grouping, HeaderPeriod, Join, ListMode, ListRowKind, MemorySource, Mods,
     NavRowKind, NavTarget, NavigatorSource, NavigatorState, NoteFile, OpenIn, Orientation, Outcome,
-    Pane, PeriodKind, PropertyValue, SortOption,
+    Pane, PeriodKind, PropertyValue, SortOption, TreeSort,
 };
 use architect_navigator::{FileVisibility, HideTarget, Shortcut, ShortcutKind, VaultProfile};
 use architect_navigator::{Hotkey, KeyAction, KeyScope};
@@ -51,6 +51,18 @@ pub const MANIFEST: &str = include_str!("../extension.toml");
 pub struct NavigatorExtension;
 
 static HANDLE: Mutex<Option<Handle>> = Mutex::new(None);
+
+/// The homepage was opened this run.
+static HOME_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The navigator has read its vault (`storage-ready` was raised).
+static READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether `storage-ready` has been raised (`isStorageReady`).
+#[must_use]
+pub fn is_ready() -> bool {
+    READY.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 fn handle() -> Option<Handle> {
     HANDLE
@@ -144,6 +156,14 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_TAG_DELETE",
     "NAVIGATOR_TAG_NEW_NOTE",
     "NAVIGATOR_PROPERTY_SET",
+    "NAVIGATOR_PROPERTY_RENAME",
+    "NAVIGATOR_OPEN_HOMEPAGE",
+    "NAVIGATOR_TOGGLE_TAG_SORT",
+    "NAVIGATOR_TOGGLE_TAGS_BY_SELECTION",
+    "NAVIGATOR_TOGGLE_PROPERTIES_BY_SELECTION",
+    "NAVIGATOR_FOLD_GROUPS",
+    "NAVIGATOR_MOVE_CHILD",
+    "NAVIGATOR_PROPERTY_DELETE",
     "NAVIGATOR_DROP",
     "NAVIGATOR_SEARCH",
     "NAVIGATOR_TOGGLE_SEARCH",
@@ -189,6 +209,7 @@ pub const ACTIONS: &[&str] = &[
 /// may (`capabilities.events = ["navigator.*"]`) as `app:navigator.<name>`
 /// (Notebook Navigator's API events).
 pub const EVENTS: &[&str] = &[
+    "storage-ready",
     "nav-item-changed",
     "selection-changed",
     "pinned-files-changed",
@@ -271,6 +292,40 @@ fn Drive(mount: NavigatorMount) -> Element {
     let _mounted = use_hook(|| std::rc::Rc::new(bridge::Mounted::new()));
     // The API's events: raised as what they say changes.
     let last = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<Raised>)));
+    // The homepage (`homepage`), once a run, when the vault's navigator
+    // has read its vault.
+    use_effect(move || {
+        let ready = nav.state.read().index().file_count() > 0;
+        if ready
+            && mount.on_vault.is_none()
+            && !HOME_DONE.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            match nav.state.peek().homepage() {
+                Ok(Some(out)) => nav.open_or_create(Ok(out), mount.on_open),
+                Ok(None) => {}
+                Err(e) => nav.say(e),
+            }
+        }
+    });
+    // `storage-ready` (`isStorageReady`, `whenReady`): once, when the
+    // navigator has read its vault.
+    let ready = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(false)));
+    use_effect(move || {
+        let s = nav.state.read();
+        if !ready.get() && s.index().file_count() > 0 {
+            ready.set(true);
+            READY.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Some(h) = handle() {
+                let ask = h.host(architect_extensions::hostcall::HostRequest::Raise {
+                    name: "storage-ready".to_owned(),
+                    detail: json!({ "files": s.index().file_count() }),
+                });
+                spawn(async move {
+                    let _ = ask.await;
+                });
+            }
+        }
+    });
     use_effect(move || {
         let now = Raised::of(&nav.state.read());
         let mut last = last.borrow_mut();
@@ -661,6 +716,69 @@ fn run(
         "NAVIGATOR_TAG_DELETE" => {
             let tag = text(args, "tag").ok_or("`tag`: the tag to delete")?;
             let out = nav.state.peek().delete_tag(tag)?;
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_PROPERTY_RENAME" => {
+            let key = text(args, "key").ok_or("`key`: the property to rename")?;
+            let to = text(args, "to").ok_or("`to`: its new name")?;
+            let out = match text(args, "value") {
+                Some(v) => nav.state.peek().rename_property_value(key, v, to)?,
+                None => nav.state.peek().rename_property_key(key, to)?.0,
+            };
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_MOVE_CHILD" => {
+            // `tag:<t>` or `property:<k>=<v>`; `by` places, or `reset` its
+            // children's order (`tag:<t>`, `property:<k>`).
+            let id = text(args, "target")
+                .ok_or("`target`: tag:<tag>, property:<key>=<value>")?
+                .to_owned();
+            if flag(args, "reset") == Some(true) {
+                nav.update(|s| s.reset_child_order(&id));
+            } else {
+                let by = int(args, "by").unwrap_or(1);
+                let moved = nav.update(|s| s.move_nested(&id, isize::try_from(by).unwrap_or(0)));
+                if !moved {
+                    return Err(format!("{id} cannot move there"));
+                }
+            }
+            Ok(trees(&nav.state.peek()))
+        }
+        "NAVIGATOR_OPEN_HOMEPAGE" => {
+            let out = nav
+                .state
+                .peek()
+                .homepage()?
+                .ok_or("no homepage: set Homepage in Navigator's settings")?;
+            periodic(&nav, on_open, Ok(out), &json!({ "confirm": false }))
+        }
+        // `toggle-tag-sort`: A to Z, or most notes first.
+        "NAVIGATOR_TOGGLE_TAG_SORT" => {
+            nav.settings.update(|s| {
+                s.tag_sort = if s.tag_sort == TreeSort::FrequencyDesc {
+                    TreeSort::AlphaAsc
+                } else {
+                    TreeSort::FrequencyDesc
+                };
+            });
+            Ok(json!({ "tag_sort": format!("{:?}", nav.settings.read().tag_sort) }))
+        }
+        "NAVIGATOR_TOGGLE_TAGS_BY_SELECTION" => {
+            nav.settings.update(|s| s.scope_tags = !s.scope_tags);
+            Ok(json!({ "scope_tags": nav.settings.read().scope_tags }))
+        }
+        "NAVIGATOR_TOGGLE_PROPERTIES_BY_SELECTION" => {
+            nav.settings
+                .update(|s| s.scope_properties = !s.scope_properties);
+            Ok(json!({ "scope_properties": nav.settings.read().scope_properties }))
+        }
+        "NAVIGATOR_FOLD_GROUPS" => {
+            let folded = nav.update(NavigatorState::fold_all_groups);
+            Ok(json!({ "folded": folded }))
+        }
+        "NAVIGATOR_PROPERTY_DELETE" => {
+            let key = text(args, "key").ok_or("`key`: the property to delete")?;
+            let (out, _) = nav.state.peek().delete_property_key(key)?;
             write(&nav, on_open, out)
         }
         "NAVIGATOR_TAG_NEW_NOTE" => {
@@ -1088,6 +1206,12 @@ fn files(
                     name_format: text(args, "name_format").unwrap_or("").to_owned(),
                     location,
                     folder: text(args, "folder").unwrap_or("").to_owned(),
+                    icon: text(args, "icon").unwrap_or("").to_owned(),
+                    placement: if text(args, "placement") == Some("header") {
+                        architect_navigator::template::CommandPlacement::Header
+                    } else {
+                        architect_navigator::template::CommandPlacement::None
+                    },
                 };
                 if nav
                     .state
@@ -1361,6 +1485,8 @@ fn profile_state(s: &NavigatorState) -> Value {
         "hidden_file_names": p.hidden_file_names,
         "hidden_file_properties": p.hidden_file_properties,
         "banner": p.banner,
+        "property_keys": p.property_keys,
+        "periodic_folder": p.periodic_folder,
         "shortcuts": p.shortcuts.iter().enumerate().map(|(i, sc)| shortcut_json(i, sc)).collect::<Vec<_>>(),
         "recent": p.recent.iter().filter(|r| s.index().file(r).is_some()).collect::<Vec<_>>(),
     })
@@ -1432,6 +1558,20 @@ fn set_profile(p: &mut VaultProfile, set: &Value) -> Result<(), String> {
             "hidden_file_properties" => p.hidden_file_properties = list(v),
             "banner" => {
                 p.banner = v
+                    .as_str()
+                    .filter(|b| !b.trim().is_empty())
+                    .map(str::to_owned);
+            }
+            // Over the settings' (`propertyKeys`, `periodicNotesFolder`);
+            // empty or null: the settings'.
+            "property_keys" => {
+                p.property_keys = v
+                    .as_str()
+                    .filter(|b| !b.trim().is_empty())
+                    .map(str::to_owned);
+            }
+            "periodic_folder" => {
+                p.periodic_folder = v
                     .as_str()
                     .filter(|b| !b.trim().is_empty())
                     .map(str::to_owned);
@@ -1665,6 +1805,8 @@ pub fn state(s: &NavigatorState) -> Value {
         .collect();
     json!({
         "target": target,
+        // `isStorageReady`: its vault is read.
+        "ready": is_ready() || s.index().file_count() > 0,
         "own_list": s.appearance(&s.target()).is_some(),
         "sort": e.sort.id(),
         "grouping": e.grouping.under(e.sort).id(),

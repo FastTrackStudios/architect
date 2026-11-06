@@ -24,7 +24,9 @@ use crate::properties::{self, PropertyTree, ROOT};
 use crate::query::{Join, Operand, Query};
 use crate::search::{FilterSearch, toggle_term};
 use crate::selection::{NavTarget, Selection};
-use crate::settings::{FolderNoteOpen, NavigatorSettings, SearchProvider, SortOption};
+use crate::settings::{
+    CollapseScope, FolderNoteOpen, NavigatorSettings, RainbowMode, SearchProvider, SortOption,
+};
 use crate::source::{FileOp, NoteFile, PropertyValue, SourceEvent, ancestors, is_within, parent};
 use crate::tags::{self, TAGGED, TagTree, UNTAGGED, is_or_below, tag_key};
 use crate::template::Templates;
@@ -196,6 +198,14 @@ pub struct ViewState {
     /// A person's own keys (`keyboardShortcuts`), over the defaults.
     #[facet(default)]
     pub keys: Vec<KeyBinding>,
+    /// Nested tags under a parent (its key), as a person ordered them
+    /// (`tagChildOrder`).
+    #[facet(default)]
+    pub tag_child_order: Vec<ChildOrder>,
+    /// A property key's values (by the key, folded), as a person ordered
+    /// them (`propertyChildOrder`).
+    #[facet(default)]
+    pub property_value_order: Vec<ChildOrder>,
 }
 
 /// An icon for a target (`folder:<path>`, `tag:<tag>`,
@@ -294,6 +304,12 @@ pub struct NavigatorState {
     expanded_tags: BTreeSet<String>,
     expanded_props: BTreeSet<String>,
     tag_order: Vec<String>,
+    tag_child_order: BTreeMap<String, Vec<String>>,
+    property_value_order: BTreeMap<String, Vec<String>>,
+    /// The navigation rainbow's colour of each row it colours, by row key.
+    rainbow: BTreeMap<String, String>,
+    /// The rows pinned over the tree (`pinShortcuts`).
+    pinned_rows: Vec<NavRow>,
     property_order: Vec<String>,
     /// The search box's search (⌘/Ctrl-clicks write to it too); the list
     /// shows what it matches.
@@ -303,6 +319,8 @@ pub struct NavigatorState {
     /// With the full-text provider: the notes whose text holds the
     /// search's words, as the source found them.
     full_text: Option<BTreeSet<String>>,
+    /// Each full-text match's line, by path.
+    excerpts: BTreeMap<String, String>,
     /// The words the full-text matches are for.
     full_text_for: Option<String>,
     /// The vault as the source has it; `index` is what of it shows.
@@ -342,6 +360,7 @@ impl NavigatorState {
             search: FilterSearch::default(),
             search_open: false,
             full_text: None,
+            excerpts: BTreeMap::new(),
             full_text_for: None,
             shortcuts_folded: false,
             recent_folded: false,
@@ -387,6 +406,10 @@ impl NavigatorState {
             expanded_tags: std::iter::once(TAGGED.to_owned()).collect(),
             expanded_props: std::iter::once(ROOT.to_owned()).collect(),
             tag_order: Vec::new(),
+            tag_child_order: BTreeMap::new(),
+            property_value_order: BTreeMap::new(),
+            rainbow: BTreeMap::new(),
+            pinned_rows: Vec::new(),
             property_order: Vec::new(),
         };
         s.index = s.visible();
@@ -629,6 +652,7 @@ impl NavigatorState {
         TreeOptions {
             show_root: self.settings.show_root,
             child_order: self.child_order.clone(),
+            descending: self.settings.folder_sort == crate::settings::FolderSort::ZToA,
         }
     }
 
@@ -646,6 +670,7 @@ impl NavigatorState {
         self.tree = TreeOptions {
             show_root: self.settings.show_root,
             child_order: self.child_order.clone(),
+            descending: self.settings.folder_sort == crate::settings::FolderSort::ZToA,
         };
         self.rebuild_trees();
         self.rebuild_nav();
@@ -668,6 +693,13 @@ impl NavigatorState {
             on.then(|| list::files_of(&self.index, &target, &effective, &self.pins, &self.hidden))
         };
         let s = &self.settings;
+        // The profile's keys, else the setting's.
+        let property_keys = self
+            .profiles
+            .active()
+            .property_keys
+            .clone()
+            .unwrap_or_else(|| s.property_keys.clone());
         self.tag_tree = if !s.tag_tree {
             TagTree::default()
         } else if let Some(files) = selected(s.scope_tags && !matches!(target, NavTarget::Tag(_))) {
@@ -675,7 +707,7 @@ impl NavigatorState {
         } else {
             TagTree::build(self.index.files())
         };
-        let keys = NavigatorSettings::list(&s.property_keys);
+        let keys = NavigatorSettings::list(&property_keys);
         self.property_tree = if !s.property_tree || keys.is_empty() {
             PropertyTree::default()
         } else if let Some(files) =
@@ -694,7 +726,23 @@ impl NavigatorState {
             expanded.insert(String::new());
         }
         self.nav_rows = tree::flatten(&self.index, &expanded, &self.tree_options());
-        let top = self.top_rows();
+        let mut top = self.top_rows();
+        // Pinned shortcuts (`pinShortcuts`), and the recent notes with
+        // them (`pinRecentNotesWithShortcuts`): over the tree, not in it.
+        self.pinned_rows.clear();
+        if self.settings.pin_shortcuts {
+            let pin = |r: &NavRow| match &r.kind {
+                NavRowKind::Shortcut { .. } => true,
+                NavRowKind::Section { id, .. } => {
+                    id == SHORTCUTS || (id == RECENT && self.settings.pin_recent)
+                }
+                NavRowKind::Recent { .. } => self.settings.pin_recent,
+                _ => false,
+            };
+            let (pinned, rest): (Vec<NavRow>, Vec<NavRow>) = top.into_iter().partition(|r| pin(r));
+            self.pinned_rows = pinned;
+            top = rest;
+        }
         if !top.is_empty() {
             let at = usize::from(!self.nav_rows.is_empty());
             self.nav_rows.splice(at..at, top);
@@ -712,6 +760,7 @@ impl NavigatorState {
                     sort: self.settings.tag_sort,
                     below,
                     order: &self.tag_order,
+                    child_order: &self.tag_child_order,
                 },
             ));
         }
@@ -722,16 +771,38 @@ impl NavigatorState {
                 self.settings.property_sort,
                 below,
                 &self.property_order,
+                &self.property_value_order,
+                self.settings.properties_row,
             ));
         }
         self.nav_rows.extend(bottom);
         let h = self.nav_item_height();
-        self.nav_offsets = Offsets::new(self.nav_rows.iter().map(|r| match r.kind {
-            NavRowKind::TopSpacer => tree::TOP_SPACER,
-            NavRowKind::BottomSpacer => tree::BOTTOM_SPACER,
-            NavRowKind::Banner { .. } => tree::BANNER_HEIGHT,
-            _ => h,
-        }));
+        // Space between top rows (`rootLevelSpacing`), the first left be.
+        let gap = f64::from(self.settings.root_spacing.min(16));
+        let mut first_top = true;
+        let spaced: Vec<f64> = self
+            .nav_rows
+            .iter()
+            .map(|r| match r.kind {
+                NavRowKind::TopSpacer => tree::TOP_SPACER,
+                NavRowKind::BottomSpacer => tree::BOTTOM_SPACER,
+                NavRowKind::Banner { .. } => tree::BANNER_HEIGHT,
+                NavRowKind::Folder { .. }
+                | NavRowKind::Tag { .. }
+                | NavRowKind::Property { .. }
+                    if r.level == 0 =>
+                {
+                    if std::mem::take(&mut first_top) {
+                        h
+                    } else {
+                        h + gap
+                    }
+                }
+                _ => h,
+            })
+            .collect();
+        self.nav_offsets = Offsets::new(spaced);
+        self.rainbow = crate::rainbow::colours(&self.nav_rows, &self.settings);
         self.clamp_scroll(Pane::Navigation);
         self.settle(Pane::Navigation);
     }
@@ -773,7 +844,8 @@ impl NavigatorState {
     /// New settings.
     pub fn set_settings(&mut self, settings: NavigatorSettings) {
         if settings != self.settings {
-            self.periodic = PeriodicNotes::from_settings(&settings);
+            self.periodic =
+                PeriodicNotes::from_settings(&periodic_settings(&settings, self.profiles.active()));
             if settings.search_provider != SearchProvider::FullText {
                 self.full_text = None;
                 self.full_text_for = None;
@@ -906,6 +978,22 @@ impl NavigatorState {
     }
 
     pub fn set_expanded(&mut self, folder: &str, open: bool) {
+        // One branch open (`collapseOtherBranchesOnExpand`): what is not on
+        // its chain, nor below it, folds.
+        if open && self.settings.accordion {
+            let before = self.expanded.len();
+            self.expanded.retain(|p| {
+                p.is_empty()
+                    || p == folder
+                    || folder.starts_with(&format!("{p}/"))
+                    || p.starts_with(&format!("{folder}/"))
+            });
+            if self.expanded.len() != before {
+                self.expanded.insert(folder.to_owned());
+                self.rebuild_nav();
+                return;
+            }
+        }
         let changed = if open {
             self.expanded.insert(folder.to_owned())
         } else {
@@ -934,12 +1022,62 @@ impl NavigatorState {
         } else {
             std::iter::once(String::new()).collect()
         };
-        let collapsed = self.expanded == keep || !self.any_expanded();
+        let mut keep = keep;
+        // `excludeVaultRootFromCollapse` off: with its row on show, the
+        // vault folds too.
+        if !self.settings.collapse_keeps_root
+            && self.settings.show_root
+            && self.selection.folder().is_none()
+        {
+            keep.remove("");
+        }
+        let scope = self.settings.collapse_scope;
+        let (folders, tags_on, props) = (
+            matches!(scope, CollapseScope::All | CollapseScope::Folders),
+            matches!(scope, CollapseScope::All | CollapseScope::Tags),
+            matches!(scope, CollapseScope::All | CollapseScope::Properties),
+        );
+        let tags_folded = self.expanded_tags.iter().all(|t| t == tags::TAGGED);
+        let props_folded = self.expanded_props.iter().all(|p| p == ROOT);
+        let folders_folded = self.expanded == keep || !self.any_expanded();
+        let collapsed =
+            (!folders || folders_folded) && (!tags_on || tags_folded) && (!props || props_folded);
         if collapsed {
-            self.expanded = self.index.expandable().into_iter().collect();
-            self.expanded.insert(String::new());
+            if folders {
+                self.expanded = self.index.expandable().into_iter().collect();
+                self.expanded.insert(String::new());
+            }
+            if tags_on {
+                self.expanded_tags = self
+                    .tag_tree
+                    .nodes()
+                    .filter(|n| !n.children.is_empty())
+                    .map(|n| n.key.clone())
+                    .chain(std::iter::once(tags::TAGGED.to_owned()))
+                    .collect();
+            }
+            if props {
+                let keys = self.property_tree.roots(
+                    &self.property_order,
+                    self.settings.property_sort,
+                    true,
+                );
+                self.expanded_props = keys
+                    .iter()
+                    .map(|k| properties::key_id(k))
+                    .chain(std::iter::once(ROOT.to_owned()))
+                    .collect();
+            }
         } else {
-            self.expanded = keep;
+            if folders {
+                self.expanded = keep;
+            }
+            if tags_on {
+                self.expanded_tags.retain(|t| t == tags::TAGGED);
+            }
+            if props {
+                self.expanded_props.retain(|p| p == ROOT);
+            }
         }
         self.rebuild_nav();
         if let Some(f) = self.selection.folder().map(folder_key) {
@@ -1125,6 +1263,9 @@ impl NavigatorState {
     pub fn click_folder(&mut self, folder: &str) -> Option<Outcome> {
         self.focus = Pane::Navigation;
         self.select_folder(folder);
+        if self.settings.expand_on_select {
+            self.set_expanded(folder, true);
+        }
         if self.single == Pane::Navigation {
             self.single = Pane::Files;
         }
@@ -1220,6 +1361,45 @@ impl NavigatorState {
         if self.pick_tag(tag) && self.single == Pane::Navigation {
             self.single = Pane::Files;
         }
+        if self.settings.expand_on_select && !tags::is_virtual(tag) {
+            self.set_nav_expanded(&NavTarget::Tag(tag.to_owned()), true);
+        }
+    }
+
+    /// The first note of the list, opened (`autoSelectFirstFileOnFocusChange`),
+    /// when the settings say so.
+    #[must_use]
+    pub fn first_note(&self) -> Option<Outcome> {
+        if !self.settings.open_first_note {
+            return None;
+        }
+        let path = self.list_order().into_iter().next()?.to_owned();
+        Some(Outcome::Open {
+            path,
+            how: OpenIn::Here,
+            settle: false,
+        })
+    }
+
+    /// The navigation rainbow's colour for row `key`, and whether it is
+    /// the background's (else the text's).
+    #[must_use]
+    pub fn rainbow(&self, key: &str) -> Option<(&str, bool)> {
+        let c = self.rainbow.get(key)?;
+        Some((c.as_str(), self.settings.rainbow == RainbowMode::Background))
+    }
+
+    /// The shortcut (and recent) rows pinned over the tree, when the
+    /// settings pin them.
+    #[must_use]
+    pub fn pinned_rows(&self) -> &[NavRow] {
+        &self.pinned_rows
+    }
+
+    /// Whether the navigator is on a phone.
+    #[must_use]
+    pub const fn touch(&self) -> bool {
+        self.touch
     }
 
     /// Selects a property's `key` (and `value`), or the "Properties" row
@@ -1253,6 +1433,15 @@ impl NavigatorState {
         if self.single == Pane::Navigation {
             self.single = Pane::Files;
         }
+        if self.settings.expand_on_select && value.is_none() {
+            self.set_nav_expanded(
+                &NavTarget::Property {
+                    key: key.to_owned(),
+                    value: None,
+                },
+                true,
+            );
+        }
     }
 
     /// Selects what a navigation row selects.
@@ -1282,11 +1471,23 @@ impl NavigatorState {
     }
 
     pub fn set_nav_expanded(&mut self, target: &NavTarget, open: bool) {
+        let accordion = open && self.settings.accordion;
         let (set, key) = match target {
             NavTarget::Folder(f) => return self.set_expanded(f, open),
             NavTarget::Tag(t) => (&mut self.expanded_tags, expansion_key(t)),
             NavTarget::Property { key, .. } => (&mut self.expanded_props, prop_expansion(key)),
         };
+        if accordion {
+            // Its chain, what is below it, and the section rows stay.
+            let k = key.clone();
+            set.retain(|x| {
+                x == tags::TAGGED
+                    || x == ROOT
+                    || *x == k
+                    || k.starts_with(&format!("{x}/"))
+                    || x.starts_with(&format!("{k}/"))
+            });
+        }
         let changed = if open {
             set.insert(key)
         } else {
@@ -1339,6 +1540,24 @@ impl NavigatorState {
     /// The notes whose text holds the search's words (the source's full
     /// text search), or `None` (a source that cannot) to match the words
     /// against names.
+    /// The full text's matches with the line each matched in: the list
+    /// shows that line in place of the preview, its words marked
+    /// (`useOmnisearchListResult`'s excerpt).
+    pub fn set_full_text_hits(&mut self, hits: Option<Vec<(String, String)>>) {
+        self.excerpts = hits
+            .as_ref()
+            .map(|h| h.iter().filter(|(_, e)| !e.is_empty()).cloned().collect())
+            .unwrap_or_default();
+        self.set_full_text(hits.map(|h| h.into_iter().map(|(p, _)| p).collect()));
+    }
+
+    /// The line the full text matched `path` in, while its matches show.
+    #[must_use]
+    pub fn excerpt(&self, path: &str) -> Option<&str> {
+        self.full_text.as_ref()?;
+        self.excerpts.get(path).map(String::as_str)
+    }
+
     pub fn set_full_text(&mut self, hits: Option<BTreeSet<String>>) {
         self.full_text_for = Some(self.full_text_words());
         if hits != self.full_text {
@@ -1445,6 +1664,11 @@ impl NavigatorState {
     /// The hiding compiled again and the vault shown anew: a profile
     /// switched or edited, hidden items shown or not.
     fn rehide(&mut self) {
+        // The profile's periodic notes folder, if it has one.
+        self.periodic = PeriodicNotes::from_settings(&periodic_settings(
+            &self.settings,
+            self.profiles.active(),
+        ));
         self.hidden = Hidden::new(&self.profiles.active().rules(), self.show_hidden);
         self.index = self.visible();
         let index = &self.index;
@@ -1882,6 +2106,121 @@ impl NavigatorState {
     /// had (a list becomes that one value); notes that have it already are
     /// left.
     ///
+    /// Renames property key `key` to `to` in every note that has it
+    /// (`PropertyOperations.renamePropertyKey`), and how many notes have
+    /// `to` already: theirs is replaced by `key`'s, so the person is asked
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// The Properties row, an empty name, the same name, or no note has it.
+    pub fn rename_property_key(&self, key: &str, to: &str) -> Result<(Outcome, usize), String> {
+        let to = to.trim();
+        if key.trim().is_empty() || key == ROOT {
+            return Err("Pick a property to rename".to_owned());
+        }
+        if to.is_empty() || to.contains(['\n', ':']) {
+            return Err(format!("{to:?} cannot be a property's name"));
+        }
+        let name = self
+            .property_tree
+            .key(key)
+            .map_or_else(|| key.trim().to_owned(), |k| k.name.clone());
+        if name == to {
+            return Err(format!("{name} is called that already"));
+        }
+        let (from_k, to_k) = (properties::fold(&name), properties::fold(to));
+        let mut having = 0_usize;
+        let mut both = 0_usize;
+        for f in self.index.files() {
+            let has = |k: &str| f.properties.iter().any(|(x, _)| properties::fold(x) == k);
+            if has(&from_k) {
+                having = having.saturating_add(1_usize);
+                if from_k != to_k && has(&to_k) {
+                    both = both.saturating_add(1_usize);
+                }
+            }
+        }
+        if having == 0 {
+            return Err(format!("No note has {name}"));
+        }
+        Ok((
+            write(FileOp::RenamePropertyKey {
+                from: name,
+                to: to.to_owned(),
+            }),
+            both,
+        ))
+    }
+
+    /// Takes property key `key` off every note
+    /// (`PropertyOperations.deletePropertyKey`).
+    ///
+    /// # Errors
+    ///
+    /// The Properties row, or no note has it.
+    pub fn delete_property_key(&self, key: &str) -> Result<(Outcome, usize), String> {
+        if key.trim().is_empty() || key == ROOT {
+            return Err("Pick a property to delete".to_owned());
+        }
+        let name = self
+            .property_tree
+            .key(key)
+            .map_or_else(|| key.trim().to_owned(), |k| k.name.clone());
+        let n = self
+            .index
+            .files()
+            .filter(|f| {
+                f.properties
+                    .iter()
+                    .any(|(k, _)| properties::fold(k) == properties::fold(&name))
+            })
+            .count();
+        if n == 0 {
+            return Err(format!("No note has {name}"));
+        }
+        Ok((write(FileOp::DeletePropertyKey(name)), n))
+    }
+
+    /// Renames value `value` of key `key` to `to` in every note: a text
+    /// value, or that element of a list.
+    ///
+    /// # Errors
+    ///
+    /// An empty value, the same value, or no note has it.
+    pub fn rename_property_value(
+        &self,
+        key: &str,
+        value: &str,
+        to: &str,
+    ) -> Result<Outcome, String> {
+        let to = to.trim();
+        if to.is_empty() {
+            return Err("Give the value a name".to_owned());
+        }
+        let written = self
+            .property_tree
+            .value(key, value)
+            .map_or_else(|| value.trim().to_owned(), |n| n.written.clone());
+        if properties::value_path(&written) == properties::value_path(to) && written == to {
+            return Err(format!("{written} is called that already"));
+        }
+        let name = self
+            .property_tree
+            .key(key)
+            .map_or_else(|| key.trim().to_owned(), |k| k.name.clone());
+        let op = FileOp::RenamePropertyValue {
+            key: name.clone(),
+            from: written.clone(),
+            to: to.to_owned(),
+        };
+        let files: Vec<NoteFile> = self.index.files().cloned().collect();
+        if properties::expand(&op, &files).is_empty() {
+            return Err(format!("No note has {name}: {written}"));
+        }
+        Ok(write(op))
+    }
+
     /// # Errors
     ///
     /// No notes, one that is not a Markdown note, no key, or every note has
@@ -2042,7 +2381,7 @@ impl NavigatorState {
     /// open, and the selection and search with it (`handleTagRename`,
     /// `handleTagDelete`, only once the notes are done).
     pub fn after_write(&mut self, ops: &[FileOp]) {
-        let mut changed = false;
+        let mut changed = self.after_property_ops(ops);
         for op in ops {
             let (from, to) = match op {
                 FileOp::RenameTag { from, to } => (tag_key(from), Some(to.as_str())),
@@ -2122,6 +2461,171 @@ impl NavigatorState {
         if changed {
             self.rebuild();
         }
+    }
+
+    /// A property key or value renamed or deleted: its paints, its place
+    /// in the order, whether it is open, and the selection and search
+    /// follow (`updateSettingsAfterRename`'s view half). Whether anything did.
+    fn after_property_ops(&mut self, ops: &[FileOp]) -> bool {
+        let mut changed = false;
+        for op in ops {
+            // Ids as the tree and paints have them: `key:<key>[=<value>]`,
+            // `property:<key>[=<value>]`.
+            let (from, to): (String, Option<String>) = match op {
+                FileOp::RenamePropertyKey { from, to } => {
+                    (properties::key_id(from), Some(properties::key_id(to)))
+                }
+                FileOp::DeletePropertyKey(key) => (properties::key_id(key), None),
+                FileOp::RenamePropertyValue { key, from, to } => (
+                    properties::value_id(key, from),
+                    Some(properties::value_id(key, to)),
+                ),
+                _ => continue,
+            };
+            changed = true;
+            let is_value = from.contains('=');
+            // `key:k` names k and its values (`key:k=v`); `key:k=v` itself.
+            let moved = |id: &str| -> Option<Option<String>> {
+                if id == from {
+                    return Some(to.clone());
+                }
+                if !is_value && let Some(rest) = id.strip_prefix(&format!("{from}=")) {
+                    return Some(to.as_ref().map(|t| format!("{t}={rest}")));
+                }
+                None
+            };
+            // A paint's key (`property:<key>[=<value>]`) as an id, and back.
+            let as_id = |k: &str| -> Option<String> {
+                let p = k.strip_prefix("property:")?;
+                Some(p.split_once('=').map_or_else(
+                    || properties::key_id(p),
+                    |(k, v)| properties::value_id(k, v),
+                ))
+            };
+            let as_paint = |id: &str| -> Option<String> {
+                let (k, v) = properties::parse_id(id)?;
+                Some(colour_key(&v.map_or_else(
+                    || format!("property:{k}"),
+                    |v| format!("property:{k}={v}"),
+                )))
+            };
+            let repaint = |map: BTreeMap<String, String>| -> BTreeMap<String, String> {
+                map.into_iter()
+                    .filter_map(|(k, c)| match as_id(&k).map(|id| moved(&id)) {
+                        Some(Some(Some(new))) => Some((as_paint(&new).unwrap_or(k), c)),
+                        Some(Some(None)) => None,
+                        _ => Some((k, c)),
+                    })
+                    .collect()
+            };
+            self.colours = repaint(std::mem::take(&mut self.colours));
+            self.icons = repaint(std::mem::take(&mut self.icons));
+            self.backgrounds = repaint(std::mem::take(&mut self.backgrounds));
+            self.expanded_props = std::mem::take(&mut self.expanded_props)
+                .into_iter()
+                .filter_map(|k| moved(&k).unwrap_or(Some(k)))
+                .collect();
+            // The order holds keys, folded.
+            if !is_value {
+                self.property_order = std::mem::take(&mut self.property_order)
+                    .into_iter()
+                    .filter_map(|k| {
+                        moved(&properties::key_id(&k)).map_or(Some(k), |new| {
+                            new.as_deref()
+                                .and_then(properties::parse_id)
+                                .map(|(k, _)| k)
+                        })
+                    })
+                    .collect();
+            }
+            if let NavTarget::Property { key, value } = self.target() {
+                let id = value.as_ref().map_or_else(
+                    || properties::key_id(&key),
+                    |v| properties::value_id(&key, v),
+                );
+                if let Some(new) = moved(&id) {
+                    let next = new
+                        .as_deref()
+                        .and_then(properties::parse_id)
+                        .map_or(NavTarget::Folder(String::new()), |(key, value)| {
+                            NavTarget::Property { key, value }
+                        });
+                    self.selection.select_target(next, None);
+                }
+            }
+        }
+        changed
+    }
+
+    /// Moves nested tag `key` `by` places among its siblings, in its
+    /// parent's hand-made order (`tagChildOrder`). Whether it moved.
+    pub fn move_tag_child(&mut self, key: &str, by: isize) -> bool {
+        let key = tag_key(key);
+        let Some((parent, _)) = key.rsplit_once('/') else {
+            return false;
+        };
+        let parent = parent.to_owned();
+        let now = tree::hand_ordered(
+            self.tag_tree.children(
+                &parent,
+                self.settings.tag_sort,
+                self.settings.include_descendants,
+            ),
+            self.tag_child_order.get(&parent),
+        );
+        let Some(next) = tree::moved_in(&now, &key, by) else {
+            return false;
+        };
+        self.tag_child_order.insert(parent, next);
+        self.rebuild_nav();
+        true
+    }
+
+    /// Moves value `value` of key `key` `by` places among the key's values
+    /// (`propertyChildOrder`). Whether it moved.
+    pub fn move_property_value(&mut self, key: &str, value: &str, by: isize) -> bool {
+        let key = properties::fold(key);
+        let value = properties::value_path(value);
+        let now = tree::hand_ordered(
+            self.property_tree.values(&key, self.settings.property_sort),
+            self.property_value_order.get(&key),
+        );
+        let Some(next) = tree::moved_in(&now, &value, by) else {
+            return false;
+        };
+        self.property_value_order.insert(key, next);
+        self.rebuild_nav();
+        true
+    }
+
+    /// Moves a nested tag (`tag:<t>`) or a value (`property:<k>=<v>`) `by`
+    /// places in its hand-made order. Whether it moved.
+    pub fn move_nested(&mut self, id: &str, by: isize) -> bool {
+        if let Some(t) = id.strip_prefix("tag:") {
+            self.move_tag_child(t, by)
+        } else if let Some((k, v)) = id.strip_prefix("property:").and_then(|p| p.split_once('=')) {
+            self.move_property_value(k, v, by)
+        } else {
+            false
+        }
+    }
+
+    /// Forgets `parent`'s hand-made order: a tag's children (`tag:<key>`)
+    /// or a key's values (`property:<key>`), back to the sort.
+    pub fn reset_child_order(&mut self, parent: &str) -> bool {
+        let gone = if let Some(t) = parent.strip_prefix("tag:") {
+            self.tag_child_order.remove(&tag_key(t)).is_some()
+        } else if let Some(k) = parent.strip_prefix("property:") {
+            self.property_value_order
+                .remove(&properties::fold(k))
+                .is_some()
+        } else {
+            false
+        };
+        if gone {
+            self.rebuild_nav();
+        }
+        gone
     }
 
     /// Moves root tag `key` (or [`UNTAGGED`]) `by` places in the manual
@@ -2227,6 +2731,69 @@ impl NavigatorState {
             self.collapsed.insert(key.to_owned());
         }
         self.rebuild_list();
+    }
+
+    /// Folds every group of the list, or unfolds them all when every one
+    /// is folded (`collapse-expand-list-groups`). Whether they are folded now.
+    pub fn fold_all_groups(&mut self) -> bool {
+        let groups: Vec<String> = self
+            .list_rows
+            .iter()
+            .filter_map(|r| match &r.kind {
+                crate::list::ListRowKind::Header { group, .. } => Some(group.clone()),
+                _ => None,
+            })
+            .collect();
+        let folded = !groups.is_empty() && groups.iter().all(|g| self.collapsed.contains(g));
+        for g in groups {
+            if folded {
+                self.collapsed.remove(&g);
+            } else {
+                self.collapsed.insert(g);
+            }
+        }
+        self.rebuild_list();
+        !folded
+    }
+
+    /// What opens as the homepage (`homepage`): a periodic note (`daily`,
+    /// `weekly`, `monthly`, `quarterly`, `yearly`), made when missing, or a
+    /// note by its path. `None` when there is none.
+    ///
+    /// # Errors
+    ///
+    /// The note is not there, or its kind of periodic note is off.
+    pub fn homepage(&self) -> Result<Option<Outcome>, String> {
+        let h = self.settings.homepage.trim();
+        if h.is_empty() {
+            return Ok(None);
+        }
+        let kind = match h.to_ascii_lowercase().as_str() {
+            "daily" | "today" => Some(PeriodKind::Day),
+            "weekly" => Some(PeriodKind::Week),
+            "monthly" => Some(PeriodKind::Month),
+            "quarterly" => Some(PeriodKind::Quarter),
+            "yearly" => Some(PeriodKind::Year),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            return self
+                .open_periodic(kind, self.today(), OpenIn::Here)
+                .map(Some);
+        }
+        let path = if h.contains('.') {
+            h.to_owned()
+        } else {
+            format!("{h}.md")
+        };
+        if self.index.file(&path).is_none() {
+            return Err(format!("the homepage {path} is not in the vault"));
+        }
+        Ok(Some(Outcome::Open {
+            path,
+            how: OpenIn::Here,
+            settle: false,
+        }))
     }
 
     /// Gives `target` its own list (an empty one lets it go); fields equal
@@ -2386,6 +2953,62 @@ impl NavigatorState {
         Ok(Outcome::Write {
             ops: vec![FileOp::Move { from: note, to }],
             open: None,
+        })
+    }
+
+    /// The notes the template picker offers (`TemplateFileModal`): the
+    /// Markdown notes in the template folder (the whole vault's when it is
+    /// empty), by path.
+    #[must_use]
+    pub fn template_notes(&self) -> Vec<String> {
+        let folder = self.settings.template_folder.trim().trim_matches('/');
+        let mut out: Vec<String> = self
+            .all
+            .files()
+            .filter(|f| f.is_markdown())
+            .filter(|f| folder.is_empty() || f.path.starts_with(&format!("{folder}/")))
+            .map(|f| f.path.clone())
+            .collect();
+        out.sort_by(|a, b| crate::tree::natural_cmp(a, b));
+        out
+    }
+
+    /// What "Create folder note" makes for `folder` (`createFolderNote`): a
+    /// note of the settings' type named for the folder, from the folder
+    /// note template when there is one.
+    ///
+    /// # Errors
+    ///
+    /// Folder notes are off, the vault's root, or it has one already.
+    pub fn folder_note_request(&self, folder: &str) -> Result<NewNote, String> {
+        if !self.settings.folder_notes {
+            return Err("Folder notes are off in Navigator's settings".to_owned());
+        }
+        if folder.is_empty() {
+            return Err("The vault has no folder note".to_owned());
+        }
+        if let Some(n) = self.folder_note(folder) {
+            return Err(format!("{folder} has a folder note already: {n}"));
+        }
+        let kind = match self.settings.folder_note_type {
+            crate::settings::FolderNoteType::Markdown => NewKind::Note,
+            crate::settings::FolderNoteType::Canvas => NewKind::Canvas,
+            crate::settings::FolderNoteType::Base => NewKind::Base,
+        };
+        let template = Some(self.settings.folder_note_template.trim().to_owned())
+            .filter(|t| !t.is_empty() && kind == NewKind::Note);
+        Ok(NewNote {
+            folder: folder.to_owned(),
+            kind,
+            no_template: template.is_none(),
+            template,
+            name: Some(list::folder_note_name(&self.settings, folder)),
+            how: if self.settings.folder_note_open == FolderNoteOpen::NewTab {
+                OpenIn::Tab
+            } else {
+                OpenIn::Here
+            },
+            ..NewNote::default()
         })
     }
 
@@ -3090,6 +3713,8 @@ impl NavigatorState {
             expanded_properties: self.expanded_props.iter().cloned().collect(),
             tag_order: self.tag_order.clone(),
             property_order: self.property_order.clone(),
+            tag_child_order: orders_of(&self.tag_child_order),
+            property_value_order: orders_of(&self.property_value_order),
             search: self.search.text().to_owned(),
             search_open: self.search_open,
             profiles: self.profiles.clone(),
@@ -3186,6 +3811,16 @@ impl NavigatorState {
         }
         self.tag_order.clone_from(&state.tag_order);
         self.property_order.clone_from(&state.property_order);
+        self.tag_child_order = state
+            .tag_child_order
+            .iter()
+            .map(|o| (o.parent.clone(), o.names.clone()))
+            .collect();
+        self.property_value_order = state
+            .property_value_order
+            .iter()
+            .map(|o| (o.parent.clone(), o.names.clone()))
+            .collect();
         if state.nav_width > 0.0 {
             self.nav_width = state.nav_width;
         }
@@ -3316,4 +3951,25 @@ pub const fn whole(v: f64) -> usize {
     } else {
         v as usize
     }
+}
+
+/// A hand-made order map as the view state keeps it.
+fn orders_of(map: &BTreeMap<String, Vec<String>>) -> Vec<ChildOrder> {
+    map.iter()
+        .map(|(parent, names)| ChildOrder {
+            parent: parent.clone(),
+            names: names.clone(),
+        })
+        .collect()
+}
+
+/// `settings` with `profile`'s periodic notes folder, when it has one.
+fn periodic_settings(settings: &NavigatorSettings, profile: &VaultProfile) -> NavigatorSettings {
+    profile.periodic_folder.as_ref().map_or_else(
+        || settings.clone(),
+        |f| NavigatorSettings {
+            periodic_folder: f.clone(),
+            ..settings.clone()
+        },
+    )
 }

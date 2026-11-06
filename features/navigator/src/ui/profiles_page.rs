@@ -178,8 +178,18 @@ fn ProfilesPage() -> Element {
 fn ProfileCard(nav: Navigator, active: bool, profile: VaultProfile) -> Element {
     let id = profile.id.clone();
     let default = id == crate::profiles::DEFAULT_ID;
-    let (i1, i2, i3, i4, i5) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+    let (i1, i2, i3, i4, i5, i6, i7) = (
+        id.clone(),
+        id.clone(),
+        id.clone(),
+        id.clone(),
+        id.clone(),
+        id.clone(),
+        id.clone(),
+    );
     let banner = profile.banner.clone().unwrap_or_default();
+    let keys = profile.property_keys.clone().unwrap_or_default();
+    let periodic = profile.periodic_folder.clone().unwrap_or_default();
     let vis = profile.file_visibility;
     let border = if active {
         "2px solid var(--nv-open)"
@@ -245,6 +255,29 @@ fn ProfileCard(nav: Navigator, active: bool, profile: VaultProfile) -> Element {
                         let v = e.value();
                         let _ = nav.update(|s| s.edit_profile_in(&i5, |p| {
                             p.banner = Some(v.trim().to_owned()).filter(|b| !b.is_empty());
+                        }));
+                    },
+                }
+            }
+            // Over the settings' (`propertyKeys`, `periodicNotesFolder`).
+            div { style: "display:flex; gap:8px; align-items:center;",
+                span { style: "flex:0 0 180px; font-size:12px;", "Property keys" }
+                input { "aria-label": "Property keys", placeholder: "The settings' (status, type)", value: "{keys}", style: FIELD,
+                    onchange: move |e| {
+                        let v = e.value();
+                        let _ = nav.update(|s| s.edit_profile_in(&i6, |p| {
+                            p.property_keys = Some(v.trim().to_owned()).filter(|b| !b.is_empty());
+                        }));
+                    },
+                }
+            }
+            div { style: "display:flex; gap:8px; align-items:center;",
+                span { style: "flex:0 0 180px; font-size:12px;", "Periodic notes folder" }
+                input { "aria-label": "Periodic notes folder", placeholder: "The settings' (Journal)", value: "{periodic}", style: FIELD,
+                    onchange: move |e| {
+                        let v = e.value();
+                        let _ = nav.update(|s| s.edit_profile_in(&i7, |p| {
+                            p.periodic_folder = Some(v.trim().to_owned()).filter(|b| !b.is_empty());
                         }));
                     },
                 }

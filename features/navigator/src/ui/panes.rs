@@ -20,7 +20,7 @@ use crate::selection::NavTarget;
 use crate::settings::{CountPlacement, Grouping, ListMode, NavigatorSettings, SortOption};
 use crate::source::Millis;
 use crate::state::{Mods, NavigatorState};
-use crate::tree::NavRowKind;
+use crate::tree::{NavRow, NavRowKind};
 
 /// A pane's header: the tools along its top.
 const HEADER: f64 = 36.0;
@@ -45,6 +45,15 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
     let reordering = s.reordering;
     let dual = s.settings().dual_pane;
     let calendar_on = s.settings().calendar;
+    // Collected, so the state is let go before the header is drawn.
+    #[allow(clippy::needless_collect)]
+    let header_commands: Vec<crate::template::TemplateCommand> = s
+        .templates()
+        .commands
+        .iter()
+        .filter(|c| c.placement == crate::template::CommandPlacement::Header)
+        .cloned()
+        .collect();
     let calendar_open = s.calendar_open;
     let show_hidden = s.show_hidden();
     let profiles: Vec<(String, String)> = s
@@ -106,6 +115,20 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                             } }
                     }
                 }
+                // "Create note" commands placed in the header
+                // (`templateCommands[].placement`).
+                for c in header_commands {
+                    {
+                        let id = c.id.clone();
+                        let icon = crate::Icon::parse(if c.icon.is_empty() { "file-plus" } else { &c.icon });
+                        rsx! {
+                            button { key: "{c.id}", class: "nv-tool nv-template-command", "aria-label": "{c.name}", title: "{c.name}",
+                                onclick: move |_| nav.run_template_command(&id, on_open),
+                                if let Some(i) = icon { super::icon::IconView { nav, icon: i, size: 16, colour: None } }
+                            }
+                        }
+                    }
+                }
                 if calendar_on {
                     button { class: if calendar_open { "nv-tool nv-on" } else { "nv-tool" },
                         "aria-label": if calendar_open { "Hide calendar" } else { "Show calendar" },
@@ -119,6 +142,7 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                     Columns2 { size: 16 }
                 }
             }
+            PinnedRows { nav, on_open }
             div { style: "flex:1 1 0; min-height:0; position:relative;",
                 VirtualPane { nav, pane: Pane::Navigation, label: "Folders", NavRows { nav, on_open } }
                 if let Some(menu) = row_menu {
@@ -127,6 +151,45 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
             }
             if calendar {
                 Calendar { nav, on_open }
+            }
+        }
+    }
+}
+
+/// The shortcuts (and recent notes) pinned over the tree (`pinShortcuts`):
+/// they stay as the tree scrolls.
+#[component]
+fn PinnedRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
+    let s = nav.state.read();
+    let rows: Vec<NavRow> = s.pinned_rows().to_vec();
+    if rows.is_empty() {
+        return rsx! {};
+    }
+    let h = s.nav_item_height();
+    let active = s.active().map(str::to_owned);
+    let reordering = s.reordering;
+    drop(s);
+    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+    let total = h.mul_add(rows.len() as f64, 6.0);
+    rsx! {
+        div { class: "nv-pinned", style: "flex:0 0 auto; position:relative; height:{total}px; border-bottom:1px solid var(--nv-divider);",
+            for (i, row) in rows.into_iter().enumerate() {
+                {
+                    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+                    let top = h.mul_add(i as f64, 3.0);
+                    match row.kind.clone() {
+                        NavRowKind::Section { id, name, expanded, count } => rsx! {
+                            tree_rows::SectionRow { key: "{row.key}", nav, id, name, expanded, count, top, height: h, drop_here: false }
+                        },
+                        NavRowKind::Shortcut { at, shortcut, name, missing } => rsx! {
+                            tree_rows::ShortcutRow { key: "{row.key}", nav, on_open, at, shortcut, name, missing, reorder: reordering, top, height: h, drop_here: false }
+                        },
+                        NavRowKind::Recent { path, name } => rsx! {
+                            tree_rows::RecentRow { key: "{row.key}", nav, on_open, active: active.as_deref() == Some(path.as_str()), path, name, top, height: h }
+                        },
+                        _ => rsx! {},
+                    }
+                }
             }
         }
     }
@@ -195,11 +258,34 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                 }
                 _ => (None, None),
             };
-            let colour = match &row.kind {
+            let mut colour = match &row.kind {
                 NavRowKind::Folder { path, .. } => {
                     s.colour(&format!("folder:{path}")).map(str::to_owned)
                 }
                 _ => colour,
+            };
+            let mut background = background;
+            // The rainbow where the row has no colour of its own
+            // (`applyRainbowOverlay`).
+            match s.rainbow(&row.key) {
+                Some((c, false)) if colour.is_none() => colour = Some(c.to_owned()),
+                Some((c, true)) if background.is_none() => {
+                    background = Some(format!("color-mix(in srgb, {c} 22%, transparent)"));
+                }
+                _ => {}
+            }
+            // A top row's gap (`rootLevelSpacing`) above it, not in it.
+            let base = s.nav_item_height();
+            let (top, h) = if h > base + 0.5
+                && matches!(
+                    row.kind,
+                    NavRowKind::Folder { .. }
+                        | NavRowKind::Tag { .. }
+                        | NavRowKind::Property { .. }
+                ) {
+                (top + h - base, base)
+            } else {
+                (top, h)
             };
             Some((row.clone(), top, h, note, colour, icon, background))
         })
@@ -374,7 +460,8 @@ fn FolderRow(
     };
     let name_weight = if root { 600 } else { 400 };
     let (p1, p2, p3, p4) = (path.clone(), path.clone(), name.clone(), name.clone());
-    let (p5, p6, p7) = (path.clone(), path.clone(), path.clone());
+    let (p5, p6, p7, p8) = (path.clone(), path.clone(), path.clone(), path.clone());
+    let name_flex = tree_rows::name_flex(nav, !count.is_empty() && !reorder);
     rsx! {
         div {
             class,
@@ -391,6 +478,9 @@ fn FolderRow(
                     return;
                 }
                 let out = nav.update(|s| s.click_folder(&p1));
+                // The folder note, else (`autoSelectFirstFileOnFocusChange`)
+                // its first note.
+                let out = out.or_else(|| nav.state.peek().first_note());
                 nav.act(out, on_open);
             },
             // Add to shortcuts, hide (`buildFolderMenu`'s).
@@ -432,7 +522,8 @@ fn FolderRow(
             } else {
                 span { class: if note { "nv-name nv-has-note" } else { "nv-name" },
                     "data-folder-note": if note { "true" } else { "false" },
-                    style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight}; {name_colour}",
+                    title: tree_rows::tooltip(nav, &p8),
+                    style: "flex:{name_flex}; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight}; {name_colour}",
                     "{name}"
                 }
             }
@@ -449,8 +540,10 @@ fn FolderRow(
                     ArrowDown { size: 13 }
                 }
             } else if !count.is_empty() {
+                tree_rows::Leader { nav }
                 span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{count}" }
             }
+            tree_rows::Guides { nav, level, indent }
         }
     }
 }
@@ -751,7 +844,14 @@ fn ListRows(
                         path: path.clone(),
                         marks: crate::search::highlights(&name, &marked),
                         name,
-                        preview: f.preview.clone().unwrap_or_default(),
+                        // The line the full text matched, else the preview.
+                        preview: s
+                            .excerpt(path)
+                            .map_or_else(|| f.preview.clone().unwrap_or_default(), str::to_owned),
+                        preview_marks: s
+                            .excerpt(path)
+                            .map(|e| crate::search::highlights(e, s.search().words()))
+                            .unwrap_or_default(),
                         date: date_label(at, clock),
                         parent: parent.clone(),
                         selected: s.selection().is_selected(path),
@@ -875,6 +975,8 @@ struct FileItem {
     background: Option<String>,
     icon_only: bool,
     preview: String,
+    /// The search's words in the preview (a full-text match's line).
+    preview_marks: Vec<std::ops::Range<usize>>,
     date: String,
     parent: Option<String>,
     selected: bool,
@@ -909,6 +1011,7 @@ fn FileRow(
         background,
         icon_only,
         preview,
+        preview_marks,
         date,
         parent,
         selected,
@@ -1009,6 +1112,7 @@ fn FileRow(
                         tree_rows::InlineRename { nav, on_open, what: Renaming::File(p4), value: name }
                     } else {
                         div { class: "nv-file-name",
+                            title: tree_rows::tooltip(nav, &path),
                             style: "flex:1 1 auto; min-width:0; max-height:{title_h}px; line-height:20px; overflow:hidden; text-overflow:ellipsis; \
                                     white-space:{wrap}; font-weight:{weight}; color:{name_colour};",
                             if marks.is_empty() {
@@ -1031,7 +1135,17 @@ fn FileRow(
                 if lines.preview > 0 && !preview.trim().is_empty() {
                     div { class: "nv-file-preview",
                         style: "flex:0 0 auto; max-height:{preview_h}px; line-height:18px; overflow:hidden; color:var(--nv-muted); font-size:12px;",
-                        "{preview}"
+                        if preview_marks.is_empty() {
+                            "{preview}"
+                        } else {
+                            for (i, (text, mark)) in marked_parts(&preview, &preview_marks).into_iter().enumerate() {
+                                if mark {
+                                    mark { key: "{i}", class: "nv-search-highlight", "{text}" }
+                                } else {
+                                    span { key: "{i}", "{text}" }
+                                }
+                            }
+                        }
                     }
                 }
                 if lines.meta {

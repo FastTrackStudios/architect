@@ -124,6 +124,36 @@ rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), 
 The sandbox's Vault tab does this (`apps/ui/src/vault.rs` `FilesView`,
 `apps/ui/src/extensions.rs`).
 
+## Notebook Navigator parity (layer 7)
+
+- **Properties:** `NavigatorState::rename_property_key` (its count of notes
+  that have the new key already, which the UI asks about),
+  `delete_property_key`, `rename_property_value`; the vault-wide ops
+  `FileOp::RenamePropertyKey`, `DeletePropertyKey`, `RenamePropertyValue`,
+  expanded note by note by `properties::expand` (a source writes them as
+  `SetProperty`/`RemoveProperty`); `NavigatorSettings::after_property_ops`
+  moves the settings' key lists. Actions `NAVIGATOR_PROPERTY_RENAME`,
+  `NAVIGATOR_PROPERTY_DELETE`.
+- **Orders:** `move_nested` (`tag:<t>`, `property:<k>=<v>`),
+  `reset_child_order`, kept in `ViewState::tag_child_order` and
+  `property_value_order`; `NAVIGATOR_MOVE_CHILD`. `spring_open` takes a
+  `NavTarget` (folders and tags).
+- **Providers:** `Snapshot::ordered` keeps a provider's node order
+  (`NavigatorSource::child_order`).
+- **Settings added:** collapse scope and keep-root, accordion, expand on
+  select, open first note, folder sort, indent guides, count leader, root
+  spacing, Properties row, tooltips, the rainbow (`rainbow`,
+  `rainbow::colours`), pinned shortcuts (`NavigatorState::pinned_rows`),
+  homepage (`NavigatorState::homepage`, `NAVIGATOR_OPEN_HOMEPAGE`), new
+  note in tab, phone zoom (`zoom_phone`), folder note type, template
+  engine (`template::templater`).
+- **Profiles:** `VaultProfile::property_keys`, `periodic_folder`.
+- **Extensions' menu rows:** `ui::MenuExtra` (rows and a runner, given by
+  the app over its `[[context]]` on `navigator:folder|tag|property`).
+- **Events:** `storage-ready`; `NAVIGATOR_STATE` says `ready`.
+- **Full text:** `NavigatorSource::search_excerpts`,
+  `NavigatorState::set_full_text_hits`, `excerpt`.
+
 ## Recipe: the navigator without extensions
 
 ```rust,ignore

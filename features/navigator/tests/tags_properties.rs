@@ -558,3 +558,167 @@ fn the_query_reads_back_quotes_and_binds_and_tighter() {
     assert!(Query::parse(".status=progress").unwrap().matches(&f));
     assert!(!Query::parse(".status=done").unwrap().matches(&f));
 }
+
+/// A property key renamed in every note (`renamePropertyKeyInFile`): any
+/// case, a note with the new key already takes the old one's value; its
+/// colour, the selection and the settings that list it follow. A value
+/// renamed, in text and in lists; a key deleted.
+#[test]
+fn a_property_key_or_value_is_renamed_and_a_key_deleted() {
+    let src = vault().with_file(
+        NoteFile::new("Work/Both.md", NOW, NOW)
+            .property("Status", text("open"))
+            .property("state", text("old")),
+    );
+    let mut s = state(&src, settings());
+    s.paint(
+        architect_navigator::state::Paint::Colour,
+        "property:status",
+        Some("tomato"),
+    )
+    .unwrap();
+    s.select_property("status", None);
+    // Nothing to rename, or no new name.
+    assert!(s.rename_property_key("nothing", "x").is_err());
+    assert!(s.rename_property_key("status", " ").is_err());
+    let (out, both) = s.rename_property_key("status", "state").unwrap();
+    assert_eq!(both, 1, "Both.md has a state already");
+    apply(&mut s, &src, out);
+    let both = src.file("Work/Both.md").unwrap();
+    assert_eq!(both.properties, [("state".to_owned(), text("open"))]);
+    let plan = src.file("Work/Plan.md").unwrap();
+    assert!(
+        plan.properties
+            .iter()
+            .any(|(k, v)| k == "state" && *v == text("doing"))
+    );
+    assert!(
+        !plan
+            .properties
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("status"))
+    );
+    assert_eq!(s.colour("property:state"), Some("tomato"));
+    assert_eq!(
+        s.target(),
+        NavTarget::Property {
+            key: "state".into(),
+            value: None
+        }
+    );
+    let mut kept = settings();
+    assert!(kept.after_property_ops(&[FileOp::RenamePropertyKey {
+        from: "Status".into(),
+        to: "state".into()
+    }]));
+    assert_eq!(kept.property_keys, "state, type, missing");
+
+    // A value: in a text, and in a list.
+    let out = s.rename_property_value("type", "plan", "Plan").unwrap();
+    apply(&mut s, &src, out);
+    assert_eq!(
+        src.file("Work/Plan.md")
+            .unwrap()
+            .properties
+            .iter()
+            .find(|(k, _)| k == "type")
+            .unwrap()
+            .1,
+        text("Plan")
+    );
+    assert_eq!(
+        src.file("Home/Garden.md")
+            .unwrap()
+            .properties
+            .iter()
+            .find(|(k, _)| k == "type")
+            .unwrap()
+            .1,
+        PropertyValue::List(vec!["Plan".into(), "list".into()])
+    );
+    assert!(s.rename_property_value("type", "nope", "x").is_err());
+
+    // Deleted from every note, and from the settings.
+    let (out, n) = s.delete_property_key("type").unwrap();
+    assert_eq!(n, 2);
+    apply(&mut s, &src, out);
+    assert!(
+        src.files()
+            .iter()
+            .all(|f| !f.properties.iter().any(|(k, _)| k == "type"))
+    );
+    assert!(kept.after_property_ops(&[FileOp::DeletePropertyKey("type".into())]));
+    assert_eq!(kept.property_keys, "state, missing");
+}
+
+/// A collapsed tag held under a drag opens (`scheduleTagAutoExpand`);
+/// one with nothing below it, or open, does not.
+#[test]
+fn a_tag_springs_open_under_a_drag() {
+    let src = vault();
+    let mut s = state(&src, settings());
+    let project = NavTarget::Tag("project".into());
+    let collapsed = |s: &NavigatorState| {
+        s.nav_rows().iter().any(|r| matches!(&r.kind, NavRowKind::Tag { tag, expanded: false, has_children: true, .. } if tag.eq_ignore_ascii_case("project")))
+    };
+    assert!(collapsed(&s), "{:?}", tag_rows(&s));
+    assert!(s.spring_open(&project));
+    assert!(!collapsed(&s));
+    assert!(!s.spring_open(&project), "open already");
+    assert!(
+        !s.spring_open(&NavTarget::Tag("home".into())),
+        "nothing below it"
+    );
+}
+
+/// Nested tags and a key's values in a hand-made order (`tagChildOrder`,
+/// `propertyChildOrder`), kept between runs, reset to the sort.
+#[test]
+fn nested_tags_and_values_keep_a_hand_made_order() {
+    let src = vault();
+    let mut s = state(&src, settings());
+    s.toggle_nav(&NavTarget::Tag("project".into()));
+    let below = |s: &NavigatorState| -> Vec<String> {
+        tag_rows(s)
+            .into_iter()
+            .filter(|r| r.1 == 2)
+            .map(|r| r.0)
+            .collect()
+    };
+    assert_eq!(below(&s), ["Alpha", "beta"]);
+    assert!(s.move_nested("tag:project/beta", -1));
+    assert_eq!(below(&s), ["beta", "Alpha"]);
+    assert!(!s.move_nested("tag:project/beta", -1), "first already");
+    // Kept between runs.
+    let kept = s.view_state();
+    let mut again = state(&src, settings());
+    // The open tags come back too.
+    again.restore(&kept);
+    assert_eq!(below(&again), ["beta", "Alpha"]);
+    assert!(s.reset_child_order("tag:project"));
+    assert_eq!(below(&s), ["Alpha", "beta"]);
+
+    // A key's values.
+    s.toggle_nav(&NavTarget::Property {
+        key: "status".into(),
+        value: None,
+    });
+    let values = |s: &NavigatorState| -> Vec<String> {
+        s.nav_rows()
+            .iter()
+            .filter_map(|r| match &r.kind {
+                NavRowKind::Property {
+                    key,
+                    value: Some(v),
+                    ..
+                } if key == "status" => Some(v.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = values(&s);
+    assert!(first.len() >= 2, "{first:?}");
+    let last = first.last().unwrap().clone();
+    assert!(s.move_nested(&format!("property:status={last}"), -10));
+    assert_eq!(values(&s)[0], last);
+}
