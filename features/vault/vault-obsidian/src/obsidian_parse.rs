@@ -61,8 +61,10 @@ pub const BLOCK_REF_REGEX: &str = LOGSEQ_BLOCK_REF_REGEX;
 /// 2=url. Leading `!` (image embed) is matched separately so the
 /// link form doesn't double-match. Inline title (`"…"` after the
 /// URL) is allowed but discarded.
-pub const MD_LINK_REGEX: &str = r"\[([^\]\n]*)\]\(([^)\s]+)(?:\s+\x22[^\x22]*\x22)?\)";
-pub const MD_IMAGE_REGEX: &str = r"!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+\x22[^\x22]*\x22)?\)";
+// The text may wrap a line: a block's lines are one paragraph, and a
+// soft break inside a link's text is still the link (CommonMark).
+pub const MD_LINK_REGEX: &str = r"\[([^\]]*)\]\(([^)\s]+)(?:\s+\x22[^\x22]*\x22)?\)";
+pub const MD_IMAGE_REGEX: &str = r"!\[([^\]]*)\]\(([^)\s]+)(?:\s+\x22[^\x22]*\x22)?\)";
 
 /// Inline code span: backtick-delimited run that does NOT cross a
 /// newline. We mark these so `extract_refs` can skip any wikilink /
@@ -677,9 +679,12 @@ pub fn parse_page(src: &str) -> ParsedPage {
             continue;
         }
 
-        // Detect code fence opener.
+        // Detect code fence opener. It interrupts a paragraph (CommonMark,
+        // and Obsidian): a fence right under a line of text is still code,
+        // and a `#tag` or `[[link]]` in it is still not one.
         let ts = trimmed.trim_start();
-        if (ts.starts_with("```") || ts.starts_with("~~~")) && cur.is_none() {
+        if ts.starts_with("```") || ts.starts_with("~~~") {
+            push_cur(&mut blocks, cur.take());
             let fence_char = if ts.starts_with("```") { "```" } else { "~~~" };
             let lang = ts[3..].trim().to_string();
             let mut b = ParsedBlock {
@@ -975,3 +980,35 @@ fn extract_logseq_props(content: &str) -> (String, Vec<FrontmatterEntry>) {
 // out of the deleted knowledge-proto crate — they depended on the
 // `Page` / `Block` / `Vault` entity types that went away. Re-add
 // against `vault_obsidian::{VaultPage, Vault}` if they come back.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tags(page: &ParsedPage) -> Vec<String> {
+        page.blocks
+            .iter()
+            .flat_map(|b| &b.refs)
+            .filter_map(|r| match r {
+                Ref::Tag(t) => Some(t.path.join("/")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_fence_right_under_text_is_still_code() {
+        let page = parse_page("A line #real\n```lua\nreturn #selected\n```\n");
+        assert_eq!(tags(&page), vec!["real"]);
+        assert!(page.blocks.iter().any(|b| b.kind == "code"));
+    }
+
+    #[test]
+    fn a_markdown_link_may_wrap_a_line() {
+        let refs = extract_refs("See [the settings\nsection](@/settings.md) here.");
+        assert!(
+            refs.iter()
+                .any(|r| matches!(r, Ref::MarkdownLink(l) if l.url == "@/settings.md"))
+        );
+    }
+}
