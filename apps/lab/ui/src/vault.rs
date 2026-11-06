@@ -670,6 +670,27 @@ fn use_lab_vault() -> LabVault {
     })
 }
 
+/// The demo vault's periodic notes (`apps/lab/demo-vault.py`'s journal):
+/// set when the five patterns and the folder are still the defaults, so a
+/// person's own are left alone.
+fn demo_vault_periodic_notes(s: &mut architect_navigator::NavigatorSettings) {
+    let defaults = architect_navigator::NavigatorSettings::default();
+    let untouched = s.periodic_folder == defaults.periodic_folder
+        && s.daily_pattern == defaults.daily_pattern
+        && s.weekly_pattern == defaults.weekly_pattern
+        && s.monthly_pattern == defaults.monthly_pattern
+        && s.quarterly_pattern == defaults.quarterly_pattern
+        && s.yearly_pattern == defaults.yearly_pattern;
+    if untouched {
+        s.periodic_folder = "Journal".to_owned();
+        s.daily_pattern = "[Daily]/YYYY-MM-DD".to_owned();
+        s.weekly_pattern = "[Weekly]/GGGG-[W]WW".to_owned();
+        s.monthly_pattern = "[Monthly]/YYYY-MM".to_owned();
+        s.quarterly_pattern = "[Quarterly]/YYYY-[Q]Q".to_owned();
+        s.yearly_pattern = "[Yearly]/YYYY".to_owned();
+    }
+}
+
 /// The vault's files as the navigator sees them: the lab's notes in
 /// folders, each with the start of its text, a few days apart, and a file
 /// of a kind the lab has no view for (an extension's opener claims it: the
@@ -862,6 +883,12 @@ fn FilesView() -> Element {
     use_hook(move || {
         if let Some(v) = kept.peek().as_ref() {
             nav.restore(v);
+        }
+        // The demo vault keeps its periodic notes in `Journal/Daily`,
+        // `Journal/Weekly` (ISO weeks), …: the calendar reads them there,
+        // while the periodic notes are still Notebook Navigator's defaults.
+        if disk.peek().is_some() {
+            nav.settings.update(demo_vault_periodic_notes);
         }
     });
     use_drop(move || {
