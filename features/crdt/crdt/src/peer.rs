@@ -589,10 +589,37 @@ pub struct PullReport {
     /// Of those, documents the peer had history of that this node lacked.
     pub pulled: usize,
     /// Two nodes that made two different documents of one id; left as
-    /// they are on both.
+    /// they are on both ([`Foreign::Refuse`]).
     pub foreign: usize,
+    /// Of those, settled: the second seed adopted the first's lineage
+    /// ([`Foreign::AdoptFirst`], [`adopt_lineage`]).
+    pub adopted: usize,
     /// Refused, dropped or timed out; tried again next sweep.
     pub failed: usize,
+}
+
+/// What a [`pull`] does with a document both nodes made separately.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Foreign {
+    /// Leave both as they are and count it ([`PullReport::foreign`]).
+    #[default]
+    Refuse,
+    /// The second seed adopts the first's lineage ([`adopt_lineage`]).
+    AdoptFirst,
+}
+
+/// [`pull_with`] that refuses foreign lineage.
+///
+/// # Errors
+///
+/// The peer's `list` failed: unreachable, or this node is not admitted.
+pub async fn pull<S: BuildHasher + Sync>(
+    local: &impl SyncLane,
+    peer: &DocPeerClient,
+    ours: &HashMap<Uuid, String, S>,
+    per_doc: Duration,
+) -> Result<PullReport, SessionEnd> {
+    pull_with(local, peer, ours, per_doc, Foreign::Refuse).await
 }
 
 /// Pull `peer`'s documents into this node and push ours to it.
@@ -606,11 +633,12 @@ pub struct PullReport {
 /// # Errors
 ///
 /// The peer's `list` failed: unreachable, or this node is not admitted.
-pub async fn pull<S: BuildHasher + Sync>(
+pub async fn pull_with<S: BuildHasher + Sync>(
     local: &impl SyncLane,
     peer: &DocPeerClient,
     ours: &HashMap<Uuid, String, S>,
     per_doc: Duration,
+    foreign: Foreign,
 ) -> Result<PullReport, SessionEnd> {
     let theirs = peer.list().await.map_err(classify_err)?;
     let mut report = PullReport {
@@ -629,6 +657,16 @@ pub async fn pull<S: BuildHasher + Sync>(
         match tokio::time::timeout(per_doc, exchange(entry.doc_id, local, &remote)).await {
             Ok(Ok(Exchanged::Pulled)) => report.pulled = report.pulled.saturating_add(1),
             Ok(Ok(Exchanged::Unchanged)) => {}
+            Ok(Err(SessionEnd::ForeignLineage)) if foreign == Foreign::AdoptFirst => {
+                let adopted =
+                    tokio::time::timeout(per_doc, adopt_lineage(entry.doc_id, local, &remote))
+                        .await;
+                if matches!(adopted, Ok(Ok(_))) {
+                    report.adopted = report.adopted.saturating_add(1);
+                } else {
+                    report.foreign = report.foreign.saturating_add(1);
+                }
+            }
             Ok(Err(SessionEnd::ForeignLineage)) => {
                 report.foreign = report.foreign.saturating_add(1);
             }
@@ -644,4 +682,250 @@ pub async fn pull<S: BuildHasher + Sync>(
         );
     }
     Ok(report)
+}
+
+// ── Live ───────────────────────────────────────────────────────────────
+
+/// One side of a [`bridge`]: its session and what it is known to hold.
+struct Side<F> {
+    call: std::pin::Pin<Box<F>>,
+    up: vox::Tx<Vec<u8>>,
+    down: vox::Rx<SyncDown>,
+    /// What this side holds, as far as the bridge knows: its attach's
+    /// version, plus every update it sent or was sent.
+    known: VersionVector,
+    attached: bool,
+}
+
+/// A session on `lane`, attached with `from`.
+fn open_side<'a, L: SyncLane>(
+    lane: &'a L,
+    doc_id: Uuid,
+    from: &VersionVector,
+) -> Side<impl Future<Output = Result<(), vox::VoxError<SyncError>>> + Send + 'a> {
+    let (up, up_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, down) = vox::channel::<SyncDown>();
+    Side {
+        call: Box::pin(lane.sync(doc_id, from.encode(), up_rx, down_tx)),
+        up,
+        down,
+        known: VersionVector::new(),
+        attached: false,
+    }
+}
+
+impl<F> Side<F> {
+    /// Take one frame into `pipe`.
+    fn take(&mut self, frame: SyncDown, pipe: &CrdtDoc) -> Result<(), SessionEnd> {
+        match frame {
+            SyncDown::Attached { server_vv, backlog } => {
+                if !backlog.is_empty() && pipe.apply_remote(&backlog).is_err() {
+                    return Err(SessionEnd::Dropped);
+                }
+                self.known = VersionVector::decode(&server_vv).map_err(|_| SessionEnd::Dropped)?;
+                self.attached = true;
+            }
+            SyncDown::Update(bytes) => {
+                if pipe.apply_remote(&bytes).is_err() {
+                    return Err(SessionEnd::Dropped);
+                }
+                if let Ok(meta) = LoroDoc::decode_import_blob_meta(&bytes, false) {
+                    self.known.merge(&meta.partial_end_vv);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Send this side what `pipe` holds past what it is known to hold.
+    async fn flush(&mut self, pipe: &CrdtDoc, doc_id: Uuid) -> Result<(), SessionEnd> {
+        let now = pipe.loro().oplog_vv();
+        if !self.attached || self.known.includes_vv(&now) {
+            return Ok(());
+        }
+        let chunks = crate::sync::backlog_chunks(pipe.loro(), &self.known, crate::sync::MAX_FRAME)
+            .map_err(|e| {
+                tracing::warn!(?doc_id, "doc-peer: live export: {e}");
+                SessionEnd::Dropped
+            })?;
+        for bytes in chunks {
+            self.up.send(bytes).await.map_err(|_| SessionEnd::Dropped)?;
+        }
+        self.known.merge(&now);
+        Ok(())
+    }
+}
+
+/// What came down one side: a frame, or `None` at the end of its stream.
+macro_rules! frame {
+    ($incoming:expr) => {{
+        let mut owned: Option<SyncDown> = None;
+        if let Ok(Some(frame)) = $incoming {
+            let _ = frame.map(|f| owned = Some(f));
+        }
+        owned
+    }};
+}
+
+/// Keep one document live between this node's registry (`local`) and a
+/// peer's (`remote`), both directions, until either session ends.
+///
+/// Two ordinary `DocSync` sessions through an in-memory pipe: what one
+/// side publishes goes to the other as soon as it arrives, so an edit
+/// reaches the peer's registry (and every editor attached there) within
+/// a round trip, not a sweep. Echoes stop at the pipe: only history a
+/// side is not known to hold is sent to it.
+///
+/// The local session attaches first, and the peer's with what it held,
+/// so a peer whose document shares no history with this node's is
+/// refused ([`SessionEnd::ForeignLineage`]) rather than merged; see
+/// [`adopt_lineage`].
+///
+/// Returns how it ended: the link dropped, a side refused (the device
+/// was revoked), or foreign lineage.
+pub async fn bridge(doc_id: Uuid, local: &impl SyncLane, remote: &impl SyncLane) -> SessionEnd {
+    let pipe = CrdtDoc::ephemeral();
+    let mut near = open_side(local, doc_id, &VersionVector::new());
+    // The local backlog first: it is what the peer's attach is checked by.
+    while !near.attached {
+        tokio::select! {
+            biased;
+            res = &mut near.call => return classify(res),
+            incoming = near.down.recv() => match frame!(incoming) {
+                Some(f) => if let Err(end) = near.take(f, &pipe) { return end },
+                None => return classify((&mut near.call).await),
+            },
+        }
+    }
+    let held = pipe.loro().oplog_vv();
+    let mut far = open_side(remote, doc_id, &held);
+    loop {
+        tokio::select! {
+            biased;
+            res = &mut near.call => return classify(res),
+            res = &mut far.call => return classify(res),
+            incoming = near.down.recv() => match frame!(incoming) {
+                Some(f) => if let Err(end) = near.take(f, &pipe) { return end },
+                None => return classify((&mut near.call).await),
+            },
+            incoming = far.down.recv() => match frame!(incoming) {
+                Some(f) => if let Err(end) = far.take(f, &pipe) { return end },
+                None => return classify((&mut far.call).await),
+            },
+        }
+        if let Err(end) = near.flush(&pipe, doc_id).await {
+            return end;
+        }
+        if let Err(end) = far.flush(&pipe, doc_id).await {
+            return end;
+        }
+    }
+}
+
+// ── Two seeds ──────────────────────────────────────────────────────────
+
+/// Which of two foreign histories came first: the one whose earliest
+/// change is older (Loro's change timestamps, where recorded), then the
+/// one with the lower peer id. Every node that compares the two picks
+/// the same one.
+fn first_key(doc: &LoroDoc) -> (i64, u64) {
+    doc.oplog_vv()
+        .iter()
+        .filter(|(_, c)| **c > 0)
+        .map(|(peer, _)| {
+            let at = doc
+                .get_change(loro::ID::new(*peer, 0))
+                .map_or(i64::MAX, |c| c.timestamp);
+            (at, *peer)
+        })
+        .min()
+        .unwrap_or((i64::MAX, u64::MAX))
+}
+
+/// The peer id the adopting change is written as: the same on every
+/// node that adopts the same two histories, so two of them adopting at
+/// once write one change, not two.
+fn adoption_peer(doc_id: Uuid, a: &VersionVector, b: &VersionVector) -> u64 {
+    let (mut lo, mut hi) = (a.encode(), b.encode());
+    if lo > hi {
+        std::mem::swap(&mut lo, &mut hi);
+    }
+    // FNV-1a over the id and both versions.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in doc_id.as_bytes().iter().chain(&lo).chain(&hi) {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    // `u64::MAX` is not a peer id Loro takes.
+    hash.min(u64::MAX - 1)
+}
+
+/// Settle two documents of one id made separately (a vault seeded on two
+/// nodes, [`FOREIGN_LINEAGE`]): the second seed adopts the first's
+/// lineage.
+///
+/// Both histories are fetched whole (an empty attach is never foreign),
+/// merged, and then reverted to the first's state ([`first_key`]) in one
+/// change: the document holds both histories, so neither side is foreign
+/// to it any more, and reads as the first seed did. A second seed that
+/// said the same thing (the usual case: one vault copied twice) loses
+/// nothing; one that differed keeps its text in the history only. The
+/// result goes to both registries.
+///
+/// The change is the same on every node that adopts the same two
+/// histories ([`adoption_peer`]), and reverting only deletes the second
+/// seed's text, so two nodes adopting at once still converge.
+///
+/// # Errors
+///
+/// A session ended short of converging.
+pub async fn adopt_lineage(
+    doc_id: Uuid,
+    local: &impl SyncLane,
+    remote: &impl SyncLane,
+) -> Result<Exchanged, SessionEnd> {
+    let ours = CrdtDoc::ephemeral();
+    sync_once(&ours, doc_id, local).await?;
+    let theirs = CrdtDoc::ephemeral();
+    sync_once(&theirs, doc_id, remote).await?;
+    let (ours_vv, theirs_vv) = (ours.loro().oplog_vv(), theirs.loro().oplog_vv());
+    if !is_foreign_lineage(&ours_vv, &theirs_vv) {
+        return exchange(doc_id, local, remote).await;
+    }
+    let first = if first_key(theirs.loro()) <= first_key(ours.loro()) {
+        &theirs_vv
+    } else {
+        &ours_vv
+    };
+    let merged = LoroDoc::new();
+    let snapshot = |doc: &CrdtDoc| {
+        doc.loro()
+            .export(loro::ExportMode::all_updates())
+            .map_err(|_| SessionEnd::Dropped)
+    };
+    for doc in [&ours, &theirs] {
+        merged
+            .import(&snapshot(doc)?)
+            .map_err(|_| SessionEnd::Dropped)?;
+    }
+    merged
+        .set_peer_id(adoption_peer(doc_id, &ours_vv, &theirs_vv))
+        .map_err(|_| SessionEnd::Dropped)?;
+    let at = merged.vv_to_frontiers(first);
+    merged.revert_to(&at).map_err(|_| SessionEnd::Dropped)?;
+    merged.commit();
+    let pipe = CrdtDoc::ephemeral();
+    pipe.apply_remote(
+        &merged
+            .export(loro::ExportMode::all_updates())
+            .map_err(|_| SessionEnd::Dropped)?,
+    )
+    .map_err(|_| SessionEnd::Dropped)?;
+    sync_once(&pipe, doc_id, local).await?;
+    sync_once(&pipe, doc_id, remote).await?;
+    tracing::info!(
+        ?doc_id,
+        "doc-peer: a second seed adopted the first's lineage"
+    );
+    Ok(Exchanged::Pulled)
 }

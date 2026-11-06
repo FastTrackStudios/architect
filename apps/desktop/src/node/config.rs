@@ -24,7 +24,8 @@
 //! | `ARCHITECT_IROH` | `iroh` | `n0` | `n0` (relays and lookup) or `local` (loopback, no relay: tests) |
 //! | `ARCHITECT_IROH_BIND` | `iroh_bind` | any port | the iroh UDP socket (`0.0.0.0:7777`, for a fixed port) |
 //! | `ARCHITECT_MCP_TOKEN_FILE` | `mcp_token_file` | none | `/mcp` is served only with a bearer, read from this file |
-//! | `ARCHITECT_SWEEP_SECS` | `sweep_secs` | `30` | how often it exchanges documents with its peers |
+//! | `ARCHITECT_SWEEP_SECS` | `sweep_secs` | `30` | how often it sweeps its peers: the fallback for what a live bridge missed |
+//! | `ARCHITECT_LIVE_MAX` | `live_max` | `256` | how many notes it keeps live with each peer (a `DocSync` bridge each); `0` sweeps only |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -63,6 +64,7 @@ pub struct Config {
     pub iroh_bind: Option<String>,
     pub mcp_token_file: Option<PathBuf>,
     pub sweep_secs: u64,
+    pub live_max: usize,
 }
 
 impl Default for Config {
@@ -85,6 +87,7 @@ impl Default for Config {
             iroh_bind: None,
             mcp_token_file: None,
             sweep_secs: 30,
+            live_max: 256,
         }
     }
 }
@@ -205,6 +208,12 @@ impl Config {
         if let Some(v) = get("ARCHITECT_SWEEP_SECS") {
             self.sweep_secs = v.trim().parse().map_err(|e| ConfigError::Env {
                 var: "ARCHITECT_SWEEP_SECS",
+                why: format!("{e}"),
+            })?;
+        }
+        if let Some(v) = get("ARCHITECT_LIVE_MAX") {
+            self.live_max = v.trim().parse().map_err(|e| ConfigError::Env {
+                var: "ARCHITECT_LIVE_MAX",
                 why: format!("{e}"),
             })?;
         }
