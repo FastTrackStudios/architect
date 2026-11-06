@@ -105,6 +105,8 @@ pub struct OrgLane {
     gate: Arc<PermissionsGate>,
     router: LayerRouter,
     issuer: IssuerLane,
+    vaults: bool,
+    shares: bool,
 }
 
 impl OrgLane {
@@ -120,7 +122,7 @@ impl OrgLane {
             device_enrolment_service_descriptor(),
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
         );
-        let gate = gate(&engine, &members, &issuer, false);
+        let gate = gate(&engine, &members, &issuer, false, false);
         Self {
             org,
             members,
@@ -128,11 +130,33 @@ impl OrgLane {
             gate,
             router,
             issuer,
+            vaults: false,
+            shares: false,
         }
     }
 
-    fn make_gate(&self, vaults: bool) -> Arc<PermissionsGate> {
-        gate(&self.engine, &self.members, &self.issuer, vaults)
+    fn make_gate(&self) -> Arc<PermissionsGate> {
+        gate(
+            &self.engine,
+            &self.members,
+            &self.issuer,
+            self.vaults,
+            self.shares,
+        )
+    }
+
+    /// Serve the vaults' share links on the lane too
+    /// (`architect_spaces::ShareLinks`): any member lists them, a member
+    /// or above makes, changes and revokes one.
+    #[must_use]
+    pub fn with_shares(mut self, shares: super::shares::Shares) -> Self {
+        self.router = self.router.with(
+            architect_spaces::share_links_rpc_service_descriptor(),
+            architect_spaces::ShareLinksDispatcher::new(super::shares::SharesLane(shares)),
+        );
+        self.shares = true;
+        self.gate = self.make_gate();
+        self
     }
 
     /// Serve the vaults on the lane too: `notes` (the node's `Notes`
@@ -149,7 +173,8 @@ impl OrgLane {
             crdt::sync::doc_sync_service_descriptor(),
             crdt::sync::DocSyncDispatcher::new(VaultSync { registry, catalog }),
         );
-        self.gate = self.make_gate(true);
+        self.vaults = true;
+        self.gate = self.make_gate();
         self
     }
 
@@ -192,12 +217,14 @@ impl OrgLane {
 }
 
 /// The lane's gate: the org's engine, callers resolved by the issuer;
-/// with `vaults`, `Notes` and `DocSync` permitted too.
+/// with `vaults`, `Notes` and `DocSync` permitted too, with `shares`
+/// `ShareLinks`.
 fn gate(
     engine: &Arc<ConfinedEngine>,
     members: &Members,
     issuer: &IssuerLane,
     vaults: bool,
+    shares: bool,
 ) -> Arc<PermissionsGate> {
     let identity = MembersResolver::new(
         IssuerSessions::new(issuer.clone()),
@@ -214,6 +241,12 @@ fn gate(
                 &NOTES_PERMITS,
             )
             .permit(crdt::sync::doc_sync_service_descriptor(), &SYNC_PERMITS);
+    }
+    if shares {
+        gate = gate.permit(
+            architect_spaces::share_links_rpc_service_descriptor(),
+            &architect_spaces::SHARE_PERMITS,
+        );
     }
     Arc::new(gate)
 }
@@ -265,7 +298,7 @@ impl IssuerLane {
         }
     }
 
-    async fn client<C>(&self) -> Result<C, String>
+    pub(super) async fn client<C>(&self) -> Result<C, String>
     where
         C: vox::FromVoxLane,
     {
@@ -275,7 +308,7 @@ impl IssuerLane {
             .map_err(|e| e.to_string())
     }
 
-    fn evict(&self) {
+    pub(super) fn evict(&self) {
         self.pool.evict(&self.target);
     }
 }

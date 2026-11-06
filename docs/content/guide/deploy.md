@@ -1,6 +1,6 @@
 +++
 title = "Deploy: Architect, headless"
-description = "architect-desktop serve: the Architect app run with no window as an always-on node, a sync peer for the org's vaults that serves Sites, MCP and the HTTP face, released as a pure-Nix OCI image."
+description = "architect-desktop serve: the Architect app run with no window as an always-on node, a sync peer for the org's vaults that serves Sites, share links, MCP and the HTTP face, released as a pure-Nix OCI image."
 weight = 75
 +++
 
@@ -37,6 +37,7 @@ and no GPU libraries in the image. The desktop build is unchanged.
 | **Its lanes over iroh** | The node's documents (`crdt::p2p::node_router`: `DocSync` and `DocPeer`), served to the devices its `Admission` lets in. A revoked device's connections close (`architect_devices::serve`). |
 | **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. With each peer it dials, the node keeps a live `DocSync` bridge per note (below), so an edit reaches the others within a second. Every `ARCHITECT_SWEEP_SECS` it also sweeps each peer (`crdt::peer::pull_with`), the fallback for what a bridge missed. |
 | **Sites** | Each vault in `ARCHITECT_SITES` is built as a Site ([sites](@/features/sites.md)) and rebuilt when the vault changes. |
+| **Share links** | `/<code>/`: a share's scope of a vault as a Site, to the audience it names, until it expires or is revoked ([below](#share-links)). |
 | **The HTTP face and vox** | `apps/desktop/src/node/service.rs` `Node` (`status`) over same-origin vox at `/vox`, its HTTP face (`POST /node/status`) and the Action List (`NODE_STATUS`). |
 | **MCP** | `/mcp`, only when `ARCHITECT_MCP_TOKEN_FILE` holds a bearer: `NODE_STATUS` and the `NOTES_LIST`, `NOTES_READ` and `NOTES_WRITE` actions (`apps/desktop/src/node/service.rs` `Notes`). An agent writes a note on the always-on node, and every device that syncs with it gets the note. |
 | **Health** | `GET /health` answers `ok`; `GET /version.json` gives the build. |
@@ -168,6 +169,103 @@ enrol_at = "https://architect.fasttrackstudio.app"
 enrol_org = "fasttrackstudio"
 ```
 
+## Share links
+
+A share link puts part of a vault on `https://<node>/<code>/`, the way you
+share a topic with someone (#374). The model is #197's share links
+(`features/spaces/src/share.rs` `Share`):
+
+| | |
+| --- | --- |
+| **Scope** | the whole vault, a folder (the link is rooted there), a tag, a list of notes, or the notes a `.base` file selects (`ShareScope`) |
+| **Code** | 16 random characters of base32, 80 bits (`code_from`): the link's first segment |
+| **Audience** | `public` (anyone, may be listed), `link` (anyone with the link, `noindex`), `org` (the org's members, signed in at the issuer), `invited:<emails>` (those people, signed in) (`Audience`) |
+| **Access** | read-only, or allowed to comment (`ShareAccess`) |
+| **Expiry** | an optional time, after which the link is `404` |
+| **Revoke** | final; the link is `404` from the next request on, and its pages are deleted |
+| **Domain** | optional: the same share at the root of a host of its own |
+
+**Kept as org data.** A share is a note of the vault it shares,
+`_architect/shares/<code>.md` (`share_note_path`), with `publish: false`, so
+no Site ever shows it. It syncs to every device that holds the vault like
+any other note. The node that serves the link reads every vault's shares
+when it starts and again whenever the vault changes. A share made or
+revoked on another device reaches it with the note, and one made from the
+app over the org lane is held at once. Comments go in a note beside it,
+`_architect/shares/<code>.comments.md`.
+
+**Made from the app.** The node that hosts the org (`ARCHITECT_HOST_ORG`)
+serves `architect_spaces::ShareLinks` on its org lane (`/org/<slug>/vox`,
+the issuer session as the bearer): `create`, `shares`, `update`, `revoke` and
+`comments`. Any member lists shares. A member or above makes, changes and
+revokes them (`SHARE_PERMITS`). The app's `SHARE_*` and `PUBLISH_*` actions
+call it.
+
+**Served** (`apps/desktop/src/node/shares.rs` `gate`, the node's outermost
+layer, ahead of a Site mounted at `/`):
+
+- Each live share is built as a scoped Site (`architect_sites::Scope`) at
+  `/<code>/` into `<data>/shares/<code>/`. It is rebuilt whenever its vault
+  changes: an edit on disk, from a peer's live bridge (#412) or from a web
+  client on the org lane. An open page reloads itself through `/<code>/_live`,
+  an event stream that fires after each rebuild. A revoke fires it as well,
+  so the page reloads to `404`.
+- **Nothing outside the scope is in it, so nothing outside it can be
+  served.** A link to a note outside the scope is plain text with no URL. An
+  embed of one is left out. No backlink, base row, search entry or tag page
+  lists one. Under a folder scope only the folder's own attachments are
+  copied ([sites](@/features/sites.md)). A path that is not a built page is
+  `404`, and so is any `..`.
+- **The audience is checked on every request.** `org` and `invited` need a
+  person signed in at the issuer: their session as `Authorization: Bearer`
+  (the #413 bearer), or the `architect_session` cookie. The node resolves it
+  with the issuer's `whoami` and `orgs`, and caches the answer for a minute.
+  With nobody signed in the link is `401` with a Sign in button, and a person
+  it was not shared with gets `403`. An expired, revoked or unknown code is
+  `404`.
+- **Signing in** (`/_share/signin`) is the issuer's device sign-in. The node
+  starts one and links to its approval page, the person approves it there
+  (signed in at the issuer), and the node sets the session as an `HttpOnly`,
+  `SameSite=Lax` cookie (`Secure` behind `https`). The node never sees a
+  password. `/_share/signout` clears the cookie.
+- **Answers keep the code private:** `Referrer-Policy: no-referrer` on every
+  response; `X-Robots-Tag: noindex` unless the share is public; `private,
+  no-store` for a signed-in audience.
+- **Comments.** A share that takes comments shows each page's comments and a
+  form under it (`POST /<code>/_comment`). The comment is signed by the
+  person if they are signed in, and by the name typed, marked "not signed
+  in", if not. A read-only share refuses with `403`.
+
+`apps/desktop/tests/shares.rs` tests all of it against the in-process issuer:
+the scope never leaks, each audience, expiry and revoke, a live edit on the
+shared page, comments, and a domain.
+
+## Its own deployment
+
+A share, or a whole vault, can also live at a URL of its own. There are two
+ways, simplest first:
+
+1. **A domain mapped to a share.** Give the share a domain (`SHARE_UPDATE`
+   with `domain`, or `PUBLISH_DOMAIN`). The node then serves that share at
+   the domain's root as well, built with base `/`. Point the domain's DNS at
+   the node's ingress and add the host there with a certificate. Nothing
+   else changes: same node, same audience, expiry and revoke, same live
+   rebuilds.
+2. **A static export.** Build the same scoped site into a folder, and host
+   it anywhere static files are served:
+
+   ```sh
+   architect site build --vault ~/notes --folder Album --base / --url https://album.example.com --out dist
+   # or --tag, --note (repeatable), --base-scope; `just docs` builds this repo's docs the same way
+   ```
+
+   `PUBLISH_EXPORT` does the same from the app. An export is a snapshot: it
+   has no audience, expiry or revoke, and no live updates.
+
+A separate headless instance (another `serve` with its own `ARCHITECT_SITES`)
+also works. It is one more node to run, so use it only when a site must be
+isolated from the org's node.
+
 ## The image
 
 `flake.nix` builds it with `dockerTools.streamLayeredImage`, the way Task's
@@ -199,12 +297,25 @@ pod needs:
 - a persistent volume at `/data`: its iroh key (a stable endpoint id) and its
   documents;
 - liveness and readiness on `GET /health` (port `8080`);
+- every path of its host routed to it (share links are `/<code>/` at the
+  root, beside a Site at `/`), with `X-Forwarded-Proto` set so the sign-in
+  cookie is `Secure`; and, for each share with a domain of its own, that
+  host on the same ingress with a certificate;
+- `ARCHITECT_HOST_ORG` for the org's lane, which the app makes shares on,
+  and for the `org` audience;
 - `ARCHITECT_NAME`, `ARCHITECT_ISSUER`, `ARCHITECT_ORG`, `ARCHITECT_VAULTS`
   and `ARCHITECT_SITES` as values, and the session and MCP bearer as a
   Secret mounted as files (`ARCHITECT_SESSION_FILE`,
   `ARCHITECT_MCP_TOKEN_FILE`).
 
 ## Not yet
+
+- **Share sign-in by redirect.** A signed-in audience signs in by approving a
+  device code at the issuer. An OAuth redirect back to the link would be one
+  click fewer.
+- **A share is served by the node that hosts the org.** Any node that holds
+  the vault knows its shares and would serve them, but the app makes them on
+  the host (`host`).
 
 - **An org's enrolments live on its host.** The issuer keeps the account's
   devices but not an org's: two nodes hosting one org hold two tables, and the
