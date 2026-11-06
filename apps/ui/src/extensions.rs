@@ -869,13 +869,17 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                 extensions = with;
             }
         }
-        // The Project Management bundle's Projects and Tasks (#375):
-        // first-party extensions the app ships, on by default. Each runs
-        // alone; together a project's page shows its tasks. The sandbox's
-        // made-up data and goldens stay as they were.
+        // The Project Management bundle's Projects, Tasks and Time Tracker
+        // (#375): first-party extensions the app ships, on by default. Each
+        // runs alone; together a project's page shows its tasks and their
+        // time, and a task its timer. The sandbox's made-up data and goldens
+        // stay as they were.
         if !sandbox {
-            let bundle: [&dyn architect_extensions::linked::Extension; 2] =
-                [&architect_projects::Projects, &architect_tasks::Tasks];
+            let bundle: [&dyn architect_extensions::linked::Extension; 3] = [
+                &architect_projects::Projects,
+                &architect_tasks::Tasks,
+                &architect_time_tracker::TimeTracker,
+            ];
             for linked in bundle {
                 if let Ok(with) = extensions.clone().with_linked(linked) {
                     extensions = with;

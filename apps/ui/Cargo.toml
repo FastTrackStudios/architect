@@ -49,6 +49,7 @@ architect-sandbox-board = { path = "../sandbox/board" }
 # First-party extensions the app ships, on by default (#368, #375).
 architect-projects = { workspace = true }
 architect-tasks = { workspace = true }
+architect-time-tracker = { workspace = true }
 # The theme picker, architect's built-in extension.
 architect-theme-picker = { workspace = true }
 architect-settings-sheet = { workspace = true }
