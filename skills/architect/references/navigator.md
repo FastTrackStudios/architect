@@ -43,7 +43,8 @@ pub trait NavigatorSource: Send + Sync {
     fn folders(&self) -> Vec<String>;         // every folder path, the root ("") left out
     fn files(&self) -> Vec<NoteFile>;         // every file
     fn subscribe(&self, listener: Listener) -> Subscription; // changes, until dropped
-    // default methods: resource_url, write, search_text (full text; None by default)
+    // default methods: resource_url, can_write, write, search_text (full text),
+    // read_text (a template's, notes merged); None or false by default
 }
 ```
 
@@ -53,12 +54,16 @@ pub trait NavigatorSource: Send + Sync {
 - `None` means "not worked out yet". Send a `SourceEvent::FileModified`
   when the value arrives.
 - `NavigatorSource::write` does `FileOp`s: `CreateFolder`, `CreateFile`
-  (a periodic note made), `Move`, `SetProperty`. A source that can write
-  implements it; the default is read-only.
+  (a note, canvas or base made), `Move`, `SetProperty`, the tag ops,
+  `Copy`, `MoveFolder`, `CopyFolder` and `Trash`. A source that can write
+  implements it and says so with `can_write` (the view offers New note);
+  the default is read-only. `read_text` gives a file's text: templates and
+  merged notes are read through it.
 - `SourceEvent` has these variants: `FolderCreated`, `FolderDeleted`,
   `FolderRenamed`, `FileCreated`, `FileModified`, `FileDeleted`,
   `FileRenamed` and `Reset` (read everything again).
-- `MemorySource` keeps a vault in memory. `MemorySource::synthetic` makes
+- `MemorySource` keeps a vault in memory (`with_text` for a file's text,
+  `trashed` for what went to the trash). `MemorySource::synthetic` makes
   a large one for load tests.
 - `VaultSource` (feature `vault`, native; `features/navigator/src/vault_source.rs`)
   is architect's vault (`vault::actions::OpenVault`): folders (empty ones
@@ -68,7 +73,11 @@ pub trait NavigatorSource: Send + Sync {
   embedded), bases and attachments. `resource_url` gives a vault path (or
   an embed's bare name) as a `file:` URL the desk loads; `write` does the
   navigator's `FileOp`s on disk (a folder made, any file moved, a note's
-  through `rename` so backlinks follow, a property set). Its `save`,
+  through `rename` so backlinks follow, a property set; files copied,
+  folders moved with `OpenVault::move_folder` so links by path follow,
+  folders copied, and things put in the vault's `.trash` with
+  `OpenVault::trash`, all MIT in `features/vault/vault/src/actions/edit.rs`);
+  `read_text` is `OpenVault::text`. Its `save`,
   `create_note` and `rename` say what changed at once; `watch` hears edits
   made outside the app. `search_text` is the vault's full-text search
   (`OpenVault::search_text`, over `vault_live::sync::search_pages`, MIT).
@@ -305,6 +314,55 @@ default; a page or an extension fills it while its view is on show.
   note (`set_active`) records it first in the profile's recent notes,
   `recent_notes_count` kept. Settings: `show_shortcuts`,
   `show_recent_notes`.
+- **File operations** (`features/navigator/src/state/files.rs`,
+  Notebook Navigator's `FileSystemService`): each returns an
+  `Outcome::Write` for the source. `new_note` (a `NewNote`: a note,
+  canvas or base, `NewKind`, named `Untitled`, by a typed name or by a
+  name format, from a template; it answers `Made::Ask` with the prompts
+  to answer first, or `Made::Done` with the write, the cursor and a
+  warning), `new_folder`, `rename_file` (the extension kept),
+  `rename_folder` (its folder note named after it follows), `move_files`,
+  `copy_files` (numbered when taken), `move_folder`, `duplicate`
+  (`Plan 1`, opened), `duplicate_folder`, `trash` (and `trash_question`;
+  the view asks first by `confirm_delete`), `merge` (`MergeSeparator`;
+  the first note's frontmatter kept), `open_all` (the view asks at
+  `OPEN_ALL_WARNING`, 15). `check_name` says what a name cannot be
+  (empty, a leading period, `:` or `/`) and what breaks links (`#`, `|`,
+  `^`, `%%`, `[[`, `]]`). `drop_on` takes notes and folders on folders,
+  copying with the copy key (⌥ on a Mac, Ctrl elsewhere);
+  `drop_on_shortcuts` moves a shortcut dragged among them, or adds what is
+  dropped there; `spring_open` opens a folder held under a drag
+  (`spring_loaded_folders`, `spring_loaded_delay_ms`,
+  `spring_loaded_next_delay_ms`). The view renames in place
+  (`ui::Renaming`, `Navigator::renaming`), asks with `ui::Ask`, and its
+  row menu on a folder makes notes, canvases, bases and folders, runs the
+  create-note commands, moves or copies the selection there, opens all,
+  sets the folder template, renames, duplicates, moves and deletes it.
+  Tests: `features/navigator/tests/files.rs`.
+- **Templates** (`features/navigator/src/template.rs`, Notebook
+  Navigator's built-in engine): `render` writes `{{title}}`, `{{folder}}`,
+  `{{path}}`, `{{date}}` (and `yesterday`, `tomorrow`, `monday` …
+  `sunday`), `{{time}}`, `{{today}}`, `{{now}}`, with offsets (`+1M`,
+  `-2d`, `+90m`) and Moment formats (`{{date:YYYY-MM-DD}}`, through
+  `Pattern::format_at`), `{{cursor}}`, `{{prompt:Label}}`/`{{value}}`,
+  `{{number:000}}` and `{{!name}}`; unknown tokens stay as written, and
+  quoted frontmatter values are escaped. `numbered_name`, `next_number`
+  and `format_numbered` number a name format by the notes in its folder.
+  `Templates` (kept in `ViewState::templates`) holds each folder's
+  `FolderTemplate`, inherited by subfolders (`folder_template`), and the
+  `TemplateCommand`s ("create note" commands with a name format, a
+  template and a location, `CommandLocation`; stable ids). Template
+  paths follow their files moved. Periodic notes take
+  `daily_template` … `yearly_template`, `{{date}}` in their file name's
+  pattern; settings `date_format`, `time_format`, `template_folder`,
+  `folder_note_template`. `NavigatorState::set_reader` reads templates
+  (`use_navigator` sets it to the source's `read_text`).
+- **Search highlighting** (`features/navigator/src/search.rs`):
+  `highlights` gives where the search's words are in a name (byte
+  ranges, accents folded), drawn as `mark.nv-search-highlight` in the
+  role `navigator.search-highlight`; `FilterSearch::tag_match`
+  (`SearchMatch`) lights a tag's row and pills that a `#tag` takes in or
+  `-#tag` leaves out.
 - **Keys** (`NavigatorState::key`): ↑ ↓ Home End PageUp PageDown in both
   panes, through the folders, the tags and the properties.
   - Folders, tags, keys: → expands, then moves to the list. ← collapses,
@@ -381,9 +439,21 @@ default; a page or an extension fills it while its view is on show.
   `open`), `NAVIGATOR_ADD_SHORTCUT`, `NAVIGATOR_OPEN_SHORTCUT_1`…`9`,
   `NAVIGATOR_RECENT` (`open`, `clear`), `NAVIGATOR_PROFILE` (`select`,
   `add`, `remove`, `rename`; `set` the hidden lists, `banner`,
-  `file_visibility`) and `NAVIGATOR_SELECT_PROFILE_1`…`3`. A note's
-  context menu has "Add to shortcuts" and "Hide note"; a folder's, tag's
-  or property's row menu, "Add to shortcuts" and "Hide".
+  `file_visibility`) and `NAVIGATOR_SELECT_PROFILE_1`…`3`; the file
+  operations and templates: `NAVIGATOR_NEW_NOTE` (`folder`, `kind`,
+  `name`, `name_format`, `template`, `no_template`, `prompts`, `tab`;
+  it answers the `path` and the `cursor`, or the prompts to answer),
+  `NAVIGATOR_NEW_FOLDER`, `NAVIGATOR_RENAME` (no `name`: in place),
+  `NAVIGATOR_DUPLICATE`, `NAVIGATOR_MOVE_TO`, `NAVIGATOR_COPY_TO`,
+  `NAVIGATOR_DELETE` (`confirm` false to skip the question),
+  `NAVIGATOR_MERGE`, `NAVIGATOR_OPEN_ALL`, `NAVIGATOR_OPEN_SELECTED`,
+  `NAVIGATOR_FOLDER_TEMPLATE`, `NAVIGATOR_TEMPLATE_COMMANDS` (`add`,
+  `remove`) and `NAVIGATOR_TEMPLATE_COMMAND` (`id`); `NAVIGATOR_DROP`
+  takes `drag_folder`, `to` (a folder) and `copy`. A note's context menu
+  has "Add to shortcuts", "Hide note", "Rename…", "Duplicate", "Move to…",
+  "Open the selected in new tabs", "Merge the selected notes" and
+  "Delete"; a folder's, tag's or property's row menu, "Add to shortcuts"
+  and "Hide", and a folder's the file operations.
   Without the extension, `NavigatorView` puts its own on the palette.
 - **Settings.** One section, `navigator` (`NavigatorSettings`, a
   `#[derive(Settings)]` struct).
@@ -392,7 +462,8 @@ default; a page or an extension fills it while its view is on show.
   sizes, the pins, the folded groups, each place's own list, the
   colours, the open tags and properties, and their hand-made orders; the
   search box's text, the profiles (with their shortcuts and recent
-  notes), show-hidden and the folded sections. It is a facet struct: the
+  notes), show-hidden and the folded sections; the folder templates and
+  create-note commands (`templates`). It is a facet struct: the
   Architect app keeps it in its folder (`apps/ui/src/vault.rs`
   `view_store`, an `architect::settings::Store`).
 
@@ -403,7 +474,8 @@ periodic notes, #336, tags and properties, #337, and search, shortcuts,
 recents, profiles and hiding, #338, are done):
 
 - the real vault as a source (#353);
-- file operations, templates, icons and colours.
+- #339's keyboard map, icons and colours, settings and the API (file
+  operations and templates are done).
 
 Each adds variants to `NavRowKind` and `ListRowKind`, and adds `NavTarget`
 (both `#[non_exhaustive]`).

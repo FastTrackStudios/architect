@@ -342,3 +342,33 @@ fn dates_come_from_frontmatter_when_the_settings_say_so() {
     s.set_search("@today");
     assert_eq!(listed(&s), ["New.md"]);
 }
+
+#[test]
+fn matched_words_are_marked_in_names_and_tags_in_the_tree() {
+    use architect_navigator::SearchMatch;
+    use architect_navigator::search::highlights;
+    let today = NaiveDate::from_ymd_opt(2026, 11, 5).unwrap();
+    let q = FilterSearch::parse("cafe pla -#archive #work", today, DayMonthOrder::default());
+    let words = q.words().to_vec();
+    assert_eq!(
+        highlights("Café plans, a plan", &words),
+        [0..5, 6..9, 15..18]
+    );
+    // A decomposed accent goes with its letter.
+    assert_eq!(highlights("Cafe\u{301}", &words).first(), Some(&(0..6)));
+    assert!(highlights("Nothing", &words).is_empty());
+    // Overlapping words merge.
+    let merged = highlights("planet", &["pla".to_owned(), "lan".to_owned()]);
+    assert_eq!((merged.len(), merged.first()), (1, Some(&(0..4))));
+    assert_eq!(q.tag_match("work"), Some(SearchMatch::Include));
+    assert_eq!(
+        q.tag_match("Work/Team"),
+        Some(SearchMatch::Include),
+        "below it"
+    );
+    assert_eq!(q.tag_match("archive/2025"), Some(SearchMatch::Exclude));
+    assert_eq!(q.tag_match("home"), None);
+    let e = FilterSearch::parse("#a OR -#b", today, DayMonthOrder::default());
+    assert_eq!(e.tag_match("a"), Some(SearchMatch::Include));
+    assert_eq!(e.tag_match("b"), Some(SearchMatch::Exclude));
+}

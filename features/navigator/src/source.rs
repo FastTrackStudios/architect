@@ -257,6 +257,17 @@ pub enum FileOp {
     RenameTag { from: String, to: String },
     /// Take a tag, and the tags below it, off every note.
     DeleteTag(String),
+    /// Copy a file (a note duplicated, or dropped with the copy key held);
+    /// an error when `to` is there already. Links in it stay as written.
+    Copy { from: String, to: String },
+    /// Move (or rename) a folder and everything in it; the links that
+    /// named its notes by path follow.
+    MoveFolder { from: String, to: String },
+    /// Copy a folder and everything in it (a folder duplicated).
+    CopyFolder { from: String, to: String },
+    /// Move a file or a folder to the trash (the vault's `.trash`, where it
+    /// can be got back).
+    Trash(String),
 }
 
 /// Kept while the subscriber wants events; dropping it stops them.
@@ -316,6 +327,12 @@ pub trait NavigatorSource: Send + Sync {
         None
     }
 
+    /// Whether [`write`](Self::write) does anything (the view offers New
+    /// note); `false` by default, a read-only source.
+    fn can_write(&self) -> bool {
+        false
+    }
+
     /// Does `ops`, in order, and says what changed through its events.
     ///
     /// # Errors
@@ -335,6 +352,13 @@ pub trait NavigatorSource: Send + Sync {
         let _ = query;
         None
     }
+
+    /// The text of the file at `path` (a template, notes to merge); `None`
+    /// when there is none or the source cannot read text (the default).
+    fn read_text(&self, path: &str) -> Option<String> {
+        let _ = path;
+        None
+    }
 }
 
 /// A vault kept in memory.
@@ -349,6 +373,10 @@ struct MemoryInner {
     folders: RwLock<BTreeSet<String>>,
     files: RwLock<BTreeMap<String, NoteFile>>,
     resources: RwLock<BTreeMap<String, String>>,
+    /// The notes' texts, where they were given or written.
+    texts: RwLock<BTreeMap<String, String>>,
+    /// What went to the trash, in order.
+    trash: RwLock<Vec<String>>,
     listeners: Mutex<Vec<(u64, Arc<dyn Fn(&SourceEvent) + Send + Sync>)>>,
     next: Mutex<u64>,
 }
@@ -385,6 +413,31 @@ impl MemorySource {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(path.into(), url.into());
         self
+    }
+
+    /// With `text` as the text of the file at `path` (what
+    /// [`NavigatorSource::read_text`] reads).
+    #[must_use]
+    pub fn with_text(self, path: impl Into<String>, text: impl Into<String>) -> Self {
+        self.texts_mut().insert(path.into(), text.into());
+        self
+    }
+
+    /// What went to the trash, in order.
+    #[must_use]
+    pub fn trashed(&self) -> Vec<String> {
+        self.inner
+            .trash
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn texts_mut(&self) -> std::sync::RwLockWriteGuard<'_, BTreeMap<String, String>> {
+        self.inner
+            .texts
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// With every file of `files`, at once (one [`SourceEvent::Reset`]).
@@ -463,6 +516,11 @@ impl MemorySource {
             files.insert(file.path.clone(), file.clone());
             file
         };
+        let mut texts = self.texts_mut();
+        if let Some(t) = texts.remove(from) {
+            texts.insert(file.path.clone(), t);
+        }
+        drop(texts);
         self.emit(&SourceEvent::FileRenamed {
             from: from.to_owned(),
             file,
@@ -563,6 +621,10 @@ impl NavigatorSource for MemorySource {
             .cloned()
     }
 
+    fn can_write(&self) -> bool {
+        true
+    }
+
     fn write(&self, ops: &[FileOp]) -> Result<(), String> {
         ops.iter().try_for_each(|op| self.write_one(op))
     }
@@ -589,6 +651,15 @@ impl NavigatorSource for MemorySource {
                 .map(|f| f.path.clone())
                 .collect(),
         )
+    }
+
+    fn read_text(&self, path: &str) -> Option<String> {
+        self.inner
+            .texts
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(path)
+            .cloned()
     }
 
     fn subscribe(&self, listener: Listener) -> Subscription {
@@ -665,6 +736,7 @@ impl MemorySource {
                     .collect();
                 let mut file = NoteFile::new(path.clone(), now, now).preview(body.join(" "));
                 file.tags = tags;
+                self.texts_mut().insert(path.clone(), text.clone());
                 self.put(file);
             }
             FileOp::Move { from, to } => {
@@ -703,7 +775,165 @@ impl MemorySource {
             }
             FileOp::RenameTag { from, to } => self.retag_everywhere(from, Some(to))?,
             FileOp::DeleteTag(tag) => self.retag_everywhere(tag, None)?,
+            FileOp::Copy { from, to } => {
+                if self.file(to).is_some() {
+                    return Err(format!("{to} is there already"));
+                }
+                let mut file = self.file(from).ok_or_else(|| format!("no {from}"))?;
+                file.path.clone_from(to);
+                let folder = parent(to);
+                if !folder.is_empty() {
+                    self.create_folder(folder.to_owned());
+                }
+                if let Some(t) = self.read_text(from) {
+                    self.texts_mut().insert(to.clone(), t);
+                }
+                self.put(file);
+            }
+            FileOp::MoveFolder { from, to } => self.move_folder(from, to)?,
+            FileOp::CopyFolder { from, to } => {
+                if self.has_folder(to) {
+                    return Err(format!("{to} is there already"));
+                }
+                if !self.has_folder(from) {
+                    return Err(format!("no folder {from}"));
+                }
+                let moved = |p: &str| format!("{to}{}", p.get(from.len()..).unwrap_or(""));
+                let folders: Vec<String> = self.folders_within(from);
+                for f in folders {
+                    self.create_folder(moved(&f));
+                }
+                let files: Vec<NoteFile> = self
+                    .files()
+                    .into_iter()
+                    .filter(|f| is_within(&f.path, from))
+                    .collect();
+                for mut f in files {
+                    let text = self.read_text(&f.path);
+                    f.path = moved(&f.path);
+                    if let Some(t) = text {
+                        self.texts_mut().insert(f.path.clone(), t);
+                    }
+                    self.put(f);
+                }
+            }
+            FileOp::Trash(path) => {
+                if self.file(path).is_some() {
+                    self.texts_mut().remove(path);
+                    self.remove(path);
+                } else if self.has_folder(path) {
+                    self.texts_mut().retain(|p, _| !is_within(p, path));
+                    self.delete_folder(path);
+                } else {
+                    return Err(format!("no {path}"));
+                }
+                self.inner
+                    .trash
+                    .write()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(path.clone());
+            }
         }
+        Ok(())
+    }
+
+    /// Every folder: those made, and those a file's path passes through.
+    fn all_folders(&self) -> BTreeSet<String> {
+        let mut all = self
+            .inner
+            .folders
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        for p in self
+            .inner
+            .files
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+        {
+            all.extend(
+                ancestors(p)
+                    .filter(|a| !a.is_empty() && *a != p)
+                    .map(str::to_owned),
+            );
+        }
+        all
+    }
+
+    fn has_folder(&self, folder: &str) -> bool {
+        !folder.is_empty() && self.all_folders().contains(folder)
+    }
+
+    /// `folder` and the folders in it.
+    fn folders_within(&self, folder: &str) -> Vec<String> {
+        self.all_folders()
+            .into_iter()
+            .filter(|f| is_within(f, folder))
+            .collect()
+    }
+
+    /// `from` and everything in it, at `to`: one [`SourceEvent::FolderRenamed`].
+    fn move_folder(&self, from: &str, to: &str) -> Result<(), String> {
+        if from.is_empty() || to.is_empty() {
+            return Err("the vault's root does not move".to_owned());
+        }
+        if !self.has_folder(from) {
+            return Err(format!("no folder {from}"));
+        }
+        if is_within(to, from) {
+            return Err(format!("{from} cannot go into itself"));
+        }
+        if self.has_folder(to) || self.file(to).is_some() {
+            return Err(format!("{to} is there already"));
+        }
+        let moved = |p: &str| format!("{to}{}", p.get(from.len()..).unwrap_or(""));
+        let inside = self.folders_within(from);
+        {
+            let mut folders = self
+                .inner
+                .folders
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
+            for f in inside {
+                folders.remove(&f);
+                folders.insert(moved(&f));
+            }
+            for a in ancestors(to).filter(|a| !a.is_empty()) {
+                folders.insert(a.to_owned());
+            }
+        }
+        {
+            let mut files = self.files_mut();
+            let inside: Vec<String> = files
+                .keys()
+                .filter(|p| is_within(p, from))
+                .cloned()
+                .collect();
+            for p in inside {
+                if let Some(mut f) = files.remove(&p) {
+                    f.path = moved(&p);
+                    files.insert(f.path.clone(), f);
+                }
+            }
+        }
+        {
+            let mut texts = self.texts_mut();
+            let inside: Vec<String> = texts
+                .keys()
+                .filter(|p| is_within(p, from))
+                .cloned()
+                .collect();
+            for p in inside {
+                if let Some(t) = texts.remove(&p) {
+                    texts.insert(moved(&p), t);
+                }
+            }
+        }
+        self.emit(&SourceEvent::FolderRenamed {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        });
         Ok(())
     }
 

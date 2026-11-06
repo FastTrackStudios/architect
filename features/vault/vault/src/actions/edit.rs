@@ -1,6 +1,7 @@
 //! Editing an open vault from an app: a note's text read and saved, notes
-//! made and renamed (the links that named them following), its folders,
-//! and what changed on disk ([`Changes`]), read again on request or as a
+//! made and renamed (the links that named them following), its folders
+//! made, moved and copied, files copied and put in the trash, and what
+//! changed on disk ([`Changes`]), read again on request or as a
 //! watcher hears it ([`OpenVault::watch`]).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -97,6 +98,33 @@ pub fn folders_in(root: &Path) -> BTreeSet<String> {
         }
     }
     out
+}
+
+/// `path` is not a path inside the vault: empty, absolute, or out of it.
+fn check_inside(path: &str) -> Result<(), String> {
+    let bad = path.is_empty()
+        || path.starts_with('/')
+        || path
+            .split('/')
+            .any(|s| s.is_empty() || s == "." || s == "..");
+    if bad {
+        return Err(format!("{path:?} is not a path inside the vault"));
+    }
+    Ok(())
+}
+
+/// `src`'s tree copied to `dst`.
+fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for e in std::fs::read_dir(src)?.flatten() {
+        let to = dst.join(e.file_name());
+        if e.file_type()?.is_dir() {
+            copy_tree(&e.path(), &to)?;
+        } else {
+            std::fs::copy(e.path(), &to)?;
+        }
+    }
+    Ok(())
 }
 
 /// `to` is not a note's path a person can mean: empty, absolute, out of
@@ -303,6 +331,156 @@ impl OpenVault {
         }
         std::fs::rename(&src, &dst).map_err(|e| e.to_string())?;
         self.refresh().map_err(|e| e.to_string())
+    }
+
+    /// Copies the file at `from` to `to`, as it is (its links are not
+    /// rewritten for the new place); the vault read again after.
+    ///
+    /// # Errors
+    ///
+    /// No file at `from`, `to` is taken or not inside the vault, or the
+    /// copy fails.
+    pub fn copy_file(&self, from: &str, to: &str) -> Result<Changes, String> {
+        check_inside(to)?;
+        let root = self.root();
+        let (src, dst) = (root.join(from), root.join(to));
+        if !src.is_file() {
+            return Err(format!("no file at {from}"));
+        }
+        if dst.exists() {
+            return Err(format!("{to} is there already"));
+        }
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::copy(&src, &dst).map_err(|e| e.to_string())?;
+        self.refresh().map_err(|e| e.to_string())
+    }
+
+    /// Moves (or renames) the folder `from` to `to` with everything in it:
+    /// each note through [`Self::rename`], so the links that named it by
+    /// its path follow, then the other files. The notes moved.
+    ///
+    /// # Errors
+    ///
+    /// No folder `from`, `to` is taken, inside `from` or not inside the
+    /// vault, or a move fails (the ones before it stay done).
+    pub fn move_folder(&self, from: &str, to: &str) -> Result<Vec<Renamed>, String> {
+        check_inside(from)?;
+        check_inside(to)?;
+        let root = self.root();
+        let (src, dst) = (root.join(from), root.join(to));
+        if !src.is_dir() {
+            return Err(format!("no folder {from}"));
+        }
+        if to == from || to.starts_with(&format!("{from}/")) {
+            return Err(format!("{from} cannot go into itself"));
+        }
+        if dst.exists() {
+            return Err(format!("{to} is there already"));
+        }
+        let moved = |p: &str| format!("{to}{}", p.get(from.len()..).unwrap_or(""));
+        let notes: Vec<String> = self.with(|v| {
+            v.pages
+                .iter()
+                .map(|p| p.rel_path.clone())
+                .filter(|p| p.starts_with(&format!("{from}/")))
+                .collect()
+        });
+        let mut renamed = Vec::new();
+        for n in notes {
+            renamed.push(self.rename(&n, &moved(&n))?);
+        }
+        // The rest (attachments, bases, hidden files), and the folders
+        // left empty.
+        std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
+        let mut dirs = vec![src.clone()];
+        let mut i = 0;
+        while let Some(dir) = dirs.get(i).cloned() {
+            i = i.saturating_add(1);
+            for e in std::fs::read_dir(&dir)
+                .map_err(|e| e.to_string())?
+                .flatten()
+            {
+                let path = e.path();
+                let rel = path.strip_prefix(&src).map_err(|e| e.to_string())?;
+                let target = dst.join(rel);
+                if e.file_type().is_ok_and(|t| t.is_dir()) {
+                    std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+                    dirs.push(path);
+                } else {
+                    std::fs::rename(&path, &target).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        for dir in dirs.iter().rev() {
+            std::fs::remove_dir(dir).map_err(|e| e.to_string())?;
+        }
+        self.refresh().map_err(|e| e.to_string())?;
+        Ok(renamed)
+    }
+
+    /// Copies the folder `from` and everything in it to `to`; the vault
+    /// read again after.
+    ///
+    /// # Errors
+    ///
+    /// No folder `from`, `to` is taken, inside `from` or not inside the
+    /// vault, or a copy fails.
+    pub fn copy_folder(&self, from: &str, to: &str) -> Result<Changes, String> {
+        check_inside(from)?;
+        check_inside(to)?;
+        let root = self.root();
+        let (src, dst) = (root.join(from), root.join(to));
+        if !src.is_dir() {
+            return Err(format!("no folder {from}"));
+        }
+        if to == from || to.starts_with(&format!("{from}/")) {
+            return Err(format!("{from} cannot go into itself"));
+        }
+        if dst.exists() {
+            return Err(format!("{to} is there already"));
+        }
+        copy_tree(&src, &dst).map_err(|e| e.to_string())?;
+        self.refresh().map_err(|e| e.to_string())
+    }
+
+    /// Moves the file or folder at `path` to the vault's trash (`.trash`,
+    /// Obsidian's: by its name, numbered when the trash has one), where it
+    /// can be got back. What changed, and where it went.
+    ///
+    /// # Errors
+    ///
+    /// Nothing at `path`, it is not inside the vault, or the move fails.
+    pub fn trash(&self, path: &str) -> Result<(Changes, String), String> {
+        check_inside(path)?;
+        let root = self.root();
+        let src = root.join(path);
+        if !src.exists() {
+            return Err(format!("nothing at {path}"));
+        }
+        let trash = root.join(".trash");
+        std::fs::create_dir_all(&trash).map_err(|e| e.to_string())?;
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let (stem, ext) = match name.rsplit_once('.') {
+            Some((s, e)) if src.is_file() && !s.is_empty() => (s, format!(".{e}")),
+            _ => (name, String::new()),
+        };
+        let mut n = 0u32;
+        let dst = loop {
+            let candidate = if n == 0 {
+                format!("{stem}{ext}")
+            } else {
+                format!("{stem} {n}{ext}")
+            };
+            if !trash.join(&candidate).exists() {
+                break candidate;
+            }
+            n = n.saturating_add(1);
+        };
+        std::fs::rename(&src, trash.join(&dst)).map_err(|e| e.to_string())?;
+        let changes = self.refresh().map_err(|e| e.to_string())?;
+        Ok((changes, format!(".trash/{dst}")))
     }
 
     /// Sets one frontmatter property of the note at `path` (the rest of

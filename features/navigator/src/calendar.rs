@@ -87,6 +87,19 @@ impl PeriodicNotes {
         }
     }
 
+    /// The pattern a note of `kind`'s file name is written in (its last
+    /// part, past the folders), when notes of `kind` are on.
+    #[must_use]
+    pub fn file_pattern(&self, kind: PeriodKind) -> Option<&Pattern> {
+        self.kind(kind).as_ref().ok().map(|k| &k.file)
+    }
+
+    /// The locale's weeks (`week_start`).
+    #[must_use]
+    pub const fn weeks(&self) -> WeekRules {
+        self.weeks
+    }
+
     /// Whether notes of `kind` are on, with a pattern that makes paths.
     #[must_use]
     pub const fn enabled(&self, kind: PeriodKind) -> bool {

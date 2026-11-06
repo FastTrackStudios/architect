@@ -36,6 +36,12 @@ pub const ROLES: &[(&str, &str, &str)] = &[
     // A tag's or a property's pill without a colour of its own, and the
     // box behind a note's image (`file-tag-bg`, `feature-image-bg`).
     ("navigator.pill", "alpha($ink, 0.07)", "active"),
+    // A search's words in names (`--nn-theme-search-highlight-bg`).
+    (
+        "navigator.search-highlight",
+        "alpha($brand, 0.25)",
+        "brand-soft",
+    ),
     ("navigator.thumb", "alpha($ink, 0.05)", "active"),
     // The calendar: today (`calendar-day-today-bg`, `-color`), the
     // weekend's shade, a day's note dot (`calendar-note-indicator-color`)
@@ -70,6 +76,7 @@ pub const TOKENS: &[(&str, &str)] = &[
     ("navigator.handle", "$brand"),
     ("navigator.open", "$brand"),
     ("navigator.pill", "alpha($ink, 0.07)"),
+    ("navigator.search-highlight", "alpha($brand, 0.25)"),
     ("navigator.thumb", "alpha($ink, 0.05)"),
     ("navigator.calendar-today", "$brand-soft"),
     ("navigator.calendar-today-text", "$brand"),

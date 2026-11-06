@@ -115,6 +115,15 @@ them there; New makes one in the selected container.
   visibility, and the folders kept out of the lists above them.
 - `features/navigator/src/profiles.rs`: `Profiles` and `VaultProfile`,
   each with its hiding, banner, `Shortcut`s and recent notes.
+- `features/navigator/src/template.rs`: the built-in template engine
+  (`render`, `prompts`), numbered names (`numbered_name`, `next_number`)
+  and `Templates`: folder templates and create-note commands.
+- `features/navigator/src/state/files.rs`: the file operations on
+  `NavigatorState` (`new_note`, `new_folder`, `rename_file`,
+  `rename_folder`, `move_files`, `copy_files`, `move_folder`,
+  `duplicate`, `trash`, `merge`, `open_all`) and `check_name`. On disk
+  they go through `OpenVault`'s `copy_file`, `move_folder`, `copy_folder`
+  and `trash` (`features/vault/vault/src/actions/edit.rs`, MIT).
 - `features/navigator/src/appearance.rs`: `Appearance`, a folder's or a
   tag's own list. `Appearance::over` applies it to the settings.
 - `features/navigator/src/state.rs`: `NavigatorState` holds everything.
@@ -159,6 +168,12 @@ them there; New makes one in the selected container.
   view on show and brings back its answer.
 
 ## Tests to read
+
+- `features/navigator/tests/files.rs`: notes, canvases and bases made,
+  numbered, from folder templates and create-note commands with prompts;
+  periodic notes from templates; renames, moves, copies, duplicates, the
+  trash and merging; drops on folders and among the shortcuts.
+  `features/vault/vault/tests/edit.rs` does the same on disk.
 
 - `features/navigator/tests/search.rs`: the filter search, term by term,
   the box and ⌘/Ctrl-clicks writing to it, kept across runs, the
@@ -240,8 +255,8 @@ Notebook Navigator's parts are ported in layers (#332):
     with OR (`Query`).
   - Not ported: tag and property icons
     chosen by a person and the shortcuts pane (#339), a key's or value's
-    rename, child orders by hand (`tagChildOrder`, `propertyChildOrder`),
-    spring-loaded folders while dragging.
+    rename, child orders by hand (`tagChildOrder`, `propertyChildOrder`).
+    Spring-loaded folders came with layer 6.
 - **Layer 5, done (#338): search, shortcuts, recents, profiles and
   hiding.**
   - The filter search in a box over the list: names and aliases, tags,
@@ -258,12 +273,31 @@ Notebook Navigator's parts are ported in layers (#332):
   - Hiding folders, tags, notes and files by pattern, frontmatter or tag,
     with a show-hidden toggle; folders kept out of the lists above them
     and still browsed.
-  - Not ported: the search's highlight of matching tags in the tree and
-    of matched words in names, Omnisearch (the full text is architect's),
-    a profile's own property keys and periodic notes folder, the profile
-    editor in the settings (profiles are edited with `NAVIGATOR_PROFILE`),
-    dragging shortcuts (they move with the reorder arrows), pinning recent
-    notes with the shortcuts, and the navigation rainbow.
+  - Not ported: Omnisearch (the full text is architect's), a profile's
+    own property keys and periodic notes folder, the profile editor in
+    the settings (profiles are edited with `NAVIGATOR_PROFILE`), pinning
+    recent notes with the shortcuts, and the navigation rainbow. The
+    search's highlighting and dragging shortcuts came with layer 6.
+- **Layer 6 (#339): file operations and templates, done.**
+  - New notes, folders, canvases and bases from a folder's menu, the
+    list's header and the palette; inline rename with warnings for names
+    that cannot be or break links; duplicate, move, copy, the trash and
+    merging; "Open all notes", asking at 15 or more.
+  - Drag and drop: notes and folders onto folders (copied with ⌥ on a
+    Mac, Ctrl elsewhere), folders that open while a drag is held over
+    them, and shortcuts dragged to reorder them or things dropped among
+    them to add them.
+  - Templates: the built-in engine with title, folder, path, dates with
+    offsets, weekdays, time, now, cursor, prompts and numbering; folder
+    templates inherited by subfolders; create-note commands with a name
+    format, a template and a location; periodic note templates.
+  - The search's words marked in names, and its tags in the tree.
+  - Not ported: Templater (`<%` commands are left as written), a template
+    picker (the template is typed as a vault path), the ribbon and tab-bar
+    buttons of create-note commands, Excalidraw drawings made from the
+    menu, version history and "reveal in Finder". A new base is
+    Obsidian's YAML, not Notebook Navigator's legacy database JSON. The
+    app does not yet place the editor's cursor at `Open::cursor`.
 - **Still to come.**
   - Rendered PDF covers. A source gives a cover as the note's
     `feature_image`; without one, a PDF shows its badge.

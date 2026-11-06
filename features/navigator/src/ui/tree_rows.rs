@@ -3,10 +3,13 @@
 //! the search box, the banner, shortcut and recent-note rows over the
 //! folders, and dragging notes and tags onto them (`useDragAndDrop`).
 //!
-//! A drag starts on a note's row or a tag's with the mouse pressed and
-//! moved; Blitz sends the moves and the release to the row pressed, so it
-//! finds the row under the pointer itself, from the navigation pane's
-//! place on screen ([`Navigator`]'s `nav_box`) and the rows' offsets.
+//! A drag starts on a note's, a folder's, a tag's or a shortcut's row with
+//! the mouse pressed and moved; Blitz sends the moves and the release to
+//! the row pressed, so it finds the row under the pointer itself, from the
+//! navigation pane's place on screen ([`Navigator`]'s `nav_box`) and the
+//! rows' offsets. Held over a closed folder, the folder opens
+//! (spring-loaded folders); the copy key (⌥ on a Mac, Ctrl elsewhere)
+//! makes a drop on a folder a copy.
 
 // `Navigator` is a `Copy` handle of signals, taken as the components take it.
 #![allow(clippy::large_types_passed_by_value)]
@@ -17,12 +20,13 @@ use lucide_dioxus::{
     Search, Tag, Tags, TextAlignStart, X,
 };
 
-use super::{Navigator, Open};
+use super::{Ask, AskThen, Navigator, Open, Renaming};
 use crate::profiles::{Shortcut, ShortcutKind};
 use crate::properties::ROOT;
 use crate::selection::NavTarget;
-use crate::state::{Drag, HideTarget, Mods, Outcome};
+use crate::state::{Drag, HideTarget, MergeSeparator, Mods, NewKind, NewNote, Outcome, check_name};
 use crate::tags::{TAGGED, UNTAGGED};
+use crate::tree::{NavRowKind, SHORTCUTS};
 
 /// How far a press moves before it is a drag.
 const DRAG_SLOP: f64 = 4.0;
@@ -36,6 +40,10 @@ pub struct DragNow {
     pub active: bool,
     /// The row key under the pointer, when it takes a drop.
     pub over: Option<String>,
+    /// The copy key held at the last move.
+    pub copy: bool,
+    /// Folders opened under it so far: the first waits longer.
+    pub springs: u32,
 }
 
 /// A row's menu, open.
@@ -54,6 +62,22 @@ pub enum PromptKind {
     AddTag(Vec<String>),
     /// A value of `key` for these notes.
     SetValue { key: String, paths: Vec<String> },
+    /// A new folder's name, in this one.
+    NewFolder(String),
+    /// A new note's name, in this folder, of this kind.
+    NewNamed { folder: String, kind: NewKind },
+    /// The folder these files go to.
+    MoveTo(Vec<String>),
+    /// The folder this folder goes into.
+    MoveFolderTo(String),
+    /// The template a note made from in this folder takes.
+    TemplateFor(String),
+    /// A folder's template (a vault path; empty, none).
+    FolderTemplate(String),
+    /// The merged note's name, for these notes.
+    Merge(Vec<String>),
+    /// A template's prompt, `label`, for this request.
+    Template { req: Box<NewNote>, label: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +85,18 @@ pub struct Prompt {
     pub title: String,
     pub value: String,
     pub kind: PromptKind,
+}
+
+impl Prompt {
+    /// Asks the folder `paths` move to.
+    #[must_use]
+    pub fn move_to(paths: Vec<String>) -> Self {
+        Self {
+            title: "Move to folder (a vault path; empty, the root)".to_owned(),
+            value: String::new(),
+            kind: PromptKind::MoveTo(paths),
+        }
+    }
 }
 
 /// The icon a row draws.
@@ -96,12 +132,19 @@ pub(super) fn ItemRow(
     reorder: bool,
     /// Under a drag that it takes.
     drop_here: bool,
+    /// A tag the search takes in or leaves out.
+    search: Option<crate::SearchMatch>,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
     let class = match (selected, drop_here) {
         (_, true) => "nv-row nv-drop-target",
         (true, false) => "nv-row nv-selected",
         (false, false) => "nv-row",
+    };
+    let name_class = match search {
+        Some(crate::SearchMatch::Include) => "nv-name nv-search-include",
+        Some(crate::SearchMatch::Exclude) => "nv-name nv-search-exclude",
+        None => "nv-name",
     };
     let weight = if matches!(icon, RowIcon::AllTags | RowIcon::AllProperties) {
         600
@@ -197,7 +240,7 @@ pub(super) fn ItemRow(
                     RowIcon::Value => rsx! { Equal { size: 14 } },
                 }
             }
-            span { class: "nv-name",
+            span { class: name_class,
                 style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{weight}; {name_colour}",
                 "{name}"
             }
@@ -227,7 +270,8 @@ fn reorder_by(nav: Navigator, target: &NavTarget, by: isize) {
 
 // ── Dragging ───────────────────────────────────────────────────────────
 
-/// A mouse press on a note's row or a tag's: a drag, once it moves.
+/// A mouse press on a note's, a folder's, a tag's or a shortcut's row: a
+/// drag, once it moves.
 pub(super) fn start_drag(nav: Navigator, what: Drag, e: &PointerEvent) {
     // A finger scrolls the pane (Notebook Navigator drags on a desk alone).
     if e.data().pointer_type() != "mouse" {
@@ -240,11 +284,23 @@ pub(super) fn start_drag(nav: Navigator, what: Drag, e: &PointerEvent) {
         from: (p.x, p.y),
         active: false,
         over: None,
+        copy: false,
+        springs: 0,
     }));
 }
 
+/// The copy key: ⌥ on a Mac, Ctrl elsewhere (`getVaultItemFolderDropEffect`).
+fn copy_key(e: &PointerEvent) -> bool {
+    let m = e.modifiers();
+    if cfg!(target_os = "macos") {
+        m.alt()
+    } else {
+        m.ctrl()
+    }
+}
+
 /// The pointer moved with a drag pressed: past the slop it is one, and
-/// the row under it found.
+/// the row under it found; a closed folder under it opens after a while.
 pub(super) fn drag_move(nav: Navigator, e: &PointerEvent) {
     let Some(mut now) = nav.drag.peek().clone() else {
         return;
@@ -258,26 +314,92 @@ pub(super) fn drag_move(nav: Navigator, e: &PointerEvent) {
         let mut dragged = nav.dragged;
         dragged.set(true);
     }
-    let over = drop_row(nav, p.x, p.y).map(|(key, _)| key);
-    if over != now.over || !nav.drag.peek().as_ref().is_some_and(|d| d.active) {
-        now.over = over;
+    let over = drop_row(nav, &now.what, p.x, p.y);
+    let copy = copy_key(e);
+    let was_active = nav.drag.peek().as_ref().is_some_and(|d| d.active);
+    if over != now.over || copy != now.copy || !was_active {
+        let entered = over != now.over;
+        now.over.clone_from(&over);
+        now.copy = copy;
+        let springs = now.springs;
         let mut drag = nav.drag;
         drag.set(Some(now));
+        if entered && let Some(key) = over {
+            spring(nav, key, springs);
+        }
     }
 }
 
-/// The row under the client point `x`, `y` that takes a drop: its key and
-/// what it selects.
-fn drop_row(nav: Navigator, x: f64, y: f64) -> Option<(String, NavTarget)> {
+/// Opens the closed folder at row `key` if the drag is still over it after
+/// the settings' delay (`springLoadedFolders`).
+fn spring(nav: Navigator, key: String, springs: u32) {
+    let (on, first, next) = {
+        let s = nav.state.peek();
+        let st = s.settings();
+        (
+            st.spring_loaded_folders,
+            st.spring_loaded_delay_ms,
+            st.spring_loaded_next_delay_ms,
+        )
+    };
+    let folder = nav
+        .state
+        .peek()
+        .nav_rows()
+        .iter()
+        .find(|r| r.key == key)
+        .and_then(|r| match &r.kind {
+            NavRowKind::Folder {
+                path,
+                has_children: true,
+                expanded: false,
+                ..
+            } => Some(path.clone()),
+            _ => None,
+        });
+    let Some(folder) = folder.filter(|_| on) else {
+        return;
+    };
+    let wait = if springs == 0 { first } else { next };
+    spawn(async move {
+        futures_timer::Delay::new(std::time::Duration::from_millis(u64::from(wait))).await;
+        let still = nav
+            .drag
+            .peek()
+            .as_ref()
+            .is_some_and(|d| d.active && d.over.as_deref() == Some(key.as_str()));
+        if still && nav.update(|s| s.spring_open(&folder)) {
+            let mut drag = nav.drag;
+            if let Some(d) = drag.write().as_mut() {
+                d.springs = d.springs.saturating_add(1);
+            }
+        }
+    });
+}
+
+/// The row under the client point `x`, `y` that takes `what` dropped: its
+/// key. Folders take notes and folders; tags and properties take notes
+/// and tags; the shortcuts take anything, a shortcut only them.
+fn drop_row(nav: Navigator, what: &Drag, x: f64, y: f64) -> Option<String> {
     let (bx, by, bw, bh) = (*nav.nav_box.peek())?;
     if x < bx || x > bx + bw || y < by || y > by + bh {
         return None;
     }
     let s = nav.state.peek();
     let row = s.nav_row_at(y - by)?;
-    let target = row.target()?;
-    matches!(target, NavTarget::Tag(_) | NavTarget::Property { .. })
-        .then(|| (row.key.clone(), target))
+    let takes = match (&row.kind, what) {
+        (NavRowKind::Section { id, .. }, _) => id == SHORTCUTS,
+        (NavRowKind::Shortcut { .. }, _)
+        | (NavRowKind::Folder { .. }, Drag::Notes(_))
+        | (NavRowKind::Tag { .. } | NavRowKind::Property { .. }, Drag::Notes(_) | Drag::Tag(_)) => {
+            true
+        }
+        (NavRowKind::Folder { path, .. }, Drag::Folder(src)) => {
+            path != src && !crate::source::is_within(path, src)
+        }
+        _ => false,
+    };
+    takes.then(|| row.key.clone())
 }
 
 /// The press let go: a drag ends on the row under it.
@@ -288,15 +410,30 @@ pub(super) fn drag_end(nav: Navigator, on_open: EventHandler<Open>) {
         return;
     }
     let Some(key) = now.over else { return };
-    let target = nav
+    let row = nav
         .state
         .peek()
         .nav_rows()
         .iter()
         .find(|r| r.key == key)
-        .and_then(crate::tree::NavRow::target);
-    let Some(target) = target else { return };
-    let out = nav.state.peek().drop_on(&now.what, &target);
+        .cloned();
+    let Some(row) = row else { return };
+    // Among the shortcuts: moved or added there.
+    let at = match &row.kind {
+        NavRowKind::Shortcut { at, .. } => Some(*at),
+        NavRowKind::Section { id, .. } if id == SHORTCUTS => Some(0),
+        _ => None,
+    };
+    if let Some(at) = at {
+        if nav.update(|s| s.drop_on_shortcuts(&now.what, at))
+            && !matches!(now.what, Drag::Shortcut(_))
+        {
+            nav.say("Added to shortcuts");
+        }
+        return;
+    }
+    let Some(target) = row.target() else { return };
+    let out = nav.state.peek().drop_on(&now.what, &target, now.copy);
     match (out, &now.what) {
         // A tag moved is a rename: asked first, as Notebook Navigator
         // opens its rename dialog filled in.
@@ -308,13 +445,13 @@ pub(super) fn drag_end(nav: Navigator, on_open: EventHandler<Open>) {
                 },
                 _ => String::new(),
             };
-            let mut ask = nav.ask;
-            ask.set(Some((
+            nav.ask(
                 format!("Rename #{src} to #{to}, in every note?"),
-                out,
-            )));
+                "OK",
+                AskThen::Act(out),
+            );
         }
-        (Ok(out), Drag::Notes(_)) => nav.act(Some(out), on_open),
+        (Ok(out), _) => nav.act(Some(out), on_open),
         (Err(e), _) => nav.say(e),
     }
 }
@@ -388,7 +525,69 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                 ));
             }
         }
-        NavTarget::Folder(_) => {}
+        NavTarget::Folder(f) => {
+            // `buildFolderMenu`: make things in it, then change it.
+            let f = f.clone();
+            items.push((
+                "New note".to_owned(),
+                MenuAct::New(f.clone(), NewKind::Note),
+            ));
+            items.push((
+                "New note from template…".to_owned(),
+                MenuAct::FromTemplate(f.clone()),
+            ));
+            for c in &s.templates().commands {
+                let name = if c.name.trim().is_empty() {
+                    "Unnamed"
+                } else {
+                    c.name.as_str()
+                };
+                items.push((format!("New: {name}"), MenuAct::Command(c.id.clone())));
+            }
+            items.push(("New folder…".to_owned(), MenuAct::NewFolder(f.clone())));
+            items.push((
+                "New canvas".to_owned(),
+                MenuAct::New(f.clone(), NewKind::Canvas),
+            ));
+            items.push((
+                "New base".to_owned(),
+                MenuAct::New(f.clone(), NewKind::Base),
+            ));
+            if n > 0 {
+                items.push((
+                    format!("Move {n} selected here"),
+                    MenuAct::Drop(paths.clone(), f.clone(), false),
+                ));
+                items.push((
+                    format!("Copy {n} selected here"),
+                    MenuAct::Drop(paths, f.clone(), true),
+                ));
+            }
+            items.push(("Open all notes".to_owned(), MenuAct::OpenAll(f.clone())));
+            let own = s
+                .templates()
+                .folders
+                .iter()
+                .any(|t| t.folder.trim_matches('/') == f);
+            items.push((
+                if own {
+                    "Change folder template…"
+                } else {
+                    "Set folder template…"
+                }
+                .to_owned(),
+                MenuAct::FolderTemplate(f.clone()),
+            ));
+            if !f.is_empty() {
+                items.push(("Rename…".to_owned(), MenuAct::RenameFolder(f.clone())));
+                items.push((
+                    "Duplicate folder".to_owned(),
+                    MenuAct::DuplicateFolder(f.clone()),
+                ));
+                items.push(("Move folder to…".to_owned(), MenuAct::MoveFolder(f.clone())));
+                items.push(("Delete folder".to_owned(), MenuAct::Trash(vec![f])));
+            }
+        }
     }
     // Every folder, tag and property but the virtual rows: a shortcut, and
     // (folders and tags) hiding it.
@@ -435,6 +634,15 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
     }
     drop(s);
     let top = menu.top;
+    // Kept inside the pane, scrolled when longer (a folder's menu).
+    let room = (nav
+        .state
+        .peek()
+        .scroll(crate::layout::Pane::Navigation)
+        .view
+        - top
+        - 8.0)
+        .max(120.0);
     let mut open = nav.menu;
     rsx! {
         // A press anywhere else closes it.
@@ -443,8 +651,8 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
             oncontextmenu: move |e: MouseEvent| { e.prevent_default(); open.set(None); },
         }
         div { class: "nv-menu nv-row-menu", role: "menu",
-            style: "position:absolute; left:12px; right:12px; top:{top}px; z-index:10; padding:4px; border-radius:8px; \
-                    background:var(--nv-background); border:1px solid var(--nv-divider); display:flex; flex-direction:column;",
+            style: "position:absolute; left:12px; right:12px; top:{top}px; max-height:{room}px; z-index:10; padding:4px; border-radius:8px; \
+                    background:var(--nv-background); border:1px solid var(--nv-divider); display:flex; flex-direction:column; overflow-y:auto;",
             for (label, act) in items {
                 button { class: "nv-menu-row", role: "menuitem", "data-menu-item": "{label}",
                     style: "text-align:left; height:26px; padding:0 8px; border:none; border-radius:5px; background:transparent; color:var(--nv-text); cursor:pointer; font-size:12px;",
@@ -473,6 +681,20 @@ enum MenuAct {
     /// A shortcut added (`true`) or taken out.
     Shortcut(Shortcut, bool),
     Hide(HideTarget),
+    /// A new file of a kind in a folder.
+    New(String, NewKind),
+    FromTemplate(String),
+    /// A "create note" command, by its id.
+    Command(String),
+    NewFolder(String),
+    /// Files moved (or copied) into a folder.
+    Drop(Vec<String>, String, bool),
+    OpenAll(String),
+    FolderTemplate(String),
+    RenameFolder(String),
+    DuplicateFolder(String),
+    MoveFolder(String),
+    Trash(Vec<String>),
     Nothing,
 }
 
@@ -507,15 +729,95 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
         }
         MenuAct::Delete(t) => match nav.state.peek().delete_tag(&t) {
             Ok(out) => {
-                let mut ask = nav.ask;
-                ask.set(Some((
+                nav.ask(
                     format!("Delete #{t} and the tags below it from every note?"),
-                    out,
-                )));
+                    "Delete",
+                    AskThen::Act(out),
+                );
                 return;
             }
             Err(e) => Err(e),
         },
+        MenuAct::New(folder, kind) => {
+            nav.new_note(
+                NewNote {
+                    folder,
+                    kind,
+                    ..NewNote::default()
+                },
+                on_open,
+            );
+            return;
+        }
+        MenuAct::FromTemplate(folder) => {
+            let hint = nav.state.peek().settings().template_folder.clone();
+            ask_for(
+                nav,
+                "Template (a vault path)",
+                &hint,
+                PromptKind::TemplateFor(folder),
+            );
+            return;
+        }
+        MenuAct::Command(id) => {
+            nav.run_template_command(&id, on_open);
+            return;
+        }
+        MenuAct::NewFolder(parent) => {
+            ask_for(nav, "New folder", "", PromptKind::NewFolder(parent));
+            return;
+        }
+        MenuAct::Drop(paths, folder, copy) => {
+            nav.state
+                .peek()
+                .drop_on(&Drag::Notes(paths), &NavTarget::Folder(folder), copy)
+        }
+        MenuAct::OpenAll(folder) => {
+            let out = nav.update(|s| s.click_folder(&folder));
+            nav.act(out, on_open);
+            match nav.state.peek().open_all() {
+                Ok(paths) => nav.open_many(paths, on_open),
+                Err(e) => nav.say(e),
+            }
+            return;
+        }
+        MenuAct::FolderTemplate(folder) => {
+            let now = nav
+                .state
+                .peek()
+                .templates()
+                .folders
+                .iter()
+                .find(|t| t.folder.trim_matches('/') == folder)
+                .map(|t| t.template.clone())
+                .unwrap_or_default();
+            ask_for(
+                nav,
+                "Folder template (a vault path; empty, none)",
+                &now,
+                PromptKind::FolderTemplate(folder),
+            );
+            return;
+        }
+        MenuAct::RenameFolder(folder) => {
+            let mut renaming = nav.renaming;
+            renaming.set(Some(Renaming::Folder(folder)));
+            return;
+        }
+        MenuAct::DuplicateFolder(folder) => nav.state.peek().duplicate_folder(&folder),
+        MenuAct::MoveFolder(folder) => {
+            ask_for(
+                nav,
+                "Move to folder (a vault path; empty, the root)",
+                "",
+                PromptKind::MoveFolderTo(folder),
+            );
+            return;
+        }
+        MenuAct::Trash(paths) => {
+            nav.trash(&paths, on_open);
+            return;
+        }
         MenuAct::ResetTagOrder => {
             nav.update(crate::NavigatorState::reset_tag_order);
             return;
@@ -545,27 +847,108 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
 
 // ── Asking ─────────────────────────────────────────────────────────────
 
-/// A bar over the navigator's foot asking for a name.
+/// Asks for a name: `title` over a field holding `value`.
+pub(super) fn ask_for(nav: Navigator, title: &str, value: &str, kind: PromptKind) {
+    let mut prompt = nav.prompt;
+    prompt.set(Some(Prompt {
+        title: title.to_owned(),
+        value: value.to_owned(),
+        kind,
+    }));
+}
+
+/// What a name typed into `kind`'s bar is warned of (a note's or a
+/// folder's name): `fileNameUtils`' checks.
+fn name_warning(kind: &PromptKind, text: &str) -> Option<String> {
+    match kind {
+        PromptKind::NewFolder(_) | PromptKind::NewNamed { .. } | PromptKind::Merge(_) => {
+            let c = check_name(text);
+            c.error.or(c.warning)
+        }
+        _ => None,
+    }
+}
+
+/// What a prompt's text asks of the navigator, when it is given.
+fn submit_prompt(
+    nav: Navigator,
+    on_open: EventHandler<Open>,
+    kind: &PromptKind,
+    text: &str,
+) -> Result<Option<Outcome>, String> {
+    let s = nav.state.peek();
+    let out = match kind {
+        PromptKind::RenameTag(from) => s.rename_tag(from, text),
+        PromptKind::AddTag(paths) => s.add_tag(paths, text),
+        PromptKind::SetValue { key, paths } => s.set_property(paths, key, Some(text)),
+        PromptKind::NewFolder(parent) => s.new_folder(parent, text),
+        PromptKind::MoveTo(paths) => s.move_files(paths, text.trim_matches('/')),
+        PromptKind::MoveFolderTo(folder) => s.move_folder(folder, text.trim_matches('/')),
+        PromptKind::Merge(paths) => s.merge(paths, text, None, MergeSeparator::BlankLine, false),
+        PromptKind::FolderTemplate(folder) => {
+            drop(s);
+            let (folder, template) = (folder.clone(), text.to_owned());
+            nav.update(|s| s.edit_templates(|t| t.set_folder(&folder, &template, true)));
+            nav.say(if text.trim().is_empty() {
+                "The folder has no template now"
+            } else {
+                "New notes here and below take the template"
+            });
+            return Ok(None);
+        }
+        PromptKind::NewNamed { folder, kind } => {
+            drop(s);
+            nav.new_note(
+                NewNote {
+                    folder: folder.clone(),
+                    kind: *kind,
+                    name: Some(text.to_owned()),
+                    ..NewNote::default()
+                },
+                on_open,
+            );
+            return Ok(None);
+        }
+        PromptKind::TemplateFor(folder) => {
+            drop(s);
+            nav.new_note(
+                NewNote {
+                    folder: folder.clone(),
+                    template: Some(text.trim().to_owned()).filter(|t| !t.is_empty()),
+                    ..NewNote::default()
+                },
+                on_open,
+            );
+            return Ok(None);
+        }
+        PromptKind::Template { req, label } => {
+            drop(s);
+            let mut req = (**req).clone();
+            req.prompts.insert(label.clone(), text.to_owned());
+            nav.new_note(req, on_open);
+            return Ok(None);
+        }
+    };
+    out.map(Some)
+}
+
+/// A bar over the navigator's foot asking for a name: what it would break
+/// said under it as it is typed.
 #[component]
 pub(super) fn PromptBar(nav: Navigator, on_open: EventHandler<Open>, prompt: Prompt) -> Element {
     let mut value = use_signal(|| prompt.value.clone());
     let mut open = nav.prompt;
     let kind = prompt.kind.clone();
+    let warning = name_warning(&kind, &value.read());
     let submit = move || {
         let text = value.peek().trim().to_owned();
-        let out = match &kind {
-            PromptKind::RenameTag(from) => nav.state.peek().rename_tag(from, &text),
-            PromptKind::AddTag(paths) => nav.state.peek().add_tag(paths, &text),
-            PromptKind::SetValue { key, paths } => {
-                nav.state.peek().set_property(paths, key, Some(&text))
+        open.set(None);
+        match submit_prompt(nav, on_open, &kind, &text) {
+            Ok(Some(out)) => nav.act(Some(out), on_open),
+            Ok(None) => {}
+            Err(e) => {
+                nav.say(e);
             }
-        };
-        match out {
-            Ok(out) => {
-                open.set(None);
-                nav.act(Some(out), on_open);
-            }
-            Err(e) => nav.say(e),
         }
     };
     let mut on_enter = submit.clone();
@@ -576,14 +959,21 @@ pub(super) fn PromptBar(nav: Navigator, on_open: EventHandler<Open>, prompt: Pro
                     background:var(--nv-background); border:1px solid var(--nv-divider); display:flex; flex-direction:column; gap:8px;",
             div { style: "font-weight:600;", "{prompt.title}" }
             input { class: "nv-prompt-input", "data-testid": "nv-prompt-input", value: "{value}",
+                autofocus: true,
                 style: "height:26px; padding:0 8px; border-radius:6px; border:1px solid var(--nv-divider); background:transparent; color:var(--nv-text);",
                 oninput: move |e| value.set(e.value()),
                 onkeydown: move |e: KeyboardEvent| {
                     e.stop_propagation();
                     if e.key() == Key::Named(NamedKey::Enter) {
                         on_enter();
+                    } else if e.key() == Key::Named(NamedKey::Escape) {
+                        open.set(None);
                     }
                 },
+            }
+            if let Some(w) = warning {
+                div { class: "nv-name-warning", "data-testid": "nv-name-warning", role: "status",
+                    style: "font-size:11px; color:var(--nv-muted); overflow-wrap:anywhere;", "{w}" }
             }
             div { style: "display:flex; justify-content:flex-end; gap:6px;",
                 button { class: "nv-confirm-cancel", "data-testid": "nv-prompt-cancel",
@@ -601,15 +991,12 @@ pub(super) fn PromptBar(nav: Navigator, on_open: EventHandler<Open>, prompt: Pro
     }
 }
 
-/// A bar asking a yes before a write that changes many notes.
+/// A bar asking a yes before a write that changes many notes, puts things
+/// in the trash, or opens many notes.
 #[component]
-pub(super) fn AskBar(
-    nav: Navigator,
-    on_open: EventHandler<Open>,
-    text: String,
-    out: Outcome,
-) -> Element {
-    let mut ask = nav.ask;
+pub(super) fn AskBar(nav: Navigator, on_open: EventHandler<Open>, ask: Ask) -> Element {
+    let mut open = nav.ask;
+    let Ask { text, then, ok } = ask;
     rsx! {
         div { class: "nv-confirm nv-ask", role: "alertdialog", "aria-label": "{text}",
             style: "position:absolute; left:8px; right:8px; bottom:8px; z-index:20; padding:10px; border-radius:10px; \
@@ -618,16 +1005,75 @@ pub(super) fn AskBar(
             div { style: "display:flex; justify-content:flex-end; gap:6px;",
                 button { class: "nv-confirm-cancel", "data-testid": "nv-ask-cancel",
                     style: "height:26px; padding:0 10px; border-radius:6px; border:1px solid var(--nv-divider); background:transparent; color:var(--nv-text); cursor:pointer;",
-                    onclick: move |_| ask.set(None),
+                    onclick: move |_| open.set(None),
                     "Cancel"
                 }
                 button { class: "nv-confirm-create", "data-testid": "nv-ask-ok",
                     style: "height:26px; padding:0 10px; border-radius:6px; border:none; background:var(--nv-open); color:var(--nv-background); cursor:pointer; font-weight:600;",
                     onclick: move |_| {
-                        ask.set(None);
-                        nav.act(Some(out.clone()), on_open);
+                        open.set(None);
+                        nav.then(then.clone(), on_open);
                     },
-                    "OK"
+                    "{ok}"
+                }
+            }
+        }
+    }
+}
+
+/// A note's or a folder's name being edited in place (`InlineRenameInput`):
+/// Return renames, Escape or leaving it lets go; what the name would break
+/// is said under it.
+#[component]
+pub(super) fn InlineRename(
+    nav: Navigator,
+    on_open: EventHandler<Open>,
+    what: Renaming,
+    value: String,
+) -> Element {
+    let mut text = use_signal(|| value.clone());
+    let mut renaming = nav.renaming;
+    let check = check_name(&text.read());
+    let note = check.error.clone().or_else(|| check.warning.clone());
+    let w1 = what;
+    let done = move || {
+        let name = text.peek().trim().to_owned();
+        renaming.set(None);
+        if name == value.trim() {
+            return;
+        }
+        let out = match &w1 {
+            Renaming::File(p) => nav.state.peek().rename_file(p, &name),
+            Renaming::Folder(f) => nav.state.peek().rename_folder(f, &name),
+        };
+        match out {
+            Ok(out) => nav.act(Some(out), on_open),
+            Err(e) => nav.say(e),
+        }
+    };
+    let mut on_enter = done;
+    rsx! {
+        span { class: "nv-rename", style: "flex:1 1 auto; min-width:0; display:flex; flex-direction:column; position:relative;",
+            input { class: "nv-rename-input", "data-testid": "nv-rename-input", value: "{text}",
+                autofocus: true,
+                "aria-label": "Name",
+                style: "height:22px; padding:0 4px; border-radius:4px; border:1px solid var(--nv-open); background:var(--nv-background); color:var(--nv-text); font-size:13px;",
+                onclick: move |e| e.stop_propagation(),
+                oninput: move |e| text.set(e.value()),
+                onkeydown: move |e: KeyboardEvent| {
+                    e.stop_propagation();
+                    match e.key() {
+                        Key::Named(NamedKey::Enter) => on_enter(),
+                        Key::Named(NamedKey::Escape) => renaming.set(None),
+                        _ => {}
+                    }
+                },
+            }
+            if let Some(n) = note {
+                span { class: "nv-name-warning", "data-testid": "nv-name-warning", role: "status",
+                    style: "position:absolute; top:24px; left:0; right:0; z-index:5; padding:2px 6px; border-radius:4px; \
+                            background:var(--nv-background); border:1px solid var(--nv-divider); font-size:11px; color:var(--nv-muted); white-space:normal;",
+                    "{n}"
                 }
             }
         }
@@ -722,10 +1168,17 @@ pub(super) fn SectionRow(
     count: usize,
     top: f64,
     height: f64,
+    /// Under a drag that it takes (the shortcuts', to add at the top).
+    drop_here: bool,
 ) -> Element {
     let toggle = id.clone();
+    let class = if drop_here {
+        "nv-row nv-section nv-drop-target"
+    } else {
+        "nv-row nv-section"
+    };
     rsx! {
-        div { class: "nv-row nv-section", role: "treeitem", "data-section": "{id}",
+        div { class, role: "treeitem", "data-section": "{id}",
             "aria-expanded": if expanded { "true" } else { "false" },
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:4px; \
                     padding:0 8px 0 6px; border-radius:6px; white-space:nowrap; color:var(--nv-muted); font-size:11px; font-weight:600; \
@@ -753,8 +1206,15 @@ pub(super) fn ShortcutRow(
     reorder: bool,
     top: f64,
     height: f64,
+    /// Under a drag that it takes.
+    drop_here: bool,
 ) -> Element {
     let badge = (at < 9).then(|| at.saturating_add(1).to_string());
+    let class = if drop_here {
+        "nv-row nv-shortcut nv-drop-target"
+    } else {
+        "nv-row nv-shortcut"
+    };
     let open = shortcut.clone();
     let remove = shortcut.clone();
     let kind = shortcut.kind;
@@ -765,13 +1225,22 @@ pub(super) fn ShortcutRow(
     };
     let deco = if missing { "line-through" } else { "none" };
     rsx! {
-        div { class: "nv-row nv-shortcut", role: "treeitem", "data-shortcut": "{at}", "data-kind": "{kind.id()}",
+        div { class, role: "treeitem", "data-shortcut": "{at}", "data-kind": "{kind.id()}",
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:6px; \
                     padding:0 8px 0 10px; border-radius:6px; white-space:nowrap; color:{colour};",
-            onclick: move |_| match nav.update(|s| s.open_shortcut_entry(&open)) {
-                Ok(out) => nav.act(out, on_open),
-                Err(e) => nav.say(e),
+            onclick: move |_| {
+                if nav.dragged.cloned() {
+                    return;
+                }
+                match nav.update(|s| s.open_shortcut_entry(&open)) {
+                    Ok(out) => nav.act(out, on_open),
+                    Err(e) => nav.say(e),
+                }
             },
+            // Dragged to another place among them (`SHORTCUT_POINTER_CONSTRAINT`).
+            onpointerdown: move |e: PointerEvent| start_drag(nav, Drag::Shortcut(at), &e),
+            onpointermove: move |e: PointerEvent| drag_move(nav, &e),
+            onpointerup: move |_| drag_end(nav, on_open),
             span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);",
                 match kind {
                     ShortcutKind::Note => rsx! { FileText { size: 15 } },

@@ -10,7 +10,7 @@
 //! `[literals]` and `\` escapes; time tokens format midnight. A letter that
 //! is no token is itself, as in Moment.
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use crate::period::{WeekRules, add_days};
 
@@ -102,9 +102,71 @@ enum T {
     WeekOrd {
         iso: bool,
     },
-    /// The time tokens, at midnight: `H` `HH` `k` `kk` `h` `hh` `m` `mm`
-    /// `s` `ss` `S…` `a` `A`.
-    Time(&'static str),
+    /// The time tokens: `H` `HH` `k` `kk` `h` `hh` `m` `mm` `s` `ss` `S…`
+    /// `a` `A`; a date alone writes them at midnight.
+    Time(Tm),
+    /// The time zone's offset: `Z` (`+01:00`), `ZZ` (`+0100`).
+    Zone {
+        colon: bool,
+    },
+}
+
+/// A time token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tm {
+    /// `H`, `HH`: 0 to 23.
+    Hour24(u8),
+    /// `k`, `kk`: 1 to 24.
+    Hour1To24(u8),
+    /// `h`, `hh`: 1 to 12.
+    Hour12(u8),
+    Minute(u8),
+    Second(u8),
+    /// `S`, `SS`, `SSS`: tenths, hundredths, thousandths.
+    Fraction(u8),
+    /// `a` `am`/`pm`, `A` `AM`/`PM`.
+    Meridiem {
+        upper: bool,
+    },
+}
+
+impl Tm {
+    /// The token at `t`.
+    fn write(self, t: NaiveTime) -> String {
+        let n = |v: u32, w: u8| format!("{v:0w$}", w = usize::from(w));
+        match self {
+            Self::Hour24(w) => n(t.hour(), w),
+            Self::Hour1To24(w) => n(if t.hour() == 0 { 24 } else { t.hour() }, w),
+            Self::Hour12(w) => n(
+                match t.hour() % 12 {
+                    0 => 12,
+                    h => h,
+                },
+                w,
+            ),
+            Self::Minute(w) => n(t.minute(), w),
+            Self::Second(w) => n(t.second(), w),
+            Self::Fraction(w) => {
+                let ms = t.nanosecond() / 1_000_000 % 1000;
+                let v = match w {
+                    1 => ms / 100,
+                    2 => ms / 10,
+                    _ => ms,
+                };
+                n(v, w)
+            }
+            Self::Meridiem { upper } => {
+                let pm = t.hour() >= 12;
+                match (pm, upper) {
+                    (false, false) => "am",
+                    (true, false) => "pm",
+                    (false, true) => "AM",
+                    (true, true) => "PM",
+                }
+                .to_owned()
+            }
+        }
+    }
 }
 
 /// A pattern's parts: tokens, and literal text.
@@ -156,21 +218,23 @@ const TOKENS: &[(&str, T)] = &[
     ("WW", T::Week { iso: true, len: 2 }),
     ("Wo", T::WeekOrd { iso: true }),
     ("W", T::Week { iso: true, len: 1 }),
-    ("HH", T::Time("00")),
-    ("H", T::Time("0")),
-    ("kk", T::Time("24")),
-    ("k", T::Time("24")),
-    ("hh", T::Time("12")),
-    ("h", T::Time("12")),
-    ("mm", T::Time("00")),
-    ("m", T::Time("0")),
-    ("ss", T::Time("00")),
-    ("s", T::Time("0")),
-    ("SSS", T::Time("000")),
-    ("SS", T::Time("00")),
-    ("S", T::Time("0")),
-    ("a", T::Time("am")),
-    ("A", T::Time("AM")),
+    ("HH", T::Time(Tm::Hour24(2))),
+    ("H", T::Time(Tm::Hour24(1))),
+    ("kk", T::Time(Tm::Hour1To24(2))),
+    ("k", T::Time(Tm::Hour1To24(1))),
+    ("hh", T::Time(Tm::Hour12(2))),
+    ("h", T::Time(Tm::Hour12(1))),
+    ("mm", T::Time(Tm::Minute(2))),
+    ("m", T::Time(Tm::Minute(1))),
+    ("ss", T::Time(Tm::Second(2))),
+    ("s", T::Time(Tm::Second(1))),
+    ("SSS", T::Time(Tm::Fraction(3))),
+    ("SS", T::Time(Tm::Fraction(2))),
+    ("S", T::Time(Tm::Fraction(1))),
+    ("a", T::Time(Tm::Meridiem { upper: false })),
+    ("A", T::Time(Tm::Meridiem { upper: true })),
+    ("ZZ", T::Zone { colon: false }),
+    ("Z", T::Zone { colon: true }),
 ];
 
 /// A Moment date pattern, read into its parts.
@@ -326,14 +390,24 @@ impl Pattern {
         })
     }
 
-    /// `date` written in it; locale weeks (`w`, `g`, `e`) by `weeks`.
+    /// `date` written in it; locale weeks (`w`, `g`, `e`) by `weeks`. Its
+    /// time tokens write midnight, its zone UTC.
     #[must_use]
     pub fn format(&self, date: NaiveDate, weeks: WeekRules) -> String {
+        self.format_at(date.and_time(NaiveTime::MIN), 0, weeks)
+    }
+
+    /// `at` written in it, in a time zone `offset` seconds east of UTC
+    /// (for `Z`); locale weeks by `weeks`.
+    #[must_use]
+    pub fn format_at(&self, at: NaiveDateTime, offset: i32, weeks: WeekRules) -> String {
         let mut out = String::new();
         for part in &self.parts {
             match part {
                 Part::Lit(s) => out.push_str(s),
-                Part::Tok(t) => out.push_str(&token(*t, date, weeks)),
+                Part::Tok(T::Time(t)) => out.push_str(&t.write(at.time())),
+                Part::Tok(T::Zone { colon }) => out.push_str(&zone(offset, *colon)),
+                Part::Tok(t) => out.push_str(&token(*t, at.date(), weeks)),
             }
         }
         out
@@ -423,7 +497,20 @@ fn token(t: T, d: NaiveDate, weeks: WeekRules) -> String {
         }
         T::Week { iso, len } => pad(i64::from(rules(iso).week_of(d).1), usize::from(len)),
         T::WeekOrd { iso } => ordinal(rules(iso).week_of(d).1),
-        T::Time(s) => s.to_owned(),
+        T::Time(t) => t.write(NaiveTime::MIN),
+        T::Zone { colon } => zone(0, colon),
+    }
+}
+
+/// An offset east of UTC as Moment's `Z` (`+01:00`) or `ZZ` (`+0100`).
+fn zone(offset: i32, colon: bool) -> String {
+    let sign = if offset < 0 { '-' } else { '+' };
+    let m = offset.unsigned_abs() / 60;
+    let (h, m) = (m / 60, m % 60);
+    if colon {
+        format!("{sign}{h:02}:{m:02}")
+    } else {
+        format!("{sign}{h:02}{m:02}")
     }
 }
 
@@ -514,10 +601,11 @@ fn read(parts: &[Part], text: &str, f: Fields) -> Option<Fields> {
                 .collect();
             names(text, &list)
         }
-        T::Time(s) => text
-            .strip_prefix(s)
+        T::Time(t) => text
+            .strip_prefix(t.write(NaiveTime::MIN).as_str())
             .map(|r| vec![(0, r)])
             .unwrap_or_default(),
+        T::Zone { .. } => Vec::new(),
     };
     options.into_iter().find_map(|(n, rest)| {
         let mut f = f;
@@ -559,7 +647,8 @@ fn read(parts: &[Part], text: &str, f: Fields) -> Option<Fields> {
             | T::LocaleWeekday
             | T::IsoWeekday
             | T::WeekdayName(_)
-            | T::Time(_) => true,
+            | T::Time(_)
+            | T::Zone { .. } => true,
         };
         if ok { read(rest_parts, rest, f) } else { None }
     })

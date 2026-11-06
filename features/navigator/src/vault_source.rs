@@ -284,6 +284,39 @@ impl VaultSource {
                 let changed = vault.edit_tags_everywhere(&TagEdit::Delete(tag))?;
                 self.modified(&changed);
             }
+            FileOp::Copy { from, to } => {
+                let changes = vault.copy_file(from, to)?;
+                self.changed(&changes);
+            }
+            FileOp::CopyFolder { from, to } => {
+                let changes = vault.copy_folder(from, to)?;
+                self.changed(&changes);
+            }
+            // One event for the folder; the notes whose links followed
+            // changed too.
+            FileOp::MoveFolder { from, to } => {
+                let renamed = vault.move_folder(from, to)?;
+                new_folders(self);
+                self.emit(&SourceEvent::FolderRenamed {
+                    from: from.clone(),
+                    to: to.clone(),
+                });
+                let relinked: Vec<String> = renamed
+                    .into_iter()
+                    .flat_map(|r| r.relinked)
+                    .filter(|p| !p.starts_with(&format!("{to}/")))
+                    .collect();
+                self.modified(&relinked);
+            }
+            FileOp::Trash(path) => {
+                let was_folder = before.contains(path);
+                let (changes, _) = vault.trash(path)?;
+                if was_folder {
+                    self.emit(&SourceEvent::FolderDeleted(path.clone()));
+                } else {
+                    self.changed(&changes);
+                }
+            }
         }
         Ok(())
     }
@@ -337,6 +370,10 @@ impl NavigatorSource for VaultSource {
             .map(|abs| file_url(&abs))
     }
 
+    fn can_write(&self) -> bool {
+        true
+    }
+
     fn write(&self, ops: &[FileOp]) -> Result<(), String> {
         ops.iter().try_for_each(|op| self.write_one(op))
     }
@@ -351,6 +388,10 @@ impl NavigatorSource for VaultSource {
                 .map(|h| h.path)
                 .collect(),
         )
+    }
+
+    fn read_text(&self, path: &str) -> Option<String> {
+        self.inner.vault.text(path)
     }
 
     fn subscribe(&self, listener: Listener) -> Subscription {

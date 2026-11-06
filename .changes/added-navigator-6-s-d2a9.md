@@ -1,0 +1,10 @@
+---
+"architect-app" = "minor"
+"architect-navigator" = "major"
+"architect-navigator-extension" = "minor"
+"vault" = "minor"
+---
+
+Added Navigator 6's file operations and templates (#339): notes, folders, canvases and bases made (NavigatorState::new_note, NewNote, NewKind, Made; new_folder), renamed in place with name warnings (rename_file, rename_folder, check_name), moved, copied, duplicated, merged and put in the trash (move_files, copy_files, move_folder, duplicate, duplicate_folder, merge, MergeSeparator, trash), Open all notes (open_all, OPEN_ALL_WARNING), drops on folders with the copy key, spring-loaded folders and shortcuts dragged to reorder (drop_on_shortcuts, spring_open), the built-in template engine with folder templates and create-note commands (architect_navigator::template: render, Templates, FolderTemplate, TemplateCommand; periodic note templates; ViewState::templates), search highlighting (search::highlights, FilterSearch::tag_match, SearchMatch), FileOp::Copy, MoveFolder, CopyFolder and Trash, NavigatorSource::read_text and can_write, OpenVault::copy_file, move_folder, copy_folder and trash, and the actions NAVIGATOR_NEW_NOTE, NAVIGATOR_NEW_FOLDER, NAVIGATOR_RENAME, NAVIGATOR_DUPLICATE, NAVIGATOR_MOVE_TO, NAVIGATOR_COPY_TO, NAVIGATOR_DELETE, NAVIGATOR_MERGE, NAVIGATOR_OPEN_ALL, NAVIGATOR_OPEN_SELECTED, NAVIGATOR_FOLDER_TEMPLATE, NAVIGATOR_TEMPLATE_COMMANDS and NAVIGATOR_TEMPLATE_COMMAND
+
+Migration: `NavigatorState::drop_on` takes a third argument, `copy` (`false` for what it did before); `state::Drag` has `Folder` and `Shortcut`. `ui::Open` has a `cursor` field (`None` when you build one). `ui::Navigator::ask` is a `Signal<Option<ui::Ask>>` (text, OK word, and `ui::AskThen`) in place of `(String, Outcome)`; ask with `Navigator::ask`. `NavigatorView` draws New note in the list's header whenever the source `can_write`, from the navigator's own `new_note` (folder templates) unless `on_new_note` is given. `pattern::Pattern`'s time tokens write the time with `format_at`, and `Z`/`ZZ` are its zone, no longer letters.

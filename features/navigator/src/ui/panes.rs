@@ -12,7 +12,7 @@ use lucide_dioxus::{
 use super::calendar::Calendar;
 use super::tree_rows::{self, ItemRow, RowIcon};
 use super::virtual_pane::VirtualPane;
-use super::{Navigator, Open};
+use super::{Navigator, Open, Renaming};
 use crate::index::NoteCount;
 use crate::layout::Pane;
 use crate::list::{self, Clock, Lines, ListRowKind, Thumb};
@@ -139,6 +139,8 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     let root_level = u16::from(s.settings().show_root);
     let tag_root_level = u16::from(s.settings().all_tags_row);
     let over = nav.drag.read().as_ref().and_then(|d| d.over.clone());
+    let renaming = nav.renaming.read().clone();
+    let search = s.search().clone();
     let active = s.active().map(str::to_owned);
     // Collected, so the state is let go before the rows are drawn.
     #[allow(clippy::needless_collect)]
@@ -175,9 +177,11 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
             if let NavRowKind::Banner { src } = row.kind.clone() {
                 tree_rows::BannerRow { key: "{row.key}", nav, src, top, height: h }
             } else if let NavRowKind::Section { id, name, expanded, count } = row.kind.clone() {
-                tree_rows::SectionRow { key: "{row.key}", nav, id, name, expanded, count, top, height: h }
+                tree_rows::SectionRow { key: "{row.key}", nav, id, name, expanded, count, top, height: h,
+                    drop_here: over.as_deref() == Some(row.key.as_str()) }
             } else if let NavRowKind::Shortcut { at, shortcut, name, missing } = row.kind.clone() {
-                tree_rows::ShortcutRow { key: "{row.key}", nav, on_open, at, shortcut, name, missing, reorder: reordering, top, height: h }
+                tree_rows::ShortcutRow { key: "{row.key}", nav, on_open, at, shortcut, name, missing, reorder: reordering, top, height: h,
+                    drop_here: over.as_deref() == Some(row.key.as_str()) }
             } else if let NavRowKind::Recent { path, name } = row.kind.clone() {
                 tree_rows::RecentRow { key: "{row.key}", nav, on_open, active: active.as_deref() == Some(path.as_str()), path, name, top, height: h }
             } else if let NavRowKind::Tag { tag, key, name, has_children, expanded, count } = row.kind.clone() {
@@ -185,6 +189,7 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     key: "{row.key}",
                     nav,
                     on_open,
+                    search: search.tag_match(&tag),
                     selected: target == NavTarget::Tag(tag.clone()),
                     drop_here: over.as_deref() == Some(row.key.as_str()),
                     target: NavTarget::Tag(tag),
@@ -210,6 +215,7 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     key: "{row.key}",
                     nav,
                     on_open,
+                    search: None,
                     selected: target == NavTarget::Property { key: key.clone(), value: value.clone() },
                     drop_here: over.as_deref() == Some(row.key.as_str()),
                     icon: if key == crate::properties::ROOT {
@@ -238,6 +244,8 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     nav,
                     on_open,
                     note,
+                    drop_here: over.as_deref() == Some(row.key.as_str()),
+                    renaming: renaming == Some(Renaming::Folder(path.clone())),
                     selected: selected.as_deref() == Some(path.as_str()),
                     path: path.clone(),
                     name,
@@ -292,22 +300,27 @@ fn FolderRow(
     height: f64,
     indent: f64,
     reorder: bool,
+    /// Under a drag that it takes.
+    drop_here: bool,
+    /// Its name is being edited.
+    renaming: bool,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
     let root = path.is_empty();
-    let class = if selected {
-        "nv-row nv-selected"
-    } else {
-        "nv-row"
+    let class = match (selected, drop_here) {
+        (_, true) => "nv-row nv-drop-target",
+        (true, false) => "nv-row nv-selected",
+        (false, false) => "nv-row",
     };
     let name_weight = if root { 600 } else { 400 };
     let (p1, p2, p3, p4) = (path.clone(), path.clone(), name.clone(), name.clone());
-    let p5 = path.clone();
+    let (p5, p6, p7) = (path.clone(), path.clone(), path.clone());
     rsx! {
         div {
             class,
             role: "treeitem",
             "data-folder": "{path}",
+            "data-drop-zone": "folder",
             "aria-selected": if selected { "true" } else { "false" },
             "aria-expanded": if has_children { if expanded { "true" } else { "false" } } else { "" },
             "aria-level": "{level}",
@@ -326,6 +339,14 @@ fn FolderRow(
                 let mut menu = nav.menu;
                 menu.set(Some(tree_rows::RowMenu { target: NavTarget::Folder(p5.clone()), top: top + height }));
             },
+            // Dragged onto another folder: moved into it (the root stays).
+            onpointerdown: move |e: PointerEvent| {
+                if !p6.is_empty() && !renaming {
+                    tree_rows::start_drag(nav, crate::state::Drag::Folder(p6.clone()), &e);
+                }
+            },
+            onpointermove: move |e: PointerEvent| tree_rows::drag_move(nav, &e),
+            onpointerup: move |_| tree_rows::drag_end(nav, on_open),
             // The chevron opens and closes without selecting.
             div {
                 class: "nv-chevron",
@@ -344,10 +365,14 @@ fn FolderRow(
             span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);",
                 if root { Vault { size: 15 } } else if expanded { FolderOpen { size: 15 } } else { Folder { size: 15 } }
             }
-            span { class: if note { "nv-name nv-has-note" } else { "nv-name" },
-                "data-folder-note": if note { "true" } else { "false" },
-                style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight};",
-                "{name}"
+            if renaming {
+                tree_rows::InlineRename { nav, on_open, what: Renaming::Folder(p7), value: name }
+            } else {
+                span { class: if note { "nv-name nv-has-note" } else { "nv-name" },
+                    "data-folder-note": if note { "true" } else { "false" },
+                    style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight};",
+                    "{name}"
+                }
             }
             if note {
                 span { class: "nv-folder-note", "aria-label": "Has a folder note", style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", FileText { size: 12 } }
@@ -413,6 +438,7 @@ pub(super) fn ListPane(
         _ => String::new(),
     };
     let empty = s.list_order().is_empty();
+    let writable = nav.source().can_write();
     let searching = s.search_open || !s.search().text().is_empty();
     drop(s);
     let own = *nav.own.read() || has_own;
@@ -439,9 +465,14 @@ pub(super) fn ListPane(
                 span { class: "nv-title", style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; padding:0 4px;", "{title}" }
                 // Notebook Navigator's "New note" in the list's header: in
                 // the folder on show.
-                if let Some(new_note) = on_new_note {
+                // The app's, when it gave one; else the navigator's own,
+                // from the folder's template.
+                if on_new_note.is_some() || writable {
                     button { class: "nv-tool", "aria-label": "New note", "data-testid": "nv-new-note",
-                        onclick: move |_| new_note.call(new_in.clone()),
+                        onclick: move |_| match on_new_note {
+                            Some(new_note) => new_note.call(new_in.clone()),
+                            None => nav.new_note(crate::state::NewNote { folder: new_in.clone(), ..Default::default() }, on_open),
+                        },
                         SquarePen { size: 16 }
                     }
                 }
@@ -555,6 +586,13 @@ fn ListRows(
     let active = s.active().map(str::to_owned);
     let target = s.target();
     let source = nav.source();
+    // The search's words, marked in the names they matched (the filter
+    // search's; the full text's are in the text).
+    let marked: Vec<String> = if s.settings().search_provider == crate::SearchProvider::Filter {
+        s.search().words().to_vec()
+    } else {
+        Vec::new()
+    };
     // Collected, so the state is let go before the rows are drawn.
     #[allow(clippy::needless_collect)]
     let rows: Vec<_> = window
@@ -593,6 +631,7 @@ fn ListRows(
                     let tags = list::shown_tags(f, &cx)
                         .into_iter()
                         .map(|(full, shown)| Pill {
+                            search: s.search().tag_match(full),
                             key: full.to_owned(),
                             text: shown.to_owned(),
                             colour: settings
@@ -610,6 +649,7 @@ fn ListRows(
                         list::shown_properties(f, &settings)
                             .into_iter()
                             .map(|(k, v)| Pill {
+                                search: None,
                                 colour: s
                                     .colour(&format!("property:{k}={v}"))
                                     .or_else(|| s.colour(&format!("property:{k}")))
@@ -629,6 +669,7 @@ fn ListRows(
                             key: "words".to_owned(),
                             text: w.clone(),
                             colour: None,
+                            search: None,
                         });
                     }
                     let image = thumb.as_ref().map(|t| match t {
@@ -638,9 +679,11 @@ fn ListRows(
                         Thumb::Url(u) => ThumbView::Url(u.clone()),
                         Thumb::Badge(b) => ThumbView::Badge(b.clone()),
                     });
+                    let name = f.title(&settings.name_fields()).to_owned();
                     Some(Item::File(FileItem {
                         path: path.clone(),
-                        name: f.title(&settings.name_fields()).to_owned(),
+                        marks: crate::search::highlights(&name, &marked),
+                        name,
                         preview: f.preview.clone().unwrap_or_default(),
                         date: date_label(at, clock),
                         parent: parent.clone(),
@@ -742,6 +785,8 @@ struct Pill {
     key: String,
     text: String,
     colour: Option<String>,
+    /// A tag the search names (`searchMatchTerms`).
+    search: Option<crate::SearchMatch>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -754,6 +799,8 @@ enum ThumbView {
 struct FileItem {
     path: String,
     name: String,
+    /// Where the search's words are in it (byte ranges).
+    marks: Vec<std::ops::Range<usize>>,
     preview: String,
     date: String,
     parent: Option<String>,
@@ -783,6 +830,7 @@ fn FileRow(
     let FileItem {
         path,
         name,
+        marks,
         preview,
         date,
         parent,
@@ -805,6 +853,8 @@ fn FileRow(
         "nv-row nv-file"
     };
     let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
+    let renaming = nav.renaming.read().as_ref() == Some(&Renaming::File(path.clone()));
+    let p4 = path.clone();
     let title_h = f64::from(lines.title) * 20.0;
     let preview_h = f64::from(lines.preview) * 18.0;
     let weight = if open { 700 } else { 600 };
@@ -849,6 +899,9 @@ fn FileRow(
             // Dragged onto a tag or a property: the selected notes when it
             // is one of them, else it alone.
             onpointerdown: move |e: PointerEvent| {
+                if renaming {
+                    return;
+                }
                 let paths: Vec<String> = {
                     let s = nav.state.peek();
                     if s.selection().is_selected(&p3) {
@@ -863,10 +916,24 @@ fn FileRow(
             onpointerup: move |_| tree_rows::drag_end(nav, on_open),
             div { class: "nv-file-body", style: "flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:{justify};",
                 div { class: "nv-file-title", style: "flex:0 0 auto; display:flex; align-items:baseline; gap:6px; min-width:0;",
-                    div { class: "nv-file-name",
-                        style: "flex:1 1 auto; min-width:0; max-height:{title_h}px; line-height:20px; overflow:hidden; text-overflow:ellipsis; \
-                                white-space:{wrap}; font-weight:{weight}; color:var(--nv-text);",
-                        "{name}"
+                    if renaming {
+                        tree_rows::InlineRename { nav, on_open, what: Renaming::File(p4), value: name }
+                    } else {
+                        div { class: "nv-file-name",
+                            style: "flex:1 1 auto; min-width:0; max-height:{title_h}px; line-height:20px; overflow:hidden; text-overflow:ellipsis; \
+                                    white-space:{wrap}; font-weight:{weight}; color:var(--nv-text);",
+                            if marks.is_empty() {
+                                "{name}"
+                            } else {
+                                for (i, (text, mark)) in marked_parts(&name, &marks).into_iter().enumerate() {
+                                    if mark {
+                                        mark { key: "{i}", class: "nv-search-highlight", "{text}" }
+                                    } else {
+                                        span { key: "{i}", "{text}" }
+                                    }
+                                }
+                            }
+                        }
                     }
                     if let Some(w) = words {
                         span { class: "nv-file-count", style: "flex:0 0 auto; font-size:11px; color:var(--nv-faint);", "{w}" }
@@ -929,6 +996,23 @@ fn FileRow(
     }
 }
 
+/// `text` cut at `marks`: each part, and whether it is marked.
+fn marked_parts(text: &str, marks: &[std::ops::Range<usize>]) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    for m in marks {
+        if m.start > at {
+            out.push((text.get(at..m.start).unwrap_or("").to_owned(), false));
+        }
+        out.push((text.get(m.clone()).unwrap_or("").to_owned(), true));
+        at = m.end;
+    }
+    if at < text.len() {
+        out.push((text.get(at..).unwrap_or("").to_owned(), false));
+    }
+    out
+}
+
 /// Done over all, as a percentage.
 fn progress(done: u32, total: u32) -> f64 {
     if total == 0 {
@@ -950,8 +1034,13 @@ fn pill_style(colour: Option<&str>) -> String {
 #[component]
 fn TagPill(nav: Navigator, pill: Pill) -> Element {
     let tag = pill.key.clone();
+    let class = match pill.search {
+        Some(crate::SearchMatch::Include) => "nv-pill nv-tag nv-search-include",
+        Some(crate::SearchMatch::Exclude) => "nv-pill nv-tag nv-search-exclude",
+        None => "nv-pill nv-tag",
+    };
     rsx! {
-        span { class: "nv-pill nv-tag", "data-tag": "{pill.key}", role: "link",
+        span { class, "data-tag": "{pill.key}", role: "link",
             style: pill_style(pill.colour.as_deref()),
             onclick: move |e: MouseEvent| {
                 e.stop_propagation();

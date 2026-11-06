@@ -24,6 +24,9 @@ use std::time::Duration;
 
 use architect_extensions::linked::{Builder, Extension, Handle};
 use architect_navigator::state::Drag;
+use architect_navigator::state::{Made, MergeSeparator, NewKind, NewNote};
+use architect_navigator::template::{CommandLocation, TemplateCommand};
+use architect_navigator::ui::Renaming;
 use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
 use architect_navigator::{
     CalendarGrid, Grouping, HeaderPeriod, Join, ListMode, ListRowKind, MemorySource, Mods,
@@ -145,6 +148,19 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_SELECT_PROFILE_1",
     "NAVIGATOR_SELECT_PROFILE_2",
     "NAVIGATOR_SELECT_PROFILE_3",
+    "NAVIGATOR_NEW_NOTE",
+    "NAVIGATOR_NEW_FOLDER",
+    "NAVIGATOR_RENAME",
+    "NAVIGATOR_DUPLICATE",
+    "NAVIGATOR_MOVE_TO",
+    "NAVIGATOR_COPY_TO",
+    "NAVIGATOR_DELETE",
+    "NAVIGATOR_MERGE",
+    "NAVIGATOR_OPEN_ALL",
+    "NAVIGATOR_OPEN_SELECTED",
+    "NAVIGATOR_FOLDER_TEMPLATE",
+    "NAVIGATOR_TEMPLATE_COMMANDS",
+    "NAVIGATOR_TEMPLATE_COMMAND",
 ];
 
 impl Extension for NavigatorExtension {
@@ -589,12 +605,21 @@ fn run(
             write(&nav, on_open, out)
         }
         "NAVIGATOR_DROP" => {
-            let drag = text(args, "drag_tag").map_or_else(
-                || Drag::Notes(paths_of(args, &nav.state.peek())),
-                |t| Drag::Tag(t.to_owned()),
+            let drag = text(args, "drag_folder").map_or_else(
+                || {
+                    text(args, "drag_tag").map_or_else(
+                        || Drag::Notes(paths_of(args, &nav.state.peek())),
+                        |t| Drag::Tag(t.to_owned()),
+                    )
+                },
+                |f| Drag::Folder(f.trim_matches('/').to_owned()),
             );
-            let on = target_of(args)?;
-            let out = nav.state.peek().drop_on(&drag, &on)?;
+            let on = match args.get("to").and_then(Value::as_str) {
+                Some(f) => NavTarget::Folder(f.trim_matches('/').to_owned()),
+                None => target_of(args)?,
+            };
+            let copy = flag(args, "copy") == Some(true);
+            let out = nav.state.peek().drop_on(&drag, &on, copy)?;
             write(&nav, on_open, out)
         }
         "NAVIGATOR_SEARCH" => {
@@ -743,8 +768,292 @@ fn run(
             nav.update(|s| s.select_profile(n))?;
             Ok(profile_state(&nav.state.peek()))
         }
+        _ => files(&nav, on_open, id, args),
+    }
+}
+
+/// The paths an action is about, from `paths`, `path` or `folder`; else
+/// the notes selected.
+fn targets(args: &Value, s: &NavigatorState) -> Vec<String> {
+    if let Some(f) =
+        text(args, "folder").filter(|_| args.get("paths").is_none() && text(args, "path").is_none())
+    {
+        return vec![f.trim_matches('/').to_owned()];
+    }
+    paths_of(args, s)
+}
+
+/// A request for a new note from an action's args.
+fn new_note_of(args: &Value, s: &NavigatorState) -> Result<NewNote, String> {
+    let kind = match text(args, "kind").unwrap_or("note") {
+        "note" => NewKind::Note,
+        "canvas" => NewKind::Canvas,
+        "base" => NewKind::Base,
+        other => return Err(format!("no kind {other:?} (note, canvas, base)")),
+    };
+    let prompts = args
+        .get("prompts")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(NewNote {
+        folder: text(args, "folder")
+            .map_or_else(|| s.current_folder(), |f| f.trim_matches('/').to_owned()),
+        kind,
+        template: text(args, "template").map(str::to_owned),
+        no_template: flag(args, "no_template") == Some(true),
+        name_format: text(args, "name_format").map(str::to_owned),
+        name: text(args, "name").map(str::to_owned),
+        prompts,
+        how: if flag(args, "tab") == Some(true) {
+            OpenIn::Tab
+        } else {
+            OpenIn::Here
+        },
+        date: None,
+    })
+}
+
+/// A note made, as an action answers it: its path, the cursor, what to
+/// say; or the prompts it needs answered.
+fn made(nav: &Navigator, on_open: EventHandler<Open>, m: Made) -> Result<Value, String> {
+    match m {
+        Made::Ask(labels) => Err(format!(
+            "answer its prompts first: `prompts` {{{}}}",
+            labels
+                .iter()
+                .map(|l| format!("\"{l}\": \"…\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+        Made::Done {
+            out,
+            cursor,
+            warning,
+        } => {
+            let path = match &out {
+                Outcome::Write {
+                    open: Some((p, _)), ..
+                } => p.clone(),
+                _ => String::new(),
+            };
+            nav.write(out, on_open, cursor)?;
+            Ok(json!({ "path": path, "cursor": cursor, "warning": warning }))
+        }
+    }
+}
+
+/// The file operations and templates (#339).
+fn files(
+    nav: &Navigator,
+    on_open: EventHandler<Open>,
+    id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let nav = *nav;
+    let ok = |nav: Navigator| Ok(state(&nav.state.peek()));
+    let done = |out: Result<Outcome, String>| -> Result<Value, String> {
+        nav.write(out?, on_open, None)?;
+        Ok(state(&nav.state.peek()))
+    };
+    match id {
+        "NAVIGATOR_NEW_NOTE" => {
+            let req = new_note_of(args, &nav.state.peek())?;
+            let m = nav.state.peek().new_note(&req)?;
+            made(&nav, on_open, m)
+        }
+        "NAVIGATOR_NEW_FOLDER" => {
+            let name = text(args, "name").ok_or("the folder's `name`?")?;
+            let parent = text(args, "parent").map_or_else(
+                || nav.state.peek().current_folder(),
+                |p| p.trim_matches('/').to_owned(),
+            );
+            done(nav.state.peek().new_folder(&parent, name))
+        }
+        "NAVIGATOR_RENAME" => {
+            let folder = text(args, "folder").filter(|_| text(args, "path").is_none());
+            match (text(args, "name"), folder) {
+                (Some(name), Some(f)) => done(nav.state.peek().rename_folder(f, name)),
+                (Some(name), None) => {
+                    let p = one_path(args, &nav.state.peek())?;
+                    done(nav.state.peek().rename_file(&p, name))
+                }
+                // No name: its name is edited in place.
+                (None, f) => {
+                    let what = match f {
+                        Some(f) => Renaming::Folder(f.trim_matches('/').to_owned()),
+                        None => Renaming::File(one_path(args, &nav.state.peek())?),
+                    };
+                    let mut renaming = nav.renaming;
+                    renaming.set(Some(what));
+                    ok(nav)
+                }
+            }
+        }
+        "NAVIGATOR_DUPLICATE" => {
+            if let Some(f) = text(args, "folder").filter(|_| text(args, "path").is_none()) {
+                done(nav.state.peek().duplicate_folder(f))
+            } else {
+                let p = one_path(args, &nav.state.peek())?;
+                done(nav.state.peek().duplicate(&p))
+            }
+        }
+        "NAVIGATOR_MOVE_TO" | "NAVIGATOR_COPY_TO" => {
+            let Some(to) = args.get("to").and_then(Value::as_str) else {
+                // No folder named: asked for.
+                let paths = paths_of(args, &nav.state.peek());
+                let mut prompt = nav.prompt;
+                prompt.set(Some(architect_navigator::ui::Prompt::move_to(paths)));
+                return ok(nav);
+            };
+            let to = to.trim_matches('/');
+            let s = nav.state.peek();
+            let out = match (text(args, "folder"), id) {
+                (Some(f), "NAVIGATOR_MOVE_TO")
+                    if text(args, "path").is_none() && args.get("paths").is_none() =>
+                {
+                    s.move_folder(f, to)
+                }
+                (_, "NAVIGATOR_MOVE_TO") => s.move_files(&paths_of(args, &s), to),
+                _ => s.copy_files(&paths_of(args, &s), to),
+            };
+            drop(s);
+            done(out)
+        }
+        "NAVIGATOR_DELETE" => {
+            let paths = targets(args, &nav.state.peek());
+            if flag(args, "confirm") == Some(false) {
+                done(nav.state.peek().trash(&paths))
+            } else {
+                nav.trash(&paths, on_open);
+                ok(nav)
+            }
+        }
+        "NAVIGATOR_MERGE" => {
+            let paths = if args.get("paths").is_some() {
+                paths_of(args, &nav.state.peek())
+            } else {
+                nav.state.peek().selected_in_order()
+            };
+            let sep = match text(args, "separator") {
+                Some(t) => MergeSeparator::parse(t).ok_or_else(|| {
+                    format!("no separator {t:?} (none, blank-line, horizontal-rule, heading)")
+                })?,
+                None => MergeSeparator::BlankLine,
+            };
+            let name = text(args, "name").unwrap_or("Merged");
+            done(nav.state.peek().merge(
+                &paths,
+                name,
+                text(args, "into"),
+                sep,
+                flag(args, "trash") == Some(true),
+            ))
+        }
+        "NAVIGATOR_OPEN_ALL" | "NAVIGATOR_OPEN_SELECTED" => {
+            if let Some(f) = text(args, "folder") {
+                let out = nav.update(|s| s.click_folder(f.trim_matches('/')));
+                nav.act(out, on_open);
+            }
+            let paths = if id == "NAVIGATOR_OPEN_ALL" {
+                nav.state.peek().open_all()?
+            } else {
+                nav.state.peek().selected_in_order()
+            };
+            let n = paths.len();
+            if flag(args, "confirm") == Some(false) {
+                nav.then(architect_navigator::ui::AskThen::OpenAll(paths), on_open);
+            } else {
+                nav.open_many(paths, on_open);
+            }
+            Ok(json!({ "notes": n }))
+        }
+        "NAVIGATOR_FOLDER_TEMPLATE" => {
+            let folder = text(args, "folder")
+                .unwrap_or("")
+                .trim_matches('/')
+                .to_owned();
+            let template = args
+                .get("template")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let below = flag(args, "subfolders").unwrap_or(true);
+            nav.update(|s| s.edit_templates(|t| t.set_folder(&folder, &template, below)));
+            Ok(templates_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_TEMPLATE_COMMANDS" => {
+            if let Some(name) = text(args, "add") {
+                let location = if text(args, "folder").is_some() {
+                    CommandLocation::Folder
+                } else {
+                    CommandLocation::Current
+                };
+                let n = nav.state.peek().templates().commands.len();
+                let c = TemplateCommand {
+                    id: text(args, "id")
+                        .map_or_else(|| format!("c{}", n.saturating_add(1)), str::to_owned),
+                    name: name.to_owned(),
+                    template: text(args, "template").unwrap_or("").to_owned(),
+                    name_format: text(args, "name_format").unwrap_or("").to_owned(),
+                    location,
+                    folder: text(args, "folder").unwrap_or("").to_owned(),
+                };
+                if nav
+                    .state
+                    .peek()
+                    .templates()
+                    .command(&c.id)
+                    .is_some_and(|x| x.id == c.id)
+                {
+                    return Err(format!("there is a command {:?} already", c.id));
+                }
+                nav.update(|s| s.edit_templates(|t| t.commands.push(c)));
+            } else if let Some(which) = text(args, "remove") {
+                let id = nav
+                    .state
+                    .peek()
+                    .templates()
+                    .command(which)
+                    .map(|c| c.id.clone())
+                    .ok_or_else(|| format!("no create-note command {which:?}"))?;
+                nav.update(|s| s.edit_templates(|t| t.commands.retain(|c| c.id != id)));
+            }
+            Ok(templates_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_TEMPLATE_COMMAND" => {
+            let which = text(args, "id").ok_or("which command? (`id`, its name or number)")?;
+            let mut req = nav
+                .state
+                .peek()
+                .template_command_request(which, OpenIn::Here)?;
+            let asked = new_note_of(args, &nav.state.peek())?;
+            req.prompts = asked.prompts;
+            let m = nav.state.peek().new_note(&req)?;
+            made(&nav, on_open, m)
+        }
         other => Err(format!("Navigator has no action {other}")),
     }
+}
+
+/// The templates as `NAVIGATOR_FOLDER_TEMPLATE` and
+/// `NAVIGATOR_TEMPLATE_COMMANDS` answer them.
+fn templates_state(s: &NavigatorState) -> Value {
+    let t = s.templates();
+    json!({
+        "folders": t.folders.iter().map(|f| json!({
+            "folder": f.folder, "template": f.template, "subfolders": f.subfolders,
+        })).collect::<Vec<_>>(),
+        "commands": t.commands.iter().map(|c| json!({
+            "id": c.id, "name": c.name, "template": c.template, "name_format": c.name_format,
+            "location": match c.location { CommandLocation::Current => "current", CommandLocation::Folder => "folder" },
+            "folder": c.folder,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 /// The search as `NAVIGATOR_SEARCH` answers it: its text, whether it is

@@ -299,6 +299,95 @@ impl FilterSearch {
     }
 }
 
+/// How a tag stands in the search (`SearchMatchState`): taken in by a
+/// `#tag` on it or above it, left out by a `-#tag`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchMatch {
+    Include,
+    Exclude,
+}
+
+impl FilterSearch {
+    /// How tag `tag` stands in the search, for its row and its pills
+    /// (`TagTreeItem`'s search classes); `None` when no term names it.
+    #[must_use]
+    pub fn tag_match(&self, tag: &str) -> Option<SearchMatch> {
+        let tag = fold_tag(tag);
+        let named = |want: &str| tag_matches(&tag, want);
+        let (mut inc, mut exc) = (
+            self.tags.iter().any(|t| named(t)),
+            self.not_tags.iter().any(|t| named(t)),
+        );
+        for (_, o) in self.expression.iter().flatten() {
+            match o {
+                Operand::Tag(Some(t)) => inc |= named(t),
+                Operand::NotTag(Some(t)) => exc |= named(t),
+                _ => {}
+            }
+        }
+        if exc {
+            Some(SearchMatch::Exclude)
+        } else if inc {
+            Some(SearchMatch::Include)
+        } else {
+            None
+        }
+    }
+}
+
+/// Where `words` (folded, as [`FilterSearch::words`]) are in `text`: byte
+/// ranges of `text`, in order, overlaps merged
+/// (`getFoldedSearchHighlightRanges`). A folded-out accent belongs to the
+/// letter before it.
+#[must_use]
+pub fn highlights(text: &str, words: &[String]) -> Vec<std::ops::Range<usize>> {
+    // Each byte of the folded text, and the source character it came from.
+    let mut folded = String::new();
+    let mut from: Vec<std::ops::Range<usize>> = Vec::new();
+    for (at, c) in text.char_indices() {
+        let end = at.saturating_add(c.len_utf8());
+        let piece = fold(&c.to_string());
+        if piece.is_empty() {
+            if let Some(last) = from.last_mut() {
+                let start = last.start;
+                for r in from.iter_mut().rev().take_while(|r| r.start == start) {
+                    r.end = end;
+                }
+            }
+            continue;
+        }
+        for _ in 0..piece.len() {
+            from.push(at..end);
+        }
+        folded.push_str(&piece);
+    }
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for w in words.iter().filter(|w| !w.is_empty()) {
+        if !seen.insert(w.as_str()) {
+            continue;
+        }
+        let mut at = 0;
+        while let Some(i) = folded.get(at..).and_then(|r| r.find(w.as_str())) {
+            let fs = at.saturating_add(i);
+            let fe = fs.saturating_add(w.len());
+            if let (Some(a), Some(b)) = (from.get(fs), from.get(fe.saturating_sub(1))) {
+                ranges.push(a.start..b.end);
+            }
+            at = fe;
+        }
+    }
+    ranges.sort_by_key(|r| (r.start, r.end));
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
+    for r in ranges {
+        match merged.last_mut() {
+            Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+            _ => merged.push(r),
+        }
+    }
+    merged
+}
+
 /// Text in any case, Latin accents folded (`foldSearchText`).
 #[must_use]
 pub fn fold(text: &str) -> String {

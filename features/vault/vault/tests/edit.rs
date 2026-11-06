@@ -135,3 +135,65 @@ fn the_watcher_hears_an_outside_edit_and_not_the_apps_own() {
     assert_eq!(v.text("Ionian.md").as_deref(), Some("Pulled.\n"));
     drop(watch);
 }
+
+#[test]
+fn a_copy_keeps_the_text_and_the_original() {
+    let (tmp, v) = vault();
+    let c = v.copy_file("Ionian.md", "Notes/Ionian 1.md").unwrap();
+    assert_eq!(c.created, ["Notes/Ionian 1.md"]);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("Notes/Ionian 1.md")).unwrap(),
+        "# Ionian\nThe major scale.\n"
+    );
+    assert!(tmp.path().join("Ionian.md").exists());
+    assert!(v.copy_file("Ionian.md", "Notes/Modes.md").is_err(), "taken");
+    assert!(
+        v.copy_file("Ionian.md", "../out.md").is_err(),
+        "out of the vault"
+    );
+}
+
+#[test]
+fn a_folder_moves_with_its_notes_and_files_and_links_by_path_follow() {
+    let (tmp, v) = vault();
+    let root = tmp.path();
+    std::fs::write(root.join("Notes/pic.png"), b"png").unwrap();
+    std::fs::write(root.join("Links.md"), "[[Notes/Other]] and [[Other]]\n").unwrap();
+    v.refresh().unwrap();
+    let moved = v.move_folder("Notes", "Archive/Notes").unwrap();
+    let mut tos: Vec<&str> = moved.iter().map(|r| r.to.as_str()).collect();
+    tos.sort_unstable();
+    assert_eq!(tos, ["Archive/Notes/Modes.md", "Archive/Notes/Other.md"]);
+    assert!(!root.join("Notes").exists());
+    assert!(root.join("Archive/Notes/pic.png").exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("Links.md")).unwrap(),
+        "[[Archive/Notes/Other]] and [[Other]]\n"
+    );
+    assert!(v.folders().contains("Archive/Notes"));
+    assert!(
+        v.move_folder("Archive", "Archive/In").is_err(),
+        "into itself"
+    );
+    assert!(v.move_folder("Archive", "Empty").is_err(), "taken");
+}
+
+#[test]
+fn a_folder_copies_and_things_go_to_the_trash_numbered() {
+    let (tmp, v) = vault();
+    let root = tmp.path();
+    v.copy_folder("Notes", "Notes 1").unwrap();
+    assert!(root.join("Notes 1/Modes.md").exists());
+    assert!(root.join("Notes/Modes.md").exists());
+    let (c, at) = v.trash("Notes 1/Modes.md").unwrap();
+    assert_eq!(c.removed, ["Notes 1/Modes.md"]);
+    assert_eq!(at, ".trash/Modes.md");
+    let (_, again) = v.trash("Notes/Modes.md").unwrap();
+    assert_eq!(again, ".trash/Modes 1.md");
+    let (c, at) = v.trash("Notes 1").unwrap();
+    assert_eq!(at, ".trash/Notes 1");
+    assert_eq!(c.folders_removed, ["Notes 1"]);
+    assert!(root.join(".trash/Notes 1/Other.md").exists());
+    assert!(v.with(|v| v.pages.iter().all(|p| !p.rel_path.starts_with(".trash"))));
+    assert!(v.trash("Nothing.md").is_err());
+}
