@@ -24,6 +24,8 @@ serde_json = { workspace = true }
 futures-timer = { workspace = true }
 # An action's answer, from the view that did it.
 futures-channel = "0.3"
+# The calendar's days, in its actions' arguments and answers.
+chrono = { workspace = true }
 
 [dev-dependencies]
 architect = { workspace = true, features = ["action-list"] }

@@ -215,3 +215,58 @@ fn a_click_on_a_folder_lists_it_and_a_click_on_a_note_opens_it() {
         1
     );
 }
+
+#[test]
+fn the_calendar_draws_days_and_a_click_opens_or_makes_their_notes() {
+    use chrono::Datelike as _;
+    let today = chrono::Local::now().date_naive();
+    // Today's daily note (Notebook Navigator's default pattern), and the
+    // week's other days empty.
+    let path_of = |d: chrono::NaiveDate| format!("{}/{}.md", d.year(), d.format("%Y%m%d"));
+    let mut note = NoteFile::new(path_of(today), NOW, NOW).preview("Today");
+    note.feature_image = Some("https://example.com/sky.jpg".to_owned());
+    let source = MemorySource::new("Days").with_file(note);
+    let mut doc = mount(Arc::new(source.clone()), 600, false);
+    assert_eq!(count(&doc, ".nv-calendar"), 0);
+    click(&mut doc, "[data-testid=nv-calendar-toggle]");
+    // Side by side: under the folders, one week.
+    assert_eq!(count(&doc, ".nv-nav .nv-calendar"), 1);
+    assert_eq!(count(&doc, ".nv-cal-day"), 7);
+    assert_eq!(count(&doc, ".nv-cal-day.is-today"), 1);
+    assert_eq!(count(&doc, ".nv-cal-day.has-note.has-image"), 1);
+    let (_, _, w, h) = rect(&doc, ".nv-cal-day.is-today");
+    assert!(w > 10.0 && h > 10.0, "{w}×{h}");
+    // A day with a note opens it.
+    click(&mut doc, ".nv-cal-day.is-today");
+    assert_eq!(OPENED.with(|v| v.borrow().clone()), [path_of(today)]);
+    // A day without one asks, then makes it and opens it.
+    let other = if today.weekday() == chrono::Weekday::Sat {
+        today.pred_opt().unwrap()
+    } else {
+        today.succ_opt().unwrap()
+    };
+    click(&mut doc, &format!("[data-date=\"{other}\"]"));
+    assert_eq!(count(&doc, ".nv-confirm"), 1);
+    click(&mut doc, "[data-testid=nv-confirm-create]");
+    assert_eq!(count(&doc, ".nv-confirm"), 0);
+    assert!(source.files().iter().any(|f| f.path == path_of(other)));
+    assert_eq!(
+        OPENED.with(|v| v.borrow().last().cloned()),
+        Some(path_of(other))
+    );
+    // Stacked: under the notes. The whole month: four to six weeks.
+    nav().settings.update(|s| {
+        s.orientation = architect_navigator::Orientation::Vertical;
+        s.calendar_weeks = 6;
+    });
+    settle(&mut doc);
+    assert_eq!(count(&doc, ".nv-list .nv-calendar"), 1);
+    assert_eq!(count(&doc, ".nv-nav .nv-calendar"), 0);
+    let weeks = count(&doc, ".nv-cal-week");
+    assert!((4..=6).contains(&weeks), "{weeks} weeks");
+    // The month's name opens, or here asks to make, the monthly note.
+    click(&mut doc, ".nv-cal-period[data-period=month]");
+    assert_eq!(count(&doc, ".nv-confirm"), 1);
+    click(&mut doc, "[data-testid=nv-confirm-cancel]");
+    assert_eq!(count(&doc, ".nv-confirm"), 0);
+}

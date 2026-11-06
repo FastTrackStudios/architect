@@ -586,7 +586,8 @@ pub fn thumb(index: &VaultIndex, f: &NoteFile, s: &NavigatorSettings) -> Option<
 }
 
 /// An image a property or the source names: a URL (`https` only, as
-/// Notebook Navigator) or a path in the vault (`[[cover.png]]` too).
+/// Notebook Navigator, or a source's `file://`) or a path in the vault
+/// (`[[cover.png]]` too).
 fn image_ref(text: &str) -> Option<Thumb> {
     let t = text.trim();
     let t = t
@@ -597,7 +598,7 @@ fn image_ref(text: &str) -> Option<Thumb> {
     if t.is_empty() || t.starts_with("http://") {
         return None;
     }
-    if t.starts_with("https://") || t.starts_with("data:") {
+    if t.starts_with("https://") || t.starts_with("data:") || t.starts_with("file://") {
         Some(Thumb::Url(t.to_owned()))
     } else {
         Some(Thumb::File(t.to_owned()))

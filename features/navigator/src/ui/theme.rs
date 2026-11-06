@@ -37,6 +37,18 @@ pub const ROLES: &[(&str, &str, &str)] = &[
     // box behind a note's image (`file-tag-bg`, `feature-image-bg`).
     ("navigator.pill", "alpha($ink, 0.07)", "active"),
     ("navigator.thumb", "alpha($ink, 0.05)", "active"),
+    // The calendar: today (`calendar-day-today-bg`, `-color`), the
+    // weekend's shade, a day's note dot (`calendar-note-indicator-color`)
+    // and its tasks-left ring (`calendar-task-indicator-color`).
+    ("navigator.calendar-today", "$brand-soft", "brand-soft"),
+    ("navigator.calendar-today-text", "$brand", "brand"),
+    ("navigator.calendar-weekend", "alpha($ink, 0.04)", "active"),
+    ("navigator.calendar-dot", "$ink-3", "ink-3"),
+    ("navigator.calendar-task", "$brand", "brand"),
+    // A day's number over its feature image, and the shade under it
+    // (`calendar-feature-image-overlay-color`).
+    ("navigator.calendar-image-text", "#ffffff", "sheet"),
+    ("navigator.calendar-image-shade", "alpha(#000000, 0.3)", "active"),
 ];
 
 /// The roles as `(name, default)`, for an app's `App` layer.
@@ -55,6 +67,13 @@ pub const TOKENS: &[(&str, &str)] = &[
     ("navigator.open", "$brand"),
     ("navigator.pill", "alpha($ink, 0.07)"),
     ("navigator.thumb", "alpha($ink, 0.05)"),
+    ("navigator.calendar-today", "$brand-soft"),
+    ("navigator.calendar-today-text", "$brand"),
+    ("navigator.calendar-weekend", "alpha($ink, 0.04)"),
+    ("navigator.calendar-dot", "$ink-3"),
+    ("navigator.calendar-task", "$brand"),
+    ("navigator.calendar-image-text", "#ffffff"),
+    ("navigator.calendar-image-shade", "alpha(#000000, 0.3)"),
 ];
 
 /// `layer` with the navigator's roles added.
