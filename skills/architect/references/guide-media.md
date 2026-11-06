@@ -126,7 +126,7 @@ Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
 | `GUIDE_TOUR_LIST` | the tours on offer `{id, title, safe}` |
 | `GUIDE_TOUR_NEXT` / `_BACK` / `_SKIP` | move it from outside; each move is a `guide` change event |
 | `TOURS_LIST` | the Architect app's: every tour, its own and each running extension's `{id, title, description, extension, label, place}` (`apps/ui/src/guide.rs` `use_extension_tours`) |
-| `TOUR_START {id \| extension, step?, restart?}` | the Architect app's: start one where the person left it (⌘K's "Take the <extension> tour") |
+| `TOUR_START {id \| extension, step?, restart?}` | the Architect app's: start one where the person left it; with neither, ⌘K opens on the tours. The app also gives ⌘K a `tours:` source (`Commands::register_source`): a "Take the <extension> tour" row each |
 
 ## An extension's tour (`[[tours]]`)
 

@@ -756,6 +756,13 @@ impl Extension for TimeTracker {
         include_str!("../extension.toml")
     }
 
+    fn files(&self) -> &'static [(&'static str, &'static str)] {
+        &[(
+            "tours/time-tour.styx",
+            include_str!("../tours/time-tour.styx"),
+        )]
+    }
+
     fn build(&self, ext: &mut Builder) {
         vault::connect(ext.handle());
         // Its navigator provider: running, today, this week, earlier.

@@ -1,7 +1,8 @@
 //! The Architect app's own tours played as tests, over the Architect app
 //! (not the sandbox) on a copy of the demo vault
 //! (`architect_sandbox_media::architect_app`): the capture tour and each
-//! built-in extension's `[[tours]]` (Projects, Tasks, Navigator). Each
+//! built-in extension's `[[tours]]` (Projects, Tasks, Time Tracker,
+//! Navigator). Each
 //! step's setup runs and its target must be on screen, so a tour that
 //! rots fails here. A process of its own: it makes the process the
 //! Architect app for good.
@@ -16,6 +17,7 @@ fn every_architect_tour_plays_as_a_scenario() {
         "capture-tour",
         "projects-tour",
         "tasks-tour",
+        "time-tour",
         "navigator-tour",
     ] {
         assert!(

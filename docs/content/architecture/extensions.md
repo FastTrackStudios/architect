@@ -1897,8 +1897,11 @@ off, and a tour two extensions add is the first loaded's. The registry is
 - **actions**: `TOURS_LIST` (each tour's id, title, description, the
   extension that ships it, its row "Take the Projects tour", and where the
   person left it) and `TOUR_START {id | extension, step?, restart?}`, which
-  resumes where they stopped (`tour-places.json`). ⌘K lists them through
-  these two.
+  resumes where they stopped (`tour-places.json`). Both are ⌘K rows like
+  any action, and the app gives the palette a source of tour rows
+  (`Commands::register_source`, prefix `tours:`): "Take the Projects
+  tour" and the rest, picked as `TOUR_START`. `TOUR_START` with no tour
+  named opens ⌘K on them.
 
 Each first-party tour plays as a test (`apps/sandbox/media/tests`
 `architect_tours.rs` over the Architect app and its demo vault, and
