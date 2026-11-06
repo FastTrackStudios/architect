@@ -450,6 +450,13 @@ fn run(
             Ok(calendar(&nav.state.peek()))
         }
         "NAVIGATOR_CALENDAR" => {
+            if let Some(n) = int(args, "weeks") {
+                let n = u32::try_from(n)
+                    .ok()
+                    .filter(|n| (1..=6).contains(n))
+                    .ok_or("`weeks` is 1 to 6 (6, the whole month)")?;
+                nav.settings.update(move |s| s.calendar_weeks = n);
+            }
             if flag(args, "today") == Some(true) {
                 nav.update(|s| {
                     let today = s.today();

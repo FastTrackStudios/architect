@@ -49,6 +49,9 @@ pub trait NavigatorSource: Send + Sync {
   `feature_image` and `tasks` (`TaskCounts`).
 - `None` means "not worked out yet". Send a `SourceEvent::FileModified`
   when the value arrives.
+- `NavigatorSource::write` does `FileOp`s: `CreateFolder`, `CreateFile`
+  (a periodic note made), `Move`, `SetProperty`. A source that can write
+  implements it; the default is read-only.
 - `SourceEvent` has these variants: `FolderCreated`, `FolderDeleted`,
   `FolderRenamed`, `FileCreated`, `FileModified`, `FileDeleted`,
   `FileRenamed` and `Reset` (read everything again).
@@ -187,6 +190,45 @@ film's in-memory one).
     note.
   - Return opens a note: ⇧ in a tab, ⌘ beside.
   - A note the keys move to opens after `KEY_OPEN_SETTLE`.
+- **The calendar** (`features/navigator/src/calendar.rs` `grid`, drawn by
+  `features/navigator/src/ui/calendar.rs` `Calendar`). The folders'
+  header toggles it (`NavigatorState::toggle_calendar`, kept in
+  `ViewState::calendar`). It sits under the folders side by side, under
+  the notes stacked (a vertical split), and with one pane at a time under
+  the folders or under both (`calendar_placement`).
+  - 1 to 6 weeks (`calendar_weeks`, 1 by default; 6 is the whole month),
+    paged by `calendar_move`; Today (`calendar_today`) opens today's note
+    if there is one.
+  - A day shows a dot when it has a daily note, the note's feature image
+    instead (`calendar_feature_images`), a ring for tasks left, today lit,
+    the weekend shaded, and the note open ringed. The calendar goes to a
+    day's, week's or month's note as it opens (`set_active`).
+  - A click on a day opens its daily note, or makes it. A click on a
+    week's number, the month, the quarter or the year opens theirs.
+    Making a note asks first (`calendar_confirm_create`;
+    `Navigator::open_or_create`).
+- **Periodic notes** (`features/navigator/src/calendar.rs`
+  `PeriodicNotes`). Daily, weekly, monthly, quarterly and yearly notes
+  live under `periodic_folder`, each named by a Moment pattern
+  (`features/navigator/src/pattern.rs` `Pattern`: `YYYY/YYYYMMDD`,
+  `gggg/[W]ww`, `YYYY/YYYYMM`, `YYYY/[Q]Q`, `YYYY` by default; empty turns
+  a kind off).
+  - `PeriodicNotes::path` writes a period's path. `period_of` reads a
+    path's period back, checked by writing it again.
+  - Weeks start on `week_start`. A weekly pattern with `W` or `G` makes
+    them ISO weeks.
+  - `NavigatorState::open_period` and `open_periodic` return
+    `Outcome::Open`, or `Outcome::Write` with a `FileOp::CreateFile`
+    (a heading until templates, #339).
+  - `open_adjacent_period` and `open_parent_period` move from the note
+    open: next, previous, or the period it is in (a week's month is its
+    first day's).
+- **Periods and date filters** (`features/navigator/src/period.rs`).
+  `Period` (a `PeriodKind` and its first day) steps, climbs and gives its
+  search token (`Period::filter_token`: `@2026-11-05`,
+  `@2026-11-01..2026-11-07`, `@2026-11`, `@2026-Q4`, `@2026`).
+  `DateFilter::parse` reads Notebook Navigator's date filters (`@c:`,
+  `@m:`, ranges, `@2026-w45`, `@today`, `@last7d`, …) for the search.
 - **Actions.** Under the extension they are its manifest's (`ACTIONS`):
   `NAVIGATOR_STATE`, `NAVIGATOR_SELECT`, `NAVIGATOR_REVEAL`,
   `NAVIGATOR_COLLAPSE_OR_EXPAND`, `NAVIGATOR_BACK`, `NAVIGATOR_FORWARD`,
@@ -197,7 +239,12 @@ film's in-memory one).
   `NAVIGATOR_TOGGLE_GROUP`, `NAVIGATOR_OWN_LIST`, `NAVIGATOR_COLOUR`,
   `NAVIGATOR_PIN`, `NAVIGATOR_PIN_FOLDER_NOTES`, `NAVIGATOR_MOVE`,
   `NAVIGATOR_CONVERT_TO_FOLDER_NOTE`, `NAVIGATOR_SET_AS_FOLDER_NOTE`,
-  `NAVIGATOR_DETACH_FOLDER_NOTE`, `NAVIGATOR_OPEN_FOLDER_NOTE_TAB`.
+  `NAVIGATOR_DETACH_FOLDER_NOTE`, `NAVIGATOR_OPEN_FOLDER_NOTE_TAB`,
+  `NAVIGATOR_TOGGLE_CALENDAR`, `NAVIGATOR_CALENDAR` (the month, and `weeks`,
+  `date`, `move`, `today`), `NAVIGATOR_OPEN_DAILY_NOTE`, `…_WEEKLY_…`,
+  `…_MONTHLY_…`, `…_QUARTERLY_…`, `…_YEARLY_NOTE` (`date`, `confirm`,
+  `tab`), and `NAVIGATOR_NEXT_PERIOD` (⌃⌥→), `NAVIGATOR_PREVIOUS_PERIOD`
+  (⌃⌥←) and `NAVIGATOR_PARENT_PERIOD` (⌃⌥↑).
   Without the extension, `NavigatorView` puts its own on the palette.
 - **Settings.** One section, `navigator` (`NavigatorSettings`, a
   `#[derive(Settings)]` struct).
@@ -209,10 +256,10 @@ film's in-memory one).
 
 ## Later layers
 
-These are tracked in #332 (the list in full, #335, is done):
+These are tracked in #332 (the list in full, #335, and the calendar and
+periodic notes, #336, are done):
 
 - the real vault as a source (#353);
-- the calendar and periodic notes;
 - tags and properties;
 - search, shortcuts, recents, profiles and hiding;
 - file operations, templates, icons and colours.

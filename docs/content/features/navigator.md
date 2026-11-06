@@ -84,6 +84,23 @@ directly. Its palette commands are then the view's own.
   `detach_folder_note`, `open_folder_note`. The manual order:
   `move_in_order`. `ViewState` keeps pins, folded groups, own lists and
   colours between runs.
+- `features/navigator/src/period.rs`: `Period`, a day, week, month,
+  quarter or year, and `WeekRules`, Moment's weeks (ISO, or from Sunday or
+  Saturday). `Period::filter_token` and `DateFilter::parse` are the search's
+  date filters (`@2026-11`, `@2026-Q4`, `@c:2026-11-01..2026-11-07`,
+  `@today`).
+- `features/navigator/src/pattern.rs`: `Pattern`, the part of Moment's date
+  format a note's path uses, both ways: `format`, and `parse`.
+- `features/navigator/src/calendar.rs`: `PeriodicNotes` turns the settings'
+  folder and patterns into paths (`path`) and paths back into periods
+  (`period_of`, checked by writing the path again). `grid` is the calendar
+  the view draws: weeks of days, each with its note, image and tasks left.
+  `NavigatorState::open_period` opens a note, or returns a `FileOp::CreateFile`
+  that makes it. `open_adjacent_period` and `open_parent_period` move from
+  the note open.
+- `features/navigator/src/ui/calendar.rs`: the calendar at the foot of a
+  pane: the month, quarter and year with ‹ Today › beside them, then the
+  weeks.
 - `features/navigator/src/ui/panes.rs`: the panes. It draws the list's
   header (sort, group and "Only this folder" menu), group headings, and the
   note rows with their image, tags, properties and task bar.
@@ -95,6 +112,10 @@ directly. Its palette commands are then the view's own.
 
 ## Tests to read
 
+- `features/navigator/tests/calendar.rs`: the calendar and the periodic
+  notes. It covers Moment's tokens and weeks, the default and the demo
+  vault's paths read back, kinds turned off, the grid, opening and making
+  notes, next, previous and parent periods, and the date filters.
 - `features/navigator/tests/list.rs`: the list pane in full. It covers each
   grouping, folded groups, pins, compact rows, images and badges, a row's
   items, a tag's list, frontmatter names and dates, the manual order and its
@@ -129,6 +150,19 @@ Notebook Navigator's parts are ported in layers (#332):
   - Each folder's and tag's own sort, grouping, rows, compact mode and
     notes from below.
   - Navigator as a built-in extension.
+- **Layer 3, done (#336): the calendar and periodic notes.**
+  - A calendar of daily notes under the folders (under the notes when the
+    panes are stacked): dots, feature images, tasks left, today, and the
+    note open ringed. It shows one to six weeks.
+  - Daily, weekly, monthly, quarterly and yearly notes, each named by a
+    Moment pattern under one folder, with Notebook Navigator's defaults.
+    A click, or an action, opens one or makes it, asking first.
+  - The next, previous and parent periods (⌃⌥→, ⌃⌥←, ⌃⌥↑).
+  - The period model the search's date filters use.
+  - Not ported: the right sidebar's year panel, the Daily Notes core
+    plug-in as a source, month highlights, hover previews, and locales
+    other than English (weeks start on Sunday, Monday or Saturday).
+    Templates come with #339: until then a new note gets a heading.
 - **Still to come.**
   - The real vault as a source, with real editing (#353).
   - Tags and properties in the navigation pane. A tag is selected today
