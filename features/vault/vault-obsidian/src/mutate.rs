@@ -233,7 +233,9 @@ pub fn prepend_to_page(
 // ── property:set / property:remove ──────────────────────────────────
 
 /// Set and remove frontmatter keys in a page's source, leaving the
-/// body — every byte after the closing `---` — exactly as it was.
+/// body — every byte after the closing `---` — exactly as it was, and
+/// every frontmatter line but the changed keys' too
+/// ([`crate::frontmatter_write`]: a flow list stays one, quotes stay).
 ///
 /// `set` replaces a key's value in place (keeping its position) or
 /// appends it; `remove` drops keys, and an absent one is not an error.
@@ -278,7 +280,8 @@ pub fn edit_frontmatter(
     if fm == before {
         return Ok(None);
     }
-    Ok(Some(format!("{}{}", serialize_frontmatter(&fm), body)))
+    let head = crate::frontmatter_write::write_frontmatter(raw, body_offset, &before, &fm);
+    Ok(Some(format!("{head}{body}")))
 }
 
 /// Whether a `---`-fenced block carries anything but the fences,
