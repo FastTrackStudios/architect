@@ -232,10 +232,10 @@ toggle = true
 [[actions]]
 id = "NAVIGATOR_CALENDAR"
 name = "Navigator: the calendar"
-description = "The calendar's month: its weeks and days, each day's daily note, image and tasks left, the week, month, quarter and year notes, and each period's search token (@2026-11). `date` (YYYY-MM-DD) goes to that day, `move` pages by the weeks on show (a month with the whole month), `today` back to today."
+description = "The calendar's month: its weeks and days, each day's daily note, image and tasks left, the week, month, quarter and year notes, and each period's search token (@2026-11). `date` (YYYY-MM-DD) goes to that day, `move` pages by the weeks on show (a month with the whole month), `today` back to today, `weeks` (1 to 6) sets how many weeks show."
 group = "Navigator"
 effect = "mutating"
-params = '{"type":"object","properties":{"date":{"type":"string"},"move":{"type":"integer"},"today":{"type":"boolean"}}}'
+params = '{"type":"object","properties":{"date":{"type":"string"},"move":{"type":"integer"},"today":{"type":"boolean"},"weeks":{"type":"integer","minimum":1,"maximum":6}}}'
 
 [[actions]]
 id = "NAVIGATOR_OPEN_DAILY_NOTE"

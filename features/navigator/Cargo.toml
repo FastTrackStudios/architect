@@ -12,7 +12,8 @@ description = "The navigator: a port of Notebook Navigator (an Obsidian plugin) 
 # The default set is the model, wasm-clean: the source a vault is seen
 # through (`NavigatorSource`, `MemorySource`), the folder index, the tree
 # and list rows, sorting, selection and history, expansion, the virtual
-# window, the keys and the pane layout. `ui` is the Dioxus view on the
+# window, the keys and the pane layout; the calendar, the periodic notes'
+# patterns, periods and date filters. `ui` is the Dioxus view on the
 # shell: `NavigatorView`, its commands on the palette, its settings
 # section, its colours as theme tokens.
 

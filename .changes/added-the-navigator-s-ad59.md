@@ -1,0 +1,6 @@
+---
+"architect-navigator" = "minor"
+"architect-navigator-extension" = "minor"
+---
+
+Added the navigator's calendar and periodic notes (#336): a calendar of daily notes at the foot of a pane (under the notes in a vertical split), with dots, feature images, tasks left, today and the open note marked, one to six weeks (`calendar::grid`, `ui::Navigator::open_or_create`); daily, weekly, monthly, quarterly and yearly notes named by Moment patterns under one folder (`PeriodicNotes`, `Pattern`), opened or made (`NavigatorState::open_period`, `open_periodic`), with next, previous and parent periods (`open_adjacent_period`, `open_parent_period`); periods and Notebook Navigator's date filters for the search (`Period`, `PeriodKind`, `WeekRules`, `DateFilter`); the calendar's settings in the Navigator section; and the actions `NAVIGATOR_TOGGLE_CALENDAR`, `NAVIGATOR_CALENDAR`, `NAVIGATOR_OPEN_DAILY_NOTE` to `NAVIGATOR_OPEN_YEARLY_NOTE`, `NAVIGATOR_NEXT_PERIOD` (⌃⌥→), `NAVIGATOR_PREVIOUS_PERIOD` (⌃⌥←) and `NAVIGATOR_PARENT_PERIOD` (⌃⌥↑). Changed (pre-1.0): `FileOp` gained `CreateFile`, `ViewState` gained `calendar`, `NavigatorSettings` gained the calendar's and the periodic notes' fields, `ui::Navigator` gained `confirm`, `chrono` is no longer behind `ui`, and a feature image given as a `file://` URL is drawn as one.
