@@ -16,6 +16,8 @@ Source: the STA-219 architecture report and the `architect` wiki page `fts-auth`
 
 ## Known gaps (don't trip on them)
 
+- The Architect app (`apps/ui/src/accounts.rs` `use_app_accounts`) has no OIDC client at the issuer: starcommand's fts-auth module (modules/services/fts-auth/fts-auth.nix) registers one per `appDomains` entry (task, studio, session, signal, keyflow, ignition). Until an `architect` client exists (with `app.fasttrackstudio.architect://auth/callback` and a loopback redirect), it signs in by browser code (`/auth/device/*`) or password, which hold issuer sessions, not OIDC access JWTs: no `offline_access` refresh token, and `/oauth2/linked-token` refuses them (as for Session).
+
 - Check that Signal and Session pin an architect tag with `DeviceService` before wiring the account sync pass; neither runs it yet.
 - Signal's default redirect `http://localhost:4040/account/callback` may not be registered at the issuer: sign-in needs the env override, or the redirect added in the cluster module.
 - Session's device-code session token can't read linked provider tokens: `/oauth2/linked-token` accepts only OIDC access JWTs.
