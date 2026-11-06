@@ -357,6 +357,27 @@ default; a page or an extension fills it while its view is on show.
   pattern; settings `date_format`, `time_format`, `template_folder`,
   `folder_note_template`. `NavigatorState::set_reader` reads templates
   (`use_navigator` sets it to the source's `read_text`).
+- **Icons and colours** (`features/navigator/src/icons.rs` `Icon`,
+  `features/navigator/src/state/looks.rs`, Notebook Navigator's
+  `MetadataService` and `iconizeFormat.ts`): `NavigatorState::paint`
+  (`Paint::Icon`, `Colour`, `Background`) sets or clears one on
+  `folder:<path>`, `tag:<tag>`, `property:<key>[=<value>]` or
+  `file:<path>`, kept in `ViewState::icons`, `colours` and
+  `backgrounds`; with `use_frontmatter`, a note's are read from and
+  written to its frontmatter (`frontmatter_icon_field`,
+  `frontmatter_color_field`, `frontmatter_background_field`; it returns
+  the `FileOp::SetProperty` or `RemoveProperty`). `Icon::parse` reads
+  Lucide names (`folder`, `lucide-folder`, `li:folder`), Iconize's
+  (`LiFolderOpen`, `PhHouse`), packs (`ph:house`), emoji and vault SVGs;
+  `Icon::frontmatter` writes the short form. `folder_icon`, `item_icon`
+  and `file_icon` (a note's own, then by name, `file_name_icons` with
+  `file_name_icon_map`, then by type, `file_type_icons` with
+  `file_type_icon_map`); colours inherit by `inherit_folder_colors`,
+  `inherit_tag_colors` and `inherit_property_colors`; `color_icon_only`.
+  Lucide icons are drawn by name from `features/shell/src/lucide.rs`
+  `LucideIcon` (MIT; every icon of the pinned lucide-dioxus as data,
+  `features/shell/scripts/lucide.py`). An icon pack's icon is drawn as a
+  box until packs come. Paint follows folders and notes moved.
 - **Search highlighting** (`features/navigator/src/search.rs`):
   `highlights` gives where the search's words are in a name (byte
   ranges, accents folded), drawn as `mark.nv-search-highlight` in the
@@ -371,6 +392,16 @@ default; a page or an extension fills it while its view is on show.
     note.
   - Return opens a note: ⇧ in a tab, ⌘ beside.
   - A note the keys move to opens after `KEY_OPEN_SETTLE`.
+  - The keyboard map (`features/navigator/src/keys.rs` `KeyMap`, Notebook
+    Navigator's `keyboardShortcuts.ts`): every key is a `KeyAction` with a
+    stable id (`pane:move-up`, `pane:rename` on F2, `pane:delete-selected`,
+    `navigation:collapse-or-parent`, `list:select-all`,
+    `list:manual-sort-up`, `list:open`, `list:pin`, `search:close`, …),
+    bound to `Hotkey`s (`Mod+Shift+P`; `Mod` is ⌘ on a Mac, Ctrl
+    elsewhere). The view reads a key with `KeyMap::action` in its
+    `KeyScope` and does it with `NavigatorState::run_key`; `vim_keys`
+    adds h j k l, g and ⇧G; a person's own (`bind_keys`, `KeyBinding`)
+    are kept in `ViewState::keys`.
 - **The calendar** (`features/navigator/src/calendar.rs` `grid`, drawn by
   `features/navigator/src/ui/calendar.rs` `Calendar`). The folders'
   header toggles it (`NavigatorState::toggle_calendar`, kept in
@@ -449,10 +480,13 @@ default; a page or an extension fills it while its view is on show.
   `NAVIGATOR_MERGE`, `NAVIGATOR_OPEN_ALL`, `NAVIGATOR_OPEN_SELECTED`,
   `NAVIGATOR_FOLDER_TEMPLATE`, `NAVIGATOR_TEMPLATE_COMMANDS` (`add`,
   `remove`) and `NAVIGATOR_TEMPLATE_COMMAND` (`id`); `NAVIGATOR_DROP`
-  takes `drag_folder`, `to` (a folder) and `copy`. A note's context menu
+  takes `drag_folder`, `to` (a folder) and `copy`; the icons, colours and
+  keys: `NAVIGATOR_ICON`, `NAVIGATOR_COLOUR` (any target, `background`;
+  no value asks), `NAVIGATOR_KEYS` (the map; `action` with `keys` or
+  `reset`) and `NAVIGATOR_KEY` (does a key action by its id). A note's context menu
   has "Add to shortcuts", "Hide note", "Rename…", "Duplicate", "Move to…",
-  "Open the selected in new tabs", "Merge the selected notes" and
-  "Delete"; a folder's, tag's or property's row menu, "Add to shortcuts"
+  "Open the selected in new tabs", "Merge the selected notes",
+  "Delete", "Set icon…" and "Set colour…"; a folder's, tag's or property's row menu, "Add to shortcuts"
   and "Hide", and a folder's the file operations.
   Without the extension, `NavigatorView` puts its own on the palette.
 - **Settings.** One section, `navigator` (`NavigatorSettings`, a
@@ -463,7 +497,8 @@ default; a page or an extension fills it while its view is on show.
   colours, the open tags and properties, and their hand-made orders; the
   search box's text, the profiles (with their shortcuts and recent
   notes), show-hidden and the folded sections; the folder templates and
-  create-note commands (`templates`). It is a facet struct: the
+  create-note commands (`templates`), icons and backgrounds (`icons`,
+  `backgrounds`) and a person's keys (`keys`). It is a facet struct: the
   Architect app keeps it in its folder (`apps/ui/src/vault.rs`
   `view_store`, an `architect::settings::Store`).
 
@@ -474,8 +509,9 @@ periodic notes, #336, tags and properties, #337, and search, shortcuts,
 recents, profiles and hiding, #338, are done):
 
 - the real vault as a source (#353);
-- #339's keyboard map, icons and colours, settings and the API (file
-  operations and templates are done).
+- #339's settings (synced or device-local per setting, its own zoom) and
+  the API (file operations, templates, the keyboard map, icons and
+  colours are done).
 
 Each adds variants to `NavRowKind` and `ListRowKind`, and adds `NavTarget`
 (both `#[non_exhaustive]`).

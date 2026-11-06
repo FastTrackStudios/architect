@@ -256,6 +256,12 @@ impl VaultSource {
                     }
                 }
             }
+            FileOp::RemoveProperty { path, key } => {
+                vault.remove_property(path, key)?;
+                if let Some(f) = self.file(path) {
+                    self.emit(&SourceEvent::FileModified(f));
+                }
+            }
             FileOp::SetProperty { path, key, value } => {
                 vault.set_property(path, key, json_of(value))?;
                 if let Some(f) = self.file(path) {

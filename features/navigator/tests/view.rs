@@ -454,3 +454,53 @@ fn a_note_dropped_on_a_folder_moves_words_are_marked_and_a_name_is_edited_in_pla
     settle(&mut doc);
     assert_eq!(count(&doc, "[data-file=\"Inbox/Plans #1.md\"]"), 1);
 }
+
+#[test]
+fn folders_tags_and_notes_draw_their_icons_and_colours() {
+    let source = MemorySource::new("Lab")
+        .with_file(NoteFile::new("Projects/Meeting notes.md", NOW, NOW).tag("work"))
+        .with_file(NoteFile::new("Projects/Plan.md", NOW - 1, NOW - 1));
+    let mut doc = mount(Arc::new(source), 900, false);
+    nav().update(|s| {
+        let mut st = s.settings().clone();
+        st.file_name_icons = true;
+        st.file_name_icon_map = "meeting=users".to_owned();
+        s.set_settings(st);
+        s.paint(
+            architect_navigator::state::Paint::Icon,
+            "folder:Projects",
+            Some("rocket"),
+        )
+        .unwrap();
+        s.paint(
+            architect_navigator::state::Paint::Colour,
+            "folder:Projects",
+            Some("tomato"),
+        )
+        .unwrap();
+        s.paint(
+            architect_navigator::state::Paint::Icon,
+            "tag:work",
+            Some("💼"),
+        )
+        .unwrap();
+    });
+    settle(&mut doc);
+    click(&mut doc, "[data-folder=\"Projects\"]");
+    assert_eq!(
+        count(&doc, "[data-folder=\"Projects\"] svg[data-icon=\"rocket\"]"),
+        1
+    );
+    assert_eq!(count(&doc, "[data-tag=\"work\"] .nv-emoji"), 1);
+    assert_eq!(
+        count(
+            &doc,
+            "[data-file=\"Projects/Meeting notes.md\"] svg[data-icon=\"users\"]"
+        ),
+        1
+    );
+    assert_eq!(
+        count(&doc, "[data-file=\"Projects/Plan.md\"] .nv-file-icon"),
+        0
+    );
+}

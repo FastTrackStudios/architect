@@ -168,12 +168,39 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                 } => s.colour(&format!("property:{key}")).map(str::to_owned),
                 _ => None,
             };
-            Some((row.clone(), top, h, note, colour))
+            // A folder's, tag's or property's icon and background
+            // (`folderIcons`, `…BackgroundColors`).
+            let (icon, background) = match &row.kind {
+                NavRowKind::Folder { path, .. } => (
+                    s.folder_icon(path),
+                    s.background(&format!("folder:{path}")).map(str::to_owned),
+                ),
+                NavRowKind::Tag { key, .. } => (
+                    s.item_icon(&format!("tag:{key}")),
+                    s.background(&format!("tag:{key}")).map(str::to_owned),
+                ),
+                NavRowKind::Property { key, value, .. } => {
+                    let t = value.as_ref().map_or_else(
+                        || format!("property:{key}"),
+                        |v| format!("property:{key}={v}"),
+                    );
+                    (s.item_icon(&t), s.background(&t).map(str::to_owned))
+                }
+                _ => (None, None),
+            };
+            let colour = match &row.kind {
+                NavRowKind::Folder { path, .. } => {
+                    s.colour(&format!("folder:{path}")).map(str::to_owned)
+                }
+                _ => colour,
+            };
+            Some((row.clone(), top, h, note, colour, icon, background))
         })
         .collect();
+    let icon_only = nav.state.peek().settings().color_icon_only;
     drop(s);
     rsx! {
-        for (row, top, h, note, colour) in rows {
+        for (row, top, h, note, colour, icon, background) in rows {
             if let NavRowKind::Banner { src } = row.kind.clone() {
                 tree_rows::BannerRow { key: "{row.key}", nav, src, top, height: h }
             } else if let NavRowKind::Section { id, name, expanded, count } = row.kind.clone() {
@@ -189,6 +216,9 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     key: "{row.key}",
                     nav,
                     on_open,
+                    custom_icon: icon,
+                    background,
+                    icon_only,
                     search: search.tag_match(&tag),
                     selected: target == NavTarget::Tag(tag.clone()),
                     drop_here: over.as_deref() == Some(row.key.as_str()),
@@ -215,6 +245,9 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     key: "{row.key}",
                     nav,
                     on_open,
+                    custom_icon: icon,
+                    background,
+                    icon_only,
                     search: None,
                     selected: target == NavTarget::Property { key: key.clone(), value: value.clone() },
                     drop_here: over.as_deref() == Some(row.key.as_str()),
@@ -244,6 +277,10 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     nav,
                     on_open,
                     note,
+                    icon,
+                    colour,
+                    background,
+                    icon_only,
                     drop_here: over.as_deref() == Some(row.key.as_str()),
                     renaming: renaming == Some(Renaming::Folder(path.clone())),
                     selected: selected.as_deref() == Some(path.as_str()),
@@ -304,9 +341,25 @@ fn FolderRow(
     drop_here: bool,
     /// Its name is being edited.
     renaming: bool,
+    /// Its own icon, colour and background.
+    icon: Option<crate::Icon>,
+    colour: Option<String>,
+    background: Option<String>,
+    /// The colour paints the icon alone.
+    icon_only: bool,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
     let root = path.is_empty();
+    let name_colour = colour
+        .as_ref()
+        .filter(|_| !icon_only)
+        .map_or_else(String::new, |c| format!("color:{c};"));
+    let icon_colour = colour
+        .clone()
+        .unwrap_or_else(|| "var(--nv-faint)".to_owned());
+    let bg = background
+        .filter(|_| !selected && !drop_here)
+        .map_or_else(String::new, |b| format!("background:{b};"));
     let class = match (selected, drop_here) {
         (_, true) => "nv-row nv-drop-target",
         (true, false) => "nv-row nv-selected",
@@ -325,7 +378,7 @@ fn FolderRow(
             "aria-expanded": if has_children { if expanded { "true" } else { "false" } } else { "" },
             "aria-level": "{level}",
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; \
-                    gap:4px; padding-left:{pad}px; padding-right:8px; border-radius:6px; white-space:nowrap;",
+                    gap:4px; padding-left:{pad}px; padding-right:8px; border-radius:6px; white-space:nowrap; {bg}",
             onclick: move |_| {
                 if nav.dragged.cloned() {
                     return;
@@ -362,15 +415,17 @@ fn FolderRow(
                     if expanded { ChevronDown { size: 14 } } else { ChevronRight { size: 14 } }
                 }
             }
-            span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);",
-                if root { Vault { size: 15 } } else if expanded { FolderOpen { size: 15 } } else { Folder { size: 15 } }
+            span { style: "flex:0 0 auto; display:flex; color:{icon_colour};",
+                if let Some(i) = icon {
+                    super::icon::IconView { nav, icon: i, size: 15, colour }
+                } else if root { Vault { size: 15 } } else if expanded { FolderOpen { size: 15 } } else { Folder { size: 15 } }
             }
             if renaming {
                 tree_rows::InlineRename { nav, on_open, what: Renaming::Folder(p7), value: name }
             } else {
                 span { class: if note { "nv-name nv-has-note" } else { "nv-name" },
                     "data-folder-note": if note { "true" } else { "false" },
-                    style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight};",
+                    style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight}; {name_colour}",
                     "{name}"
                 }
             }
@@ -680,7 +735,12 @@ fn ListRows(
                         Thumb::Badge(b) => ThumbView::Badge(b.clone()),
                     });
                     let name = f.title(&settings.name_fields()).to_owned();
+                    let at_file = format!("file:{path}");
                     Some(Item::File(FileItem {
+                        icon: s.file_icon(path),
+                        colour: s.colour(&at_file).map(str::to_owned),
+                        background: s.background(&at_file).map(str::to_owned),
+                        icon_only: s.settings().color_icon_only,
                         path: path.clone(),
                         marks: crate::search::highlights(&name, &marked),
                         name,
@@ -801,6 +861,12 @@ struct FileItem {
     name: String,
     /// Where the search's words are in it (byte ranges).
     marks: Vec<std::ops::Range<usize>>,
+    /// Its icon (its own, its name's or its type's), colour and
+    /// background (`fileIcons`, `fileColors`, `fileBackgroundColors`).
+    icon: Option<crate::Icon>,
+    colour: Option<String>,
+    background: Option<String>,
+    icon_only: bool,
     preview: String,
     date: String,
     parent: Option<String>,
@@ -831,6 +897,10 @@ fn FileRow(
         path,
         name,
         marks,
+        icon,
+        colour,
+        background,
+        icon_only,
         preview,
         date,
         parent,
@@ -854,6 +924,13 @@ fn FileRow(
     };
     let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
     let renaming = nav.renaming.read().as_ref() == Some(&Renaming::File(path.clone()));
+    let name_colour = colour
+        .as_ref()
+        .filter(|_| !icon_only)
+        .map_or_else(|| "var(--nv-text)".to_owned(), Clone::clone);
+    let bg = background
+        .filter(|_| !selected)
+        .map_or_else(String::new, |b| format!("background:{b};"));
     let p4 = path.clone();
     let title_h = f64::from(lines.title) * 20.0;
     let preview_h = f64::from(lines.preview) * 18.0;
@@ -883,7 +960,7 @@ fn FileRow(
             "aria-selected": if selected { "true" } else { "false" },
             "aria-current": if open { "page" } else { "false" },
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{h}px; border-radius:6px; overflow:hidden; \
-                    display:flex; flex-direction:row; gap:8px; padding:{padding}; box-sizing:border-box;",
+                    display:flex; flex-direction:row; gap:8px; padding:{padding}; box-sizing:border-box; {bg}",
             onclick: move |e: MouseEvent| {
                 if nav.dragged.cloned() {
                     return;
@@ -916,12 +993,17 @@ fn FileRow(
             onpointerup: move |_| tree_rows::drag_end(nav, on_open),
             div { class: "nv-file-body", style: "flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:{justify};",
                 div { class: "nv-file-title", style: "flex:0 0 auto; display:flex; align-items:baseline; gap:6px; min-width:0;",
+                    if let Some(i) = icon {
+                        span { class: "nv-file-icon", style: "flex:0 0 auto; align-self:center; display:flex; color:{colour.clone().unwrap_or_else(|| \"var(--nv-faint)\".to_owned())};",
+                            super::icon::IconView { nav, icon: i, size: 14, colour: colour.clone() }
+                        }
+                    }
                     if renaming {
                         tree_rows::InlineRename { nav, on_open, what: Renaming::File(p4), value: name }
                     } else {
                         div { class: "nv-file-name",
                             style: "flex:1 1 auto; min-width:0; max-height:{title_h}px; line-height:20px; overflow:hidden; text-overflow:ellipsis; \
-                                    white-space:{wrap}; font-weight:{weight}; color:var(--nv-text);",
+                                    white-space:{wrap}; font-weight:{weight}; color:{name_colour};",
                             if marks.is_empty() {
                                 "{name}"
                             } else {

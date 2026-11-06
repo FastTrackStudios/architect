@@ -246,6 +246,8 @@ pub enum FileOp {
         key: String,
         value: PropertyValue,
     },
+    /// Take a frontmatter property off a note.
+    RemoveProperty { path: String, key: String },
     /// Tag notes: one that has the tag or a tag above it is left; the tags
     /// below it go (`crate::tags::added`).
     AddTag { paths: Vec<String>, tag: String },
@@ -758,6 +760,11 @@ impl MemorySource {
                     Some((_, v)) => *v = value.clone(),
                     None => file.properties.push((key.clone(), value.clone())),
                 }
+                self.put(file);
+            }
+            FileOp::RemoveProperty { path, key } => {
+                let mut file = self.file(path).ok_or_else(|| format!("no {path}"))?;
+                file.properties.retain(|(k, _)| k != key);
                 self.put(file);
             }
             FileOp::AddTag { paths, tag } => self.retag(paths, |t| crate::tags::added(t, tag))?,

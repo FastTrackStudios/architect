@@ -20,16 +20,16 @@ use dioxus::prelude::*;
 use futures_util::StreamExt as _;
 
 use crate::index::VaultIndex;
+use crate::keys::{KeyAction, KeyEvent, KeyScope};
 use crate::layout::{self, Pane, PaneLayout};
 use crate::list::Clock;
 use crate::period::PeriodKind;
 use crate::settings::{CalendarPlacement, Grouping, ListMode, NavigatorSettings, Orientation};
 use crate::source::{NavigatorSource, SourceEvent, Subscription};
-use crate::state::{
-    Key as NavKey, Made, Mods, NavigatorState, NewNote, OPEN_ALL_WARNING, OpenIn, Outcome, Reader,
-};
+use crate::state::{Made, NavigatorState, NewNote, OPEN_ALL_WARNING, OpenIn, Outcome, Reader};
 
 mod calendar;
+mod icon;
 mod panes;
 pub mod theme;
 mod tree_rows;
@@ -379,6 +379,43 @@ impl Navigator {
         }
     }
 
+    /// Renames what is selected in `scope`'s pane in place: the note at
+    /// the cursor, or the folder (`pane:rename`).
+    pub fn rename_selected(&self, scope: KeyScope) {
+        let what = {
+            let s = self.state.peek();
+            match scope {
+                KeyScope::List => s.selection().cursor().map(|p| Renaming::File(p.to_owned())),
+                _ => match s.target() {
+                    crate::NavTarget::Folder(f) if !f.is_empty() => Some(Renaming::Folder(f)),
+                    _ => None,
+                },
+            }
+        };
+        if let Some(w) = what {
+            let mut renaming = self.renaming;
+            renaming.set(Some(w));
+        }
+    }
+
+    /// Puts what is selected in `scope`'s pane in the trash: the notes, or
+    /// the folder (`pane:delete-selected`).
+    pub fn delete_selected(&self, scope: KeyScope, on_open: EventHandler<Open>) {
+        let paths: Vec<String> = {
+            let s = self.state.peek();
+            match scope {
+                KeyScope::List => s.selection().files().iter().cloned().collect(),
+                _ => match s.target() {
+                    crate::NavTarget::Folder(f) if !f.is_empty() => vec![f],
+                    _ => Vec::new(),
+                },
+            }
+        };
+        if !paths.is_empty() {
+            self.trash(&paths, on_open);
+        }
+    }
+
     /// Puts `paths` in the trash, asking first when the settings say
     /// (`confirmBeforeDelete`).
     pub fn trash(&self, paths: &[String], on_open: EventHandler<Open>) {
@@ -563,38 +600,20 @@ impl Navigator {
     }
 }
 
-/// The key a keyboard event is to the navigator.
-fn nav_key(e: &KeyboardEvent) -> Option<(NavKey, Mods)> {
+/// A keyboard event as the keyboard map reads it.
+pub(crate) fn key_event(e: &KeyboardEvent) -> KeyEvent {
     let m = e.modifiers();
-    let command = if cfg!(target_os = "macos") {
-        m.meta()
-    } else {
-        m.ctrl()
-    };
-    let key = match e.key() {
-        Key::Named(NamedKey::ArrowUp) => NavKey::Up,
-        Key::Named(NamedKey::ArrowDown) => NavKey::Down,
-        Key::Named(NamedKey::ArrowLeft) => NavKey::Left,
-        Key::Named(NamedKey::ArrowRight) => NavKey::Right,
-        Key::Named(NamedKey::Home) => NavKey::Home,
-        Key::Named(NamedKey::End) => NavKey::End,
-        Key::Named(NamedKey::PageUp) => NavKey::PageUp,
-        Key::Named(NamedKey::PageDown) => NavKey::PageDown,
-        Key::Named(NamedKey::Enter) => NavKey::Enter,
-        Key::Named(NamedKey::Tab) => NavKey::Tab,
-        Key::Named(NamedKey::Escape) => NavKey::Escape,
-        Key::Character(c) if c.eq_ignore_ascii_case("a") && command => NavKey::A,
-        Key::Character(c) if c.eq_ignore_ascii_case("p") && command && m.shift() => NavKey::Pin,
-        _ => return None,
-    };
-    Some((
-        key,
-        Mods {
-            shift: m.shift(),
-            command,
-        },
-    ))
+    KeyEvent {
+        key: e.key().to_string(),
+        shift: m.shift(),
+        ctrl: m.ctrl(),
+        alt: m.alt(),
+        meta: m.meta(),
+    }
 }
+
+/// Whether ⌘ is the command key (`Mod`).
+pub(crate) const MAC: bool = cfg!(target_os = "macos");
 
 /// `command`, or not now (`why`).
 fn when(command: Command, ok: bool, why: &str) -> Command {
@@ -1232,11 +1251,28 @@ pub fn NavigatorView(
         Pane::Navigation => "navigation",
         Pane::Files => "files",
     };
+    // The keyboard map (`keyboardShortcuts`): what a key is in the pane
+    // with the keyboard; rename and delete are the view's.
     let on_key = move |e: KeyboardEvent| {
-        if let Some((key, mods)) = nav_key(&e) {
-            e.prevent_default();
-            let out = nav.state.clone().write().key(key, mods);
-            nav.outcome(out, on_open, on_focus_editor, None);
+        let ev = key_event(&e);
+        let (action, scope) = {
+            let s = nav.state.peek();
+            let scope = if s.focus == Pane::Navigation {
+                KeyScope::Navigation
+            } else {
+                KeyScope::List
+            };
+            (s.keymap().action(scope, &ev, MAC), scope)
+        };
+        let Some(action) = action else { return };
+        e.prevent_default();
+        match action {
+            KeyAction::PaneRename => nav.rename_selected(scope),
+            KeyAction::DeleteSelected => nav.delete_selected(scope, on_open),
+            _ => {
+                let out = nav.state.clone().write().run_key(action);
+                nav.outcome(out, on_open, on_focus_editor, None);
+            }
         }
     };
     // The calendar's place (Notebook Navigator's `calendarLeftPlacement`
