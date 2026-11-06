@@ -47,6 +47,31 @@ pub struct Account {
     /// the first fetch.
     #[facet(default)]
     pub orgs: Option<Orgs>,
+    /// Where each org's enrolments are kept: the HTTP origin of the node
+    /// that hosts the org (`architect-desktop serve` with `host_org`),
+    /// by org id. Not a secret.
+    #[facet(default)]
+    pub org_hosts: Vec<OrgHost>,
+}
+
+/// The node an org's devices are enrolled at.
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+pub struct OrgHost {
+    /// The org's id (`Org::id`).
+    pub org: String,
+    /// The node's HTTP origin (`https://node.example`).
+    pub host: String,
+}
+
+impl Account {
+    /// The node that hosts org `org`'s enrolments, if one was given.
+    #[must_use]
+    pub fn org_host(&self, org: &str) -> Option<&str> {
+        self.org_hosts
+            .iter()
+            .find(|h| h.org == org)
+            .map(|h| h.host.as_str())
+    }
 }
 
 impl Account {
@@ -238,6 +263,7 @@ mod tests {
             image: None,
             needs_sign_in: false,
             orgs: None,
+            org_hosts: Vec::new(),
         }
     }
 

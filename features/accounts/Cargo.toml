@@ -19,7 +19,7 @@ description = "Accounts on an issuer: who is signed in, their sessions in the pl
 [features]
 default = []
 keychain = ["dep:keyring"]
-http = ["architect-orgs/auth", "dep:auth-proto", "dep:architect", "architect/http-client", "dep:tokio", "dep:uuid", "dep:webbrowser"]
+http = ["architect-orgs/auth", "dep:auth-proto", "dep:architect", "architect/http-client", "architect/connect", "dep:architect-devices", "architect-devices/vox", "dep:tokio", "dep:uuid", "dep:webbrowser"]
 actions = ["http", "architect/action-list"]
 ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:lucide-dioxus", "dep:futures-channel", "dep:futures-util"]
 
@@ -33,6 +33,9 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 auth-proto = { workspace = true, optional = true }
 architect = { workspace = true, optional = true }
+# An org's enrolled devices (`ORG_DEVICES`, `ORG_ENROL`, `ORG_REVOKE`):
+# `DeviceEnrolment` on the hosting node's `/org/{slug}/vox`.
+architect-devices = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }

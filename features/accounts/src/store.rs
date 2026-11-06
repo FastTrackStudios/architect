@@ -263,6 +263,28 @@ impl AccountStore {
         Ok(orgs)
     }
 
+    /// Keeps `host` as the node that hosts org `org`'s enrolments, for
+    /// the active account.
+    ///
+    /// # Errors
+    ///
+    /// [`StoreError::SignedOut`]; the file's.
+    pub fn set_org_host(&self, org: &str, host: &str) -> Result<(), StoreError> {
+        let mut file = self.file();
+        let key = file.active.clone().ok_or(StoreError::SignedOut)?;
+        let account = file
+            .accounts
+            .iter_mut()
+            .find(|a| a.key() == key)
+            .ok_or(StoreError::SignedOut)?;
+        account.org_hosts.retain(|h| h.org != org);
+        account.org_hosts.push(crate::model::OrgHost {
+            org: org.to_owned(),
+            host: host.trim().trim_end_matches('/').to_owned(),
+        });
+        self.save(&file)
+    }
+
     /// Adds `account` without making it active (an update of its name or
     /// picture from the issuer).
     ///
@@ -362,6 +384,7 @@ mod tests {
             image: None,
             needs_sign_in: false,
             orgs: None,
+            org_hosts: Vec::new(),
         }
     }
 

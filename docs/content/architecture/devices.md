@@ -81,6 +81,13 @@ member their own) and `revoke` (the member who enrolled it, or an owner or
 admin). The org is the lane's (`architect_orgs::server::current_org`), never
 an argument.
 
+The headless app hosts it (`architect-desktop serve` with `host_org`,
+`apps/desktop/src/node/org.rs` `OrgLane`, [deploy](@/guide/deploy.md)), over
+HTTP at `/org/{slug}/vox` with the issuer's session as the bearer; the app
+reaches it with `ORG_DEVICES`, `ORG_ENROL` and `ORG_REVOKE`. On that node an
+enrolled device opens the vaults' notes as its role may write them
+(`crdt::p2p::NodeAccess::org_docs`).
+
 `project_members` keeps `architect_orgs::server::Members` in step with the
 table, so an enrolled device is a `Principal::Host` member of its orgs and
 the org's `ConfinedEngine` gives it its role's rules there, exactly as for a
@@ -119,6 +126,7 @@ takes part.
 | `features/devices/tests/peer_to_peer.rs` `two_account_devices_and_a_paired_one_edit_live_with_the_issuer_stopped` | two devices of one account meet through a real issuer, a third is paired by code, and all three edit one document live over loopback iroh with the issuer stopped; the paired one opens nothing its scopes do not name |
 | `features/devices/tests/peer_to_peer.rs` `revoking_a_device_closes_its_lanes` | taking back a pairing, and taking a device off the account, ends its live session and closes its connection; it gets nothing after |
 | `features/devices/tests/peer_to_peer.rs` `a_code_pairs_once_and_a_wrong_one_nothing` | a wrong code admits nothing, a stranger may only ask to pair, an offer is used once |
+| `apps/desktop/tests/node.rs` `a_member_enrols_in_an_org_and_a_revoke_refuses_the_next_call` | a member's headless node enrols itself at the org's node and syncs its vault; a member enrols a device from the app, never above his role; the owner lists both and revokes the node, whose next call is refused |
 | `features/devices/tests/enrolment.rs` | a member enrols a device with a role the org's engine then enforces, never above their own; listing and revoking by owner or admin; non-members refused |
 
 No test needs multicast: endpoints bind loopback and dial by address.
@@ -128,8 +136,8 @@ No test needs multicast: endpoints bind loopback and dial by address.
 - One endpoint per device row: the issuer's `AuthDevice` holds one
   `endpoint_id`, so two apps on one device with endpoints of their own
   (Task's node, Studio's engine) cannot both register theirs yet.
-- The devices page (this device, the account's others, enrolments, revoke)
-  comes with the sign-in UI (architect#188).
+- An org's enrolments live on the node that hosts it: the issuer has no
+  table of them, and no record of which node hosts an org.
 - Learnt routes (direct addresses from a connection, LAN sightings) are
   recorded by `Admission::learn_route`, but nothing records them
   automatically; the route list and its preflight are remote access (AR1).

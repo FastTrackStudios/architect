@@ -16,6 +16,10 @@
 //! | `ARCHITECT_ISSUER` | `issuer` | none | the account server (`https://auth.fasttrackstudio.app`) |
 //! | `ARCHITECT_SESSION_FILE` | `session_file` | none | a file holding the account's session token |
 //! | `ARCHITECT_ORG` | `org` | none | the org (slug) it offers the account when the account shares none yet |
+//! | `ARCHITECT_HOST_ORG` | `host_org` | none | an issuer org (slug) of the session's: the node serves its enrolment lane, `/org/{slug}/vox`, and its vaults are that org's |
+//! | `ARCHITECT_ENROL_AT` | `enrol_at` | none | another node's HTTP origin: this node enrols itself in `enrol_org` there, once |
+//! | `ARCHITECT_ENROL_ORG` | `enrol_org` | none | the issuer org (slug) to enrol in there; its vaults are that org's |
+//! | `ARCHITECT_ENROL_ROLE` | `enrol_role` | `member` | the role it asks for: at most the session's own in the org |
 //! | `ARCHITECT_PEERS` | `peers` | none | `endpoint@host:port,…`: nodes dialled directly (no lookup) |
 //! | `ARCHITECT_IROH` | `iroh` | `n0` | `n0` (relays and lookup) or `local` (loopback, no relay: tests) |
 //! | `ARCHITECT_IROH_BIND` | `iroh_bind` | any port | the iroh UDP socket (`0.0.0.0:7777`, for a fixed port) |
@@ -50,6 +54,10 @@ pub struct Config {
     pub issuer: Option<String>,
     pub session_file: Option<PathBuf>,
     pub org: Option<String>,
+    pub host_org: Option<String>,
+    pub enrol_at: Option<String>,
+    pub enrol_org: Option<String>,
+    pub enrol_role: String,
     pub peers: Vec<String>,
     pub iroh: IrohMode,
     pub iroh_bind: Option<String>,
@@ -68,6 +76,10 @@ impl Default for Config {
             issuer: None,
             session_file: None,
             org: None,
+            host_org: None,
+            enrol_at: None,
+            enrol_org: None,
+            enrol_role: "member".to_owned(),
             peers: Vec::new(),
             iroh: IrohMode::N0,
             iroh_bind: None,
@@ -157,6 +169,18 @@ impl Config {
         if let Some(v) = get("ARCHITECT_ORG") {
             self.org = Some(v);
         }
+        if let Some(v) = get("ARCHITECT_HOST_ORG") {
+            self.host_org = Some(v);
+        }
+        if let Some(v) = get("ARCHITECT_ENROL_AT") {
+            self.enrol_at = Some(v);
+        }
+        if let Some(v) = get("ARCHITECT_ENROL_ORG") {
+            self.enrol_org = Some(v);
+        }
+        if let Some(v) = get("ARCHITECT_ENROL_ROLE") {
+            self.enrol_role = v.trim().to_ascii_lowercase();
+        }
         if let Some(v) = get("ARCHITECT_PEERS") {
             self.peers = list(&v);
         }
@@ -185,6 +209,13 @@ impl Config {
             })?;
         }
         Ok(())
+    }
+
+    /// The issuer org (slug) the node's vaults are: the one it hosts,
+    /// else the one it enrols in.
+    #[must_use]
+    pub fn vault_org(&self) -> Option<&str> {
+        self.host_org.as_deref().or(self.enrol_org.as_deref())
     }
 
     /// Where vault `path` lives: under the data dir when relative.
