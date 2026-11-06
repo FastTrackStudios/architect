@@ -1049,7 +1049,6 @@ fn FilesView() -> Element {
         .locate(&pane.id)
         .is_some_and(|l| l.window == 0);
     let columns = sidebar_columns().filter(|_| in_main);
-    let new_pane = pane.clone();
     use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
     let open_pane = pane.clone();
     let menu_pane = pane;
@@ -1098,14 +1097,9 @@ fn FilesView() -> Element {
     let on_context_menu = EventHandler::new(move |(path, e): (String, MouseEvent)| {
         menu_pane.context_menu("file", path, &e);
     });
-    // New note in the list's header, for a vault on disk.
-    let on_new_note = disk.peek().is_some().then(|| {
-        EventHandler::new(move |folder: String| {
-            if let Some(disk) = disk.cloned() {
-                new_vault_note(new_pane.workspace(), &disk, &folder);
-            }
-        })
-    });
+    // New note in the list's header is the navigator's own: from the
+    // folder's template, opened through `on_open` (#339).
+    let on_new_note: Option<EventHandler<String>> = None;
     // Navigator, the built-in extension, draws it: its view over this
     // navigator (or a development copy's, `EXT_CLONE {"id":"navigator"}`).
     let mut mount = use_context_provider(|| {

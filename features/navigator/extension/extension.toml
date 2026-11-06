@@ -384,11 +384,11 @@ params = '{"type":"object","properties":{"key":{"type":"string"},"value":{"type"
 
 [[actions]]
 id = "NAVIGATOR_DROP"
-name = "Navigator: drop on a tag or property"
-description = "Drops notes (`path`, `paths`, or the selected ones) or tag `drag_tag` on tag `tag` or property `property` (and `value`), as a drag would: notes are tagged (cleared on __untagged__) or get the property; a tag moves under the tag (to the top on __tagged__)."
+name = "Navigator: drop on a folder, tag or property"
+description = "Drops notes (`path`, `paths`, or the selected ones), tag `drag_tag` or folder `drag_folder` on folder `to`, tag `tag` or property `property` (and `value`), as a drag would: notes move into the folder (copied with `copy`, the copy key held), are tagged (cleared on __untagged__) or get the property; a tag moves under the tag (to the top on __tagged__); a folder moves into the folder."
 group = "Navigator"
 effect = "mutating"
-params = '{"type":"object","properties":{"drag_tag":{"type":"string"},"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"}}}'
+params = '{"type":"object","properties":{"drag_tag":{"type":"string"},"drag_folder":{"type":"string"},"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"to":{"type":"string"},"copy":{"type":"boolean"},"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"}}}'
 
 [[actions]]
 id = "NAVIGATOR_SEARCH"
@@ -546,6 +546,110 @@ description = "Switches to vault profile 3: what it hides, its shortcuts, its re
 group = "Navigator"
 effect = "mutating"
 
+[[actions]]
+id = "NAVIGATOR_NEW_NOTE"
+name = "New note"
+description = "Makes a note (or `kind` canvas, base) in `folder` (else the folder selected): named `name`, by `name_format` (template tokens, `{{number}}`), or Untitled; its text from `template` (a vault path), else the folder's template (`no_template` for none); `prompts` answers its `{{prompt:Label}}`s. Opens it (`tab` in a new tab). Answers its `path` and where the `cursor` goes."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"},"kind":{"type":"string","enum":["note","canvas","base"]},"name":{"type":"string"},"name_format":{"type":"string"},"template":{"type":"string"},"no_template":{"type":"boolean"},"prompts":{"type":"object","additionalProperties":{"type":"string"}},"tab":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_NEW_FOLDER"
+name = "New folder"
+description = "Makes folder `name` in `parent` (else the folder selected)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"name":{"type":"string"},"parent":{"type":"string"}},"required":["name"]}'
+
+[[actions]]
+id = "NAVIGATOR_RENAME"
+name = "Rename"
+description = "Renames note `path` (else the one selected) or folder `folder` to `name`; the links that named it follow, and a folder note named after its folder with it. With no `name`, its name is edited in place."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"folder":{"type":"string"},"name":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_DUPLICATE"
+name = "Duplicate"
+description = "Duplicates note `path` (else the one selected) beside it as `Name 1` and opens it, or folder `folder` with everything in it."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"folder":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_MOVE_TO"
+name = "Move to…"
+description = "Moves files (`path`, `paths`, else the notes selected), or folder `folder`, into folder `to` (empty, the root). With no `to`, asks for it."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"folder":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_COPY_TO"
+name = "Copy to…"
+description = "Copies files (`path`, `paths`, else the notes selected) into folder `to`, each keeping its name (numbered when taken)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["to"]}'
+
+[[actions]]
+id = "NAVIGATOR_DELETE"
+name = "Delete"
+description = "Puts files (`path`, `paths`, else the notes selected) or folder `folder` in the vault's trash (`.trash`). Asks first when the settings say, unless `confirm` is false."
+group = "Navigator"
+effect = "destructive"
+params = '{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"folder":{"type":"string"},"confirm":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_MERGE"
+name = "Merge notes"
+description = "Merges the notes `paths` (else the ones selected, in the list's order) into one note `name` in folder `into` (else the first's): the first's frontmatter kept, `separator` (none, blank-line, horizontal-rule, heading) between; with `trash`, the notes go to the trash after. Opens it."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"paths":{"type":"array","items":{"type":"string"}},"name":{"type":"string"},"into":{"type":"string"},"separator":{"type":"string","enum":["none","blank-line","horizontal-rule","heading"]},"trash":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_ALL"
+name = "Open all notes"
+description = "Opens every note in the list (of folder `folder`, when named) in new tabs; asks first at 15 or more, unless `confirm` is false."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"},"confirm":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SELECTED"
+name = "Open the selected notes"
+description = "Opens the notes selected in new tabs, in the list's order; asks first at 15 or more, unless `confirm` is false."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"confirm":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_FOLDER_TEMPLATE"
+name = "Navigator: folder template"
+description = "Sets folder `folder`'s template to `template` (a vault path; empty clears it); notes made in its subfolders take it too unless `subfolders` is false or a nearer folder has its own. Answers the templates."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"},"template":{"type":"string"},"subfolders":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_TEMPLATE_COMMANDS"
+name = "Navigator: create-note commands"
+description = "The commands that make a note from a template: `add` one by name, with `template`, `name_format` and `folder` (else the current folder) and a stable `id`; `remove` one (its id, name or number). Answers the templates."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"add":{"type":"string"},"id":{"type":"string"},"template":{"type":"string"},"name_format":{"type":"string"},"folder":{"type":"string"},"remove":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_TEMPLATE_COMMAND"
+name = "Run a create-note command"
+description = "Runs create-note command `id` (its id, name or number): a note named by its format, from its template, in its folder; `prompts` answers its prompts. Answers its `path`."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"},"prompts":{"type":"object","additionalProperties":{"type":"string"}}},"required":["id"]}'
+
 # A note's context menu (the app's file menu): pin, and folder notes.
 [[context]]
 target = "file:md"
@@ -571,6 +675,36 @@ title = "Add to shortcuts"
 target = "file:md"
 action = "NAVIGATOR_HIDE"
 title = "Hide note"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_RENAME"
+title = "Rename…"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_DUPLICATE"
+title = "Duplicate"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_MOVE_TO"
+title = "Move to…"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_OPEN_SELECTED"
+title = "Open the selected in new tabs"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_MERGE"
+title = "Merge the selected notes"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_DELETE"
+title = "Delete"
 
 # Its settings: NavigatorSettings (features/navigator/src/settings.rs), as
 # the settings page draws them. Generated by tests/both_ways.rs
@@ -1758,5 +1892,154 @@ max = 20.0
 step = 1.0
 unit = ""
 placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.confirm_delete"
+title = "Ask before deleting"
+description = "Ask before notes and folders go to the trash."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.spring_loaded_folders"
+title = "Open folders while dragging"
+description = "A folder held under a drag opens (spring-loaded folders)."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.spring_loaded_delay_ms"
+title = "First folder opens after"
+description = ""
+control = "slider"
+default = 500.0
+min = 100.0
+max = 3000.0
+step = 100.0
+unit = " ms"
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.spring_loaded_next_delay_ms"
+title = "Next folders open after"
+description = ""
+control = "slider"
+default = 500.0
+min = 100.0
+max = 3000.0
+step = 100.0
+unit = " ms"
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.date_format"
+title = "Date format"
+description = "A Moment format: `{{date}}` and `{{today}}` in templates."
+control = "text"
+default = "MMM D, YYYY"
+unit = ""
+placeholder = "MMM D, YYYY"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.time_format"
+title = "Time format"
+description = "`{{time}}` in templates."
+control = "text"
+default = "h:mm a"
+unit = ""
+placeholder = "h:mm a"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.template_folder"
+title = "Template folder"
+description = "Where the template picker looks; empty, the whole vault."
+control = "text"
+default = ""
+unit = ""
+placeholder = "Templates"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.folder_note_template"
+title = "Folder note template"
+description = "The template a new folder note is made from (a vault path)."
+control = "text"
+default = ""
+unit = ""
+placeholder = "Templates/Folder.md"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.daily_template"
+title = "Daily note template"
+description = ""
+control = "text"
+default = ""
+unit = ""
+placeholder = "Templates/Daily.md"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.weekly_template"
+title = "Weekly note template"
+description = ""
+control = "text"
+default = ""
+unit = ""
+placeholder = "Templates/Weekly.md"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.monthly_template"
+title = "Monthly note template"
+description = ""
+control = "text"
+default = ""
+unit = ""
+placeholder = "Templates/Monthly.md"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.quarterly_template"
+title = "Quarterly note template"
+description = ""
+control = "text"
+default = ""
+unit = ""
+placeholder = "Templates/Quarterly.md"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.yearly_template"
+title = "Yearly note template"
+description = ""
+control = "text"
+default = ""
+unit = ""
+placeholder = "Templates/Yearly.md"
 choices = []
 aliases = []

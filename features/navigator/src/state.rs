@@ -26,8 +26,15 @@ use crate::selection::{NavTarget, Selection};
 use crate::settings::{FolderNoteOpen, NavigatorSettings, SearchProvider, SortOption};
 use crate::source::{FileOp, NoteFile, PropertyValue, SourceEvent, ancestors, is_within, parent};
 use crate::tags::{self, TAGGED, TagTree, UNTAGGED, is_or_below, tag_key};
+use crate::template::Templates;
 use crate::tree::{self, NavRow, NavRowKind, RECENT, SHORTCUTS, TagRowOptions, TreeOptions};
 use crate::virtualize::{Align, OVERSCAN, Offsets};
+
+mod files;
+
+pub use files::{
+    Made, MergeSeparator, NameCheck, NewKind, NewNote, OPEN_ALL_WARNING, Reader, check_name,
+};
 
 /// A key the navigator answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,14 +179,21 @@ pub struct ViewState {
     /// `recentNotesExpanded`).
     pub shortcuts_folded: bool,
     pub recent_folded: bool,
+    /// The folders' templates and the "create note" commands
+    /// (`folderTemplates`, `templateCommands`).
+    #[facet(default)]
+    pub templates: Templates,
 }
 
-/// What is dragged onto a tag, a property or the "Tags" row: notes, or a
-/// tag (Notebook Navigator's `TAG_DRAG_MIME`).
+/// What is dragged onto a folder, a tag, a property or the "Tags" row:
+/// notes, a tag (Notebook Navigator's `TAG_DRAG_MIME`), or a folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Drag {
     Notes(Vec<String>),
     Tag(String),
+    Folder(String),
+    /// A shortcut, by its place from 0, dragged to another place.
+    Shortcut(usize),
 }
 
 /// A pinned note: pinned in folders, in tags.
@@ -276,6 +290,9 @@ pub struct NavigatorState {
     hidden: Hidden,
     shortcuts_folded: bool,
     recent_folded: bool,
+    templates: Templates,
+    /// Reads a file's text (a template, notes merged); the source's.
+    reader: Reader,
 }
 
 impl NavigatorState {
@@ -300,6 +317,8 @@ impl NavigatorState {
             full_text_for: None,
             shortcuts_folded: false,
             recent_folded: false,
+            templates: Templates::default(),
+            reader: Reader::none(),
             periodic: PeriodicNotes::from_settings(&settings),
             calendar_open: false,
             calendar_cursor: None,
@@ -771,10 +790,15 @@ impl NavigatorState {
         match event {
             SourceEvent::FileDeleted(p) | SourceEvent::FolderDeleted(p) => {
                 self.profiles.follow(p, None);
+                self.templates.follow(p, None);
             }
-            SourceEvent::FolderRenamed { from, to } => self.profiles.follow(from, Some(to)),
+            SourceEvent::FolderRenamed { from, to } => {
+                self.profiles.follow(from, Some(to));
+                self.templates.follow(from, Some(to));
+            }
             SourceEvent::FileRenamed { from, file } => {
                 self.profiles.follow(from, Some(&file.path));
+                self.templates.follow(from, Some(&file.path));
             }
             _ => {}
         }
@@ -1869,15 +1893,21 @@ impl NavigatorState {
     /// - notes on a tag tag them; on "Untagged", clear their tags; on a
     ///   property, set it;
     /// - a tag on a tag moves it under it (`a/b` on `c` is `c/b`); on the
-    ///   "Tags" row, to the top (`promoteTagToRoot`).
+    ///   "Tags" row, to the top (`promoteTagToRoot`);
+    /// - notes on a folder move into it, or are copied with `copy` (the
+    ///   copy key held: ⌥ on a Mac, Ctrl elsewhere); a folder on a folder
+    ///   moves into it.
     ///
     /// # Errors
     ///
     /// What cannot go there: a tag on itself or inside itself, on
-    /// "Untagged", on a property or a folder; notes on the "Tags" row or a
-    /// folder; anything but Markdown notes.
-    pub fn drop_on(&self, drag: &Drag, on: &NavTarget) -> Result<Outcome, String> {
+    /// "Untagged", on a property or a folder; notes on the "Tags" row; a
+    /// folder into itself or anywhere but a folder; a name taken; tags and
+    /// properties on anything but Markdown notes.
+    pub fn drop_on(&self, drag: &Drag, on: &NavTarget, copy: bool) -> Result<Outcome, String> {
         match (drag, on) {
+            (_, NavTarget::Folder(f)) => self.drop_on_folder(drag, f, copy),
+            (Drag::Folder(src), _) => Err(format!("{src} goes on a folder")),
             (Drag::Notes(paths), NavTarget::Tag(t)) if t == UNTAGGED => self.clear_tags(paths),
             (Drag::Notes(_), NavTarget::Tag(t)) if t == TAGGED => {
                 Err("Drop notes on a tag to tag them".to_owned())
@@ -1911,7 +1941,29 @@ impl NavigatorState {
                 self.rename_tag(src, &to)
             }
             (Drag::Tag(src), _) => Err(format!("#{src} goes on a tag")),
-            (Drag::Notes(_), _) => Err("Drop notes on a tag or a property".to_owned()),
+            (Drag::Shortcut(_), _) => Err("A shortcut goes among the shortcuts".to_owned()),
+        }
+    }
+
+    /// What dropping `drag` among the shortcuts, at place `at` from 0,
+    /// does (the shortcuts' sortable list and `handleShortcutDrop`): a
+    /// shortcut moves there; notes, a folder or a tag are added there.
+    /// Whether anything changed.
+    pub fn drop_on_shortcuts(&mut self, drag: &Drag, at: usize) -> bool {
+        match drag {
+            Drag::Shortcut(from) => *from != at && self.move_shortcut(*from, at),
+            Drag::Notes(paths) => {
+                let mut added = false;
+                for (i, p) in paths.iter().enumerate() {
+                    added |=
+                        self.add_shortcut(Shortcut::note(p.clone()), Some(at.saturating_add(i)));
+                }
+                added
+            }
+            Drag::Folder(f) => {
+                self.add_shortcut(Shortcut::to(&NavTarget::Folder(f.clone())), Some(at))
+            }
+            Drag::Tag(t) => self.add_shortcut(Shortcut::to(&NavTarget::Tag(t.clone())), Some(at)),
         }
     }
 
@@ -2806,7 +2858,7 @@ impl NavigatorState {
         if self.index.folder(&path).is_some() {
             return Err(format!("{path} is a folder"));
         }
-        let text = self.periodic.new_note_text(&path);
+        let text = self.periodic_text(period.kind, &path, period.start);
         Ok(Outcome::Write {
             ops: vec![FileOp::CreateFile {
                 path: path.clone(),
@@ -2913,6 +2965,7 @@ impl NavigatorState {
             show_hidden: self.show_hidden,
             shortcuts_folded: self.shortcuts_folded,
             recent_folded: self.recent_folded,
+            templates: self.templates.clone(),
         }
     }
 
@@ -2923,6 +2976,7 @@ impl NavigatorState {
         self.show_hidden = state.show_hidden;
         self.shortcuts_folded = state.shortcuts_folded;
         self.recent_folded = state.recent_folded;
+        self.templates = state.templates.clone();
         self.search_open = state.search_open || !state.search.is_empty();
         self.search = FilterSearch::parse(&state.search, self.today(), DayMonthOrder::default());
         self.hidden = Hidden::new(&self.profiles.active().rules(), self.show_hidden);

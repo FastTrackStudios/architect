@@ -25,7 +25,9 @@ use crate::list::Clock;
 use crate::period::PeriodKind;
 use crate::settings::{CalendarPlacement, Grouping, ListMode, NavigatorSettings, Orientation};
 use crate::source::{NavigatorSource, SourceEvent, Subscription};
-use crate::state::{Key as NavKey, Mods, NavigatorState, OpenIn, Outcome};
+use crate::state::{
+    Key as NavKey, Made, Mods, NavigatorState, NewNote, OPEN_ALL_WARNING, OpenIn, Outcome, Reader,
+};
 
 mod calendar;
 mod panes;
@@ -34,6 +36,7 @@ mod tree_rows;
 mod virtual_pane;
 
 pub use theme::{NavigatorColours, TOKENS, with_tokens};
+pub use tree_rows::{Prompt, PromptKind};
 
 /// Notebook Navigator's `DEBOUNCE_KEYBOARD_FILE_OPEN`: a note the keyboard
 /// moved to opens once the keys rest this long.
@@ -47,6 +50,34 @@ pub struct Open {
     /// The arrow keys moved to it: the person is browsing, so an app may
     /// show it in place of the last rather than open one more tab.
     pub browsing: bool,
+    /// Where the editor's cursor goes, when a template said
+    /// (`{{cursor}}`): a line and a column, from 0.
+    pub cursor: Option<(usize, usize)>,
+}
+
+/// What a person is asked before it is done: a write that changes many
+/// notes or puts things in the trash, or many notes opened at once.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ask {
+    pub text: String,
+    pub then: AskThen,
+    /// The OK button's word.
+    pub ok: String,
+}
+
+/// What a yes to an [`Ask`] does.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AskThen {
+    Act(Outcome),
+    /// Open these in new tabs.
+    OpenAll(Vec<String>),
+}
+
+/// What is being renamed in place.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Renaming {
+    File(String),
+    Folder(String),
 }
 
 /// The navigator, kept by the component that called [`use_navigator`]:
@@ -72,9 +103,11 @@ pub struct Navigator {
     /// A periodic note waiting to be made, and its path: the person is
     /// asked first (`calendarConfirmBeforeCreate`).
     pub confirm: Signal<Option<(Outcome, String)>>,
-    /// A write that changes many notes (a tag renamed or deleted), and
-    /// what the person is asked before it.
-    pub ask: Signal<Option<(String, Outcome)>>,
+    /// A write that changes many notes (a tag renamed or deleted, things
+    /// put in the trash) or many notes to open, asked first.
+    pub ask: Signal<Option<Ask>>,
+    /// A note or a folder being renamed in place.
+    pub renaming: Signal<Option<Renaming>>,
     /// A name asked for (a tag's new name, a property's value).
     pub prompt: Signal<Option<tree_rows::Prompt>>,
     /// A tag's or a property's menu, open.
@@ -94,11 +127,15 @@ pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navig
     let source = use_hook(|| CopyValue::new(source()));
     let state = use_signal(|| {
         let s = source.read();
-        NavigatorState::new(
+        let mut state = NavigatorState::new(
             VaultIndex::read(s.as_ref()),
             settings.value.peek().clone(),
             clock_now(),
-        )
+        );
+        // Templates and notes merged are read through the source.
+        let read = Arc::clone(&s);
+        state.set_reader(Reader::new(move |p| read.read_text(p)));
+        state
     });
     let nav = Navigator {
         state,
@@ -111,6 +148,7 @@ pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navig
         own: use_signal(|| false),
         confirm: use_signal(|| None),
         ask: use_signal(|| None),
+        renaming: use_signal(|| None),
         prompt: use_signal(|| None),
         menu: use_signal(|| None),
         drag: use_signal(|| None),
@@ -300,7 +338,117 @@ impl Navigator {
     /// Does what an input asked of the app (an [`Outcome`] from the
     /// model): opens a note through `on_open`, or writes to the source.
     pub fn act(&self, out: Option<Outcome>, on_open: EventHandler<Open>) {
-        self.outcome(out, on_open, None);
+        self.outcome(out, on_open, None, None);
+    }
+
+    /// Asks `text` first, then does `then`.
+    pub fn ask(&self, text: impl Into<String>, ok: impl Into<String>, then: AskThen) {
+        let mut ask = self.ask;
+        ask.set(Some(Ask {
+            text: text.into(),
+            then,
+            ok: ok.into(),
+        }));
+    }
+
+    /// Does a yes.
+    pub fn then(&self, then: AskThen, on_open: EventHandler<Open>) {
+        match then {
+            AskThen::Act(out) => self.act(Some(out), on_open),
+            AskThen::OpenAll(paths) => {
+                for path in paths {
+                    on_open.call(Open {
+                        path,
+                        how: OpenIn::Tab,
+                        browsing: false,
+                        cursor: None,
+                    });
+                }
+            }
+        }
+    }
+
+    /// Opens `paths` in new tabs, asking first at
+    /// [`OPEN_ALL_WARNING`] or more (`openAllFiles`).
+    pub fn open_many(&self, paths: Vec<String>, on_open: EventHandler<Open>) {
+        if paths.len() >= OPEN_ALL_WARNING {
+            let n = paths.len();
+            self.ask(format!("Open {n} notes?"), "Open", AskThen::OpenAll(paths));
+        } else {
+            self.then(AskThen::OpenAll(paths), on_open);
+        }
+    }
+
+    /// Puts `paths` in the trash, asking first when the settings say
+    /// (`confirmBeforeDelete`).
+    pub fn trash(&self, paths: &[String], on_open: EventHandler<Open>) {
+        let (out, question, confirm) = {
+            let s = self.state.peek();
+            (
+                s.trash(paths),
+                s.trash_question(paths),
+                s.settings().confirm_delete,
+            )
+        };
+        match out {
+            Ok(out) if confirm => self.ask(question, "Delete", AskThen::Act(out)),
+            Ok(out) => self.act(Some(out), on_open),
+            Err(e) => self.say(e),
+        }
+    }
+
+    /// Makes a note as `req` asks: its prompts asked one by one first,
+    /// then written and opened with the cursor where the template put it.
+    pub fn new_note(&self, req: NewNote, on_open: EventHandler<Open>) {
+        let made = self.state.peek().new_note(&req);
+        self.made(made, req, on_open);
+    }
+
+    /// Runs the "create note" command `which` (its id, name or number).
+    pub fn run_template_command(&self, which: &str, on_open: EventHandler<Open>) {
+        let req = self
+            .state
+            .peek()
+            .template_command_request(which, OpenIn::Here);
+        match req {
+            Ok(req) => self.new_note(req, on_open),
+            Err(e) => self.say(e),
+        }
+    }
+
+    /// What a request for a note gave: prompts to ask, or a note to write.
+    pub(crate) fn made(
+        &self,
+        made: Result<Made, String>,
+        req: NewNote,
+        on_open: EventHandler<Open>,
+    ) {
+        match made {
+            Ok(Made::Ask(labels)) => {
+                let mut prompt = self.prompt;
+                if let Some(first) = labels.first() {
+                    prompt.set(Some(tree_rows::Prompt {
+                        title: first.clone(),
+                        value: String::new(),
+                        kind: tree_rows::PromptKind::Template {
+                            req: Box::new(req),
+                            label: first.clone(),
+                        },
+                    }));
+                }
+            }
+            Ok(Made::Done {
+                out,
+                cursor,
+                warning,
+            }) => {
+                if let Some(w) = warning {
+                    self.say(w);
+                }
+                self.outcome(Some(out), on_open, None, cursor);
+            }
+            Err(e) => self.say(e),
+        }
     }
 
     /// Opens a periodic note, or makes it: asking first when it is new
@@ -332,6 +480,7 @@ impl Navigator {
         out: Option<Outcome>,
         on_open: EventHandler<Open>,
         on_editor: Option<EventHandler<()>>,
+        cursor: Option<(usize, usize)>,
     ) {
         match out {
             Some(Outcome::Open {
@@ -345,6 +494,7 @@ impl Navigator {
                     path,
                     how,
                     browsing: false,
+                    cursor: None,
                 });
             }
             Some(Outcome::Open {
@@ -362,6 +512,7 @@ impl Navigator {
                             path,
                             how,
                             browsing: true,
+                            cursor: None,
                         });
                     }
                 });
@@ -371,23 +522,44 @@ impl Navigator {
                     e.call(());
                 }
             }
-            Some(Outcome::Write { ops, open }) => match self.source.read().write(&ops) {
-                Ok(()) => {
-                    // A tag renamed or deleted: its colours, order and
-                    // selection follow.
-                    self.update(|s| s.after_write(&ops));
-                    if let Some((path, how)) = open {
-                        on_open.call(Open {
-                            path,
-                            how,
-                            browsing: false,
-                        });
-                    }
+            Some(out @ Outcome::Write { .. }) => {
+                if let Err(e) = self.write(out, on_open, cursor) {
+                    self.say(e);
                 }
-                Err(e) => self.say(e),
-            },
+            }
             None => {}
         }
+    }
+
+    /// Does an [`Outcome::Write`] (anything else is let be): the source
+    /// writes it, what follows a write follows, and the note it names
+    /// opens (with the cursor at `cursor`).
+    ///
+    /// # Errors
+    ///
+    /// The source's: read-only, or an op failed.
+    pub fn write(
+        &self,
+        out: Outcome,
+        on_open: EventHandler<Open>,
+        cursor: Option<(usize, usize)>,
+    ) -> Result<(), String> {
+        let Outcome::Write { ops, open } = out else {
+            return Ok(());
+        };
+        self.source.read().write(&ops)?;
+        // A tag renamed or deleted: its colours, order and selection
+        // follow.
+        self.update(|s| s.after_write(&ops));
+        if let Some((path, how)) = open {
+            on_open.call(Open {
+                path,
+                how,
+                browsing: false,
+                cursor,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -575,7 +747,7 @@ fn use_commands(nav: &Navigator) {
                 return;
             };
             match nav.update(|s| s.convert_to_folder_note(&p)) {
-                Ok(out) => nav.outcome(Some(out), nav_open(), None),
+                Ok(out) => nav.outcome(Some(out), nav_open(), None, None),
                 Err(e) => nav.say(e),
             }
         },
@@ -591,7 +763,7 @@ fn use_commands(nav: &Navigator) {
                 return;
             };
             match nav.update(|s| s.set_as_folder_note(&p)) {
-                Ok(out) => nav.outcome(Some(out), nav_open(), None),
+                Ok(out) => nav.outcome(Some(out), nav_open(), None, None),
                 Err(e) => nav.say(e),
             }
         },
@@ -607,7 +779,7 @@ fn use_commands(nav: &Navigator) {
                 return;
             };
             match nav.update(|s| s.detach_folder_note(&f, None)) {
-                Ok(out) => nav.outcome(Some(out), nav_open(), None),
+                Ok(out) => nav.outcome(Some(out), nav_open(), None, None),
                 Err(e) => nav.say(e),
             }
         },
@@ -637,7 +809,7 @@ fn use_commands(nav: &Navigator) {
             let out = folder
                 .as_deref()
                 .and_then(|f| nav.state.peek().open_folder_note(f, true));
-            nav.outcome(out, nav_open(), None);
+            nav.outcome(out, nav_open(), None, None);
         },
     );
     let calendar_on = s.settings().calendar;
@@ -784,6 +956,193 @@ fn use_commands(nav: &Navigator) {
             },
         );
     }
+    use_file_commands(&nav);
+}
+
+/// The file operations on the palette (`new-note`, `new-note-from-template`,
+/// `move-files`, `merge-notes`, `delete-files`, `open-all-files`), and the
+/// "create note" commands a person made.
+fn use_file_commands(nav: &Navigator) {
+    let nav = *nav;
+    let group = "Navigator";
+    let s = nav.state.read();
+    let picked = s.selection().files().len();
+    let cursor = s.selection().cursor().map(str::to_owned);
+    let listed = !s.list_order().is_empty();
+    let commands: Vec<(String, String)> = s
+        .templates()
+        .commands
+        .iter()
+        .map(|c| (c.id.clone(), c.name.clone()))
+        .collect();
+    drop(s);
+    use_command(
+        Command::new("NAVIGATOR_NEW_NOTE", "New note").group(group),
+        move || {
+            let folder = nav.state.peek().current_folder();
+            nav.new_note(
+                NewNote {
+                    folder,
+                    ..NewNote::default()
+                },
+                nav_open(),
+            );
+        },
+    );
+    use_command(
+        Command::new(
+            "NAVIGATOR_NEW_NOTE_FROM_TEMPLATE",
+            "New note from template…",
+        )
+        .group(group),
+        move || {
+            let (folder, hint) = {
+                let s = nav.state.peek();
+                (s.current_folder(), s.settings().template_folder.clone())
+            };
+            tree_rows::ask_for(
+                nav,
+                "Template (a vault path)",
+                &hint,
+                tree_rows::PromptKind::TemplateFor(folder),
+            );
+        },
+    );
+    use_command(
+        Command::new("NAVIGATOR_NEW_FOLDER", "New folder…").group(group),
+        move || {
+            let folder = nav.state.peek().current_folder();
+            tree_rows::ask_for(
+                nav,
+                "New folder",
+                "",
+                tree_rows::PromptKind::NewFolder(folder),
+            );
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_RENAME", "Rename the selected note").group(group),
+            cursor.is_some(),
+            "No note is selected",
+        ),
+        move || {
+            if let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) {
+                let mut renaming = nav.renaming;
+                renaming.set(Some(Renaming::File(p)));
+            }
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_DUPLICATE", "Duplicate the selected note").group(group),
+            cursor.is_some(),
+            "No note is selected",
+        ),
+        move || {
+            let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) else {
+                return;
+            };
+            let out = nav.state.peek().duplicate(&p);
+            match out {
+                Ok(out) => nav.act(Some(out), nav_open()),
+                Err(e) => nav.say(e),
+            }
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_MOVE_TO", "Move the selected notes to…").group(group),
+            picked > 0,
+            "No note is selected",
+        ),
+        move || {
+            let paths: Vec<String> = nav
+                .state
+                .peek()
+                .selection()
+                .files()
+                .iter()
+                .cloned()
+                .collect();
+            tree_rows::ask_for(
+                nav,
+                "Move to folder (a vault path; empty, the root)",
+                "",
+                tree_rows::PromptKind::MoveTo(paths),
+            );
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_MERGE", "Merge the selected notes…").group(group),
+            picked > 1,
+            "Select two notes or more",
+        ),
+        move || {
+            let paths = nav.state.peek().selected_in_order();
+            tree_rows::ask_for(
+                nav,
+                "The merged note's name",
+                "Merged",
+                tree_rows::PromptKind::Merge(paths),
+            );
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_DELETE", "Delete the selected notes").group(group),
+            picked > 0,
+            "No note is selected",
+        ),
+        move || {
+            let paths: Vec<String> = nav
+                .state
+                .peek()
+                .selection()
+                .files()
+                .iter()
+                .cloned()
+                .collect();
+            nav.trash(&paths, nav_open());
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_OPEN_ALL", "Open all notes in the list").group(group),
+            listed,
+            "No notes here",
+        ),
+        move || match nav.state.peek().open_all() {
+            Ok(paths) => nav.open_many(paths, nav_open()),
+            Err(e) => nav.say(e),
+        },
+    );
+    // Nine places, as hooks are as many each time (the shortcuts' way);
+    // the action `NAVIGATOR_TEMPLATE_COMMAND` takes a command's stable id.
+    for n in 1..=9_usize {
+        let named = commands.get(n.saturating_sub(1));
+        let label = named.map_or_else(
+            || format!("Create note command {n}"),
+            |(_, name)| {
+                let name = if name.trim().is_empty() {
+                    "Unnamed"
+                } else {
+                    name.as_str()
+                };
+                format!("New: {name}")
+            },
+        );
+        let id = named.map(|(id, _)| id.clone()).unwrap_or_default();
+        use_command(
+            when(
+                Command::new(format!("NAVIGATOR_TEMPLATE_COMMAND_{n}"), label).group(group),
+                named.is_some(),
+                "No create-note command with that number",
+            ),
+            move || nav.run_template_command(&id, nav_open()),
+        );
+    }
 }
 
 /// The `on_open` the mounted view gave (commands run outside its props).
@@ -877,7 +1236,7 @@ pub fn NavigatorView(
         if let Some((key, mods)) = nav_key(&e) {
             e.prevent_default();
             let out = nav.state.clone().write().key(key, mods);
-            nav.outcome(out, on_open, on_focus_editor);
+            nav.outcome(out, on_open, on_focus_editor, None);
         }
     };
     // The calendar's place (Notebook Navigator's `calendarLeftPlacement`
@@ -993,8 +1352,8 @@ pub fn NavigatorView(
             if let Some((out, path)) = confirm {
                 ConfirmCreate { nav, on_open, out, path }
             }
-            if let Some((text, out)) = ask {
-                tree_rows::AskBar { nav, on_open, text, out }
+            if let Some(ask) = ask {
+                tree_rows::AskBar { nav, on_open, ask }
             }
             if let Some(prompt) = prompt {
                 tree_rows::PromptBar { key: "{prompt.title}", nav, on_open, prompt }
@@ -1093,4 +1452,8 @@ const CSS: &str = "
 .nv-root .nv-menu-row:hover { background: var(--nv-hover); }
 .nv-root .nv-thumb { background: var(--nv-faint); opacity: 0.35; }
 .nv-root .nv-thumb:hover { opacity: 0.6; }
+.nv-root .nv-row.nv-drop-target { background: var(--nv-selected); box-shadow: inset 0 0 0 1px var(--nv-open); }
+.nv-root mark.nv-search-highlight { background: var(--nv-search-highlight); color: inherit; border-radius: 2px; }
+.nv-root .nv-search-include { color: var(--nv-open); font-weight: 600; }
+.nv-root .nv-search-exclude { color: var(--nv-faint); text-decoration: line-through; }
 ";

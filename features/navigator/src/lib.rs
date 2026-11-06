@@ -46,6 +46,7 @@ pub mod settings;
 pub mod source;
 pub mod state;
 pub mod tags;
+pub mod template;
 pub mod tree;
 pub mod virtualize;
 
@@ -65,7 +66,7 @@ pub use period::{DateField, DateFilter, DayMonthOrder, Period, PeriodKind, WeekR
 pub use profiles::{Profiles, Shortcut, ShortcutKind, VaultProfile};
 pub use properties::PropertyTree;
 pub use query::{Join, Operand, Query};
-pub use search::{FilterSearch, SearchContext};
+pub use search::{FilterSearch, SearchContext, SearchMatch};
 pub use selection::{NavTarget, Selection};
 pub use settings::{
     CalendarPlacement, CountPlacement, FolderNoteOpen, Grouping, ListMode, MonthFormat,

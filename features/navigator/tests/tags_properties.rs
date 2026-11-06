@@ -330,49 +330,56 @@ fn drops_tag_notes_clear_them_and_move_tags() {
         other => panic!("{other:?}"),
     };
     assert_eq!(
-        op(s.drop_on(&notes, &tag("home")).unwrap()),
+        op(s.drop_on(&notes, &tag("home"), false).unwrap()),
         [FileOp::AddTag {
             paths: vec!["Home/Loose.md".to_owned()],
             tag: "home".to_owned()
         }]
     );
     assert_eq!(
-        op(s.drop_on(&notes, &tag(UNTAGGED)).unwrap()),
+        op(s.drop_on(&notes, &tag(UNTAGGED), false).unwrap()),
         [FileOp::ClearTags {
             paths: vec!["Home/Loose.md".to_owned()]
         }]
     );
-    assert!(s.drop_on(&notes, &tag(TAGGED)).is_err());
+    assert!(s.drop_on(&notes, &tag(TAGGED), false).is_err());
     assert!(
         s.drop_on(
             &Drag::Notes(vec!["Home/Photo.png".to_owned()]),
-            &tag("home")
+            &tag("home"),
+            false
         )
         .is_err()
     );
     // A tag on a tag goes under it; on the "Tags" row, to the top.
     let alpha = Drag::Tag("Project/Alpha".to_owned());
     assert_eq!(
-        op(s.drop_on(&alpha, &tag("home")).unwrap()),
+        op(s.drop_on(&alpha, &tag("home"), false).unwrap()),
         [FileOp::RenameTag {
             from: "Project/Alpha".to_owned(),
             to: "home/Alpha".to_owned()
         }]
     );
     assert_eq!(
-        op(s.drop_on(&alpha, &tag(TAGGED)).unwrap()),
+        op(s.drop_on(&alpha, &tag(TAGGED), false).unwrap()),
         [FileOp::RenameTag {
             from: "Project/Alpha".to_owned(),
             to: "Alpha".to_owned()
         }]
     );
-    assert!(s.drop_on(&alpha, &tag("project/alpha/spec")).is_err());
-    assert!(s.drop_on(&alpha, &tag("project")).is_err(), "there already");
     assert!(
-        s.drop_on(&Drag::Tag("work".to_owned()), &tag(TAGGED))
+        s.drop_on(&alpha, &tag("project/alpha/spec"), false)
             .is_err()
     );
-    assert!(s.drop_on(&alpha, &tag(UNTAGGED)).is_err());
+    assert!(
+        s.drop_on(&alpha, &tag("project"), false).is_err(),
+        "there already"
+    );
+    assert!(
+        s.drop_on(&Drag::Tag("work".to_owned()), &tag(TAGGED), false)
+            .is_err()
+    );
+    assert!(s.drop_on(&alpha, &tag(UNTAGGED), false).is_err());
 }
 
 #[test]
@@ -451,6 +458,7 @@ fn a_property_is_set_on_notes_dropped_or_selected() {
                 key: "status".to_owned(),
                 value: Some("doing".to_owned()),
             },
+            false,
         )
         .unwrap();
     let Outcome::Write { ops, .. } = &out else {

@@ -36,6 +36,12 @@
 //! The search, shortcuts and recent notes: `searchProvider` internal (the
 //! filter search), `showShortcuts` true, `showRecentNotes` true,
 //! `recentNotesCount` 5.
+//! Files and templates: `confirmBeforeDelete` true, `springLoadedFolders`
+//! true with `springLoadedFoldersInitialDelay` and
+//! `springLoadedFoldersSubsequentDelay` 0.5 s, `dateFormat` `MMM D, YYYY`,
+//! `timeFormat` `h:mm a`, `calendarTemplateFolder` empty, and no folder
+//! note or periodic note templates (`folderNoteTemplate`,
+//! `calendarCustomFileTemplate` and the week's to the year's).
 //! The tags and the property browser: `showTags` true, `showAllTagsFolder`
 //! true, `showUntagged` true, `scopeTagsToCurrentContext` false,
 //! `tagSortOrder` alpha-asc; `showProperties` true, the profile's
@@ -46,6 +52,9 @@
 //! What a person sets for one folder or tag (its sort, grouping, rows,
 //! mode, notes from below) is not here but in [`crate::Appearance`],
 //! kept with the view's state.
+
+// The derived section is one long list of settings, built at once.
+#![allow(clippy::large_stack_arrays)]
 
 use architect_settings::Settings;
 use facet::Facet;
@@ -650,6 +659,49 @@ pub struct NavigatorSettings {
     /// Recent notes to show
     #[setting(control = stepper(1..=20))]
     pub recent_notes_count: u32,
+    /// Ask before deleting
+    /// Ask before notes and folders go to the trash.
+    pub confirm_delete: bool,
+    /// Open folders while dragging
+    /// A folder held under a drag opens (spring-loaded folders).
+    pub spring_loaded_folders: bool,
+    /// First folder opens after
+    #[setting(control = slider(100..=3000, step = 100), unit = " ms")]
+    pub spring_loaded_delay_ms: u32,
+    /// Next folders open after
+    #[setting(control = slider(100..=3000, step = 100), unit = " ms")]
+    pub spring_loaded_next_delay_ms: u32,
+    /// Date format
+    /// A Moment format: `{{date}}` and `{{today}}` in templates.
+    #[setting(placeholder = "MMM D, YYYY")]
+    pub date_format: String,
+    /// Time format
+    /// `{{time}}` in templates.
+    #[setting(placeholder = "h:mm a")]
+    pub time_format: String,
+    /// Template folder
+    /// Where the template picker looks; empty, the whole vault.
+    #[setting(placeholder = "Templates")]
+    pub template_folder: String,
+    /// Folder note template
+    /// The template a new folder note is made from (a vault path).
+    #[setting(placeholder = "Templates/Folder.md")]
+    pub folder_note_template: String,
+    /// Daily note template
+    #[setting(placeholder = "Templates/Daily.md")]
+    pub daily_template: String,
+    /// Weekly note template
+    #[setting(placeholder = "Templates/Weekly.md")]
+    pub weekly_template: String,
+    /// Monthly note template
+    #[setting(placeholder = "Templates/Monthly.md")]
+    pub monthly_template: String,
+    /// Quarterly note template
+    #[setting(placeholder = "Templates/Quarterly.md")]
+    pub quarterly_template: String,
+    /// Yearly note template
+    #[setting(placeholder = "Templates/Yearly.md")]
+    pub yearly_template: String,
 }
 
 impl NavigatorSettings {
@@ -765,6 +817,19 @@ impl Default for NavigatorSettings {
             show_shortcuts: true,
             show_recent_notes: true,
             recent_notes_count: 5,
+            confirm_delete: true,
+            spring_loaded_folders: true,
+            spring_loaded_delay_ms: 500,
+            spring_loaded_next_delay_ms: 500,
+            date_format: "MMM D, YYYY".to_owned(),
+            time_format: "h:mm a".to_owned(),
+            template_folder: String::new(),
+            folder_note_template: String::new(),
+            daily_template: String::new(),
+            weekly_template: String::new(),
+            monthly_template: String::new(),
+            quarterly_template: String::new(),
+            yearly_template: String::new(),
         }
     }
 }

@@ -409,3 +409,48 @@ fn the_search_box_narrows_the_list_and_shortcuts_and_recent_notes_draw_over_the_
     click(&mut doc, "[data-recent=\"Guides/Shell.md\"]");
     assert_eq!(OPENED.with(|v| v.borrow().clone()), ["Guides/Shell.md"]);
 }
+
+#[test]
+fn a_note_dropped_on_a_folder_moves_words_are_marked_and_a_name_is_edited_in_place() {
+    let source = MemorySource::new("Lab")
+        .with_file(NoteFile::new("Inbox/Café plans.md", NOW, NOW).tag("work"))
+        .with_file(NoteFile::new("Inbox/Other.md", NOW - 1, NOW - 1))
+        .with_file(NoteFile::new("Archive/Old.md", NOW - 2, NOW - 2));
+    let mut doc = mount(Arc::new(source.clone()), 900, false);
+    click(&mut doc, "[data-folder=\"Inbox\"]");
+    // Dragged onto the folder's row: moved there.
+    drag(
+        &mut doc,
+        "[data-file=\"Inbox/Other.md\"]",
+        "[data-folder=\"Archive\"]",
+    );
+    assert!(source.file("Archive/Other.md").is_some());
+    assert!(source.file("Inbox/Other.md").is_none());
+    // The search's words are marked in the names, and its tag in the tree.
+    nav().set_search("cafe #work");
+    settle(&mut doc);
+    assert_eq!(count(&doc, "mark.nv-search-highlight"), 1);
+    assert_eq!(count(&doc, "[data-tag=\"work\"] .nv-search-include"), 1);
+    nav().set_search("");
+    settle(&mut doc);
+    assert_eq!(count(&doc, "mark.nv-search-highlight"), 0);
+    // Renamed in place: what would break links is said; Return renames.
+    let mut renaming = nav().renaming;
+    renaming.set(Some(architect_navigator::ui::Renaming::File(
+        "Inbox/Café plans.md".to_owned(),
+    )));
+    settle(&mut doc);
+    assert_eq!(count(&doc, "[data-testid=\"nv-rename-input\"]"), 1);
+    assert_eq!(count(&doc, "[data-testid=\"nv-name-warning\"]"), 0);
+    let out = nav()
+        .state
+        .peek()
+        .rename_file("Inbox/Café plans.md", "Plans #1")
+        .unwrap();
+    let architect_navigator::Outcome::Write { ops, .. } = out else {
+        panic!("a write")
+    };
+    source.write(&ops).unwrap();
+    settle(&mut doc);
+    assert_eq!(count(&doc, "[data-file=\"Inbox/Plans #1.md\"]"), 1);
+}
