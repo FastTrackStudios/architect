@@ -31,6 +31,9 @@ path = "extensions/tasks"
 # a [requires]: Tasks runs alone.
 [uses]
 "architect.projects" = "^0.1"
+# The Time Tracker, when it is installed: each task's time, and a button
+# on its row that times it.
+"architect.time" = "^0.1"
 
 # It reaches notes only through the app's actions: vault reads and
 # writes, base queries, opening its views and the board.
@@ -41,7 +44,7 @@ effect = "mutating"
 [[actions]]
 id = "TASKS_LIST"
 name = "Tasks: list"
-description = "The vault's tasks: `view` all (the default), open, today (in progress, or due or planned by today) or mine (assigned to the name in Settings → Tasks); `project` narrows to one project (its project.md's path, a link or its name). Open work first: in progress, then by due date, priority and title."
+description = "The vault's tasks: `view` all (the default), open, today (in progress, or due or planned by today) or mine (assigned to the name in Settings → Tasks); `project` narrows to one project (its project.md's path, a link or its name). Open work first: in progress, then by due date, priority and title. With the Time Tracker, each task has its `time` (seconds, today, week, running)."
 group = "Tasks"
 effect = "read_only"
 params = '{"type":"object","properties":{"view":{"type":"string","enum":["all","open","today","mine"]},"project":{"type":"string"}}}'

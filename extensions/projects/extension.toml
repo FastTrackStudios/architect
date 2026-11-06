@@ -27,6 +27,9 @@ path = "extensions/projects"
 # [requires]: Projects runs alone.
 [uses]
 "architect.tasks" = "^0.1"
+# The Time Tracker, when it is installed: the page shows the project's
+# time and starts timers on it and its tasks.
+"architect.time" = "^0.1"
 
 [capabilities]
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "EXT_PROJECT_TYPES"]
@@ -43,7 +46,7 @@ params = '{"type":"object","properties":{"state":{"type":"string"},"type":{"type
 [[actions]]
 id = "PROJECTS_READ"
 name = "Projects: read one"
-description = "Project `path` (its project.md, its folder, a link or its name): the project, its type, its roadmap (milestones with their tasks' progress), goals, tasks (when the Tasks extension is on) and its other notes."
+description = "Project `path` (its project.md, its folder, a link or its name): the project, its type, its roadmap (milestones with their tasks' progress), goals, tasks (when the Tasks extension is on), time (when the Time Tracker is on: architect.time for_project) and its other notes."
 group = "Projects"
 effect = "read_only"
 params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}'
