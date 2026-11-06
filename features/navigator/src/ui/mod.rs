@@ -37,7 +37,7 @@ mod tree_rows;
 mod virtual_pane;
 
 pub use theme::{NavigatorColours, TOKENS, with_tokens};
-pub use tree_rows::{Prompt, PromptKind};
+pub use tree_rows::{MenuExtra, Prompt, PromptKind, menu_extra_target};
 
 /// Notebook Navigator's `DEBOUNCE_KEYBOARD_FILE_OPEN`: a note the keyboard
 /// moved to opens once the keys rest this long.

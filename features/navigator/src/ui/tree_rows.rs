@@ -790,6 +790,18 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
         ));
     }
     drop(s);
+    // Extensions' rows (NN's MenusAPI `registerFolderMenu`,
+    // `registerTagMenu`, `registerPropertyMenu`): their `[[context]]` on
+    // `navigator:folder`, `navigator:tag`, `navigator:property`.
+    if let Some(extra) = try_use_context::<MenuExtra>() {
+        let (kind, id) = menu_extra_target(&menu.target);
+        for (label, command) in (extra.rows)(kind, &id) {
+            items.push((
+                label,
+                MenuAct::Extension(command, kind.to_owned(), id.clone()),
+            ));
+        }
+    }
     let top = menu.top;
     // Kept inside the pane, scrolled when longer (a folder's menu).
     let room = (nav
@@ -815,6 +827,12 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     style: "text-align:left; height:26px; padding:0 8px; border:none; border-radius:5px; background:transparent; color:var(--nv-text); cursor:pointer; font-size:12px;",
                     onclick: move |_| {
                         open.set(None);
+                        if let MenuAct::Extension(command, kind, id) = &act {
+                            if let Some(extra) = try_consume_context::<MenuExtra>() {
+                                (extra.run)(command, kind, id);
+                            }
+                            return;
+                        }
                         menu_act(nav, on_open, act.clone());
                     },
                     "{label}"
@@ -839,6 +857,8 @@ enum MenuAct {
     DeleteKey(String),
     CreateFolderNote(String),
     DetachFolderNote(String),
+    /// An extension's row: its command, run on the target and its id.
+    Extension(String, String, String),
     /// A nested tag (`tag:<t>`) or a value (`property:<k>=<v>`) moved.
     MoveChild(String, isize),
     ResetChildOrder(String),
@@ -1110,7 +1130,7 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             nav.say("Hidden: show hidden items to see it again");
             return;
         }
-        MenuAct::Nothing => return,
+        MenuAct::Nothing | MenuAct::Extension(..) => return,
     };
     match out {
         Ok(out) => nav.act(Some(out), on_open),
@@ -1721,4 +1741,30 @@ pub(super) fn tooltip(nav: Navigator, path: &str) -> Option<String> {
         }
     }
     Some(out.join("\n"))
+}
+
+/// Rows others add to the navigator's menus (Notebook Navigator's
+/// `MenusAPI`), given by the app over its extensions' `[[context]]` on
+/// `navigator:folder`, `navigator:tag` and `navigator:property`; each is
+/// a label and the command it runs, told the target and its id (a
+/// folder's path, a tag, `key` or `key=value`).
+#[derive(Clone)]
+pub struct MenuExtra {
+    pub rows: std::rc::Rc<dyn Fn(&str, &str) -> Vec<(String, String)>>,
+    pub run: std::rc::Rc<dyn Fn(&str, &str, &str)>,
+}
+
+/// A menu's target as others' rows name it: `navigator:<kind>` and its id.
+#[must_use]
+pub fn menu_extra_target(target: &NavTarget) -> (&'static str, String) {
+    match target {
+        NavTarget::Folder(f) => ("navigator:folder", f.clone()),
+        NavTarget::Tag(t) => ("navigator:tag", t.clone()),
+        NavTarget::Property { key, value } => (
+            "navigator:property",
+            value
+                .as_ref()
+                .map_or_else(|| key.clone(), |v| format!("{key}={v}")),
+        ),
+    }
 }

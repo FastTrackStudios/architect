@@ -1514,6 +1514,34 @@ fn VaultFiles() -> Element {
     // New note in the list's header is the navigator's own: from the
     // folder's template, opened through `on_open` (#339).
     let on_new_note: Option<EventHandler<String>> = None;
+    // Extensions' rows in the navigator's own menus (NN's MenusAPI): their
+    // `[[context]]` on `navigator:folder`, `navigator:tag`,
+    // `navigator:property`, run as a context menu's row is, told the
+    // target and its id.
+    let entries = try_use_context::<architect_workspace::ContextEntries>();
+    let commands = architect_commands::try_use_commands();
+    use_context_provider(move || architect_navigator::ui::MenuExtra {
+        rows: std::rc::Rc::new(move |target: &str, id: &str| {
+            entries
+                .as_ref()
+                .map(|e| {
+                    (e.0)(target, id)
+                        .into_iter()
+                        .map(|x| (x.label, x.command))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }),
+        run: std::rc::Rc::new(move |command: &str, target: &str, id: &str| {
+            if let Some(c) = &commands {
+                let invocation = architect::action::Invocation::new(
+                    architect::action::InvocationSource::ContextMenu,
+                )
+                .on(target, id);
+                let _ = c.run_invoked(command, None, invocation);
+            }
+        }),
+    });
     // Navigator, the built-in extension, draws it: its view over this
     // navigator (or a development copy's, `EXT_CLONE {"id":"navigator"}`).
     let mut mount = use_context_provider(|| {
