@@ -1,0 +1,184 @@
+# Tasks (extensions/tasks/src/lib.rs): tasks as vault notes, in
+# TaskNotes' shape. One Rust value (`Tasks`, a linked::Extension) runs it
+# two ways: the app links it in as a built-in, and its program
+# (src/main.rs) serves the same value as a process, this manifest's
+# [entry], when a development copy runs (EXT_CLONE {"id":"tasks"}).
+# Turn it off (EXT_DISABLE {"id":"tasks"}) and everything below goes.
+id = "tasks"
+name = "Tasks"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Tasks as notes in your vault (TaskNotes' frontmatter): a list, Today, My tasks, a kanban board for Bases, quick add, sub-tasks, dependencies, repeats and assignees. A task belongs to a project when the Projects extension is there."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-tasks"
+
+# EXT_CLONE writes this crate to the development folder and builds its
+# program, which then overrides the linked copy under the same id.
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "extensions/tasks"
+
+# Its API for others (`services.call("architect.tasks", "list", …)`, Handle::service):
+# method `m` is its action TASKS_<M>.
+[provides]
+"architect.tasks" = "0.1.0"
+
+# Projects, when it is installed: a task's project is resolved by it. Not
+# a [requires]: Tasks runs alone.
+[uses]
+"architect.projects" = "^0.1"
+
+# It reaches notes only through the app's actions: vault reads and
+# writes, base queries, opening its views and the board.
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+effect = "mutating"
+
+[[actions]]
+id = "TASKS_LIST"
+name = "Tasks: list"
+description = "The vault's tasks: `view` all (the default), open, today (in progress, or due or planned by today) or mine (assigned to the name in Settings → Tasks); `project` narrows to one project (its project.md's path, a link or its name). Open work first: in progress, then by due date, priority and title."
+group = "Tasks"
+effect = "read_only"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["all","open","today","mine"]},"project":{"type":"string"}}}'
+
+[[actions]]
+id = "TASKS_READ"
+name = "Tasks: read one"
+description = "Task `path`: its properties, and its relations — what blocks it (and whether any is open), what it blocks, its parent, its sub-tasks (and how many are done), what it relates to."
+group = "Tasks"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}'
+
+[[actions]]
+id = "TASKS_ADD"
+name = "New task"
+description = "Adds a task from a line as typed: `[[Project]]`, `#tag`, `@context`, `!high`, `today` / `tomorrow` / a weekday / `next fri` / YYYY-MM-DD, `every week` / `every 3 days` / `every weekday`; the rest is its title. `project` puts it in a project as well. Written to the project's Tasks folder, else Tasks/."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"text":{"type":"string"},"project":{"type":"string"}},"required":["text"]}'
+
+[[actions]]
+id = "TASKS_CREATE"
+name = "Tasks: create"
+description = "A task with these properties: `title`, `status`, `priority`, `due`, `scheduled`, `project`, `milestone`, `parent` (a sub-task's task), `blocked_by`, `assignees`, `tags`, `contexts`, `recurrence` (an RRULE), `recurrence_anchor`, `time_estimate` (minutes), `details` (its body)."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"},"status":{"type":"string"},"priority":{"type":"string"},"due":{"type":"string"},"scheduled":{"type":"string"},"project":{"type":"string"},"milestone":{"type":"string"},"parent":{"type":"string"},"blocked_by":{"type":"array","items":{"type":"string"}},"assignees":{"type":"array","items":{"type":"string"}},"tags":{"type":"array","items":{"type":"string"}},"contexts":{"type":"array","items":{"type":"string"}},"recurrence":{"type":"string"},"recurrence_anchor":{"type":"string"},"time_estimate":{"type":"integer"},"details":{"type":"string"}},"required":["title"]}'
+
+[[actions]]
+id = "TASKS_UPDATE"
+name = "Tasks: update"
+description = "Sets the given properties of task `path` (`null` removes one): `title`, `status`, `priority`, `due`, `scheduled`, `project`, `projects`, `milestone`, `parent`, `blocked_by`, `relates`, `assignees`, `tags`, `contexts`, `recurrence`."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"title":{"type":"string"},"status":{"type":"string"},"priority":{"type":"string"},"due":{"type":["string","null"]},"scheduled":{"type":["string","null"]},"project":{"type":"string"},"projects":{"type":"array","items":{"type":"string"}},"milestone":{"type":["string","null"]},"parent":{"type":["string","null"]},"blocked_by":{"type":"array","items":{"type":"string"}},"relates":{"type":"array","items":{"type":"string"}},"assignees":{"type":"array","items":{"type":"string"}},"tags":{"type":"array","items":{"type":"string"}},"contexts":{"type":"array","items":{"type":"string"}},"recurrence":{"type":["string","null"]}},"required":["path"]}'
+
+[[actions]]
+id = "TASKS_SET_STATUS"
+name = "Tasks: set status"
+description = "Task `path`'s status (open, in-progress, waiting, done, cancelled, or any text). Done stamps completedDate; a repeating task done stays open, its date moved to the next time and today added to complete_instances."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"status":{"type":"string"}},"required":["path","status"]}'
+
+[[actions]]
+id = "TASKS_FOR_PROJECT"
+name = "Tasks: a project's"
+description = "The tasks of project `project` (its project.md's path): those linking it in `projects`, and those inside its folder; how many are done; and per milestone, how many are done of how many."
+group = "Tasks"
+effect = "read_only"
+params = '{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}'
+
+[[actions]]
+id = "TASKS_STATUSES"
+name = "Tasks: statuses"
+description = "The status groups a task falls in (to do, in progress, waiting, done, cancelled), each with the status a task moved there is given."
+group = "Tasks"
+effect = "read_only"
+
+[[actions]]
+id = "TASKS_OPEN"
+name = "Open Tasks"
+description = "Opens a Tasks view: `view` list (the default), today, mine or board."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["list","today","mine","board"]}}}'
+
+[[actions]]
+id = "TASKS_BOARD"
+name = "Open the task board"
+description = "Opens Tasks/Board.base — every task in a column per status, drawn by this extension's kanban view — writing it first when it is not there."
+group = "Tasks"
+effect = "mutating"
+
+[[actions]]
+id = "TASKS_STARTED"
+name = "Tasks: started"
+description = "Its startup hook: reads the tasks, so its status item says what is due."
+group = "Tasks"
+effect = "read_only"
+
+[[views]]
+id = "list"
+title = "Tasks"
+icon = "list-checks"
+
+[[views]]
+id = "today"
+title = "Today"
+icon = "calendar-check"
+
+[[views]]
+id = "mine"
+title = "My tasks"
+icon = "user-check"
+
+[[status]]
+id = "due"
+text = "Tasks…"
+icon = "list-checks"
+hint = "What is due today"
+side = "left"
+
+[[menus]]
+menu = "View"
+action = "TASKS_OPEN"
+
+[[menus]]
+menu = "View"
+action = "TASKS_BOARD"
+
+[[bar]]
+action = "TASKS_ADD"
+title = "New task"
+icon = "list-plus"
+
+[[hooks]]
+on = "startup"
+action = "TASKS_STARTED"
+
+# A view type for Bases: a base's view of `type: kanban` is drawn by this
+# extension's code (`Builder::base_view("kanban", …)`): a column per value
+# of `columnBy` (status by default). Off, it leaves Bases' view picker.
+[[base_views]]
+id = "kanban"
+name = "Kanban"
+icon = "square-kanban"
+options = [{ key = "columnBy", name = "Columns", kind = "property", default = '"status"' }]
+
+[[sections]]
+id = "tasks"
+title = "Tasks"
+icon = "list-checks"
+
+[[sections.settings]]
+key = "tasks.me"
+title = "Your name"
+description = "My tasks lists the open tasks whose assignees name you (a name, or a link to your note)."
+control = "text"
+default = ""

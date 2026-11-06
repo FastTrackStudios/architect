@@ -1298,11 +1298,19 @@ impl ExtensionApi {
         method: &str,
         args: &Value,
     ) -> Result<Value, HostError> {
-        let req = manifest.requires.get(service).cloned();
+        // A service it requires, or one it uses when it is there.
+        let req = manifest
+            .requires
+            .get(service)
+            .or_else(|| manifest.uses.get(service))
+            .cloned();
         let check = req.as_ref().map(|_| ()).ok_or_else(|| {
             (
                 "requires".to_owned(),
-                format!("{} does not require {service} ([requires])", manifest.id),
+                format!(
+                    "{} neither requires nor uses {service} ([requires], [uses])",
+                    manifest.id
+                ),
             )
         });
         Self::decide("requires", check)?;

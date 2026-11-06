@@ -532,6 +532,172 @@ fn a_service_is_called_across_extensions_and_needs_its_provider() {
     );
 }
 
+const SOFT: &str = r#"
+id = "lab.soft"
+name = "Soft click"
+version = "0.1.0"
+kind = "process"
+
+[entry]
+path = "soft"
+
+[uses]
+"lab.tempo" = "^1"
+
+[capabilities]
+effect = "read_only"
+
+[[actions]]
+id = "LAB_SOFT_BPM"
+name = "Soft click: the tempo, when there is one"
+"#;
+
+static SOFT_HANDLE: Mutex<Option<Handle>> = Mutex::new(None);
+
+struct Soft;
+
+impl Extension for Soft {
+    fn manifest(&self) -> &'static str {
+        SOFT
+    }
+
+    fn build(&self, ext: &mut Builder) {
+        *SOFT_HANDLE.lock().unwrap() = Some(ext.handle());
+        ext.action("LAB_SOFT_BPM", |_| async move {
+            let handle = SOFT_HANDLE.lock().unwrap().clone().unwrap();
+            match handle
+                .service("lab.tempo", "get", json!({"from": "soft"}))
+                .await
+            {
+                Ok(v) => Ok(v),
+                Err(HostError::NotFound { what }) => Ok(json!({ "none": what })),
+                Err(e) => Err(e.to_string()),
+            }
+        });
+    }
+}
+
+#[test]
+fn a_service_it_uses_is_called_when_there_and_missed_when_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    // No provider: it loads all the same ([uses] is no [requires]).
+    let ext = Extensions::new(host(&list), Installs::new(tmp.path().join("i")))
+        .with_linked(&Soft)
+        .unwrap();
+    let events = ext.sync();
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Failed { .. })),
+        "{events:?}"
+    );
+    assert_eq!(
+        run(&list, "LAB_SOFT_BPM", Value::Null).unwrap(),
+        json!({ "none": "provider of lab.tempo ^1" })
+    );
+    // The provider comes: its calls are answered.
+    let ext = ext.with_linked(&Tempo).unwrap();
+    let _ = ext.sync();
+    assert_eq!(run(&list, "LAB_SOFT_BPM", Value::Null).unwrap()["bpm"], 120);
+    // It goes: the user stays, and misses it again.
+    let _ = ext.disable("lab.tempo");
+    assert!(ext.host().get("lab.soft").is_some(), "not unloaded with it");
+    assert!(
+        run(&list, "LAB_SOFT_BPM", Value::Null)
+            .unwrap()
+            .get("none")
+            .is_some()
+    );
+    // Its effect is still checked: reset is past what it may run.
+    let _ = ext.enable("lab.tempo");
+    let refused = block_on(ext.host().api("lab.soft").call(HostRequest::Service {
+        service: "lab.tempo".to_owned(),
+        method: "reset".to_owned(),
+        args: Value::Null,
+    }));
+    assert!(
+        matches!(refused, Err(HostError::Refused { capability, .. }) if capability == "effect")
+    );
+    // One table or the other, not both.
+    let both = SOFT.replace("[uses]", "[requires]\n\"lab.tempo\" = \"^1\"\n\n[uses]");
+    assert!(
+        Manifest::parse(&both)
+            .unwrap_err()
+            .to_string()
+            .contains("uses.lab.tempo")
+    );
+}
+
+// ---- project types (#344) -----------------------------------------------
+
+const KINDS: &str = r#"
+id = "lab.kinds"
+name = "Kinds"
+version = "0.1.0"
+kind = "data"
+
+[[views]]
+id = "page"
+title = "Song"
+
+[[project_types]]
+id = "song"
+name = "Song"
+icon = "music"
+properties = [{ key = "key", name = "Key", kind = "text", default = '"C"' }]
+template = "templates/song.md"
+folders = ["Charts", "Stems"]
+views = ["page"]
+"#;
+
+#[test]
+fn project_types_are_registered_while_loaded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let ext = Extensions::new(host(&list), Installs::new(tmp.path().join("i")));
+    ext.install_contribution_actions().unwrap();
+    let dir = tmp.path().join("kinds");
+    std::fs::create_dir_all(dir.join("templates")).unwrap();
+    std::fs::write(dir.join("extension.toml"), KINDS).unwrap();
+    std::fs::write(dir.join("templates/song.md"), "# {{title}}\n\n## Lyric\n").unwrap();
+    let _ = ext.dev(&dir);
+    let types = run(&list, "EXT_PROJECT_TYPES", Value::Null).unwrap();
+    assert_eq!(types[0]["id"], "song");
+    assert_eq!(types[0]["from"], "lab.kinds");
+    assert_eq!(types[0]["folders"], json!(["Charts", "Stems"]));
+    assert_eq!(
+        types[0]["template_text"], "# {{title}}\n\n## Lyric\n",
+        "read from its package when it loaded"
+    );
+    assert_eq!(
+        run(&list, "EXT_PROJECT_TYPES", json!({ "id": "song" })).unwrap()["name"],
+        "Song"
+    );
+    assert!(
+        run(&list, "EXT_PROJECT_TYPES", json!({ "id": "nope" }))
+            .unwrap()
+            .is_null()
+    );
+    // Off: its types go with it.
+    let _ = ext.disable("lab.kinds");
+    assert_eq!(
+        run(&list, "EXT_PROJECT_TYPES", Value::Null).unwrap(),
+        json!([])
+    );
+    // Checked at parse: an id it can write, a template in its package, its
+    // own views.
+    for (bad, why) in [
+        ("id = \"song\"", "id = \"Song Type\""),
+        (
+            "template = \"templates/song.md\"",
+            "template = \"../song.md\"",
+        ),
+        ("views = [\"page\"]", "views = [\"nope\"]"),
+    ] {
+        let text = KINDS.replacen(bad, why, 2);
+        assert!(Manifest::parse(&text).is_err(), "{why}");
+    }
+}
+
 // ---- windows ------------------------------------------------------------
 
 thread_local! {

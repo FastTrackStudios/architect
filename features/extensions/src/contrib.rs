@@ -621,6 +621,64 @@ pub struct BaseViewInput {
     pub rows: serde_json::Value,
 }
 
+/// One property a project type adds to architect's `project` kind
+/// (`[[project_types]] properties`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ProjectPropertyDecl {
+    /// The frontmatter key.
+    pub key: String,
+    pub name: String,
+    /// `text` (the default), `number`, `date`, `toggle`, `link`, `list`
+    /// or `select` (one of `choices`).
+    pub kind: String,
+    pub choices: Vec<String>,
+    /// Its value in a new project, as JSON text (`"\"client\""`, `0`).
+    pub default: Option<String>,
+}
+
+/// A type of project (`[[project_types]]`, #344): architect owns the
+/// `project` kind (a folder whose `project.md` is the project); an
+/// extension adds types of it, each with properties on top of the
+/// kind's, the `project.md` a new one starts with, the folders made in
+/// it and the views it opens with.
+///
+/// ```toml
+/// [[project_types]]
+/// id = "software"
+/// name = "Software"
+/// icon = "code"
+/// properties = [{ key = "repo", name = "Repository", kind = "link" }]
+/// template = "templates/software.md"   # in its package
+/// folders = ["Docs", "Releases"]
+/// views = ["page"]                      # its own [[views]]
+/// ```
+///
+/// Withdrawn with the rest of its contributions when the extension is
+/// turned off. The app's registry is [`Contributions::project_types`]
+/// (`EXT_PROJECT_TYPES`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ProjectTypeDecl {
+    /// What a project of it writes as its `projectType:`; unique among
+    /// every loaded extension's types.
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub description: String,
+    pub properties: Vec<ProjectPropertyDecl>,
+    /// A markdown file in its package: the body (and frontmatter) a new
+    /// project's `project.md` starts with.
+    pub template: Option<String>,
+    /// `template`'s text, read from the package when it loaded.
+    #[serde(skip_deserializing)]
+    pub template_text: Option<String>,
+    /// Folders made inside a new project.
+    pub folders: Vec<String>,
+    /// Its own views a project of this type opens with.
+    pub views: Vec<String>,
+}
+
 /// Everything an extension adds to the interface past actions, settings,
 /// views and themes: a manifest's tables, or the same sent at run time.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -639,6 +697,8 @@ pub struct Contribution {
     pub embeds: Vec<EmbedDecl>,
     /// View types for Bases (`[[base_views]]`).
     pub base_views: Vec<BaseViewDecl>,
+    /// Types of architect's `project` kind (`[[project_types]]`).
+    pub project_types: Vec<ProjectTypeDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
     pub keymaps: Vec<editor_ext::KeymapEntry>,
@@ -721,6 +781,7 @@ impl Contribution {
             slots: join(&self.slots, &other.slots, |s| s.slot.clone()),
             embeds: join(&self.embeds, &other.embeds, |e| e.id.clone()),
             base_views: join(&self.base_views, &other.base_views, |b| b.id.clone()),
+            project_types: join(&self.project_types, &other.project_types, |p| p.id.clone()),
             keymaps: join(&self.keymaps, &other.keymaps, keymap_key),
             slash: join(&self.slash, &other.slash, |s| s.action.clone()),
         }
@@ -754,6 +815,11 @@ impl Contribution {
             self.base_views
                 .iter()
                 .map(|b| format!("base_view:{}", b.id)),
+        );
+        out.extend(
+            self.project_types
+                .iter()
+                .map(|p| format!("project_type:{}", p.id)),
         );
         out.extend(
             self.keymaps
@@ -818,6 +884,7 @@ impl Contribution {
             self.slots.len(),
             self.embeds.len(),
             self.base_views.len(),
+            self.project_types.len(),
             self.keymaps.len(),
             self.slash.len(),
         ]
@@ -1034,6 +1101,34 @@ impl Contribution {
                 (Some(_), Some(_)) => {
                     return refuse(what, "it is drawn by one view or one page".to_owned());
                 }
+            }
+        }
+        for p in &self.project_types {
+            let what = format!("project type {}", p.id);
+            if p.id.is_empty()
+                || !p
+                    .id
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c))
+            {
+                return refuse(
+                    what,
+                    "its id is lowercase letters, digits, - and _".to_owned(),
+                );
+            }
+            if let Some(t) = &p.template
+                && !inside(t)
+            {
+                return refuse(what, format!("{t} is outside the package"));
+            }
+            let mut keys = BTreeSet::new();
+            for prop in &p.properties {
+                if prop.key.is_empty() || !keys.insert(prop.key.as_str()) {
+                    return refuse(what, format!("property {:?} is empty or twice", prop.key));
+                }
+            }
+            for v in &p.views {
+                view(&what, v)?;
             }
         }
         for e in &self.embeds {
@@ -1652,6 +1747,24 @@ impl Contributions {
         self.base_views()
             .into_iter()
             .find(|b| b.item.id.eq_ignore_ascii_case(id))
+    }
+
+    /// Every project type (`[[project_types]]`), in the order its owner
+    /// came: the registry of architect's `project` kind's types. A type
+    /// two extensions add is the first's.
+    #[must_use]
+    pub fn project_types(&self) -> Vec<By<ProjectTypeDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.project_types.clone())
+            .into_iter()
+            .filter(|p| seen.insert(p.item.id.clone()))
+            .collect()
+    }
+
+    /// The project type `id`: the first loaded that adds it.
+    #[must_use]
+    pub fn project_type(&self, id: &str) -> Option<By<ProjectTypeDecl>> {
+        self.project_types().into_iter().find(|p| p.item.id == id)
     }
 
     /// The embed that draws `claim`: the first loaded that claims it.

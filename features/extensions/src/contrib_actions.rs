@@ -16,6 +16,7 @@
 //! | `EXT_EMIT` | raises app event `{event, detail?}`: the hooks on it run |
 //! | `EXT_ENABLE` / `EXT_DISABLE` | turns `{id}` on or off: loaded or unloaded at once, everything it adds with it |
 //! | `EXT_EMBEDS` | every inline embed and what it claims, or `{claim}`'s (`fence:kf`): which extension draws it, and how |
+//! | `EXT_PROJECT_TYPES` | every project type loaded extensions add (`[[project_types]]`), or `{id}`'s: its properties, template, folders, views and owner |
 
 use architect::action::{
     ActionCaller, ActionError, ActionMeta, Effect, Invocation, InvocationSource, RawJson,
@@ -94,6 +95,14 @@ static EMBEDS: ActionMeta = meta(
      one that draws it: its extension, view or page, and how tall it may grow. None claiming it \
      answers `null`.",
 );
+static PROJECT_TYPES: ActionMeta = meta(
+    "EXT_PROJECT_TYPES",
+    "Project types",
+    "The types of architect's `project` kind that loaded extensions add (`[[project_types]]`): \
+     each one's id, name, icon, the properties it adds to `project`, its `project.md` template's \
+     text, the folders a new project gets, its views and the extension it is from. With `id`, \
+     that one (`null` when no loaded extension adds it).",
+);
 static ENABLE: ActionMeta = meta(
     "EXT_ENABLE",
     "Turn an extension on",
@@ -161,6 +170,12 @@ pub struct EmbedsArgs {
     pub claim: Option<String>,
 }
 
+/// `EXT_PROJECT_TYPES`' arguments.
+#[derive(Debug, Default, Facet)]
+pub struct ProjectTypesArgs {
+    pub id: Option<String>,
+}
+
 /// `EXT_ENABLE` / `EXT_DISABLE`'s arguments.
 #[derive(Debug, Facet)]
 pub struct IdArgs {
@@ -210,7 +225,8 @@ fn invoked(caller: &ActionCaller, source: InvocationSource) -> Invocation {
 impl Extensions {
     /// Puts the contribution actions (`EXT_CONTRIBUTIONS`, `EXT_OPEN`,
     /// `EXT_VIEW_OPEN`, `EXT_STATE_SET`, `EXT_STATE_CLEAR`, `EXT_EMIT`,
-    /// `EXT_ENABLE`, `EXT_DISABLE`) on the host's list.
+    /// `EXT_ENABLE`, `EXT_DISABLE`, `EXT_EMBEDS`, `EXT_PROJECT_TYPES`) on
+    /// the host's list.
     ///
     /// # Errors
     ///
@@ -364,6 +380,27 @@ impl Extensions {
                     })
                 });
                 Ok(RawJson::from(answer.to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &PROJECT_TYPES,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, a: ProjectTypesArgs| {
+                let host = me.host();
+                let reg = host.contributions();
+                let one = |t: crate::contrib::By<crate::contrib::ProjectTypeDecl>| {
+                    let mut v = serde_json::to_value(&t.item).unwrap_or(Value::Null);
+                    if let Some(map) = v.as_object_mut() {
+                        map.insert("from".to_owned(), json!(t.owner));
+                    }
+                    v
+                };
+                let answer = match a.id {
+                    Some(id) => reg.project_type(&id).map_or(Value::Null, one),
+                    None => Value::Array(reg.project_types().into_iter().map(one).collect()),
+                };
+                Ok::<_, String>(RawJson::from(answer.to_string()))
             },
         )?;
         for (meta, on) in [(&ENABLE, true), (&DISABLE, false)] {

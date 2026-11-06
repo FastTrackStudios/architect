@@ -571,6 +571,12 @@ pub struct Manifest {
     /// The services it needs, each a semver requirement (`[requires]`).
     #[serde(default)]
     pub requires: std::collections::BTreeMap<String, String>,
+    /// The services it calls when one is loaded, each a semver requirement
+    /// (`[uses]`): an optional `[requires]`. None loaded is no problem (it
+    /// loads, and its calls answer that no provider is there), so an
+    /// extension that integrates with another still runs alone.
+    #[serde(default)]
+    pub uses: std::collections::BTreeMap<String, String>,
     /// App action ids (`APP_…`) it owns, when the app allows it
     /// (`Host::allow_reserved`): the settings sheet's `APP_SETTINGS`.
     #[serde(default)]
@@ -974,6 +980,7 @@ impl Manifest {
             contribute: &self.contribute,
             provides: &self.provides,
             requires: &self.requires,
+            uses: &self.uses,
             reserved: &self.reserved,
         })
         .map_err(|b| ManifestError::Interop {

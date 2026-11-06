@@ -1,0 +1,40 @@
+[package]
+name = "architect-tasks"
+description = "Tasks, a first-party architect extension: tasks as vault notes in TaskNotes' shape (list, Today, My tasks, a kanban base view, quick add, sub-tasks, dependencies, repeats), linked in or run as a process; it provides `tasks` (extensions/tasks/extension.toml)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-tasks"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); the app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+chrono = { workspace = true }
+dioxus = { workspace = true }
+futures-timer = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+# The app's side in a test: a vault's actions and Bases' over a folder.
+architect-bases = { workspace = true, features = ["actions"] }
+vault = { workspace = true, features = ["actions"] }
+futures = "0.3"
+serde_yaml = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
