@@ -469,7 +469,9 @@ pub fn step(cursor: NaiveDate, delta: i32, weeks_to_show: u32) -> NaiveDate {
     } else {
         add_days(
             cursor,
-            i64::from(delta).saturating_mul(7).saturating_mul(i64::from(n)),
+            i64::from(delta)
+                .saturating_mul(7)
+                .saturating_mul(i64::from(n)),
         )
     }
 }
@@ -525,9 +527,7 @@ pub fn grid(cx: CalendarContext<'_>, s: &NavigatorSettings, cursor: NaiveDate) -
                         date,
                         in_month,
                         today: date == cx.today,
-                        weekend: s
-                            .weekend_days
-                            .has(date.weekday().num_days_from_sunday()),
+                        weekend: s.weekend_days.has(date.weekday().num_days_from_sunday()),
                         unfinished: unfinished(cx.index, note.as_deref(), s.calendar_tasks),
                         active: is_active(&note),
                         note,
@@ -577,4 +577,3 @@ pub fn grid(cx: CalendarContext<'_>, s: &NavigatorSettings, cursor: NaiveDate) -
         week_notes: cx.periodic.enabled(PeriodKind::Week),
     }
 }
-

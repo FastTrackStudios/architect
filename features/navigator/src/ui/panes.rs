@@ -4,9 +4,9 @@
 
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, CalendarDays, Check, ChevronDown,
-    ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder, FolderOpen, ListTree,
-    Pin, Rows3, SquarePen, Tag, Vault,
+    ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, CalendarDays, Check,
+    ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder,
+    FolderOpen, ListTree, Pin, Rows3, SquarePen, Tag, Vault,
 };
 
 use super::calendar::Calendar;

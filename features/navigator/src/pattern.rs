@@ -51,7 +51,11 @@ pub fn month_name(month0: u32, short: bool) -> &'static str {
         .get(usize::try_from(month0).unwrap_or(0))
         .copied()
         .unwrap_or("");
-    if short { name.get(..3).unwrap_or(name) } else { name }
+    if short {
+        name.get(..3).unwrap_or(name)
+    } else {
+        name
+    }
 }
 
 /// A token of a pattern.
@@ -60,15 +64,22 @@ enum T {
     /// `YYYY` (4), `YY` (2), `Y` (any), `YYYYY` (5), `YYYYYY` (6).
     Year(u8),
     /// `gggg`, `gg`, `ggggg`; ISO: `GGGG`, `GG`, `GGGGG`.
-    WeekYear { iso: bool, len: u8 },
+    WeekYear {
+        iso: bool,
+        len: u8,
+    },
     /// `M`, `MM`.
     Month(u8),
     /// `MMM`, `MMMM`.
-    MonthName { short: bool },
+    MonthName {
+        short: bool,
+    },
     /// `Mo`.
     MonthOrd,
     /// `Q`, `Qo`.
-    Quarter { ord: bool },
+    Quarter {
+        ord: bool,
+    },
     /// `D`, `DD`, `Do`.
     Day(u8),
     DayOrd,
@@ -84,8 +95,13 @@ enum T {
     /// `dd`, `ddd`, `dddd`.
     WeekdayName(u8),
     /// `w`, `ww`, `wo`; ISO: `W`, `WW`, `Wo`.
-    Week { iso: bool, len: u8 },
-    WeekOrd { iso: bool },
+    Week {
+        iso: bool,
+        len: u8,
+    },
+    WeekOrd {
+        iso: bool,
+    },
     /// The time tokens, at midnight: `H` `HH` `k` `kk` `h` `hh` `m` `mm`
     /// `s` `ss` `S…` `a` `A`.
     Time(&'static str),
@@ -254,23 +270,15 @@ impl Pattern {
     /// It has a month (`M…`).
     #[must_use]
     pub fn has_month(&self) -> bool {
-        self.tokens().any(|t| {
-            matches!(
-                t,
-                T::Month(_) | T::MonthName { .. } | T::MonthOrd
-            )
-        })
+        self.tokens()
+            .any(|t| matches!(t, T::Month(_) | T::MonthName { .. } | T::MonthOrd))
     }
 
     /// It has a day of the month or of the year (`D…`).
     #[must_use]
     pub fn has_day(&self) -> bool {
-        self.tokens().any(|t| {
-            matches!(
-                t,
-                T::Day(_) | T::DayOrd | T::DayOfYear(_) | T::DayOfYearOrd
-            )
-        })
+        self.tokens()
+            .any(|t| matches!(t, T::Day(_) | T::DayOrd | T::DayOfYear(_) | T::DayOfYearOrd))
     }
 
     #[must_use]
@@ -394,7 +402,11 @@ fn token(t: T, d: NaiveDate, weeks: WeekRules) -> String {
         T::WeekdayOrd => ordinal(d.weekday().num_days_from_sunday()),
         T::LocaleWeekday => {
             let from_sunday = d.weekday().num_days_from_sunday();
-            (from_sunday.saturating_add(7).saturating_sub(u32::from(weeks.dow) % 7) % 7).to_string()
+            (from_sunday
+                .saturating_add(7)
+                .saturating_sub(u32::from(weeks.dow) % 7)
+                % 7)
+            .to_string()
         }
         T::IsoWeekday => d.weekday().number_from_monday().to_string(),
         T::WeekdayName(n) => {
@@ -477,10 +489,9 @@ fn read(parts: &[Part], text: &str, f: Fields) -> Option<Fields> {
         T::Month(_) | T::Day(_) | T::Week { .. } => digits(text, 1, 2),
         T::DayOfYear(3) => digits(text, 3, 3),
         T::DayOfYear(_) => digits(text, 1, 3),
-        T::Quarter { ord: false }
-        | T::Weekday
-        | T::LocaleWeekday
-        | T::IsoWeekday => digits(text, 1, 1),
+        T::Quarter { ord: false } | T::Weekday | T::LocaleWeekday | T::IsoWeekday => {
+            digits(text, 1, 1)
+        }
         T::MonthOrd
         | T::DayOrd
         | T::DayOfYearOrd
@@ -488,9 +499,7 @@ fn read(parts: &[Part], text: &str, f: Fields) -> Option<Fields> {
         | T::WeekOrd { .. }
         | T::Quarter { ord: true } => ordinals(text),
         T::MonthName { short } => {
-            let list: Vec<String> = (0..12)
-                .map(|m| month_name(m, short).to_owned())
-                .collect();
+            let list: Vec<String> = (0..12).map(|m| month_name(m, short).to_owned()).collect();
             names(text, &list)
         }
         T::WeekdayName(n) => {

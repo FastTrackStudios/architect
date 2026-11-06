@@ -48,7 +48,11 @@ pub const ROLES: &[(&str, &str, &str)] = &[
     // A day's number over its feature image, and the shade under it
     // (`calendar-feature-image-overlay-color`).
     ("navigator.calendar-image-text", "#ffffff", "sheet"),
-    ("navigator.calendar-image-shade", "alpha(#000000, 0.3)", "active"),
+    (
+        "navigator.calendar-image-shade",
+        "alpha(#000000, 0.3)",
+        "active",
+    ),
 ];
 
 /// The roles as `(name, default)`, for an app's `App` layer.

@@ -115,8 +115,14 @@ fn locale_and_iso_weeks_number_as_moment() {
     assert_eq!(fmt("GGGG-[W]WW", "2025-12-28", us), "2025-W52");
     assert_eq!(WeekRules::ISO.weeks_in_year(2026), 53);
     assert_eq!(WeekRules::ISO.weeks_in_year(2025), 52);
-    assert_eq!(WeekRules::SUNDAY.week_start(day("2026-11-05")), day("2026-11-01"));
-    assert_eq!(WeekRules::ISO.week_start(day("2026-11-05")), day("2026-11-02"));
+    assert_eq!(
+        WeekRules::SUNDAY.week_start(day("2026-11-05")),
+        day("2026-11-01")
+    );
+    assert_eq!(
+        WeekRules::ISO.week_start(day("2026-11-05")),
+        day("2026-11-02")
+    );
     assert_eq!(
         WeekRules::SATURDAY.week_start(day("2026-11-05")),
         day("2026-10-31")
@@ -251,7 +257,9 @@ fn periods_step_and_climb() {
     assert!(week.contains(day("2026-12-06")));
     assert!(!week.contains(day("2026-12-07")));
     assert_eq!(
-        Period::containing(PeriodKind::Year, day("2026-11-05"), w).shift(-2).start,
+        Period::containing(PeriodKind::Year, day("2026-11-05"), w)
+            .shift(-2)
+            .start,
         day("2024-01-01")
     );
 }
@@ -384,7 +392,10 @@ fn a_day_opens_its_note_or_makes_it() {
             text: "# 2026\n".to_owned()
         }]
     );
-    assert_eq!(open, Some(("Journal/Yearly/2026.md".to_owned(), OpenIn::Tab)));
+    assert_eq!(
+        open,
+        Some(("Journal/Yearly/2026.md".to_owned(), OpenIn::Tab))
+    );
     // The source makes it, and its folder.
     source.write(&ops).unwrap();
     assert!(source.folders().contains(&"Journal/Yearly".to_owned()));

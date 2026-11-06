@@ -673,8 +673,11 @@ impl NavigatorState {
             let go = match period.kind {
                 PeriodKind::Day | PeriodKind::Week => !self.calendar_shows(period.start),
                 PeriodKind::Month => {
-                    Period::containing(PeriodKind::Month, self.calendar_cursor(), self.periodic.week_rules())
-                        != period
+                    Period::containing(
+                        PeriodKind::Month,
+                        self.calendar_cursor(),
+                        self.periodic.week_rules(),
+                    ) != period
                 }
                 PeriodKind::Quarter | PeriodKind::Year => false,
             };

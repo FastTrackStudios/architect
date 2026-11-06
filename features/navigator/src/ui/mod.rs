@@ -609,9 +609,24 @@ fn use_commands(nav: &Navigator) {
     }
     let periodic = s.active_period().is_some();
     for (id, label, keys, by) in [
-        ("NAVIGATOR_NEXT_PERIOD", "Open the next periodic note", "⌃⌥→", 1),
-        ("NAVIGATOR_PREVIOUS_PERIOD", "Open the previous periodic note", "⌃⌥←", -1),
-        ("NAVIGATOR_PARENT_PERIOD", "Open the parent periodic note", "⌃⌥↑", 0),
+        (
+            "NAVIGATOR_NEXT_PERIOD",
+            "Open the next periodic note",
+            "⌃⌥→",
+            1,
+        ),
+        (
+            "NAVIGATOR_PREVIOUS_PERIOD",
+            "Open the previous periodic note",
+            "⌃⌥←",
+            -1,
+        ),
+        (
+            "NAVIGATOR_PARENT_PERIOD",
+            "Open the parent periodic note",
+            "⌃⌥↑",
+            0,
+        ),
     ] {
         use_command(
             when(
@@ -839,7 +854,12 @@ pub fn NavigatorView(
 /// Notebook Navigator's "New daily note" dialog, as a bar over the
 /// navigator's foot: the note's path, Cancel and Create.
 #[component]
-fn ConfirmCreate(nav: Navigator, on_open: EventHandler<Open>, out: Outcome, path: String) -> Element {
+fn ConfirmCreate(
+    nav: Navigator,
+    on_open: EventHandler<Open>,
+    out: Outcome,
+    path: String,
+) -> Element {
     let mut confirm = nav.confirm;
     rsx! {
         div { class: "nv-confirm", role: "alertdialog", "aria-label": "New note",

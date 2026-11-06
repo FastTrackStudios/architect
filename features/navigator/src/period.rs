@@ -107,7 +107,10 @@ impl WeekRules {
     #[must_use]
     pub fn week_start(self, date: NaiveDate) -> NaiveDate {
         let from_sunday = date.weekday().num_days_from_sunday();
-        let back = from_sunday.saturating_add(7).saturating_sub(u32::from(self.dow) % 7) % 7;
+        let back = from_sunday
+            .saturating_add(7)
+            .saturating_sub(u32::from(self.dow) % 7)
+            % 7;
         date.checked_sub_days(Days::new(u64::from(back)))
             .unwrap_or(date)
     }
