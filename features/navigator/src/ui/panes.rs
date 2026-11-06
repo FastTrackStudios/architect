@@ -5,8 +5,8 @@
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, CalendarDays, Check,
-    ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder,
-    FolderOpen, ListTree, Pin, Rows3, SquarePen, Tag, Vault,
+    ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Eye, EyeOff, FileText,
+    Folder, FolderOpen, ListTree, Pin, Rows3, Search, SquarePen, Tag, UserRound, Vault,
 };
 
 use super::calendar::Calendar;
@@ -46,13 +46,22 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
     let dual = s.settings().dual_pane;
     let calendar_on = s.settings().calendar;
     let calendar_open = s.calendar_open;
+    let show_hidden = s.show_hidden();
+    let profiles: Vec<(String, String)> = s
+        .profiles()
+        .all()
+        .map(|p| (p.id.clone(), p.name.clone()))
+        .collect();
+    let profile = s.profile().id.clone();
+    let profile_name = s.profile().name.clone();
     drop(s);
     let row_menu = nav.menu.read().clone();
+    let mut profile_menu = use_signal(|| false);
     rsx! {
         div { class: "nv-nav", "data-pane": "navigation",
             style: "position:absolute; inset:0; display:flex; flex-direction:column; background:var(--nv-background);",
             div { class: "nv-header",
-                style: "flex:0 0 {HEADER}px; display:flex; align-items:center; gap:2px; padding:0 6px; border-bottom:1px solid var(--nv-divider);",
+                style: "flex:0 0 {HEADER}px; display:flex; align-items:center; gap:2px; padding:0 6px; border-bottom:1px solid var(--nv-divider); position:relative; z-index:4;",
                 button { class: "nv-tool", "aria-label": if any { "Collapse all folders" } else { "Expand all folders" },
                     onclick: move |_| nav.update(NavigatorState::collapse_or_expand_all),
                     if any { ChevronsDownUp { size: 16 } } else { ChevronsUpDown { size: 16 } }
@@ -62,6 +71,34 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                     ArrowUpDown { size: 16 }
                 }
                 div { style: "flex:1;" }
+                // The vault profiles (`VaultTitle`'s menu), when there are more than one.
+                if profiles.len() > 1 {
+                    button { class: if profile_menu() { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Profile: {profile_name}",
+                        "data-testid": "nv-profile", title: "{profile_name}",
+                        onclick: move |_| profile_menu.toggle(),
+                        UserRound { size: 16 }
+                    }
+                }
+                button { class: if show_hidden { "nv-tool nv-on" } else { "nv-tool" },
+                    "aria-label": if show_hidden { "Hide hidden items" } else { "Show hidden items" },
+                    "data-testid": "nv-show-hidden",
+                    onclick: move |_| nav.update(NavigatorState::toggle_hidden),
+                    if show_hidden { Eye { size: 16 } } else { EyeOff { size: 16 } }
+                }
+                if profile_menu() {
+                    div { class: "nv-menu nv-profile-menu", role: "menu",
+                        style: "position:absolute; top:{HEADER}px; right:6px; z-index:10; min-width:180px; padding:4px; border-radius:8px; \
+                                background:var(--nv-background); border:1px solid var(--nv-divider);",
+                        MenuHeading { label: "Vault profile" }
+                        for (id, name) in profiles {
+                            MenuRow { key: "{id}", data: format!("profile:{id}"), label: name, checked: id == profile,
+                                on_pick: move |()| {
+                                    if let Err(e) = nav.update(|s| s.select_profile(&id)) { nav.say(e); }
+                                    profile_menu.set(false);
+                                } }
+                        }
+                    }
+                }
                 if calendar_on {
                     button { class: if calendar_open { "nv-tool nv-on" } else { "nv-tool" },
                         "aria-label": if calendar_open { "Hide calendar" } else { "Show calendar" },
@@ -102,6 +139,7 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     let root_level = u16::from(s.settings().show_root);
     let tag_root_level = u16::from(s.settings().all_tags_row);
     let over = nav.drag.read().as_ref().and_then(|d| d.over.clone());
+    let active = s.active().map(str::to_owned);
     // Collected, so the state is let go before the rows are drawn.
     #[allow(clippy::needless_collect)]
     let rows: Vec<_> = window
@@ -134,7 +172,15 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     drop(s);
     rsx! {
         for (row, top, h, note, colour) in rows {
-            if let NavRowKind::Tag { tag, key, name, has_children, expanded, count } = row.kind.clone() {
+            if let NavRowKind::Banner { src } = row.kind.clone() {
+                tree_rows::BannerRow { key: "{row.key}", nav, src, top, height: h }
+            } else if let NavRowKind::Section { id, name, expanded, count } = row.kind.clone() {
+                tree_rows::SectionRow { key: "{row.key}", nav, id, name, expanded, count, top, height: h }
+            } else if let NavRowKind::Shortcut { at, shortcut, name, missing } = row.kind.clone() {
+                tree_rows::ShortcutRow { key: "{row.key}", nav, on_open, at, shortcut, name, missing, reorder: reordering, top, height: h }
+            } else if let NavRowKind::Recent { path, name } = row.kind.clone() {
+                tree_rows::RecentRow { key: "{row.key}", nav, on_open, active: active.as_deref() == Some(path.as_str()), path, name, top, height: h }
+            } else if let NavRowKind::Tag { tag, key, name, has_children, expanded, count } = row.kind.clone() {
                 ItemRow {
                     key: "{row.key}",
                     nav,
@@ -256,6 +302,7 @@ fn FolderRow(
     };
     let name_weight = if root { 600 } else { 400 };
     let (p1, p2, p3, p4) = (path.clone(), path.clone(), name.clone(), name.clone());
+    let p5 = path.clone();
     rsx! {
         div {
             class,
@@ -272,6 +319,12 @@ fn FolderRow(
                 }
                 let out = nav.update(|s| s.click_folder(&p1));
                 nav.act(out, on_open);
+            },
+            // Add to shortcuts, hide (`buildFolderMenu`'s).
+            oncontextmenu: move |e: MouseEvent| {
+                e.prevent_default();
+                let mut menu = nav.menu;
+                menu.set(Some(tree_rows::RowMenu { target: NavTarget::Folder(p5.clone()), top: top + height }));
             },
             // The chevron opens and closes without selecting.
             div {
@@ -360,6 +413,7 @@ pub(super) fn ListPane(
         _ => String::new(),
     };
     let empty = s.list_order().is_empty();
+    let searching = s.search_open || !s.search().text().is_empty();
     drop(s);
     let own = *nav.own.read() || has_own;
     let place = match &target {
@@ -390,6 +444,10 @@ pub(super) fn ListPane(
                         onclick: move |_| new_note.call(new_in.clone()),
                         SquarePen { size: 16 }
                     }
+                }
+                button { class: if searching { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Search", "data-testid": "nv-search-toggle",
+                    onclick: move |_| nav.update(NavigatorState::toggle_search),
+                    Search { size: 16 }
                 }
                 button { class: if descendants { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Notes from folders below",
                     onclick: move |_| nav.edit_list(|_, s| s.include_descendants = !s.include_descendants),
@@ -435,7 +493,7 @@ pub(super) fn ListPane(
                     }
                 }
             }
-            tree_rows::QueryBar { nav }
+            tree_rows::SearchBar { nav }
             if let Some(text) = notice {
                 div { class: "nv-notice", role: "status",
                     style: "flex:0 0 auto; display:flex; align-items:center; gap:6px; padding:4px 10px; font-size:12px; color:var(--nv-muted); border-bottom:1px solid var(--nv-divider);",
@@ -447,7 +505,9 @@ pub(super) fn ListPane(
             div { style: "flex:1 1 0; min-height:0; position:relative;",
                 if empty {
                     div { style: "position:absolute; top:0; left:0; right:0; bottom:0; display:flex; flex-direction:column; justify-content:center; padding:16px;",
-                        p { style: "margin:0; text-align:center; color:var(--nv-faint); font-size:12px;", "No notes here" }
+                        p { style: "margin:0; text-align:center; color:var(--nv-faint); font-size:12px;",
+                            if searching { "No notes match the search" } else { "No notes here" }
+                        }
                     }
                 } else {
                     VirtualPane { nav, pane: Pane::Files, label: "Notes", ListRows { nav, on_open, on_context_menu } }

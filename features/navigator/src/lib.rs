@@ -31,13 +31,16 @@
 
 pub mod appearance;
 pub mod calendar;
+pub mod hidden;
 pub mod index;
 pub mod layout;
 pub mod list;
 pub mod pattern;
 pub mod period;
+pub mod profiles;
 pub mod properties;
 pub mod query;
+pub mod search;
 pub mod selection;
 pub mod settings;
 pub mod source;
@@ -53,24 +56,27 @@ pub mod vault_source;
 
 pub use appearance::Appearance;
 pub use calendar::{CalendarDay, CalendarGrid, CalendarWeek, HeaderPeriod, PeriodicNotes};
+pub use hidden::{FileVisibility, Hidden, HiddenRules};
 pub use index::{NoteCount, VaultIndex};
 pub use layout::{Pane, PaneLayout};
 pub use list::{Clock, Lines, ListContext, ListRow, ListRowKind, PinIn, Thumb};
 pub use pattern::Pattern;
 pub use period::{DateField, DateFilter, DayMonthOrder, Period, PeriodKind, WeekRules};
+pub use profiles::{Profiles, Shortcut, ShortcutKind, VaultProfile};
 pub use properties::PropertyTree;
 pub use query::{Join, Operand, Query};
+pub use search::{FilterSearch, SearchContext};
 pub use selection::{NavTarget, Selection};
 pub use settings::{
     CalendarPlacement, CountPlacement, FolderNoteOpen, Grouping, ListMode, MonthFormat,
-    NarrowLayout, NavigatorSettings, Orientation, SortOption, StartPane, TextCount, TreeSort,
-    WeekStart, WeekendDays,
+    NarrowLayout, NavigatorSettings, Orientation, SearchProvider, SortOption, StartPane, TextCount,
+    TreeSort, WeekStart, WeekendDays,
 };
 pub use source::{
     FileOp, Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
     Subscription, TaskCounts,
 };
-pub use state::{Colour, Key, Mods, NavigatorState, OpenIn, Outcome, Pin, ViewState};
+pub use state::{Colour, HideTarget, Key, Mods, NavigatorState, OpenIn, Outcome, Pin, ViewState};
 pub use tags::TagTree;
 pub use tree::{NavRow, NavRowKind};
 #[cfg(feature = "vault")]

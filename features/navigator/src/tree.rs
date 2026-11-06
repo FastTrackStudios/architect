@@ -17,6 +17,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::index::{NoteCount, VaultIndex};
+use crate::profiles::Shortcut;
 use crate::properties::{PropertyTree, ROOT, key_id, value_id};
 use crate::selection::NavTarget;
 use crate::settings::TreeSort;
@@ -64,9 +65,42 @@ pub enum NavRowKind {
         expanded: bool,
         count: NoteCount,
     },
+    /// The profile's banner over the rest: an image, a vault path or a
+    /// URL (`navigationBanner`).
+    Banner {
+        src: String,
+    },
+    /// The "Shortcuts" or "Recent notes" header ([`SHORTCUTS`],
+    /// [`RECENT`]), folding the rows under it.
+    Section {
+        id: String,
+        name: String,
+        expanded: bool,
+        count: usize,
+    },
+    /// A shortcut, `at` from 0 (its command is `at + 1`); `missing` when
+    /// what it opens is gone.
+    Shortcut {
+        at: usize,
+        shortcut: Shortcut,
+        name: String,
+        missing: bool,
+    },
+    /// A recent note.
+    Recent {
+        path: String,
+        name: String,
+    },
     TopSpacer,
     BottomSpacer,
 }
+
+/// The shortcuts' section.
+pub const SHORTCUTS: &str = "shortcuts";
+/// The recent notes' section.
+pub const RECENT: &str = "recent";
+/// The banner's height.
+pub const BANNER_HEIGHT: f64 = 96.0;
 
 /// One row of the navigation pane.
 #[derive(Debug, Clone, PartialEq, Eq)]

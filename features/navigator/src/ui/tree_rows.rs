@@ -1,7 +1,7 @@
 //! The tag and property rows (Notebook Navigator's `TagTreeItem`,
 //! `PropertyTreeItem`), their menu, the bars that ask for a name or a yes,
-//! the search a ⌘/Ctrl-click built, and dragging notes and tags onto them
-//! (`useDragAndDrop`).
+//! the search box, the banner, shortcut and recent-note rows over the
+//! folders, and dragging notes and tags onto them (`useDragAndDrop`).
 //!
 //! A drag starts on a note's row or a tag's with the mouse pressed and
 //! moved; Blitz sends the moves and the release to the row pressed, so it
@@ -13,15 +13,15 @@
 
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    ArrowDown, ArrowUp, ChevronDown, ChevronRight, Equal, FileCode, Search, Tag, Tags,
-    TextAlignStart, X,
+    ArrowDown, ArrowUp, BookmarkPlus, ChevronDown, ChevronRight, Equal, FileCode, FileText, Folder,
+    Search, Tag, Tags, TextAlignStart, X,
 };
 
 use super::{Navigator, Open};
+use crate::profiles::{Shortcut, ShortcutKind};
 use crate::properties::ROOT;
-use crate::query::Query;
 use crate::selection::NavTarget;
-use crate::state::{Drag, Mods, Outcome};
+use crate::state::{Drag, HideTarget, Mods, Outcome};
 use crate::tags::{TAGGED, UNTAGGED};
 
 /// How far a press moves before it is a drag.
@@ -390,6 +390,43 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
         }
         NavTarget::Folder(_) => {}
     }
+    // Every folder, tag and property but the virtual rows: a shortcut, and
+    // (folders and tags) hiding it.
+    let real = match &menu.target {
+        NavTarget::Tag(t) => t != TAGGED && t != UNTAGGED,
+        NavTarget::Property { key, .. } => key != ROOT,
+        NavTarget::Folder(_) => true,
+    };
+    if real {
+        let shortcut = Shortcut::to(&menu.target);
+        let has = s.profile().shortcuts.iter().any(|x| x.same(&shortcut));
+        items.push(if has {
+            (
+                "Remove from shortcuts".to_owned(),
+                MenuAct::Shortcut(shortcut, false),
+            )
+        } else {
+            (
+                "Add to shortcuts".to_owned(),
+                MenuAct::Shortcut(shortcut, true),
+            )
+        });
+        match &menu.target {
+            NavTarget::Folder(f) if !f.is_empty() => {
+                items.push((
+                    "Hide folder".to_owned(),
+                    MenuAct::Hide(HideTarget::Folder(f.clone())),
+                ));
+            }
+            NavTarget::Tag(t) => {
+                items.push((
+                    "Hide tag".to_owned(),
+                    MenuAct::Hide(HideTarget::Tag(t.clone())),
+                ));
+            }
+            _ => {}
+        }
+    }
     if n == 0 && matches!(menu.target, NavTarget::Property { .. } | NavTarget::Tag(_)) {
         items.push((
             "Select notes to tag them or set properties".to_owned(),
@@ -433,6 +470,9 @@ enum MenuAct {
     ResetTagOrder,
     SetProperty(Vec<String>, String, Option<String>),
     SetValue(Vec<String>, String),
+    /// A shortcut added (`true`) or taken out.
+    Shortcut(Shortcut, bool),
+    Hide(HideTarget),
     Nothing,
 }
 
@@ -478,6 +518,21 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
         },
         MenuAct::ResetTagOrder => {
             nav.update(crate::NavigatorState::reset_tag_order);
+            return;
+        }
+        MenuAct::Shortcut(sc, add) => {
+            nav.update(|s| {
+                if add {
+                    s.add_shortcut(sc, None);
+                } else {
+                    s.remove_shortcut(&sc);
+                }
+            });
+            return;
+        }
+        MenuAct::Hide(what) => {
+            nav.update(|s| s.hide(&what, false));
+            nav.say("Hidden: show hidden items to see it again");
             return;
         }
         MenuAct::Nothing => return,
@@ -579,24 +634,201 @@ pub(super) fn AskBar(
     }
 }
 
-/// The search a ⌘/Ctrl-click built, over the list, with a button that
-/// clears it.
+/// The search box over the list (`SearchInput`): what it types narrows
+/// the list (the filter search, `crate::search`); ⌘/Ctrl-clicks on tags
+/// and properties write to it. Escape closes and clears it; the bookmark
+/// saves it as a shortcut.
 #[component]
-pub(super) fn QueryBar(nav: Navigator) -> Element {
-    let text = nav.state.read().query().text();
-    if text.is_empty() {
+pub(super) fn SearchBar(nav: Navigator) -> Element {
+    let s = nav.state.read();
+    let text = s.search().text().to_owned();
+    let open = s.search_open || !text.is_empty();
+    let expression = s.search().is_expression();
+    let full = s.settings().search_provider == crate::SearchProvider::FullText;
+    drop(s);
+    if !open {
         return rsx! {};
     }
+    let placeholder = if full {
+        "Search the notes' text, #tags, .properties, @dates"
+    } else {
+        "Search names, #tags, .properties, @dates, folder:"
+    };
+    let save = text.clone();
     rsx! {
-        div { class: "nv-query", "data-testid": "nv-query", "data-query": "{text}",
-            style: "flex:0 0 26px; display:flex; align-items:center; gap:6px; padding:0 10px; border-bottom:1px solid var(--nv-divider); \
+        div { class: "nv-query nv-search", "data-testid": "nv-query", "data-query": "{text}",
+            "data-expression": if expression { "true" } else { "false" },
+            style: "flex:0 0 30px; display:flex; align-items:center; gap:6px; padding:0 8px; border-bottom:1px solid var(--nv-divider); \
                     color:var(--nv-muted); font-size:12px; white-space:nowrap; overflow:hidden;",
             Search { size: 12 }
-            span { style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;", "{text}" }
+            input { class: "nv-search-input", "data-testid": "nv-search-input", value: "{text}",
+                placeholder,
+                "aria-label": "Search",
+                autofocus: true,
+                style: "flex:1 1 auto; min-width:0; height:22px; padding:0 4px; border:none; outline:none; background:transparent; color:var(--nv-text); font-size:12px;",
+                oninput: move |e| nav.set_search(&e.value()),
+                onkeydown: move |e: KeyboardEvent| {
+                    e.stop_propagation();
+                    if e.key() == Key::Named(NamedKey::Escape) {
+                        nav.update(crate::NavigatorState::toggle_search);
+                    }
+                },
+            }
+            if !text.is_empty() {
+                button { class: "nv-tool", "aria-label": "Save the search as a shortcut", "data-testid": "nv-search-save", style: "width:20px; height:20px;",
+                    onclick: move |_| {
+                        let added = nav.update(|s| s.add_shortcut(Shortcut::search(save.clone(), save.clone()), None));
+                        nav.say(if added { "Saved to shortcuts" } else { "It is in the shortcuts" });
+                    },
+                    BookmarkPlus { size: 12 }
+                }
+            }
             button { class: "nv-tool", "aria-label": "Clear the search", style: "width:20px; height:20px;",
-                onclick: move |_| nav.update(|s| s.set_query(Query::default())),
+                onclick: move |_| nav.update(crate::NavigatorState::toggle_search),
                 X { size: 12 }
             }
+        }
+    }
+}
+
+// ── Over the folders: the banner, the shortcuts, the recent notes ─────
+
+/// The profile's banner (`NavigationBanner`): a vault image or a URL.
+#[component]
+pub(super) fn BannerRow(nav: Navigator, src: String, top: f64, height: f64) -> Element {
+    let url = if src.contains("://") || src.starts_with("data:") {
+        Some(src)
+    } else {
+        nav.source().resource_url(&src)
+    };
+    let Some(url) = url else {
+        return rsx! {};
+    };
+    rsx! {
+        div { class: "nv-banner", "data-testid": "nv-banner",
+            style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; padding:4px 0; box-sizing:border-box;",
+            img { src: "{url}", alt: "", style: "width:100%; height:100%; object-fit:cover; border-radius:8px; display:block;" }
+        }
+    }
+}
+
+/// The "Shortcuts" or "Recent notes" header, folding its rows.
+#[component]
+pub(super) fn SectionRow(
+    nav: Navigator,
+    id: String,
+    name: String,
+    expanded: bool,
+    count: usize,
+    top: f64,
+    height: f64,
+) -> Element {
+    let toggle = id.clone();
+    rsx! {
+        div { class: "nv-row nv-section", role: "treeitem", "data-section": "{id}",
+            "aria-expanded": if expanded { "true" } else { "false" },
+            style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:4px; \
+                    padding:0 8px 0 6px; border-radius:6px; white-space:nowrap; color:var(--nv-muted); font-size:11px; font-weight:600; \
+                    text-transform:uppercase; letter-spacing:0.04em;",
+            onclick: move |_| nav.update(|s| s.toggle_section(&toggle)),
+            span { style: "flex:0 0 16px; display:flex; align-items:center; justify-content:center; color:var(--nv-faint);",
+                if expanded { ChevronDown { size: 14 } } else { ChevronRight { size: 14 } }
+            }
+            span { style: "flex:1 1 auto;", "{name}" }
+            span { class: "nv-count", style: "flex:0 0 auto; color:var(--nv-faint); font-weight:400;", "{count}" }
+        }
+    }
+}
+
+/// A shortcut: a click opens it; its number (1 to 9) is its command's;
+/// reordering shows its arrows and a remove.
+#[component]
+pub(super) fn ShortcutRow(
+    nav: Navigator,
+    on_open: EventHandler<Open>,
+    at: usize,
+    shortcut: Shortcut,
+    name: String,
+    missing: bool,
+    reorder: bool,
+    top: f64,
+    height: f64,
+) -> Element {
+    let badge = (at < 9).then(|| at.saturating_add(1).to_string());
+    let open = shortcut.clone();
+    let remove = shortcut.clone();
+    let kind = shortcut.kind;
+    let colour = if missing {
+        "var(--nv-faint)"
+    } else {
+        "var(--nv-text)"
+    };
+    let deco = if missing { "line-through" } else { "none" };
+    rsx! {
+        div { class: "nv-row nv-shortcut", role: "treeitem", "data-shortcut": "{at}", "data-kind": "{kind.id()}",
+            style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:6px; \
+                    padding:0 8px 0 10px; border-radius:6px; white-space:nowrap; color:{colour};",
+            onclick: move |_| match nav.update(|s| s.open_shortcut_entry(&open)) {
+                Ok(out) => nav.act(out, on_open),
+                Err(e) => nav.say(e),
+            },
+            span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);",
+                match kind {
+                    ShortcutKind::Note => rsx! { FileText { size: 15 } },
+                    ShortcutKind::Folder => rsx! { Folder { size: 15 } },
+                    ShortcutKind::Tag => rsx! { Tag { size: 15 } },
+                    ShortcutKind::Property => rsx! { TextAlignStart { size: 15 } },
+                    ShortcutKind::Search => rsx! { Search { size: 15 } },
+                }
+            }
+            span { class: "nv-name", style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; text-decoration:{deco};", "{name}" }
+            if reorder {
+                button { class: "nv-tool", "aria-label": "Move {name} up", style: "width:20px; height:20px;",
+                    onclick: move |e| { e.stop_propagation(); nav.update(|s| s.move_shortcut(at, at.saturating_sub(1))); },
+                    ArrowUp { size: 13 }
+                }
+                button { class: "nv-tool", "aria-label": "Move {name} down", style: "width:20px; height:20px;",
+                    onclick: move |e| { e.stop_propagation(); nav.update(|s| s.move_shortcut(at, at.saturating_add(1))); },
+                    ArrowDown { size: 13 }
+                }
+                button { class: "nv-tool", "aria-label": "Remove {name} from shortcuts", style: "width:20px; height:20px;",
+                    onclick: move |e| { e.stop_propagation(); nav.update(|s| s.remove_shortcut(&remove)); },
+                    X { size: 13 }
+                }
+            } else if let Some(b) = badge {
+                span { class: "nv-count nv-shortcut-badge", style: "flex:0 0 auto; color:var(--nv-faint); font-size:11px;", "{b}" }
+            }
+        }
+    }
+}
+
+/// A recent note: a click opens it.
+#[component]
+pub(super) fn RecentRow(
+    nav: Navigator,
+    on_open: EventHandler<Open>,
+    path: String,
+    name: String,
+    active: bool,
+    top: f64,
+    height: f64,
+) -> Element {
+    let class = if active {
+        "nv-row nv-recent nv-selected"
+    } else {
+        "nv-row nv-recent"
+    };
+    let p = path.clone();
+    rsx! {
+        div { class, role: "treeitem", "data-recent": "{path}",
+            style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:6px; \
+                    padding:0 8px 0 10px; border-radius:6px; white-space:nowrap;",
+            onclick: move |_| {
+                let out = nav.state.peek().open_recent(&p);
+                nav.act(out, on_open);
+            },
+            span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", FileText { size: 15 } }
+            span { class: "nv-name", style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;", "{name}" }
         }
     }
 }

@@ -83,6 +83,15 @@ directly. Its palette commands are then the view's own.
   `features/navigator/src/tree.rs` `tag_rows` and `property_rows` draw them
   under the folders. `features/navigator/src/query.rs`: `Query`, the
   search a ⌘/Ctrl-click builds (tags and properties, AND and OR).
+- `features/navigator/src/search.rs`: `FilterSearch`, the search box's
+  filter search, read (`parse`) and matched (`matches`): names and
+  aliases, tags, properties, dates, folders, extensions and tasks, with
+  exclusions, quoted text, and AND and OR between tags and properties.
+- `features/navigator/src/hidden.rs`: `Hidden`, a profile's hiding
+  compiled: folder, tag, file name and frontmatter patterns, file
+  visibility, and the folders kept out of the lists above them.
+- `features/navigator/src/profiles.rs`: `Profiles` and `VaultProfile`,
+  each with its hiding, banner, `Shortcut`s and recent notes.
 - `features/navigator/src/appearance.rs`: `Appearance`, a folder's or a
   tag's own list. `Appearance::over` applies it to the settings.
 - `features/navigator/src/state.rs`: `NavigatorState` holds everything.
@@ -91,7 +100,11 @@ directly. Its palette commands are then the view's own.
   `click_tag`, `add_tag`, `remove_tag`, `clear_tags`, `rename_tag`,
   `delete_tag`, `new_note_in_tag`, `move_tag_root`. Properties:
   `click_property`, `set_property`. Drops: `drop_on`. The search:
-  `query`, `toggle_query`, `set_query`. Folder
+  `set_search`, `toggle_search`, `search_vault`, `set_full_text`, and
+  `query`, `toggle_query`, `set_query`. Profiles and hiding:
+  `select_profile`, `add_profile`, `edit_profile`, `toggle_hidden`, `hide`.
+  Shortcuts and recent notes: `add_shortcut`, `move_shortcut`,
+  `open_shortcut`, `open_recent`, `toggle_section`. Folder
   notes: `convert_to_folder_note`, `set_as_folder_note`,
   `detach_folder_note`, `open_folder_note`. The manual order:
   `move_in_order`. `ViewState` keeps pins, folded groups, own lists and
@@ -123,6 +136,13 @@ directly. Its palette commands are then the view's own.
   view on show and brings back its answer.
 
 ## Tests to read
+
+- `features/navigator/tests/search.rs`: the filter search, term by term,
+  the box and ⌘/Ctrl-clicks writing to it, kept across runs, the
+  vault-wide search, and the full text through the source.
+- `features/navigator/tests/profiles.rs`: hiding by pattern, frontmatter,
+  tag and file type, show hidden, folders kept out of the lists above,
+  profiles switched and kept, shortcuts and recent notes.
 
 - `features/navigator/tests/tags_properties.rs`: the tag tree and the
   property browser, their counts, sorts and orders, the tag operations and
@@ -194,13 +214,34 @@ Notebook Navigator's parts are ported in layers (#332):
     and counts, colours and icons; a property set on the notes selected or
     dropped.
   - ⌘/Ctrl-click puts a tag or property into the search with AND, with ⇧
-    with OR (`Query`, which the search pane, #338, takes over).
-  - Not ported: hidden tags and profiles (#338), tag and property icons
+    with OR (`Query`).
+  - Not ported: tag and property icons
     chosen by a person and the shortcuts pane (#339), a key's or value's
     rename, child orders by hand (`tagChildOrder`, `propertyChildOrder`),
     spring-loaded folders while dragging.
+- **Layer 5, done (#338): search, shortcuts, recents, profiles and
+  hiding.**
+  - The filter search in a box over the list: names and aliases, tags,
+    properties, dates (relative and absolute, created or modified),
+    folders, extensions and tasks; AND and OR, exclusions, quoted text. It
+    is kept across runs; "Search the whole vault" searches from the root.
+    The full-text provider searches the notes' text through architect's
+    own index.
+  - Shortcuts to notes, folders, tags, properties and saved searches over
+    the folders, numbered, reordered, opened with commands 1 to 9.
+  - Recent notes, per profile.
+  - Vault profiles, each with its hidden items, file visibility, banner
+    and shortcuts; switched from the header or with commands.
+  - Hiding folders, tags, notes and files by pattern, frontmatter or tag,
+    with a show-hidden toggle; folders kept out of the lists above them
+    and still browsed.
+  - Not ported: the search's highlight of matching tags in the tree and
+    of matched words in names, Omnisearch (the full text is architect's),
+    a profile's own property keys and periodic notes folder, the profile
+    editor in the settings (profiles are edited with `NAVIGATOR_PROFILE`),
+    dragging shortcuts (they move with the reorder arrows), pinning recent
+    notes with the shortcuts, and the navigation rainbow.
 - **Still to come.**
-  - Search, and the shortcuts pane.
   - Rendered PDF covers. A source gives a cover as the note's
     `feature_image`; without one, a PDF shows its badge.
   - Notebook Navigator's `custom` grouping (header notes in a manual sort),

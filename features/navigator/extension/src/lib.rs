@@ -28,8 +28,9 @@ use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
 use architect_navigator::{
     CalendarGrid, Grouping, HeaderPeriod, Join, ListMode, ListRowKind, MemorySource, Mods,
     NavRowKind, NavTarget, NavigatorSource, NavigatorState, NoteFile, OpenIn, Orientation, Outcome,
-    Pane, PeriodKind, PropertyValue, Query, SortOption,
+    Pane, PeriodKind, PropertyValue, SortOption,
 };
+use architect_navigator::{FileVisibility, HideTarget, Shortcut, ShortcutKind, VaultProfile};
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
@@ -124,6 +125,26 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_PROPERTY_SET",
     "NAVIGATOR_DROP",
     "NAVIGATOR_SEARCH",
+    "NAVIGATOR_TOGGLE_SEARCH",
+    "NAVIGATOR_SEARCH_VAULT",
+    "NAVIGATOR_TOGGLE_HIDDEN",
+    "NAVIGATOR_HIDE",
+    "NAVIGATOR_SHORTCUTS",
+    "NAVIGATOR_ADD_SHORTCUT",
+    "NAVIGATOR_OPEN_SHORTCUT_1",
+    "NAVIGATOR_OPEN_SHORTCUT_2",
+    "NAVIGATOR_OPEN_SHORTCUT_3",
+    "NAVIGATOR_OPEN_SHORTCUT_4",
+    "NAVIGATOR_OPEN_SHORTCUT_5",
+    "NAVIGATOR_OPEN_SHORTCUT_6",
+    "NAVIGATOR_OPEN_SHORTCUT_7",
+    "NAVIGATOR_OPEN_SHORTCUT_8",
+    "NAVIGATOR_OPEN_SHORTCUT_9",
+    "NAVIGATOR_RECENT",
+    "NAVIGATOR_PROFILE",
+    "NAVIGATOR_SELECT_PROFILE_1",
+    "NAVIGATOR_SELECT_PROFILE_2",
+    "NAVIGATOR_SELECT_PROFILE_3",
 ];
 
 impl Extension for NavigatorExtension {
@@ -578,12 +599,10 @@ fn run(
         }
         "NAVIGATOR_SEARCH" => {
             if flag(args, "clear") == Some(true) {
-                nav.update(|s| s.set_query(Query::default()));
-            } else if let Some(q) = text(args, "query") {
-                let query = Query::parse(q).ok_or(
-                    "`query` is tags and properties joined by AND or OR (#tag .key .key=value)",
-                )?;
-                nav.update(|s| s.set_query(query));
+                nav.set_search("");
+            } else if let Some(q) = args.get("query").and_then(Value::as_str) {
+                nav.set_search(q);
+                nav.update(|s| s.search_open = true);
             } else if text(args, "tag").is_some() || text(args, "property").is_some() {
                 // As a ⌘/Ctrl-click (⇧ too with `or`).
                 let mods = Mods {
@@ -598,15 +617,263 @@ fn run(
                     _ => {}
                 }
             }
+            if let Some(open) = flag(args, "open") {
+                nav.update(|s| {
+                    if s.search_open != open {
+                        s.toggle_search();
+                    }
+                });
+            }
+            Ok(search_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_TOGGLE_SEARCH" => {
+            nav.update(NavigatorState::toggle_search);
+            Ok(search_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_SEARCH_VAULT" => {
+            nav.update(NavigatorState::search_vault);
+            if let Some(q) = args.get("query").and_then(Value::as_str) {
+                nav.set_search(q);
+            }
+            Ok(search_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_TOGGLE_HIDDEN" => {
+            nav.update(NavigatorState::toggle_hidden);
+            Ok(profile_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_HIDE" => {
+            let unhide = flag(args, "unhide") == Some(true);
+            let what = if let Some(f) = text(args, "folder") {
+                HideTarget::Folder(f.trim_matches('/').to_owned())
+            } else if let Some(t) = text(args, "tag") {
+                HideTarget::Tag(t.to_owned())
+            } else if let Some(p) = text(args, "path") {
+                HideTarget::Note(p.to_owned())
+            } else {
+                return Err("hide what? (`folder`, `tag` or `path`)".to_owned());
+            };
+            nav.update(|s| s.hide(&what, unhide));
+            Ok(profile_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_SHORTCUTS" | "NAVIGATOR_ADD_SHORTCUT" => {
             let s = nav.state.peek();
-            Ok(json!({
-                "query": s.query().text(),
-                "join": s.query().terms.iter().map(|(j, _)| match j { Join::And => "and", Join::Or => "or" }).collect::<Vec<_>>(),
-                "files": s.list_order(),
-            }))
+            let shortcut = shortcut_of(args, &s);
+            drop(s);
+            if id == "NAVIGATOR_ADD_SHORTCUT" || text(args, "add").is_some() {
+                let shortcut = shortcut?;
+                let at = int(args, "at").and_then(|n| usize::try_from(n).ok());
+                if !nav.update(|s| s.add_shortcut(shortcut, at)) {
+                    return Err("It is in the shortcuts".to_owned());
+                }
+            } else if let Some(n) = int(args, "remove").and_then(|n| usize::try_from(n).ok()) {
+                let sc = nav
+                    .state
+                    .peek()
+                    .profile()
+                    .shortcuts
+                    .get(n.saturating_sub(1))
+                    .cloned()
+                    .ok_or_else(|| format!("No shortcut {n}"))?;
+                nav.update(|s| s.remove_shortcut(&sc));
+            } else if let (Some(from), Some(to)) = (int(args, "move"), int(args, "to")) {
+                let (Ok(from), Ok(to)) = (usize::try_from(from), usize::try_from(to)) else {
+                    return Err("`move` and `to` are numbers from 1".to_owned());
+                };
+                nav.update(|s| s.move_shortcut(from.saturating_sub(1), to.saturating_sub(1)));
+            } else if let Some(n) = int(args, "rename").and_then(|n| usize::try_from(n).ok()) {
+                let name = text(args, "name").unwrap_or_default();
+                if !nav.update(|s| s.rename_shortcut(n.saturating_sub(1), name)) {
+                    return Err(format!("No shortcut {n}"));
+                }
+            } else if let Some(n) = int(args, "open").and_then(|n| usize::try_from(n).ok()) {
+                let out = nav.update(|s| s.open_shortcut(n))?;
+                nav.act(out, on_open);
+            }
+            Ok(profile_state(&nav.state.peek()))
+        }
+        _ if id.starts_with("NAVIGATOR_OPEN_SHORTCUT_") => {
+            let n: usize = id
+                .trim_start_matches("NAVIGATOR_OPEN_SHORTCUT_")
+                .parse()
+                .map_err(|_| format!("Navigator has no action {id}"))?;
+            let out = nav.update(|s| s.open_shortcut(n))?;
+            nav.act(out, on_open);
+            ok(nav)
+        }
+        "NAVIGATOR_RECENT" => {
+            if flag(args, "clear") == Some(true) {
+                nav.update(|s| s.edit_profile(|p| p.recent.clear()));
+            } else if let Some(n) = int(args, "open").and_then(|n| usize::try_from(n).ok()) {
+                let s = nav.state.peek();
+                let path = s
+                    .profile()
+                    .recent
+                    .iter()
+                    .filter(|p| s.index().file(p).is_some())
+                    .nth(n.saturating_sub(1))
+                    .cloned()
+                    .ok_or_else(|| format!("No recent note {n}"))?;
+                let out = s.open_recent(&path);
+                drop(s);
+                nav.act(out, on_open);
+            }
+            Ok(profile_state(&nav.state.peek()))
+        }
+        "NAVIGATOR_PROFILE" => {
+            if let Some(which) = text(args, "select") {
+                nav.update(|s| s.select_profile(which))?;
+            } else if let Some(name) = text(args, "add") {
+                let copy = flag(args, "copy").unwrap_or(true);
+                nav.update(|s| s.add_profile(name, copy))?;
+            } else if let Some(which) = text(args, "remove") {
+                nav.update(|s| s.remove_profile(which))?;
+            } else if let Some(which) = text(args, "rename") {
+                let name = text(args, "name").ok_or("the new `name`?")?;
+                nav.update(|s| s.rename_profile(which, name))?;
+            }
+            if let Some(set) = args.get("set").filter(|v| v.is_object()) {
+                let mut edit: Result<(), String> = Ok(());
+                nav.update(|s| s.edit_profile(|p| edit = set_profile(p, set)));
+                edit?;
+            }
+            Ok(profile_state(&nav.state.peek()))
+        }
+        _ if id.starts_with("NAVIGATOR_SELECT_PROFILE_") => {
+            let n = id.trim_start_matches("NAVIGATOR_SELECT_PROFILE_");
+            nav.update(|s| s.select_profile(n))?;
+            Ok(profile_state(&nav.state.peek()))
         }
         other => Err(format!("Navigator has no action {other}")),
     }
+}
+
+/// The search as `NAVIGATOR_SEARCH` answers it: its text, whether it is
+/// an expression of tags and properties (and its joins), whether the box
+/// is open, and the notes it lists.
+fn search_state(s: &NavigatorState) -> Value {
+    let q = s.query();
+    json!({
+        "query": s.search().text(),
+        "expression": s.search().is_expression(),
+        "join": q.terms.iter().map(|(j, _)| match j { Join::And => "and", Join::Or => "or" }).collect::<Vec<_>>(),
+        "open": s.search_open,
+        "files": s.list_order(),
+    })
+}
+
+/// A shortcut as the actions answer it.
+fn shortcut_json(at: usize, sc: &Shortcut) -> Value {
+    json!({
+        "n": at.saturating_add(1),
+        "kind": sc.kind.id(),
+        "target": sc.target,
+        "value": sc.value,
+        "name": sc.label(),
+    })
+}
+
+/// The profiles, the one in use, what it hides, its shortcuts and its
+/// recent notes.
+fn profile_state(s: &NavigatorState) -> Value {
+    let p = s.profile();
+    json!({
+        "profile": p.id,
+        "profiles": s.profiles().all().map(|p| json!({ "id": p.id, "name": p.name })).collect::<Vec<_>>(),
+        "show_hidden": s.show_hidden(),
+        "file_visibility": p.file_visibility.id(),
+        "hidden_folders": p.hidden_folders,
+        "descendant_excluded": p.descendant_excluded,
+        "hidden_tags": p.hidden_tags,
+        "hidden_file_tags": p.hidden_file_tags,
+        "hidden_file_names": p.hidden_file_names,
+        "hidden_file_properties": p.hidden_file_properties,
+        "banner": p.banner,
+        "shortcuts": p.shortcuts.iter().enumerate().map(|(i, sc)| shortcut_json(i, sc)).collect::<Vec<_>>(),
+        "recent": p.recent.iter().filter(|r| s.index().file(r).is_some()).collect::<Vec<_>>(),
+    })
+}
+
+/// The shortcut an action names: `add` its kind (`note`, `folder`, `tag`,
+/// `property`, `search`) with `path`, `folder`, `tag`, `property` (and
+/// `value`), or `query` (and `name`); else the note selected, else the
+/// folder, tag or property selected.
+fn shortcut_of(args: &Value, s: &NavigatorState) -> Result<Shortcut, String> {
+    let kind = text(args, "add").or_else(|| text(args, "kind"));
+    let mut sc = match kind
+        .map(|k| ShortcutKind::from_id(k).ok_or(format!("no shortcut kind {k}")))
+        .transpose()?
+    {
+        Some(ShortcutKind::Note) => Shortcut::note(one_path(args, s)?),
+        Some(ShortcutKind::Folder) => Shortcut::to(&NavTarget::Folder(
+            text(args, "folder")
+                .or_else(|| text(args, "path"))
+                .unwrap_or("")
+                .trim_matches('/')
+                .to_owned(),
+        )),
+        Some(ShortcutKind::Tag | ShortcutKind::Property) => Shortcut::to(&target_of(args)?),
+        Some(ShortcutKind::Search) => {
+            let q = text(args, "query").ok_or("which search? (`query`)")?;
+            Shortcut::search(text(args, "name").unwrap_or(q), q)
+        }
+        None => match text(args, "path").or_else(|| s.selection().cursor()) {
+            Some(p) => Shortcut::note(p),
+            None => Shortcut::to(&s.target()),
+        },
+    };
+    if let (Some(name), false) = (text(args, "name"), sc.kind == ShortcutKind::Search) {
+        sc.name = name.to_owned();
+    }
+    Ok(sc)
+}
+
+/// A profile's hiding, banner and file visibility, from `set`.
+fn set_profile(p: &mut VaultProfile, set: &Value) -> Result<(), String> {
+    let list = |v: &Value| -> Vec<String> {
+        v.as_array().map_or_else(
+            || {
+                v.as_str()
+                    .map(|s| {
+                        s.split(',')
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            },
+            |a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            },
+        )
+    };
+    for (key, v) in set.as_object().into_iter().flatten() {
+        match key.as_str() {
+            "hidden_folders" => p.hidden_folders = list(v),
+            "descendant_excluded" => p.descendant_excluded = list(v),
+            "hidden_tags" => p.hidden_tags = list(v),
+            "hidden_file_tags" => p.hidden_file_tags = list(v),
+            "hidden_file_names" => p.hidden_file_names = list(v),
+            "hidden_file_properties" => p.hidden_file_properties = list(v),
+            "banner" => {
+                p.banner = v
+                    .as_str()
+                    .filter(|b| !b.trim().is_empty())
+                    .map(str::to_owned)
+            }
+            "file_visibility" => {
+                let id = v.as_str().unwrap_or_default();
+                p.file_visibility = FileVisibility::from_id(id).ok_or_else(|| {
+                    format!("file_visibility is documents, supported or all, not {id}")
+                })?;
+            }
+            other => return Err(format!("a profile has no {other}")),
+        }
+    }
+    Ok(())
 }
 
 /// A tag (`tag`) or a property (`property`, and `value`) an action is
@@ -679,7 +946,7 @@ pub fn trees(s: &NavigatorState) -> Value {
         "tagged": s.tag_tree().tagged,
         "untagged": s.tag_tree().untagged,
         "properties": properties,
-        "search": s.query().text(),
+        "search": s.search().text(),
     })
 }
 
@@ -833,7 +1100,8 @@ pub fn state(s: &NavigatorState) -> Value {
         "descendants": e.include_descendants,
         "selected": s.selection().files(),
         "active": s.active(),
-        "search": s.query().text(),
+        "search": s.search().text(),
+        "profile": s.profile().id,
         "rows": rows,
     })
 }
