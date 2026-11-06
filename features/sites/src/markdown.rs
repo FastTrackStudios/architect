@@ -56,6 +56,9 @@ pub enum Target {
     Broken,
     /// Not the vault's (another site, a path the site does not manage).
     Keep,
+    /// A note of the vault outside a scoped site ([`crate::Scope`]):
+    /// drawn as plain text, with no URL, no title and no report.
+    Outside,
 }
 
 /// What [`render`] needs.
@@ -117,11 +120,22 @@ pub fn render(input: &Input<'_>) -> Rendered {
     let mut fence: Option<(String, String)> = None;
     // What closes each open link: our own markup, or the parser's.
     let mut links: Vec<Option<&'static str>> = Vec::new();
+    // Per image: whether it was dropped (it names a note outside the
+    // scope), with all it holds.
+    let mut images: Vec<bool> = Vec::new();
     let mut used_ids: BTreeMap<String, u32> = BTreeMap::new();
     let mut section = Section::default();
     let mut seen_content = false;
 
     for event in Parser::new_ext(input.body, options) {
+        // Inside an embed of something outside the scope: nothing of it,
+        // not even its alt text.
+        if images.contains(&true) && !matches!(event, Event::End(TagEnd::Image)) {
+            if matches!(event, Event::Start(Tag::Image { .. })) {
+                images.push(true);
+            }
+            continue;
+        }
         if let Some(open) = heading.as_mut() {
             match event {
                 Event::End(TagEnd::Heading(_)) => {}
@@ -207,6 +221,11 @@ pub fn render(input: &Input<'_>) -> Rendered {
                 events.push(Event::Html(open.into()));
                 links.push(Some(close));
             }
+            Event::End(TagEnd::Image) => {
+                if images.pop() != Some(true) {
+                    events.push(Event::End(TagEnd::Image));
+                }
+            }
             Event::End(TagEnd::Link) => {
                 if let Some(Some(close)) = links.pop() {
                     events.push(Event::Html(close.into()));
@@ -229,7 +248,12 @@ pub fn render(input: &Input<'_>) -> Rendered {
                         dest_url
                     }
                     Target::Keep => dest_url,
+                    Target::Outside => {
+                        images.push(true);
+                        continue;
+                    }
                 };
+                images.push(false);
                 events.push(Event::Start(Tag::Image {
                     link_type,
                     dest_url,
@@ -328,6 +352,7 @@ fn link_markup(
                 "</span>",
             )
         }
+        Target::Outside => ("<span class=\"site-outside\">".to_owned(), "</span>"),
         Target::Keep => {
             let external = dest.contains("://") || dest.starts_with("mailto:");
             let rel = if external { " rel=\"noopener\"" } else { "" };

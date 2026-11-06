@@ -94,6 +94,24 @@ Build any other vault:
 cargo run -p architect-cli -- site build --vault ~/notes --out /tmp/notes-site
 ```
 
+Publish one part of a vault (`Options::scope`, `architect_sites::Scope`):
+a folder (rooted there, so its own note is the home page), a tag (nested
+tags included), a list of notes, or the notes a `.base` file's views select.
+The whole vault is still read, so links resolve, but only the scope's notes
+become pages. A link to a note outside the scope is drawn as plain text
+(`site-outside`, with no URL and no title), an embed of one is left out
+entirely (its alt text too), and it is never reported as a problem. No
+backlink, base row, search entry, tag page or feed lists a note outside it.
+An attachment is copied only when a note in the scope links to it or embeds
+it, and under a folder scope only when it is in the folder. A one-note scope
+makes that note the home page. A share link is a scoped site
+([deploy](@/guide/deploy.md)).
+
+```sh
+cargo run -p architect-cli -- site build --vault ~/notes --folder Album --base /album/ --out /tmp/album
+# or --tag mix, --note Album/track.md (repeatable), --base-scope Mixes.base
+```
+
 From Rust, register what draws your blocks and build:
 
 ```rust,ignore

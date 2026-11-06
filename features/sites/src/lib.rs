@@ -44,6 +44,7 @@ mod frontmatter;
 mod markdown;
 #[cfg(feature = "pages")]
 mod page_blocks;
+mod scope;
 mod search;
 mod site;
 pub mod ui;
@@ -58,6 +59,7 @@ pub use frontmatter::Meta;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
 pub use page_blocks::PageBlocks;
+pub use scope::Scope;
 pub use search::SearchEntry;
 pub use site::{Crumb, NavNode, Options, Page, Problem, Site, SiteError};
 pub use url::{fragment_id, slug_segment};

@@ -1,7 +1,10 @@
 //! A vault built into a site, end to end: pages at their URLs, links
 //! resolved by the vault's index (wikilinks, markdown and Zola `@/`),
 //! backlinks, tags, search, a claimed block drawn, drafts left out, broken
-//! links reported, and the output folder guarded.
+//! links reported, and the output folder guarded. A scoped site (a folder,
+//! a tag, a note list, a base) publishes its notes and nothing else: no
+//! link, embed, backlink, base row, search entry or attachment reaches a
+//! note outside it.
 
 #![allow(
     clippy::unwrap_used,
@@ -14,7 +17,7 @@
 use std::path::Path;
 
 use architect_sites::{
-    Blocks, BuildError, Drawn, FnBlock, Options, Site, SiteError, WriteError, build,
+    Blocks, BuildError, Drawn, FnBlock, Options, Scope, Site, SiteError, WriteError, build,
 };
 
 fn touch(root: &Path, rel: &str, body: &str) {
@@ -255,4 +258,163 @@ fn a_rebuild_replaces_a_site_but_never_another_folder() {
         "{err}"
     );
     assert!(mine.join("notes.txt").is_file());
+}
+
+/// A vault with a shared folder and private notes it links to.
+fn mixed() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    touch(
+        root,
+        "Private/plan.md",
+        "---\ntags: [secret]\n---\nThe secret plan.\n",
+    );
+    touch(root, "Private/cover.png", "private png");
+    touch(
+        root,
+        "Shared/index.md",
+        "---\ntitle: The album\n---\nRead [[Private/plan|the plan]], [this](../Private/plan.md) and [[track]].\n\n![[plan]]\n\n![[cover.png]]\n\n![[art.png]]\n",
+    );
+    touch(root, "Shared/art.png", "shared png");
+    touch(
+        root,
+        "Shared/track.md",
+        "---\ntags: [mix]\nkey: G\n---\nBack [[index|home]]. Not [[plan]].\n\n```base\nviews:\n  - type: table\n    name: Everything\n    order:\n      - file.name\n```\n",
+    );
+    touch(
+        root,
+        "Elsewhere/also-mix.md",
+        "---\ntags: [mix/final]\n---\nAlso a mix. See [[plan]].\n",
+    );
+    touch(root, "Elsewhere/links-in.md", "Links to [[track]].\n");
+    dir
+}
+
+fn all_html(out: &Path) -> String {
+    fn walk(dir: &Path, into: &mut String) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, into);
+            } else if path
+                .extension()
+                .is_some_and(|e| e == "html" || e == "json" || e == "xml")
+            {
+                into.push_str(&std::fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    let mut all = String::new();
+    walk(out, &mut all);
+    all
+}
+
+#[test]
+fn a_folder_scope_publishes_the_folder_and_nothing_outside_it() {
+    let vault = mixed();
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = out_dir.path().join("site");
+    let mut opts = Options::new(vault.path(), "");
+    opts.base = "/abc123/".to_owned();
+    opts.scope = Scope::Folder("Shared".to_owned());
+    let report = build(&opts, &blocks(), &out).expect("build");
+
+    // Rooted at the folder: its note is home, its other note one level down.
+    let home = read(&out, "index.html");
+    assert!(home.contains("The album"), "{home}");
+    let track = read(&out, "track/index.html");
+    assert!(track.contains("href=\"/abc123/\""), "{track}");
+    assert!(home.contains("href=\"/abc123/track/\""), "{home}");
+
+    // Links to a note outside: plain text, no URL, no name in a title.
+    assert!(
+        home.contains("<span class=\"site-outside\">the plan</span>"),
+        "{home}"
+    );
+    assert!(
+        home.contains("<span class=\"site-outside\">this</span>"),
+        "{home}"
+    );
+    assert!(
+        track.contains("<span class=\"site-outside\">plan</span>"),
+        "{track}"
+    );
+    // The embed of a note outside is gone, its own attachment is kept.
+    assert!(home.contains("/abc123/Shared/art.png"), "{home}");
+    assert!(out.join("Shared/art.png").is_file());
+    // Nothing outside the folder anywhere in the site: pages, search,
+    // feeds, tag pages, backlinks, the base's rows, the attachment.
+    let everything = all_html(&out);
+    for leak in [
+        "secret plan",
+        "Private",
+        "Elsewhere",
+        "also-mix",
+        "Links to",
+        "links-in",
+        "cover.png",
+        "secret",
+    ] {
+        assert!(!everything.contains(leak), "`{leak}` leaked");
+    }
+    assert!(!out.join("Private").exists());
+    // An out-of-scope link is not a problem to report.
+    assert!(report.problems.is_empty(), "{:?}", report.problems);
+    // The base lists the scope's notes only.
+    assert!(track.contains("data-by=\"architect.bases\""), "{track}");
+    assert!(
+        track.contains("href=\"/abc123/track/\">Track</a>"),
+        "{track}"
+    );
+}
+
+#[test]
+fn a_tag_a_note_list_and_a_base_scope_publish_only_their_notes() {
+    let vault = mixed();
+    let out_dir = tempfile::tempdir().unwrap();
+    let pages = |scope: Scope| {
+        let mut opts = Options::new(vault.path(), "Shared");
+        opts.scope = scope;
+        Site::read(&opts, &blocks())
+            .unwrap()
+            .pages
+            .iter()
+            .filter_map(|p| p.rel_path.clone())
+            .collect::<Vec<_>>()
+    };
+    // A tag holds its nested tags too, any case.
+    let mut tagged = pages(Scope::Tag("#MIX".to_owned()));
+    tagged.sort();
+    assert_eq!(tagged, ["Elsewhere/also-mix.md", "Shared/track.md"]);
+    assert_eq!(
+        pages(Scope::Notes(vec!["Shared/track".to_owned()])),
+        ["Shared/track.md"]
+    );
+    // One note is the site's home page.
+    let mut opts = Options::new(vault.path(), "");
+    opts.scope = Scope::Notes(vec!["Shared/track.md".to_owned()]);
+    let one = Site::read(&opts, &blocks()).unwrap();
+    assert_eq!(one.pages.len(), 1);
+    assert_eq!(one.pages[0].url, "/");
+    assert!(one.pages[0].html.contains("Back"), "{}", one.pages[0].html);
+
+    touch(
+        vault.path(),
+        "Mixes.base",
+        "filters:\n  and:\n    - file.hasTag(\"mix\")\nviews:\n  - type: table\n    name: Mixes\n",
+    );
+    // The base's own evaluator decides (its `hasTag` is exact).
+    assert_eq!(
+        pages(Scope::Base("Mixes.base".to_owned())),
+        ["Shared/track.md"]
+    );
+    assert_eq!(pages(Scope::Base("Mixes".to_owned())), ["Shared/track.md"]);
+
+    // A scope with nothing in it builds nothing.
+    let mut opts = Options::new(vault.path(), "");
+    opts.scope = Scope::Folder("Nowhere".to_owned());
+    assert!(matches!(
+        build(&opts, &blocks(), &out_dir.path().join("none")),
+        Err(BuildError::Read(SiteError::Empty(_)))
+    ));
 }

@@ -11,6 +11,7 @@ use crate::bases::BaseBlocks;
 use crate::blocks::Blocks;
 use crate::frontmatter::{self, Meta};
 use crate::markdown::{self, Heading, Input, Section, Target};
+use crate::scope::Scope;
 use crate::url::{
     decode_percent, encode_path, folder_url, folders, is_index_name, is_md, normalise_base,
     slug_segment,
@@ -44,6 +45,9 @@ pub struct Options {
     /// ([`crate::BaseBlocks`]), unless a renderer the caller gave claims
     /// them first. On by default.
     pub bases: bool,
+    /// Which notes are published ([`Scope`]): the whole vault by
+    /// default. A link to a note outside it is plain text.
+    pub scope: Scope,
 }
 
 impl Options {
@@ -62,6 +66,7 @@ impl Options {
             strict: false,
             static_dirs: Vec::new(),
             bases: true,
+            scope: Scope::Vault,
         }
     }
 }
@@ -208,6 +213,16 @@ impl Site {
             })
             .filter(|n| !n.meta.hidden)
             .collect();
+        let scoped = !opts.scope.is_vault();
+        let notes = if scoped {
+            let wanted = opts.scope.notes(&vault);
+            notes
+                .into_iter()
+                .filter(|n| wanted.contains(&n.page.rel_path))
+                .collect()
+        } else {
+            notes
+        };
         if notes.is_empty() {
             return Err(SiteError::Empty(opts.vault.clone()));
         }
@@ -216,8 +231,13 @@ impl Site {
         let title = if opts.title.trim().is_empty() {
             notes
                 .iter()
-                .find(|n| !n.page.rel_path.contains('/') && is_index_name(&n.page.basename))
+                .find(|n| {
+                    opts.scope.is_one_note()
+                        || !opts.scope.shown(&n.page.rel_path).contains('/')
+                            && is_index_name(&n.page.basename)
+                })
                 .map(|n| n.title.clone())
+                .or_else(|| opts.scope.folder()?.rsplit('/').next().map(deslug))
                 .or_else(|| {
                     let root = opts.vault.canonicalize().ok()?;
                     Some(root.file_name()?.to_string_lossy().into_owned())
@@ -249,10 +269,11 @@ impl Site {
         let mut tree = Folder::default();
         for (i, note) in notes.iter().enumerate() {
             let mut at = &mut tree;
-            for folder in folders(&note.page.rel_path) {
+            for folder in folders(opts.scope.shown(&note.page.rel_path)) {
                 at = at.folders.entry(folder.to_owned()).or_default();
             }
-            if is_index_name(&note.page.basename) && at.index.is_none() {
+            let home = is_index_name(&note.page.basename) || opts.scope.is_one_note();
+            if home && at.index.is_none() {
                 at.index = Some(i);
             } else {
                 at.notes.push(i);
@@ -318,7 +339,13 @@ impl Site {
                     Some((n.page.rel_path.clone(), (url.clone(), n.title.clone())))
                 })
                 .collect();
-            blocks.add(std::sync::Arc::new(BaseBlocks::new(&vault, pages)));
+            let bases = BaseBlocks::new(&vault, pages);
+            let bases = if scoped {
+                bases.published_only()
+            } else {
+                bases
+            };
+            blocks.add(std::sync::Arc::new(bases));
         }
         let blocks = &blocks;
 
@@ -349,6 +376,7 @@ impl Site {
                 &url_of,
                 &attachments,
                 &base,
+                &opts.scope,
             ) {
                 Target::Broken if wiki => {
                     let name = dest.split('#').next().unwrap_or_default();
@@ -378,7 +406,10 @@ impl Site {
                 });
             }
             for link in &outgoing {
-                if let Some(target) = link.resolved.filter(|t| attachments.contains(t)) {
+                if let Some(target) = link
+                    .resolved
+                    .filter(|t| attachments.contains(t) && opts.scope.holds_file(t))
+                {
                     used_attachments.insert(target.to_owned());
                 }
             }
@@ -593,7 +624,9 @@ impl Site {
 
 /// Where the link `dest` from a note goes. The vault's index resolved
 /// it (matched by what was written, then without its anchor); this maps
-/// what it resolved to onto the site.
+/// what it resolved to onto the site. In a scoped site a note that is
+/// not published, or an attachment the scope does not hold, is outside
+/// it: plain text, never reported.
 fn resolve_link(
     dest: &str,
     wiki: bool,
@@ -601,7 +634,9 @@ fn resolve_link(
     url_of: &HashMap<&str, String>,
     attachments: &BTreeSet<&str>,
     base: &str,
+    scope: &Scope,
 ) -> Target {
+    let scoped = !scope.is_vault();
     let decoded = decode_percent(dest);
     let path_of = |s: &str| s.split('#').next().unwrap_or_default().trim().to_owned();
     let wanted = path_of(&decoded);
@@ -614,10 +649,17 @@ fn resolve_link(
             return Target::Page(url.clone());
         }
         if attachments.contains(target) {
+            if !scope.holds_file(target) {
+                return Target::Outside;
+            }
             return Target::File(format!("{base}{}", encode_path(target)));
         }
-        // A note that is not published (a draft).
-        return Target::Broken;
+        // A note that is not published: a draft, or outside the scope.
+        return if scoped {
+            Target::Outside
+        } else {
+            Target::Broken
+        };
     }
     let external = dest.contains("://") || dest.starts_with("mailto:") || dest.starts_with("//");
     if external {
