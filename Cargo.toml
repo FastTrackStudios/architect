@@ -103,6 +103,9 @@ members = [
     "apps/sandbox/board",
     "apps/sandbox/wasi-counter",
     "apps/sandbox/media",
+    # ── first-party extensions (#368) ─────────────────────────────────
+    "extensions/projects",
+    "extensions/tasks",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -146,6 +149,8 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 # and the vault index. Crate names are Task's, so Task re-points by path.
 vault = { path = "features/vault/vault" }
 architect-bases = { path = "features/bases" }
+architect-projects = { path = "extensions/projects" }
+architect-tasks = { path = "extensions/tasks" }
 vault-proto = { path = "features/vault/vault-proto", default-features = false }
 vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }

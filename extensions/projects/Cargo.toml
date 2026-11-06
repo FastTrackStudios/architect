@@ -1,0 +1,41 @@
+[package]
+name = "architect-projects"
+description = "Projects, a first-party architect extension: a page on architect's built-in project kind (state, members, roadmap, goals, tasks, notes), the software and client project types, goals and milestones as vault kinds, linked in or run as a process; it provides `projects` (extensions/projects/extension.toml)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-projects"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); the app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+futures-timer = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+# The app's side in a test: a vault's actions and Bases' over a folder.
+architect-bases = { workspace = true, features = ["actions"] }
+vault = { workspace = true, features = ["actions"] }
+futures = "0.3"
+# The bundle together: a project page with its tasks.
+architect-tasks = { workspace = true }
+serde_yaml = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

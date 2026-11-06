@@ -825,11 +825,13 @@ dependencies = [
  "architect-orgs",
  "architect-pages",
  "architect-presence",
+ "architect-projects",
  "architect-sandbox-board",
  "architect-scripting",
  "architect-settings",
  "architect-settings-sheet",
  "architect-shell",
+ "architect-tasks",
  "architect-theme",
  "architect-theme-picker",
  "architect-ui",
@@ -1495,6 +1497,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-projects"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-bases",
+ "architect-extensions",
+ "architect-settings",
+ "architect-tasks",
+ "architect-workspace-hack",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "vault",
+]
+
+[[package]]
 name = "architect-rpc-derive"
 version = "0.1.0"
 dependencies = [
@@ -1802,6 +1824,26 @@ dependencies = [
  "png 0.17.16",
  "rgb",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "architect-tasks"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-bases",
+ "architect-extensions",
+ "architect-settings",
+ "architect-workspace-hack",
+ "chrono",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "vault",
 ]
 
 [[package]]

@@ -1518,10 +1518,19 @@ impl Host {
         }
         // What it adds to the interface, as a diff (what it added at run
         // time stays until its new instance says otherwise).
-        let declared = instance.declared().map_or_else(
+        let mut declared = instance.declared().map_or_else(
             || manifest.contributes.clone(),
             |code| manifest.contributes.merged(&code),
         );
+        // A project type's template is read from its package now, so the
+        // registry hands out its text (a linked package has no folder).
+        for t in &mut declared.project_types {
+            if t.template_text.is_none()
+                && let Some(path) = &t.template
+            {
+                t.template_text = package.text(path).ok();
+            }
+        }
         // Its context-menu rows are items of their targets' points.
         let mut items = manifest.point_items();
         for row in &declared.context {

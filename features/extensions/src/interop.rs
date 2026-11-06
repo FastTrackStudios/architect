@@ -179,6 +179,7 @@ pub struct Decls<'a> {
     pub contribute: &'a BTreeMap<String, Vec<toml::Value>>,
     pub provides: &'a BTreeMap<String, String>,
     pub requires: &'a BTreeMap<String, String>,
+    pub uses: &'a BTreeMap<String, String>,
     pub reserved: &'a [String],
 }
 
@@ -256,18 +257,23 @@ pub fn check(d: &Decls<'_>) -> Result<(), Bad> {
         Version::parse(version)
             .map_err(|e| bad(format!("provides.{service}"), format!("{version}: {e}")))?;
     }
-    for (service, req) in d.requires {
-        if !good_name(service) {
-            return Err(bad(format!("requires.{service}"), "not a service's name"));
+    for (table, list) in [("requires", d.requires), ("uses", d.uses)] {
+        for (service, req) in list {
+            let field = format!("{table}.{service}");
+            if !good_name(service) {
+                return Err(bad(field, "not a service's name"));
+            }
+            VersionReq::parse(req).map_err(|e| bad(field.clone(), format!("{req}: {e}")))?;
+            if d.provides.contains_key(service) {
+                return Err(bad(field, "it provides that service itself"));
+            }
         }
-        VersionReq::parse(req)
-            .map_err(|e| bad(format!("requires.{service}"), format!("{req}: {e}")))?;
-        if d.provides.contains_key(service) {
-            return Err(bad(
-                format!("requires.{service}"),
-                "it provides that service itself",
-            ));
-        }
+    }
+    if let Some(service) = d.uses.keys().find(|s| d.requires.contains_key(*s)) {
+        return Err(bad(
+            format!("uses.{service}"),
+            "it is in [requires] too: one or the other",
+        ));
     }
     Ok(())
 }

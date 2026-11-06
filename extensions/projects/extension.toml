@@ -1,0 +1,206 @@
+# Projects (extensions/projects/src/lib.rs): a page and actions on
+# architect's built-in `project` kind (#344), its project types, and goals
+# and milestones. One Rust value (`Projects`, a linked::Extension) runs it
+# two ways: linked in as a built-in, and as its program (src/main.rs) when
+# a development copy runs (EXT_CLONE {"id":"projects"}).
+id = "projects"
+name = "Projects"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Your vault's projects (folders whose project.md is the project): a page with their state, members, roadmap, goals, tasks and notes; software and client project types; goals and milestones as notes."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-projects"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "extensions/projects"
+
+# Its API for others: method `m` is its action PROJECTS_<M>.
+[provides]
+"architect.projects" = "0.1.0"
+
+# Tasks, when it is installed: a project's page shows its tasks. Not a
+# [requires]: Projects runs alone.
+[uses]
+"architect.tasks" = "^0.1"
+
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "EXT_PROJECT_TYPES"]
+effect = "mutating"
+
+[[actions]]
+id = "PROJECTS_LIST"
+name = "Projects: list"
+description = "The vault's projects (each folder's project.md): path, folder, title, type, state, dates, members. `state` (planning, active, on_hold, done) or `type` narrows it."
+group = "Projects"
+effect = "read_only"
+params = '{"type":"object","properties":{"state":{"type":"string"},"type":{"type":"string"}}}'
+
+[[actions]]
+id = "PROJECTS_READ"
+name = "Projects: read one"
+description = "Project `path` (its project.md, its folder, a link or its name): the project, its type, its roadmap (milestones with their tasks' progress), goals, tasks (when the Tasks extension is on) and its other notes."
+group = "Projects"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}'
+
+[[actions]]
+id = "PROJECTS_CREATE"
+name = "New project"
+description = "A project: <folder>/<title>/project.md (folder Projects by default), of `type` when given (any loaded extension's, EXT_PROJECT_TYPES: its properties, template and folders), in `state` (planning by default), with `members` and `due`."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"},"type":{"type":"string"},"folder":{"type":"string"},"state":{"type":"string"},"members":{"type":"array","items":{"type":"string"}},"due":{"type":"string"}},"required":["title"]}'
+
+[[actions]]
+id = "PROJECTS_SET_STATE"
+name = "Projects: set state"
+description = "Project `path`'s state: planning, active, on_hold or done (paused, completed and the like are read as these)."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"state":{"type":"string"}},"required":["path","state"]}'
+
+[[actions]]
+id = "PROJECTS_ADD_MEMBER"
+name = "Projects: add a member"
+description = "Adds `member` (a name or a link to a person's note) to project `path`."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"member":{"type":"string"}},"required":["path","member"]}'
+
+[[actions]]
+id = "PROJECTS_SET_MEMBERS"
+name = "Projects: set members"
+description = "Project `path`'s members, in place of the ones it had."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"members":{"type":"array","items":{"type":"string"}}},"required":["path","members"]}'
+
+[[actions]]
+id = "PROJECTS_RESOLVE"
+name = "Projects: resolve a link"
+description = "The project `link` names: a link or path to its project.md or its folder, its folder's name, or its title."
+group = "Projects"
+effect = "read_only"
+params = '{"type":"object","properties":{"link":{"type":"string"}},"required":["link"]}'
+
+[[actions]]
+id = "PROJECTS_TYPES"
+name = "Projects: types"
+description = "The project types loaded extensions add (EXT_PROJECT_TYPES): this one's software and client, and any other's."
+group = "Projects"
+effect = "read_only"
+
+[[actions]]
+id = "PROJECTS_GOAL_CREATE"
+name = "New goal"
+description = "A goal note (`type: goal`): `title`, `kind` (lifetime, yearly, quarterly, cycle, weekly, other), `status` (aspiration, active, paused, achieved, abandoned), `target` date, `parent` goal; in `project`'s Goals folder when given, else Goals/."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"},"project":{"type":"string"},"kind":{"type":"string"},"status":{"type":"string"},"target":{"type":"string"},"parent":{"type":"string"}},"required":["title"]}'
+
+[[actions]]
+id = "PROJECTS_GOALS"
+name = "Projects: goals"
+description = "Every goal, or `project`'s."
+group = "Projects"
+effect = "read_only"
+params = '{"type":"object","properties":{"project":{"type":"string"}}}'
+
+[[actions]]
+id = "PROJECTS_MILESTONE_CREATE"
+name = "New milestone"
+description = "A milestone note (`type: milestone`) in `project`'s Milestones folder: `title`, `due` date, `goal`. A task joins it with `milestone: [[…]]`."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"project":{"type":"string"},"title":{"type":"string"},"due":{"type":"string"},"goal":{"type":"string"}},"required":["project","title"]}'
+
+[[actions]]
+id = "PROJECTS_MILESTONES"
+name = "Projects: roadmap"
+description = "Project `project`'s milestones by due date, each with how many of its tasks are done."
+group = "Projects"
+effect = "read_only"
+params = '{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}'
+
+[[actions]]
+id = "PROJECTS_MILESTONE_SET_STATUS"
+name = "Projects: close or open a milestone"
+description = "Milestone `path`'s status: open or closed."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"status":{"type":"string"}},"required":["path","status"]}'
+
+[[actions]]
+id = "PROJECTS_OPEN"
+name = "Open Projects"
+description = "Opens project `path`'s page, or without one the projects list."
+group = "Projects"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"}}}'
+
+[[actions]]
+id = "PROJECTS_STARTED"
+name = "Projects: started"
+description = "Its startup hook: reads the projects, so its status item counts the active ones."
+group = "Projects"
+effect = "read_only"
+
+[[views]]
+id = "list"
+title = "Projects"
+icon = "folder"
+
+[[views]]
+id = "page"
+title = "Project"
+icon = "folder"
+
+[[status]]
+id = "count"
+text = "Projects…"
+icon = "folder"
+hint = "Active projects"
+side = "left"
+
+[[menus]]
+menu = "View"
+action = "PROJECTS_OPEN"
+
+[[hooks]]
+on = "startup"
+action = "PROJECTS_STARTED"
+
+# The project types it adds to architect's `project` kind (#344). A
+# project of one gets `projectType: <id>`, the properties' defaults, the
+# template as its project.md's body and a folder note in each folder.
+[[project_types]]
+id = "software"
+name = "Software"
+icon = "code"
+description = "A codebase: its repository, its stack, its docs and releases."
+properties = [
+    { key = "repo", name = "Repository", kind = "link" },
+    { key = "stack", name = "Stack", kind = "list" },
+]
+template = "templates/software.md"
+folders = ["Docs", "Releases"]
+views = ["page"]
+
+[[project_types]]
+id = "client"
+name = "Client"
+icon = "users"
+description = "Work for a client: who, the rate, the contract."
+properties = [
+    { key = "client", name = "Client", kind = "link" },
+    { key = "rate", name = "Hourly rate", kind = "number" },
+    { key = "billable", name = "Billable", kind = "toggle", default = "true" },
+]
+template = "templates/client.md"
+folders = ["Meetings", "Deliverables"]
+views = ["page"]
