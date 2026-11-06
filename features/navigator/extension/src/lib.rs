@@ -800,7 +800,7 @@ fn profile_state(s: &NavigatorState) -> Value {
 fn shortcut_of(args: &Value, s: &NavigatorState) -> Result<Shortcut, String> {
     let kind = text(args, "add").or_else(|| text(args, "kind"));
     let mut sc = match kind
-        .map(|k| ShortcutKind::from_id(k).ok_or(format!("no shortcut kind {k}")))
+        .map(|k| ShortcutKind::from_id(k).ok_or_else(|| format!("no shortcut kind {k}")))
         .transpose()?
     {
         Some(ShortcutKind::Note) => Shortcut::note(one_path(args, s)?),
@@ -816,13 +816,12 @@ fn shortcut_of(args: &Value, s: &NavigatorState) -> Result<Shortcut, String> {
             let q = text(args, "query").ok_or("which search? (`query`)")?;
             Shortcut::search(text(args, "name").unwrap_or(q), q)
         }
-        None => match text(args, "path").or_else(|| s.selection().cursor()) {
-            Some(p) => Shortcut::note(p),
-            None => Shortcut::to(&s.target()),
-        },
+        None => text(args, "path")
+            .or_else(|| s.selection().cursor())
+            .map_or_else(|| Shortcut::to(&s.target()), Shortcut::note),
     };
     if let (Some(name), false) = (text(args, "name"), sc.kind == ShortcutKind::Search) {
-        sc.name = name.to_owned();
+        name.clone_into(&mut sc.name);
     }
     Ok(sc)
 }
@@ -862,7 +861,7 @@ fn set_profile(p: &mut VaultProfile, set: &Value) -> Result<(), String> {
                 p.banner = v
                     .as_str()
                     .filter(|b| !b.trim().is_empty())
-                    .map(str::to_owned)
+                    .map(str::to_owned);
             }
             "file_visibility" => {
                 let id = v.as_str().unwrap_or_default();

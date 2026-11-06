@@ -996,7 +996,7 @@ fn FilesView() -> Element {
     // Kept as it changes, every two seconds at most: an app that quits
     // runs no drop.
     use_future(move || async move {
-        let Some(store) = disk.peek().as_ref().and(view_store()) else {
+        let Some(store) = disk.peek().as_ref().and_then(|_| view_store()) else {
             return;
         };
         let mut saved: Option<ViewState> = None;
