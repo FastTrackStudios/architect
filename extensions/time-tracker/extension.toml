@@ -1,0 +1,208 @@
+# The Time Tracker (extensions/time-tracker/src/lib.rs): timers and time
+# entries as vault data, a row of a note's `timeEntries` (TaskNotes'
+# shape, Task's task::TimeEntry). One Rust value (`TimeTracker`, a
+# linked::Extension) runs it two ways: the app links it in as a
+# built-in, and its program (src/main.rs) serves the same value as a
+# process, this manifest's [entry], when a development copy runs
+# (EXT_CLONE {"id":"time"}). Turn it off (EXT_DISABLE {"id":"time"}) and
+# everything below goes.
+id = "time"
+name = "Time Tracker"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Timers and timesheets: start and stop a timer on a task or a project, log time by hand, and see totals per task, project, day and week, with billable time and amounts from the project's rate. Entries are kept in the note's frontmatter (TaskNotes' timeEntries)."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-time-tracker"
+
+# EXT_CLONE writes this crate to the development folder and builds its
+# program, which then overrides the linked copy under the same id.
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "extensions/time-tracker"
+
+# Its API for others (`services.call("architect.time", "start", …)`,
+# Handle::service): method `m` is its action TIME_<M>.
+[provides]
+"architect.time" = "0.1.0"
+
+# Tasks and Projects, when they are installed: a task is found by Tasks,
+# a project resolved by Projects, a task's time counted toward its
+# project. Not [requires]: the Time Tracker runs alone.
+[uses]
+"architect.tasks" = "^0.1"
+"architect.projects" = "^0.1"
+
+# It reaches notes only through the app's actions: vault reads and
+# writes, base queries, opening its report and the timesheet.
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+effect = "mutating"
+
+[[actions]]
+id = "TIME_START"
+name = "Start a timer"
+description = "Starts a timer on `task` (its path or link, found by the Tasks extension when it is there), `project` (its project.md's path, a link or its name) or `note`, or on Time/Unfiled.md when none is given: an entry with a startTime and no endTime in the note's timeEntries. One timer runs at a time: a running one is stopped first. `description` says what it is; `billable` overrides the project's billableDefault."
+group = "Time"
+effect = "mutating"
+params = '{"type":"object","properties":{"task":{"type":"string"},"project":{"type":"string"},"note":{"type":"string"},"description":{"type":"string"},"billable":{"type":"boolean"}}}'
+
+[[actions]]
+id = "TIME_STOP"
+name = "Stop the timer"
+description = "Stops the running timer: its entry's endTime is now. Fails when none runs."
+group = "Time"
+effect = "mutating"
+
+[[actions]]
+id = "TIME_ACTIVE"
+name = "Time: the running timer"
+description = "The running timer (its note's path and title, start, seconds so far, description), or null."
+group = "Time"
+effect = "read_only"
+
+[[actions]]
+id = "TIME_TOGGLE"
+name = "Time: stop or open"
+description = "Its status item's press: stops the running timer, or opens the time report when none runs."
+group = "Time"
+effect = "mutating"
+
+[[actions]]
+id = "TIME_LOG"
+name = "Log time"
+description = "A finished entry, by hand (\"I forgot to start the timer\"): on `task`, `project` or `note` (Time/Unfiled.md by default), for `duration` (1h30m, 45m, 1:30), `minutes` or `seconds` ending now — or on `date` (YYYY-MM-DD) from 09:00 — or from `start` to `end` (RFC 3339). `description`, `billable`. A running timer keeps running."
+group = "Time"
+effect = "mutating"
+params = '{"type":"object","properties":{"task":{"type":"string"},"project":{"type":"string"},"note":{"type":"string"},"duration":{"type":"string"},"minutes":{"type":"integer"},"seconds":{"type":"integer"},"date":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"description":{"type":"string"},"billable":{"type":"boolean"}}}'
+
+[[actions]]
+id = "TIME_CAPTURE"
+name = "Time: from a capture"
+description = "The `time` capture target's action (\"Log time\"): logs a capture from architect's composer or inbox: its length from `for:1h30` (properties.duration) or a length in the title, its project from properties.projects (`[[Album]]`), its day from properties.due (`today`, a date), the rest of the title its description. Run by CAPTURE_ADD and INBOX_PROCESS with `target` time."
+group = "Time"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"properties":{"type":"object"},"source":{"type":"string"},"inbox":{"type":["string","null"]}},"required":["title"]}'
+
+[[actions]]
+id = "TIME_TOTALS"
+name = "Time: totals per note"
+description = "Each note with time on it (or only `paths`), by path: its title, kind (task, project, note), seconds in all, today and this week, and whether its timer runs."
+group = "Time"
+effect = "read_only"
+params = '{"type":"object","properties":{"paths":{"type":"array","items":{"type":"string"}}}}'
+
+[[actions]]
+id = "TIME_FOR_PROJECT"
+name = "Time: a project's"
+description = "Project `project`'s time (its project.md's path, a link or its name): its own entries and its tasks' (those Tasks' for_project names, those linking it, those in its folder): seconds in all, today and this week, billable seconds, its rate (defaultRateCents, currency) and the amount, the running timer if it is one of them, and each task's totals."
+group = "Time"
+effect = "read_only"
+params = '{"type":"object","properties":{"project":{"type":"string"}},"required":["project"]}'
+
+[[actions]]
+id = "TIME_REPORT"
+name = "Time: report"
+description = "Totals over `range` (today, week — the default, Monday on —, last-week, month, all) or `from`..`to` (YYYY-MM-DD, `to` exclusive): seconds and billable seconds, per day, per note and per project (with its rate and amount), and the running timer."
+group = "Time"
+effect = "read_only"
+params = '{"type":"object","properties":{"range":{"type":"string","enum":["today","week","last-week","month","all"]},"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "TIME_OPEN"
+name = "Open the time report"
+description = "Opens a Time view: `view` report (the default) or timesheet."
+group = "Time"
+effect = "mutating"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["report","timesheet"]}}}'
+
+[[actions]]
+id = "TIME_TIMESHEET"
+name = "Open the timesheet"
+description = "Opens Time/Timesheet.base — a week, a row per note with time in it and a column per day, drawn by this extension's timesheet view — writing it first when it is not there."
+group = "Time"
+effect = "mutating"
+
+[[actions]]
+id = "TIME_STARTED"
+name = "Time: started"
+description = "Its startup hook: reads the vault's time, so its status item says what is running."
+group = "Time"
+effect = "read_only"
+
+[[actions]]
+id = "TIME_NAV_SNAPSHOT"
+name = "Time: the navigator's tree"
+description = "Its navigator provider's snapshot (architect-navigator-api `Snapshot`): Running, Today, This week and Earlier, and each tracked note in the one it was last worked on."
+group = "Time"
+effect = "read_only"
+
+[[actions]]
+id = "TIME_NAV_MOVE"
+name = "Time: start a timer by dragging"
+description = "Items `items` (their paths) dropped on `to`: on `running`, a timer starts on the first."
+group = "Time"
+effect = "mutating"
+params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
+
+# The sidebar while its report shows (src/nav.rs).
+[[navigator_providers]]
+id = "time"
+title = "Time"
+icon = "timer"
+views = ["report"]
+actions = "TIME_NAV"
+
+[[views]]
+id = "report"
+title = "Time"
+icon = "timer"
+
+# The running timer, always in sight; a press stops it (or opens the
+# report when none runs).
+[[status]]
+id = "timer"
+text = "No timer"
+icon = "timer"
+hint = "The running timer: press to stop it"
+side = "left"
+action = "TIME_TOGGLE"
+
+[[menus]]
+menu = "View"
+action = "TIME_OPEN"
+
+[[menus]]
+menu = "View"
+action = "TIME_TIMESHEET"
+
+[[bar]]
+action = "TIME_STOP"
+title = "Stop the timer"
+icon = "timer-off"
+
+[[hooks]]
+on = "startup"
+action = "TIME_STARTED"
+
+# What a capture can become (architect's capture, #352): "Log time", its
+# project and day as chips, `for:1h30` its length.
+[[capture_targets]]
+id = "time"
+name = "Log time"
+icon = "timer"
+description = "Time spent, logged on its project (or Time/Unfiled.md): `for:1h30` or a length such as 45m, `[[Project]]`, a day."
+action = "TIME_CAPTURE"
+chips = ["projects", "due", "duration"]
+tokens = [{ prefix = "for:", key = "duration" }]
+
+# A view type for Bases: a base's view of `type: timesheet` is drawn by
+# this extension's code (`Builder::base_view("timesheet", …)`): a week, a
+# row per note, a column per day. Off, it leaves Bases' view picker.
+[[base_views]]
+id = "timesheet"
+name = "Timesheet"
+icon = "calendar-range"

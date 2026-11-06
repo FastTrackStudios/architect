@@ -108,6 +108,7 @@ members = [
     # ── first-party extensions (#368) ─────────────────────────────────
     "extensions/projects",
     "extensions/tasks",
+    "extensions/time-tracker",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -153,6 +154,7 @@ vault = { path = "features/vault/vault" }
 architect-bases = { path = "features/bases" }
 architect-projects = { path = "extensions/projects" }
 architect-tasks = { path = "extensions/tasks" }
+architect-time-tracker = { path = "extensions/time-tracker" }
 vault-proto = { path = "features/vault/vault-proto", default-features = false }
 vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }

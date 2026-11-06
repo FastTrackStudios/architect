@@ -836,6 +836,7 @@ dependencies = [
  "architect-tasks",
  "architect-theme",
  "architect-theme-picker",
+ "architect-time-tracker",
  "architect-ui",
  "architect-workspace",
  "architect-workspace-hack",
@@ -1962,6 +1963,30 @@ dependencies = [
  "futures",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "architect-time-tracker"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-bases",
+ "architect-capture",
+ "architect-extensions",
+ "architect-navigator-api",
+ "architect-projects",
+ "architect-settings",
+ "architect-tasks",
+ "architect-workspace-hack",
+ "chrono",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "vault",
 ]
 
 [[package]]
