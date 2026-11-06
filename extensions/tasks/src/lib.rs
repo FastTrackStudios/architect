@@ -567,6 +567,13 @@ impl Extension for Tasks {
         include_str!("../extension.toml")
     }
 
+    fn files(&self) -> &'static [(&'static str, &'static str)] {
+        &[(
+            "tours/tasks-tour.styx",
+            include_str!("../tours/tasks-tour.styx"),
+        )]
+    }
+
     fn build(&self, ext: &mut Builder) {
         vault::connect(ext.handle());
         // Its navigator provider: status groups, then their tasks (`nav`).

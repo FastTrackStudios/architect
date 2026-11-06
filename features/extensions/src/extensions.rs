@@ -45,6 +45,13 @@ struct Inner {
     builds: crate::source::Builds,
 }
 
+/// The topic of the `Changed` event a person installing or turning on an
+/// extension is, its detail the extension's id.
+///
+/// Told once it runs, never at startup nor on a reload: what an app
+/// offers the extension's tour on (`[[tours]]`).
+pub const TURNED_ON: &str = "extensions.turned_on";
+
 /// The app's extensions. Cheap to clone.
 #[derive(Clone)]
 pub struct Extensions {
@@ -270,6 +277,7 @@ impl Extensions {
         let (source, listing) = self.find(id, req)?;
         let install = self.inner.installs.install(source.as_ref(), &listing)?;
         let _ = self.sync();
+        self.turned_on(&install.id);
         Ok(install)
     }
 
@@ -320,8 +328,20 @@ impl Extensions {
     /// Turns `id` back on.
     #[must_use = "what happened"]
     pub fn enable(&self, id: &str) -> Vec<Event> {
-        lock(&self.inner.disabled).remove(id);
-        self.sync()
+        let was_off = lock(&self.inner.disabled).remove(id);
+        let events = self.sync();
+        if was_off {
+            self.turned_on(id);
+        }
+        events
+    }
+
+    /// Tells the app's list ([`TURNED_ON`]) that a person installed or
+    /// turned on `id` and it runs: where the app offers its tour once.
+    pub(crate) fn turned_on(&self, id: &str) {
+        if self.inner.host.get(id).is_some() {
+            self.inner.host.list().changed(TURNED_ON, id);
+        }
     }
 
     /// Whether `id` is turned off.

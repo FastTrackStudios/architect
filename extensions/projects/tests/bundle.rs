@@ -317,11 +317,13 @@ fn as_a_process() {
     std::fs::create_dir_all(&dir).unwrap();
     let dev = tmp.path().join("projects");
     std::fs::create_dir_all(dev.join("templates")).unwrap();
+    std::fs::create_dir_all(dev.join("tours")).unwrap();
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));
     for f in [
         "extension.toml",
         "templates/software.md",
         "templates/client.md",
+        "tours/projects-tour.styx",
     ] {
         std::fs::copy(here.join(f), dev.join(f)).unwrap();
     }

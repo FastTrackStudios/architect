@@ -70,6 +70,9 @@ pub const TOPIC: &str = "guide";
 #[derive(Clone, Default)]
 pub struct TourSet {
     scenarios: Vec<Scenario>,
+    /// Who offers each scenario, by id, when not the app ([`Tours::offer`]:
+    /// an extension's id).
+    owners: std::collections::BTreeMap<String, String>,
     resolvers: Vec<Resolver>,
     playground: Option<Rc<dyn Fn(&Scenario) -> Result<(), String>>>,
     moved: Option<Rc<dyn Fn(&Moved)>>,
@@ -142,6 +145,26 @@ impl TourSet {
         &self.scenarios
     }
 
+    /// Who offers tour `id`: an owner [`Tours::offer`] named, or `""` for
+    /// the app's own.
+    #[must_use]
+    pub fn owner(&self, id: &str) -> &str {
+        self.owners.get(id).map_or("", String::as_str)
+    }
+
+    /// The tours on offer, as [`LIST_ACTION`] answers.
+    fn infos(&self) -> Vec<TourInfo> {
+        self.scenarios
+            .iter()
+            .map(|s| TourInfo {
+                id: s.id.clone(),
+                title: s.title.clone(),
+                safe: s.safe,
+                owner: self.owner(&s.id).to_owned(),
+            })
+            .collect()
+    }
+
     /// Why `scenario` cannot start, if it cannot: not `safe`, and no
     /// playground, or the playground could not be set up.
     fn may_start(&self, scenario: &Scenario) -> Result<(), String> {
@@ -173,6 +196,9 @@ pub struct TourState {
     pub waiting: bool,
     /// Whether its target is on screen (or it has none).
     pub found: bool,
+    /// The tour the app invites the person to take ([`Tours::invite`]),
+    /// while no tour plays; empty when none.
+    pub invited: String,
 }
 
 /// One tour on offer, as [`LIST_ACTION`] answers.
@@ -182,6 +208,8 @@ pub struct TourInfo {
     pub title: String,
     /// Whether it may play over the person's own data.
     pub safe: bool,
+    /// Who offers it: an extension's id, or empty for the app's own.
+    pub owner: String,
 }
 
 /// What [`START_ACTION`] takes.
@@ -220,6 +248,10 @@ pub struct Tours {
     /// The driver's inbox: asks from the Action List, and a nudge when a
     /// tour starts.
     driver: CopyValue<Option<UnboundedSender<Msg>>>,
+    /// What [`LIST_ACTION`] answers, kept as the set changes.
+    offered: CopyValue<Arc<Mutex<Vec<TourInfo>>>>,
+    /// The tour a card invites the person to take ([`Tours::invite`]).
+    invited: Signal<Option<String>>,
 }
 
 impl PartialEq for Tours {
@@ -308,6 +340,8 @@ pub fn use_tours(list: Arc<ActionList>, set: TourSet) -> Tours {
     let popover = use_hook(|| CopyValue::new(None::<Rc<MountedData>>));
     let mirror = use_hook(|| Arc::new(Mutex::new(TourState::default())));
     let mut inbox_tx = use_hook(|| CopyValue::new(None::<UnboundedSender<Msg>>));
+    let offered = use_hook(|| CopyValue::new(Arc::new(Mutex::new(set.peek().infos()))));
+    let invited = use_signal(|| None::<String>);
     let tours = Tours {
         set,
         list: held,
@@ -319,6 +353,8 @@ pub fn use_tours(list: Arc<ActionList>, set: TourSet) -> Tours {
         layer,
         popover,
         driver: inbox_tx,
+        offered,
+        invited,
     };
     let driver = use_coroutine(move |mut inbox: UnboundedReceiver<Msg>| async move {
         let mut at = None::<Playing>;
@@ -349,14 +385,15 @@ pub fn use_tours(list: Arc<ActionList>, set: TourSet) -> Tours {
     let registered = use_hook({
         let list = list.clone();
         let mirror = mirror.clone();
-        move || register(&list, &driver.tx(), &mirror, &set.peek())
+        move || register(&list, &driver.tx(), &mirror, &offered.peek())
     });
     // The mirror the state action reads, and a `guide` event each move.
     let told = list.clone();
     use_effect(move || {
         let now = playing();
         let found = spot().is_some();
-        let next = set.with_peek(|s| state_of(s, now, found));
+        let mut next = set.with_peek(|s| state_of(s, now, found));
+        next.invited = invited().unwrap_or_default();
         let mut kept = mirror.lock().unwrap_or_else(PoisonError::into_inner);
         if *kept != next {
             let moved = kept.scenario != next.scenario || kept.step != next.step;
@@ -390,7 +427,7 @@ fn register(
     list: &ActionList,
     driver: &UnboundedSender<Msg>,
     mirror: &Arc<Mutex<TourState>>,
-    set: &TourSet,
+    offered: &Arc<Mutex<Vec<TourInfo>>>,
 ) -> bool {
     let asker = |ask: fn(StartTour) -> Ask| {
         let tx = driver.clone();
@@ -419,15 +456,7 @@ fn register(
         }
     };
     let read = mirror.clone();
-    let offered: Vec<TourInfo> = set
-        .scenarios
-        .iter()
-        .map(|s| TourInfo {
-            id: s.id.clone(),
-            title: s.title.clone(),
-            safe: s.safe,
-        })
-        .collect();
+    let offered = offered.clone();
     [
         list.register_async(
             &START_META,
@@ -438,7 +467,10 @@ fn register(
             Ok(read.lock().unwrap_or_else(PoisonError::into_inner).clone())
         }),
         list.register(&LIST_META, Effect::ReadOnly, move |(): ()| {
-            Ok(offered.clone())
+            Ok(offered
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone())
         }),
         list.register_async(&NEXT_META, Effect::Mutating, mover(Ask::Next)),
         list.register_async(&BACK_META, Effect::Mutating, mover(Ask::Back)),
@@ -549,12 +581,97 @@ impl Tours {
         })
     }
 
+    /// Offers `scenarios` as `owner`'s tours (an extension's id), in
+    /// place of what `owner` offered before: none withdraws them. A
+    /// scenario whose id another owner (or the app) offers already is
+    /// left out. A tour playing that is withdrawn ends; one that stays
+    /// plays on.
+    pub fn offer(&self, owner: &str, scenarios: Vec<Scenario>) {
+        let playing = *self.playing.peek();
+        let mut set = self.set;
+        let now = set.with_mut(|s| {
+            let was = playing.and_then(|p| s.scenarios.get(p.scenario).map(|sc| sc.id.clone()));
+            let theirs = |id: &str| s.owners.get(id).is_some_and(|o| o == owner);
+            let kept: Vec<Scenario> = s.scenarios.drain(..).filter(|sc| !theirs(&sc.id)).collect();
+            s.scenarios = kept;
+            s.owners.retain(|_, o| o != owner);
+            for sc in scenarios {
+                if s.scenarios.iter().any(|have| have.id == sc.id) {
+                    continue;
+                }
+                s.owners.insert(sc.id.clone(), owner.to_owned());
+                s.scenarios.push(sc);
+            }
+            *self
+                .offered
+                .peek()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = s.infos();
+            was.map(|id| s.scenarios.iter().position(|sc| sc.id == id))
+        });
+        match (playing, now) {
+            (Some(p), Some(Some(n))) if n != p.scenario => {
+                let mut playing = self.playing;
+                playing.set(Some(Playing { scenario: n, ..p }));
+            }
+            (Some(_), Some(None)) => self.stop(),
+            _ => {}
+        }
+    }
+
+    /// Who offers tour `id` (`""`: the app), when it is on offer.
+    #[must_use]
+    pub fn owner(&self, id: &str) -> Option<String> {
+        self.set.with_peek(|s| {
+            s.scenarios
+                .iter()
+                .any(|sc| sc.id == id)
+                .then(|| s.owner(id).to_owned())
+        })
+    }
+
+    /// Tour `id`'s scenario, when it is on offer.
+    #[must_use]
+    pub fn scenario(&self, id: &str) -> Option<Scenario> {
+        self.set
+            .with_peek(|s| s.scenarios.iter().find(|sc| sc.id == id).cloned())
+    }
+
+    /// Invites the person to take tour `id` (an extension's, once it is
+    /// installed): a card in the window's corner says so, with "Take the
+    /// tour" and "Not now", until one is pressed or a tour starts. No such
+    /// tour: nothing.
+    pub fn invite(&self, id: &str) {
+        if self.scenario(id).is_none() {
+            return;
+        }
+        let mut invited = self.invited;
+        invited.set(Some(id.to_owned()));
+    }
+
+    /// The tour the card invites the person to take.
+    #[must_use]
+    pub fn invited(&self) -> Option<String> {
+        (self.invited)()
+    }
+
+    /// Puts the invitation away.
+    pub fn decline(&self) {
+        let mut invited = self.invited;
+        if invited.peek().is_some() {
+            invited.set(None);
+        }
+    }
+
     fn go(&self, to: Option<Playing>) {
         self.go_as(to, false);
     }
 
     /// Moves to `to`; `finished`: a tour ending was played to its end.
     fn go_as(&self, to: Option<Playing>, finished: bool) {
+        if to.is_some() {
+            self.decline();
+        }
         let mut playing = self.playing;
         let from = *playing.peek();
         if from != to {
@@ -814,6 +931,7 @@ fn state_of(set: &TourSet, playing: Option<Playing>, found: bool) -> TourState {
         of,
         waiting: step.done.is_some(),
         found: step.target.is_none() || found,
+        invited: String::new(),
     }
 }
 
@@ -1054,6 +1172,14 @@ pub fn TourLayer() -> Element {
     };
     let next_label = if card.last { "Done" } else { "Next" };
     let back_opacity = if card.first { 0.35 } else { 1.0 };
+    // The invitation, while no tour plays.
+    let invite = tours
+        .invited()
+        .filter(|_| !on)
+        .and_then(|id| tours.scenario(&id).map(|sc| (id, sc.title)));
+    if let Some((id, title)) = invite {
+        return rsx! { Invite { tours, id, title } };
+    }
     let layer_display = if shown { "block" } else { "none" };
     let card_display = if has_card { "flex" } else { "none" };
     let (card_x, card_y) = (px.value(), py.value());
@@ -1122,6 +1248,41 @@ pub fn TourLayer() -> Element {
                         onclick: move |_| tours.next(),
                         "{next_label}"
                     }
+                }
+            }
+        }
+    }
+}
+
+/// The card that invites the person to take a tour ([`Tours::invite`]).
+#[component]
+fn Invite(tours: Tours, id: String, title: String) -> Element {
+    rsx! {
+        div {
+            "data-testid": "guide-tour-invite",
+            style: "position: absolute; right: 20px; bottom: 20px; width: {CARD_W}px; z-index: {TOUR_LAYER}; \
+                    display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; padding: 14px 16px 12px; \
+                    background: #18181b; border: 1px solid #3f3f46; border-radius: 12px; \
+                    box-shadow: 0 16px 48px rgba(0,0,0,0.55); color: #e4e4e7; font-size: 13px; line-height: 1.45; \
+                    font-family: Inter, system-ui, -apple-system, sans-serif;",
+            div { style: "font-size: 11px; color: #a1a1aa;", "New here" }
+            div { style: "font-size: 14px; color: #fafafa;", "{title} has a tour: a few steps over what it adds." }
+            div { style: "display: flex; align-items: center; gap: 8px; margin-top: 4px;",
+                span { style: "flex: 1 1 0;" }
+                button {
+                    "data-testid": "guide-tour-invite-later",
+                    style: "{GHOST}",
+                    onclick: move |_| tours.decline(),
+                    "Not now"
+                }
+                button {
+                    "data-testid": "guide-tour-invite-take",
+                    style: "height: 28px; padding: 0 14px; border-radius: 7px; border: none; \
+                            background: {ACCENT}; color: #0b1220; font-size: 12px; font-weight: 600;",
+                    onclick: move |_| {
+                        let _ = tours.start(&id);
+                    },
+                    "Take the tour"
                 }
             }
         }

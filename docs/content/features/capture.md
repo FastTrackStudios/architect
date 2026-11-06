@@ -95,6 +95,7 @@ composer and the deck. Mount `CaptureLayer { capture }` once over the window.
 | `CAPTURE_ADD {text, properties?, target?, source?}` | captures into the inbox, or straight into a target |
 | `CAPTURE_PARSE {text}` | the title, properties and suggested target, writing nothing |
 | `CAPTURE_TARGETS` | the app's note, then every `[[capture_targets]]` |
+| `CAPTURE_CLOSE` | puts the composer and the deck away (a tour's setup between chapters) |
 | `INBOX_OPEN` | opens the deck |
 | `INBOX_LIST {all?}` | the captures waiting, oldest first |
 | `INBOX_PROCESS {path, target, title?, properties?}` | makes it `target`'s thing; it leaves the inbox |
@@ -119,6 +120,9 @@ that removal is the move's other half, not a deletion the caller asked for.
   as its process. An inbox capture processed into a task is checked on disk.
 - `features/extensions/tests/interop.rs`
   `capture_targets_are_registered_while_loaded`.
+- `apps/sandbox/media/tests/architect_tours.rs`: the capture tour
+  (`architect_capture::TOUR`, `features/capture/tours/capture-tour.styx`:
+  the composer, Into, the deck) played over the Architect app.
 
 ## Status
 

@@ -96,6 +96,10 @@ timers; with it off, the page has no Time section.
   and a ▶ that times it) and its other notes. A linked view is given no pane state,
   so `PROJECTS_OPEN` sets the project the page shows before it opens it.
 
+Its tour (`[[tours]]`, `extensions/projects/tours/projects-tour.styx`)
+walks the list, a new project, the navigator's tree and a project's page
+(state, roadmap, tasks), running only `PROJECTS_OPEN`.
+
 ## 5. Tests
 
 - `extensions/projects/src/model.rs`: projects, links, goals, milestones.

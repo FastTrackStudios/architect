@@ -1,0 +1,30 @@
+// The Board's tour (extension.toml [[tours]]): what a linked extension adds
+// from its manifest, shown on its status item, and its pin and clear
+// actions. Its setup pins and clears (its own LAB_BOARD_* actions), so it
+// is not `safe`: it plays in the sandbox, whose data is all made up. Played
+// as a test by apps/sandbox/media/tests/scenarios.rs
+// (every_tour_plays_as_a_scenario).
+id board-tour
+title "Board"
+view {width 1280, height 800}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    {id status-1, hide true, do @run{id LAB_BOARD_CLEAR}}
+    {
+        id status
+        text "The Board is the sandbox's example extension, one Rust value linked in. Everything it adds comes from its manifest: this status item, the Board tab, a context-menu row on notes, a .kf opener, a Bases view type and a toolbar."
+        target @css"[title=\"What is on the board\"]"
+    }
+    {id pin-1, hide true, do @run{id LAB_BOARD_PIN, args {title "The tour's pin"}}, done {check ({id LAB_BOARD_STATE, has {pins ("The tour's pin")}})}}
+    {
+        id pin
+        text "LAB_BOARD_PIN pinned a note, and the status item counts it. In a note, right-click › Pin to the board runs the same action; so do ⌘K, MCP and the CLI."
+        target @css"[title=\"What is on the board\"]"
+    }
+    {id clear-1, hide true, do @run{id LAB_BOARD_CLEAR}, done {check ({id LAB_BOARD_STATE, has {pins ()}})}}
+    {
+        id clear
+        text "View › Clear the board (LAB_BOARD_CLEAR) takes the pins off. Turn the Board off in the extensions manager and all of it goes, live; on again and it comes back."
+        target @css"[title=\"What is on the board\"]"
+    }
+)

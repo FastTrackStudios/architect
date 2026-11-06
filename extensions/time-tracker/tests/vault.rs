@@ -334,6 +334,13 @@ fn as_a_process() {
         dev.join("extension.toml"),
     )
     .unwrap();
+    // Its tour: the manifest names it, so its package has it.
+    std::fs::create_dir_all(dev.join("tours")).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tours/time-tour.styx"),
+        dev.join("tours/time-tour.styx"),
+    )
+    .unwrap();
     std::os::unix::fs::symlink(
         env!("CARGO_BIN_EXE_architect-time-tracker"),
         dev.join("architect-time-tracker"),

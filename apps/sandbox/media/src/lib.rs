@@ -45,6 +45,38 @@ pub fn app() -> App {
     App::new(Root, Arc::new(ActionList::new())).fonts(architect_app::font_context())
 }
 
+/// The Architect app (not the sandbox) for one run.
+///
+/// What its own tours play over (Projects, Tasks, capture:
+/// `architect_app::builtin_tours`). The first call makes this process the Architect app
+/// (`architect_app::Mode`, for good: run it in a process of its own, as
+/// `tests/architect_tours.rs` is) on a folder of its own and a copy of the
+/// demo vault (`$ARCHITECT_CONFIG_DIR`, `$ARCHITECT_VAULT`, unless the
+/// caller set them), both made fresh and never the person's. `sandbox-media`
+/// films with it when `SANDBOX_MEDIA_APP=architect`.
+#[must_use]
+pub fn architect_app() -> App {
+    static SET: OnceLock<()> = OnceLock::new();
+    SET.get_or_init(|| {
+        let root = std::env::temp_dir().join(format!("architect-film-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (var, dir) in [
+            ("ARCHITECT_CONFIG_DIR", "app"),
+            ("ARCHITECT_VAULT", "vault"),
+        ] {
+            if std::env::var_os(var).is_none_or(|v| v.is_empty()) {
+                // SAFETY: once, before the app (and its threads) start.
+                unsafe { std::env::set_var(var, root.join(dir)) };
+            }
+        }
+        if let Some(vault) = std::env::var_os("ARCHITECT_VAULT") {
+            let _ = architect_app::vaults::write_demo(std::path::Path::new(&vault));
+        }
+        architect_app::Mode::Architect.set();
+    });
+    App::new(Root, Arc::new(ActionList::new())).fonts(architect_app::font_context())
+}
+
 /// Points the lab's folder at a new empty one, unless the process was
 /// started with one (a test that sets its own).
 fn fresh_folder() {

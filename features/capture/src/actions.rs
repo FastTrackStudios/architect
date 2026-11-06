@@ -8,6 +8,7 @@
 //! | `CAPTURE_ADD` | captures `text` into the inbox, or straight into a `target` |
 //! | `CAPTURE_PARSE` | reads `text` as quick add: its title, properties and the target it suggests |
 //! | `CAPTURE_TARGETS` | what a capture can become: the app's note and every extension's `[[capture_targets]]` |
+//! | `CAPTURE_CLOSE` | puts the composer and the inbox deck away (a tour's setup) |
 //! | `INBOX_OPEN` | opens the inbox deck |
 //! | `INBOX_LIST` | the captures waiting (`all`: those put off too) |
 //! | `INBOX_PROCESS` | turns capture `path` into `target`'s thing |
@@ -38,6 +39,7 @@ pub mod ids {
     pub const ADD: &str = "CAPTURE_ADD";
     pub const PARSE: &str = "CAPTURE_PARSE";
     pub const TARGETS: &str = "CAPTURE_TARGETS";
+    pub const CLOSE: &str = "CAPTURE_CLOSE";
     pub const INBOX_OPEN: &str = "INBOX_OPEN";
     pub const INBOX_LIST: &str = "INBOX_LIST";
     pub const INBOX_PROCESS: &str = "INBOX_PROCESS";
@@ -45,8 +47,9 @@ pub mod ids {
     pub const INBOX_DEFER: &str = "INBOX_DEFER";
     pub const INBOX_DISCARD: &str = "INBOX_DISCARD";
     /// Every id, in menu order.
-    pub const ALL: [&str; 10] = [
+    pub const ALL: [&str; 11] = [
         OPEN,
+        CLOSE,
         ADD,
         PARSE,
         TARGETS,
@@ -109,6 +112,12 @@ static TARGETS: ActionMeta = meta(
      `[[capture_targets]]` (id, name, icon, the chips it offers, the quick-add tokens it adds, \
      the action that makes one, its extension).",
 );
+static CLOSE: ActionMeta = meta(
+    ids::CLOSE,
+    "Close capture",
+    "Puts the composer and the inbox deck away, what was typed in the composer with it: where a \
+     tour's setup leaves the window before its next chapter.",
+);
 static INBOX_OPEN: ActionMeta = meta(
     ids::INBOX_OPEN,
     "Process inbox",
@@ -158,6 +167,8 @@ pub enum Open {
     Window { text: String },
     /// The inbox deck.
     Inbox,
+    /// Neither: the composer and the deck put away.
+    Close,
 }
 
 /// Shows what [`Open`] asks for: the app's window side (called on any
@@ -745,6 +756,12 @@ pub fn register(
             }
         },
     )?;
+    let o = opener.clone();
+    list.register(&CLOSE, Effect::Mutating, move |(): ()| {
+        let open = o.as_ref().ok_or("no window to close it in")?;
+        open(Open::Close);
+        Ok(())
+    })?;
     let o = opener;
     list.register(&INBOX_OPEN, Effect::Mutating, move |(): ()| {
         let open = o.as_ref().ok_or("no window to open the inbox in")?;

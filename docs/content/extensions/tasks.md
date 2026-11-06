@@ -123,6 +123,10 @@ too (`Task::in_project`).
 
 A status item counts what is due today; a startup hook fills it.
 
+Its tour (`[[tours]]`, `extensions/tasks/tours/tasks-tour.styx`) walks
+the list, quick add, Today, the sidebar by status and its status item,
+running only `TASKS_OPEN`; it adds no task (the person may).
+
 ## 7. Tests
 
 - `extensions/tasks/src/model.rs` and `extensions/tasks/src/quick.rs`:

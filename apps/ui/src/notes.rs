@@ -165,34 +165,40 @@ pub fn view_types() -> &'static ViewTypes {
 
 /// Opens the app's vault, puts its `VAULT_*`, `LINKS_*`, `TAGS_*` and
 /// `BASES_*` actions on `list`, and says which folder it is in
-/// `APP_STATUS` (`vault`).
+/// `APP_STATUS` (`vault`). The vault opens once a process; a later list (a
+/// film's next run, its own app) gets the same vault's actions.
 pub fn register(list: &Arc<ActionList>) {
-    if OPEN.get().is_some() {
+    let open = if let Some(open) = OPEN.get() {
+        open.clone()
+    } else {
+        let Some(dir) = folder() else { return };
+        match vault::actions::OpenVault::open(&dir) {
+            Ok(open) => OPEN.get_or_init(|| open).clone(),
+            Err(e) => {
+                tracing::warn!(dir = %dir.display(), "the app's vault: {e}");
+                return;
+            }
+        }
+    };
+    if list.info(vault::actions::ids::READ).is_some() {
         return;
     }
-    let Some(dir) = folder() else { return };
-    match vault::actions::OpenVault::open(&dir) {
-        Ok(open) => {
-            let _ = vault::actions::register(list, &open);
-            let _ = links::actions::register(list, &open);
-            let _ = tag::actions::register(list, &open);
-            let _ = architect_bases::actions::register(list, &open, view_types());
-            let shown = open.clone();
-            let seeded = env_either("ARCHITECT_VAULT_SEED", "ARCHITECT_LAB_SEED")
-                .map(|s| s.to_string_lossy().into_owned());
-            list.status().section("vault", move || {
-                let notes = shown.with(|v| v.pages.len());
-                serde_json::json!({
-                    "folder": shown.root().display().to_string(),
-                    "seeded_from": seeded,
-                    "notes": notes,
-                })
-                .to_string()
-            });
-            let _ = OPEN.set(open);
-        }
-        Err(e) => tracing::warn!(dir = %dir.display(), "the app's vault: {e}"),
-    }
+    let _ = vault::actions::register(list, &open);
+    let _ = links::actions::register(list, &open);
+    let _ = tag::actions::register(list, &open);
+    let _ = architect_bases::actions::register(list, &open, view_types());
+    let shown = open;
+    let seeded = env_either("ARCHITECT_VAULT_SEED", "ARCHITECT_LAB_SEED")
+        .map(|s| s.to_string_lossy().into_owned());
+    list.status().section("vault", move || {
+        let notes = shown.with(|v| v.pages.len());
+        serde_json::json!({
+            "folder": shown.root().display().to_string(),
+            "seeded_from": seeded,
+            "notes": notes,
+        })
+        .to_string()
+    });
 }
 
 #[cfg(test)]

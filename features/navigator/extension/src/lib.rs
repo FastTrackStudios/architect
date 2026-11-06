@@ -183,6 +183,13 @@ impl Extension for NavigatorExtension {
         MANIFEST
     }
 
+    fn files(&self) -> &'static [(&'static str, &'static str)] {
+        &[(
+            "tours/navigator-tour.styx",
+            include_str!("../tours/navigator-tour.styx"),
+        )]
+    }
+
     fn build(&self, ext: &mut Builder) {
         *HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = Some(ext.handle());
         ext.view("files", FilesView);

@@ -157,6 +157,9 @@ architect-settings = { workspace = true }
 architect-navigator-api = { workspace = true }
 architect-orgs = { workspace = true }
 architect-commands = { workspace = true }
+# A tour's scenario (`[[tours]]`) read and checked at load: the guide's
+# model only (no Dioxus, wasm-clean).
+architect-guide = { workspace = true }
 # MIDI ports, OSC endpoints and control surfaces (`ports`, feature
 # `host`): the messages, the backends, the surface engine.
 architect-input = { workspace = true }

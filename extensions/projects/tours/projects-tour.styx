@@ -1,0 +1,56 @@
+// The Projects tour (extension.toml [[tours]]): its list, a new project,
+// the navigator's tree, a project's page and its status item. Played as
+// the extension: each setup step runs one of its own actions. It only
+// opens views, so it may play over your own vault (safe); a chapter whose
+// part your vault lacks (the Album project of the demo vault) shows its
+// text without a ring. Played as a test by
+// apps/sandbox/media/tests/extension_tours.rs.
+id projects-tour
+title "Projects"
+safe true
+view {width 1280, height 800}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    {id list-1, hide true, do @run{id PROJECTS_OPEN}}
+    {
+        id list
+        text "A project is a folder whose project.md is the project. This list is every one in your vault, under its state: active, planning, on hold, done."
+        target @css".projects-list"
+    }
+    {id new-1, hide true, do @run{id PROJECTS_OPEN}}
+    {
+        id new
+        text "Start one here: type its name, pick a type and press ↵. Plain is architect's own; Software and Client are this extension's [[project_types]], each with its own properties, template and folders. Try: type a name."
+        target @css".projects-new"
+    }
+    {id sidebar-1, hide true, do @run{id PROJECTS_OPEN}}
+    {
+        id sidebar
+        text "While a Projects view shows, the sidebar is its tree: projects under their state, and a project's tasks as its items. Drag a task onto another project to move it there."
+        target @css".nv-nav"
+    }
+    {id page-1, hide true, do @run{id PROJECTS_OPEN, args {path "Projects/Album/project.md"}}}
+    {
+        id page
+        text "A project's page: its type, due date and progress, then its state. Click a state to move the project; agents do the same with PROJECTS_SET_STATE."
+        target @css".projects-state"
+    }
+    {id roadmap-1, hide true, do @run{id PROJECTS_OPEN, args {path "Projects/Album/project.md"}}}
+    {
+        id roadmap
+        text "The roadmap: milestones by due date, each with how many of its tasks are done. Type one with a date at the end to add it. Try: “Mixdown 2027-02-01”."
+        target @css".projects-roadmap"
+    }
+    {id tasks-1, hide true, do @run{id PROJECTS_OPEN, args {path "Projects/Album/project.md"}}}
+    {
+        id tasks
+        text "With the Tasks extension on, the project's tasks show here, and a line typed below is a task in it, read as quick add."
+        target @css".projects-tasks"
+    }
+    {id status-1, hide true, do @run{id PROJECTS_OPEN}}
+    {
+        id status
+        text "Its status item counts your active projects; View › Open Projects comes back here. Every part of it is an action on the Action List (PROJECTS_*), for ⌘K, MCP and agents."
+        target @css"[title=\"Active projects\"]"
+    }
+)

@@ -218,6 +218,13 @@ inserted over panes as they mount collapses them; see
   place in its folder and resumes it from ⌘K › Take the tour
   (`apps/ui/src/guide.rs` `tours`,
   [The Architect tour](@/getting-started/tour.md)).
+- **Tours that come and go**: `Tours::offer(owner, scenarios)` puts an
+  owner's tours (an extension's `[[tours]]`) beside the app's, in place of
+  what it offered before; none withdraws them, ending one that plays.
+  `TourInfo::owner` says whose each is. `Tours::invite(id)` shows a card
+  that invites the person to take one (after an install: [Extensions,
+  Tours](@/architecture/extensions.md)), and `GUIDE_TOUR_STATE`'s `invited`
+  says which.
 - **Safety**: a scenario not marked `safe` never plays over the person's
   own data. `TourSet::playground` sets up the app's playground first (a
   sample document, a scratch session); an app with none cannot start

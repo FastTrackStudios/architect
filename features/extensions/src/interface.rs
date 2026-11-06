@@ -1044,14 +1044,22 @@ pub fn ExtensionView(
         }
     }
     if let Some(root) = host.linked_view(&extension, &view) {
+        // A list of one, so its key is diffed: a pane that goes from one
+        // of its views to another (Projects' list to a project's page)
+        // mounts the new one afresh, its hooks its own.
+        let key = format!("{extension}/{view}");
         if bare {
             return rsx! {
-                LinkedRoot { key: "{extension}/{view}", root }
+                for key in std::iter::once(key) {
+                    LinkedRoot { key: "{key}", root }
+                }
             };
         }
         return rsx! {
             div { style: "{size} display: flex; flex-direction: column;",
-                LinkedRoot { key: "{extension}/{view}", root }
+                for key in std::iter::once(key) {
+                    LinkedRoot { key: "{key}", root }
+                }
             }
         };
     }

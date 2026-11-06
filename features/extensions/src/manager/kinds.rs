@@ -52,6 +52,7 @@ impl ItemKind for ExtensionKind {
 
     fn list(&self) -> Vec<Item> {
         let problems = self.ext().problems();
+        let tours = self.ext().host().contributions().tours();
         self.browse
             .rows("")
             .into_iter()
@@ -89,6 +90,10 @@ impl ItemKind for ExtensionKind {
                     });
                     i.ops.push(Op::new("clone", "Clone to edit"));
                 }
+                // Its tour, while it runs (`[[tours]]`).
+                if !r.disabled && tours.iter().any(|t| t.owner == r.id) {
+                    i.ops.push(Op::new("tour", "Take the tour"));
+                }
                 if r.at == Where::Installed {
                     i.ops.push(Op::new("update", "Update"));
                     i.ops.push(Op::new("pin", "Pin"));
@@ -122,6 +127,24 @@ impl ItemKind for ExtensionKind {
                 a.asks.iter().map(|x| x.says.clone()).collect(),
             ));
             parts.push(Part::new("Where it runs", vec![a.runner.clone()]));
+        }
+        let tours: Vec<String> = self
+            .ext()
+            .host()
+            .contributions()
+            .tours()
+            .into_iter()
+            .filter(|t| t.owner == id)
+            .map(|t| {
+                if t.item.description.is_empty() {
+                    t.item.title
+                } else {
+                    format!("{} — {}", t.item.title, t.item.description)
+                }
+            })
+            .collect();
+        if !tours.is_empty() {
+            parts.push(Part::new("Tours", tours));
         }
         let lines = self.ext().host().logs().since(id, None, 8);
         parts.push(Part::new(
@@ -174,6 +197,10 @@ impl ItemKind for ExtensionKind {
                 Ok(Extensions::installed_json(&installed))
             }
             "enable" => Ok(events(ext.enable(id))),
+            "tour" => {
+                ext.host().start_tour(id, arg(args, "tour"))?;
+                Ok(json!({ "started": id }))
+            }
             "disable" => Ok(events(ext.disable(id))),
             "remove" => Ok(json!({ "removed": ext.uninstall(id).map_err(|e| e.to_string())? })),
             "update" => Ok(serde_json::to_value(ext.update(Some(id))).unwrap_or(Value::Null)),

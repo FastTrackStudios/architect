@@ -80,10 +80,11 @@ Rules:
 ## Tour it in the app (feature `ui`)
 
 Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
-`TourSet` (`new`, `from_sources`, `resolver`, `playground`, `on_move`),
-`Moved`, `Tours` (`start`, `start_at`, `next`, `back`, `stop`, `playing`,
-`offered`), `StartTour` (`id`, `step`), `TourLayer`, `TourState`, `hint`,
-`place`; `features/guide/src/locate.rs` `find_live`,
+`TourSet` (`new`, `from_sources`, `resolver`, `playground`, `on_move`,
+`owner`), `Moved`, `Tours` (`start`, `start_at`, `next`, `back`, `stop`,
+`playing`, `offered`, `offer`, `owner`, `scenario`, `invite`, `invited`,
+`decline`), `StartTour` (`id`, `step`), `TourLayer`, `TourState`
+(`invited`), `TourInfo` (`owner`), `hint`, `place`; `features/guide/src/locate.rs` `find_live`,
 `find_in`, `Resolver`.
 
 1. `let tours = use_tours(list, TourSet::from_sources([include_str!(…)])?
@@ -124,6 +125,41 @@ Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
 | `GUIDE_TOUR_STATE` | `{scenario, step, index, of, waiting, found}` (read-only; `scenario` empty when none plays) |
 | `GUIDE_TOUR_LIST` | the tours on offer `{id, title, safe}` |
 | `GUIDE_TOUR_NEXT` / `_BACK` / `_SKIP` | move it from outside; each move is a `guide` change event |
+| `TOURS_LIST` | the Architect app's: every tour, its own and each running extension's `{id, title, description, extension, label, place}` (`apps/ui/src/guide.rs` `use_extension_tours`) |
+| `TOUR_START {id \| extension, step?, restart?}` | the Architect app's: start one where the person left it; with neither, ⌘K opens on the tours. The app also gives ⌘K a `tours:` source (`Commands::register_source`): a "Take the <extension> tour" row each |
+
+## An extension's tour (`[[tours]]`)
+
+An extension or a feature ships its tour as a scenario in its package:
+
+```toml
+[[tours]]
+id = "projects-tour"                  # the scenario's id
+title = "Projects"
+description = "The list, a new project and a project's page."
+scenario = "tours/projects-tour.styx" # a linked one lists it in `files()`
+```
+
+- Checked at load (`features/extensions/src/manifest.rs` `Manifest`
+  `tours`, `features/extensions/src/contrib.rs` `TourDecl`): it reads, its
+  id is the tour's, and every `@run` is the extension's own action or one
+  its capabilities reach. A broken tour fails the load.
+- Withdrawn when the extension is turned off (`Contributions::tours`);
+  the app offers the rest beside its own (`Tours::offer`).
+- Started from the manager's "Take the tour" (`Host::on_tour`), the
+  invitation after an install or enable (`TURNED_ON`, `Tours::invite`),
+  and `TOURS_LIST` / `TOUR_START`.
+- Write chapters as the Architect tour does. Only open views in the setup
+  and mark it `safe true`; seed nothing into the person's vault (ring the
+  field and let them type). Rings: `@css".projects-roadmap"`, a status item
+  by its hint (`@css"[title=\"Active projects\"]"`), a control by its
+  `id`.
+- Played as a test: `architect_app::builtin_tours` lists every first-party
+  tour; `apps/sandbox/media/tests/architect_tours.rs` plays them over the
+  Architect app and its demo vault (`architect_sandbox_media::architect_app`),
+  and `apps/sandbox/media/tests/scenarios.rs` plays the sandbox's (the
+  Board's). Film one with `SANDBOX_MEDIA_APP=architect cargo run -p
+  architect-sandbox-media -- extensions/projects/tours/projects-tour.styx`.
 
 To film or test a tour, write a scenario that starts it and follows it,
 checking `GUIDE_TOUR_STATE` after each step:

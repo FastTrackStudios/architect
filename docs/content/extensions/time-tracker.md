@@ -138,6 +138,10 @@ and inbox deck, with a `for:` token: `Call with the label for:45m
 [[Album]] today` logs 45 minutes on Album today, described as "Call with
 the label" (`capture`). A length typed in the title (`45m`) works too.
 
+Its tour (`[[tours]]`, `extensions/time-tracker/tours/time-tour.styx`)
+walks the report, logging time, the totals, the sidebar by project and the
+timer's status item, running only `TIME_OPEN`; it starts no timer.
+
 ## 7. Tests
 
 - `extensions/time-tracker/src/model.rs` and

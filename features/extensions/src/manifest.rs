@@ -1049,6 +1049,32 @@ impl Manifest {
         }
     }
 
+    /// Its tours (`[[tours]]`), each with its scenario: the text `read`
+    /// gives for its path in the package, read and checked against its
+    /// rules ([`crate::contrib::TourDecl::read`]). What a load checks, and
+    /// what a test plays.
+    ///
+    /// # Errors
+    ///
+    /// The first tour that is missing, does not read or reaches past it.
+    pub fn tours(
+        &self,
+        read: impl Fn(&str) -> Option<String>,
+    ) -> Result<Vec<(crate::contrib::TourDecl, architect_guide::Scenario)>, Refused> {
+        let views = self.view_ids();
+        let rules = self.rules(&views);
+        self.contributes
+            .tours
+            .iter()
+            .map(|t| {
+                let mut t = t.clone();
+                t.scenario_text = read(&t.scenario);
+                let scenario = t.read(&rules)?;
+                Ok((t, scenario))
+            })
+            .collect()
+    }
+
     /// Its secret `id` (`[[secrets]]`).
     #[must_use]
     pub fn secret(&self, id: &str) -> Option<&SecretDecl> {

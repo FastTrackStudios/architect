@@ -1,0 +1,46 @@
+// The capture tour (architect-capture's TOUR; the Architect app offers it
+// beside its own tours, not the sandbox): the composer, quick add, what a
+// capture can become, and the inbox deck. Its setup opens the composer and
+// the deck and puts them away again (CAPTURE_CLOSE); nothing is captured
+// unless you press Capture, so it may play over your own vault. Played as a
+// test by apps/sandbox/media/tests/extension_tours.rs.
+id capture-tour
+title "Capture"
+safe true
+view {width 1280, height 800}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    {id composer-1, hide true, do @run{id CAPTURE_CLOSE}}
+    {id composer-2, hide true, do @run{id CAPTURE_OPEN, args {text "Call the venue tomorrow [[Album]] !high #gigs"}}}
+    {
+        id composer
+        text "Capture first, sort it later. ⇧⌘N (or the feather) opens this composer, and ⌃⌥N a capture window over every app. The line is read as you type: [[Project]], dates, !priority, #tags, @contexts and repeats become chips."
+        target @id"capture-title"
+    }
+    {id into-1, hide true, do @run{id CAPTURE_CLOSE}}
+    {id into-2, hide true, do @run{id CAPTURE_OPEN, args {text "Call the venue tomorrow [[Album]] !high #gigs"}}}
+    {
+        id into
+        text "Into says what it becomes: the inbox (decide later), a note, or what extensions add (their [[capture_targets]]; Tasks adds Task). A line with a date or a project suggests a task."
+        target @id"capture-into-task"
+    }
+    {id go-1, hide true, do @run{id CAPTURE_CLOSE}}
+    {id go-2, hide true, do @run{id CAPTURE_OPEN, args {text "Call the venue tomorrow [[Album]] !high #gigs"}}}
+    {
+        id go
+        text "↵ captures it; Create more keeps the composer open for the next. Agents capture with CAPTURE_ADD, the same parser and targets."
+        target @id"capture-go"
+    }
+    {id inbox-1, hide true, do @run{id CAPTURE_CLOSE}}
+    {id inbox-2, hide true, do @run{id INBOX_OPEN}}
+    {
+        id inbox
+        text "File › Process inbox deals the captures one at a time: make it a task, file it as a note, put it off to tomorrow or next week, or discard it."
+        target @id"inbox-title"
+    }
+    {id done-1, hide true, do @run{id CAPTURE_CLOSE}}
+    {
+        id done
+        text "That is capture. The tour put everything away; nothing was captured unless you pressed Capture."
+    }
+)

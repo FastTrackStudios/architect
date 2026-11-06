@@ -1,0 +1,43 @@
+// The Time Tracker's tour (extension.toml [[tours]]): the report, logging
+// time, the totals, the sidebar and the timer's status item. Played as the
+// extension: each setup step runs its own TIME_OPEN. It only opens a view
+// (it starts no timer and writes no timesheet: you do, if you like), so it
+// may play over your own vault. Played as a test by
+// apps/sandbox/media/tests/architect_tours.rs.
+id time-tour
+title "Time Tracker"
+safe true
+view {width 1280, height 800}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    {id report-1, hide true, do @run{id TIME_OPEN, args {view report}}}
+    {
+        id report
+        text "Time is kept on your notes: a task's, a project's or any note's timeEntries, in TaskNotes' shape. This report is the time in your vault, with the timer that runs, if one does."
+        target @css".time-report"
+    }
+    {id log-1, hide true, do @run{id TIME_OPEN, args {view report}}}
+    {
+        id log
+        text "Forgot to start the timer? Log it as you'd say it: a length and what it was on. Try: “45m Call with the label [[Album]]” and ↵. ⇧⌘N's Log time does the same from anywhere."
+        target @css".time-log"
+    }
+    {id totals-1, hide true, do @run{id TIME_OPEN, args {view report}}}
+    {
+        id totals
+        text "The totals: all of it, and what is billable at each project's rate. Below them, the days and the projects and notes the time went to; ▶ on a note starts its timer."
+        target @css".time-totals"
+    }
+    {id sidebar-1, hide true, do @run{id TIME_OPEN, args {view report}}}
+    {
+        id sidebar
+        text "While the report shows, the sidebar is your time by project. View › Open the timesheet is a week of it, a row a note and a column a day (a Bases view this extension adds)."
+        target @css".nv-nav"
+    }
+    {id status-1, hide true, do @run{id TIME_OPEN, args {view report}}}
+    {
+        id status
+        text "Its status item shows the running timer; press it to stop. A task's and a project's page show their time too. Every part is an action: TIME_START, TIME_STOP, TIME_LOG, TIME_REPORT on ⌘K, MCP and the CLI."
+        target @css"[title=\"The running timer: press to stop it\"]"
+    }
+)

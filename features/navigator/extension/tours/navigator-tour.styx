@@ -1,0 +1,50 @@
+// The Navigator tour (extension.toml [[tours]]): the Vault's sidebar,
+// its two panes, search, the calendar and a new note. Its setup shows the
+// Vault with a note of it in front (LAB_GO and WORKSPACES_LOAD, in its
+// capabilities: a page of an extension's in front shows that extension's
+// tree instead) and selects the vault's top (NAVIGATOR_SELECT, its own);
+// it only moves the view, so it may play over your own vault. Played as a test by apps/sandbox/media/tests/scenarios.rs
+// (every_tour_plays_as_a_scenario).
+id navigator-tour
+title "Navigator"
+safe true
+view {width 1280, height 800}
+capture {fps 10, width 960, outputs (png)}
+steps (
+    {id folders-1, hide true, do @run{id LAB_GO, args {tab vault}}}
+    {id folders-2, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {id folders-3, hide true, do @run{id NAVIGATOR_SELECT, args {folder ""}}}
+    {
+        id folders
+        text "The navigator is the Vault's sidebar: folders, tags and properties on the left, the selection's notes beside them. Click a folder to list its notes; a folder with a note of its own name opens it."
+        target @css".nv-nav"
+    }
+    {id notes-1, hide true, do @run{id LAB_GO, args {tab vault}}}
+    {id notes-2, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id notes
+        text "The notes of what you selected: newest first, grouped by date, pinned ones on top, each with a preview and its first image. Right-click one to pin it, move it or reveal it."
+        target @css".nv-list"
+    }
+    {id search-1, hide true, do @run{id LAB_GO, args {tab vault}}}
+    {id search-2, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id search
+        text "Search narrows the list as you type; a search can be saved as a shortcut."
+        target @css"[data-testid=\"nv-search-toggle\"]"
+    }
+    {id calendar-1, hide true, do @run{id LAB_GO, args {tab vault}}}
+    {id calendar-2, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id calendar
+        text "The calendar shows which days have notes; click a day for its daily note."
+        target @css"[data-testid=\"nv-calendar-toggle\"]"
+    }
+    {id new-1, hide true, do @run{id LAB_GO, args {tab vault}}}
+    {id new-2, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
+    {
+        id new
+        text "A new note goes in the folder you selected. Other extensions fill the sidebar too: while a Projects or Tasks view shows, it is their tree (navigator_providers)."
+        target @css"[data-testid=\"nv-new-note\"]"
+    }
+)

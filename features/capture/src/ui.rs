@@ -112,6 +112,10 @@ pub fn use_capture(list: &Arc<ActionList>, config: Config) -> CaptureUi {
                 Open::Composer { text, target } => sheet.set(Some((text, target))),
                 Open::Window { text } => window.set(Some(text)),
                 Open::Inbox => deck.set(true),
+                Open::Close => {
+                    sheet.set(None);
+                    deck.set(false);
+                }
             }
         }
     });

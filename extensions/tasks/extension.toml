@@ -235,3 +235,11 @@ title = "Your name"
 description = "My tasks lists the open tasks whose assignees name you (a name, or a link to your note)."
 control = "text"
 default = ""
+
+# Its tour (#379): offered once after it is installed or turned on, on its
+# page in the extensions manager, and through TOURS_LIST / TOUR_START.
+[[tours]]
+id = "tasks-tour"
+title = "Tasks"
+description = "The task list, quick add, Today and My tasks, and the sidebar by status."
+scenario = "tours/tasks-tour.styx"

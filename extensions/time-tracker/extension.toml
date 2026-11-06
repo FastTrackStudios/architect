@@ -206,3 +206,11 @@ tokens = [{ prefix = "for:", key = "duration" }]
 id = "timesheet"
 name = "Timesheet"
 icon = "calendar-range"
+
+# Its tour (#379): offered once after it is installed or turned on, on its
+# page in the extensions manager, and through TOURS_LIST / TOUR_START.
+[[tours]]
+id = "time-tour"
+title = "Time Tracker"
+description = "The time report, logging time, the totals, the sidebar by project and the timer."
+scenario = "tours/time-tour.styx"
