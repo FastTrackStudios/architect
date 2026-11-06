@@ -770,12 +770,18 @@ pub fn NavigatorView(
             let p = slide();
             let nav_left = -p * 100.0;
             let list_left = (1.0 - p) * 100.0;
+            // The pane slid all the way out is hidden, not just clipped:
+            // Blitz's hit test does not clip to `overflow`, so the folders
+            // off to the left took the presses meant for what is beside
+            // the sidebar (the shell's ribbon).
+            let nav_shown = if p >= 1.0 { "hidden" } else { "visible" };
+            let list_shown = if p <= 0.0 { "hidden" } else { "visible" };
             rsx! {
                 div { style: "position:absolute; inset:0; display:flex; flex-direction:column;",
                     div { class: "nv-split nv-single", "data-pane": if single == Pane::Navigation { "navigation" } else { "files" },
                         style: "flex:1 1 0; min-height:0; position:relative; overflow:hidden;",
-                        div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{nav_left}%;", {nav_pane} }
-                        div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{list_left}%;", {list_pane} }
+                        div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{nav_left}%; visibility:{nav_shown};", {nav_pane} }
+                        div { class: "nv-slot", style: "position:absolute; top:0; bottom:0; width:100%; left:{list_left}%; visibility:{list_shown};", {list_pane} }
                     }
                     if cal_below {
                         calendar::Calendar { nav, on_open }
