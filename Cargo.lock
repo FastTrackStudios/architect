@@ -1125,6 +1125,7 @@ dependencies = [
  "architect-settings",
  "architect-shell",
  "architect-sites",
+ "architect-spaces",
  "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",

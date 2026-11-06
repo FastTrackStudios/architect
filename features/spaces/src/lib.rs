@@ -23,6 +23,10 @@
 //!   engine for them ([`server::SpacesEngine`]) and the service for the
 //!   gate's caller; every change is audited first, and every check reads
 //!   the current state, so a removal binds on the next call.
+//! - Share links ([`share`], #197/#374): a scope of a vault on a link,
+//!   for an audience, with an expiry and an access; [`ShareLinks`] is
+//!   its wire (`vox`), [`share_note`] how it is kept in the vault
+//!   (`server`).
 //! - `files`: a space over a folder grants its members that folder in
 //!   `architect-files`, generated per call.
 
@@ -31,6 +35,11 @@ mod model;
 pub mod server;
 #[cfg(feature = "vox")]
 mod service;
+pub mod share;
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+mod share_note;
+#[cfg(feature = "vox")]
+mod share_service;
 
 pub use model::{
     COMMENTER, EDITOR, FILES_PREFIX, Holding, MANAGER, Member, NewSpace, OrgSpaces, SPACES_PREFIX,
@@ -42,4 +51,15 @@ pub use model::{
 pub use service::{
     PERMITS, SpacesService, SpacesServiceClient, layer, serve,
     spaces_service_rpc_service_descriptor,
+};
+pub use share::{
+    Audience, NewShare, Share, ShareAccess, ShareChange, ShareComment, ShareFault, ShareScope,
+    ShareState, Verdict, Viewer,
+};
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub use share_note::{comments_note, parse_comments, parse_share_note, share_note};
+#[cfg(feature = "vox")]
+pub use share_service::{
+    SHARE_PERMITS, ShareLinks, ShareLinksClient, ShareLinksDispatcher,
+    share_links_rpc_service_descriptor,
 };

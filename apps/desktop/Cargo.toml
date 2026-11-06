@@ -79,6 +79,10 @@ vault-proto = { workspace = true, features = ["vox"] }
 vault-collab = { workspace = true }
 # Sites (#364): a vault published, rebuilt when it changes.
 architect-sites = { workspace = true }
+# Share links (#374): the model, its wire (`ShareLinks`) and its note.
+architect-spaces = { workspace = true, features = ["server"] }
+# A share's page reload stream.
+futures = { workspace = true }
 facet = { workspace = true }
 iroh = { workspace = true }
 serde = { workspace = true }

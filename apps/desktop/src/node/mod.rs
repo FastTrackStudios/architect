@@ -40,12 +40,17 @@
 //!   changes); [`service::Node`] over same-origin vox (`/vox`) and its
 //!   HTTP face (`POST /node/status`); and `/mcp`, with its bearer only,
 //!   serving `NODE_STATUS` and the `NOTES_*` actions.
+//! - **Share links** ([`shares`], #374): `/<code>/` serves a share's
+//!   scope of a vault as a Site to the audience it names, until it
+//!   expires or is revoked; the org lane serves `ShareLinks` to make,
+//!   change and revoke them.
 
 pub mod catalog;
 pub mod config;
 mod live;
 pub mod org;
 pub mod service;
+pub mod shares;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -356,6 +361,17 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         every,
     )));
 
+    // ── Share links ──────────────────────────────────────────────────
+    let shares = shares::Shares::new(
+        backend.clone(),
+        data,
+        node_org.clone(),
+        config.issuer.as_deref(),
+    );
+    for id in config.vaults.keys() {
+        tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
+    }
+
     // ── Sites ────────────────────────────────────────────────────────
     let mut sites = Vec::new();
     for (mount, vault) in &config.sites {
@@ -391,6 +407,7 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         host = lane
             .clone()
             .with_vaults(registry.clone(), catalog.clone(), notes)
+            .with_shares(shares.clone())
             .mount(host);
     }
     if let Some(file) = &config.mcp_token_file {
@@ -409,6 +426,17 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
             }
         }
     }
+    // Outermost: a share's link and domain are answered before anything
+    // else is matched (a Site mounted at `/` included).
+    let host = host.finish({
+        let shares = shares.clone();
+        move |app| {
+            app.layer(architect::http::axum::middleware::from_fn_with_state(
+                shares,
+                shares::gate,
+            ))
+        }
+    });
     let app = host.into_app();
     let listener = tokio::net::TcpListener::bind(&config.bind)
         .await
