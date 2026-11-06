@@ -36,9 +36,13 @@ mod controller;
 mod enrolment;
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 mod issuer;
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+mod shares;
 
 #[cfg(all(feature = "actions", not(target_arch = "wasm32")))]
 pub mod actions;
+#[cfg(all(feature = "actions", not(target_arch = "wasm32")))]
+pub mod share_actions;
 #[cfg(all(feature = "ui", not(target_arch = "wasm32")))]
 pub mod ui;
 
@@ -53,3 +57,5 @@ pub use keychain::{DEFAULT_SERVICE, Keychain, SERVICE_ENV};
 pub use controller::{Accounts, BrowserWait, Sheet, Status};
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use issuer::{DEFAULT_ISSUER, ISSUER_ENV, Issuer, IssuerError, SignedIn, issuer_from_env};
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+pub use shares::ShareDraft;

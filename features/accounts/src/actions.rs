@@ -154,6 +154,7 @@ fn sheet_name(sheet: Option<Sheet>) -> String {
         Some(Sheet::SignIn) => "sign-in",
         Some(Sheet::Accounts) => "accounts",
         Some(Sheet::OrgDevices) => "org-devices",
+        Some(Sheet::Share) => "share",
         None => "closed",
     }
     .to_owned()
@@ -242,7 +243,8 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
             }
         },
     )?;
-    register_orgs(list, accounts)
+    register_orgs(list, accounts)?;
+    crate::share_actions::register(list, accounts)
 }
 
 /// What [`ids::DEVICES`] answers.

@@ -16,6 +16,9 @@
 //!   is on the shared page within seconds, and its `_live` stream fires.
 //! - A share that takes comments takes them; a read-only one refuses.
 //! - A share with a domain of its own is served at that host's root.
+//! - From the app (`architect-accounts`' Action List, signed in as Grace):
+//!   `SHARE_CREATE` makes a link that opens, `SHARE_LIST` lists it,
+//!   `PUBLISH_DOMAIN` gives it a domain, `SHARE_REVOKE` takes it down.
 
 #![allow(
     clippy::unwrap_used,
@@ -80,6 +83,7 @@ fn touch(root: &Path, rel: &str, body: &str) {
 
 struct World {
     host: Running,
+    issuer: String,
     grace: String,
     alan: String,
     ada: String,
@@ -119,6 +123,7 @@ async fn world() -> World {
     let ada = session_of(&origin, &tmp.path().join("ada"), "ada@local.test").await;
     World {
         host,
+        issuer: origin,
         grace,
         alan,
         ada,
@@ -505,6 +510,83 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
             .await
             .is_err()
     );
+
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_share_actions_make_list_and_revoke_a_link() {
+    use std::sync::Arc;
+
+    use architect::action::ActionList;
+    use architect_accounts::{AccountStore, Accounts, MemorySecrets};
+    use serde_json::{Value, json};
+
+    let w = world().await;
+    // The app, signed in as Grace, in `indie`.
+    let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));
+    let accounts = Accounts::new(store, Issuer::new(&w.issuer), "architect-test").without_browser();
+    let list = Arc::new(ActionList::new());
+    architect_accounts::actions::register(&list, &accounts).unwrap();
+    accounts
+        .sign_in_password("grace@local.test", auth_server::dev::DEV_PASSWORD)
+        .await
+        .unwrap();
+    accounts.refresh_orgs().await.unwrap();
+    list.run_json("ORG_SWITCH", br#"{"org":"indie"}"#).unwrap();
+    let run = |id: &'static str, args: Value| {
+        let list = Arc::clone(&list);
+        async move {
+            list.run_json_async(id, args.to_string().as_bytes())
+                .await
+                .map(|out| serde_json::from_slice::<Value>(&out).unwrap())
+                .map_err(|e| format!("{e:?}"))
+        }
+    };
+    let host = format!("http://{}", w.host.http);
+
+    let made = run(
+        "SHARE_CREATE",
+        json!({"folder": "Shared", "audience": "link", "expires": "7d", "host": host}),
+    )
+    .await
+    .unwrap();
+    let url = made["share"]["url"].as_str().unwrap().to_owned();
+    let code = made["share"]["code"].as_str().unwrap().to_owned();
+    assert_eq!(url, format!("{host}/{code}/"));
+    assert_eq!(made["share"]["scope"], "the folder Shared");
+    assert_eq!(made["share"]["state"], "live");
+    page_with(&url, None, "The album").await;
+
+    let listed = run("SHARE_LIST", json!({})).await.unwrap();
+    assert_eq!(listed["shares"].as_array().unwrap().len(), 1, "{listed}");
+
+    let changed = run("SHARE_UPDATE", json!({"code": code, "audience": "org"}))
+        .await
+        .unwrap();
+    assert_eq!(changed["share"]["audience"], "org");
+    assert_eq!(get(&url, None).await.0, StatusCode::UNAUTHORIZED);
+    page_with(&url, Some(&w.alan), "The album").await;
+
+    let domained = run(
+        "PUBLISH_DOMAIN",
+        json!({"code": code, "domain": "album.example.test"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(domained["share"]["domain"], "album.example.test");
+
+    // The sheet opens on a scope (from a file's context menu it would be
+    // that file).
+    let sheet = run("SHARE_SHEET", json!({"tag": "mix"})).await.unwrap();
+    assert_eq!(sheet["sheet"], "share");
+    assert_eq!(sheet["scope"], "the notes tagged #mix");
+
+    run("SHARE_REVOKE", json!({"code": code})).await.unwrap();
+    let (status, _, _) = get(&url, Some(&w.alan)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let listed = run("SHARE_LIST", json!({})).await.unwrap();
+    assert_eq!(listed["shares"][0]["state"], "revoked");
 
     w.host.stop().await;
 }

@@ -187,6 +187,7 @@ pub fn register(list: &Arc<ActionList>) {
     let _ = links::actions::register(list, &open);
     let _ = tag::actions::register(list, &open);
     let _ = architect_bases::actions::register(list, &open, view_types());
+    crate::publish::register(list, &open);
     let shown = open;
     let seeded = env_either("ARCHITECT_VAULT_SEED", "ARCHITECT_LAB_SEED")
         .map(|s| s.to_string_lossy().into_owned());

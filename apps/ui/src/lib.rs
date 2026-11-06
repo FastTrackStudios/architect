@@ -30,6 +30,7 @@ mod notes;
 mod pages;
 mod paint;
 pub mod presence;
+mod publish;
 mod screen;
 mod settings;
 mod surfaces;

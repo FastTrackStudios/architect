@@ -26,6 +26,9 @@ pub enum Sheet {
     Accounts,
     /// The devices enrolled in the current org, at the node hosting it.
     OrgDevices,
+    /// Share links: share a note, folder, tag or vault, and the org's
+    /// shares, at the node hosting it.
+    Share,
 }
 
 /// The last thing a flow said.
@@ -57,6 +60,11 @@ pub struct BrowserWait {
 pub struct State {
     /// The current org's enrolled devices, as last fetched from its host.
     pub org_devices: Option<Result<Vec<architect_devices::Peer>, String>>,
+    /// The org's share links, as last fetched from its host.
+    pub shares: Option<Result<Vec<architect_spaces::Share>, String>>,
+    /// What the Share sheet shares, and the share it just made.
+    pub(crate) share_draft: Option<crate::shares::ShareDraft>,
+    pub(crate) share_made: Option<architect_spaces::Share>,
     sheet: Option<Sheet>,
     status: Status,
     browser: Option<BrowserWait>,
@@ -241,6 +249,12 @@ impl Accounts {
             let me = self.clone();
             issuer::spawn(async move {
                 let _ = me.org_devices(None).await;
+            });
+        }
+        if page == Sheet::Share && self.org_host().is_some() {
+            let me = self.clone();
+            issuer::spawn(async move {
+                let _ = me.shares(None).await;
             });
         }
     }
