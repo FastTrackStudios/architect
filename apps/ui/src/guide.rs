@@ -257,6 +257,8 @@ pub fn tour_place() -> TourPlace {
 pub const LIST_TOURS: &str = "TOURS_LIST";
 /// Starts a tour where the person left it.
 pub const START_TOUR: &str = "TOUR_START";
+/// The palette's source of tour rows (its prefix: `tours:`).
+const TOUR_ROWS: &str = "tours";
 
 /// One tour, as `TOURS_LIST` answers: what ⌘K, a Tours page or an agent
 /// shows for it.
@@ -309,7 +311,7 @@ static START_TOUR_META: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Take a tour",
-    description: "Starts tour `id` (TOURS_LIST names them), or extension `extension`'s first tour, where the person left it: at `step` when given, from the start with `restart` or once they finished it.",
+    description: "Starts tour `id` (TOURS_LIST names them), or extension `extension`'s first tour, where the person left it: at `step` when given, from the start with `restart` or once they finished it. With neither, it opens ⌘K on the tours (`tours:`) to pick one.",
     category: "Guide",
     group: "Tours",
     shortcut: "",
@@ -362,6 +364,18 @@ pub fn use_extension_tours(
         async move {
             use futures_util::StreamExt as _;
             while let Some((id, step)) = asks.next().await {
+                // No tour named (⌘K's bare "Take a tour"): the palette,
+                // on the tours.
+                if id.is_empty() {
+                    let _ = list
+                        .run_json_async(
+                            "COMMANDS_SHOW",
+                            format!(r#"{{"overlay":"palette","query":"{TOUR_ROWS}: "}}"#)
+                                .as_bytes(),
+                        )
+                        .await;
+                    continue;
+                }
                 // The settings window (where the manager's "Take the tour"
                 // is) would cover the tour: put it away first.
                 let _ = list
@@ -385,6 +399,11 @@ pub fn use_extension_tours(
             });
             let tx = starts.tx();
             let _ = list.register(&START_TOUR_META, Effect::Mutating, move |a: StartArgs| {
+                if a.id.is_none() && a.extension.is_none() {
+                    tx.unbounded_send((String::new(), None))
+                        .map_err(|_| "the window is gone".to_owned())?;
+                    return Ok(TourRow::default());
+                }
                 let row = pick(&rows.lock().unwrap_or_else(PoisonError::into_inner), &a)?;
                 let step = match (a.step, a.restart, place_of(&row.id)) {
                     (Some(step), _, _) | (None, false, TourPlace::At(step)) => Some(step),
@@ -396,6 +415,46 @@ pub fn use_extension_tours(
             });
         }
     });
+    // ⌘K: a row a tour, "Take the Projects tour", once something is typed
+    // (or `tours:`); picking one is TOUR_START, where the person left it.
+    {
+        let rows = rows.clone();
+        let commands = architect_commands::try_use_commands();
+        use_hook(move || {
+            let Some(commands) = commands else {
+                return;
+            };
+            let tx = starts.tx();
+            let read = rows;
+            commands.register_source(
+                architect_commands::FnSource::new(TOUR_ROWS, "Tours", move |_| {
+                    read.lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .iter()
+                        // The app's own have their rows in Help already.
+                        .filter(|r| !r.extension.is_empty())
+                        .map(|r| {
+                            architect_commands::engine::Item::new(r.id.clone(), r.label.clone())
+                                .detail(r.description.clone())
+                        })
+                        .collect()
+                })
+                .ranking(architect_commands::Ranking::Commands),
+                move |item: &architect_commands::engine::Item| {
+                    let step = match place_of(&item.id) {
+                        TourPlace::At(step) => Some(step),
+                        _ => None,
+                    };
+                    let _ = tx.unbounded_send((item.id.clone(), step));
+                },
+            );
+        });
+        use_drop(move || {
+            if let Some(c) = commands {
+                c.remove_source(TOUR_ROWS);
+            }
+        });
+    }
     // The manager's "Take the tour".
     {
         let rows = rows.clone();
@@ -590,6 +649,8 @@ pub fn builtin_tours() -> Result<Vec<(String, architect_guide::Scenario)>, Strin
     } else {
         linked.push(&architect_projects::Projects);
         linked.push(&architect_tasks::Tasks);
+        linked.push(&architect_time_tracker::TimeTracker);
+        linked.push(&architect_time_tracker::TimeTracker);
     }
     let mut out = Vec::new();
     if !sandbox {
