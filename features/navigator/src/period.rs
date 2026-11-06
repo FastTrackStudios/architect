@@ -75,7 +75,7 @@ impl PeriodKind {
     #[must_use]
     pub fn longer(self) -> &'static [Self] {
         let i = Self::ALL.iter().position(|k| *k == self).unwrap_or(0);
-        Self::ALL.get(i + 1..).unwrap_or(&[])
+        Self::ALL.get(i.saturating_add(1)..).unwrap_or(&[])
     }
 }
 
@@ -99,7 +99,7 @@ impl WeekRules {
 
     /// The day a week starts on.
     #[must_use]
-    pub fn first_day(self) -> Weekday {
+    pub const fn first_day(self) -> Weekday {
         sunday_based(self.dow)
     }
 
@@ -107,12 +107,16 @@ impl WeekRules {
     #[must_use]
     pub fn week_start(self, date: NaiveDate) -> NaiveDate {
         let from_sunday = date.weekday().num_days_from_sunday();
-        let back = (from_sunday + 7 - u32::from(self.dow) % 7) % 7;
-        date - Days::new(u64::from(back))
+        let back = from_sunday.saturating_add(7).saturating_sub(u32::from(self.dow) % 7) % 7;
+        date.checked_sub_days(Days::new(u64::from(back)))
+            .unwrap_or(date)
     }
 
     /// The week year and the week number of `date` (Moment's `weekYear()`
     /// and `week()`; with [`Self::ISO`], `isoWeekYear()` and `isoWeek()`).
+    // Moment's formula, over days of a year and weekdays: nothing near an
+    // overflow.
+    #[allow(clippy::arithmetic_side_effects)]
     #[must_use]
     pub fn week_of(self, date: NaiveDate) -> (i32, u32) {
         let year = date.year();
@@ -132,6 +136,7 @@ impl WeekRules {
     }
 
     /// How many weeks `year` (a week year) has: 52 or 53.
+    #[allow(clippy::arithmetic_side_effects)]
     #[must_use]
     pub fn weeks_in_year(self, year: i32) -> i64 {
         let days = if NaiveDate::from_ymd_opt(year, 2, 29).is_some() {
@@ -144,6 +149,7 @@ impl WeekRules {
 
     /// Moment's `firstWeekOffset`: where week 1 starts, as a day of the
     /// year less one (it can be before January 1, so negative).
+    #[allow(clippy::arithmetic_side_effects)]
     fn first_week_offset(self, year: i32) -> i64 {
         let dow = i64::from(self.dow);
         let fwd = 7 + dow - i64::from(self.doy);
@@ -157,7 +163,7 @@ impl WeekRules {
 
 /// A weekday from Moment's number, 0 Sunday to 6 Saturday.
 #[must_use]
-pub fn sunday_based(n: u8) -> Weekday {
+pub const fn sunday_based(n: u8) -> Weekday {
     match n % 7 {
         0 => Weekday::Sun,
         1 => Weekday::Mon,
@@ -186,10 +192,9 @@ impl Period {
             PeriodKind::Day => date,
             PeriodKind::Week => weeks.week_start(date),
             PeriodKind::Month => date.with_day(1).unwrap_or(date),
-            PeriodKind::Quarter => {
-                let month = (date.month0() / 3) * 3 + 1;
-                NaiveDate::from_ymd_opt(date.year(), month, 1).unwrap_or(date)
-            }
+            PeriodKind::Quarter => quarter_start(quarter_of(date))
+                .and_then(|month| NaiveDate::from_ymd_opt(date.year(), month, 1))
+                .unwrap_or(date),
             PeriodKind::Year => NaiveDate::from_ymd_opt(date.year(), 1, 1).unwrap_or(date),
         };
         Self { kind, start }
@@ -201,7 +206,7 @@ impl Period {
     pub fn shift(self, n: i32) -> Self {
         let start = match self.kind {
             PeriodKind::Day => add_days(self.start, i64::from(n)),
-            PeriodKind::Week => add_days(self.start, i64::from(n) * 7),
+            PeriodKind::Week => add_days(self.start, i64::from(n).saturating_mul(7)),
             PeriodKind::Month => add_months(self.start, n),
             PeriodKind::Quarter => add_months(self.start, n.saturating_mul(3)),
             PeriodKind::Year => add_months(self.start, n.saturating_mul(12)),
@@ -261,9 +266,27 @@ impl Period {
                 add_days(d, 6).format("%Y-%m-%d")
             ),
             PeriodKind::Month => format!("@{}", d.format("%Y-%m")),
-            PeriodKind::Quarter => format!("@{}-Q{}", d.year(), d.month0() / 3 + 1),
+            PeriodKind::Quarter => format!("@{}-Q{}", d.year(), quarter_of(d)),
             PeriodKind::Year => format!("@{}", d.year()),
         }
+    }
+}
+
+/// The quarter `date` is in, 1 to 4.
+#[must_use]
+pub fn quarter_of(date: NaiveDate) -> u32 {
+    (date.month0() / 3).saturating_add(1)
+}
+
+/// The month quarter `q` (1 to 4) starts in.
+#[must_use]
+pub const fn quarter_start(q: u32) -> Option<u32> {
+    match q {
+        1 => Some(1),
+        2 => Some(4),
+        3 => Some(7),
+        4 => Some(10),
+        _ => None,
     }
 }
 
@@ -302,7 +325,7 @@ pub fn day_of(at: Millis, offset: Millis) -> NaiveDate {
 #[must_use]
 pub fn start_of(date: NaiveDate, offset: Millis) -> Millis {
     let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap_or(NaiveDate::MIN);
-    (date - epoch)
+    date.signed_duration_since(epoch)
         .num_days()
         .saturating_mul(86_400_000)
         .saturating_sub(offset)
@@ -472,7 +495,7 @@ fn number(text: &str, min: usize, max: usize) -> Option<u32> {
     text.parse().ok()
 }
 
-fn is_sep(c: char) -> bool {
+const fn is_sep(c: char) -> bool {
     matches!(c, '-' | '/' | '.')
 }
 
@@ -504,15 +527,15 @@ fn date_token(t: &str, order: DayMonthOrder) -> Option<(NaiveDate, NaiveDate)> {
     // A quarter or a week: 2026-q4, 2026q4, 2026-w45.
     for (mark, is_week) in [('q', false), ('w', true)] {
         if let Some(at) = t.find(mark) {
-            let (left, right) = (t.get(..at)?, t.get(at + 1..)?);
+            let (left, right) = (t.get(..at)?, t.get(at.saturating_add(1)..)?);
             let left = left.strip_suffix(is_sep).unwrap_or(left);
             let y = year(left, 3)?;
             if is_week {
                 let w = number(right, 1, 2)?;
                 return iso_week(y, w);
             }
-            let q = number(right, 1, 1).filter(|q| (1..=4).contains(q))?;
-            let start = NaiveDate::from_ymd_opt(y, (q - 1) * 3 + 1, 1)?;
+            let q = number(right, 1, 1)?;
+            let start = NaiveDate::from_ymd_opt(y, quarter_start(q)?, 1)?;
             return Some((start, add_months(start, 3)));
         }
     }

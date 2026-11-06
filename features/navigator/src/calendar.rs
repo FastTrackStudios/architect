@@ -76,14 +76,20 @@ impl PeriodicNotes {
         }
     }
 
-    fn kind(&self, kind: PeriodKind) -> &Result<KindPattern, String> {
-        let i = PeriodKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
-        &self.kinds[i]
+    const fn kind(&self, kind: PeriodKind) -> &Result<KindPattern, String> {
+        let [day, week, month, quarter, year] = &self.kinds;
+        match kind {
+            PeriodKind::Day => day,
+            PeriodKind::Week => week,
+            PeriodKind::Month => month,
+            PeriodKind::Quarter => quarter,
+            PeriodKind::Year => year,
+        }
     }
 
     /// Whether notes of `kind` are on, with a pattern that makes paths.
     #[must_use]
-    pub fn enabled(&self, kind: PeriodKind) -> bool {
+    pub const fn enabled(&self, kind: PeriodKind) -> bool {
         self.kind(kind).is_ok()
     }
 
@@ -172,7 +178,7 @@ impl PeriodicNotes {
                 .map(|d| Period::containing(kind, d, self.week_rules())),
             PeriodKind::Quarter => fields
                 .quarter
-                .map(|q| (q - 1) * 3 + 1)
+                .and_then(crate::period::quarter_start)
                 .or(fields.month)
                 .and_then(|m| NaiveDate::from_ymd_opt(year, m, 1))
                 .map(|d| Period::containing(kind, d, self.week_rules())),
@@ -182,7 +188,7 @@ impl PeriodicNotes {
             // the weeks from December before to the year's end are tried,
             // the first that writes the path wins.
             PeriodKind::Week => {
-                let from = NaiveDate::from_ymd_opt(year - 1, 12, 1)?;
+                let from = NaiveDate::from_ymd_opt(year.checked_sub(1)?, 12, 1)?;
                 let mut p = self.period(PeriodKind::Week, from);
                 let mut found = None;
                 while p.start.year() <= year {
@@ -230,7 +236,7 @@ fn capital(s: &str) -> String {
 /// `name.md`, unless it ends so already.
 fn ensure_md(name: &str) -> String {
     if name.to_ascii_lowercase().ends_with(".md") {
-        let stem = name.get(..name.len() - 3).unwrap_or(name);
+        let stem = name.get(..name.len().saturating_sub(3)).unwrap_or(name);
         format!("{stem}.md")
     } else {
         format!("{name}.md")
@@ -442,11 +448,15 @@ pub fn week_window(cursor: NaiveDate, weeks_to_show: u32, rules: WeekRules) -> (
         let first = cursor.with_day(1).unwrap_or(cursor);
         let start = rules.week_start(first);
         let last = add_days(add_months(first, 1), -1);
-        let rows = (rules.week_start(last) - start).num_weeks() + 1;
+        let rows = rules
+            .week_start(last)
+            .signed_duration_since(start)
+            .num_weeks()
+            .saturating_add(1);
         return (start, u32::try_from(rows.clamp(1, 6)).unwrap_or(6));
     }
-    let back = i64::from((n - 1) / 2) * 7;
-    (add_days(rules.week_start(cursor), -back), n)
+    let back = i64::from(n.saturating_sub(1) / 2).saturating_mul(7);
+    (add_days(rules.week_start(cursor), back.saturating_neg()), n)
 }
 
 /// The day `cursor` moves to by `delta` (`handleNavigate`): a month at a
@@ -457,7 +467,10 @@ pub fn step(cursor: NaiveDate, delta: i32, weeks_to_show: u32) -> NaiveDate {
     if n == 6 {
         add_months(cursor, delta)
     } else {
-        add_days(cursor, i64::from(delta) * 7 * i64::from(n))
+        add_days(
+            cursor,
+            i64::from(delta).saturating_mul(7).saturating_mul(i64::from(n)),
+        )
     }
 }
 
@@ -492,7 +505,7 @@ pub fn grid(cx: CalendarContext<'_>, s: &NavigatorSettings, cursor: NaiveDate) -
     let is_active = |note: &Option<String>| note.is_some() && note.as_deref() == cx.active;
     let weeks = (0..rows)
         .map(|w| {
-            let week_start = add_days(start, i64::from(w) * 7);
+            let week_start = add_days(start, i64::from(w).saturating_mul(7));
             let days = (0..7)
                 .map(|i| {
                     let date = add_days(week_start, i);
@@ -554,11 +567,11 @@ pub fn grid(cx: CalendarContext<'_>, s: &NavigatorSettings, cursor: NaiveDate) -
         ),
         quarter: header(
             PeriodKind::Quarter,
-            format!("Q{}", cursor.month0() / 3 + 1),
+            format!("Q{}", crate::period::quarter_of(cursor)),
         ),
         year: header(PeriodKind::Year, cursor.year().to_string()),
         weekdays: (0..7)
-            .filter_map(|i| WEEKDAYS_MIN.get((first + i) % 7).copied())
+            .filter_map(|i| WEEKDAYS_MIN.get(first.saturating_add(i) % 7).copied())
             .collect(),
         weeks,
         week_notes: cx.periodic.enabled(PeriodKind::Week),
