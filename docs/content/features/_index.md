@@ -63,3 +63,4 @@ When a page and the code disagree, the code is right.
 - [Remote views](@/features/remote-views.md): a process extension's Dioxus views in workspace panes.
 - [Navigator](@/features/navigator.md): folders beside notes in the sidebar, a port of Notebook Navigator (GPL-3.0), as a built-in extension.
 - [A2UI: agents' generated UI](@/features/a2ui.md): an agent's form, list or approval drawn with architect-ui from a catalog, kept in Loro, its buttons asking before any write.
+- [Sites](@/features/sites.md): a vault published as a static site, extensions drawing their blocks, hosted by the architect server.

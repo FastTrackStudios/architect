@@ -315,6 +315,9 @@ fn resolve(
     if trimmed.is_empty() {
         return None;
     }
+    if let Some(rooted) = root_relative(trimmed) {
+        return resolve_rooted(rooted, by_path);
+    }
 
     // 0. Relative-path resolution (`./foo`, `../foo/bar.md`) — join
     //    against the source page's folder + normalize `..` segments,
@@ -397,6 +400,9 @@ fn resolve_all(
     if trimmed.is_empty() {
         return Vec::new();
     }
+    if let Some(rooted) = root_relative(trimmed) {
+        return resolve_rooted(rooted, by_path).into_iter().collect();
+    }
 
     // Relative paths are unambiguous (one normalized result).
     if trimmed.starts_with("./") || trimmed.starts_with("../") {
@@ -446,6 +452,26 @@ fn resolve_all(
     }
 
     Vec::new()
+}
+
+/// A link written from the vault's root: Zola's `@/guide/ui.md` (a docs
+/// folder written for Zola is a vault too), or `/guide/ui.md`. The path
+/// after the prefix, which never resolves against the source's folder
+/// or by basename.
+fn root_relative(linkpath: &str) -> Option<&str> {
+    linkpath
+        .strip_prefix("@/")
+        .or_else(|| linkpath.strip_prefix('/'))
+        .filter(|rest| !rest.is_empty())
+}
+
+/// A root-relative path (see [`root_relative`]), as written or with
+/// `.md` added.
+fn resolve_rooted(path: &str, by_path: &HashMap<&str, usize>) -> Option<usize> {
+    by_path
+        .get(path)
+        .or_else(|| by_path.get(format!("{path}.md").as_str()))
+        .copied()
 }
 
 /// Normalize a `./foo` / `../foo/bar` relative path against
@@ -660,6 +686,27 @@ mod tests {
         touch(&dir.path().join("Lonely.md"), "Nothing here.\n");
         let v = Vault::open(dir.path()).expect("open");
         (dir, v)
+    }
+
+    /// A docs folder written for Zola links pages from its root
+    /// (`[UI](@/guide/ui.md)`): those are edges like any other.
+    #[test]
+    fn root_relative_links_resolve_from_the_vault_root() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(&dir.path().join("guide/ui.md"), "The UI.\n");
+        touch(
+            &dir.path().join("features/shell.md"),
+            "See [the UI](@/guide/ui.md#tabs) and [again](/guide/ui).\n",
+        );
+        let v = Vault::open(dir.path()).expect("open");
+        let idx = LinkIndex::build(&v);
+        assert_eq!(idx.backlinks("guide/ui.md"), vec!["features/shell.md"]);
+        let out = idx.outgoing("features/shell.md");
+        assert!(
+            out.iter().all(|l| l.resolved == Some("guide/ui.md")),
+            "{out:?}"
+        );
+        assert!(idx.unresolved().is_empty());
     }
 
     #[test]

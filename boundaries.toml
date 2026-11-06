@@ -625,3 +625,14 @@ package = "architect-control"
 features = ["server", "cli"]
 layer = "L3"
 note = "the per-app control socket on its own tokio runtime, and the actions CLI; desk only"
+
+[[row]]
+package = "architect-sites"
+layer = "L3"
+note = "a vault published as a static site (#364), read and written at build time; desk only"
+
+[[row]]
+package = "architect-sites"
+features = ["pages"]
+layer = "L3"
+note = "with extensions' embed pages (QuickJS) drawing the blocks they claim"

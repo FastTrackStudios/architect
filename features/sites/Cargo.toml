@@ -1,0 +1,57 @@
+[package]
+name = "architect-sites"
+description = "Sites: a vault published as a static site (#364). The vault's index resolves links, tags and backlinks; pure Dioxus components lay the pages out; extensions draw the blocks they claim at build time."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# One crate, the engine of `architect site build` / `serve` (apps/cli) and,
+# later, the Sites extension (#374). Its roles are cargo features:
+#
+#   default — read a vault, render it, write the site. Blocks come from
+#             `BlockRenderer`s the caller registers (Rust).
+#   pages   — `PageBlocks`: an extension's embed pages (`[[embeds]] page`,
+#             TSX/JS on QuickJS) drawn once per block at build time,
+#             through the same element tree pages draw a pane with.
+
+[features]
+default = []
+pages = ["architect-pages/js", "dep:architect", "dep:architect-scripting"]
+
+[dependencies]
+# The vault: its walker reads the folder, its link index resolves every
+# link and gives the backlinks, its parser the tags and frontmatter.
+vault = { workspace = true, default-features = false, features = ["obsidian"] }
+# Markdown to HTML. `html` is its writer; wikilinks are parsed natively
+# (0.13), so `[[x]]` inside code stays text.
+pulldown-cmark = { workspace = true }
+# A docs folder written for Zola or Hugo carries TOML frontmatter (`+++`).
+toml = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# The site's light and dark themes: architect's tokens as CSS variables.
+architect-theme = { workspace = true }
+# The element tree an extension's page draws (`architect_pages::Element`),
+# and the claims an extension makes on blocks (`Claim`, `[[embeds]]`).
+architect-pages = { workspace = true }
+architect-extensions = { workspace = true }
+# The layout: pure components, rendered to a string once per page.
+dioxus = { workspace = true }
+dioxus-ssr = { workspace = true }
+# `pages`: an embed page's host and its stop.
+architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-scripting = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

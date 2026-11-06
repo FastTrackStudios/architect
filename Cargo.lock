@@ -874,6 +874,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-cli"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-sites",
+ "architect-workspace-hack",
+ "axum",
+ "clap",
+ "futures",
+ "notify",
+ "tokio",
+]
+
+[[package]]
 name = "architect-commands"
 version = "0.1.0"
 dependencies = [
@@ -1624,6 +1638,28 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "tracing",
  "web-time",
+]
+
+[[package]]
+name = "architect-sites"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-pages",
+ "architect-scripting",
+ "architect-theme",
+ "architect-workspace-hack",
+ "dioxus",
+ "dioxus-ssr",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 0.8.2",
+ "tracing",
+ "vault",
 ]
 
 [[package]]
@@ -13605,6 +13641,24 @@ dependencies = [
  "idna",
  "psl-types",
 ]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3db2be46835f013dd3f4fa7f5f7402c537787b54ebb6fe2b94bbdd7e2669bb7b"
+dependencies = [
+ "bitflags 2.13.2",
+ "memchr",
+ "pulldown-cmark-escape",
+ "unicase",
+]
+
+[[package]]
+name = "pulldown-cmark-escape"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
 
 [[package]]
 name = "pulley-interpreter"

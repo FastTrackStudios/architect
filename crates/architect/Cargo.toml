@@ -516,6 +516,10 @@ name = "host_mounts"
 required-features = ["host"]
 
 [[test]]
+name = "host_site"
+required-features = ["host"]
+
+[[test]]
 name = "host_gate"
 required-features = ["host", "connect"]
 

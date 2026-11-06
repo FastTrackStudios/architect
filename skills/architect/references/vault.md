@@ -26,6 +26,7 @@ A vault is a folder of markdown: notes, their properties (YAML frontmatter), the
 - **Writes lock what they touch** (`vault.write.granular`) and **are atomic per file** (`vault.write.atomic`: temp file beside it, then rename; the frontmatter the write did not touch keeps its order and spelling).
 - **A private directory stays on its node** (`vault.private.node-only`): a folder with `.fts-private` is in no manifest, walk or replica and is not served by path.
 - **Bases follow links** (`vault.bases.links`): `file.links`, `file.hasLink`, `x.exists()`, `note.song.key` through a link, formulas once per row.
+- **The index reads links as a renderer does:** a link written from the vault's root (Zola's `@/guide/ui.md`, or `/guide/ui.md`) resolves there; a markdown link's text may wrap a line; a fence right under a line of text is still code, so a `#tag` or `[[link]]` inside it is neither (`features/vault/vault-obsidian/src/links.rs` `root_relative`, `features/vault/vault-obsidian/src/obsidian_parse.rs` `parse_page`). A page's tags, frontmatter and inline: `vault::obsidian::page_tags`. A site built from the vault (`architect-sites`) takes its links, backlinks and tags from here.
 
 ## What an app supplies
 

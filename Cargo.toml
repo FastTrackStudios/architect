@@ -88,6 +88,9 @@ members = [
     "features/links/links-proto",
     "features/tags/tag",
     "features/tags/tag-proto",
+    # ── sites: a vault published as a static site (#364) ─────────────
+    "features/sites",
+    "apps/cli",
     "apps/lab/ui",
     "apps/lab/desktop",
     "apps/lab/mobile",
@@ -308,6 +311,7 @@ architect-extension-archive = { path = "features/extensions/archive" }
 architect-canvas = { path = "features/canvas" }
 architect-a2ui = { path = "features/a2ui" }
 architect-pages = { path = "features/pages" }
+architect-sites = { path = "features/sites" }
 architect-files = { path = "features/files" }
 # The sidebar: a port of Notebook Navigator. GPL-3.0-or-later, the one GPL
 # crate (features/navigator/README.md): an app that links it ships under the GPL.
@@ -364,6 +368,7 @@ sha3 = "0.12"
 hex = "0.4"
 serde_json = "1.0"
 toml = "0.8"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 # xtask fleet-deps: the resolver cargo-hakari uses, per platform.
 guppy = "0.19"
 thiserror = "2.0"

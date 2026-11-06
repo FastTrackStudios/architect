@@ -65,7 +65,7 @@ pub mod watcher;
 pub mod graph;
 
 pub use config::{ObsidianConfig, read_obsidian_config};
-pub use graph::GraphBackend;
+pub use graph::{GraphBackend, page_tags};
 pub use guard::SelfWriteGuard;
 pub use links::{LinkIndex, OutgoingLink, UnresolvedLink};
 pub use vault::{LoadError, SaveError, Vault, VaultBase, VaultEntryRef, VaultPage};

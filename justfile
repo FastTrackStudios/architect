@@ -127,6 +127,18 @@ media-publish PUSH="0":
         echo "media: pushed"
     fi
 
+# Build architect's docs (docs/content) into target/site: a static site
+# with the Board's ```kf charts drawn by its own page (#364).
+docs OUT="target/site":
+    cargo run -q -p architect-cli -- site build --vault docs/content --out {{OUT}} \
+        --extension apps/lab/board \
+        --url https://architect.fasttrackstudio.app
+
+# Serve the docs on http://127.0.0.1:4321/, rebuilt and reloaded on save.
+docs-serve PORT="4321":
+    cargo run -q -p architect-cli -- site serve --vault docs/content --out target/site-serve \
+        --extension apps/lab/board --port {{PORT}}
+
 # Every path and command the docs and skills name must exist (CI runs this).
 docs-check:
     cargo run -q -p xtask -- docs

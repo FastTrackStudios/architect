@@ -314,7 +314,8 @@ impl VaultGraph for GraphBackend {
 /// (string or list form) plus inline `#tag` refs from the parsed
 /// body. Normalized without the leading `#`; nested tags keep
 /// their `parent/child` path.
-fn page_tags(page: &VaultPage) -> BTreeSet<String> {
+#[must_use]
+pub fn page_tags(page: &VaultPage) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     // Frontmatter forms — same parsing the CLI's `vault tags`
     // verb uses.
