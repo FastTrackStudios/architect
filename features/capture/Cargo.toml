@@ -10,7 +10,8 @@ description = "Capture: the quick-add parser, the vault inbox and processing it,
 # parser, an inbox note's shape, the targets — pure data, wasm-clean.
 # `actions` registers CAPTURE_* / INBOX_* over an Action List's VAULT_*
 # and the host's EXT_CAPTURE_TARGETS; `ui` the composer, the inbox deck
-# and the capture window; `global-shortcut` the system-wide key (desk).
+# and the capture window; `native` the system-wide key and the window
+# over every app (desk).
 
 [features]
 default = []
@@ -21,12 +22,15 @@ ui = [
     "dep:architect-shell",
     "architect-shell/ui",
     "dep:architect-workspace",
+    "architect-workspace/ui",
     "dep:architect-theme",
     "dep:futures-channel",
     "dep:futures-util",
     "dep:futures-timer",
 ]
-global-shortcut = ["ui", "dep:global-hotkey"]
+# The desk: the system-wide shortcut, and the capture window raised over
+# every app.
+native = ["ui", "architect-workspace/native", "dep:dioxus-native", "dep:global-hotkey"]
 
 [dependencies]
 chrono = { workspace = true }
@@ -45,6 +49,7 @@ architect-theme = { workspace = true, optional = true }
 futures-channel = { version = "0.3", optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
 futures-timer = { workspace = true, optional = true }
+dioxus-native = { workspace = true, optional = true }
 
 # The system-wide shortcut: Carbon's hot keys on macOS, RegisterHotKey on
 # Windows, X11's grab on Linux (already in the tree through dioxus-desktop).

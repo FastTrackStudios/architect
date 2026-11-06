@@ -458,10 +458,19 @@ impl Capturer {
             .await?;
         let today = today();
         let mut items = Vec::new();
+        let folder = self.config.folder.trim_matches('/');
         for n in notes.as_array().into_iter().flatten() {
             let Some(path) = n.get("path").and_then(Value::as_str) else {
                 continue;
             };
+            // Directly in the folder: `Inbox/Processed/…` is not waiting.
+            let inside = path
+                .strip_prefix(folder)
+                .map(|r| r.trim_start_matches('/'))
+                .unwrap_or(path);
+            if inside.contains('/') {
+                continue;
+            }
             let Ok(note) = self.run(caller, "VAULT_READ", json!({ "path": path })).await else {
                 continue;
             };

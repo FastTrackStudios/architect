@@ -12,8 +12,8 @@
 //! Tasks' does for `TASKS_ADD`). `actions` puts `CAPTURE_*` and `INBOX_*`
 //! on an Action List over the vault's `VAULT_*` ([`actions`]); `ui` adds
 //! the composer, the inbox deck and the capture window ([`ui`]);
-//! `global-shortcut` the system-wide key that opens the window from any
-//! app (desk only).
+//! `native` the system-wide key that opens the window from any app, and
+//! the window raised over every app (desk only).
 //!
 //! `docs/content/features/capture.md`.
 
@@ -27,7 +27,7 @@ pub mod actions;
 #[cfg(feature = "ui")]
 pub mod ui;
 
-#[cfg(feature = "global-shortcut")]
+#[cfg(feature = "native")]
 pub mod shortcut;
 
 pub use parse::{Draft, Repeat, TokenRule, merge, parse, parse_with};

@@ -19,9 +19,11 @@ pub fn id() -> &'static str {
     Mode::current().bundle_id()
 }
 
-/// What the lab declares: its menus read the tab on show, live.
+/// What the lab declares: its menus read the tab on show, live. With
+/// `capture` (the Architect app's, #352), the menu-bar item opens the
+/// capture window, over whatever app is in front.
 #[must_use]
-pub fn declare(lab: Lab, inbox: usize) -> Presence {
+pub fn declare(lab: Lab, inbox: usize, capture: bool) -> Presence {
     let tabs = move || {
         let on = (lab.route)().tab();
         tabs()
@@ -36,9 +38,12 @@ pub fn declare(lab: Lab, inbox: usize) -> Presence {
         .separator()
         .command(TOGGLE_BACKGROUND);
     let mode = Mode::current();
-    let tray = Menu::new(mode.name())
-        .command(SHOW_WINDOW)
-        .command("LAB_CAPTURE")
+    let tray = Menu::new(mode.name()).command(SHOW_WINDOW).command(if capture {
+        crate::capture::WINDOW_COMMAND
+    } else {
+        "LAB_CAPTURE"
+    });
+    let tray = tray
         .separator()
         .section("Tabs", tabs)
         .separator()

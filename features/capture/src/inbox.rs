@@ -18,6 +18,11 @@
 //! The rest of what was typed, after the first line.
 //! ```
 //!
+//! A vault's own inbox convention reads too: `type: capture`, `captured`
+//! (when) and `processed: false` (the demo vault's,
+//! `apps/ui/demo-vault/Inbox`). Only the notes directly in the folder are
+//! captures (`Inbox/Processed/` is not).
+//!
 //! Its file name is its title; the properties the quick-add tokens gave
 //! (`crate::parse`) ride along until it is processed. Put off, it has a
 //! `resurface_on` date and stays out of the inbox until then.
@@ -34,6 +39,9 @@ pub const FOLDER: &str = "Inbox";
 /// What an inbox note's `type` says.
 pub const KIND: &str = "inbox-item";
 
+/// What a vault's own convention calls one (`type: capture`).
+pub const KIND_ALT: &str = "capture";
+
 /// The frontmatter keys the inbox owns (a capture's own properties are
 /// the parser's, `crate::parse::keys`).
 pub mod keys {
@@ -42,9 +50,20 @@ pub mod keys {
     pub const SOURCE: &str = "source";
     pub const CREATED: &str = "created";
     pub const RESURFACE_ON: &str = "resurface_on";
+    /// The other convention's `created` and `status`.
+    pub const CAPTURED: &str = "captured";
+    pub const PROCESSED: &str = "processed";
     /// Every key that only means something in the inbox: taken off a
     /// capture as it leaves.
-    pub const ALL: &[&str] = &[TYPE, STATUS, SOURCE, CREATED, RESURFACE_ON];
+    pub const ALL: &[&str] = &[
+        TYPE,
+        STATUS,
+        SOURCE,
+        CREATED,
+        RESURFACE_ON,
+        CAPTURED,
+        PROCESSED,
+    ];
 }
 
 /// A capture's note, before it is written: where, its frontmatter, its
@@ -90,7 +109,10 @@ impl Item {
         // A note dropped in the folder by hand is a capture too; one that
         // says it is something else, or done, is not.
         let kind = text(props, keys::TYPE);
-        if !kind.is_empty() && kind != KIND {
+        if !kind.is_empty() && kind != KIND && kind != KIND_ALT {
+            return None;
+        }
+        if props.get(keys::PROCESSED).and_then(Value::as_bool) == Some(true) {
             return None;
         }
         let status = text(props, keys::STATUS);
@@ -111,7 +133,9 @@ impl Item {
                 .trim()
                 .to_owned(),
             source: text(props, keys::SOURCE),
-            created: text(props, keys::CREATED),
+            created: Some(text(props, keys::CREATED))
+                .filter(|c| !c.is_empty())
+                .unwrap_or_else(|| text(props, keys::CAPTURED)),
             resurface_on: props
                 .get(keys::RESURFACE_ON)
                 .and_then(Value::as_str)
@@ -312,6 +336,15 @@ mod tests {
         assert!(read(json!({})).is_some(), "a note dropped in by hand");
         assert!(read(json!({ "type": "task" })).is_none());
         assert!(read(json!({ "type": "inbox-item", "status": "processed" })).is_none());
+        // The demo vault's convention.
+        let alt = read(json!({
+            "type": "capture", "captured": "2026-11-01T17:30:00", "processed": false,
+            "source": "quick-add", "title": "Gift idea",
+        }))
+        .unwrap();
+        assert_eq!(alt.created, "2026-11-01T17:30:00");
+        assert_eq!(alt.properties, *json!({ "title": "Gift idea" }).as_object().unwrap());
+        assert!(read(json!({ "type": "capture", "processed": true })).is_none());
     }
 
     #[test]
