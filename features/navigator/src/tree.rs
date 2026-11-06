@@ -431,7 +431,11 @@ pub fn ordered_children(index: &VaultIndex, parent: &str, opts: &TreeOptions) ->
     let Some(folder) = index.folder(parent) else {
         return Vec::new();
     };
-    let manual = opts.child_order.get(parent);
+    // By hand first, else as the source orders them, else by name.
+    let manual = opts
+        .child_order
+        .get(parent)
+        .or_else(|| index.source_order(parent));
     let rank =
         |path: &str| manual.and_then(|order| order.iter().position(|n| n == file_name(path)));
     let mut children: Vec<String> = folder.folders.iter().cloned().collect();

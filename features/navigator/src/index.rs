@@ -43,6 +43,9 @@ pub struct VaultIndex {
     name: String,
     folders: HashMap<String, Folder>,
     files: HashMap<String, NoteFile>,
+    /// The source's order of children, by parent
+    /// ([`NavigatorSource::child_order`]).
+    order: std::collections::BTreeMap<String, Vec<String>>,
     /// Bumped by every change: what a view's memo keys on.
     revision: u64,
 }
@@ -52,6 +55,27 @@ impl VaultIndex {
     #[must_use]
     pub fn read(source: &dyn NavigatorSource) -> Self {
         Self::from_parts(source.name(), source.folders(), source.files())
+            .with_order(source.child_order())
+    }
+
+    /// With the source's order of children, by parent.
+    #[must_use]
+    pub fn with_order(mut self, order: std::collections::BTreeMap<String, Vec<String>>) -> Self {
+        self.order = order;
+        self
+    }
+
+    /// The source's order of `parent`'s children (their names), if it
+    /// gives one.
+    #[must_use]
+    pub fn source_order(&self, parent: &str) -> Option<&Vec<String>> {
+        self.order.get(parent)
+    }
+
+    /// Every parent's source order.
+    #[must_use]
+    pub const fn orders(&self) -> &std::collections::BTreeMap<String, Vec<String>> {
+        &self.order
     }
 
     /// A vault of these folders and files.

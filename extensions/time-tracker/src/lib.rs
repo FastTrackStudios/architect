@@ -594,6 +594,36 @@ async fn totals(args: Value) -> Result<Value, String> {
     Ok(json!({ "notes": out }))
 }
 
+/// `TIME_ENTRIES {from?, to?}`: each entry over `from`..`to`
+/// (YYYY-MM-DD, `to` exclusive; this week by default), the running one
+/// to now, in time order: what a calendar draws as blocks.
+async fn entries(args: Value) -> Result<Value, String> {
+    let notes = refresh().await?;
+    let day = |k: &str| {
+        arg(&args, k)
+            .map(|d| {
+                NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                    .map_err(|_| format!("{k} {d:?}: YYYY-MM-DD"))
+            })
+            .transpose()
+    };
+    let from = day("from")?.unwrap_or_else(|| model::week_start(today()));
+    let to = day("to")?.unwrap_or(from + chrono::Duration::days(7));
+    let (a, b) = (model::day_start(from, &Local), model::day_start(to, &Local));
+    let now = Utc::now();
+    let mut out: Vec<(DateTime<Utc>, Value)> = notes
+        .iter()
+        .flat_map(|n| n.entries.iter().map(move |e| (n, e)))
+        .filter(|(_, e)| e.start < b && e.end.unwrap_or(now) > a)
+        .map(|(n, e)| (e.start, entry_json(&n.path, &n.title, e, now)))
+        .collect();
+    out.sort_by_key(|(t, _)| *t);
+    let entries: Vec<Value> = out.into_iter().map(|(_, v)| v).collect();
+    Ok(
+        json!({ "from": from.to_string(), "to": to.to_string(), "count": entries.len(), "entries": entries }),
+    )
+}
+
 /// `TIME_FOR_PROJECT {project}`: a project's time, its own and its
 /// tasks' (those Tasks' `for_project` names, and those that link it or
 /// sit in its folder): totals, billing, the running timer, each task's.
@@ -776,6 +806,7 @@ impl Extension for TimeTracker {
             .action("TIME_LOG", log)
             .action("TIME_CAPTURE", capture)
             .action("TIME_TOTALS", totals)
+            .action("TIME_ENTRIES", entries)
             .action("TIME_FOR_PROJECT", for_project)
             .action("TIME_REPORT", report)
             .action("TIME_OPEN", open)

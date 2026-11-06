@@ -101,6 +101,8 @@ use_context_provider(|| Signal::new(NavigatorMount {
     // The shell sidebar's columns (`SidebarLayout::columns`), and New note
     // in the list's header (given the folder on show); both optional.
     columns: Some(shell.sidebar_layout().columns()), on_new_note: Some(new_note),
+    // A provider's mount only: shows the vault's navigator instead.
+    on_vault: None,
 }));
 rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), bare: true } }
 ```
@@ -161,7 +163,10 @@ default; a page or an extension fills it while its view is on show.
 - **The trait** (`features/navigator-api/src/lib.rs` `NavigatorProvider`):
   `snapshot()` answers the title, the `Node` tree (id, title, icon, colour,
   children) and every `Item` (id, container, title, preview, dates, icon,
-  thumbnail, tags, `progress`, badges, properties, `open`). `open(item)`,
+  thumbnail, tags, `progress`, badges, properties, `open`).
+  `Snapshot::ordered` keeps the nodes in the order given (Today before
+  Later) instead of by name, until the person orders them by hand
+  (`NavigatorSource::child_order`, `VaultIndex::source_order`). `open(item)`,
   `move_items(items, to)` and `create(container, title)` default to nothing
   or an error. Every method is async (`ProviderFuture`).
 - **Serving it:** declare `[[navigator_providers]] id, title, icon, views,
@@ -177,8 +182,12 @@ default; a page or an extension fills it while its view is on show.
   onto a folder and New come back as `ProviderRequest`s. `apps/ui/src/vault.rs`
   `FilesView` switches with the page, keeps each provider's view state, and
   `ProviderFiles` polls the snapshot every three seconds and after each
-  request.
-- **Examples:** `extensions/projects/src/nav.rs` `ProjectsNav` (projects
+  request. A provider's `NavigatorMount` sets `on_vault`: the actions only
+  the vault's navigator does (`VAULT_ONLY` in
+  `features/navigator/extension/src/lib.rs`: the periodic notes and period
+  moves) switch the sidebar to the vault and run there.
+- **Examples:** `extensions/calendar/src/nav.rs` `CalendarNav` (events by when they come; ordered),
+  `extensions/projects/src/nav.rs` `ProjectsNav` (projects
   under their state, their tasks; a drag moves a task to a project) and
   `extensions/tasks/src/nav.rs` `TasksNav` (status groups; a drag sets the
   status). Tests: `features/navigator/tests/provider.rs`,

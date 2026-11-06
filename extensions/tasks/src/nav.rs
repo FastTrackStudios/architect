@@ -110,7 +110,7 @@ pub fn task_item(t: &Task) -> Item {
 /// The groups, and every task in its own.
 #[must_use]
 pub fn snapshot_of(tasks: &[Task]) -> Snapshot {
-    let mut snap = Snapshot::new("Tasks");
+    let mut snap = Snapshot::new("Tasks").ordered();
     for g in Group::ALL {
         snap = snap.node(Node::new(group_node(g), g.label()).icon(group_icon(g)));
     }

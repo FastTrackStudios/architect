@@ -77,7 +77,24 @@ pub struct NavigatorMount {
     /// New note in the list's header, given the folder on show
     /// (`NavigatorView`'s `on_new_note`).
     pub on_new_note: Option<EventHandler<String>>,
+    /// Set when this navigator is a provider's, not the vault's: shows the
+    /// vault's instead. An action only the vault can do (a periodic note)
+    /// asked of it switches there and is done by the vault's navigator.
+    pub on_vault: Option<EventHandler<()>>,
 }
+
+/// The actions only the vault's navigator does: its periodic notes are
+/// notes of the vault, whatever the sidebar shows.
+pub const VAULT_ONLY: &[&str] = &[
+    "NAVIGATOR_OPEN_DAILY_NOTE",
+    "NAVIGATOR_OPEN_WEEKLY_NOTE",
+    "NAVIGATOR_OPEN_MONTHLY_NOTE",
+    "NAVIGATOR_OPEN_QUARTERLY_NOTE",
+    "NAVIGATOR_OPEN_YEARLY_NOTE",
+    "NAVIGATOR_NEXT_PERIOD",
+    "NAVIGATOR_PREVIOUS_PERIOD",
+    "NAVIGATOR_PARENT_PERIOD",
+];
 
 /// Every action it declares (`extension.toml`), in its order.
 pub const ACTIONS: &[&str] = &[
@@ -241,6 +258,7 @@ fn Standalone() -> Element {
                 phone: false,
                 columns: None,
                 on_new_note: None,
+                on_vault: None,
             }
         }
     }
@@ -264,8 +282,21 @@ fn Drive(mount: NavigatorMount) -> Element {
         *last = Some(now);
     });
     use_future(move || async move {
+        let mut handed = false;
         loop {
             for ask in bridge::take() {
+                // A provider's navigator hands the vault's own asks to the
+                // vault's, which mounts once the sidebar switches.
+                if let Some(to_vault) = mount.on_vault
+                    && VAULT_ONLY.contains(&ask.action.as_str())
+                {
+                    if !handed {
+                        handed = true;
+                        to_vault.call(());
+                    }
+                    bridge::put_back(ask);
+                    continue;
+                }
                 let out = run(&nav, mount.on_open, &ask.action, &ask.args);
                 let _ = ask.answer.send(out);
             }

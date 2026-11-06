@@ -1405,6 +1405,7 @@ impl NavigatorState {
                 .filter(|f| !h.hides_file(f))
                 .map(|f| h.shown(f)),
         )
+        .with_order(self.all.orders().clone())
     }
 
     /// A change in the source, as the shown vault takes it; `None` to

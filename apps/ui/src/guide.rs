@@ -650,7 +650,7 @@ pub fn builtin_tours() -> Result<Vec<(String, architect_guide::Scenario)>, Strin
         linked.push(&architect_projects::Projects);
         linked.push(&architect_tasks::Tasks);
         linked.push(&architect_time_tracker::TimeTracker);
-        linked.push(&architect_time_tracker::TimeTracker);
+        linked.push(&architect_calendar::Calendar);
     }
     let mut out = Vec::new();
     if !sandbox {

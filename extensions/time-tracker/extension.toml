@@ -96,6 +96,14 @@ effect = "read_only"
 params = '{"type":"object","properties":{"paths":{"type":"array","items":{"type":"string"}}}}'
 
 [[actions]]
+id = "TIME_ENTRIES"
+name = "Time: entries"
+description = "Each time entry over `from`..`to` (YYYY-MM-DD, `to` exclusive; this week, Monday on, by default), in time order: its note's path and title, start, end (null while it runs), seconds, description, billable. What the Calendar draws as blocks."
+group = "Time"
+effect = "read_only"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
 id = "TIME_FOR_PROJECT"
 name = "Time: a project's"
 description = "Project `project`'s time (its project.md's path, a link or its name): its own entries and its tasks' (those Tasks' for_project names, those linking it, those in its folder): seconds in all, today and this week, billable seconds, its rate (defaultRateCents, currency) and the amount, the running timer if it is one of them, and each task's totals."

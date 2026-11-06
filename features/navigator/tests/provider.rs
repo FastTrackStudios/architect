@@ -145,3 +145,36 @@ fn a_new_snapshot_resets_and_the_same_one_does_nothing() {
         Some("Alpha/Ship it.md")
     );
 }
+
+/// A snapshot that keeps its order (Today before Later): its folders show
+/// so until the person orders them by hand; one that does not, by name.
+#[test]
+fn an_ordered_snapshot_keeps_its_order() {
+    let when = |ordered: bool| {
+        let s = Snapshot::new("Calendar")
+            .node(Node::new("today", "Today"))
+            .node(Node::new("tomorrow", "Tomorrow"))
+            .node(Node::new("later", "Later"));
+        if ordered { s.ordered() } else { s }
+    };
+    let index = VaultIndex::read(&ProviderSource::with(when(true)));
+    let opts = architect_navigator::tree::TreeOptions::default();
+    assert_eq!(
+        architect_navigator::tree::ordered_children(&index, "", &opts),
+        ["Today", "Tomorrow", "Later"]
+    );
+    let index = VaultIndex::read(&ProviderSource::with(when(false)));
+    assert_eq!(
+        architect_navigator::tree::ordered_children(&index, "", &opts),
+        ["Later", "Today", "Tomorrow"]
+    );
+    // By hand wins.
+    let index = VaultIndex::read(&ProviderSource::with(when(true)));
+    let mut opts = architect_navigator::tree::TreeOptions::default();
+    opts.child_order
+        .insert(String::new(), vec!["Later".to_owned()]);
+    assert_eq!(
+        architect_navigator::tree::ordered_children(&index, "", &opts),
+        ["Later", "Today", "Tomorrow"]
+    );
+}
