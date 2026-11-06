@@ -704,3 +704,138 @@ fn booking_slots() {
         "Work hours"
     );
 }
+
+/// One `.ics` feed, served at `/cal.ics` from 127.0.0.1 while the test
+/// runs: whatever `feed` holds at each request.
+fn serve(feed: Arc<std::sync::Mutex<String>>) -> String {
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0_u8; 4096];
+            let _ = s.read(&mut buf);
+            let body = feed.lock().unwrap().clone();
+            let _ = write!(
+                s,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/calendar\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}/cal.ics")
+}
+
+fn ics(events: &str) -> String {
+    format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n{events}END:VCALENDAR\r\n")
+}
+
+/// Subscriptions: a feed fetched, its events notes, updated in place,
+/// dropped ones tombstoned, read only on the calendar; and a file imported.
+#[test]
+fn calendar_subscriptions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = vault_in(tmp.path());
+    let app = app_list(&dir);
+    let (_ext, list) = extensions(tmp.path(), &app, None, false);
+    let d = monday().format("%Y%m%d").to_string();
+    let rehearsal = format!(
+        "BEGIN:VEVENT\r\nUID:reh@band\r\nSUMMARY:Rehearsal\r\nDTSTART:{d}T190000\r\nDTEND:{d}T210000\r\nRRULE:FREQ=WEEKLY\r\nLOCATION:The Room\r\nEND:VEVENT\r\n"
+    );
+    let show = format!(
+        "BEGIN:VEVENT\r\nUID:show@band\r\nSUMMARY:Show\r\nDTSTART;VALUE=DATE:{d}\r\nEND:VEVENT\r\n"
+    );
+    let feed = Arc::new(std::sync::Mutex::new(ics(&format!("{rehearsal}{show}"))));
+    let url = serve(Arc::clone(&feed));
+    let sub = run(
+        &list,
+        "CALENDAR_SUBSCRIBE",
+        json!({ "url": url, "name": "Band" }),
+    );
+    // The startup hook's sync may meet it: one of them makes the two.
+    let r = &sub["report"];
+    assert_eq!(
+        r["created"].as_u64().unwrap() + r["unchanged"].as_u64().unwrap(),
+        2,
+        "{sub}"
+    );
+    assert!(read(&dir, "Calendar/Subscriptions/Band.md").contains("type: calendar-subscription"));
+    let notes: Vec<String> = std::fs::read_dir(dir.join("Calendar/Band"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    let blocks = week(&list);
+    let reh = blocks.iter().find(|b| b["title"] == "Rehearsal").unwrap();
+    assert_eq!(reh["start"], format!("{}T19:00", day(0)));
+    assert_eq!(reh["source"]["readonly"], true);
+    assert!(
+        blocks
+            .iter()
+            .any(|b| b["title"] == "Show" && b["all_day"] == true)
+    );
+
+    // The feed moves the rehearsal and drops the show: a sync follows.
+    *feed.lock().unwrap() = ics(&rehearsal
+        .replace("T190000", "T200000")
+        .replace("T210000", "T220000"));
+    let s = run(&list, "CALENDAR_SYNC", json!({}));
+    let r = &s["synced"][0]["report"];
+    assert_eq!(
+        (
+            r["updated"].clone(),
+            r["tombstoned"].clone(),
+            r["created"].clone()
+        ),
+        (json!(1), json!(1), json!(0)),
+        "{s}"
+    );
+    let blocks = week(&list);
+    assert_eq!(
+        blocks.iter().find(|b| b["title"] == "Rehearsal").unwrap()["start"],
+        format!("{}T20:00", day(0))
+    );
+    assert!(!blocks.iter().any(|b| b["title"] == "Show"));
+    // Again, nothing changes.
+    let s = run(&list, "CALENDAR_SYNC", json!({ "name": "Band" }));
+    assert_eq!(s["synced"][0]["report"]["unchanged"], 1, "{s}");
+    let subs = run(&list, "CALENDAR_SUBSCRIPTIONS", json!({}));
+    assert_eq!(subs["subscriptions"][0]["events"], 1, "{subs}");
+    assert!(subs["subscriptions"][0]["synced"].is_string());
+
+    // A file imported, a moved occurrence its override.
+    let text = ics(&format!(
+        "BEGIN:VEVENT\r\nUID:yoga\r\nSUMMARY:Yoga\r\nDTSTART:{d}T070000\r\nDURATION:PT45M\r\nRRULE:FREQ=DAILY;COUNT=5\r\nEXDATE:{e}T070000\r\nEND:VEVENT\r\n\
+BEGIN:VEVENT\r\nUID:yoga\r\nRECURRENCE-ID:{f}T070000\r\nSUMMARY:Yoga\r\nDTSTART:{f}T083000\r\nDTEND:{f}T091500\r\nEND:VEVENT\r\n",
+        e = (monday() + chrono::Duration::days(1)).format("%Y%m%d"),
+        f = (monday() + chrono::Duration::days(2)).format("%Y%m%d"),
+    ));
+    let imp = run(
+        &list,
+        "CALENDAR_IMPORT",
+        json!({ "text": text, "name": "Gym" }),
+    );
+    assert_eq!(imp["report"]["created"], 2, "{imp}");
+    let yoga: Vec<String> = week(&list)
+        .iter()
+        .filter(|b| b["title"] == "Yoga")
+        .map(|b| b["start"].as_str().unwrap()[5..].to_owned())
+        .collect();
+    assert_eq!(yoga.len(), 4, "five, one skipped: {yoga:?}");
+    assert!(
+        yoga.contains(&format!("{}T08:30", &day(2)[5..])),
+        "{yoga:?}"
+    );
+
+    // Read only here.
+    let b = week(&list)
+        .into_iter()
+        .find(|b| b["title"] == "Rehearsal")
+        .unwrap();
+    let path = b["source"]["path"].as_str().unwrap().to_owned();
+    assert!(path.starts_with("Calendar/Band/"), "{path}");
+    let gone = run(&list, "CALENDAR_UNSUBSCRIBE", json!({ "name": "Band" }));
+    assert_eq!(gone["events"], 2);
+    assert!(!dir.join("Calendar/Subscriptions/Band.md").exists());
+}

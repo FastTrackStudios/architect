@@ -187,8 +187,38 @@ A schedule's `timezone` is kept, but not converted: its hours are the
 person's time zone's. Task's audit log of booking changes
 (`Records/audit/booking-events.jsonl`) is not ported.
 
-## Not yet
+## 8. Calendars from elsewhere
 
-- Read-only ICS import is in its own pull request.
+Task has no external calendars. The Calendar reads iCalendar feeds, read
+only: a CalDAV calendar's `.ics` export, Google's or iCloud's secret
+address, a `webcal://` link (`extensions/calendar/src/ics.rs`,
+`extensions/calendar/src/sync.rs`).
+
+- **A subscription is a note:** `Calendar/Subscriptions/<name>.md`, of
+  type `calendar-subscription`, holding the feed's `url`, a `color` and
+  when it was last `synced`. It syncs with the vault like any note.
+- **A sync** fetches the feed through the host (`fetch`, which needs
+  `capabilities.hosts = ["*"]` because the address is the person's). Each
+  `VEVENT` becomes an event note in `Calendar/<name>/`, keyed by
+  `external_ref` `ics:<UID>`:
+  - repeats keep their `RRULE` and `EXDATE`s;
+  - a moved occurrence (`RECURRENCE-ID`) is an override of its series;
+  - `STATUS:CANCELLED` is a tombstone, and so is an event the feed no
+    longer has.
+  - A changed note is changed key by key, so its body and its own keys
+    stay.
+- **On the calendar they don't drag or edit.** The feed is where they
+  change. A sync runs at each start, and on `CALENDAR_SYNC`.
+- **Times:** `…Z` is UTC. A `TZID` or a floating time is read in the
+  person's own time zone, since no `VTIMEZONE` is read.
+
+| action | what |
+|---|---|
+| `CALENDAR_SUBSCRIBE` | a feed's `url`, `name`, `color`; synced at once |
+| `CALENDAR_SYNC` | every subscription, or one |
+| `CALENDAR_IMPORT` | an `.ics` file's text, once (again with the same name: updated) |
+| `CALENDAR_SUBSCRIPTIONS`, `CALENDAR_UNSUBSCRIBE` | list them; remove one and its notes |
+
+Two-way CalDAV, where edits here go back to the server, is not built.
 - Day-plan templates (`task:features/scheduling/scheduling-proto/src/resolve.rs`)
   are not ported.

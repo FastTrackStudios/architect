@@ -217,6 +217,9 @@ async fn commit(
     all_day: bool,
 ) -> Result<(), String> {
     match &b.source {
+        Source::Event { readonly: true, .. } => {
+            Err("this event comes from a subscribed calendar: change it there".to_owned())
+        }
         Source::Event {
             path,
             series,
@@ -1111,6 +1114,13 @@ async fn save(p: Picked, f: Form, scope: Scope) -> Result<(), String> {
 #[component]
 fn Editor(picked: Signal<Option<Picked>>, problem: Signal<Option<String>>) -> Element {
     let Some(p) = picked() else { return rsx! {} };
+    let readonly = matches!(
+        &p,
+        Picked::Block(Block {
+            source: Source::Event { readonly: true, .. },
+            ..
+        })
+    );
     let mut form = use_signal(|| Form::of(&p));
     let mut scope = use_signal(|| Scope::This);
     let mut was = use_signal(|| p.clone());
@@ -1176,7 +1186,9 @@ fn Editor(picked: Signal<Option<Picked>>, problem: Signal<Option<String>>) -> El
                 span { style: "flex: 1; font-weight: 700; font-size: 15px;", "{heading}" }
                 button { class: "cal-editor-close", style: TOOL, onclick: move |_| close(), "×" }
             }
-            if kind == "booking" {
+            if readonly {
+                div { class: "cal-readonly", style: MUTED, "From a subscribed calendar: it changes there, and comes here when the calendar syncs (CALENDAR_SYNC)." }
+            } else if kind == "booking" {
                 div { style: MUTED, "A booking of an event type. Cancel it in Bookings (CALENDAR_BOOKINGS_OPEN)." }
             } else if kind == "time" {
                 div { style: MUTED, "Time tracked on this note. Change it in the Time Tracker." }
