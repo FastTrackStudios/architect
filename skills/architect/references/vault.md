@@ -66,6 +66,13 @@ Links and tags, over the same `OpenVault` (`links::actions::register`, `tag::act
 | `LINKS_ORPHANS` | read | notes nothing links to |
 | `TAGS_LIST` | read | every tag in use, its note count, its icon and colour from the registry |
 | `TAGS_NOTES {tag}` | read | notes tagged `tag` or a tag nested under it |
+| `TAGS_ADD {paths, tag}` | mutating | tags notes (a note with the tag or one above it is left; the tags below it go) |
+| `TAGS_REMOVE {paths, tag}` | mutating | takes the tag itself (any case) off notes |
+| `TAGS_CLEAR {paths}` | mutating | takes every tag off notes |
+| `TAGS_RENAME {from, to}` | mutating | renames a tag and the tags below it in every note |
+| `TAGS_DELETE {tag}` | destructive | takes a tag and the tags below it off every note |
+
+The tag writes edit the markdown (`features/vault/vault-obsidian/src/tag_edit.rs` `edit_tags`, `TagEdit`): the frontmatter's `tags`/`tag` (and `#` aliases) and inline `#tags` as the parser reads them, not in code or links. `OpenVault::edit_tags` and `edit_tags_everywhere` do them from an app (the navigator's `VaultSource`); `OpenVault::remove_property` removes a property.
 
 Tests: `features/vault/vault/tests/actions.rs`, `features/links/links/tests/actions.rs`, `features/tags/tag/tests/actions.rs` (over the sandbox's sample), `features/vault/vault-entity/tests/index.rs` (the index rules).
 

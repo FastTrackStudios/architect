@@ -744,7 +744,7 @@ fn use_lab_vault() -> LabVault {
 
 /// The demo vault's periodic notes (`apps/ui/demo-vault.py`'s journal):
 /// set when the five patterns and the folder are still the defaults, so a
-/// person's own are left alone.
+/// person's own are left alone; and the properties its browser shows.
 fn demo_vault_periodic_notes(s: &mut architect_navigator::NavigatorSettings) {
     let defaults = architect_navigator::NavigatorSettings::default();
     let untouched = s.periodic_folder == defaults.periodic_folder
@@ -760,6 +760,11 @@ fn demo_vault_periodic_notes(s: &mut architect_navigator::NavigatorSettings) {
         "[Monthly]/YYYY-MM".clone_into(&mut s.monthly_pattern);
         "[Quarterly]/YYYY-[Q]Q".clone_into(&mut s.quarterly_pattern);
         "[Yearly]/YYYY".clone_into(&mut s.yearly_pattern);
+    }
+    // The property browser shows the keys named (none by default, as
+    // Notebook Navigator's `propertyKeys`): the demo vault's own.
+    if s.property_keys.trim().is_empty() {
+        "status, type, mood".clone_into(&mut s.property_keys);
     }
 }
 
