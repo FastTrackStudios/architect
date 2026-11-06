@@ -337,10 +337,19 @@ fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
         let _ = w.activate(&id);
         return;
     }
+    drop(w);
+    open_in_main(workspace, vault_note(path), target);
+}
+
+/// Opens `pane` at `target` in the main area: beside the note on show, and
+/// never in the dock the navigator is in, even with no note open.
+fn open_in_main(workspace: Signal<Workspace>, pane: Pane, target: Target) {
+    let mut workspace = workspace;
+    let mut w = workspace.write();
     if let Some(doc) = w.current_document().cloned() {
         let _ = w.activate(&doc);
     }
-    let Ok(id) = w.open(vault_note(path), target) else {
+    let Ok(id) = w.open(pane, target) else {
         return;
     };
     let docked = w
@@ -959,9 +968,17 @@ fn FilesView() -> Element {
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("base"));
         if base {
-            // A base: its pane (one per base), beside the note on show.
-            let mut workspace = open_pane.workspace();
-            let _ = workspace.write().open(base_pane(&o.path), Target::Tab);
+            // A base: its pane (one per base), in the main area beside
+            // the note on show; open already, it comes forward.
+            let workspace = open_pane.workspace();
+            let id = architect_workspace::PaneId::new(architect_bases::actions::pane_id(&o.path));
+            let open = workspace.peek().pane(&id).is_some();
+            if open {
+                let mut workspace = workspace;
+                let _ = workspace.write().activate(&id);
+            } else {
+                open_in_main(workspace, base_pane(&o.path), target);
+            }
         } else if markdown && disk.peek().is_some() {
             // Beside the note on show, not in the dock pressed.
             show_vault_note(open_pane.workspace(), &o.path, target);
