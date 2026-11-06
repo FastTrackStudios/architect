@@ -45,6 +45,13 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
     let reordering = s.reordering;
     let dual = s.settings().dual_pane;
     let calendar_on = s.settings().calendar;
+    let header_commands: Vec<crate::template::TemplateCommand> = s
+        .templates()
+        .commands
+        .iter()
+        .filter(|c| c.placement == crate::template::CommandPlacement::Header)
+        .cloned()
+        .collect();
     let calendar_open = s.calendar_open;
     let show_hidden = s.show_hidden();
     let profiles: Vec<(String, String)> = s
@@ -104,6 +111,20 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                                     nav.say("No settings page to edit the profiles on");
                                 }
                             } }
+                    }
+                }
+                // "Create note" commands placed in the header
+                // (`templateCommands[].placement`).
+                for c in header_commands.clone() {
+                    {
+                        let id = c.id.clone();
+                        let icon = crate::Icon::parse(if c.icon.is_empty() { "file-plus" } else { &c.icon });
+                        rsx! {
+                            button { key: "{c.id}", class: "nv-tool nv-template-command", "aria-label": "{c.name}", title: "{c.name}",
+                                onclick: move |_| nav.run_template_command(&id, on_open),
+                                if let Some(i) = icon { super::icon::IconView { nav, icon: i, size: 16, colour: None } }
+                            }
+                        }
                     }
                 }
                 if calendar_on {

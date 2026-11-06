@@ -1041,6 +1041,25 @@ pub struct TemplateCommand {
     pub name_format: String,
     pub location: CommandLocation,
     pub folder: String,
+    /// Its button's icon (`templateCommands[].icon`): a Lucide name, an
+    /// emoji, … as an item's icon is written; `file-plus` when empty.
+    #[facet(default)]
+    pub icon: String,
+    /// Where its button is (`templateCommands[].placement`): none, or the
+    /// navigator's header (NN's tab bar).
+    #[facet(default)]
+    pub placement: CommandPlacement,
+}
+
+/// Where a "create note" command's button is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum CommandPlacement {
+    /// Nowhere: the palette and the menus only
+    #[default]
+    None,
+    /// The navigator's header
+    Header,
 }
 
 /// What a person keeps for templates (Notebook Navigator's

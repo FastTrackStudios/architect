@@ -1206,6 +1206,12 @@ fn files(
                     name_format: text(args, "name_format").unwrap_or("").to_owned(),
                     location,
                     folder: text(args, "folder").unwrap_or("").to_owned(),
+                    icon: text(args, "icon").unwrap_or("").to_owned(),
+                    placement: if text(args, "placement") == Some("header") {
+                        architect_navigator::template::CommandPlacement::Header
+                    } else {
+                        architect_navigator::template::CommandPlacement::None
+                    },
                 };
                 if nav
                     .state

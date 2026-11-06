@@ -702,10 +702,10 @@ params = '{"type":"object","properties":{"folder":{"type":"string"},"template":{
 [[actions]]
 id = "NAVIGATOR_TEMPLATE_COMMANDS"
 name = "Navigator: create-note commands"
-description = "The commands that make a note from a template: `add` one by name, with `template`, `name_format` and `folder` (else the current folder) and a stable `id`; `remove` one (its id, name or number). Answers the templates."
+description = "The commands that make a note from a template: `add` one by name, with `template`, `name_format` and `folder` (else the current folder), a stable `id`, its button's `icon` and `placement` (header: a button in the navigator's header, NN's tab bar); `remove` one (its id, name or number). Answers the templates."
 group = "Navigator"
 effect = "mutating"
-params = '{"type":"object","properties":{"add":{"type":"string"},"id":{"type":"string"},"template":{"type":"string"},"name_format":{"type":"string"},"folder":{"type":"string"},"remove":{"type":"string"}}}'
+params = '{"type":"object","properties":{"add":{"type":"string"},"id":{"type":"string"},"template":{"type":"string"},"name_format":{"type":"string"},"folder":{"type":"string"},"icon":{"type":"string"},"placement":{"type":"string","enum":["none","header"]},"remove":{"type":"string"}}}'
 
 [[actions]]
 id = "NAVIGATOR_TEMPLATE_COMMAND"

@@ -209,6 +209,8 @@ fn prompts_are_asked_first_and_a_command_numbers_its_notes() {
             name_format: "Meeting {{number:00}}".to_owned(),
             location: architect_navigator::template::CommandLocation::Folder,
             folder: "Inbox".to_owned(),
+            icon: String::new(),
+            placement: architect_navigator::template::CommandPlacement::None,
         });
     });
     let asked =
