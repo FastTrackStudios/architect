@@ -112,6 +112,7 @@ members = [
     "extensions/tasks",
     "extensions/time-tracker",
     "extensions/calendar",
+    "features/threads",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -159,6 +160,8 @@ architect-projects = { path = "extensions/projects" }
 architect-tasks = { path = "extensions/tasks" }
 architect-time-tracker = { path = "extensions/time-tracker" }
 architect-calendar = { path = "extensions/calendar" }
+# Threads (#348): comments on any entity, a built-in extension.
+architect-threads = { path = "features/threads" }
 vault-proto = { path = "features/vault/vault-proto", default-features = false }
 vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }

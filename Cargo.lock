@@ -841,6 +841,7 @@ dependencies = [
  "architect-tasks",
  "architect-theme",
  "architect-theme-picker",
+ "architect-threads",
  "architect-time-tracker",
  "architect-ui",
  "architect-workspace",
@@ -2021,6 +2022,26 @@ dependencies = [
  "futures",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "architect-threads"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-bases",
+ "architect-extensions",
+ "architect-settings",
+ "architect-workspace-hack",
+ "chrono",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "vault",
 ]
 
 [[package]]

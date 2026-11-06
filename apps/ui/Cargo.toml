@@ -51,6 +51,7 @@ architect-projects = { workspace = true }
 architect-tasks = { workspace = true }
 architect-time-tracker = { workspace = true }
 architect-calendar = { workspace = true }
+architect-threads = { workspace = true }
 # The theme picker, architect's built-in extension.
 architect-theme-picker = { workspace = true }
 # ⌘K and ⌘O: the Command Palette, a linked extension (#381).

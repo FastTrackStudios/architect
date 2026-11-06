@@ -780,6 +780,14 @@ impl Opening {
 /// What opens a [`ViewOpen`] in the app's window: its answer, or why not.
 pub type ViewOpener = Arc<dyn Fn(ViewOpen) -> Result<Value, String> + Send + Sync>;
 
+/// What takes an extension's popup or overlay away in the app's window,
+/// by its workspace kind (`<extension>/<view>`).
+pub type ViewCloser = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+/// What opens a path no extension claims: the app's own (a vault note in
+/// its editor).
+pub type PathOpener = Arc<dyn Fn(&str) -> Result<Value, String> + Send + Sync>;
+
 struct Inner {
     list: ActionList,
     sections: Arc<dyn SectionSink>,
@@ -810,6 +818,8 @@ struct Inner {
     running: Arc<Mutex<BTreeSet<String>>>,
     /// What opens extensions' views in the app's window.
     view_opener: Mutex<Option<ViewOpener>>,
+    view_closer: Mutex<Option<ViewCloser>>,
+    path_opener: Mutex<Option<PathOpener>>,
     /// The in-process extensions linked into the app, built, by id.
     #[cfg(feature = "linked")]
     linked: Mutex<BTreeMap<String, Arc<crate::linked::Builder>>>,
@@ -886,6 +896,8 @@ impl Host {
                 started: Mutex::new(BTreeSet::new()),
                 running: Arc::default(),
                 view_opener: Mutex::new(None),
+                view_closer: Mutex::new(None),
+                path_opener: Mutex::new(None),
                 #[cfg(feature = "linked")]
                 linked: Mutex::new(BTreeMap::new()),
                 services: crate::hostapi::Services::default(),
@@ -969,6 +981,57 @@ impl Host {
             .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(opener));
     }
 
+    /// Opens a path no extension's opener claims with `opener` (the app's:
+    /// a vault note in its editor), from now on. `Host::open` asks it last.
+    pub fn set_path_opener(
+        &self,
+        opener: impl Fn(&str) -> Result<Value, String> + Send + Sync + 'static,
+    ) {
+        *self
+            .inner
+            .path_opener
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(opener));
+    }
+
+    /// Takes extensions' popups and overlays away with `closer` (the app's
+    /// window's), from now on.
+    pub fn set_view_closer(
+        &self,
+        closer: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+    ) {
+        *self
+            .inner
+            .view_closer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(closer));
+    }
+
+    /// Takes extension `extension`'s view `view` away when it shows as a
+    /// popup or an overlay (a notification centre after its "go to").
+    ///
+    /// # Errors
+    ///
+    /// It is not loaded, has no such view, or the app has no window.
+    pub fn close_view(&self, extension: &str, view: &str) -> Result<(), String> {
+        let decl = self
+            .get(extension)
+            .ok_or_else(|| format!("{extension} is not loaded"))?
+            .manifest
+            .views
+            .into_iter()
+            .find(|v| v.id == view)
+            .ok_or_else(|| format!("{extension} has no view {view}"))?;
+        let closer = self
+            .inner
+            .view_closer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or("this app closes no extension views (no window)")?;
+        closer(&decl.workspace_kind(extension))
+    }
+
     /// Opens extension `extension`'s view `view` (showing `state`), as its
     /// manifest places it unless `placement` says otherwise.
     ///
@@ -1033,10 +1096,19 @@ impl Host {
                 "path",
             ),
         };
-        let by = claims
-            .into_iter()
-            .next()
-            .ok_or_else(|| format!("nothing opens {}", what.describe()))?;
+        let Some(by) = claims.into_iter().next() else {
+            // No extension claims it: the app's own opener, for a path.
+            let app = self
+                .inner
+                .path_opener
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if let (Opening::Path(p), Some(open)) = (&what, app) {
+                return open(p);
+            }
+            return Err(format!("nothing opens {}", what.describe()));
+        };
         if invocation.source == InvocationSource::App {
             invocation.source = if field == "url" {
                 InvocationSource::Link

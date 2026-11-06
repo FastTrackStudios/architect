@@ -884,11 +884,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // calendar the tasks' days and the time tracked. The sandbox's
         // made-up data and goldens stay as they were.
         if !sandbox {
-            let bundle: [&dyn architect_extensions::linked::Extension; 4] = [
+            let bundle: [&dyn architect_extensions::linked::Extension; 5] = [
                 &architect_projects::Projects,
                 &architect_tasks::Tasks,
                 &architect_time_tracker::TimeTracker,
                 &architect_calendar::Calendar,
+                // Threads (#348): comments on notes and anything else.
+                &architect_threads::Threads,
             ];
             for linked in bundle {
                 if let Ok(with) = extensions.clone().with_linked(linked) {
@@ -1112,6 +1114,8 @@ impl AppContext for LabContext {
         Some(serde_json::json!({
             "focused": ws.get("focused"),
             "focused_title": ws.get("focused_title"),
+            "focused_view": ws.get("focused_view"),
+            "focused_state": ws.get("focused_state"),
             "screenset": ws.get("screenset"),
         }))
     }

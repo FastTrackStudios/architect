@@ -11,6 +11,7 @@
 //! | `EXT_CONTRIBUTIONS` | every loaded extension's contributions now (declared and added at run time), who fills each slot, and the runtime state |
 //! | `EXT_OPEN` | opens `{path}`, `{url}` or `{doc_kind, path?}` with the first opener that claims it |
 //! | `EXT_VIEW_OPEN` | opens `{extension, view, state?, placement?}` in the window |
+//! | `EXT_VIEW_CLOSE` | takes `{extension, view}` away when it shows as a popup or overlay |
 //! | `EXT_STATE_SET` | writes runtime state as `{source, key, kind?, text?, icon?, target?, seq?, ttl_ms?}` |
 //! | `EXT_STATE_CLEAR` | clears `{source, key?}`'s state |
 //! | `EXT_EMIT` | raises app event `{event, detail?}`: the hooks on it run |
@@ -67,6 +68,12 @@ static VIEW_OPEN: ActionMeta = meta(
     "Open an extension's view",
     "Opens extension `extension`'s view `view` in the window, showing `state` when given, placed \
      as its manifest says unless `placement` (tab, split, overlay, popup, zoomed, float) does.",
+);
+static VIEW_CLOSE: ActionMeta = meta(
+    "EXT_VIEW_CLOSE",
+    "Close an extension's popup",
+    "Takes extension `extension`'s view `view` away when it shows over the window (a popup or an \
+     overlay): what a notification centre does after its \"go to\". One not showing is no error.",
 );
 static STATE_SET: ActionMeta = meta(
     "EXT_STATE_SET",
@@ -152,6 +159,13 @@ pub struct ViewOpenArgs {
     pub state: Option<String>,
     /// `tab`, `split`, `overlay`, `popup`, `zoomed` or `float`.
     pub placement: Option<String>,
+}
+
+/// `EXT_VIEW_CLOSE`'s arguments.
+#[derive(Debug, Facet)]
+pub struct ViewCloseArgs {
+    pub extension: String,
+    pub view: String,
 }
 
 /// `EXT_STATE_SET`'s arguments.
@@ -303,6 +317,15 @@ impl Extensions {
                     invoked(caller, InvocationSource::App),
                 )?;
                 Ok::<_, String>(RawJson::from(json!({ "opened": opened }).to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &VIEW_CLOSE,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: ViewCloseArgs| {
+                me.host().close_view(&a.extension, &a.view)?;
+                Ok::<_, String>(RawJson::from(json!({ "closed": true }).to_string()))
             },
         )?;
         let me = self.clone();

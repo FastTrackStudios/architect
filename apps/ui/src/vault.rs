@@ -1423,6 +1423,40 @@ fn VaultFiles() -> Element {
             }
         }
     });
+    // A vault note opened by path from anywhere (an extension's `open`, a
+    // notification's "go to"): its pane in the main area, as a click here.
+    let path_pane = pane.clone();
+    let opener = use_hook(move || {
+        let (tx, rx) = futures_channel::mpsc::unbounded::<String>();
+        if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
+            ui.host().set_path_opener(move |path| {
+                let markdown = std::path::Path::new(path)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+                if !markdown {
+                    return Err(format!("nothing opens {path}"));
+                }
+                tx.unbounded_send(path.to_owned())
+                    .map_err(|_| "the window is gone".to_owned())?;
+                Ok(serde_json::json!({ "opened_by": "app", "path": path }))
+            });
+        }
+        std::rc::Rc::new(std::cell::RefCell::new(Some(rx)))
+    });
+    use_future(move || {
+        let taken = opener.borrow_mut().take();
+        let workspace = path_pane.workspace();
+        async move {
+            use futures_util::StreamExt as _;
+            let Some(mut rx) = taken else { return };
+            while let Some(path) = rx.next().await {
+                // Only a vault on disk has notes by path.
+                if disk.peek().is_some() {
+                    show_vault_note(workspace, &path, Target::Tab);
+                }
+            }
+        }
+    });
     use_drop(move || {
         let mut kept = kept;
         let view = nav.view_state();
