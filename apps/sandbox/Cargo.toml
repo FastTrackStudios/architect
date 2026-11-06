@@ -1,0 +1,25 @@
+[package]
+name = "architect-sandbox"
+description = "The dev sandbox: the Architect app on made-up data (Inbox, Tasks, Schedule, the Board and the Clicker) for framework demos, goldens, scenarios and films, with a folder and identity of its own. `dx serve` it for hot reload."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "architect-sandbox"
+path = "src/main.rs"
+
+[features]
+keyflow-lab = ["architect-desktop/keyflow-lab"]
+wasi = ["architect-desktop/wasi"]
+
+[dependencies]
+architect-desktop = { path = "../desktop" }
+architect-app = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

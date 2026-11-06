@@ -5,9 +5,9 @@
 "architect-theme" = "minor"
 "architect-commands" = "minor"
 "architect-workspace" = "minor"
-"architect-lab-ui" = "none"
-"architect-lab-board" = "none"
-"architect-lab-clicker" = "none"
+"architect-app" = "none"
+"architect-sandbox-board" = "none"
+"architect-sandbox-clicker" = "none"
 ---
 
 Added extensions that change the GUI at run time, and the interface as files. architect: `action::Invocation` and `InvocationSource`, `ActionCaller::with_invocation` / `invocation` (where a run came from and on what). architect-extensions: interface contributions in the manifest and at run time (`contrib::Contribution`: `[[openers]]` that claim `files`, `doc_kinds` and `urls`, `[[doc_kinds]]`, `[[tabs]]`, `[[status]]`, `[[menus]]`, `[[context]]`, `[[bar]]`, `[[hooks]]`, `[[slots]]`; `Manifest::contributes`), the registry `Contributions` (a diff per load, withdrawn on unload) with owned, sequenced, time-limited runtime state (`StateWrite`); `ViewDecl` `home`, `placement`, `width`, `height`, `on_unload`; `Host::contributions`, `Host::emit`, `Host::watch`, `Host::open` (`Opening`), `Host::set_view_opener` / `open_view` (`ViewOpen`), `Host::with_contributions`, `Host::with_spawn`; hooks (startup, `workspace.changed`, `doc.opened`, `theme.changed`, `selection.changed`, `changed:<topic>`) running an action or a Luau script; Luau `ctx` and `ext` (`contribute`, `state`, `clear`); in-process extensions (`linked::Extension`, `Builder`, `Handle`, feature `linked`; `Extensions::with_linked`, `Host::link`, `Host::linked_view`, `Guest::extension`); wire 4 (`ProcessExtension::run_in`, the `updates` stream, `wire::Update`, `Guest::action_in`, `guest::contribute`, `set_state`, `clear_state`); the window side `interface::use_extension_ui`, `ExtensionUi`, `ExtensionView`, `ExtensionOverlays`, `link_press`; actions `EXT_CONTRIBUTIONS`, `EXT_OPEN`, `EXT_VIEW_OPEN`, `EXT_STATE_SET`, `EXT_STATE_CLEAR`, `EXT_EMIT`, `EXT_ENABLE`, `EXT_DISABLE` (`Extensions::install_contribution_actions`). architect-shell: the chrome as slots (`Chrome`, `Slot`, `Filler`, `use_chrome`, `Chrome::over`), contributed tabs, status items and bar buttons, `named_icon`, `intern`. architect-theme: `ThemeStore::resolve_with`. architect-commands: `MenuBar::contributed`, `Commands::run_invoked`. architect-workspace: `ContextEntries` / `ContextEntry` for a pane's context menu; feature `home` (`home::Home`: `layouts/<name>.json`, `keys.json`, `.state/`, last-good with a `.error`, read-only built-ins, `home::Problem`; `HOME_LAYOUTS`, `HOME_LAYOUT_USE`, `HOME_SLOT_SET`, `HOME_PROBLEMS`; `home::ui`).

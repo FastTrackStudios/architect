@@ -11,12 +11,12 @@
 //!    `[entry] path`'s file name);
 //! 3. **WASI**: not built here. The WASI runner (PR #285) runs components
 //!    written against their own guest crate (`architect-extension-wasi`,
-//!    the lab's `apps/lab/wasi-counter`), not a `linked::Extension`. The
+//!    the sandbox's `apps/sandbox/wasi-counter`), not a `linked::Extension`. The
 //!    third way waits on a `linked::Extension` exported as a component
 //!    (#272); the components themselves are built and run by
 //!    `features/extensions/tests/wasi.rs`.
 //!
-//! The Board (`apps/lab/board`) is the first.
+//! The Board (`apps/sandbox/board`) is the first.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -138,7 +138,8 @@ mod tests {
         assert!(
             found
                 .iter()
-                .any(|b| b.package == "architect-lab-board" && b.bin == "architect-lab-board"),
+                .any(|b| b.package == "architect-sandbox-board"
+                    && b.bin == "architect-sandbox-board"),
             "{found:?}"
         );
     }

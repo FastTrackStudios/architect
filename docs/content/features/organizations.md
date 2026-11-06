@@ -26,7 +26,7 @@ never from the caller. Design: [Organizations](@/architecture/organizations.md).
 
 The default build is the model and scope (wasm-clean); `auth` adds `fetch`;
 `ui` the hooks and switcher; `commands` ⌘O across orgs; `server` confinement.
-Client side, as in `apps/lab/ui/src/lib.rs`:
+Client side, as in `apps/ui/src/lib.rs`:
 
 ```rust
 let caps = Capabilities::new()

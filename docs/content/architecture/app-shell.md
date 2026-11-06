@@ -5,8 +5,8 @@ weight = 53
 +++
 
 > **Status: first cut landed (2026-10-31)** in `architect-shell`
-> (`features/shell`), with a lab to develop it in (`apps/lab`: the
-> desktop and iOS apps run under `dx serve`). Task's shell is the
+> (`features/shell`), with a sandbox to develop it in (`apps/sandbox`, the
+> Architect app on made-up data; it and the iOS app run under `dx serve`). Task's shell is the
 > reference; Studio is the second app on it.
 
 Task has a shell people like: on a phone, the screen's name large at the
@@ -313,8 +313,8 @@ app on the shell gets it:
   calls `WindowChrome::on_drag`). Linux and Windows draw the same in-app
   row (52pt without a `WindowChrome`); on a Mac the traffic lights are
   AppKit's, put in the row by `features/shell/src/shell/mac.rs`
-  `fit_traffic_lights`, which the lab calls from
-  `apps/lab/ui/src/screen.rs` `use_window_chrome` after each resize.
+  `fit_traffic_lights`, which the sandbox calls from
+  `apps/ui/src/screen.rs` `use_window_chrome` after each resize.
   A pane popped out to a window of its own gets the same row: on a Mac
   its launcher makes the title bar transparent, puts the traffic lights
   in it and hands the pop-out a `TitleRow`

@@ -7,8 +7,8 @@
 //! }
 //! ```
 //!
-//! `lab-media` (`apps/lab/media`) is one: `cargo run -p
-//! architect-lab-media -- showcase-layout --out target/media`. With
+//! `sandbox-media` (`apps/sandbox/media`) is one: `cargo run -p
+//! architect-sandbox-media -- showcase-layout --out target/media`. With
 //! feature `story`, [`main_stories`] is the same command over the
 //! scenarios of the stories linked in.
 

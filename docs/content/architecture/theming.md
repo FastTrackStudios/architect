@@ -10,7 +10,7 @@ weight = 69
 > `ShellTheme`, `AppShell`), architect-ui's root
 > (`features/ui/architect-ui/src/theme/runtime.rs` `ThemeStoreProvider`)
 > and paint panes (`features/workspace/src/paint/widget.rs` `PaintPane`)
-> follow it. The lab uses it (`apps/lab/ui/src/theme.rs`). An app's own
+> follow it. The sandbox uses it (`apps/ui/src/theme.rs`). An app's own
 > namespaced tokens, expressions over other tokens, numbers, provenance
 > and `THEME_INSPECT` landed with it (below). Extensions' themes and
 > tokens, the theme for Luau scripts, `ImGui` windows and process
@@ -179,7 +179,7 @@ the person's choice, and the device's sits over it.
 `Persist::local(store, app, delay)` is the whole of it for an app with no
 account yet: the device's layer in `<app dir>/appearance.json`, the
 person's in a synced settings document kept as `<app dir>/person.loro`
-(the lab's look, `apps/lab/ui/src/theme.rs` `use_lab_theme`).
+(the sandbox's look, `apps/ui/src/theme.rs` `use_lab_theme`).
 
 ```rust,ignore
 let persist = Persist::start(&store, &values, Duration::from_millis(250), move |s: &Saved| match s.scope {
@@ -217,10 +217,10 @@ layer's value away, so the one under it shows. A key the org locked is
 dimmed, saying so. The page sizes its own rows by `density` and
 `text-scale`. The shell's own chrome does not read them yet.
 
-The lab keeps the device's layer in `<app dir>/appearance.json` and the
+The sandbox keeps the device's layer in `<app dir>/appearance.json` and the
 person's in a synced settings document saved as `<app dir>/person.loro`
 (it has no account to sync it with). Its made-up orgs have defaults:
-Harbor & Pine's is Nord with small corners (`apps/lab/ui/src/theme.rs`
+Harbor & Pine's is Nord with small corners (`apps/ui/src/theme.rs`
 `persist`, `org_settings`).
 
 ## Theme files (feature `fs`)
@@ -432,10 +432,10 @@ two apps' tokens never collide in one map.
 
 **A view's roles.** A view that paints (an editor, an arrangement) is a
 theming target like the shell: every colour it draws is a role of its own,
-an app token with a default over architect's, never a literal. The lab's
-Keyflow source editor is the worked example (`apps/lab/ui/src/keyflow.rs`
-`EDITOR_TOKENS`, set as the lab's `App` layer by
-`apps/lab/ui/src/theme.rs` `app_layer`):
+an app token with a default over architect's, never a literal. The sandbox's
+Keyflow source editor is the worked example (`apps/ui/src/keyflow.rs`
+`EDITOR_TOKENS`, set as the sandbox's `App` layer by
+`apps/ui/src/theme.rs` `app_layer`):
 
 | Role | Default | What it colours |
 |---|---|---|
@@ -462,7 +462,7 @@ and sets them as CSS variables on its own root: editor-view's inputs
 variables: a `document::Style` is inserted once and never updated, so a
 sheet built from the theme's values would keep the first theme. A theme
 change restyles the editor by its `style` alone, in a pop-out too
-(`apps/lab/ui/src/keyflow.rs` `theme_set_restyles_the_editor`). A theme
+(`apps/ui/src/keyflow.rs` `theme_set_restyles_the_editor`). A theme
 file or a person overrides any role (`THEME_TOKEN_SET {name:
 "editor.caret", value: "$warn"}`); a broken one draws magenta.
 

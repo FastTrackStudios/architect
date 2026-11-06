@@ -286,26 +286,26 @@ kind the app has no provider for refuses the load with its reason,
 (it has: dioxus)`, a loaded copy stays as it was, and nothing of the new
 one lands (`features/extensions/tests/view_kinds.rs`).
 
-## The lab's gallery
+## The sandbox's gallery
 
-The lab's Vault keeps one pane of each kind it shows in a screenset,
+The sandbox's Vault keeps one pane of each kind it shows in a screenset,
 "Embedded views" (⌘3, the palette's "Load screenset: Embedded views", or
 `WORKSPACES_LOAD {"name": "Embedded views"}` over MCP and the CLI): a
 Dioxus component, a Luau script's ImGui window, a Frame surface, the
 A2UI surfaces and a paint view, each naming its kind
-(`apps/lab/ui/src/embedded.rs`). The paint pane (`apps/lab/ui/src/paint.rs`)
+(`apps/ui/src/embedded.rs`). The paint pane (`apps/ui/src/paint.rs`)
 draws a 100 × 100 grid of rectangles: the pointer lights the one under it,
 a press picks one, the arrow keys move the pick and typed or composed text
 is kept, all in the pane's typed host data (`PaintState`). The line under
 the grid and `LAB_PAINT_STATE` read it, with the pane's frame count and
 p50 / p99 times. The
 Frame surface is FastTrackStudios/frame's `frame-surface` program, a
-process extension the lab loads when it finds it
-(`ARCHITECT_LAB_FRAME_SURFACE`, beside the lab, or on the `PATH`); the lab
+process extension the sandbox loads when it finds it
+(`ARCHITECT_LAB_FRAME_SURFACE`, beside the sandbox, or on the `PATH`); the sandbox
 declares the `frame.surface` kind itself and never links Frame. It shows
-the lab's Frame document, `apps/lab/surfaces/drive.frame`
+the sandbox's Frame document, `apps/sandbox/surfaces/drive.frame`
 (`ARCHITECT_LAB_FRAME_DOCUMENT` names another), and a save to it reloads
-the surface. The document's knob is bound to the lab's drive and its meter
+the surface. The document's knob is bound to the sandbox's drive and its meter
 follows the drive: `LAB_FRAME_SET {"drive": 0.9}` turns the knob and moves
 the meter to -0.6 dB, turning the knob by hand sets the drive, and
 `LAB_FRAME_STATE` reads the drive, the level, the document and how many
@@ -322,7 +322,7 @@ surface. The surface can be patched live, for example
 `A2UI_PATCH {"messages": [{"updateDataModel": {"surfaceId": "release",
 "path": "/tasks/2", "value": {"title": "Notarize the build", "done":
 false}}}]}` over MCP adds a task. Scenario:
-[`apps/lab/scenarios/embedded-views.styx`](https://github.com/FastTrackStudios/architect/blob/main/apps/lab/scenarios/embedded-views.styx).
+[`apps/sandbox/scenarios/embedded-views.styx`](https://github.com/FastTrackStudios/architect/blob/main/apps/sandbox/scenarios/embedded-views.styx).
 
 ![The Embedded views screenset: a Dioxus swatch picked, the Luau ImGui window's button pressed, the Frame surface's knob turned up with its meter following, and the A2UI release surface patched with a task and shipped after a confirmation](https://raw.githubusercontent.com/FastTrackStudios/architect/media/embedded-views.gif)
 

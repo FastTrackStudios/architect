@@ -13,7 +13,7 @@ export const root = resolve(here, '../../../..');
 /// checkout's `target/wasm32-wasip2/debug`); null when they were not.
 export function guests() {
   const dir = process.env.ARCHITECT_WASI_GUESTS ?? join(root, 'target/wasm32-wasip2/debug');
-  return existsSync(join(dir, 'architect_lab_wasi_counter.wasm')) ? dir : null;
+  return existsSync(join(dir, 'architect_sandbox_wasi_counter.wasm')) ? dir : null;
 }
 
 const done = new Map();

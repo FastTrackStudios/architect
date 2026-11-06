@@ -54,7 +54,7 @@ workspace-members = [
     # is not a host dependency.
     "architect-extension-wasi",
     "architect-extension-wasi-hazards",
-    "architect-lab-wasi-counter",
+    "architect-sandbox-wasi-counter",
 ]
 
 # The optional WASI runtime (`architect-extensions`' `wasi` feature, Wasmtime

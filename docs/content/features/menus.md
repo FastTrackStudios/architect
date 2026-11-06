@@ -23,7 +23,7 @@ Use it for every app's menu bar. Design: [App menus](@/architecture/app-menus.md
 ## A minimal example
 
 The model is in the default build of `architect-commands`; `ui` adds
-`InWindowMenus`, `native` adds `NativeMenus`. From `apps/lab/ui/src/lib.rs`:
+`InWindowMenus`, `native` adds `NativeMenus`. From `apps/ui/src/lib.rs`:
 
 ```rust
 let menus = architect_commands::MenuBar::standard("Architect Lab")

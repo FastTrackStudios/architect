@@ -19,7 +19,7 @@ handler of its own. In this chapter you will:
    iPad, in the window elsewhere;
 5. serve the list to a model over MCP.
 
-The lab wires all of it: `apps/lab/ui/src/lib.rs` `LabApp`.
+The sandbox wires all of it: `apps/ui/src/lib.rs` `LabApp`.
 
 ## 1. Actions
 
@@ -62,7 +62,7 @@ the UI does with it.
 Some commands exist only while a view is on screen: "Mark done" on a list,
 "Open the selected item". A view registers them with `use_command`
 (`features/commands/src/ui.rs`); they are in the palette, run by their
-shortcut, and gone when the view unmounts. From the lab:
+shortcut, and gone when the view unmounts. From the sandbox:
 
 ```rust
 architect_commands::use_command(
@@ -117,7 +117,7 @@ What you get:
 ![⌘K opened, "done" typed, Mark done run from the palette](https://raw.githubusercontent.com/FastTrackStudios/architect/media/palette-run.gif)
 
 - **⌘O, quick open** (`QuickOpen`): every opener at once. A feature
-  registers one with `use_opener`; the lab's Vault registers its notes and
+  registers one with `use_opener`; the sandbox's Vault registers its notes and
   opens the picked one where the person asked (here, a new tab, a split):
 
   ```rust
@@ -147,7 +147,7 @@ What you get:
   searchable by name, id, group and binding; for each its bindings by
   context, with the **binding editor** (`BindingEditor`: press the chord to
   record it, conflicts shown, reset to the app's default) and custom actions
-  with conditions (`KeymapTools`). It is an ordinary component, so the lab
+  with conditions (`KeymapTools`). It is an ordinary component, so the sandbox
   makes it a workspace view:
 
   ```rust
@@ -233,7 +233,7 @@ binding names an action, the way `docs/content/architecture/input.md`
 
 The menu bar is a view of the commands (`features/commands/src/menu.rs`
 `MenuBar`): you say which commands go in which menu; the labels, shortcuts,
-enabled state and ticks come from the commands. From the lab:
+enabled state and ticks come from the commands. From the sandbox:
 
 ```rust
 let menus = architect_commands::MenuBar::standard("Architect Lab")
@@ -269,7 +269,7 @@ let menus = architect_commands::MenuBar::standard("Architect Lab")
   `list.changed(topic, detail)`.
 
 Draw it with both components; the in-window one stands aside where the
-platform shows the bar (`apps/lab/ui/src/lib.rs` `NativeMenus`):
+platform shows the bar (`apps/ui/src/lib.rs` `NativeMenus`):
 
 ```rust
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "ios"))]
@@ -289,7 +289,7 @@ rsx! {
 
 The Linux and iPad bars are checked to build, not yet run on a device.
 
-<!-- media: menu-bar-native-macos — the macOS menu bar built from the lab's MenuBar: a ticked Details toggle and the live Tabs section -->
+<!-- media: menu-bar-native-macos — the macOS menu bar built from the sandbox's MenuBar: a ticked Details toggle and the live Tabs section -->
 ![the in-window menu bar on Linux without a global menu, a menu opened with its shortcuts](https://raw.githubusercontent.com/FastTrackStudios/architect/media/menu-bar-in-window.gif)
 
 ## 5. MCP

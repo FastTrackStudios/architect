@@ -484,7 +484,7 @@ pub struct WasmDecl {
 /// [source]
 /// git = "https://github.com/FastTrackStudios/architect"
 /// rev = "main"
-/// path = "apps/lab/board"
+/// path = "apps/sandbox/board"
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -494,7 +494,7 @@ pub struct SourceDecl {
     pub git: String,
     /// The commit, tag or branch (`main` when empty).
     pub rev: String,
-    /// The crate's folder in the repository (`apps/lab/board`).
+    /// The crate's folder in the repository (`apps/sandbox/board`).
     pub path: String,
     /// The binary that serves it as a process (`Guest::extension(..).serve()`):
     /// its `[entry] path`'s file name when empty.

@@ -32,7 +32,7 @@ Example: `examples/extension`, a registry with a Luau extension and a process ex
 
 ## A minimal example
 
-The manifest, from `apps/lab/extensions/metronome/extension.toml`:
+The manifest, from `apps/sandbox/extensions/metronome/extension.toml`:
 
 ```toml
 id = "fts.metronome"
@@ -59,7 +59,7 @@ default = true
 ```
 
 The host side, `architect-extensions` with `host`, after
-`apps/lab/ui/src/extensions.rs`:
+`apps/ui/src/extensions.rs`:
 
 ```rust
 use architect_extensions::extensions::Extensions;
@@ -72,7 +72,7 @@ let ext = Extensions::new(Host::new(list.clone(), sections), Installs::new(app_d
     .with_source(FolderRegistry::new(registry_dir));   // or GitRegistry, ReaPackSource
 ext.install_actions()?;                                // EXT_LIST, EXT_SEARCH, EXT_INSTALL, ..
 ext.install("fts.metronome", &VersionReq::STAR)?;
-// On a timer (the lab polls every 500 ms): ext.reload_changed();
+// On a timer (the sandbox polls every 500 ms): ext.reload_changed();
 ```
 
 ## Contributions
@@ -143,7 +143,7 @@ only the extensions whose files changed.
 
 ## Tests to read
 
-- `features/extensions/tests/metronome.rs`: the lab metronome installs from a
+- `features/extensions/tests/metronome.rs`: the sandbox metronome installs from a
   git registry, reloads on save keeping what didn't change, keeps the last
   good copy after a broken save, and takes its settings with it on uninstall;
   a built-in shadowed by a development copy, disabled and enabled; a project's
@@ -154,7 +154,7 @@ only the extensions whose files changed.
 
 ## Status
 
-Done in architect for the data, Luau and process kinds; the lab runs the
+Done in architect for the data, Luau and process kinds; the sandbox runs the
 metronome and the clicker. Not yet: WASM runners; the host starting
 `[[overlays]]` by itself (they are parsed and checked, and run today as
 [canvas](@/features/canvas.md) scripts the app starts); signed archives; a

@@ -1,5 +1,5 @@
 ---
-"architect-lab-ui" = "none"
+"architect-app" = "none"
 "architect-mobile" = "none"
 ---
 

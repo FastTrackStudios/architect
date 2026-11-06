@@ -68,7 +68,7 @@ pub trait NavigatorSource: Send + Sync {
   through `rename` so backlinks follow, a property set). Its `save`,
   `create_note` and `rename` say what changed at once; `watch` hears edits
   made outside the app. `note_from_text` derives a `NoteFile` the same way
-  from a text you hold (the lab's in-memory vault reads the demo vault's
+  from a text you hold (the sandbox's in-memory vault reads the demo vault's
   files with it).
   Tests: `features/navigator/tests/vault_source.rs`.
 
@@ -105,8 +105,8 @@ rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), 
   process. Without the app's `NavigatorMount`, it draws a sample vault
   (`sample`).
 
-The lab's Vault tab does this (`apps/lab/ui/src/vault.rs` `FilesView`,
-`apps/lab/ui/src/extensions.rs`).
+The sandbox's Vault tab does this (`apps/ui/src/vault.rs` `FilesView`,
+`apps/ui/src/extensions.rs`).
 
 ## Recipe: the navigator without extensions
 
@@ -130,7 +130,7 @@ rsx! { NavigatorView {
 nav.set_active(Some(path));
 ```
 
-The lab's Vault tab does exactly this (`apps/lab/ui/src/vault.rs`
+The sandbox's Vault tab does exactly this (`apps/ui/src/vault.rs`
 `FilesView`: a `VaultSource` over the demo vault, `lab_vault` for a
 film's in-memory one).
 

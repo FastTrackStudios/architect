@@ -194,7 +194,7 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
 #[test]
 fn every_base_in_the_labs_demo_vault_runs_every_view() {
     let tmp = tempfile::tempdir().unwrap();
-    let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/lab/demo-vault");
+    let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/ui/demo-vault");
     copy_dir(&demo, tmp.path());
     let list = Arc::new(ActionList::new());
     let open = vault::actions::OpenVault::open(tmp.path()).unwrap();

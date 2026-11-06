@@ -8,7 +8,7 @@ weight = 68
 > (`features/pages`): the API, the QuickJS and Luau runners, TSX by
 > oxc with source maps, A2UI JSON pages, workers and timers in both
 > script runners, reload on save with the last good page kept,
-> overrides in the app's folder, and the lab's Board tab as a file (with
+> overrides in the app's folder, and the sandbox's Board tab as a file (with
 > an A2UI page and a Luau page beside it). In a browser (#325): TSX/JS
 > pages in a Web Worker on the browser's own engine, the same file and
 > types ("On the web" below). A framework's own DOM (#326):
@@ -62,8 +62,8 @@ services, so a process or the web build speaks the same API.
 descriptors (named types and caller interfaces), plus the runtime's
 surface — and `architect.d.luau` from the same shapes. The app writes
 both into its folder with its agents' guide, which names them
-(`features/control/src/guide.rs` `Guide::file`; the lab's
-`apps/lab/ui/src/lib.rs` `page_types`); `write_types` writes them on
+(`features/control/src/guide.rs` `Guide::file`; the sandbox's
+`apps/ui/src/lib.rs` `page_types`); `write_types` writes them on
 their own. The copies in `features/pages/types/` are
 checked by `features/pages/tests/types.rs`, which fails when they drift
 (`BLESS=1` writes them again).
@@ -87,9 +87,9 @@ export default function Board() {
 }
 ```
 
-The lab's Board tab is this, in full: `apps/lab/board/pages/board.tsx`
-with its worker `apps/lab/board/pages/primes.js`
-(`apps/lab/board/tests/page.rs`). A Luau page builds the same tree:
+The sandbox's Board tab is this, in full: `apps/sandbox/board/pages/board.tsx`
+with its worker `apps/sandbox/board/pages/primes.js`
+(`apps/sandbox/board/tests/page.rs`). A Luau page builds the same tree:
 
 ```lua
 local n = 0
@@ -100,7 +100,7 @@ end)
 ```
 
 And an A2UI page declares it, bound to its extension's data and actions
-(`apps/lab/board/pages/summary.a2ui.json` is the Board's, in full):
+(`apps/sandbox/board/pages/summary.a2ui.json` is the Board's, in full):
 
 ```json
 {
@@ -173,8 +173,8 @@ thread with a frame after. `worker.spawn("count.luau", args)` runs a
 its handle has `w:post`, `w:cancel`, `w:status`, `w:progress`,
 `w:result`, and callbacks `w:on_message`, `w:on_progress`, `w:on_done`,
 which run as the worker's news wakes the page's thread (`deliver`), a
-frame after (`features/pages/tests/luau.rs`; the lab's
-`apps/lab/board/pages/luau-primes.luau` with its worker `count.luau`).
+frame after (`features/pages/tests/luau.rs`; the sandbox's
+`apps/sandbox/board/pages/luau-primes.luau` with its worker `count.luau`).
 
 **A2UI** (`features/pages/src/a2ui.rs` `A2uiEngine`, feature `a2ui`,
 `Pages::with_a2ui`): a `.a2ui.json` page is A2UI v1.0 — the page form
@@ -201,7 +201,7 @@ in once it has rendered. One that fails keeps the last good page on
 screen under a banner and writes `<file>.error`; the next good save
 takes both away. A theme change renders the page again with the new
 snapshot (keyed by its revision, as Luau's `ThemeModule`). Measured
-in the lab: a save shows in about 150–300 ms, of which loading and
+in the sandbox: a save shows in about 150–300 ms, of which loading and
 rendering the page is 2–3 ms.
 
 ## On the web
@@ -222,7 +222,7 @@ one, shared state and the embed's input are kept in the worker (each
 change comes from the main thread), `worker.spawn("job.js")` starts a
 nested Web Worker with the worker runtime
 (`features/pages/src/web/job.js`). The page's folder is given as text
-(`PageFolder`: the lab's are its files, `include_str!`'d); its scripts
+(`PageFolder`: the sandbox's are its files, `include_str!`'d); its scripts
 are transpiled by oxc in the main thread's wasm and their imports
 resolved by the native loader's rules (`features/pages/src/modules.rs`
 `prepare`: `"architect"`, `"architect/dom"`, `"architect/worker"`,
@@ -248,7 +248,7 @@ worker has none of the browser's own network, storage or workers
 (`fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `indexedDB`,
 `Worker`… are taken away before the page loads), and the embedder's
 Content-Security-Policy, which the worker inherits, keeps `import()` of
-another host and eval out (the lab's: `apps/lab/web/index.html`).
+another host and eval out (the sandbox's: `apps/web/index.html`).
 
 **Limits.** A browser has no interrupt to stop one call, so the page's
 work is timed in units: a message (an event, a host call's answer,
@@ -273,13 +273,13 @@ swapped in once it has rendered.
 ports and secrets (the browser host has none), and services
 (`services.call`).
 
-**The lab.** `just lab-web` builds and serves the web lab
-(`apps/lab/web`): the Board's own `apps/lab/board/pages/board.tsx` (and
+**The sandbox.** `just web` builds and serves the web lab
+(`apps/web`): the Board's own `apps/sandbox/board/pages/board.tsx` (and
 `primes.js`, its worker) with the three Board actions it runs answered in
-the page (`apps/lab/web/src/board.rs`; the Board's Rust extension is not
+the page (`apps/web/src/board.rs`; the Board's Rust extension is not
 built for a browser), beside the WASI Counter; `?page=preact` is the
-Board's Preact page; `?page=runaway` and `?page=net` are checks. `just lab-web-test` drives them in a headless
-Chrome (`apps/lab/web/test/pages.test.mjs`): the Board renders and its
+Board's Preact page; `?page=runaway` and `?page=net` are checks. `just web-test` drives them in a headless
+Chrome (`apps/web/test/pages.test.mjs`): the Board renders and its
 handlers and worker run, the Preact page answers clicks and typing, a
 runaway is stopped while the main thread
 keeps drawing, a host outside the page's capabilities is refused, and a
@@ -364,10 +364,10 @@ export default document.body;
 The page's default export is the body it rendered into (`mount` in
 `features/pages/src/js/prelude.js` takes a component or that body). The
 framework comes from the page's folder, as any file does — no Node, no
-bundler: the lab's Board ships Preact 11 in
-`apps/lab/board/pages/vendor/` (its hooks' `import "preact"` written as
+bundler: the sandbox's Board ships Preact 11 in
+`apps/sandbox/board/pages/vendor/` (its hooks' `import "preact"` written as
 `"./preact.js"`, since a page imports no packages) and its `preact` view
-is `apps/lab/board/pages/preact.tsx`.
+is `apps/sandbox/board/pages/preact.tsx`.
 
 **What it has.** `createElement`/`createElementNS`, `createTextNode`,
 `createComment`, `createDocumentFragment`; `appendChild`,
@@ -395,6 +395,6 @@ are drawn as listeners too (Solid is not tested yet).
 
 Tests: `features/pages/tests/dom.rs` (Preact's tree and the edits each
 click makes; the DOM by hand: capture and bubbling, a move that keeps
-its node), `apps/lab/board/tests/page.rs` (the Board's Preact view), and
-the web lab's `apps/lab/web/test/pages.test.mjs` (`?page=preact`, in a
+its node), `apps/sandbox/board/tests/page.rs` (the Board's Preact view), and
+the web sandbox's `apps/web/test/pages.test.mjs` (`?page=preact`, in a
 headless Chrome).

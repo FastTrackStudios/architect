@@ -11,11 +11,11 @@ weight = 56
 > `features/presence/src/instance.rs` `Handoff`), the component that binds
 > it (`features/presence/src/ui.rs` `AppPresence`) and the platforms'
 > side: macOS (`features/presence/src/mac.rs`, proven in the real Dock and
-> menu bar with the lab), Linux (`features/presence/src/linux.rs`:
+> menu bar with the sandbox), Linux (`features/presence/src/linux.rs`:
 > StatusNotifierItem, Unity's launcher entry, XDG autostart; checked to
 > build, not yet run on a desktop) and Windows (the window's life and the
-> Run key; no tray yet, and not compiled here). The lab uses it
-> (`apps/lab/ui/src/presence.rs`).
+> Run key; no tray yet, and not compiled here). The sandbox uses it
+> (`apps/ui/src/presence.rs`).
 
 Task and Studio each hand-rolled how their app lives off screen: Task's
 tray menu and its LaunchAgent with `--background`
@@ -122,10 +122,10 @@ scheme).
 
 ## Proven on macOS
 
-The lab, bundled as `Architect Lab.app` and run on an M4 Mac mini: the
+The lab (now the sandbox), bundled as `Architect Lab.app` and run on an M4 Mac mini: the
 Dock tile badged with the Inbox count; the Dock menu listing Capture, the
 tabs (the one on show ticked) and the background toggle, a pick running
-its command; closing the window leaving the lab in the menu bar as an
+its command; closing the window leaving the sandbox in the menu bar as an
 accessory with no Dock tile; the tray menu's Show the window, a second
 launch, and `open` on the bundle each bringing the window back where it
 was, the badge with it; Quit quitting; Open at login writing the

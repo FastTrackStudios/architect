@@ -1,7 +1,7 @@
 ---
 "architect" = "minor"
 "architect-extensions" = "minor"
-"architect-lab-board" = "none"
+"architect-sandbox-board" = "none"
 "architect-rpc-derive" = "minor"
 ---
 

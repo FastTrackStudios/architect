@@ -8,8 +8,8 @@ weight = 54
 > The model is `architect-workspace` (`features/workspace/src/model.rs`,
 > `ops.rs`, `screenset.rs`, `store.rs`); the host is its `ui` feature
 > (`features/workspace/src/host/mod.rs` `WorkspaceView`, `View`, `Views`,
-> `TitleRow`), developed in the lab's Vault tab
-> (`apps/lab/ui/src/vault.rs`). Pop-out OS windows are the `native`
+> `TitleRow`), developed in the sandbox's Vault tab
+> (`apps/ui/src/vault.rs`). Pop-out OS windows are the `native`
 > feature's launcher (`features/workspace/src/native.rs` `launch`); tabs
 > reorder within a bar, a finger held on a tab opens its menu, stacked
 > tabs slide over each other, ⌘1–9 recall screensets for the screen's

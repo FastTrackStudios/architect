@@ -101,7 +101,7 @@ back as JSON with the result, the log, the actions run and the undo step.
 
 ## Status
 
-Done in architect; the lab uses it. Not yet: dry runs, the typed model
+Done in architect; the sandbox uses it. Not yet: dry runs, the typed model
 services in the Luau library, streams, Luau on the web.
 
 - **Task** and **Studio** do not use it yet; both have Action Lists to run

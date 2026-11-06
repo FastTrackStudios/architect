@@ -67,11 +67,11 @@ Links and tags, over the same `OpenVault` (`links::actions::register`, `tag::act
 | `TAGS_LIST` | read | every tag in use, its note count, its icon and colour from the registry |
 | `TAGS_NOTES {tag}` | read | notes tagged `tag` or a tag nested under it |
 
-Tests: `features/vault/vault/tests/actions.rs`, `features/links/links/tests/actions.rs`, `features/tags/tag/tests/actions.rs` (over the lab's sample), `features/vault/vault-entity/tests/index.rs` (the index rules).
+Tests: `features/vault/vault/tests/actions.rs`, `features/links/links/tests/actions.rs`, `features/tags/tag/tests/actions.rs` (over the sandbox's sample), `features/vault/vault-entity/tests/index.rs` (the index rules).
 
-## In the lab
+## In the sandbox
 
-`just lab` and `devenv up` open a scratch copy of the demo vault (`apps/lab/demo-vault`, made by `apps/lab/demo-vault.py`: nested folders, an empty one, 300 notes for scroll tests, every property type, nested tags, links, tasks, daily to yearly notes, projects, images and a PDF, bases, inbox captures) at `ARCHITECT_LAB_VAULT` under devenv's state, seeded from `ARCHITECT_LAB_SEED` when missing; `just lab-vault-reset` seeds it again; `APP_STATUS`'s `vault` says which folder is open. Without them the lab opens `<its folder>/vault` (`ARCHITECT_LAB_CONFIG_DIR` moves its folder), seeded on first run from `apps/lab/vault` (five notes); `apps/lab/ui/src/notes.rs`. Its notes open in the editor and save to their files (`apps/lab/ui/src/vault.rs` `VaultNote`). With a lab running: `lab-session.sh act <name> <worktree> run VAULT_READ --arg path=Welcome.md`.
+`just sandbox` and `devenv up` open a scratch copy of the demo vault (`apps/ui/demo-vault`, made by `apps/ui/demo-vault.py`: nested folders, an empty one, 300 notes for scroll tests, every property type, nested tags, links, tasks, daily to yearly notes, projects, images and a PDF, bases, inbox captures) at `ARCHITECT_VAULT` under devenv's state, seeded from `ARCHITECT_VAULT_SEED` when missing; `just vault-reset` seeds it again; `APP_STATUS`'s `vault` says which folder is open. Without them the sandbox opens `<its folder>/vault` (`ARCHITECT_SANDBOX_CONFIG_DIR` moves its folder), seeded on first run from `apps/sandbox/vault` (five notes); `apps/ui/src/notes.rs`. Its notes open in the editor and save to their files (`apps/ui/src/vault.rs` `VaultNote`). With a sandbox running: `lab-session.sh act <name> <worktree> run VAULT_READ --arg path=Welcome.md`.
 
 ## Still in Task
 

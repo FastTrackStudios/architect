@@ -99,7 +99,7 @@ fn build(&self, ext: &mut Builder) {
   written to the file and read back, a cell's edit, the view types.
 - `features/bases/tests/extension.rs`: `Bases` claims the fence, and lets it
   go when turned off.
-- `apps/lab/board/tests/both_ways.rs`: the Board's `board` type, linked in
+- `apps/sandbox/board/tests/both_ways.rs`: the Board's `board` type, linked in
   and as a process, withdrawn when it is disabled.
 - `features/extensions/src/contrib.rs` (unit tests): a type is drawn by a
   view, a page or its code, never takes a built-in's id.
@@ -107,8 +107,8 @@ fn build(&self, ext: &mut Builder) {
 ## Status
 
 Done in architect: the three built-in views, the toolbar, editable cells,
-the fence embed, the contribution point, the actions; the lab opens
-the base in `apps/lab/vault` ("Notes by status") from its Files pane and has a
+the fence embed, the contribution point, the actions; the sandbox opens
+the base in `apps/sandbox/vault` ("Notes by status") from its Files pane and has a
 note with a fence ("A base in a note"); the Board adds `board`.
 
 Not yet: Obsidian's structured filter builder (filters are edited as

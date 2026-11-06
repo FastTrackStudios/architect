@@ -1,4 +1,4 @@
-//! The issue's bar: the lab's metronome (`apps/lab/extensions`) is a real
+//! The issue's bar: the lab's metronome (`apps/sandbox/extensions`) is a real
 //! extension, installed from a registry — here a git repository made of
 //! the lab's registry folder — loaded without a restart, reloaded when its
 //! files are saved, its settings coming and going with it.
@@ -27,7 +27,7 @@ const COUNT_IN: &str = "FTS_METRONOME_COUNT_IN";
 
 /// The lab's registry folder.
 fn lab_registry() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/lab/extensions")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions")
 }
 
 fn copy(from: &Path, to: &Path) {
@@ -191,19 +191,19 @@ fn the_metronome_installs_from_a_git_registry_reloads_on_save_and_goes() {
 /// The lab's metronome, linked into the build.
 fn builtin() -> Package {
     Package::embedded(
-        include_str!("../../../apps/lab/extensions/metronome/extension.toml"),
+        include_str!("../../../apps/sandbox/extensions/metronome/extension.toml"),
         &[
             (
                 "count_in.luau",
-                include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/count_in.luau"),
             ),
             (
                 "click.luau",
-                include_str!("../../../apps/lab/extensions/metronome/click.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/click.luau"),
             ),
             (
                 "status.luau",
-                include_str!("../../../apps/lab/extensions/metronome/status.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/status.luau"),
             ),
         ],
     )

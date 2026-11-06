@@ -170,7 +170,7 @@ fn app_status(list: &ActionList, at: SocketAddr, issuer: Issuer, rt: tokio::runt
 }
 
 fn lab_metronome() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/lab/extensions/metronome")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions/metronome")
 }
 
 fn copy(from: &Path, to: &Path) {

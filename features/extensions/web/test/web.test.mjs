@@ -52,7 +52,7 @@ function component(name, opts = {}) {
 }
 
 const counter = (opts) =>
-  component('architect_lab_wasi_counter', { workers: { primes: { entry: 'count-primes' } }, ...opts });
+  component('architect_sandbox_wasi_counter', { workers: { primes: { entry: 'count-primes' } }, ...opts });
 const hazards = (opts) =>
   component('architect_extension_wasi_hazards', {
     workers: Object.fromEntries(['forever', 'hoard', 'chatty', 'deaf', 'echo'].map((w) => [w, { entry: w }])),

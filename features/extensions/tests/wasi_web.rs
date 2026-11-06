@@ -64,7 +64,7 @@ fn guests() -> Option<PathBuf> {
     let build = [
         "build",
         "-p",
-        "architect-lab-wasi-counter",
+        "architect-sandbox-wasi-counter",
         "-p",
         "architect-extension-wasi-hazards",
         "--target",

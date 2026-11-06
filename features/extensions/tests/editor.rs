@@ -1,5 +1,5 @@
 //! The editor API (#312): the lab's `lab.outline` extension
-//! (`apps/lab/extensions/outline`, Luau) works an editor through the host
+//! (`apps/sandbox/extensions/outline`, Luau) works an editor through the host
 //! service — its keymaps pick its actions by the block at the cursor
 //! (Tab/Shift-Tab indent and outdent a list item, move between a table's
 //! cells), each edit is one undo step made as the extension, its
@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 const NOTE: &str = "- one\n- two\n\n| a | b |\n|---|---|\n| c | d |";
 
 fn outline_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/lab/extensions/outline")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions/outline")
 }
 
 fn host(editor: &Arc<MemoryEditor>) -> (ActionList, Host) {

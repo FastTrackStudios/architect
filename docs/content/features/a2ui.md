@@ -44,8 +44,8 @@ can't express.
 ## A minimal example
 
 The app puts the surfaces and the `A2UI_*` actions on its list, and the
-view in its workspace (the lab: `apps/lab/ui/src/lib.rs` `LabApp`,
-`apps/lab/ui/src/vault.rs`):
+view in its workspace (the sandbox: `apps/ui/src/lib.rs` `LabApp`,
+`apps/ui/src/vault.rs`):
 
 ```rust
 let surfaces = architect_a2ui::Surfaces::new(crdt::CrdtDoc::ephemeral(), architect_a2ui::store::ROOT);
@@ -149,7 +149,7 @@ What an agent can't do from a surface:
   drawn and nothing else is.
 - `features/a2ui/src/store.rs` tests: the Loro round trip, all-or-nothing
   batches, the catalog refusal.
-- `apps/lab/desktop/tests/actions.rs`: `A2UI_RENDER`, `A2UI_PATCH` and
+- `apps/desktop/tests/actions.rs`: `A2UI_RENDER`, `A2UI_PATCH` and
   `A2UI_SURFACE` give the same answers over MCP and the CLI.
 
 ## Status
@@ -160,7 +160,7 @@ Done (architect#228):
 - surfaces in Loro;
 - events as actions, confirmed;
 - the `A2UI_*` actions over MCP and the CLI;
-- the renderer on Blitz, and the lab's "Agent UI" view.
+- the renderer on Blitz, and the sandbox's "Agent UI" view.
 - the default build and `ui` compile to `wasm32-unknown-unknown` (CI's
   wasm job checks both, #253). In the browser a `CrdtDoc` is not `Send`,
   so `Surfaces` holds it in a `send_wrapper::SendWrapper` there
@@ -175,7 +175,7 @@ Not yet:
   `TextField`, `Tabs`) and the theme's sheets next to an app's own
   Tailwind sheet are checked in a browser by #253's second part. It needs
   `dx` and a `wasm-bindgen` CLI in the dev shell.
-- **The lab's persistence.** The lab keeps its surfaces in an in-memory
+- **The sandbox's persistence.** The sandbox keeps its surfaces in an in-memory
   document. An app keeps them in one of its own documents (a `DocFile`, a
   synced doc).
 - **Opening the pane.** `A2UI_RENDER` does not open the "Agent UI" pane by

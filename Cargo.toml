@@ -91,14 +91,17 @@ members = [
     # ── sites: a vault published as a static site (#364) ─────────────
     "features/sites",
     "apps/cli",
-    "apps/lab/ui",
-    "apps/lab/desktop",
-    "apps/lab/mobile",
-    "apps/lab/clicker",
-    "apps/lab/board",
-    "apps/lab/wasi-counter",
-    "apps/lab/web",
-    "apps/lab/media",
+    # ── the Architect app (apps/ui, its desktop, mobile and web) ──────
+    "apps/ui",
+    "apps/desktop",
+    "apps/mobile",
+    "apps/web",
+    # ── the dev sandbox: made-up data and example extensions ──────────
+    "apps/sandbox",
+    "apps/sandbox/clicker",
+    "apps/sandbox/board",
+    "apps/sandbox/wasi-counter",
+    "apps/sandbox/media",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -320,8 +323,8 @@ architect-navigator-extension = { path = "features/navigator/extension" }
 architect-attachments = { path = "features/attachments" }
 architect-devices = { path = "features/devices" }
 architect-spaces = { path = "features/spaces" }
-architect-lab-ui = { path = "apps/lab/ui" }
-# iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
+architect-app = { path = "apps/ui" }
+# iOS: the UIScene lifecycle the mobile app adopts (apps/mobile).
 objc2 = "0.6"
 objc2-ui-kit = "0.3"
 futures-timer = "3"
@@ -436,7 +439,7 @@ anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b
 # The renderer and windowing forks a Blitz app needs (each one's reason is
 # in vendor's README): Vello's window renderer and the compositor, the
 # hybrid renderer's resize, Vello's surface on Metal, winit's UIKit
-# backend, wgpu's Metal layer. Only the lab apps (apps/lab) reach the iOS
+# backend, wgpu's Metal layer. Only the Architect apps (apps/desktop, apps/mobile) reach the iOS
 # ones.
 anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }

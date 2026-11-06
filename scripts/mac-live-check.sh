@@ -46,7 +46,8 @@
 # once, each with its own app and Simulator. State is in
 # ${MLC_STATE_DIR:-/tmp/mac-live-check-$USER}/<session>.
 # Other knobs: MLC_TIMEOUT (seconds to wait for a socket or window, 90),
-# MLC_CONFIG_ENV (the app's config-folder variable, ARCHITECT_LAB_CONFIG_DIR),
+# MLC_CONFIG_ENV (the app's config-folder variable, ARCHITECT_CONFIG_DIR;
+# ARCHITECT_SANDBOX_CONFIG_DIR for architect-sandbox),
 # MLC_IOS_DEVICE (the Simulator's device type, the newest iPhone),
 # MLC_DELIVERY (cua-driver's delivery for clicks and keys: foreground,
 # as a winit window hears no input in the background; or background),
@@ -62,7 +63,7 @@ set -euo pipefail
 SESSION="${MLC_SESSION:-default}"
 STATE="${MLC_STATE_DIR:-/tmp/mac-live-check-${USER:-$(id -un)}}/$SESSION"
 TIMEOUT="${MLC_TIMEOUT:-90}"
-CONFIG_ENV="${MLC_CONFIG_ENV:-ARCHITECT_LAB_CONFIG_DIR}"
+CONFIG_ENV="${MLC_CONFIG_ENV:-ARCHITECT_CONFIG_DIR}"
 
 die() { echo "mac-live-check: $*" >&2; exit 1; }
 say() { echo "mac-live-check: $*" >&2; }

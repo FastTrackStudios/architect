@@ -21,7 +21,9 @@ specs (
                     features/vault/**/*.rs
                     features/links/**/*.rs
                     features/tags/**/*.rs
-                    apps/lab/**/*.rs
+                    apps/ui/**/*.rs
+                    apps/desktop/**/*.rs
+                    apps/sandbox/**/*.rs
                 )
                 exclude (
                     target/**

@@ -3,8 +3,8 @@
 "architect-extensions" = "major"
 "architect-scripting" = "minor"
 "architect-canvas" = "major"
-"architect-lab-ui" = "none"
-"architect-lab-clicker" = "none"
+"architect-app" = "none"
+"architect-sandbox-clicker" = "none"
 ---
 
 Added live theming for extensions and the GUIs they draw. architect-theme: `ThemeStore::contribute` / `withdraw` / `contribution` and `Contribution` (an owner's themes, broken files and token defaults, diffed, last good kept), the `LayerKind::Extension` layer (under the theme's own overrides), `Source::label` (`THEME_LIST` says `extension:<id>`), `TOKEN_NAME_RULE`, `Rgba::packed`. architect-extensions: a manifest `[tokens]` table (`Manifest::tokens`, `Manifest::token_namespace`, `ManifestError::BadToken`), `Host::with_themes` and `host::theme_contribution` (an extension's `[[themes]]` and tokens into the app's store while it is loaded, a broken file a `THEME_PROBLEMS` entry), `ProcessRunner::with_theme` and the theme as data to a process (`wire::ThemeData`, `ProcessExtension::theme`, wire 3), `Guest::theme`, `Guest::on_theme` and `guest::use_theme`. architect-scripting: `theme::ThemeModule` (`theme.color`, `number`, `value`, `scheme`, `id`, `revision`, `snapshot`, `subscribe`; a frozen snapshot per revision) over `ThemeSource` (`ThemeStore`, `ThemeCell`), and `Module::frame` / `Module::live_fields`. architect-canvas: `imgui::Style::from_theme` and `imgui::Col` (each style colour from an `imgui.*` token or derived from the shell's), `Ui::push_style_color` / `pop_style_color` and `ImGui.PushStyleColor` / `PopStyleColor` / `ImGui.Col_*`, `luau::Session::start_themed` / `set_theme`; `use_script_canvas` follows the theme store above it, so a Luau `ImGui` window no longer keeps the colours it started with.

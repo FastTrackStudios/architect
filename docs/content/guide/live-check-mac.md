@@ -14,7 +14,7 @@ the fleet's agents start a headless test desktop for that
 
 1. **launch** the binary you built, with `FTS_CONTROL=1` (its control
    socket, [CLI and MCP](@/guide/cli-and-mcp.md)), a config folder made
-   for the session (`ARCHITECT_LAB_CONFIG_DIR`, so it never reads or
+   for the session (`ARCHITECT_SANDBOX_CONFIG_DIR`, so it never reads or
    writes the person's own settings) and a `TMPDIR` of its own (so its
    socket and its one-instance claim are the session's, and a second
    session or the person's own copy of the app is never in the way);
@@ -32,7 +32,7 @@ the fleet's agents start a headless test desktop for that
 6. **stop**: the app, its child processes and the Simulator, gone; the
    session's folders removed.
 
-## The lab, end to end
+## The sandbox, end to end
 
 ```bash
 devenv shell -- cargo build -p architect-desktop
@@ -110,14 +110,14 @@ window id and the config folder. `status` prints them again.
 already installed, or an Xcode scheme in the current folder (built with
 `xcodebuild` for the session's Simulator first). The Simulator is made
 for the session (the newest runtime's newest iPhone, or
-`MLC_IOS_DEVICE`), headless: no Simulator.app window is needed. The lab's
-iOS app is built without dx by `apps/lab/mobile/ios/build-app.sh`, which
+`MLC_IOS_DEVICE`), headless: no Simulator.app window is needed. The sandbox's
+iOS app is built without dx by `apps/mobile/ios/build-app.sh`, which
 also puts the WASI Counter's component in its bundle:
 
 ```bash
 S=scripts/mac-live-check.sh
 export MLC_SESSION=ios MLC_CLI=target/debug/architect-desktop
-$S ios "$(apps/lab/mobile/ios/build-app.sh --features wasi)"   # → /tmp/mlc-ios-ios.png
+$S ios "$(apps/mobile/ios/build-app.sh --features wasi)"   # → /tmp/mlc-ios-ios.png
 $S ios-act LAB_GO --arg tab=vault
 $S ios-act WORKSPACE_OPEN --json '{"view":"wasi.counter","at":{"replace":{"pane":"note-welcome"}},"focus":true}'
 $S ios-tap 149 249                                             # "Add one", in points
@@ -132,9 +132,9 @@ $S stop
   most), so `architect-control` serves in the folder it is given
   (`features/control/src/endpoint.rs` `DIR_ENV`). Any architect app's
   `actions` CLI talks to it (`MLC_CLI`), and MCP reaches it through the
-  desk lab's bridge: `architect-desktop mcp --app <dir>/architect-mobile.sock`
+  desk sandbox's bridge: `architect-desktop mcp --app <dir>/architect-mobile.sock`
   (an iOS app has no stdio of its own; `cargo xtask surfaces` accepts the
-  phone's `// surfaces: mcp via apps/lab/desktop` for that reason,
+  phone's `// surfaces: mcp via apps/desktop` for that reason,
   `xtask/src/surfaces.rs`).
 - **`ios-tap <x> <y>`** taps in points, a screenshot's pixels over its
   scale (3 on an iPhone), through idb (`idb ui tap`; `pip install

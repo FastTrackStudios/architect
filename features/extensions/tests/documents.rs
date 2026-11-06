@@ -1,5 +1,5 @@
 //! The document API (#309): the lab's `lab.tidy` extension
-//! (`apps/lab/extensions/tidy`) creates, tidies (one transaction, one
+//! (`apps/sandbox/extensions/tidy`) creates, tidies (one transaction, one
 //! undo step), renames, files away and watches documents in the lab's
 //! spaces, kept as `crdt` documents (`documents::CrdtDocuments`); the
 //! person's concurrent typing merges with its edits; an extension that
@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 const TIDY: &str = "lab.tidy";
 
 fn tidy_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/lab/extensions/tidy")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions/tidy")
 }
 
 /// The lab's spaces, and a note in them.

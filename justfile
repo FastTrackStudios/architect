@@ -79,15 +79,15 @@ release-notes *REF:
 release-next *REF:
     @bash scripts/release-notes.sh next {{REF}}
 
-# Film the lab's guide scenarios (apps/lab/scenarios; all of them, or
+# Film the sandbox's guide scenarios (apps/sandbox/scenarios; all of them, or
 # one by id) into target/media: <id>.gif and <id>.png, and .webm/.mp4
 # where a scenario asks. Needs ffmpeg and gifski (the dev shell has them).
 media *IDS:
-    cargo run -q -p architect-lab-media -- {{IDS}} --out target/media
+    cargo run -q -p architect-sandbox-media -- {{IDS}} --out target/media
 
-# Play the lab's guide scenarios as tests, no frames.
+# Play the sandbox's guide scenarios as tests, no frames.
 media-test *IDS:
-    cargo run -q -p architect-lab-media -- {{IDS}} --test
+    cargo run -q -p architect-sandbox-media -- {{IDS}} --test
 
 # Regenerate every scenario's media and commit them to the orphan `media`
 # branch (only the generated files; README and docs embed them from
@@ -101,7 +101,7 @@ media-publish PUSH="0":
     out=$(mktemp -d)
     tree=$(mktemp -d)
     trap 'git -C "$root" worktree remove --force "$tree" 2>/dev/null || true; rm -rf "$out" "$tree"' EXIT
-    cargo run -q -p architect-lab-media -- --out "$out"
+    cargo run -q -p architect-sandbox-media -- --out "$out"
     git -C "$root" fetch -q origin media 2>/dev/null || true
     if git -C "$root" rev-parse -q --verify origin/media >/dev/null; then
         git -C "$root" worktree add -q --detach "$tree" origin/media
@@ -131,13 +131,13 @@ media-publish PUSH="0":
 # with the Board's ```kf charts drawn by its own page (#364).
 docs OUT="target/site":
     cargo run -q -p architect-cli -- site build --vault docs/content --out {{OUT}} \
-        --extension apps/lab/board \
+        --extension apps/sandbox/board \
         --url https://architect.fasttrackstudio.app
 
 # Serve the docs on http://127.0.0.1:4321/, rebuilt and reloaded on save.
 docs-serve PORT="4321":
     cargo run -q -p architect-cli -- site serve --vault docs/content --out target/site-serve \
-        --extension apps/lab/board --port {{PORT}}
+        --extension apps/sandbox/board --port {{PORT}}
 
 # Every path and command the docs and skills name must exist (CI runs this).
 docs-check:
@@ -279,68 +279,89 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
 auth-e2e:
     cd apps/auth-server/e2e && npm install && npx playwright test
 
-# ARGS go to the app: `just lab actions list` asks a running lab. Runs in
-# the dev shell (its libraries) unless you are already in it. Its vault is a
-# scratch copy of apps/lab/demo-vault under devenv's state, seeded when
-# missing (ARCHITECT_LAB_VAULT names another folder).
-# The lab on the desktop (apps/lab/desktop, a Blitz window) on the demo vault.
-lab *ARGS:
+# Its own folder (~/.config/architect); its first run asks for a vault.
+# ARGS go to the app: `just app actions list` asks the running app. Runs
+# in the dev shell (its libraries) unless you are already in it.
+# The Architect app on the desktop (apps/desktop), as a person runs it.
+app *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    export ARCHITECT_LAB_VAULT="${ARCHITECT_LAB_VAULT:-${DEVENV_STATE:-$PWD/.devenv/state}/lab-vault}"
-    export ARCHITECT_LAB_SEED="${ARCHITECT_LAB_SEED:-$PWD/apps/lab/demo-vault}"
     if [ -n "${DEVENV_ROOT:-}" ]; then
         exec cargo run -q -p architect-desktop -- {{ARGS}}
     fi
     exec devenv shell -- cargo run -q -p architect-desktop -- {{ARGS}}
 
-# Every edit a run made is thrown away.
-# The lab's scratch vault, seeded again from apps/lab/demo-vault.
-lab-vault-reset:
+# The lab's old name for `just app`, for now.
+alias lab := app
+
+# Inbox, Tasks, Schedule, the Board and the Clicker, with a folder of its
+# own (~/.config/architect-sandbox). Its vault is a scratch copy of
+# apps/ui/demo-vault under devenv's state, seeded when missing
+# (ARCHITECT_VAULT names another folder). ARGS go to the sandbox:
+# `just sandbox actions list`.
+# The dev sandbox (apps/sandbox): the app on made-up data.
+sandbox *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
-    dir="${ARCHITECT_LAB_VAULT:-${DEVENV_STATE:-$PWD/.devenv/state}/lab-vault}"
+    export ARCHITECT_VAULT="${ARCHITECT_VAULT:-${DEVENV_STATE:-$PWD/.devenv/state}/demo-vault}"
+    export ARCHITECT_VAULT_SEED="${ARCHITECT_VAULT_SEED:-$PWD/apps/ui/demo-vault}"
+    if [ -n "${DEVENV_ROOT:-}" ]; then
+        exec cargo run -q -p architect-sandbox -- {{ARGS}}
+    fi
+    exec devenv shell -- cargo run -q -p architect-sandbox -- {{ARGS}}
+
+# Every edit a run made is thrown away.
+# The scratch vault (`just sandbox`, `devenv up`), seeded again from apps/ui/demo-vault.
+vault-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="${ARCHITECT_VAULT:-${DEVENV_STATE:-$PWD/.devenv/state}/demo-vault}"
     rm -rf "$dir"
     mkdir -p "$(dirname "$dir")"
-    cp -r apps/lab/demo-vault "$dir"
+    cp -r apps/ui/demo-vault "$dir"
     rm -f "$dir/.empty-folders"
     while IFS= read -r folder; do
         [ -n "$folder" ] && mkdir -p "$dir/$folder"
-    done < apps/lab/demo-vault/.empty-folders
-    echo "lab-vault-reset: $dir"
+    done < apps/ui/demo-vault/.empty-folders
+    echo "vault-reset: $dir"
+
+alias lab-vault-reset := vault-reset
 
 
-# The lab in a browser (apps/lab/web): the WASI Counter component built for
+# The app in a browser (apps/web), for now the sandbox's browser demo: the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page
-# built for wasm32-unknown-unknown, into target/lab-web; then served on
+# built for wasm32-unknown-unknown, into target/web; then served on
 # PORT (0: build only). Needs node (the `wasi` dev profile has it) and
 # wasm-bindgen-cli at Cargo.lock's version (installed into target/tools
 # when missing).
-lab-web PORT="8090":
+web PORT="8090":
     #!/usr/bin/env bash
     set -euo pipefail
-    out=target/lab-web
+    out=target/web
     mkdir -p "$out"
-    devenv --profile wasi shell -- cargo build -q -p architect-lab-wasi-counter --target wasm32-wasip2
+    devenv --profile wasi shell -- cargo build -q -p architect-sandbox-wasi-counter --target wasm32-wasip2
     (cd features/extensions/web && [ -d node_modules ] || npm ci --silent)
-    node features/extensions/web/transpile.mjs target/wasm32-wasip2/debug/architect_lab_wasi_counter.wasm "$out/wasi-counter" >/dev/null
-    cargo build -q -p architect-lab-web --target wasm32-unknown-unknown
+    node features/extensions/web/transpile.mjs target/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm "$out/wasi-counter" >/dev/null
+    cargo build -q -p architect-web --target wasm32-unknown-unknown
     want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/,""); print; exit}' Cargo.lock)
     bindgen=target/tools/bin/wasm-bindgen
     if ! "$bindgen" --version 2>/dev/null | grep -q "$want"; then
         cargo install -q wasm-bindgen-cli --version "$want" --locked --root target/tools
     fi
-    "$bindgen" --target web --no-typescript --out-dir "$out" target/wasm32-unknown-unknown/debug/architect_lab_web.wasm
-    cp apps/lab/web/index.html apps/lab/web/start.js apps/lab/web/hello.txt "$out/"
-    echo "lab-web: $out"
+    "$bindgen" --target web --no-typescript --out-dir "$out" target/wasm32-unknown-unknown/debug/architect_web.wasm
+    cp apps/web/index.html apps/web/start.js apps/web/hello.txt "$out/"
+    echo "web: $out"
     if [ "{{PORT}}" != "0" ]; then
         echo "serving http://localhost:{{PORT}}"
         python3 -m http.server -d "$out" -b 127.0.0.1 {{PORT}}
     fi
 
-# The web lab in a real browser (apps/lab/web/test): the Board's page file,
+# The web app in a real browser (apps/web/test): the Board's page file,
 # a runaway page and a page's reach, in a headless Chrome of its own
-# (CHROME=… names one; screenshots in target/lab-web-shots).
-lab-web-test:
-    just lab-web 0
-    node --test apps/lab/web/test/pages.test.mjs
+# (CHROME=… names one; screenshots in target/web-shots).
+web-test:
+    just web 0
+    node --test apps/web/test/pages.test.mjs
+
+alias lab-web := web
+alias lab-web-test := web-test

@@ -24,7 +24,7 @@ use futures::executor::block_on;
 use serde_json::{Value, json};
 
 fn metronome() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/lab/extensions/metronome")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/sandbox/extensions/metronome")
 }
 
 fn copy_of(dir: &Path, to: &Path) -> PathBuf {
@@ -44,19 +44,19 @@ fn edit(file: &Path, from: &str, to: &str) {
 
 fn builtin() -> Package {
     Package::embedded(
-        include_str!("../../../apps/lab/extensions/metronome/extension.toml"),
+        include_str!("../../../apps/sandbox/extensions/metronome/extension.toml"),
         &[
             (
                 "count_in.luau",
-                include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/count_in.luau"),
             ),
             (
                 "click.luau",
-                include_str!("../../../apps/lab/extensions/metronome/click.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/click.luau"),
             ),
             (
                 "status.luau",
-                include_str!("../../../apps/lab/extensions/metronome/status.luau"),
+                include_str!("../../../apps/sandbox/extensions/metronome/status.luau"),
             ),
         ],
     )

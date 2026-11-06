@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
     // The vault to check: the first argument, else the lab's sample.
     let root = std::env::args().nth(1).map_or_else(
-        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/lab/vault"),
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/sandbox/vault"),
         PathBuf::from,
     );
     let vault = vault_live::Vault::open(&root)?;

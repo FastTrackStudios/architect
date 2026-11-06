@@ -15,4 +15,4 @@ result-*
 
 # Local git worktrees created by tooling.
 /.claude/worktrees/
-apps/lab/media/tests/golden/*.got.html
+apps/sandbox/media/tests/golden/*.got.html

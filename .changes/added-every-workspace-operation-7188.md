@@ -1,5 +1,5 @@
 ---
-"architect-lab-ui" = "minor"
+"architect-app" = "minor"
 "architect-workspace" = "minor"
 ---
 
