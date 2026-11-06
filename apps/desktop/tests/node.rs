@@ -20,6 +20,10 @@
 //! and a vault seeded on both nodes separately becomes one document per
 //! note (the second seed adopts the first's lineage), its text once.
 //!
+//! A signed-in web client (vox over WebSocket, an issuer session as the
+//! bearer) lists the org's notes and edits one live on the org's lane;
+//! a caller with no session, or not in the org, is refused.
+//!
 //! And in an issuer org (`indie`: Grace its owner, Alan a member), with
 //! nodes on two accounts: Grace's node hosts the org's enrolment lane,
 //! Alan's enrols itself there and syncs the vault; Alan enrols a device
@@ -574,4 +578,90 @@ async fn a_vault_seeded_on_two_nodes_becomes_one_document() {
 
     laptop.stop().await;
     always.stop().await;
+}
+
+/// The org lane at `node` as a browser reaches it: `/org/indie/vox` over
+/// WebSocket with `token` (if any) as the bearer.
+async fn web<C: vox::FromVoxLane>(node: &Running, token: Option<String>) -> C {
+    let at = architect::connect::Endpoint::url(format!("ws://{}/org/indie/vox", node.http))
+        .with_bearer(token);
+    architect::connect::Pool::new().client(&at).await.unwrap()
+}
+
+fn token_in(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("session")).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::{DocSyncClient, SyncedDoc};
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host_dir = tmp.path().join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        host_dir.join("data/vaults/notes/hello.md"),
+        "# Hello\n\nThe org's note.\n",
+    )
+    .unwrap();
+    let mut host = config(
+        "indie-host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    let host = node::start(host).await.unwrap();
+
+    // Alan, a member, signed in at the issuer: the notes, then one live.
+    let alan_dir = tmp.path().join("alan-web");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let alan = token_in(&alan_dir);
+    let notes: NotesClient = web(&host, Some(alan.clone())).await;
+    let listed = notes.list().await.unwrap();
+    assert!(listed.iter().any(|n| n.path == "hello.md"), "{listed:?}");
+
+    let sync: DocSyncClient = web(&host, Some(alan)).await;
+    let doc_id = vault_proto::collab_doc_id("notes", "hello.md");
+    let replica = crdt::CrdtDoc::ephemeral();
+    let mut synced = SyncedDoc::new(doc_id, replica.clone());
+    let session = tokio::spawn(async move {
+        let _ = synced.run(&sync).await;
+    });
+    let body = || {
+        replica
+            .loro()
+            .get_text(vault_proto::COLLAB_BODY_CONTAINER)
+            .to_string()
+    };
+    until("the note reaches the browser", || {
+        body().contains("The org's note.")
+    })
+    .await;
+    let text = replica.loro().get_text(vault_proto::COLLAB_BODY_CONTAINER);
+    text.insert(text.len_unicode(), "\nTyped in the browser.\n")
+        .unwrap();
+    replica.loro().commit();
+    live_text(&host, "Typed in the browser.").await;
+    until("the host's file has it", || {
+        reads(&note(&host), "Typed in the browser.")
+    })
+    .await;
+    session.abort();
+
+    // No session, or a session not in the org: refused.
+    let anonymous: NotesClient = web(&host, None).await;
+    assert!(anonymous.list().await.is_err());
+    let ada_dir = tmp.path().join("ada-web");
+    session_of(&origin, &ada_dir, "ada@local.test").await;
+    let ada: NotesClient = web(&host, Some(token_in(&ada_dir))).await;
+    let refused = ada.list().await.unwrap_err();
+    assert!(
+        format!("{refused:?}").contains("not a member"),
+        "{refused:?}"
+    );
+
+    host.stop().await;
 }

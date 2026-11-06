@@ -18,6 +18,14 @@
 //!   in as the org's (`Grant::Org`), and syncs with it like any peer. A
 //!   revoke is final: the node does not enrol itself again.
 //!
+//! - **Vaults for signed-in clients** ([`OrgLane::with_vaults`]). The same
+//!   lane carries the vaults: `Notes` (list and read for any member,
+//!   write for a member or above) and `DocSync` on the vaults' registry, so
+//!   a web app signed in at the issuer edits a note live over
+//!   `/org/{slug}/vox` with its session as the bearer. Which notes a person
+//!   opens is the org's engine's call ([`OrgLane::opens`]): a viewer reads,
+//!   a member writes.
+//!
 //! The node's vaults are the org's: one org per node.
 
 use std::collections::HashMap;
@@ -39,8 +47,10 @@ use architect_orgs::server::{
 };
 use architect_orgs::{OrgId, Role};
 use architect_permissions::{
-    BoxIdentityFuture, IdentityResolver, PermissionEngine, Principal, Rule,
+    Action, BoxIdentityFuture, IdentityResolver, MethodPermit, PermissionEngine, Principal,
+    Resource, Rule, ServicePermits,
 };
+use uuid::Uuid;
 
 use super::service::node::NodeHttpClient;
 
@@ -62,6 +72,23 @@ pub fn engine(members: Members) -> ConfinedEngine {
         .role(&Role::Owner, admin())
 }
 
+/// `Notes` on the org lane: any member lists and reads, writing is a
+/// write.
+const NOTES_PERMITS: ServicePermits = ServicePermits {
+    service: "Notes",
+    methods: &[
+        MethodPermit::new("list", "read", "vaults/**"),
+        MethodPermit::new("read", "read", "vaults/**"),
+        MethodPermit::new("write", "write", "vaults/**").audited(),
+    ],
+};
+
+/// `DocSync` on the org lane; which note is [`OrgLane::opens`]' call.
+const SYNC_PERMITS: ServicePermits = ServicePermits {
+    service: "DocSync",
+    methods: &[MethodPermit::new("sync", "read", "docs/**")],
+};
+
 /// The org this node's vaults belong to, as the issuer names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeOrg {
@@ -77,6 +104,7 @@ pub struct OrgLane {
     pub engine: Arc<ConfinedEngine>,
     gate: Arc<PermissionsGate>,
     router: LayerRouter,
+    issuer: IssuerLane,
 }
 
 impl OrgLane {
@@ -88,25 +116,57 @@ impl OrgLane {
         project_members(admission, &members);
         let engine = Arc::new(engine(members.clone()));
         let issuer = IssuerLane::new(issuer);
-        let identity = MembersResolver::new(
-            IssuerSessions::new(issuer.clone()),
-            IssuerOrgs(issuer),
-            members.clone(),
-        );
-        let shared: Arc<dyn PermissionEngine> = engine.clone();
-        let gate = PermissionsGate::new(shared, Arc::new(identity))
-            .permit(device_enrolment_service_descriptor(), &ENROL_PERMITS);
         let router = LayerRouter::new().with(
             device_enrolment_service_descriptor(),
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
         );
+        let gate = gate(&engine, &members, &issuer, false);
         Self {
             org,
             members,
             engine,
-            gate: Arc::new(gate),
+            gate,
             router,
+            issuer,
         }
+    }
+
+    fn make_gate(&self, vaults: bool) -> Arc<PermissionsGate> {
+        gate(&self.engine, &self.members, &self.issuer, vaults)
+    }
+
+    /// Serve the vaults on the lane too: `notes` (the node's `Notes`
+    /// router) and `DocSync` over `registry`, whose authorizer must ask
+    /// [`Self::opens`] for people.
+    #[must_use]
+    pub fn with_vaults(
+        mut self,
+        registry: crdt::DocRegistry,
+        catalog: super::VaultCatalog,
+        notes: LayerRouter,
+    ) -> Self {
+        self.router = self.router.merge_router(notes).with(
+            crdt::sync::doc_sync_service_descriptor(),
+            crdt::sync::DocSyncDispatcher::new(VaultSync { registry, catalog }),
+        );
+        self.gate = self.make_gate(true);
+        self
+    }
+
+    /// Whether a person may open note `doc_id` live: a member of the org
+    /// who may `write` it (a viewer reads its file through `Notes`, not
+    /// a live session, which writes).
+    #[must_use]
+    pub fn opens(&self, who: &Principal, doc_id: Uuid) -> bool {
+        matches!(who, Principal::User { .. })
+            && self
+                .engine
+                .check(
+                    who,
+                    &Resource::new(format!("org/{}/docs/{doc_id}", self.org.id.0)),
+                    &Action::write(),
+                )
+                .allowed()
     }
 
     /// Serve the lane at `/org/{slug}/vox` on `host`; any other slug is
@@ -128,6 +188,64 @@ impl OrgLane {
                 .scoped(lane.org.id.clone()))
             }
         })
+    }
+}
+
+/// The lane's gate: the org's engine, callers resolved by the issuer;
+/// with `vaults`, `Notes` and `DocSync` permitted too.
+fn gate(
+    engine: &Arc<ConfinedEngine>,
+    members: &Members,
+    issuer: &IssuerLane,
+    vaults: bool,
+) -> Arc<PermissionsGate> {
+    let identity = MembersResolver::new(
+        IssuerSessions::new(issuer.clone()),
+        IssuerOrgs(issuer.clone()),
+        members.clone(),
+    );
+    let engine: Arc<dyn PermissionEngine> = engine.clone();
+    let mut gate = PermissionsGate::new(engine, Arc::new(identity))
+        .permit(device_enrolment_service_descriptor(), &ENROL_PERMITS);
+    if vaults {
+        gate = gate
+            .permit(
+                super::service::notes::notes_service_descriptor(),
+                &NOTES_PERMITS,
+            )
+            .permit(crdt::sync::doc_sync_service_descriptor(), &SYNC_PERMITS);
+    }
+    Arc::new(gate)
+}
+
+/// `DocSync` for a client that names a note by its id alone: the note is
+/// registered with its vault first (as the peer lane's `resolve` does by
+/// name), then the registry serves the session.
+#[derive(Clone)]
+struct VaultSync {
+    registry: crdt::DocRegistry,
+    catalog: super::VaultCatalog,
+}
+
+impl crdt::sync::DocSync for VaultSync {
+    async fn sync(
+        &self,
+        doc_id: Uuid,
+        from: Vec<u8>,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<crdt::sync::SyncDown>,
+    ) -> Result<(), crdt::sync::SyncError> {
+        let held = self
+            .catalog
+            .notes()
+            .into_iter()
+            .find(|n| n.doc_id == doc_id);
+        let at = held.ok_or(crdt::sync::SyncError::UnknownDoc)?;
+        self.catalog.register(&crdt::peer::DocAt {
+            doc_id,
+            name: at.name,
+        })?;
+        crdt::sync::DocSync::sync(&self.registry, doc_id, from, up, down).await
     }
 }
 

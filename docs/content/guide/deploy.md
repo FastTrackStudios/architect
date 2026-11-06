@@ -33,7 +33,7 @@ and no GPU libraries in the image. The desktop build is unchanged.
 | | |
 | --- | --- |
 | **On the account** | With an issuer and a session it registers itself in the account's address book as a `server` device at its iroh endpoint, offers its org (`ARCHITECT_ORG`) if the account shares none yet, and lets the account's other devices in (`architect_devices::account::pass`). It runs again every five minutes, and on every sweep until another device is on the account. |
-| **In an issuer org** | With `ARCHITECT_HOST_ORG` it hosts the org's enrolments (below); with `ARCHITECT_ENROL_AT` it enrols itself in an org another node hosts. Its vaults are that org's. |
+| **In an issuer org** | With `ARCHITECT_HOST_ORG` it hosts the org's enrolments and its vaults for signed-in web clients (below); with `ARCHITECT_ENROL_AT` it enrols itself in an org another node hosts. Its vaults are that org's. |
 | **Its lanes over iroh** | The node's documents (`crdt::p2p::node_router`: `DocSync` and `DocPeer`), served to the devices its `Admission` lets in. A revoked device's connections close (`architect_devices::serve`). |
 | **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. With each peer it dials, the node keeps a live `DocSync` bridge per note (below), so an edit reaches the others within a second. Every `ARCHITECT_SWEEP_SECS` it also sweeps each peer (`crdt::peer::pull_with`), the fallback for what a bridge missed. |
 | **Sites** | Each vault in `ARCHITECT_SITES` is built as a Site ([sites](@/features/sites.md)) and rebuilt when the vault changes. |
@@ -150,6 +150,15 @@ An org's other members' devices are enrolled at the node that hosts the org
   `accounts.json`). The Account menu's Organization section opens the same
   page ("Devices in <org>…").
 
+- **Signed-in web clients.** The same lane carries the vaults: `Notes` (list
+  and read for any member, write for a member or above) and `DocSync` on the
+  vaults' registry. A web app signed in at the issuer opens
+  `wss://<node>/org/<slug>/vox` with its session as the bearer, lists the notes
+  and edits one live (`crdt::sync::SyncedDoc` on `collab_doc_id(vault, path)`),
+  the way a device does over iroh. A member or above opens a note live; a viewer
+  reads it through `Notes` (`apps/desktop/src/node/org.rs` `OrgLane::opens`).
+  No session, or a session not in the org, is refused at the gate.
+
 ```toml
 # the org's always-on node
 host_org = "fasttrackstudio"
@@ -200,9 +209,10 @@ pod needs:
 - **An org's enrolments live on its host.** The issuer keeps the account's
   devices but not an org's: two nodes hosting one org hold two tables, and the
   app is told which node to ask (`host`).
-- **Signed-in web clients on `/vox`.** The vox and HTTP lanes carry only the
-  public `Node` service. The vaults reach a browser through a Site, not live.
-  A web app editing a vault needs an issuer-bearer identity on those lanes.
+- **The web app's side.** The org lane serves signed-in clients, but the
+  Architect web app does not open it yet: it needs the node's address for the
+  org (as `ORG_*` take `host`) and a `SyncedDoc` per open note. The root `/vox`
+  stays the public `Node` service only.
 - **Live bridges per note, not per vault.** A node keeps a session per note
   with each peer, up to `ARCHITECT_LIVE_MAX`; a large vault's other notes wait
   for the sweep. One multiplexed session per vault would lift the cap.
