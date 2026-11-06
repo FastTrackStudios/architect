@@ -394,6 +394,11 @@ layer = "L4"
 note = "Tasks, a first-party extension (#375): tasks as vault notes, its list, Today, My tasks and a kanban base view; linked in, or its own process (guest)"
 
 [[row]]
+package = "architect-threads"
+layer = "L4"
+note = "Threads, a built-in extension (#348): comments anchored to any entity, replies, mentions, resolve/reopen, kept as notes in Threads/; the comments pane; linked in, or its own process (guest)"
+
+[[row]]
 package = "architect-time-tracker"
 layer = "L4"
 note = "the Time Tracker, a first-party extension (#375): timers and time entries on vault notes, totals, a timesheet base view and a report; linked in, or its own process (guest)"

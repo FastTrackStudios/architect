@@ -1,0 +1,181 @@
+# Threads (features/threads/src/lib.rs, #348): conversations anchored to
+# any entity — a note, a project, a task, an event, a shared page — with
+# comments, replies, @mentions and resolve/reopen. Ported from Task's
+# features/threads. A thread is a note in Threads/, so it syncs as notes
+# do. One Rust value (`Threads`, a linked::Extension): the app links it in
+# as a built-in, and its program (src/main.rs) serves the same value as a
+# process when a development copy runs (EXT_CLONE {"id":"threads"}).
+id = "threads"
+name = "Threads"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Comments on notes and anything else: start a thread, reply, @mention someone (they are notified), resolve and reopen. Threads are notes in Threads/, so they sync with the vault."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-threads"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/threads"
+
+# Its API for others (`services.call("architect.threads", "post", …)`):
+# method `m` is its action THREADS_<M>. Projects, Tasks, Media Review and
+# share links that let a guest comment use it.
+[provides]
+"architect.threads" = "0.1.0"
+
+# Notify, when it is there: a mention or a reply tells the people it
+# reaches, and whose name you write under comes from it. Not [requires]:
+# comments work without it.
+[uses]
+"architect.notify" = "^0.1"
+
+# It reaches notes only through the app's actions; it follows the note
+# being read (selection), opens notes and puts a badge on their tabs and
+# rows. Deleting a thread deletes its note.
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+effect = "destructive"
+reads = ["selection", "documents"]
+ui = ["badges"]
+
+[[actions]]
+id = "THREADS_LIST"
+name = "Threads: list"
+description = "The threads on an entity: a note's `path`, or `entity_type` (note, project, task, event, page, …) and `entity_id`; with neither, the note the comments pane is on. `anchor_path` narrows to a place inside it and what is under it. `resolved: false` leaves resolved threads out. Newest activity first, each with its comments oldest first."
+group = "Threads"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"},"entity_type":{"type":"string"},"entity_id":{"type":"string"},"anchor_path":{"type":"string"},"resolved":{"type":"boolean"}}}'
+
+[[actions]]
+id = "THREADS_GET"
+name = "Threads: read one"
+description = "Thread `thread` (its id or its note's path): its anchor, title, kind, resolved state and comments."
+group = "Threads"
+effect = "read_only"
+params = '{"type":"object","properties":{"thread":{"type":"string"}},"required":["thread"]}'
+
+[[actions]]
+id = "THREADS_START"
+name = "Threads: start a thread"
+description = "Starts a thread on an entity (a note's `path`, or `entity_type` and `entity_id`; else the note the pane is on) with its first comment `body`. `title` defaults to the comment's first line, `kind` to discussion (question, decision, action, praise). `@name` in the body notifies that person through Notify. `author` defaults to your name."
+group = "Threads"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"},"entity_type":{"type":"string"},"entity_id":{"type":"string"},"anchor_path":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string"},"body":{"type":"string"},"author":{"type":"string"}},"required":["body"]}'
+
+[[actions]]
+id = "THREADS_POST"
+name = "Threads: comment"
+description = "Adds comment `body` to thread `thread`; `reply_to` (a comment's id) makes it a reply. A resolved thread reopens. Whoever it @mentions, and the thread's other participants, are notified."
+group = "Threads"
+effect = "mutating"
+params = '{"type":"object","properties":{"thread":{"type":"string"},"body":{"type":"string"},"reply_to":{"type":"string"},"author":{"type":"string"}},"required":["thread","body"]}'
+
+[[actions]]
+id = "THREADS_REPLY"
+name = "Threads: reply"
+description = "Replies to comment `comment` of thread `thread` with `body` (THREADS_POST with reply_to)."
+group = "Threads"
+effect = "mutating"
+params = '{"type":"object","properties":{"thread":{"type":"string"},"comment":{"type":"string"},"body":{"type":"string"},"author":{"type":"string"}},"required":["thread","comment","body"]}'
+
+[[actions]]
+id = "THREADS_EDIT"
+name = "Threads: edit a comment"
+description = "Comment `comment` of thread `thread` says `body` instead (marked edited)."
+group = "Threads"
+effect = "mutating"
+params = '{"type":"object","properties":{"thread":{"type":"string"},"comment":{"type":"string"},"body":{"type":"string"}},"required":["thread","comment","body"]}'
+
+[[actions]]
+id = "THREADS_DELETE_COMMENT"
+name = "Threads: delete a comment"
+description = "Takes comment `comment` out of thread `thread`."
+group = "Threads"
+effect = "mutating"
+params = '{"type":"object","properties":{"thread":{"type":"string"},"comment":{"type":"string"}},"required":["thread","comment"]}'
+
+[[actions]]
+id = "THREADS_RESOLVE"
+name = "Threads: resolve"
+description = "Marks thread `thread` resolved, by `by` (you, by default)."
+group = "Threads"
+effect = "mutating"
+params = '{"type":"object","properties":{"thread":{"type":"string"},"by":{"type":"string"}},"required":["thread"]}'
+
+[[actions]]
+id = "THREADS_REOPEN"
+name = "Threads: reopen"
+description = "Marks thread `thread` open again."
+group = "Threads"
+effect = "mutating"
+params = '{"type":"object","properties":{"thread":{"type":"string"}},"required":["thread"]}'
+
+[[actions]]
+id = "THREADS_DELETE"
+name = "Threads: delete a thread"
+description = "Deletes thread `thread`: its note, with every comment."
+group = "Threads"
+effect = "destructive"
+params = '{"type":"object","properties":{"thread":{"type":"string"}},"required":["thread"]}'
+
+[[actions]]
+id = "THREADS_COUNTS"
+name = "Threads: counts"
+description = "Each entity's open threads, threads and comments in the open ones, by `<entity_type>:<entity_id>` (`note:Projects/Album.md`); `entity_type` narrows to one type."
+group = "Threads"
+effect = "read_only"
+params = '{"type":"object","properties":{"entity_type":{"type":"string"}}}'
+
+[[actions]]
+id = "THREADS_MENTIONS"
+name = "Threads: mentions"
+description = "Every comment that @mentions `who` (you, by default), newest first, with its thread and entity."
+group = "Threads"
+effect = "read_only"
+params = '{"type":"object","properties":{"who":{"type":"string"}}}'
+
+[[actions]]
+id = "THREADS_PANE"
+name = "Show comments"
+description = "Opens the comments pane in the right dock, on note `path` or the note being read; it follows the note you read."
+group = "Threads"
+effect = "read_only"
+params = '{"type":"object","properties":{"path":{"type":"string"}}}'
+
+[[actions]]
+id = "THREADS_REVEAL"
+name = "Threads: go to a thread"
+description = "Opens thread `thread`'s note and the comments pane on it, the thread first: what a notification's \"go to\" runs."
+group = "Threads"
+effect = "read_only"
+params = '{"type":"object","properties":{"thread":{"type":"string"},"entity":{"type":"string"},"comment":{"type":"string"},"href":{"type":"string"}}}'
+
+[[actions]]
+id = "THREADS_STARTED"
+name = "Threads: read the vault"
+description = "Reads every thread and puts the badges on commented notes (its startup hook)."
+group = "Threads"
+effect = "read_only"
+
+[[views]]
+id = "comments"
+title = "Comments"
+icon = "message-square"
+home = "right"
+
+[[menus]]
+menu = "View"
+action = "THREADS_PANE"
+
+[[bar]]
+action = "THREADS_PANE"
+title = "Comments"
+icon = "message-square"
+
+[[hooks]]
+on = "startup"
+action = "THREADS_STARTED"

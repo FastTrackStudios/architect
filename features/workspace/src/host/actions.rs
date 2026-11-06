@@ -55,6 +55,13 @@ pub struct WorkspaceStatus {
     /// The focused pane's id, and its title; empty when none is.
     pub focused: String,
     pub focused_title: String,
+    /// The focused pane's view kind (`vault.note`) and state (what it
+    /// shows: a note's path); empty when none is focused. What an
+    /// extension that follows the note being read looks at.
+    #[facet(default)]
+    pub focused_view: String,
+    #[facet(default)]
+    pub focused_state: String,
     /// Its windows: each one's groups (id, tabs, the tab showing), its
     /// docks' groups and how many floats it has.
     pub windows: Vec<WindowStatus>,
@@ -91,13 +98,14 @@ fn status_of(mirror: &Mirror, overlays: &Overlays) -> String {
         .unwrap_or_else(PoisonError::into_inner)
         .clone();
     let arranged = crate::guide::Arrangement::measured(&st.workspace, st.revision, &env.measured);
-    let focused_title = st
+    let focused_pane = st
         .workspace
         .active
         .as_ref()
-        .and_then(|id| st.workspace.pane(id))
-        .map(|p| p.title.clone())
-        .unwrap_or_default();
+        .and_then(|id| st.workspace.pane(id));
+    let focused_title = focused_pane.map(|p| p.title.clone()).unwrap_or_default();
+    let focused_view = focused_pane.map(|p| p.view.0.clone()).unwrap_or_default();
+    let focused_state = focused_pane.map(|p| p.state.clone()).unwrap_or_default();
     let screenset = st
         .screensets
         .active
@@ -113,6 +121,8 @@ fn status_of(mirror: &Mirror, overlays: &Overlays) -> String {
         revision: st.revision,
         focused: arranged.active.clone(),
         focused_title,
+        focused_view,
+        focused_state,
         windows: arranged
             .windows
             .into_iter()

@@ -485,6 +485,7 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     // opens where it goes as it appears, and closes as it goes.
     crate::toolbar_ui::use_pane_toolbars(ui, Arc::clone(&app));
     // Its views open in the window: a pane, or a layer over it.
+    let close_host = host.clone();
     let opener = use_hook(move || {
         let (tx, rx) = mpsc::unbounded::<ViewOpen>();
         let busy = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
@@ -505,6 +506,25 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
             Ok(json!({ "placement": placed }))
         });
         Rc::new(std::cell::RefCell::new(Some((rx, busy))))
+    });
+    // An extension's EXT_VIEW_CLOSE takes its popup or overlay away.
+    let closing = use_hook(move || {
+        let (tx, rx) = mpsc::unbounded::<String>();
+        close_host.set_view_closer(move |kind| {
+            tx.unbounded_send(kind.to_owned())
+                .map_err(|_| "the window is gone".to_owned())
+        });
+        Rc::new(std::cell::RefCell::new(Some(rx)))
+    });
+    use_future(move || {
+        let taken = closing.borrow_mut().take();
+        async move {
+            let Some(mut rx) = taken else { return };
+            let mut layers = layers;
+            while let Some(kind) = rx.next().await {
+                layers.write().retain(|l| l.open.kind != kind);
+            }
+        }
     });
     let mut layers_w = layers;
     let closer = Arc::clone(&app);
