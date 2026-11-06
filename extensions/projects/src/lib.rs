@@ -17,6 +17,9 @@
 //! - **Views:** the projects list, and a project's page: its state,
 //!   members, roadmap (milestones with their tasks' progress), goals,
 //!   tasks and notes.
+//! - **Navigator:** while its views show, the sidebar's navigator shows
+//!   the projects (under their state) and the selected one's tasks
+//!   ([`nav`], `[[navigator_providers]]`, #356).
 //! - **Service:** it provides `architect.projects` and uses `architect.tasks` when it is
 //!   there: the page's tasks are the Tasks extension's
 //!   (`architect.tasks` `for_project`), and a task's project is resolved here
@@ -27,6 +30,7 @@
 #![allow(clippy::indexing_slicing)]
 
 pub mod model;
+pub mod nav;
 pub mod vault;
 
 use std::fmt::Write as _;
@@ -606,6 +610,8 @@ impl Extension for Projects {
 
     fn build(&self, ext: &mut Builder) {
         vault::connect(ext.handle());
+        // Its navigator provider: projects, then their tasks (`nav`).
+        ext.navigator(nav::ACTIONS, nav::ProjectsNav);
         ext.view("list", ListView)
             .view("page", PageView)
             .action("PROJECTS_LIST", list)

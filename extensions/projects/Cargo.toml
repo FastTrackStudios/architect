@@ -16,6 +16,8 @@ path = "src/main.rs"
 [dependencies]
 # The trait and the guest (its process copy); the app adds `linked`.
 architect-extensions = { workspace = true, features = ["guest"] }
+# Its navigator provider (MIT; never the GPL navigator itself).
+architect-navigator-api = { workspace = true }
 dioxus = { workspace = true }
 futures-timer = { workspace = true }
 serde = { workspace = true }
