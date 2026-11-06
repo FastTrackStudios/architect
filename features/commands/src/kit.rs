@@ -183,4 +183,3 @@ pub fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
         }
     }
 }
-

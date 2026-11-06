@@ -84,7 +84,6 @@ pub fn PaletteView() -> Element {
     }
 }
 
-
 /// ⌘O: open anything every opener knows; ↵ here, ⌘↵ in a new tab. The
 /// `quick-open` view.
 #[component]
@@ -100,7 +99,9 @@ pub fn QuickOpenView() -> Element {
     // or the field set.
     let mut only = use_signal(|| None::<String>);
     use_effect(move || {
-        let Some(q) = commands.take_seed() else { return };
+        let Some(q) = commands.take_seed() else {
+            return;
+        };
         let kind = q
             .strip_suffix(':')
             .map(str::trim)
@@ -121,9 +122,7 @@ pub fn QuickOpenView() -> Element {
     );
     let found: Vec<Found> = commands.open_rows(&asked);
     let placeholder = only()
-        .and_then(|k| {
-            commands.open_title(&k).map(|t| format!("{t}…"))
-        })
+        .and_then(|k| commands.open_title(&k).map(|t| format!("{t}…")))
         .unwrap_or_else(|| "Open…  (note: to look in one place)".to_owned());
     let count = found.len();
     use_effect(move || {
@@ -202,4 +201,3 @@ pub fn QuickOpenView() -> Element {
         }
     }
 }
-

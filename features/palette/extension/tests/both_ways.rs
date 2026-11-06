@@ -131,7 +131,11 @@ fn exercise(
         views,
         [
             (ID.to_owned(), "palette".to_owned(), "palette".to_owned()),
-            (ID.to_owned(), "quick-open".to_owned(), "quick-open".to_owned()),
+            (
+                ID.to_owned(),
+                "quick-open".to_owned(),
+                "quick-open".to_owned()
+            ),
         ]
     );
     let keys: Vec<(String, String)> = reg
@@ -139,8 +143,11 @@ fn exercise(
         .into_iter()
         .map(|by| (by.item.chord, by.item.action))
         .collect();
-    for (chord, action) in [("⌘K", OPEN_ACTION), ("⌃K", OPEN_ACTION), ("⌘O", OPEN_ANYTHING_ACTION)]
-    {
+    for (chord, action) in [
+        ("⌘K", OPEN_ACTION),
+        ("⌃K", OPEN_ACTION),
+        ("⌘O", OPEN_ANYTHING_ACTION),
+    ] {
         assert!(
             keys.contains(&(chord.to_owned(), action.to_owned())),
             "{chord} → {action}: {keys:?}"
@@ -149,7 +156,11 @@ fn exercise(
     shown.lock().unwrap().clear();
     let _ = run(list, OPEN_ACTION, Value::Null);
     let _ = run(list, OPEN_ANYTHING_ACTION, Value::Null);
-    let _ = run(list, SHOW_ACTION, json!({"overlay": "quick-open", "query": "theme:"}));
+    let _ = run(
+        list,
+        SHOW_ACTION,
+        json!({"overlay": "quick-open", "query": "theme:"}),
+    );
     assert_eq!(
         *shown.lock().unwrap(),
         [

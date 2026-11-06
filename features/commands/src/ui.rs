@@ -30,14 +30,14 @@ use architect_input::{InputContext, InputProcessor, KeymapConfig, MacroKeys};
 use dioxus::prelude::*;
 use lucide_dioxus::Command as CommandIcon;
 
-use architect_palette::fuzzy;
 use crate::keymap::{Keymap, PersonKeymap};
 use crate::keys_ui::{Asking, Recording};
 use crate::kit::{fill, theme};
 use crate::menu::Pick as MenuPick;
-use architect_palette::{Engine, Found, OpenIn, Opener, Openers};
-use architect_palette::{Command, Query, Ranked, Scope, rank};
 use architect_palette::Recents;
+use architect_palette::fuzzy;
+use architect_palette::{Command, Query, Ranked, Scope, rank};
+use architect_palette::{Engine, Found, OpenIn, Opener, Openers};
 
 /// A command a view registered, with what it runs.
 struct Scoped {
@@ -856,7 +856,10 @@ impl Commands {
                     }));
                     if narrowed.is_none() {
                         rows.sort_by(|(a, _), (b, _)| {
-                            b.item.enabled.cmp(&a.item.enabled).then(b.score.cmp(&a.score))
+                            b.item
+                                .enabled
+                                .cmp(&a.item.enabled)
+                                .then(b.score.cmp(&a.score))
                         });
                     }
                 }
@@ -974,6 +977,27 @@ pub(crate) fn chord(e: &KeyboardEvent) -> Option<String> {
     }
     out.push_str(&key);
     Some(out)
+}
+
+/// The palette's slot, mounted once inside the app (over everything,
+/// absolute against the app's root): the overlay on show, drawn by the
+/// extension whose view fills it ([`Commands::set_palette_views`]; the
+/// Command Palette, `features/palette/extension`), and the which-key
+/// panel. With no palette installed it draws no overlay.
+#[component]
+pub fn CommandLayer() -> Element {
+    let commands = try_use_commands();
+    let Some(commands) = commands else {
+        return rsx! {};
+    };
+    let views = (commands.views)();
+    let overlay = (commands.overlay)()
+        .and_then(|o| views.iter().find(|v| v.overlay == o).cloned())
+        .map_or_else(|| rsx! {}, |v| (v.draw)());
+    rsx! {
+        {overlay}
+        crate::WhichKeyPanel {}
+    }
 }
 
 /// The action list window (REAPER's): every command, searchable, with its

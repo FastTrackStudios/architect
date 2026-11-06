@@ -70,7 +70,10 @@ fn disabled_rows_come_last_and_recents_lead_an_empty_query() {
     recents.touch("WORKSPACE_SPLIT_RIGHT");
     let rows = engine.search("", &recents);
     let ids: Vec<&str> = rows.iter().map(|r| r.item.id.as_str()).collect();
-    assert_eq!(ids, ["WORKSPACE_SPLIT_RIGHT", "WORKSPACE_CLOSE_TAB", "THEME_PICK"]);
+    assert_eq!(
+        ids,
+        ["WORKSPACE_SPLIT_RIGHT", "WORKSPACE_CLOSE_TAB", "THEME_PICK"]
+    );
     let rows = engine.search("t", &recents);
     assert_eq!(rows.last().map(|r| r.item.id.as_str()), Some("THEME_PICK"));
 }

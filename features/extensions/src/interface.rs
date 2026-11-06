@@ -311,9 +311,19 @@ fn declared(host: &Host) -> BTreeMap<String, (String, ViewDecl)> {
         .into_iter()
         .flat_map(|l| {
             let id = l.manifest.id.clone();
+            // A view the palette slot draws (`[[palette_views]]`) is an
+            // overlay of the shell's, not a pane.
+            let slotted: Vec<String> = l
+                .manifest
+                .contributes
+                .palette_views
+                .iter()
+                .map(|p| p.view.clone())
+                .collect();
             l.manifest
                 .views
                 .into_iter()
+                .filter(move |v| !slotted.contains(&v.id))
                 .map(move |v| (v.workspace_kind(&id), (id.clone(), v)))
         })
         .collect()
@@ -671,8 +681,9 @@ fn use_palette(ui: ExtensionUi, host: Host, revision: Signal<u64>) {
                 decl.action.clone(),
                 move |out| palette_items(&id, out),
             );
-            let source = architect_commands::FnSource::new(decl.id.clone(), decl.title.clone(), items)
-                .ranking(ranking);
+            let source =
+                architect_commands::FnSource::new(decl.id.clone(), decl.title.clone(), items)
+                    .ranking(ranking);
             let (run, by_id) = if decl.run.is_empty() {
                 (decl.action.clone(), false)
             } else {

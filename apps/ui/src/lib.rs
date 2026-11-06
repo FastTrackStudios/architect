@@ -1193,11 +1193,14 @@ pub fn LabApp() -> Element {
             } else {
                 m
             };
-            let m = m.command("COMMAND_PALETTE_OPEN_ANYTHING").separator().commands([
-                "WORKSPACE_CLOSE_TAB",
-                "WORKSPACE_REOPEN_TAB",
-                "WORKSPACE_CLOSE_OTHER_TABS",
-            ]);
+            let m = m
+                .command("COMMAND_PALETTE_OPEN_ANYTHING")
+                .separator()
+                .commands([
+                    "WORKSPACE_CLOSE_TAB",
+                    "WORKSPACE_REOPEN_TAB",
+                    "WORKSPACE_CLOSE_OTHER_TABS",
+                ]);
             // The account's, where the app has accounts.
             if accounts.is_some() {
                 m.separator().commands([

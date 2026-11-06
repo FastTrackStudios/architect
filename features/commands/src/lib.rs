@@ -42,6 +42,13 @@ mod sidebar;
 #[cfg(feature = "ui")]
 mod ui;
 
+/// The engine the palette ranks through (`architect-palette`): its
+/// model, re-exported where the palette's callers have always found it.
+pub use architect_palette as engine;
+pub use architect_palette::{
+    Command, Effect, Engine, FnSource, Found, Match, OpenIn, OpenItem, Opener, Openers, Query,
+    Ranked, Ranking, Recents, Scope, Source, fuzzy, rank,
+};
 #[cfg(feature = "ui")]
 pub use bridge::{
     CommandInfo, CommandList, CommandsState, Ran, RunCommand, ShowCommands, use_command_actions,
@@ -70,13 +77,6 @@ pub use menu_view::InWindowMenus;
 pub use native::WindowKeys;
 #[cfg(all(feature = "native", target_os = "macos"))]
 pub use native_menu::NativeMenus;
-/// The engine the palette ranks through (`architect-palette`): its
-/// model, re-exported where the palette's callers have always found it.
-pub use architect_palette as engine;
-pub use architect_palette::{
-    Command, Effect, Engine, FnSource, Found, Match, OpenIn, OpenItem, Opener, Openers,
-    Query, Ranked, Ranking, Recents, Scope, Source, fuzzy, rank,
-};
 #[cfg(feature = "ui")]
 pub use sidebar::{sidebar_command, use_sidebar_commands};
 #[cfg(feature = "ui")]

@@ -21,16 +21,16 @@ use dioxus::prelude::*;
 use serde_json::Value;
 
 use crate::custom::{Condition, CustomAction, Runner, Step};
-use architect_palette::fuzzy;
 use crate::keymap::{
     Binding, Clash, EVERYWHERE, Keymap, Layer, PersonKeymap, display_chord, display_keys,
     normalize_keys,
 };
-use architect_palette::{OpenIn, OpenItem, Opener};
-use architect_palette::{Command, Query, Ranked, Scope};
-use crate::params::{Param, args_json, to_ask};
 use crate::kit::{Frame, Kbd, fill, theme};
+use crate::params::{Param, args_json, to_ask};
 use crate::ui::{Commands, try_use_commands};
+use architect_palette::fuzzy;
+use architect_palette::{Command, Query, Ranked, Scope};
+use architect_palette::{OpenIn, OpenItem, Opener};
 
 /// What a palette row does when picked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -371,14 +371,10 @@ impl Commands {
             Pick::Item(item) => {
                 self.close();
                 let mut recents = self.recents;
-                recents.write().touch(&format!("{}:{}", item.source, item.id));
-                let run = self
-                    .sources
-                    .peek()
-                    .borrow()
-                    .runs
-                    .get(&item.source)
-                    .cloned();
+                recents
+                    .write()
+                    .touch(&format!("{}:{}", item.source, item.id));
+                let run = self.sources.peek().borrow().runs.get(&item.source).cloned();
                 if let Some(run) = run {
                     run(item);
                 }

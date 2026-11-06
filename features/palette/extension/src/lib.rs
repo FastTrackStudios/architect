@@ -159,7 +159,10 @@ impl Extension for CommandPalette {
         *HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = Some(host.clone());
         ext.view("palette", Palette);
         ext.view("quick-open", QuickOpen);
-        for (id, overlay) in [(OPEN_ACTION, "palette"), (OPEN_ANYTHING_ACTION, "quick-open")] {
+        for (id, overlay) in [
+            (OPEN_ACTION, "palette"),
+            (OPEN_ANYTHING_ACTION, "quick-open"),
+        ] {
             let h = host.clone();
             ext.action(id, move |_| {
                 let h = h.clone();
