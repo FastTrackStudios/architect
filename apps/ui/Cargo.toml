@@ -37,6 +37,9 @@ architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store", "synced", "appearance"] }
 loro = { workspace = true }
 architect-orgs = { workspace = true, features = ["ui"] }
+# Sign-in (src/accounts.rs): the accounts, their sessions in the keychain,
+# the switcher, the sheet, ACCOUNT_*.
+architect-accounts = { workspace = true, features = ["ui", "keychain"] }
 # `crdt`: the lab's spaces as documents extensions reach (src/extensions.rs).
 architect-extensions = { workspace = true, features = ["ui", "remote", "page", "pickers", "crdt"] }
 # Extensions' ports and the targets of their control surfaces (#311).

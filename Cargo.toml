@@ -51,6 +51,7 @@ members = [
     "features/settings",
     "features/settings/derive",
     "features/orgs",
+    "features/accounts",
     "features/scripting",
     "features/extensions",
     "features/extensions/wasi-guest",
@@ -307,6 +308,7 @@ architect-commands = { path = "features/commands" }
 architect-settings = { path = "features/settings" }
 architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
+architect-accounts = { path = "features/accounts" }
 architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
 architect-extension-wasi = { path = "features/extensions/wasi-guest" }

@@ -19,6 +19,7 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
     let list = use_context::<Arc<ActionList>>();
     let t = shell::use_shell().theme;
     let mut error = use_signal(|| None::<String>);
+    let signed_in_ui = architect_accounts::ui::try_use_accounts();
     let choose = use_callback(move |dir: std::io::Result<PathBuf>| {
         let opened = dir.and_then(|dir| {
             crate::vaults::remember(&dir)?;
@@ -91,9 +92,18 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
                     span { style: "{about}", "Made-up notes, projects, bases and a journal to try things on." }
                 }
                 div { style: "height: 1px; background: {t.rule}; margin: 6px 0;" }
-                div { "data-testid": "first-run-sign-in", style: "{row} opacity: 0.5; cursor: default;",
-                    span { style: label, "Sign in" }
-                    span { style: "{about}", "Coming soon: your account, organizations and sync." }
+                // Optional: the sheet, over the welcome (#188).
+                if let Some(accounts) = signed_in_ui {
+                    button { "data-testid": "first-run-sign-in", style: "{row}",
+                        onclick: move |_| accounts.open(architect_accounts::Sheet::SignIn),
+                        span { style: label, "Sign in" }
+                        span { style: "{about}", "Optional: your account, its devices and, soon, sync." }
+                    }
+                } else {
+                    div { "data-testid": "first-run-sign-in", style: "{row} opacity: 0.5; cursor: default;",
+                        span { style: label, "Sign in" }
+                        span { style: "{about}", "Coming soon: your account, organizations and sync." }
+                    }
                 }
                 if let Some(e) = error() {
                     p { style: "margin: 4px 0 0 0; font-size: 12.5px; color: {t.danger};", "{e}" }

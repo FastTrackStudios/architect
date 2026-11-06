@@ -42,7 +42,10 @@ architect-server = ["server-seaorm"]
 # story fuzz/parity/snapshots and ui-snapshot reach tower-http (4).
 # transport-host: auth-ui (server-axum), example-greeter (host, http,
 # server-axum). lints: architect-mcp.
-ui-reach = 11
+# 2026-11-05 (+1, #188): architect-accounts' `ui` signs in over the
+# issuer's HTTP face, and reqwest 0.12 (architect/http-client) depends on
+# tower-http client-side; no server stack is reached.
+ui-reach = 12
 transport-host = 4
 lints = 1
 
@@ -118,6 +121,11 @@ layer = "L0"
 [[row]]
 package = "architect-orgs"
 layer = "L0"
+
+[[row]]
+package = "architect-accounts"
+layer = "L0"
+note = "accounts and the active one, the secret store's trait, the account store: wasm-clean"
 
 [[row]]
 package = "architect-scripting"
@@ -294,6 +302,12 @@ layer = "L4"
 package = "architect-orgs"
 features = ["ui"]
 layer = "L4"
+
+[[row]]
+package = "architect-accounts"
+features = ["ui", "keychain"]
+layer = "L4"
+note = "the shell's Account item, the switcher, the sign-in sheet, ACCOUNT_*; the issuer over its HTTP face, sessions in the keychain"
 
 [[row]]
 package = "architect-extensions"

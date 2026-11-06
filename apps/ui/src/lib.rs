@@ -12,6 +12,7 @@
 //! in the right, the example extensions (Board, Clicker) loaded. Its own
 //! menu (the flask) switches the shell's style live.
 
+mod accounts;
 mod arrange;
 mod confirm;
 mod embedded;
@@ -753,6 +754,8 @@ pub fn LabApp() -> Element {
     let (theme, appearance) = theme::use_lab_theme(windowed, files, &list);
     // An agent's Delete waits for the person's yes, in the sheet below.
     use_hook(|| confirm::require(&list));
+    // Sign-in (#188): the person's accounts, ACCOUNT_* on the list.
+    let accounts = accounts::use_app_accounts(&list, files);
     // The lab's vault: a folder of markdown, its VAULT_* actions (only
     // with files: a film's run keeps nothing).
     use_hook(|| {
@@ -1155,13 +1158,24 @@ pub fn LabApp() -> Element {
     // The menu bar: a view of the commands, labels and keys and all.
     let menus = architect_commands::MenuBar::standard(Mode::current().name())
         .menu("File", |m| {
-            m.commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
+            let m = m
+                .commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
                 .separator()
                 .commands([
                     "WORKSPACE_CLOSE_TAB",
                     "WORKSPACE_REOPEN_TAB",
                     "WORKSPACE_CLOSE_OTHER_TABS",
+                ]);
+            // The account's, where the app has accounts.
+            if accounts.is_some() {
+                m.separator().commands([
+                    architect_accounts::actions::ids::SIGN_IN,
+                    architect_accounts::actions::ids::SWITCH,
+                    architect_accounts::actions::ids::SIGN_OUT,
                 ])
+            } else {
+                m
+            }
         })
         .menu("Edit", |m| {
             m.instead(architect_commands::Standard::Undo, "LAB_UNDO")
@@ -1363,14 +1377,21 @@ pub fn LabApp() -> Element {
                 .on_press(move |()| lab.redo()),
         );
     }
-    // The sandbox's made-up person; the Architect app's is no one until
-    // sign-in (#188).
-    let account = if Mode::current().is_sandbox() {
-        shell::Account::new("Cody Wright")
+    // The Account item's own rows, under the switcher's.
+    let account_menu = shell::Menu::new()
+        .item("Settings", icon!(Settings2), move |()| settings.show(None))
+        .item("Keys and help", icon!(Keyboard), move |()| {
+            lab.help();
+        });
+    // The signed-in person and the switcher (#188); the sandbox's made-up
+    // person, or no one where a run keeps nothing.
+    let account = match accounts {
+        Some(accounts) => accounts.shell_account(account_menu),
+        None if Mode::current().is_sandbox() => shell::Account::new("Cody Wright")
             .detail("cody@fasttrackstudio.app")
             .presence("#22c55e")
-    } else {
-        shell::Account::new("Not signed in").detail("Sign-in is coming soon")
+            .menu(account_menu),
+        None => shell::Account::new("Not signed in").menu(account_menu),
     };
     rsx! {
         div {
@@ -1415,22 +1436,7 @@ pub fn LabApp() -> Element {
                         },
                         separate: Mode::current().is_sandbox().then_some(capture),
                         brand: rsx! { Brand {} },
-                        account: account.menu(
-                            // No account to leave yet: only what works, and
-                            // the Architect app's sign-in to come (#188).
-                            {
-                                let menu = shell::Menu::new()
-                                    .item("Settings", icon!(Settings2), move |()| settings.show(None))
-                                    .item("Keys and help", icon!(Keyboard), move |()| {
-                                        lab.help();
-                                    });
-                                if Mode::current().is_sandbox() {
-                                    menu
-                                } else {
-                                    menu.item("Sign in", None, |()| {}).note("Coming soon")
-                                }
-                            },
-                        ),
+                        account,
                         workspaces,
                         foot,
                         // The sandbox's made-up projects; the Architect app's
@@ -1470,6 +1476,7 @@ pub fn LabApp() -> Element {
             }
             architect_commands::CommandLayer {}
             architect_commands::ConfirmSheet {}
+            architect_accounts::ui::AccountSheet {}
             architect_settings::SettingsPage {}
             architect_extensions::interface::ExtensionOverlays { ui: ext_ui }
             architect_guide::tour::TourLayer {}
