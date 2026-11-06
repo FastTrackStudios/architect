@@ -51,6 +51,9 @@ const PROJECTS: &str = "architect.projects";
 /// The Time Tracker's service, which it uses when it is there.
 const TIME: &str = "architect.time";
 
+/// Notify, when it is installed: a task's new assignees are told.
+const NOTIFY: &str = "architect.notify";
+
 /// Its status item.
 const DUE: &str = "due";
 
@@ -307,7 +310,67 @@ async fn write_new(mut task: Task, body: &str) -> Result<Task, String> {
     let path = format!("{folder}/{}.md", model::file_name(&task.title));
     task.path = vault::create(&path, &task.frontmatter(), body).await?;
     let _ = refresh().await;
+    notify_assigned(&task, &[]).await;
     Ok(task)
+}
+
+/// An assignee as a person's name: a link's note name (`[[People/Alex]]`
+/// is Alex), else the text.
+fn person(assignee: &str) -> String {
+    let target = model::link_target(assignee);
+    target
+        .rsplit('/')
+        .next()
+        .unwrap_or(target)
+        .trim()
+        .to_owned()
+}
+
+/// Tells each of `task`'s assignees not in `before` through Notify (when
+/// it is installed): "<you> assigned you <task>", going to the task.
+/// Whoever assigns is not told of their own assignment. The names told.
+async fn notify_assigned(task: &Task, before: &[String]) -> Vec<String> {
+    let old: Vec<String> = before.iter().map(|a| person(a).to_lowercase()).collect();
+    let new: Vec<String> = task
+        .assignees
+        .iter()
+        .map(|a| person(a))
+        .filter(|p| !p.is_empty() && !old.contains(&p.to_lowercase()))
+        .collect();
+    if new.is_empty() {
+        return Vec::new();
+    }
+    let actor = match vault::service(NOTIFY, "me", json!({})).await {
+        Some(Ok(v)) => v
+            .get("me")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        // No Notify: nobody to tell.
+        None => return Vec::new(),
+        Some(Err(_)) => String::new(),
+    };
+    let title = format!(
+        "{} assigned you {}",
+        if actor.is_empty() { "Someone" } else { &actor },
+        task.title
+    );
+    let mut told = Vec::new();
+    for who in new {
+        let post = json!({
+            "to": who, "kind": "task-assigned", "title": title, "actor": actor,
+            "body": task.due.as_ref().map(|d| format!("Due {d}")).unwrap_or_default(),
+            "source": { "service": SERVICE, "entity": task.path, "href": task.path },
+        });
+        if let Some(Ok(v)) = vault::service(NOTIFY, "post", post).await
+            && v.get("sent")
+                .and_then(Value::as_array)
+                .is_some_and(|s| !s.is_empty())
+        {
+            told.push(who);
+        }
+    }
+    told
 }
 
 async fn find(path: &str) -> Result<Task, String> {
@@ -434,7 +497,12 @@ async fn update(args: Value) -> Result<Value, String> {
         return Err("nothing to change: give a property to set".to_owned());
     }
     let after = find(&task.path).await?;
-    Ok(json!({ "task": task_json(&after), "changed": changed }))
+    let notified = if changed.contains(&keys::ASSIGNEES) {
+        notify_assigned(&after, &task.assignees).await
+    } else {
+        Vec::new()
+    };
+    Ok(json!({ "task": task_json(&after), "changed": changed, "notified": notified }))
 }
 
 async fn me() -> String {

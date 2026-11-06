@@ -1502,6 +1502,8 @@ dependencies = [
  "architect-bases",
  "architect-extensions",
  "architect-settings",
+ "architect-tasks",
+ "architect-threads",
  "architect-workspace-hack",
  "chrono",
  "dioxus",

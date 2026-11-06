@@ -30,6 +30,9 @@ architect-settings = { workspace = true }
 # The app's side in a test: a vault's actions and Bases' over a folder.
 architect-bases = { workspace = true, features = ["actions"] }
 vault = { workspace = true, features = ["actions"] }
+# Threads and Tasks, to test the wiring: a mention and an assignment notify.
+architect-threads = { workspace = true }
+architect-tasks = { workspace = true }
 futures = "0.3"
 tempfile = "3"
 
