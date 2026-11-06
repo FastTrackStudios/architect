@@ -54,9 +54,9 @@ pub struct BrowserWait {
 }
 
 #[derive(Default)]
-pub(crate) struct State {
+pub struct State {
     /// The current org's enrolled devices, as last fetched from its host.
-    pub(crate) org_devices: Option<Result<Vec<architect_devices::Peer>, String>>,
+    pub org_devices: Option<Result<Vec<architect_devices::Peer>, String>>,
     sheet: Option<Sheet>,
     status: Status,
     browser: Option<BrowserWait>,

@@ -93,11 +93,9 @@ impl OrgLane {
             IssuerOrgs(issuer),
             members.clone(),
         );
-        let gate = PermissionsGate::new(
-            Arc::clone(&engine) as Arc<dyn PermissionEngine>,
-            Arc::new(identity),
-        )
-        .permit(device_enrolment_service_descriptor(), &ENROL_PERMITS);
+        let shared: Arc<dyn PermissionEngine> = engine.clone();
+        let gate = PermissionsGate::new(shared, Arc::new(identity))
+            .permit(device_enrolment_service_descriptor(), &ENROL_PERMITS);
         let router = LayerRouter::new().with(
             device_enrolment_service_descriptor(),
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
@@ -262,6 +260,7 @@ pub async fn resolve(issuer: &str, token: &str, slug: &str) -> Result<NodeOrg, S
 
 /// The org a node resolved once, kept in its data dir so it starts with
 /// the issuer down.
+#[must_use]
 pub fn remembered(data: &Path, slug: &str) -> Option<NodeOrg> {
     let text = std::fs::read_to_string(org_file(data)).ok()?;
     let (kept, id) = text.trim().split_once('=')?;

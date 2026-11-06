@@ -202,10 +202,8 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
     };
     let mut access = NodeAccess::new(admission.clone(), Shares::new());
     if let Some(lane) = &lane {
-        access = access.org_docs(
-            lane.org.id.0.clone(),
-            Arc::clone(&lane.engine) as Arc<dyn architect_permissions::PermissionEngine>,
-        );
+        let engine: Arc<dyn architect_permissions::PermissionEngine> = lane.engine.clone();
+        access = access.org_docs(lane.org.id.0.clone(), engine);
     }
     let registry = collab.registry().clone().with_authorizer({
         let access = access.clone();
