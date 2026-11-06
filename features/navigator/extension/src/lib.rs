@@ -605,14 +605,15 @@ fn run(
             write(&nav, on_open, out)
         }
         "NAVIGATOR_DROP" => {
-            let drag = if let Some(f) = text(args, "drag_folder") {
-                Drag::Folder(f.trim_matches('/').to_owned())
-            } else {
-                text(args, "drag_tag").map_or_else(
-                    || Drag::Notes(paths_of(args, &nav.state.peek())),
-                    |t| Drag::Tag(t.to_owned()),
-                )
-            };
+            let drag = text(args, "drag_folder").map_or_else(
+                || {
+                    text(args, "drag_tag").map_or_else(
+                        || Drag::Notes(paths_of(args, &nav.state.peek())),
+                        |t| Drag::Tag(t.to_owned()),
+                    )
+                },
+                |f| Drag::Folder(f.trim_matches('/').to_owned()),
+            );
             let on = match args.get("to").and_then(Value::as_str) {
                 Some(f) => NavTarget::Folder(f.trim_matches('/').to_owned()),
                 None => target_of(args)?,
@@ -767,7 +768,7 @@ fn run(
             nav.update(|s| s.select_profile(n))?;
             Ok(profile_state(&nav.state.peek()))
         }
-        _ => files(nav, on_open, id, args),
+        _ => files(&nav, on_open, id, args),
     }
 }
 
@@ -819,7 +820,7 @@ fn new_note_of(args: &Value, s: &NavigatorState) -> Result<NewNote, String> {
 
 /// A note made, as an action answers it: its path, the cursor, what to
 /// say; or the prompts it needs answered.
-fn made(nav: Navigator, on_open: EventHandler<Open>, m: Made) -> Result<Value, String> {
+fn made(nav: &Navigator, on_open: EventHandler<Open>, m: Made) -> Result<Value, String> {
     match m {
         Made::Ask(labels) => Err(format!(
             "answer its prompts first: `prompts` {{{}}}",
@@ -848,11 +849,12 @@ fn made(nav: Navigator, on_open: EventHandler<Open>, m: Made) -> Result<Value, S
 
 /// The file operations and templates (#339).
 fn files(
-    nav: Navigator,
+    nav: &Navigator,
     on_open: EventHandler<Open>,
     id: &str,
     args: &Value,
 ) -> Result<Value, String> {
+    let nav = *nav;
     let ok = |nav: Navigator| Ok(state(&nav.state.peek()));
     let done = |out: Result<Outcome, String>| -> Result<Value, String> {
         nav.write(out?, on_open, None)?;
@@ -862,7 +864,7 @@ fn files(
         "NAVIGATOR_NEW_NOTE" => {
             let req = new_note_of(args, &nav.state.peek())?;
             let m = nav.state.peek().new_note(&req)?;
-            made(nav, on_open, m)
+            made(&nav, on_open, m)
         }
         "NAVIGATOR_NEW_FOLDER" => {
             let name = text(args, "name").ok_or("the folder's `name`?")?;
@@ -893,12 +895,11 @@ fn files(
             }
         }
         "NAVIGATOR_DUPLICATE" => {
-            match text(args, "folder").filter(|_| text(args, "path").is_none()) {
-                Some(f) => done(nav.state.peek().duplicate_folder(f)),
-                None => {
-                    let p = one_path(args, &nav.state.peek())?;
-                    done(nav.state.peek().duplicate(&p))
-                }
+            if let Some(f) = text(args, "folder").filter(|_| text(args, "path").is_none()) {
+                done(nav.state.peek().duplicate_folder(f))
+            } else {
+                let p = one_path(args, &nav.state.peek())?;
+                done(nav.state.peek().duplicate(&p))
             }
         }
         "NAVIGATOR_MOVE_TO" | "NAVIGATOR_COPY_TO" => {
@@ -1033,7 +1034,7 @@ fn files(
             let asked = new_note_of(args, &nav.state.peek())?;
             req.prompts = asked.prompts;
             let m = nav.state.peek().new_note(&req)?;
-            made(nav, on_open, m)
+            made(&nav, on_open, m)
         }
         other => Err(format!("Navigator has no action {other}")),
     }
