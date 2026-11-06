@@ -64,6 +64,10 @@ pub enum PromptKind {
     AddTag(Vec<String>),
     /// A value of `key` for these notes.
     SetValue { key: String, paths: Vec<String> },
+    /// A property key's new name.
+    RenameKey(String),
+    /// A value's new name, of a key.
+    RenameValue { key: String, value: String },
     /// A new folder's name, in this one.
     NewFolder(String),
     /// A new note's name, in this folder, of this kind.
@@ -563,6 +567,21 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     MenuAct::SetValue(paths, key.clone()),
                 ));
             }
+            // `buildPropertyMenu`: the key's rename and delete, and (ours)
+            // a value's rename.
+            match value {
+                None => {
+                    items.push((format!("Rename {name}…"), MenuAct::RenameKey(key.clone())));
+                    items.push((
+                        format!("Delete {name} from every note"),
+                        MenuAct::DeleteKey(key.clone()),
+                    ));
+                }
+                Some(v) => items.push((
+                    "Rename value…".to_owned(),
+                    MenuAct::RenameValue(key.clone(), v.clone()),
+                )),
+            }
         }
         NavTarget::Folder(f) => {
             // `buildFolderMenu`: make things in it, then change it.
@@ -753,6 +772,9 @@ enum MenuAct {
     ResetTagOrder,
     SetProperty(Vec<String>, String, Option<String>),
     SetValue(Vec<String>, String),
+    RenameKey(String),
+    DeleteKey(String),
+    RenameValue(String, String),
     /// A shortcut added (`true`) or taken out.
     Shortcut(Shortcut, bool),
     Hide(HideTarget),
@@ -826,6 +848,50 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             }));
             return;
         }
+        MenuAct::RenameKey(key) => {
+            let name = nav
+                .state
+                .peek()
+                .property_tree()
+                .key(&key)
+                .map_or_else(|| key.clone(), |k| k.name.clone());
+            let mut prompt = nav.prompt;
+            prompt.set(Some(Prompt {
+                title: format!("Rename property {name}"),
+                value: name,
+                kind: PromptKind::RenameKey(key),
+            }));
+            return;
+        }
+        MenuAct::RenameValue(key, value) => {
+            let shown = nav
+                .state
+                .peek()
+                .property_tree()
+                .value(&key, &value)
+                .map_or_else(|| value.clone(), |n| n.written.clone());
+            let mut prompt = nav.prompt;
+            prompt.set(Some(Prompt {
+                title: format!("Rename {shown}"),
+                value: shown,
+                kind: PromptKind::RenameValue { key, value },
+            }));
+            return;
+        }
+        MenuAct::DeleteKey(key) => match nav.state.peek().delete_property_key(&key) {
+            Ok((out, n)) => {
+                nav.ask(
+                    format!(
+                        "Delete {key} from {n} note{}?",
+                        if n == 1 { "" } else { "s" }
+                    ),
+                    "Delete",
+                    AskThen::Act(out),
+                );
+                return;
+            }
+            Err(e) => Err(e),
+        },
         MenuAct::Delete(t) => match nav.state.peek().delete_tag(&t) {
             Ok(out) => {
                 nav.ask(
@@ -1001,6 +1067,25 @@ fn submit_prompt(
     let s = nav.state.peek();
     let out = match kind {
         PromptKind::RenameTag(from) => s.rename_tag(from, text),
+        PromptKind::RenameKey(key) => {
+            let (out, both) = s.rename_property_key(key, text)?;
+            if both > 0 {
+                drop(s);
+                // `confirmRenameConflicts`: theirs is replaced.
+                nav.ask(
+                    format!(
+                        "{both} note{} have {} already: their value is replaced by {key}'s. Rename?",
+                        if both == 1 { "" } else { "s" },
+                        text.trim()
+                    ),
+                    "Rename",
+                    AskThen::Act(out),
+                );
+                return Ok(None);
+            }
+            Ok(out)
+        }
+        PromptKind::RenameValue { key, value } => s.rename_property_value(key, value, text),
         PromptKind::AddTag(paths) => s.add_tag(paths, text),
         PromptKind::SetValue { key, paths } => s.set_property(paths, key, Some(text)),
         PromptKind::NewFolder(parent) => s.new_folder(parent, text),

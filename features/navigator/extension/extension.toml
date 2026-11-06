@@ -373,6 +373,22 @@ effect = "destructive"
 params = '{"type":"object","properties":{"tag":{"type":"string"}},"required":["tag"]}'
 
 [[actions]]
+id = "NAVIGATOR_PROPERTY_RENAME"
+name = "Rename a property"
+description = "Renames property key `key` to `to` in every note that has it (a note with `to` already takes `key`'s value), and the settings that list it; with `value`, renames that value of the key instead (a text value, or that element of a list)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"},"to":{"type":"string"}},"required":["key","to"]}'
+
+[[actions]]
+id = "NAVIGATOR_PROPERTY_DELETE"
+name = "Delete a property"
+description = "Takes property key `key` off every note, and out of the settings that list it."
+group = "Navigator"
+effect = "destructive"
+params = '{"type":"object","properties":{"key":{"type":"string"}},"required":["key"]}'
+
+[[actions]]
 id = "NAVIGATOR_TAG_NEW_NOTE"
 name = "New note in a tag"
 description = "Makes a note tagged `tag` beside the selected note (or the one open, or at the root), and opens it."

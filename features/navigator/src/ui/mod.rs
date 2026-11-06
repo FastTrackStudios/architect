@@ -596,6 +596,11 @@ impl Navigator {
         // A tag renamed or deleted: its colours, order and selection
         // follow.
         self.update(|s| s.after_write(&ops));
+        // A property key renamed or deleted: the settings that list it.
+        let mut next = self.settings.read();
+        if next.after_property_ops(&ops) {
+            self.settings.update(move |s| *s = next);
+        }
         if let Some((path, how)) = open {
             on_open.call(Open {
                 path,

@@ -259,6 +259,18 @@ pub enum FileOp {
     RenameTag { from: String, to: String },
     /// Take a tag, and the tags below it, off every note.
     DeleteTag(String),
+    /// Rename a frontmatter key (any case) in every note that has it; a
+    /// note with `to` already takes `from`'s value (`renamePropertyKeyInFile`).
+    RenamePropertyKey { from: String, to: String },
+    /// Take a frontmatter key (any case) off every note.
+    DeletePropertyKey(String),
+    /// Rename one value of a key in every note: a text value, or that
+    /// element of a list.
+    RenamePropertyValue {
+        key: String,
+        from: String,
+        to: String,
+    },
     /// Copy a file (a note duplicated, or dropped with the copy key held);
     /// an error when `to` is there already. Links in it stay as written.
     Copy { from: String, to: String },
@@ -787,6 +799,14 @@ impl MemorySource {
                 self.retag(paths, |t| (!t.is_empty()).then(Vec::new))?;
             }
             FileOp::RenameTag { from, to } => self.retag_everywhere(from, Some(to))?,
+            op @ (FileOp::RenamePropertyKey { .. }
+            | FileOp::DeletePropertyKey(_)
+            | FileOp::RenamePropertyValue { .. }) => {
+                let files = self.files();
+                for each in crate::properties::expand(op, &files) {
+                    self.write(std::slice::from_ref(&each))?;
+                }
+            }
             FileOp::DeleteTag(tag) => self.retag_everywhere(tag, None)?,
             FileOp::Copy { from, to } => {
                 if self.file(to).is_some() {

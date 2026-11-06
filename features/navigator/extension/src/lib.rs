@@ -144,6 +144,8 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_TAG_DELETE",
     "NAVIGATOR_TAG_NEW_NOTE",
     "NAVIGATOR_PROPERTY_SET",
+    "NAVIGATOR_PROPERTY_RENAME",
+    "NAVIGATOR_PROPERTY_DELETE",
     "NAVIGATOR_DROP",
     "NAVIGATOR_SEARCH",
     "NAVIGATOR_TOGGLE_SEARCH",
@@ -661,6 +663,20 @@ fn run(
         "NAVIGATOR_TAG_DELETE" => {
             let tag = text(args, "tag").ok_or("`tag`: the tag to delete")?;
             let out = nav.state.peek().delete_tag(tag)?;
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_PROPERTY_RENAME" => {
+            let key = text(args, "key").ok_or("`key`: the property to rename")?;
+            let to = text(args, "to").ok_or("`to`: its new name")?;
+            let out = match text(args, "value") {
+                Some(v) => nav.state.peek().rename_property_value(key, v, to)?,
+                None => nav.state.peek().rename_property_key(key, to)?.0,
+            };
+            write(&nav, on_open, out)
+        }
+        "NAVIGATOR_PROPERTY_DELETE" => {
+            let key = text(args, "key").ok_or("`key`: the property to delete")?;
+            let (out, _) = nav.state.peek().delete_property_key(key)?;
             write(&nav, on_open, out)
         }
         "NAVIGATOR_TAG_NEW_NOTE" => {

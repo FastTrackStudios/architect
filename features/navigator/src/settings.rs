@@ -793,6 +793,52 @@ impl NavigatorSettings {
     }
 }
 
+impl NavigatorSettings {
+    /// The keys its lists name moved as a property key was renamed or
+    /// deleted (`updateSettingsAfterRename`, `updateSettingsAfterDelete`):
+    /// `property_keys`, `list_properties` and `feature_image_properties`.
+    /// Whether any changed.
+    pub fn after_property_ops(&mut self, ops: &[crate::source::FileOp]) -> bool {
+        use crate::source::FileOp;
+        let mut changed = false;
+        for op in ops {
+            let (from, to) = match op {
+                FileOp::RenamePropertyKey { from, to } => (from.as_str(), Some(to.as_str())),
+                FileOp::DeletePropertyKey(key) => (key.as_str(), None),
+                _ => continue,
+            };
+            let from = crate::properties::fold(from);
+            for list in [
+                &mut self.property_keys,
+                &mut self.list_properties,
+                &mut self.feature_image_properties,
+            ] {
+                let mut out: Vec<String> = Vec::new();
+                let mut moved = false;
+                for k in list.split(',').map(str::trim).filter(|k| !k.is_empty()) {
+                    if crate::properties::fold(k) == from {
+                        moved = true;
+                        if let Some(to) = to
+                            && !out
+                                .iter()
+                                .any(|o| crate::properties::fold(o) == crate::properties::fold(to))
+                        {
+                            out.push(to.to_owned());
+                        }
+                    } else {
+                        out.push(k.to_owned());
+                    }
+                }
+                if moved {
+                    *list = out.join(", ");
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+}
+
 impl Default for NavigatorSettings {
     fn default() -> Self {
         Self {

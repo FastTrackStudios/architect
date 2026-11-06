@@ -290,6 +290,15 @@ impl VaultSource {
                 let changed = vault.edit_tags_everywhere(&TagEdit::Delete(tag))?;
                 self.modified(&changed);
             }
+            // Note by note, as the property ops they make.
+            op @ (FileOp::RenamePropertyKey { .. }
+            | FileOp::DeletePropertyKey(_)
+            | FileOp::RenamePropertyValue { .. }) => {
+                let files = self.files();
+                for each in crate::properties::expand(op, &files) {
+                    self.write(std::slice::from_ref(&each))?;
+                }
+            }
             FileOp::Copy { from, to } => {
                 let changes = vault.copy_file(from, to)?;
                 self.changed(&changes);

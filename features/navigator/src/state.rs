@@ -1882,6 +1882,121 @@ impl NavigatorState {
     /// had (a list becomes that one value); notes that have it already are
     /// left.
     ///
+    /// Renames property key `key` to `to` in every note that has it
+    /// (`PropertyOperations.renamePropertyKey`), and how many notes have
+    /// `to` already: theirs is replaced by `key`'s, so the person is asked
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// The Properties row, an empty name, the same name, or no note has it.
+    pub fn rename_property_key(&self, key: &str, to: &str) -> Result<(Outcome, usize), String> {
+        let to = to.trim();
+        if key.trim().is_empty() || key == ROOT {
+            return Err("Pick a property to rename".to_owned());
+        }
+        if to.is_empty() || to.contains(['\n', ':']) {
+            return Err(format!("{to:?} cannot be a property's name"));
+        }
+        let name = self
+            .property_tree
+            .key(key)
+            .map_or_else(|| key.trim().to_owned(), |k| k.name.clone());
+        if name == to {
+            return Err(format!("{name} is called that already"));
+        }
+        let (from_k, to_k) = (properties::fold(&name), properties::fold(to));
+        let mut having = 0;
+        let mut both = 0;
+        for f in self.index.files() {
+            let has = |k: &str| f.properties.iter().any(|(x, _)| properties::fold(x) == k);
+            if has(&from_k) {
+                having += 1;
+                if from_k != to_k && has(&to_k) {
+                    both += 1;
+                }
+            }
+        }
+        if having == 0 {
+            return Err(format!("No note has {name}"));
+        }
+        Ok((
+            write(FileOp::RenamePropertyKey {
+                from: name,
+                to: to.to_owned(),
+            }),
+            both,
+        ))
+    }
+
+    /// Takes property key `key` off every note
+    /// (`PropertyOperations.deletePropertyKey`).
+    ///
+    /// # Errors
+    ///
+    /// The Properties row, or no note has it.
+    pub fn delete_property_key(&self, key: &str) -> Result<(Outcome, usize), String> {
+        if key.trim().is_empty() || key == ROOT {
+            return Err("Pick a property to delete".to_owned());
+        }
+        let name = self
+            .property_tree
+            .key(key)
+            .map_or_else(|| key.trim().to_owned(), |k| k.name.clone());
+        let n = self
+            .index
+            .files()
+            .filter(|f| {
+                f.properties
+                    .iter()
+                    .any(|(k, _)| properties::fold(k) == properties::fold(&name))
+            })
+            .count();
+        if n == 0 {
+            return Err(format!("No note has {name}"));
+        }
+        Ok((write(FileOp::DeletePropertyKey(name)), n))
+    }
+
+    /// Renames value `value` of key `key` to `to` in every note: a text
+    /// value, or that element of a list.
+    ///
+    /// # Errors
+    ///
+    /// An empty value, the same value, or no note has it.
+    pub fn rename_property_value(
+        &self,
+        key: &str,
+        value: &str,
+        to: &str,
+    ) -> Result<Outcome, String> {
+        let to = to.trim();
+        if to.is_empty() {
+            return Err("Give the value a name".to_owned());
+        }
+        let written = self
+            .property_tree
+            .value(key, value)
+            .map_or_else(|| value.trim().to_owned(), |n| n.written.clone());
+        if properties::value_path(&written) == properties::value_path(to) && written == to {
+            return Err(format!("{written} is called that already"));
+        }
+        let name = self
+            .property_tree
+            .key(key)
+            .map_or_else(|| key.trim().to_owned(), |k| k.name.clone());
+        let op = FileOp::RenamePropertyValue {
+            key: name.clone(),
+            from: written.clone(),
+            to: to.to_owned(),
+        };
+        let files: Vec<NoteFile> = self.index.files().cloned().collect();
+        if properties::expand(&op, &files).is_empty() {
+            return Err(format!("No note has {name}: {written}"));
+        }
+        Ok(write(op))
+    }
+
     /// # Errors
     ///
     /// No notes, one that is not a Markdown note, no key, or every note has
@@ -2042,7 +2157,7 @@ impl NavigatorState {
     /// open, and the selection and search with it (`handleTagRename`,
     /// `handleTagDelete`, only once the notes are done).
     pub fn after_write(&mut self, ops: &[FileOp]) {
-        let mut changed = false;
+        let mut changed = self.after_property_ops(ops);
         for op in ops {
             let (from, to) = match op {
                 FileOp::RenameTag { from, to } => (tag_key(from), Some(to.as_str())),
@@ -2122,6 +2237,100 @@ impl NavigatorState {
         if changed {
             self.rebuild();
         }
+    }
+
+    /// A property key or value renamed or deleted: its paints, its place
+    /// in the order, whether it is open, and the selection and search
+    /// follow (`updateSettingsAfterRename`'s view half). Whether anything did.
+    fn after_property_ops(&mut self, ops: &[FileOp]) -> bool {
+        let mut changed = false;
+        for op in ops {
+            // Ids as the tree and paints have them: `key:<key>[=<value>]`,
+            // `property:<key>[=<value>]`.
+            let (from, to): (String, Option<String>) = match op {
+                FileOp::RenamePropertyKey { from, to } => {
+                    (properties::key_id(from), Some(properties::key_id(to)))
+                }
+                FileOp::DeletePropertyKey(key) => (properties::key_id(key), None),
+                FileOp::RenamePropertyValue { key, from, to } => (
+                    properties::value_id(key, from),
+                    Some(properties::value_id(key, to)),
+                ),
+                _ => continue,
+            };
+            changed = true;
+            let is_value = from.contains('=');
+            // `key:k` names k and its values (`key:k=v`); `key:k=v` itself.
+            let moved = |id: &str| -> Option<Option<String>> {
+                if id == from {
+                    return Some(to.clone());
+                }
+                if !is_value && let Some(rest) = id.strip_prefix(&format!("{from}=")) {
+                    return Some(to.as_ref().map(|t| format!("{t}={rest}")));
+                }
+                None
+            };
+            // A paint's key (`property:<key>[=<value>]`) as an id, and back.
+            let as_id = |k: &str| -> Option<String> {
+                let p = k.strip_prefix("property:")?;
+                Some(p.split_once('=').map_or_else(
+                    || properties::key_id(p),
+                    |(k, v)| properties::value_id(k, v),
+                ))
+            };
+            let as_paint = |id: &str| -> Option<String> {
+                let (k, v) = properties::parse_id(id)?;
+                Some(colour_key(&v.map_or_else(
+                    || format!("property:{k}"),
+                    |v| format!("property:{k}={v}"),
+                )))
+            };
+            let repaint = |map: BTreeMap<String, String>| -> BTreeMap<String, String> {
+                map.into_iter()
+                    .filter_map(|(k, c)| match as_id(&k).map(|id| moved(&id)) {
+                        Some(Some(Some(new))) => Some((as_paint(&new).unwrap_or(k), c)),
+                        Some(Some(None)) => None,
+                        _ => Some((k, c)),
+                    })
+                    .collect()
+            };
+            self.colours = repaint(std::mem::take(&mut self.colours));
+            self.icons = repaint(std::mem::take(&mut self.icons));
+            self.backgrounds = repaint(std::mem::take(&mut self.backgrounds));
+            self.expanded_props = std::mem::take(&mut self.expanded_props)
+                .into_iter()
+                .filter_map(|k| moved(&k).unwrap_or(Some(k)))
+                .collect();
+            // The order holds keys, folded.
+            if !is_value {
+                self.property_order = std::mem::take(&mut self.property_order)
+                    .into_iter()
+                    .filter_map(|k| match moved(&properties::key_id(&k)) {
+                        Some(new) => new
+                            .as_deref()
+                            .and_then(properties::parse_id)
+                            .map(|(k, _)| k),
+                        None => Some(k),
+                    })
+                    .collect();
+            }
+            if let NavTarget::Property { key, value } = self.target() {
+                let id = value.as_ref().map_or_else(
+                    || properties::key_id(&key),
+                    |v| properties::value_id(&key, v),
+                );
+                if let Some(new) = moved(&id) {
+                    let next = new
+                        .as_deref()
+                        .and_then(properties::parse_id)
+                        .map_or(NavTarget::Folder(String::new()), |(key, value)| {
+                            NavTarget::Property { key, value }
+                        });
+                    self.selection.select_target(next, None);
+                }
+            }
+        }
+        changed
     }
 
     /// Moves root tag `key` (or [`UNTAGGED`]) `by` places in the manual
