@@ -286,12 +286,9 @@ impl Navigator {
             }
             s.full_text_words()
         };
-        let hits = self
-            .source()
-            .search_text(&words)
-            .map(|paths| paths.into_iter().collect());
+        let hits = self.source().search_excerpts(&words);
         let mut state = self.state;
-        state.write().set_full_text(hits);
+        state.write().set_full_text_hits(hits);
     }
 
     /// Selects the vault's root with the notes of every folder below (the

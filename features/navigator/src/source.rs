@@ -373,6 +373,14 @@ pub trait NavigatorSource: Send + Sync {
         None
     }
 
+    /// As [`Self::search_text`], each note with the line it matched in (as
+    /// Omnisearch gives an `excerpt`); an empty one when the source has
+    /// none.
+    fn search_excerpts(&self, query: &str) -> Option<Vec<(String, String)>> {
+        self.search_text(query)
+            .map(|paths| paths.into_iter().map(|p| (p, String::new())).collect())
+    }
+
     /// The text of the file at `path` (a template, notes to merge); `None`
     /// when there is none or the source cannot read text (the default).
     fn read_text(&self, path: &str) -> Option<String> {

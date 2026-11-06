@@ -319,6 +319,8 @@ pub struct NavigatorState {
     /// With the full-text provider: the notes whose text holds the
     /// search's words, as the source found them.
     full_text: Option<BTreeSet<String>>,
+    /// Each full-text match's line, by path.
+    excerpts: BTreeMap<String, String>,
     /// The words the full-text matches are for.
     full_text_for: Option<String>,
     /// The vault as the source has it; `index` is what of it shows.
@@ -358,6 +360,7 @@ impl NavigatorState {
             search: FilterSearch::default(),
             search_open: false,
             full_text: None,
+            excerpts: BTreeMap::new(),
             full_text_for: None,
             shortcuts_folded: false,
             recent_folded: false,
@@ -1537,6 +1540,24 @@ impl NavigatorState {
     /// The notes whose text holds the search's words (the source's full
     /// text search), or `None` (a source that cannot) to match the words
     /// against names.
+    /// The full text's matches with the line each matched in: the list
+    /// shows that line in place of the preview, its words marked
+    /// (`useOmnisearchListResult`'s excerpt).
+    pub fn set_full_text_hits(&mut self, hits: Option<Vec<(String, String)>>) {
+        self.excerpts = hits
+            .as_ref()
+            .map(|h| h.iter().filter(|(_, e)| !e.is_empty()).cloned().collect())
+            .unwrap_or_default();
+        self.set_full_text(hits.map(|h| h.into_iter().map(|(p, _)| p).collect()));
+    }
+
+    /// The line the full text matched `path` in, while its matches show.
+    #[must_use]
+    pub fn excerpt(&self, path: &str) -> Option<&str> {
+        self.full_text.as_ref()?;
+        self.excerpts.get(path).map(String::as_str)
+    }
+
     pub fn set_full_text(&mut self, hits: Option<BTreeSet<String>>) {
         self.full_text_for = Some(self.full_text_words());
         if hits != self.full_text {

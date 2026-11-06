@@ -840,7 +840,14 @@ fn ListRows(
                         path: path.clone(),
                         marks: crate::search::highlights(&name, &marked),
                         name,
-                        preview: f.preview.clone().unwrap_or_default(),
+                        // The line the full text matched, else the preview.
+                        preview: s
+                            .excerpt(path)
+                            .map_or_else(|| f.preview.clone().unwrap_or_default(), str::to_owned),
+                        preview_marks: s
+                            .excerpt(path)
+                            .map(|e| crate::search::highlights(e, s.search().words()))
+                            .unwrap_or_default(),
                         date: date_label(at, clock),
                         parent: parent.clone(),
                         selected: s.selection().is_selected(path),
@@ -964,6 +971,8 @@ struct FileItem {
     background: Option<String>,
     icon_only: bool,
     preview: String,
+    /// The search's words in the preview (a full-text match's line).
+    preview_marks: Vec<std::ops::Range<usize>>,
     date: String,
     parent: Option<String>,
     selected: bool,
@@ -998,6 +1007,7 @@ fn FileRow(
         background,
         icon_only,
         preview,
+        preview_marks,
         date,
         parent,
         selected,
@@ -1121,7 +1131,17 @@ fn FileRow(
                 if lines.preview > 0 && !preview.trim().is_empty() {
                     div { class: "nv-file-preview",
                         style: "flex:0 0 auto; max-height:{preview_h}px; line-height:18px; overflow:hidden; color:var(--nv-muted); font-size:12px;",
-                        "{preview}"
+                        if preview_marks.is_empty() {
+                            "{preview}"
+                        } else {
+                            for (i, (text, mark)) in marked_parts(&preview, &preview_marks).into_iter().enumerate() {
+                                if mark {
+                                    mark { key: "{i}", class: "nv-search-highlight", "{text}" }
+                                } else {
+                                    span { key: "{i}", "{text}" }
+                                }
+                            }
+                        }
                     }
                 }
                 if lines.meta {

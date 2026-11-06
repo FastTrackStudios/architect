@@ -405,6 +405,26 @@ impl NavigatorSource for VaultSource {
         )
     }
 
+    fn search_excerpts(&self, query: &str) -> Option<Vec<(String, String)>> {
+        Some(
+            self.inner
+                .vault
+                .search_text(query, usize::MAX)
+                .into_iter()
+                .map(|h| {
+                    (
+                        h.path,
+                        if h.line == 0 {
+                            String::new()
+                        } else {
+                            h.excerpt
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
     fn read_text(&self, path: &str) -> Option<String> {
         self.inner.vault.text(path)
     }

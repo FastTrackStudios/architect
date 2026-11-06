@@ -372,3 +372,32 @@ fn matched_words_are_marked_in_names_and_tags_in_the_tree() {
     assert_eq!(e.tag_match("a"), Some(SearchMatch::Include));
     assert_eq!(e.tag_match("b"), Some(SearchMatch::Exclude));
 }
+
+/// The full text's matches with their lines (Omnisearch's excerpts): the
+/// line stands for the preview while they show.
+#[test]
+fn full_text_matches_keep_their_lines() {
+    use architect_navigator::{
+        MemorySource, NavigatorSettings, NavigatorState, NoteFile, VaultIndex,
+    };
+    let src = MemorySource::new("Lab")
+        .with_file(NoteFile::new("A.md", 1, 1))
+        .with_file(NoteFile::new("B.md", 1, 1));
+    let mut s = NavigatorState::new(
+        VaultIndex::read(&src),
+        NavigatorSettings {
+            search_provider: architect_navigator::SearchProvider::FullText,
+            ..NavigatorSettings::default()
+        },
+        architect_navigator::list::Clock { now: 1, offset: 0 },
+    );
+    s.set_search("mixing");
+    s.set_full_text_hits(Some(vec![
+        ("A.md".into(), "We start mixing on Monday".into()),
+        ("B.md".into(), String::new()),
+    ]));
+    assert_eq!(s.excerpt("A.md"), Some("We start mixing on Monday"));
+    assert_eq!(s.excerpt("B.md"), None, "a title match has no line");
+    s.set_full_text_hits(None);
+    assert_eq!(s.excerpt("A.md"), None);
+}
