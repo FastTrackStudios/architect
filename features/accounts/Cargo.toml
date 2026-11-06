@@ -1,0 +1,76 @@
+[package]
+name = "architect-accounts"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Accounts on an issuer: who is signed in, their sessions in the platform keychain, sign-in by browser code or password, the account switcher, the sign-in sheet and the account's devices"
+
+# skills/architect/references/fts-auth.md. The default set is the model —
+# accounts, the active one, the secret store's trait and the account store
+# (metadata in a JSON file, sessions behind `SecretStore`): wasm-clean.
+# `keychain` keeps sessions in the platform keychain (macOS/iOS Keychain,
+# the Secret Service on Linux, the Credential Manager on Windows). `http`
+# signs in at the issuer over its HTTP face (auth-proto's generated
+# clients) and is the thread-safe controller the app and its actions drive.
+# `actions` puts ACCOUNT_* on an Action List (MCP, menus, ⌘K). `ui` is the
+# shell's Account item, the switcher and the sign-in sheet.
+
+[features]
+default = []
+keychain = ["dep:keyring"]
+http = ["dep:auth-proto", "dep:architect", "architect/http-client", "dep:tokio", "dep:uuid", "dep:webbrowser"]
+actions = ["http", "architect/action-list"]
+ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:lucide-dioxus", "dep:futures-channel", "dep:futures-util"]
+
+[dependencies]
+auth-client = { workspace = true }
+facet = { workspace = true }
+facet-json = { version = "0.50.0-rc.5" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+auth-proto = { workspace = true, optional = true }
+architect = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+architect-shell = { workspace = true, optional = true }
+lucide-dioxus = { workspace = true, optional = true }
+# The UI hears the controller's changes on its own task.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The platform keychain. Linux: the Secret Service over D-Bus (libdbus, as
+# the rest of the desk app already links), never the kernel keyring (it
+# forgets on reboot) and never a plain file.
+keyring = { version = "3.6", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
+# The issuer's requests run on a small runtime of their own, whoever asks
+# (the window's executor is not tokio).
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "sync"], optional = true }
+# This device's id at the issuer (auth_client::this_device).
+uuid = { version = "1", default-features = false, optional = true }
+# "Continue in browser": the issuer's approval page.
+webbrowser = { version = "1", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }
+# The issuer itself, in process: the tests sign in against the real server.
+auth-server = { workspace = true }
+architect-auth = { workspace = true, features = ["db"] }
+axum = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+
+[[test]]
+name = "issuer"
+required-features = ["actions"]
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

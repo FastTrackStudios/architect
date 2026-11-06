@@ -242,7 +242,9 @@ aes-gcm = { version = "0.10.3" }
 ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+block-padding = { version = "0.3.3", default-features = false, features = ["std"] }
 bumpalo = { version = "3.20.3", features = ["collections"] }
+cipher = { version = "0.4.4", default-features = false, features = ["alloc", "block-padding"] }
 crossbeam-epoch = { version = "0.9.21" }
 event-listener-strategy = { version = "0.5.4" }
 futures-lite = { version = "2.6.1" }
@@ -255,6 +257,7 @@ hyper-rustls = { version = "0.27.9", default-features = false, features = ["http
 hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy", "http2"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
+inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
 libc = { version = "0.2.189" }
@@ -459,6 +462,7 @@ rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
+security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["early-data"] }
