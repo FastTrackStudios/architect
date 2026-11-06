@@ -341,6 +341,11 @@ layer = "L4"
 note = "Navigator, a built-in extension: the navigator's view, actions and settings; linked in, or its own process (guest). GPL-3.0-or-later, as the crate it links"
 
 [[row]]
+package = "architect-bases"
+layer = "L4"
+note = "Bases, a built-in extension: a vault's .base files as table, cards and list, base view types extensions add, BASES_* actions, the ```base fence"
+
+[[row]]
 package = "architect-theme-picker"
 layer = "L4"
 note = "the theme picker, a built-in extension: linked in, or its own process (guest)"
