@@ -356,10 +356,22 @@ pub fn use_extension_tours(
             }
         });
     }
-    let starts = use_coroutine(move |mut asks: UnboundedReceiver<Start>| async move {
-        use futures_util::StreamExt as _;
-        while let Some((id, step)) = asks.next().await {
-            let _ = tours.start_at(&id, step.as_deref());
+    let held = list.clone();
+    let starts = use_coroutine(move |mut asks: UnboundedReceiver<Start>| {
+        let list = held.clone();
+        async move {
+            use futures_util::StreamExt as _;
+            while let Some((id, step)) = asks.next().await {
+                // The settings window (where the manager's "Take the tour"
+                // is) would cover the tour: put it away first.
+                let _ = list
+                    .run_json_async(
+                        "EXT_WINDOW_CLOSE",
+                        br#"{"extension":"settings","id":"settings"}"#,
+                    )
+                    .await;
+                let _ = tours.start_at(&id, step.as_deref());
+            }
         }
     });
     use_hook({
