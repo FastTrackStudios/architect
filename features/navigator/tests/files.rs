@@ -446,6 +446,9 @@ fn new_folders_open_all_and_drops_among_the_shortcuts() {
     assert!(!r.s.drop_on_shortcuts(&Drag::Shortcut(1), 1), "where it is");
     // A folder held under a drag opens.
     r.s.collapse_all();
-    assert!(r.s.spring_open("Projects"));
-    assert!(!r.s.spring_open("Projects"), "open already");
+    assert!(r.s.spring_open(&architect_navigator::NavTarget::Folder("Projects".into())));
+    assert!(
+        !r.s.spring_open(&architect_navigator::NavTarget::Folder("Projects".into())),
+        "open already"
+    );
 }

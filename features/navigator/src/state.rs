@@ -196,6 +196,14 @@ pub struct ViewState {
     /// A person's own keys (`keyboardShortcuts`), over the defaults.
     #[facet(default)]
     pub keys: Vec<KeyBinding>,
+    /// Nested tags under a parent (its key), as a person ordered them
+    /// (`tagChildOrder`).
+    #[facet(default)]
+    pub tag_child_order: Vec<ChildOrder>,
+    /// A property key's values (by the key, folded), as a person ordered
+    /// them (`propertyChildOrder`).
+    #[facet(default)]
+    pub property_value_order: Vec<ChildOrder>,
 }
 
 /// An icon for a target (`folder:<path>`, `tag:<tag>`,
@@ -294,6 +302,8 @@ pub struct NavigatorState {
     expanded_tags: BTreeSet<String>,
     expanded_props: BTreeSet<String>,
     tag_order: Vec<String>,
+    tag_child_order: BTreeMap<String, Vec<String>>,
+    property_value_order: BTreeMap<String, Vec<String>>,
     property_order: Vec<String>,
     /// The search box's search (⌘/Ctrl-clicks write to it too); the list
     /// shows what it matches.
@@ -387,6 +397,8 @@ impl NavigatorState {
             expanded_tags: std::iter::once(TAGGED.to_owned()).collect(),
             expanded_props: std::iter::once(ROOT.to_owned()).collect(),
             tag_order: Vec::new(),
+            tag_child_order: BTreeMap::new(),
+            property_value_order: BTreeMap::new(),
             property_order: Vec::new(),
         };
         s.index = s.visible();
@@ -712,6 +724,7 @@ impl NavigatorState {
                     sort: self.settings.tag_sort,
                     below,
                     order: &self.tag_order,
+                    child_order: &self.tag_child_order,
                 },
             ));
         }
@@ -722,6 +735,7 @@ impl NavigatorState {
                 self.settings.property_sort,
                 below,
                 &self.property_order,
+                &self.property_value_order,
             ));
         }
         self.nav_rows.extend(bottom);
@@ -2333,6 +2347,77 @@ impl NavigatorState {
         changed
     }
 
+    /// Moves nested tag `key` `by` places among its siblings, in its
+    /// parent's hand-made order (`tagChildOrder`). Whether it moved.
+    pub fn move_tag_child(&mut self, key: &str, by: isize) -> bool {
+        let key = tag_key(key);
+        let Some((parent, _)) = key.rsplit_once('/') else {
+            return false;
+        };
+        let parent = parent.to_owned();
+        let now = tree::hand_ordered(
+            self.tag_tree.children(
+                &parent,
+                self.settings.tag_sort,
+                self.settings.include_descendants,
+            ),
+            self.tag_child_order.get(&parent),
+        );
+        let Some(next) = tree::moved_in(&now, &key, by) else {
+            return false;
+        };
+        self.tag_child_order.insert(parent, next);
+        self.rebuild_nav();
+        true
+    }
+
+    /// Moves value `value` of key `key` `by` places among the key's values
+    /// (`propertyChildOrder`). Whether it moved.
+    pub fn move_property_value(&mut self, key: &str, value: &str, by: isize) -> bool {
+        let key = properties::fold(key);
+        let value = properties::value_path(value);
+        let now = tree::hand_ordered(
+            self.property_tree.values(&key, self.settings.property_sort),
+            self.property_value_order.get(&key),
+        );
+        let Some(next) = tree::moved_in(&now, &value, by) else {
+            return false;
+        };
+        self.property_value_order.insert(key, next);
+        self.rebuild_nav();
+        true
+    }
+
+    /// Moves a nested tag (`tag:<t>`) or a value (`property:<k>=<v>`) `by`
+    /// places in its hand-made order. Whether it moved.
+    pub fn move_nested(&mut self, id: &str, by: isize) -> bool {
+        if let Some(t) = id.strip_prefix("tag:") {
+            self.move_tag_child(t, by)
+        } else if let Some((k, v)) = id.strip_prefix("property:").and_then(|p| p.split_once('=')) {
+            self.move_property_value(k, v, by)
+        } else {
+            false
+        }
+    }
+
+    /// Forgets `parent`'s hand-made order: a tag's children (`tag:<key>`)
+    /// or a key's values (`property:<key>`), back to the sort.
+    pub fn reset_child_order(&mut self, parent: &str) -> bool {
+        let gone = if let Some(t) = parent.strip_prefix("tag:") {
+            self.tag_child_order.remove(&tag_key(t)).is_some()
+        } else if let Some(k) = parent.strip_prefix("property:") {
+            self.property_value_order
+                .remove(&properties::fold(k))
+                .is_some()
+        } else {
+            false
+        };
+        if gone {
+            self.rebuild_nav();
+        }
+        gone
+    }
+
     /// Moves root tag `key` (or [`UNTAGGED`]) `by` places in the manual
     /// order (`rootTagOrder`).
     pub fn move_tag_root(&mut self, key: &str, by: isize) {
@@ -3299,6 +3384,8 @@ impl NavigatorState {
             expanded_properties: self.expanded_props.iter().cloned().collect(),
             tag_order: self.tag_order.clone(),
             property_order: self.property_order.clone(),
+            tag_child_order: orders_of(&self.tag_child_order),
+            property_value_order: orders_of(&self.property_value_order),
             search: self.search.text().to_owned(),
             search_open: self.search_open,
             profiles: self.profiles.clone(),
@@ -3395,6 +3482,16 @@ impl NavigatorState {
         }
         self.tag_order.clone_from(&state.tag_order);
         self.property_order.clone_from(&state.property_order);
+        self.tag_child_order = state
+            .tag_child_order
+            .iter()
+            .map(|o| (o.parent.clone(), o.names.clone()))
+            .collect();
+        self.property_value_order = state
+            .property_value_order
+            .iter()
+            .map(|o| (o.parent.clone(), o.names.clone()))
+            .collect();
         if state.nav_width > 0.0 {
             self.nav_width = state.nav_width;
         }
@@ -3525,4 +3622,14 @@ pub const fn whole(v: f64) -> usize {
     } else {
         v as usize
     }
+}
+
+/// A hand-made order map as the view state keeps it.
+fn orders_of(map: &BTreeMap<String, Vec<String>>) -> Vec<ChildOrder> {
+    map.iter()
+        .map(|(parent, names)| ChildOrder {
+            parent: parent.clone(),
+            names: names.clone(),
+        })
+        .collect()
 }

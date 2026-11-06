@@ -381,6 +381,14 @@ effect = "mutating"
 params = '{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"},"to":{"type":"string"}},"required":["key","to"]}'
 
 [[actions]]
+id = "NAVIGATOR_MOVE_CHILD"
+name = "Move a nested tag or a value"
+description = "Moves nested tag `target` (tag:<tag>) among its siblings, or a property's value (property:<key>=<value>) among the key's, `by` places (-1 up, 1 down): a hand-made order kept per parent (tagChildOrder, propertyChildOrder). With `reset` true and a parent (tag:<tag>, property:<key>), its children go back to the sort."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"target":{"type":"string"},"by":{"type":"integer"},"reset":{"type":"boolean"}},"required":["target"]}'
+
+[[actions]]
 id = "NAVIGATOR_PROPERTY_DELETE"
 name = "Delete a property"
 description = "Takes property key `key` off every note, and out of the settings that list it."

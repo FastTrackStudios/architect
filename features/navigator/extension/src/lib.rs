@@ -145,6 +145,7 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_TAG_NEW_NOTE",
     "NAVIGATOR_PROPERTY_SET",
     "NAVIGATOR_PROPERTY_RENAME",
+    "NAVIGATOR_MOVE_CHILD",
     "NAVIGATOR_PROPERTY_DELETE",
     "NAVIGATOR_DROP",
     "NAVIGATOR_SEARCH",
@@ -673,6 +674,23 @@ fn run(
                 None => nav.state.peek().rename_property_key(key, to)?.0,
             };
             write(&nav, on_open, out)
+        }
+        "NAVIGATOR_MOVE_CHILD" => {
+            // `tag:<t>` or `property:<k>=<v>`; `by` places, or `reset` its
+            // children's order (`tag:<t>`, `property:<k>`).
+            let id = text(args, "target")
+                .ok_or("`target`: tag:<tag>, property:<key>=<value>")?
+                .to_owned();
+            if flag(args, "reset") == Some(true) {
+                nav.update(|s| s.reset_child_order(&id));
+            } else {
+                let by = int(args, "by").unwrap_or(1);
+                let moved = nav.update(|s| s.move_nested(&id, isize::try_from(by).unwrap_or(0)));
+                if !moved {
+                    return Err(format!("{id} cannot move there"));
+                }
+            }
+            Ok(trees(&nav.state.peek()))
         }
         "NAVIGATOR_PROPERTY_DELETE" => {
             let key = text(args, "key").ok_or("`key`: the property to delete")?;

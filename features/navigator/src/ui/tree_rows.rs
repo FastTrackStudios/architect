@@ -384,7 +384,8 @@ fn spring(nav: Navigator, key: String, springs: u32) {
             st.spring_loaded_next_delay_ms,
         )
     };
-    let folder = nav
+    // A collapsed folder, or (`scheduleTagAutoExpand`) a collapsed tag.
+    let target = nav
         .state
         .peek()
         .nav_rows()
@@ -396,10 +397,16 @@ fn spring(nav: Navigator, key: String, springs: u32) {
                 has_children: true,
                 expanded: false,
                 ..
-            } => Some(path.clone()),
+            } => Some(NavTarget::Folder(path.clone())),
+            NavRowKind::Tag {
+                tag,
+                has_children: true,
+                expanded: false,
+                ..
+            } => Some(NavTarget::Tag(tag.clone())),
             _ => None,
         });
-    let Some(folder) = folder.filter(|_| on) else {
+    let Some(target) = target.filter(|_| on) else {
         return;
     };
     let wait = if springs == 0 { first } else { next };
@@ -410,7 +417,7 @@ fn spring(nav: Navigator, key: String, springs: u32) {
             .peek()
             .as_ref()
             .is_some_and(|d| d.active && d.over.as_deref() == Some(key.as_str()));
-        if still && nav.update(|s| s.spring_open(&folder)) {
+        if still && nav.update(|s| s.spring_open(&target)) {
             let mut drag = nav.drag;
             if let Some(d) = drag.write().as_mut() {
                 d.springs = d.springs.saturating_add(1);
@@ -538,6 +545,21 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
                     MenuAct::Remove(paths, t.clone()),
                 ));
             }
+            // A nested tag moves among its siblings (`tagChildOrder`).
+            if t.contains('/') {
+                items.push((
+                    "Move up".to_owned(),
+                    MenuAct::MoveChild(format!("tag:{t}"), -1),
+                ));
+                items.push((
+                    "Move down".to_owned(),
+                    MenuAct::MoveChild(format!("tag:{t}"), 1),
+                ));
+            }
+            items.push((
+                "Reset order of tags below".to_owned(),
+                MenuAct::ResetChildOrder(format!("tag:{t}")),
+            ));
             items.push(("Rename tag…".to_owned(), MenuAct::Rename(t.clone())));
             items.push((format!("Delete #{t}"), MenuAct::Delete(t)));
         }
@@ -571,16 +593,26 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
             // a value's rename.
             match value {
                 None => {
+                    items.push((
+                        "Reset order of values".to_owned(),
+                        MenuAct::ResetChildOrder(format!("property:{key}")),
+                    ));
                     items.push((format!("Rename {name}…"), MenuAct::RenameKey(key.clone())));
                     items.push((
                         format!("Delete {name} from every note"),
                         MenuAct::DeleteKey(key.clone()),
                     ));
                 }
-                Some(v) => items.push((
-                    "Rename value…".to_owned(),
-                    MenuAct::RenameValue(key.clone(), v.clone()),
-                )),
+                Some(v) => {
+                    // A value moves among the key's (`propertyChildOrder`).
+                    let id = format!("property:{key}={v}");
+                    items.push(("Move up".to_owned(), MenuAct::MoveChild(id.clone(), -1)));
+                    items.push(("Move down".to_owned(), MenuAct::MoveChild(id, 1)));
+                    items.push((
+                        "Rename value…".to_owned(),
+                        MenuAct::RenameValue(key.clone(), v.clone()),
+                    ));
+                }
             }
         }
         NavTarget::Folder(f) => {
@@ -774,6 +806,9 @@ enum MenuAct {
     SetValue(Vec<String>, String),
     RenameKey(String),
     DeleteKey(String),
+    /// A nested tag (`tag:<t>`) or a value (`property:<k>=<v>`) moved.
+    MoveChild(String, isize),
+    ResetChildOrder(String),
     RenameValue(String, String),
     /// A shortcut added (`true`) or taken out.
     Shortcut(Shortcut, bool),
@@ -846,6 +881,14 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
                 value: String::new(),
                 kind: PromptKind::SetValue { key, paths },
             }));
+            return;
+        }
+        MenuAct::MoveChild(id, by) => {
+            nav.update(|s| s.move_nested(&id, by));
+            return;
+        }
+        MenuAct::ResetChildOrder(id) => {
+            nav.update(|s| s.reset_child_order(&id));
             return;
         }
         MenuAct::RenameKey(key) => {

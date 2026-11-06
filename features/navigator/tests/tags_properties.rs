@@ -650,3 +650,75 @@ fn a_property_key_or_value_is_renamed_and_a_key_deleted() {
     assert!(kept.after_property_ops(&[FileOp::DeletePropertyKey("type".into())]));
     assert_eq!(kept.property_keys, "state, missing");
 }
+
+/// A collapsed tag held under a drag opens (`scheduleTagAutoExpand`);
+/// one with nothing below it, or open, does not.
+#[test]
+fn a_tag_springs_open_under_a_drag() {
+    let src = vault();
+    let mut s = state(&src, settings());
+    let project = NavTarget::Tag("project".into());
+    let collapsed = |s: &NavigatorState| {
+        s.nav_rows().iter().any(|r| matches!(&r.kind, NavRowKind::Tag { tag, expanded: false, has_children: true, .. } if tag.eq_ignore_ascii_case("project")))
+    };
+    assert!(collapsed(&s), "{:?}", tag_rows(&s));
+    assert!(s.spring_open(&project));
+    assert!(!collapsed(&s));
+    assert!(!s.spring_open(&project), "open already");
+    assert!(
+        !s.spring_open(&NavTarget::Tag("home".into())),
+        "nothing below it"
+    );
+}
+
+/// Nested tags and a key's values in a hand-made order (`tagChildOrder`,
+/// `propertyChildOrder`), kept between runs, reset to the sort.
+#[test]
+fn nested_tags_and_values_keep_a_hand_made_order() {
+    let src = vault();
+    let mut s = state(&src, settings());
+    s.toggle_nav(&NavTarget::Tag("project".into()));
+    let below = |s: &NavigatorState| -> Vec<String> {
+        tag_rows(s)
+            .into_iter()
+            .filter(|r| r.1 == 2)
+            .map(|r| r.0)
+            .collect()
+    };
+    assert_eq!(below(&s), ["Alpha", "beta"]);
+    assert!(s.move_nested("tag:project/beta", -1));
+    assert_eq!(below(&s), ["beta", "Alpha"]);
+    assert!(!s.move_nested("tag:project/beta", -1), "first already");
+    // Kept between runs.
+    let kept = s.view_state();
+    let mut again = state(&src, settings());
+    // The open tags come back too.
+    again.restore(&kept);
+    assert_eq!(below(&again), ["beta", "Alpha"]);
+    assert!(s.reset_child_order("tag:project"));
+    assert_eq!(below(&s), ["Alpha", "beta"]);
+
+    // A key's values.
+    s.toggle_nav(&NavTarget::Property {
+        key: "status".into(),
+        value: None,
+    });
+    let values = |s: &NavigatorState| -> Vec<String> {
+        s.nav_rows()
+            .iter()
+            .filter_map(|r| match &r.kind {
+                NavRowKind::Property {
+                    key,
+                    value: Some(v),
+                    ..
+                } if key == "status" => Some(v.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let first = values(&s);
+    assert!(first.len() >= 2, "{first:?}");
+    let last = first.last().unwrap().clone();
+    assert!(s.move_nested(&format!("property:status={last}"), -10));
+    assert_eq!(values(&s)[0], last);
+}

@@ -181,6 +181,35 @@ pub struct TagRowOptions<'a> {
     pub below: bool,
     /// The roots as a person ordered them (`rootTagOrder`).
     pub order: &'a [String],
+    /// Nested tags as a person ordered them, by parent (`tagChildOrder`).
+    pub child_order: &'a BTreeMap<String, Vec<String>>,
+}
+
+/// `list` with those `order` names first, in its order, then the rest
+/// as they were (a child new since is appended, `useChildOrderAppend`).
+#[must_use]
+pub fn hand_ordered(list: Vec<String>, order: Option<&Vec<String>>) -> Vec<String> {
+    let Some(order) = order else { return list };
+    let mut out: Vec<String> = order.iter().filter(|o| list.contains(o)).cloned().collect();
+    out.extend(list.into_iter().filter(|x| !order.contains(x)));
+    out
+}
+
+/// `list` with `item` moved `by` places; `None` when it is not there or
+/// cannot move.
+#[must_use]
+pub fn moved_in(list: &[String], item: &str, by: isize) -> Option<Vec<String>> {
+    let at = list.iter().position(|x| x == item)?;
+    let to = at
+        .saturating_add_signed(by)
+        .min(list.len().saturating_sub(1));
+    if to == at {
+        return None;
+    }
+    let mut out = list.to_vec();
+    let x = out.remove(at);
+    out.insert(to, x);
+    Some(out)
 }
 
 /// The tag rows: the "Tags" row and the tags below it when it is open (or
@@ -271,7 +300,7 @@ fn walk_tag(
         },
     });
     if open {
-        for c in tree.children(key, o.sort, o.below) {
+        for c in hand_ordered(tree.children(key, o.sort, o.below), o.child_order.get(key)) {
             walk_tag(tree, &c, level.saturating_add(1), expanded, o, rows);
         }
     }
@@ -287,6 +316,7 @@ pub fn property_rows(
     sort: TreeSort,
     below: bool,
     order: &[String],
+    value_order: &BTreeMap<String, Vec<String>>,
 ) -> Vec<NavRow> {
     let mut rows = Vec::new();
     if tree.is_empty() {
@@ -314,7 +344,7 @@ pub fn property_rows(
     for key in tree.roots(order, sort, below) {
         let Some(k) = tree.key(&key) else { continue };
         let id = key_id(&key);
-        let values = tree.values(&key, sort);
+        let values = hand_ordered(tree.values(&key, sort), value_order.get(&key));
         let open = expanded.contains(&id) && !values.is_empty();
         let mut count = k.count();
         if !below {
