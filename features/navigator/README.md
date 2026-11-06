@@ -13,7 +13,8 @@ not depend on them; a tool or server that leaves them out stays permissive.
 
 - The model (default features, wasm-clean): `NavigatorSource` and `MemorySource`, the folder
   index, the tree and list rows, selection and history, the virtual window, the keys, the
-  pane layout, `NavigatorSettings`.
+  pane layout, `NavigatorSettings`; the calendar's grid, the periodic notes' Moment patterns,
+  periods and date filters.
 - `ui`: the Dioxus view on architect's shell, `use_navigator` and `NavigatorView`.
 - `extension/`: Navigator, the built-in extension: its sidebar view, its `NAVIGATOR_*` actions
   and its settings section, linked into an app or run as a process (`EXT_CLONE`).

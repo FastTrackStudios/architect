@@ -9,10 +9,14 @@ use std::ops::Range;
 
 use facet::Facet;
 
+use chrono::NaiveDate;
+
 use crate::appearance::{Appearance, target_key};
+use crate::calendar::{self, CalendarContext, CalendarGrid, PeriodicNotes};
 use crate::index::VaultIndex;
 use crate::layout::{NAV_HEIGHT, NAV_WIDTH, Pane};
 use crate::list::{self, Clock, ListContext, ListMetrics, ListRow, ListRowKind, PinIn};
+use crate::period::{Period, PeriodKind, day_of};
 use crate::selection::{NavTarget, Selection};
 use crate::settings::{FolderNoteOpen, NavigatorSettings, SortOption};
 use crate::source::{FileOp, NoteFile, PropertyValue, SourceEvent, ancestors, is_within, parent};
@@ -138,6 +142,8 @@ pub struct ViewState {
     pub appearances: Vec<Appearance>,
     /// Tags' and properties' colours.
     pub colours: Vec<Colour>,
+    /// The calendar is on show (Notebook Navigator's `showCalendar`).
+    pub calendar: bool,
 }
 
 /// A pinned note: pinned in folders, in tags.
@@ -202,6 +208,12 @@ pub struct NavigatorState {
     colours: BTreeMap<String, String>,
     /// The settings with the selected place's own over them.
     effective: NavigatorSettings,
+    /// The periodic notes' patterns, read from the settings.
+    periodic: PeriodicNotes,
+    /// The calendar is on show (the folders' header toggles it).
+    pub calendar_open: bool,
+    /// The day the calendar is around; today when none.
+    calendar_cursor: Option<NaiveDate>,
 }
 
 impl NavigatorState {
@@ -214,6 +226,9 @@ impl NavigatorState {
         };
         let mut s = Self {
             index,
+            periodic: PeriodicNotes::from_settings(&settings),
+            calendar_open: false,
+            calendar_cursor: None,
             effective: settings.clone(),
             settings,
             expanded: std::iter::once(String::new()).collect(),
@@ -480,6 +495,7 @@ impl NavigatorState {
     /// New settings.
     pub fn set_settings(&mut self, settings: NavigatorSettings) {
         if settings != self.settings {
+            self.periodic = PeriodicNotes::from_settings(&settings);
             self.settings = settings;
             self.rebuild();
         }
@@ -650,6 +666,25 @@ impl NavigatorState {
             return;
         }
         self.active = path.map(str::to_owned);
+        // The calendar goes to a day's, a week's or a month's note as it
+        // opens (`shouldAutoRevealCalendarNoteKind`): to its days, and to
+        // a month's own month.
+        if let Some(period) = path.and_then(|p| self.periodic.period_of(p)) {
+            let go = match period.kind {
+                PeriodKind::Day | PeriodKind::Week => !self.calendar_shows(period.start),
+                PeriodKind::Month => {
+                    Period::containing(
+                        PeriodKind::Month,
+                        self.calendar_cursor(),
+                        self.periodic.week_rules(),
+                    ) != period
+                }
+                PeriodKind::Quarter | PeriodKind::Year => false,
+            };
+            if go {
+                self.calendar_cursor = Some(period.start);
+            }
+        }
         if let Some(p) = path
             && self.settings.auto_reveal
             && self.index.file(p).is_some()
@@ -1458,6 +1493,176 @@ impl NavigatorState {
         }
     }
 
+    // ── The calendar and periodic notes ────────────────────────────────
+
+    /// The periodic notes' paths, as the settings write them.
+    #[must_use]
+    pub const fn periodic(&self) -> &PeriodicNotes {
+        &self.periodic
+    }
+
+    /// Today, in the person's time zone.
+    #[must_use]
+    pub fn today(&self) -> NaiveDate {
+        day_of(self.clock.now, self.clock.offset)
+    }
+
+    /// The day the calendar is around.
+    #[must_use]
+    pub fn calendar_cursor(&self) -> NaiveDate {
+        self.calendar_cursor.unwrap_or_else(|| self.today())
+    }
+
+    /// What the calendar draws.
+    #[must_use]
+    pub fn calendar(&self) -> CalendarGrid {
+        calendar::grid(
+            CalendarContext {
+                index: &self.index,
+                periodic: &self.periodic,
+                today: self.today(),
+                active: self.active.as_deref(),
+            },
+            &self.settings,
+            self.calendar_cursor(),
+        )
+    }
+
+    /// Whether `date` is among the days the calendar shows.
+    fn calendar_shows(&self, date: NaiveDate) -> bool {
+        let (start, rows) = calendar::week_window(
+            self.calendar_cursor(),
+            self.settings.calendar_weeks,
+            self.periodic.week_rules(),
+        );
+        let end = crate::period::add_days(start, i64::from(rows).saturating_mul(7));
+        start <= date && date < end
+    }
+
+    /// Shows or hides the calendar (`toggle-calendar`); it is not shown
+    /// with the calendar off in the settings.
+    pub const fn toggle_calendar(&mut self) {
+        self.calendar_open = !self.calendar_open;
+    }
+
+    /// Whether the calendar is drawn: on in the settings, and shown.
+    #[must_use]
+    pub const fn calendar_visible(&self) -> bool {
+        self.settings.calendar && self.calendar_open
+    }
+
+    /// The calendar `delta` pages on (back, when negative): a month at a
+    /// time on a whole month, else as many weeks as show.
+    pub fn calendar_move(&mut self, delta: i32) {
+        self.calendar_cursor = Some(calendar::step(
+            self.calendar_cursor(),
+            delta,
+            self.settings.calendar_weeks,
+        ));
+    }
+
+    /// The calendar around `date`.
+    pub const fn calendar_go(&mut self, date: NaiveDate) {
+        self.calendar_cursor = Some(date);
+    }
+
+    /// The calendar back on today (its Today button); today's note opens
+    /// if there is one (`handleToday`), and none is made.
+    pub fn calendar_today(&mut self) -> Option<Outcome> {
+        let today = self.today();
+        self.calendar_cursor = Some(today);
+        let period = self.periodic.period(PeriodKind::Day, today);
+        let path = self.periodic.path(period)?;
+        self.index.file(&path).is_some().then_some(Outcome::Open {
+            path,
+            how: OpenIn::Here,
+            settle: false,
+        })
+    }
+
+    /// Opens `period`'s note, or makes it (`openOrCreateCustomCalendarNote`):
+    /// an [`Outcome::Open`] when the vault has it, else an
+    /// [`Outcome::Write`] that makes it ([`FileOp::CreateFile`], a heading
+    /// until templates come) and opens it.
+    ///
+    /// # Errors
+    ///
+    /// Notes of its kind are off, or their pattern makes no path.
+    pub fn open_period(&self, period: Period, how: OpenIn) -> Result<Outcome, String> {
+        let path = self
+            .periodic
+            .path(period)
+            .ok_or_else(|| self.periodic.why_not(period.kind).unwrap_or_default())?;
+        if self.index.file(&path).is_some() {
+            return Ok(Outcome::Open {
+                path,
+                how,
+                settle: false,
+            });
+        }
+        if self.index.folder(&path).is_some() {
+            return Err(format!("{path} is a folder"));
+        }
+        let text = self.periodic.new_note_text(&path);
+        Ok(Outcome::Write {
+            ops: vec![FileOp::CreateFile {
+                path: path.clone(),
+                text,
+            }],
+            open: Some((path, how)),
+        })
+    }
+
+    /// Opens, or makes, the note of `kind` holding `date`
+    /// (`open-daily-note`, `open-weekly-note`, …, for today).
+    ///
+    /// # Errors
+    ///
+    /// As [`open_period`](Self::open_period).
+    pub fn open_periodic(
+        &self,
+        kind: PeriodKind,
+        date: NaiveDate,
+        how: OpenIn,
+    ) -> Result<Outcome, String> {
+        self.open_period(self.periodic.period(kind, date), how)
+    }
+
+    /// The note open, as a periodic note: its period.
+    #[must_use]
+    pub fn active_period(&self) -> Option<Period> {
+        self.active
+            .as_deref()
+            .and_then(|p| self.periodic.period_of(p))
+    }
+
+    /// Opens, or makes, the note `by` periods on from the one open
+    /// (`open-next-periodic-note`, `open-previous-periodic-note`).
+    ///
+    /// # Errors
+    ///
+    /// The note open is no periodic note.
+    pub fn open_adjacent_period(&self, by: i32, how: OpenIn) -> Result<Outcome, String> {
+        let p = self.active_period().ok_or(NOT_PERIODIC)?;
+        self.open_period(p.shift(by), how)
+    }
+
+    /// Opens, or makes, the note of the period the open one is in: a
+    /// day's week, a week's month (the month of its first day), …,
+    /// skipping kinds that are off (`open-parent-periodic-note`).
+    ///
+    /// # Errors
+    ///
+    /// The note open is no periodic note, or a year's.
+    pub fn open_parent_period(&self, how: OpenIn) -> Result<Outcome, String> {
+        let p = self.active_period().ok_or(NOT_PERIODIC)?;
+        let parent = self
+            .periodic
+            .parent(p)
+            .ok_or("A yearly note has no parent period")?;
+        self.open_period(parent, how)
+    }
+
     // ── Kept between runs ──────────────────────────────────────────────
 
     #[must_use]
@@ -1494,6 +1699,7 @@ impl NavigatorState {
                     colour: colour.clone(),
                 })
                 .collect(),
+            calendar: self.calendar_open,
         }
     }
 
@@ -1535,6 +1741,7 @@ impl NavigatorState {
             .iter()
             .map(|c| (c.target.clone(), c.colour.clone()))
             .collect();
+        self.calendar_open = state.calendar;
         if state.nav_width > 0.0 {
             self.nav_width = state.nav_width;
         }
@@ -1548,6 +1755,9 @@ impl NavigatorState {
         self.rebuild();
     }
 }
+
+/// Why there is no period to move from.
+const NOT_PERIODIC: &str = "The note open is not a periodic note";
 
 /// `name` in `folder` (the root: `name` alone).
 fn join(folder: &str, name: &str) -> String {

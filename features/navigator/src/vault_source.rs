@@ -226,6 +226,17 @@ impl VaultSource {
                 vault.create_folder(folder)?;
                 new_folders(self);
             }
+            // A periodic note made (the calendar's), and its folders.
+            FileOp::CreateFile { path, text } => {
+                if vault.text(path).is_some() {
+                    return Err(format!("{path} is there already"));
+                }
+                vault.create(path, text)?;
+                new_folders(self);
+                if let Some(f) = self.file(path) {
+                    self.emit(&SourceEvent::FileCreated(f));
+                }
+            }
             FileOp::Move { from, to } => {
                 let note = |p: &str| {
                     std::path::Path::new(p)

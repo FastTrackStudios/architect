@@ -22,7 +22,17 @@
 //! `useFrontmatterMetadata` false, `manualSortPropertyKey` `sort_index`,
 //! `enableFolderNotes` false, `folderNoteNamePattern` `{{folder}}`,
 //! `hideFolderNoteInList` true, `pinCreatedFolderNote` false,
-//! `folderNoteOpenLocation` current tab.
+//! `folderNoteOpenLocation` current tab; the calendar and the periodic
+//! notes: `calendarEnabled` true, `calendarConfirmBeforeCreate` true,
+//! `calendarWeeksToShow` 1, `calendarLeftPlacement` navigation,
+//! `calendarWeekendDays` sat-sun, `calendarMonthHeadingFormat` full,
+//! `calendarHighlightToday` true, `calendarShowOutsideMonthDays` true,
+//! `calendarShowFeatureImage` true, `calendarShowTasks` true,
+//! `calendarShowWeekNumber` and `calendarShowQuarter` false,
+//! `periodicNotesFolder` empty, and the patterns `YYYY/YYYYMMDD`,
+//! `gggg/[W]ww`, `YYYY/YYYYMM`, `YYYY/[Q]Q` and `YYYY`. Its
+//! `calendarLocale` (system default, Obsidian's `en`: weeks from Sunday)
+//! is [`WeekStart`]; month and day names are English.
 //!
 //! What a person sets for one folder or tag (its sort, grouping, rows,
 //! mode, notes from below) is not here but in [`crate::Appearance`],
@@ -263,6 +273,58 @@ pub enum ListMode {
     Compact,
 }
 
+/// The day a week starts on, and so how weeks are numbered (Notebook
+/// Navigator's `calendarLocale`, as Moment's locales number weeks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum WeekStart {
+    /// Sunday (week 1 holds January 1, as in the United States)
+    #[default]
+    Sunday,
+    /// Monday (ISO 8601: week 1 holds January 4)
+    Monday,
+    /// Saturday (week 1 holds January 1)
+    Saturday,
+}
+
+/// The days the calendar shades as the weekend (`calendarWeekendDays`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum WeekendDays {
+    /// None
+    None,
+    /// Saturday and Sunday
+    #[default]
+    SatSun,
+    /// Friday and Saturday
+    FriSat,
+    /// Thursday and Friday
+    ThuFri,
+}
+
+/// How the calendar names its month (`calendarMonthHeadingFormat`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum MonthFormat {
+    /// January
+    #[default]
+    Full,
+    /// Jan
+    Short,
+}
+
+/// Where the calendar goes when one pane shows at a time
+/// (`calendarLeftPlacement`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum CalendarPlacement {
+    /// Under the folders
+    #[default]
+    Navigation,
+    /// Under both panes
+    Below,
+}
+
 /// Navigator
 /// The sidebar's folders and notes.
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Settings)]
@@ -423,6 +485,69 @@ pub struct NavigatorSettings {
     /// Folder notes open in
     #[setting(control = segmented)]
     pub folder_note_open: FolderNoteOpen,
+    /// Calendar
+    /// Days under the folders, the calendar button in their header shows
+    /// them: a click opens a day's note, or makes it.
+    pub calendar: bool,
+    /// Confirm before creating a note
+    /// Ask before a click makes a periodic note that is not there yet.
+    pub calendar_confirm_create: bool,
+    /// Weeks to show
+    /// 6 is the whole month.
+    #[setting(control = stepper(1..=6))]
+    pub calendar_weeks: u32,
+    /// Calendar in one pane
+    /// Where the calendar goes when one pane shows at a time.
+    #[setting(control = segmented)]
+    pub calendar_placement: CalendarPlacement,
+    /// Week starts on
+    /// And so how weeks are numbered.
+    pub week_start: WeekStart,
+    /// Weekend days
+    /// Shaded in the calendar.
+    pub weekend_days: WeekendDays,
+    /// Month name
+    #[setting(control = segmented)]
+    pub month_format: MonthFormat,
+    /// Highlight today
+    pub calendar_highlight_today: bool,
+    /// Days from other months
+    /// With the whole month on show, the days before and after it.
+    pub calendar_outside_days: bool,
+    /// Feature images on days
+    /// A daily note's image fills its day.
+    pub calendar_feature_images: bool,
+    /// Tasks on days
+    /// A ring on days, weeks and months whose notes have tasks left.
+    pub calendar_tasks: bool,
+    /// Week numbers
+    /// A column of them; a click opens the week's note.
+    pub calendar_week_numbers: bool,
+    /// Quarter
+    /// The quarter beside the month; a click opens its note.
+    pub calendar_quarter: bool,
+    /// Periodic notes folder
+    /// Where periodic notes go; their patterns can add folders under it.
+    #[setting(placeholder = "Journal")]
+    pub periodic_folder: String,
+    /// Daily notes
+    /// A Moment date pattern: `YYYY/YYYYMMDD`. Wrap words in brackets,
+    /// `[Daily]/YYYY-MM-DD`.
+    #[setting(placeholder = "YYYY/YYYYMMDD")]
+    pub daily_pattern: String,
+    /// Weekly notes
+    /// `gggg/[W]ww` (the locale's weeks), `GGGG-[W]WW` (ISO); empty, none.
+    #[setting(placeholder = "gggg/[W]ww")]
+    pub weekly_pattern: String,
+    /// Monthly notes
+    #[setting(placeholder = "YYYY/YYYYMM")]
+    pub monthly_pattern: String,
+    /// Quarterly notes
+    #[setting(placeholder = "YYYY/[Q]Q")]
+    pub quarterly_pattern: String,
+    /// Yearly notes
+    #[setting(placeholder = "YYYY")]
+    pub yearly_pattern: String,
 }
 
 impl NavigatorSettings {
@@ -506,6 +631,25 @@ impl Default for NavigatorSettings {
             hide_folder_note: true,
             pin_created_folder_note: false,
             folder_note_open: FolderNoteOpen::CurrentTab,
+            calendar: true,
+            calendar_confirm_create: true,
+            calendar_weeks: 1,
+            calendar_placement: CalendarPlacement::Navigation,
+            week_start: WeekStart::Sunday,
+            weekend_days: WeekendDays::SatSun,
+            month_format: MonthFormat::Full,
+            calendar_highlight_today: true,
+            calendar_outside_days: true,
+            calendar_feature_images: true,
+            calendar_tasks: true,
+            calendar_week_numbers: false,
+            calendar_quarter: false,
+            periodic_folder: String::new(),
+            daily_pattern: crate::calendar::DEFAULT_DAILY.to_owned(),
+            weekly_pattern: crate::calendar::DEFAULT_WEEKLY.to_owned(),
+            monthly_pattern: crate::calendar::DEFAULT_MONTHLY.to_owned(),
+            quarterly_pattern: crate::calendar::DEFAULT_QUARTERLY.to_owned(),
+            yearly_pattern: crate::calendar::DEFAULT_YEARLY.to_owned(),
         }
     }
 }

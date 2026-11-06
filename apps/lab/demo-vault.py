@@ -676,6 +676,10 @@ def journal():
             body += ["", "#journal/highlight"]
         props = {"type": "daily", "date": d.isoformat(), "mood": rng.randint(2, 5), "tags": ["daily"],
                  "exercised": rng.random() < 0.5, "created": f"{d.isoformat()}T07:{rng.randint(10, 59)}:00"}
+        # A few days with a picture: the calendar shows a daily note's
+        # feature image on its day (#336).
+        if i % 6 == 4:
+            props["feature"] = feat(["sun.jpg", "plasma-a.jpg", "gradient-dusk.jpg", "swirl.jpg", "stripes.jpg"][i // 6])
         W(f"Journal/Daily/{d.isoformat()}.md", props, "\n".join(body))
     for w in range(40, 46):
         mon = dt.date.fromisocalendar(2026, w, 1)

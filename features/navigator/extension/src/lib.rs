@@ -25,8 +25,9 @@ use std::time::Duration;
 use architect_extensions::linked::{Builder, Extension, Handle};
 use architect_navigator::ui::{Navigator, NavigatorView, Open, use_navigator};
 use architect_navigator::{
-    Grouping, ListMode, ListRowKind, MemorySource, NavTarget, NavigatorSource, NavigatorState,
-    NoteFile, Orientation, Pane, PropertyValue, SortOption,
+    CalendarGrid, Grouping, HeaderPeriod, ListMode, ListRowKind, MemorySource, NavTarget,
+    NavigatorSource, NavigatorState, NoteFile, OpenIn, Orientation, Outcome, Pane, PeriodKind,
+    PropertyValue, SortOption,
 };
 use dioxus::prelude::*;
 use serde_json::{Value, json};
@@ -100,6 +101,16 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_SET_AS_FOLDER_NOTE",
     "NAVIGATOR_DETACH_FOLDER_NOTE",
     "NAVIGATOR_OPEN_FOLDER_NOTE_TAB",
+    "NAVIGATOR_TOGGLE_CALENDAR",
+    "NAVIGATOR_CALENDAR",
+    "NAVIGATOR_OPEN_DAILY_NOTE",
+    "NAVIGATOR_OPEN_WEEKLY_NOTE",
+    "NAVIGATOR_OPEN_MONTHLY_NOTE",
+    "NAVIGATOR_OPEN_QUARTERLY_NOTE",
+    "NAVIGATOR_OPEN_YEARLY_NOTE",
+    "NAVIGATOR_NEXT_PERIOD",
+    "NAVIGATOR_PREVIOUS_PERIOD",
+    "NAVIGATOR_PARENT_PERIOD",
 ];
 
 impl Extension for NavigatorExtension {
@@ -431,8 +442,157 @@ fn run(
             nav.act(Some(out), on_open);
             ok(nav)
         }
+        "NAVIGATOR_TOGGLE_CALENDAR" => {
+            if !nav.state.peek().settings().calendar {
+                return Err("The calendar is off in Navigator's settings".to_owned());
+            }
+            nav.update(NavigatorState::toggle_calendar);
+            Ok(calendar(&nav.state.peek()))
+        }
+        "NAVIGATOR_CALENDAR" => {
+            if let Some(n) = int(args, "weeks") {
+                let n = u32::try_from(n)
+                    .ok()
+                    .filter(|n| (1..=6).contains(n))
+                    .ok_or("`weeks` is 1 to 6 (6, the whole month)")?;
+                nav.settings.update(move |s| s.calendar_weeks = n);
+            }
+            if flag(args, "today") == Some(true) {
+                nav.update(|s| {
+                    let today = s.today();
+                    s.calendar_go(today);
+                });
+            }
+            if let Some(d) = text(args, "date") {
+                let d = date(d)?;
+                nav.update(|s| s.calendar_go(d));
+            }
+            if let Some(by) = int(args, "move") {
+                let by = i32::try_from(by).map_err(|_| "`move` is too far")?;
+                nav.update(|s| s.calendar_move(by));
+            }
+            Ok(calendar(&nav.state.peek()))
+        }
+        "NAVIGATOR_OPEN_DAILY_NOTE"
+        | "NAVIGATOR_OPEN_WEEKLY_NOTE"
+        | "NAVIGATOR_OPEN_MONTHLY_NOTE"
+        | "NAVIGATOR_OPEN_QUARTERLY_NOTE"
+        | "NAVIGATOR_OPEN_YEARLY_NOTE" => {
+            let kind = id
+                .strip_prefix("NAVIGATOR_OPEN_")
+                .and_then(|k| k.strip_suffix("_NOTE"))
+                .and_then(PeriodKind::from_id)
+                .ok_or("no such periodic note")?;
+            let day = match text(args, "date") {
+                Some(d) => date(d)?,
+                None => nav.state.peek().today(),
+            };
+            let out = nav.state.peek().open_periodic(kind, day, how(args));
+            periodic(&nav, on_open, out, args)
+        }
+        "NAVIGATOR_NEXT_PERIOD" | "NAVIGATOR_PREVIOUS_PERIOD" | "NAVIGATOR_PARENT_PERIOD" => {
+            let out = {
+                let s = nav.state.peek();
+                match id {
+                    "NAVIGATOR_NEXT_PERIOD" => s.open_adjacent_period(1, how(args)),
+                    "NAVIGATOR_PREVIOUS_PERIOD" => s.open_adjacent_period(-1, how(args)),
+                    _ => s.open_parent_period(how(args)),
+                }
+            };
+            periodic(&nav, on_open, out, args)
+        }
         other => Err(format!("Navigator has no action {other}")),
     }
+}
+
+/// A day as `YYYY-MM-DD`.
+fn date(text: &str) -> Result<chrono::NaiveDate, String> {
+    chrono::NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d")
+        .map_err(|_| format!("`date` is a day as YYYY-MM-DD, not {text:?}"))
+}
+
+/// Where a note opens: `tab` true, a new tab.
+fn how(args: &Value) -> OpenIn {
+    if flag(args, "tab") == Some(true) {
+        OpenIn::Tab
+    } else {
+        OpenIn::Here
+    }
+}
+
+/// Opens or makes a periodic note, and says which: its `path`, whether it
+/// is `new`, and whether the person is `asked` first (`confirm` false
+/// does not ask).
+fn periodic(
+    nav: &Navigator,
+    on_open: EventHandler<Open>,
+    out: Result<Outcome, String>,
+    args: &Value,
+) -> Result<Value, String> {
+    let out = out?;
+    let (path, new) = match &out {
+        Outcome::Open { path, .. } => (path.clone(), false),
+        Outcome::Write {
+            open: Some((path, _)),
+            ..
+        } => (path.clone(), true),
+        _ => (String::new(), false),
+    };
+    let asked = new
+        && flag(args, "confirm") != Some(false)
+        && nav.state.peek().settings().calendar_confirm_create;
+    if asked {
+        nav.open_or_create(Ok(out), on_open);
+    } else {
+        nav.act(Some(out), on_open);
+    }
+    Ok(json!({ "path": path, "new": new, "asked": asked }))
+}
+
+fn header(h: &HeaderPeriod) -> Value {
+    json!({
+        "label": h.label, "note": h.note, "active": h.active, "enabled": h.enabled,
+        "token": h.period.filter_token(),
+    })
+}
+
+/// What `NAVIGATOR_CALENDAR` says: the month on show, week by week.
+#[must_use]
+pub fn calendar(s: &NavigatorState) -> Value {
+    let g: CalendarGrid = s.calendar();
+    let weeks: Vec<Value> = g
+        .weeks
+        .iter()
+        .map(|w| {
+            let days: Vec<Value> = w
+                .days
+                .iter()
+                .filter(|d| !d.hidden)
+                .map(|d| {
+                    json!({
+                        "date": d.date.to_string(), "in_month": d.in_month, "today": d.today,
+                        "note": d.note, "image": d.image.is_some(), "unfinished": d.unfinished,
+                        "active": d.active,
+                    })
+                })
+                .collect();
+            json!({
+                "start": w.start.to_string(), "number": w.number, "note": w.note,
+                "active": w.active, "days": days,
+            })
+        })
+        .collect();
+    json!({
+        "shown": s.calendar_visible(),
+        "cursor": g.cursor.to_string(),
+        "today": s.today().to_string(),
+        "month": header(&g.month),
+        "quarter": header(&g.quarter),
+        "year": header(&g.year),
+        "weekdays": g.weekdays,
+        "weeks": weeks,
+        "active_period": s.active_period().map(|p| json!({ "kind": p.kind.id(), "start": p.start.to_string() })),
+    })
 }
 
 /// The folder an action is about: `folder`, the folder of `path` (a

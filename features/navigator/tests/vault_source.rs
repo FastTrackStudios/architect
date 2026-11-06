@@ -251,3 +251,44 @@ fn the_navigators_writes_land_on_disk_and_are_events() {
         .is_err()
     );
 }
+
+#[test]
+fn a_periodic_note_the_calendar_makes_lands_on_disk_with_its_folders() {
+    use architect_navigator::list::Clock;
+    use architect_navigator::{
+        NavigatorSettings, NavigatorState, OpenIn, Outcome, PeriodKind, VaultIndex,
+    };
+    let (tmp, s) = source();
+    let (events, _sub) = heard(&s);
+    let state = NavigatorState::new(
+        VaultIndex::read(&s),
+        NavigatorSettings {
+            periodic_folder: "Journal".to_owned(),
+            daily_pattern: "[Daily]/YYYY-MM-DD".to_owned(),
+            ..NavigatorSettings::default()
+        },
+        Clock::default(),
+    );
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 6).unwrap();
+    let Outcome::Write { ops, .. } = state
+        .open_periodic(PeriodKind::Day, day, OpenIn::Here)
+        .unwrap()
+    else {
+        panic!("a new note")
+    };
+    s.write(&ops).unwrap();
+    let text = std::fs::read_to_string(tmp.path().join("Journal/Daily/2026-11-06.md")).unwrap();
+    assert_eq!(text, "# 2026-11-06\n");
+    assert!(s.folders().contains(&"Journal/Daily".to_owned()));
+    let events = events.lock().unwrap().clone();
+    assert!(events.iter().any(
+        |e| matches!(e, SourceEvent::FileCreated(f) if f.path == "Journal/Daily/2026-11-06.md")
+    ));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SourceEvent::FolderCreated(f) if f == "Journal/Daily"))
+    );
+    // A second time, it is there already.
+    assert!(s.write(&ops).is_err());
+}

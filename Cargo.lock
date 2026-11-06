@@ -1376,6 +1376,7 @@ dependencies = [
  "architect-navigator",
  "architect-settings",
  "architect-workspace-hack",
+ "chrono",
  "dioxus",
  "futures",
  "futures-channel",
