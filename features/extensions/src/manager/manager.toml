@@ -37,7 +37,7 @@ params = '{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"
 [[actions]]
 id = "MANAGER_RUN"
 name = "Manager: run an op"
-description = "Runs op `op` (one MANAGER_LIST names for the item: install, enable, disable, update, pin, clone, remove, revoke, builtin, use, restart, stop) on item `id` of `kind`, with `args` (`version`, `as`). A destructive op from a caller from outside needs the person's yes; installing what asks for capabilities answers needs_consent."
+description = "Runs op `op` (one MANAGER_LIST names for the item: install, enable, disable, tour, update, pin, clone, remove, revoke, builtin, use, restart, stop) on item `id` of `kind`, with `args` (`version`, `as`, `tour`). A destructive op from a caller from outside needs the person's yes; installing what asks for capabilities answers needs_consent."
 group = "Extensions"
 effect = "mutating"
 params = '{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"op":{"type":"string"},"args":{"type":"object"}},"required":["kind","id","op"]}'

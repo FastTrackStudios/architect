@@ -828,6 +828,113 @@ fn palette_views_keys_and_sources_are_registered_while_loaded() {
     }
 }
 
+// ---- tours (#379) -------------------------------------------------------
+
+const TOURED: &str = r#"
+id = "lab.toured"
+name = "Toured"
+version = "0.1.0"
+kind = "luau"
+
+[[actions]]
+id = "LAB_TOURED_OPEN"
+name = "Open it"
+script = "open.luau"
+
+[[tours]]
+id = "toured-tour"
+title = "Toured"
+description = "What it adds."
+scenario = "tours/toured-tour.styx"
+"#;
+
+const TOUR: &str = r#"
+id toured-tour
+title "Toured"
+safe true
+steps (
+    {id open, hide true, do @run{id LAB_TOURED_OPEN}}
+    {id look, text "Here it is."}
+)
+"#;
+
+/// A Luau extension with `tour` as its tour, in `dir`, run as a
+/// development copy: what loaded.
+fn toured(ext: &Extensions, dir: &std::path::Path, tour: &str) -> Vec<Event> {
+    std::fs::create_dir_all(dir.join("tours")).unwrap();
+    std::fs::write(dir.join("extension.toml"), TOURED).unwrap();
+    std::fs::write(dir.join("open.luau"), "return nil\n").unwrap();
+    std::fs::write(dir.join("tours/toured-tour.styx"), tour).unwrap();
+    ext.dev(dir)
+}
+
+#[test]
+fn tours_are_checked_at_load_and_withdrawn_when_off() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let ext = Extensions::new(host(&list), Installs::new(tmp.path().join("i")));
+    let dir = tmp.path().join("toured");
+    let loaded = toured(&ext, &dir, TOUR);
+    let tours = ext.host().contributions().tours();
+    assert_eq!(tours.len(), 1, "{loaded:?}");
+    assert_eq!(tours[0].owner, "lab.toured");
+    assert_eq!(tours[0].item.title, "Toured");
+    // Its scenario's text was read from its package at load.
+    assert_eq!(tours[0].item.scenario_text.as_deref(), Some(TOUR));
+    // Off: its tours go with it; on again, the app hears it was turned on
+    // (where it offers the tour), and they are back.
+    let _ = ext.disable("lab.toured");
+    assert!(ext.host().contributions().tours().is_empty());
+    let since = list.latest();
+    let _ = ext.enable("lab.toured");
+    assert_eq!(ext.host().contributions().tours().len(), 1);
+    let (events, _) = list.events_since(since, 64, Duration::ZERO);
+    assert!(events.iter().any(|e| matches!(
+        &e.kind,
+        architect::action::EventKind::Changed { topic, detail }
+            if topic == architect_extensions::extensions::TURNED_ON && detail == "lab.toured"
+    )));
+    // A tour that does not read, is another scenario, or runs an action
+    // beyond its capabilities fails the load.
+    for (bad, why) in [
+        ("steps (", "a scenario that does not read"),
+        ("id toured-tour", "another scenario"),
+        ("LAB_TOURED_OPEN", "an action it does not reach"),
+    ] {
+        let broken = match why {
+            "a scenario that does not read" => TOUR.replacen(bad, "steps {", 1),
+            "another scenario" => TOUR.replacen(bad, "id someone-else", 1),
+            _ => TOUR.replacen(bad, "VAULT_DELETE", 1),
+        };
+        let fresh = Extensions::new(
+            host(&ActionList::new()),
+            Installs::new(tmp.path().join("j")),
+        );
+        let other = tmp.path().join(why.replace(' ', "-"));
+        let events = toured(&fresh, &other, &broken);
+        assert!(
+            events.iter().any(|e| matches!(e, Event::Failed { .. })),
+            "{why}: {events:?}"
+        );
+    }
+    // Checked at parse: an id it can have, a title, a .styx in its package.
+    for (bad, why) in [
+        ("id = \"toured-tour\"", "id = \"Toured Tour\""),
+        ("title = \"Toured\"", "title = \"\""),
+        (
+            "scenario = \"tours/toured-tour.styx\"",
+            "scenario = \"../toured-tour.styx\"",
+        ),
+        (
+            "scenario = \"tours/toured-tour.styx\"",
+            "scenario = \"tours/toured-tour.md\"",
+        ),
+    ] {
+        let text = TOURED.replacen(bad, why, 1);
+        assert!(Manifest::parse(&text).is_err(), "{why}");
+    }
+}
+
 // ---- windows ------------------------------------------------------------
 
 thread_local! {

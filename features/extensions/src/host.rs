@@ -730,6 +730,9 @@ struct Running {
 
 type Listener = Arc<dyn Fn(&Event) + Send + Sync>;
 
+/// What starts an extension's tour ([`Host::on_tour`]).
+type TourStarter = Arc<dyn Fn(&str, Option<&str>) -> Result<(), String> + Send + Sync>;
+
 /// What runs a hook's work: the app's executor, or a thread of its own.
 pub type Spawn = Arc<dyn Fn(ActionFuture) + Send + Sync>;
 
@@ -793,6 +796,8 @@ struct Inner {
     theme_heard: Mutex<Option<architect_theme::Subscription>>,
     /// What loaded extensions add to the interface.
     contributions: Contributions,
+    /// What starts an extension's tour: the app's ([`Host::on_tour`]).
+    tour: Mutex<Option<TourStarter>>,
     /// The toolbars in force: the extensions' and a person's files.
     toolbars: crate::toolbars::Toolbars,
     /// Where hooks' work runs.
@@ -871,6 +876,7 @@ impl Host {
                 themes: Mutex::new(None),
                 theme_heard: Mutex::new(None),
                 contributions: Contributions::new(),
+                tour: Mutex::new(None),
                 toolbars: crate::toolbars::Toolbars::new(),
                 spawn: Mutex::new(Arc::new(|work: ActionFuture| {
                     std::thread::spawn(move || {
@@ -1141,6 +1147,36 @@ impl Host {
         &self.inner.contributions
     }
 
+    /// Starts extension `id`'s tour with `start` from now on: `(id, tour)`,
+    /// its tour by id or its first. The app's tour layer is what plays it
+    /// (`architect_guide::tour`); the manager's "Take the tour" asks it.
+    pub fn on_tour(
+        &self,
+        start: impl Fn(&str, Option<&str>) -> Result<(), String> + Send + Sync + 'static,
+    ) {
+        *self
+            .inner
+            .tour
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(start));
+    }
+
+    /// Starts extension `id`'s tour `tour` (its first when `None`).
+    ///
+    /// # Errors
+    ///
+    /// The app plays no tours, or it could not start this one.
+    pub fn start_tour(&self, id: &str, tour: Option<&str>) -> Result<(), String> {
+        let start = self
+            .inner
+            .tour
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or_else(|| "this app plays no tours".to_owned())?;
+        start(id, tour)
+    }
+
     /// The toolbars in force: every extension's `[[toolbars]]`, a person's
     /// files over them (`Toolbars::set_dir`), and which action is armed.
     #[must_use]
@@ -1406,6 +1442,9 @@ impl Host {
     ) -> Result<Change, LoadError> {
         let manifest = &package.manifest;
         manifest.check().map_err(|e| LoadError::Package(e.into()))?;
+        // Its tours, read from its package and checked as it now: a broken
+        // one fails the load, before anything is swapped.
+        let tours = read_tours(package)?;
         self.check_reserved(manifest, origin)?;
         let runner = match self.linked_runner(&manifest.id, origin) {
             Some(linked) => linked,
@@ -1529,6 +1568,14 @@ impl Host {
                 && let Some(path) = &t.template
             {
                 t.template_text = package.text(path).ok();
+            }
+        }
+        for t in &mut declared.tours {
+            if t.scenario_text.is_none() {
+                t.scenario_text = tours
+                    .iter()
+                    .find(|r| r.id == t.id)
+                    .and_then(|r| r.scenario_text.clone());
             }
         }
         // Its context-menu rows are items of their targets' points.
@@ -2132,6 +2179,16 @@ fn providers_of<'a>(
 
 /// Refuses `manifest` when a service it requires has no loaded provider
 /// meeting its requirement.
+/// `package`'s tours (`[[tours]]`), each with its scenario's text, read
+/// and checked against its manifest's rules ([`Manifest::tours`]).
+fn read_tours(package: &Package) -> Result<Vec<contrib::TourDecl>, LoadError> {
+    package
+        .manifest
+        .tours(|path| package.text(path).ok())
+        .map(|tours| tours.into_iter().map(|(t, _)| t).collect())
+        .map_err(|r| LoadError::Package(crate::manifest::ManifestError::Contribution(r).into()))
+}
+
 fn check_requires(
     manifest: &Manifest,
     loaded: &BTreeMap<String, Running>,

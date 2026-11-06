@@ -768,6 +768,20 @@ fn Actions(browse: Browse, row: Row, installed: Option<String>, about: Option<Pr
                 if row.disabled { "Turn on" } else { "Turn off" }
             }
         }
+        // Its tour (`[[tours]]`), while it runs: the app's tour layer plays it.
+        if !row.disabled && ext.host().contributions().tours().iter().any(|t| t.owner == row.id) {
+            Button { variant: ButtonVariant::Outline,
+                on_click: {
+                    let (ext, id) = (ext.clone(), id.clone());
+                    move |_| {
+                        if let Err(e) = ext.host().start_tour(&id, None) {
+                            say(s, false, e);
+                        }
+                    }
+                },
+                "Take the tour"
+            }
+        }
         if row.at == Where::Installed {
             Button { variant: ButtonVariant::Destructive,
                 on_click: {

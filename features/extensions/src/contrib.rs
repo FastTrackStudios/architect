@@ -860,6 +860,88 @@ pub struct PaletteSourceDecl {
 /// ids.
 pub const BUILTIN_CAPTURE_TARGETS: &[&str] = &["note", "inbox"];
 
+/// A guided tour of the extension (`[[tours]]`, #379): a guide scenario
+/// in its package (`architect-guide`'s `.styx`, the format of the app's
+/// own tours and films), played live over the app to show what it adds.
+///
+/// ```toml
+/// [[tours]]
+/// id = "projects-tour"            # the scenario's own id
+/// title = "Projects"
+/// description = "A project's page, its roadmap and the navigator's tree."
+/// scenario = "tours/projects-tour.styx"   # in its package
+/// ```
+///
+/// Its steps are the guide's: hidden setup steps (`do @run{id …}`), and
+/// steps a person reads, each ringed on a target (a view, a control, a
+/// row). It plays as the extension: each `@run` is one of its own actions
+/// or one its capabilities reach, checked at load with the scenario
+/// itself, so a broken tour fails the load. The app lists it
+/// (`TOURS_LIST`), starts it (`TOUR_START`), offers it once after the
+/// extension is installed or turned on, and puts "Take the tour" on its
+/// page in the extensions manager. Withdrawn with the rest of its
+/// contributions when the extension is turned off. The registry is
+/// [`Contributions::tours`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TourDecl {
+    /// The scenario's id: unique among every loaded extension's tours and
+    /// the app's own.
+    pub id: String,
+    /// What a person sees: "Take the <title> tour".
+    pub title: String,
+    pub description: String,
+    /// A `.styx` scenario file in its package.
+    pub scenario: String,
+    /// `scenario`'s text, read from the package when it loaded.
+    #[serde(skip_deserializing)]
+    pub scenario_text: Option<String>,
+}
+
+impl TourDecl {
+    /// Its scenario, read and checked against its owner's `rules`: it
+    /// parses, its id is the tour's, and each action a step runs is the
+    /// owner's own or one its capabilities reach (a check only reads, and
+    /// the guide runs only read-only ones).
+    ///
+    /// # Errors
+    ///
+    /// No text read yet, or the first thing wrong with it.
+    pub fn read(&self, rules: &Rules<'_>) -> Result<architect_guide::Scenario, Refused> {
+        let what = format!("tour {}", self.id);
+        let refuse = |why: String| Refused {
+            what: what.clone(),
+            why,
+        };
+        let text = self
+            .scenario_text
+            .as_deref()
+            .ok_or_else(|| refuse(format!("{} is not in its package", self.scenario)))?;
+        let scenario =
+            architect_guide::load(text).map_err(|e| refuse(format!("{}: {e}", self.scenario)))?;
+        if scenario.id != self.id {
+            return Err(refuse(format!(
+                "{} is scenario {:?}; its id is the tour's",
+                self.scenario, scenario.id
+            )));
+        }
+        if !scenario.steps.iter().any(|s| !s.hide) {
+            return Err(refuse("it has no step a person sees".to_owned()));
+        }
+        for step in &scenario.steps {
+            if let Some(architect_guide::Do::Run { id, .. }) = &step.act
+                && !rules.reaches(id)
+            {
+                return Err(refuse(format!(
+                    "step {} runs {id}, neither its own ({}…) nor one its capabilities reach",
+                    step.id, rules.prefix
+                )));
+            }
+        }
+        Ok(scenario)
+    }
+}
+
 /// Everything an extension adds to the interface past actions, settings,
 /// views and themes: a manifest's tables, or the same sent at run time.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -892,6 +974,8 @@ pub struct Contribution {
     pub palette_views: Vec<PaletteViewDecl>,
     /// Sources of the palette's rows (`[[palette_sources]]`).
     pub palette_sources: Vec<PaletteSourceDecl>,
+    /// Its guided tours (`[[tours]]`).
+    pub tours: Vec<TourDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
     pub keymaps: Vec<editor_ext::KeymapEntry>,
@@ -920,6 +1004,19 @@ pub struct Rules<'a> {
     /// What of the app's state it asks to change (`capabilities.writes`):
     /// a keymap or a slash row needs `editor`.
     pub writes: &'a [String],
+}
+
+impl Rules<'_> {
+    /// Whether action `id` is its owner's own or one its capabilities
+    /// reach.
+    #[must_use]
+    pub fn reaches(&self, id: &str) -> bool {
+        id.starts_with(self.prefix.as_str())
+            || self
+                .reach
+                .iter()
+                .any(|p| p == "*" || id.starts_with(p.as_str()))
+    }
 }
 
 /// Why a contribution was refused.
@@ -988,6 +1085,7 @@ impl Contribution {
             palette_sources: join(&self.palette_sources, &other.palette_sources, |p| {
                 p.id.clone()
             }),
+            tours: join(&self.tours, &other.tours, |t| t.id.clone()),
             keymaps: join(&self.keymaps, &other.keymaps, keymap_key),
             slash: join(&self.slash, &other.slash, |s| s.action.clone()),
         }
@@ -1048,6 +1146,7 @@ impl Contribution {
                 .iter()
                 .map(|p| format!("palette_source:{}", p.id)),
         );
+        out.extend(self.tours.iter().map(|t| format!("tour:{}", t.id)));
         out.extend(
             self.keymaps
                 .iter()
@@ -1070,12 +1169,7 @@ impl Contribution {
             if id.is_empty() {
                 return refuse(what.to_owned(), "it names no action".to_owned());
             }
-            let reached = id.starts_with(rules.prefix.as_str())
-                || rules
-                    .reach
-                    .iter()
-                    .any(|p| p == "*" || id.starts_with(p.as_str()));
-            if reached {
+            if rules.reaches(id) {
                 Ok(())
             } else {
                 refuse(
@@ -1117,6 +1211,7 @@ impl Contribution {
             self.key_bindings.len(),
             self.palette_views.len(),
             self.palette_sources.len(),
+            self.tours.len(),
             self.keymaps.len(),
             self.slash.len(),
         ]
@@ -1437,6 +1532,32 @@ impl Contribution {
                 .any(|t| t.prefix.trim().is_empty() || t.key.trim().is_empty())
             {
                 return refuse(what, "a token needs a prefix and a key".to_owned());
+            }
+        }
+        for t in &self.tours {
+            let what = format!("tour {}", t.id);
+            if t.id.is_empty()
+                || !t
+                    .id
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || "-_.".contains(ch))
+            {
+                return refuse(
+                    what,
+                    "its id is lowercase letters, digits, -, _ and .".to_owned(),
+                );
+            }
+            if t.title.trim().is_empty() {
+                return refuse(what, "it needs a title".to_owned());
+            }
+            let styx = std::path::Path::new(&t.scenario)
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("styx"));
+            if !inside(&t.scenario) || !styx {
+                return refuse(
+                    what,
+                    format!("{:?} is not a .styx file in its package", t.scenario),
+                );
             }
         }
         for e in &self.embeds {
@@ -2111,6 +2232,17 @@ impl Contributions {
         self.all(|c| c.palette_sources.clone())
             .into_iter()
             .filter(|p| seen.insert(p.item.id.clone()))
+            .collect()
+    }
+
+    /// Every guided tour (`[[tours]]`), in the order its owner came. A
+    /// tour two extensions add is the first's.
+    #[must_use]
+    pub fn tours(&self) -> Vec<By<TourDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.tours.clone())
+            .into_iter()
+            .filter(|t| seen.insert(t.item.id.clone()))
             .collect()
     }
 

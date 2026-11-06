@@ -193,6 +193,7 @@ fn adds(m: &Manifest) -> Vec<String> {
         ("openers", "opener"),
         ("doc_kinds", "document kind"),
         ("slots", "chrome slot"),
+        ("tours", "tour"),
     ] {
         let Some(items) = contributes.get(field).and_then(Value::as_array) else {
             continue;
@@ -580,6 +581,7 @@ impl Extensions {
         }
         let install = self.installs().install_archive(bytes, from)?;
         let _ = self.sync();
+        self.turned_on(&install.id);
         Ok(Installed::Done {
             loaded: self.host().get(&install.id).is_some(),
             id: install.id,
