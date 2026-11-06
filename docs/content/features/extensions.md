@@ -99,6 +99,8 @@ extension's namespace, capabilities and views when it loads
 | `[[hooks]]` | an action or Luau script run on an app event: `startup`, `workspace.changed`, `doc.opened`, `theme.changed`, `selection.changed`, `changed:<topic>` | `HookDecl` |
 | `[[slots]]` | a shell region (`ribbon`, `left`, `right`, `tabs`, `status`, `title`) filled with one of its views; the latest claim wins | `SlotDecl` |
 | `[[embeds]]` | an inline block of a document drawn by one of its views: a fenced block by language, a note by its `type:`, an embed by what it points at | `EmbedDecl` |
+| `[[base_views]]` | a view type for Bases (`type:` of a base's view), drawn by one of its views, a page or its code | `BaseViewDecl` |
+| `[[project_types]]` | a type of architect's `project` kind: properties on top of the kind's, a `project.md` template, folders and views; the registry `EXT_PROJECT_TYPES` reads | `ProjectTypeDecl` |
 | `[[keymaps]]` | keys in the live editor that run its actions (needs `writes = ["editor"]`) | `editor_ext::KeymapEntry` |
 | `[[slash]]` | rows of the editor's slash menu that run its actions (needs `writes = ["editor"]`) | `editor_ext::SlashEntry` |
 

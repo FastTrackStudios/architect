@@ -695,6 +695,7 @@ const FORWARDED: &[&str] = &[
     "MANAGER_RUN",
     "EXT_CONTRIBUTIONS",
     "EXT_EMBEDS",
+    "EXT_PROJECT_TYPES",
     "EXT_OPEN",
     "EXT_VIEW_OPEN",
     "EXT_STATE_SET",
@@ -865,6 +866,19 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                 .with_linked(&architect_sandbox_board::Board)
             {
                 extensions = with;
+            }
+        }
+        // The Project Management bundle's Projects and Tasks (#375):
+        // first-party extensions the app ships, on by default. Each runs
+        // alone; together a project's page shows its tasks. The sandbox's
+        // made-up data and goldens stay as they were.
+        if !sandbox {
+            let bundle: [&dyn architect_extensions::linked::Extension; 2] =
+                [&architect_projects::Projects, &architect_tasks::Tasks];
+            for linked in bundle {
+                if let Ok(with) = extensions.clone().with_linked(linked) {
+                    extensions = with;
+                }
             }
         }
         // Bases: a note's ```base fence, drawn as a base.

@@ -637,11 +637,12 @@ pub struct ProjectPropertyDecl {
     pub default: Option<String>,
 }
 
-/// A type of project (`[[project_types]]`, #344): architect owns the
-/// `project` kind (a folder whose `project.md` is the project); an
-/// extension adds types of it, each with properties on top of the
-/// kind's, the `project.md` a new one starts with, the folders made in
-/// it and the views it opens with.
+/// A type of project (`[[project_types]]`, #344).
+///
+/// Architect owns the `project` kind (a folder whose `project.md` is the
+/// project); an extension adds types of it, each with properties on top
+/// of the kind's, the `project.md` a new one starts with, the folders made
+/// in it and the views it opens with.
 ///
 /// ```toml
 /// [[project_types]]

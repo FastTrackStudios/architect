@@ -18,6 +18,9 @@
 //! target's tokens; until then the Tasks list's "New task" field and
 //! `TASKS_ADD` read them.
 
+// Token indices within one line, and a day or a week on a date.
+#![allow(clippy::arithmetic_side_effects)]
+
 use chrono::{Datelike, Duration, NaiveDate, Weekday};
 
 use crate::model::{Priority, Status, Task};
@@ -29,7 +32,7 @@ const DATE_CONNECTORS: &[&str] = &["for", "on", "by", "due", "until", "before"];
 #[must_use]
 pub fn parse(input: &str, today: NaiveDate) -> Task {
     let ymd = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
-    let (tokens, recur) = recurrence(tokenize(input), today);
+    let (tokens, recur) = recurrence(&tokenize(input), today);
     let (tokens, phrase_due) = next_phrase(tokens, today);
     let mut task = Task {
         status: Status::Open.as_str().to_owned(),
@@ -159,7 +162,7 @@ struct Recurrence {
     first: Option<NaiveDate>,
 }
 
-fn rrule_day(w: Weekday) -> &'static str {
+const fn rrule_day(w: Weekday) -> &'static str {
     match w {
         Weekday::Mon => "MO",
         Weekday::Tue => "TU",
@@ -184,7 +187,7 @@ fn freq(tok: &str) -> Option<&'static str> {
 /// The first repeat phrase, taken out of the tokens (a second is left in
 /// the title).
 #[allow(clippy::indexing_slicing)]
-fn recurrence(tokens: Vec<String>, today: NaiveDate) -> (Vec<String>, Option<Recurrence>) {
+fn recurrence(tokens: &[String], today: NaiveDate) -> (Vec<String>, Option<Recurrence>) {
     let mut out = Vec::with_capacity(tokens.len());
     let mut found: Option<Recurrence> = None;
     let mut i = 0;
@@ -247,15 +250,15 @@ fn recurrence(tokens: Vec<String>, today: NaiveDate) -> (Vec<String>, Option<Rec
                 freq(unit).map(|f| (format!("FREQ={f}"), "completion", today))
             }
         });
-        let Some((base, anchor, first)) = parsed else {
+        let Some((rule_base, anchor, first)) = parsed else {
             out.push(tokens[i].clone());
             i += 1;
             continue;
         };
         let rule = if interval > 1 {
-            format!("{base};INTERVAL={interval}")
+            format!("{rule_base};INTERVAL={interval}")
         } else {
-            base
+            rule_base
         };
         found = Some(Recurrence {
             rule,

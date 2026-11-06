@@ -62,7 +62,7 @@ pub async fn setting(key: &str) -> Value {
 }
 
 /// One note a base found: its path, name and properties.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Row {
     pub path: String,
     pub name: String,

@@ -1,10 +1,12 @@
-//! A task, as the note it is: Task's `TaskInfo` (`task:features/task/task-proto/src/model.rs`),
-//! ported to the vault. The frontmatter keeps TaskNotes' names, so a
-//! TaskNotes vault reads as it is: `status`, `priority`, `due`,
+//! A task, as the note it is.
+//!
+//! Task's `TaskInfo` (`task:features/task/task-proto/src/model.rs`),
+//! ported to the vault. The frontmatter keeps `TaskNotes`' names, so a
+//! `TaskNotes` vault reads as it is: `status`, `priority`, `due`,
 //! `scheduled`, `tags`, `contexts`, `projects`, `timeEstimate`,
 //! `recurrence`, `recurrence_anchor`, `complete_instances`,
 //! `completedDate`, `dateCreated`, `dateModified`, `blockedBy`. Past
-//! TaskNotes: `parent` (a sub-task's task), `relates`, `assignees` and
+//! `TaskNotes`: `parent` (a sub-task's task), `relates`, `assignees` and
 //! `milestone`.
 //!
 //! Where Task points at a project or another task by UUID, a note points
@@ -14,11 +16,17 @@
 //!
 //! Everything here is pure: no host, no files.
 
+// Calendar arithmetic on dates a person writes (a week on, a month on):
+// chrono's own ranges bound it, years from now.
+#![allow(clippy::arithmetic_side_effects)]
+
+use std::fmt::Write as _;
+
 use chrono::{Datelike, Duration, NaiveDate, Weekday};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-/// The frontmatter keys a task writes, TaskNotes' names first.
+/// The frontmatter keys a task writes, `TaskNotes`' names first.
 pub mod keys {
     pub const TYPE: &str = "type";
     pub const TITLE: &str = "title";
@@ -67,7 +75,7 @@ pub mod keys {
     ];
 }
 
-/// What a note is a task by: `type: task`, or the `task` tag (TaskNotes').
+/// What a note is a task by: `type: task`, or the `task` tag (`TaskNotes`').
 pub const KIND: &str = "task";
 
 /// One task note.
@@ -96,7 +104,7 @@ pub struct Task {
     pub assignees: Vec<String>,
     /// Minutes.
     pub time_estimate: Option<u32>,
-    /// RFC 5545 RRULE (`FREQ=WEEKLY;BYDAY=MO`), TaskNotes' `recurrence`.
+    /// RFC 5545 RRULE (`FREQ=WEEKLY;BYDAY=MO`), `TaskNotes`' `recurrence`.
     pub recurrence: Option<String>,
     /// `scheduled` (the next one from the date it was due) or
     /// `completion` (from the day it was done).
@@ -303,7 +311,7 @@ pub enum Group {
 
 impl Group {
     #[must_use]
-    pub fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Todo => "To do",
             Self::Doing => "In progress",
@@ -315,7 +323,7 @@ impl Group {
 
     /// The status a task moved into this group is given.
     #[must_use]
-    pub fn status(self) -> Status {
+    pub const fn status(self) -> Status {
         match self {
             Self::Todo => Status::Open,
             Self::Doing => Status::InProgress,
@@ -336,7 +344,7 @@ impl Group {
 
 impl Status {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
             Self::InProgress => "in-progress",
@@ -365,13 +373,12 @@ impl Status {
     #[must_use]
     pub fn group_of(status: &str) -> Group {
         match Self::parse(status) {
-            Some(Self::Open) => Group::Todo,
             Some(Self::InProgress) => Group::Doing,
             Some(Self::Waiting) => Group::Waiting,
             Some(Self::Done) => Group::Done,
             Some(Self::Cancelled) => Group::Cancelled,
             None if status_is_terminal(status) => Group::Done,
-            None => Group::Todo,
+            Some(Self::Open) | None => Group::Todo,
         }
     }
 }
@@ -413,7 +420,7 @@ pub enum Priority {
 
 impl Priority {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Low => "low",
@@ -484,7 +491,7 @@ pub fn order(a: &Task, b: &Task) -> std::cmp::Ordering {
 }
 
 /// How often a task comes back: a subset of RFC 5545's RRULE, the shape
-/// TaskNotes writes (`FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH`).
+/// `TaskNotes` writes (`FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Repeat {
     pub freq: Freq,
@@ -539,7 +546,7 @@ impl Repeat {
         })
     }
 
-    /// The rule as TaskNotes writes it.
+    /// The rule as `TaskNotes` writes it.
     #[must_use]
     pub fn rule(&self) -> String {
         let freq = match self.freq {
@@ -550,11 +557,11 @@ impl Repeat {
         };
         let mut out = format!("FREQ={freq}");
         if self.interval > 1 {
-            out.push_str(&format!(";INTERVAL={}", self.interval));
+            let _ = write!(out, ";INTERVAL={}", self.interval);
         }
         if !self.by_day.is_empty() {
             let days: Vec<&str> = self.by_day.iter().map(|d| rrule_day(*d)).collect();
-            out.push_str(&format!(";BYDAY={}", days.join(",")));
+            let _ = write!(out, ";BYDAY={}", days.join(","));
         }
         out
     }
@@ -615,7 +622,7 @@ fn weekday(s: &str) -> Option<Weekday> {
     )
 }
 
-fn rrule_day(d: Weekday) -> &'static str {
+const fn rrule_day(d: Weekday) -> &'static str {
     match d {
         Weekday::Mon => "MO",
         Weekday::Tue => "TU",
@@ -631,7 +638,7 @@ fn rrule_day(d: Weekday) -> &'static str {
 /// removes one).
 ///
 /// A one-off closes: `status` and `completedDate`. A repeating one stays
-/// open (TaskNotes'): `today` joins `complete_instances`, and its `due`
+/// open (`TaskNotes`'): `today` joins `complete_instances`, and its `due`
 /// (and `scheduled`) moves to the next time, counted from the date it was
 /// due, or from `today` when its anchor is `completion`.
 #[must_use]
@@ -643,7 +650,7 @@ pub fn complete(task: &Task, status: &str, today: NaiveDate) -> Vec<(&'static st
         (true, Some(rule)) => {
             let mut done = task.complete_instances.clone();
             if !done.contains(&today_s) {
-                done.push(today_s.clone());
+                done.push(today_s);
             }
             let from_completion = task.recurrence_anchor.as_deref() == Some("completion");
             let next = |date: &Option<String>| {
@@ -701,8 +708,9 @@ pub enum Relation {
     Relates,
 }
 
-/// Every edge among `tasks` whose links resolve to one of them (Task's
-/// `relations::edges`, over links): `blockedBy: [b]` on `t` is `b blocks
+/// Every edge among `tasks` whose links resolve to one of them.
+///
+/// Task's `relations::edges`, over links: `blockedBy: [b]` on `t` is `b blocks
 /// t`, `parent: p` on `t` is `t subtask p`, `relates: [r]` is `t relates
 /// r`. Self-edges are dropped.
 #[must_use]

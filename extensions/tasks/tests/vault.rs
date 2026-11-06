@@ -7,7 +7,8 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::indexing_slicing
+    clippy::indexing_slicing,
+    clippy::needless_pass_by_value
 )]
 
 use std::path::Path;
@@ -170,6 +171,11 @@ fn exercise(dir: &Path, ext: &Extensions, list: &ActionList, app: &ActionList, o
         json!({ "source": architect_tasks::board_base() }),
     );
     assert_eq!(rows["view"]["type"], "kanban", "{rows}");
+    // TASKS_BOARD writes it once as a file Bases knows, then opens it.
+    let board = run(list, "TASKS_BOARD", json!({}));
+    assert_eq!(board["written"], true, "{board}");
+    assert!(dir.join("Tasks/Board.base").is_file());
+    assert_eq!(run(list, "TASKS_BOARD", json!({}))["written"], false);
 }
 
 #[test]

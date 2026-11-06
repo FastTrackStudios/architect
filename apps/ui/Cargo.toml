@@ -46,6 +46,9 @@ architect-extensions = { workspace = true, features = ["ui", "remote", "page", "
 architect-input = { workspace = true, features = ["udp"] }
 # The lab's example extension, linked in (apps/sandbox/board).
 architect-sandbox-board = { path = "../sandbox/board" }
+# First-party extensions the app ships, on by default (#368, #375).
+architect-projects = { workspace = true }
+architect-tasks = { workspace = true }
 # The theme picker, architect's built-in extension.
 architect-theme-picker = { workspace = true }
 architect-settings-sheet = { workspace = true }

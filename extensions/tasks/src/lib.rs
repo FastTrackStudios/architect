@@ -6,7 +6,7 @@
 //! same value as a process (`Guest::extension`), so `EXT_CLONE {"id":
 //! "tasks"}` gives a development copy that overrides the linked one.
 //!
-//! - **Data:** a task is a note (`type: task`, TaskNotes' frontmatter;
+//! - **Data:** a task is a note (`type: task`, `TaskNotes`' frontmatter;
 //!   [`model`]). It reads and writes notes only through the host service:
 //!   `BASES_ROWS` to find every task in one query, `VAULT_CREATE` and
 //!   `VAULT_SET_PROPERTY` to write ([`vault`]).
@@ -21,6 +21,7 @@ pub mod model;
 pub mod quick;
 pub mod vault;
 
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -50,15 +51,15 @@ pub const FOLDER: &str = "Tasks";
 /// The base `TASKS_BOARD` writes and opens, in [`FOLDER`].
 pub const BOARD: &str = "Board.base";
 
-/// The base that finds every task: `type: task`, or TaskNotes' tag.
+/// The base that finds every task: `type: task`, or `TaskNotes`' tag.
 #[must_use]
 pub fn tasks_base() -> String {
     format!(
         "filters:\n  or:\n    - type == \"task\"\n    - file.hasTag(\"task\")\nviews:\n  - type: table\n    name: Tasks\n    order:\n{}",
-        keys::ALL
-            .iter()
-            .map(|k| format!("      - {k}\n"))
-            .collect::<String>()
+        keys::ALL.iter().fold(String::new(), |mut out, k| {
+            let _ = writeln!(out, "      - {k}");
+            out
+        })
     )
 }
 
@@ -216,7 +217,10 @@ async fn resolve_project(project: &str) -> Option<(String, String)> {
     }
     // Alone: a path to a project.md is one as it is.
     let target = model::link_target(project);
-    let path = if target.ends_with(".md") {
+    let path = if std::path::Path::new(target)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+    {
         target.to_owned()
     } else {
         format!("{target}.md")
@@ -244,7 +248,9 @@ async fn write_new(mut task: Task, body: &str) -> Result<Task, String> {
     {
         // A link the vault and Obsidian resolve: by path, shown as its
         // title.
-        task.projects[0] = link_to(&path, Some(&title));
+        if let Some(link) = task.projects.first_mut() {
+            *link = link_to(&path, Some(&title));
+        }
         if let Some((dir, _)) = path.rsplit_once('/') {
             folder = format!("{dir}/{FOLDER}");
         }
@@ -410,23 +416,21 @@ async fn for_project(args: Value) -> Result<Value, String> {
         &ymd(today()),
     );
     let done = mine.iter().filter(|t| !t.is_open()).count();
-    let by_milestone: Map<String, Value> = mine
-        .iter()
-        .filter_map(|t| {
-            t.milestone
-                .as_ref()
-                .map(|m| (model::link_target(m).to_owned(), t))
-        })
-        .fold(Map::new(), |mut m, (k, t)| {
-            let e = m
-                .entry(k)
-                .or_insert_with(|| json!({ "total": 0, "done": 0 }));
-            e["total"] = json!(e["total"].as_u64().unwrap_or(0) + 1);
+    let mut counts: std::collections::BTreeMap<String, (u64, u64)> =
+        std::collections::BTreeMap::new();
+    for t in &mine {
+        if let Some(m) = &t.milestone {
+            let (total, done) = counts.entry(model::link_target(m).to_owned()).or_default();
+            *total = total.saturating_add(1);
             if !t.is_open() {
-                e["done"] = json!(e["done"].as_u64().unwrap_or(0) + 1);
+                *done = done.saturating_add(1);
             }
-            m
-        });
+        }
+    }
+    let by_milestone: Map<String, Value> = counts
+        .into_iter()
+        .map(|(k, (total, done))| (k, json!({ "total": total, "done": done })))
+        .collect();
     Ok(json!({
         "project": project,
         "total": mine.len(),
@@ -474,6 +478,9 @@ async fn board() -> Result<Value, String> {
             json!({ "path": path, "body": board_base() }),
         )
         .await?;
+        // VAULT_CREATE indexes what it writes as a note: read the folder
+        // again so Bases knows the new file is a base.
+        vault::run("VAULT_RELOAD", Value::Null).await?;
     }
     let opened = vault::run("BASES_OPEN", json!({ "path": path })).await?;
     Ok(json!({ "path": path, "written": !exists, "opened": opened.get("opened") }))
@@ -536,7 +543,7 @@ fn use_tasks() -> u64 {
         loop {
             futures_timer::Delay::new(Duration::from_millis(250)).await;
             ticks = ticks.wrapping_add(1);
-            if ticks % 12 == 0 {
+            if ticks.is_multiple_of(12) {
                 let _ = refresh().await;
             }
             let now = REVISION.load(Ordering::Relaxed);
@@ -682,15 +689,16 @@ pub fn TaskRow(task: Task, today: String) -> Element {
     let due = task.due.as_deref().map(model::day).map(str::to_owned);
     let project = task.projects.first().map(|p| {
         let t = model::link_target(p);
-        p.split_once('|')
-            .map(|(_, a)| a.trim_end_matches("]]").to_owned())
-            .unwrap_or_else(|| {
+        p.split_once('|').map_or_else(
+            || {
                 t.trim_end_matches("/project")
                     .rsplit('/')
                     .next()
                     .unwrap_or(t)
                     .to_owned()
-            })
+            },
+            |(_, a)| a.trim_end_matches("]]").to_owned(),
+        )
     });
     let priority = model::Priority::rank(&task.priority);
     let flag = match priority {
@@ -824,16 +832,15 @@ fn Kanban() -> Element {
         } else {
             v.clone()
         };
-        match columns.iter_mut().find(|(k, _, _)| *k == key) {
-            Some((_, _, list)) => list.push(r),
-            None => {
-                let label = if key.is_empty() {
-                    "(none)".to_owned()
-                } else {
-                    key.clone()
-                };
-                columns.push((key, label, vec![r]));
-            }
+        if let Some((_, _, list)) = columns.iter_mut().find(|(k, _, _)| *k == key) {
+            list.push(r);
+        } else {
+            let label = if key.is_empty() {
+                "(none)".to_owned()
+            } else {
+                key.clone()
+            };
+            columns.push((key, label, vec![r]));
         }
     }
     let keys_in_order: Vec<String> = columns.iter().map(|(k, _, _)| k.clone()).collect();
@@ -852,7 +859,7 @@ fn Kanban() -> Element {
                     for card in cards {
                         KanbanCard {
                             key: "{card.path}",
-                            card: card.clone(),
+                            card: card,
                             by: by.clone(),
                             prev: i.checked_sub(1).and_then(|p| keys_in_order.get(p)).cloned(),
                             next: keys_in_order.get(i + 1).cloned(),
@@ -906,10 +913,10 @@ fn KanbanCard(card: vault::Row, by: String, prev: Option<String>, next: Option<S
                 }
                 span { style: "flex: 1;" }
                 if prev.is_some() {
-                    button { style: "{arrow}", "aria-label": "Move back", onclick: mover(prev.clone()), "‹" }
+                    button { style: "{arrow}", "aria-label": "Move back", onclick: mover(prev), "‹" }
                 }
                 if next.is_some() {
-                    button { style: "{arrow}", "aria-label": "Move on", onclick: mover(next.clone()), "›" }
+                    button { style: "{arrow}", "aria-label": "Move on", onclick: mover(next), "›" }
                 }
             }
         }

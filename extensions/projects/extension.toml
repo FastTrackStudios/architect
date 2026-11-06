@@ -153,17 +153,17 @@ effect = "read_only"
 [[views]]
 id = "list"
 title = "Projects"
-icon = "folder-kanban"
+icon = "folder"
 
 [[views]]
 id = "page"
 title = "Project"
-icon = "folder-open"
+icon = "folder"
 
 [[status]]
 id = "count"
 text = "Projects…"
-icon = "folder-kanban"
+icon = "folder"
 hint = "Active projects"
 side = "left"
 
@@ -194,7 +194,7 @@ views = ["page"]
 [[project_types]]
 id = "client"
 name = "Client"
-icon = "briefcase"
+icon = "users"
 description = "Work for a client: who, the rate, the contract."
 properties = [
     { key = "client", name = "Client", kind = "link" },

@@ -126,22 +126,22 @@ effect = "read_only"
 [[views]]
 id = "list"
 title = "Tasks"
-icon = "list-checks"
+icon = "check"
 
 [[views]]
 id = "today"
 title = "Today"
-icon = "calendar-check"
+icon = "calendar"
 
 [[views]]
 id = "mine"
 title = "My tasks"
-icon = "user-check"
+icon = "user"
 
 [[status]]
 id = "due"
 text = "Tasks…"
-icon = "list-checks"
+icon = "check"
 hint = "What is due today"
 side = "left"
 
@@ -156,7 +156,7 @@ action = "TASKS_BOARD"
 [[bar]]
 action = "TASKS_ADD"
 title = "New task"
-icon = "list-plus"
+icon = "check"
 
 [[hooks]]
 on = "startup"
@@ -168,13 +168,13 @@ action = "TASKS_STARTED"
 [[base_views]]
 id = "kanban"
 name = "Kanban"
-icon = "square-kanban"
+icon = "layout-dashboard"
 options = [{ key = "columnBy", name = "Columns", kind = "property", default = '"status"' }]
 
 [[sections]]
 id = "tasks"
 title = "Tasks"
-icon = "list-checks"
+icon = "check"
 
 [[sections.settings]]
 key = "tasks.me"

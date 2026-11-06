@@ -22,9 +22,14 @@
 //!   (`architect.tasks` `for_project`), and a task's project is resolved here
 //!   (`architect.projects` `resolve`).
 
+// Its views read the JSON its actions answer with `value["key"]`:
+// serde_json's index answers `Null` for what is missing, never a panic.
+#![allow(clippy::indexing_slicing)]
+
 pub mod model;
 pub mod vault;
 
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -76,10 +81,10 @@ pub fn notes_base() -> String {
     ];
     format!(
         "filters:\n  or:\n    - file.name == \"project\"\n    - type == \"project\"\n    - type == \"goal\"\n    - type == \"milestone\"\nviews:\n  - type: table\n    name: Projects\n    order:\n{}",
-        order
-            .iter()
-            .map(|k| format!("      - {k}\n"))
-            .collect::<String>()
+        order.iter().fold(String::new(), |mut out, k| {
+            let _ = writeln!(out, "      - {k}");
+            out
+        })
     )
 }
 
@@ -285,8 +290,7 @@ async fn create(args: Value) -> Result<Value, String> {
         props.insert("members".to_owned(), json!(model::list_of(m)));
     }
     let mut body = format!("# {title}\n");
-    let mut folders = Vec::new();
-    if let Some(t) = &ty {
+    let folders = ty.as_ref().map_or_else(Vec::new, |t| {
         let id = t.get("id").and_then(Value::as_str).unwrap_or_default();
         props.insert(TYPE_KEY.to_owned(), json!(id));
         for p in t
@@ -308,8 +312,8 @@ async fn create(args: Value) -> Result<Value, String> {
         if let Some(text) = t.get("template_text").and_then(Value::as_str) {
             body = model::fill(text, &title);
         }
-        folders = t.get("folders").map(model::list_of).unwrap_or_default();
-    }
+        t.get("folders").map(model::list_of).unwrap_or_default()
+    });
     let path = format!("{folder}/{}", model::PROJECT_PAGE);
     vault::run(
         "VAULT_CREATE",
@@ -639,7 +643,7 @@ fn use_projects() -> u64 {
         loop {
             futures_timer::Delay::new(Duration::from_millis(250)).await;
             ticks = ticks.wrapping_add(1);
-            if ticks % 12 == 0 {
+            if ticks.is_multiple_of(12) {
                 let _ = refresh().await;
             }
             let now = REVISION.load(Ordering::Relaxed);
@@ -713,7 +717,9 @@ fn ListView() -> Element {
         spawn(async move {
             let mut args = json!({ "title": title });
             if !kind.is_empty() {
-                args["type"] = json!(kind);
+                if let Some(a) = args.as_object_mut() {
+                    a.insert("type".to_owned(), json!(kind));
+                }
             }
             match create(args).await {
                 Ok(made) => {
@@ -740,7 +746,7 @@ fn ListView() -> Element {
                     onkeydown: move |e: KeyboardEvent| if e.key() == Key::Named(NamedKey::Enter) { submit() },
                 }
                 button { style: chip(ty().is_empty()), onclick: move |_| ty.set(String::new()), "Plain" }
-                for (id, name) in kinds {
+                for (id, name) in kinds.into_iter() {
                     button { key: "{id}", style: chip(ty() == id), onclick: move |_| ty.set(id.clone()), "{name}" }
                 }
             }
@@ -801,7 +807,7 @@ fn PageView() -> Element {
     // Read again whenever what it knows moves on (a write, a tick).
     use_effect(use_reactive!(|revision, current| {
         let _ = revision;
-        if let Some(path) = current.clone() {
+        if let Some(path) = current {
             spawn(async move {
                 let got = read(json!({ "path": path })).await;
                 if page.peek().as_ref() != Some(&got) {
@@ -909,7 +915,9 @@ fn ProjectPage(project: Project, data: Value) -> Element {
             spawn(async move {
                 let mut args = json!({ "project": path, "title": title });
                 if let Some(d) = due {
-                    args["due"] = json!(d);
+                    if let Some(a) = args.as_object_mut() {
+                        a.insert("due".to_owned(), json!(d));
+                    }
                 }
                 if let Err(e) = milestone_create(args).await {
                     problem.set(Some(e));
@@ -1064,7 +1072,7 @@ fn MilestoneLine(milestone: Value) -> Element {
     let m = milestone;
     let total = m["progress"]["total"].as_u64().unwrap_or(0);
     let done = m["progress"]["done"].as_u64().unwrap_or(0);
-    let pct = if total == 0 { 0 } else { done * 100 / total };
+    let pct = done.saturating_mul(100).checked_div(total).unwrap_or(0);
     let open = m["status"].as_str() == Some("open");
     let path = m["path"].as_str().unwrap_or_default().to_owned();
     let fill = if open {
@@ -1091,7 +1099,7 @@ fn MilestoneLine(milestone: Value) -> Element {
             }
             span { style: "width: 70px; text-align: right; font-size: 12px; {MUTED}", "{done}/{total}" }
             span { style: "width: 84px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; {MUTED}",
-                {m["dueDate"].as_str().or(m["due_date"].as_str()).unwrap_or("").to_owned()}
+                {m["dueDate"].as_str().or_else(|| m["due_date"].as_str()).unwrap_or("").to_owned()}
             }
         }
     }
@@ -1149,8 +1157,7 @@ fn NoteLine(note: Value) -> Element {
     let path = note["path"].as_str().unwrap_or_default().to_owned();
     let title = note["title"]
         .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| path.clone());
+        .map_or_else(|| path.clone(), str::to_owned);
     rsx! {
         div { style: "padding: 3px 0; cursor: pointer;",
             onclick: move |_| {
@@ -1161,7 +1168,7 @@ fn NoteLine(note: Value) -> Element {
                     }
                 });
             },
-            "📄 {title}"
+            "{title}"
         }
     }
 }

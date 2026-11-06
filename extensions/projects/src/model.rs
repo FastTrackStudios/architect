@@ -41,7 +41,7 @@ impl State {
     pub const ALL: [Self; 4] = [Self::Active, Self::Planning, Self::OnHold, Self::Done];
 
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Planning => "planning",
             Self::Active => "active",
@@ -51,7 +51,7 @@ impl State {
     }
 
     #[must_use]
-    pub fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Planning => "Planning",
             Self::Active => "Active",

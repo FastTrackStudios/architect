@@ -391,15 +391,14 @@ impl Extensions {
                 let reg = host.contributions();
                 let one = |t: crate::contrib::By<crate::contrib::ProjectTypeDecl>| {
                     let mut v = serde_json::to_value(&t.item).unwrap_or(Value::Null);
-                    if let Some(map) = v.as_object_mut() {
-                        map.insert("from".to_owned(), json!(t.owner));
-                    }
+                    v.as_object_mut()
+                        .map(|map| map.insert("from".to_owned(), json!(t.owner)));
                     v
                 };
-                let answer = match a.id {
-                    Some(id) => reg.project_type(&id).map_or(Value::Null, one),
-                    None => Value::Array(reg.project_types().into_iter().map(one).collect()),
-                };
+                let answer = a.id.map_or_else(
+                    || Value::Array(reg.project_types().into_iter().map(one).collect()),
+                    |id| reg.project_type(&id).map_or(Value::Null, one),
+                );
                 Ok::<_, String>(RawJson::from(answer.to_string()))
             },
         )?;

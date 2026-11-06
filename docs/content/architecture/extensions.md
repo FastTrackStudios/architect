@@ -1470,13 +1470,20 @@ providers first, and one whose service has no loaded provider meeting
 the requirement is not loaded (`LoadError::Requires`, in `APP_STATUS`:
 `it requires the service lab.tempo ^2: the loaded provider is lab.tempo
 1.2.0`); when a provider goes, what requires it goes too, until it is
-back. A call is the host service's `service {service, method, args}`,
+back. `[uses] <service> = "<req>"` is the optional form, for an integration
+that lights up when the other extension is there (#367): no provider is
+no problem, the extension loads and stays when its provider goes, and a
+call answers `no provider of <service> <req>` (`HostError::NotFound`)
+until one is loaded. A service is in one table or the other, never both.
+Tasks and Projects use each other this way
+(`extensions/tasks/extension.toml`, `extensions/projects/extension.toml`).
+A call is the host service's `service {service, method, args}`,
 the same from every runner: `linked::Handle::service` in Rust (linked or
 process), `host.service(name, method, args)` in Luau, `call-service` in
 the WIT world (`features/extensions/wit/extension.wit`; the WASI guest's
 `host::service`), and `services.call(service, method, args)` on a
 `QuickJS` page (`EXT_SERVICE_CALL`, run as the page's extension). It is
-checked as every host call is: the caller must require the service, the
+checked as every host call is: the caller must require or use the service, the
 method's effect must be within its `capabilities.effect`, and it runs
 as `Principal::Extension` for whoever the caller acts for.
 
@@ -1648,6 +1655,46 @@ sub-document, given a `BaseViewInput` under the claim
 rows or the view change. A page reads it with `useEmbed()` (its `props`).
 The sandbox's Board adds `board` (`apps/sandbox/board/extension.toml`,
 `apps/sandbox/board/src/lib.rs` `BaseBoard`).
+Tasks adds `kanban` (`extensions/tasks/src/lib.rs` `Kanban`): a column
+per status, a card's arrows moving it on.
+
+## Project types
+
+Architect owns the `project` kind (#344): a folder whose `project.md` is
+the project, with the kind's properties (`state`, `start`, `due`, `up`,
+`members`, `icon`; `features/vault/vault-live/src/property_schema.rs`
+`PropertySchemaRegistry`). An extension adds **types** of it, each with
+properties on top of the kind's, never in place of them:
+
+```toml
+[[project_types]]
+id = "software"                     # written as the project's `projectType:`
+name = "Software"
+icon = "code"
+description = "A codebase: its repository, its stack, its docs and releases."
+properties = [
+    { key = "repo", name = "Repository", kind = "link" },
+    { key = "billable", name = "Billable", kind = "toggle", default = "true" },
+]
+template = "templates/software.md"  # in its package: a new project.md's body
+folders = ["Docs", "Releases"]      # made inside a new project
+views = ["page"]                    # its own [[views]] it opens with
+```
+
+A type is a contribution like the rest (`features/extensions/src/contrib.rs`
+`ProjectTypeDecl`, `ProjectPropertyDecl`): checked at load (an id of
+lowercase letters, digits, `-` and `_`; its template inside its package;
+each property once; its views its own), its template's text read from the
+package when it loads (`ProjectTypeDecl::template_text`, so a linked
+package with no folder hands it out too), and withdrawn when the
+extension unloads. A type two extensions add is the first loaded's. The
+registry is `Contributions::project_types` / `Contributions::project_type`;
+the app and other extensions read it with `EXT_PROJECT_TYPES {id?}`
+(`features/extensions/src/contrib_actions.rs`), which answers each type
+with the extension it is `from`. An in-process extension adds types with
+`Builder::contribute(Contribution { project_types, .. })`. The Projects
+extension adds `software` and `client` and creates a project of any
+loaded type ([Projects](@/extensions/projects.md)).
 
 ## One trait, three ways to run it
 
