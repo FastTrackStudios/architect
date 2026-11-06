@@ -63,7 +63,11 @@ pub fn group_by<T>(
                 _ => {}
             }
             let by = compare_labels(&a.label, &b.label);
-            if order == Order::Desc { by.reverse() } else { by }
+            if order == Order::Desc {
+                by.reverse()
+            } else {
+                by
+            }
         });
     }
     out
@@ -84,7 +88,12 @@ mod tests {
 
     #[test]
     fn groups_keep_first_seen_order_or_sort_with_the_empty_group_last() {
-        let rows = [("a", json!("todo")), ("b", json!(null)), ("c", json!("done")), ("d", json!("todo"))];
+        let rows = [
+            ("a", json!("todo")),
+            ("b", json!(null)),
+            ("c", json!("done")),
+            ("d", json!("todo")),
+        ];
         let first = group_by(rows.iter(), |r| label(&r.1), Order::FirstSeen);
         let labels: Vec<_> = first.iter().map(|g| g.label.as_str()).collect();
         assert_eq!(labels, ["todo", "", "done"]);

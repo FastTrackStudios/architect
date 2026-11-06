@@ -33,16 +33,20 @@ pub struct ViewType {
 /// Bases' own view types: table, cards and list.
 #[must_use]
 pub fn builtin_types() -> Vec<ViewType> {
-    [("table", "Table", "table"), ("cards", "Cards", "layout-grid"), ("list", "List", "list")]
-        .into_iter()
-        .map(|(id, name, icon)| ViewType {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            icon: icon.to_owned(),
-            owner: None,
-            options: Vec::new(),
-        })
-        .collect()
+    [
+        ("table", "Table", "table"),
+        ("cards", "Cards", "layout-grid"),
+        ("list", "List", "list"),
+    ]
+    .into_iter()
+    .map(|(id, name, icon)| ViewType {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        icon: icon.to_owned(),
+        owner: None,
+        options: Vec::new(),
+    })
+    .collect()
 }
 
 /// Whether Bases draws `kind` itself (`gallery` is cards' old name).
@@ -61,7 +65,9 @@ type Source = Arc<dyn Fn() -> Vec<ViewType> + Send + Sync>;
 
 impl std::fmt::Debug for ViewTypes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ViewTypes").field(&self.contributed().len()).finish()
+        f.debug_tuple("ViewTypes")
+            .field(&self.contributed().len())
+            .finish()
     }
 }
 
@@ -79,7 +85,11 @@ impl ViewTypes {
     /// The types extensions add now.
     #[must_use]
     pub fn contributed(&self) -> Vec<ViewType> {
-        let source = self.0.read().unwrap_or_else(PoisonError::into_inner).clone();
+        let source = self
+            .0
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         source.map(|s| s()).unwrap_or_default()
     }
 
@@ -176,7 +186,9 @@ pub fn put(value: &mut Value, key: &str, field: Value) {
 /// View `name` (any case), or the first, to change.
 fn view_mut<'a>(base: &'a mut ParsedBase, name: Option<&str>) -> Result<&'a mut ViewSpec, String> {
     let i = view_index(base, name)?;
-    base.views.get_mut(i).ok_or_else(|| "no such view".to_owned())
+    base.views
+        .get_mut(i)
+        .ok_or_else(|| "no such view".to_owned())
 }
 
 /// A view as JSON, in the base's own words: `type`, `name`, `order`,
@@ -222,10 +234,17 @@ pub fn base_json(path: &str, base: &ParsedBase) -> Value {
 /// formulas (`formula.<name>`).
 #[must_use]
 pub fn columns(base: &ParsedBase, rows: &[BaseRow]) -> Vec<String> {
-    let mut out: Vec<String> = ["file.name", "file.path", "file.folder", "file.ext", "file.tags", "file.mtime"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+    let mut out: Vec<String> = [
+        "file.name",
+        "file.path",
+        "file.folder",
+        "file.ext",
+        "file.tags",
+        "file.mtime",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
     let mut keys: Vec<String> = rows
         .iter()
         .flat_map(|r| r.frontmatter.keys().cloned())
@@ -270,7 +289,8 @@ pub fn set_filters(
     match scope {
         Scope::Base => base.global_filter = node,
         Scope::View => {
-            view_mut(base, view)?.filter = (!matches!(node, vault::bases::FilterNode::None)).then_some(node);
+            view_mut(base, view)?.filter =
+                (!matches!(node, vault::bases::FilterNode::None)).then_some(node);
         }
     }
     Ok(())
@@ -291,7 +311,10 @@ pub fn set_sort(base: &mut ParsedBase, view: Option<&str>, keys: &[String]) -> R
                 Some("desc") => SortDir::Desc,
                 _ => SortDir::Asc,
             };
-            Some(SortKey { property, direction })
+            Some(SortKey {
+                property,
+                direction,
+            })
         })
         .collect();
     Ok(())
@@ -302,8 +325,15 @@ pub fn set_sort(base: &mut ParsedBase, view: Option<&str>, keys: &[String]) -> R
 /// # Errors
 ///
 /// No such view.
-pub fn set_group(base: &mut ParsedBase, view: Option<&str>, property: Option<&str>) -> Result<(), String> {
-    view_mut(base, view)?.group_by = property.map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned);
+pub fn set_group(
+    base: &mut ParsedBase,
+    view: Option<&str>,
+    property: Option<&str>,
+) -> Result<(), String> {
+    view_mut(base, view)?.group_by = property
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned);
     Ok(())
 }
 
@@ -312,7 +342,11 @@ pub fn set_group(base: &mut ParsedBase, view: Option<&str>, property: Option<&st
 /// # Errors
 ///
 /// No such view.
-pub fn set_order(base: &mut ParsedBase, view: Option<&str>, order: &[String]) -> Result<(), String> {
+pub fn set_order(
+    base: &mut ParsedBase,
+    view: Option<&str>,
+    order: &[String],
+) -> Result<(), String> {
     let v = view_mut(base, view)?;
     let mut seen = Vec::new();
     for c in order.iter().map(|c| c.trim()).filter(|c| !c.is_empty()) {
@@ -361,10 +395,18 @@ pub fn add_view(base: &mut ParsedBase, name: &str, kind: &str) -> Result<String,
     if kind.trim().is_empty() {
         return Err("a view needs a type".to_owned());
     }
-    let wanted = if name.trim().is_empty() { kind.trim() } else { name.trim() };
+    let wanted = if name.trim().is_empty() {
+        kind.trim()
+    } else {
+        name.trim()
+    };
     let mut name = wanted.to_owned();
     let mut n = 2_u32;
-    while base.views.iter().any(|v| v.name.eq_ignore_ascii_case(&name)) {
+    while base
+        .views
+        .iter()
+        .any(|v| v.name.eq_ignore_ascii_case(&name))
+    {
         name = format!("{wanted} {n}");
         n = n.saturating_add(1);
     }
@@ -387,8 +429,15 @@ pub fn add_view(base: &mut ParsedBase, name: &str, kind: &str) -> Result<String,
 /// # Errors
 ///
 /// No such view, or a key the base itself uses.
-pub fn set_option(base: &mut ParsedBase, view: Option<&str>, key: &str, value: Value) -> Result<(), String> {
-    const OWN: &[&str] = &["type", "name", "filters", "order", "sort", "limit", "groupBy"];
+pub fn set_option(
+    base: &mut ParsedBase,
+    view: Option<&str>,
+    key: &str,
+    value: Value,
+) -> Result<(), String> {
+    const OWN: &[&str] = &[
+        "type", "name", "filters", "order", "sort", "limit", "groupBy",
+    ];
     if key.trim().is_empty() || OWN.contains(&key) {
         return Err(format!("{key:?} is not a view option"));
     }
@@ -411,16 +460,36 @@ mod tests {
     use super::*;
 
     fn base() -> ParsedBase {
-        vault::bases::parse("views:\n  - type: table\n    name: All\n    order: [file.name, status]\n").unwrap()
+        vault::bases::parse(
+            "views:\n  - type: table\n    name: All\n    order: [file.name, status]\n",
+        )
+        .unwrap()
     }
 
     #[test]
     fn edits_land_in_the_view_and_survive_a_round_trip() {
         let mut b = base();
-        set_filters(&mut b, None, Scope::View, Conjunction::And, &["status != null".into()]).unwrap();
-        set_sort(&mut b, Some("all"), &["status desc".into(), "file.name".into()]).unwrap();
+        set_filters(
+            &mut b,
+            None,
+            Scope::View,
+            Conjunction::And,
+            &["status != null".into()],
+        )
+        .unwrap();
+        set_sort(
+            &mut b,
+            Some("all"),
+            &["status desc".into(), "file.name".into()],
+        )
+        .unwrap();
         set_group(&mut b, None, Some("status")).unwrap();
-        set_order(&mut b, None, &["status".into(), "file.name".into(), "status".into()]).unwrap();
+        set_order(
+            &mut b,
+            None,
+            &["status".into(), "file.name".into(), "status".into()],
+        )
+        .unwrap();
         set_formula(&mut b, "loud", "upper(status)").unwrap();
         let added = add_view(&mut b, "", "board").unwrap();
         assert_eq!(added, "board");
@@ -431,7 +500,10 @@ mod tests {
         let v = view_json(&again.views[0]);
         assert_eq!(v["groupBy"], "status");
         assert_eq!(v["order"], json!(["status", "file.name"]));
-        assert_eq!(v["sort"][0], json!({ "property": "status", "direction": "DESC" }));
+        assert_eq!(
+            v["sort"][0],
+            json!({ "property": "status", "direction": "DESC" })
+        );
         assert_eq!(v["filters"]["clauses"], json!(["status != null"]));
         assert_eq!(again.formulas[0].name, "loud");
         assert_eq!(again.views[1].kind.as_str(), "board");
@@ -455,8 +527,16 @@ mod tests {
         assert_eq!(types.all().len(), 3);
         types.set_source(|| {
             vec![
-                ViewType { id: "board".into(), name: "Board".into(), owner: Some("lab.board".into()), ..ViewType::default() },
-                ViewType { id: "TABLE".into(), ..ViewType::default() },
+                ViewType {
+                    id: "board".into(),
+                    name: "Board".into(),
+                    owner: Some("lab.board".into()),
+                    ..ViewType::default()
+                },
+                ViewType {
+                    id: "TABLE".into(),
+                    ..ViewType::default()
+                },
             ]
         });
         let ids: Vec<_> = types.all().into_iter().map(|t| t.id).collect();

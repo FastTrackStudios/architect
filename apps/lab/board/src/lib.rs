@@ -465,17 +465,31 @@ fn BaseBoard() -> Element {
     let Some(input) = architect_extensions::linked::use_base_view() else {
         return rsx! {};
     };
-    let by = input.view.get("options").unwrap_or(&Value::Null).get("columnBy").unwrap_or(&Value::Null)
+    let by = input
+        .view
+        .get("options")
+        .unwrap_or(&Value::Null)
+        .get("columnBy")
+        .unwrap_or(&Value::Null)
         .as_str()
         .map(str::to_owned)
         .filter(|s| !s.is_empty());
-    let rows: Vec<Value> = input.rows.get("groups").unwrap_or(&Value::Null)
+    let rows: Vec<Value> = input
+        .rows
+        .get("groups")
+        .unwrap_or(&Value::Null)
         .as_array()
         .into_iter()
         .flatten()
         .flat_map(|g| {
-            let label = g.get("label").unwrap_or(&Value::Null).as_str().unwrap_or_default().to_owned();
-            g.get("rows").unwrap_or(&Value::Null)
+            let label = g
+                .get("label")
+                .unwrap_or(&Value::Null)
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            g.get("rows")
+                .unwrap_or(&Value::Null)
                 .as_array()
                 .cloned()
                 .unwrap_or_default()
@@ -525,4 +539,3 @@ fn BaseBoard() -> Element {
         }
     }
 }
-

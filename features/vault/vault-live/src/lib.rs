@@ -74,9 +74,9 @@
     clippy::use_self
 )]
 pub mod bases;
-pub mod grouping;
 pub mod blocks;
 pub mod cook;
+pub mod grouping;
 pub mod lexorank;
 pub mod lookup;
 pub mod mutate;

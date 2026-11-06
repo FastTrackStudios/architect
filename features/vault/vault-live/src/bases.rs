@@ -780,7 +780,9 @@ pub fn filter_clauses(node: &FilterNode) -> (Conjunction, Vec<String>) {
     let text = args
         .into_iter()
         .map(|a| match a {
-            FilterNode::Not { arg } if !matches!(**arg, FilterNode::And { .. } | FilterNode::Or { .. }) => {
+            FilterNode::Not { arg }
+                if !matches!(**arg, FilterNode::And { .. } | FilterNode::Or { .. }) =>
+            {
                 filter_leaf(arg).map_or_else(|| clause_json(a), |t| format!("!({t})"))
             }
             other => filter_leaf(other).unwrap_or_else(|| clause_json(other)),
@@ -2167,7 +2169,6 @@ pub fn view_table(base: &ParsedBase, view: &ViewSpec, rows: &[BaseRow]) -> ViewT
         groups,
     }
 }
-
 
 fn is_truthy(v: &serde_json::Value) -> bool {
     match v {
@@ -3666,14 +3667,20 @@ mod clause_tests {
 
     #[test]
     fn a_filter_reads_as_clauses_and_back() {
-        let clauses = vec!["status != null".to_owned(), r#"file.hasTag("song")"#.to_owned()];
+        let clauses = vec![
+            "status != null".to_owned(),
+            r#"file.hasTag("song")"#.to_owned(),
+        ];
         let node = filter_of_clauses(Conjunction::Or, &clauses).unwrap();
         assert!(matches!(node, FilterNode::Or { .. }));
         let (join, back) = filter_clauses(&node);
         assert_eq!(join, Conjunction::Or);
         assert_eq!(back.len(), 2);
         assert_eq!(filter_of_clauses(join, &back).unwrap(), node);
-        assert_eq!(filter_of_clauses(Conjunction::And, &[]).unwrap(), FilterNode::None);
+        assert_eq!(
+            filter_of_clauses(Conjunction::And, &[]).unwrap(),
+            FilterNode::None
+        );
         let one = filter_of_clauses(Conjunction::And, &clauses[..1]).unwrap();
         assert!(matches!(one, FilterNode::Cmp { .. }));
     }

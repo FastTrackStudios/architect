@@ -1016,7 +1016,10 @@ impl Contribution {
             if b.id.is_empty() {
                 return refuse(what, "it needs an id".to_owned());
             }
-            if BUILTIN_BASE_VIEWS.iter().any(|v| v.eq_ignore_ascii_case(&b.id)) {
+            if BUILTIN_BASE_VIEWS
+                .iter()
+                .any(|v| v.eq_ignore_ascii_case(&b.id))
+            {
                 return refuse(what, "Bases draws that type itself".to_owned());
             }
             match (&b.view, &b.page) {
@@ -2150,11 +2153,17 @@ mod tests {
         let _ = reg.put(
             "lab.board",
             Contribution {
-                base_views: vec![BaseViewDecl { id: "board".into(), ..BaseViewDecl::default() }],
+                base_views: vec![BaseViewDecl {
+                    id: "board".into(),
+                    ..BaseViewDecl::default()
+                }],
                 ..Contribution::default()
             },
         );
-        assert_eq!(reg.base_view("BOARD").map(|b| b.owner).as_deref(), Some("lab.board"));
+        assert_eq!(
+            reg.base_view("BOARD").map(|b| b.owner).as_deref(),
+            Some("lab.board")
+        );
         let _ = reg.withdraw("lab.board");
         assert!(reg.base_views().is_empty());
     }

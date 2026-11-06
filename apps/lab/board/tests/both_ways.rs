@@ -98,7 +98,11 @@ fn linked_in() {
     );
     assert!(ext.host().contributions().of(ID).is_none());
     assert!(status(&ext).is_empty(), "its status went with it");
-    assert!(keys.contains("tab:board") && keys.contains("base_view:board") && keys.contains("context:view:note/LAB_BOARD_PIN"));
+    assert!(
+        keys.contains("tab:board")
+            && keys.contains("base_view:board")
+            && keys.contains("context:view:note/LAB_BOARD_PIN")
+    );
 }
 
 /// The same board as a process, overriding the linked one.

@@ -1,7 +1,12 @@
 //! `Bases`, linked in: it claims ```` ```base ```` fences, and lets them go
 //! when it is off.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use architect::action::ActionList;
 use architect_bases::ui::{Bases, ID};

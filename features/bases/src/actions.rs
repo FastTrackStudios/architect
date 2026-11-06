@@ -71,18 +71,66 @@ const fn meta(id: &'static str, name: &'static str, description: &'static str) -
     }
 }
 
-static LIST: ActionMeta = meta(ids::LIST, "List bases", "The vault's bases (`.base` files): path, name, folder, each view's name and type, and why one that failed to parse did.");
-static OPEN: ActionMeta = meta(ids::OPEN, "Open a base", "Opens the base at `path` as a workspace view (its pane `base:<path>`), on view `view` when given; answers with the base.");
-static READ: ActionMeta = meta(ids::READ, "Read a base", "One base: its filters (`{join, clauses}`), formulas, properties and views (type, name, order, sort, groupBy, filters, limit, options).");
-static ROWS: ActionMeta = meta(ids::ROWS, "Read a base's rows", "Runs one view of a base (`path`), or of a base's YAML (`source`); the first view unless `view` names one. Answers with the view, its columns, its rows in groups, and every column it could show.");
-static SET_FILTERS: ActionMeta = meta(ids::SET_FILTERS, "Set a base's filters", "Sets a view's filters to `clauses` (expressions: `status != null`, `file.hasTag(\"song\")`), joined by `join` (`and`, the default, or `or`); `scope: \"base\"` sets the whole base's. No clauses: no filter.");
-static SET_SORT: ActionMeta = meta(ids::SET_SORT, "Sort a base's view", "Sorts a view by `sort`, each a column with an optional direction: `[\"status desc\", \"file.name\"]`.");
-static SET_GROUP: ActionMeta = meta(ids::SET_GROUP, "Group a base's view", "Groups a view's rows by `property` (any column), or not at all when it is left out.");
-static SET_PROPERTIES: ActionMeta = meta(ids::SET_PROPERTIES, "Set a view's properties", "The columns a view shows, in order (`order`); the rest are hidden.");
-static SET_FORMULA: ActionMeta = meta(ids::SET_FORMULA, "Set a base's formula", "Adds or changes formula `name` (`expression`: `price * qty`); an empty expression removes it. A view shows it as `formula.<name>`.");
-static SET_OPTION: ActionMeta = meta(ids::SET_OPTION, "Set a view's option", "Sets option `key` of a view (one its type takes) to `value`: JSON, or else text; `null` removes it.");
-static ADD_VIEW: ActionMeta = meta(ids::ADD_VIEW, "Add a view to a base", "Adds a view of type `type` (one of BASES_VIEW_TYPES) named `name` (the type's when left out), showing what the first view shows.");
-static VIEW_TYPES: ActionMeta = meta(ids::VIEW_TYPES, "Base view types", "Every type a base's view may be: Bases' own (table, cards, list) and those loaded extensions add (`[[base_views]]`), each with its options and owner.");
+static LIST: ActionMeta = meta(
+    ids::LIST,
+    "List bases",
+    "The vault's bases (`.base` files): path, name, folder, each view's name and type, and why one that failed to parse did.",
+);
+static OPEN: ActionMeta = meta(
+    ids::OPEN,
+    "Open a base",
+    "Opens the base at `path` as a workspace view (its pane `base:<path>`), on view `view` when given; answers with the base.",
+);
+static READ: ActionMeta = meta(
+    ids::READ,
+    "Read a base",
+    "One base: its filters (`{join, clauses}`), formulas, properties and views (type, name, order, sort, groupBy, filters, limit, options).",
+);
+static ROWS: ActionMeta = meta(
+    ids::ROWS,
+    "Read a base's rows",
+    "Runs one view of a base (`path`), or of a base's YAML (`source`); the first view unless `view` names one. Answers with the view, its columns, its rows in groups, and every column it could show.",
+);
+static SET_FILTERS: ActionMeta = meta(
+    ids::SET_FILTERS,
+    "Set a base's filters",
+    "Sets a view's filters to `clauses` (expressions: `status != null`, `file.hasTag(\"song\")`), joined by `join` (`and`, the default, or `or`); `scope: \"base\"` sets the whole base's. No clauses: no filter.",
+);
+static SET_SORT: ActionMeta = meta(
+    ids::SET_SORT,
+    "Sort a base's view",
+    "Sorts a view by `sort`, each a column with an optional direction: `[\"status desc\", \"file.name\"]`.",
+);
+static SET_GROUP: ActionMeta = meta(
+    ids::SET_GROUP,
+    "Group a base's view",
+    "Groups a view's rows by `property` (any column), or not at all when it is left out.",
+);
+static SET_PROPERTIES: ActionMeta = meta(
+    ids::SET_PROPERTIES,
+    "Set a view's properties",
+    "The columns a view shows, in order (`order`); the rest are hidden.",
+);
+static SET_FORMULA: ActionMeta = meta(
+    ids::SET_FORMULA,
+    "Set a base's formula",
+    "Adds or changes formula `name` (`expression`: `price * qty`); an empty expression removes it. A view shows it as `formula.<name>`.",
+);
+static SET_OPTION: ActionMeta = meta(
+    ids::SET_OPTION,
+    "Set a view's option",
+    "Sets option `key` of a view (one its type takes) to `value`: JSON, or else text; `null` removes it.",
+);
+static ADD_VIEW: ActionMeta = meta(
+    ids::ADD_VIEW,
+    "Add a view to a base",
+    "Adds a view of type `type` (one of BASES_VIEW_TYPES) named `name` (the type's when left out), showing what the first view shows.",
+);
+static VIEW_TYPES: ActionMeta = meta(
+    ids::VIEW_TYPES,
+    "Base view types",
+    "Every type a base's view may be: Bases' own (table, cards, list) and those loaded extensions add (`[[base_views]]`), each with its options and owner.",
+);
 
 #[derive(Facet)]
 struct PathArgs {
@@ -213,7 +261,12 @@ fn list(vault: &Vault) -> Value {
 }
 
 /// Runs view `view` of `base` over the vault's notes.
-pub(crate) fn rows(vault: &Vault, path: &str, base: &ParsedBase, view: Option<&str>) -> Result<Value, String> {
+pub(crate) fn rows(
+    vault: &Vault,
+    path: &str,
+    base: &ParsedBase,
+    view: Option<&str>,
+) -> Result<Value, String> {
     let i = model::view_index(base, view)?;
     let all = vault_obsidian::vault_to_rows(vault);
     let spec = base.views.get(i).ok_or_else(|| "no such view".to_owned())?;
@@ -233,7 +286,12 @@ fn rows_of(vault: &Vault, a: &RowsArgs) -> Result<Value, String> {
     match (a.path.as_deref(), a.source.as_deref()) {
         (_, Some(source)) => {
             let base = vault::bases::parse(source).map_err(|e| e.to_string())?;
-            rows(vault, a.path.as_deref().unwrap_or_default(), &model::with_a_view(base), a.view.as_deref())
+            rows(
+                vault,
+                a.path.as_deref().unwrap_or_default(),
+                &model::with_a_view(base),
+                a.view.as_deref(),
+            )
         }
         (Some(path), None) => rows(vault, path, &base_at(vault, path)?, a.view.as_deref()),
         (None, None) => Err("give a base's `path` or its `source`".to_owned()),
@@ -273,78 +331,144 @@ fn types_json(types: &ViewTypes) -> RawJson {
 /// # Errors
 ///
 /// An id is taken.
-pub fn register(list: &Arc<ActionList>, vault: &OpenVault, types: &ViewTypes) -> Result<(), ActionError> {
+pub fn register(
+    list: &Arc<ActionList>,
+    vault: &OpenVault,
+    types: &ViewTypes,
+) -> Result<(), ActionError> {
     let v = vault.clone();
     list.register_with(&LIST, Effect::ReadOnly, move |_: &ActionCaller, (): ()| {
         Ok::<_, String>(raw(&v.with(self::list)))
     })?;
     let v = vault.clone();
-    list.register_with(&READ, Effect::ReadOnly, move |_: &ActionCaller, a: PathArgs| {
-        v.with(|vault| base_at(vault, &a.path).map(|b| raw(&model::base_json(&a.path, &b))))
-    })?;
+    list.register_with(
+        &READ,
+        Effect::ReadOnly,
+        move |_: &ActionCaller, a: PathArgs| {
+            v.with(|vault| base_at(vault, &a.path).map(|b| raw(&model::base_json(&a.path, &b))))
+        },
+    )?;
     let v = vault.clone();
-    list.register_with(&ROWS, Effect::ReadOnly, move |_: &ActionCaller, a: RowsArgs| {
-        v.with(|vault| rows_of(vault, &a)).map(|j| raw(&j))
-    })?;
+    list.register_with(
+        &ROWS,
+        Effect::ReadOnly,
+        move |_: &ActionCaller, a: RowsArgs| v.with(|vault| rows_of(vault, &a)).map(|j| raw(&j)),
+    )?;
     let (v, weak): (OpenVault, Weak<ActionList>) = (vault.clone(), Arc::downgrade(list));
-    list.register_async_with(&OPEN, Effect::Mutating, move |_: &ActionCaller, a: OpenArgs| {
-        let found = v.with(|vault| base_at(vault, &a.path).map(|b| model::base_json(&a.path, &b)));
-        let weak = weak.clone();
-        async move {
-            let mut base = found?;
-            let opened = match weak.upgrade() {
-                Some(list) if list.info("WORKSPACE_OPEN").is_some() => open_pane(&list, &a.path, a.view.as_deref()).await?,
-                _ => false,
+    list.register_async_with(
+        &OPEN,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: OpenArgs| {
+            let found =
+                v.with(|vault| base_at(vault, &a.path).map(|b| model::base_json(&a.path, &b)));
+            let weak = weak.clone();
+            async move {
+                let mut base = found?;
+                let opened = match weak.upgrade() {
+                    Some(list) if list.info("WORKSPACE_OPEN").is_some() => {
+                        open_pane(&list, &a.path, a.view.as_deref()).await?
+                    }
+                    _ => false,
+                };
+                put(&mut base, "opened", json!(opened));
+                Ok::<_, String>(raw(&base))
+            }
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &SET_FILTERS,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: FiltersArgs| {
+            let join = join_of(a.join.as_deref())?;
+            let scope = match a.scope.as_deref() {
+                None | Some("" | "view") => Scope::View,
+                Some("base") => Scope::Base,
+                Some(other) => return Err(format!("scope {other:?}: `view` or `base`")),
             };
-            put(&mut base, "opened", json!(opened));
+            edit(&v, &a.path, |b| {
+                model::set_filters(b, a.view.as_deref(), scope, join, &a.clauses)
+            })
+            .map(|j| raw(&j))
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &SET_SORT,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: SortArgs| {
+            edit(&v, &a.path, |b| {
+                model::set_sort(b, a.view.as_deref(), &a.sort)
+            })
+            .map(|j| raw(&j))
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &SET_GROUP,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: GroupArgs| {
+            edit(&v, &a.path, |b| {
+                model::set_group(b, a.view.as_deref(), a.property.as_deref())
+            })
+            .map(|j| raw(&j))
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &SET_PROPERTIES,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: PropertiesArgs| {
+            edit(&v, &a.path, |b| {
+                model::set_order(b, a.view.as_deref(), &a.order)
+            })
+            .map(|j| raw(&j))
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &SET_FORMULA,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: FormulaArgs| {
+            edit(&v, &a.path, |b| {
+                model::set_formula(b, &a.name, a.expression.as_deref().unwrap_or_default())
+            })
+            .map(|j| raw(&j))
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &SET_OPTION,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: OptionArgs| {
+            let value =
+                serde_json::from_str(&a.value).unwrap_or_else(|_| Value::String(a.value.clone()));
+            edit(&v, &a.path, |b| {
+                model::set_option(b, a.view.as_deref(), &a.key, value)
+            })
+            .map(|j| raw(&j))
+        },
+    )?;
+    let v = vault.clone();
+    list.register_with(
+        &ADD_VIEW,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: AddViewArgs| {
+            let mut added = String::new();
+            let mut base = edit(&v, &a.path, |b| {
+                added = model::add_view(b, a.name.as_deref().unwrap_or_default(), &a.r#type)?;
+                Ok(())
+            })?;
+            put(&mut base, "added", json!(added));
             Ok::<_, String>(raw(&base))
-        }
-    })?;
-    let v = vault.clone();
-    list.register_with(&SET_FILTERS, Effect::Mutating, move |_: &ActionCaller, a: FiltersArgs| {
-        let join = join_of(a.join.as_deref())?;
-        let scope = match a.scope.as_deref() {
-            None | Some("" | "view") => Scope::View,
-            Some("base") => Scope::Base,
-            Some(other) => return Err(format!("scope {other:?}: `view` or `base`")),
-        };
-        edit(&v, &a.path, |b| model::set_filters(b, a.view.as_deref(), scope, join, &a.clauses)).map(|j| raw(&j))
-    })?;
-    let v = vault.clone();
-    list.register_with(&SET_SORT, Effect::Mutating, move |_: &ActionCaller, a: SortArgs| {
-        edit(&v, &a.path, |b| model::set_sort(b, a.view.as_deref(), &a.sort)).map(|j| raw(&j))
-    })?;
-    let v = vault.clone();
-    list.register_with(&SET_GROUP, Effect::Mutating, move |_: &ActionCaller, a: GroupArgs| {
-        edit(&v, &a.path, |b| model::set_group(b, a.view.as_deref(), a.property.as_deref())).map(|j| raw(&j))
-    })?;
-    let v = vault.clone();
-    list.register_with(&SET_PROPERTIES, Effect::Mutating, move |_: &ActionCaller, a: PropertiesArgs| {
-        edit(&v, &a.path, |b| model::set_order(b, a.view.as_deref(), &a.order)).map(|j| raw(&j))
-    })?;
-    let v = vault.clone();
-    list.register_with(&SET_FORMULA, Effect::Mutating, move |_: &ActionCaller, a: FormulaArgs| {
-        edit(&v, &a.path, |b| model::set_formula(b, &a.name, a.expression.as_deref().unwrap_or_default())).map(|j| raw(&j))
-    })?;
-    let v = vault.clone();
-    list.register_with(&SET_OPTION, Effect::Mutating, move |_: &ActionCaller, a: OptionArgs| {
-        let value = serde_json::from_str(&a.value).unwrap_or_else(|_| Value::String(a.value.clone()));
-        edit(&v, &a.path, |b| model::set_option(b, a.view.as_deref(), &a.key, value)).map(|j| raw(&j))
-    })?;
-    let v = vault.clone();
-    list.register_with(&ADD_VIEW, Effect::Mutating, move |_: &ActionCaller, a: AddViewArgs| {
-        let mut added = String::new();
-        let mut base = edit(&v, &a.path, |b| {
-            added = model::add_view(b, a.name.as_deref().unwrap_or_default(), &a.r#type)?;
-            Ok(())
-        })?;
-        put(&mut base, "added", json!(added));
-        Ok::<_, String>(raw(&base))
-    })?;
+        },
+    )?;
     let t = types.clone();
-    list.register_with(&VIEW_TYPES, Effect::ReadOnly, move |_: &ActionCaller, (): ()| {
-        Ok::<_, String>(types_json(&t))
-    })?;
+    list.register_with(
+        &VIEW_TYPES,
+        Effect::ReadOnly,
+        move |_: &ActionCaller, (): ()| Ok::<_, String>(types_json(&t)),
+    )?;
     Ok(())
 }
 
@@ -356,7 +480,10 @@ async fn open_pane(list: &ActionList, path: &str, view: Option<&str>) -> Result<
         .await
         .map_err(|e| e.to_string())?;
     let layout: Value = serde_json::from_slice(&layout).unwrap_or(Value::Null);
-    let active = layout.get("active").and_then(Value::as_str).unwrap_or_default();
+    let active = layout
+        .get("active")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let at = if active.is_empty() {
         json!({ "float": {} })
     } else {

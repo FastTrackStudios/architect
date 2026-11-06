@@ -305,7 +305,6 @@ fn base_pane(path: &str) -> Pane {
     pane
 }
 
-
 /// The view a note of the vault on disk is.
 const VAULT_NOTE: &str = "vault.note";
 

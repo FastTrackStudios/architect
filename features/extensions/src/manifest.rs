@@ -1028,9 +1028,11 @@ impl Manifest {
     #[must_use]
     pub fn draws(&self, view: &str) -> bool {
         self.views.iter().any(|d| d.id == view)
-            || self.contributes.base_views.iter().any(|b| {
-                b.view.is_none() && b.page.is_none() && b.view_name() == view
-            })
+            || self
+                .contributes
+                .base_views
+                .iter()
+                .any(|b| b.view.is_none() && b.page.is_none() && b.view_name() == view)
     }
 
     /// What its contributions are checked against: its namespace, its

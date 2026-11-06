@@ -82,7 +82,11 @@ pub fn contributed_types(host: &Host) -> Vec<ViewType> {
         .into_iter()
         .map(|by| ViewType {
             id: by.item.id.clone(),
-            name: if by.item.name.is_empty() { by.item.id.clone() } else { by.item.name.clone() },
+            name: if by.item.name.is_empty() {
+                by.item.id.clone()
+            } else {
+                by.item.name.clone()
+            },
             icon: by.item.icon.clone(),
             owner: Some(by.owner),
             options: by
@@ -139,8 +143,16 @@ fn use_revision(list: Arc<ActionList>) -> Signal<u64> {
 /// Whether action `id` writes what a base shows.
 fn writes(id: &str) -> bool {
     const READS: &[&str] = &[
-        ids::LIST, ids::READ, ids::ROWS, ids::VIEW_TYPES, ids::OPEN,
-        "VAULT_STATUS", "VAULT_LIST", "VAULT_READ", "VAULT_SEARCH", "VAULT_QUERY_BASE",
+        ids::LIST,
+        ids::READ,
+        ids::ROWS,
+        ids::VIEW_TYPES,
+        ids::OPEN,
+        "VAULT_STATUS",
+        "VAULT_LIST",
+        "VAULT_READ",
+        "VAULT_SEARCH",
+        "VAULT_QUERY_BASE",
     ];
     (id.starts_with("BASES_") || id.starts_with("VAULT_")) && !READS.contains(&id)
 }
@@ -165,7 +177,12 @@ enum Panel {
 
 fn strings(v: &Value) -> Vec<String> {
     v.as_array()
-        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -214,7 +231,8 @@ pub fn BaseView(
     let spec = data.at("view").clone();
     let current = spec.at("name").as_str().unwrap_or_default().to_owned();
     let kind = spec.at("type").as_str().unwrap_or("table").to_owned();
-    let views: Vec<(String, String)> = data.at("views")
+    let views: Vec<(String, String)> = data
+        .at("views")
         .as_array()
         .map(|a| {
             a.iter()
@@ -227,9 +245,11 @@ pub fn BaseView(
                 .collect()
         })
         .unwrap_or_default();
-    let count: usize = data.at("rows").at("groups")
-        .as_array()
-        .map_or(0, |g| g.iter().map(|g| g.at("rows").as_array().map_or(0, Vec::len)).sum());
+    let count: usize = data.at("rows").at("groups").as_array().map_or(0, |g| {
+        g.iter()
+            .map(|g| g.at("rows").as_array().map_or(0, Vec::len))
+            .sum()
+    });
     // A write: its action, then everything drawn again.
     let write = {
         let list = list.clone();
@@ -258,7 +278,11 @@ pub fn BaseView(
     let set_cell = {
         let list = list.clone();
         Callback::new(move |(note, key, value): (String, String, String)| {
-            match run(&list, "VAULT_SET_PROPERTY", &json!({ "path": note, "key": key, "value": value })) {
+            match run(
+                &list,
+                "VAULT_SET_PROPERTY",
+                &json!({ "path": note, "key": key, "value": value }),
+            ) {
                 Ok(_) => {
                     problem.set(None);
                     bump.with_mut(|n| *n = n.wrapping_add(1));
@@ -272,12 +296,17 @@ pub fn BaseView(
         view: spec,
         rows: data.at("rows").clone(),
     };
-    let contributed = types.iter().find(|t| t.id.eq_ignore_ascii_case(&kind) && t.owner.is_some()).cloned();
+    let contributed = types
+        .iter()
+        .find(|t| t.id.eq_ignore_ascii_case(&kind) && t.owner.is_some())
+        .cloned();
     let body = match kind.as_str() {
-        "table" => rsx! { Table { data: data.clone(), on_cell: set_cell, sortable: file.is_some(), on_sort: {
-            let mut write = write.clone();
-            move |sort: Vec<String>| { let _ = write(ids::SET_SORT, json!({ "sort": sort })); }
-        } } },
+        "table" => {
+            rsx! { Table { data: data.clone(), on_cell: set_cell, sortable: file.is_some(), on_sort: {
+                let mut write = write.clone();
+                move |sort: Vec<String>| { let _ = write(ids::SET_SORT, json!({ "sort": sort })); }
+            } } }
+        }
         "cards" | "gallery" => rsx! { Cards { data: data.clone(), on_cell: set_cell } },
         "list" => rsx! { List { data: data.clone() } },
         other => match contributed {
@@ -289,10 +318,18 @@ pub fn BaseView(
                     fallback: rsx! { Note { text: format!("No loaded extension draws {other} views.") } },
                 }
             },
-            None => rsx! { Note { text: format!("No loaded extension adds the view type {other:?}: turn on the extension that does, or pick another view.") } },
+            None => {
+                rsx! { Note { text: format!("No loaded extension adds the view type {other:?}: turn on the extension that does, or pick another view.") } }
+            }
         },
     };
-    let lit = |on: bool| if on { "var(--accent, var(--muted))" } else { "transparent" };
+    let lit = |on: bool| {
+        if on {
+            "var(--accent, var(--muted))"
+        } else {
+            "transparent"
+        }
+    };
     rsx! {
         div { class: "base", "data-base": "{path.clone().unwrap_or_default()}",
             style: "display: flex; flex-direction: column; gap: 8px; min-height: 0; color: var(--foreground); font-size: 13px; {pad(embedded)}",
@@ -358,7 +395,11 @@ const CHIP: &str = "min-height: 26px; padding: 0 10px; border-radius: 6px; borde
                     background: transparent; color: var(--foreground); font-size: 12px; cursor: pointer;";
 
 const fn pad(embedded: bool) -> &'static str {
-    if embedded { "padding: 8px; border: 1px solid var(--border); border-radius: 8px;" } else { "flex: 1; padding: 16px 20px;" }
+    if embedded {
+        "padding: 8px; border: 1px solid var(--border); border-radius: 8px;"
+    } else {
+        "flex: 1; padding: 16px 20px;"
+    }
 }
 
 const fn weight(on: bool) -> u32 {
@@ -396,7 +437,12 @@ fn panel_body(
     match p {
         Panel::Filters => {
             let clauses = strings(&spec.at("filters").at("clauses"));
-            let join = spec.at("filters").at("join").as_str().unwrap_or("and").to_owned();
+            let join = spec
+                .at("filters")
+                .at("join")
+                .as_str()
+                .unwrap_or("and")
+                .to_owned();
             let other = if join == "or" { "and" } else { "or" };
             let base_clauses = strings(&data.at("filters").at("clauses"));
             rsx! {
@@ -437,12 +483,24 @@ fn panel_body(
             }
         }
         Panel::Sort => {
-            let keys: Vec<(String, bool)> = spec.at("sort")
+            let keys: Vec<(String, bool)> = spec
+                .at("sort")
                 .as_array()
-                .map(|a| a.iter().map(|k| (k.at("property").as_str().unwrap_or_default().to_owned(), k.at("direction") == "DESC")).collect())
+                .map(|a| {
+                    a.iter()
+                        .map(|k| {
+                            (
+                                k.at("property").as_str().unwrap_or_default().to_owned(),
+                                k.at("direction") == "DESC",
+                            )
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
             let words = |keys: &[(String, bool)]| -> Vec<String> {
-                keys.iter().map(|(p, d)| if *d { format!("{p} desc") } else { p.clone() }).collect()
+                keys.iter()
+                    .map(|(p, d)| if *d { format!("{p} desc") } else { p.clone() })
+                    .collect()
             };
             rsx! {
                 if keys.is_empty() { div { style: "color: var(--muted-foreground);", "Not sorted: by name." } }
@@ -517,9 +575,19 @@ fn panel_body(
             }
         }
         Panel::Formulas => {
-            let formulas: Vec<(String, String)> = data.at("formulas")
+            let formulas: Vec<(String, String)> = data
+                .at("formulas")
                 .as_array()
-                .map(|a| a.iter().map(|f| (f.at("name").as_str().unwrap_or_default().to_owned(), f.at("expression").as_str().unwrap_or_default().to_owned())).collect())
+                .map(|a| {
+                    a.iter()
+                        .map(|f| {
+                            (
+                                f.at("name").as_str().unwrap_or_default().to_owned(),
+                                f.at("expression").as_str().unwrap_or_default().to_owned(),
+                            )
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
             let mut name = use_signal(String::new);
             rsx! {
@@ -593,11 +661,17 @@ fn Chips(items: Vec<String>, on_pick: EventHandler<String>) -> Element {
 
 /// A view's groups: `(label, rows)`.
 fn groups(data: &Value) -> Vec<(String, Vec<Value>)> {
-    data.at("rows").at("groups")
+    data.at("rows")
+        .at("groups")
         .as_array()
         .map(|a| {
             a.iter()
-                .map(|g| (g.at("label").as_str().unwrap_or_default().to_owned(), g.at("rows").as_array().cloned().unwrap_or_default()))
+                .map(|g| {
+                    (
+                        g.at("label").as_str().unwrap_or_default().to_owned(),
+                        g.at("rows").as_array().cloned().unwrap_or_default(),
+                    )
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -614,7 +688,10 @@ fn text(v: &Value) -> String {
 }
 
 fn grouped(data: &Value) -> bool {
-    data.at("view").at("groupBy").as_str().is_some_and(|g| !g.is_empty())
+    data.at("view")
+        .at("groupBy")
+        .as_str()
+        .is_some_and(|g| !g.is_empty())
 }
 
 /// Bases' table: a header per column (pressed, sorts by it), a row per
@@ -628,12 +705,25 @@ fn Table(
     on_sort: EventHandler<Vec<String>>,
 ) -> Element {
     let columns = strings(&data.at("rows").at("columns"));
-    let sorted: Vec<(String, bool)> = data.at("view").at("sort")
+    let sorted: Vec<(String, bool)> = data
+        .at("view")
+        .at("sort")
         .as_array()
-        .map(|a| a.iter().map(|k| (k.at("property").as_str().unwrap_or_default().to_owned(), k.at("direction") == "DESC")).collect())
+        .map(|a| {
+            a.iter()
+                .map(|k| {
+                    (
+                        k.at("property").as_str().unwrap_or_default().to_owned(),
+                        k.at("direction") == "DESC",
+                    )
+                })
+                .collect()
+        })
         .unwrap_or_default();
     let width = columns.len().max(1);
-    let grid = format!("display: grid; grid-template-columns: repeat({width}, minmax(120px, 1fr)); gap: 0;");
+    let grid = format!(
+        "display: grid; grid-template-columns: repeat({width}, minmax(120px, 1fr)); gap: 0;"
+    );
     let grouped = grouped(&data);
     rsx! {
         div { class: "base-table", style: "display: flex; flex-direction: column; min-width: fit-content;",
@@ -748,7 +838,10 @@ fn Field(
 /// properties; a group's label over its cards.
 #[component]
 fn Cards(data: Value, on_cell: Callback<(String, String, String)>) -> Element {
-    let columns: Vec<String> = strings(&data.at("rows").at("columns")).into_iter().filter(|c| c != "file.name").collect();
+    let columns: Vec<String> = strings(&data.at("rows").at("columns"))
+        .into_iter()
+        .filter(|c| c != "file.name")
+        .collect();
     let grouped = grouped(&data);
     rsx! {
         div { class: "base-cards", style: "display: flex; flex-direction: column; gap: 10px;",
@@ -783,7 +876,10 @@ fn Cards(data: Value, on_cell: Callback<(String, String, String)>) -> Element {
 /// properties after it.
 #[component]
 fn List(data: Value) -> Element {
-    let columns: Vec<String> = strings(&data.at("rows").at("columns")).into_iter().filter(|c| c != "file.name").collect();
+    let columns: Vec<String> = strings(&data.at("rows").at("columns"))
+        .into_iter()
+        .filter(|c| c != "file.name")
+        .collect();
     let grouped = grouped(&data);
     rsx! {
         div { class: "base-list", style: "display: flex; flex-direction: column; gap: 2px;",
@@ -858,13 +954,25 @@ mod tests {
 
     #[test]
     fn a_panes_state_is_json_or_a_path() {
-        assert_eq!(PaneState::parse(r#"{"path":"B.base","view":"All"}"#).view.as_deref(), Some("All"));
+        assert_eq!(
+            PaneState::parse(r#"{"path":"B.base","view":"All"}"#)
+                .view
+                .as_deref(),
+            Some("All")
+        );
         assert_eq!(PaneState::parse("B.base").path, "B.base");
         assert!(writes("BASES_SET_SORT") && writes("VAULT_SET_PROPERTY"));
-        let s = |v: &[(&str, bool)]| v.iter().map(|(p, d)| ((*p).to_owned(), *d)).collect::<Vec<_>>();
+        let s = |v: &[(&str, bool)]| {
+            v.iter()
+                .map(|(p, d)| ((*p).to_owned(), *d))
+                .collect::<Vec<_>>()
+        };
         assert_eq!(header_sort(&[], "a"), ["a"]);
         assert_eq!(header_sort(&s(&[("a", false)]), "a"), ["a desc"]);
-        assert_eq!(header_sort(&s(&[("a", true), ("b", true)]), "a"), ["b desc"]);
+        assert_eq!(
+            header_sort(&s(&[("a", true), ("b", true)]), "a"),
+            ["b desc"]
+        );
         assert!(!writes(ids::ROWS) && !writes("VAULT_READ") && !writes("WORKSPACE_OPEN"));
     }
 }
