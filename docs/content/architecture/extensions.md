@@ -1842,6 +1842,71 @@ the extension it is `from`. Capture offers the targets after its own note
 (`CAPTURE_TARGETS`), puts their tokens into the parser, and runs a target's
 action for `CAPTURE_ADD {target}` and `INBOX_PROCESS`.
 
+## Tours
+
+Every extension can ship a guided tour (#379), so a new one is easy to
+explore and shows off what it adds:
+
+```toml
+[[tours]]
+id = "projects-tour"                      # the scenario's own id
+title = "Projects"                        # "Take the Projects tour"
+description = "The projects list, a new project and a project's page."
+scenario = "tours/projects-tour.styx"     # in its package
+```
+
+The scenario is a guide scenario ([Guide media](@/architecture/guide-media.md)),
+the format of the app's own tours and films: hidden setup steps that run an
+action (`do @run{id PROJECTS_OPEN}`), then a step a person reads, ringed on
+a `target` (`@css".projects-roadmap"`, `@id"capture-title"`, a tab, a
+pane, a palette row). A linked extension lists the file among its `files`
+(`features/extensions/src/linked.rs` `Extension`); a package on disk has it
+in its folder.
+
+It is checked at load (`features/extensions/src/manifest.rs` `Manifest`
+`tours`, `features/extensions/src/contrib.rs` `TourDecl`), and a broken one
+fails the load like a broken manifest:
+
+- an id of lowercase letters, digits, `-`, `_` and `.`, a title, and a
+  `.styx` file inside its package;
+- the file reads as a scenario, its `id` is the tour's, and a person sees
+  at least one of its steps;
+- it plays **as the extension**: every action a step runs is its own or one
+  its capabilities reach (`Rules::reaches`). A check only reads, and the
+  guide runs only read-only checks. The Navigator asks for `LAB_GO` and
+  `WORKSPACES_LOAD` to show the Vault with a note in front.
+
+A tour that only opens views is `safe true` and may play over the person's
+own vault; one that changes things (the sandbox Board's pins) is not, and
+plays only in the app's playground. Seed nothing into the person's notes:
+ring the field and let them type.
+
+It is a contribution like the rest: withdrawn when the extension is turned
+off, and a tour two extensions add is the first loaded's. The registry is
+`Contributions::tours`. The Architect app (`apps/ui/src/guide.rs`
+`use_extension_tours`) offers each running extension's tours beside its own
+(`architect_guide::tour::Tours::offer`), and starts them from:
+
+- **the extensions manager**: "Take the tour" on the extension's page, and
+  the `tour` op (`MANAGER_RUN {kind: extension, id, op: tour}`), through
+  `Host::on_tour` / `Host::start_tour`; its tours are listed under "Tours";
+- **after an install**: `Extensions::install` and `Extensions::enable` tell
+  the host's list `TURNED_ON` (`extensions.turned_on`, the extension's id),
+  and the app invites the person once (`Tours::invite`: a card with "Take
+  the tour" and "Not now"), remembering it in `tours-invited`;
+- **actions**: `TOURS_LIST` (each tour's id, title, description, the
+  extension that ships it, its row "Take the Projects tour", and where the
+  person left it) and `TOUR_START {id | extension, step?, restart?}`, which
+  resumes where they stopped (`tour-places.json`). ⌘K lists them through
+  these two.
+
+Each first-party tour plays as a test (`apps/sandbox/media/tests`
+`architect_tours.rs` over the Architect app and its demo vault, and
+`scenarios.rs` `every_tour_plays_as_a_scenario` for the sandbox's Board):
+every setup runs and every target must be on screen, so a tour that rots
+fails CI. `sandbox-media <path to the .styx>` films one
+(`SANDBOX_MEDIA_APP=architect` over the Architect app).
+
 ## One trait, three ways to run it
 
 `features/extensions/src/linked.rs` `Extension` is a crate's extension

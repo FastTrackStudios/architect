@@ -102,6 +102,7 @@ extension's namespace, capabilities and views when it loads
 | `[[base_views]]` | a view type for Bases (`type:` of a base's view), drawn by one of its views, a page or its code | `BaseViewDecl` |
 | `[[project_types]]` | a type of architect's `project` kind: properties on top of the kind's, a `project.md` template, folders and views; the registry `EXT_PROJECT_TYPES` reads | `ProjectTypeDecl` |
 | `[[capture_targets]]` | what a capture can become: a choice in the composer and the inbox deck, its chips, its quick-add tokens and the action that makes one; the registry `EXT_CAPTURE_TARGETS` reads | `CaptureTargetDecl` |
+| `[[tours]]` | a guided tour: a guide scenario in its package (`scenario = "tours/intro.styx"`), checked at load and played as the extension; offered once after it is installed or turned on, on its page in the extensions manager, and through `TOURS_LIST` / `TOUR_START` | `TourDecl` |
 | `[[keymaps]]` | keys in the live editor that run its actions (needs `writes = ["editor"]`) | `editor_ext::KeymapEntry` |
 | `[[slash]]` | rows of the editor's slash menu that run its actions (needs `writes = ["editor"]`) | `editor_ext::SlashEntry` |
 
