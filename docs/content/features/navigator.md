@@ -75,7 +75,7 @@ directly. Its palette commands are then the view's own.
   known before it is drawn.
 - `features/navigator/src/list.rs` `property_groups`: grouping by a
   property's value with Bases' `group_by`
-  (`features/vault/vault-live/src/grouping.rs`, MIT, the one grouping in
+  (`features/vault/vault-proto/src/grouping.rs`, MIT, the one grouping in
   architect), with "None" last.
 - `features/navigator/src/tags.rs`: `TagTree`, the tags nested by `/` with
   their counts, sort and hand-made root order; `features/navigator/src/properties.rs`:

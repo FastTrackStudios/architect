@@ -1324,7 +1324,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "vault",
- "vault-live",
+ "vault-proto",
 ]
 
 [[package]]
@@ -18232,6 +18232,7 @@ dependencies = [
  "chrono",
  "facet",
  "fake",
+ "indexmap",
  "sea-orm",
  "serde",
  "serde_json",

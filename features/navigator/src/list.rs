@@ -26,7 +26,7 @@ use crate::settings::{
 use crate::source::{Millis, NoteFile, PropertyValue, file_name, parent};
 use crate::tags::{self, TAGGED, UNTAGGED};
 use crate::tree::{TreeOptions, natural_cmp, ordered_children};
-use vault_live::grouping::{Order, group_by};
+use vault_proto::grouping::{Order, group_by};
 
 /// What a list row is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -599,7 +599,7 @@ pub struct PropertyGroup<T> {
 /// `items` grouped by the property `value` reads from each, as Bases
 /// groups rows.
 ///
-/// Through `vault_live::grouping::group_by`, the one grouping in
+/// Through `vault_proto::grouping::group_by`, the one grouping in
 /// architect: a group per whole value, shown as [`value_label`]; numbers
 /// first, then text in natural order; those with none last, under "None"
 /// (`getPropertyGroupingValueFromRecord`, `src/utils/sortUtils.ts`).
