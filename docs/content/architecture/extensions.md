@@ -1658,6 +1658,79 @@ The sandbox's Board adds `board` (`apps/sandbox/board/extension.toml`,
 Tasks adds `kanban` (`extensions/tasks/src/lib.rs` `Kanban`): a column
 per status, a card's arrows moving it on.
 
+## Navigator providers
+
+The navigator (`features/navigator`, [Navigator](@/features/navigator.md))
+is the app's one left sidebar (#356): a tree of containers beside a list
+of the items in the selected one. The vault fills it by default: folders,
+and the notes in them. An extension fills it while one of its views is on
+show: the Projects extension shows projects and their tasks, the Tasks
+extension status groups and their tasks.
+
+```toml
+[[navigator_providers]]
+id = "projects"
+title = "Projects"           # the root's row, and its switcher button
+icon = "folder-kanban"
+views = ["list", "page"]     # its own [[views]]: one on show switches to it
+actions = "PROJECTS_NAV"     # PROJECTS_NAV_SNAPSHOT (required), _OPEN, _MOVE, _CREATE
+```
+
+```rust,ignore
+use architect_navigator_api::{Item, NavigatorProvider, Node, Open, ProviderFuture, Snapshot};
+
+struct ProjectsNav;
+
+impl NavigatorProvider for ProjectsNav {
+    fn snapshot(&self) -> ProviderFuture<Snapshot> {
+        Box::pin(async {
+            Ok(Snapshot::new("Projects")
+                .node(Node::new("p1", "Album"))
+                .item(Item::new("Tasks/Mix.md", "p1", "Mix it")))
+        })
+    }
+    fn open(&self, item: String) -> ProviderFuture<Open> {
+        Box::pin(async move { Ok(Open::File { path: item }) })
+    }
+    // move_items (a drag onto a node) and create (New) default to an error
+}
+
+fn build(&self, ext: &mut Builder) {
+    ext.navigator("PROJECTS_NAV", ProjectsNav); // its four actions
+}
+```
+
+The provider's requests are actions of its own, named from `actions`
+(`architect_navigator_api::Method`): `_SNAPSHOT` answers a `Snapshot` (its
+title, the `Node` tree, every `Item` with its container), `_OPEN {item}`
+an `Open` (a vault file, one of an extension's views, an action, or
+nothing), `_MOVE {items, to}` moves items into a container, and
+`_CREATE {container, title}` makes one. Declare the ones it answers in
+`[[actions]]`. `linked::Builder::navigator` serves a Rust
+`NavigatorProvider` as those actions, linked in or as a process; a process,
+Luau or page extension answers them itself. The app reads every provider
+the same way, through its actions (`ActionProvider`), every few seconds and
+after each request; an item whose `open` is set opens without asking.
+
+**Licence.** The API is `architect-navigator-api` (`features/navigator-api`),
+MIT OR Apache-2.0. The navigator itself is GPL-3.0-or-later. An extension
+implements the API and never links the GPL crate; the app that draws the
+navigator links it and ships under the GPL.
+
+The declaration is a contribution like the rest
+(`features/extensions/src/contrib.rs` `NavigatorProviderDecl`;
+`Contributions::navigator_providers`, `Contributions::navigator_provider_for`):
+checked at load (an id, `actions`, its snapshot action in its own
+namespace, views it has), withdrawn when it unloads. The app's sidebar
+(`apps/ui/src/vault.rs` `FilesView`) switches to a provider when one of its
+views comes on show, keeps each provider's navigator (selection, open
+containers, widths) for the run, stays on it while the notes it opened
+show, and goes back to the vault for any other note; a row over a
+provider's navigator switches by hand. Inside the navigator a provider is
+a `ProviderSource` (`features/navigator/src/provider_source.rs`): nodes as
+folders and items as notes, so the panes, the keys, multi-select, grouping,
+sorting, pins, search, shortcuts and the phone's single pane work the same.
+
 ## Project types
 
 Architect owns the `project` kind (#344): a folder whose `project.md` is

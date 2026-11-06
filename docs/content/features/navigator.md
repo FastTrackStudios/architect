@@ -60,6 +60,29 @@ rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), 
 An app without extensions mounts `architect_navigator::ui::NavigatorView`
 directly. Its palette commands are then the view's own.
 
+## Providers: pages and extensions fill it
+
+The navigator is the app's only left sidebar (#356). The vault fills it by
+default; a page or an extension fills it with its own containers and
+items while one of its views is on show: the Projects extension shows
+projects under their state and each one's tasks, the Tasks extension
+status groups and their tasks. A provider implements
+`NavigatorProvider` from `architect-navigator-api` (`features/navigator-api`),
+which is MIT OR Apache-2.0, so a provider never links the GPL navigator;
+it declares `[[navigator_providers]]` in its manifest and serves the
+provider as actions (`Builder::navigator`). See
+[Extensions](@/architecture/extensions.md#navigator-providers).
+
+In the app, opening a provider's view switches the sidebar to it, and a
+row over it switches back to the vault or to another provider. Each
+provider keeps its selection, open containers and widths while the app
+runs. Inside the navigator a provider is a `ProviderSource`: its
+containers are folders and its items notes, so the two panes, the phone's
+single pane, the keys, multi-select, grouping, sorting, pins and the
+search work for every provider. Opening an item does what the provider
+says (a note, a view, an action); dragging items onto a container moves
+them there; New makes one in the selected container.
+
 ## Code tour
 
 - `features/navigator/src/source.rs`: `NavigatorSource`, `NoteFile`
