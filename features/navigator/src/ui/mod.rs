@@ -121,6 +121,7 @@ pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navig
         let s = settings.read();
         let mut state = state;
         state.write().set_settings(s);
+        nav.fill_full_text();
     });
     // The source's changes: heard on its thread, applied here in batches.
     let events = use_hook(move || {
@@ -213,10 +214,47 @@ impl Navigator {
         layout::resolve(s.settings(), phone, *self.width.read(), s.nav_width)
     }
 
-    /// Changes the navigator with `f`.
+    /// Changes the navigator with `f`; a search whose words go to the full
+    /// text asks the source for them.
     pub fn update<R>(&self, f: impl FnOnce(&mut NavigatorState) -> R) -> R {
         let mut state = self.state;
-        f(&mut state.write())
+        let out = f(&mut state.write());
+        self.fill_full_text();
+        out
+    }
+
+    /// Asks the source's full-text search for the search's words, when due
+    /// ([`NavigatorState::full_text_due`]).
+    pub fn fill_full_text(&self) {
+        let words = {
+            let s = self.state.peek();
+            if !s.full_text_due() {
+                return;
+            }
+            s.full_text_words()
+        };
+        let hits = self
+            .source()
+            .search_text(&words)
+            .map(|paths| paths.into_iter().collect());
+        let mut state = self.state;
+        state.write().set_full_text(hits);
+    }
+
+    /// Selects the vault's root with the notes of every folder below (the
+    /// setting, on the settings page too) and opens the search box
+    /// (`search-vault`).
+    pub fn search_vault(&self) {
+        if !self.settings.value.peek().include_descendants {
+            self.settings.update(|s| s.include_descendants = true);
+        }
+        self.update(NavigatorState::search_vault);
+    }
+
+    /// Sets the search box's text (the full text asked, with that
+    /// provider).
+    pub fn set_search(&self, text: &str) {
+        self.update(|s| s.set_search(text));
     }
 
     /// Says `text` under the list's header.
@@ -664,6 +702,85 @@ fn use_commands(nav: &Navigator) {
                 };
                 drop(s);
                 nav.open_or_create(out, nav_open());
+            },
+        );
+    }
+    // The search, shortcuts, profiles and hiding (#338).
+    let st = nav.state.read();
+    let searching = st.search_open;
+    let show_hidden = st.show_hidden();
+    let shortcuts: Vec<String> = st
+        .profile()
+        .shortcuts
+        .iter()
+        .map(crate::Shortcut::label)
+        .collect();
+    let profiles: Vec<String> = st.profiles().all().map(|p| p.name.clone()).collect();
+    let target = st.target();
+    let cursor = st.selection().cursor().map(str::to_owned);
+    drop(st);
+    use_command(
+        Command::new("NAVIGATOR_TOGGLE_SEARCH", "Search")
+            .group(group)
+            .checked(searching),
+        move || nav.update(NavigatorState::toggle_search),
+    );
+    use_command(
+        Command::new("NAVIGATOR_SEARCH_VAULT", "Search the whole vault").group(group),
+        move || nav.search_vault(),
+    );
+    use_command(
+        Command::new("NAVIGATOR_TOGGLE_HIDDEN", "Show hidden items")
+            .group(group)
+            .checked(show_hidden),
+        move || nav.update(NavigatorState::toggle_hidden),
+    );
+    use_command(
+        Command::new("NAVIGATOR_ADD_SHORTCUT", "Add to shortcuts").group(group),
+        move || {
+            let shortcut = cursor
+                .as_deref()
+                .map_or_else(|| crate::Shortcut::to(&target), crate::Shortcut::note);
+            let added = nav.update(|s| s.add_shortcut(shortcut, None));
+            nav.say(if added {
+                "Added to shortcuts"
+            } else {
+                "It is in the shortcuts"
+            });
+        },
+    );
+    for n in 1..=9_usize {
+        let label = shortcuts.get(n.saturating_sub(1)).map_or_else(
+            || format!("Open shortcut {n}"),
+            |l| format!("Open shortcut {n}: {l}"),
+        );
+        use_command(
+            when(
+                Command::new(format!("NAVIGATOR_OPEN_SHORTCUT_{n}"), label).group(group),
+                shortcuts.len() >= n,
+                "No shortcut with that number",
+            ),
+            move || match nav.update(|s| s.open_shortcut(n)) {
+                Ok(out) => nav.act(out, nav_open()),
+                Err(e) => nav.say(e),
+            },
+        );
+    }
+    for n in 1..=3_usize {
+        let label = profiles.get(n.saturating_sub(1)).map_or_else(
+            || format!("Use vault profile {n}"),
+            |name| format!("Use vault profile {n}: {name}"),
+        );
+        use_command(
+            when(
+                Command::new(format!("NAVIGATOR_SELECT_PROFILE_{n}"), label).group(group),
+                profiles.len() >= n,
+                "No vault profile with that number",
+            ),
+            move || {
+                if let Err(e) = nav.update(|s| s.select_profile(&n.to_string())) {
+                    nav.say(e);
+                }
             },
         );
     }

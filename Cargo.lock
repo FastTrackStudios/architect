@@ -1354,6 +1354,7 @@ dependencies = [
  "lucide-dioxus",
  "serde_json",
  "tempfile",
+ "unicode-normalization",
  "vault",
  "vault-proto",
 ]

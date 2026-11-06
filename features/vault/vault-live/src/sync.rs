@@ -930,33 +930,21 @@ impl VaultSync for Backend {
         query: &str,
         limit: u32,
     ) -> Result<Vec<TextHit>, VaultSyncError> {
-        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         let dir = self.root(vault_id)?;
-        if words.is_empty() || !dir.exists() {
+        if query.split_whitespace().next().is_none() || !dir.exists() {
             return Ok(Vec::new());
         }
         let vault = Vault::snapshot(&dir).map_err(|e| VaultSyncError::Internal(e.to_string()))?;
-        let mut hits: Vec<(bool, TextHit)> = vault
-            .pages
-            .iter()
-            .filter_map(|p| {
-                let fm = parse_frontmatter(&p.raw);
-                let title = page_title(
-                    &p.raw,
-                    &p.basename,
-                    fm.as_ref().and_then(|f| fm_text(f, "title")),
-                );
-                search_page(&p.raw, &p.rel_path, title, &words)
-            })
-            .collect();
-        // Title matches first, then the most matching lines, then by name.
-        hits.sort_by(|(at, a), (bt, b)| {
-            bt.cmp(at)
-                .then(b.matches.cmp(&a.matches))
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        let pages = vault.pages.iter().map(|p| {
+            let fm = parse_frontmatter(&p.raw);
+            let title = page_title(
+                &p.raw,
+                &p.basename,
+                fm.as_ref().and_then(|f| fm_text(f, "title")),
+            );
+            (&*p.raw, p.rel_path.as_str(), title)
         });
-        hits.truncate(limit.clamp(1, 200) as usize);
-        Ok(hits.into_iter().map(|(_, h)| h).collect())
+        Ok(search_pages(pages, query, limit.clamp(1, 200) as usize))
     }
 
     fn set_folder(
@@ -1330,6 +1318,35 @@ fn fm_tags(fm: &FrontMatter) -> Vec<String> {
         }
     }
     out
+}
+
+/// A full-text search over `pages` (each its text, its path and its
+/// title): the pages with every word of `query`, in any case, in their
+/// title or their body (properties are not text); title matches first,
+/// then the most matching lines, then by title; at most `limit`. What
+/// `VaultSync::search_text` answers, for any set of pages (the
+/// navigator's full-text search over an open vault).
+#[must_use]
+pub fn search_pages<'a>(
+    pages: impl IntoIterator<Item = (&'a str, &'a str, String)>,
+    query: &str,
+    limit: usize,
+) -> Vec<TextHit> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let mut hits: Vec<(bool, TextHit)> = pages
+        .into_iter()
+        .filter_map(|(raw, path, title)| search_page(raw, path, title, &words))
+        .collect();
+    hits.sort_by(|(at, a), (bt, b)| {
+        bt.cmp(at)
+            .then(b.matches.cmp(&a.matches))
+            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+    });
+    hits.truncate(limit);
+    hits.into_iter().map(|(_, h)| h).collect()
 }
 
 /// Whether one page matches every word of a search (lowercased), in its

@@ -520,7 +520,7 @@ fn command_click_builds_the_search_and_the_list_follows_it() {
         files(&s).is_empty(),
         "no untagged note is #project or #home"
     );
-    s.set_query(Query::default());
+    s.set_query(&Query::default());
     assert_eq!(files(&s), ["Home/Loose.md"]);
 }
 

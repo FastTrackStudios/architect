@@ -41,6 +41,7 @@ pub trait NavigatorSource: Send + Sync {
     fn folders(&self) -> Vec<String>;         // every folder path, the root ("") left out
     fn files(&self) -> Vec<NoteFile>;         // every file
     fn subscribe(&self, listener: Listener) -> Subscription; // changes, until dropped
+    // default methods: resource_url, write, search_text (full text; None by default)
 }
 ```
 
@@ -67,7 +68,9 @@ pub trait NavigatorSource: Send + Sync {
   navigator's `FileOp`s on disk (a folder made, any file moved, a note's
   through `rename` so backlinks follow, a property set). Its `save`,
   `create_note` and `rename` say what changed at once; `watch` hears edits
-  made outside the app. `note_from_text` derives a `NoteFile` the same way
+  made outside the app. `search_text` is the vault's full-text search
+  (`OpenVault::search_text`, over `vault_live::sync::search_pages`, MIT).
+  `note_from_text` derives a `NoteFile` the same way
   from a text you hold (the sandbox's in-memory vault reads the demo vault's
   files with it).
   Tests: `features/navigator/tests/vault_source.rs`.
@@ -221,8 +224,49 @@ film's in-memory one).
   property with AND, with ⇧ too with OR, or take it out. `Query::text`
   writes `#tag`, `.key`, `.key=value` (quoted where needed) joined by
   `AND`/`OR`; `Query::parse` reads it back; `Query::matches` filters the
-  list (AND binds tighter). The search pane (#338) reads and writes the
-  same `Query` (`NavigatorState::query`, `set_query`).
+  list (AND binds tighter). The search box writes the same text
+  (`NavigatorState::query` reads it back when it is tags and properties
+  alone).
+- **The filter search** (`features/navigator/src/search.rs`
+  `FilterSearch`, Notebook Navigator's `filterSearch.ts`): the search box
+  over the list (`NavigatorState::set_search`, `toggle_search`;
+  `Navigator::set_search` in the view). Words match names and aliases
+  (every word, any case, Latin accents folded); `#tag`, `#`, `.key`,
+  `.key=value`, `.key=null`; dates `@today`, `@last7d`, `@thisweek`,
+  `@2026-11`, `@2026-Q4`, `@2026-W45`, ranges, with `@c:`/`@m:` for the
+  created or modified time; `folder:name`, `folder:/path`, `ext:pdf`,
+  `has:task`; `-` leaves out, a `"quoted"` term is text. `AND`/`OR` are
+  operators only between tags and properties (`FilterSearch::is_expression`),
+  words elsewhere. A ⌘/Ctrl-click writes into a mixed search as a term of
+  its own (`search::toggle_term`). `search_vault` selects the root with
+  the notes below and opens the box. With `SearchProvider::FullText`
+  (setting `search_provider`) the words go to
+  `NavigatorSource::search_text` (`NavigatorState::full_text_due`,
+  `set_full_text`; the view's `Navigator::update` asks for them) and the
+  rest of the search still narrows. Tests: `features/navigator/tests/search.rs`.
+- **Vault profiles and hiding** (`features/navigator/src/profiles.rs`
+  `Profiles`, `VaultProfile`; `features/navigator/src/hidden.rs` `Hidden`):
+  a "Default" profile always, others added (`add_profile`, as the one in
+  use or empty), switched (`select_profile`: id, name or number), renamed,
+  removed. Each hides folders (`archive`, `temp*`, `*_old`, `/a/b`,
+  `/projects/*/drafts`), tags (`archive` and below, `temp*`, `*draft`, a
+  path), notes by name or path glob (`hidden_file_names`), by frontmatter
+  (`key`, `key=value`) and by tag; `file_visibility` (documents, the types
+  architect opens, all); `descendant_excluded` folders keep their notes
+  out of the lists above but are still browsed; a `banner` image over the
+  folders. `NavigatorState::index` is what shows, `all` the whole vault;
+  `toggle_hidden` shows hidden items; `hide` (a `HideTarget`) is the
+  context menus' "Hide". `edit_profile` changes the one in use. Tests:
+  `features/navigator/tests/profiles.rs`.
+- **Shortcuts and recent notes** (`Shortcut`, `ShortcutKind`): notes,
+  folders, tags, properties and saved searches, per profile, as
+  `NavRowKind::Section`/`Shortcut`/`Recent` rows (and `Banner`) over the
+  folders. `add_shortcut` (once per target), `remove_shortcut`,
+  `move_shortcut`, `rename_shortcut`, `open_shortcut(n)` (the palette's
+  `NAVIGATOR_OPEN_SHORTCUT_1`…`9`); a move or delete follows. Opening a
+  note (`set_active`) records it first in the profile's recent notes,
+  `recent_notes_count` kept. Settings: `show_shortcuts`,
+  `show_recent_notes`.
 - **Keys** (`NavigatorState::key`): ↑ ↓ Home End PageUp PageDown in both
   panes, through the folders, the tags and the properties.
   - Folders, tags, keys: → expands, then moves to the list. ← collapses,
@@ -289,26 +333,38 @@ film's in-memory one).
   `NAVIGATOR_TAGS`, `NAVIGATOR_PROPERTIES`, `NAVIGATOR_TOGGLE`,
   `NAVIGATOR_TAG_ADD`, `NAVIGATOR_TAG_REMOVE`, `NAVIGATOR_TAG_CLEAR`,
   `NAVIGATOR_TAG_RENAME`, `NAVIGATOR_TAG_DELETE`, `NAVIGATOR_TAG_NEW_NOTE`,
-  `NAVIGATOR_PROPERTY_SET`, `NAVIGATOR_DROP` and `NAVIGATOR_SEARCH` (as a
-  ⌘/Ctrl-click, `or` as with ⇧; or a whole `query`); `NAVIGATOR_SELECT`
-  takes `property` and `value` too.
+  `NAVIGATOR_PROPERTY_SET`, `NAVIGATOR_DROP` and `NAVIGATOR_SEARCH` (a
+  whole filter-search `query`, `open`, `clear`; or a ⌘/Ctrl-click, `or` as
+  with ⇧); `NAVIGATOR_SELECT` takes `property` and `value` too; the
+  search, shortcuts, recents and profiles: `NAVIGATOR_TOGGLE_SEARCH`,
+  `NAVIGATOR_SEARCH_VAULT` (`query`), `NAVIGATOR_TOGGLE_HIDDEN`,
+  `NAVIGATOR_HIDE` (`folder`, `tag` or `path`; `unhide`),
+  `NAVIGATOR_SHORTCUTS` (`add` a kind, `remove`, `move`/`to`, `rename`,
+  `open`), `NAVIGATOR_ADD_SHORTCUT`, `NAVIGATOR_OPEN_SHORTCUT_1`…`9`,
+  `NAVIGATOR_RECENT` (`open`, `clear`), `NAVIGATOR_PROFILE` (`select`,
+  `add`, `remove`, `rename`; `set` the hidden lists, `banner`,
+  `file_visibility`) and `NAVIGATOR_SELECT_PROFILE_1`…`3`. A note's
+  context menu has "Add to shortcuts" and "Hide note"; a folder's, tag's
+  or property's row menu, "Add to shortcuts" and "Hide".
   Without the extension, `NavigatorView` puts its own on the palette.
 - **Settings.** One section, `navigator` (`NavigatorSettings`, a
   `#[derive(Settings)]` struct).
 - **Kept between runs.** `ViewState` (`Navigator::view_state`, `restore`):
   the open folders, the manual order, the selected folder, the panes'
   sizes, the pins, the folded groups, each place's own list, the
-  colours, the open tags and properties, and their hand-made orders. It is a facet struct, so the app stores it where it keeps its
-  settings.
+  colours, the open tags and properties, and their hand-made orders; the
+  search box's text, the profiles (with their shortcuts and recent
+  notes), show-hidden and the folded sections. It is a facet struct: the
+  Architect app keeps it in its folder (`apps/ui/src/vault.rs`
+  `view_store`, an `architect::settings::Store`).
 
 ## Later layers
 
 These are tracked in #332 (the list in full, #335, the calendar and
-periodic notes, #336, and tags and properties, #337, are done):
+periodic notes, #336, tags and properties, #337, and search, shortcuts,
+recents, profiles and hiding, #338, are done):
 
 - the real vault as a source (#353);
-- search, shortcuts, recents, profiles and hiding (#338: its search pane
-  reads and writes `Query`);
 - file operations, templates, icons and colours.
 
 Each adds variants to `NavRowKind` and `ListRowKind`, and adds `NavTarget`

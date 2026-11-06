@@ -341,6 +341,18 @@ impl NavigatorSource for VaultSource {
         ops.iter().try_for_each(|op| self.write_one(op))
     }
 
+    /// The vault's full-text search (`OpenVault::search_text`).
+    fn search_text(&self, query: &str) -> Option<Vec<String>> {
+        Some(
+            self.inner
+                .vault
+                .search_text(query, usize::MAX)
+                .into_iter()
+                .map(|h| h.path)
+                .collect(),
+        )
+    }
+
     fn subscribe(&self, listener: Listener) -> Subscription {
         let id = {
             let mut n = self

@@ -33,6 +33,9 @@
 //! `gggg/[W]ww`, `YYYY/YYYYMM`, `YYYY/[Q]Q` and `YYYY`. Its
 //! `calendarLocale` (system default, Obsidian's `en`: weeks from Sunday)
 //! is [`WeekStart`]; month and day names are English.
+//! The search, shortcuts and recent notes: `searchProvider` internal (the
+//! filter search), `showShortcuts` true, `showRecentNotes` true,
+//! `recentNotesCount` 5.
 //! The tags and the property browser: `showTags` true, `showAllTagsFolder`
 //! true, `showUntagged` true, `scopeTagsToCurrentContext` false,
 //! `tagSortOrder` alpha-asc; `showProperties` true, the profile's
@@ -46,6 +49,17 @@
 
 use architect_settings::Settings;
 use facet::Facet;
+
+/// What the list's search box searches with (`searchProvider`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum SearchProvider {
+    /// The filter search: names, tags, properties, dates, folders
+    #[default]
+    Filter,
+    /// The filter search, its words in the notes' text
+    FullText,
+}
 
 /// How the two panes sit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
@@ -621,6 +635,21 @@ pub struct NavigatorSettings {
     pub scope_properties: bool,
     /// Sort properties
     pub property_sort: TreeSort,
+    /// Search with
+    /// The filter search reads words in names; the full text, in the
+    /// notes' text (architect's own index).
+    #[setting(control = segmented)]
+    pub search_provider: SearchProvider,
+    /// Shortcuts
+    /// Notes, folders, tags, properties and saved searches over the
+    /// folders.
+    pub show_shortcuts: bool,
+    /// Recent notes
+    /// The notes opened last, over the folders.
+    pub show_recent_notes: bool,
+    /// Recent notes to show
+    #[setting(control = stepper(1..=20))]
+    pub recent_notes_count: u32,
 }
 
 impl NavigatorSettings {
@@ -732,6 +761,10 @@ impl Default for NavigatorSettings {
             property_keys: String::new(),
             scope_properties: false,
             property_sort: TreeSort::AlphaAsc,
+            search_provider: SearchProvider::Filter,
+            show_shortcuts: true,
+            show_recent_notes: true,
+            recent_notes_count: 5,
         }
     }
 }

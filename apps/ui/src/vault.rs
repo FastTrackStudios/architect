@@ -742,6 +742,18 @@ fn use_lab_vault() -> LabVault {
     })
 }
 
+/// Where the navigator keeps what it had open between runs: the app's
+/// folder's `navigator-view` (the Architect app's, or the sandbox's
+/// throwaway one); none for an in-memory vault.
+fn view_store() -> Option<architect::settings::Store<ViewState>> {
+    let dir = crate::app_dir()?;
+    Some(architect::settings::Store::in_dir(
+        crate::Mode::current().folder(),
+        "navigator-view",
+        dir,
+    ))
+}
+
 /// The demo vault's periodic notes (`apps/ui/demo-vault.py`'s journal):
 /// set when the five patterns and the folder are still the defaults, so a
 /// person's own are left alone; and the properties its browser shows.
@@ -962,6 +974,15 @@ fn FilesView() -> Element {
     } = use_lab_vault();
     let nav = use_navigator(move || source.cloned());
     use_hook(move || {
+        // What the navigator had open last run (its search, profiles,
+        // shortcuts and recent notes too), from the app's folder.
+        if kept.peek().is_none()
+            && disk.peek().is_some()
+            && let Some(v) = view_store().and_then(|s| s.load().ok())
+        {
+            let mut kept = kept;
+            kept.set(Some(v));
+        }
         if let Some(v) = kept.peek().as_ref() {
             nav.restore(v);
         }
@@ -972,9 +993,31 @@ fn FilesView() -> Element {
             nav.settings.update(demo_vault_periodic_notes);
         }
     });
+    // Kept as it changes, every two seconds at most: an app that quits
+    // runs no drop.
+    use_future(move || async move {
+        let Some(store) = disk.peek().as_ref().and_then(|_| view_store()) else {
+            return;
+        };
+        let mut saved: Option<ViewState> = None;
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_secs(2)).await;
+            let view = nav.view_state();
+            if saved.as_ref() != Some(&view) {
+                let _ = store.save(&view);
+                saved = Some(view);
+            }
+        }
+    });
     use_drop(move || {
         let mut kept = kept;
-        kept.set(Some(nav.view_state()));
+        let view = nav.view_state();
+        if disk.peek().is_some()
+            && let Some(store) = view_store()
+        {
+            let _ = store.save(&view);
+        }
+        kept.set(Some(view));
     });
     // A pop-out window has no screen of the lab's: a desk's.
     let phone =

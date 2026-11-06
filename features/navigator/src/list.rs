@@ -16,9 +16,10 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use crate::hidden::Hidden;
 use crate::index::VaultIndex;
 use crate::properties;
-use crate::query::Query;
+use crate::search::{FilterSearch, SearchContext};
 use crate::selection::NavTarget;
 use crate::settings::{
     CountPlacement, Grouping, ListMode, NavigatorSettings, SortOption, TextCount,
@@ -159,22 +160,38 @@ pub struct ListContext<'a> {
     pub collapsed: &'a BTreeSet<String>,
     /// The tree's order, for folder groups.
     pub tree: &'a TreeOptions,
-    /// The search a ⌘/Ctrl-click built: the notes it matches.
-    pub query: &'a Query,
+    /// The search box's search: the notes it matches.
+    pub search: &'a FilterSearch,
+    /// With the full-text provider, the notes whose text holds the
+    /// search's words (the source's index); `None` matches the words
+    /// against names.
+    pub full_text: Option<&'a BTreeSet<String>>,
+    /// The profile's hiding: the folders whose notes stay out of the lists
+    /// above them.
+    pub hidden: &'a Hidden,
 }
 
-/// The notes of a folder (and the folders below it when the settings say
-/// so), a tag or a property, as `rows` lists them: what is hidden left
-/// out, unsorted.
+/// The notes of a folder, a tag or a property, as `rows` lists them:
+/// what is hidden left out, unsorted.
+///
+/// A folder's take the folders below it when the settings say so, but
+/// for those `hidden` keeps out of the lists above them.
 #[must_use]
 pub fn files_of<'a>(
     index: &'a VaultIndex,
     target: &NavTarget,
     settings: &NavigatorSettings,
     pins: &BTreeMap<String, PinIn>,
+    hidden: &Hidden,
 ) -> Vec<&'a NoteFile> {
     let files = match target {
-        NavTarget::Folder(folder) => index.files_in(folder, settings.include_descendants),
+        NavTarget::Folder(folder) => {
+            let mut files = index.files_in(folder, settings.include_descendants);
+            if settings.include_descendants {
+                files.retain(|f| !hidden.bounded_between(f.folder(), folder));
+            }
+            files
+        }
         NavTarget::Tag(tag) if tag == TAGGED => index
             .files()
             .filter(|f| f.is_markdown() && !f.tags.is_empty())
@@ -258,9 +275,23 @@ pub fn collapse_key(scope: &str, mode: &str, id: &str) -> String {
 #[must_use]
 pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
     let s = cx.settings;
-    let mut files = files_of(index, cx.target, s, cx.pins);
-    if !cx.query.is_empty() {
-        files.retain(|f| cx.query.matches(f));
+    let mut files = files_of(index, cx.target, s, cx.pins, cx.hidden);
+    if cx.search.is_active() || cx.full_text.is_some() {
+        let fields = s.name_fields();
+        let by_created = matches!(s.sort, SortOption::CreatedAsc | SortOption::CreatedDesc);
+        let search_cx = SearchContext {
+            name_fields: &fields,
+            by_created,
+            offset: cx.clock.offset,
+            dates: Some((s, cx.clock)),
+        };
+        match cx.full_text {
+            Some(hits) => {
+                let rest = cx.search.without_words();
+                files.retain(|f| hits.contains(&f.path) && rest.matches(f, &search_cx));
+            }
+            None => files.retain(|f| cx.search.matches(f, &search_cx)),
+        }
     }
     sort(&mut files, s, cx.clock);
     let scope = scope_of(cx.target);

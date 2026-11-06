@@ -326,6 +326,15 @@ pub trait NavigatorSource: Send + Sync {
         let _ = ops;
         Err("this vault is read-only".to_owned())
     }
+
+    /// The paths of the notes whose text holds every word of `query` (the
+    /// search's full-text provider, architect's own index rather than
+    /// Omnisearch); `None` when the source cannot search text (the
+    /// default), and the words are matched against names.
+    fn search_text(&self, query: &str) -> Option<Vec<String>> {
+        let _ = query;
+        None
+    }
 }
 
 /// A vault kept in memory.
@@ -556,6 +565,30 @@ impl NavigatorSource for MemorySource {
 
     fn write(&self, ops: &[FileOp]) -> Result<(), String> {
         ops.iter().try_for_each(|op| self.write_one(op))
+    }
+
+    /// Its notes' names and previews, the text it keeps.
+    fn search_text(&self, query: &str) -> Option<Vec<String>> {
+        let words: Vec<String> = query.split_whitespace().map(crate::search::fold).collect();
+        let files = self
+            .inner
+            .files
+            .read()
+            .unwrap_or_else(PoisonError::into_inner);
+        Some(
+            files
+                .values()
+                .filter(|f| {
+                    let text = crate::search::fold(&format!(
+                        "{} {}",
+                        f.name(),
+                        f.preview.as_deref().unwrap_or_default()
+                    ));
+                    words.iter().all(|w| text.contains(w.as_str()))
+                })
+                .map(|f| f.path.clone())
+                .collect(),
+        )
     }
 
     fn subscribe(&self, listener: Listener) -> Subscription {

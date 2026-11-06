@@ -393,10 +393,158 @@ params = '{"type":"object","properties":{"drag_tag":{"type":"string"},"path":{"t
 [[actions]]
 id = "NAVIGATOR_SEARCH"
 name = "Navigator: the search"
-description = "Adds tag `tag` or property `property` (and `value`) to the search as a Cmd/Ctrl-click does (with AND; `or` true, OR as with Shift), or takes it out; or sets the whole `query` (#tag .key .key=value, AND, OR); `clear` empties it. Answers the search and the notes it lists."
+description = "Sets the search box's `query` (the filter search: words in names and aliases, #tag, .key, .key=value, .key=null, @today, @2026-11, @c:2026-W45, @2026-11-01..2026-11-07, folder:name, folder:/path, ext:pdf, has:task; - leaves out, \"quoted\" is text; AND and OR between tags and properties alone); or adds tag `tag` or property `property` (and `value`) as a Cmd/Ctrl-click does (with AND; `or` true, OR), or takes it out; `clear` empties it; `open` opens or closes the box. Answers the search, whether it is an expression, and the notes it lists."
 group = "Navigator"
 effect = "mutating"
-params = '{"type":"object","properties":{"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"},"or":{"type":"boolean"},"query":{"type":"string"},"clear":{"type":"boolean"}}}'
+params = '{"type":"object","properties":{"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"},"or":{"type":"boolean"},"query":{"type":"string"},"clear":{"type":"boolean"},"open":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_SEARCH"
+name = "Search"
+description = "Opens the search box over the notes, or closes and clears it."
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_SEARCH_VAULT"
+name = "Search the whole vault"
+description = "Selects the vault's root with the notes of every folder below, and opens the search box (with `query`, searches it)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"query":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_HIDDEN"
+name = "Show hidden items"
+description = "Shows the folders, tags, notes and files the vault profile hides, or hides them again."
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_HIDE"
+name = "Hide a folder, tag or note"
+description = "Hides folder `folder`, tag `tag` (and the tags below it) or note `path` in the vault profile in use; `unhide` true shows it again. Answers the profile."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"},"tag":{"type":"string"},"path":{"type":"string"},"unhide":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_SHORTCUTS"
+name = "Navigator: shortcuts"
+description = "The vault profile's shortcuts. `add` a kind (note, folder, tag, property, search) with `path`, `folder`, `tag`, `property` and `value`, or `query` (and `name`), at `at`; `remove` n, `move` n `to` m, `rename` n to `name`, `open` n (from 1). Answers the profile."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"add":{"type":"string"},"path":{"type":"string"},"folder":{"type":"string"},"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"},"query":{"type":"string"},"name":{"type":"string"},"at":{"type":"integer"},"remove":{"type":"integer"},"move":{"type":"integer"},"to":{"type":"integer"},"rename":{"type":"integer"},"open":{"type":"integer"}}}'
+
+[[actions]]
+id = "NAVIGATOR_ADD_SHORTCUT"
+name = "Add to shortcuts"
+description = "Adds the note selected (or `path`), else the folder, tag or property selected, to the shortcuts. As NAVIGATOR_SHORTCUTS's `add`."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"kind":{"type":"string"},"path":{"type":"string"},"folder":{"type":"string"},"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"},"query":{"type":"string"},"name":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_1"
+name = "Open shortcut 1"
+description = "Opens shortcut 1: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_2"
+name = "Open shortcut 2"
+description = "Opens shortcut 2: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_3"
+name = "Open shortcut 3"
+description = "Opens shortcut 3: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_4"
+name = "Open shortcut 4"
+description = "Opens shortcut 4: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_5"
+name = "Open shortcut 5"
+description = "Opens shortcut 5: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_6"
+name = "Open shortcut 6"
+description = "Opens shortcut 6: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_7"
+name = "Open shortcut 7"
+description = "Opens shortcut 7: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_8"
+name = "Open shortcut 8"
+description = "Opens shortcut 8: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_OPEN_SHORTCUT_9"
+name = "Open shortcut 9"
+description = "Opens shortcut 9: a note opens, a folder, tag or property is selected, a saved search runs."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_RECENT"
+name = "Navigator: recent notes"
+description = "The vault profile's recent notes, newest first; `open` n opens one (from 1), `clear` forgets them."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"open":{"type":"integer"},"clear":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_PROFILE"
+name = "Navigator: vault profiles"
+description = "The vault profiles: `select` one (its id, name or number), `add` one named so (as the one in use unless `copy` is false), `remove` or `rename` one (to `name`); `set` the one in use's hidden_folders, descendant_excluded, hidden_tags, hidden_file_tags, hidden_file_names, hidden_file_properties (lists), banner, file_visibility (documents, supported, all). Answers the profile."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"select":{"type":"string"},"add":{"type":"string"},"copy":{"type":"boolean"},"remove":{"type":"string"},"rename":{"type":"string"},"name":{"type":"string"},"set":{"type":"object"}}}'
+
+[[actions]]
+id = "NAVIGATOR_SELECT_PROFILE_1"
+name = "Use vault profile 1"
+description = "Switches to vault profile 1: what it hides, its shortcuts, its recent notes."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_SELECT_PROFILE_2"
+name = "Use vault profile 2"
+description = "Switches to vault profile 2: what it hides, its shortcuts, its recent notes."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_SELECT_PROFILE_3"
+name = "Use vault profile 3"
+description = "Switches to vault profile 3: what it hides, its shortcuts, its recent notes."
+group = "Navigator"
+effect = "mutating"
 
 # A note's context menu (the app's file menu): pin, and folder notes.
 [[context]]
@@ -413,6 +561,16 @@ title = "Convert to folder note"
 target = "file:md"
 action = "NAVIGATOR_SET_AS_FOLDER_NOTE"
 title = "Set as folder note"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_ADD_SHORTCUT"
+title = "Add to shortcuts"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_HIDE"
+title = "Hide note"
 
 # Its settings: NavigatorSettings (features/navigator/src/settings.rs), as
 # the settings page draws them. Generated by tests/both_ways.rs
@@ -1546,3 +1704,59 @@ detail = ""
 value = "FrequencyDesc"
 label = "Most notes first"
 detail = ""
+
+[[sections.settings]]
+key = "navigator.search_provider"
+title = "Search with"
+description = "The filter search reads words in names; the full text, in the notes' text (architect's own index)."
+control = "segmented"
+default = "Filter"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Filter"
+label = "The filter search: names, tags, properties, dates, folders"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FullText"
+label = "The filter search, its words in the notes' text"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.show_shortcuts"
+title = "Shortcuts"
+description = "Notes, folders, tags, properties and saved searches over the folders."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_recent_notes"
+title = "Recent notes"
+description = "The notes opened last, over the folders."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.recent_notes_count"
+title = "Recent notes to show"
+description = ""
+control = "stepper"
+default = 5
+min = 1.0
+max = 20.0
+step = 1.0
+unit = ""
+placeholder = ""
+choices = []
+aliases = []

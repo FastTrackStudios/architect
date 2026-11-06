@@ -13,17 +13,20 @@ use chrono::NaiveDate;
 
 use crate::appearance::{Appearance, target_key};
 use crate::calendar::{self, CalendarContext, CalendarGrid, PeriodicNotes};
+use crate::hidden::Hidden;
 use crate::index::VaultIndex;
 use crate::layout::{NAV_HEIGHT, NAV_WIDTH, Pane};
 use crate::list::{self, Clock, ListContext, ListMetrics, ListRow, ListRowKind, PinIn};
-use crate::period::{Period, PeriodKind, day_of};
+use crate::period::{DayMonthOrder, Period, PeriodKind, day_of};
+use crate::profiles::{Profiles, Shortcut, ShortcutKind, VaultProfile};
 use crate::properties::{self, PropertyTree, ROOT};
 use crate::query::{Join, Operand, Query};
+use crate::search::{FilterSearch, toggle_term};
 use crate::selection::{NavTarget, Selection};
-use crate::settings::{FolderNoteOpen, NavigatorSettings, SortOption};
+use crate::settings::{FolderNoteOpen, NavigatorSettings, SearchProvider, SortOption};
 use crate::source::{FileOp, NoteFile, PropertyValue, SourceEvent, ancestors, is_within, parent};
 use crate::tags::{self, TAGGED, TagTree, UNTAGGED, is_or_below, tag_key};
-use crate::tree::{self, NavRow, NavRowKind, TagRowOptions, TreeOptions};
+use crate::tree::{self, NavRow, NavRowKind, RECENT, SHORTCUTS, TagRowOptions, TreeOptions};
 use crate::virtualize::{Align, OVERSCAN, Offsets};
 
 /// A key the navigator answers.
@@ -156,6 +159,19 @@ pub struct ViewState {
     pub tag_order: Vec<String>,
     /// The property keys as a person ordered them (`rootPropertyOrder`).
     pub property_order: Vec<String>,
+    /// The search box's text, kept across runs (`searchQuery`), and
+    /// whether the box is open.
+    pub search: String,
+    pub search_open: bool,
+    /// The vault profiles, and the one in use (`vaultProfiles`,
+    /// `vaultProfile`).
+    pub profiles: Profiles,
+    /// Hidden items shown (`showHiddenItems`).
+    pub show_hidden: bool,
+    /// The shortcuts and the recent notes folded (`shortcutsExpanded`,
+    /// `recentNotesExpanded`).
+    pub shortcuts_folded: bool,
+    pub recent_folded: bool,
 }
 
 /// What is dragged onto a tag, a property or the "Tags" row: notes, or a
@@ -242,8 +258,24 @@ pub struct NavigatorState {
     expanded_props: BTreeSet<String>,
     tag_order: Vec<String>,
     property_order: Vec<String>,
-    /// The search ⌘/Ctrl-clicks build; the list shows what it matches.
-    query: Query,
+    /// The search box's search (⌘/Ctrl-clicks write to it too); the list
+    /// shows what it matches.
+    search: FilterSearch,
+    /// The search box is open.
+    pub search_open: bool,
+    /// With the full-text provider: the notes whose text holds the
+    /// search's words, as the source found them.
+    full_text: Option<BTreeSet<String>>,
+    /// The words the full-text matches are for.
+    full_text_for: Option<String>,
+    /// The vault as the source has it; `index` is what of it shows.
+    all: VaultIndex,
+    profiles: Profiles,
+    show_hidden: bool,
+    /// The profile's hiding, compiled.
+    hidden: Hidden,
+    shortcuts_folded: bool,
+    recent_folded: bool,
 }
 
 impl NavigatorState {
@@ -254,8 +286,20 @@ impl NavigatorState {
             crate::settings::StartPane::Navigation => Pane::Navigation,
             crate::settings::StartPane::Files => Pane::Files,
         };
+        let profiles = Profiles::default();
+        let hidden = Hidden::new(&profiles.active().rules(), false);
         let mut s = Self {
-            index,
+            index: VaultIndex::default(),
+            all: index,
+            profiles,
+            hidden,
+            show_hidden: false,
+            search: FilterSearch::default(),
+            search_open: false,
+            full_text: None,
+            full_text_for: None,
+            shortcuts_folded: false,
+            recent_folded: false,
             periodic: PeriodicNotes::from_settings(&settings),
             calendar_open: false,
             calendar_cursor: None,
@@ -293,8 +337,8 @@ impl NavigatorState {
             expanded_props: std::iter::once(ROOT.to_owned()).collect(),
             tag_order: Vec::new(),
             property_order: Vec::new(),
-            query: Query::default(),
         };
+        s.index = s.visible();
         s.selection
             .select_target(NavTarget::Folder(String::new()), None);
         s.rebuild();
@@ -379,10 +423,41 @@ impl NavigatorState {
         &self.property_tree
     }
 
-    /// The search ⌘/Ctrl-clicks built.
+    /// The search as tags and properties, as ⌘/Ctrl-clicks build it;
+    /// empty when the search is more than that.
     #[must_use]
-    pub const fn query(&self) -> &Query {
-        &self.query
+    pub fn query(&self) -> Query {
+        Query::parse(self.search.text()).unwrap_or_default()
+    }
+
+    /// The search box's search.
+    #[must_use]
+    pub const fn search(&self) -> &FilterSearch {
+        &self.search
+    }
+
+    /// The vault profiles.
+    #[must_use]
+    pub const fn profiles(&self) -> &Profiles {
+        &self.profiles
+    }
+
+    /// The profile in use.
+    #[must_use]
+    pub fn profile(&self) -> &VaultProfile {
+        self.profiles.active()
+    }
+
+    /// Whether hidden items show.
+    #[must_use]
+    pub const fn show_hidden(&self) -> bool {
+        self.show_hidden
+    }
+
+    /// The vault as the source has it, hidden items too.
+    #[must_use]
+    pub const fn all(&self) -> &VaultIndex {
+        &self.all
     }
 
     /// `folder`'s note, when folder notes are on and it has one.
@@ -401,7 +476,9 @@ impl NavigatorState {
             pins: &self.pins,
             collapsed: &self.collapsed,
             tree: self.tree_cache(),
-            query: &self.query,
+            search: &self.search,
+            full_text: self.full_text.as_ref(),
+            hidden: &self.hidden,
         }
     }
 
@@ -541,7 +618,7 @@ impl NavigatorState {
         let target = self.target();
         let effective = self.settings_for(&target);
         let selected = |on: bool| -> Option<Vec<&NoteFile>> {
-            on.then(|| list::files_of(&self.index, &target, &effective, &self.pins))
+            on.then(|| list::files_of(&self.index, &target, &effective, &self.pins, &self.hidden))
         };
         let s = &self.settings;
         self.tag_tree = if !s.tag_tree {
@@ -570,6 +647,11 @@ impl NavigatorState {
             expanded.insert(String::new());
         }
         self.nav_rows = tree::flatten(&self.index, &expanded, &self.tree_options());
+        let top = self.top_rows();
+        if !top.is_empty() {
+            let at = usize::from(!self.nav_rows.is_empty());
+            self.nav_rows.splice(at..at, top);
+        }
         // The tags and the properties, under the folders.
         let bottom = self.nav_rows.pop();
         let below = self.settings.include_descendants;
@@ -600,6 +682,7 @@ impl NavigatorState {
         self.nav_offsets = Offsets::new(self.nav_rows.iter().map(|r| match r.kind {
             NavRowKind::TopSpacer => tree::TOP_SPACER,
             NavRowKind::BottomSpacer => tree::BOTTOM_SPACER,
+            NavRowKind::Banner { .. } => tree::BANNER_HEIGHT,
             _ => h,
         }));
         self.clamp_scroll(Pane::Navigation);
@@ -644,6 +727,10 @@ impl NavigatorState {
     pub fn set_settings(&mut self, settings: NavigatorSettings) {
         if settings != self.settings {
             self.periodic = PeriodicNotes::from_settings(&settings);
+            if settings.search_provider != SearchProvider::FullText {
+                self.full_text = None;
+                self.full_text_for = None;
+            }
             self.settings = settings;
             self.rebuild();
         }
@@ -674,7 +761,23 @@ impl NavigatorState {
 
     /// A change in the source.
     pub fn apply(&mut self, event: &SourceEvent) {
-        let moved = self.index.apply(event);
+        let moved = self.all.apply(event);
+        match self.visible_event(event) {
+            Some(e) => {
+                self.index.apply(&e);
+            }
+            None => self.index = self.visible(),
+        }
+        match event {
+            SourceEvent::FileDeleted(p) | SourceEvent::FolderDeleted(p) => {
+                self.profiles.follow(p, None);
+            }
+            SourceEvent::FolderRenamed { from, to } => self.profiles.follow(from, Some(to)),
+            SourceEvent::FileRenamed { from, file } => {
+                self.profiles.follow(from, Some(&file.path));
+            }
+            _ => {}
+        }
         let index = &self.index;
         self.selection
             .follow(&moved, |p| index.file(p).is_some(), |f| index.has_folder(f));
@@ -709,7 +812,7 @@ impl NavigatorState {
 
     /// Everything read again from a fresh index (a [`SourceEvent::Reset`]).
     pub fn replace_index(&mut self, index: VaultIndex) {
-        self.index = index;
+        self.all = index;
         self.apply(&SourceEvent::Reset);
     }
 
@@ -814,6 +917,15 @@ impl NavigatorState {
             return;
         }
         self.active = path.map(str::to_owned);
+        // `recordFileOpen`.
+        if let Some(p) = path
+            && self.all.file(p).is_some()
+        {
+            let limit = usize::try_from(self.settings.recent_notes_count).unwrap_or(5);
+            if self.profiles.active_mut().record(p, limit) {
+                self.rebuild_nav();
+            }
+        }
         // The calendar goes to a day's, a week's or a month's note as it
         // opens (`shouldAutoRevealCalendarNoteKind`): to its days, and to
         // a month's own month.
@@ -1020,7 +1132,7 @@ impl NavigatorState {
     fn pick(&mut self, target: NavTarget, row: &str) {
         let s = self.settings_for(&target);
         let keep = self.active.clone().filter(|a| {
-            list::files_of(&self.index, &target, &s, &self.pins)
+            list::files_of(&self.index, &target, &s, &self.pins, &self.hidden)
                 .iter()
                 .any(|f| f.path == *a)
         });
@@ -1131,20 +1243,416 @@ impl NavigatorState {
 
     // ── The search ─────────────────────────────────────────────────────
 
-    /// Adds `operand` to the search joined by `join`, or takes it out.
+    /// Adds `operand` to the search joined by `join`, or takes it out
+    /// (`updateFilterQueryWithTag`, `updateFilterQueryWithProperty`): in
+    /// the expression when the search is tags and properties alone, else
+    /// as a term of its own; the search box opens with it.
     pub fn toggle_query(&mut self, operand: Operand, join: Join) {
-        self.query.toggle(operand, join);
+        let text = match Query::parse(self.search.text()) {
+            Some(mut q) => {
+                q.toggle(operand, join);
+                q.text()
+            }
+            None => toggle_term(self.search.text(), &operand.text()),
+        };
+        if !text.is_empty() {
+            self.search_open = true;
+        }
+        self.set_search(&text);
+    }
+
+    /// The search as tags and properties.
+    pub fn set_query(&mut self, query: &Query) {
+        self.set_search(&query.text());
+    }
+
+    /// The search box's text, read again; the list shows what it matches.
+    /// With the full-text provider, the matches wait for
+    /// [`set_full_text`](Self::set_full_text).
+    pub fn set_search(&mut self, text: &str) {
+        if text == self.search.text() {
+            return;
+        }
+        self.search = FilterSearch::parse(text, self.today(), DayMonthOrder::default());
+        self.full_text = None;
+        self.full_text_for = None;
         self.rebuild_list();
         self.ask_scroll_top();
     }
 
-    /// The search, all of it (the search pane's, #338).
-    pub fn set_query(&mut self, query: Query) {
-        if query != self.query {
-            self.query = query;
+    /// The notes whose text holds the search's words (the source's full
+    /// text search), or `None` (a source that cannot) to match the words
+    /// against names.
+    pub fn set_full_text(&mut self, hits: Option<BTreeSet<String>>) {
+        self.full_text_for = Some(self.full_text_words());
+        if hits != self.full_text {
+            self.full_text = hits;
             self.rebuild_list();
-            self.ask_scroll_top();
         }
+    }
+
+    /// The search's words, as the full text is asked for them.
+    #[must_use]
+    pub fn full_text_words(&self) -> String {
+        self.search.words().join(" ")
+    }
+
+    /// Whether the full text must be asked for the search's words: the
+    /// provider is the full text, there are words, and the matches are
+    /// for others (or none yet).
+    #[must_use]
+    pub fn full_text_due(&self) -> bool {
+        self.settings.search_provider == SearchProvider::FullText
+            && !self.search.words().is_empty()
+            && self.full_text_for.as_deref() != Some(self.full_text_words().as_str())
+    }
+
+    /// Opens the search box, or closes and clears it (`toggleSearch`).
+    pub fn toggle_search(&mut self) {
+        self.search_open = !self.search_open;
+        if !self.search_open {
+            self.set_search("");
+        }
+    }
+
+    /// Selects the vault's root, lists the notes of every folder, and
+    /// opens the search box (`search-vault`, `searchWithDescendants`).
+    pub fn search_vault(&mut self) {
+        if !self.settings.include_descendants {
+            let mut s = self.settings.clone();
+            s.include_descendants = true;
+            self.set_settings(s);
+        }
+        self.select_folder("");
+        self.search_open = true;
+    }
+
+    // ── Profiles, hiding, shortcuts and recent notes ───────────────────
+
+    /// What of the vault shows, by the profile's hiding.
+    fn visible(&self) -> VaultIndex {
+        if self.hidden.is_empty() {
+            return self.all.clone();
+        }
+        let h = &self.hidden;
+        let folders: Vec<String> = self
+            .all
+            .folder_paths()
+            .filter(|f| !h.hides_folder(f))
+            .map(str::to_owned)
+            .collect();
+        VaultIndex::from_parts(
+            self.all.name().to_owned(),
+            folders,
+            self.all
+                .files()
+                .filter(|f| !h.hides_file(f))
+                .map(|f| h.shown(f)),
+        )
+    }
+
+    /// A change in the source, as the shown vault takes it; `None` to
+    /// read the shown vault again.
+    fn visible_event(&self, e: &SourceEvent) -> Option<SourceEvent> {
+        let h = &self.hidden;
+        if matches!(e, SourceEvent::Reset) {
+            return None;
+        }
+        if h.is_empty() {
+            return Some(e.clone());
+        }
+        Some(match e {
+            SourceEvent::FolderCreated(p) if h.hides_folder(p) => SourceEvent::Reset,
+            SourceEvent::FileCreated(f) | SourceEvent::FileModified(f) => {
+                if h.hides_file(f) {
+                    SourceEvent::FileDeleted(f.path.clone())
+                } else {
+                    SourceEvent::FileModified(h.shown(f))
+                }
+            }
+            SourceEvent::FileRenamed { from, file } => {
+                if h.hides_file(file) {
+                    SourceEvent::FileDeleted(from.clone())
+                } else {
+                    SourceEvent::FileRenamed {
+                        from: from.clone(),
+                        file: h.shown(file),
+                    }
+                }
+            }
+            SourceEvent::FolderRenamed { .. } | SourceEvent::Reset => return None,
+            other => other.clone(),
+        })
+    }
+
+    /// The hiding compiled again and the vault shown anew: a profile
+    /// switched or edited, hidden items shown or not.
+    fn rehide(&mut self) {
+        self.hidden = Hidden::new(&self.profiles.active().rules(), self.show_hidden);
+        self.index = self.visible();
+        let index = &self.index;
+        self.expanded.retain(|p| index.has_folder(p));
+        self.expanded.insert(String::new());
+        if let NavTarget::Folder(f) = self.target()
+            && !self.index.has_folder(&f)
+        {
+            self.selection
+                .select_target(NavTarget::Folder(String::new()), None);
+        }
+        self.rebuild();
+    }
+
+    /// Shows hidden items, or hides them again (`toggle-hidden`).
+    pub fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        self.rehide();
+    }
+
+    /// Uses the profile `which` names: its id, its name, or its number
+    /// (`select-profile`, `select-profile-1`…).
+    pub fn select_profile(&mut self, which: &str) -> Result<bool, String> {
+        let changed = self.profiles.select(which)?;
+        if changed {
+            self.rehide();
+        }
+        Ok(changed)
+    }
+
+    /// Adds a profile, as the one in use (`copy`) or empty, and uses it.
+    pub fn add_profile(&mut self, name: &str, copy: bool) -> Result<String, String> {
+        let id = self.profiles.add(name, copy)?;
+        self.select_profile(&id)?;
+        Ok(id)
+    }
+
+    /// Takes out a profile (not the default).
+    pub fn remove_profile(&mut self, which: &str) -> Result<(), String> {
+        self.profiles.remove(which)?;
+        self.rehide();
+        Ok(())
+    }
+
+    /// Renames a profile.
+    pub fn rename_profile(&mut self, which: &str, name: &str) -> Result<(), String> {
+        self.profiles.rename(which, name)?;
+        self.rebuild_nav();
+        Ok(())
+    }
+
+    /// Changes the profile in use: what it hides, its banner.
+    pub fn edit_profile(&mut self, f: impl FnOnce(&mut VaultProfile)) {
+        let before = self.profiles.active().clone();
+        f(self.profiles.active_mut());
+        if *self.profiles.active() != before {
+            self.rehide();
+        }
+    }
+
+    /// Hides a folder (`/path`), a tag, or a note (`/path`) in the profile
+    /// in use, or shows it again (`unhide`).
+    pub fn hide(&mut self, what: &HideTarget, unhide: bool) {
+        let (list, pattern): (fn(&mut VaultProfile) -> &mut Vec<String>, String) = match what {
+            HideTarget::Folder(p) => (|v| &mut v.hidden_folders, format!("/{p}")),
+            HideTarget::Tag(t) => (|v| &mut v.hidden_tags, tag_key(t)),
+            HideTarget::Note(p) => (|v| &mut v.hidden_file_names, format!("/{p}")),
+        };
+        self.edit_profile(|v| {
+            let l = list(v);
+            if unhide {
+                l.retain(|p| !p.eq_ignore_ascii_case(&pattern));
+            } else if !l.iter().any(|p| p.eq_ignore_ascii_case(&pattern)) {
+                l.push(pattern);
+            }
+        });
+    }
+
+    /// Adds a shortcut to the profile in use (at `at`, else last); `false`
+    /// when it has it.
+    pub fn add_shortcut(&mut self, shortcut: Shortcut, at: Option<usize>) -> bool {
+        let added = self.profiles.active_mut().add_shortcut(shortcut, at);
+        if added {
+            self.rebuild_nav();
+        }
+        added
+    }
+
+    /// Takes out a shortcut.
+    pub fn remove_shortcut(&mut self, shortcut: &Shortcut) -> bool {
+        let removed = self.profiles.active_mut().remove_shortcut(shortcut);
+        if removed {
+            self.rebuild_nav();
+        }
+        removed
+    }
+
+    /// Moves the shortcut at `from` to `to`.
+    pub fn move_shortcut(&mut self, from: usize, to: usize) -> bool {
+        let moved = self.profiles.active_mut().move_shortcut(from, to);
+        if moved {
+            self.rebuild_nav();
+        }
+        moved
+    }
+
+    /// Names the shortcut at `at` (`""`: its target's name again).
+    pub fn rename_shortcut(&mut self, at: usize, name: &str) -> bool {
+        let Some(s) = self.profiles.active_mut().shortcuts.get_mut(at) else {
+            return false;
+        };
+        name.trim().clone_into(&mut s.name);
+        self.rebuild_nav();
+        true
+    }
+
+    /// Opens shortcut `n` (from 1, `open-shortcut-1`…`9`): a note opens, a
+    /// folder, tag or property is selected, a saved search is run.
+    ///
+    /// # Errors
+    ///
+    /// No shortcut `n`, or what it opens is gone.
+    pub fn open_shortcut(&mut self, n: usize) -> Result<Option<Outcome>, String> {
+        let s = n
+            .checked_sub(1)
+            .and_then(|i| self.profile().shortcuts.get(i))
+            .cloned()
+            .ok_or_else(|| format!("No shortcut {n}"))?;
+        self.open_shortcut_entry(&s)
+    }
+
+    /// Opens a shortcut.
+    ///
+    /// # Errors
+    ///
+    /// What it opens is gone.
+    pub fn open_shortcut_entry(&mut self, s: &Shortcut) -> Result<Option<Outcome>, String> {
+        match s.kind {
+            ShortcutKind::Note => {
+                if self.index.file(&s.target).is_none() {
+                    return Err(format!("{} is not in the vault", s.target));
+                }
+                self.reveal(&s.target, true);
+                Ok(Some(Outcome::Open {
+                    path: s.target.clone(),
+                    how: OpenIn::Here,
+                    settle: false,
+                }))
+            }
+            ShortcutKind::Search => {
+                self.search_open = true;
+                self.set_search(&s.target);
+                Ok(None)
+            }
+            ShortcutKind::Folder if !self.index.has_folder(&s.target) => {
+                Err(format!("No folder {}", s.target))
+            }
+            _ => {
+                if let Some(t) = s.nav_target() {
+                    self.select_nav(&t);
+                    self.focus = Pane::Navigation;
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    /// Opens a recent note.
+    #[must_use]
+    pub fn open_recent(&self, path: &str) -> Option<Outcome> {
+        self.index.file(path).map(|_| Outcome::Open {
+            path: path.to_owned(),
+            how: OpenIn::Here,
+            settle: false,
+        })
+    }
+
+    /// Folds or unfolds the shortcuts ([`SHORTCUTS`]) or the recent notes
+    /// ([`RECENT`]).
+    pub fn toggle_section(&mut self, id: &str) {
+        match id {
+            SHORTCUTS => self.shortcuts_folded = !self.shortcuts_folded,
+            RECENT => self.recent_folded = !self.recent_folded,
+            _ => return,
+        }
+        self.rebuild_nav();
+    }
+
+    /// The banner, shortcut and recent rows over the folders.
+    fn top_rows(&self) -> Vec<NavRow> {
+        let p = self.profile();
+        let mut rows = Vec::new();
+        if let Some(src) = p.banner.as_deref().filter(|b| !b.trim().is_empty()) {
+            rows.push(NavRow {
+                key: "banner".to_owned(),
+                level: 0,
+                kind: NavRowKind::Banner {
+                    src: src.trim().to_owned(),
+                },
+            });
+        }
+        if self.settings.show_shortcuts && !p.shortcuts.is_empty() {
+            rows.push(section(
+                SHORTCUTS,
+                "Shortcuts",
+                !self.shortcuts_folded,
+                p.shortcuts.len(),
+            ));
+            if !self.shortcuts_folded {
+                for (at, sc) in p.shortcuts.iter().enumerate() {
+                    let missing = match sc.kind {
+                        ShortcutKind::Note => self.index.file(&sc.target).is_none(),
+                        ShortcutKind::Folder => !self.index.has_folder(&sc.target),
+                        _ => false,
+                    };
+                    let name = match (sc.kind, self.index.file(&sc.target)) {
+                        (ShortcutKind::Note, Some(f)) if sc.name.is_empty() => {
+                            f.title(&self.settings.name_fields()).to_owned()
+                        }
+                        _ => sc.label(),
+                    };
+                    rows.push(NavRow {
+                        key: format!("shortcut:{at}"),
+                        level: 0,
+                        kind: NavRowKind::Shortcut {
+                            at,
+                            shortcut: sc.clone(),
+                            name,
+                            missing,
+                        },
+                    });
+                }
+            }
+        }
+        if self.settings.show_recent_notes {
+            let limit = usize::try_from(self.settings.recent_notes_count).unwrap_or(5);
+            let recent: Vec<&NoteFile> = p
+                .recent
+                .iter()
+                .filter_map(|r| self.index.file(r))
+                .take(limit)
+                .collect();
+            if !recent.is_empty() {
+                rows.push(section(
+                    RECENT,
+                    "Recent notes",
+                    !self.recent_folded,
+                    recent.len(),
+                ));
+                if !self.recent_folded {
+                    let fields = self.settings.name_fields();
+                    for f in recent {
+                        rows.push(NavRow {
+                            key: format!("recent:{}", f.path),
+                            level: 0,
+                            kind: NavRowKind::Recent {
+                                path: f.path.clone(),
+                                name: f.title(&fields).to_owned(),
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        rows
     }
 
     // ── Tag operations ─────────────────────────────────────────────────
@@ -1472,17 +1980,21 @@ impl NavigatorState {
                 .into_iter()
                 .filter_map(|k| moved(&k).unwrap_or(Some(k)))
                 .collect();
-            self.query.terms.retain_mut(|(_, o)| match o {
-                Operand::Tag(t) => match moved(t) {
-                    Some(Some(new)) => {
-                        *t = new;
-                        true
-                    }
-                    Some(None) => false,
-                    None => true,
-                },
-                Operand::Property { .. } => true,
-            });
+            if let Some(mut q) = Query::parse(self.search.text()) {
+                q.terms.retain_mut(|(_, o)| match o {
+                    Operand::Tag(t) => match moved(t) {
+                        Some(Some(new)) => {
+                            *t = new;
+                            true
+                        }
+                        Some(None) => false,
+                        None => true,
+                    },
+                    Operand::Property { .. } => true,
+                });
+                self.search =
+                    FilterSearch::parse(&q.text(), self.today(), DayMonthOrder::default());
+            }
             if let NavTarget::Tag(t) = self.target()
                 && let Some(new) = moved(&tag_key(&t))
             {
@@ -1581,7 +2093,7 @@ impl NavigatorState {
         let s = self.effective.clone();
         let notes: Vec<String> = match &target {
             NavTarget::Folder(f) => self.index.files_in(f, s.include_descendants),
-            other => list::files_of(&self.index, other, &s, &self.pins),
+            other => list::files_of(&self.index, other, &s, &self.pins, &self.hidden),
         }
         .into_iter()
         .filter(|n| list::is_folder_note(&self.index, &s, &n.path))
@@ -2395,12 +2907,26 @@ impl NavigatorState {
             expanded_properties: self.expanded_props.iter().cloned().collect(),
             tag_order: self.tag_order.clone(),
             property_order: self.property_order.clone(),
+            search: self.search.text().to_owned(),
+            search_open: self.search_open,
+            profiles: self.profiles.clone(),
+            show_hidden: self.show_hidden,
+            shortcuts_folded: self.shortcuts_folded,
+            recent_folded: self.recent_folded,
         }
     }
 
     /// Puts back what [`view_state`](Self::view_state) kept; folders that
     /// are gone are let go.
     pub fn restore(&mut self, state: &ViewState) {
+        self.profiles = state.profiles.clone();
+        self.show_hidden = state.show_hidden;
+        self.shortcuts_folded = state.shortcuts_folded;
+        self.recent_folded = state.recent_folded;
+        self.search_open = state.search_open || !state.search.is_empty();
+        self.search = FilterSearch::parse(&state.search, self.today(), DayMonthOrder::default());
+        self.hidden = Hidden::new(&self.profiles.active().rules(), self.show_hidden);
+        self.index = self.visible();
         self.expanded = state
             .expanded
             .iter()
@@ -2457,6 +2983,28 @@ impl NavigatorState {
                 .select_target(NavTarget::Folder(f.to_owned()), None);
         }
         self.rebuild();
+    }
+}
+
+/// What [`NavigatorState::hide`] hides: a folder, a tag, a note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HideTarget {
+    Folder(String),
+    Tag(String),
+    Note(String),
+}
+
+/// A section's header row.
+fn section(id: &str, name: &str, expanded: bool, count: usize) -> NavRow {
+    NavRow {
+        key: format!("section:{id}"),
+        level: 0,
+        kind: NavRowKind::Section {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            expanded,
+            count,
+        },
     }
 }
 

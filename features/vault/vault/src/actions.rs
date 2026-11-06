@@ -112,6 +112,23 @@ impl OpenVault {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// The notes with every word of `query` in their title or text, as
+    /// the vault's full-text search finds them
+    /// (`vault_live::sync::search_pages`): title matches first, at most
+    /// `limit`.
+    #[must_use]
+    pub fn search_text(&self, query: &str, limit: usize) -> Vec<vault_proto::TextHit> {
+        self.with(|v| {
+            vault_live::sync::search_pages(
+                v.pages
+                    .iter()
+                    .map(|p| (p.raw.as_str(), p.rel_path.as_str(), title(p))),
+                query,
+                limit,
+            )
+        })
+    }
+
     /// Runs `f` over the vault as it is now.
     pub fn with<R>(&self, f: impl FnOnce(&Vault) -> R) -> R {
         f(&self.read())

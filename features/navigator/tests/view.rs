@@ -365,3 +365,47 @@ fn tag_rows_draw_a_command_click_searches_and_a_note_dropped_on_a_tag_is_tagged(
         .tags;
     assert_eq!(tags, ["work"]);
 }
+
+#[test]
+fn the_search_box_narrows_the_list_and_shortcuts_and_recent_notes_draw_over_the_folders() {
+    let source = MemorySource::new("Lab")
+        .with_file(NoteFile::new("Welcome.md", NOW, NOW).preview("Hello"))
+        .with_file(NoteFile::new("Guides/Shell.md", NOW, NOW).tag("guide"))
+        .with_file(NoteFile::new("Guides/Workspace.md", NOW - 1, NOW - 1));
+    let mut doc = mount(Arc::new(source), 700, false);
+    // The header's search opens the box; what it types narrows the list.
+    assert_eq!(count(&doc, "[data-testid=\"nv-search-input\"]"), 0);
+    click(&mut doc, "[data-testid=\"nv-search-toggle\"]");
+    assert_eq!(count(&doc, "[data-testid=\"nv-search-input\"]"), 1);
+    nav().update(|s| {
+        let mut settings = s.settings().clone();
+        settings.include_descendants = true;
+        s.set_settings(settings);
+    });
+    nav().set_search("#guide");
+    settle(&mut doc);
+    assert_eq!(count(&doc, "[data-file]"), 1);
+    assert_eq!(
+        count(&doc, "[data-query=\"#guide\"][data-expression=\"true\"]"),
+        1
+    );
+    // Saved as a shortcut: a row over the folders, numbered 1.
+    click(&mut doc, "[data-testid=\"nv-search-save\"]");
+    assert_eq!(count(&doc, "[data-section=\"shortcuts\"]"), 1);
+    assert_eq!(
+        count(&doc, "[data-shortcut=\"0\"][data-kind=\"search\"]"),
+        1
+    );
+    click(&mut doc, "[aria-label=\"Clear the search\"]");
+    assert_eq!(count(&doc, "[data-file]"), 3);
+    click(&mut doc, "[data-shortcut=\"0\"]");
+    assert_eq!(nav().state.peek().search().text(), "#guide");
+    // A note opened: a recent note, which opens it again.
+    click(&mut doc, "[data-file=\"Guides/Shell.md\"]");
+    nav().set_active(Some("Guides/Shell.md"));
+    settle(&mut doc);
+    assert_eq!(count(&doc, "[data-recent=\"Guides/Shell.md\"]"), 1);
+    OPENED.with(|v| v.borrow_mut().clear());
+    click(&mut doc, "[data-recent=\"Guides/Shell.md\"]");
+    assert_eq!(OPENED.with(|v| v.borrow().clone()), ["Guides/Shell.md"]);
+}
