@@ -698,6 +698,60 @@ fn project_types_are_registered_while_loaded() {
     }
 }
 
+// ---- capture targets (#352) ---------------------------------------------
+
+const IDEAS: &str = r#"
+id = "lab.ideas"
+name = "Ideas"
+version = "0.1.0"
+kind = "data"
+
+[[capture_targets]]
+id = "song-idea"
+name = "Song idea"
+icon = "music"
+action = "LAB_IDEAS_CAPTURE"
+chips = ["key", "tags"]
+tokens = [{ prefix = "key:", key = "key" }]
+"#;
+
+#[test]
+fn capture_targets_are_registered_while_loaded() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let ext = Extensions::new(host(&list), Installs::new(tmp.path().join("i")));
+    ext.install_contribution_actions().unwrap();
+    let dir = tmp.path().join("ideas");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("extension.toml"), IDEAS).unwrap();
+    let _ = ext.dev(&dir);
+    let targets = run(&list, "EXT_CAPTURE_TARGETS", Value::Null).unwrap();
+    assert_eq!(targets[0]["id"], "song-idea");
+    assert_eq!(targets[0]["from"], "lab.ideas");
+    assert_eq!(targets[0]["action"], "LAB_IDEAS_CAPTURE");
+    assert_eq!(targets[0]["tokens"], json!([{ "prefix": "key:", "key": "key" }]));
+    // Off: its targets go with it.
+    let _ = ext.disable("lab.ideas");
+    assert_eq!(
+        run(&list, "EXT_CAPTURE_TARGETS", Value::Null).unwrap(),
+        json!([])
+    );
+    // Checked at parse: an id it can have, the app's own ids left alone,
+    // its own action, whole tokens.
+    for (bad, why) in [
+        ("id = \"song-idea\"", "id = \"Song Idea\""),
+        ("id = \"song-idea\"", "id = \"note\""),
+        (
+            "action = \"LAB_IDEAS_CAPTURE\"",
+            "action = \"VAULT_DELETE\"",
+        ),
+        ("prefix = \"key:\"", "prefix = \"\""),
+    ] {
+        let text = IDEAS.replacen(bad, why, 1);
+        assert!(Manifest::parse(&text).is_err(), "{why}");
+    }
+}
+
 // ---- windows ------------------------------------------------------------
 
 thread_local! {

@@ -1,0 +1,72 @@
+[package]
+name = "architect-capture"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Capture: the quick-add parser, the vault inbox and processing it, capture targets extensions add, the composer and the global capture window, CAPTURE_* and INBOX_* on the Action List"
+
+# docs/content/features/capture.md. The default set is the model — the
+# parser, an inbox note's shape, the targets — pure data, wasm-clean.
+# `actions` registers CAPTURE_* / INBOX_* over an Action List's VAULT_*
+# and the host's EXT_CAPTURE_TARGETS; `ui` the composer, the inbox deck
+# and the capture window; `global-shortcut` the system-wide key (desk).
+
+[features]
+default = []
+actions = ["dep:architect", "dep:facet", "dep:facet-json", "dep:facet-value"]
+ui = [
+    "actions",
+    "dep:dioxus",
+    "dep:architect-shell",
+    "architect-shell/ui",
+    "dep:architect-workspace",
+    "dep:architect-theme",
+    "dep:futures-channel",
+    "dep:futures-util",
+    "dep:futures-timer",
+]
+global-shortcut = ["ui", "dep:global-hotkey"]
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+architect = { workspace = true, optional = true, features = ["action-list"] }
+facet = { workspace = true, optional = true }
+facet-json = { version = "0.50.0-rc.7", optional = true }
+facet-value = { version = "0.50.0-rc.7", optional = true }
+dioxus = { workspace = true, optional = true }
+architect-shell = { workspace = true, optional = true }
+architect-workspace = { workspace = true, optional = true }
+architect-theme = { workspace = true, optional = true }
+# What the platform says (the global key) comes to the window's thread on
+# a channel that wakes it.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+futures-timer = { workspace = true, optional = true }
+
+# The system-wide shortcut: Carbon's hot keys on macOS, RegisterHotKey on
+# Windows, X11's grab on Linux (already in the tree through dioxus-desktop).
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios", target_os = "android")))'.dependencies]
+global-hotkey = { version = "0.9", optional = true }
+
+[dev-dependencies]
+# The tests run the actions: build them with it.
+architect-capture = { path = ".", features = ["actions"] }
+architect = { workspace = true, features = ["action-list"] }
+facet = { workspace = true }
+facet-json = { version = "0.50.0-rc.7" }
+facet-value = { version = "0.50.0-rc.7" }
+vault = { workspace = true, features = ["actions"] }
+futures = "0.3"
+tempfile = "3"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

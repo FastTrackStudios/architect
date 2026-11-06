@@ -727,6 +727,58 @@ impl NavigatorProviderDecl {
     }
 }
 
+/// A quick-add word a capture target adds (`[[capture_targets]]
+/// tokens`): one starting with `prefix` gives property `key` the rest
+/// (Keyflow's `{ prefix = "key:", key = "key" }`: `key:D` → `key: D`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct CaptureTokenDecl {
+    pub prefix: String,
+    pub key: String,
+}
+
+/// What a capture can become (`[[capture_targets]]`, #352).
+///
+/// Architect owns capture — the composer, the quick-add parser, the
+/// inbox and processing it (`architect-capture`); an extension adds a
+/// target: a choice in the composer and the inbox deck, the chips it
+/// offers, the quick-add words it adds, and its action that makes one
+/// from a capture (run with `{title, body, properties, source, inbox}`,
+/// answering at least `{path}`).
+///
+/// ```toml
+/// [[capture_targets]]
+/// id = "task"
+/// name = "Task"
+/// icon = "check"
+/// action = "TASKS_CAPTURE"   # its own action
+/// chips = ["projects", "due", "priority", "tags"]
+/// tokens = [{ prefix = "key:", key = "key" }]
+/// ```
+///
+/// Withdrawn with the rest of its contributions when the extension is
+/// turned off. The app's registry is [`Contributions::capture_targets`]
+/// (`EXT_CAPTURE_TARGETS`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct CaptureTargetDecl {
+    /// Unique among every loaded extension's targets; `note` and `inbox`
+    /// are the app's.
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub description: String,
+    /// Its action that makes one from a capture.
+    pub action: String,
+    /// The properties it offers as chips, in order.
+    pub chips: Vec<String>,
+    pub tokens: Vec<CaptureTokenDecl>,
+}
+
+/// The capture targets the app has itself: no extension may take their
+/// ids.
+pub const BUILTIN_CAPTURE_TARGETS: &[&str] = &["note", "inbox"];
+
 /// Everything an extension adds to the interface past actions, settings,
 /// views and themes: a manifest's tables, or the same sent at run time.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -750,6 +802,8 @@ pub struct Contribution {
     /// What fills the navigator's panes while its views show
     /// (`[[navigator_providers]]`).
     pub navigator_providers: Vec<NavigatorProviderDecl>,
+    /// What a capture can become (`[[capture_targets]]`).
+    pub capture_targets: Vec<CaptureTargetDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
     pub keymaps: Vec<editor_ext::KeymapEntry>,
@@ -836,6 +890,9 @@ impl Contribution {
             navigator_providers: join(&self.navigator_providers, &other.navigator_providers, |n| {
                 n.id.clone()
             }),
+            capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
+                c.id.clone()
+            }),
             keymaps: join(&self.keymaps, &other.keymaps, keymap_key),
             slash: join(&self.slash, &other.slash, |s| s.action.clone()),
         }
@@ -879,6 +936,11 @@ impl Contribution {
             self.navigator_providers
                 .iter()
                 .map(|n| format!("navigator_provider:{}", n.id)),
+        );
+        out.extend(
+            self.capture_targets
+                .iter()
+                .map(|c| format!("capture_target:{}", c.id)),
         );
         out.extend(
             self.keymaps
@@ -945,6 +1007,7 @@ impl Contribution {
             self.base_views.len(),
             self.project_types.len(),
             self.navigator_providers.len(),
+            self.capture_targets.len(),
             self.keymaps.len(),
             self.slash.len(),
         ]
@@ -1202,6 +1265,27 @@ impl Contribution {
             action(&what, &n.snapshot_action())?;
             for v in &n.views {
                 view(&what, v)?;
+            }
+        }
+        for c in &self.capture_targets {
+            let what = format!("capture target {}", c.id);
+            if c.id.is_empty()
+                || !c
+                    .id
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || "-_".contains(ch))
+            {
+                return refuse(
+                    what,
+                    "its id is lowercase letters, digits, - and _".to_owned(),
+                );
+            }
+            if BUILTIN_CAPTURE_TARGETS.contains(&c.id.as_str()) {
+                return refuse(what, "the app has that target itself".to_owned());
+            }
+            action(&what, &c.action)?;
+            if c.tokens.iter().any(|t| t.prefix.trim().is_empty() || t.key.trim().is_empty()) {
+                return refuse(what, "a token needs a prefix and a key".to_owned());
             }
         }
         for e in &self.embeds {
@@ -1831,6 +1915,18 @@ impl Contributions {
         self.all(|c| c.project_types.clone())
             .into_iter()
             .filter(|p| seen.insert(p.item.id.clone()))
+            .collect()
+    }
+
+    /// Every capture target (`[[capture_targets]]`), in the order its
+    /// owner came: what a capture can become past the app's note. A target
+    /// two extensions add is the first's.
+    #[must_use]
+    pub fn capture_targets(&self) -> Vec<By<CaptureTargetDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.capture_targets.clone())
+            .into_iter()
+            .filter(|t| seen.insert(t.item.id.clone()))
             .collect()
     }
 

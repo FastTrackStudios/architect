@@ -57,10 +57,18 @@ params = '{"type":"object","properties":{"path":{"type":"string"}},"required":["
 [[actions]]
 id = "TASKS_ADD"
 name = "New task"
-description = "Adds a task from a line as typed: `[[Project]]`, `#tag`, `@context`, `!high`, `today` / `tomorrow` / a weekday / `next fri` / YYYY-MM-DD, `every week` / `every 3 days` / `every weekday`; the rest is its title. `project` puts it in a project as well. Written to the project's Tasks folder, else Tasks/."
+description = "Adds a task from a line as typed, read by architect's quick-add parser (CAPTURE_PARSE's): `[[Project]]`, `#tag`, `@context`, `!high`, `today` / `tomorrow` / a weekday / `next fri` / YYYY-MM-DD, `every week` / `every 3 days` / `every weekday`; the rest is its title. `project` puts it in a project as well. Written to the project's Tasks folder, else Tasks/."
 group = "Tasks"
 effect = "mutating"
 params = '{"type":"object","properties":{"text":{"type":"string"},"project":{"type":"string"}},"required":["text"]}'
+
+[[actions]]
+id = "TASKS_CAPTURE"
+name = "Tasks: from a capture"
+description = "The `task` capture target's action: makes a task of a capture from architect's composer or inbox (`title`, `body` its details, `properties` — `projects`, `due`, `priority`, `tags`, `contexts`, `recurrence`, `status`, as quick add reads them — `source`, `inbox`). Run by CAPTURE_ADD and INBOX_PROCESS with `target` task."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"properties":{"type":"object"},"source":{"type":"string"},"inbox":{"type":["string","null"]}},"required":["title"]}'
 
 [[actions]]
 id = "TASKS_CREATE"
@@ -192,6 +200,17 @@ icon = "check"
 [[hooks]]
 on = "startup"
 action = "TASKS_STARTED"
+
+# What a capture can become (architect's capture, #352): the composer
+# and the inbox offer "Task", these chips and tokens; TASKS_CAPTURE makes
+# one from the capture.
+[[capture_targets]]
+id = "task"
+name = "Task"
+icon = "check"
+description = "A task in the vault: its project, due date, priority, tags, contexts and repeat from the capture."
+action = "TASKS_CAPTURE"
+chips = ["projects", "due", "priority", "tags", "contexts", "recurrence"]
 
 # A view type for Bases: a base's view of `type: kanban` is drawn by this
 # extension's code (`Builder::base_view("kanban", …)`): a column per value

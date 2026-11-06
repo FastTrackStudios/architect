@@ -18,6 +18,8 @@ path = "src/main.rs"
 architect-extensions = { workspace = true, features = ["guest"] }
 # Its navigator provider (MIT; never the GPL navigator itself).
 architect-navigator-api = { workspace = true }
+# The one quick-add parser and a capture's shape (its model only).
+architect-capture = { workspace = true }
 chrono = { workspace = true }
 dioxus = { workspace = true }
 futures-timer = { workspace = true }
@@ -31,6 +33,7 @@ architect-settings = { workspace = true }
 # The app's side in a test: a vault's actions and Bases' over a folder.
 architect-bases = { workspace = true, features = ["actions"] }
 vault = { workspace = true, features = ["actions"] }
+architect-capture = { workspace = true, features = ["actions"] }
 futures = "0.3"
 serde_yaml = { workspace = true }
 tempfile = "3"

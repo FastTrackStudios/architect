@@ -51,6 +51,7 @@ members = [
     "features/settings",
     "features/settings/derive",
     "features/orgs",
+    "features/capture",
     "features/accounts",
     "features/scripting",
     "features/extensions",
@@ -314,6 +315,7 @@ architect-commands = { path = "features/commands" }
 architect-settings = { path = "features/settings" }
 architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
+architect-capture = { path = "features/capture" }
 architect-accounts = { path = "features/accounts" }
 architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }

@@ -283,6 +283,16 @@ async fn add(args: Value) -> Result<Value, String> {
     write_new(task, "").await.map(|t| task_json(&t))
 }
 
+/// `TASKS_CAPTURE {title, body, properties, source, inbox?}`: the `task`
+/// capture target (`[[capture_targets]]`): a capture from architect's
+/// composer or inbox made into a task, its body the task's details.
+async fn capture(args: Value) -> Result<Value, String> {
+    let capture: architect_capture::Capture =
+        serde_json::from_value(args).map_err(|e| format!("not a capture: {e}"))?;
+    let task = quick::from_capture(&capture);
+    write_new(task, &capture.body).await.map(|t| task_json(&t))
+}
+
 /// `TASKS_CREATE {title, …}`.
 async fn create(args: Value) -> Result<Value, String> {
     let title = arg(&args, "title").ok_or("give `title`")?;
@@ -520,6 +530,7 @@ impl Extension for Tasks {
             .action("TASKS_LIST", list)
             .action("TASKS_READ", read)
             .action("TASKS_ADD", add)
+            .action("TASKS_CAPTURE", capture)
             .action("TASKS_CREATE", create)
             .action("TASKS_UPDATE", update)
             .action("TASKS_SET_STATUS", |args| async move {

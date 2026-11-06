@@ -963,6 +963,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-capture"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-capture",
+ "architect-shell",
+ "architect-theme",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "chrono",
+ "dioxus",
+ "facet",
+ "facet-json",
+ "facet-value",
+ "futures",
+ "futures-channel",
+ "futures-timer",
+ "futures-util",
+ "global-hotkey",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vault",
+]
+
+[[package]]
 name = "architect-cli"
 version = "0.1.0"
 dependencies = [
@@ -1867,6 +1893,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-bases",
+ "architect-capture",
  "architect-extensions",
  "architect-navigator-api",
  "architect-settings",
