@@ -37,6 +37,7 @@
 //! [`build`] does all of it: [`Site::read`] then [`write()`].
 
 mod assets;
+mod bases;
 mod blocks;
 mod element_html;
 mod frontmatter;
@@ -50,6 +51,7 @@ mod url;
 mod write;
 
 pub use architect_extensions::contrib::Claim;
+pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;

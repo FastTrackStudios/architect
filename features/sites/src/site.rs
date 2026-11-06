@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use vault::obsidian::{LinkIndex, OutgoingLink, Vault, VaultPage, page_tags};
 
+use crate::bases::BaseBlocks;
 use crate::blocks::Blocks;
 use crate::frontmatter::{self, Meta};
 use crate::markdown::{self, Heading, Input, Section, Target};
@@ -39,6 +40,10 @@ pub struct Options {
     pub strict: bool,
     /// Folders copied into the site as they are (a docs `static/`).
     pub static_dirs: Vec<PathBuf>,
+    /// Draw ```` ```base ```` fences as their views over the vault
+    /// ([`crate::BaseBlocks`]), unless a renderer the caller gave claims
+    /// them first. On by default.
+    pub bases: bool,
 }
 
 impl Options {
@@ -56,6 +61,7 @@ impl Options {
             live_reload: None,
             strict: false,
             static_dirs: Vec::new(),
+            bases: true,
         }
     }
 }
@@ -300,6 +306,21 @@ impl Site {
                     .or_insert_with(|| url.clone());
             }
         }
+
+        // Bases are the vault's own: drawn over it, after the caller's
+        // renderers, so an extension claiming `fence:base` wins.
+        let mut blocks = blocks.clone();
+        if opts.bases {
+            let pages = notes
+                .iter()
+                .filter_map(|n| {
+                    let url = url_of.get(n.page.rel_path.as_str())?;
+                    Some((n.page.rel_path.clone(), (url.clone(), n.title.clone())))
+                })
+                .collect();
+            blocks.add(std::sync::Arc::new(BaseBlocks::new(&vault, pages)));
+        }
+        let blocks = &blocks;
 
         // Draw every note, its links resolved by the vault's index.
         let index = LinkIndex::build(&vault);

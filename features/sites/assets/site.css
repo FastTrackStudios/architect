@@ -239,6 +239,20 @@ details[open] > summary > .site-tree-chevron { transform: scale(0.45) rotate(45d
 .site-table tr:last-child td { border-bottom: 0; }
 .site-table th { background: var(--site-sidebar); font-weight: 600; }
 
+/* A base's views (```base). */
+.site-base { margin: 0 0 1.3em; }
+.site-base figcaption { font-size: 13px; font-weight: 600; color: var(--site-faint); margin: 0 0 6px; }
+.site-base .site-table { margin: 0; }
+.site-base-group th { background: var(--site-sidebar); font-size: 13px; color: var(--site-faint); }
+.site-base-cards, .site-base-list { list-style: none; margin: 0; padding: 0; }
+.site-base-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.site-base-cards li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--site-radius); background: var(--card); font-size: 14px; }
+.site-base-list li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.site-base-name { font-weight: 600; }
+.site-base-value { color: var(--site-faint); }
+.site-base-value b { font-weight: 500; color: var(--foreground); }
+.site-base-empty { color: var(--site-faint); font-size: 14px; }
+
 /* A block an extension drew. */
 .site-block { margin: 0 0 1.3em; }
 .site-block-failed .site-block-why { color: var(--destructive, #d33); font-size: 14px; margin: 0 0 6px; }

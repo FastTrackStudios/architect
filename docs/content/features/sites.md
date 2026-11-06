@@ -54,6 +54,24 @@ is written out as HTML, the same tree a page draws in a pane:
 | F | G | C | C |
 ```
 
+A ```` ```base ```` fence is drawn the same way, as its views over the
+vault. Its YAML, or one line naming a `.base` file, is a base as
+[Bases](@/features/bases.md) reads one. The vault's own evaluator runs each
+view, and the site writes it out as a table, cards or a list, each row
+linked to its note's page. Bases draws it unless an extension claims
+`fence:base` first, and `Options::bases` turns it off. This one lists the
+first chapters of the guide:
+
+```base
+filters:
+  and:
+    - file.inFolder("guide")
+views:
+  - type: list
+    name: From the guide
+    limit: 4
+```
+
 **The layout is pure components.** Each Dioxus component in
 `architect_sites::ui` depends only on the built site. None has hooks,
 state or I/O. A pre-rendered route and a hydrated one therefore always
@@ -117,6 +135,8 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
    an extension's embed page drawing a block. **`features/sites/src/element_html.rs`**,
    `elements_to_html`, writes a page's element tree out as HTML. It escapes
    text, and drops handlers, scripts and `javascript:` URLs.
+   **`features/sites/src/bases.rs`**, `BaseBlocks`, draws a ```` ```base ````
+   fence's views with `vault::bases::view_table`.
 4. **`features/sites/src/ui.rs`**: the pure components (the header, the
    navigator-style sidebar, the page, its contents, tags, backlinks, and
    previous and next).
@@ -157,14 +177,15 @@ Done in architect (#364, first part):
   `just docs` and `just docs-serve`;
 - pages, the navigation tree, tags, backlinks, search and a page's
   contents, in architect's themes, light and dark, readable on a phone;
-- ```` ```kf ```` blocks drawn by the Board's own page, through
-  `BlockRenderer`. A ```` ```base ```` view plugs in the same way, as a
-  `BlockRenderer` that claims `fence:base` and reads the vault;
+- ```` ```kf ```` blocks drawn by the Board's own page, and
+  ```` ```base ```` blocks drawn as their views (`BaseBlocks`), both
+  through `BlockRenderer`;
 - `EngineHost::site` and `site_router`, with cache headers.
 
 Still to do for #364: building another repo's docs folder
 (`--repo github.com/<owner>/<repo> --path docs`), blocks that become
-interactive islands in the browser (#325), base views (#346), an
+interactive islands in the browser (#325), a base's board and calendar
+views (drawn as tables for now), an
 extension's own theme tokens on its blocks, the link graph, and deploying
 architect.fasttrackstudio.app from FastTrackStudios/architect-deploy. The
 Sites extension that manages all of this from the app is #374.

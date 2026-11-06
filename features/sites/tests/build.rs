@@ -53,6 +53,18 @@ fn vault() -> tempfile::TempDir {
         "+++\ntitle = \"The shell\"\nweight = 2\n[taxonomies]\ntags = [\"ui\"]\n+++\n\n![[pic.png]]\n\n## Tabs\n\nTabs live here.\n\n```shout\nhello\n```\n",
     );
     touch(root, "features/pic.png", "png");
+    touch(root, "gigs/one.md", "---\nfee: 200\nkey: G\n---\nA gig.\n");
+    touch(root, "gigs/two.md", "---\nfee: 50\nkey: C\n---\nAnother.\n");
+    touch(
+        root,
+        "gigs/Gigs.base",
+        "filters:\n  and:\n    - file.inFolder(\"gigs\")\nviews:\n  - type: cards\n    name: All gigs\n    order:\n      - file.name\n      - key\n",
+    );
+    touch(
+        root,
+        "gigs/_index.md",
+        "+++\ntitle = \"Gigs\"\n+++\n\n```base\nfilters:\n  and:\n    - file.inFolder(\"gigs\")\nviews:\n  - type: table\n    name: By fee\n    order:\n      - file.name\n      - fee\n    sort:\n      - property: fee\n        direction: DESC\n```\n\n```base\nGigs.base\n```\n",
+    );
     touch(root, "drafts/wip.md", "---\ndraft: true\n---\nNot yet.\n");
     dir
 }
@@ -159,6 +171,40 @@ fn a_vault_builds_into_a_linked_site() {
     assert!(index.contains("\"install\",\"Install\""), "{index}");
     let css = assets.iter().find(|a| a.ends_with(".css")).unwrap();
     assert!(read(&out.join("_site"), css).contains("--background:"));
+}
+
+#[test]
+fn a_base_fence_is_drawn_as_its_views_over_the_vault() {
+    let vault = vault();
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = out_dir.path().join("site");
+    let report = build(&Options::new(vault.path(), "Demo"), &blocks(), &out).expect("build");
+    assert_eq!(report.problems.len(), 1, "{:?}", report.problems);
+
+    let gigs = read(&out, "gigs/index.html");
+    // The YAML fence: a table, sorted by fee, each name its note's link.
+    assert!(gigs.contains("data-by=\"architect.bases\""), "{gigs}");
+    assert!(gigs.contains("<figcaption>By fee</figcaption>"), "{gigs}");
+    let one = gigs
+        .find("href=\"/gigs/one/\">One</a>")
+        .expect("one linked");
+    let two = gigs
+        .find("href=\"/gigs/two/\">Two</a>")
+        .expect("two linked");
+    assert!(one < two, "sorted by fee, descending");
+    assert!(gigs.contains("<td>200</td>"));
+    // The fence naming a `.base` file: its cards.
+    assert!(
+        gigs.contains("data-view=\"cards\"><figcaption>All gigs</figcaption>"),
+        "{gigs}"
+    );
+    assert!(gigs.contains("<b>key</b> G"));
+
+    // Turned off, the fence is a code block.
+    let mut opts = Options::new(vault.path(), "Demo");
+    opts.bases = false;
+    build(&opts, &blocks(), &out).unwrap();
+    assert!(read(&out, "gigs/index.html").contains("data-lang=\"base\""));
 }
 
 #[test]
