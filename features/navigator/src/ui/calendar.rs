@@ -51,19 +51,19 @@ pub(super) fn Calendar(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                 }
                 HeaderButton { head: g.year.clone(), strong: false, on_pick: move |p| open(p, OpenIn::Here) }
                 div { style: "flex:1;" }
-                button { class: "nv-tool", "aria-label": "Previous", "data-testid": "nv-cal-prev",
+                button { class: "nv-tool", "aria-label": "Previous", "data-testid": "nv-cal-prev", style: "width:22px; height:22px;",
                     onclick: move |_| nav.update(|s| s.calendar_move(-1)),
                     ChevronLeft { size: 15 }
                 }
                 button { class: "nv-cal-today", "aria-label": "Today", "data-testid": "nv-cal-today",
-                    style: "height:22px; padding:0 6px; border:none; border-radius:6px; background:transparent; color:var(--nv-muted); font-size:11px; cursor:pointer;",
+                    style: "height:22px; padding:0 4px; border:none; border-radius:6px; background:transparent; color:var(--nv-muted); font-size:11px; cursor:pointer;",
                     onclick: move |_| {
                         let out = nav.update(crate::state::NavigatorState::calendar_today);
                         nav.act(out, on_open);
                     },
                     "Today"
                 }
-                button { class: "nv-tool", "aria-label": "Next", "data-testid": "nv-cal-next",
+                button { class: "nv-tool", "aria-label": "Next", "data-testid": "nv-cal-next", style: "width:22px; height:22px;",
                     onclick: move |_| nav.update(|s| s.calendar_move(1)),
                     ChevronRight { size: 15 }
                 }
@@ -136,7 +136,7 @@ fn HeaderButton(head: HeaderPeriod, strong: bool, on_pick: EventHandler<Period>)
     let period = head.period;
     rsx! {
         button { class, "data-period": "{period.kind.id()}", disabled: !head.enabled,
-            style: "position:relative; height:24px; padding:0 5px; border-radius:6px; background:transparent; \
+            style: "position:relative; height:26px; padding:0 4px; border-radius:6px; background:transparent; \
                     color:{colour}; font-size:13px; font-weight:{weight}; cursor:pointer; white-space:nowrap;",
             onclick: move |_| on_pick.call(period),
             "{head.label}"
@@ -206,6 +206,7 @@ pub(super) const CSS: &str = "
 .nv-root .nv-cal-day.is-outside { color: var(--nv-faint); }
 .nv-root [data-highlight-today=true] .nv-cal-day.is-today { background-color: var(--nv-calendar-today); color: var(--nv-calendar-today-text); font-weight: 700; }
 .nv-root .nv-cal-day.is-active, .nv-root .nv-cal-period.is-active, .nv-root .nv-cal-weeknumber.is-active { border-color: var(--nv-open); }
+.nv-root .nv-cal-period .nv-cal-dot { bottom: 0; }
 .nv-root .nv-cal-dot { position: absolute; left: 50%; bottom: 2px; width: 4px; height: 4px; margin-left: -2px; border-radius: 2px; background: var(--nv-calendar-dot); }
 .nv-root .nv-cal-day.has-tasks .nv-cal-dot { background: transparent; border: 1px solid var(--nv-calendar-task); width: 3px; height: 3px; }
 .nv-root .nv-cal-day.has-image { color: var(--nv-calendar-image-text); font-weight: 600; }

@@ -335,12 +335,23 @@ fn the_calendar_follows_the_note_open() {
     let mut s = state(&source, journal_settings());
     s.set_active(Some("Journal/Daily/2026-11-05.md"));
     assert_eq!(s.calendar_cursor(), day("2026-11-05"));
+    // A day out of the week on show: the calendar goes there.
+    s.set_active(Some("Journal/Daily/2026-11-20.md"));
+    assert_eq!(s.calendar_cursor(), day("2026-11-20"));
+    // The month on show already: it stays.
     s.set_active(Some("Journal/Monthly/2026-11.md"));
-    // November 1 is not in the week on show: the calendar goes there.
-    assert_eq!(s.calendar_cursor(), day("2026-11-01"));
+    assert_eq!(s.calendar_cursor(), day("2026-11-20"));
     // A quarter's note does not move it.
     s.set_active(Some("Journal/Quarterly/2026-Q4.md"));
-    assert_eq!(s.calendar_cursor(), day("2026-11-01"));
+    assert_eq!(s.calendar_cursor(), day("2026-11-20"));
+    // A month's goes to its month, though the whole of November shows
+    // December 1.
+    let mut settings = journal_settings();
+    settings.calendar_weeks = 6;
+    let mut s = state(&source, settings);
+    s.set_active(Some("Journal/Monthly/2026-12.md"));
+    assert_eq!(s.calendar_cursor(), day("2026-12-01"));
+    assert_eq!(s.calendar().month.label, "December");
 }
 
 // ── Opening and making notes ────────────────────────────────────────────

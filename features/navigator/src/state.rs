@@ -667,15 +667,20 @@ impl NavigatorState {
         }
         self.active = path.map(str::to_owned);
         // The calendar goes to a day's, a week's or a month's note as it
-        // opens (`shouldAutoRevealCalendarNoteKind`).
-        if let Some(period) = path.and_then(|p| self.periodic.period_of(p))
-            && matches!(
-                period.kind,
-                PeriodKind::Day | PeriodKind::Week | PeriodKind::Month
-            )
-            && !self.calendar_shows(period.start)
-        {
-            self.calendar_cursor = Some(period.start);
+        // opens (`shouldAutoRevealCalendarNoteKind`): to its days, and to
+        // a month's own month.
+        if let Some(period) = path.and_then(|p| self.periodic.period_of(p)) {
+            let go = match period.kind {
+                PeriodKind::Day | PeriodKind::Week => !self.calendar_shows(period.start),
+                PeriodKind::Month => {
+                    Period::containing(PeriodKind::Month, self.calendar_cursor(), self.periodic.week_rules())
+                        != period
+                }
+                PeriodKind::Quarter | PeriodKind::Year => false,
+            };
+            if go {
+                self.calendar_cursor = Some(period.start);
+            }
         }
         if let Some(p) = path
             && self.settings.auto_reveal
