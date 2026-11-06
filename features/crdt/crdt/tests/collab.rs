@@ -132,7 +132,8 @@ fn serve(scope: &std::sync::Arc<Scope>) -> LocalServer {
 }
 
 async fn eventually(what: &str, mut pred: impl FnMut() -> bool) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    // Generous for a loaded CI host; a passing wait returns at once.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while !pred() {
         assert!(
             tokio::time::Instant::now() < deadline,
@@ -248,23 +249,27 @@ async fn a_pointer_reaches_the_other_side_as_a_place_in_a_view() {
     };
     let chart = |p: &Place| (p.space == "chart").then_some((0.0, 0.0));
 
+    // The pointer and the state (selection, view) are separate keys and
+    // arrive on their own: wait for both, not the pointer alone (#401).
     eventually(
-        "Bob's arrangement draws Ann's pointer on the kick track",
+        "Bob sees Ann's pointer on the kick track, her selection and her view",
         || {
             let roster = bob.roster("bob");
             let drawn = roster.pointers(clock_ms() + 1_000.0, arrangement);
-            drawn.len() == 1 && drawn[0].name == "Ann" && (drawn[0].x, drawn[0].y) == (125.0, 60.0)
+            let looking: Vec<_> = roster
+                .here()
+                .map(|(_, s)| s.looking_at.as_deref())
+                .collect();
+            drawn.len() == 1
+                && drawn[0].name == "Ann"
+                && (drawn[0].x, drawn[0].y) == (125.0, 60.0)
+                && roster.selections_in("session.arrange").count() == 1
+                && looking == [Some("session.arrange")]
         },
     )
     .await;
     let roster = bob.roster("bob");
     assert!(roster.pointers(clock_ms() + 1_000.0, chart).is_empty());
-    assert_eq!(roster.selections_in("session.arrange").count(), 1);
-    let looking: Vec<_> = roster
-        .here()
-        .map(|(_, s)| s.looking_at.as_deref())
-        .collect();
-    assert_eq!(looking, [Some("session.arrange")]);
 
     // Ann's pointer leaves the window: gone from Bob's view.
     ann.here.no_pointer();

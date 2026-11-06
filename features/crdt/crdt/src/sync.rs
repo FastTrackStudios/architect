@@ -670,6 +670,18 @@ pub struct PresencePeer {
     /// Keys this peer owns — re-announced on every (re)attach so a
     /// reconnect doesn't leave us invisible until the next change.
     local_keys: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+    /// When each owned key was last written, on the store's clock: a
+    /// `delete` waits until that millisecond has passed (#401). Locked
+    /// after `local_keys`, never alone around a store write.
+    written: Arc<std::sync::Mutex<std::collections::HashMap<String, i64>>>,
+}
+
+/// The store's clock: `EphemeralStore` stamps entries with the wall
+/// clock's milliseconds since the epoch.
+fn store_ms() -> i64 {
+    architect::platform::SystemTime::now()
+        .duration_since(architect::platform::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 impl PresencePeer {
@@ -686,6 +698,7 @@ impl PresencePeer {
         let peer = Self {
             store,
             local_keys: Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new())),
+            written: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         };
         let driver = PresenceDriver {
             doc_id,
@@ -701,14 +714,40 @@ impl PresencePeer {
     /// connected, re-announced on reconnect, expired by timeout when
     /// this peer vanishes.
     pub fn set(&self, key: &str, value: impl Into<loro::LoroValue>) {
-        architect::lock(&self.local_keys).insert(key.to_string());
+        // Held across the store write, as in `delete` and `refresh`, so a
+        // refresh never re-sets a key withdrawn while it ran (#401).
+        let mut keys = architect::lock(&self.local_keys);
+        keys.insert(key.to_string());
         self.store.set(key, value);
+        architect::lock(&self.written).insert(key.to_string(), store_ms());
+        drop(keys);
     }
 
     /// Withdraw a key explicitly (leaving a page, signing out).
+    ///
+    /// The store is last-write-wins by millisecond, and a receiver keeps
+    /// what it has when the timestamps tie: a delete stamped in the same
+    /// millisecond as the key's last write (a `refresh` on the timer, a
+    /// pointer move) would be dropped on the other side, and the key
+    /// would linger there until it timed out. So the delete waits, at
+    /// most a millisecond, until the clock has moved past that write.
     pub fn delete(&self, key: &str) {
-        architect::lock(&self.local_keys).remove(key);
+        let mut keys = architect::lock(&self.local_keys);
+        keys.remove(key);
+        let last = architect::lock(&self.written).remove(key);
+        if let Some(last) = last {
+            loop {
+                let now = store_ms();
+                // Past the write, or the clock stepped back (give up
+                // waiting rather than spin).
+                if now > last || now < last.saturating_sub(1_000) {
+                    break;
+                }
+                std::hint::spin_loop();
+            }
+        }
         self.store.delete(key);
+        drop(keys);
     }
 
     /// Everyone's current state. Expired peers are pruned by the
@@ -735,12 +774,19 @@ impl PresencePeer {
     /// otherwise vanish while it is still here. The driver does this on
     /// a timer.
     fn refresh(&self) {
-        let keys: Vec<String> = architect::lock(&self.local_keys).iter().cloned().collect();
-        for key in keys {
-            if let Some(value) = self.store.get(&key) {
-                self.store.set(&key, value);
+        // The keys stay locked while their values are read and re-set: a
+        // `delete` in between would otherwise be undone by the re-set, and
+        // the withdrawn key (a pointer that left) would linger on the other
+        // side until it timed out (#401).
+        let keys = architect::lock(&self.local_keys);
+        for key in keys.iter() {
+            let value = self.store.get(key);
+            if let Some(value) = value {
+                self.store.set(key, value);
+                architect::lock(&self.written).insert(key.clone(), store_ms());
             }
         }
+        drop(keys);
     }
 
     /// The underlying store — for change subscriptions.
