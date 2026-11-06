@@ -783,20 +783,46 @@ pub fn LabApp() -> Element {
             .flatten()
             .map(std::rc::Rc::new)
     });
-    let save = store.clone();
+    // The person's (synced) values, such as Navigator's: kept beside the
+    // device's until a synced store holds them.
+    let synced_store = use_hook(|| {
+        windowed
+            .then(|| {
+                architect_settings::DeviceValues::open_named(
+                    Mode::current().folder(),
+                    "settings-synced",
+                )
+                .ok()
+            })
+            .flatten()
+            .map(std::rc::Rc::new)
+    });
+    let (save, save_synced) = (store.clone(), synced_store.clone());
     let settings = architect_settings::use_settings_provider(
         settings::registry,
-        || architect_settings::ScopedValues {
-            device: store.as_ref().map(|s| s.load()).unwrap_or_default(),
-            ..Default::default()
+        || {
+            let mut device = store.as_ref().map(|s| s.load()).unwrap_or_default();
+            let mut synced = synced_store.as_ref().map(|s| s.load()).unwrap_or_default();
+            if settings::adopt_synced(&mut device, &mut synced) {
+                if let (Some(d), Some(p)) = (store.as_ref(), synced_store.as_ref()) {
+                    let _ = (d.save(&device), p.save(&synced));
+                }
+            }
+            architect_settings::ScopedValues {
+                device,
+                synced,
+                ..Default::default()
+            }
         },
         Some(Callback::new(
             move |change: architect_settings::SettingsChange| {
-                // The lab's sections are all this device's.
-                if change.scope == architect_settings::Scope::Device {
-                    if let Some(s) = save.as_ref() {
-                        let _ = s.save(&change.values);
-                    }
+                let to = match change.scope {
+                    architect_settings::Scope::Device => save.as_ref(),
+                    architect_settings::Scope::Synced => save_synced.as_ref(),
+                    architect_settings::Scope::Project => None,
+                };
+                if let Some(s) = to {
+                    let _ = s.save(&change.values);
                 }
             },
         )),

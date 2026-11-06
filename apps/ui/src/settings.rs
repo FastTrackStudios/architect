@@ -9,6 +9,31 @@ use architect_settings::{Choice, Control, Registry, Section, Setting, Settings, 
 use architect_shell::{ShellStyle, StatusStyle};
 use facet::Facet;
 
+/// The sections whose settings became the person's (synced) after a
+/// device kept them: Navigator's (#339).
+const NOW_SYNCED: &[&str] = &["navigator."];
+
+/// Moves the values this device kept for settings that are now synced
+/// into the person's (`synced`), unless the device keeps them on purpose
+/// (`Values::local`) or the person has one already. Whether any moved.
+pub fn adopt_synced(
+    device: &mut architect_settings::Values,
+    synced: &mut architect_settings::Values,
+) -> bool {
+    let moved: Vec<String> = device
+        .set
+        .keys()
+        .filter(|k| NOW_SYNCED.iter().any(|p| k.starts_with(p)) && !device.local.contains(*k))
+        .cloned()
+        .collect();
+    for k in &moved {
+        if let Some(v) = device.set.remove(k) {
+            synced.set.entry(k.clone()).or_insert(v);
+        }
+    }
+    !moved.is_empty()
+}
+
 /// Every section the lab itself declares.
 pub fn registry() -> Registry {
     let mut r = Registry::new();

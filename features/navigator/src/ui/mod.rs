@@ -31,6 +31,7 @@ use crate::state::{Made, NavigatorState, NewNote, OPEN_ALL_WARNING, OpenIn, Outc
 mod calendar;
 mod icon;
 mod panes;
+pub mod profiles_page;
 pub mod theme;
 mod tree_rows;
 mod virtual_pane;
@@ -237,6 +238,13 @@ impl Navigator {
     pub fn restore(&self, view: &crate::ViewState) {
         let mut state = self.state;
         state.write().restore(view);
+    }
+
+    /// Its own zoom (`zoom`): what a length on screen is over one in the
+    /// view's layout (pointer and measured sizes are on screen).
+    #[must_use]
+    pub fn zoom(&self) -> f64 {
+        f64::from(self.state.peek().settings().zoom.clamp(50, 200)) / 100.0
     }
 
     /// The source it reads.
@@ -996,6 +1004,14 @@ fn use_file_commands(nav: &Navigator) {
         .collect();
     drop(s);
     use_command(
+        Command::new("NAVIGATOR_EDIT_PROFILES", "Edit vault profiles").group(group),
+        move || {
+            if !profiles_page::open_profiles_page() {
+                nav.say("No settings page to edit the profiles on");
+            }
+        },
+    );
+    use_command(
         Command::new("NAVIGATOR_NEW_NOTE", "New note").group(group),
         move || {
             let folder = nav.state.peek().current_folder();
@@ -1206,6 +1222,8 @@ pub fn NavigatorView(
         use_commands(&nav);
     }
     let colours = architect_theme::use_themed::<NavigatorColours>();
+    // Its vault profiles' editor on the settings page.
+    profiles_page::use_profiles_page(nav);
     let mut root: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     // A phone's taller rows.
     use_effect(move || {
@@ -1220,7 +1238,7 @@ pub fn NavigatorView(
             if let Some(m) = root.peek().clone()
                 && let Ok(r) = m.get_client_rect().await
             {
-                let w = r.size.width;
+                let w = r.size.width / nav.zoom();
                 if w > 0.0 && nav.width.peek().is_none_or(|old| (old - w).abs() > 0.5) {
                     let mut width = nav.width;
                     width.set(Some(w));
@@ -1247,6 +1265,13 @@ pub fn NavigatorView(
     let slide = use_slide(single, transition_ms);
     let mut drag: Signal<Option<(f64, f64)>> = use_signal(|| None);
     let vars = colours.read().vars();
+    // Its own zoom (`zoom`, Notebook Navigator's `desktopScale`).
+    let zoom = f64::from(nav.state.read().settings().zoom.clamp(50, 200)) / 100.0;
+    let zoom_style = if (zoom - 1.0).abs() < f64::EPSILON {
+        String::new()
+    } else {
+        format!("zoom:{zoom};")
+    };
     let focus_attr = match focus {
         Pane::Navigation => "navigation",
         Pane::Files => "files",
@@ -1360,7 +1385,7 @@ pub fn NavigatorView(
                             let Some((start, from)) = *drag.peek() else { return };
                             let p = e.data().client_coordinates();
                             let at = if horizontal { p.x } else { p.y };
-                            let to = layout::clamp_size(orientation, from + at - start, room);
+                            let to = layout::clamp_size(orientation, from + (at - start) / nav.zoom(), room);
                             nav.update(|s| if horizontal { s.nav_width = to } else { s.nav_height = to });
                         },
                         onpointerup: move |_| drag.set(None),
@@ -1381,7 +1406,7 @@ pub fn NavigatorView(
             class: "nv-root",
             "data-navigator": "",
             "data-focus-pane": "{focus_attr}",
-            style: "{vars} position:absolute; inset:0; overflow:hidden; background:var(--nv-background); color:var(--nv-text); font-size:13px;",
+            style: "{vars} position:absolute; inset:0; overflow:hidden; background:var(--nv-background); color:var(--nv-text); font-size:13px; {zoom_style}",
             onmounted: move |e| root.set(Some(e.data())),
             onkeydown: on_key,
             {body}

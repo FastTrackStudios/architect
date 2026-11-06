@@ -21,8 +21,9 @@
 use architect_shell::{ShellTheme, try_use_shell};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    AudioLines, Bell, ChevronDown, ChevronLeft, ChevronRight, FolderTree, Keyboard, Minus, Monitor,
-    Palette, PanelBottom, Plus, Puzzle, RotateCcw, Search, Settings2, Shield, Timer, Type, User, X,
+    AudioLines, Bell, ChevronDown, ChevronLeft, ChevronRight, Cloud, FolderTree, Keyboard, Laptop,
+    Minus, Monitor, Palette, PanelBottom, Plus, Puzzle, RotateCcw, Search, Settings2, Shield,
+    Timer, Type, User, X,
 };
 
 use crate::derive::Settings;
@@ -282,6 +283,20 @@ impl SettingsHandle {
         }
     }
 
+    /// Keeps synced setting `key` on this device, or gives it back to
+    /// every device ([`ScopedValues::set_local`]); this device's store
+    /// keeps the choice.
+    pub fn set_local(&self, key: &str, local: bool) {
+        let mut values = self.values;
+        let changed = {
+            let registry = self.registry.peek();
+            values.write().set_local(&registry, key, local)
+        };
+        if changed == Ok(true) {
+            self.changed(Scope::Device, vec![key.to_owned()]);
+        }
+    }
+
     pub fn reset(&self, key: &str) {
         let mut values = self.values;
         let scope = {
@@ -303,7 +318,7 @@ impl SettingsHandle {
             scoped
                 .changed_in(&registry, id)
                 .into_iter()
-                .map(|s| (s.scope, s.key.clone()))
+                .map(|s| (scoped.scope_of(s), s.key.clone()))
                 .collect()
         };
         {
@@ -775,15 +790,20 @@ fn Row(setting: Setting, first: bool) -> Element {
     };
     let t = theme();
     let focus = use_setting_focus(&setting.key);
-    let (value, changed, locked) = {
+    let (value, changed, locked, local) = {
         let registry = h.registry.read();
         let values = h.values.read();
         (
             values.get(&registry, &setting.key),
             values.is_changed(&registry, &setting.key),
             values.is_locked(&setting.key),
+            values.is_local(&setting.key),
         )
     };
+    // A synced setting: kept on every device, or on this one alone
+    // (Notebook Navigator's sync toggle).
+    let syncs = setting.scope == Scope::Synced && !locked;
+    let local_key = setting.key.clone();
     let Some(value) = value else {
         return rsx! {};
     };
@@ -810,6 +830,22 @@ fn Row(setting: Setting, first: bool) -> Element {
             div { style: "position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;",
                 div { style: "display: flex; align-items: center; gap: 8px;",
                     span { style: "font-size: 13px; font-weight: 550; color: {t.ink};", "{setting.title}" }
+                    if syncs {
+                        button {
+                            style: "width: 20px; height: 20px; border: none; border-radius: 5px; background: transparent; \
+                                    display: flex; align-items: center; justify-content: center; cursor: pointer;",
+                            title: if local { "On this device only: sync it to every device" } else { "On every device: keep it on this one" },
+                            "aria-label": if local { "Sync {setting.title} to every device" } else { "Keep {setting.title} on this device" },
+                            "aria-pressed": if local { "true" } else { "false" },
+                            "data-sync": if local { "device" } else { "synced" },
+                            onclick: move |_| h.set_local(&local_key, !local),
+                            if local {
+                                Laptop { size: 12, color: t.accent.to_string() }
+                            } else {
+                                Cloud { size: 12, color: t.ink_3.to_string() }
+                            }
+                        }
+                    }
                     if changed {
                         span { style: "width: 6px; height: 6px; border-radius: 3px; background: {t.accent};", title: "Changed" }
                         button {

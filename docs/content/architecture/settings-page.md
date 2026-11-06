@@ -105,6 +105,13 @@ setting it is refused (`ValueError::Locked`). Which org's settings
 apply is the app's to say (`SettingsHandle::set_org` when the window's
 org changes).
 
+A synced setting can be kept on one device instead
+(`ScopedValues::set_local`, the cloud and laptop toggle on its row,
+Notebook Navigator's per-setting sync mode): the device's values list it
+in `Values::local`, and it is read and written there, starting from the
+person's value; given back, the person's value holds again.
+`ScopedValues::scope_of` says where a setting is kept now.
+
 Every change reaches the provider's `on_change` as a `SettingsChange`
 (the scope, its values, the keys that changed), so the app sends it to
 that scope's store. The `Synced` store is a CRDT document: `DocValues`

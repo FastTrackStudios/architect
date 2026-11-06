@@ -504,3 +504,28 @@ fn folders_tags_and_notes_draw_their_icons_and_colours() {
         0
     );
 }
+
+#[test]
+fn the_navigator_has_its_own_zoom() {
+    let source = MemorySource::new("Lab")
+        .with_file(NoteFile::new("Inbox/A.md", NOW, NOW))
+        .with_file(NoteFile::new("Archive/B.md", NOW, NOW));
+    let mut doc = mount(Arc::new(source.clone()), 900, false);
+    let (_, _, _, h1) = rect(&doc, "[data-folder=\"Inbox\"]");
+    nav().update(|s| {
+        let mut st = s.settings().clone();
+        st.zoom = 150;
+        s.set_settings(st);
+    });
+    settle(&mut doc);
+    let (_, _, _, h2) = rect(&doc, "[data-folder=\"Inbox\"]");
+    assert!((h2 / h1 - 1.5).abs() < 0.05, "{h1} to {h2}");
+    // A drag still finds the row under the pointer.
+    click(&mut doc, "[data-folder=\"Inbox\"]");
+    drag(
+        &mut doc,
+        "[data-file=\"Inbox/A.md\"]",
+        "[data-folder=\"Archive\"]",
+    );
+    assert!(source.file("Archive/A.md").is_some());
+}

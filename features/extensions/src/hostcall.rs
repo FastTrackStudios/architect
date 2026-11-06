@@ -246,6 +246,14 @@ pub enum HostRequest {
     },
     /// The events it can hear, and the hooks it made.
     Events,
+    /// Raises its own event `<its id>.<name>` with `detail`: what other
+    /// extensions hear as `app:<its id>.<name>` when they may
+    /// (`capabilities.events`). How many hooks it started.
+    Raise {
+        name: String,
+        #[serde(default)]
+        detail: Value,
+    },
     /// An HTTP request, to a host it may reach.
     Fetch(Fetch),
     /// The next part, at most `max` bytes, of the body of a response
@@ -654,6 +662,7 @@ impl HostRequest {
             Self::Subscribe(_) => "subscribe",
             Self::Unsubscribe { .. } => "unsubscribe",
             Self::Events => "events",
+            Self::Raise { .. } => "raise",
             Self::Fetch(_) => "fetch",
             Self::ReadBody { .. } => "read_body",
             Self::CloseBody { .. } => "close_body",
@@ -899,7 +908,10 @@ pub fn check(
                 _ => Ok(()),
             },
         ),
-        HostRequest::Unsubscribe { .. } | HostRequest::Events => ("events", Ok(())),
+        // Its own events, under its id: no grant to raise them.
+        HostRequest::Unsubscribe { .. } | HostRequest::Events | HostRequest::Raise { .. } => {
+            ("events", Ok(()))
+        }
         HostRequest::Fetch(fetch) => ("hosts", fetch_check(manifest, may, fetch)),
         // Its own streams: the host that keeps them checks whose they are.
         HostRequest::ReadBody { .. } | HostRequest::CloseBody { .. } => ("hosts", Ok(())),

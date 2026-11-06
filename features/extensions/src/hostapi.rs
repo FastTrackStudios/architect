@@ -901,6 +901,10 @@ impl ExtensionApi {
                 .map_err(|message| HostError::Failed { message }),
             HostRequest::Unsubscribe { key } => Ok(Value::Bool(host.unsubscribe(&self.id, &key))),
             HostRequest::Events => Ok(host.events_for(&self.id)),
+            HostRequest::Raise { name, detail } => host
+                .raise_own(&self.id, &name, &detail)
+                .map(Value::from)
+                .map_err(|message| HostError::Failed { message }),
             #[cfg(feature = "net")]
             HostRequest::Fetch(fetch) => self.fetch(&host, manifest, &may, fetch).await,
             #[cfg(feature = "net")]

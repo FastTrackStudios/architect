@@ -165,6 +165,17 @@ pub const ACTIONS: &[&str] = &[
     "NAVIGATOR_ICON",
     "NAVIGATOR_KEYS",
     "NAVIGATOR_KEY",
+    "NAVIGATOR_METADATA",
+];
+
+/// The events it raises (`HostRequest::Raise`), heard by an extension that
+/// may (`capabilities.events = ["navigator.*"]`) as `app:navigator.<name>`
+/// (Notebook Navigator's API events).
+pub const EVENTS: &[&str] = &[
+    "nav-item-changed",
+    "selection-changed",
+    "pinned-files-changed",
+    "metadata-changed",
 ];
 
 impl Extension for NavigatorExtension {
@@ -233,6 +244,18 @@ fn Standalone() -> Element {
 fn Drive(mount: NavigatorMount) -> Element {
     let nav = mount.navigator;
     let _mounted = use_hook(|| std::rc::Rc::new(bridge::Mounted::new()));
+    // The API's events: raised as what they say changes.
+    let last = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(None::<Raised>)));
+    use_effect(move || {
+        let now = Raised::of(&nav.state.read());
+        let mut last = last.borrow_mut();
+        if let Some(then) = last.as_ref()
+            && *then != now
+        {
+            raise_changes(then, &now);
+        }
+        *last = Some(now);
+    });
     use_future(move || async move {
         loop {
             for ask in bridge::take() {
@@ -764,6 +787,12 @@ fn run(
             Ok(profile_state(&nav.state.peek()))
         }
         "NAVIGATOR_PROFILE" => {
+            // The editor on the settings page.
+            if flag(args, "edit") == Some(true)
+                && !architect_navigator::ui::profiles_page::open_profiles_page()
+            {
+                return Err("no settings page to edit the profiles on".to_owned());
+            }
             if let Some(which) = text(args, "select") {
                 nav.update(|s| s.select_profile(which))?;
             } else if let Some(name) = text(args, "add") {
@@ -1099,6 +1128,22 @@ fn files(
             }
             ok(nav)
         }
+        "NAVIGATOR_METADATA" => {
+            let s = nav.state.peek();
+            if flag(args, "pinned") == Some(true) {
+                return Ok(pinned_state(&s));
+            }
+            let target = paint_target(args)?;
+            let mut v = looks_state(&s, &target);
+            if let (Some(p), Some(o)) = (target.strip_prefix("file:"), v.as_object_mut()) {
+                let at = s.pinned(p);
+                o.insert(
+                    "pinned".to_owned(),
+                    json!({ "folder": at.folder, "tag": at.tag }),
+                );
+            }
+            Ok(v)
+        }
         other => Err(format!("Navigator has no action {other}")),
     }
 }
@@ -1139,6 +1184,72 @@ fn looks_state(s: &NavigatorState, target: &str) -> Value {
         "colour": s.colour(target),
         "background": s.background(target),
     })
+}
+
+/// The pinned notes, as `NAVIGATOR_METADATA` and the
+/// `pinned-files-changed` event give them.
+fn pinned_state(s: &NavigatorState) -> Value {
+    json!({
+        "pinned": s.pins().iter().map(|(path, at)| json!({
+            "path": path, "folder": at.folder, "tag": at.tag,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// What the events say, and the last of it raised.
+#[derive(Clone, PartialEq, Default)]
+struct Raised {
+    target: Value,
+    selection: Value,
+    pinned: Value,
+    painted: Value,
+}
+
+impl Raised {
+    fn of(s: &NavigatorState) -> Self {
+        let (icons, colours, backgrounds) = s.painted();
+        Self {
+            target: state_target(s),
+            selection: json!({
+                "selected": s.selection().files(),
+                "cursor": s.selection().cursor(),
+                "active": s.active(),
+            }),
+            pinned: pinned_state(s),
+            painted: json!({ "icons": icons, "colours": colours, "backgrounds": backgrounds }),
+        }
+    }
+}
+
+/// Raises each event whose part of `now` differs from `then`.
+fn raise_changes(then: &Raised, now: &Raised) {
+    let Some(h) = handle() else { return };
+    for (name, a, b) in [
+        ("nav-item-changed", &then.target, &now.target),
+        ("selection-changed", &then.selection, &now.selection),
+        ("pinned-files-changed", &then.pinned, &now.pinned),
+        ("metadata-changed", &then.painted, &now.painted),
+    ] {
+        if a != b {
+            let ask = h.host(architect_extensions::hostcall::HostRequest::Raise {
+                name: name.to_owned(),
+                detail: b.clone(),
+            });
+            spawn(async move {
+                let _ = ask.await;
+            });
+        }
+    }
+}
+
+/// The navigation item as the API gives it.
+fn state_target(s: &NavigatorState) -> Value {
+    match s.target() {
+        NavTarget::Folder(f) => json!({ "folder": f }),
+        NavTarget::Tag(t) => json!({ "tag": t }),
+        NavTarget::Property { key, value } => json!({ "property": key, "value": value }),
+        _ => Value::Null,
+    }
 }
 
 /// The keyboard map as `NAVIGATOR_KEYS` answers it: each action's id and

@@ -166,6 +166,28 @@ impl Host {
         Ok(self.emit_value(&format!("{}{name}", crate::events::APP_PREFIX), detail))
     }
 
+    /// Raises extension `id`'s own event `<id>.<name>` with `detail`
+    /// (`HostRequest::Raise`), defined the first time it is raised. How
+    /// many hooks started.
+    ///
+    /// # Errors
+    ///
+    /// `name` is not `a-z 0-9 . _ -`.
+    pub fn raise_own(&self, id: &str, name: &str, detail: &Value) -> Result<usize, String> {
+        let full = format!("{id}.{name}");
+        if !crate::events::valid_name(&full) {
+            return Err(format!("{name:?} is not an event's name (a-z 0-9 . _ -)"));
+        }
+        if !lock(&self.event_state().defined).contains_key(&full) {
+            self.define_event(AppEvent {
+                name: full.clone(),
+                title: format!("{id}: {name}"),
+                ..AppEvent::default()
+            })?;
+        }
+        self.raise_app(&full, detail)
+    }
+
     // ── Document and app events ─────────────────────────────────────
 
     /// Raises document event `event` (`doc.saved`, …): the hooks on it run

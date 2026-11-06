@@ -520,10 +520,10 @@ params = '{"type":"object","properties":{"open":{"type":"integer"},"clear":{"typ
 [[actions]]
 id = "NAVIGATOR_PROFILE"
 name = "Navigator: vault profiles"
-description = "The vault profiles: `select` one (its id, name or number), `add` one named so (as the one in use unless `copy` is false), `remove` or `rename` one (to `name`); `set` the one in use's hidden_folders, descendant_excluded, hidden_tags, hidden_file_tags, hidden_file_names, hidden_file_properties (lists), banner, file_visibility (documents, supported, all). Answers the profile."
+description = "The vault profiles: `select` one (its id, name or number), `add` one named so (as the one in use unless `copy` is false), `remove` or `rename` one (to `name`); `set` the one in use's hidden_folders, descendant_excluded, hidden_tags, hidden_file_tags, hidden_file_names, hidden_file_properties (lists), banner, file_visibility (documents, supported, all). Answers the profile. With `edit`, opens the profiles' editor on the settings page."
 group = "Navigator"
 effect = "mutating"
-params = '{"type":"object","properties":{"select":{"type":"string"},"add":{"type":"string"},"copy":{"type":"boolean"},"remove":{"type":"string"},"rename":{"type":"string"},"name":{"type":"string"},"set":{"type":"object"}}}'
+params = '{"type":"object","properties":{"select":{"type":"string"},"edit":{"type":"boolean"},"add":{"type":"string"},"copy":{"type":"boolean"},"remove":{"type":"string"},"rename":{"type":"string"},"name":{"type":"string"},"set":{"type":"object"}}}'
 
 [[actions]]
 id = "NAVIGATOR_SELECT_PROFILE_1"
@@ -674,6 +674,14 @@ group = "Navigator"
 effect = "mutating"
 params = '{"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}'
 
+[[actions]]
+id = "NAVIGATOR_METADATA"
+name = "Navigator: metadata"
+description = "A folder's, tag's, property's or note's icon, colour and background (`target`, or `path`, `folder`, `tag`, `property` and `value`), and a note's pins; with `pinned`, every pinned note. Navigator raises its events as they change, heard as app:navigator.nav-item-changed, selection-changed, pinned-files-changed and metadata-changed by an extension whose capabilities.events has navigator.*."
+group = "Navigator"
+effect = "read_only"
+params = '{"type":"object","properties":{"target":{"type":"string"},"path":{"type":"string"},"folder":{"type":"string"},"tag":{"type":"string"},"property":{"type":"string"},"value":{"type":"string"},"pinned":{"type":"boolean"}}}'
+
 # A note's context menu (the app's file menu): pin, and folder notes.
 [[context]]
 target = "file:md"
@@ -759,6 +767,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.orientation"
@@ -769,6 +778,7 @@ default = "Horizontal"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Horizontal"
@@ -789,6 +799,7 @@ default = "SinglePane"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Keep"
@@ -814,6 +825,7 @@ default = "Files"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Navigation"
@@ -838,6 +850,7 @@ unit = " ms"
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_root"
@@ -849,6 +862,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_note_count"
@@ -860,6 +874,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.separate_note_counts"
@@ -871,6 +886,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.auto_reveal"
@@ -882,6 +898,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.reveal_shortest_path"
@@ -893,6 +910,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.smart_collapse"
@@ -904,6 +922,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.item_height"
@@ -918,6 +937,7 @@ unit = " pt"
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.indent"
@@ -932,6 +952,7 @@ unit = " pt"
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.sort"
@@ -942,6 +963,7 @@ default = "ModifiedDesc"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "ModifiedDesc"
@@ -997,6 +1019,7 @@ default = "Date"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "None"
@@ -1028,6 +1051,7 @@ unit = ""
 placeholder = "status"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_group_counts"
@@ -1039,6 +1063,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_folder_group_paths"
@@ -1050,6 +1075,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.filter_pinned_by_folder"
@@ -1061,6 +1087,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.include_descendants"
@@ -1072,6 +1099,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.mode"
@@ -1082,6 +1110,7 @@ default = "Standard"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Standard"
@@ -1106,6 +1135,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_preview"
@@ -1117,6 +1147,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.preview_rows"
@@ -1131,6 +1162,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_date"
@@ -1142,6 +1174,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_parent_folder"
@@ -1153,6 +1186,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.compact_height"
@@ -1167,6 +1201,7 @@ unit = " pt"
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_feature_image"
@@ -1178,6 +1213,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.feature_image_properties"
@@ -1189,6 +1225,7 @@ unit = ""
 placeholder = "cover, image"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.feature_image_size"
@@ -1203,6 +1240,7 @@ unit = " pt"
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.force_square_image"
@@ -1214,6 +1252,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.hide_drawing_previews"
@@ -1225,6 +1264,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_tags"
@@ -1236,6 +1276,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_tag_ancestors"
@@ -1247,6 +1288,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.color_tags"
@@ -1258,6 +1300,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_tags_compact"
@@ -1269,6 +1312,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_properties"
@@ -1280,6 +1324,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.list_properties"
@@ -1291,6 +1336,7 @@ unit = ""
 placeholder = "status, priority"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_task_progress"
@@ -1302,6 +1348,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.hide_task_progress_complete"
@@ -1313,6 +1360,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.text_count"
@@ -1323,6 +1371,7 @@ default = "None"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "None"
@@ -1343,6 +1392,7 @@ default = "Title"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Title"
@@ -1364,6 +1414,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.frontmatter_name_field"
@@ -1375,6 +1426,7 @@ unit = ""
 placeholder = "title, name"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.frontmatter_created_field"
@@ -1386,6 +1438,7 @@ unit = ""
 placeholder = "created"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.frontmatter_modified_field"
@@ -1397,6 +1450,7 @@ unit = ""
 placeholder = "modified"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.manual_sort_property"
@@ -1408,6 +1462,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.folder_notes"
@@ -1419,6 +1474,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.folder_note_name"
@@ -1430,6 +1486,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.hide_folder_note"
@@ -1441,6 +1498,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.pin_created_folder_note"
@@ -1452,6 +1510,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.folder_note_open"
@@ -1462,6 +1521,7 @@ default = "CurrentTab"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "CurrentTab"
@@ -1483,6 +1543,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_confirm_create"
@@ -1494,6 +1555,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_weeks"
@@ -1508,6 +1570,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_placement"
@@ -1518,6 +1581,7 @@ default = "Navigation"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Navigation"
@@ -1538,6 +1602,7 @@ default = "Sunday"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Sunday"
@@ -1563,6 +1628,7 @@ default = "SatSun"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "None"
@@ -1593,6 +1659,7 @@ default = "Full"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Full"
@@ -1614,6 +1681,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_outside_days"
@@ -1625,6 +1693,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_feature_images"
@@ -1636,6 +1705,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_tasks"
@@ -1647,6 +1717,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_week_numbers"
@@ -1658,6 +1729,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.calendar_quarter"
@@ -1669,6 +1741,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.periodic_folder"
@@ -1680,6 +1753,7 @@ unit = ""
 placeholder = "Journal"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.daily_pattern"
@@ -1691,6 +1765,7 @@ unit = ""
 placeholder = "YYYY/YYYYMMDD"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.weekly_pattern"
@@ -1702,6 +1777,7 @@ unit = ""
 placeholder = "gggg/[W]ww"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.monthly_pattern"
@@ -1713,6 +1789,7 @@ unit = ""
 placeholder = "YYYY/YYYYMM"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.quarterly_pattern"
@@ -1724,6 +1801,7 @@ unit = ""
 placeholder = "YYYY/[Q]Q"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.yearly_pattern"
@@ -1735,6 +1813,7 @@ unit = ""
 placeholder = "YYYY"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.tag_tree"
@@ -1746,6 +1825,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.all_tags_row"
@@ -1757,6 +1837,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_untagged"
@@ -1768,6 +1849,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.scope_tags"
@@ -1779,6 +1861,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.tag_sort"
@@ -1789,6 +1872,7 @@ default = "AlphaAsc"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "AlphaAsc"
@@ -1820,6 +1904,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.property_keys"
@@ -1831,6 +1916,7 @@ unit = ""
 placeholder = "status, type"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.scope_properties"
@@ -1842,6 +1928,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.property_sort"
@@ -1852,6 +1939,7 @@ default = "AlphaAsc"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "AlphaAsc"
@@ -1882,6 +1970,7 @@ default = "Filter"
 unit = ""
 placeholder = ""
 aliases = []
+scope = "synced"
 
 [[sections.settings.choices]]
 value = "Filter"
@@ -1903,6 +1992,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_recent_notes"
@@ -1914,6 +2004,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.recent_notes_count"
@@ -1928,6 +2019,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.confirm_delete"
@@ -1939,6 +2031,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.spring_loaded_folders"
@@ -1950,6 +2043,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.spring_loaded_delay_ms"
@@ -1964,6 +2058,7 @@ unit = " ms"
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.spring_loaded_next_delay_ms"
@@ -1978,6 +2073,7 @@ unit = " ms"
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.date_format"
@@ -1989,6 +2085,7 @@ unit = ""
 placeholder = "MMM D, YYYY"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.time_format"
@@ -2000,6 +2097,7 @@ unit = ""
 placeholder = "h:mm a"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.template_folder"
@@ -2011,6 +2109,7 @@ unit = ""
 placeholder = "Templates"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.folder_note_template"
@@ -2022,6 +2121,7 @@ unit = ""
 placeholder = "Templates/Folder.md"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.daily_template"
@@ -2033,6 +2133,7 @@ unit = ""
 placeholder = "Templates/Daily.md"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.weekly_template"
@@ -2044,6 +2145,7 @@ unit = ""
 placeholder = "Templates/Weekly.md"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.monthly_template"
@@ -2055,6 +2157,7 @@ unit = ""
 placeholder = "Templates/Monthly.md"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.quarterly_template"
@@ -2066,6 +2169,7 @@ unit = ""
 placeholder = "Templates/Quarterly.md"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.yearly_template"
@@ -2077,6 +2181,7 @@ unit = ""
 placeholder = "Templates/Yearly.md"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_folder_icons"
@@ -2088,6 +2193,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.inherit_folder_colors"
@@ -2099,6 +2205,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_tag_icons"
@@ -2110,6 +2217,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.inherit_tag_colors"
@@ -2121,6 +2229,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_property_icons"
@@ -2132,6 +2241,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.inherit_property_colors"
@@ -2143,6 +2253,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.color_icon_only"
@@ -2154,6 +2265,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.show_file_icons"
@@ -2165,6 +2277,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.file_name_icons"
@@ -2176,6 +2289,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.file_name_icon_map"
@@ -2187,6 +2301,7 @@ unit = ""
 placeholder = "meeting=users, todo=list-todo"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.file_type_icons"
@@ -2198,6 +2313,7 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.file_type_icon_map"
@@ -2209,6 +2325,7 @@ unit = ""
 placeholder = "pdf=book, csv=sheet"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.frontmatter_icon_field"
@@ -2220,6 +2337,7 @@ unit = ""
 placeholder = "icon"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.frontmatter_color_field"
@@ -2231,6 +2349,7 @@ unit = ""
 placeholder = "color"
 choices = []
 aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.frontmatter_background_field"
@@ -2242,6 +2361,22 @@ unit = ""
 placeholder = "background"
 choices = []
 aliases = []
+scope = "synced"
+
+[[sections.settings]]
+key = "navigator.zoom"
+title = "Zoom"
+description = "The navigator's own size, apart from the app's (`desktopScale`)."
+control = "slider"
+default = 100.0
+min = 50.0
+max = 200.0
+step = 5.0
+unit = "%"
+placeholder = ""
+choices = []
+aliases = []
+scope = "synced"
 
 [[sections.settings]]
 key = "navigator.vim_keys"
@@ -2253,3 +2388,4 @@ unit = ""
 placeholder = ""
 choices = []
 aliases = []
+scope = "synced"

@@ -2251,6 +2251,15 @@ not run, and says so in its log. Raising an event that was not defined
 is an error. The consent prompt says it in words ("Hear the app's
 transport.* events").
 
+**Events an extension raises.** An extension raises its own events with
+`HostRequest::Raise { name, detail }`: the host defines `<its id>.<name>`
+the first time (`Host::raise_own`) and raises it, so another extension
+hears it as `app:<its id>.<name>` under the same `capabilities.events`
+grant. Navigator raises `navigator.nav-item-changed`,
+`navigator.selection-changed`, `navigator.pinned-files-changed` and
+`navigator.metadata-changed` (`features/navigator/extension/src/lib.rs`
+`EVENTS`). Raising needs no grant: an extension's events are its own.
+
 **Hooks made at run time.** The host service's `subscribe {on | every |
 at, action | script, function?}` adds a hook, checked as a manifest's
 are, and answers its key; `unsubscribe {key}` takes it off; `events`

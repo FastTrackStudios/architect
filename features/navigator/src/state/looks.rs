@@ -49,6 +49,25 @@ impl NavigatorState {
         }
     }
 
+    /// The icons, colours and backgrounds a person set, by target (the
+    /// API's metadata; a note's in its frontmatter are not here).
+    #[must_use]
+    pub const fn painted(
+        &self,
+    ) -> (
+        &std::collections::BTreeMap<String, String>,
+        &std::collections::BTreeMap<String, String>,
+        &std::collections::BTreeMap<String, String>,
+    ) {
+        (&self.icons, &self.colours, &self.backgrounds)
+    }
+
+    /// The pinned notes, and where each is pinned.
+    #[must_use]
+    pub const fn pins(&self) -> &std::collections::BTreeMap<String, crate::list::PinIn> {
+        &self.pins
+    }
+
     /// A note's colour from its frontmatter (`frontmatterColorField`).
     pub(super) fn frontmatter_colour(&self, key: &str) -> Option<&str> {
         self.frontmatter_of(key, &self.settings.frontmatter_color_field)
