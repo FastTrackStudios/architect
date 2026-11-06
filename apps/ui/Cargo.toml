@@ -91,6 +91,9 @@ dioxus-native = { workspace = true }
 # at login (src/presence.rs): the model everywhere, the platforms' side on
 # a desk.
 architect-presence = { workspace = true }
+# Capture (#352, src/capture.rs): the composer, the inbox deck, the
+# capture window; on a desk its system-wide shortcut too.
+architect-capture = { workspace = true, features = ["ui"] }
 lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true }
 # A vault note hears the vault's changes on its own task (src/vault.rs).
@@ -109,6 +112,7 @@ blitz-traits = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 architect-presence = { workspace = true, features = ["native"] }
+architect-capture = { workspace = true, features = ["native"] }
 # The first run's folder picker (`src/first_run.rs`).
 rfd = { workspace = true }
 

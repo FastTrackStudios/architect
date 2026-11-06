@@ -1769,6 +1769,46 @@ with the extension it is `from`. An in-process extension adds types with
 extension adds `software` and `client` and creates a project of any
 loaded type ([Projects](@/extensions/projects.md)).
 
+## Capture targets
+
+Architect owns capture (#352, [Capture](@/features/capture.md)): the
+composer, the quick-add parser, the inbox and processing it. An extension
+adds what a capture can **become**:
+
+```toml
+[[capture_targets]]
+id = "task"                        # not `note` or `inbox`: the app's own
+name = "Task"
+icon = "check"
+description = "A task in the vault."
+action = "TASKS_CAPTURE"           # its own action: makes one from a capture
+chips = ["projects", "due", "priority", "tags", "contexts", "recurrence"]
+tokens = [{ prefix = "key:", key = "key" }]   # quick-add words it adds
+```
+
+`action` is the extension's half of the contract. It is run with
+`{title, body, properties, source, inbox}` (`architect_capture::Capture`;
+`properties` hold `TaskNotes`' keys as the parser writes them, with hand-set
+chips laid over them) and answers at least `{path}`, the note it wrote.
+Because `action` is the target's own, it works the same linked in, as a
+process or as a component.
+
+A target is a contribution like the rest (`features/extensions/src/contrib.rs`
+`CaptureTargetDecl`, `CaptureTokenDecl`). At load it is checked for:
+
+- an id of lowercase letters, digits, `-` and `_`, and none of
+  `BUILTIN_CAPTURE_TARGETS`;
+- an action of its own, or one its capabilities reach;
+- whole tokens.
+
+It is withdrawn when the extension unloads, and a target two extensions add
+is the first loaded's. The registry is `Contributions::capture_targets`, and
+the app reads it with `EXT_CAPTURE_TARGETS`
+(`features/extensions/src/contrib_actions.rs`), each target answered with
+the extension it is `from`. Capture offers the targets after its own note
+(`CAPTURE_TARGETS`), puts their tokens into the parser, and runs a target's
+action for `CAPTURE_ADD {target}` and `INBOX_PROCESS`.
+
 ## One trait, three ways to run it
 
 `features/extensions/src/linked.rs` `Extension` is a crate's extension

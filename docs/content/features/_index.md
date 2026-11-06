@@ -54,6 +54,7 @@ When a page and the code disagree, the code is right.
 - [Menus](@/features/menus.md): `MenuBar` from the commands, native and in the window.
 - [Workspace and shell](@/features/workspace-and-shell.md): tab groups, docks, pop-out windows, screensets, the app frame.
 - [Atom and forms](@/features/atom-and-forms.md): the optimistic store, the offline call queue, validated fields.
+- [Capture](@/features/capture.md): one quick-add parser, the composer, a capture window on a system-wide shortcut, the vault inbox and processing it, `[[capture_targets]]`, `CAPTURE_*` and `INBOX_*`.
 
 ## Extending
 

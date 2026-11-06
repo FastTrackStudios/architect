@@ -123,6 +123,11 @@ package = "architect-orgs"
 layer = "L0"
 
 [[row]]
+package = "architect-capture"
+layer = "L0"
+note = "Capture's model (#352): the quick-add parser, an inbox note's shape, capture targets"
+
+[[row]]
 package = "architect-accounts"
 layer = "L0"
 note = "accounts and the active one, the secret store's trait, the account store: wasm-clean"
@@ -309,6 +314,12 @@ features = ["ui"]
 layer = "L4"
 
 [[row]]
+package = "architect-capture"
+features = ["ui"]
+layer = "L4"
+note = "The composer, the inbox deck, the capture window"
+
+[[row]]
 package = "architect-accounts"
 features = ["ui", "keychain"]
 layer = "L4"
@@ -485,6 +496,12 @@ note = "facade over vault-proto, vault-live, vault-obsidian"
 package = "vault"
 features = ["actions"]
 layer = "L1"
+
+[[row]]
+package = "architect-capture"
+features = ["actions"]
+layer = "L1"
+note = "CAPTURE_* and INBOX_* over the vault's VAULT_*"
 
 [[row]]
 package = "links"

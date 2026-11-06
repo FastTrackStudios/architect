@@ -14,6 +14,7 @@
 
 mod accounts;
 mod arrange;
+mod capture;
 mod confirm;
 mod embedded;
 mod extensions;
@@ -763,6 +764,9 @@ pub fn LabApp() -> Element {
             notes::register(&list);
         }
     });
+    // Capture (#352): the composer, the inbox over the vault, the capture
+    // window on a system-wide key, CAPTURE_* and INBOX_* on the list.
+    let capture_ui = capture::use_app_capture(&list, files, windowed);
     // An agent's UI (A2UI): its surfaces on a document of their own, the
     // `A2UI_*` actions on the list, the Vault's "Agent UI" view drawing
     // them. Every write a surface's button makes asks first (the sheet).
@@ -1020,13 +1024,17 @@ pub fn LabApp() -> Element {
             let c = architect_commands::Command::new("LAB_CAPTURE", "Capture")
                 .group("Inbox")
                 .shortcut("⇧⌘N");
-            if Mode::current().is_sandbox() {
+            if Mode::current().is_sandbox() || capture_ui.is_some() {
                 c
             } else {
-                c.disabled("capture comes with the inbox (#352)")
+                c.disabled("capture needs a vault")
             }
         },
-        move || lab.capture("inbox"),
+        // The Architect app's composer; the sandbox's capture page.
+        move || match capture_ui {
+            Some(c) => c.compose(""),
+            None => lab.capture("inbox"),
+        },
     );
     for (id, label, by) in [
         ("LAB_NEXT", "Select the next item", 1),
@@ -1184,14 +1192,21 @@ pub fn LabApp() -> Element {
     // The menu bar: a view of the commands, labels and keys and all.
     let menus = architect_commands::MenuBar::standard(Mode::current().name())
         .menu("File", |m| {
-            let m = m
-                .commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
-                .separator()
-                .commands([
-                    "WORKSPACE_CLOSE_TAB",
-                    "WORKSPACE_REOPEN_TAB",
-                    "WORKSPACE_CLOSE_OTHER_TABS",
-                ]);
+            let m = m.command("LAB_CAPTURE");
+            // The inbox deck and the capture window, where capture is.
+            let m = if capture_ui.is_some() {
+                m.commands([
+                    architect_capture::actions::ids::INBOX_OPEN,
+                    capture::WINDOW_COMMAND,
+                ])
+            } else {
+                m
+            };
+            let m = m.command("LAB_OPEN_ANYTHING").separator().commands([
+                "WORKSPACE_CLOSE_TAB",
+                "WORKSPACE_REOPEN_TAB",
+                "WORKSPACE_CLOSE_OTHER_TABS",
+            ]);
             // The account's, where the app has accounts.
             if accounts.is_some() {
                 m.separator().commands([
@@ -1338,8 +1353,9 @@ pub fn LabApp() -> Element {
     } else {
         None
     };
-    let capture = shell::Action::new("Capture", icon!(Feather), move |()| {
-        lab.capture("inbox");
+    let capture = shell::Action::new("Capture", icon!(Feather), move |()| match capture_ui {
+        Some(c) => c.compose(""),
+        None => lab.capture("inbox"),
     });
     // The sidebar's foot, above the switcher and the account (bottom to
     // top: Account, Workspace, Settings, Theme).
@@ -1431,7 +1447,7 @@ pub fn LabApp() -> Element {
                 ListKeys {}
                 // The Dock icon, its badge and menu, the menu-bar item,
                 // background mode and opening at login.
-                presence::LabPresence { presence: presence::declare(lab, inbox_count), inbox: inbox_count }
+                presence::LabPresence { presence: presence::declare(lab, inbox_count, capture_ui.is_some()), inbox: inbox_count }
             }
             // A column: the in-window menu bar (where there is one) takes
             // its height off the top, the shell the rest. Under
@@ -1461,7 +1477,7 @@ pub fn LabApp() -> Element {
                                 lab.jump(Route::Tab(id));
                             }
                         },
-                        separate: Mode::current().is_sandbox().then_some(capture),
+                        separate: (Mode::current().is_sandbox() || capture_ui.is_some()).then_some(capture),
                         brand: rsx! { Brand {} },
                         account,
                         workspaces,
@@ -1506,6 +1522,9 @@ pub fn LabApp() -> Element {
             architect_accounts::ui::AccountSheet {}
             architect_settings::SettingsPage {}
             architect_extensions::interface::ExtensionOverlays { ui: ext_ui }
+            if let Some(capture) = capture_ui {
+                architect_capture::ui::CaptureLayer { capture }
+            }
             architect_guide::tour::TourLayer {}
             screen::DeviceChrome {}
         }

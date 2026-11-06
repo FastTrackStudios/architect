@@ -176,6 +176,37 @@ fn exercise(dir: &Path, ext: &Extensions, list: &ActionList, app: &ActionList, o
     assert_eq!(board["written"], true, "{board}");
     assert!(dir.join("Tasks/Board.base").is_file());
     assert_eq!(run(list, "TASKS_BOARD", json!({}))["written"], false);
+
+    // A target of architect's capture (#352): a capture from the inbox,
+    // processed into a task, leaves the inbox and is a task on disk.
+    let targets = run(app, "CAPTURE_TARGETS", json!({}));
+    assert_eq!(targets[1]["id"], "task", "{targets}");
+    assert_eq!(targets[1]["from"], ID);
+    let captured = run(
+        app,
+        "CAPTURE_ADD",
+        json!({ "text": "Book the van fri #tour\nThe big one", "source": "window" }),
+    );
+    let inbox = captured["path"].as_str().unwrap().to_owned();
+    assert_eq!(inbox, "Inbox/Book the van.md");
+    let made = run(
+        app,
+        "INBOX_PROCESS",
+        json!({ "path": inbox, "target": "task", "properties": { "priority": "high" } }),
+    );
+    assert_eq!(made["path"], "Tasks/Book the van.md", "{made}");
+    let text = std::fs::read_to_string(dir.join("Tasks/Book the van.md")).unwrap();
+    for line in [
+        "type: task",
+        "status: open",
+        "priority: high",
+        "- tour",
+        "due: ",
+        "The big one",
+    ] {
+        assert!(text.contains(line), "{line:?} in\n{text}");
+    }
+    assert!(!dir.join(&inbox).exists(), "it left the inbox");
 }
 
 #[test]
@@ -200,8 +231,33 @@ fn extensions(
         .with_linked(&Tasks)
         .unwrap();
     ext.install_contribution_actions().unwrap();
+    // As the app has it: the registry of capture targets on its list, and
+    // capture over it.
+    forward(app, &list, "EXT_CAPTURE_TARGETS");
+    architect_capture::actions::register(app, architect_capture::actions::Config::default(), None)
+        .unwrap();
     let _ = ext.sync();
     (ext, list)
+}
+
+/// Puts `id` of `from` on `to`, run on `from` as whoever ran it (the
+/// app's `forward`, `apps/ui/src/extensions.rs`).
+fn forward(to: &ActionList, from: &ActionList, id: &str) {
+    let info = from.info(id).unwrap();
+    let (list, id) = (from.clone(), id.to_owned());
+    to.register_forwarded_with(
+        &info,
+        Arc::new(
+            move |caller: &architect::action::ActionCaller, args: &[u8]| {
+                let (list, caller, id, args) =
+                    (list.clone(), caller.clone(), id.clone(), args.to_vec());
+                let run: architect::action::ActionFuture =
+                    Box::pin(async move { list.run_json_async_with(&caller, &id, &args).await });
+                Ok(run)
+            },
+        ),
+    )
+    .unwrap();
 }
 
 fn linked_in() {

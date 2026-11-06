@@ -17,6 +17,7 @@
 //! | `EXT_ENABLE` / `EXT_DISABLE` | turns `{id}` on or off: loaded or unloaded at once, everything it adds with it |
 //! | `EXT_EMBEDS` | every inline embed and what it claims, or `{claim}`'s (`fence:kf`): which extension draws it, and how |
 //! | `EXT_PROJECT_TYPES` | every project type loaded extensions add (`[[project_types]]`), or `{id}`'s: its properties, template, folders, views and owner |
+//! | `EXT_CAPTURE_TARGETS` | every capture target loaded extensions add (`[[capture_targets]]`): its chips, tokens, action and owner |
 
 use architect::action::{
     ActionCaller, ActionError, ActionMeta, Effect, Invocation, InvocationSource, RawJson,
@@ -102,6 +103,14 @@ static PROJECT_TYPES: ActionMeta = meta(
      each one's id, name, icon, the properties it adds to `project`, its `project.md` template's \
      text, the folders a new project gets, its views and the extension it is from. With `id`, \
      that one (`null` when no loaded extension adds it).",
+);
+static CAPTURE_TARGETS: ActionMeta = meta(
+    "EXT_CAPTURE_TARGETS",
+    "Capture targets",
+    "What a capture can become that loaded extensions add (`[[capture_targets]]`): each one's \
+     id, name, icon, description, the action that makes one from a capture, the chips it \
+     offers, the quick-add tokens it adds and the extension it is from (`from`). Architect's \
+     capture (CAPTURE_TARGETS) offers them after its own note.",
 );
 static ENABLE: ActionMeta = meta(
     "EXT_ENABLE",
@@ -225,8 +234,8 @@ fn invoked(caller: &ActionCaller, source: InvocationSource) -> Invocation {
 impl Extensions {
     /// Puts the contribution actions (`EXT_CONTRIBUTIONS`, `EXT_OPEN`,
     /// `EXT_VIEW_OPEN`, `EXT_STATE_SET`, `EXT_STATE_CLEAR`, `EXT_EMIT`,
-    /// `EXT_ENABLE`, `EXT_DISABLE`, `EXT_EMBEDS`, `EXT_PROJECT_TYPES`) on
-    /// the host's list.
+    /// `EXT_ENABLE`, `EXT_DISABLE`, `EXT_EMBEDS`, `EXT_PROJECT_TYPES`,
+    /// `EXT_CAPTURE_TARGETS`) on the host's list.
     ///
     /// # Errors
     ///
@@ -400,6 +409,26 @@ impl Extensions {
                     |id| reg.project_type(&id).map_or(Value::Null, one),
                 );
                 Ok::<_, String>(RawJson::from(answer.to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &CAPTURE_TARGETS,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, (): ()| {
+                let host = me.host();
+                let all: Vec<Value> = host
+                    .contributions()
+                    .capture_targets()
+                    .into_iter()
+                    .map(|t| {
+                        let mut v = serde_json::to_value(&t.item).unwrap_or(Value::Null);
+                        v.as_object_mut()
+                            .map(|map| map.insert("from".to_owned(), json!(t.owner)));
+                        v
+                    })
+                    .collect();
+                Ok::<_, String>(RawJson::from(Value::Array(all).to_string()))
             },
         )?;
         for (meta, on) in [(&ENABLE, true), (&DISABLE, false)] {
