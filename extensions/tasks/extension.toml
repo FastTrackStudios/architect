@@ -34,6 +34,9 @@ path = "extensions/tasks"
 # The Time Tracker, when it is installed: each task's time, and a button
 # on its row that times it.
 "architect.time" = "^0.1"
+# Notify, when it is installed: a task's new assignees are told ("Cody
+# assigned you Mix the album"), going to the task.
+"architect.notify" = "^0.1"
 
 # It reaches notes only through the app's actions: vault reads and
 # writes, base queries, opening its views and the board.
@@ -84,7 +87,7 @@ params = '{"type":"object","properties":{"title":{"type":"string"},"status":{"ty
 [[actions]]
 id = "TASKS_UPDATE"
 name = "Tasks: update"
-description = "Sets the given properties of task `path` (`null` removes one): `title`, `status`, `priority`, `due`, `scheduled`, `project`, `projects`, `milestone`, `parent`, `blocked_by`, `relates`, `assignees`, `tags`, `contexts`, `recurrence`."
+description = "Sets the given properties of task `path` (`null` removes one): `title`, `status`, `priority`, `due`, `scheduled`, `project`, `projects`, `milestone`, `parent`, `blocked_by`, `relates`, `assignees`, `tags`, `contexts`, `recurrence`. New assignees are notified through Notify when it is installed (`notified`)."
 group = "Tasks"
 effect = "mutating"
 params = '{"type":"object","properties":{"path":{"type":"string"},"title":{"type":"string"},"status":{"type":"string"},"priority":{"type":"string"},"due":{"type":["string","null"]},"scheduled":{"type":["string","null"]},"project":{"type":"string"},"projects":{"type":"array","items":{"type":"string"}},"milestone":{"type":["string","null"]},"parent":{"type":["string","null"]},"blocked_by":{"type":"array","items":{"type":"string"}},"relates":{"type":"array","items":{"type":"string"}},"assignees":{"type":"array","items":{"type":"string"}},"tags":{"type":"array","items":{"type":"string"}},"contexts":{"type":"array","items":{"type":"string"}},"recurrence":{"type":["string","null"]}},"required":["path"]}'
