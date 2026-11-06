@@ -2581,6 +2581,27 @@ aliases = []
 scope = "synced"
 
 [[sections.settings]]
+key = "navigator.template_engine"
+title = "Template engine"
+description = "Automatic reads Templater's common commands (`<% tp.date.now(\"YYYY-MM-DD\") %>`, `tp.file.title`, `tp.file.cursor()`, `tp.system.prompt`) too; its scripts (`<%* %>`) are left as written."
+control = "segmented"
+default = "Automatic"
+unit = ""
+placeholder = ""
+aliases = []
+scope = "synced"
+
+[[sections.settings.choices]]
+value = "Automatic"
+label = "Built-in, Templater's common commands too"
+detail = ""
+
+[[sections.settings.choices]]
+value = "BuiltIn"
+label = "Built-in only"
+detail = ""
+
+[[sections.settings]]
 key = "navigator.folder_note_template"
 title = "Folder note template"
 description = "The template a new folder note is made from (a vault path)."

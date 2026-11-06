@@ -270,6 +270,17 @@ impl NavigatorState {
             .map_or_else(String::new, |a| parent(a).to_owned())
     }
 
+    /// A template's text as the engine reads it: Templater's commands
+    /// (`<% tp.… %>`) as tokens, unless the settings say the built-in
+    /// engine alone (`templateEngine`).
+    fn engine_text(&self, text: String) -> String {
+        if self.settings.template_engine == crate::settings::TemplateEngine::BuiltIn {
+            text
+        } else {
+            template::templater(&text)
+        }
+    }
+
     /// A template's text written for a note at `path`.
     fn render_for(
         &self,
@@ -367,7 +378,10 @@ impl NavigatorState {
             .flatten();
         // A template that does not read makes an empty note, and says so
         // (Notebook Navigator's `readFailed`).
-        let text = template_path.as_deref().and_then(|p| self.reader.read(p));
+        let text = template_path
+            .as_deref()
+            .and_then(|p| self.reader.read(p))
+            .map(|t| self.engine_text(t));
         let mut warning = template_path
             .as_deref()
             .filter(|_| text.is_none())
@@ -542,6 +556,7 @@ impl NavigatorState {
         let Some(text) = Some(setting.trim())
             .filter(|t| !t.is_empty())
             .and_then(|t| self.reader.read(t))
+            .map(|t| self.engine_text(t))
         else {
             return self.periodic.new_note_text(path);
         };

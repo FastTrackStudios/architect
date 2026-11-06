@@ -305,3 +305,27 @@ fn a_folder_note_is_made_of_its_type_from_its_template() {
     let off = state(settings());
     assert!(off.folder_note_request("Alpha").is_err());
 }
+
+/// The template picker's notes (`TemplateFileModal`): the template
+/// folder's, by path.
+#[test]
+fn the_template_picker_lists_the_template_folder() {
+    let src = vault()
+        .with_file(NoteFile::new("Templates/Meeting.md", NOW, NOW))
+        .with_file(NoteFile::new("Templates/Daily.md", NOW, NOW));
+    let s = NavigatorState::new(
+        VaultIndex::read(&src),
+        NavigatorSettings {
+            template_folder: "Templates".into(),
+            ..settings()
+        },
+        Clock {
+            now: NOW,
+            offset: 0,
+        },
+    );
+    assert_eq!(
+        s.template_notes(),
+        ["Templates/Daily.md", "Templates/Meeting.md"]
+    );
+}

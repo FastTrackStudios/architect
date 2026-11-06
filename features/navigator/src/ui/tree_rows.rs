@@ -999,11 +999,12 @@ fn menu_act(nav: Navigator, on_open: EventHandler<Open>, act: MenuAct) {
             return;
         }
         MenuAct::FromTemplate(folder) => {
-            let hint = nav.state.peek().settings().template_folder.clone();
+            // The picker (`TemplateFileModal`): the template folder's notes
+            // under the field, narrowed as one types.
             ask_for(
                 nav,
-                "Template (a vault path)",
-                &hint,
+                "New note from a template",
+                "",
                 PromptKind::TemplateFor(folder),
             );
             return;
@@ -1248,7 +1249,21 @@ pub(super) fn PromptBar(nav: Navigator, on_open: EventHandler<Open>, prompt: Pro
         }
     };
     let mut on_enter = submit.clone();
-    let mut on_ok = submit;
+    let mut on_ok = submit.clone();
+    let on_pick = submit;
+    let choices: Vec<String> = match &prompt.kind {
+        PromptKind::TemplateFor(_) => {
+            let want = value.read().trim().to_lowercase();
+            nav.state
+                .peek()
+                .template_notes()
+                .into_iter()
+                .filter(|t| want.is_empty() || t.to_lowercase().contains(&want))
+                .take(8)
+                .collect()
+        }
+        _ => Vec::new(),
+    };
     rsx! {
         div { class: "nv-confirm nv-prompt", role: "dialog", "aria-label": "{prompt.title}",
             style: "position:absolute; left:8px; right:8px; bottom:8px; z-index:20; padding:10px; border-radius:10px; \
@@ -1266,6 +1281,24 @@ pub(super) fn PromptBar(nav: Navigator, on_open: EventHandler<Open>, prompt: Pro
                         open.set(None);
                     }
                 },
+            }
+            if !choices.is_empty() {
+                div { class: "nv-prompt-choices", role: "listbox", style: "display:flex; flex-direction:column; gap:2px; max-height:200px; overflow-y:auto;",
+                    for c in choices {
+                        {
+                            let pick = c.clone();
+                            let mut on_pick = on_pick.clone();
+                            let shown = c.trim_end_matches(".md").to_owned();
+                            rsx! {
+                                button { key: "{c}", class: "nv-prompt-choice", role: "option",
+                                    style: "text-align:left; height:24px; padding:0 8px; border:none; border-radius:6px; background:transparent; color:var(--nv-text); cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",
+                                    onclick: move |_| { value.set(pick.clone()); on_pick(); },
+                                    "{shown}"
+                                }
+                            }
+                        }
+                    }
+                }
             }
             if let Some(w) = warning {
                 div { class: "nv-name-warning", "data-testid": "nv-name-warning", role: "status",

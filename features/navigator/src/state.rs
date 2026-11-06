@@ -2935,6 +2935,23 @@ impl NavigatorState {
         })
     }
 
+    /// The notes the template picker offers (`TemplateFileModal`): the
+    /// Markdown notes in the template folder (the whole vault's when it is
+    /// empty), by path.
+    #[must_use]
+    pub fn template_notes(&self) -> Vec<String> {
+        let folder = self.settings.template_folder.trim().trim_matches('/');
+        let mut out: Vec<String> = self
+            .all
+            .files()
+            .filter(|f| f.is_markdown())
+            .filter(|f| folder.is_empty() || f.path.starts_with(&format!("{folder}/")))
+            .map(|f| f.path.clone())
+            .collect();
+        out.sort_by(|a, b| crate::tree::natural_cmp(a, b));
+        out
+    }
+
     /// What "Create folder note" makes for `folder` (`createFolderNote`): a
     /// note of the settings' type named for the folder, from the folder
     /// note template when there is one.

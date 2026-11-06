@@ -366,6 +366,17 @@ pub enum CalendarPlacement {
     Below,
 }
 
+/// Which engine writes templates (`templateEngine`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum TemplateEngine {
+    /// Built-in, Templater's common commands too
+    #[default]
+    Automatic,
+    /// Built-in only
+    BuiltIn,
+}
+
 /// What a new folder note is (`folderNoteType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
 #[repr(u8)]
@@ -851,6 +862,10 @@ pub struct NavigatorSettings {
     /// Where the template picker looks; empty, the whole vault.
     #[setting(placeholder = "Templates")]
     pub template_folder: String,
+    /// Template engine
+    /// Automatic reads Templater's common commands (`<% tp.date.now("YYYY-MM-DD") %>`, `tp.file.title`, `tp.file.cursor()`, `tp.system.prompt`) too; its scripts (`<%* %>`) are left as written.
+    #[setting(control = segmented)]
+    pub template_engine: TemplateEngine,
     /// Folder note template
     /// The template a new folder note is made from (a vault path).
     #[setting(placeholder = "Templates/Folder.md")]
@@ -1118,6 +1133,7 @@ impl Default for NavigatorSettings {
             zoom: 100,
             zoom_phone: 100,
             folder_note_type: FolderNoteType::Markdown,
+            template_engine: TemplateEngine::Automatic,
             collapse_scope: CollapseScope::All,
             collapse_keeps_root: true,
             accordion: false,
