@@ -47,6 +47,7 @@ use lucide_dioxus::{
     Users,
 };
 
+pub use guide::builtin_tours;
 pub use mode::{Mode, app_dir, app_dir_or_temp};
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
@@ -948,7 +949,11 @@ pub fn LabApp() -> Element {
     // Guided tours, from ⌘K (Help) or the Action List (`GUIDE_TOUR_START`):
     // the Architect tour (its place kept in a window's lab), and two of the
     // lab's scenarios.
-    let tours = architect_guide::tour::use_tours(list, use_hook(|| guide::tours(windowed)));
+    let tours = architect_guide::tour::use_tours(list.clone(), use_hook(|| guide::tours(windowed)));
+    // Each running extension's tours (`[[tours]]`) beside them, TOURS_LIST
+    // and TOUR_START, the manager's "Take the tour", and the invitation
+    // after an install.
+    guide::use_extension_tours(&list, &tours, ext_ui, windowed);
     // "Take the tour" goes on where the person left it, from the start
     // once they finished it; a window's lab offers it on its first start.
     let take_tour = move || {
