@@ -2340,12 +2340,7 @@ mod linked {
 
         fn start(&self, package: &Package, _: Context<'_>) -> Result<Box<dyn Instance>, String> {
             let m = &package.manifest;
-            if let Some(view) = self
-                .0
-                .view_ids()
-                .into_iter()
-                .find(|v| !m.views.iter().any(|d| &d.id == v))
-            {
+            if let Some(view) = self.0.view_ids().into_iter().find(|v| !m.draws(v)) {
                 return Err(format!(
                     "its code draws {view}, which its manifest does not declare"
                 ));

@@ -542,6 +542,85 @@ pub struct EmbedInput {
     pub props: serde_json::Value,
 }
 
+/// One option a base view type takes: a key the base's YAML may set on
+/// a view of its type (`columnBy: status`), with how a toolbar edits it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct BaseViewOption {
+    /// The view's YAML key.
+    pub key: String,
+    pub name: String,
+    /// `text` (the default), `number`, `toggle`, `property` (one of the
+    /// base's properties) or `select` (one of `choices`).
+    pub kind: String,
+    pub choices: Vec<String>,
+    /// Its value when the view sets none, as JSON text.
+    pub default: Option<String>,
+}
+
+/// A view type for Bases (`[[base_views]]`): Bases draws a base's view of
+/// type `id` with it, as an Obsidian plugin adds a Bases view.
+///
+/// ```toml
+/// [[base_views]]
+/// id = "board"
+/// name = "Board"
+/// icon = "kanban"
+/// options = [{ key = "columnBy", name = "Columns", kind = "property" }]
+/// # Drawn by one of its [[views]] (`view = "…"`), a page
+/// # (`page = "pages/board.tsx"`), or — neither — by its code:
+/// # `Builder::base_view("board", BoardView)`.
+/// ```
+///
+/// The view is given a [`BaseViewInput`] (the view's spec and its rows):
+/// a linked or process view reads it with `linked::use_base_view`, a page
+/// with `useEmbed()` (its `props`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct BaseViewDecl {
+    /// The base's `type:` it draws; unique among its base views, and not
+    /// one of Bases' own (`table`, `cards`, `list`).
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub options: Vec<BaseViewOption>,
+    /// One of its views that draws it.
+    pub view: Option<String>,
+    /// A page file in its package that draws it.
+    pub page: Option<String>,
+}
+
+impl BaseViewDecl {
+    /// The view it is drawn as: its `view`, else `base.<id>` (its code's,
+    /// `Builder::base_view`).
+    #[must_use]
+    pub fn view_name(&self) -> String {
+        self.view
+            .clone()
+            .unwrap_or_else(|| format!("{BASE_VIEW_PREFIX}{}", self.id))
+    }
+}
+
+/// What a code-drawn base view's view id starts with (`base.board`).
+pub const BASE_VIEW_PREFIX: &str = "base.";
+
+/// The view types Bases draws itself: no extension may take their ids.
+pub const BUILTIN_BASE_VIEWS: &[&str] = &["table", "cards", "list"];
+
+/// What a base view type's view is given: the base, the view and its rows.
+///
+/// The view's spec is its YAML as JSON (`type`, `name`, `order`, `sort`,
+/// `groupBy`, its options); its rows are run (`{columns, groups: [{label,
+/// rows: [{path, name, values, formulas}]}]}`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct BaseViewInput {
+    /// The base's vault path (empty for a base written in a note's fence).
+    pub base: String,
+    pub view: serde_json::Value,
+    pub rows: serde_json::Value,
+}
+
 /// Everything an extension adds to the interface past actions, settings,
 /// views and themes: a manifest's tables, or the same sent at run time.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -558,6 +637,8 @@ pub struct Contribution {
     pub hooks: Vec<HookDecl>,
     pub slots: Vec<SlotDecl>,
     pub embeds: Vec<EmbedDecl>,
+    /// View types for Bases (`[[base_views]]`).
+    pub base_views: Vec<BaseViewDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
     pub keymaps: Vec<editor_ext::KeymapEntry>,
@@ -639,6 +720,7 @@ impl Contribution {
             hooks: join(&self.hooks, &other.hooks, hook_key),
             slots: join(&self.slots, &other.slots, |s| s.slot.clone()),
             embeds: join(&self.embeds, &other.embeds, |e| e.id.clone()),
+            base_views: join(&self.base_views, &other.base_views, |b| b.id.clone()),
             keymaps: join(&self.keymaps, &other.keymaps, keymap_key),
             slash: join(&self.slash, &other.slash, |s| s.action.clone()),
         }
@@ -668,6 +750,11 @@ impl Contribution {
         out.extend(self.hooks.iter().map(|h| format!("hook:{}", hook_key(h))));
         out.extend(self.slots.iter().map(|s| format!("slot:{}", s.slot)));
         out.extend(self.embeds.iter().map(|e| format!("embed:{}", e.id)));
+        out.extend(
+            self.base_views
+                .iter()
+                .map(|b| format!("base_view:{}", b.id)),
+        );
         out.extend(
             self.keymaps
                 .iter()
@@ -730,6 +817,7 @@ impl Contribution {
             self.hooks.len(),
             self.slots.len(),
             self.embeds.len(),
+            self.base_views.len(),
             self.keymaps.len(),
             self.slash.len(),
         ]
@@ -922,6 +1010,31 @@ impl Contribution {
                 return refuse(what, format!("not a slot ({})", SLOTS.join(", ")));
             }
             view(&what, &s.view)?;
+        }
+        for b in &self.base_views {
+            let what = format!("base view {}", b.id);
+            if b.id.is_empty() {
+                return refuse(what, "it needs an id".to_owned());
+            }
+            if BUILTIN_BASE_VIEWS
+                .iter()
+                .any(|v| v.eq_ignore_ascii_case(&b.id))
+            {
+                return refuse(what, "Bases draws that type itself".to_owned());
+            }
+            match (&b.view, &b.page) {
+                (Some(v), None) => view(&what, v)?,
+                (None, Some(page)) => {
+                    if !inside(page) {
+                        return refuse(what, format!("{page} is outside the package"));
+                    }
+                }
+                // Drawn by its code (`Builder::base_view`).
+                (None, None) => {}
+                (Some(_), Some(_)) => {
+                    return refuse(what, "it is drawn by one view or one page".to_owned());
+                }
+            }
         }
         for e in &self.embeds {
             let what = format!("embed {}", e.id);
@@ -1527,6 +1640,20 @@ impl Contributions {
         self.all(|c| c.embeds.clone())
     }
 
+    /// Every base view type, in the order its owner came.
+    #[must_use]
+    pub fn base_views(&self) -> Vec<By<BaseViewDecl>> {
+        self.all(|c| c.base_views.clone())
+    }
+
+    /// The base view type `id` (any case): the first loaded that adds it.
+    #[must_use]
+    pub fn base_view(&self, id: &str) -> Option<By<BaseViewDecl>> {
+        self.base_views()
+            .into_iter()
+            .find(|b| b.item.id.eq_ignore_ascii_case(id))
+    }
+
     /// The embed that draws `claim`: the first loaded that claims it.
     #[must_use]
     pub fn embed_for(&self, claim: &Claim) -> Option<By<EmbedDecl>> {
@@ -1997,6 +2124,48 @@ mod tests {
             },
             ..EmbedDecl::default()
         }
+    }
+
+    #[test]
+    fn a_base_view_type_is_drawn_by_a_view_a_page_or_its_code_and_not_a_builtin() {
+        let views = vec!["chart".to_owned()];
+        let check = |id: &str, view: Option<&str>, page: Option<&str>| {
+            Contribution {
+                base_views: vec![BaseViewDecl {
+                    id: id.into(),
+                    view: view.map(Into::into),
+                    page: page.map(Into::into),
+                    ..BaseViewDecl::default()
+                }],
+                ..Contribution::default()
+            }
+            .check(&rules(&views, &[]))
+        };
+        assert!(check("board", None, None).is_ok());
+        assert!(check("board", Some("chart"), None).is_ok());
+        assert!(check("board", None, Some("pages/b.tsx")).is_ok());
+        let why = |r: Result<(), Refused>| r.unwrap_err().why;
+        assert!(why(check("Table", None, None)).contains("itself"));
+        assert!(why(check("board", Some("nope"), None)).contains("no view"));
+        assert!(why(check("board", None, Some("../b.tsx"))).contains("outside"));
+        assert!(why(check("", None, None)).contains("id"));
+        let reg = Contributions::new();
+        let _ = reg.put(
+            "lab.board",
+            Contribution {
+                base_views: vec![BaseViewDecl {
+                    id: "board".into(),
+                    ..BaseViewDecl::default()
+                }],
+                ..Contribution::default()
+            },
+        );
+        assert_eq!(
+            reg.base_view("BOARD").map(|b| b.owner).as_deref(),
+            Some("lab.board")
+        );
+        let _ = reg.withdraw("lab.board");
+        assert!(reg.base_views().is_empty());
     }
 
     #[test]

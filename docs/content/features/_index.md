@@ -38,6 +38,7 @@ When a page and the code disagree, the code is right.
 - [Blobs](@/features/blobs.md): content-addressed bytes fetched on demand, pinned and collected.
 - [Files](@/features/files.md): `architect-files`, an org's files with versions, quota and access.
 - [Attachments](@/features/attachments.md): `architect-attachments`, files attached to documents and records, offline first, access following the parent.
+- [Bases](@/features/bases.md): `architect-bases`, a vault's `.base` files as table, cards and list views, view types extensions add, `BASES_*`.
 
 ## Identity
 

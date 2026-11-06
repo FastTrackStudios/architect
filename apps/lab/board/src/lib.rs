@@ -200,6 +200,7 @@ impl Extension for Board {
             .view("summary", PagesOnly)
             .view("luau-primes", PagesOnly)
             .view("preact", PagesOnly)
+            .base_view("board", BaseBoard)
             .action_in(
                 "LAB_BOARD_PIN",
                 |args, cx| async move { Ok(pin(&args, cx)) },
@@ -450,6 +451,89 @@ pub fn SongCard() -> Element {
                 }
                 span { style: "padding: 2px 8px; font-size: 12px; color: var(--muted-foreground);",
                     {format!("{lines} line{} of lyric", if lines == 1 { "" } else { "s" })}
+                }
+            }
+        }
+    }
+}
+
+/// Its Bases view type (`[[base_views]] id = "board"`): the view's rows
+/// in a column per value of its `columnBy` option, or per group when the
+/// view is grouped, a card per note.
+#[component]
+fn BaseBoard() -> Element {
+    let Some(input) = architect_extensions::linked::use_base_view() else {
+        return rsx! {};
+    };
+    let by = input
+        .view
+        .get("options")
+        .unwrap_or(&Value::Null)
+        .get("columnBy")
+        .unwrap_or(&Value::Null)
+        .as_str()
+        .map(str::to_owned)
+        .filter(|s| !s.is_empty());
+    let rows: Vec<Value> = input
+        .rows
+        .get("groups")
+        .unwrap_or(&Value::Null)
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|g| {
+            let label = g
+                .get("label")
+                .unwrap_or(&Value::Null)
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            g.get("rows")
+                .unwrap_or(&Value::Null)
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |mut r| {
+                    if let Some(map) = r.as_object_mut() {
+                        map.insert("group".to_owned(), json!(label));
+                    }
+                    r
+                })
+        })
+        .collect();
+    let column_of = |r: &Value| -> String {
+        let v = by.as_ref().map_or_else(
+            || r.get("group"),
+            |key| r.get("values").and_then(|v| v.get(key.as_str())),
+        );
+        let v = v.unwrap_or(&Value::Null);
+        match v {
+            Value::String(s) => s.clone(),
+            Value::Null => String::new(),
+            other => other.to_string(),
+        }
+    };
+    let mut columns: Vec<(String, Vec<Value>)> = Vec::new();
+    for r in rows {
+        let c = column_of(&r);
+        match columns.iter_mut().find(|(l, _)| *l == c) {
+            Some((_, list)) => list.push(r),
+            None => columns.push((c, vec![r])),
+        }
+    }
+    rsx! {
+        div { class: "lab-board-base", style: "display: flex; gap: 12px; align-items: flex-start; padding: 4px; color: var(--foreground); font-size: 13px;",
+            for (label, cards) in columns {
+                div { key: "{label}", class: "lab-board-column", "data-column": "{label}",
+                    style: "display: flex; flex-direction: column; gap: 6px; min-width: 160px; padding: 8px; border-radius: 10px; background: var(--muted);",
+                    div { style: "font-weight: 700;", if label.is_empty() { "(none)" } else { "{label}" } " · {cards.len()}" }
+                    for c in cards {
+                        div { key: "{c.get(\"path\").unwrap_or(&Value::Null)}",
+                            style: "padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card);",
+                            {c.get("name").unwrap_or(&Value::Null).as_str().unwrap_or_default().to_owned()}
+                        }
+                    }
                 }
             }
         }

@@ -1,0 +1,68 @@
+[package]
+name = "architect-bases"
+description = "Bases: a vault's .base files as table, cards and list views, with filters, sort, group-by, properties and formulas; view types extensions add ([[base_views]]); the BASES_* actions; a note's ```base fence as an embed."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# docs/content/features/bases.md. The parser and evaluator are the
+# vault's (`vault::bases`); this crate is the model over them (`model`),
+# the BASES_* actions over an open vault (`actions`), and the views
+# (`ui`): a base as a workspace view, its toolbar, the built-in table,
+# cards and list, a contributed type drawn by its extension, and the
+# linked `Bases` extension that claims ```base fences.
+
+[features]
+default = []
+actions = [
+    "dep:architect",
+    "architect/action-list",
+    "dep:facet",
+    "vault/actions",
+    "dep:vault-obsidian",
+]
+ui = [
+    "actions",
+    "dep:dioxus",
+    "dep:architect-workspace",
+    "architect-workspace/ui",
+    "dep:architect-extensions",
+    "architect-extensions/ui",
+    "architect-extensions/linked",
+    "dep:futures-timer",
+]
+
+[dependencies]
+vault = { workspace = true, default-features = false, features = ["live"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+architect = { workspace = true, optional = true }
+facet = { workspace = true, optional = true }
+vault-obsidian = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+architect-workspace = { workspace = true, optional = true }
+architect-extensions = { workspace = true, optional = true }
+futures-timer = { workspace = true, optional = true }
+
+[dev-dependencies]
+architect-bases = { path = ".", features = ["actions"] }
+architect = { workspace = true, features = ["action-list"] }
+vault = { workspace = true, features = ["actions"] }
+tempfile = "3"
+futures = "0.3"
+# tests/extension.rs: `Bases` linked into a host.
+architect-extensions = { workspace = true, features = ["host", "linked", "ui"] }
+architect-settings = { workspace = true }
+
+[[test]]
+name = "extension"
+required-features = ["ui"]
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

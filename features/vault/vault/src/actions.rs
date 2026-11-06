@@ -115,6 +115,13 @@ impl OpenVault {
         f(&self.read())
     }
 
+    /// Runs `f` over the vault to change it, with the write guard its
+    /// writes to disk are marked with (what `bases` saves a `.base`
+    /// through).
+    pub fn update<R>(&self, f: impl FnOnce(&mut Vault, &SelfWriteGuard) -> R) -> R {
+        f(&mut self.write(), &self.guard)
+    }
+
     /// Reads the folder again.
     ///
     /// # Errors

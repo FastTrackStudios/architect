@@ -342,6 +342,49 @@ fn save_to_mutate(e: crate::vault::SaveError) -> MutateError {
 
 // ── tests ───────────────────────────────────────────────────────────
 
+/// Writes `base` to the `.base` file at `rel_path` (made when it is not
+/// there) and puts it in `vault.bases`, parsed: what an edit to a base's
+/// filters, sort, grouping, properties, formulas or views saves.
+///
+/// # Errors
+///
+/// The path is not a vault path ending `.base`, the base does not
+/// serialize, or the file cannot be written.
+pub fn save_base(
+    vault: &mut Vault,
+    rel_path: &str,
+    base: &vault_live::bases::ParsedBase,
+    guard: &SelfWriteGuard,
+) -> Result<(), MutateError> {
+    validate_rel(rel_path)?;
+    if !rel_path.ends_with(".base") {
+        return Err(MutateError::InvalidPath(format!("{rel_path}: not a .base")));
+    }
+    let raw = vault_live::bases::serialize(base)
+        .map_err(|e| MutateError::InvalidFrontmatter(e.to_string()))?;
+    let abs = abs_path(vault, rel_path);
+    if let Some(parent) = abs.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| MutateError::Io(e.to_string()))?;
+    }
+    guard.mark(&abs);
+    vault_live::mutate::write_atomic(&abs, raw.as_bytes()).map_err(MutateError::Io)?;
+    guard.mark(&abs);
+    let (folder, basename) = split_rel(rel_path);
+    let entry = crate::vault::VaultBase {
+        rel_path: rel_path.to_owned(),
+        basename,
+        folder,
+        raw,
+        parsed: Ok(base.clone()),
+        mtime: mtime_of(&abs),
+    };
+    match vault.bases.iter_mut().find(|b| b.rel_path == rel_path) {
+        Some(b) => *b = entry,
+        None => vault.bases.push(entry),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,28 @@
+# Bases as a linked extension (features/bases/src/ui.rs, `ui::Bases`): it
+# claims a note's ```base fence and draws it as an inline base — the
+# fence's YAML run over the vault, or the one `.base` file it names. The
+# base as a workspace view (`ui::view`), the BASES_* actions and the view
+# types extensions add ([[base_views]]) are the app's, not this
+# extension's; turned off, a fence is its plain text again.
+id = "architect.bases"
+name = "Bases"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "A note's ```base fence drawn as a base: table, cards, list, or a type an extension adds."
+authors = ["FastTrackStudios"]
+
+[entry]
+path = "architect-bases"
+
+[[views]]
+id = "fence"
+title = "Base"
+icon = "table"
+
+[[embeds]]
+id = "base"
+title = "Base"
+view = "fence"
+claims = { fence = ["base"] }
+max_height = 560

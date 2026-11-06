@@ -834,6 +834,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-bases"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-bases",
+ "architect-extensions",
+ "architect-settings",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "dioxus",
+ "facet",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vault",
+ "vault-obsidian",
+]
+
+[[package]]
 name = "architect-canvas"
 version = "0.1.0"
 dependencies = [
@@ -1199,6 +1220,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-a2ui",
+ "architect-bases",
  "architect-canvas",
  "architect-commands",
  "architect-extensions",

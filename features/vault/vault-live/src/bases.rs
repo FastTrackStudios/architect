@@ -756,6 +756,84 @@ fn filter_to_yaml(f: &FilterNode) -> Result<serde_yaml::Value, BaseParseError> {
     })
 }
 
+/// How a filter's clauses join: all must hold, or any.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Conjunction {
+    #[default]
+    And,
+    Or,
+}
+
+/// A filter as its clauses, each an expression's text (`status != null`,
+/// `!file.hasTag("x")`), and how they join: what a toolbar edits and
+/// [`filter_of_clauses`] reads back. A clause that is itself a group is
+/// its YAML's JSON (`{"or":[…]}`).
+#[must_use]
+pub fn filter_clauses(node: &FilterNode) -> (Conjunction, Vec<String>) {
+    let (join, args): (Conjunction, Vec<&FilterNode>) = match node {
+        FilterNode::None => return (Conjunction::And, Vec::new()),
+        FilterNode::And { args } => (Conjunction::And, args.iter().collect()),
+        FilterNode::Or { args } => (Conjunction::Or, args.iter().collect()),
+        other => (Conjunction::And, vec![other]),
+    };
+    let text = args
+        .into_iter()
+        .map(|a| match a {
+            FilterNode::Not { arg }
+                if !matches!(**arg, FilterNode::And { .. } | FilterNode::Or { .. }) =>
+            {
+                filter_leaf(arg).map_or_else(|| clause_json(a), |t| format!("!({t})"))
+            }
+            other => filter_leaf(other).unwrap_or_else(|| clause_json(other)),
+        })
+        .collect();
+    (join, text)
+}
+
+fn filter_leaf(node: &FilterNode) -> Option<String> {
+    match filter_to_yaml(node).ok()? {
+        serde_yaml::Value::String(s) => Some(s),
+        _ => None,
+    }
+}
+
+fn clause_json(node: &FilterNode) -> String {
+    filter_to_yaml(node)
+        .ok()
+        .map(|y| yaml_to_json(&y).to_string())
+        .unwrap_or_default()
+}
+
+/// The filter `clauses` make, joined by `join`: `FilterNode::None` for
+/// none, the clause itself for one.
+///
+/// # Errors
+///
+/// A clause that does not parse.
+pub fn filter_of_clauses(
+    join: Conjunction,
+    clauses: &[String],
+) -> Result<FilterNode, BaseParseError> {
+    let mut args = Vec::new();
+    for c in clauses.iter().map(|c| c.trim()).filter(|c| !c.is_empty()) {
+        let node = if c.starts_with('{') {
+            let json: serde_json::Value =
+                serde_json::from_str(c).map_err(|e| BaseParseError::Filter(e.to_string()))?;
+            parse_filter_node(&json_to_yaml(&json))?
+        } else {
+            expr_parser::parse_filter(c)?
+        };
+        args.push(node);
+    }
+    Ok(match (args.len(), join) {
+        (0, _) => FilterNode::None,
+        (1, Conjunction::And) => args.remove(0),
+        (_, Conjunction::And) => FilterNode::And { args },
+        (_, Conjunction::Or) => FilterNode::Or { args },
+    })
+}
+
 fn cmp_to_source(op: CmpOp) -> &'static str {
     match op {
         CmpOp::Eq => "==",
@@ -2092,16 +2170,6 @@ pub fn view_table(base: &ParsedBase, view: &ViewSpec, rows: &[BaseRow]) -> ViewT
     }
 }
 
-fn value_to_label(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => String::new(),
-        other => other.to_string(),
-    }
-}
-
 fn is_truthy(v: &serde_json::Value) -> bool {
     match v {
         serde_json::Value::Null => false,
@@ -2321,14 +2389,16 @@ impl<'a> BaseEval<'a> {
         keep.sort_by(|&a, &b| self.compare_rows(&self.rows[a], &self.rows[b], &view.sort));
 
         let mut groups: Vec<(String, Vec<usize>)> = if let Some(key) = view.group_by.as_deref() {
-            let mut buckets: indexmap::IndexMap<String, Vec<usize>> = indexmap::IndexMap::new();
-            for i in keep {
-                let label = value_to_label(&self.column(&self.rows[i], key));
-                buckets.entry(label).or_default().push(i);
-            }
-            // Stable: insertion order is the order labels were first
-            // observed. Caller can reorder via post-processing.
-            buckets.into_iter().collect()
+            // Stable: the order labels were first seen in (the shared
+            // grouping the navigator's list uses too).
+            crate::grouping::group_by(
+                keep,
+                |&i| crate::grouping::label(&self.column(&self.rows[i], key)),
+                crate::grouping::Order::FirstSeen,
+            )
+            .into_iter()
+            .map(|g| (g.label, g.items))
+            .collect()
         } else {
             vec![(String::new(), keep)]
         };
@@ -3588,5 +3658,30 @@ views:
             ..base.views[1].clone()
         };
         assert_eq!(view_table(&base, &bare, &rows).columns, ["file.name"]);
+    }
+}
+
+#[cfg(test)]
+mod clause_tests {
+    use super::*;
+
+    #[test]
+    fn a_filter_reads_as_clauses_and_back() {
+        let clauses = vec![
+            "status != null".to_owned(),
+            r#"file.hasTag("song")"#.to_owned(),
+        ];
+        let node = filter_of_clauses(Conjunction::Or, &clauses).unwrap();
+        assert!(matches!(node, FilterNode::Or { .. }));
+        let (join, back) = filter_clauses(&node);
+        assert_eq!(join, Conjunction::Or);
+        assert_eq!(back.len(), 2);
+        assert_eq!(filter_of_clauses(join, &back).unwrap(), node);
+        assert_eq!(
+            filter_of_clauses(Conjunction::And, &[]).unwrap(),
+            FilterNode::None
+        );
+        let one = filter_of_clauses(Conjunction::And, &clauses[..1]).unwrap();
+        assert!(matches!(one, FilterNode::Cmp { .. }));
     }
 }

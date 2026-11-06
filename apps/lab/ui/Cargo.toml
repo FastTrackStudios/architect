@@ -72,6 +72,9 @@ vault-doc = { workspace = true }
 base64 = { workspace = true }
 links = { workspace = true, features = ["actions"] }
 tag = { workspace = true, features = ["actions"] }
+# Bases: a .base as a workspace view, a note's ```base fence, the
+# BASES_* actions (src/notes.rs, src/vault.rs).
+architect-bases = { workspace = true, features = ["ui"] }
 architect = { workspace = true, features = ["action-list", "settings"] }
 dioxus = { workspace = true }
 facet = { workspace = true }

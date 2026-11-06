@@ -1596,6 +1596,59 @@ would be drawn by the extension's own Dioxus tree into an element of the
 page (linked views work as they are), or a page's tree rendered into
 a shadow root, its height read with a `ResizeObserver`.
 
+## Base view types
+
+Bases (`features/bases`, [Bases](@/features/bases.md)) draws a base's
+table, cards and list itself; any other `type:` a base's view names is
+drawn by the extension that adds it, as an Obsidian plugin adds a Bases
+view. Task's calendar, kanban, gantt, heatmap and graph views become such
+extensions (#350).
+
+```toml
+[[base_views]]
+id = "board"                # the base's `type:`; not table, cards or list
+name = "Board"              # in the view picker
+icon = "kanban"             # a lucide name
+# What a view of this type may set in the base's YAML, and how a toolbar
+# edits it: kind = text | number | toggle | property | select (choices).
+options = [{ key = "columnBy", name = "Columns", kind = "property" }]
+# Drawn by one of its [[views]] (view = "…"), by a page in its package
+# (page = "pages/board.tsx"), or — neither — by its code:
+```
+
+```rust,ignore
+fn build(&self, ext: &mut Builder) {
+    ext.base_view("board", BoardView);   // drawn as its view `base.board`
+}
+
+#[component]
+fn BoardView() -> Element {
+    let Some(input) = linked::use_base_view() else { return rsx! {} };
+    // input.base: the .base's path; input.view: the view's spec (type,
+    // name, order, sort, groupBy, filters, limit, options); input.rows:
+    // {columns, groups: [{label, rows: [{path, name, values, formulas}]}]}
+    …
+}
+```
+
+The type is a contribution like the rest (`features/extensions/src/contrib.rs`
+`BaseViewDecl`, `BaseViewOption`; `Contributions::base_views`,
+`Contributions::base_view`): checked at load (an id, not a built-in's; one
+view or one page or neither), merged with what its code adds, and
+withdrawn when the extension unloads, so the view picker lists it only
+while it is on and a view of its type shows why it cannot be drawn
+instead. `linked::Builder::base_view` registers the code that draws a type
+which names no view or page; the manifest's `Manifest::draws` lets that
+`base.<id>` view through the check every built view meets, and a process
+copy serves it like any of its views. Bases mounts it with
+`embeds::BaseViewEmbed` (`Embeds::base_view`), the inline-embed path: a
+linked view in the app's document, a page or a process view as a
+sub-document, given a `BaseViewInput` under the claim
+`embed_type:base_view` (`linked::BASE_VIEW_CLAIM`), drawn again when the
+rows or the view change. A page reads it with `useEmbed()` (its `props`).
+The lab's Board adds `board` (`apps/lab/board/extension.toml`,
+`apps/lab/board/src/lib.rs` `BaseBoard`).
+
 ## One trait, three ways to run it
 
 `features/extensions/src/linked.rs` `Extension` is a crate's extension

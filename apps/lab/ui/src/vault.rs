@@ -25,7 +25,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::{
     AudioLines, Bot, CalendarCheck, Cpu, FileText, Files, Hourglass, Layers, Link, ListTree,
     MousePointerClick, Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal,
-    Terminal,
+    Table, Terminal,
 };
 
 /// The lab's views, and the kinds that draw them, with the views loaded
@@ -184,10 +184,14 @@ fn views(extra: Vec<View>) -> Views {
             .home(Target::Split(Side::Right))
             .still(),
         )
+        // A .base file: Bases' table, cards and list, and the types loaded
+        // extensions add (`architect_bases::ui`). Last, so the Open menu's
+        // other rows keep their places.
+        .view(architect_bases::ui::view().icon(icon!(Table)))
 }
 
 /// The vault's notes (the lab has no files yet).
-const NOTES: [(&str, &str); 7] = [
+const NOTES: [(&str, &str); 8] = [
     ("note-welcome", "Welcome"),
     ("note-shell", "The app shell"),
     ("note-workspace", "The workspace"),
@@ -195,12 +199,27 @@ const NOTES: [(&str, &str); 7] = [
     ("note-extensions", "Extensions"),
     ("note-chart", "A chart in a note"),
     ("note-song", "Amazing Grace"),
+    ("note-base", "A base in a note"),
 ];
 
 /// The notes written in Markdown (the rest say [`WELCOME`]): a ```` ```kf ````
 /// fence and a `type: song` note, which the Board extension draws inline
 /// (`crate::note`).
-const MARKDOWN: [(&str, &str); 3] = [
+const MARKDOWN: [(&str, &str); 4] = [
+    (
+        "note-base",
+        "The fence below is a base: Bases claims its language (base) and runs its YAML over the lab's vault, \
+here as a list. Turn Bases off and the fence is plain text again.
+
+```base
+filters: 'status != null'
+views:
+  - type: list
+    name: Notes
+    order: [file.name, status]
+```
+",
+    ),
     (
         "note-chart",
         "The fence below is Keyflow. The Board extension claims its language (kf), so it is drawn as a chart, \
@@ -265,6 +284,27 @@ fn note(id: &str, title: &str) -> Pane {
     Pane::new(id, "note", title)
 }
 
+/// The lab vault's base (`apps/lab/vault`).
+const BASE: &str = "Bases/Notes by status.base";
+
+fn base_title(path: &str) -> &str {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+}
+
+/// The pane a base opens in: the one `BASES_OPEN` opens.
+fn base_pane(path: &str) -> Pane {
+    let mut pane = Pane::new(
+        architect_bases::actions::pane_id(path),
+        architect_bases::actions::VIEW_KIND,
+        base_title(path),
+    );
+    pane.state = serde_json::json!({ "path": path }).to_string();
+    pane
+}
+
 /// The view a note of the vault on disk is.
 const VAULT_NOTE: &str = "vault.note";
 
@@ -297,10 +337,19 @@ fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
         let _ = w.activate(&id);
         return;
     }
+    drop(w);
+    open_in_main(workspace, vault_note(path), target);
+}
+
+/// Opens `pane` at `target` in the main area: beside the note on show, and
+/// never in the dock the navigator is in, even with no note open.
+fn open_in_main(workspace: Signal<Workspace>, pane: Pane, target: Target) {
+    let mut workspace = workspace;
+    let mut w = workspace.write();
     if let Some(doc) = w.current_document().cloned() {
         let _ = w.activate(&doc);
     }
-    let Ok(id) = w.open(vault_note(path), target) else {
+    let Ok(id) = w.open(pane, target) else {
         return;
     };
     let docked = w
@@ -810,7 +859,7 @@ fn preview_of(text: &str) -> String {
 
 /// Each note's file in the vault, by its pane id: the lab's notes at the
 /// root (where the scenarios find them), more in folders.
-const FILES: [(&str, &str); 14] = [
+const FILES: [(&str, &str); 16] = [
     ("note-welcome", "Welcome.md"),
     ("note-shell", "The app shell.md"),
     ("note-workspace", "The workspace.md"),
@@ -825,6 +874,9 @@ const FILES: [(&str, &str); 14] = [
     ("note-nav-keys", "Projects/Navigator/Keys.md"),
     ("note-vault-index", "Projects/Vault/The index.md"),
     ("kf-intro", "Songs/Intro.kf"),
+    ("note-base", "A base in a note.md"),
+    // The lab vault's base: opens as a base (`architect_bases::ui::view`).
+    ("base-status", BASE),
 ];
 
 /// The note a file is (its pane id and title), if the lab draws it.
@@ -865,6 +917,7 @@ fn path_of(pane: &str) -> Option<String> {
             pane.strip_prefix("note-new-")
                 .map(|n| format!("Untitled {n}.md"))
         })
+        .or_else(|| pane.strip_prefix("base:").map(str::to_owned))
 }
 
 /// The left dock's files: the navigator over the lab's vault. A click
@@ -938,7 +991,22 @@ fn FilesView() -> Element {
             (_, true) => Target::Here,
             (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
         };
-        if markdown && disk.peek().is_some() {
+        let base = std::path::Path::new(&o.path)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("base"));
+        if base {
+            // A base: its pane (one per base), in the main area beside
+            // the note on show; open already, it comes forward.
+            let workspace = open_pane.workspace();
+            let id = architect_workspace::PaneId::new(architect_bases::actions::pane_id(&o.path));
+            let open = workspace.peek().pane(&id).is_some();
+            if open {
+                let mut workspace = workspace;
+                let _ = workspace.write().activate(&id);
+            } else {
+                open_in_main(workspace, base_pane(&o.path), target);
+            }
+        } else if markdown && disk.peek().is_some() {
             // Beside the note on show, not in the dock pressed.
             show_vault_note(open_pane.workspace(), &o.path, target);
         } else if let Some((id, title)) = note_of(&o.path).filter(|_| disk.peek().is_none()) {
