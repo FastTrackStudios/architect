@@ -634,6 +634,15 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
     }
     drop(s);
     let top = menu.top;
+    // Kept inside the pane, scrolled when longer (a folder's menu).
+    let room = (nav
+        .state
+        .peek()
+        .scroll(crate::layout::Pane::Navigation)
+        .view
+        - top
+        - 8.0)
+        .max(120.0);
     let mut open = nav.menu;
     rsx! {
         // A press anywhere else closes it.
@@ -642,8 +651,8 @@ pub(super) fn Menu(nav: Navigator, on_open: EventHandler<Open>, menu: RowMenu) -
             oncontextmenu: move |e: MouseEvent| { e.prevent_default(); open.set(None); },
         }
         div { class: "nv-menu nv-row-menu", role: "menu",
-            style: "position:absolute; left:12px; right:12px; top:{top}px; z-index:10; padding:4px; border-radius:8px; \
-                    background:var(--nv-background); border:1px solid var(--nv-divider); display:flex; flex-direction:column;",
+            style: "position:absolute; left:12px; right:12px; top:{top}px; max-height:{room}px; z-index:10; padding:4px; border-radius:8px; \
+                    background:var(--nv-background); border:1px solid var(--nv-divider); display:flex; flex-direction:column; overflow-y:auto;",
             for (label, act) in items {
                 button { class: "nv-menu-row", role: "menuitem", "data-menu-item": "{label}",
                     style: "text-align:left; height:26px; padding:0 8px; border:none; border-radius:5px; background:transparent; color:var(--nv-text); cursor:pointer; font-size:12px;",
