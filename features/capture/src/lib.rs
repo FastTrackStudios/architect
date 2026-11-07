@@ -24,6 +24,8 @@ pub mod target;
 #[cfg(feature = "actions")]
 pub mod actions;
 
+pub mod vocabulary;
+
 #[cfg(feature = "ui")]
 pub mod ui;
 

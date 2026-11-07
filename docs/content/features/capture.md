@@ -75,10 +75,27 @@ composer and the deck. Mount `CaptureLayer { capture }` once over the window.
   one path behind the actions, the composer and the deck. It writes only
   through `VAULT_*` and runs each as the caller. `register` is the entry
   point, with `ids` and `Opener`.
-- `features/capture/src/ui.rs` (feature `ui`) has `use_capture` /
-  `CaptureUi`, `Composer`, `InboxDeck` and `CaptureLayer`. The capture window
-  is an `architect_workspace::Popout::page`, falling back to a card where
-  there is no OS window.
+- `features/capture/src/vocabulary.rs`: `Vocabulary`, what the composer
+  offers to pick from (people, projects, the vault's tags as labels,
+  contexts), read by `Capturer::vocabulary` from whichever of `TAGS_LIST`,
+  `PROJECTS_LIST`, `TASKS_LIST` and `VAULT_LIST` is on the list.
+- `features/capture/src/ui/mod.rs` (feature `ui`) has `use_capture` /
+  `CaptureUi`, `InboxDeck` and `CaptureLayer`. The capture window is an
+  `architect_workspace::Popout::page`, falling back to a card where there is
+  no OS window.
+- The composer is Task's, ported (#445), its look and behaviour kept:
+  `features/capture/src/ui/composer.rs` `Composer` (a full-screen sheet on a
+  phone whose properties ride the keyboard as one scrolling bar, a card with
+  its chips in a row on a desk; `@` people and contexts, `#` labels,
+  `[[Project]]`, dates, repeats and `!priority` read live as chips, a chip set
+  by hand winning; a More menu for labels, a due date, a repeat, sub-tasks and
+  a link; the kind at the top a menu of the targets; "Create more", ⌘↩),
+  `Hand`, `kind_from_text`, `resolved_kind`; its chips
+  `features/capture/src/ui/chips.rs` (`StatusChip`, `PriorityChip`,
+  `AssigneeChip`, `ProjectChip`, `LabelsChip`) and their picker
+  `features/capture/src/ui/picker.rs` `PropertyPicker`; quick add's bar
+  `features/capture/src/ui/quick_add.rs` `QuickAdd`; Task's Tailwind as
+  architect's theme tokens `features/capture/src/ui/style.rs` `Look`.
 - `features/capture/src/shortcut.rs` (feature `native`, desk only) has
   `use_global_shortcut` (`global-hotkey`, registered on the event loop's
   thread as macOS requires) and `use_float_window` (the window over every

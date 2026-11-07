@@ -27,6 +27,7 @@ ui = [
     "dep:futures-channel",
     "dep:futures-util",
     "dep:futures-timer",
+    "dep:lucide-dioxus",
 ]
 # The desk: the system-wide shortcut, and the capture window raised over
 # every app.
@@ -50,6 +51,8 @@ futures-channel = { version = "0.3", optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
 futures-timer = { workspace = true, optional = true }
 dioxus-native = { workspace = true, optional = true }
+# Task's icons, the same components its composer drew (#445).
+lucide-dioxus = { workspace = true, optional = true }
 
 # The system-wide shortcut: Carbon's hot keys on macOS, RegisterHotKey on
 # Windows, X11's grab on Linux (already in the tree through dioxus-desktop).
