@@ -99,6 +99,10 @@ pub enum NavRowKind {
 pub const SHORTCUTS: &str = "shortcuts";
 /// The recent notes' section.
 pub const RECENT: &str = "recent";
+/// Every vault's top-level folders, with several sources (#443).
+pub const VAULTS: &str = "vaults";
+/// The asset libraries, with several sources.
+pub const ASSETS: &str = "assets";
 /// The banner's height.
 pub const BANNER_HEIGHT: f64 = 96.0;
 
@@ -427,6 +431,21 @@ pub fn flatten(index: &VaultIndex, expanded: &BTreeSet<String>, opts: &TreeOptio
         level: 0,
         kind: NavRowKind::BottomSpacer,
     });
+    rows
+}
+
+/// The folder at `path` at `level`, and below it the folders `expanded`
+/// opens.
+#[must_use]
+pub fn subtree(
+    index: &VaultIndex,
+    path: &str,
+    level: u16,
+    expanded: &BTreeSet<String>,
+    opts: &TreeOptions,
+) -> Vec<NavRow> {
+    let mut rows = Vec::new();
+    walk(index, path, level, expanded, opts, &mut rows);
     rows
 }
 

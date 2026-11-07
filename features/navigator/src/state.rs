@@ -18,6 +18,7 @@ use crate::index::VaultIndex;
 use crate::keys::{KeyAction, KeyBinding, KeyMap};
 use crate::layout::{NAV_HEIGHT, NAV_WIDTH, Pane};
 use crate::list::{self, Clock, ListContext, ListMetrics, ListRow, ListRowKind, PinIn};
+use crate::mounts::Place;
 use crate::period::{DayMonthOrder, Period, PeriodKind, day_of};
 use crate::profiles::{Profiles, Shortcut, ShortcutKind, VaultProfile};
 use crate::properties::{self, PropertyTree, ROOT};
@@ -210,6 +211,10 @@ pub struct ViewState {
     /// them (`propertyChildOrder`).
     #[facet(default)]
     pub property_value_order: Vec<ChildOrder>,
+    /// The left list's sections folded (Recent Files/, Vaults/, Assets/:
+    /// [`crate::tree::VAULTS`], …), with several sources (#443).
+    #[facet(default)]
+    pub sections_folded: Vec<String>,
 }
 
 /// An icon for a target (`folder:<path>`, `tag:<tag>`,
@@ -335,6 +340,7 @@ pub struct NavigatorState {
     hidden: Hidden,
     shortcuts_folded: bool,
     recent_folded: bool,
+    sections_folded: BTreeSet<String>,
     templates: Templates,
     icons: BTreeMap<String, String>,
     backgrounds: BTreeMap<String, String>,
@@ -368,6 +374,7 @@ impl NavigatorState {
             full_text_for: None,
             shortcuts_folded: false,
             recent_folded: false,
+            sections_folded: BTreeSet::new(),
             templates: Templates::default(),
             icons: BTreeMap::new(),
             backgrounds: BTreeMap::new(),
@@ -709,7 +716,7 @@ impl NavigatorState {
         } else if let Some(files) = selected(s.scope_tags && !matches!(target, NavTarget::Tag(_))) {
             TagTree::build(files)
         } else {
-            TagTree::build(self.index.files())
+            TagTree::build(self.index.files().filter(|f| self.index.in_vault(&f.path)))
         };
         let keys = NavigatorSettings::list(&property_keys);
         self.property_tree =
@@ -720,18 +727,33 @@ impl NavigatorState {
             {
                 PropertyTree::build(files, &keys)
             } else {
-                PropertyTree::build(self.index.files(), &keys)
+                PropertyTree::build(
+                    self.index.files().filter(|f| self.index.in_vault(&f.path)),
+                    &keys,
+                )
             };
     }
 
     fn rebuild_nav(&mut self) {
+        if self.index.mounts().is_empty() {
+            self.rebuild_vault_nav();
+        } else {
+            self.nav_rows = self.mounted_rows();
+            self.pinned_rows.clear();
+        }
+        self.measure_nav();
+    }
+
+    /// One vault's rows: the shortcuts and recent notes, the folder tree,
+    /// the tags and the properties.
+    fn rebuild_vault_nav(&mut self) {
         let mut expanded = self.expanded.clone();
         if !self.settings.show_root {
             // A hidden root is always open.
             expanded.insert(String::new());
         }
         self.nav_rows = tree::flatten(&self.index, &expanded, &self.tree_options());
-        let mut top = self.top_rows();
+        let mut top = self.top_rows(!self.shortcuts_folded);
         // Pinned shortcuts (`pinShortcuts`), and the recent notes with
         // them (`pinRecentNotesWithShortcuts`): over the tree, not in it.
         self.pinned_rows.clear();
@@ -781,6 +803,10 @@ impl NavigatorState {
             ));
         }
         self.nav_rows.extend(bottom);
+    }
+
+    /// The rows' heights, the rainbow, and the scroll kept in bounds.
+    fn measure_nav(&mut self) {
         let h = self.nav_item_height();
         // Space between top rows (`rootLevelSpacing`), the first left be.
         let gap = f64::from(self.settings.root_spacing.min(16));
@@ -834,8 +860,13 @@ impl NavigatorState {
     /// The settings `target`'s list is drawn with.
     #[must_use]
     pub fn settings_for(&self, target: &NavTarget) -> NavigatorSettings {
-        self.appearances
-            .get(&target_key(target))
+        let own = self.appearances.get(&target_key(target));
+        // A mount's folders list as it says, unless they have their own.
+        let mounted = || match target {
+            NavTarget::Folder(f) => self.index.mount_of(f).and_then(|m| m.list.as_ref()),
+            _ => None,
+        };
+        own.or_else(mounted)
             .map_or_else(|| self.settings.clone(), |a| a.over(&self.settings))
     }
 
@@ -1631,6 +1662,7 @@ impl NavigatorState {
         )
         .with_order(self.all.orders().clone())
         .with_properties(self.all.browses_properties())
+        .with_mounts(self.all.mounts().to_vec())
     }
 
     /// A change in the source, as the shown vault takes it; `None` to
@@ -1880,13 +1912,185 @@ impl NavigatorState {
         match id {
             SHORTCUTS => self.shortcuts_folded = !self.shortcuts_folded,
             RECENT => self.recent_folded = !self.recent_folded,
+            tree::VAULTS | tree::ASSETS => {
+                if !self.sections_folded.remove(id) {
+                    self.sections_folded.insert(id.to_owned());
+                }
+            }
             _ => return,
         }
         self.rebuild_nav();
     }
 
+    /// The left list over several sources ([`crate::Mounts`], #443):
+    ///
+    /// - top rows with no header: each [`Place::Top`] mount (Inbox,
+    ///   Calendar, Projects; its containers nest under it), then the
+    ///   pinned shortcuts;
+    /// - Recent Files/;
+    /// - Vaults/: every vault's top-level folders in one flat list, by
+    ///   name (or as a person ordered them), each opening to its tree;
+    /// - Assets/: the [`Place::Assets`] mounts' containers, flat;
+    /// - Tags/ (the "Tags" row, Untagged last), then the Properties.
+    fn mounted_rows(&self) -> Vec<NavRow> {
+        let opts = self.tree_options();
+        let expanded = &self.expanded;
+        let mut rows = vec![NavRow {
+            key: "top-spacer".to_owned(),
+            level: 0,
+            kind: NavRowKind::TopSpacer,
+        }];
+        let mounts = self.index.mounts();
+        for m in mounts.iter().filter(|m| m.place == Place::Top) {
+            let Some(folder) = self.index.folder(&m.id) else {
+                continue;
+            };
+            let nests = m.nests && !folder.folders.is_empty();
+            let open = nests && expanded.contains(&m.id);
+            rows.push(NavRow {
+                key: format!("folder:{}", m.id),
+                level: 0,
+                kind: NavRowKind::Folder {
+                    path: m.id.clone(),
+                    name: m.title.clone(),
+                    has_children: nests,
+                    expanded: open,
+                    count: crate::NoteCount {
+                        current: m.count.unwrap_or(0),
+                        descendants: 0,
+                    },
+                },
+            });
+            if open {
+                for child in tree::ordered_children(&self.index, &m.id, &opts) {
+                    rows.extend(tree::subtree(&self.index, &child, 1, expanded, &opts));
+                }
+            }
+        }
+        // The shortcuts, in the same block, and the recent files under
+        // their header.
+        for r in self.top_rows(true) {
+            match &r.kind {
+                NavRowKind::Section { id, .. } if id == SHORTCUTS => {}
+                NavRowKind::Section {
+                    id,
+                    expanded,
+                    count,
+                    ..
+                } if id == RECENT => rows.push(section(RECENT, "Recent Files", *expanded, *count)),
+                _ => rows.push(r),
+            }
+        }
+        let folded = |id: &str| self.sections_folded.contains(id);
+        let flat = |place: Place| -> Vec<String> {
+            let mut tops: Vec<String> = mounts
+                .iter()
+                .filter(|m| m.place == place)
+                .flat_map(|m| tree::ordered_children(&self.index, &m.id, &opts))
+                .collect();
+            tops.sort_by(|a, b| {
+                tree::natural_cmp(self.index.folder_name(a), self.index.folder_name(b))
+            });
+            if opts.descending {
+                tops.reverse();
+            }
+            let key = place_order_key(place);
+            match self.child_order.get(key) {
+                Some(order) => tree::hand_ordered(tops, Some(order)),
+                None => tops,
+            }
+        };
+        for (place, id, name) in [
+            (Place::Vaults, tree::VAULTS, "Vaults"),
+            (Place::Assets, tree::ASSETS, "Assets"),
+        ] {
+            if !mounts.iter().any(|m| m.place == place) {
+                continue;
+            }
+            let tops = flat(place);
+            rows.push(section(id, name, !folded(id), tops.len()));
+            if !folded(id) {
+                for top in tops {
+                    rows.extend(tree::subtree(&self.index, &top, 0, expanded, &opts));
+                }
+            }
+        }
+        let below = self.settings.include_descendants;
+        if self.settings.tag_tree {
+            rows.extend(tree::tag_rows(
+                &self.tag_tree,
+                &self.expanded_tags,
+                &TagRowOptions {
+                    // Tags/ is the "Tags" row, always.
+                    all_row: true,
+                    untagged: self.settings.show_untagged,
+                    sort: self.settings.tag_sort,
+                    below,
+                    order: &self.tag_order,
+                    child_order: &self.tag_child_order,
+                },
+            ));
+        }
+        if self.settings.property_tree {
+            rows.extend(tree::property_rows(
+                &self.property_tree,
+                &self.expanded_props,
+                self.settings.property_sort,
+                below,
+                &self.property_order,
+                &self.property_value_order,
+                self.settings.properties_row,
+            ));
+        }
+        rows.push(NavRow {
+            key: "bottom-spacer".to_owned(),
+            level: 0,
+            kind: NavRowKind::BottomSpacer,
+        });
+        rows
+    }
+
+    /// The org badge a folder row shows: a vault's top-level folder's (a
+    /// row of Vaults/) or an assets mount's container's, with several
+    /// sources.
+    #[must_use]
+    pub fn badge(&self, path: &str) -> Option<&crate::OrgBadge> {
+        let m = self.index.mount_of(path)?;
+        let (_, rest) = crate::mounts::split(path)?;
+        let top = !rest.is_empty() && !rest.contains('/');
+        (top && matches!(m.place, Place::Vaults | Place::Assets))
+            .then_some(m.org.as_ref())
+            .flatten()
+    }
+
+    /// A top row's icon: its mount's (a provider's manifest `icon`), when
+    /// `path` is a mount drawn as a row of its own.
+    #[must_use]
+    pub fn mount_icon(&self, path: &str) -> Option<crate::Icon> {
+        let m = self.index.mounts().iter().find(|m| m.id == path)?;
+        m.icon.as_deref().and_then(crate::Icon::parse)
+    }
+
+    /// Whether the folder at `path` is a wiki: its folder note says
+    /// `wiki: true`.
+    #[must_use]
+    pub fn is_wiki(&self, path: &str) -> bool {
+        self.folder_note(path)
+            .and_then(|n| self.index.file(n))
+            .is_some_and(|f| {
+                f.properties.iter().any(|(k, v)| {
+                    k.eq_ignore_ascii_case("wiki")
+                        && match v {
+                            PropertyValue::Bool(b) => *b,
+                            PropertyValue::Text(t) => t.trim().eq_ignore_ascii_case("true"),
+                            _ => false,
+                        }
+                })
+            })
+    }
+
     /// The banner, shortcut and recent rows over the folders.
-    fn top_rows(&self) -> Vec<NavRow> {
+    fn top_rows(&self, shortcuts_open: bool) -> Vec<NavRow> {
         let p = self.profile();
         let mut rows = Vec::new();
         if let Some(src) = p.banner.as_deref().filter(|b| !b.trim().is_empty()) {
@@ -1902,10 +2106,10 @@ impl NavigatorState {
             rows.push(section(
                 SHORTCUTS,
                 "Shortcuts",
-                !self.shortcuts_folded,
+                shortcuts_open,
                 p.shortcuts.len(),
             ));
-            if !self.shortcuts_folded {
+            if shortcuts_open {
                 for (at, sc) in p.shortcuts.iter().enumerate() {
                     let missing = match sc.kind {
                         ShortcutKind::Note => self.index.file(&sc.target).is_none(),
@@ -3726,6 +3930,7 @@ impl NavigatorState {
             profiles: self.profiles.clone(),
             show_hidden: self.show_hidden,
             shortcuts_folded: self.shortcuts_folded,
+            sections_folded: self.sections_folded.iter().cloned().collect(),
             recent_folded: self.recent_folded,
             templates: self.templates.clone(),
             icons: self
@@ -3754,6 +3959,7 @@ impl NavigatorState {
         self.profiles = state.profiles.clone();
         self.show_hidden = state.show_hidden;
         self.shortcuts_folded = state.shortcuts_folded;
+        self.sections_folded = state.sections_folded.iter().cloned().collect();
         self.recent_folded = state.recent_folded;
         self.templates = state.templates.clone();
         self.icons = state
@@ -3850,6 +4056,15 @@ pub enum HideTarget {
 }
 
 /// A section's header row.
+/// Where a person's own order of a flat section's rows is kept, in
+/// `child_order` (a key no folder path can be).
+const fn place_order_key(place: Place) -> &'static str {
+    match place {
+        Place::Assets => "//assets",
+        _ => "//vaults",
+    }
+}
+
 fn section(id: &str, name: &str, expanded: bool, count: usize) -> NavRow {
     NavRow {
         key: format!("section:{id}"),

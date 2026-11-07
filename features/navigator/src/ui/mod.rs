@@ -1517,6 +1517,7 @@ fn ease_in_out(t: f64) -> f64 {
 const CSS: &str = "
 .nv-root .nv-row { cursor: default; }
 .nv-root .nv-row:hover { background: var(--nv-hover); }
+.nv-root .nv-has-note:hover { text-decoration: underline; }
 .nv-root .nv-row.nv-selected { background: var(--nv-selected-inactive); }
 .nv-root[data-focus-pane=navigation] .nv-nav .nv-row.nv-selected { background: var(--nv-selected); }
 .nv-root[data-focus-pane=files] .nv-list .nv-row.nv-selected { background: var(--nv-selected); }

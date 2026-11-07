@@ -217,6 +217,16 @@ pub fn files_of<'a>(
                 .collect()
         }
     };
+    // A tag or a property lists vaults' notes: a provider's items (a task
+    // as a row of the Queue) are the same notes again, or none (#443).
+    let files: Vec<&NoteFile> = if matches!(target, NavTarget::Folder(_)) {
+        files
+    } else {
+        files
+            .into_iter()
+            .filter(|f| index.in_vault(&f.path))
+            .collect()
+    };
     let pinned = |p: &str| pins.get(p).is_some_and(|w| w.folder || w.tag);
     files
         .into_iter()

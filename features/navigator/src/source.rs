@@ -344,6 +344,14 @@ pub trait NavigatorSource: Send + Sync {
     fn browses_properties(&self) -> bool {
         true
     }
+
+    /// The sources it is made of, when it is several in one
+    /// ([`crate::Mounts`]): each under its own first path segment, drawn
+    /// in its place in the left list. None for one vault (the default),
+    /// which draws as a folder tree.
+    fn mounts(&self) -> Vec<crate::Mount> {
+        Vec::new()
+    }
     /// Calls `listener` with each change from now on, until the
     /// [`Subscription`] is dropped.
     fn subscribe(&self, listener: Listener) -> Subscription;
