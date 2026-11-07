@@ -108,8 +108,72 @@ window. `ARCHITECT_FILES_AGENT` overrides the address. The unit's
 - `apps/desktop/tests/drive.rs`: the real binary mounts; `kill -9` leaves
   no mount; a stale mount is cleared by the next start; SIGTERM unmounts.
 
+## macOS
+
+On a Mac the drive is meant to be a **File Provider**, the way Dropbox and
+Google Drive work: it shows in Finder's sidebar under Locations, and lives
+at `~/Library/CloudStorage/Architect-<domain>`. Until that ships:
+
+- `architect-files` builds on macOS with fuser's `macos-no-mount`, so
+  everything compiles without macFUSE.
+- `drive::mount` says why it can't mount.
+- The agent, its launchd install, sync and the WebDAV face all work, and
+  Finder can mount WebDAV (Go → Connect to Server,
+  `http://127.0.0.1:18471/dav/`).
+
+**FUSE on a Mac in the meantime.** macFUSE or FUSE-T has to be installed
+first. Both install as packages that need an admin password. macFUSE also
+needs its kernel extension approved in System Settings → Privacy & Security
+(then a restart); FUSE-T doesn't, because it runs over a local NFS server.
+After that, build fuser without `macos-no-mount` (it links the installed
+`libfuse`), and the same `DriveFs` mounts with `volname=Architect`.
+
+**What the File Provider needs:**
+
+- **Its shape.** An `NSFileProviderReplicatedExtension` (macOS 11+), as an
+  app extension (`.appex`, extension point `com.apple.fileprovider-nonui`)
+  inside an `Architect.app` bundle. The app registers its domain with
+  `NSFileProviderManager.add(NSFileProviderDomain(identifier: "architect",
+  displayName: "Architect"))`.
+- **Talking to the agent.** The extension is Swift and talks to the agent
+  over its HTTP face on `127.0.0.1:18471`; none of the Rust moves into the
+  extension:
+  - enumerating calls `FILES_ROOTS` and `FILES_BROWSE`;
+  - fetching contents is `GET /dav/…`, which streams from a peer while the
+    bytes arrive;
+  - create and modify are `PUT /dav/…`, delete is `DELETE`, rename is
+    `MOVE`;
+  - Finder's "Keep Downloaded" (`contentPolicy`,
+    `.downloadEagerlyAndKeepDownloaded`) maps to `FILES_PIN`, "Remove
+    Download" to `FILES_UNPIN`;
+  - changes reach Finder through `signalEnumerator` when the manifests
+    change.
+- **Entitlements.**
+  - Both bundles: an App Group shared by the app and the extension
+    (`com.apple.security.application-groups`,
+    `group.<TEAMID>.com.fasttrackstudios.architect`).
+  - The extension: the App Sandbox (`com.apple.security.app-sandbox`) and
+    network client (`com.apple.security.network.client`), to reach the
+    agent on loopback.
+- **Signing.** Two App IDs (the app, and the extension under it), both with
+  the App Group capability, and a provisioning profile for each.
+  - **Development:** an Apple Development identity (airlock has one, team
+    `T79FBHC959`) with profiles made by `xcodebuild
+    -allowProvisioningUpdates`. That needs Xcode signed in to the team, or
+    an App Store Connect API key (key id, issuer id, `.p8`) on the build
+    machine.
+  - **Shipping outside the App Store:** a Developer ID Application
+    certificate, and notarization (`notarytool` with the same API key).
+- **From the team before it can be built:**
+  - the team and bundle ids;
+  - Xcode signed in on the Mac that builds, or an App Store Connect API
+    key there;
+  - a Developer ID certificate, for distribution.
+
 ## Status
 
-Linux works. macOS: the same code over macFUSE or FUSE-T, and a File
-Provider, are the next layer (`skills/architect/references/files.md`, the
-drive).
+- **Linux:** done and checked live (mount, on-demand open, pin by xattr,
+  edit through the mount, `rsync`, crash safety under systemd).
+- **macOS:** the agent, launchd and WebDAV work. The FUSE drive needs
+  macFUSE or FUSE-T installed and fuser rebuilt. The File Provider is
+  specified above and needs the signing setup.
