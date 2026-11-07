@@ -332,6 +332,44 @@ impl Capturer {
         serde_json::from_slice(&out).map_err(|e| format!("{id} answered {e}"))
     }
 
+    /// Runs action `id` with `args` as `caller`: what the composer reads
+    /// beyond capture (`TAGS_LIST`, `PROJECTS_LIST`) and does beside it
+    /// (`TIME_START`, `PROJECTS_CREATE`, `TASKS_CREATE`).
+    ///
+    /// # Errors
+    ///
+    /// The app is closing, no such action, or it failed.
+    pub async fn call(
+        &self,
+        caller: &ActionCaller,
+        id: &str,
+        args: Value,
+    ) -> Result<Value, String> {
+        self.run(caller, id, args).await
+    }
+
+    /// Whether action `id` is on the list (an extension's, while loaded).
+    #[must_use]
+    pub fn has(&self, id: &str) -> bool {
+        self.list.upgrade().is_some_and(|l| l.info(id).is_some())
+    }
+
+    /// What the composer offers to pick from: the vault's people,
+    /// projects, tags and contexts ([`crate::vocabulary`]), each from
+    /// whichever action knows it, while it is there.
+    pub async fn vocabulary(&self, caller: &ActionCaller) -> crate::vocabulary::Vocabulary {
+        let mut answers = Vec::new();
+        for (id, args) in crate::vocabulary::SOURCES {
+            if self.has(id) {
+                let args: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
+                if let Ok(v) = self.run(caller, id, args).await {
+                    answers.push((*id, v));
+                }
+            }
+        }
+        crate::vocabulary::Vocabulary::from_answers(&answers)
+    }
+
     fn changed(&self, detail: &str) {
         if let Some(list) = self.list.upgrade() {
             list.changed("inbox", detail);

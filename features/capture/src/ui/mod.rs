@@ -6,17 +6,37 @@
 //! deck or the floating window from a key, a button or an action.
 //! [`CaptureLayer`], mounted once over the window, draws what is open:
 //!
-//! - the [`Composer`] as a card over the window (filling it on a phone):
-//!   a title read as it is typed, the properties its tokens give as chips
-//!   under it (a chip's ✕ takes it away, the ⋯ row sets a date or a
-//!   priority by hand, which beats the text), what it becomes (the inbox,
-//!   or a target picked deliberately; the one it looks like outlined),
-//!   "Create more", ↩ or ⌘↩ to capture, Esc to close;
+//! - the [`Composer`], ported from Task (#445): a full-screen sheet on a
+//!   phone whose properties ride the keyboard as one scrolling bar, a
+//!   card with its chips in a row on a desk; a title read as it is typed
+//!   (`@` people and contexts, `#` labels, `[[Project]]`, dates, repeats,
+//!   `!priority` as live chips; a chip set by hand wins), a More menu, the
+//!   kind at the top a menu of `[[capture_targets]]`, "Create more", ⌘↩;
+//! - [`QuickAdd`], the inline bar with a live preview of what it parsed;
 //! - the [`InboxDeck`]: each capture once, its targets, Later, Discard;
 //! - the capture window: the composer alone in a small OS window of its
 //!   own, where the platform gives one (`architect_workspace::Popout::page`;
 //!   feature `native` raises it over every app and puts it where the
 //!   person is looking), else a card.
+
+mod chips;
+mod composer;
+mod picker;
+mod quick_add;
+mod style;
+
+pub use chips::{
+    AssigneeChip, Chip, Hotkey, LabelsChip, PRIORITIES, PersonDot, PriorityChip, PriorityIcon,
+    ProjectChip, STATUSES, StatusChip, StatusIcon, canonical_priority, canonical_status,
+    label_color,
+};
+pub use composer::{
+    CaptureKind, Composer, Hand, Trigger, drop_last_word, kind_from_text, offers_process_now,
+    project_title, resolved_kind, trigger_at_end,
+};
+pub use picker::{PickOption, PropertyPicker, filtered, match_rank};
+pub use quick_add::{QuickAdd, parsed_bits};
+pub use style::{CSS, CaptureCss, Look, use_look, wash};
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -25,10 +45,10 @@ use architect::action::{ActionCaller, ActionList};
 use architect_shell::{ShellTheme, try_use_shell};
 use dioxus::prelude::*;
 use futures_util::StreamExt as _;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
-use crate::actions::{self, AddArgs, Capturer, Config, Open, Opener};
-use crate::inbox::{self, Item};
+use crate::actions::{self, Capturer, Config, Open, Opener};
+use crate::inbox::Item;
 use crate::parse::keys as k;
 use crate::target::{self, Target};
 
@@ -154,7 +174,7 @@ fn theme() -> ShellTheme {
 }
 
 fn phone() -> bool {
-    try_use_shell().is_some_and(|s| s.form() == architect_shell::FormFactor::Phone)
+    style::phone()
 }
 
 /// What is open, over the window: mount it once at the root.
@@ -165,25 +185,39 @@ pub fn CaptureLayer(capture: CaptureUi) -> Element {
     let sheet = capture.sheet.read().clone();
     let window = capture.window.read().clone();
     let deck = *capture.deck.read();
-    let scrim = format!(
-        "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {}; \
-         background: {}; display: flex; align-items: flex-start; justify-content: center; \
-         padding-top: 12vh; box-sizing: border-box;",
-        architect_shell::layer::SHEET,
-        t.scrim
-    );
-    let card = if phone() {
+    // Task's composer frame: on a phone the sheet is the screen; on a desk
+    // a scrim, and a card 10vh down (`md:max-w-2xl md:max-h-[80vh]
+    // md:rounded-xl md:border md:shadow-2xl`). The card does not clip, so
+    // a chip's picker can drop past its foot.
+    let phone = phone();
+    let scrim = if phone {
         format!(
-            "position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; \
-             flex-direction: column; background: {}; font-family: {}; color: {};",
-            t.desk, t.font, t.ink
+            "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {}; display: flex; \
+             background: {};",
+            architect_shell::layer::SHEET,
+            t.sheet
         )
     } else {
         format!(
-            "width: 560px; max-width: 92%; max-height: 76%; display: flex; flex-direction: column; \
-             overflow: hidden; border-radius: 14px; background: {}; border: 1px solid {}; \
-             box-shadow: {}; font-family: {}; color: {};",
-            t.desk, t.rule, t.shadow_float, t.font, t.ink
+            "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {}; \
+             background: {}; display: flex; align-items: flex-start; justify-content: center; \
+             padding: 10vh 24px 24px; box-sizing: border-box;",
+            architect_shell::layer::SHEET,
+            t.scrim
+        )
+    };
+    let card = if phone {
+        format!(
+            "display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; width: 100%; \
+             background: {}; padding-bottom: {}px;",
+            t.sheet,
+            architect_shell::keyboard().height
+        )
+    } else {
+        format!(
+            "width: 672px; max-width: 100%; max-height: 80vh; display: flex; flex-direction: column; \
+             border-radius: 12px; background: {}; border: 1px solid {}; box-shadow: {};",
+            t.sheet, t.rule, t.shadow_float
         )
     };
     let mut c = capture;
@@ -282,7 +316,7 @@ fn WindowPage(capture: CaptureUi, text: String) -> Element {
     crate::shortcut::use_float_window();
     let ground = format!(
         "html, body {{ margin: 0; padding: 0; height: 100%; background: {}; }}",
-        t.desk
+        t.sheet
     );
     let mut c = capture;
     rsx! {
@@ -292,7 +326,7 @@ fn WindowPage(capture: CaptureUi, text: String) -> Element {
         }
         div {
             style: "position: relative; width: 100vw; height: 100vh; display: flex; flex-direction: column; \
-                    overflow: hidden; background: {t.desk}; color: {t.ink}; font-family: {t.font}; font-size: 13px; \
+                    overflow: hidden; background: {t.sheet}; color: {t.ink}; font-family: {t.font}; font-size: 13px; \
                     padding-top: 22px; box-sizing: border-box;",
             Composer {
                 capture,
@@ -346,7 +380,7 @@ fn day_label(ymd: &str) -> String {
 }
 
 /// An RRULE in words, as far as quick add writes them.
-fn repeat_label(rule: &str) -> String {
+pub(super) fn repeat_label(rule: &str) -> String {
     let part = |key: &str| {
         rule.split(';')
             .find_map(|p| p.strip_prefix(key).and_then(|v| v.strip_prefix('=')))
@@ -392,258 +426,9 @@ fn repeat_label(rule: &str) -> String {
     }
 }
 
-/// The hand-set presets the ⋯ row offers: (label, key, value).
-fn presets() -> Vec<(&'static str, &'static str, Value)> {
-    let day = |n: i64| json!(actions::day_after(n).format("%Y-%m-%d").to_string());
-    vec![
-        ("Today", k::DUE, day(0)),
-        ("Tomorrow", k::DUE, day(1)),
-        ("Next week", k::DUE, day(7)),
-        ("No date", k::DUE, Value::Null),
-        ("Low", k::PRIORITY, json!("low")),
-        ("High", k::PRIORITY, json!("high")),
-        ("Critical", k::PRIORITY, json!("critical")),
-    ]
-}
-
 /// A JSON object as an action's facet value.
-fn facet_of(map: &Map<String, Value>) -> Option<facet_value::Value> {
+pub(super) fn facet_of(map: &Map<String, Value>) -> Option<facet_value::Value> {
     facet_json::from_str::<facet_value::Value>(&Value::Object(map.clone()).to_string()).ok()
-}
-
-/// The composer: a title read as it is typed, its chips, what it
-/// becomes, and Capture.
-#[component]
-pub fn Composer(
-    capture: CaptureUi,
-    text: String,
-    target: Option<String>,
-    /// `ui`, `window`: written as the capture's `source`.
-    source: &'static str,
-    on_close: EventHandler<()>,
-) -> Element {
-    let t = theme();
-    let mut title = use_signal(|| text.clone());
-    let mut body = use_signal(String::new);
-    let mut hand = use_signal(Map::<String, Value>::new);
-    let mut into = use_signal(|| target.clone());
-    let mut more = use_signal(|| false);
-    let mut extra = use_signal(|| false);
-    let mut busy = use_signal(|| false);
-    let mut said = use_signal(|| None::<String>);
-    let targets = use_resource(move || {
-        let cap = capture.capturer();
-        async move { cap.targets(&ActionCaller::app()).await }
-    });
-    let all: Vec<Target> = targets
-        .read()
-        .clone()
-        .unwrap_or_else(|| vec![Target::note()]);
-    let draft = Capturer::parse(&title.read(), &all);
-    let props = crate::parse::merge(draft.properties(), &hand.read());
-    let looks_task = inbox::suggests_task(&props) && all.iter().any(|t| t.id == "task");
-    let chips: Vec<(String, String)> = props
-        .iter()
-        .flat_map(|(key, v)| {
-            chip_label(key, v)
-                .into_iter()
-                .map(move |l| (key.clone(), l))
-        })
-        .collect();
-    let empty = title.read().trim().is_empty();
-    let mut go = move || {
-        if *busy.peek() {
-            return;
-        }
-        let line = title.peek().trim().to_owned();
-        if line.is_empty() {
-            return;
-        }
-        let rest = body.peek().trim().to_owned();
-        let text = if rest.is_empty() {
-            line
-        } else {
-            format!("{line}\n{rest}")
-        };
-        let properties = (!hand.peek().is_empty())
-            .then(|| facet_of(&hand.peek()))
-            .flatten();
-        let args = AddArgs {
-            text,
-            properties,
-            target: into.peek().clone(),
-            source: Some(source.to_owned()),
-        };
-        busy.set(true);
-        let cap = capture.capturer();
-        spawn(async move {
-            let out = cap.capture(&ActionCaller::app(), args).await;
-            busy.set(false);
-            match out {
-                Ok(v) => {
-                    capture.changed();
-                    let path = v.get("path").and_then(Value::as_str).unwrap_or_default();
-                    if *more.peek() {
-                        title.set(String::new());
-                        body.set(String::new());
-                        hand.set(Map::new());
-                        said.set(Some(format!("Captured to {path}")));
-                    } else {
-                        on_close.call(());
-                    }
-                }
-                Err(e) => said.set(Some(e)),
-            }
-        });
-    };
-    let field = format!(
-        "box-sizing: border-box; width: 100%; padding: 10px 12px; border-radius: 10px; \
-         border: 1px solid {}; background: {}; color: {}; font-family: {}; ",
-        t.rule, t.pill, t.ink, t.font
-    );
-    let pill = {
-        let t = t.clone();
-        move |on: bool, dashed: bool| {
-            format!(
-                "padding: 4px 10px; border-radius: 999px; font-size: 12px; cursor: pointer; \
-                 border: 1px {} {}; background: {}; color: {};",
-                if dashed { "dashed" } else { "solid" },
-                if on || dashed { &t.accent } else { &t.rule },
-                if on { &t.accent } else { &t.pill },
-                if on { &t.accent_ink } else { &t.ink },
-            )
-        }
-    };
-    let picked = into.read().clone();
-    let shown_extra = *extra.read();
-    let dim = if empty { "0.5" } else { "1" };
-    rsx! {
-        div {
-            style: "display: flex; flex-direction: column; gap: 10px; padding: 16px; flex: 1; min-height: 0;",
-            onkeydown: move |e: KeyboardEvent| {
-                if e.key() == Key::Named(NamedKey::Escape) {
-                    e.prevent_default();
-                    on_close.call(());
-                } else if e.key() == Key::Named(NamedKey::Enter) && e.modifiers().meta() {
-                    e.prevent_default();
-                    go();
-                }
-            },
-            div { style: "display: flex; align-items: baseline; justify-content: space-between;",
-                span { style: "font-size: 13px; font-weight: 600; color: {t.ink_2};", "Capture" }
-                span { style: "font-size: 11px; color: {t.ink_3};",
-                    "[[Project]] tomorrow !high #tag @context every week"
-                }
-            }
-            input {
-                id: "capture-title",
-                r#type: "text",
-                autofocus: true,
-                value: "{title}",
-                style: "{field} font-size: 16px; height: 44px;",
-                oninput: move |e: FormEvent| title.set(e.value()),
-                onkeydown: move |e: KeyboardEvent| {
-                    if e.key() == Key::Named(NamedKey::Enter) && !e.modifiers().shift() {
-                        e.prevent_default();
-                        go();
-                    }
-                },
-            }
-            if !chips.is_empty() {
-                div { style: "display: flex; flex-wrap: wrap; gap: 6px;",
-                    for (i, (key, label)) in chips.into_iter().enumerate() {
-                        span {
-                            key: "{i}",
-                            style: "display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; \
-                                    border-radius: 6px; font-size: 12px; background: {t.accent_soft}; color: {t.ink};",
-                            "{label}"
-                            span {
-                                style: "cursor: pointer; color: {t.ink_3};",
-                                title: "Take it away",
-                                onclick: move |_| {
-                                    hand.write().insert(key.clone(), Value::Null);
-                                },
-                                "×"
-                            }
-                        }
-                    }
-                }
-            }
-            textarea {
-                id: "capture-body",
-                value: "{body}",
-                rows: 2,
-                style: "{field} font-size: 13px; resize: none;",
-                oninput: move |e: FormEvent| body.set(e.value()),
-            }
-            if shown_extra {
-                div { style: "display: flex; flex-wrap: wrap; gap: 6px;",
-                    for (label, key, value) in presets() {
-                        button {
-                            key: "{label}",
-                            style: "{pill(false, false)}",
-                            onclick: move |_| {
-                                hand.write().insert(key.to_owned(), value.clone());
-                            },
-                            "{label}"
-                        }
-                    }
-                }
-            }
-            div { style: "display: flex; flex-wrap: wrap; align-items: center; gap: 6px;",
-                span { style: "font-size: 12px; color: {t.ink_3}; margin-right: 2px;", "Into" }
-                button {
-                    style: "{pill(picked.is_none(), false)}",
-                    onclick: move |_| into.set(None),
-                    "Inbox"
-                }
-                for tg in all.iter().cloned() {
-                    button {
-                        key: "{tg.id}",
-                        id: "capture-into-{tg.id}",
-                        style: "{pill(picked.as_deref() == Some(tg.id.as_str()), picked.is_none() && looks_task && tg.id == \"task\")}",
-                        title: "{tg.description}",
-                        onclick: move |_| into.set(Some(tg.id.clone())),
-                        "{tg.name}"
-                    }
-                }
-                button {
-                    style: "{pill(shown_extra, false)}",
-                    title: "A date or a priority, by hand",
-                    onclick: move |_| extra.set(!shown_extra),
-                    "⋯"
-                }
-            }
-            if let Some(s) = said.read().clone() {
-                div { style: "font-size: 12px; color: {t.ink_2};", "{s}" }
-            }
-            div { style: "display: flex; align-items: center; gap: 10px; margin-top: auto;",
-                label { style: "display: flex; align-items: center; gap: 6px; font-size: 12px; color: {t.ink_2}; cursor: pointer;",
-                    input {
-                        r#type: "checkbox",
-                        checked: *more.read(),
-                        onchange: move |e: FormEvent| more.set(e.checked()),
-                    }
-                    "Create more"
-                }
-                span { style: "flex: 1;" }
-                span { style: "font-size: 11px; color: {t.ink_3};", "Return or ⌘ Return" }
-                button {
-                    style: "padding: 7px 14px; border-radius: 8px; border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; font-size: 13px; cursor: pointer;",
-                    onclick: move |_| on_close.call(()),
-                    "Cancel"
-                }
-                button {
-                    id: "capture-go",
-                    disabled: empty || *busy.read(),
-                    style: "padding: 7px 14px; border-radius: 8px; border: none; background: {t.accent}; color: {t.accent_ink}; \
-                            font-size: 13px; font-weight: 600; cursor: pointer; opacity: {dim};",
-                    onclick: move |_| go(),
-                    "Capture"
-                }
-            }
-        }
-    }
 }
 
 /// What the deck does with a capture.
@@ -847,6 +632,8 @@ pub fn InboxDeck(capture: CaptureUi, on_close: EventHandler<()>) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
