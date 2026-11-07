@@ -53,6 +53,7 @@ pub(super) fn engine(
             })
         }),
     )
+    .with_transcoder(architect_files::server::FfmpegTranscoder::new())
 }
 
 /// The agent on the node's HTTP side, when it listens on loopback only (a

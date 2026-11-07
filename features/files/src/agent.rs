@@ -8,7 +8,8 @@
 //! A root is named by its place (`codywright/Projects/Right Here`) or its
 //! manifest's id. The engine answers it (`crate::sync`).
 
-use crate::roots::{Checkpoint, FileEntry, FileVersion, RootStatus};
+use crate::rendition::Peaks;
+use crate::roots::{Asset, Checkpoint, FileEntry, FileVersion, Hit, RootStatus};
 
 /// Why the agent refused.
 #[architect::error]
@@ -26,7 +27,7 @@ pub enum AgentError {
 }
 
 pub mod files {
-    use super::{AgentError, Checkpoint, FileEntry, FileVersion, RootStatus};
+    use super::{AgentError, Asset, Checkpoint, FileEntry, FileVersion, Hit, Peaks, RootStatus};
 
     /// The agent: roots, pins, versions.
     #[architect::service(actions)]
@@ -57,6 +58,15 @@ pub mod files {
         /// The root's checkpoints: save points, imports, named ones.
         #[action(effect = read_only)]
         async fn checkpoints(&self, root: String) -> Result<Vec<Checkpoint>, AgentError>;
+        /// A library's assets: their properties, media and links.
+        #[action(effect = read_only)]
+        async fn assets(&self, root: String) -> Result<Vec<Asset>, AgentError>;
+        /// Projects, assets and files whose name or properties hold every word.
+        #[action(effect = read_only)]
+        async fn search(&self, query: String) -> Result<Vec<Hit>, AgentError>;
+        /// A sound file's waveform (`audiowaveform` JSON v2).
+        #[action(effect = read_only)]
+        async fn peaks(&self, root: String, path: String) -> Result<Peaks, AgentError>;
         /// Put the whole root back at a checkpoint; how many files changed.
         async fn restore_checkpoint(
             &self,

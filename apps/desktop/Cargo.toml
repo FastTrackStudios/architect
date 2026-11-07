@@ -65,8 +65,9 @@ tracing = { workspace = true }
 # app, so it may (boundaries.toml `host-dirs`).
 architect = { workspace = true, features = ["action-list", "host", "http", "iroh", "connect", "blob"] }
 # Projects and asset libraries (`src/node/files.rs`): the files engine,
-# held in place on the always-on node, pinned on a laptop.
-architect-files = { workspace = true, features = ["sync"] }
+# held in place on the always-on node, pinned on a laptop; `ffmpeg` makes
+# waveforms of anything but a WAV with the `ffmpeg` on PATH, when there is one.
+architect-files = { workspace = true, features = ["sync", "ffmpeg"] }
 architect-mcp = { workspace = true, features = ["http"] }
 architect-permissions = { workspace = true }
 # Who the node lets in (the account's devices), and its account pass.

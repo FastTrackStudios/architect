@@ -286,3 +286,91 @@ async fn two_offline_saves_keep_both_and_a_restore_brings_a_version_back() {
         "<REAPER_PROJECT 0.1\n>\n"
     );
 }
+
+fn wav(samples: &[i16]) -> Vec<u8> {
+    let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    let mut out = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+    for chunk in [
+        &16u32.to_le_bytes()[..],
+        &1u16.to_le_bytes(),
+        &1u16.to_le_bytes(),
+        &8000u32.to_le_bytes(),
+        &16000u32.to_le_bytes(),
+        &2u16.to_le_bytes(),
+        &16u16.to_le_bytes(),
+    ] {
+        out.extend_from_slice(chunk);
+    }
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+    out.extend(data);
+    out
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_library_s_assets_browse_search_and_draw_from_a_laptop_that_holds_none_of_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("starcommand");
+    let tracks = tree.join("days-to-praise/Assets/Tracks/Praise - Elevation Worship");
+    std::fs::create_dir_all(tracks.join("audio/wav")).unwrap();
+    std::fs::write(
+        tracks.join("Praise - Elevation Worship.md"),
+        "---\ntype: song\nartist: Elevation Worship\nkey: A\nstems:\n  - name: \"Click\"\n    path: \"audio/wav/01 - Click.wav\"\n---\n# Praise\n",
+    )
+    .unwrap();
+    let click: Vec<i16> = (0..16000)
+        .map(|i| if i % 800 < 40 { 20000 } else { 0 })
+        .collect();
+    std::fs::write(tracks.join("audio/wav/01 - Click.wav"), wav(&click)).unwrap();
+    let setlists = tree.join("days-to-praise/Assets/Setlists");
+    std::fs::create_dir_all(&setlists).unwrap();
+    std::fs::write(
+        setlists.join("Testing.md"),
+        "---\ntype: setlist\ntitle: Testing\n---\n[[Praise - Elevation Worship]]\n",
+    )
+    .unwrap();
+
+    let node = device("node", tmp.path(), tree.clone(), true, None);
+    let laptop = device(
+        "laptop",
+        tmp.path(),
+        tmp.path().join("laptop-files"),
+        false,
+        Some(&node.engine.store),
+    );
+    passes(&node).await;
+    exchange(&node, &laptop);
+    laptop.engine.pass_all().await;
+
+    let library = laptop
+        .engine
+        .resolve_root("days-to-praise/Assets/Tracks")
+        .unwrap();
+    let assets = laptop.engine.assets(library).await.unwrap();
+    assert_eq!(assets.len(), 1);
+    let song = &assets[0];
+    assert_eq!(song.properties["artist"], "Elevation Worship");
+    assert_eq!(song.media[0].name, "Click");
+    let setlist = laptop
+        .engine
+        .resolve_root("days-to-praise/Assets/Setlists")
+        .unwrap();
+    assert_eq!(
+        laptop.engine.assets(setlist).await.unwrap()[0].links,
+        vec!["Praise - Elevation Worship"]
+    );
+
+    let hits = laptop.engine.search("elevation song").await;
+    assert!(
+        hits.iter()
+            .any(|h| h.what == "song" && h.name == "Praise - Elevation Worship"),
+        "{hits:?}"
+    );
+
+    let peaks = laptop
+        .engine
+        .peaks(library, &song.media[0].path)
+        .await
+        .unwrap();
+    assert!(peaks.length > 0 && peaks.data.iter().copied().max() == Some(20000));
+}

@@ -11,6 +11,7 @@
 //! - [`engine`]: each pass, scan then apply, forks, checkpoints, pins.
 
 mod agent;
+pub mod assets;
 pub mod dav;
 pub mod engine;
 pub mod lane;
