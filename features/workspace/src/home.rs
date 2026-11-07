@@ -536,6 +536,92 @@ impl Home {
 /// [`register`] also makes the files a source of the list's problems
 /// (`ActionList::problems`, key `interface`), so `APP_STATUS` lists a
 /// broken layout or `keys.json` with everything else that is wrong.
+/// Writes `text` to `path` whole: a temporary file beside it, renamed over
+/// it, so a reader never sees half (the folders made first).
+fn write_whole(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// A [`crate::Store`] in one file: a deck session, the screensets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileStore(pub PathBuf);
+
+impl crate::Store for FileStore {
+    fn load(&self) -> Option<String> {
+        std::fs::read_to_string(&self.0).ok()
+    }
+
+    fn save(&self, json: &str) {
+        // A layout not kept is not lost work (`Store::save`).
+        let _ = write_whole(&self.0, json);
+    }
+}
+
+/// Where each deck's context keeps its layout ([`crate::ContextLayout`]),
+/// beside the context (`docs/content/architecture/interface-files.md`):
+///
+/// - a context with a folder of its own (a project's): its
+///   `.architect/deck.json`;
+/// - any other (a song note, an org root): under `root` (the vault's),
+///   `.architect/decks/<type>/<id>.json`.
+///
+/// A relative folder is under `root`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextFiles {
+    root: PathBuf,
+}
+
+impl ContextFiles {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    /// The file `context`'s layout is kept in.
+    #[must_use]
+    pub fn path_for(&self, context: &crate::DeckContext) -> PathBuf {
+        let file_name = |s: &str| -> String {
+            s.chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect()
+        };
+        context.folder.as_deref().map_or_else(
+            || {
+                self.root
+                    .join(".architect")
+                    .join("decks")
+                    .join(file_name(&context.kind))
+                    .join(format!("{}.json", file_name(&context.id)))
+            },
+            |folder| self.root.join(folder).join(".architect").join("deck.json"),
+        )
+    }
+}
+
+impl crate::store::ContextStore for ContextFiles {
+    fn load(&self, context: &crate::DeckContext) -> Option<String> {
+        std::fs::read_to_string(self.path_for(context)).ok()
+    }
+
+    fn save(&self, context: &crate::DeckContext, json: &str) {
+        let path = self.path_for(context);
+        if std::fs::read_to_string(&path).is_ok_and(|now| now == json) {
+            return;
+        }
+        let _ = write_whole(&path, json);
+    }
+}
+
 pub mod actions {
     use std::collections::BTreeMap;
 

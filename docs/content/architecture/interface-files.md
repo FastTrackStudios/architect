@@ -112,6 +112,36 @@ beats it (that slot's hand change is dropped).
 | `HOME_SLOT_SET` | `{slot, view?, hidden?, tokens?}` or `{slot, clear: true}`, into `.state/` |
 | `HOME_PROBLEMS` | what is wrong with the files (the same as `APP_STATUS`'s `layout` and `keymap` problems) |
 
+## A deck's layout, kept with its context
+
+A [deck](@/architecture/workspace.md) (one loaded context shown in a
+screenset) keeps what the person changed inside it with the context,
+not with the app, so the context opens again as it was left, on any
+device that has it (`features/workspace/src/home.rs` `ContextFiles`):
+
+| context | file |
+|---|---|
+| one with a folder of its own (a project) | `<folder>/.architect/deck.json` |
+| any other (a song note, an org root) | `<vault>/.architect/decks/<type>/<id>.json` |
+
+```json
+{
+  "context": { "kind": "project", "id": "Projects/Album", "title": "Album",
+               "folder": "Projects/Album" },
+  "screenset": "project",
+  "layouts": [ { "class": "Desk", "workspace": { "windows": [ … ] } } ]
+}
+```
+
+- `screenset`: the id of the screenset the deck was shown in.
+- `layouts`: its override per class of screen; none, the screenset as
+  saved.
+
+The app writes it when the deck's layout settles; a person or an agent
+may delete it (the deck goes back to its screenset). Which decks are
+open is the device's, not the context's: the session file in the app's
+folder (`store::save_session`).
+
 ## An agent changing the window
 
 1. `HOME_LAYOUTS` for the folder and what shows.
