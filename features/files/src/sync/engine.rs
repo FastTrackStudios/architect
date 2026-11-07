@@ -133,6 +133,8 @@ pub struct Engine {
     pub(super) served: Arc<std::sync::RwLock<std::collections::HashSet<Sha256>>>,
     /// The manifests as the peer lane lists them.
     pub(super) held: Arc<std::sync::RwLock<Vec<super::lane::HeldManifest>>>,
+    /// The drive's mount, and whether a peer answers: what `Files::drive` reports.
+    pub(super) drive: Arc<std::sync::RwLock<(Option<PathBuf>, bool)>>,
     /// What makes peaks of anything but a WAV.
     pub(super) transcoder: Option<Arc<dyn crate::server::Transcoder>>,
 }
@@ -152,7 +154,27 @@ impl Engine {
             served: Arc::default(),
             held: Arc::default(),
             transcoder: None,
+            drive: Arc::default(),
         }
+    }
+
+    /// Say where this device's drive is mounted (`None`: no drive).
+    pub fn set_drive(&self, at: Option<PathBuf>) {
+        self.drive.write().unwrap_or_else(PoisonError::into_inner).0 = at;
+    }
+
+    /// Say whether a peer answers the fetcher.
+    pub fn set_online(&self, online: bool) {
+        self.drive.write().unwrap_or_else(PoisonError::into_inner).1 = online;
+    }
+
+    /// The drive's mount and whether a peer answers.
+    #[must_use]
+    pub fn drive_info(&self) -> (Option<PathBuf>, bool) {
+        self.drive
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Make peaks of non-WAV media with `transcoder` (`FfmpegTranscoder`).

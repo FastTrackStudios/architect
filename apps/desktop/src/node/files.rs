@@ -81,6 +81,27 @@ pub(super) fn mount(host: EngineHost, engine: &Engine, bind: &str) -> EngineHost
     })
 }
 
+/// Mount the drive at `at` (Linux, macOS): every root `engine` knows, as a
+/// real folder; a guard process unmounts it if the node dies. A mount
+/// that fails is logged, and the node runs without it.
+#[cfg(unix)]
+pub(super) fn mount_drive(
+    engine: &Engine,
+    config: &Config,
+    at: &Path,
+) -> Option<architect_files::drive::Mounted> {
+    engine.set_drive(Some(at.to_owned()));
+    let tmp = config.data_dir.join("files").join("drive-tmp");
+    let handle = tokio::runtime::Handle::current();
+    match architect_files::drive::mount(engine.clone(), handle, at, tmp, true) {
+        Ok(mounted) => Some(mounted),
+        Err(error) => {
+            tracing::warn!(%error, "the drive is not mounted");
+            None
+        }
+    }
+}
+
 /// `BlobTransfer` on the node's peer lane, behind its gate.
 pub(super) fn more(engine: &Engine) -> More {
     More {
@@ -133,6 +154,7 @@ pub(super) async fn dial_forever(
                 .map(|c| -> Arc<dyn Remote> { Arc::new(VoxRemote::new(c.clone())) })
                 .collect();
             tracing::debug!(peers = remotes.len(), "files: blob peers");
+            engine.set_online(!remotes.is_empty());
             engine.fetcher.set_remotes(remotes);
         }
         tokio::time::sleep(DIAL_EVERY).await;

@@ -11,7 +11,7 @@ use super::manifest::{Tree, doc_id_for};
 use crate::agent::{AgentError, Files};
 use crate::id::VersionId;
 use crate::rendition::Peaks;
-use crate::roots::{Asset, Checkpoint, FileEntry, FileVersion, Hit, RootStatus};
+use crate::roots::{Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus};
 
 impl From<EngineError> for AgentError {
     fn from(e: EngineError) -> Self {
@@ -169,4 +169,39 @@ impl Files for Engine {
         let id = self.resolve_root(&root)?;
         Ok(Self::peaks(self, id, &path).await?)
     }
+
+    async fn drive(&self) -> Result<DriveStatus, AgentError> {
+        let (mount, online) = self.drive_info();
+        let roots = self.status().await;
+        Ok(DriveStatus {
+            mounted: mount.as_deref().is_some_and(mounted_at),
+            mount: mount.map(|m| m.display().to_string()),
+            syncing: u32::try_from(roots.iter().filter(|r| r.pinned && !r.synced).count())
+                .unwrap_or(u32::MAX),
+            offline: !online,
+            cache_bytes: dir_size(self.store.local.root()),
+        })
+    }
+}
+
+/// Whether a FUSE mount is at `at` (Linux: `/proc/self/mountinfo`).
+fn mounted_at(at: &std::path::Path) -> bool {
+    let target = at.to_string_lossy().replace(' ', "\\040");
+    std::fs::read_to_string("/proc/self/mountinfo").is_ok_and(|info| {
+        info.lines()
+            .any(|l| l.split(' ').nth(4) == Some(target.as_str()) && l.contains(" - fuse"))
+    })
+}
+
+fn dir_size(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .flatten()
+            .map(|e| match e.file_type() {
+                Ok(t) if t.is_dir() => dir_size(&e.path()),
+                Ok(_) => e.metadata().map_or(0, |m| m.len()),
+                Err(_) => 0,
+            })
+            .fold(0_u64, u64::saturating_add)
+    })
 }

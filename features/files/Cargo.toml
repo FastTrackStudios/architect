@@ -40,6 +40,10 @@ ffmpeg = ["server", "tokio/process"]
 # The files agent's service (`agent`): FILES_* and its HTTP face; the
 # window's client turns on `architect/http-client` itself.
 agent = ["vox", "architect/action-list"]
+# The drive (`drive`, Linux and macOS): every root a device knows mounted
+# as a real folder over FUSE (`fuser`, no libfuse needed; mounting goes
+# through the setuid `fusermount3`).
+drive = ["sync", "dep:fuser", "dep:libc"]
 sync = ["http", "agent", "dep:loro", "dep:tracing", "dep:tokio-util", "dep:httpdate", "dep:percent-encoding", "uuid/v5", "tokio/macros", "tokio/time"]
 
 [dependencies]
@@ -75,9 +79,13 @@ hmac = { version = "0.12", optional = true }
 rand = { workspace = true, optional = true }
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "rt", "sync"], optional = true }
 
+[target.'cfg(unix)'.dependencies]
+fuser = { version = "0.18", optional = true }
+libc = { version = "0.2", optional = true }
+
 [dev-dependencies]
 # The tests drive the server and the client: build them with both.
-architect-files = { path = ".", features = ["server", "http", "ffmpeg", "sync"] }
+architect-files = { path = ".", features = ["server", "http", "ffmpeg", "sync", "drive"] }
 architect = { workspace = true, features = ["vox", "local", "http", "http-client"] }
 architect-permissions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }

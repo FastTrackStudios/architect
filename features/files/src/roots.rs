@@ -176,3 +176,17 @@ pub struct Hit {
     pub what: String,
     pub detail: String,
 }
+
+/// A device's drive, for the app's status.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
+pub struct DriveStatus {
+    /// Where it is mounted, when the agent has a drive.
+    pub mount: Option<String>,
+    pub mounted: bool,
+    /// Pinned roots not at their heads yet.
+    pub syncing: u32,
+    /// No peer answers: an unpinned file that is not cached cannot open.
+    pub offline: bool,
+    /// Bytes in the cache (the blob store; pinned working copies aside).
+    pub cache_bytes: u64,
+}

@@ -13,7 +13,9 @@ use architect::action::ActionList;
 use architect_files::agent::AgentError;
 use architect_files::agent::files::{Files, FilesHttpClient, files_actions};
 use architect_files::rendition::Peaks;
-use architect_files::roots::{Asset, Checkpoint, FileEntry, FileVersion, Hit, RootStatus};
+use architect_files::roots::{
+    Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus,
+};
 
 /// Where the agent listens: `http://127.0.0.1:8090`.
 pub const AGENT: &str = "ARCHITECT_FILES_AGENT";
@@ -114,5 +116,9 @@ impl Files for Agent {
     ) -> Result<u32, AgentError> {
         let c = self.0.clone();
         on_runtime(async move { Files::restore_checkpoint(&c, root, checkpoint).await }).await
+    }
+    async fn drive(&self) -> Result<DriveStatus, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::drive(&c).await }).await
     }
 }
