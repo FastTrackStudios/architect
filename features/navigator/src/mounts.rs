@@ -45,6 +45,9 @@ pub enum Place {
     Top,
     /// Its containers, flat with the other assets mounts', under Assets/.
     Assets,
+    /// A folding section of its own, its title the header, its containers
+    /// under it.
+    Section,
     /// Not in the list (a provider turned off in it); its notes still open.
     Hidden,
 }
@@ -107,6 +110,9 @@ pub struct Mount {
     /// How a folder of it lists, unless a person set its own (the Queue:
     /// with what is below, grouped by folder).
     pub list: Option<crate::Appearance>,
+    /// Its folders' lists grouped by this property, its groups in this
+    /// order (a project's `section`: Songs, Notes, Sub-projects, Tasks).
+    pub group_by: Option<(String, Vec<String>)>,
 }
 
 impl Mount {
@@ -123,6 +129,7 @@ impl Mount {
             count: None,
             nests: true,
             list: None,
+            group_by: None,
         }
     }
 
@@ -139,6 +146,7 @@ impl Mount {
             count: None,
             nests: true,
             list: None,
+            group_by: None,
         }
     }
 
@@ -152,6 +160,13 @@ impl Mount {
     #[must_use]
     pub const fn flat(mut self) -> Self {
         self.nests = false;
+        self
+    }
+
+    /// Its folders' lists grouped by property `key`, `order` first.
+    #[must_use]
+    pub fn grouped_by(mut self, key: impl Into<String>, order: Vec<String>) -> Self {
+        self.group_by = Some((key.into(), order));
         self
     }
 
@@ -553,6 +568,18 @@ impl NavigatorSource for Mounts {
 
     fn mounts(&self) -> Vec<Mount> {
         self.mounts_now()
+    }
+
+    fn folder_orgs(&self) -> std::collections::BTreeMap<String, crate::source::FolderOrg> {
+        read(&self.inner.entries)
+            .iter()
+            .flat_map(|(m, s)| {
+                let id = m.id.clone();
+                s.folder_orgs()
+                    .into_iter()
+                    .map(move |(p, o)| (join(&id, &p), o))
+            })
+            .collect()
     }
 
     fn subscribe(&self, listener: Listener) -> Subscription {

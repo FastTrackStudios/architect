@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, BookOpen, CalendarDays, Check,
     ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Eye, EyeOff, FileText,
-    Folder, FolderOpen, ListTree, Pin, Rows3, Search, SquarePen, Tag, UserRound, Vault,
+    Folder, FolderOpen, ListTree, Pin, Rows3, Search, SquarePen, Tag, UserRound, Users, Vault,
 };
 
 use super::calendar::Calendar;
@@ -289,9 +289,10 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
             };
             // With several sources: a Vaults/ or Assets/ row's org, a
             // wiki's mark, a top row's own icon.
+            let shared = matches!(&row.kind, NavRowKind::Folder { path, .. } if s.is_shared(path));
             let (badge, wiki, icon) = match &row.kind {
                 NavRowKind::Folder { path, .. } => (
-                    s.badge(path).cloned(),
+                    s.badge(path),
                     s.is_wiki(path),
                     icon.or_else(|| s.mount_icon(path)),
                 ),
@@ -307,13 +308,14 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                 background,
                 badge,
                 wiki,
+                shared,
             ))
         })
         .collect();
     let icon_only = nav.state.peek().settings().color_icon_only;
     drop(s);
     rsx! {
-        for (row, top, h, note, colour, icon, background, badge, wiki) in rows {
+        for (row, top, h, note, colour, icon, background, badge, wiki, shared) in rows {
             if let NavRowKind::Banner { src } = row.kind.clone() {
                 tree_rows::BannerRow { key: "{row.key}", nav, src, top, height: h }
             } else if let NavRowKind::Section { id, name, expanded, count } = row.kind.clone() {
@@ -392,6 +394,7 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     note,
                     badge,
                     wiki,
+                    shared,
                     icon,
                     colour,
                     background,
@@ -487,6 +490,8 @@ fn FolderRow(
     badge: Option<crate::OrgBadge>,
     /// Its folder note says `wiki: true`.
     wiki: bool,
+    /// Shared into this org from another (a project in a Space).
+    shared: bool,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
     let root = path.is_empty();
@@ -586,6 +591,9 @@ fn FolderRow(
             }
             if wiki {
                 span { class: "nv-wiki", "aria-label": "Wiki", title: "Wiki", style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", BookOpen { size: 12 } }
+            }
+            if shared {
+                span { class: "nv-shared", "aria-label": "Shared", title: "Shared with this org through a Space", style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", Users { size: 12 } }
             }
             if let Some(b) = badge {
                 OrgMark { badge: b }

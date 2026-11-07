@@ -75,7 +75,7 @@ steps (
     {
         id file-menu
         text "Right-click a file: its entry runs told which file."
-        target @css"[data-file=\"Welcome.md\"]"
+        target @css"[data-file=\"@me/Welcome.md\"]"
         do @click{secondary true}
         hold 0.6
     }

@@ -15,8 +15,8 @@ use std::sync::Arc;
 use architect_extensions::contrib::NavigatorProviderDecl;
 use architect_navigator::ui::{NavigatorView, Open, use_navigator};
 use architect_navigator::{
-    MemorySource, Millis, NavigatorSource, NoteFile, OpenIn, ProviderRequest, ProviderSource,
-    SourceEvent, VaultSource, ViewState,
+    MemorySource, Millis, Mount, Mounts, NavigatorSource, NoteFile, OpenIn, Place, ProviderRequest,
+    ProviderSource, SourceEvent, VaultSource, ViewState,
 };
 use architect_navigator_api::{ActionProvider, NavigatorProvider};
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
@@ -754,18 +754,48 @@ fn project_folder(path: &str) -> &str {
     path.strip_suffix("/project.md").unwrap_or(path)
 }
 
-/// The lab's vault and what its navigator had open, for the run: at the
+/// The lab's vaults and what its navigator had open, for the run: at the
 /// root, as the sidebar that shows them comes and goes.
+///
+/// Org = vault (#443): the app's vault is its org's, and every other org
+/// vault this device holds (`crate::vaults::catalog`) opens beside it,
+/// all in one navigator ([`Mounts`]), with the providers' mounts.
 #[derive(Clone, Copy)]
 struct LabVault {
-    /// What the navigator reads: the vault on disk, else the in-memory one.
+    /// What the navigator reads: every vault and provider.
     /// `CopyValue`s, so the ribbon's handler stays `Copy`.
     source: CopyValue<Arc<dyn NavigatorSource>>,
+    mounts: CopyValue<Mounts>,
+    /// The app's vault's mount id (`@<org>`).
+    own: CopyValue<String>,
     /// The vault on disk (`crate::notes`), live, when the lab has one.
     disk: CopyValue<Option<VaultSource>>,
+    /// The other orgs' vaults, by mount id.
+    others: CopyValue<std::collections::BTreeMap<String, VaultSource>>,
     /// The in-memory vault a film's run shows instead.
     memory: CopyValue<Option<MemorySource>>,
     kept: Signal<Option<ViewState>>,
+}
+
+impl LabVault {
+    /// The vault a note pane's state is in, and its path there: the app's
+    /// for a plain path, another org's for `@<org>/<path>`.
+    fn vault_of(&self, state: &str) -> (Option<VaultSource>, String) {
+        match architect_navigator::mounts::split(state) {
+            Some((m, rest)) if *self.own.peek() == m => (self.disk.peek().clone(), rest.to_owned()),
+            Some((m, rest)) => (self.others.peek().get(m).cloned(), rest.to_owned()),
+            None => (self.disk.peek().clone(), state.to_owned()),
+        }
+    }
+}
+
+/// A vault on disk as the navigator reads it, watched.
+fn watched(open: vault::actions::OpenVault, name: String) -> VaultSource {
+    let source = VaultSource::named(open, name);
+    if let Err(e) = source.watch() {
+        tracing::warn!(error = %e, "lab.vault.watch_failed");
+    }
+    source
 }
 
 fn use_lab_vault() -> LabVault {
@@ -780,21 +810,43 @@ fn use_lab_vault() -> LabVault {
                 root.file_name()
                     .map_or_else(|| "Vault".to_owned(), |n| n.to_string_lossy().into_owned())
             };
-            let source = VaultSource::named(open, name);
-            if let Err(e) = source.watch() {
-                tracing::warn!(error = %e, "lab.vault.watch_failed");
-            }
-            source
+            watched(open, name)
         });
         let memory = disk.is_none().then(lab_vault);
-        let source: Arc<dyn NavigatorSource> = match (&disk, &memory) {
+        let catalog = crate::vaults::catalog();
+        let dir = disk.as_ref().map(|d| d.vault().root());
+        let own = crate::vaults::app_vault_org(&catalog, dir.as_deref());
+        let own_mount = Mount::vault(own.badge());
+        let own_source: Arc<dyn NavigatorSource> = match (&disk, &memory) {
             (Some(d), _) => Arc::new(d.clone()),
             (None, Some(m)) => Arc::new(m.clone()),
             (None, None) => Arc::new(MemorySource::new("Lab")),
         };
+        let mounts = Mounts::new("Navigator");
+        let mut others = std::collections::BTreeMap::new();
+        let mut vaults: Vec<(Mount, Arc<dyn NavigatorSource>)> =
+            vec![(own_mount.clone(), own_source)];
+        for v in catalog.iter().filter(|v| v.org != own.org) {
+            match vault::actions::OpenVault::open(&v.dir) {
+                Ok(open) => {
+                    let source = watched(open, v.name.clone());
+                    let m = Mount::vault(v.badge());
+                    others.insert(m.id.clone(), source.clone());
+                    vaults.push((m, Arc::new(source)));
+                }
+                Err(e) => tracing::warn!(org = %v.org, error = %e, "lab.vault.org_vault_unopened"),
+            }
+        }
+        for (m, s) in vaults {
+            mounts.mount(m, s);
+        }
+        let source: Arc<dyn NavigatorSource> = Arc::new(mounts.clone());
         LabVault {
             source: CopyValue::new_in_scope(source, ScopeId::ROOT),
+            mounts: CopyValue::new_in_scope(mounts, ScopeId::ROOT),
+            own: CopyValue::new_in_scope(own_mount.id, ScopeId::ROOT),
             disk: CopyValue::new_in_scope(disk, ScopeId::ROOT),
+            others: CopyValue::new_in_scope(others, ScopeId::ROOT),
             memory: CopyValue::new_in_scope(memory, ScopeId::ROOT),
             kept: Signal::new_in_scope(None, ScopeId::ROOT),
         }
@@ -1019,28 +1071,6 @@ fn path_of(pane: &str) -> Option<String> {
         .or_else(|| pane.strip_prefix("base:").map(str::to_owned))
 }
 
-/// What fills the navigator, the app's one left sidebar (#356): the vault,
-/// or the provider of the page on show (`[[navigator_providers]]`). At the
-/// root, so each provider's selection, open containers and widths last
-/// while the app runs.
-#[derive(Clone, Copy)]
-struct NavProviders {
-    /// The provider on show (`<extension>/<id>`); `None` is the vault.
-    current: Signal<Option<String>>,
-    /// Each provider's source and what its navigator had open.
-    kept: Signal<std::collections::HashMap<String, (ProviderSource, Option<ViewState>)>>,
-    /// Notes a provider opened: one of them on show keeps its provider.
-    opened: Signal<std::collections::HashSet<String>>,
-}
-
-fn use_nav_providers() -> NavProviders {
-    use_root_context(|| NavProviders {
-        current: Signal::new_in_scope(None, ScopeId::ROOT),
-        kept: Signal::new_in_scope(std::collections::HashMap::new(), ScopeId::ROOT),
-        opened: Signal::new_in_scope(std::collections::HashSet::new(), ScopeId::ROOT),
-    })
-}
-
 /// A loaded provider: its key (`<extension>/<id>`), its owner and its
 /// declaration.
 #[derive(Clone, PartialEq)]
@@ -1050,17 +1080,38 @@ struct LoadedProvider {
     decl: NavigatorProviderDecl,
 }
 
-/// The left dock's files: the navigator, over the vault or over the
-/// provider of the page on show. A page with a provider (one of its
-/// extension's `[[navigator_providers]] views`) switches it to that
-/// provider; a vault note on show switches it back, unless the provider
-/// opened it. While a provider shows, a row over it switches by hand.
-#[component]
-fn FilesView() -> Element {
-    let pane = use_pane();
-    let np = use_nav_providers();
-    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
-    let providers: Vec<LoadedProvider> = ui
+impl LoadedProvider {
+    /// Where the left list shows it (`[[navigator_providers]] section`).
+    fn place(&self) -> Place {
+        if !self.decl.shown() {
+            return Place::Hidden;
+        }
+        match self.decl.section.as_str() {
+            "top" => Place::Top,
+            "assets" => Place::Assets,
+            _ => Place::Section,
+        }
+    }
+
+    /// Its mount in the navigator: `~<extension>:<id>`.
+    fn mount(&self) -> Mount {
+        let mut m = Mount::provider(&self.key, self.decl.title.clone(), self.place());
+        if !self.decl.icon.is_empty() {
+            m = m.icon(self.decl.icon.clone());
+        }
+        if self.decl.nest == Some(false) {
+            m = m.flat();
+        }
+        m
+    }
+}
+
+/// The providers the loaded extensions declare, in the left list's order:
+/// by section, then `position`, then title.
+fn loaded_providers(
+    ui: Option<architect_extensions::interface::ExtensionUi>,
+) -> Vec<LoadedProvider> {
+    let mut out: Vec<LoadedProvider> = ui
         .map(|ui| {
             let _ = ui.revision();
             ui.host()
@@ -1075,93 +1126,49 @@ fn FilesView() -> Element {
                 .collect()
         })
         .unwrap_or_default();
-    // What the page on show asks for: `Some(Some(key))` a provider,
-    // `Some(None)` the vault, `None` nothing (the navigator stays).
-    let want: Option<Option<String>> = {
-        let workspace = pane.workspace();
-        let w = workspace.read();
-        w.current_document()
-            .and_then(|id| w.pane(id))
-            .and_then(|p| {
-                if p.view.0 == VAULT_NOTE {
-                    (!np.opened.read().contains(&p.state)).then_some(None)
-                } else {
-                    let (extension, view) = p.view.0.split_once('/')?;
-                    providers
-                        .iter()
-                        .find(|l| {
-                            l.extension == extension && l.decl.views.iter().any(|v| v == view)
-                        })
-                        .map(|l| Some(l.key.clone()))
-                }
-            })
-    };
-    use_effect(use_reactive!(|want| {
-        if let Some(want) = want {
-            let mut current = np.current;
-            if *current.peek() != want {
-                current.set(want);
-            }
-        }
-    }));
-    let current = (np.current)();
-    let shown = current
-        .as_ref()
-        .and_then(|k| providers.iter().find(|l| &l.key == k))
-        .cloned();
-    let Some(shown) = shown else {
-        return rsx! { VaultFiles {} };
-    };
-    rsx! {
-        div { style: "display: flex; flex-direction: column; height: 100%; min-height: 0;",
-            ProviderSwitch { providers, current: shown.key.clone() }
-            div { style: "flex: 1 1 0; min-height: 0; position: relative;",
-                // In a list, so its key holds: another provider is a new
-                // navigator (a key outside one does not remount it).
-                for l in std::iter::once(shown) {
-                    ProviderFiles {
-                        key: "{l.key}",
-                        id: l.key.clone(),
-                        prefix: l.decl.actions.clone(),
-                        title: l.decl.title,
-                    }
-                }
-            }
-        }
-    }
+    out.sort_by(|a, b| {
+        (a.decl.position.unwrap_or(i32::MAX), &a.decl.title)
+            .cmp(&(b.decl.position.unwrap_or(i32::MAX), &b.decl.title))
+    });
+    out
 }
 
-/// The row over a provider's navigator: the vault, and each provider.
+/// A provider in the navigator: its source (in its mount) and how it is
+/// asked to open an item, by mount id. At the root: the sidebar comes and
+/// goes, the feeds stay.
+#[derive(Clone, Copy)]
+struct Feeds(Signal<std::collections::HashMap<String, Feed>>);
+
+#[derive(Clone)]
+struct Feed {
+    source: ProviderSource,
+    provider: Arc<ActionProvider>,
+}
+
+fn use_feeds() -> Feeds {
+    use_root_context(|| {
+        Feeds(Signal::new_in_scope(
+            std::collections::HashMap::new(),
+            ScopeId::ROOT,
+        ))
+    })
+}
+
+/// The left dock's files: the navigator, one over every vault the person
+/// reaches and every provider (#443): the providers' rows (Inbox,
+/// Calendar, Projects) at the top, Recent Files/, Vaults/, Assets/,
+/// Tags/. A page with a provider (one of its extension's
+/// `[[navigator_providers]] views`) selects that provider's row.
 #[component]
-fn ProviderSwitch(providers: Vec<LoadedProvider>, current: String) -> Element {
-    let np = use_nav_providers();
-    let chip = |on: bool| {
-        format!(
-            "padding: 3px 10px; border-radius: 999px; font-size: 12px; cursor: pointer; border: 1px solid var(--border); \
-             background: {}; color: {};",
-            if on { "var(--accent)" } else { "transparent" },
-            if on {
-                "var(--accent-foreground)"
-            } else {
-                "var(--muted-foreground)"
-            },
-        )
-    };
+fn FilesView() -> Element {
+    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let providers = loaded_providers(ui);
     rsx! {
-        div { class: "navigator-providers", role: "tablist", "aria-label": "Sidebar",
-            style: "display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 8px; border-bottom: 1px solid var(--border);",
-            button { role: "tab", style: chip(false), "aria-selected": "false",
-                onclick: move |_| { let mut c = np.current; c.set(None); },
-                "Vault"
-            }
-            for l in providers {
-                button { key: "{l.key}", role: "tab", style: chip(l.key == current),
-                    "aria-selected": if l.key == current { "true" } else { "false" },
-                    onclick: { let k = l.key; move |_| { let mut c = np.current; c.set(Some(k.clone())); } },
-                    "{l.decl.title}"
-                }
-            }
+        // A provider left out of the list is not read at all.
+        for l in providers.iter().filter(|l| l.place() != Place::Hidden).cloned() {
+            ProviderFeed { key: "{l.key}", provider: l }
         }
+        VaultFiles { providers }
     }
 }
 
@@ -1184,17 +1191,33 @@ fn host_runner(host: architect_extensions::host::Host) -> architect_navigator_ap
     })
 }
 
-/// A provider's navigator: its snapshot read through its actions now and
-/// every few seconds, its items opened as it says, a drag and New sent
-/// back to it. Drawn by Navigator (the built-in extension) as the vault's
-/// is, so `NAVIGATOR_*` act on it.
+/// What a provider's snapshot says of its row: its count, its groups.
+fn describe(m: &mut Mount, snap: &architect_navigator_api::Snapshot) {
+    m.count = snap.count.and_then(|n| usize::try_from(n).ok());
+    if snap.groups {
+        m.nests = false;
+        m.list = Some(architect_navigator::Appearance {
+            descendants: Some(true),
+            grouping: Some(architect_navigator::Grouping::Folder),
+            ..architect_navigator::Appearance::default()
+        });
+    }
+    m.group_by = snap.group_by.clone().map(|k| (k, snap.group_order.clone()));
+}
+
+/// A provider's feed: its snapshot read through its actions now and every
+/// few seconds into its mount of the navigator; a drag and New sent back
+/// to it. Draws nothing.
 #[component]
-fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
+fn ProviderFeed(provider: LoadedProvider) -> Element {
     let pane = use_pane();
-    let np = use_nav_providers();
+    let lab = use_lab_vault();
+    let feeds = use_feeds();
     let ui = use_context::<architect_extensions::interface::ExtensionUi>();
-    let provider = use_hook({
-        let prefix = prefix;
+    let mount = use_hook(|| provider.mount());
+    let id = mount.id.clone();
+    let remote = use_hook({
+        let prefix = provider.decl.actions.clone();
         move || Arc::new(ActionProvider::new(prefix, host_runner(ui.host())))
     });
     let (requests, mut rx) = use_hook(|| {
@@ -1202,52 +1225,49 @@ fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
         (tx, CopyValue::new(Some(rx)))
     });
     let source = use_hook({
-        let id = id.clone();
+        let (id, title, remote) = (id.clone(), provider.decl.title, Arc::clone(&remote));
         move || {
-            let kept = np.kept.peek().get(&id).map(|(s, _)| s.clone());
+            let kept = feeds.0.peek().get(&id).map(|f| f.source.clone());
             let source = kept.unwrap_or_else(|| {
-                ProviderSource::with(architect_navigator_api::Snapshot::new(title.clone()))
+                ProviderSource::with(architect_navigator_api::Snapshot::new(title))
             });
-            // This mount's: a source kept from before sends here now.
-            source.on_request(move |r| {
+            // This feed's: a source kept from before sends here now.
+            let source = source.on_request(move |r| {
                 let _ = requests.unbounded_send(r);
-            })
-        }
-    });
-    let nav = use_navigator({
-        let source = source.clone();
-        move || {
-            let s: Arc<dyn NavigatorSource> = Arc::new(source);
-            s
-        }
-    });
-    use_hook({
-        let id = id.clone();
-        move || {
-            if let Some((_, Some(view))) = np.kept.peek().get(&id) {
-                nav.restore(view);
-            }
+            });
+            lab.mounts
+                .peek()
+                .mount(mount.clone(), Arc::new(source.clone()));
+            let mut feeds = feeds.0;
+            feeds.write().insert(
+                id,
+                Feed {
+                    source: source.clone(),
+                    provider: remote,
+                },
+            );
+            source
         }
     });
     use_drop({
-        let (id, source) = (id, source.clone());
-        move || {
-            let mut kept = np.kept;
-            kept.write().insert(id, (source, Some(nav.view_state())));
-        }
+        let id = id.clone();
+        move || lab.mounts.peek().unmount(&id)
     });
     // Read now, then every three seconds: an extension's data changes
     // under it (a task written elsewhere).
     let reload = {
-        let (provider, source) = (Arc::clone(&provider), source.clone());
+        let (remote, source, id) = (Arc::clone(&remote), source, id);
         move || {
-            let (provider, source) = (Arc::clone(&provider), source.clone());
+            let (remote, source, id) = (Arc::clone(&remote), source.clone(), id.clone());
             async move {
-                match provider.snapshot().await {
+                match remote.snapshot().await {
                     Ok(snap) => {
+                        lab.mounts.peek().describe(&id, |m| describe(m, &snap));
                         source.load(snap);
                     }
-                    Err(e) => nav.say(format!("{} could not be read: {e}", source.name())),
+                    Err(e) => {
+                        tracing::warn!(provider = %id, error = %e, "lab.navigator.provider_unread");
+                    }
                 }
             }
         }
@@ -1264,67 +1284,13 @@ fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
             }
         }
     });
-    let workspace = pane.workspace();
-    let disk = use_lab_vault().disk;
-    // Opens what the provider says an item opens.
-    let decks = architect_workspace::try_use_decks();
-    let follow = move |open: architect_navigator_api::Open, target: Target, new_deck: bool| {
-        use architect_navigator_api::Open as O;
-        match open {
-            O::Nothing => {}
-            // A song, a project: loaded onto the deck on show, or a new one.
-            O::Context {
-                context_type,
-                id,
-                title,
-                folder,
-            } => {
-                let mut context = architect_workspace::DeckContext::new(context_type, id, title);
-                context.folder = folder;
-                let how = if new_deck {
-                    architect_workspace::Load::NewDeck
-                } else {
-                    architect_workspace::Load::Here
-                };
-                if let Some(decks) = decks {
-                    crate::decks::load(&decks, workspace, context, how);
-                }
-            }
-            O::File { path } => {
-                np.opened.write_unchecked().insert(path.clone());
-                if disk.peek().is_some() {
-                    show_vault_note(workspace, &path, target);
-                } else {
-                    let _ = ui.open_path(&path);
-                }
-            }
-            O::View {
-                extension,
-                view,
-                state,
-            } => {
-                let list = ui.host().list().clone();
-                let args =
-                    serde_json::json!({ "extension": extension, "view": view, "state": state });
-                spawn(async move {
-                    let _ = list
-                        .run_json_async("EXT_VIEW_OPEN", args.to_string().as_bytes())
-                        .await;
-                });
-            }
-            O::Action { id, args } => {
-                let list = ui.host().list().clone();
-                spawn(async move {
-                    let _ = list.run_json_async(&id, args.to_string().as_bytes()).await;
-                });
-            }
-        }
-    };
     // What the navigator asked of it (a drag, New): sent, then read again.
+    let workspace = pane.workspace();
+    let decks = architect_workspace::try_use_decks();
     use_future({
-        let (provider, reload) = (Arc::clone(&provider), reload);
+        let (remote, reload) = (Arc::clone(&remote), reload);
         move || {
-            let (provider, reload) = (Arc::clone(&provider), reload.clone());
+            let (remote, reload) = (Arc::clone(&remote), reload.clone());
             async move {
                 let Some(mut rx) = rx.write().take() else {
                     return;
@@ -1332,167 +1298,173 @@ fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
                 while let Some(r) = futures_util::StreamExt::next(&mut rx).await {
                     let done = match r {
                         ProviderRequest::Move { items, to } => {
-                            provider.move_items(items, to).await.map(|()| None)
+                            remote.move_items(items, to).await.map(|()| None)
                         }
                         ProviderRequest::Create { container, title } => {
-                            provider.create(container, title).await.map(Some)
+                            remote.create(container, title).await.map(Some)
                         }
                     };
                     match done {
-                        Ok(open) => {
-                            if let Some(open) = open {
-                                follow(open, Target::Tab, false);
-                            }
-                        }
-                        Err(e) => nav.say(e),
+                        Ok(Some(open)) => follow(
+                            open,
+                            &Opening {
+                                workspace,
+                                decks: decks.clone(),
+                                ui,
+                                lab,
+                                target: Target::Tab,
+                                new_deck: false,
+                            },
+                        ),
+                        Ok(None) => {}
+                        Err(e) => tracing::warn!(error = %e, "lab.navigator.provider_request"),
                     }
                     reload().await;
                 }
             }
         }
     });
-    let phone =
-        try_use_context::<Signal<Screen>>().is_some_and(|s| s().form() == FormFactor::Phone);
-    let shell = try_use_context::<Signal<architect_shell::Shell>>();
-    let sidebar_columns = use_memo(move || {
-        shell.and_then(|s| {
-            let s = s.read();
-            s.desk().then(|| s.sidebar_layout().columns())
-        })
-    });
-    let in_main = pane
-        .workspace()
-        .read()
-        .locate(&pane.id)
-        .is_some_and(|l| l.window == 0);
-    let columns = sidebar_columns().filter(|_| in_main);
-    // The note on show, lit, when it is one of the provider's items.
-    let open_now = {
-        let w = workspace.read();
-        w.current_document()
-            .and_then(|p| w.pane(p))
-            .filter(|p| p.view.0 == VAULT_NOTE)
-            .map(|p| p.state.clone())
-            .and_then(|path| source.path_of(&path))
-    };
-    use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
-    let on_open = EventHandler::new({
-        let (source, provider) = (source.clone(), Arc::clone(&provider));
-        move |o: Open| {
-            let Some(item) = source.item_at(&o.path) else {
-                return;
-            };
-            let target = match (o.how, o.browsing) {
-                (OpenIn::Split, _) => Target::Split(Side::Right),
-                (_, true) => Target::Here,
-                (OpenIn::Here | OpenIn::Tab | OpenIn::NewDeck, false) => Target::Tab,
-            };
-            let new_deck = o.how == OpenIn::NewDeck;
-            // The item says what it opens, else the provider is asked.
-            if let Some(open) = item.open {
-                follow(open, target, new_deck);
+    rsx! {}
+}
+
+/// Where and how an item opens.
+#[derive(Clone)]
+struct Opening {
+    workspace: Signal<Workspace>,
+    decks: Option<architect_workspace::DeckHandle>,
+    ui: architect_extensions::interface::ExtensionUi,
+    lab: LabVault,
+    target: Target,
+    new_deck: bool,
+}
+
+/// Opens what a provider says an item opens.
+fn follow(open: architect_navigator_api::Open, how: &Opening) {
+    use architect_navigator_api::Open as O;
+    let Opening {
+        workspace,
+        ref decks,
+        ref ui,
+        lab,
+        target,
+        new_deck,
+    } = *how;
+    match open {
+        O::Nothing => {}
+        // A song, a project: loaded onto the deck on show, or a new one.
+        O::Context {
+            context_type,
+            id,
+            title,
+            folder,
+        } => {
+            let mut context = architect_workspace::DeckContext::new(context_type, id, title);
+            context.folder = folder;
+            let how = if new_deck {
+                architect_workspace::Load::NewDeck
             } else {
-                let provider = Arc::clone(&provider);
-                spawn(async move {
-                    match provider.open(item.id).await {
-                        Ok(open) => follow(open, target, new_deck),
-                        Err(e) => nav.say(e),
-                    }
-                });
+                architect_workspace::Load::Here
+            };
+            if let Some(decks) = decks {
+                crate::decks::load(&decks, workspace, context, how);
             }
         }
-    });
-    // Its items that load as decks: a ⌘-click or a middle-click on one
-    // loads it onto a new deck.
-    {
-        let source = source.clone();
-        use_context_provider(move || {
-            architect_navigator::ui::DeckRows(std::rc::Rc::new(move |path: &str| {
-                source.item_at(path).is_some_and(|i| {
-                    matches!(i.open, Some(architect_navigator_api::Open::Context { .. }))
-                })
-            }))
-        });
-    }
-    let on_new_note = EventHandler::new({
-        let source = source;
-        move |folder: String| {
-            let path = if folder.is_empty() {
-                "Untitled.md".to_owned()
+        O::File { path } => {
+            if lab.disk.peek().is_some() {
+                show_vault_note(workspace, &path, target);
             } else {
-                format!("{folder}/Untitled.md")
-            };
-            if let Err(e) = source.write(&[architect_navigator::FileOp::CreateFile {
-                path,
-                text: String::new(),
-            }]) {
-                nav.say(e);
+                let _ = ui.open_path(&path);
             }
         }
-    });
-    let mut mount = use_context_provider(|| {
-        Signal::new(architect_navigator_extension::NavigatorMount {
-            navigator: nav,
-            on_open,
-            on_context_menu: None,
-            on_focus_editor: None,
-            phone,
-            columns,
-            on_new_note: Some(on_new_note),
-            // A periodic note is the vault's: asked here, the sidebar
-            // shows the vault, whose navigator makes or opens it.
-            on_vault: Some(EventHandler::new(move |()| {
-                let mut c = np.current;
-                c.set(None);
-            })),
-        })
-    });
-    if mount.peek().phone != phone || mount.peek().columns != columns {
-        let mut m = mount.write();
-        m.phone = phone;
-        m.columns = columns;
-    }
-    rsx! {
-        architect_extensions::interface::ExtensionView {
-            ui,
-            extension: architect_navigator_extension::ID.to_owned(),
-            view: "files".to_owned(),
-            bare: true,
+        O::View {
+            extension,
+            view,
+            state,
+        } => {
+            let list = ui.host().list().clone();
+            let args = serde_json::json!({ "extension": extension, "view": view, "state": state });
+            spawn(async move {
+                let _ = list
+                    .run_json_async("EXT_VIEW_OPEN", args.to_string().as_bytes())
+                    .await;
+            });
+        }
+        O::Action { id, args } => {
+            let list = ui.host().list().clone();
+            spawn(async move {
+                let _ = list.run_json_async(&id, args.to_string().as_bytes()).await;
+            });
         }
     }
 }
 
-/// The navigator over the lab's vault. A click opens a note here (one open
-/// already comes forward); the note on show is revealed; a right-click is
-/// the file's context menu, with what extensions add (`[[context]] target
-/// = "file"`).
+/// A note pane's state as the navigator's path: the app's vault's notes
+/// are kept by their vault path, another org's as `@<org>/<path>`.
+fn nav_path(own: &str, state: &str) -> String {
+    if architect_navigator::mounts::split(state).is_some() {
+        state.to_owned()
+    } else if state.is_empty() {
+        own.to_owned()
+    } else {
+        format!("{own}/{state}")
+    }
+}
+
+/// A view kept before the navigator held every vault: its folders, as
+/// the app's vault's.
+fn mounted_view(mut v: ViewState, own: &str) -> ViewState {
+    let fix = |p: &mut String| {
+        if architect_navigator::mounts::split(p).is_none() {
+            *p = nav_path(own, p);
+        }
+    };
+    if !v.expanded.iter().any(|p| p.starts_with('@')) {
+        v.expanded.iter_mut().for_each(fix);
+        v.expanded.push(String::new());
+        if let Some(f) = v.folder.as_mut() {
+            fix(f);
+        }
+    }
+    v
+}
+
+/// The navigator over every vault and provider. A click opens a note here
+/// (one open already comes forward); the note on show is revealed; a
+/// right-click is the file's context menu, with what extensions add
+/// (`[[context]] target = "file"`).
 #[component]
-fn VaultFiles() -> Element {
+fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
     let pane = use_pane();
-    // The dock is drawn by the shell, above the page: the vault and what
+    // The dock is drawn by the shell, above the page: the vaults and what
     // the navigator had open are the app's, kept at its root.
+    let lab = use_lab_vault();
     let LabVault {
         source, kept, disk, ..
-    } = use_lab_vault();
+    } = lab;
+    let own = lab.own.peek().clone();
+    let feeds = use_feeds();
     let nav = use_navigator(move || source.cloned());
-    use_hook(move || {
-        // What the navigator had open last run (its search, profiles,
-        // shortcuts and recent notes too), from the app's folder.
-        if kept.peek().is_none()
-            && disk.peek().is_some()
-            && let Some(v) = view_store().and_then(|s| s.load().ok())
-        {
-            let mut kept = kept;
-            kept.set(Some(v));
-        }
-        if let Some(v) = kept.peek().as_ref() {
-            nav.restore(v);
-        }
-        // The demo vault keeps its periodic notes in `Journal/Daily`,
-        // `Journal/Weekly` (ISO weeks), …: the calendar reads them there,
-        // while the periodic notes are still Notebook Navigator's defaults.
-        if disk.peek().is_some() {
-            nav.settings.update(demo_vault_periodic_notes);
+    use_hook({
+        let own = own.clone();
+        move || {
+            // What the navigator had open last run (its search, profiles,
+            // shortcuts and recent notes too), from the app's folder.
+            if kept.peek().is_none()
+                && disk.peek().is_some()
+                && let Some(v) = view_store().and_then(|s| s.load().ok())
+            {
+                let mut kept = kept;
+                kept.set(Some(mounted_view(v, &own)));
+            }
+            if let Some(v) = kept.peek().as_ref() {
+                nav.restore(v);
+            }
+            // The demo vault keeps its periodic notes in `Journal/Daily`,
+            // `Journal/Weekly` (ISO weeks), …: the calendar reads them there,
+            // while the periodic notes are still Notebook Navigator's defaults.
+            if disk.peek().is_some() {
+                nav.settings.update(demo_vault_periodic_notes);
+            }
         }
     });
     // Kept as it changes, every two seconds at most: an app that quits
@@ -1555,6 +1527,30 @@ fn VaultFiles() -> Element {
         }
         kept.set(Some(view));
     });
+    // A page with a provider selects its row: once each time it comes on
+    // show, so a click elsewhere holds.
+    let want: Option<String> = {
+        let workspace = pane.workspace();
+        let w = workspace.read();
+        w.current_document()
+            .and_then(|id| w.pane(id))
+            .and_then(|p| {
+                let (extension, view) = p.view.0.split_once('/')?;
+                providers
+                    .iter()
+                    .find(|l| {
+                        l.place() != Place::Hidden
+                            && l.extension == extension
+                            && l.decl.views.iter().any(|v| v == view)
+                    })
+                    .map(|l| l.mount().id)
+            })
+    };
+    use_effect(use_reactive!(|want| {
+        if let Some(id) = want {
+            nav.update(|s| s.select_folder(&id));
+        }
+    }));
     // A pop-out window has no screen of the lab's: a desk's.
     let phone =
         try_use_context::<Signal<Screen>>().is_some_and(|s| s().form() == FormFactor::Phone);
@@ -1565,8 +1561,8 @@ fn VaultFiles() -> Element {
         w.current_document().and_then(|p| {
             w.pane(p)
                 .filter(|p| p.view.0 == VAULT_NOTE)
-                .map(|p| p.state.clone())
-                .or_else(|| path_of(&p.0))
+                .map(|p| nav_path(&own, &p.state))
+                .or_else(|| path_of(&p.0).map(|p| nav_path(&own, &p)))
         })
     };
     // In the shell's sidebar on a desk, as many columns as it has. A memo
@@ -1588,20 +1584,87 @@ fn VaultFiles() -> Element {
     use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
     let open_pane = pane.clone();
     let menu_pane = pane;
-    // A project's folder (or its project.md) loads as a deck: a ⌘-click
-    // or a middle-click on one loads it onto a new deck.
+    // A project's folder (or its project.md) in the app's vault, or a
+    // provider's item that is a context, loads as a deck: a ⌘-click or a
+    // middle-click on one loads it onto a new deck.
     let decks = architect_workspace::try_use_decks();
-    use_context_provider(|| {
-        architect_navigator::ui::DeckRows(std::rc::Rc::new(|path: &str| {
-            crate::decks::project_context(project_folder(path)).is_some()
-        }))
-    });
-    let on_open = EventHandler::new(move |o: Open| {
-        if o.how == OpenIn::NewDeck {
-            if let (Some(decks), Some(context)) = (
-                decks,
-                crate::decks::project_context(project_folder(&o.path)),
-            ) {
+    {
+        let own = own.clone();
+        use_context_provider(move || {
+            architect_navigator::ui::DeckRows(std::rc::Rc::new(move |path: &str| {
+                match architect_navigator::mounts::split(path) {
+                    Some((m, rest)) if m == own => {
+                        crate::decks::project_context(project_folder(rest)).is_some()
+                    }
+                    Some((m, rest)) if m.starts_with('~') => {
+                        feeds.0.peek().get(m).is_some_and(|f| {
+                            f.source.item_at(rest).is_some_and(|i| {
+                                matches!(
+                                    i.open,
+                                    Some(architect_navigator_api::Open::Context { .. })
+                                )
+                            })
+                        })
+                    }
+                    _ => false,
+                }
+            }))
+        });
+    }
+    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let on_open = EventHandler::new({
+        let own = own.clone();
+        move |o: Open| {
+            let target = match (o.how, o.browsing) {
+                (OpenIn::Split, _) => Target::Split(Side::Right),
+                (_, true) => Target::Here,
+                (OpenIn::Here | OpenIn::Tab | OpenIn::NewDeck, false) => Target::Tab,
+            };
+            let new_deck = o.how == OpenIn::NewDeck;
+            let (mount, rest) =
+                architect_navigator::mounts::split(&o.path).unwrap_or(("", &o.path));
+            // A provider's item: as it says, else as the provider says.
+            if mount.starts_with('~') {
+                let (Some(ui), Some(feed)) = (ui, feeds.0.peek().get(mount).cloned()) else {
+                    return;
+                };
+                let Some(item) = feed.source.item_at(rest) else {
+                    return;
+                };
+                let how = Opening {
+                    workspace: open_pane.workspace(),
+                    decks: decks.clone(),
+                    ui,
+                    lab,
+                    target,
+                    new_deck,
+                };
+                if let Some(open) = item.open {
+                    follow(open, &how);
+                } else {
+                    spawn(async move {
+                        match feed.provider.open(item.id).await {
+                            Ok(open) => follow(open, &how),
+                            Err(e) => nav.say(e),
+                        }
+                    });
+                }
+                return;
+            }
+            let markdown = has_ext(rest, "md");
+            // Another org's note: opened from its own vault, without
+            // switching the app's.
+            if mount != own {
+                if markdown && disk.peek().is_some() {
+                    show_vault_note(open_pane.workspace(), &o.path, target);
+                }
+                return;
+            }
+            let path = rest.to_owned();
+            if new_deck
+                && let (Some(decks), Some(context)) =
+                    (decks, crate::decks::project_context(project_folder(&path)))
+            {
                 crate::decks::load(
                     &decks,
                     open_pane.workspace(),
@@ -1610,53 +1673,52 @@ fn VaultFiles() -> Element {
                 );
                 return;
             }
-        }
-        let markdown = std::path::Path::new(&o.path)
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-        let target = match (o.how, o.browsing) {
-            (OpenIn::Split, _) => Target::Split(Side::Right),
-            (_, true) => Target::Here,
-            (OpenIn::Here | OpenIn::Tab | OpenIn::NewDeck, false) => Target::Tab,
-        };
-        let base = std::path::Path::new(&o.path)
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("base"));
-        if base {
-            // A base: its pane (one per base), in the main area beside
-            // the note on show; open already, it comes forward.
-            let workspace = open_pane.workspace();
-            let id = architect_workspace::PaneId::new(architect_bases::actions::pane_id(&o.path));
-            let open = workspace.peek().pane(&id).is_some();
-            if open {
-                let mut workspace = workspace;
-                let _ = workspace.write().activate(&id);
-            } else {
-                open_in_main(workspace, base_pane(&o.path), target);
+            if has_ext(&path, "base") {
+                // A base: its pane (one per base), in the main area beside
+                // the note on show; open already, it comes forward.
+                let workspace = open_pane.workspace();
+                let id = architect_workspace::PaneId::new(architect_bases::actions::pane_id(&path));
+                let open = workspace.peek().pane(&id).is_some();
+                if open {
+                    let mut workspace = workspace;
+                    let _ = workspace.write().activate(&id);
+                } else {
+                    open_in_main(workspace, base_pane(&path), target);
+                }
+            } else if markdown && disk.peek().is_some() {
+                // Beside the note on show, not in the dock pressed.
+                show_vault_note(open_pane.workspace(), &path, target);
+            } else if let Some((id, title)) = note_of(&path).filter(|_| disk.peek().is_none()) {
+                // A click opens a tab in the group of the note on show; the
+                // arrow keys show each note in its place.
+                let mut workspace = open_pane.workspace();
+                let mut w = workspace.write();
+                if let Some(doc) = w.current_document().cloned() {
+                    let _ = w.activate(&doc);
+                }
+                let _ = w.open(note(&id, &title), target);
+            } else if let Some(ui) =
+                try_consume_context::<architect_extensions::interface::ExtensionUi>()
+            {
+                let _ = ui.open_path(&path);
             }
-        } else if markdown && disk.peek().is_some() {
-            // Beside the note on show, not in the dock pressed.
-            show_vault_note(open_pane.workspace(), &o.path, target);
-        } else if let Some((id, title)) = note_of(&o.path).filter(|_| disk.peek().is_none()) {
-            // A click opens a tab in the group of the note on show; the
-            // arrow keys show each note in its place.
-            let mut workspace = open_pane.workspace();
-            let mut w = workspace.write();
-            if let Some(doc) = w.current_document().cloned() {
-                let _ = w.activate(&doc);
-            }
-            let _ = w.open(note(&id, &title), target);
-        } else if let Some(ui) =
-            try_consume_context::<architect_extensions::interface::ExtensionUi>()
-        {
-            let _ = ui.open_path(&o.path);
         }
     });
-    let on_context_menu = EventHandler::new(move |(path, e): (String, MouseEvent)| {
-        menu_pane.context_menu("file", path, &e);
+    let on_context_menu = EventHandler::new({
+        let own = own;
+        move |(path, e): (String, MouseEvent)| {
+            // The app's vault's files by their vault path, as every
+            // `[[context]] target = "file"` takes them.
+            let path = match architect_navigator::mounts::split(&path) {
+                Some((m, rest)) if m == own => rest.to_owned(),
+                _ => path,
+            };
+            menu_pane.context_menu("file", path, &e);
+        }
     });
     // New note in the list's header is the navigator's own: from the
-    // folder's template, opened through `on_open` (#339).
+    // folder's template, opened through `on_open` (#339); in a provider's
+    // container, an item it makes.
     let on_new_note: Option<EventHandler<String>> = None;
     // Extensions' rows in the navigator's own menus (NN's MenusAPI): their
     // `[[context]]` on `navigator:folder`, `navigator:tag`,
@@ -1881,7 +1943,7 @@ fn VaultNoteView() -> Element {
     let pane = use_pane();
     let id = pane.id.0.clone();
     let path = pane.state();
-    if use_lab_vault().disk.peek().is_none() || path.is_empty() {
+    if use_lab_vault().vault_of(&path).0.is_none() || path.is_empty() {
         return rsx! { Stand { what: "No vault is open", next: "Open the lab on a folder of notes (just lab)." } };
     }
     // Keyed by the pane (in a list, where keys count: a lone root's key
@@ -1898,7 +1960,25 @@ fn VaultNoteView() -> Element {
 fn VaultNote(path: String) -> Element {
     let pane = use_pane();
     let t = use_shell().theme;
-    let disk = use_lab_vault().disk;
+    // The vault it is in (the app's, or another org's for `@<org>/…`),
+    // and its path there: its links resolve in that vault (#443).
+    let lab = use_lab_vault();
+    let (vault, path) = lab.vault_of(&path);
+    let disk = use_hook(|| CopyValue::new(vault));
+    let mount = use_hook(|| {
+        CopyValue::new(
+            architect_navigator::mounts::split(&pane.state())
+                .map(|(m, _)| m.to_owned())
+                .filter(|m| *m != *lab.own.peek()),
+        )
+    });
+    // A path in its vault as this app keeps a note pane's state.
+    let state_of = move |p: &str| {
+        mount
+            .peek()
+            .as_ref()
+            .map_or_else(|| p.to_owned(), |m| format!("{m}/{p}"))
+    };
     // The note's path now (a rename moves it).
     let mut at = use_signal(|| path.clone());
     use_effect(use_reactive!(|path| {
@@ -2004,7 +2084,7 @@ fn VaultNote(path: String) -> Element {
                     }
                     SourceEvent::FileRenamed { from, file } if from == here => {
                         at.set(file.path.clone());
-                        pane.set_state(file.path.clone());
+                        pane.set_state(state_of(&file.path));
                         pane.set_title(title_of(&file.path));
                     }
                     SourceEvent::FileDeleted(p) if p == here => gone.set(true),
@@ -2058,7 +2138,9 @@ fn VaultNote(path: String) -> Element {
             .map(crate::note_editor::NoteVault)
             .and_then(|v| v.file_path(&name));
         match path {
-            Some(path) if has_ext(&path, "md") => show_vault_note(workspace, &path, Target::Tab),
+            Some(path) if has_ext(&path, "md") => {
+                show_vault_note(workspace, &state_of(&path), Target::Tab);
+            }
             Some(path) if has_ext(&path, "base") => {
                 open_in_main(workspace, base_pane(&path), Target::Tab);
             }

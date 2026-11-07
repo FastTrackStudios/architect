@@ -191,6 +191,8 @@ title = "Projects"
 icon = "folder-kanban"
 views = ["list", "page"]
 actions = "PROJECTS_NAV"
+section = "top"
+position = 3
 
 [[views]]
 id = "list"

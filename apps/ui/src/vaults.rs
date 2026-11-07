@@ -37,6 +37,108 @@ pub fn remember(dir: &Path) -> std::io::Result<()> {
     std::fs::write(app.join(KEPT), kept.to_string())
 }
 
+/// One org's vault on this device (org = vault, #443): what the
+/// navigator's Vaults/ shows beside the app's own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrgVault {
+    /// The org's id (`codywright`): its mount is `@<org>`.
+    pub org: String,
+    /// The org's name, its badge's tooltip.
+    pub name: String,
+    /// Its badge's colour.
+    pub colour: String,
+    /// Its own icon (a Lucide name or an emoji), else its initial.
+    pub icon: Option<String>,
+    /// The vault's folder.
+    pub dir: PathBuf,
+}
+
+impl OrgVault {
+    /// Its badge in the navigator.
+    #[must_use]
+    pub fn badge(&self) -> architect_navigator::OrgBadge {
+        let mut b = architect_navigator::OrgBadge::new(&self.org, &self.name, &self.colour);
+        b.icon.clone_from(&self.icon);
+        b
+    }
+}
+
+/// The org vaults this device holds (#443).
+///
+/// `orgs` in `vaults.json`, and a run's own in the JSON file
+/// `ARCHITECT_ORG_VAULTS` names (a test session's scratch vaults), as
+/// `[{org, name, colour, icon, dir}]`. One of them may be the app's vault
+/// ([`app_vault_org`]); the rest open beside it. A folder that is not
+/// there is left out.
+#[must_use]
+pub fn catalog() -> Vec<OrgVault> {
+    let mut texts = Vec::new();
+    if let Some(app) = crate::app_dir()
+        && let Ok(t) = std::fs::read_to_string(app.join(KEPT))
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&t)
+        && let Some(orgs) = v.get("orgs")
+    {
+        texts.push(orgs.clone());
+    }
+    if let Some(path) = std::env::var_os("ARCHITECT_ORG_VAULTS")
+        && let Ok(t) = std::fs::read_to_string(path)
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&t)
+    {
+        texts.push(v);
+    }
+    let mut out: Vec<OrgVault> = Vec::new();
+    for list in texts {
+        for e in list.as_array().into_iter().flatten() {
+            let Some(v) = parse_entry(e) else { continue };
+            if v.dir.is_dir() && !out.iter().any(|o| o.org == v.org) {
+                out.push(v);
+            }
+        }
+    }
+    out
+}
+
+/// One `[{org, name, colour, icon, dir}]` entry.
+fn parse_entry(e: &serde_json::Value) -> Option<OrgVault> {
+    let text = |k: &str| {
+        e.get(k)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    let org = text("org").filter(|o| !o.trim().is_empty())?;
+    Some(OrgVault {
+        name: text("name").unwrap_or_else(|| org.clone()),
+        colour: text("colour")
+            .or_else(|| text("color"))
+            .unwrap_or_else(|| "#3f3f46".to_owned()),
+        icon: text("icon"),
+        dir: PathBuf::from(text("dir")?),
+        org,
+    })
+}
+
+/// The org the app's own vault (at `dir`) is: the catalog's entry for its
+/// folder, else the person's own org on this device.
+#[must_use]
+pub fn app_vault_org(catalog: &[OrgVault], dir: Option<&Path>) -> OrgVault {
+    let same = |a: &Path, b: &Path| {
+        a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+    };
+    if let Some(dir) = dir
+        && let Some(v) = catalog.iter().find(|v| same(&v.dir, dir))
+    {
+        return v.clone();
+    }
+    let me = architect_accounts::device_org();
+    OrgVault {
+        org: me.id.0,
+        name: me.name,
+        colour: me.color,
+        icon: None,
+        dir: dir.map(Path::to_path_buf).unwrap_or_default(),
+    }
+}
+
 /// The demo vault, written out to `<app dir>/Demo vault` when it is not
 /// there yet (an edit made to it stays; delete the folder for a fresh one).
 ///
@@ -123,6 +225,35 @@ mod tests {
         assert!(dir.join("Archive/Empty").is_dir(), "an empty folder");
         assert!(!dir.join(crate::notes::EMPTY_FOLDERS).exists());
         assert!(!super::write_demo(&dir).unwrap(), "an edited copy is kept");
+    }
+
+    #[test]
+    fn the_catalog_reads_each_org_vault_and_names_the_apps_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let list = serde_json::json!([
+            {"org": "codywright", "name": "Cody Wright", "colour": "#047857", "dir": a},
+            {"org": "fasttrackstudio", "name": "FastTrackStudio", "icon": "music", "dir": b},
+            {"org": "gone", "dir": tmp.path().join("nowhere")},
+        ]);
+        let file = tmp.path().join("orgs.json");
+        std::fs::write(&file, list.to_string()).unwrap();
+        let entries: Vec<super::OrgVault> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(super::parse_entry)
+            .filter(|v| v.dir.is_dir())
+            .collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].colour, "#3f3f46");
+        assert_eq!(entries[1].badge().icon.as_deref(), Some("music"));
+        let own = super::app_vault_org(&entries, Some(&b));
+        assert_eq!(own.org, "fasttrackstudio");
+        let none = super::app_vault_org(&entries, Some(tmp.path()));
+        assert_eq!(none.org, architect_accounts::DEVICE_ORG);
     }
 
     #[test]

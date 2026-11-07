@@ -294,6 +294,8 @@ title = "Calendar"
 icon = "calendar"
 views = ["calendar"]
 actions = "CALENDAR_NAV"
+section = "top"
+position = 2
 
 [[views]]
 id = "calendar"

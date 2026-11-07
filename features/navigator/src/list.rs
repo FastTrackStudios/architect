@@ -169,6 +169,10 @@ pub struct ListContext<'a> {
     /// The profile's hiding: the folders whose notes stay out of the lists
     /// above them.
     pub hidden: &'a Hidden,
+    /// The order property groups come in, when the place gives one (a
+    /// project's Songs, Notes, Sub-projects, Tasks); the rest after, by
+    /// name.
+    pub group_order: Option<&'a [String]>,
 }
 
 /// The notes of a folder, a tag or a property, as `rows` lists them:
@@ -385,7 +389,17 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
         Grouping::Property => {
             let property = s.group_property.trim();
             let mode = format!("property:{property}");
-            for g in property_groups(rest, |f| f.get(property)) {
+            let mut groups = property_groups(rest, |f| f.get(property));
+            if let Some(order) = cx.group_order {
+                let at = |label: &str| {
+                    order
+                        .iter()
+                        .position(|o| o.eq_ignore_ascii_case(label))
+                        .unwrap_or(usize::MAX)
+                };
+                groups.sort_by_key(|g| at(&g.label));
+            }
+            for g in groups {
                 let key = collapse_key(&scope, &mode, &g.id);
                 out.group(&key, &g.id, &g.label, false, &g.items);
             }

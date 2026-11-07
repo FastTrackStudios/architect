@@ -91,6 +91,13 @@ pub struct Node {
     pub colour: Option<String>,
     /// The containers inside it.
     pub children: Vec<Self>,
+    /// The org it is from (`codywright`), when the provider lists more
+    /// than one org's: the navigator marks its row with the org's badge
+    /// (an asset library, a project shared from another org).
+    pub org: Option<String>,
+    /// Shared into the person's org from another (a project in a Space):
+    /// its row says so.
+    pub shared: bool,
 }
 
 impl Node {
@@ -112,6 +119,20 @@ impl Node {
     #[must_use]
     pub fn colour(mut self, colour: impl Into<String>) -> Self {
         self.colour = Some(colour.into());
+        self
+    }
+
+    /// It is org `org`'s ([`Self::org`]).
+    #[must_use]
+    pub fn org(mut self, org: impl Into<String>) -> Self {
+        self.org = Some(org.into());
+        self
+    }
+
+    /// It is shared from another org ([`Self::shared`]).
+    #[must_use]
+    pub const fn shared(mut self) -> Self {
+        self.shared = true;
         self
     }
 
@@ -276,6 +297,17 @@ pub struct Snapshot {
     /// The nodes show in the order given (Today, Tomorrow, Later), not by
     /// name, until the person orders them by hand.
     pub ordered: bool,
+    /// A number on its row in the navigator's left list: what is still to
+    /// do (the Queue's captures to process).
+    pub count: Option<u32>,
+    /// Its nodes are the list's groups, not rows of the tree: its row
+    /// selected lists every item, under its node's heading, in the nodes'
+    /// order (the Queue's Inbox, Today, Upcoming, Waiting).
+    pub groups: bool,
+    /// Its lists grouped by this item property (`section`), its groups in
+    /// [`Self::group_order`] first.
+    pub group_by: Option<String>,
+    pub group_order: Vec<String>,
 }
 
 impl Snapshot {
@@ -303,6 +335,33 @@ impl Snapshot {
     #[must_use]
     pub const fn ordered(mut self) -> Self {
         self.ordered = true;
+        self
+    }
+
+    /// The number on its row ([`Self::count`]).
+    #[must_use]
+    pub const fn count(mut self, n: u32) -> Self {
+        self.count = Some(n);
+        self
+    }
+
+    /// Its nodes are the list's groups, in order ([`Self::groups`]).
+    #[must_use]
+    pub const fn grouped(mut self) -> Self {
+        self.groups = true;
+        self.ordered = true;
+        self
+    }
+
+    /// Its lists grouped by item property `key`, `order` first.
+    #[must_use]
+    pub fn group_by<S: Into<String>>(
+        mut self,
+        key: impl Into<String>,
+        order: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.group_by = Some(key.into());
+        self.group_order = order.into_iter().map(Into::into).collect();
         self
     }
 
@@ -520,6 +579,7 @@ mod tests {
                     ],
                     items,
                     ordered: false,
+                    ..Snapshot::default()
                 })
             })
         }
