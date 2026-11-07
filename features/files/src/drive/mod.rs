@@ -115,7 +115,12 @@ pub fn mount(
     };
     clear_stale(mountpoint)?;
     std::fs::create_dir_all(mountpoint).map_err(at)?;
-    let (uid, gid) = (current_uid(), current_gid());
+    // The files are the owner's of the mount point (made just now, or theirs).
+    let owner = std::fs::metadata(mountpoint).map_err(at)?;
+    let (uid, gid) = (
+        std::os::unix::fs::MetadataExt::uid(&owner),
+        std::os::unix::fs::MetadataExt::gid(&owner),
+    );
     let fs = DriveFs::new(engine, rt, tmp, uid, gid);
     let mut config = fuser::Config::default();
     config.mount_options = vec![
@@ -124,6 +129,12 @@ pub fn mount(
         fuser::MountOption::NoAtime,
         fuser::MountOption::DefaultPermissions,
     ];
+    // Finder shows the volume by this name (macFUSE / FUSE-T).
+    if cfg!(target_os = "macos") {
+        config
+            .mount_options
+            .push(fuser::MountOption::CUSTOM("volname=Architect".to_owned()));
+    }
     config.n_threads = Some(4);
     let session = fuser::spawn_mount(fs.clone(), mountpoint, &config).map_err(at)?;
     let guard = guard.then(|| spawn_guard(mountpoint)).flatten();
@@ -134,14 +145,6 @@ pub fn mount(
         guard,
         fs,
     })
-}
-
-fn current_uid() -> u32 {
-    std::fs::metadata("/proc/self").map_or(0, |m| std::os::unix::fs::MetadataExt::uid(&m))
-}
-
-fn current_gid() -> u32 {
-    std::fs::metadata("/proc/self").map_or(0, |m| std::os::unix::fs::MetadataExt::gid(&m))
 }
 
 /// Start `<this binary> drive-guard <mount>` with a pipe from this process
