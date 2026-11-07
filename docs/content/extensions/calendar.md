@@ -138,10 +138,21 @@ It also has:
 - **The `event` capture target.** Its day comes from capture's parser, and
   its time and length from the title (`quick.rs`: `1pm`, `2-3pm`, `for
   45m`) or from the `at:` and `for:` tokens.
-- **A navigator provider** (`nav.rs` `CalendarNav`). It lists Today,
-  Tomorrow, This week, Later, Repeating and Past, in that order
-  (`Snapshot::ordered`). Drop an event on Today or Tomorrow to move it
-  there.
+- **The navigator's Calendar section** (`nav.rs` `CalendarNav`, #444), as
+  Notebook Navigator draws a calendar. Under the Calendar row in the left
+  list, a month grid (`Snapshot::calendar`: each day's dots and its day
+  template's mark) and the periodic tree, Year → Quarter → Month → Week →
+  Day (`nav.rs` `tree`, `window`: last month to the month after next; a
+  week is the month its fourth day is in). A period selected lists its
+  days' events, tasks due or scheduled, tracked time, day plan and the
+  period's note, by day and by time (`snapshot_of`). A click on a day in
+  the grid selects it and opens its daily note; an event or a task dropped
+  on a day, in the tree or the grid, moves there (`move_items`). There is
+  no rail button: the section is the way in.
+- **Day plans** (`plan.rs`, #444): each day's plan from the Day Plans
+  extension's `architect.dayplan` `days`, when it is there (see
+  [Day Plans](@/extensions/day-plans.md)). `refresh_plans` reads them
+  outside `refresh`, as Day Plans reads the agenda for a rule's `#tag`.
 - **A settings section** (`calendar.*`).
 - **A tour** (`tours/calendar-tour.styx`).
 
@@ -220,5 +231,5 @@ address, a `webcal://` link (`extensions/calendar/src/ics.rs`,
 | `CALENDAR_SUBSCRIPTIONS`, `CALENDAR_UNSUBSCRIBE` | list them; remove one and its notes |
 
 Two-way CalDAV, where edits here go back to the server, is not built.
-- Day-plan templates (`task:features/scheduling/scheduling-proto/src/resolve.rs`)
-  are not ported.
+Day-plan templates are the Day Plans extension's
+([Day Plans](@/extensions/day-plans.md)).

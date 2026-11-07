@@ -233,6 +233,10 @@ pub fn day_json(d: &Day, tracked: &[(u16, u16)]) -> Value {
         "edited": d.edited,
         "past": d.past,
         "missing": d.missing,
+        "color": d
+            .template
+            .as_deref()
+            .and_then(|t| book().template(t).and_then(|t| t.color.clone())),
         "plan": d.edited.then(|| notes::plan_path(&folder, d.date)),
         "blocks": blocks,
     })

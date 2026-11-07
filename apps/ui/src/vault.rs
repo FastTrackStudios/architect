@@ -1207,6 +1207,16 @@ fn describe(m: &mut Mount, snap: &architect_navigator_api::Snapshot) {
         });
     }
     m.group_by = snap.group_by.clone().map(|k| (k, snap.group_order.clone()));
+    // A calendar (#444): a period lists what is in its days, by day, by
+    // time.
+    if snap.calendar.is_some() {
+        m.list = Some(architect_navigator::Appearance {
+            descendants: Some(true),
+            grouping: Some(architect_navigator::Grouping::Folder),
+            sort: Some(architect_navigator::SortOption::CreatedAsc),
+            ..architect_navigator::Appearance::default()
+        });
+    }
     // A place in its own groups (a project's contents) lists itself, not
     // what is below it (a sub-project's are its own).
     if m.group_by.is_some() {
@@ -1276,6 +1286,9 @@ fn ProviderFeed(provider: LoadedProvider) -> Element {
                     Ok(snap) => {
                         lab.mounts.peek().describe(&id, |m| describe(m, &snap));
                         source.load(snap);
+                        // Its month grid's days, each its node's folder.
+                        let grid = source.section_calendar(&id);
+                        lab.mounts.peek().describe(&id, |m| m.calendar = grid);
                     }
                     Err(e) => {
                         tracing::warn!(provider = %id, error = %e, "lab.navigator.provider_unread");

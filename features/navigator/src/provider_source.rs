@@ -256,6 +256,34 @@ impl ProviderSource {
             .map(|(_, n)| n.clone())
     }
 
+    /// Its snapshot's month grid (`Snapshot::calendar`) for the mount
+    /// `mount` it is under: each day with the folder its node is.
+    #[must_use]
+    pub fn section_calendar(&self, mount: &str) -> Option<crate::mounts::SectionCalendar> {
+        let map = self.map();
+        let days = map
+            .snapshot
+            .calendar
+            .as_ref()?
+            .days
+            .iter()
+            .filter_map(|(date, d)| {
+                let folder = map.folder_of.get(&d.node)?;
+                Some((
+                    date.parse().ok()?,
+                    crate::mounts::SectionDay {
+                        folder: format!("{mount}/{folder}"),
+                        count: d.count,
+                        label: d.label.clone(),
+                        colour: d.colour.clone(),
+                    },
+                ))
+            })
+            .collect();
+        drop(map);
+        Some(crate::mounts::SectionCalendar { days })
+    }
+
     /// The folder node `id` is drawn as.
     #[must_use]
     pub fn folder_of(&self, id: &str) -> Option<String> {

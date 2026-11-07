@@ -33,6 +33,8 @@ path = "extensions/calendar"
 [uses]
 "architect.tasks" = "^0.1"
 "architect.time" = "^0.1"
+# Day Plans: each day's plan drawn under its events (#444).
+"architect.dayplan" = "^0.1"
 
 # It reaches notes only through the app's actions: vault reads, writes
 # and deletes, base queries, opening its view, and the navigator's daily
@@ -267,14 +269,14 @@ effect = "read_only"
 [[actions]]
 id = "CALENDAR_NAV_SNAPSHOT"
 name = "Calendar: the navigator's tree"
-description = "Its navigator provider's snapshot (architect-navigator-api `Snapshot`): Today, Tomorrow, This week, Later, Repeating and Past, each event in the one it next falls in."
+description = "Its navigator provider's snapshot (architect-navigator-api `Snapshot`), the Calendar section: the periodic tree (Year, Quarter, Month, Week, Day) from last month to the month after next, each day's events, tasks due or scheduled, tracked time, day plan (with Day Plans) and the periods' notes, by time; and the month grid (`calendar`): each day's node, how many things are on it, its day template and colour."
 group = "Calendar"
 effect = "read_only"
 
 [[actions]]
 id = "CALENDAR_NAV_MOVE"
 name = "Calendar: move by dragging"
-description = "Events `items` (their paths) dropped on `to`: on today or tomorrow, each moves there, its time kept (a series' next occurrence alone)."
+description = "Events and tasks `items` (their item ids) dropped on day `to` (`d:YYYY-MM-DD`, a day of the tree or the grid): each moves there, its time kept (an occurrence of a series alone; a task by CALENDAR_MOVE_TASK)."
 group = "Calendar"
 effect = "mutating"
 params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
@@ -282,7 +284,7 @@ params = '{"type":"object","properties":{"items":{"type":"array","items":{"type"
 [[actions]]
 id = "CALENDAR_NAV_CREATE"
 name = "Calendar: new event in the sidebar"
-description = "An all-day event titled `title` on node `container`'s first day (today, tomorrow, …)."
+description = "An all-day event titled `title` on period `container`'s first day (a day, a week, a month)."
 group = "Calendar"
 effect = "mutating"
 params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'

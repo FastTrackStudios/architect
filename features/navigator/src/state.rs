@@ -306,6 +306,8 @@ pub struct NavigatorState {
     pub calendar_open: bool,
     /// The day the calendar is around; today when none.
     calendar_cursor: Option<NaiveDate>,
+    /// The month a section's grid shows (#444).
+    section_cursor: Option<NaiveDate>,
     /// The tag tree and the property browser, read from the vault (or the
     /// selection's notes, scoped).
     tag_tree: TagTree,
@@ -384,6 +386,7 @@ impl NavigatorState {
             periodic: PeriodicNotes::from_settings(&settings),
             calendar_open: false,
             calendar_cursor: None,
+            section_cursor: None,
             effective: settings.clone(),
             settings,
             expanded: std::iter::once(String::new()).collect(),
@@ -826,6 +829,7 @@ impl NavigatorState {
                 NavRowKind::TopSpacer => tree::TOP_SPACER,
                 NavRowKind::BottomSpacer => tree::BOTTOM_SPACER,
                 NavRowKind::Banner { .. } => tree::BANNER_HEIGHT,
+                NavRowKind::MonthGrid { .. } => tree::MONTH_GRID_HEIGHT,
                 NavRowKind::Folder { .. }
                 | NavRowKind::Tag { .. }
                 | NavRowKind::Property { .. }
@@ -2003,6 +2007,16 @@ impl NavigatorState {
                     },
                 },
             });
+            // Its month grid, always under its row; its tree below it.
+            if m.calendar.is_some() {
+                rows.push(NavRow {
+                    key: format!("grid:{}", m.id),
+                    level: 1,
+                    kind: NavRowKind::MonthGrid {
+                        mount: m.id.clone(),
+                    },
+                });
+            }
             if open {
                 for child in tree::ordered_children(&self.index, &m.id, &opts) {
                     rows.extend(tree::subtree(&self.index, &child, 1, expanded, &opts));
@@ -3854,8 +3868,80 @@ impl NavigatorState {
 
     /// Whether the calendar is drawn: on in the settings, and shown.
     #[must_use]
-    pub const fn calendar_visible(&self) -> bool {
-        self.settings.calendar && self.calendar_open
+    pub fn calendar_visible(&self) -> bool {
+        self.settings.calendar && self.calendar_open && self.section_calendar().is_none()
+    }
+
+    /// The mount with a month grid in the left list (the Calendar
+    /// section, #444), and its days: the calendar at the foot of a pane
+    /// gives way to it.
+    #[must_use]
+    pub fn section_calendar(&self) -> Option<(&str, &crate::mounts::SectionCalendar)> {
+        self.index
+            .mounts()
+            .iter()
+            .filter(|m| m.place == Place::Top)
+            .find_map(|m| Some((m.id.as_str(), m.calendar.as_ref()?)))
+    }
+
+    /// The month a section's grid shows: the one it was paged to, else
+    /// the selected day's, else today's.
+    #[must_use]
+    pub fn section_cursor(&self) -> NaiveDate {
+        self.section_cursor
+            .unwrap_or_else(|| self.selected_section_day().unwrap_or_else(|| self.today()))
+    }
+
+    /// The day of the section's grid whose folder is selected.
+    #[must_use]
+    pub fn selected_section_day(&self) -> Option<NaiveDate> {
+        let Some(NavTarget::Folder(f)) = self.selection.target() else {
+            return None;
+        };
+        let (_, cal) = self.section_calendar()?;
+        cal.days
+            .iter()
+            .find(|(_, d)| &d.folder == f)
+            .map(|(k, _)| *k)
+    }
+
+    /// What a section's grid draws: a whole month, its days' notes and
+    /// tasks as the calendar's (the periodic notes).
+    #[must_use]
+    pub fn section_grid(&self) -> CalendarGrid {
+        let mut settings = self.settings.clone();
+        settings.calendar_weeks = 6;
+        calendar::grid(
+            CalendarContext {
+                index: &self.index,
+                periodic: &self.periodic,
+                today: self.today(),
+                active: self.active.as_deref(),
+            },
+            &settings,
+            self.section_cursor(),
+        )
+    }
+
+    /// The section's grid a month on (back, when negative).
+    pub fn section_move(&mut self, delta: i32) {
+        self.section_cursor = Some(calendar::step(self.section_cursor(), delta, 6));
+    }
+
+    /// The section's grid on this month, today selected.
+    pub fn section_today(&mut self) -> Option<Outcome> {
+        self.section_cursor = None;
+        self.pick_section_day(self.today())
+    }
+
+    /// A day of the section's grid clicked: its day selected in the list
+    /// (when the provider has it), the grid on its month.
+    pub fn pick_section_day(&mut self, date: NaiveDate) -> Option<Outcome> {
+        self.section_cursor = Some(date);
+        let folder = self
+            .section_calendar()
+            .and_then(|(_, c)| c.days.get(&date).map(|d| d.folder.clone()))?;
+        self.click_folder(&folder)
     }
 
     /// The calendar `delta` pages on (back, when negative): a month at a

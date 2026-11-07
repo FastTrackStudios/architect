@@ -362,16 +362,30 @@ fn exercise(dir: &Path, ext: &Extensions, list: &ActionList, app: &ActionList, o
     // The view's state, paged by an action.
     let shown = run(list, "CALENDAR_SHOWN", json!({}));
     assert_eq!(shown["view"], "week");
-    // Its sidebar.
+    // Its sidebar: the periodic tree, the days' contents, the month grid.
     let snap = run(list, "CALENDAR_NAV_SNAPSHOT", json!({}));
-    assert_eq!(snap["tree"].as_array().unwrap().len(), 6, "{snap}");
     assert!(
-        snap["items"]
-            .as_array()
+        snap["tree"].as_array().unwrap()[0]["id"]
+            .as_str()
             .unwrap()
-            .iter()
-            .any(|i| i["container"] == "repeating"),
+            .starts_with("y:"),
         "{snap}"
+    );
+    // An event on its day, counted on the grid; the tombstoned show not.
+    let items = snap["items"].as_array().unwrap();
+    assert!(!items.iter().any(|i| i["title"] == "Album release show"));
+    let event = items
+        .iter()
+        .find(|i| i["id"].as_str().unwrap().starts_with("e:"))
+        .unwrap_or_else(|| panic!("an event in {snap}"));
+    let on = event["container"].as_str().unwrap();
+    assert!(on.starts_with("d:"), "{event}");
+    assert_eq!(snap["calendar"]["days"][&on[2..]]["node"], on);
+    assert!(
+        snap["calendar"]["days"][&on[2..]]["count"]
+            .as_u64()
+            .unwrap()
+            >= 1
     );
 
     // Cancelled: the note goes, a series' overrides with it.

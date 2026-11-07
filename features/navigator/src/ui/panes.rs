@@ -318,6 +318,8 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
         for (row, top, h, note, colour, icon, background, badge, wiki, shared) in rows {
             if let NavRowKind::Banner { src } = row.kind.clone() {
                 tree_rows::BannerRow { key: "{row.key}", nav, src, top, height: h }
+            } else if let NavRowKind::MonthGrid { mount } = row.kind.clone() {
+                super::calendar::SectionGrid { key: "{row.key}", nav, on_open, mount, top, height: h }
             } else if let NavRowKind::Section { id, name, expanded, count } = row.kind.clone() {
                 tree_rows::SectionRow { key: "{row.key}", nav, id, name, expanded, count, top, height: h,
                     drop_here: over.as_deref() == Some(row.key.as_str()) }

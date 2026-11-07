@@ -459,6 +459,26 @@ fn drop_row(nav: Navigator, what: &Drag, x: f64, y: f64) -> Option<String> {
     let zoom = nav.zoom();
     let s = nav.state.peek();
     let row = s.nav_row_at((y - by) / zoom)?;
+    // A section's month grid: the day under the pointer takes notes (an
+    // event or a task moved to that day).
+    if let (NavRowKind::MonthGrid { mount }, Drag::Notes(_)) = (&row.kind, what) {
+        let i = s.nav_rows().iter().position(|r| r.key == row.key)?;
+        let local_y = (y - by) / zoom + s.scroll(crate::layout::Pane::Navigation).offset
+            - s.nav_offsets().start(i);
+        let weeks = s.section_grid().weeks;
+        let date = super::calendar::grid_day_at(
+            &weeks,
+            s.settings().calendar_week_numbers,
+            bw / zoom,
+            (x - bx) / zoom,
+            local_y,
+        )?;
+        let (_, cal) = s.section_calendar()?;
+        return cal
+            .days
+            .contains_key(&date)
+            .then(|| format!("grid:{mount}|{date}"));
+    }
     let takes = match (&row.kind, what) {
         (NavRowKind::Section { id, .. }, _) => id == SHORTCUTS,
         (NavRowKind::Shortcut { .. }, _)
@@ -482,6 +502,22 @@ pub(super) fn drag_end(nav: Navigator, on_open: EventHandler<Open>) {
         return;
     }
     let Some(key) = now.over else { return };
+    // A day of a section's month grid: a drop on its day's folder.
+    if let Some((_, date)) = key.strip_prefix("grid:").and_then(|k| k.split_once('|')) {
+        let folder = date.parse().ok().and_then(|d| {
+            let s = nav.state.peek();
+            s.section_calendar()
+                .and_then(|(_, c)| c.days.get(&d).map(|x| x.folder.clone()))
+        });
+        if let Some(folder) = folder {
+            let out = nav
+                .state
+                .peek()
+                .drop_on(&now.what, &NavTarget::Folder(folder), now.copy);
+            nav.open_or_create(out, on_open);
+        }
+        return;
+    }
     let row = nav
         .state
         .peek()
