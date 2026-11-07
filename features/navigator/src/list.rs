@@ -1119,6 +1119,10 @@ fn compare(
 /// year), then the year.
 #[must_use]
 pub fn date_group(at: Millis, clock: Clock) -> (String, String) {
+    // No date at all (a provider's item without one): not 1969's.
+    if at == 0 {
+        return ("relative:undated".to_owned(), "No date".to_owned());
+    }
     let today = clock.day(clock.now);
     let day = clock.day(at);
     let rel = |k: &str, l: &str| (format!("relative:{k}"), l.to_owned());

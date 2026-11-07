@@ -71,6 +71,17 @@ fn title_of(path: &str) -> String {
         })
 }
 
+/// When song `path`'s file in the vault on disk last changed.
+fn file_mtime(path: &str) -> Option<architect_navigator_api::Millis> {
+    let vault = crate::notes::open_vault()?;
+    let at = std::fs::metadata(vault.root().join(path))
+        .ok()?
+        .modified()
+        .ok()?;
+    let ms = at.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+    i64::try_from(ms).ok()
+}
+
 /// The setlists, as the navigator shows them.
 struct Setlists;
 
@@ -90,11 +101,13 @@ impl NavigatorProvider for Setlists {
                     })
                     .tag("music/songs");
                 item.icon = Some("music".to_owned());
-                // A song with no dates of its own: the setlist's day.
+                // Its own dates, else its file's on disk; none (no date
+                // shown) in the sandbox without a vault on disk.
+                let mtime = file_mtime(path);
                 let when = |key: &str| {
                     prop(&props, key)
-                        .or_else(|| Some("2026-11-01".to_owned()))
                         .and_then(|d| architect_navigator_api::date_millis(&d))
+                        .or(mtime)
                         .unwrap_or(0)
                 };
                 item = item.dates(when("created"), when("modified"));

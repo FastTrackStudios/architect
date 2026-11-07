@@ -347,6 +347,37 @@ fn a_contexts_layout_is_kept_in_its_folder_or_under_the_vault() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The app's `resolve`: a project given by its id alone gets its folder.
+struct Projects;
+
+impl architect_workspace::control::deck::Kept for Projects {
+    fn kept(&self, _: &DeckContext) -> Option<architect_workspace::ContextLayout> {
+        None
+    }
+
+    fn resolve(&self, mut context: DeckContext) -> DeckContext {
+        if context.kind == "project" && context.folder.is_none() {
+            context.folder = Some(context.id.clone());
+        }
+        context
+    }
+}
+
+#[test]
+fn deck_open_resolves_a_context_given_by_its_id() {
+    use architect_workspace::control::deck::{DeckOpenArgs, open};
+    let mut st = state();
+    let a = DeckOpenArgs {
+        context: DeckContext::new("project", "Projects/Album", "Album"),
+        new: true,
+        screenset: None,
+    };
+    let out = open(&mut st, &Projects, a).unwrap();
+    assert!(out.changed);
+    let deck = st.decks.active_deck().unwrap();
+    assert_eq!(deck.context.folder.as_deref(), Some("Projects/Album"));
+}
+
 struct Model {
     server: Server,
     decks: HeadlessDecks,

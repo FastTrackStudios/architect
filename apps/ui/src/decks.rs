@@ -183,6 +183,16 @@ pub fn use_lab_decks(
             }
         })),
         actions: Some(actions),
+        resolve: Some(Rc::new(resolve)),
+        // A project with nothing kept starts on its page: its
+        // `project.md` in the main area, in a tab (never in place of what
+        // is active: the dock's navigator, when the screenset's main area
+        // starts empty).
+        on_fresh: Some(Callback::new(move |context: DeckContext| {
+            if let Some(folder) = context.folder.filter(|_| context.kind == PROJECT) {
+                crate::vault::show_note(workspace, &format!("{folder}/project.md"), Target::Tab);
+            }
+        })),
     });
     if on_new.peek().is_none() {
         on_new.set(Some(handle));
@@ -190,16 +200,22 @@ pub fn use_lab_decks(
     handle
 }
 
-/// Loads `context` onto a deck; a project with nothing kept opens its
-/// `project.md` in the main area, so its deck starts on it.
-pub fn load(handle: &DeckHandle, workspace: Signal<Workspace>, context: DeckContext, how: Load) {
-    let fresh = handle.kept(&context).is_none_or(|k| k.layouts.is_empty())
-        && handle.decks.peek().find(&context).is_none();
-    let folder = context.folder.clone();
-    handle.load(context, how);
-    if let (true, Some(folder)) = (fresh, folder) {
-        // A tab, never in place of what is active (the dock's navigator,
-        // when the screenset's main area starts empty).
-        crate::vault::show_note(workspace, &format!("{folder}/project.md"), Target::Tab);
+/// A context as the app knows it: a project given by its id alone
+/// (`DECK_OPEN {context: {kind: project, id: "Projects/Album"}}`) gets
+/// its folder, icon and, when it has none, its title.
+fn resolve(mut context: DeckContext) -> DeckContext {
+    if context.kind != PROJECT || context.folder.is_some() {
+        return context;
     }
+    if let Some(p) = project_context(&context.id) {
+        context.id = p.id;
+        context.folder = p.folder;
+        if context.icon.is_none() {
+            context.icon = p.icon;
+        }
+        if context.title.trim().is_empty() {
+            context.title = p.title;
+        }
+    }
+    context
 }

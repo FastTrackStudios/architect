@@ -223,9 +223,15 @@ impl Navigator {
     /// The note open in the workspace (lit, and revealed when the
     /// settings say so).
     pub fn set_active(&self, path: Option<&str>) {
+        self.set_active_with(path, true);
+    }
+
+    /// [`set_active`](Self::set_active), revealing it only when `reveal`
+    /// ([`crate::NavigatorState::set_active_with`]).
+    pub fn set_active_with(&self, path: Option<&str>, reveal: bool) {
         if self.state.peek().active() != path {
             let mut state = self.state;
-            state.write().set_active(path);
+            state.write().set_active_with(path, reveal);
         }
     }
 

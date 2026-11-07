@@ -15,8 +15,8 @@ use std::sync::Arc;
 use architect_extensions::contrib::NavigatorProviderDecl;
 use architect_navigator::ui::{NavigatorView, Open, use_navigator};
 use architect_navigator::{
-    MemorySource, Millis, Mount, Mounts, NavigatorSource, NoteFile, OpenIn, Place, ProviderRequest,
-    ProviderSource, SourceEvent, VaultSource, ViewState,
+    MemorySource, Millis, Mount, Mounts, NavTarget, NavigatorSource, NoteFile, OpenIn, Place,
+    ProviderRequest, ProviderSource, SourceEvent, VaultSource, ViewState,
 };
 use architect_navigator_api::{ActionProvider, NavigatorProvider};
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
@@ -341,7 +341,7 @@ fn vault_pane_of(w: &Workspace, path: &str) -> Option<architect_workspace::PaneI
 /// else a new one at `target`, in the main area (beside the note on show;
 /// never in the dock the navigator is in, even with no note open).
 /// Shows note `path` of the vault on disk (`target`): what loading a
-/// project onto a deck opens (`crate::decks::load`).
+/// project onto a deck opens (`crate::decks`, `on_fresh`).
 pub fn show_note(workspace: Signal<Workspace>, path: &str, target: Target) {
     show_vault_note(workspace, path, target);
 }
@@ -1384,7 +1384,7 @@ fn follow(open: architect_navigator_api::Open, how: &Opening) {
                 architect_workspace::Load::Here
             };
             if let Some(decks) = decks {
-                crate::decks::load(&decks, workspace, context, how);
+                decks.load(context, how);
             }
         }
         O::File { path } => {
@@ -1455,6 +1455,132 @@ fn mounted_view(mut v: ViewState, own: &str) -> ViewState {
         }
     }
     v
+}
+
+/// Each deck's navigator selection, for the run (#468). The sidebar is
+/// shared, one navigator for every deck (its settings, pins, folds and
+/// width); what it has selected is each deck's own.
+#[derive(Default)]
+struct Picks {
+    /// The deck the navigator last followed.
+    last: Option<architect_workspace::DeckId>,
+    /// What each deck had selected when it was last on show.
+    by: std::collections::HashMap<architect_workspace::DeckId, NavTarget>,
+    /// A deck whose context's row is not in the navigator yet (its
+    /// provider's snapshot is on its way): selected once it is.
+    pending: Option<architect_workspace::DeckContext>,
+}
+
+#[derive(Clone, Copy)]
+struct DeckPicks(CopyValue<Picks>);
+
+/// At the root: the sidebar is drawn again with each deck's layout.
+fn use_deck_picks() -> DeckPicks {
+    use_root_context(|| DeckPicks(CopyValue::new_in_scope(Picks::default(), ScopeId::ROOT)))
+}
+
+/// The navigator row a deck's context begins on:
+/// - the vault's: the root, every vault and provider;
+/// - a project's: its row in the Projects provider (projects | contents,
+///   with its Songs, Notes and Tasks);
+/// - a provider's context (a setlist's song): the container it is in (its
+///   setlist).
+///
+/// `None` while that row is not in the navigator yet.
+fn deck_home(feeds: Feeds, context: &architect_workspace::DeckContext) -> Option<String> {
+    if context.kind == crate::decks::VAULT {
+        return Some(String::new());
+    }
+    let feeds = feeds.0.peek();
+    if context.kind == crate::decks::PROJECT {
+        let page = format!("{}/project.md", context.folder.as_deref()?);
+        return feeds.iter().find_map(|(mount, f)| {
+            f.source
+                .folder_of(&page)
+                .map(|folder| format!("{mount}/{folder}"))
+        });
+    }
+    feeds.iter().find_map(|(mount, f)| {
+        let item = f.source.snapshot().items.into_iter().find(|i| {
+            matches!(&i.open, Some(architect_navigator_api::Open::Context { context_type, id, .. })
+                if *context_type == context.kind && *id == context.id)
+        })?;
+        let folder = f.source.folder_of(&item.container)?;
+        Some(format!("{mount}/{folder}"))
+    })
+}
+
+/// The project a provider's row at `rest` in mount `mount` is (Projects'
+/// row for it, its node a `project.md`), as a deck's context.
+fn provider_project(
+    feeds: Feeds,
+    mount: &str,
+    rest: &str,
+) -> Option<architect_workspace::DeckContext> {
+    let node = feeds.0.peek().get(mount)?.source.node_at(rest)?;
+    let folder = node.id.strip_suffix("/project.md")?;
+    crate::decks::project_context(folder)
+}
+
+/// Selects in the navigator what deck `on_deck` had selected, or its
+/// context's row ([`deck_home`]); while the same deck stays on show, its
+/// selection is kept as it changes.
+fn follow_deck(
+    nav: &architect_navigator::ui::Navigator,
+    picks: DeckPicks,
+    feeds: Feeds,
+    on_deck: Option<(
+        architect_workspace::DeckId,
+        architect_workspace::DeckContext,
+    )>,
+) {
+    // Read, so a change of selection (or a provider's snapshot arriving)
+    // runs this again.
+    let target = nav.state.read().target();
+    let Some((id, context)) = on_deck else {
+        return;
+    };
+    let mut cell = picks.0;
+    let mut p = cell.write();
+    let show = |want: &str| {
+        nav.state.peek().index().has_folder(want).then(|| {
+            let want = want.to_owned();
+            move || nav.update(|s| s.show_folder(&want))
+        })
+    };
+    if p.last.as_ref() == Some(&id) {
+        if let Some(c) = p.pending.clone() {
+            if let Some(go) = deck_home(feeds, &c).as_deref().and_then(show) {
+                p.pending = None;
+                drop(p);
+                go();
+            }
+            return;
+        }
+        p.by.insert(id, target);
+        return;
+    }
+    let first = p.last.is_none();
+    p.last = Some(id.clone());
+    p.pending = None;
+    let kept = p.by.get(&id).cloned();
+    if let Some(t) = kept {
+        drop(p);
+        nav.update(|s| s.select_nav(&t));
+        return;
+    }
+    // The app's first deck keeps what the navigator had open last run.
+    if first && context.kind == crate::decks::VAULT {
+        p.by.insert(id, target);
+        return;
+    }
+    match deck_home(feeds, &context).as_deref().and_then(show) {
+        Some(go) => {
+            drop(p);
+            go();
+        }
+        None => p.pending = Some(context),
+    }
 }
 
 /// The navigator over every vault and provider. A click opens a note here
@@ -1556,8 +1682,21 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
         }
         kept.set(Some(view));
     });
+    let decks = architect_workspace::try_use_decks();
+    // The navigator follows the deck on show (#468): each deck has its own
+    // selection, its context's row to begin with.
+    let on_deck = decks.and_then(|d| {
+        d.decks
+            .read()
+            .active_deck()
+            .map(|x| (x.id.clone(), x.context.clone()))
+    });
     // A page with a provider selects its row: once each time it comes on
-    // show, so a click elsewhere holds.
+    // show, so a click elsewhere holds. Not on a context's deck: there the
+    // context's row is selected (`follow_deck`).
+    let on_vault = on_deck
+        .as_ref()
+        .is_none_or(|(_, c)| c.kind == crate::decks::VAULT);
     let want: Option<String> = {
         let workspace = pane.workspace();
         let w = workspace.read();
@@ -1574,6 +1713,7 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
                     })
                     .map(|l| l.mount().id)
             })
+            .filter(|_| on_vault)
     };
     use_effect(use_reactive!(|want| {
         if let Some(id) = want {
@@ -1610,13 +1750,30 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
         .locate(&pane.id)
         .is_some_and(|l| l.window == 0);
     let columns = sidebar_columns().filter(|_| in_main);
-    use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
+    let picks = use_deck_picks();
+    use_effect(use_reactive!(|on_deck| follow_deck(
+        &nav, picks, feeds, on_deck
+    )));
+    // A project deck's own note on show (its page, its songs) leaves the
+    // project selected rather than revealing the note in its vault folder.
+    let held = on_deck
+        .as_ref()
+        .filter(|(_, c)| c.kind == crate::decks::PROJECT)
+        .and_then(|(_, c)| c.folder.as_deref())
+        .zip(open_now.as_deref())
+        .is_some_and(|(folder, path)| path.starts_with(&format!("{own}/{folder}/")));
+    use_effect(use_reactive!(|open_now, held| {
+        let on_provider = matches!(
+            nav.state.peek().target(),
+            NavTarget::Folder(f) if f.starts_with('~')
+        );
+        nav.set_active_with(open_now.as_deref(), !(held && on_provider));
+    }));
     let open_pane = pane.clone();
     let menu_pane = pane;
     // A project's folder (or its project.md) in the app's vault, or a
     // provider's item that is a context, loads as a deck: a ⌘-click or a
     // middle-click on one loads it onto a new deck.
-    let decks = architect_workspace::try_use_decks();
     {
         let own = own.clone();
         use_context_provider(move || {
@@ -1626,14 +1783,15 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
                         crate::decks::project_context(project_folder(rest)).is_some()
                     }
                     Some((m, rest)) if m.starts_with('~') => {
-                        feeds.0.peek().get(m).is_some_and(|f| {
-                            f.source.item_at(rest).is_some_and(|i| {
-                                matches!(
-                                    i.open,
-                                    Some(architect_navigator_api::Open::Context { .. })
-                                )
+                        provider_project(feeds, m, rest).is_some()
+                            || feeds.0.peek().get(m).is_some_and(|f| {
+                                f.source.item_at(rest).is_some_and(|i| {
+                                    matches!(
+                                        i.open,
+                                        Some(architect_navigator_api::Open::Context { .. })
+                                    )
+                                })
                             })
-                        })
                     }
                     _ => false,
                 }
@@ -1654,6 +1812,13 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
             let (mount, rest) =
                 architect_navigator::mounts::split(&o.path).unwrap_or(("", &o.path));
             // A provider's item: as it says, else as the provider says.
+            // A project's row in Projects: onto a deck of its own.
+            if new_deck
+                && let (Some(decks), Some(context)) = (decks, provider_project(feeds, mount, rest))
+            {
+                decks.load(context, architect_workspace::Load::NewDeck);
+                return;
+            }
             if mount.starts_with('~') {
                 let (Some(ui), Some(feed)) = (ui, feeds.0.peek().get(mount).cloned()) else {
                     return;
@@ -1696,12 +1861,7 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
                 && let (Some(decks), Some(context)) =
                     (decks, crate::decks::project_context(project_folder(&path)))
             {
-                crate::decks::load(
-                    &decks,
-                    open_pane.workspace(),
-                    context,
-                    architect_workspace::Load::NewDeck,
-                );
+                decks.load(context, architect_workspace::Load::NewDeck);
                 return;
             }
             if has_ext(&path, "base") {

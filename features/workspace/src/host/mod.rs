@@ -66,7 +66,8 @@ pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
 pub use actions::{Opened, WorkspaceActions};
 pub use deck::{
-    DeckHandle, DeckStores, DeckStrip, DecksConfig, try_use_decks, use_deck_context, use_decks,
+    DeckHandle, DeckResolve, DeckStores, DeckStrip, DecksConfig, try_use_decks, use_deck_context,
+    use_decks,
 };
 pub use screens::WorkspaceStore;
 pub use windows::{Bridge, Popout, WindowSystem, Windows};

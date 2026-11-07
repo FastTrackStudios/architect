@@ -73,7 +73,18 @@ pub struct DecksConfig {
     pub on_new: Option<Callback<()>>,
     /// The app's Action List: the `DECK_*` actions go on it, run here.
     pub actions: Option<super::WorkspaceActions>,
+    /// Fills in what a context loaded by its type and id alone lacks
+    /// (`DECK_OPEN {context: {kind: project, id}}`: a project's folder),
+    /// before what it kept is read.
+    pub resolve: Option<DeckResolve>,
+    /// A context loaded onto a deck with nothing kept, its first time: the
+    /// app opens what its deck starts on (a project's page). Told for
+    /// every load, the navigator's and `DECK_OPEN`'s alike.
+    pub on_fresh: Option<Callback<DeckContext>>,
 }
+
+/// What [`DecksConfig::resolve`] is.
+pub type DeckResolve = Rc<dyn Fn(DeckContext) -> DeckContext>;
 
 /// A deck in a window of its own: its own live layout.
 #[derive(Clone, Copy, PartialEq)]
@@ -96,6 +107,8 @@ pub struct DeckHandle {
     views: CopyValue<Option<Views>>,
     bridge: CopyValue<Bridge>,
     on_new: CopyValue<Option<Callback<()>>>,
+    resolve: CopyValue<Option<DeckResolve>>,
+    on_fresh: CopyValue<Option<Callback<DeckContext>>>,
     /// Bumped when what is kept should be written (settled changes).
     dirty: Signal<u64>,
     /// The platform's windows and the shell's colours, as the app's root
@@ -128,6 +141,8 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
         bridge,
         on_new,
         actions,
+        resolve,
+        on_fresh,
     } = config;
     let handle = use_context_provider(|| DeckHandle {
         decks: Signal::new(Decks::default()),
@@ -140,6 +155,8 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
         views: CopyValue::new(views.clone()),
         bridge: CopyValue::new(bridge.clone()),
         on_new: CopyValue::new(on_new),
+        resolve: CopyValue::new(resolve.clone()),
+        on_fresh: CopyValue::new(on_fresh),
         dirty: Signal::new(0),
         windows: CopyValue::new(None),
         theme: CopyValue::new(None),
@@ -165,6 +182,8 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
     handle.views.clone().set(views);
     handle.bridge.clone().set(bridge);
     handle.on_new.clone().set(on_new);
+    handle.resolve.clone().set(resolve);
+    handle.on_fresh.clone().set(on_fresh);
     // What was kept, once.
     use_hook(move || {
         let stores = handle.stores.peek().clone();
@@ -234,12 +253,20 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
     handle
 }
 
-/// What a context kept, read from the app's store (for `DECK_OPEN`).
-struct UiKept(Option<Rc<dyn ContextStore>>);
+/// What a context kept, read from the app's store, and the app's
+/// [`DecksConfig::resolve`] (for `DECK_OPEN`).
+struct UiKept(Option<Rc<dyn ContextStore>>, Option<DeckResolve>);
 
 impl crate::control::deck::Kept for UiKept {
     fn kept(&self, context: &DeckContext) -> Option<ContextLayout> {
         store::load_context(self.0.as_ref()?.as_ref(), context)
+    }
+
+    fn resolve(&self, context: DeckContext) -> DeckContext {
+        match &self.1 {
+            Some(f) => f(context),
+            None => context,
+        }
     }
 }
 
@@ -280,12 +307,16 @@ fn use_deck_actions(handle: DeckHandle, actions: Option<super::WorkspaceActions>
             let (mirror, list) = (mirror.clone(), list.clone());
             async move {
                 while let Some(job) = jobs.next().await {
-                    let kept = UiKept(handle.stores.peek().contexts.clone());
+                    let kept = UiKept(
+                        handle.stores.peek().contexts.clone(),
+                        handle.resolve.peek().clone(),
+                    );
                     let before = handle.decks.peek().clone();
                     let now = handle.act(|st| {
                         job(st, &kept);
                         st.clone()
                     });
+                    handle.tell_fresh(&before);
                     *mirror
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = now;
@@ -425,6 +456,10 @@ impl DeckHandle {
     /// navigator's click, and its ⌘-click or middle-click. A deck in a
     /// window of its own comes forward instead.
     pub fn load(&self, context: DeckContext, load: Load) {
+        let context = match self.resolve.peek().as_ref() {
+            Some(f) => f(context),
+            None => context,
+        };
         let open = self.decks.peek().find(&context).map(|d| d.id.clone());
         if let Some(open) = open {
             if self.is_popped(&open) && load == Load::Here {
@@ -433,7 +468,29 @@ impl DeckHandle {
             }
         }
         let kept = self.kept(&context);
+        let before = self.decks.peek().clone();
         let _ = self.act(|st| st.open(context, load, None, kept));
+        self.tell_fresh(&before);
+    }
+
+    /// Tells [`DecksConfig::on_fresh`] of each context on a deck now that
+    /// was on none in `before` and kept nothing.
+    fn tell_fresh(&self, before: &Decks) {
+        let Some(on_fresh) = *self.on_fresh.peek() else {
+            return;
+        };
+        let fresh: Vec<DeckContext> = self
+            .decks
+            .peek()
+            .decks
+            .iter()
+            .map(|d| d.context.clone())
+            .filter(|c| before.find(c).is_none())
+            .filter(|c| self.kept(c).is_none_or(|k| k.layouts.is_empty()))
+            .collect();
+        for c in fresh {
+            on_fresh.call(c);
+        }
     }
 
     /// Shows deck `id` (a deck in its own window comes forward).
