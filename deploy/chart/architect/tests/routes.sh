@@ -44,5 +44,12 @@ fi
 if helm template t "$chart" --set node.s3.enabled=true --set node.s3.bucket=b >/dev/null 2>&1; then
     echo "FAIL  S3 without a credentials Secret was accepted"; fail=1
 fi
+# Images: a bare repository gets image.registry; a full one (what
+# argocd-image-updater writes) is used as is.
+images="$(helm template t "$chart" --set node.image.repository=ghcr.io/x/architect --set node.image.tag=1.2.3 | yq 'select(.kind == "Deployment") | .spec.template.spec.containers[0].image' | grep -v '^---$' | sort | tr '\n' ' ')"
+case "$images" in
+    *"ghcr.io/fasttrackstudios/architect-web:"*"ghcr.io/x/architect:1.2.3 "*) echo "ok    images: $images" ;;
+    *) echo "FAIL  images: $images"; fail=1 ;;
+esac
 [ "$fail" = 0 ] && echo "routes: all good"
 exit "$fail"
