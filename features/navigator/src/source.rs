@@ -336,6 +336,14 @@ pub trait NavigatorSource: Send + Sync {
     }
     /// Every file.
     fn files(&self) -> Vec<NoteFile>;
+
+    /// Whether the navigator browses its notes' properties (the Properties
+    /// section, `property_keys`). A vault's notes have properties; a
+    /// provider's items carry their own fields (a task's status, a
+    /// project's due date), which are not the vault's and never show there.
+    fn browses_properties(&self) -> bool {
+        true
+    }
     /// Calls `listener` with each change from now on, until the
     /// [`Subscription`] is dropped.
     fn subscribe(&self, listener: Listener) -> Subscription;

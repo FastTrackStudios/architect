@@ -46,6 +46,9 @@ pub struct VaultIndex {
     /// The source's order of children, by parent
     /// ([`NavigatorSource::child_order`]).
     order: std::collections::BTreeMap<String, Vec<String>>,
+    /// The source's notes carry no vault properties to browse
+    /// ([`NavigatorSource::browses_properties`] false: a provider's).
+    no_properties: bool,
     /// Bumped by every change: what a view's memo keys on.
     revision: u64,
 }
@@ -56,6 +59,22 @@ impl VaultIndex {
     pub fn read(source: &dyn NavigatorSource) -> Self {
         Self::from_parts(source.name(), source.folders(), source.files())
             .with_order(source.child_order())
+            .with_properties(source.browses_properties())
+    }
+
+    /// Whether its notes' properties are browsed (the Properties section):
+    /// a vault's are, a provider's items' fields are not.
+    #[must_use]
+    pub const fn with_properties(mut self, browse: bool) -> Self {
+        self.no_properties = !browse;
+        self
+    }
+
+    /// Whether the Properties section reads its notes
+    /// ([`Self::with_properties`]).
+    #[must_use]
+    pub const fn browses_properties(&self) -> bool {
+        !self.no_properties
     }
 
     /// With the source's order of children, by parent.
