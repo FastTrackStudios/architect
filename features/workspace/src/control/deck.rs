@@ -188,6 +188,12 @@ pub struct DeckDefaultArgs {
 /// [`crate::store::ContextStore`], read where the decks live.
 pub trait Kept {
     fn kept(&self, context: &DeckContext) -> Option<ContextLayout>;
+
+    /// `context` as the app knows it: what a context given by its type and
+    /// id alone lacks, filled in (a project's folder).
+    fn resolve(&self, context: DeckContext) -> DeckContext {
+        context
+    }
 }
 
 impl Kept for () {
@@ -287,9 +293,10 @@ fn target(st: &DeckState, deck: Option<String>) -> Result<DeckId, String> {
 /// A screenset that is not there.
 pub fn open(st: &mut DeckState, kept: &dyn Kept, a: DeckOpenArgs) -> Result<DeckAnswer, String> {
     let load = if a.new { Load::NewDeck } else { Load::Here };
-    let found = kept.kept(&a.context);
+    let context = kept.resolve(a.context);
+    let found = kept.kept(&context);
     let out = st
-        .open(a.context, load, a.screenset.as_deref(), found)
+        .open(context, load, a.screenset.as_deref(), found)
         .map_err(|e| e.to_string())?;
     Ok(answer(st, out))
 }

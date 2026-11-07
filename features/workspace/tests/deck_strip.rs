@@ -41,6 +41,7 @@ struct Kept {
 thread_local! {
     static KEPT: RefCell<Option<Kept>> = const { RefCell::new(None) };
     static HANDLE: RefCell<Option<DeckHandle>> = const { RefCell::new(None) };
+    static FRESH: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 #[component]
@@ -71,6 +72,10 @@ fn App() -> Element {
         bridge: architect_workspace::Bridge::default(),
         on_new: None,
         actions: None,
+        resolve: None,
+        on_fresh: Some(Callback::new(|c: DeckContext| {
+            FRESH.with(|f| f.borrow_mut().push(c.key()));
+        })),
     });
     use_hook(|| HANDLE.with(|h| *h.borrow_mut() = Some(handle)));
     let views = Views::new()
@@ -209,4 +214,28 @@ fn decks_on_a_strip_switch_layouts_and_come_back_after_a_restart() {
         1,
         "its screenset kept with it"
     );
+}
+
+#[test]
+fn a_context_loaded_with_nothing_kept_is_told_once() {
+    architect_shell::motion::set_reduced_motion(Some(true));
+    KEPT.with(|k| {
+        *k.borrow_mut() = Some(Kept {
+            session: WorkspaceStore::new(MemoryStore::new()),
+            contexts: Rc::new(MemoryContextStore::new()),
+        });
+    });
+    let mut d = doc();
+    FRESH.with(|f| f.borrow_mut().clear());
+    let h = handle();
+    let album = DeckContext::new("song", "blue-moon", "Blue Moon Walk");
+    d.vdom
+        .in_runtime(|| h.load(album.clone(), architect_workspace::Load::NewDeck));
+    settle(&mut d);
+    assert_eq!(FRESH.with(|f| f.borrow().clone()), vec!["song:blue-moon"]);
+    // Open already: it comes forward, and is not new.
+    d.vdom
+        .in_runtime(|| h.load(album, architect_workspace::Load::Here));
+    settle(&mut d);
+    assert_eq!(FRESH.with(|f| f.borrow().len()), 1);
 }
