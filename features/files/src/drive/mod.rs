@@ -113,6 +113,11 @@ pub fn mount(
         path: mountpoint.display().to_string(),
         source,
     };
+    if cfg!(target_os = "macos") {
+        return Err(at(std::io::Error::other(
+            "this build mounts no FUSE on a Mac (fuser is built without macFUSE); the Mac's drive is the File Provider",
+        )));
+    }
     clear_stale(mountpoint)?;
     std::fs::create_dir_all(mountpoint).map_err(at)?;
     // The files are the owner's of the mount point (made just now, or theirs).
