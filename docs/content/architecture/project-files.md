@@ -180,6 +180,32 @@ its HTTP face and `/mcp`. The window's `FILES_*` actions call it.
   roots' heads. A version over it is not fetched by the node.
 - **Per-folder `Grant`s** come with the merge below.
 
+## Over S3
+
+The node and a device's agent also serve the roots over the S3 API
+(feature `s3`, `s3_bind`), for `rclone`, `aws s3`, `restic` and backup
+tools, beside WebDAV.
+
+- **A bucket per org.** Keys are `Projects/<project>/<path>` and
+  `Assets/<kind>/<path>`: the org's tree as it is on the node's disk and
+  under the WebDAV mount. A bucket per root was the other choice; it
+  loses because a project's name (`Right Here`) is not a valid bucket
+  name, because a key and a role belong to an org and not to a root, and
+  because a copy from a project into a library would cross buckets
+  rather than move no bytes.
+- **Versions are the manifest's.** `PutObject` and a completed multipart
+  upload are `Engine::save_reader`, as a WebDAV `PUT`; the version's id
+  is the S3 version id, a delete is a delete marker, and
+  `ListObjectVersions` is a path's history. History is append-only, so
+  deleting one version is refused, and versioning cannot be suspended.
+- **Keys and permissions.** An access key belongs to a person or a
+  device, in one org, with a role, and is issued on the node. Each
+  request lowers that role to what the holder holds now (a device's
+  grant in `Admission`), then runs the files feature's own check
+  (`role_capabilities`, `access::resolve`). `SigV4` is `s3s`'s.
+- **Bytes** come from the device's store or working copy, else are
+  streamed from a peer as they arrive, as a WebDAV `GET` does.
+
 ## Each feature: what it reuses, what is new
 
 | Feature | Reuses in architect | New |
@@ -272,6 +298,7 @@ that leaves one set of roots.
 | Store and sync engine | `features/files/src/sync/manifest.rs`, `features/files/src/sync/scan.rs`, `features/files/src/sync/store.rs`, `features/files/src/sync/engine.rs`, `features/files/src/sync/lane.rs`; `apps/desktop/src/node/files.rs`; `VaultCollab::with_plain_docs`; `crdt::p2p::node_router_with` | `features/files/tests/sync.rs`, `apps/desktop/tests/files.rs` |
 | Pinning and mounts | `features/files/src/agent.rs` `Files`, `features/files/src/sync/agent.rs`, `features/files/src/sync/dav.rs` `Dav` | `apps/desktop/tests/files.rs` `an_unpinned_project_browses_over_webdav_and_a_file_opens_on_demand` |
 | Assets | `features/files/src/sync/assets.rs` (`assets_of`, `frontmatter`, `wav_peaks`, `Engine::search`, `Engine::peaks`) | `features/files/tests/sync.rs` `a_library_s_assets_browse_search_and_draw_from_a_laptop_that_holds_none_of_it` |
+| S3 face | `features/files/src/sync/s3/mod.rs` `S3Face`, `features/files/src/sync/s3/keys.rs` `S3Keys`, `apps/desktop/src/node/s3.rs` | `features/files/tests/s3.rs` |
 | UI | `features/files/extension/src/lib.rs`, `features/files/extension/src/nav.rs`; `apps/ui/src/files.rs` (`FILES_*` over `ARCHITECT_FILES_AGENT`) | the extension's unit tests; the live check |
 
 The live check ran on a scratch copy of one project (Right Here, 1.6 GB)

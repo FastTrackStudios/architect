@@ -30,6 +30,7 @@
 //! | `ARCHITECT_FILES_HOLD` | `files_hold` | `false` | hold every root found in `files_dir` (the always-on node); otherwise only pinned ones have a working copy |
 //! | `ARCHITECT_DRIVE` | `drive` | none | mount every root this device knows here, as a real folder (FUSE; `~/Architect` when the agent is installed, `architect-desktop agent install`); empty is off |
 //! | `ARCHITECT_FILES_SECS` | `files_secs` | `2` | how often each root is scanned and brought to its heads |
+//! | `ARCHITECT_S3_BIND` | `s3_bind` | none | the roots over S3 (`127.0.0.1:9000`): a bucket per org, keys from `serve s3-key issue` (needs `files_dir`) |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -73,6 +74,7 @@ pub struct Config {
     pub files_hold: bool,
     pub files_secs: u64,
     pub drive: Option<PathBuf>,
+    pub s3_bind: Option<String>,
 }
 
 impl Default for Config {
@@ -100,6 +102,7 @@ impl Default for Config {
             files_hold: false,
             files_secs: 2,
             drive: None,
+            s3_bind: None,
         }
     }
 }
@@ -243,6 +246,9 @@ impl Config {
                 var: "ARCHITECT_FILES_SECS",
                 why: format!("{e}"),
             })?;
+        }
+        if let Some(v) = get("ARCHITECT_S3_BIND") {
+            self.s3_bind = Some(v);
         }
         Ok(())
     }

@@ -922,6 +922,38 @@ impl Engine {
         Ok(version)
     }
 
+    /// Save `path` as `content` (bytes some version already names, in
+    /// this root or another of the device's): a version and no bytes
+    /// moved. An S3 `CopyObject` across roots.
+    ///
+    /// # Errors
+    ///
+    /// The root is not known.
+    pub async fn save_content(
+        &self,
+        doc_id: Uuid,
+        path: &str,
+        content: Sha256,
+        size: u64,
+    ) -> Result<FileVersion, EngineError> {
+        let doc = self
+            .doc(doc_id)
+            .await
+            .ok_or_else(|| EngineError::NoRoot(doc_id.to_string()))?;
+        let manifest = Manifest::new(&doc);
+        let version = FileVersion {
+            id: VersionId(Uuid::new_v4()),
+            path: path.to_owned(),
+            content: Some(content.to_hex()),
+            size,
+            by: self.config.device.clone(),
+            at_us: now_us(),
+            base: manifest.tree().heads(path).iter().map(|h| h.id).collect(),
+        };
+        manifest.push(std::slice::from_ref(&version));
+        Ok(version)
+    }
+
     /// Move or copy `from` (a file, or everything under it) to `to`: the
     /// same bytes at the new paths, so nothing is sent again.
     ///
