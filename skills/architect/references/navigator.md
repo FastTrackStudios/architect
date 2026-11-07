@@ -90,6 +90,44 @@ pub trait NavigatorSource: Send + Sync {
   files with it).
   Tests: `features/navigator/tests/vault_source.rs`.
 
+## Every vault at once: mounts (#443)
+
+Org = vault: each org the person reaches has one vault, and the navigator
+holds them all, with the providers, as one source
+(`features/navigator/src/mounts.rs` `Mounts`):
+
+```rust,ignore
+let all = Mounts::new("Navigator")
+    .with(Mount::provider("tasks/queue", "Inbox", Place::Top).icon("inbox").flat(), queue)
+    .with(Mount::vault(OrgBadge::new("codywright", "Cody Wright", "#047857")), cody_vault)
+    .with(Mount::vault(OrgBadge::new("fasttrackstudio", "FastTrackStudio", "#1d4ed8")), fts_vault);
+// `@codywright/Bible Study/Psalm 23.md`, `~tasks:queue/Today/Write it.md`
+```
+
+- A `Mount` is a first path segment: `@<org>` for a vault, `~<provider>`
+  for a provider (`mounts::split` reads a path back). `Mounts` lists every
+  mount's folders and files under its id, sends their events on with it,
+  and routes a write, a read or a URL to its mount. A move between two
+  vaults is refused (it changes who owns the note); tag and property-key
+  operations go to every vault that writes. `Mounts::describe` changes a
+  mount's count or place (a `Reset` follows).
+- `NavigatorSource::mounts` says what a source is made of; `VaultIndex`
+  keeps it (`mounts`, `mount_of`, `in_vault`). With mounts,
+  `NavigatorState::nav_rows` is the sectioned left list: each
+  `Place::Top` mount as a row with no header (its containers nest under
+  it unless `Mount::flat`; `Mount::count` on it), the shortcuts, Recent
+  Files/, Vaults/ (every vault's top-level folders, one flat list by name,
+  `tree::VAULTS`), Assets/ (`tree::ASSETS`), Tags/ (the "Tags" row, from
+  the vaults alone, merged by name) and the Properties. A section folds
+  with `toggle_section`, kept in `ViewState::sections_folded`.
+- `NavigatorState::badge` is a Vaults/ or Assets/ row's `OrgBadge` (drawn
+  as the org's icon or initial on its colour), `is_wiki` a folder whose
+  folder note says `wiki: true` (a book mark), `mount_icon` a top row's
+  icon. `Mount::listed` is how a mount's folders list unless a person set
+  their own (`settings_for`). A tag or a property lists vault notes only.
+- One source with no mounts draws as before: the folder tree.
+- Tests: `features/navigator/tests/mounts.rs`.
+
 ## Recipe: Navigator, the extension, as a sidebar
 
 A user-facing feature is a linked extension, so an app links Navigator in

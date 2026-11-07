@@ -4,7 +4,7 @@
 
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, CalendarDays, Check,
+    ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, BookOpen, CalendarDays, Check,
     ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Eye, EyeOff, FileText,
     Folder, FolderOpen, ListTree, Pin, Rows3, Search, SquarePen, Tag, UserRound, Vault,
 };
@@ -287,13 +287,33 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
             } else {
                 (top, h)
             };
-            Some((row.clone(), top, h, note, colour, icon, background))
+            // With several sources: a Vaults/ or Assets/ row's org, a
+            // wiki's mark, a top row's own icon.
+            let (badge, wiki, icon) = match &row.kind {
+                NavRowKind::Folder { path, .. } => (
+                    s.badge(path).cloned(),
+                    s.is_wiki(path),
+                    icon.or_else(|| s.mount_icon(path)),
+                ),
+                _ => (None, false, icon),
+            };
+            Some((
+                row.clone(),
+                top,
+                h,
+                note,
+                colour,
+                icon,
+                background,
+                badge,
+                wiki,
+            ))
         })
         .collect();
     let icon_only = nav.state.peek().settings().color_icon_only;
     drop(s);
     rsx! {
-        for (row, top, h, note, colour, icon, background) in rows {
+        for (row, top, h, note, colour, icon, background, badge, wiki) in rows {
             if let NavRowKind::Banner { src } = row.kind.clone() {
                 tree_rows::BannerRow { key: "{row.key}", nav, src, top, height: h }
             } else if let NavRowKind::Section { id, name, expanded, count } = row.kind.clone() {
@@ -370,6 +390,8 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     nav,
                     on_open,
                     note,
+                    badge,
+                    wiki,
                     icon,
                     colour,
                     background,
@@ -388,6 +410,27 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                     indent,
                     reorder: reordering && row.level == root_level && !path.is_empty(),
                 }
+            }
+        }
+    }
+}
+
+/// Where a row's vault comes from: the org's icon, or its initial on its
+/// colour, with its name to hover.
+#[component]
+pub(super) fn OrgMark(badge: crate::OrgBadge) -> Element {
+    let initial = badge.initial();
+    let colour = badge.colour.clone();
+    rsx! {
+        span { class: "nv-org", "data-org": "{badge.org}", title: "{badge.name}", "aria-label": "From {badge.name}",
+            style: "flex:0 0 auto; width:14px; height:14px; border-radius:4px; display:flex; align-items:center; justify-content:center; \
+                    font-size:9px; font-weight:700; color:#fff; background:{colour};",
+            match badge.icon.as_deref().and_then(crate::Icon::parse) {
+                Some(crate::Icon::Lucide(name)) => rsx! {
+                    architect_shell::lucide::LucideIcon { name, size: 10, color: Some("#fff".to_owned()) }
+                },
+                Some(crate::Icon::Emoji(e)) => rsx! { "{e}" },
+                _ => rsx! { "{initial}" },
             }
         }
     }
@@ -440,6 +483,10 @@ fn FolderRow(
     background: Option<String>,
     /// The colour paints the icon alone.
     icon_only: bool,
+    /// The org it is from (a row of Vaults/ or Assets/).
+    badge: Option<crate::OrgBadge>,
+    /// Its folder note says `wiki: true`.
+    wiki: bool,
 ) -> Element {
     let pad = f64::from(level).mul_add(indent, 6.0);
     let root = path.is_empty();
@@ -525,7 +572,7 @@ fn FolderRow(
             span { style: "flex:0 0 auto; display:flex; color:{icon_colour};",
                 if let Some(i) = icon {
                     super::icon::IconView { nav, icon: i, size: 15, colour }
-                } else if root { Vault { size: 15 } } else if expanded { FolderOpen { size: 15 } } else { Folder { size: 15 } }
+                } else if root { Vault { size: 15 } } else if note { FileText { size: 15 } } else if expanded { FolderOpen { size: 15 } } else { Folder { size: 15 } }
             }
             if renaming {
                 tree_rows::InlineRename { nav, on_open, what: Renaming::Folder(p7), value: name }
@@ -537,8 +584,11 @@ fn FolderRow(
                     "{name}"
                 }
             }
-            if note {
-                span { class: "nv-folder-note", "aria-label": "Has a folder note", style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", FileText { size: 12 } }
+            if wiki {
+                span { class: "nv-wiki", "aria-label": "Wiki", title: "Wiki", style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", BookOpen { size: 12 } }
+            }
+            if let Some(b) = badge {
+                OrgMark { badge: b }
             }
             if reorder {
                 button { class: "nv-tool", "aria-label": "Move {p3} up", style: "width:20px; height:20px;",

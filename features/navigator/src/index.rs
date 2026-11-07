@@ -49,6 +49,8 @@ pub struct VaultIndex {
     /// The source's notes carry no vault properties to browse
     /// ([`NavigatorSource::browses_properties`] false: a provider's).
     no_properties: bool,
+    /// The sources it is made of ([`NavigatorSource::mounts`]).
+    mounts: Vec<crate::Mount>,
     /// Bumped by every change: what a view's memo keys on.
     revision: u64,
 }
@@ -60,6 +62,34 @@ impl VaultIndex {
         Self::from_parts(source.name(), source.folders(), source.files())
             .with_order(source.child_order())
             .with_properties(source.browses_properties())
+            .with_mounts(source.mounts())
+    }
+
+    /// With the sources it is made of.
+    #[must_use]
+    pub fn with_mounts(mut self, mounts: Vec<crate::Mount>) -> Self {
+        self.mounts = mounts;
+        self
+    }
+
+    /// The sources it is made of, in order; empty for one vault.
+    #[must_use]
+    pub fn mounts(&self) -> &[crate::Mount] {
+        &self.mounts
+    }
+
+    /// The mount `path` is in.
+    #[must_use]
+    pub fn mount_of(&self, path: &str) -> Option<&crate::Mount> {
+        let (id, _) = crate::mounts::split(path)?;
+        self.mounts.iter().find(|m| m.id == id)
+    }
+
+    /// Whether `path` is in an org's vault: always, for one vault; with
+    /// mounts, when its mount is a vault (a provider's items are not).
+    #[must_use]
+    pub fn in_vault(&self, path: &str) -> bool {
+        self.mounts.is_empty() || self.mount_of(path).is_some_and(crate::Mount::is_vault)
     }
 
     /// Whether its notes' properties are browsed (the Properties section):
