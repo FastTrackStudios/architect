@@ -89,7 +89,15 @@ impl NavigatorState {
     pub fn folder_icon(&self, path: &str) -> Option<Icon> {
         self.settings
             .show_folder_icons
-            .then(|| self.own_icon(&format!("folder:{path}")))
+            .then(|| {
+                self.own_icon(&format!("folder:{path}")).or_else(|| {
+                    // A provider's container's own (a project's glyph).
+                    self.index
+                        .folder_meta_of(path)
+                        .and_then(|m| m.icon.as_deref())
+                        .and_then(Icon::parse)
+                })
+            })
             .flatten()
     }
 
@@ -117,6 +125,13 @@ impl NavigatorState {
             return Some(own);
         }
         let file = self.index.file(path)?;
+        // A provider's item's own icon (a song's, a capture's).
+        if !self.index.in_vault(path)
+            && let Some(PropertyValue::Text(i)) = file.get("icon")
+            && let Some(icon) = Icon::parse(i)
+        {
+            return Some(icon);
+        }
         if s.file_name_icons {
             let map = icons::icon_map(&s.file_name_icon_map);
             if let Some(i) = icons::name_icon(file.name(), &map) {

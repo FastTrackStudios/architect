@@ -1682,7 +1682,7 @@ impl NavigatorState {
         .with_order(self.all.orders().clone())
         .with_properties(self.all.browses_properties())
         .with_mounts(self.all.mounts().to_vec())
-        .with_folder_orgs(self.all.folder_orgs().clone())
+        .with_folder_meta(self.all.folder_meta().clone())
     }
 
     /// A change in the source, as the shown vault takes it; `None` to
@@ -2086,7 +2086,7 @@ impl NavigatorState {
     pub fn badge(&self, path: &str) -> Option<crate::OrgBadge> {
         // A container that says its org (an asset library, a shared
         // project): that org's vault's badge, else its id alone.
-        if let Some(org) = self.index.folder_org(path).and_then(|o| o.org.as_ref()) {
+        if let Some(org) = self.index.folder_meta_of(path).and_then(|o| o.org.as_ref()) {
             let vault = self
                 .index
                 .mounts()
@@ -2107,11 +2107,26 @@ impl NavigatorState {
             .flatten()
     }
 
+    /// The org badge a note's row shows in a tag's or a property's list
+    /// (every vault's notes), when more than one vault is mounted.
+    #[must_use]
+    pub fn note_badge(&self, path: &str) -> Option<crate::OrgBadge> {
+        let vaults = self.index.mounts().iter().filter(|m| m.is_vault()).count();
+        // A folder is one vault's: its notes need no mark.
+        if vaults < 2 || matches!(self.target(), NavTarget::Folder(_)) {
+            return None;
+        }
+        self.index
+            .mount_of(path)
+            .filter(|m| m.is_vault())
+            .and_then(|m| m.org.clone())
+    }
+
     /// Whether the folder at `path` is shared from another org (a project
     /// in a Space).
     #[must_use]
     pub fn is_shared(&self, path: &str) -> bool {
-        self.index.folder_org(path).is_some_and(|o| o.shared)
+        self.index.folder_meta_of(path).is_some_and(|o| o.shared)
     }
 
     /// A top row's icon: its mount's (a provider's manifest `icon`), when

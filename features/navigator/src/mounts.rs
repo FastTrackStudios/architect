@@ -570,12 +570,12 @@ impl NavigatorSource for Mounts {
         self.mounts_now()
     }
 
-    fn folder_orgs(&self) -> std::collections::BTreeMap<String, crate::source::FolderOrg> {
+    fn folder_meta(&self) -> std::collections::BTreeMap<String, crate::source::FolderMeta> {
         read(&self.inner.entries)
             .iter()
             .flat_map(|(m, s)| {
                 let id = m.id.clone();
-                s.folder_orgs()
+                s.folder_meta()
                     .into_iter()
                     .map(move |(p, o)| (join(&id, &p), o))
             })

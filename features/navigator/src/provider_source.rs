@@ -152,6 +152,10 @@ fn note(path: &str, item: &Item) -> NoteFile {
         .iter()
         .map(|(k, v)| (k.clone(), PropertyValue::Text(v.clone())))
         .collect();
+    if let Some(icon) = &item.icon {
+        f.properties
+            .push(("icon".to_owned(), PropertyValue::Text(icon.clone())));
+    }
     if !item.badges.is_empty() {
         f.properties.push((
             "badges".to_owned(),
@@ -308,19 +312,20 @@ impl NavigatorSource for ProviderSource {
         self.map().order.clone()
     }
 
-    fn folder_orgs(&self) -> std::collections::BTreeMap<String, crate::source::FolderOrg> {
+    fn folder_meta(&self) -> std::collections::BTreeMap<String, crate::source::FolderMeta> {
         let m = self.map();
         m.snapshot
             .nodes()
             .into_iter()
-            .filter(|(_, n)| n.org.is_some() || n.shared)
+            .filter(|(_, n)| n.org.is_some() || n.shared || n.icon.is_some())
             .filter_map(|(_, n)| {
                 let path = m.folder_of.get(&n.id)?.clone();
                 Some((
                     path,
-                    crate::source::FolderOrg {
+                    crate::source::FolderMeta {
                         org: n.org.clone(),
                         shared: n.shared,
+                        icon: n.icon.clone(),
                     },
                 ))
             })

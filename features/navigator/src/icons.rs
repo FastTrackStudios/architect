@@ -201,7 +201,25 @@ const BUILT_IN: &[(&str, &str)] = &[
     ("excalidraw.md", "pencil"),
     ("canvas", "layout-grid"),
     ("base", "database"),
-    ("pdf", "file-text"),
+    ("pdf", "file-type"),
+    // Audio, video and sessions (#443): a mix, a take, a DAW's project.
+    ("wav", "file-audio"),
+    ("aif", "file-audio"),
+    ("aiff", "file-audio"),
+    ("flac", "file-audio"),
+    ("mp3", "file-audio"),
+    ("m4a", "file-audio"),
+    ("ogg", "file-audio"),
+    ("mid", "file-music"),
+    ("midi", "file-music"),
+    ("mp4", "file-video"),
+    ("mov", "file-video"),
+    ("webm", "file-video"),
+    ("mkv", "file-video"),
+    ("rpp", "file-sliders"),
+    ("ptx", "file-sliders"),
+    ("als", "file-sliders"),
+    ("logicx", "file-sliders"),
 ];
 
 const RASTER: &[&str] = &[

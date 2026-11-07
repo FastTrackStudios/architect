@@ -1694,19 +1694,25 @@ per status, a card's arrows moving it on.
 ## Navigator providers
 
 The navigator (`features/navigator`, [Navigator](@/features/navigator.md))
-is the app's one left sidebar (#356): a tree of containers beside a list
-of the items in the selected one. The vault fills it by default: folders,
-and the notes in them. An extension fills it while one of its views is on
-show: the Projects extension shows projects and their tasks, the Tasks
-extension status groups and their tasks.
+is the app's one left sidebar (#356): a list of places beside a list of
+the items in the selected one. Since #443 it holds everything at once:
+every org's vault (under Vaults/) and every extension's provider, each a
+section of the left list: the Tasks extension's Queue is its Inbox row
+(captures and tasks in one list), the Calendar's its Calendar row, the
+Projects extension's its Projects row (projects nested, a project's
+songs, notes, sub-projects and tasks on the right).
 
 ```toml
 [[navigator_providers]]
 id = "projects"
-title = "Projects"           # the root's row, and its switcher button
-icon = "folder-kanban"
-views = ["list", "page"]     # its own [[views]]: one on show switches to it
+title = "Projects"           # its row in the left list
+icon = "folder-kanban"       # the row's icon
+views = ["list", "page"]     # its own [[views]]: one on show selects its row
 actions = "PROJECTS_NAV"     # PROJECTS_NAV_SNAPSHOT (required), _OPEN, _MOVE, _CREATE
+section = "top"              # top (a row, no header) | assets (in Assets/) | section (default)
+position = 3                 # among the same section's, low first
+# visible = false            # left out of the list (and never read)
+# nest = false               # its nodes are the list's groups, not rows under it
 ```
 
 ```rust,ignore
@@ -1755,11 +1761,12 @@ The declaration is a contribution like the rest
 `Contributions::navigator_providers`, `Contributions::navigator_provider_for`):
 checked at load (an id, `actions`, its snapshot action in its own
 namespace, views it has), withdrawn when it unloads. The app's sidebar
-(`apps/ui/src/vault.rs` `FilesView`) switches to a provider when one of its
-views comes on show, keeps each provider's navigator (selection, open
-containers, widths) for the run, stays on it while the notes it opened
-show, and goes back to the vault for any other note; a row over a
-provider's navigator switches by hand. Inside the navigator a provider is
+(`apps/ui/src/vault.rs` `FilesView`) mounts each shown provider beside the
+vaults (`architect_navigator::Mounts`) and selects its row when one of its
+views comes on show. A `Snapshot` can put a count on the row
+(`Snapshot::count`), make its nodes the list's groups (`grouped`), group
+its lists by an item property in its own order (`group_by`), and mark a
+node as another org's or shared (`Node::org`, `Node::shared`). Inside the navigator a provider is
 a `ProviderSource` (`features/navigator/src/provider_source.rs`): nodes as
 folders and items as notes, so the panes, the keys, multi-select, grouping,
 sorting, pins, search, shortcuts and the phone's single pane work the same.

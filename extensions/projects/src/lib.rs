@@ -87,6 +87,9 @@ pub fn notes_base() -> String {
         "project",
         "goal",
         "dueDate",
+        "org",
+        "space",
+        "shared",
     ];
     format!(
         "filters:\n  or:\n    - file.name == \"project\"\n    - type == \"project\"\n    - type == \"goal\"\n    - type == \"milestone\"\nviews:\n  - type: table\n    name: Projects\n    order:\n{}",

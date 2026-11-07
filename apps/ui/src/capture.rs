@@ -80,6 +80,26 @@ pub fn use_app_capture(list: &Arc<ActionList>, files: bool, windowed: bool) -> O
     Some(capture)
 }
 
+/// What the navigator's Inbox rows ask for: triage one capture, by its
+/// vault path (#443). The Queue's capture rows open it
+/// (`architect_tasks::queue::PROCESS_CARD`, `{"path": …}`).
+pub const PROCESS_CARD: &str = architect_tasks::queue::PROCESS_CARD;
+
+/// Triages capture `path`: `ProcessCard`'s shape (one capture, its targets,
+/// Later, Discard; #445). Until #445's card lands, the inbox deck
+/// (`INBOX_OPEN`), which starts at the oldest capture.
+pub fn process_card(list: Arc<ActionList>, path: &str) {
+    tracing::info!(path, "app.inbox.process_card");
+    spawn(async move {
+        if let Err(e) = list
+            .run_json_async(architect_capture::actions::ids::INBOX_OPEN, b"null")
+            .await
+        {
+            tracing::warn!(error = %e, "app.inbox.process_card_failed");
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

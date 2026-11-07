@@ -8,6 +8,7 @@ tags: [music/songs, original]
 feature: "[[Attachments/gradient-dusk.jpg]]"
 status: writing
 album: "[[Projects/Album/project|Album]]"
+sort_index: 1
 created: 2026-09-30T22:10:00
 modified: 2026-11-03T23:40:00
 ---

@@ -457,7 +457,9 @@ fn first_workspace() -> Workspace {
     if let Some(main) = w.windows.first_mut() {
         main.docks.left.ribbon = Some(Ribbon {
             views: vec![ViewKind::new("files"), ViewKind::new("search")],
-            commands: vec!["new-note".to_owned(), "daily".to_owned()],
+            // Today's note only opened a note: it is the palette's
+            // (`NAVIGATOR_OPEN_DAILY_NOTE`) and the Calendar row's (#443).
+            commands: vec!["new-note".to_owned()],
             hidden: Vec::new(),
         });
     }
@@ -500,7 +502,9 @@ fn project_workspace() -> Workspace {
     if let Some(main) = w.windows.first_mut() {
         main.docks.left.ribbon = Some(Ribbon {
             views: vec![ViewKind::new("files"), ViewKind::new("search")],
-            commands: vec!["new-note".to_owned(), "daily".to_owned()],
+            // Today's note only opened a note: it is the palette's
+            // (`NAVIGATOR_OPEN_DAILY_NOTE`) and the Calendar row's (#443).
+            commands: vec!["new-note".to_owned()],
             hidden: Vec::new(),
         });
     }
@@ -1203,6 +1207,14 @@ fn describe(m: &mut Mount, snap: &architect_navigator_api::Snapshot) {
         });
     }
     m.group_by = snap.group_by.clone().map(|k| (k, snap.group_order.clone()));
+    // A place in its own groups (a project's contents) lists itself, not
+    // what is below it (a sub-project's are its own).
+    if m.group_by.is_some() {
+        m.list = Some(architect_navigator::Appearance {
+            descendants: Some(false),
+            ..architect_navigator::Appearance::default()
+        });
+    }
 }
 
 /// A provider's feed: its snapshot read through its actions now and every
@@ -1287,10 +1299,12 @@ fn ProviderFeed(provider: LoadedProvider) -> Element {
     // What the navigator asked of it (a drag, New): sent, then read again.
     let workspace = pane.workspace();
     let decks = architect_workspace::try_use_decks();
+    let app_list = try_use_context::<Arc<architect::action::ActionList>>();
     use_future({
         let (remote, reload) = (Arc::clone(&remote), reload);
         move || {
             let (remote, reload) = (Arc::clone(&remote), reload.clone());
+            let (decks, app_list) = (decks.clone(), app_list.clone());
             async move {
                 let Some(mut rx) = rx.write().take() else {
                     return;
@@ -1311,6 +1325,7 @@ fn ProviderFeed(provider: LoadedProvider) -> Element {
                                 workspace,
                                 decks: decks.clone(),
                                 ui,
+                                app: app_list.clone(),
                                 lab,
                                 target: Target::Tab,
                                 new_deck: false,
@@ -1333,6 +1348,8 @@ struct Opening {
     workspace: Signal<Workspace>,
     decks: Option<architect_workspace::DeckHandle>,
     ui: architect_extensions::interface::ExtensionUi,
+    /// The app's own list (the inbox's actions are on it).
+    app: Option<Arc<architect::action::ActionList>>,
     lab: LabVault,
     target: Target,
     new_deck: bool,
@@ -1345,6 +1362,7 @@ fn follow(open: architect_navigator_api::Open, how: &Opening) {
         workspace,
         ref decks,
         ref ui,
+        ref app,
         lab,
         target,
         new_deck,
@@ -1388,6 +1406,17 @@ fn follow(open: architect_navigator_api::Open, how: &Opening) {
                     .run_json_async("EXT_VIEW_OPEN", args.to_string().as_bytes())
                     .await;
             });
+        }
+        // A capture of the Queue's Inbox: the app's triage card.
+        O::Action { id, args } if id == crate::capture::PROCESS_CARD => {
+            let path = args
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let list = app
+                .clone()
+                .unwrap_or_else(|| Arc::new(ui.host().list().clone()));
+            crate::capture::process_card(list, path);
         }
         O::Action { id, args } => {
             let list = ui.host().list().clone();
@@ -1612,6 +1641,7 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
         });
     }
     let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let app_list = try_use_context::<Arc<architect::action::ActionList>>();
     let on_open = EventHandler::new({
         let own = own.clone();
         move |o: Open| {
@@ -1635,6 +1665,7 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
                     workspace: open_pane.workspace(),
                     decks: decks.clone(),
                     ui,
+                    app: app_list.clone(),
                     lab,
                     target,
                     new_deck,

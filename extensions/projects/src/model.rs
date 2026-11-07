@@ -94,6 +94,14 @@ pub struct Project {
     pub members: Vec<String>,
     pub icon: Option<String>,
     pub tags: Vec<String>,
+    /// Its parent project, as linked (`parent`): a sub-project's.
+    pub parent: Option<String>,
+    /// Its home org (`org`), when the note says: the org that owns its
+    /// note and its files root (#443).
+    pub org: Option<String>,
+    /// Shared into this org through a Space (`space` set, or
+    /// `shared: true`).
+    pub shared: bool,
 }
 
 impl Project {
@@ -123,6 +131,10 @@ impl Project {
             members: values.get("members").map(list_of).unwrap_or_default(),
             icon: text("icon"),
             tags: values.get("tags").map(list_of).unwrap_or_default(),
+            parent: text("parent"),
+            org: text("org"),
+            shared: text("space").is_some()
+                || values.get("shared").and_then(Value::as_bool) == Some(true),
         }
     }
 
