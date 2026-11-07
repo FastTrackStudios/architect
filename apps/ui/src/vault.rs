@@ -322,6 +322,13 @@ fn vault_note(path: &str) -> Pane {
     pane
 }
 
+/// Whether `path`'s extension is `ext`, in any case.
+fn has_ext(path: &str, ext: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+}
+
 /// The pane showing the vault's note at `path`, if one does.
 fn vault_pane_of(w: &Workspace, path: &str) -> Option<architect_workspace::PaneId> {
     w.panes
@@ -557,8 +564,8 @@ pub fn VaultPage() -> Element {
             }
             (format!("note-new-{}", made()), "Untitled".to_owned())
         };
-        let mut workspace = workspace;
-        let _ = workspace.write().open(note(&pane_id, &title), Target::Tab);
+        // In the main area, never the dock the navigator is in (#442).
+        open_in_main(workspace, note(&pane_id, &title), Target::Tab);
     };
     let new_note = on_command.clone();
     architect_commands::use_command(
@@ -1802,9 +1809,22 @@ fn VaultNote(path: String) -> Element {
             .and_then(|d| d.vault().text(&path))
             .unwrap_or_default()
     });
-    // What the file held when last read or saved, and what is typed.
+    // What the file held when last read or saved, and what is typed: its
+    // properties (the Properties bar's) and its body (the editor's).
     let base = use_hook(|| CopyValue::new(first.clone()));
     let ours = use_hook(|| CopyValue::new(first.clone()));
+    let (block0, body0) = crate::properties::split(&first);
+    let mut block = use_signal(|| block0.to_owned());
+    let body = use_hook(|| CopyValue::new(body0.to_owned()));
+    let body0 = body0.to_owned();
+    let types = use_hook(|| crate::properties::Types {
+        declared: std::sync::Arc::new(
+            disk.peek()
+                .as_ref()
+                .map(|d| crate::properties::declared_types(&d.vault().root()))
+                .unwrap_or_default(),
+        ),
+    });
     let mut incoming = use_signal(|| None::<(u64, String)>);
     let mut gone = use_signal(|| false);
     let serial = use_hook(|| CopyValue::new(0_u64));
@@ -1864,8 +1884,16 @@ fn VaultNote(path: String) -> Element {
                         base.set(theirs.clone());
                         if merged != *ours.peek() {
                             ours.set(merged.clone());
-                            n = n.wrapping_add(1);
-                            incoming.set(Some((n, merged.clone())));
+                            let (b, rest) = crate::properties::split(&merged);
+                            if *block.peek() != b {
+                                block.set(b.to_owned());
+                            }
+                            let mut body = body;
+                            if *body.peek() != rest {
+                                body.set(rest.to_owned());
+                                n = n.wrapping_add(1);
+                                incoming.set(Some((n, rest.to_owned())));
+                            }
                         }
                         if merged != theirs {
                             later();
@@ -1909,6 +1937,32 @@ fn VaultNote(path: String) -> Element {
         StatusItem::new("words", crate::count(words, "word")).left(),
     ]);
     let shown = draft().unwrap_or_else(|| title.clone());
+    // A link followed: the vault's note it names, in the main area; a
+    // web link, by the extension that claims it.
+    let workspace = pane.workspace();
+    let open_link = move |href: String| {
+        if href.contains("://") {
+            if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>()
+            {
+                let _ = ui.open_link(&href);
+            }
+            return;
+        }
+        let name = crate::properties::link_target(&href);
+        let path = disk
+            .peek()
+            .clone()
+            .map(crate::note_editor::NoteVault)
+            .and_then(|v| v.file_path(&name));
+        match path {
+            Some(path) if has_ext(&path, "md") => show_vault_note(workspace, &path, Target::Tab),
+            Some(path) if has_ext(&path, "base") => {
+                open_in_main(workspace, base_pane(&path), Target::Tab);
+            }
+            Some(path) => tracing::info!(link = %path, "lab.vault.link_not_a_note"),
+            None => tracing::info!(link = %name, "lab.vault.link_unresolved"),
+        }
+    };
     rsx! {
         div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 24px 36px; overflow-y: scroll;",
             "data-vault-note": "{here}",
@@ -1928,13 +1982,27 @@ fn VaultNote(path: String) -> Element {
             if gone() {
                 div { style: "color: {t.ink_3}; font-size: 13px;", "This note's file was deleted." }
             }
+            crate::properties::PropertiesBar {
+                block: block(),
+                types,
+                on_change: move |b: String| {
+                    let mut ours = ours;
+                    ours.set(format!("{b}{}", body.peek()));
+                    block.set(b);
+                    later();
+                },
+                on_link: move |name: String| open_link(name),
+            }
             crate::note_editor::NoteEditor {
                 id: here.clone(),
-                text: first,
+                text: body0,
                 incoming: incoming(),
+                vault: disk.peek().clone().map(crate::note_editor::NoteVault),
+                on_link: move |href: String| open_link(href),
                 on_change: move |value: String| {
-                    let mut ours = ours;
-                    ours.set(value);
+                    let (mut ours, mut body) = (ours, body);
+                    ours.set(format!("{}{value}", block.peek()));
+                    body.set(value);
                     later();
                 },
             }

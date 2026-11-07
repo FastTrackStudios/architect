@@ -6605,7 +6605,7 @@ dependencies = [
 [[package]]
 name = "editor-ext"
 version = "0.1.0"
-source = "git+https://www.github.com/FastTrackStudios/editor?rev=f8137a9326825361e2046254790758dc516caa44#f8137a9326825361e2046254790758dc516caa44"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=81451ea7d72069195ca28f66274411e525c11ae0#81451ea7d72069195ca28f66274411e525c11ae0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6633,7 +6633,7 @@ dependencies = [
 [[package]]
 name = "editor-state"
 version = "0.1.0"
-source = "git+https://www.github.com/FastTrackStudios/editor?rev=f8137a9326825361e2046254790758dc516caa44#f8137a9326825361e2046254790758dc516caa44"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=81451ea7d72069195ca28f66274411e525c11ae0#81451ea7d72069195ca28f66274411e525c11ae0"
 dependencies = [
  "editor-ext",
  "editor-syntax",
@@ -6647,7 +6647,7 @@ dependencies = [
 [[package]]
 name = "editor-syntax"
 version = "0.1.0"
-source = "git+https://www.github.com/FastTrackStudios/editor?rev=f8137a9326825361e2046254790758dc516caa44#f8137a9326825361e2046254790758dc516caa44"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=81451ea7d72069195ca28f66274411e525c11ae0#81451ea7d72069195ca28f66274411e525c11ae0"
 dependencies = [
  "arborium",
  "arborium-theme",
@@ -6657,7 +6657,7 @@ dependencies = [
 [[package]]
 name = "editor-view"
 version = "0.1.0"
-source = "git+https://www.github.com/FastTrackStudios/editor?rev=f8137a9326825361e2046254790758dc516caa44#f8137a9326825361e2046254790758dc516caa44"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=81451ea7d72069195ca28f66274411e525c11ae0#81451ea7d72069195ca28f66274411e525c11ae0"
 dependencies = [
  "dioxus",
  "editor-state",
@@ -6675,7 +6675,7 @@ dependencies = [
 [[package]]
 name = "editor-vim"
 version = "0.1.0"
-source = "git+https://www.github.com/FastTrackStudios/editor?rev=f8137a9326825361e2046254790758dc516caa44#f8137a9326825361e2046254790758dc516caa44"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=81451ea7d72069195ca28f66274411e525c11ae0#81451ea7d72069195ca28f66274411e525c11ae0"
 dependencies = [
  "editor-state",
  "tracing",

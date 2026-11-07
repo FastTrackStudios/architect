@@ -31,6 +31,7 @@ mod notes;
 mod pages;
 mod paint;
 pub mod presence;
+mod properties;
 mod publish;
 mod screen;
 mod settings;
