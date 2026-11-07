@@ -44,6 +44,7 @@ pub mod theme;
 pub mod typography;
 
 pub mod prelude;
+pub mod sheet;
 pub mod showcase;
 
 pub mod stories;
