@@ -438,6 +438,34 @@ pub fn set_default(st: &mut DeckState, a: &DeckDefaultArgs) -> Result<DeckAnswer
     })
 }
 
+/// A deck template's shipped layout (`[[deck_templates]] layout`:
+/// `WORKSPACE_EXPORT`'s tree, as JSON) as a built-in screenset called
+/// `name`, for a desk; every view it names must be one of `views`.
+///
+/// # Errors
+///
+/// JSON that is not a layout, or a layout that does not fit
+/// (`WORKSPACE_APPLY`'s errors).
+pub fn template_screenset(
+    name: &str,
+    layout_json: &str,
+    views: Vec<super::ViewSpec>,
+) -> Result<crate::Screenset, String> {
+    let layout: super::PortableLayout =
+        facet_json::from_str(layout_json).map_err(|e| e.to_string())?;
+    let mut st = super::State::new(crate::Workspace::new());
+    super::apply(
+        &mut st,
+        &super::Env::new(views),
+        super::ApplyArgs {
+            layout,
+            if_revision: None,
+            keep_unplaced: false,
+        },
+    )?;
+    Ok(crate::Screenset::new(name).layout(crate::FormClass::Desk, st.workspace))
+}
+
 #[cfg(feature = "actions")]
 pub use on_list::{DeckExec, DeckJob, HeadlessDecks, register};
 

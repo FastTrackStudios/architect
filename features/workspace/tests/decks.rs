@@ -453,3 +453,28 @@ fn the_deck_actions_over_mcp() {
     assert_eq!(m.decks.state().decks.decks.len(), 3);
     let _ = DeckId::new("x");
 }
+
+/// What an extension ships with `[[deck_templates]] layout`.
+const SONG_LAYOUT: &str = r#"{"windows":[{"id":"main",
+  "center":{"split":{"axis":"row","children":[
+    {"share":0.62,"node":{"group":{"tabs":[{"pane":"chart","view":"song.chart","title":"Chart"}]}}},
+    {"share":0.38,"node":{"group":{"tabs":[{"pane":"lyrics","view":"song.lyrics","title":"Lyrics"}]}}}]}},
+  "docks":[{"side":"left","root":{"group":{"tabs":[{"pane":"files","view":"files","title":"Files"}]}}}]}],
+  "active":"chart"}"#;
+
+#[test]
+fn a_templates_shipped_layout_is_a_built_in_screenset() {
+    use architect_workspace::control::{ViewSpec, deck::template_screenset};
+    let views = vec![
+        ViewSpec::new("song.chart", "Chart"),
+        ViewSpec::new("song.lyrics", "Lyrics"),
+        ViewSpec::new("files", "Files"),
+    ];
+    let set = template_screenset("Song", SONG_LAYOUT, views.clone()).unwrap();
+    assert_eq!(set.id, "song");
+    assert!(set.builtin);
+    let w = set.layout_for(FormClass::Desk).unwrap();
+    assert_eq!(w.panes.len(), 3);
+    assert!(template_screenset("Song", SONG_LAYOUT, views[..1].to_vec()).is_err());
+    assert!(template_screenset("Song", "{}", views).is_err());
+}
