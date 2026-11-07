@@ -240,7 +240,8 @@ code {
 
 /* ---------- sheets ---------- */
 
-main { padding: clamp(14px, 2.4vw, 32px) var(--gutter) 0; display: grid; gap: clamp(28px, 4vw, 56px); }
+main { padding: 36px max(var(--gutter), 30px) 0; display: grid; gap: clamp(44px, 4vw, 60px); }
+@media (max-width: 640px) { main { padding-inline: 16px; } }
 
 .sheet {
   position: relative;
@@ -253,15 +254,15 @@ main { padding: clamp(14px, 2.4vw, 32px) var(--gutter) 0; display: grid; gap: cl
   grid-template-rows: 1fr auto;
 }
 /* labelled zones on the sheet's top (1-8) and left (A-F) edges, between the two borders */
+/* labelled zones just outside the outer border: 1-8 across the top, A-F down the left */
 .zones { position: absolute; display: flex; pointer-events: none; font-family: var(--font-tech); font-size: 11px; line-height: 1; color: var(--ink-3); }
 .zones span { flex: 1; display: grid; place-items: center; }
-.zones-top { left: 0; right: 0; top: -9px; height: 7px; }
+.zones span::after { content: attr(data-z); }
+.zones-top { left: -8px; right: -8px; top: -24px; height: 16px; }
 .zones-top span + span { border-left: var(--pen-1) solid var(--ink-3); }
-.zones-left { top: 0; bottom: 0; left: -9px; width: 7px; flex-direction: column; }
+.zones-left { top: -8px; bottom: -8px; left: -26px; width: 16px; flex-direction: column; }
 .zones-left span + span { border-top: var(--pen-1) solid var(--ink-3); }
-.zones span { overflow: visible; }
-.zones-top span::after, .zones-left span::after { content: attr(data-z); background: var(--paper); padding: 0 2px; }
-@media (max-width: 640px) { .zones-top span:nth-child(even), .zones-left span:nth-child(even) { color: transparent; } .zones-top span:nth-child(even)::after, .zones-left span:nth-child(even)::after { content: ""; } }
+@media (max-width: 640px) { .zones-left { display: none; } }
 
 .sheet-body {
   padding: clamp(22px, 4vw, 60px);
@@ -442,6 +443,7 @@ video.shot { aspect-ratio: auto 960 / 573; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 @keyframes fade { to { opacity: 0.9; } }
 
+.plan-more { display: none; justify-content: space-between; font-family: var(--font-tech); font-size: 0.85rem; color: var(--line); border-top: var(--pen-1) dashed var(--line); padding-top: 6px; }
 .plan-cap .t-label { font-family: var(--font-tech); color: var(--line); text-transform: uppercase; letter-spacing: 0.05em; }
 .plan-cap { display: block; }
 
@@ -513,7 +515,8 @@ h1 {
 
 @media (max-width: 640px) {
   .hero-keynotes li { flex-direction: row; }
-  .plan-scroll { overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; }
+  .plan-scroll { overflow-x: auto; padding-bottom: 8px; scrollbar-width: thin; scrollbar-color: var(--line) var(--paper-2); }
+  .plan-more { display: flex; }
   .plan-svg { min-width: 640px; max-height: none; }
 }
 @media (max-width: 520px) {

@@ -100,6 +100,11 @@
       });
     });
     requestAnimationFrame(function () { plan.classList.add("is-drawn"); });
+    // On a phone the plan scrolls sideways: open it centred on the node
+    var scroller = plan.parentNode;
+    if (scroller && scroller.scrollWidth > scroller.clientWidth) {
+      scroller.scrollLeft = (scroller.scrollWidth - scroller.clientWidth) / 2;
+    }
   }
 
   // Looping details: play when on screen, never under reduced motion unless asked
