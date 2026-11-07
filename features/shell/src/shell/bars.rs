@@ -84,6 +84,12 @@ fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool
 }
 
 /// The round separate button: Task's capture, Studio's search.
+///
+/// With a [`SwipeUp`](super::SwipeUp) (Task's `BottomTabBar` capture
+/// button): a press and a slide lifts it with the pointer, and past
+/// [`SWIPE_UP`](super::SWIPE_UP) it takes the swipe's icon and the accent
+/// and lets go into the swipe (a timer) instead of the press (capture).
+/// With a badge, the count rides its corner.
 #[component]
 pub(super) fn RoundButton(action: Action) -> Element {
     let shell = use_shell();
@@ -91,17 +97,106 @@ pub(super) fn RoundButton(action: Action) -> Element {
     // A finger's size on a touch screen, a mouse's on a desk.
     let (size, icon) = if shell.desk() { (44.0, 18) } else { (54.0, 22) };
     let press = action.on_press;
+    let swipe = action.swipe_up.clone();
+    let can_swipe = swipe.is_some();
+    // The slide: where it started, how far it has lifted, whether that is
+    // far enough, and the click a finished slide leaves to swallow.
+    let mut start_y = use_signal(|| None::<f64>);
+    let mut lift = use_signal(|| 0.0_f64);
+    let mut swiping = use_signal(|| false);
+    let mut swallow = use_signal(|| false);
+    let on_swipe = swipe.as_ref().map(|s| s.on_swipe);
+    let mut settle = move || {
+        start_y.set(None);
+        lift.set(0.0);
+        swiping.set(false);
+    };
+    let on_move = move |e: PointerEvent| {
+        if let Some(y0) = start_y() {
+            let up = (y0 - e.client_coordinates().y).max(0.0);
+            lift.set(up);
+            swiping.set(up >= super::SWIPE_UP);
+        }
+    };
+    let mut on_up = move |_: PointerEvent| {
+        let go = swiping();
+        settle();
+        if go && let Some(f) = on_swipe {
+            swallow.set(true);
+            f.call(());
+        }
+    };
+    let (bg, fg, border) = if swiping() {
+        (t.accent.clone(), t.accent_ink.clone(), t.accent.clone())
+    } else {
+        (t.pill.clone(), t.ink.clone(), t.rule.clone())
+    };
+    let shift = if lift() > 0.0 {
+        format!("transform: translateY(-{:.0}px);", lift().min(48.0))
+    } else {
+        String::new()
+    };
+    let label = match (&swipe, swiping()) {
+        (Some(s), true) => s.label.clone(),
+        _ => action.label.clone(),
+    };
     rsx! {
         button {
             class: "tip-host",
-            "aria-label": "{action.label}",
+            "aria-label": "{label}",
+            "data-swiping": "{swiping()}",
             style: "position: relative; width: {size}px; height: {size}px; flex-shrink: 0; box-sizing: border-box; border-radius: {size / 2.0}px; \
-                    display: flex; align-items: center; justify-content: center; padding: 0; background: {t.pill}; \
-                    border: 1px solid {t.rule}; color: {t.ink}; box-shadow: {t.shadow_lift};",
-            onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: icon, color: t.ink.clone() })}
+                    display: flex; align-items: center; justify-content: center; padding: 0; background: {bg}; \
+                    border: 1px solid {border}; color: {fg}; box-shadow: {t.shadow_lift}; {shift}",
+            onpointerdown: move |e: PointerEvent| {
+                // A slide let go off the button left its click elsewhere:
+                // nothing to swallow from before this press.
+                swallow.set(false);
+                if can_swipe {
+                    start_y.set(Some(e.client_coordinates().y));
+                }
+            },
+            onpointermove: on_move,
+            onpointercancel: move |_| settle(),
+            onpointerup: on_up,
+            onclick: move |_| {
+                if swallow() {
+                    swallow.set(false);
+                    return;
+                }
+                press.call(());
+            },
+            match (&swipe, swiping()) {
+                (Some(s), true) => (s.icon)(Icon { size: icon, color: fg.clone() }),
+                _ => (action.icon)(Icon { size: icon, color: fg.clone() }),
+            }
+            if let Some(n) = action.badge {
+                span {
+                    style: "position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; padding: 0 5px; \
+                            box-sizing: border-box; border-radius: 9px; display: flex; align-items: center; justify-content: center; \
+                            background: {t.accent}; color: {t.accent_ink}; font-size: 10px; font-weight: 600; \
+                            font-variant-numeric: tabular-nums; pointer-events: none;",
+                    "{n}"
+                }
+            }
             if shell.desk() {
-                span { class: "tip", style: "right: 0; bottom: {size + 8.0}px;", "{action.label}" }
+                span { class: "tip", style: "right: 0; bottom: {size + 8.0}px;", "{label}" }
+            }
+        }
+        // While it slides, the pointer is the button's wherever it goes
+        // (a touch keeps its target; a pointer would leave it above the
+        // lifted button and let go elsewhere).
+        // Only once it moves: a tap's down and up stay the button's, so its
+        // click comes.
+        if start_y().is_some() && lift() > 4.0 {
+            div {
+                style: "position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000;",
+                onpointermove: on_move,
+                onpointerup: move |e: PointerEvent| {
+                    e.stop_propagation();
+                    on_up(e);
+                },
+                onpointercancel: move |_| settle(),
             }
         }
     }
