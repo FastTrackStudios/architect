@@ -216,6 +216,11 @@ default; a page or an extension fills it while its view is on show.
   (`ActionProvider` over the host's Action List) and draws it with a
   `ProviderSource` (`features/navigator/src/provider_source.rs`): nodes as
   folders, items as notes in their container's folder, titles made unique.
+  A provider's items never fill the Properties section: their fields are
+  the provider's, not the vault's (`NavigatorSource::browses_properties`,
+  false for a `ProviderSource`; kept as `VaultIndex::browses_properties`).
+  Files with no project folder on the device shows its empty state
+  (`features/files/extension/src/nav.rs` `empty_state`) instead of an error.
   `ProviderSource::item_at` reads an opened path back as its item; a drag
   onto a folder and New come back as `ProviderRequest`s. `apps/ui/src/vault.rs`
   `FilesView` switches with the page, keeps each provider's view state, and
