@@ -41,6 +41,32 @@ config has a `drive` (`ARCHITECT_DRIVE`). The spec is in
 [Project files](@/architecture/project-files.md); the engine under it is in
 [Files](@/features/files.md).
 
+## Running itself
+
+`architect-desktop agent install` sets the device up. It writes the agent's
+config if there isn't one, then installs a service that starts it at login
+and restarts it if it dies.
+
+| | Linux | macOS |
+|---|---|---|
+| Service | `~/.config/systemd/user/architect-agent.service` (`systemctl --user`) | `~/Library/LaunchAgents/com.fasttrackstudios.architect.agent.plist` (`launchctl`, `RunAtLoad`) |
+| Config | `$XDG_CONFIG_HOME/architect/agent.toml` | `~/Library/Application Support/Architect/agent.toml` |
+| Data (keys, documents, the blob cache) | `$XDG_DATA_HOME/architect/agent` | `~/Library/Application Support/Architect/agent` |
+| Store (working copies of pinned roots) | `<data>/roots` (`files_dir`) | `<data>/roots` |
+| Drive | `~/Architect` (`drive`) | `~/Architect` (macFUSE / FUSE-T); a File Provider later |
+| Agent address | `127.0.0.1:18471` (`bind`), loopback only | the same |
+
+To move the drive or the store, edit `drive` or `files_dir` in the config
+(or use the app's Drive settings), then restart the agent. The other
+commands are `agent uninstall` (its config and data stay), `agent start`
+and `agent status`.
+
+When the app opens, it finds the agent at the config's `bind`. If the
+agent isn't running, the app starts the service, or, with no service, runs
+`architect-desktop serve --config <agent.toml>` detached, so it outlives the
+window. `ARCHITECT_FILES_AGENT` overrides the address. The unit's
+`ExecStopPost` unmounts the drive however the agent ended.
+
 ## Unmounting, always
 
 - **On a clean stop** (SIGTERM, the app's quit) the node unmounts.
@@ -81,6 +107,6 @@ config has a `drive` (`ARCHITECT_DRIVE`). The spec is in
 
 ## Status
 
-Linux works. macOS: the same code over macFUSE or FUSE-T is the next
-step, then a File Provider (see the Drive section of
-`skills/architect/references/files.md`).
+Linux works. macOS: the same code over macFUSE or FUSE-T, and a File
+Provider, are the next layer (`skills/architect/references/files.md`, the
+drive).

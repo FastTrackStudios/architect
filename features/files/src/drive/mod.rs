@@ -15,6 +15,7 @@
 //!
 //! All fetching and evicting is in [`cache`].
 
+pub mod agent;
 pub mod cache;
 pub mod fs;
 

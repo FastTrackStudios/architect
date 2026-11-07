@@ -131,6 +131,11 @@ architect-capture = { workspace = true, features = ["native"] }
 # The first run's folder picker (`src/first_run.rs`).
 rfd = { workspace = true }
 
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+# The device's agent (src/files.rs): its config's defaults, and starting it
+# (systemd / launchd) when the window opens and it is not running.
+architect-files = { workspace = true, features = ["drive"] }
+
 [lints]
 workspace = true
 

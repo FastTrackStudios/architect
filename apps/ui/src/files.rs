@@ -20,14 +20,68 @@ use architect_files::roots::{
 /// Where the agent listens: `http://127.0.0.1:8090`.
 pub const AGENT: &str = "ARCHITECT_FILES_AGENT";
 
-/// `FILES_*` on `list`, when the device has an agent.
+/// `FILES_*` on `list`, when the device has an agent: the one
+/// `ARCHITECT_FILES_AGENT` names, else the installed one (started, or
+/// joined if it runs).
 pub fn register(list: &ActionList) {
-    let Ok(base) = std::env::var(AGENT) else {
+    let Some(base) = std::env::var(AGENT).ok().or_else(join_agent) else {
         return;
     };
     let agent = Agent(FilesHttpClient::at(base.trim_end_matches('/')));
     if let Err(why) = files_actions::register(agent, list) {
         tracing::warn!(?why, "FILES_* are not on the list");
+    }
+}
+
+/// The installed agent's address, started if it is not running: through
+/// its service when there is one, else as a detached `serve` (it outlives
+/// the window: it is the device's sync agent).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn join_agent() -> Option<String> {
+    use architect_files::drive::agent as svc;
+    let defaults = svc::Defaults::here()?;
+    let text = std::fs::read_to_string(&defaults.config).ok()?;
+    let bind = svc::get_key(&text, "bind")
+        .unwrap_or_else(|| svc::BIND.to_owned())
+        .replace("0.0.0.0", "127.0.0.1");
+    let up = |addr: &str| {
+        addr.parse::<std::net::SocketAddr>().is_ok_and(|a| {
+            std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_millis(300)).is_ok()
+        })
+    };
+    if !up(&bind) {
+        let started = svc::service_dir()
+            .filter(|d| svc::installed(d))
+            .map(|_| svc::start_installed());
+        if !matches!(started, Some(Ok(()))) {
+            spawn_agent(&defaults.config);
+        }
+    }
+    Some(format!("http://{bind}"))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn join_agent() -> Option<String> {
+    None
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn spawn_agent(config: &std::path::Path) {
+    use std::os::unix::process::CommandExt as _;
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let spawned = std::process::Command::new(exe)
+        .args(["serve", "--config"])
+        .arg(config)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn();
+    match spawned {
+        Ok(child) => tracing::info!(pid = child.id(), "started the files agent"),
+        Err(why) => tracing::warn!(%why, "the files agent did not start"),
     }
 }
 

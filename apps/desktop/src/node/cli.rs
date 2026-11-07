@@ -5,6 +5,9 @@
 //! architect-desktop files unpin <path>
 //! architect-desktop files status [<path>] # the drive, or one root
 //! architect-desktop drive-guard <mount>   # started by the drive itself: unmounts when the agent ends
+//! architect-desktop agent install [--config <file>] [--service-dir <dir>] [--no-start]
+//! architect-desktop agent uninstall [--service-dir <dir>]
+//! architect-desktop agent start | status
 //! ```
 //!
 //! They find the agent through its config: `--config <file>`,
@@ -19,18 +22,19 @@ use architect_files::agent::files::{Files, FilesHttpClient};
 
 use super::Config;
 
-/// The device agent's config: `$XDG_CONFIG_HOME/architect/agent.toml`
-/// (`~/.config/…`), `~/Library/Application Support/Architect/agent.toml`
-/// on a Mac.
+/// The device agent's config (`architect_files::drive::agent::Defaults`):
+/// `$XDG_CONFIG_HOME/architect/agent.toml` (`~/.config/…`), or
+/// `~/Library/Application Support/Architect/agent.toml` on a Mac.
 #[must_use]
 pub fn default_config() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    if cfg!(target_os = "macos") {
-        return Some(home.join("Library/Application Support/Architect/agent.toml"));
+    #[cfg(unix)]
+    {
+        architect_files::drive::agent::Defaults::here().map(|d| d.config)
     }
-    let config =
-        std::env::var_os("XDG_CONFIG_HOME").map_or_else(|| home.join(".config"), PathBuf::from);
-    Some(config.join("architect").join("agent.toml"))
+    #[cfg(not(unix))]
+    {
+        None
+    }
 }
 
 /// The guard's command (the drive starts it; see `architect_files::drive`).
@@ -164,6 +168,116 @@ pub fn files(args: impl Iterator<Item = OsString>) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(why) => fail(&format!("files: {why}")),
+    }
+}
+
+/// `agent install|uninstall|start|status`.
+#[must_use]
+pub fn agent(args: impl Iterator<Item = OsString>) -> ExitCode {
+    #[cfg(unix)]
+    {
+        agent_unix(args)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        fail("agent: Linux and macOS only")
+    }
+}
+
+#[cfg(unix)]
+fn agent_unix(args: impl Iterator<Item = OsString>) -> ExitCode {
+    use architect_files::drive::agent as svc;
+    let mut args: Vec<OsString> = args.collect();
+    let mut take = |flag: &str| -> Option<PathBuf> {
+        let i = args.iter().position(|a| a == flag)?;
+        args.remove(i);
+        (i < args.len()).then(|| PathBuf::from(args.remove(i)))
+    };
+    let config = take("--config");
+    let service_dir = take("--service-dir").or_else(svc::service_dir);
+    let no_start = args
+        .iter()
+        .position(|a| a == "--no-start")
+        .map(|i| args.remove(i))
+        .is_some();
+    let Some(defaults) = svc::Defaults::here() else {
+        return fail("agent: no $HOME");
+    };
+    let Some(service_dir) = service_dir else {
+        return fail("agent: no $HOME");
+    };
+    let verb = args
+        .first()
+        .and_then(|v| v.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    match verb.as_str() {
+        "install" => {
+            let exe = match std::env::current_exe() {
+                Ok(e) => e,
+                Err(e) => return fail(&format!("agent install: {e}")),
+            };
+            // `/etc/hostname` on Linux; a Mac has none, `hostname -s` there.
+            let name = std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .or_else(|| {
+                    std::process::Command::new("hostname")
+                        .arg("-s")
+                        .output()
+                        .ok()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                })
+                .map(|h| h.trim().to_owned())
+                .filter(|h| !h.is_empty())
+                .unwrap_or_else(|| "device".to_owned());
+            let install = svc::Install {
+                exe,
+                config: config.unwrap_or_else(|| defaults.config.clone()),
+                service_dir,
+                start: !no_start,
+                defaults,
+                name,
+            };
+            match svc::install(&install) {
+                Ok(file) => {
+                    say(&format!(
+                        "installed {} (config {}){}",
+                        file.display(),
+                        install.config.display(),
+                        if install.start { ", started" } else { "" }
+                    ));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&format!("agent install: {e}")),
+            }
+        }
+        "uninstall" => match svc::uninstall(&service_dir) {
+            Ok(()) => {
+                say("uninstalled (its config and data stay)");
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(&format!("agent uninstall: {e}")),
+        },
+        "start" => match svc::start_installed() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => fail(&format!("agent start: {e}")),
+        },
+        "status" => {
+            say(&format!(
+                "service: {}\nconfig: {}\nstore: {}\ndrive: {}",
+                if svc::installed(&service_dir) {
+                    "installed"
+                } else {
+                    "not installed"
+                },
+                defaults.config.display(),
+                defaults.store.display(),
+                defaults.mount.display(),
+            ));
+            ExitCode::SUCCESS
+        }
+        _ => fail("usage: architect-desktop agent install|uninstall|start|status"),
     }
 }
 
