@@ -18,6 +18,7 @@ mod capture;
 mod confirm;
 mod embedded;
 mod extensions;
+mod files;
 mod first_run;
 mod guide;
 mod items;
@@ -764,6 +765,8 @@ pub fn LabApp() -> Element {
     use_hook(|| {
         if files {
             notes::register(&list);
+            // Projects and asset libraries (#347), over the files agent.
+            files::register(&list);
         }
     });
     // Capture (#352): the composer, the inbox over the vault, the capture

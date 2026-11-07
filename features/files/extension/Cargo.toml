@@ -1,0 +1,30 @@
+[package]
+name = "architect-files-extension"
+description = "Files, a built-in architect extension: the org's projects and asset libraries in the navigator, a project's page (pin, unpin, browse, versions, checkpoints) and an asset's (properties, links, a waveform per stem), over the device's files agent (FILES_*). Linked into an app, or run as its own process."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-files-extension"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); the app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+# Its navigator provider (MIT; never the GPL navigator itself).
+architect-navigator-api = { workspace = true }
+dioxus = { workspace = true }
+futures-timer = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

@@ -1,0 +1,81 @@
+# Files (features/files/extension/src/lib.rs, #347): the org's projects
+# and asset libraries, as the device's files agent keeps them (FILES_*,
+# architect-files' `agent`, which the app registers over the agent's
+# HTTP face). One Rust value (`FilesExtension`, a linked::Extension):
+# linked in as a built-in, or its program as a development copy.
+id = "files"
+name = "Files"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Your org's projects and asset libraries: pin a project to keep a working copy here, browse the rest on demand, see a file's versions and a project's checkpoints and put them back; an asset's properties, links and a waveform per stem."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-files-extension"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/files/extension"
+
+[capabilities]
+actions = ["FILES_", "EXT_VIEW_OPEN"]
+effect = "mutating"
+
+[[actions]]
+id = "FILES_OPEN"
+name = "Files: open"
+description = "A root's page (`root`: its place, codywright/Projects/Right Here) or an asset's (`root` a library and `asset` its name); with neither, the first root."
+group = "Files"
+effect = "read_only"
+params = '{"type":"object","properties":{"root":{"type":"string"},"asset":{"type":"string"},"path":{"type":"string"}}}'
+
+[[actions]]
+id = "FILES_NAV_SNAPSHOT"
+name = "Files: the navigator's tree"
+description = "Its navigator provider's snapshot: each org's projects and libraries, a project's top folders and files and a library's assets as items."
+group = "Files"
+effect = "read_only"
+
+[[actions]]
+id = "FILES_NAV_OPEN"
+name = "Files: open from the navigator"
+description = "What opening navigator item `item` (`<root>|<path>`) does: the root's page at that path."
+group = "Files"
+effect = "read_only"
+params = '{"type":"object","properties":{"item":{"type":"string"}},"required":["item"]}'
+
+[[actions]]
+id = "FILES_NAV_MOVE"
+name = "Files: move (refused)"
+description = "Files move in the project's own folder or over WebDAV; the navigator does not move them."
+group = "Files"
+effect = "mutating"
+params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
+
+[[actions]]
+id = "FILES_NAV_CREATE"
+name = "Files: create (refused)"
+description = "A project's files are made in its folder; the navigator does not make them."
+group = "Files"
+effect = "mutating"
+params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
+
+# The sidebar while its views show: orgs, projects, libraries (src/nav.rs).
+[[navigator_providers]]
+id = "files"
+title = "Files"
+icon = "hard-drive"
+views = ["root", "asset"]
+actions = "FILES_NAV"
+
+[[views]]
+id = "root"
+title = "Project"
+icon = "folder"
+
+[[views]]
+id = "asset"
+title = "Asset"
+icon = "music"

@@ -884,7 +884,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // calendar the tasks' days and the time tracked. The sandbox's
         // made-up data and goldens stay as they were.
         if !sandbox {
-            let bundle: [&dyn architect_extensions::linked::Extension; 6] = [
+            let bundle: [&dyn architect_extensions::linked::Extension; 7] = [
                 &architect_projects::Projects,
                 &architect_tasks::Tasks,
                 &architect_time_tracker::TimeTracker,
@@ -894,6 +894,8 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                 // Notify (#348): the bell, the centre, mentions and
                 // assignments, joined with the extensions' toasts.
                 &architect_notify::Notify,
+                // Files (#347): projects and asset libraries, over FILES_*.
+                &architect_files_extension::FilesExtension,
             ];
             for linked in bundle {
                 if let Ok(with) = extensions.clone().with_linked(linked) {

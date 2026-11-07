@@ -823,6 +823,8 @@ dependencies = [
  "architect-command-palette",
  "architect-commands",
  "architect-extensions",
+ "architect-files",
+ "architect-files-extension",
  "architect-guide",
  "architect-input",
  "architect-navigator",
@@ -869,6 +871,7 @@ dependencies = [
  "serde_json",
  "tag",
  "tempfile",
+ "tokio",
  "tracing",
  "vault",
  "vault-doc",
@@ -1314,6 +1317,18 @@ dependencies = [
  "tracing",
  "uuid",
  "vox",
+]
+
+[[package]]
+name = "architect-files-extension"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "architect-navigator-api",
+ "architect-workspace-hack",
+ "dioxus",
+ "futures-timer",
+ "serde_json",
 ]
 
 [[package]]
