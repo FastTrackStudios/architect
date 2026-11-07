@@ -3,6 +3,17 @@
   "use strict";
   var root = document.documentElement;
   root.classList.add("js");
+
+  // Label each sheet's zones: 1-8 along the top, A-F down the left
+  document.querySelectorAll(".sheet").forEach(function (sheet) {
+    [["zones zones-top", "12345678"], ["zones zones-left", "ABCDEF"]].forEach(function (z) {
+      var row = document.createElement("div");
+      row.className = z[0];
+      row.setAttribute("aria-hidden", "true");
+      z[1].split("").forEach(function (c) { var s = document.createElement("span"); s.dataset.z = c; row.appendChild(s); });
+      sheet.appendChild(row);
+    });
+  });
   var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
   var darkPref = window.matchMedia("(prefers-color-scheme: dark)");
 

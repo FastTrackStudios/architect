@@ -63,6 +63,7 @@
 <section class="sheet sheet-hero" id="site-plan" aria-labelledby="hero-title" data-sheet="A-000 Site plan">
   <div class="hero-plan">
     <figure class="plan" aria-labelledby="plan-cap">
+      <div class="plan-scroll" tabindex="0" role="group" aria-label="Site plan, scrolls sideways on small screens">
       <svg class="plan-svg" viewBox="0 0 760 540" role="img" aria-labelledby="plan-title plan-desc">
         <title id="plan-title">Site plan of one person's devices</title>
         <desc id="plan-desc">Five rooms on one plot: Desk, Laptop, Phone, Web and the Node. One sync line joins them through the Node, which is always on. The Laptop is offline, drawn dashed, and keeps working on its own copy.</desc>
@@ -149,6 +150,7 @@
           <text class="t-label" y="11" text-anchor="middle">201</text>
         </g>
       </svg>
+      </div>
       <figcaption id="plan-cap" class="plan-cap">
         <span class="t-label">Example plot</span>, from the app's demo data: one musician's devices around the always-on node. Dashed means offline.
       </figcaption>
@@ -165,7 +167,6 @@
 
   <aside class="title-block" aria-label="Title block">
     <div class="tb-row tb-project">
-      <span class="tb-k">Project</span>
       <h1 id="hero-title"><span class="h1-word">Architect</span></h1>
     </div>
     <p class="tb-lede">Your notes, projects and files on every device. Local-first: work stays on the device, and your devices sync with each other directly.</p>
@@ -192,6 +193,18 @@
       <div><dt>Licence</dt><dd>MIT or Apache-2.0</dd></div>
       <div><dt>Status</dt><dd>Pre-1.0</dd></div>
     </dl>
+    <nav class="tb-index" aria-label="Sheet index">
+      <span class="tb-k">Sheet index</span>
+      <ol>
+        <li><a href="#vault"><span class="sn">A-101</span> Vault</a></li>
+        <li><a href="#files"><span class="sn">A-201</span> Files</a></li>
+        <li><a href="#sync"><span class="sn">A-301</span> Sync</a></li>
+        <li><a href="#extensions"><span class="sn">A-401</span> Extensions</a></li>
+        <li><a href="#studio"><span class="sn">M-101</span> Studio</a></li>
+        <li><a href="#self-host"><span class="sn">S-101</span> Self-host</a></li>
+        <li><a href="#framework"><span class="sn">D-101</span> Framework</a></li>
+      </ol>
+    </nav>
     <div class="tb-sheet">
       <span class="tb-k">Sheet</span>
       <span class="tb-sn">A-000</span>
@@ -282,6 +295,8 @@
           <text class="t-label" x="648" y="124">home · full</text>
           <rect class="copy copy-un" x="648" y="150" width="194" height="40"/>
           <text class="t-label" x="660" y="175">UNVERIFIED · 2 min</text>
+          <path class="cloud" d="M640 146 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q12 8 0 16 q12 8 0 16 q12 8 0 16 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-12 -8 0 -16 q-12 -8 0 -16 q-12 -8 0 -16 Z"/>
+          <g class="cloud-tag" transform="translate(842 140)"><path d="M0 -13 L13 9 L-13 9 Z"/><text y="5" text-anchor="middle">1</text></g>
           <text class="t-label" x="648" y="222">offline</text>
         </g>
         <g class="dim">
@@ -379,13 +394,13 @@
         <div class="detail-frame"><img class="shot" src="media/palette-actions.webp" width="418" height="404" loading="lazy" decoding="async" alt="The ⌘K palette with 'count in' typed: the Metronome extension's count-in action first, then actions from the Board, Settings and Extensions."></div>
         <figcaption><span class="bubble">2<i>A-401</i></span> ⌘K runs any action, an extension's included.</figcaption>
       </figure>
-      <ol class="keynotes" aria-label="Kinds of extension">
+    </div>
+    <ol class="keynotes ext-notes" aria-label="Kinds of extension">
         <li><span class="kn">1</span><p><strong>Data.</strong> Declarations only: settings, keys, views.</p></li>
         <li><span class="kn">2</span><p><strong>Luau.</strong> Actions as scripts, run as one undo step.</p></li>
         <li><span class="kn">3</span><p><strong>Process.</strong> Its own program, with views drawn in the app's window.</p></li>
         <li><span class="kn">4</span><p><strong>Hot reload.</strong> Loaded from a registry, reloaded as you edit it.</p></li>
-      </ol>
-    </div>
+    </ol>
   </div>
   <footer class="strip" aria-hidden="true"><span class="strip-sn">A-401</span><span class="strip-t">Extensions</span><span class="strip-s">Scale: not to scale</span></footer>
 </section>
@@ -463,16 +478,16 @@ ghcr.io/fasttrackstudios/architect:latest</code></pre>
 }</code></pre>
       <figcaption>From this one trait: the vox service, <code>POST /greeter/greet</code>, <code>/greeter/greeted</code> as Server-Sent Events, <code>GreeterClient</code> and <code>GreeterHttpClient</code>, and the action <code>GREETER_GREET</code> for keys, menus, scripts and MCP.</figcaption>
     </figure>
+    <figure class="detail detail-dev">
+      <div class="detail-frame"><img class="shot" src="media/embedded-views.webp" width="960" height="573" loading="lazy" decoding="async" alt="Four embedded views in the workspace: a Dioxus component, a Frame surface with a drive knob and meter, a Luau script's immediate-mode window, and an agent's A2UI checklist."></div>
+      <figcaption><span class="bubble">1<i>D-101</i></span> Views from Dioxus, Frame, a Luau script and an agent's A2UI, side by side in one workspace.</figcaption>
+    </figure>
     <ol class="keynotes keynotes-grid dev-notes" aria-label="What the framework gives you">
       <li><span class="kn">1</span><p><strong>Contracts.</strong> Services and entities declared once: vox in process, over WebSocket and iroh, and HTTP with JSON and SSE.</p></li>
       <li><span class="kn">2</span><p><strong>Documents.</strong> Loro CRDTs with kinds, migrations and named undo, in a crash-safe file per document.</p></li>
       <li><span class="kn">3</span><p><strong>Sync.</strong> Org sync, peer to peer over iroh, presence and collaborative text.</p></li>
       <li><span class="kn">4</span><p><strong>The shell.</strong> Tab groups in splits, docks, pop-out windows and native menus, with key bindings, chords and which-key.</p></li>
     </ol>
-    <figure class="detail detail-dev">
-      <div class="detail-frame"><img class="shot" src="media/embedded-views.webp" width="960" height="573" loading="lazy" decoding="async" alt="Four embedded views in the workspace: a Dioxus component, a Frame surface with a drive knob and meter, a Luau script's immediate-mode window, and an agent's A2UI checklist."></div>
-      <figcaption><span class="bubble">1<i>D-101</i></span> Views from Dioxus, Frame, a Luau script and an agent's A2UI, side by side in one workspace.</figcaption>
-    </figure>
     <p class="dev-cta"><a class="act act-inline" href="/docs/"><span class="act-k">Read the docs</span><svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6"/></svg></a>
       <a class="text-link" href="https://github.com/FastTrackStudios/architect">Source on GitHub</a></p>
   </div>
