@@ -1,0 +1,162 @@
+# Day Plans (extensions/dayplan/src/lib.rs): Task's day templates
+# (task:features/scheduling/scheduling-proto) as an extension. One Rust
+# value (`DayPlans`, a linked::Extension) runs it two ways: the app links
+# it in as a built-in, and its program (src/main.rs) serves the same value
+# as a process, this manifest's [entry], when a development copy runs
+# (EXT_CLONE {"id":"dayplan"}). Turn it off (EXT_DISABLE {"id":"dayplan"})
+# and the plans leave the calendar.
+id = "dayplan"
+name = "Day Plans"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Day templates and plans: reusable days of time blocks (three allocatable work or free-time blocks, meal prep, a reset, sleep), rules that pick each day's template (by weekday, repeat, dates or a tagged event) with overrides by hand, and each day's own plan, its blocks given to a task, a project, a label or a recipe. A change reaches today and after; past days stay as they were."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-dayplan"
+
+# EXT_CLONE writes this crate to the development folder and builds its
+# program, which then overrides the linked copy under the same id.
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "extensions/dayplan"
+
+# Its API for others (`services.call("architect.dayplan", "days", …)`,
+# Handle::service): method `m` is its action DAYPLAN_<M>. The Calendar
+# draws plans with `days`.
+[provides]
+"architect.dayplan" = "0.1.0"
+
+# The Calendar and the Time Tracker, when they are installed: a rule's
+# `#tag` matches the Calendar's events, and a block's tracked time is the
+# Time Tracker's. Not [requires]: Day Plans run alone.
+[uses]
+"architect.calendar" = "^0.1"
+"architect.time" = "^0.1"
+
+# It reaches notes only through the app's actions: vault reads, writes
+# and deletes, base queries, opening its views.
+[capabilities]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+# Destructive: "Reset to template" deletes a day's plan (VAULT_DELETE).
+effect = "destructive"
+
+[[actions]]
+id = "DAYPLAN_GET"
+name = "Day plan"
+description = "Task's get_day_plan: `date`'s plan (YYYY-MM-DD, today, tomorrow, yesterday; today by default), or each day's of `from`..`to` (`to` exclusive, at most 62 days). Each: its template and why (`reason`: a rule, an override, the default), `chosen` (an override), `edited` (a plan of its own, kept when templates and rules change), `past` (frozen: the rules and templates it had then), and its blocks by start: id, start, end (HH:MM), label, category (reset, spiritual, meal, exercise, hygiene, allocatable, maintenance, wind_down, sleep, other), colour, fixed, assignment ({kind: task|project|recipe|label, title, path}), minutes planned and minutes tracked (with the Time Tracker)."
+group = "Day plans"
+effect = "read_only"
+params = '{"type":"object","properties":{"date":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "DAYPLAN_DAYS"
+name = "Day plans: days"
+description = "Each day of `from`..`to` (at most 62; a week from today by default) as DAYPLAN_GET gives it, from what was read last: what the Calendar's day and week views draw."
+group = "Day plans"
+effect = "read_only"
+params = '{"type":"object","properties":{"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "DAYPLAN_UPSERT"
+name = "Save a day plan"
+description = "Task's upsert_day_plan: saves `date`'s plan (today by default) as `blocks` ([{id, start, end, label, category, assignment, fixed}], HH:MM; the whole day), its `template` (a name, or none). `merge` true fills the rest of the day from its template (soft blocks shrunk into the free time); `reconcile` true reflows the blocks around the fixed ones and `obstacles` ([[\"HH:MM\",\"HH:MM\"]]): routine blocks shift or shrink, meals are embedded, the rest shrink, and `changes` says what moved. The day is edited from then on: kept when templates and rules change, until DAYPLAN_RESET."
+group = "Day plans"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"blocks":{"type":"array","items":{"type":"object"}},"template":{"type":["string","null"]},"merge":{"type":"boolean"},"reconcile":{"type":"boolean"},"obstacles":{"type":"array"}}}'
+
+[[actions]]
+id = "DAYPLAN_ASSIGN"
+name = "Day plan: assign a block"
+description = "Gives block `block` (its id) of `date` (today by default) to a `task`, a `project` or a `recipe` (`kind`, with the note's `path`; `title` defaults to its name) or a `label` (`title`); `kind` none takes it away. A meal block takes a recipe; an allocatable block a task, a project or a label. Saves the day's plan."
+group = "Day plans"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"block":{"type":"string"},"kind":{"type":"string","enum":["task","project","recipe","label","none"]},"title":{"type":"string"},"path":{"type":"string"}},"required":["block"]}'
+
+[[actions]]
+id = "DAYPLAN_SET_BLOCK"
+name = "Day plan: move a block"
+description = "Moves or resizes block `block` of `date` (today by default) to `start`..`end` (HH:MM; an end at or before the start wraps past midnight), or changes its `label`, `category` or `fixed`. Saves the day's plan."
+group = "Day plans"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"block":{"type":"string"},"start":{"type":"string"},"end":{"type":"string"},"label":{"type":"string"},"category":{"type":"string"},"fixed":{"type":"boolean"}},"required":["block"]}'
+
+[[actions]]
+id = "DAYPLAN_RESET"
+name = "Day plan: reset to template"
+description = "Deletes `date`'s own plan (today by default): the day is its template's again, and follows the template and the rules from then on. Says whether there was one."
+group = "Day plans"
+effect = "destructive"
+params = '{"type":"object","properties":{"date":{"type":"string"}}}'
+
+[[actions]]
+id = "DAYPLAN_TEMPLATES"
+name = "Day templates"
+description = "The day templates: each one's name, note, description, colour, blocks, the rules that use it (`used_by`), how many revisions it keeps for the past, and its allocatable and meal minutes."
+group = "Day plans"
+effect = "read_only"
+
+[[actions]]
+id = "DAYPLAN_TEMPLATE"
+name = "Make or change a day template"
+description = "Makes day template `name` (a note under Calendar/Day templates/) or changes it: `blocks` ([{id, start, end, label, category, fixed}], from today on: the days before keep the blocks it had), `description`, `color`, `rename` (its note, the rules and the overrides follow)."
+group = "Day plans"
+effect = "mutating"
+params = '{"type":"object","properties":{"name":{"type":"string"},"blocks":{"type":"array","items":{"type":"object"}},"description":{"type":"string"},"color":{"type":"string"},"rename":{"type":"string"}},"required":["name"]}'
+
+[[actions]]
+id = "DAYPLAN_TEMPLATE_RULES"
+name = "Day template rules"
+description = "The rules that pick each day's template, in order (the first that matches wins), the default (`fallback`) and the overrides. With `rules` ([{template, weekdays: [mon…sun]} | {template, rrule, start} | {template, from, to} | {template, tag}]) and `fallback` (a name or none), sets them from today on: past days keep the rules they had."
+group = "Day plans"
+effect = "mutating"
+params = '{"type":"object","properties":{"rules":{"type":"array","items":{"type":"object"}},"fallback":{"type":["string","null"]}}}'
+
+[[actions]]
+id = "DAYPLAN_SET_WEEKDAY"
+name = "Day template for a weekday"
+description = "Template `template` on `weekdays` ([mon, tue]) or `weekday` (mon, or mon,wed), from today on: those days leave the weekday rules that had them, and one rule takes them in."
+group = "Day plans"
+effect = "mutating"
+params = '{"type":"object","properties":{"template":{"type":"string"},"weekdays":{"type":"array","items":{"type":"string"}},"weekday":{"type":"string"}},"required":["template"]}'
+
+[[actions]]
+id = "DAYPLAN_OVERRIDE"
+name = "Day template override"
+description = "Template `template` (a name, or none for no template) by hand for `date`, the `week` from a date (its first day), or `from`..`to` (both included); `clear` true takes that override away. It beats every rule (a day's beats a week's or a range's), and is the one thing that changes a past day. A day's own override starts its plan again from the template chosen. Says each day's template and why."
+group = "Day plans"
+effect = "mutating"
+params = '{"type":"object","properties":{"date":{"type":"string"},"week":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"},"template":{"type":["string","null"]},"clear":{"type":"boolean"}}}'
+
+[[actions]]
+id = "DAYPLAN_RESOLVE"
+name = "Day template: which and why"
+description = "Which template `date` (today by default), or each day of `from`..`to` (at most 366), uses and why: a rule (its number and words), an override, the default; and whether it is edited or past."
+group = "Day plans"
+effect = "read_only"
+params = '{"type":"object","properties":{"date":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}}}'
+
+[[actions]]
+id = "DAYPLAN_STARTED"
+name = "Day plans: started"
+description = "Reads the templates, the rules and the plans: called once the app has loaded it."
+group = "Day plans"
+effect = "read_only"
+
+[[hooks]]
+on = "startup"
+action = "DAYPLAN_STARTED"
+
+[[sections]]
+id = "dayplan"
+title = "Day plans"
+icon = "calendar-clock"
+
+[[sections.settings]]
+key = "dayplan.folder"
+title = "Folder"
+description = "Where the day templates (Day templates/), the rules (Day rules.md) and each day's plan (Day plans/) are kept."
+control = "text"
+default = "Calendar"

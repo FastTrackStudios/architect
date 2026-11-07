@@ -54,6 +54,7 @@ architect-files-extension = { workspace = true }
 architect-files = { workspace = true, features = ["agent"] }
 architect-tasks = { workspace = true }
 architect-time-tracker = { workspace = true }
+architect-dayplan = { workspace = true }
 architect-calendar = { workspace = true }
 architect-threads = { workspace = true }
 architect-notify = { workspace = true }

@@ -826,6 +826,7 @@ dependencies = [
  "architect-capture",
  "architect-command-palette",
  "architect-commands",
+ "architect-dayplan",
  "architect-extensions",
  "architect-files",
  "architect-files-extension",
@@ -1111,11 +1112,19 @@ dependencies = [
 name = "architect-dayplan"
 version = "0.1.0"
 dependencies = [
+ "architect",
+ "architect-bases",
  "architect-calendar",
+ "architect-extensions",
+ "architect-settings",
+ "architect-time-tracker",
  "architect-workspace-hack",
  "chrono",
+ "futures",
  "serde",
  "serde_json",
+ "tempfile",
+ "vault",
 ]
 
 [[package]]
