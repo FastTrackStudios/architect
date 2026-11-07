@@ -514,4 +514,166 @@ mod tests {
         );
         assert_eq!(out["status"], json!("waiting"));
     }
+
+    /// Task's own parser tests (`task:features/task/task-proto/src/capture.rs`
+    /// `tests`), case for case, run here: this parser reads everything
+    /// Task's did (#445), and extensions' tokens and `!1`–`!4` besides.
+    /// Task's only differences are its shape: a title of "Untitled task"
+    /// for nothing typed (here an empty title the surface fills), and a
+    /// `task` tag it adds as its discriminator.
+    mod task_parity {
+        use super::*;
+
+        fn p(line: &str) -> Draft {
+            parse(line, today())
+        }
+
+        fn rule(line: &str) -> Option<String> {
+            p(line).repeat.map(|r| r.rule)
+        }
+
+        #[test]
+        fn extracts_tags_contexts_projects() {
+            let d = p("Buy milk #errands #urgent @shopping [[Groceries]]");
+            assert_eq!(d.title, "Buy milk");
+            assert_eq!(d.tags, ["errands", "urgent"]);
+            assert_eq!(d.contexts, ["@shopping"]);
+            assert_eq!(d.projects, ["[[Groceries]]"]);
+        }
+
+        #[test]
+        fn extracts_priority() {
+            let d = p("Fix bug !critical");
+            assert_eq!(d.title, "Fix bug");
+            assert_eq!(d.priority.as_deref(), Some("critical"));
+            assert_eq!(p("Fix bug !urgent").priority.as_deref(), Some("critical"));
+            assert_eq!(p("Fix bug !med").priority.as_deref(), Some("normal"));
+            assert_eq!(
+                p("Fix bug !1").priority.as_deref(),
+                Some("critical"),
+                "and more"
+            );
+        }
+
+        #[test]
+        fn extracts_today_tomorrow() {
+            let d = p("Buy milk tomorrow");
+            assert_eq!(d.due, ymd("2026-11-06"));
+            assert_eq!(d.title, "Buy milk");
+            assert_eq!(p("Buy milk tmrw").due, ymd("2026-11-06"));
+            assert_eq!(p("Buy milk today").due, ymd("2026-11-05"));
+        }
+
+        #[test]
+        fn extracts_next_weekday() {
+            let d = p("Standup next monday");
+            assert_eq!(d.due, ymd("2026-11-09"));
+            assert_eq!(d.title, "Standup");
+        }
+
+        #[test]
+        fn the_word_that_introduced_a_date_leaves_with_it() {
+            assert_eq!(
+                p("Book the vocal booth for friday").title,
+                "Book the vocal booth"
+            );
+            assert_eq!(p("Send stems by tomorrow").title, "Send stems");
+            assert_eq!(p("Plan for the release").title, "Plan for the release");
+        }
+
+        #[test]
+        fn empty_input_gets_an_empty_title() {
+            assert_eq!(p("").title, "");
+        }
+
+        #[test]
+        fn bare_adverbs_recur() {
+            for (input, freq) in [
+                ("Mixing practice daily", "FREQ=DAILY"),
+                ("Mixing practice weekly", "FREQ=WEEKLY"),
+                ("Rent monthly", "FREQ=MONTHLY"),
+                ("Renew domain yearly", "FREQ=YEARLY"),
+            ] {
+                let d = p(input);
+                assert_eq!(d.repeat.map(|r| r.rule).as_deref(), Some(freq), "{input}");
+                assert!(!d.title.contains("daily"), "adverb left in title: {input}");
+            }
+        }
+
+        #[test]
+        fn every_unit_with_interval() {
+            let d = p("Mixing practice every 2 weeks");
+            assert_eq!(d.title, "Mixing practice");
+            assert_eq!(
+                rule("Mixing practice every 2 weeks").as_deref(),
+                Some("FREQ=WEEKLY;INTERVAL=2")
+            );
+            let d2 = p("Deep clean every other month");
+            assert_eq!(d2.title, "Deep clean");
+            assert_eq!(
+                rule("Deep clean every other month").as_deref(),
+                Some("FREQ=MONTHLY;INTERVAL=2")
+            );
+        }
+
+        #[test]
+        fn a_named_weekday_is_calendar_anchored() {
+            let r = p("Standup every monday").repeat.unwrap();
+            assert_eq!(r.rule, "FREQ=WEEKLY;BYDAY=MO");
+            assert_eq!(r.anchor, "scheduled");
+        }
+
+        #[test]
+        fn a_bare_interval_is_completion_anchored() {
+            assert_eq!(
+                p("Mixing practice every 2 weeks").repeat.unwrap().anchor,
+                "completion"
+            );
+        }
+
+        #[test]
+        fn every_weekday_is_mon_to_fri() {
+            let r = p("Inbox zero every weekday").repeat.unwrap();
+            assert_eq!(r.rule, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR");
+            assert_eq!(r.anchor, "scheduled");
+        }
+
+        #[test]
+        fn recurrence_wins_the_weekday_token() {
+            let d = p("Standup every monday");
+            assert!(d.repeat.is_some());
+            assert!(!d.title.contains("monday"));
+        }
+
+        #[test]
+        fn an_explicit_date_beats_the_recurrence_start() {
+            let d = p("Mixing practice weekly 2026-09-01");
+            assert_eq!(d.repeat.unwrap().rule, "FREQ=WEEKLY");
+            assert_eq!(d.due, ymd("2026-09-01"));
+        }
+
+        #[test]
+        fn a_weekly_habit_starts_today_so_it_surfaces() {
+            assert_eq!(p("Mixing practice weekly").due, Some(today()));
+        }
+
+        #[test]
+        fn unrecognized_every_stays_in_the_title() {
+            let d = p("Check every input gain");
+            assert!(d.repeat.is_none());
+            assert_eq!(d.title, "Check every input gain");
+        }
+
+        #[test]
+        fn a_second_phrase_is_left_alone() {
+            let d = p("Sync weekly and daily");
+            assert_eq!(d.repeat.unwrap().rule, "FREQ=WEEKLY");
+            assert!(d.title.contains("daily"), "got: {}", d.title);
+        }
+
+        #[test]
+        fn plain_tasks_gain_no_recurrence() {
+            assert!(p("Buy milk tomorrow #errands").repeat.is_none());
+        }
+    }
 }
