@@ -20,7 +20,7 @@ rev = "main"
 path = "features/files/extension"
 
 [capabilities]
-actions = ["FILES_", "EXT_VIEW_OPEN"]
+actions = ["FILES_", "DRIVE_", "EXT_VIEW_OPEN"]
 effect = "mutating"
 
 [[actions]]
@@ -74,6 +74,26 @@ actions = "FILES_NAV"
 id = "root"
 title = "Project"
 icon = "folder"
+
+[[views]]
+id = "drive"
+title = "Drive"
+icon = "hard-drive"
+
+# The Drive on the settings page: its status, and where it mounts and
+# keeps pinned working copies (DRIVE_CONFIG, DRIVE_CONFIGURE).
+[[sections]]
+id = "drive"
+title = "Drive"
+icon = "hard-drive"
+view = "drive"
+
+[[actions]]
+id = "FILES_DRIVE_OPEN"
+name = "Drive: open its settings"
+description = "The Drive page: mounted or not, what is syncing, offline, the cache's size, and where it mounts and keeps pinned roots."
+group = "Files"
+effect = "read_only"
 
 [[views]]
 id = "asset"

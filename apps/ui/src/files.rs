@@ -20,10 +20,109 @@ use architect_files::roots::{
 /// Where the agent listens: `http://127.0.0.1:8090`.
 pub const AGENT: &str = "ARCHITECT_FILES_AGENT";
 
+/// The agent's config the window edits: `ARCHITECT_AGENT_CONFIG`, else the
+/// installed agent's (`agent.toml`).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn agent_config() -> Option<std::path::PathBuf> {
+    std::env::var_os("ARCHITECT_AGENT_CONFIG")
+        .map(std::path::PathBuf::from)
+        .or_else(|| architect_files::drive::agent::Defaults::here().map(|d| d.config))
+}
+
+static DRIVE_CONFIG: architect::action::ActionMeta = architect::action::ActionMeta {
+    id: "DRIVE_CONFIG",
+    trait_name: "",
+    method_name: "",
+    display_name: "Drive: its settings",
+    description: "The device agent's config file, its drive (the mount point, `~/Architect` by default), its store (working copies of pinned roots, under the agent's data dir) and whether the agent is installed as a service.",
+    category: "Files",
+    group: "Files",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+static DRIVE_CONFIGURE: architect::action::ActionMeta = architect::action::ActionMeta {
+    id: "DRIVE_CONFIGURE",
+    trait_name: "",
+    method_name: "",
+    display_name: "Drive: move the mount or the store",
+    description: "Sets the agent's drive (`mount`, the folder it mounts at) and/or its store (`store`, where pinned roots' working copies live) in its config, and restarts the installed agent so they apply.",
+    category: "Files",
+    group: "Files",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+/// What `DRIVE_CONFIG` answers.
+#[derive(Debug, Clone, facet::Facet)]
+pub struct DriveConfig {
+    pub config: String,
+    pub mount: String,
+    pub store: String,
+    pub installed: bool,
+    /// Set by `DRIVE_CONFIGURE`: the agent was restarted to apply it.
+    pub restarted: bool,
+}
+
+/// `DRIVE_CONFIGURE`'s arguments.
+#[derive(Debug, Clone, facet::Facet)]
+pub struct DriveSet {
+    pub mount: Option<String>,
+    pub store: Option<String>,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn read_drive_config(restarted: bool) -> Result<DriveConfig, String> {
+    use architect_files::drive::agent as svc;
+    let config = agent_config().ok_or("no agent config")?;
+    let text = std::fs::read_to_string(&config).unwrap_or_default();
+    Ok(DriveConfig {
+        mount: svc::get_key(&text, "drive").unwrap_or_default(),
+        store: svc::get_key(&text, "files_dir").unwrap_or_default(),
+        installed: svc::service_dir().is_some_and(|d| svc::installed(&d)),
+        config: config.display().to_string(),
+        restarted,
+    })
+}
+
+/// `DRIVE_CONFIG` and `DRIVE_CONFIGURE` on `list`: the Drive settings.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn register_drive_settings(list: &ActionList) {
+    use architect::action::Effect;
+    use architect_files::drive::agent as svc;
+    let _ = list.register(&DRIVE_CONFIG, Effect::ReadOnly, |(): ()| {
+        read_drive_config(false)
+    });
+    let _ = list.register(&DRIVE_CONFIGURE, Effect::Mutating, |args: DriveSet| {
+        let config = agent_config().ok_or("no agent config")?;
+        let mut text = std::fs::read_to_string(&config).map_err(|e| e.to_string())?;
+        let given = |v: &Option<String>| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned)
+        };
+        if let Some(mount) = given(&args.mount) {
+            text = svc::set_key(&text, "drive", &mount);
+        }
+        if let Some(store) = given(&args.store) {
+            text = svc::set_key(&text, "files_dir", &store);
+        }
+        std::fs::write(&config, text).map_err(|e| e.to_string())?;
+        let restarted = svc::service_dir().is_some_and(|d| svc::installed(&d))
+            && svc::restart_installed().is_ok();
+        read_drive_config(restarted)
+    });
+}
+
 /// `FILES_*` on `list`, when the device has an agent: the one
 /// `ARCHITECT_FILES_AGENT` names, else the installed one (started, or
 /// joined if it runs).
 pub fn register(list: &ActionList) {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    register_drive_settings(list);
     let Some(base) = std::env::var(AGENT).ok().or_else(join_agent) else {
         return;
     };
