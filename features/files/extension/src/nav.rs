@@ -69,6 +69,25 @@ impl NavigatorProvider for FilesNav {
             for node in tree(&roots) {
                 snap = snap.node(node);
             }
+            let mut orgs: Vec<&str> = roots.iter().map(|r| text(r, "org")).collect();
+            orgs.sort_unstable();
+            orgs.dedup();
+            for org in orgs {
+                snap.items.push(
+                    Item::new(
+                        format!("health:{org}"),
+                        format!("org:{org}"),
+                        "Storage health",
+                    )
+                    .preview("copy counts, holders, files under policy")
+                    .opens(opens(json!({ "view": "health", "root": org }))),
+                );
+                snap.items.push(
+                    Item::new(format!("find:{org}"), format!("org:{org}"), "Find files")
+                        .preview("search every root, offline, and see where each file lives")
+                        .opens(opens(json!({ "view": "find" }))),
+                );
+            }
             for r in &roots {
                 let place = text(r, "place").to_owned();
                 let org = text(r, "org");

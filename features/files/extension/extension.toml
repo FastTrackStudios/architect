@@ -8,7 +8,7 @@ name = "Files"
 version = "0.1.0"
 kind = "process"
 api = "0.1"
-description = "Your org's projects and asset libraries: pin a project to keep a working copy here, browse the rest on demand, see a file's versions and a project's checkpoints and put them back; an asset's properties, links and a waveform per stem."
+description = "Your org's projects and asset libraries: pin a project to keep a working copy here, browse the rest on demand, see a file's versions and a project's checkpoints and put them back; an asset's properties, links and a waveform per stem; where every file's copies are and how many are verified, an org's storage health and copy policy, and search over every root, offline."
 authors = ["FastTrackStudio"]
 
 [entry]
@@ -26,10 +26,10 @@ effect = "mutating"
 [[actions]]
 id = "FILES_OPEN"
 name = "Files: open"
-description = "A root's page (`root`: its place, codywright/Projects/Right Here) or an asset's (`root` a library and `asset` its name); with neither, the first root."
+description = "A root's page (`root`: its place, codywright/Projects/Right Here) or an asset's (`root` a library and `asset` its name); with neither, the first root. `view`: `health` (an org's or a root's storage health, `root` the scope) or `find` (search the registry, `query` to start with)."
 group = "Files"
 effect = "read_only"
-params = '{"type":"object","properties":{"root":{"type":"string"},"asset":{"type":"string"},"path":{"type":"string"}}}'
+params = '{"type":"object","properties":{"root":{"type":"string"},"asset":{"type":"string"},"path":{"type":"string"},"view":{"type":"string","enum":["root","asset","health","find"]},"query":{"type":"string"}}}'
 
 [[actions]]
 id = "FILES_NAV_SNAPSHOT"
@@ -67,7 +67,7 @@ params = '{"type":"object","properties":{"container":{"type":"string"},"title":{
 id = "files"
 title = "Files"
 icon = "hard-drive"
-views = ["root", "asset"]
+views = ["root", "asset", "health", "find"]
 actions = "FILES_NAV"
 
 [[views]]
@@ -99,3 +99,13 @@ effect = "read_only"
 id = "asset"
 title = "Asset"
 icon = "music"
+
+[[views]]
+id = "health"
+title = "Storage health"
+icon = "shield-check"
+
+[[views]]
+id = "find"
+title = "Find files"
+icon = "search"
