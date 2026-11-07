@@ -80,7 +80,7 @@ use tokio::task::JoinHandle;
 use vault_live::Backend;
 
 pub use catalog::VaultCatalog;
-pub use config::{Config, ConfigError, IrohMode};
+pub use config::{Config, ConfigError, IrohMode, Placement};
 pub use service::{NodeError, NodeState, NodeStatus};
 
 /// The principal this node's own sweeps attach to its registry as.
@@ -374,6 +374,18 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
     let dials = parse_peers(&config.peers);
     if let Some(engine) = &files {
         let every = Duration::from_secs(config.files_secs.max(1));
+        let bucket = files::backend(&config).await.map_err(StartError::Other)?;
+        let mut fixed: Vec<Arc<dyn architect::blob::Remote>> = Vec::new();
+        if let Some(s3) = bucket {
+            fixed.push(Arc::new(s3.clone()));
+            tasks.push(tokio::spawn(files::replicate_forever(
+                engine.clone(),
+                s3,
+                config.blob_placement,
+                config.blob_cache_mb.saturating_mul(1 << 20),
+                every,
+            )));
+        }
         tasks.push(tokio::spawn(engine.clone().run(every)));
         tasks.push(tokio::spawn(files::dial_forever(
             engine.clone(),
@@ -381,6 +393,7 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
             dials.clone(),
             admission.clone(),
             config.iroh,
+            fixed,
         )));
     }
     tasks.push(tokio::spawn(live::live_forever(live::Live {

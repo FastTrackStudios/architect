@@ -268,6 +268,10 @@ capability = ["dep:ed25519-dalek", "dep:base64", "dep:getrandom", "dep:zeroize"]
 # by `serve_http` with `http`), pins and collection. Native only for now;
 # the wasm OPFS ledger is a follow-up.
 blob = ["dep:sha2", "dep:tracing", "tokio/rt"]
+# `blob::S3Store`: blobs in any S3-compatible bucket (Garage, MinIO, R2,
+# AWS, Ceph RGW), as a `BlobStore` and a fetch `Remote`; `object_store`
+# (MIT/Apache-2.0) signs and streams.
+blob-s3 = ["blob", "dep:object_store"]
 
 # Signed self-update (`architect::release`): check GitHub Releases for a
 # newer `<prefix>X.Y.Z`, verify the minisign signature over `SHA256SUMS`
@@ -419,6 +423,7 @@ zeroize = { version = "1", optional = true }
 # `blob`: sha256 of every transfer and stored blob (already in the graph
 # through auth).
 sha2 = { workspace = true, optional = true }
+object_store = { version = "0.14", default-features = false, features = ["aws"], optional = true }
 iroh = { workspace = true, optional = true }
 iroh-mdns-address-lookup = { workspace = true, optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
@@ -474,6 +479,10 @@ axum = { workspace = true }
 ed25519-dalek = "3"
 blake2 = "0.10"
 base64 = { workspace = true }
+# blob_s3.rs: a real S3 server in process (the s3s project's, Apache-2.0).
+s3s = { version = "0.17", default-features = false }
+s3s-fs = { version = "0.17", default-features = false }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 
 [[test]]
 name = "reconnect_supervisor"
@@ -494,6 +503,10 @@ required-features = ["capability"]
 [[test]]
 name = "blob"
 required-features = ["blob"]
+
+[[test]]
+name = "blob_s3"
+required-features = ["blob-s3"]
 
 [[test]]
 name = "release"

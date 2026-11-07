@@ -66,12 +66,49 @@ its blob route; `BlobTransferHost::allow` limits which hashes a host serves.
 7. `features/crdt/crdt/src/blobs.rs` `referenced`, `live`, `missing`,
    `keep_offline`, `release`: blobs as documents see them.
 
+8. `crates/architect/src/blob/s3.rs` `S3Store` (feature `blob-s3`):
+   `open`, `holder_id`, `put_reader`, `delete`, `verify`, `list`,
+   `key_for`, `with_events`; `S3Config`; `HolderEvents`.
+
 `open_at` reads from disk when the store already has the hash. Otherwise it
 joins or starts the one transfer for that hash: the fetcher walks its
 remotes, asks each for the size, and runs a `ResumableFetch` into the
 partial file, reading the remote from the partial's length. Meanwhile the
 reader is fed from the growing file. At the end the whole blob is hashed and
 moved into place; a mismatch ends readers with an `InvalidData` error.
+
+### In an S3 bucket
+
+`S3Store` (feature `blob-s3`) keeps blobs in any S3-compatible service:
+Garage, MinIO, Cloudflare R2, AWS S3, Ceph RGW. It is a `BlobStore` (a
+`FilesServer` or an app can store in it directly) and a `Remote` (a
+`Fetcher` fills its `LocalFs` from it, resuming by range, as from a peer).
+
+- **Keys are hashes:** `<prefix>/sha256/<hh>/<hex>`. Nodes sharing a bucket
+  name the same bytes with the same key, so they dedup across each other;
+  a put of a hash the bucket holds sends nothing.
+- **A put never stages locally.** The body streams to a temporary key in
+  8 MiB parts while it is hashed; only bytes that hash to what was
+  expected are copied to their key, server-side.
+- **A holder with a stable id.** `holder_id` (`s3:<uuid>`) is kept in the
+  bucket (`<prefix>/architect-holder`), so every node opening it agrees.
+  Put, delete and verify (a scrub: read back whole and hashed) are the
+  only writes and checks, each reported to the store's `HolderEvents`:
+  the hook for replica accounting.
+- **Credentials** are the caller's to supply (`S3Config`); its `Debug`
+  redacts the secret.
+
+```rust
+let store = S3Store::open(&S3Config {
+    endpoint: Some("http://garage.lan:3900".into()),
+    region: "garage".into(),
+    bucket: "architect-blobs".into(),
+    prefix: "architect".into(),
+    access_key_id, secret_access_key, virtual_hosted: false,
+}).await?;
+let hash = store.put(None, body).await?;            // deduped by sha256
+let fetcher = Fetcher::new(LocalFs::new(dir)).with_remote(Arc::new(store));
+```
 
 ## Tests to read
 
@@ -82,10 +119,16 @@ moved into place; a mismatch ends readers with an `InvalidData` error.
   streamed, and resumes after a dropped link; blobs over iroh; a server's copy
   over HTTP resumes with a range; a host refuses what it does not allow; a
   pinned blob survives collection; `keep_offline` fetches and pins a song's audio.
+- `crates/architect/tests/blob_s3.rs` (feature `blob-s3`, a real S3 server
+  in process, `s3s-fs`): a 20 MB put in parts reads back by range; two
+  handles on one bucket are one holder and store a hash once; bytes that
+  hash wrong are refused; a scrub finds a corrupted object; a `Fetcher`
+  fills itself from the bucket; the holder events.
 
 ## Status
 
-Done in architect; `architect-files` stores its bytes in a `LocalFs`. Not yet:
+Done in architect; `architect-files` stores its bytes in a `LocalFs`, and the
+node also in an S3 bucket (`blob_s3_bucket`). Not yet:
 the browser side (OPFS and an IndexedDB ledger); fetching from several
 remotes at once (it falls through one at a time); verifying streamed bytes
 before the end.

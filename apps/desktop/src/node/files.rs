@@ -8,6 +8,14 @@
 //! travels the same lanes as the notes (the catalogue lists it, a live
 //! bridge carries it); its bytes travel `BlobTransfer`, on the same
 //! connections, from whichever peer has them.
+//!
+//! With a bucket ([`Config::blob_s3_bucket`](super::Config::blob_s3_bucket))
+//! the bytes are also in S3 ([`backend`], [`replicate_forever`]): every
+//! hash a manifest names is copied there from this node, and a hash this
+//! node lacks is fetched from there as from any peer. Nodes that share
+//! the bucket share its bytes, deduped by hash. With
+//! [`Placement::Primary`] the bucket is where the bytes live and this
+//! node's store is a cache.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -15,8 +23,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use architect::blob::{
-    BlobTransferClient, BlobTransferDispatcher, Fetcher, LocalFs, Remote, VoxRemote,
-    blob_transfer_service_descriptor,
+    BlobTransferClient, BlobTransferDispatcher, Fetcher, LocalFs, Remote, S3Config, S3Store,
+    Sha256, VoxRemote, blob_transfer_service_descriptor,
 };
 use architect::host::{DavRequest, EngineHost};
 use architect::iroh_link;
@@ -28,7 +36,8 @@ use architect_files::sync::{BLOB_PERMITS, Engine, EngineConfig, TreeStore};
 use crdt::DocRegistry;
 use crdt::p2p::More;
 
-use super::{Config, Dial, IrohMode, targets};
+use super::config::Placement;
+use super::{Config, Dial, IrohMode, read_secret, targets};
 
 /// How often the blob connections are looked at.
 const DIAL_EVERY: Duration = Duration::from_secs(3);
@@ -113,15 +122,125 @@ pub(super) fn more(engine: &Engine) -> More {
     }
 }
 
+/// The bucket of `config`, when it names one. The secret comes from
+/// `blob_s3_secret_file`, else `ARCHITECT_BLOB_S3_SECRET_ACCESS_KEY`;
+/// it is never logged.
+pub(super) async fn backend(config: &Config) -> Result<Option<S3Store>, String> {
+    let Some(bucket) = &config.blob_s3_bucket else {
+        return Ok(None);
+    };
+    let secret = config
+        .blob_s3_secret_file
+        .as_deref()
+        .and_then(read_secret)
+        .or_else(|| {
+            std::env::var("ARCHITECT_BLOB_S3_SECRET_ACCESS_KEY")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .ok_or("blob_s3_bucket is set but no secret: set blob_s3_secret_file")?;
+    let s3 = S3Config {
+        endpoint: config.blob_s3_endpoint.clone(),
+        region: config.blob_s3_region.clone(),
+        bucket: bucket.clone(),
+        prefix: config.blob_s3_prefix.clone(),
+        access_key_id: config.blob_s3_access_key_id.clone().unwrap_or_default(),
+        secret_access_key: secret,
+        virtual_hosted: false,
+    };
+    let store = S3Store::open(&s3)
+        .await
+        .map_err(|e| format!("the blob bucket {bucket}: {e}"))?;
+    tracing::info!(bucket = %bucket, holder = store.holder_id(), "files: bytes in S3 too");
+    Ok(Some(store))
+}
+
+/// Copy every hash a manifest names into the bucket, from this node;
+/// with [`Placement::Primary`], then keep the local store to its budget.
+pub(super) async fn replicate_forever(
+    engine: Engine,
+    s3: S3Store,
+    placement: Placement,
+    cache_bytes: u64,
+    every: Duration,
+) {
+    let mut there: Option<std::collections::HashSet<Sha256>> = None;
+    loop {
+        if there.is_none() {
+            match s3.list().await {
+                Ok(list) => there = Some(list.into_iter().map(|(h, _)| h).collect()),
+                Err(e) => tracing::warn!(%e, "files: the blob bucket does not list"),
+            }
+        }
+        if let Some(there) = there.as_mut() {
+            for hash in engine.named() {
+                if there.contains(&hash) {
+                    continue;
+                }
+                let Some(file) = engine.store.file_for(&hash) else {
+                    continue;
+                };
+                let Ok(body) = tokio::fs::File::open(&file).await else {
+                    continue;
+                };
+                match s3.put_reader(Some(hash), Box::pin(body)).await {
+                    Ok(_) => {
+                        there.insert(hash);
+                    }
+                    // A working file changed under us: the next scan has it.
+                    Err(e) => tracing::debug!(%hash, %e, "files: not replicated yet"),
+                }
+            }
+            if placement == Placement::Primary {
+                evict(engine.store.local.clone(), cache_bytes, there).await;
+            }
+        }
+        tokio::time::sleep(every).await;
+    }
+}
+
+/// Remove the oldest blobs from `local` that the bucket holds, until it
+/// is within `budget` bytes. Pinned blobs and working copies stay.
+async fn evict(local: LocalFs, budget: u64, there: &std::collections::HashSet<Sha256>) {
+    let (Ok(all), Ok(pinned)) = (local.list().await, local.pinned().await) else {
+        return;
+    };
+    let mut held = Vec::new();
+    let mut total = 0u64;
+    for hash in all {
+        let path = local.path_for(&hash);
+        let Ok(meta) = tokio::fs::metadata(&path).await else {
+            continue;
+        };
+        total = total.saturating_add(meta.len());
+        let at = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+        if there.contains(&hash) && !pinned.contains(&hash) {
+            held.push((at, meta.len(), path));
+        }
+    }
+    held.sort();
+    for (_, len, path) in held {
+        if total <= budget {
+            break;
+        }
+        if tokio::fs::remove_file(&path).await.is_ok() {
+            total = total.saturating_sub(len);
+        }
+    }
+}
+
 /// Keep a `BlobTransfer` connection to every peer the node can dial, the
-/// engine's fetcher reading from them in turn.
+/// engine's fetcher reading from them in turn, then from `fixed` (the
+/// node's bucket).
 pub(super) async fn dial_forever(
     engine: Engine,
     endpoint: iroh::Endpoint,
     configured: Vec<Dial>,
     admission: Admission,
     mode: IrohMode,
+    fixed: Vec<Arc<dyn Remote>>,
 ) {
+    engine.fetcher.set_remotes(fixed.clone());
     let me = architect_devices::endpoint_key(&endpoint.id().to_string());
     let mut peers: BTreeMap<String, BlobTransferClient> = BTreeMap::new();
     loop {
@@ -152,6 +271,7 @@ pub(super) async fn dial_forever(
             let remotes: Vec<Arc<dyn Remote>> = peers
                 .values()
                 .map(|c| -> Arc<dyn Remote> { Arc::new(VoxRemote::new(c.clone())) })
+                .chain(fixed.iter().cloned())
                 .collect();
             tracing::debug!(peers = remotes.len(), "files: blob peers");
             engine.set_online(!remotes.is_empty());
