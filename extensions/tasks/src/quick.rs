@@ -70,6 +70,12 @@ fn from_properties(title: &str, props: &Map<String, Value>) -> Task {
         projects: list(k::PROJECTS),
         recurrence: text(k::RECURRENCE),
         recurrence_anchor: text(k::RECURRENCE_ANCHOR),
+        // The composer's Assignee chip and processing's estimate (#445).
+        assignees: list("assignees"),
+        time_estimate: props
+            .get("time_estimate")
+            .and_then(Value::as_u64)
+            .and_then(|m| u32::try_from(m).ok()),
         ..Task::default()
     }
 }
@@ -84,6 +90,19 @@ mod tests {
     /// A Thursday.
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 11, 5).unwrap()
+    }
+
+    #[test]
+    fn a_capture_s_assignee_and_estimate_reach_the_task() {
+        let capture: architect_capture::Capture = serde_json::from_value(json!({
+            "title": "Call the venue",
+            "properties": { "assignees": ["[[Sam Okafor]]"], "time_estimate": 15, "status": "waiting" }
+        }))
+        .unwrap();
+        let t = from_capture(&capture);
+        assert_eq!(t.assignees, ["[[Sam Okafor]]"]);
+        assert_eq!(t.time_estimate, Some(15));
+        assert_eq!(t.status, "waiting");
     }
 
     #[test]

@@ -1023,6 +1023,7 @@ dependencies = [
  "futures-timer",
  "futures-util",
  "global-hotkey",
+ "lucide-dioxus",
  "serde",
  "serde_json",
  "tempfile",

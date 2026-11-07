@@ -15,20 +15,20 @@ steps (
     {
         id composer
         text "Capture first, sort it later. ⇧⌘N (or the feather) opens this composer, and ⌃⌥N a capture window over every app. The line is read as you type: [[Project]], dates, !priority, #tags, @contexts and repeats become chips."
-        target @id"capture-title"
+        target @id"composer-title"
     }
     {id into-1, hide true, do @run{id CAPTURE_CLOSE}}
     {id into-2, hide true, do @run{id CAPTURE_OPEN, args {text "Call the venue tomorrow [[Album]] !high #gigs"}}}
     {
         id into
-        text "Into says what it becomes: the inbox (decide later), a note, or what extensions add (their [[capture_targets]]; Tasks adds Task). A line with a date or a project suggests a task."
-        target @id"capture-into-task"
+        text "The top says what it becomes: a capture for the inbox (decide later) until it is given a date, a project, a person or a priority, then a task. Tap it to pick by hand: a note, or what extensions add (their [[capture_targets]]: an event, time logged)."
+        target @id"composer-kind"
     }
     {id go-1, hide true, do @run{id CAPTURE_CLOSE}}
     {id go-2, hide true, do @run{id CAPTURE_OPEN, args {text "Call the venue tomorrow [[Album]] !high #gigs"}}}
     {
         id go
-        text "↵ captures it; Create more keeps the composer open for the next. Agents capture with CAPTURE_ADD, the same parser and targets."
+        text "⌘↵ creates it (↵ on a plain capture); Create more keeps the composer open for the next. Agents capture with CAPTURE_ADD, the same parser and targets."
         target @id"capture-go"
     }
     {id inbox-1, hide true, do @run{id CAPTURE_CLOSE}}
