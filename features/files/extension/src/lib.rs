@@ -6,9 +6,12 @@
 //! libraries; a project's page pins and unpins it, browses its folders,
 //! shows a file's versions and the project's checkpoints and puts either
 //! back; an asset's page shows its properties, its links and a waveform
-//! per stem. A linked view is given no pane state, so `FILES_OPEN` sets
+//! per stem; every file's copies, where they are and how sure we are of
+//! each (`copies`); an org's storage health, and search over the registry,
+//! offline. A linked view is given no pane state, so `FILES_OPEN` sets
 //! what the page shows before it opens it.
 
+pub mod copies;
 pub mod nav;
 
 use std::fmt::Write as _;
@@ -162,7 +165,11 @@ pub fn bars(peaks: &Value, bars: usize) -> Vec<f32> {
 
 async fn open(args: Value) -> Result<Value, String> {
     let mut root = text(&args, "root").to_owned();
-    if root.is_empty() {
+    let tool = matches!(
+        args.get("view").and_then(Value::as_str),
+        Some("health" | "find")
+    );
+    if root.is_empty() && !tool {
         let roots = run("FILES_ROOTS", json!({})).await?;
         root = roots
             .as_array()
@@ -180,7 +187,17 @@ async fn open(args: Value) -> Result<Value, String> {
         _ if args.get("dir").and_then(Value::as_bool).unwrap_or(false) => (path.clone(), None),
         _ => (String::new(), Some(path.clone())),
     };
-    let view = if asset.is_some() { "asset" } else { "root" };
+    let view = match args.get("view").and_then(Value::as_str) {
+        Some("health") => "health",
+        Some("find") => "find",
+        _ if asset.is_some() => "asset",
+        _ => "root",
+    };
+    let file = if view == "find" {
+        args.get("query").and_then(Value::as_str).map(str::to_owned)
+    } else {
+        file
+    };
     set_current(Target {
         root,
         asset,
@@ -205,6 +222,8 @@ impl Extension for FilesExtension {
         ext.view("root", RootView)
             .view("asset", AssetView)
             .view("drive", DriveView)
+            .view("health", copies::HealthView)
+            .view("find", copies::FindView)
             .action("FILES_OPEN", open)
             .action("FILES_DRIVE_OPEN", |_| async {
                 run("EXT_VIEW_OPEN", json!({ "extension": ID, "view": "drive" })).await
@@ -329,6 +348,20 @@ fn RootPage(target: Target) -> Element {
             });
         }
     };
+    let free = {
+        let root = root.clone();
+        move |_| {
+            let root = root.clone();
+            spawn(async move {
+                let done = run("FILES_EVICT", json!({ "root": root, "path": "" })).await;
+                problem.set(match done {
+                    Ok(n) => Some(format!("Freed {n} cached files on this device.")),
+                    Err(e) => Some(e),
+                });
+                bump();
+            });
+        }
+    };
     let checkpoint = {
         let root = root.clone();
         move |_| {
@@ -363,6 +396,7 @@ fn RootPage(target: Target) -> Element {
                     if let Some(p) = &path { span { style: "{MUTED} font-size: 11px;", "{p}" } }
                 }
                 button { style: "{BUTTON}", "data-files": "pin", onclick: toggle, if pinned { "Unpin" } else { "Pin to this device" } }
+                if !pinned { button { style: "{BUTTON}", "data-files": "free", onclick: free, "Free up space" } }
                 button { style: "{BUTTON}", onclick: checkpoint, "Checkpoint" }
             }
             if let Some(p) = problem() { div { style: "color: var(--destructive);", "{p}" } }
@@ -456,6 +490,7 @@ fn Versions(root: String, file: String) -> Element {
         div { style: "{CARD}", "data-files": "versions",
             span { style: "{HEADING}", "{name}" }
             if sound { Waveform { root: root.clone(), path: file.clone() } }
+            copies::Copies { root: root.clone(), path: file.clone() }
             if let Some(p) = problem() { span { style: "color: var(--destructive);", "{p}" } }
             for (i, v) in versions.into_iter().enumerate() {
                 div { key: "{id(&v)}", style: "display: flex; gap: 8px; align-items: center;",
@@ -625,6 +660,7 @@ fn AssetPage(root: String, asset: String) -> Element {
                                 span { style: "{MUTED} font-size: 12px;", "{size(m.get(\"size\").and_then(Value::as_u64).unwrap_or(0))}" }
                             }
                             Waveform { root: root.clone(), path: text(&m, "path").to_owned() }
+                            copies::Copies { root: root.clone(), path: text(&m, "path").to_owned() }
                         }
                     }
                 }

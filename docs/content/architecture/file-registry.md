@@ -340,14 +340,76 @@ The CLI is the Action List's: `architect-desktop` runs any of them by name
   its passes;
 - a successful write to a working copy attests the copy.
 
-Nothing else in the engine's existing calls changes. The drive needs no
-change: its opens go through the fetcher, which attests. The S3 face uses
-`Engine::attest_external` and implements the `Prover` trait for its bucket.
+Nothing else in the engine's existing calls changes. The drive's cache
+(`features/files/src/drive/cache.rs`) is where its bytes come and go:
+
+- `Cache::begin` attests a fetched blob `cached`, verified, as it lands.
+- `Cache::evict` goes through `Engine::evict_blob`. That applies the policy
+  guard, attests `evicting`, removes the blob, then withdraws it.
+
+A bucket a node stores blobs in (`architect::blob::S3Store`, from the S3
+stack) is a holder of kind `s3` through `BucketHolder`
+(`features/files/src/sync/bucket.rs`). The node signs for it:
+
+- a put attests it `full`, verified, since the store places only bytes
+  that hashed to their name;
+- a delete, or an `S3Store::verify` that fails, withdraws it;
+- a `verify` that passes re-stamps it.
+
+## What the stack built
+
+| Layer | Code | Tests |
+|---|---|---|
+| Model | `features/files/src/copies.rs` (`Holder`, `Attestation`, `Check`, `confidence`, `Policy`, the reports) | its unit tests |
+| Registry | `features/files/src/sync/registry.rs` `Registry`, `Query`; `Engine::refresh_registry`, `Engine::search` | `features/files/tests/copies.rs` `registry_at_scale` (by hand) |
+| Ledger, verification, policy | `features/files/src/sync/ledger.rs`, `features/files/src/sync/verify.rs`, `features/files/src/sync/replicas.rs`; `Files` in `features/files/src/agent.rs` | `features/files/tests/copies.rs`, `apps/desktop/tests/files.rs` `a_pin_is_a_second_verified_copy_that_the_node_counts_and_challenges` |
+| Lanes | `apps/desktop/src/node/files.rs` (`Possession`, identity), `apps/desktop/src/node/catalog.rs` (ledger names, forgetting), `features/crdt/crdt/src/peer.rs` `DocPeerHost` | `features/crdt/crdt/tests/p2p.rs` `a_peer_is_listed_only_the_documents_it_may_open` |
+| UI | `features/files/extension/src/copies.rs` (`Copies`, the `health` and `find` views) | its unit tests; the live check |
+
+**Measured** (a test-profile build on THEBATTLESHIP, shared with other
+builds):
+
+- **Scale:** 1,000,020 files in 210 roots across 7 orgs, shaped like
+  starcommand's (song folders, `.rpp-bak`s, `Audio Files/` takes).
+- **The registry on disk:** 259 MB. Built and written in 2.4 to 4.8 s.
+  Loaded at start, in parallel, in 2.9 to 4.5 s.
+- **A word query:** 0.6 to 3 ms (`lead 2006`: 3 ms; `song 7 rpp-bak`:
+  0.6 ms).
+- **A miss:** 1.7 ms, a scan of every row.
+- **A `sha:` prefix:** 12 µs.
+
+**The live check** ran on scratch data: a dev issuer, a headless node
+holding a scratch tree, two agent nodes, and the window on one of them.
+
+- A desk holding none of the bytes found the takes offline and named the
+  node as their holder.
+- A pin on the laptop took a session file from 1 verified copy to 2 in
+  3 s.
+- Bit rot planted on the laptop (same size, same mtime) was caught by the
+  desk's and the node's challenges ("failed"). The laptop's own scrub then
+  moved the blob to `corrupt/` and withdrew it.
+- With the laptop offline, its copies showed unreachable at once and
+  "unverified since 2 min ago" once the 2-minute test window passed.
+- Freeing the desk's cache under "2 verified, 2 sites" was refused, naming
+  the files.
 
 ## What is left after this
 
-- A trigram index if linear search is not fast enough at the scale above.
-- Replication to S3 driven by policy (with `feat/347-s3`).
+- Ledger documents grow with every re-scrub: compaction (Loro shallow
+  snapshots), or scrub evidence batched per pass.
+- A ledger's first read checks every signature (about 50 µs each, spread
+  over 12 cores): a node's million attestations take seconds once per
+  start.
+- A working file a scrub found damaged is reported and left out of the
+  count. Restoring it from a good copy is not automatic yet.
+- A holder that drops off before anyone saved its ledger name is forgotten
+  until it returns. Its copies are then under-counted, never over-counted.
+- The bucket as a full holder:
+  - its scrubs (`S3Store::verify`) on a schedule within the budget;
+  - its Merkle leaves, so its copies can be challenged;
+  - a `put` of bytes already there attests them from a `HEAD` (size only),
+    which should count as unverified until a read-back.
+- Replication to S3 driven by policy, not only "every blob" (`replicate_forever`).
 - Erasure coding and repair (today a damaged copy is refetched whole).
 - A holder's capacity and free space in its record, so scheduled
   replication picks where to put bytes rather than being configured.
