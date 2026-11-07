@@ -1108,6 +1108,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-dayplan"
+version = "0.1.0"
+dependencies = [
+ "architect-calendar",
+ "architect-workspace-hack",
+ "chrono",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "architect-derive"
 version = "0.1.0"
 dependencies = [

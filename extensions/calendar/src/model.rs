@@ -211,6 +211,8 @@ pub struct Event {
     pub links: Vec<Link>,
     pub external_ref: Option<String>,
     pub tombstone: Option<String>,
+    /// Its tags, without `#` (a day plan's rule can match one: `#gig`).
+    pub tags: Vec<String>,
 }
 
 fn text_of(v: &Value) -> Option<String> {
@@ -358,6 +360,13 @@ impl Event {
             links,
             external_ref: get(keys::EXTERNAL_REF),
             tombstone: get(keys::TOMBSTONE),
+            tags: values
+                .get("tags")
+                .map(texts_of)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|t| t.trim_start_matches('#').to_owned())
+                .collect(),
         })
     }
 
@@ -446,6 +455,7 @@ impl Event {
             "links": self.links,
             "external_ref": self.external_ref,
             "tombstone": self.tombstone,
+            "tags": self.tags,
             "minutes": self.length(tz).num_minutes(),
         })
     }

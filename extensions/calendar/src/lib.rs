@@ -632,6 +632,7 @@ pub async fn create(args: Value) -> Result<Value, String> {
             .map(str::to_owned)
             .or_else(|| external_ref(&args)),
         tombstone: None,
+        tags: Vec::new(),
     };
     let written = write_new(event).await?;
     Ok(written.json(&Local))
@@ -897,6 +898,7 @@ fn override_of(
         links: e.links.clone(),
         external_ref: None,
         tombstone: None,
+        tags: e.tags.clone(),
     }
 }
 
