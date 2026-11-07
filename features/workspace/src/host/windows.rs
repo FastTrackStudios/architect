@@ -137,7 +137,7 @@ impl Bridge {
 
     /// The contexts of both.
     #[must_use]
-    fn and(self, other: &Self) -> Self {
+    pub(super) fn and(self, other: &Self) -> Self {
         let mut all = (*self.0).clone();
         all.extend(other.0.iter().cloned());
         Self(Rc::new(all))
@@ -425,6 +425,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         // The window's own title row, when its launcher draws the title
         // bar (a Mac's): the tab bars along the top are it.
         title_row: Signal::new(title_row),
+        under_strip: Signal::new(false),
         in_shell: Signal::new(false),
         phone_header: Signal::new(false),
         drag: Signal::new(None),

@@ -121,8 +121,14 @@ pub(super) fn ScreensetCommands() -> Element {
             },
             |name| Command::new(id.clone(), format!("Load {name}")),
         );
+        // Decks take ⌘1–9 while they are on; the screensets move over.
+        let chord = if super::deck::try_use_decks().is_some() {
+            "⌘⌥"
+        } else {
+            "⌘"
+        };
         let command = command.group(noun.clone()).shortcut(if keys {
-            format!("⌘{n}")
+            format!("{chord}{n}")
         } else {
             String::new()
         });

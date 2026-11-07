@@ -32,6 +32,7 @@
 
 mod actions;
 mod commands;
+mod deck;
 mod dock;
 mod group;
 mod manage;
@@ -64,6 +65,9 @@ use overlay::{DragLayer, DropHighlight, FloatView, MenuLayer, PhoneBody, SheetLa
 pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
 pub use actions::{Opened, WorkspaceActions};
+pub use deck::{
+    DeckHandle, DeckStores, DeckStrip, DecksConfig, try_use_decks, use_deck_context, use_decks,
+};
 pub use screens::WorkspaceStore;
 pub use windows::{Bridge, Popout, WindowSystem, Windows};
 
@@ -425,6 +429,9 @@ pub struct Host {
     sizes: Signal<Sizes>,
     phone: Signal<bool>,
     title_row: Signal<Option<TitleRow>>,
+    /// A deck strip sits over the panes: the center's top bars are not the
+    /// window's title row (the strip is).
+    under_strip: Signal<bool>,
     in_shell: Signal<bool>,
     /// A phone shows its own bar over the pane (the title, the switcher).
     phone_header: Signal<bool>,
@@ -1329,6 +1336,11 @@ pub fn WorkspaceView(
     arrange_key: Option<Code>,
     /// The window's title row, when the workspace reaches the window's top.
     title_row: Option<TitleRow>,
+    /// A [`DeckStrip`] sits over the panes (and is the title row there):
+    /// the center's and the right dock's top bars stay plain; a left dock
+    /// in the shell's sidebar keeps the title row.
+    #[props(default)]
+    under_strip: bool,
     /// The app's shell hosts the left dock: its groups in the shell's
     /// sidebar, its ribbon in the shell's ribbon (one left side). Read on
     /// mount.
@@ -1395,6 +1407,7 @@ pub fn WorkspaceView(
         sizes: Signal::new(Sizes::FINE),
         phone: Signal::new(phone),
         title_row: Signal::new(None),
+        under_strip: Signal::new(false),
         in_shell: Signal::new(false),
         phone_header: Signal::new(phone_header),
         drag: Signal::new(None),
@@ -1455,6 +1468,9 @@ pub fn WorkspaceView(
     let title_row = title_row.filter(|_| !phone);
     if *host.title_row.peek() != title_row {
         host.title_row.set(title_row);
+    }
+    if *host.under_strip.peek() != under_strip {
+        host.under_strip.set(under_strip);
     }
     // The top tab bars are the window's title row: the shell's own row
     // gives way to them (one row, not two).
@@ -1682,7 +1698,7 @@ fn DeskBody() -> Element {
     };
     let in_shell = (host.in_shell)();
     let center_edges = group::Edges {
-        top: true,
+        top: !(host.under_strip)(),
         left: in_shell || !open_tree(&docks.left),
         right: !open_tree(&docks.right),
         covered: if in_shell { 0.0 } else { strip(&docks.left) },

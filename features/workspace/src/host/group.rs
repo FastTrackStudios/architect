@@ -1051,7 +1051,7 @@ pub(super) fn hairline(axis: Axis, grip: f32, rule: &str, cursor: &str) -> (Stri
 /// the desk's elsewhere.
 fn bar_colour(host: &super::Host) -> std::sync::Arc<str> {
     let t = host.theme.peek();
-    if host.title_row.peek().is_some() {
+    if host.title_row.peek().is_some() && !*host.under_strip.peek() {
         t.title_bar.clone()
     } else {
         t.desk.clone()

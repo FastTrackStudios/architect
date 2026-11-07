@@ -23,6 +23,8 @@ use crate::ops::Target;
 #[component]
 pub(super) fn WorkspaceCommands() -> Element {
     let host = use_host();
+    // Decks take ⌃Tab while they are on; a group's tabs move to ⌃⌥Tab.
+    let decks = super::deck::try_use_decks().is_some();
     let w = host.workspace.read();
     let active = w.active.clone();
     let loc = active.as_ref().and_then(|p| w.locate(p));
@@ -121,7 +123,7 @@ pub(super) fn WorkspaceCommands() -> Element {
         several(
             Command::new("WORKSPACE_NEXT_TAB", "Next tab")
                 .group("Tabs")
-                .shortcut("⌃Tab"),
+                .shortcut(if decks { "⌃⌥Tab" } else { "⌃Tab" }),
         ),
         move || cycle(host, false),
     );
@@ -129,7 +131,7 @@ pub(super) fn WorkspaceCommands() -> Element {
         several(
             Command::new("WORKSPACE_PREVIOUS_TAB", "Previous tab")
                 .group("Tabs")
-                .shortcut("⌃⇧Tab"),
+                .shortcut(if decks { "⌃⌥⇧Tab" } else { "⌃⇧Tab" }),
         ),
         move || cycle(host, true),
     );
