@@ -142,7 +142,13 @@ struct Shared {
     /// Where documents persist (one dir per doc id) — how a delete finds
     /// out a file had a document even when nobody opened it since boot.
     crdt_root: PathBuf,
+    /// Ids of plain documents: not vault files, opened over file
+    /// persistence with no reconciliation ([`VaultCollab::with_plain_docs`]).
+    plain: std::sync::RwLock<Option<PlainDocs>>,
 }
+
+/// Which ids a [`VaultCollab`] also opens as plain documents.
+type PlainDocs = Arc<dyn Fn(Uuid) -> bool + Send + Sync>;
 
 /// The org-level reconciler: a [`DocRegistry`] whose factory seeds
 /// per-file docs from the vault, plus the write-behind and inbound
@@ -177,6 +183,7 @@ impl VaultCollab {
             locks: Mutex::new(HashMap::new()),
             watched: Mutex::new(HashSet::new()),
             crdt_root: crdt_root.clone(),
+            plain: std::sync::RwLock::new(None),
         });
 
         let factory_shared = shared.clone();
@@ -190,21 +197,38 @@ impl VaultCollab {
         // registered it against a real vault file. The hook sees
         // nothing but the Uuid — the reverse map lives on the backend.
         .with_admission({
-            let backend = backend.clone();
-            move |doc_id| backend.collab_route(doc_id).is_some()
+            let (backend, shared) = (backend.clone(), shared.clone());
+            move |doc_id| backend.collab_route(doc_id).is_some() || is_plain(&shared, doc_id)
         })
         // Authorization: the file's write guard, asked for the caller
         // the permissions gate resolved, on every attach through every
         // lane (the collab lane, the peer lane, this node's own).
         .with_authorizer({
-            let backend = backend.clone();
+            let (backend, shared) = (backend.clone(), shared.clone());
             move |who, doc_id| {
-                may_attach(&backend, vault_live::write_guard::account_of(who), doc_id).is_ok()
+                is_plain(&shared, doc_id)
+                    || may_attach(&backend, vault_live::write_guard::account_of(who), doc_id)
+                        .is_ok()
             }
         })
         .with_idle_eviction(IDLE_EVICTION);
 
         Self { registry, shared }
+    }
+
+    /// Also open the documents `admit` names: documents that are not
+    /// vault files (a files root's manifest, `architect_files::sync`), kept
+    /// over the same file persistence with no reconciliation, so they
+    /// travel the same lanes as the notes. Who may attach is the app's
+    /// authorizer's call (the node replaces it with its own).
+    #[must_use]
+    pub fn with_plain_docs(self, admit: impl Fn(Uuid) -> bool + Send + Sync + 'static) -> Self {
+        *self
+            .shared
+            .plain
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(admit));
+        self
     }
 
     /// The registry to mount: implements `DocSync` + `DocPresence`,
@@ -285,6 +309,15 @@ impl VaultCollab {
 
 // ── Open / seed ─────────────────────────────────────────────────────────
 
+fn is_plain(shared: &Shared, doc_id: Uuid) -> bool {
+    shared
+        .plain
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|admit| admit(doc_id))
+}
+
 /// Registry factory body: open the doc over file persistence,
 /// reconcile it with the vault file, and spawn its write-behind
 /// worker.
@@ -293,6 +326,9 @@ async fn open_doc(
     doc_id: Uuid,
     crdt_root: PathBuf,
 ) -> Result<CrdtDoc, PersistError> {
+    if shared.backend.collab_route(doc_id).is_none() && is_plain(shared, doc_id) {
+        return CrdtDoc::open(doc_id, FilePersistence::new(crdt_root)).await;
+    }
     let Some((vault_id, path)) = shared.backend.collab_route(doc_id) else {
         // Admission already gates this; double-check so a racing
         // deregistration can't open an unroutable doc.

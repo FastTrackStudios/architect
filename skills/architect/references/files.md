@@ -12,6 +12,7 @@
 | `server` (native) | every org's files on a server, and their renditions | `features/files/src/server/mod.rs` `FilesServer` (`new`, `default_org`, `with_grants`, `acting`, `set_quota`, `with_renditions`, `with_rendition_engine`, `rendition_engine`, `ticket_key`), `GrantSource` (grants from elsewhere — a space's members — asked per call); `features/files/src/server/ticket.rs` `TicketKey` (`seal`/`unseal` any claims under a prefix: another feature's tickets on the same kind of key), `who` and `principal_of` (exported as `ticket_subject`, `ticket_principal`); `features/files/src/server/acting.rs` `Acting` (in process: `locate`, `rendition`, `receive`); `features/files/src/server/renditions.rs` `Transcoder`, `TranscodeError`, `Renditions` (`new`, `concurrency`, `set`, `ready`, `schedule`, `build`) |
 | `http` (native) | the byte face a browser reads by range | `features/files/src/server/web.rs` `WebFiles` (`new(files, identity)`) |
 | `ffmpeg` (native) | renditions by the `ffmpeg`/`ffprobe` on `PATH` | `features/files/src/server/ffmpeg.rs` `FfmpegTranscoder` (`new`, `with_binaries`, `available`) |
+| `sync` (native) | synced roots: projects and asset libraries held in place, pinned per machine | `features/files/src/sync/manifest.rs` `Manifest` (`meta`, `push`, `versions`, `checkpoints`), `Tree` (`heads`, `settled`, `current`, `live`, `history`, `descends`, `ever_held`), `FileVersion`, `Checkpoint`, `RootMeta` (`place`, `doc_id`), `Section`, `doc_id_for`, `lane_name`, `place_of`, `conflict_path`; `features/files/src/sync/layout.rs` `discover`, `root_id`, `ignored`, `is_session_file`; `features/files/src/sync/scan.rs` `Scanner`, `Index`, `SETTLE`, `hash_settled`; `features/files/src/sync/store.rs` `TreeStore` (a `BlobStore` and a `Remote` that also answers from working files); `features/files/src/sync/engine.rs` `Engine` (`pass`, `pass_all`, `run`, `pin`, `unpin`, `restore`, `restore_checkpoint`, `make_checkpoint`, `save_bytes`, `status`), `EngineConfig`; `features/files/src/sync/lane.rs` `BLOB_PERMITS`, `Engine::blob_host`, `Engine::held` |
 
 ## Rules it keeps
 
@@ -26,6 +27,18 @@
 - **Media elements use tickets.** `<video>`/`<audio>`/`<img>` cannot send a header: mint `FilesService::ticket(root, path)` over the lane (needs `Read`), put `token` in `content_url`/`rendition_url`. A ticket (`fft1.…`, HMAC-SHA256, `TICKET_TTL_US` = 6 h) reads its path and below in one root, never writes, and is re-checked against the minter's access on every use. Its key is random per process unless `FilesServer::ticket_key` sets one (share it across replicas).
 - **Renditions are off the request path.** Every `Changed` entry with content schedules its source (`Renditions::schedule`, `concurrency` builds at a time, default 1); a request reports `RenditionState::Pending` (`503 rendition_pending` on the byte route) and schedules what is missing. Keyed by the version's content (same bytes share them), addressed by path + version. Video yields `Proxy` (H.264/AAC MP4, ≤720p, faststart), `Poster` (JPEG), `Peaks`; audio `Peaks`, `Audio` (AAC MP4); other nothing. Records live at `<data>/renditions/<hh>/<hex>.json` (atomic, per rendition): they survive a restart, a record of another `RECIPE` or one whose blob is gone is made again. Failures are remembered until restart (`RenditionState::Failed`, `RenditionSet::problem` for a failed probe), then retried.
 - **Quota** counts live files' bytes (`State::used`); every change that grows it past `Usage::quota` fails with `QuotaExceeded`. The deployment sets it (`FilesServer::set_quota`), not a member.
+
+## Synced roots (`sync`)
+
+The spec: `docs/content/architecture/project-files.md`. A root is `<org>/Projects/<project>` or `<org>/Assets/<kind>`; its manifest is one Loro document (an append-only `versions` list, `checkpoints`, `meta`), id `RootMeta::doc_id` derived from the place so two devices that find one tree seed one document. The node (`apps/desktop/src/node/files.rs`) runs the engine with `files_dir` (`files_hold` on the always-on node), opens manifests through `VaultCollab::with_plain_docs`, lists them in its catalogue as `files/<place>` and serves bytes as `BlobTransfer` on the peer lane (`crdt::p2p::node_router_with`).
+
+- **Working files are the truth.** The node serves the tree in place; Task's `.fts-files` and `.fts-root.json` are never synced (`layout::ignored`), the marker's id is read (`root_id`). A `#fts-stub v1` file is never content.
+- **Scan, then apply.** A change is committed once settled (same stat twice, mtime `settle` old, same stat around the hash). Incoming bytes go to `<file>.architect-part` and are renamed into place; a file whose stat differs from the index is never overwritten.
+- **Forks keep both.** `Tree::settled`: the newest content (`at_us` = the file's mtime) wins; the others are written as `conflict_path(path, by)`; one version replacing every head closes it; heads with the same content are settled.
+- **Versions are kept by size.** Up to `keep_inline` (`KEEP_INLINE`, 64 MiB) a committed file is copied into the store; a larger one stays in place, and is moved into the store when sync replaces it.
+- **Unpin only when synced.** `Engine::unpin` refuses with `EngineError::NotSynced(paths)`.
+
+Tests: `features/files/tests/sync.rs` (two engines, documents exchanged by hand), `apps/desktop/tests/files.rs` (two nodes over iroh).
 
 ## Recipe: mount it
 
@@ -85,4 +98,4 @@ Rules: access is the parent's, by the gate's engine on `org/<org>/doc/<id>` or `
 
 ## Not in architect yet
 
-Client sync (selective sync, offline copies, the device catalogue), the browser integration (service worker answering `Range` from offline copies), desktop integrations (daemon, FUSE, File Provider, WebDAV), adopting on-disk folders in place, filmstrips and a rendition-ready event (poll `renditions`), collecting rendition blobs (nothing yet hands their hashes to `LocalFs::collect`), search, review/share links, federation and peering, project versions, divergent versions, storage locations. Task and Studio still run Task's own Files.
+The browser integration (service worker answering `Range` from offline copies), FUSE and the File Provider, filmstrips and a rendition-ready event (poll `renditions`), collecting rendition blobs (nothing yet hands their hashes to `LocalFs::collect`), search, review/share links, federation, storage locations. Task and Studio still run Task's own Files.

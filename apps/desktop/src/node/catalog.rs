@@ -9,28 +9,51 @@
 
 use std::collections::HashMap;
 
+use architect_files::sync::{Engine, manifest};
 use crdt::peer::{DocAt, DocCatalog, HeldDoc};
 use crdt::sync::SyncError;
 use uuid::Uuid;
 use vault_live::Backend;
 use vault_proto::{VaultSync as _, collab_doc_id};
 
-/// [`DocCatalog`] over a vault [`Backend`].
+/// [`DocCatalog`] over a vault [`Backend`], and the files engine's
+/// manifests (`files/<org>/<section>/<name>`) when the node runs one.
 #[derive(Clone)]
 pub struct VaultCatalog {
     backend: Backend,
+    files: Option<Engine>,
 }
 
 impl VaultCatalog {
     #[must_use]
     pub const fn new(backend: Backend) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            files: None,
+        }
     }
 
-    /// Every note this node holds, as the peer lane lists it.
+    /// The same, listing `files`' manifests too.
+    #[must_use]
+    pub fn with_files(mut self, files: Option<Engine>) -> Self {
+        self.files = files;
+        self
+    }
+
+    /// Every note this node holds, and every manifest, as the peer lane
+    /// lists them.
     #[must_use]
     pub fn notes(&self) -> Vec<HeldDoc> {
-        let mut out = Vec::new();
+        let mut out: Vec<HeldDoc> = self
+            .files
+            .iter()
+            .flat_map(Engine::held)
+            .map(|m| HeldDoc {
+                doc_id: m.doc_id,
+                name: m.name,
+                digest: m.digest,
+            })
+            .collect();
         for vault in self.backend.vault_ids() {
             let Ok(manifest) = self.backend.manifest(&vault) else {
                 continue;
@@ -64,6 +87,14 @@ impl VaultCatalog {
     /// `at` names no vault this node holds, is not a note, or its id is
     /// not the one its name derives to.
     pub fn register(&self, at: &DocAt) -> Result<Uuid, SyncError> {
+        if let Some(place) = manifest::place_of(&at.name) {
+            let files = self.files.as_ref().ok_or(SyncError::UnknownDoc)?;
+            if manifest::doc_id_for(place) != at.doc_id {
+                return Err(SyncError::UnknownDoc);
+            }
+            files.learn(at.doc_id);
+            return Ok(at.doc_id);
+        }
         let (vault, path) = at.name.split_once('/').ok_or(SyncError::UnknownDoc)?;
         if !is_note(path) || collab_doc_id(vault, path) != at.doc_id {
             return Err(SyncError::UnknownDoc);

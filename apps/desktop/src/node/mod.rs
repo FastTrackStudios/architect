@@ -47,6 +47,7 @@
 
 pub mod catalog;
 pub mod config;
+mod files;
 mod live;
 pub mod org;
 pub mod service;
@@ -71,7 +72,7 @@ use architect_devices::Admission;
 use architect_devices::account::{self, AccountNode, ThisDevice};
 use architect_permissions::Principal;
 use auth_proto::{AccountOrg, PeerDevice};
-use crdt::p2p::{NodeAccess, Shares, node_router};
+use crdt::p2p::{NodeAccess, Shares, node_router_with};
 use crdt::peer::{DocAt, DocPeerClient, Foreign, SelfLane};
 use tokio::task::JoinHandle;
 use vault_live::Backend;
@@ -120,6 +121,8 @@ pub struct Running {
     pub endpoint: iroh::Endpoint,
     /// What its services answer from.
     pub state: NodeState,
+    /// Its files engine, with [`Config::files_dir`].
+    pub files: Option<architect_files::sync::Engine>,
     tasks: Vec<JoinHandle<()>>,
     registry: crdt::DocRegistry,
     _watching: Option<vault_live::sync::WatcherHandle>,
@@ -203,7 +206,20 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         roots.insert(id.clone(), root);
     }
     let backend = Backend::with_roots(roots.clone());
+    // ── Projects and asset libraries: manifests in the same registry ──
+    let files_registry: Arc<std::sync::OnceLock<crdt::DocRegistry>> = Arc::default();
+    let files = config
+        .files_dir
+        .as_ref()
+        .map(|dir| files::engine(&config, dir, files_registry.clone()));
     let collab = vault_collab::VaultCollab::new(backend.clone(), data.join("crdt"));
+    let collab = match &files {
+        Some(engine) => {
+            let engine = engine.clone();
+            collab.with_plain_docs(move |doc_id| engine.knows(doc_id))
+        }
+        None => collab,
+    };
     for id in config.vaults.keys() {
         collab.watch_vault(id);
     }
@@ -246,25 +262,28 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
                 || matches!((who, &lane), (Some(who), Some(lane)) if lane.opens(who, doc_id))
         }
     });
-    let catalog = VaultCatalog::new(backend.clone());
+    let _ = files_registry.set(registry.clone());
+    let catalog = VaultCatalog::new(backend.clone()).with_files(files.clone());
     let endpoint = bind_iroh(&config).await?;
     let endpoint_id = architect_devices::endpoint_key(&endpoint.id().to_string());
     let mut tasks = Vec::new();
     tasks.push(tokio::spawn({
-        let (endpoint, registry, catalog, access, admission) = (
+        let (endpoint, registry, catalog, access, admission, files) = (
             endpoint.clone(),
             registry.clone(),
             catalog.clone(),
             access.clone(),
             admission.clone(),
+            files.clone(),
         );
         async move {
             architect_devices::serve(&endpoint, admission, move |remote| {
-                node_router(
+                node_router_with(
                     registry.clone(),
                     catalog.clone(),
                     access.clone(),
                     &remote.to_string(),
+                    files.as_ref().map(files::more).unwrap_or_default(),
                 )
             })
             .await;
@@ -341,6 +360,17 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         .map_err(StartError::Other)?,
     );
     let dials = parse_peers(&config.peers);
+    if let Some(engine) = &files {
+        let every = Duration::from_secs(config.files_secs.max(1));
+        tasks.push(tokio::spawn(engine.clone().run(every)));
+        tasks.push(tokio::spawn(files::dial_forever(
+            engine.clone(),
+            endpoint.clone(),
+            dials.clone(),
+            admission.clone(),
+            config.iroh,
+        )));
+    }
     tasks.push(tokio::spawn(live::live_forever(live::Live {
         endpoint: endpoint.clone(),
         lane: Arc::clone(&self_lane),
@@ -465,6 +495,7 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         http,
         endpoint,
         state,
+        files,
         tasks,
         registry,
         _watching: watching,

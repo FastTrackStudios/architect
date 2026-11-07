@@ -34,6 +34,10 @@ server = [
 ]
 http = ["server", "architect/http"]
 ffmpeg = ["server", "tokio/process"]
+# Synced roots (`sync`, native): projects and asset libraries as Loro
+# manifests on the peer lanes, bytes in the blob store and in place in
+# the working copies; docs/content/architecture/project-files.md.
+sync = ["http", "dep:loro", "dep:tracing", "uuid/v5", "tokio/macros", "tokio/time"]
 
 [dependencies]
 architect = { workspace = true }
@@ -52,6 +56,10 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 sha2 = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `sync`: a root's manifest is a Loro document; the app hands the engine
+# the one its registry holds, so this crate needs loro alone, not crdt.
+loro = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 # `server`: read tickets are signed (HMAC-SHA256) with a key the server
 # holds, and travel as URL-safe base64.
 base64 = { workspace = true, optional = true }
@@ -62,7 +70,7 @@ tokio = { version = "1", default-features = false, features = ["fs", "io-util", 
 
 [dev-dependencies]
 # The tests drive the server and the client: build them with both.
-architect-files = { path = ".", features = ["server", "http", "ffmpeg"] }
+architect-files = { path = ".", features = ["server", "http", "ffmpeg", "sync"] }
 architect = { workspace = true, features = ["vox", "local", "http", "http-client"] }
 architect-permissions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }

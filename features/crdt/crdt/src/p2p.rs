@@ -426,6 +426,25 @@ pub fn node_router<C: DocCatalog + Clone>(
     access: NodeAccess,
     remote: &str,
 ) -> PermissionedRouter {
+    node_router_with(registry, catalog, access, remote, More::default())
+}
+
+/// More services for [`node_router_with`]: a router, and each service's
+/// permit table for the gate (the node's files lane: `BlobTransfer`).
+#[derive(Default)]
+pub struct More {
+    pub router: Option<LayerRouter>,
+    pub permits: Vec<(&'static vox::ServiceDescriptor, &'static ServicePermits)>,
+}
+
+/// [`node_router`] with `more` on the same connection, behind the same gate.
+pub fn node_router_with<C: DocCatalog + Clone>(
+    registry: DocRegistry,
+    catalog: C,
+    access: NodeAccess,
+    remote: &str,
+    more: More,
+) -> PermissionedRouter {
     let sweepers = access.clone();
     let host = DocPeerHost::new(registry.clone(), catalog, move |endpoint| {
         sweepers.sweeps(endpoint)
@@ -447,14 +466,23 @@ pub fn node_router<C: DocCatalog + Clone>(
         ),
         None => router,
     };
+    let router = match more.router {
+        Some(extra) => router.merge_router(extra),
+        None => router,
+    };
     let identity = ConnectionCaller {
         access: access.clone(),
         remote: remote.to_ascii_lowercase(),
     };
-    PermissionsGate::new(Arc::new(access), Arc::new(identity))
+    let gate = PermissionsGate::new(Arc::new(access), Arc::new(identity))
         .permit(doc_sync_service_descriptor(), &SYNC_PERMITS)
         .permit(doc_peer_service_descriptor(), &PEER_PERMITS)
-        .permit(device_pairing_service_descriptor(), &PAIR_PERMITS)
+        .permit(device_pairing_service_descriptor(), &PAIR_PERMITS);
+    more.permits
+        .into_iter()
+        .fold(gate, |gate, (descriptor, permits)| {
+            gate.permit(descriptor, permits)
+        })
         .wrap(router)
 }
 

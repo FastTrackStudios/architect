@@ -54,6 +54,8 @@ pub mod rendition;
 pub mod server;
 #[cfg(feature = "vox")]
 mod service;
+#[cfg(all(feature = "sync", not(target_arch = "wasm32")))]
+pub mod sync;
 pub mod web;
 
 pub use access::{Access, Capability, Effective, Grant, resolve, role_capabilities, stewards};
