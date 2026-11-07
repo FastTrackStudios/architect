@@ -1,0 +1,35 @@
+# Architect, headless, as a systemd service (docs/content/guide/deploy.md,
+# "Without Kubernetes"). Install the release binary as
+# /usr/local/bin/architect-desktop, put the settings in
+# /etc/architect/node.env, then:
+#   systemctl enable --now architect-node
+[Unit]
+Description=Architect, headless (architect-desktop serve)
+Documentation=https://architect.fasttrackstudio.app/docs/guide/deploy/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=architect
+WorkingDirectory=/var/lib/architect
+Environment=ARCHITECT_DATA_DIR=/var/lib/architect
+Environment=ARCHITECT_BIND=127.0.0.1:8080
+Environment=ARCHITECT_IROH_BIND=0.0.0.0:7777
+Environment=RUST_LOG=info
+# ARCHITECT_NAME, ARCHITECT_ISSUER, ARCHITECT_HOST_ORG, … (the table in the docs)
+EnvironmentFile=-/etc/architect/node.env
+# Secrets as files: the session, the MCP bearer, the S3 secret.
+LoadCredential=session:/etc/architect/session
+Environment=ARCHITECT_SESSION_FILE=%d/session
+ExecStart=/usr/local/bin/architect-desktop serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

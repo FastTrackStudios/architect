@@ -1,0 +1,87 @@
+{{- if .Values.web.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "architect.fullname" . }}-web
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {{- dict "issuer" (.Values.web.config.issuer | default .Values.node.issuer) "client_id" .Values.web.config.clientId | toJson | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "architect.fullname" . }}-web
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "architect.selector" (dict "root" . "component" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "architect.selector" (dict "root" . "component" "web") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toJson .Values.web.config | sha256sum }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: web
+          image: {{ include "architect.image" (dict "root" . "image" .Values.web.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /, port: http }
+          livenessProbe:
+            httpGet: { path: /, port: http }
+          volumeMounts:
+            - name: config
+              mountPath: /srv/www/app/config.json
+              subPath: config.json
+          {{- with .Values.web.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "architect.fullname" . }}-web
+      {{- with .Values.web.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.web.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.web.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "architect.fullname" . }}-web
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "architect.selector" (dict "root" . "component" "web") | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}

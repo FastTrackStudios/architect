@@ -1,0 +1,141 @@
+# Architect: the headless node and the web front end on one host
+# (docs/content/guide/deploy.md, "Self-hosting with the chart").
+#
+# Quickstart: set
+#   host                    the hostname (architect.example.com)
+#   node.issuer             your OIDC issuer
+#   node.hostOrg            the issuer org this node hosts
+# and create node.existingSecret (the account session; see below).
+#
+# Routing: the web front end is static and answers every path the node
+# does not own with a page or a real 404. The node owns the prefixes in
+# `node.paths`; a reverse proxy (this chart's Ingress, or Caddy/Traefik/
+# nginx of your own) sends those to the node Service and everything else
+# to the web Service. tests/routes.sh checks the Ingress does exactly that.
+
+host: architect.example.com
+
+image:
+  registry: ghcr.io/fasttrackstudios
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# ── The web front end (ghcr.io/fasttrackstudios/architect-web) ──────────
+web:
+  enabled: true
+  image:
+    repository: architect-web
+    tag: ""            # empty = appVersion
+  replicaCount: 2
+  # /app/config.json, the web app's settings, from a ConfigMap. Empty
+  # issuer = node.issuer.
+  config:
+    issuer: ""
+    clientId: architect
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ── The headless node (ghcr.io/fasttrackstudios/architect) ──────────────
+node:
+  image:
+    repository: architect
+    tag: ""            # empty = appVersion
+  # One node per data volume: a node is one device (its iroh key and
+  # documents live on the PVC), so more than one replica needs
+  # persistence off (the chart refuses otherwise).
+  replicaCount: 1
+  name: architect                    # ARCHITECT_NAME, its name on the account
+  issuer: https://auth.fasttrackstudio.app   # ARCHITECT_ISSUER
+  org: ""                            # ARCHITECT_ORG
+  hostOrg: ""                        # ARCHITECT_HOST_ORG: serves /org/<slug>/vox
+  vaults: ""                         # ARCHITECT_VAULTS: id=path,…
+  sites: ""                          # ARCHITECT_SITES: /mount=vault,… (add each mount to node.extraPaths)
+  # Plain env, name -> value (RUST_LOG, ARCHITECT_SWEEP_SECS, …).
+  env: {}
+
+  # An existing Secret with the node's secrets, mounted as files at
+  # /run/secrets/architect (never values in the environment):
+  #   session     the account session (ARCHITECT_SESSION_FILE)
+  #   mcp-token   optional: the /mcp bearer (ARCHITECT_MCP_TOKEN_FILE)
+  existingSecret: ""
+  mcp: false                         # serve /mcp (needs mcp-token in the Secret)
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+    existingClaim: ""
+
+  # Projects and asset libraries (ARCHITECT_FILES_DIR=/files, held in
+  # place: ARCHITECT_FILES_HOLD). One of nfs, hostPath or existingClaim.
+  files:
+    enabled: false
+    nfs: {}                          # { server: nas.lan, path: /mnt/tank/Architect }
+    hostPath: ""
+    existingClaim: ""
+
+  # The files' bytes in an S3 bucket too (ARCHITECT_BLOB_S3_*). The
+  # credentials come from an existing Secret, never from values.
+  s3:
+    enabled: false
+    bucket: ""
+    endpoint: ""                     # http://garage.lan:3900; empty = AWS
+    region: ""                       # empty = us-east-1
+    prefix: ""
+    placement: replicate             # replicate | primary
+    credentialsSecret: ""            # keys below
+    accessKeyIdKey: access-key-id
+    secretAccessKeyKey: secret-access-key
+
+  # The node's own S3 face (ARCHITECT_S3_BIND, a bucket per org): its own
+  # listener with buckets at its root, so its own host, not a path.
+  s3Face:
+    enabled: false
+    port: 9000
+    host: ""                         # e.g. s3.architect.example.com, on the Ingress
+
+  # iroh, the peer-to-peer lane: UDP 7777. Peers reach the node through
+  # n0's relays anyway; a direct UDP path is faster.
+  iroh:
+    port: 7777
+    # none | LoadBalancer | NodePort: a Service for the UDP port.
+    service: none
+    loadBalancerIP: ""
+    annotations: {}
+    hostPort: false                  # bind 7777/udp on the k8s node itself
+
+  # The paths the node owns on the shared host. Every one is routed to
+  # the node by the Ingress (tests/routes.sh) and must be by any proxy.
+  #   /vox            vox over WebSocket (the node's services)
+  #   /org            /org/<slug>/vox: the org lane (vaults, share links)
+  #   /mcp            MCP (only with node.mcp)
+  #   /health         liveness and readiness
+  #   /s              share links /s/<code>/ and their sign-in /s/_signin
+  #   /node           the node's HTTP face (POST /node/status)
+  #   /blobs          reserved for the node (files' bytes over HTTP)
+  #   /.well-known    reserved for the node
+  paths:
+    - /vox
+    - /org
+    - /mcp
+    - /health
+    - /s
+    - /node
+    - /blobs
+    - /.well-known
+  # More, e.g. each Site mount from node.sites.
+  extraPaths: []
+
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # [{ secretName: architect-tls, hosts: [architect.example.com] }]
+  tls: []

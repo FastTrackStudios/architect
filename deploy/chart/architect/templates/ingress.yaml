@@ -1,0 +1,61 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "architect.fullname" . }}
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.host | quote }}
+      http:
+        paths:
+          {{- /* The node's prefixes first; everything else is the web
+                 front end, which answers an unknown path with a real 404,
+                 never the app's page (so a forgotten prefix shows). */}}
+          {{- range (include "architect.nodePaths" . | fromJsonArray) }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "architect.fullname" $ }}-node
+                port:
+                  name: http
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                {{- if .Values.web.enabled }}
+                name: {{ include "architect.fullname" . }}-web
+                port:
+                  name: http
+                {{- else }}
+                name: {{ include "architect.fullname" . }}-node
+                port:
+                  name: http
+                {{- end }}
+    {{- if and .Values.node.s3Face.enabled .Values.node.s3Face.host }}
+    - host: {{ .Values.node.s3Face.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "architect.fullname" . }}-node
+                port:
+                  name: s3
+    {{- end }}
+{{- end }}

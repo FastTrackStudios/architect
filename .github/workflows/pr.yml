@@ -28,6 +28,15 @@ jobs:
         run: cargo fmt --all -- --check
       # The committed lockfile is the one cargo resolves: a merge that left
       # it stale fails here, not on main.
+      # The self-hosting chart: lint, and every node path routed to the
+      # node (deploy/chart/architect/tests/routes.sh). helm and yq are on
+      # the hosted runner; seconds.
+      - name: chart
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          helm lint deploy/chart/architect
+          bash deploy/chart/architect/tests/routes.sh
       - name: lockfile
         if: ${{ !cancelled() }}
         run: |
