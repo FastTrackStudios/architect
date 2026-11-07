@@ -1,4 +1,4 @@
-// A page's reach in a browser (apps/web), as features/pages/tests/net.rs
+// A page's reach in a browser (apps/sandbox/web), as features/pages/tests/net.rs
 // checks it natively: its extension (`lab.web-checks`) declares
 // `capabilities.hosts = ["127.0.0.1"]`, so `net.fetch` reaches the lab's
 // own server there and is refused `localhost`; the browser's own network

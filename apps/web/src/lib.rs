@@ -1,369 +1,331 @@
-//! The lab in a browser: the Board's tab as its page file
-//! (`apps/sandbox/board/pages/board.tsx`, the same file the desktop lab runs
-//! on `QuickJS`) in a Web Worker (`architect_pages::web`), and the WASI
-//! Counter (`apps/sandbox/wasi-counter`), the same component the desktop lab
-//! runs with Wasmtime, transpiled by jco and run by the browser's
-//! WebAssembly (`architect_extensions::web`).
+//! Architect in a browser (#431): the web app's shell, served with the
+//! landing page and the docs as one static site.
 //!
-//! The page puts the component's actions on its own Action List (beside a
-//! `THEME_LIST` of its own, what the counter's "Ask the app" runs through
-//! the host service), and the Board's three the page runs (`board`: the
-//! Board's own are its Rust extension's, which is not built for a
-//! browser). It opens a page in the main pane — the Board, its Preact page
-//! (`?page=preact`), or one of the checks in `pages/` (`?page=runaway`,
-//! `?page=net`) — mounts the
-//! counter's `counter` view below it, and shows how the page keeps up:
-//! each animation frame's gap, the longest of the last second, while a
-//! worker counts primes. Built and served by `just web`
-//! (docs/content/architecture/pages.md, "On the web";
-//! docs/content/architecture/extensions.md, "On the web").
+//! The site (`scripts/web-bundle.sh`, `just web`, the `architect-web`
+//! image in `flake.nix`) has three parts on one host:
+//!
+//! | path | what |
+//! | --- | --- |
+//! | `/` | the landing page (`apps/web/landing`, a slot for the designed page) |
+//! | `/docs/` | the docs, `docs/content` built by `architect site build` |
+//! | `/app/` | this app ([`APP`]); the sign-in comes back to `/auth/callback` ([`CALLBACK`]) |
+//!
+//! The app always lives at `/app/`, signed in or not; `/` stays the
+//! landing page, which links to it. Everything else on the host (`/vox`,
+//! `/org`, `/s`, …) belongs to the headless node, routed by the reverse
+//! proxy in front of both (`deploy/chart/architect`).
+//!
+//! **Sign-in** is the issuer's redirect flow with PKCE
+//! (`auth_client::oidc`): a public client named `architect`, which the
+//! issuer registers for `architect.fasttrackstudio.app` (fts-auth's
+//! `appDomains`). The verifier waits in `sessionStorage` while the browser
+//! is at the issuer; the session is kept in `localStorage` and renewed
+//! with its refresh token before it runs out.
+//!
+//! **Settings** come from `/app/config.json` ([`Config`]), read at start,
+//! so one bundle serves any host: the chart's `ConfigMap` replaces the
+//! file with the deployment's issuer.
+//!
+//! This module is the part that needs no browser (the config, where a
+//! URL leads, what each screen shows), tested natively; `browser` (wasm32
+//! only) does the storage, the requests and the DOM.
 
-#![cfg(target_arch = "wasm32")]
-// Nothing is `Send` in a browser.
-#![allow(clippy::future_not_send)]
+#[cfg(target_arch = "wasm32")]
+mod browser;
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
-use std::sync::Arc;
+use serde::Deserialize;
 
-use architect::action::{ActionFuture, ActionInfo, ActionList, Effect};
-use architect_extensions::Manifest;
-use architect_extensions::web::{Options, WebComponent, WebHost};
-use architect_pages::api::{ThemeSnapshot, ThemeToken};
-use architect_pages::web::{PageFolder, WebPage, WebPages};
-use serde_json::json;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
+/// Where the app is served.
+pub const APP: &str = "/app/";
+/// Where the issuer sends the browser back to, on the same origin: the
+/// path every first-party client is registered with
+/// (`https://<domain>/auth/callback`).
+pub const CALLBACK: &str = "/auth/callback";
+/// The scopes the app asks for: `offline_access` gets a refresh token,
+/// so a sign-in lasts until it is revoked rather than an hour.
+pub const SCOPE: &str = "openid email profile offline_access";
+/// The node's status, over its HTTP face, on this origin
+/// (`apps/desktop/src/node/service.rs` `Node`).
+pub const NODE_STATUS: &str = "/node/status";
+/// Where the desktop app is downloaded.
+pub const DOWNLOADS: &str = "https://github.com/FastTrackStudios/architect/releases/latest";
 
-/// Where `just web` puts the transpiled component, beside the page.
-const COMPONENT: &str = "wasi-counter/architect_sandbox_wasi_counter.js";
-const MANIFEST: &str = include_str!("../../sandbox/wasi-counter/extension.toml");
+/// `/app/config.json`: what differs between deployments.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Config {
+    /// The OIDC issuer (`https://auth.fasttrackstudio.app`).
+    pub issuer: String,
+    /// The public client the issuer knows this app as.
+    #[serde(default = "default_client")]
+    pub client_id: String,
+}
 
-/// The page's own themes, as the app's `THEME_LIST` answers.
-const THEMES: [&str; 3] = ["catppuccin-mocha", "catppuccin-latte", "zinc"];
+fn default_client() -> String {
+    "architect".to_owned()
+}
 
-mod board;
+impl Config {
+    /// Read `/app/config.json`.
+    ///
+    /// # Errors
+    ///
+    /// Not JSON, no `issuer`, or an issuer that is not an `http(s)` URL.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let mut config: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        config.issuer = config.issuer.trim().trim_end_matches('/').to_owned();
+        if !(config.issuer.starts_with("https://") || config.issuer.starts_with("http://")) {
+            return Err(format!("issuer `{}` is not an http(s) URL", config.issuer));
+        }
+        Ok(config)
+    }
 
-/// The Board: its manifest and its page files, the desktop lab's own.
-const BOARD: &str = include_str!("../../sandbox/board/extension.toml");
-const BOARD_PAGES: &[(&str, &str)] = &[
-    (
-        "board.tsx",
-        include_str!("../../sandbox/board/pages/board.tsx"),
-    ),
-    ("kf.tsx", include_str!("../../sandbox/board/pages/kf.tsx")),
-    (
-        "primes.js",
-        include_str!("../../sandbox/board/pages/primes.js"),
-    ),
-    (
-        "preact.tsx",
-        include_str!("../../sandbox/board/pages/preact.tsx"),
-    ),
-    (
-        "vendor/preact.js",
-        include_str!("../../sandbox/board/pages/vendor/preact.js"),
-    ),
-    (
-        "vendor/hooks.js",
-        include_str!("../../sandbox/board/pages/vendor/hooks.js"),
-    ),
-];
-
-/// The checks' extension: the network it may reach is the lab's server.
-const CHECKS: &str = r#"
-id = "lab.web-checks"
-name = "Web checks"
-version = "0.1.0"
-kind = "luau"
-api = "0.1"
-
-[capabilities]
-hosts = ["127.0.0.1"]
-"#;
-const CHECK_PAGES: &[(&str, &str)] = &[
-    ("runaway.tsx", include_str!("../pages/runaway.tsx")),
-    ("net.tsx", include_str!("../pages/net.tsx")),
-];
-
-/// The pages the lab opens, by `?page=`: the folder and its extension.
-fn folder(page: &str) -> Option<(PageFolder, &'static str)> {
-    match page {
-        "board" | "preact" => Some((
-            PageFolder::new(&format!("{page}.tsx"), BOARD_PAGES.iter().copied()),
-            BOARD,
-        )),
-        "runaway" | "net" => Some((
-            PageFolder::new(&format!("{page}.tsx"), CHECK_PAGES.iter().copied()),
-            CHECKS,
-        )),
-        _ => None,
+    /// The redirect URI for a page on `origin`.
+    #[must_use]
+    pub fn redirect_uri(origin: &str) -> String {
+        format!("{}{CALLBACK}", origin.trim_end_matches('/'))
     }
 }
 
-/// The lab's theme, as a page reads it: the colours of `index.html`.
-fn theme() -> ThemeSnapshot {
-    let tokens = [
-        ("background", "#18181b"),
-        ("foreground", "#e4e4e7"),
-        ("border", "#3f3f46"),
-        ("input", "#3f3f46"),
-        ("card", "#27272a"),
-        ("primary", "#4f46e5"),
-        ("primary-foreground", "#ffffff"),
-        ("secondary", "#27272a"),
-        ("secondary-foreground", "#e4e4e7"),
-        ("muted-foreground", "#a1a1aa"),
-        ("destructive", "#b91c1c"),
-        ("destructive-foreground", "#ffffff"),
-    ];
-    ThemeSnapshot {
-        id: "lab-web-zinc".to_owned(),
-        scheme: "dark".to_owned(),
-        revision: 1,
-        tokens: tokens
-            .iter()
-            .map(|(name, value)| ThemeToken {
-                name: (*name).to_owned(),
-                value: (*value).to_owned(),
-            })
-            .collect(),
-    }
+/// Where a URL leads, from its path and query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Route {
+    /// Back from the issuer with a code to redeem.
+    Callback { code: String, state: String },
+    /// Back from the issuer with a refusal (`error`, its description).
+    Refused(String),
+    /// The app itself.
+    App,
 }
 
-thread_local! {
-    /// The page open in the main pane, for `lab_status` and `lab_reload`.
-    static OPEN: RefCell<Option<(String, WebPage)>> = const { RefCell::new(None) };
-}
-
-/// What the open page is doing, as JSON: `page`, `running`, `error`,
-/// `renders`, `log` (what the lab's browser tests read).
-#[wasm_bindgen]
+/// Where `path` with `query` (without its `?`) leads.
 #[must_use]
-pub fn lab_status() -> String {
-    OPEN.with(|open| {
-        open.borrow().as_ref().map_or_else(
-            || "null".to_owned(),
-            |(name, page)| {
-                json!({
-                    "page": name,
-                    "running": page.running(),
-                    "error": page.error(),
-                    "renders": page.renders(),
-                    "log": page.log(),
-                })
-                .to_string()
-            },
-        )
-    })
-}
-
-/// A save of the open page's file: `text` in place of its entry's.
-#[wasm_bindgen]
-pub fn lab_reload(text: String) {
-    OPEN.with(|open| {
-        if let Some((name, page)) = open.borrow().as_ref()
-            && let Some((mut folder, _)) = self::folder(name)
-        {
-            folder.files.insert(folder.entry.clone(), text);
-            page.reload(&folder);
-        }
-    });
-}
-
-fn log_line(text: &str) {
-    if let Some(log) = by_id("log") {
-        let had = log.text_content().unwrap_or_default();
-        log.set_text_content(Some(&format!("{text}\n{had}")));
+pub fn route(path: &str, query: &str) -> Route {
+    if path.trim_end_matches('/') != CALLBACK {
+        return Route::App;
     }
-}
-
-/// Opens the page `?page=` names (the Board by default) in `#pane`.
-fn open_page(pages: &WebPages, list: &ActionList) -> Result<(), String> {
-    let search = web_sys::window()
-        .and_then(|w| w.location().search().ok())
-        .unwrap_or_default();
-    let name = search
-        .trim_start_matches('?')
-        .split('&')
-        .find_map(|kv| kv.strip_prefix("page="))
-        .unwrap_or("board")
-        .to_owned();
-    let (folder, manifest) = folder(&name).ok_or_else(|| format!("no page {name}"))?;
-    let manifest = Manifest::parse(manifest).map_err(|e| e.to_string())?;
-    let host = WebHost::new(manifest, list.clone());
-    let pane = by_id("pane").ok_or("no #pane")?;
-    let opened = pages.open(&folder, host, &pane);
-    opened.on_log(|level, text| log_line(&format!("{level} [page] {text}")));
-    OPEN.with(|open| *open.borrow_mut() = Some((name, opened)));
-    Ok(())
-}
-
-fn doc() -> Option<web_sys::Document> {
-    web_sys::window()?.document()
-}
-
-fn by_id(id: &str) -> Option<web_sys::Element> {
-    doc()?.get_element_by_id(id)
-}
-
-fn say(id: &str, text: &str) {
-    if let Some(el) = by_id(id) {
-        el.set_text_content(Some(text));
-    }
-}
-
-/// The page's start.
-#[wasm_bindgen(start)]
-pub fn main() {
-    spawn_local(async {
-        if let Err(why) = run().await {
-            say("status", &format!("it did not start: {why}"));
-        }
-    });
-    heartbeat();
-}
-
-async fn run() -> Result<(), String> {
-    let manifest = Manifest::parse(MANIFEST).map_err(|e| e.to_string())?;
-    let list = ActionList::new();
-    let themes = ActionInfo {
-        id: "THEME_LIST".to_owned(),
-        display_name: "Themes".to_owned(),
-        description: "The page's themes.".to_owned(),
-        category: "Theme".to_owned(),
-        group: String::new(),
-        shortcut: String::new(),
-        effect: Effect::ReadOnly,
-        params_schema: None,
-        result_schema: None,
-        enabled: true,
-        disabled_reason: None,
-        checked: None,
+    let param = |name: &str| {
+        query.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            (k == name).then(|| decode(v))
+        })
     };
-    list.register_forwarded(
-        &themes,
-        Arc::new(|_: &[u8]| {
-            let out: ActionFuture = Box::pin(async { Ok(json!(THEMES).to_string().into_bytes()) });
-            Ok(out)
-        }),
-    )
-    .map_err(|e| e.to_string())?;
-    let board = Manifest::parse(BOARD).map_err(|e| e.to_string())?;
-    board::register(&list, &board).map_err(|e| e.to_string())?;
-    let pages = WebPages::new();
-    pages.set_theme(theme());
-    let port = web_sys::window()
-        .and_then(|w| w.location().port().ok())
-        .unwrap_or_default();
-    pages.set_shared("lab.port", &json!(port));
-    pages.on_notify(|n| {
-        say("status", &format!("{}: {}", n.kind, n.text));
-    });
-    if let Err(why) = open_page(&pages, &list) {
-        say("status", &format!("the page did not open: {why}"));
+    if let Some(error) = param("error") {
+        return Route::Refused(param("error_description").unwrap_or(error));
     }
-    // The pages' app lives as long as the lab.
-    std::mem::forget(pages);
-    let host = WebHost::new(manifest, list.clone());
-    host.on_log(|line| {
-        log_line(&format!("{} [{}] {}", line.level, line.source, line.text));
-    });
-    let component = WebComponent::start(COMPONENT, host, Options::default()).await?;
-    component
-        .register_actions(&list)
-        .map_err(|e| e.to_string())?;
-    if let Some(pane) = by_id("counter") {
-        let _pane = component.mount("counter", &pane);
+    match (param("code"), param("state")) {
+        (Some(code), Some(state)) if !code.is_empty() => Route::Callback { code, state },
+        _ => Route::Refused("the issuer sent no code".to_owned()),
     }
-    say("status", "running");
-    buttons(&list, &component);
-    report(component);
-    Ok(())
 }
 
-/// A button for each of its actions on the page's list.
-fn buttons(list: &ActionList, component: &WebComponent) {
-    let Some(at) = by_id("actions") else { return };
-    let Some(doc) = doc() else { return };
-    for id in component.actions() {
-        let Some(info) = list.info(&id) else { continue };
-        let Ok(button) = doc.create_element("button") else {
-            continue;
+/// Percent-decode a query value (`+` is a space).
+fn decode(v: &str) -> String {
+    let bytes = v.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while let Some(&b) = bytes.get(i) {
+        let hex = |at: usize| {
+            bytes
+                .get(at)
+                .and_then(|h| char::from(*h).to_digit(16))
+                .and_then(|d| u8::try_from(d).ok())
         };
-        let _ = button.set_attribute("data-action", &id);
-        button.set_text_content(Some(&info.display_name));
-        let list = list.clone();
-        let click = Closure::<dyn FnMut()>::new(move || {
-            let list = list.clone();
-            let id = id.clone();
-            spawn_local(async move {
-                let said = list.run_json_async(&id, b"").await;
-                let text = match said {
-                    Ok(out) => format!("{id}: {}", String::from_utf8_lossy(&out)),
-                    Err(e) => format!("{id}: {e}"),
-                };
-                say("status", &text);
-            });
-        });
-        let _ = button.add_event_listener_with_callback("click", click.as_ref().unchecked_ref());
-        click.forget();
-        let _ = at.append_child(&button);
-    }
-}
-
-/// What the component runs, every half second.
-fn report(component: WebComponent) {
-    let tick = Closure::<dyn FnMut()>::new(move || {
-        let r = component.report();
-        say(
-            "report",
-            &serde_json::to_string_pretty(&r).unwrap_or_default(),
-        );
-    });
-    if let Some(w) = web_sys::window() {
-        let _ = w.set_interval_with_callback_and_timeout_and_arguments_0(
-            tick.as_ref().unchecked_ref(),
-            500,
-        );
-    }
-    tick.forget();
-}
-
-/// Each animation frame's gap: the longest of the last second, shown, so
-/// a page kept waiting would say so.
-fn heartbeat() {
-    let last = Rc::new(Cell::new(0.0_f64));
-    let worst = Rc::new(Cell::new(0.0_f64));
-    let since = Rc::new(Cell::new(0.0_f64));
-    let frames = Rc::new(Cell::new(0_u32));
-    let f: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
-    let again = Rc::clone(&f);
-    *f.borrow_mut() = Some(Closure::new(move |now: f64| {
-        let gap = now - last.get();
-        if last.get() > 0.0 && gap > worst.get() {
-            worst.set(gap);
+        match b {
+            b'%' => {
+                if let (Some(hi), Some(lo)) = (hex(i.saturating_add(1)), hex(i.saturating_add(2))) {
+                    out.push(hi.wrapping_mul(16).wrapping_add(lo));
+                    i = i.saturating_add(3);
+                    continue;
+                }
+                out.push(b);
+            }
+            b'+' => out.push(b' '),
+            _ => out.push(b),
         }
-        last.set(now);
-        frames.set(frames.get().saturating_add(1));
-        if now - since.get() >= 1000.0 {
-            say(
-                "beat",
-                &format!(
-                    "{} frames/s, longest gap {:.0} ms",
-                    frames.get(),
-                    worst.get()
+        i = i.saturating_add(1);
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Escape text for HTML.
+#[must_use]
+pub fn escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Who is signed in, as the issuer's `userinfo` says.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Person {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+/// The node's answer to [`NODE_STATUS`]; the fields the app shows.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct NodeStatus {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub org: Option<String>,
+    #[serde(default)]
+    pub vaults: u32,
+    #[serde(default)]
+    pub notes: u32,
+    #[serde(default)]
+    pub devices: u32,
+}
+
+/// What a screen shows; each is drawn by [`view`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Screen {
+    /// Reading the config, or redeeming a code.
+    Loading,
+    /// Nobody signed in.
+    SignedOut { problem: Option<String> },
+    /// Signed in; the node's status once it answered (or why not).
+    SignedIn {
+        person: Person,
+        node: Option<Result<NodeStatus, String>>,
+    },
+    /// The app cannot start (no usable config).
+    Broken(String),
+}
+
+/// The HTML of `screen`, for the app's root. Buttons carry
+/// `data-action` (`sign-in`, `sign-out`), which the browser half wires.
+#[must_use]
+pub fn view(screen: &Screen) -> String {
+    match screen {
+        Screen::Loading => "<p class=\"muted\">Loading…</p>".to_owned(),
+        Screen::Broken(why) => format!(
+            "<section class=\"card\"><h2>Architect can't start here</h2><p class=\"problem\">{}</p></section>",
+            escape(why)
+        ),
+        Screen::SignedOut { problem } => {
+            let problem = problem
+                .as_deref()
+                .map(|p| format!("<p class=\"problem\">{}</p>", escape(p)))
+                .unwrap_or_default();
+            format!(
+                "<section class=\"card\"><h2>Sign in to Architect</h2>\
+                 <p>Your notes, projects and files, on every device and in sync.</p>{problem}\
+                 <p><button class=\"primary\" data-action=\"sign-in\">Sign in</button></p></section>"
+            )
+        }
+        Screen::SignedIn { person, node } => {
+            let who = person
+                .name
+                .as_deref()
+                .or(person.email.as_deref())
+                .unwrap_or("you");
+            let email = person
+                .email
+                .as_deref()
+                .filter(|e| Some(*e) != person.name.as_deref())
+                .map(|e| format!(" <span class=\"muted\">{}</span>", escape(e)))
+                .unwrap_or_default();
+            let node = match node {
+                None => "<p class=\"muted\">Asking the node…</p>".to_owned(),
+                Some(Err(why)) => format!(
+                    "<p class=\"problem\">The node did not answer: {}</p>",
+                    escape(why)
                 ),
-            );
-            since.set(now);
-            frames.set(0);
-            worst.set(0.0);
+                Some(Ok(s)) => format!(
+                    "<dl class=\"facts\"><dt>Node</dt><dd>{}</dd><dt>Version</dt><dd>{}</dd>\
+                     <dt>Org</dt><dd>{}</dd><dt>Vaults</dt><dd>{} ({} notes)</dd><dt>Devices</dt><dd>{}</dd></dl>",
+                    escape(&s.name),
+                    escape(&s.version),
+                    escape(s.org.as_deref().unwrap_or("none yet")),
+                    s.vaults,
+                    s.notes,
+                    s.devices
+                ),
+            };
+            format!(
+                "<section class=\"card\"><h2>Signed in as {}{email}</h2>{node}\
+                 <p>The full app is the desktop app for now; its views come to the browser here.</p>\
+                 <p class=\"row\"><a class=\"button primary\" href=\"{DOWNLOADS}\">Download the desktop app</a>\
+                 <a class=\"button\" href=\"/docs/\">Docs</a>\
+                 <button data-action=\"sign-out\">Sign out</button></p></section>",
+                escape(who)
+            )
         }
-        if let (Some(w), Some(cb)) = (web_sys::window(), again.borrow().as_ref()) {
-            let _ = w.request_animation_frame(cb.as_ref().unchecked_ref());
-        }
-    }));
-    if let (Some(w), Some(cb)) = (web_sys::window(), f.borrow().as_ref()) {
-        let _ = w.request_animation_frame(cb.as_ref().unchecked_ref());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_config_needs_an_issuer_and_defaults_the_client() {
+        let c = Config::parse(r#"{"issuer":"https://auth.example/"}"#).unwrap();
+        assert_eq!(c.issuer, "https://auth.example");
+        assert_eq!(c.client_id, "architect");
+        assert!(Config::parse(r#"{"issuer":"auth.example"}"#).is_err());
+        assert!(Config::parse("{}").is_err());
+        assert_eq!(
+            Config::redirect_uri("https://architect.example/"),
+            "https://architect.example/auth/callback"
+        );
+    }
+
+    #[test]
+    fn the_callback_is_read_and_everything_else_is_the_app() {
+        assert_eq!(route("/app/", ""), Route::App);
+        assert_eq!(route("/app/anything", "code=x"), Route::App);
+        assert_eq!(
+            route("/auth/callback", "code=a%2Fb&state=s+1"),
+            Route::Callback {
+                code: "a/b".into(),
+                state: "s 1".into()
+            }
+        );
+        assert_eq!(
+            route(
+                "/auth/callback/",
+                "error=access_denied&error_description=No%20thanks"
+            ),
+            Route::Refused("No thanks".into())
+        );
+        assert!(matches!(
+            route("/auth/callback", "state=s"),
+            Route::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn screens_escape_what_they_show() {
+        let html = view(&Screen::SignedIn {
+            person: Person {
+                name: Some("<b>Ada</b>".into()),
+                email: Some("ada@x.test".into()),
+            },
+            node: Some(Ok(NodeStatus {
+                name: "home".into(),
+                version: "0.30.0".into(),
+                org: None,
+                vaults: 2,
+                notes: 9,
+                devices: 3,
+            })),
+        });
+        assert!(html.contains("&lt;b&gt;Ada&lt;/b&gt;"), "{html}");
+        assert!(html.contains("ada@x.test"));
+        assert!(html.contains("2 (9 notes)"));
+        assert!(html.contains("data-action=\"sign-out\""));
+        assert!(view(&Screen::SignedOut { problem: None }).contains("data-action=\"sign-in\""));
     }
 }

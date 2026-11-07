@@ -1,6 +1,6 @@
 // The Board's tab, as a page (docs/content/architecture/pages.md): a TSX
 // file on QuickJS in the app, re-rendered live when it is saved, and the
-// same file in a Web Worker in a browser (apps/web). Its types are
+// same file in a Web Worker in a browser (apps/sandbox/web). Its types are
 // <app dir>/architect.d.ts. The Board's data and actions are its Rust
 // extension's (apps/sandbox/board/src/lib.rs); this file only draws them.
 import { h, useData, useState, actions, notify, worker, theme } from "architect";

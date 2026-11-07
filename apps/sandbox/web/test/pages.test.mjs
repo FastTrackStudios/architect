@@ -1,4 +1,4 @@
-// The web app in a real browser (`just web-test`): TSX pages in Web
+// The web app in a real browser (`just sandbox-web-test`): TSX pages in Web
 // Workers (features/pages/src/web/mod.rs) — the Board's own page file, its
 // Preact page (architect/dom), a runaway, a page's reach — driven by real
 // clicks and keys in a headless Chrome. Skipped when the lab is not built
@@ -9,8 +9,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { browser, built, chrome, root, serve } from './browser.mjs';
 
-const ready = existsSync(join(built, 'architect_web_bg.wasm')) && chrome();
-const skip = ready ? false : 'needs `just web 0` and a Chrome (CHROME=…)';
+const ready = existsSync(join(built, 'architect_sandbox_web_bg.wasm')) && chrome();
+const skip = ready ? false : 'needs `just sandbox-web 0` and a Chrome (CHROME=…)';
 const SHOTS = process.env.ARCHITECT_LAB_WEB_SHOTS ?? join(root, 'target/web-shots');
 
 let server;
@@ -137,7 +137,7 @@ test('a host call outside the page\'s capabilities is refused', { skip }, async 
 test('a broken save keeps the last good page and says where', { skip }, async () => {
   await tab.go(url('board'));
   await tab.until(() => tab.text('#board-title'), 'the Board page');
-  const reload = (text) => tab.eval(`import('./architect_web.js').then((m) => m.lab_reload(${JSON.stringify(text)}))`);
+  const reload = (text) => tab.eval(`import('./architect_sandbox_web.js').then((m) => m.lab_reload(${JSON.stringify(text)}))`);
   // It does not parse: the last good page stays, the error at its line.
   await reload('import { h } from "architect";\n\nexport default function P() {\n  return <div style={{ fontSize: 26 }>x</div>;\n}\n');
   const parse = await tab.until(async () => (await tab.status()).error, 'the error');

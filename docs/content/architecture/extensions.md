@@ -639,8 +639,8 @@ rest waiting. The messages are the same:
   terminate the worker's Web Worker at once, whether it looks at
   `cancelled()` or not (natively: at its next epoch tick).
 
-**The sandbox.** `just web` builds the WASI Counter for `wasm32-wasip2`,
-transpiles it, builds `apps/web` (a page that puts the component's
+**The sandbox.** `just sandbox-web` builds the WASI Counter for `wasm32-wasip2`,
+transpiles it, builds `apps/sandbox/web` (a page that puts the component's
 actions on its own list beside a `THEME_LIST`, mounts its view and shows
 each animation frame's gap) and serves it on :8090. In Firefox the
 counter answers clicks and "Ask the app" reaches the page's list through

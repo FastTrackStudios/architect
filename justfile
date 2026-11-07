@@ -328,40 +328,70 @@ vault-reset:
 alias lab-vault-reset := vault-reset
 
 
-# The app in a browser (apps/web), for now the sandbox's browser demo: the WASI Counter component built for
+# The web front end (#431): the landing page at /, the docs at /docs/ and
+# the web app at /app/, one static bundle (scripts/web-bundle.sh) into
+# target/web-bundle, served by static-web-server with the image's own
+# config (apps/web/sws.toml) on PORT (0: build only). 8080 is a redirect
+# the issuer knows (`http://localhost:8080/auth/callback`), so sign-in
+# works locally against the real issuer.
+web PORT="8080":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/web-bundle.sh target/web-bundle
+    if [ "{{PORT}}" != "0" ]; then
+        echo "serving http://localhost:{{PORT}}"
+        exec nix run nixpkgs#static-web-server -- --config-file apps/web/sws.toml --root target/web-bundle --host 127.0.0.1 --port {{PORT}}
+    fi
+
+# The web front end in a real browser (apps/web/test/web.test.mjs): the
+# landing page, the docs, the app's sign-in redirect (caught before it
+# leaves) and its callbacks, and the node's paths answering 404 here; in
+# a headless Firefox (FIREFOX=… names one).
+web-test PORT="18080":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just web 0
+    sws="$(nix build --no-link --print-out-paths nixpkgs#static-web-server)/bin/static-web-server"
+    "$sws" --config-file apps/web/sws.toml --root target/web-bundle --host 127.0.0.1 --port {{PORT}} >/dev/null 2>&1 &
+    pid=$!
+    trap 'kill $pid' EXIT
+    for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:{{PORT}}/" && break; sleep 0.1; done
+    ARCHITECT_WEB_ORIGIN="http://127.0.0.1:{{PORT}}" node --test apps/web/test/web.test.mjs
+
+# The sandbox's browser demo (apps/sandbox/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page
-# built for wasm32-unknown-unknown, into target/web; then served on
+# built for wasm32-unknown-unknown, into target/sandbox-web; then served on
 # PORT (0: build only). Needs node (the `wasi` dev profile has it) and
 # wasm-bindgen-cli at Cargo.lock's version (installed into target/tools
 # when missing).
-web PORT="8090":
+sandbox-web PORT="8090":
     #!/usr/bin/env bash
     set -euo pipefail
-    out=target/web
+    out=target/sandbox-web
     mkdir -p "$out"
     devenv --profile wasi shell -- cargo build -q -p architect-sandbox-wasi-counter --target wasm32-wasip2
     (cd features/extensions/web && [ -d node_modules ] || npm ci --silent)
     node features/extensions/web/transpile.mjs target/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm "$out/wasi-counter" >/dev/null
-    cargo build -q -p architect-web --target wasm32-unknown-unknown
+    cargo build -q -p architect-sandbox-web --target wasm32-unknown-unknown
     want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/,""); print; exit}' Cargo.lock)
     bindgen=target/tools/bin/wasm-bindgen
     if ! "$bindgen" --version 2>/dev/null | grep -q "$want"; then
         cargo install -q wasm-bindgen-cli --version "$want" --locked --root target/tools
     fi
-    "$bindgen" --target web --no-typescript --out-dir "$out" target/wasm32-unknown-unknown/debug/architect_web.wasm
-    cp apps/web/index.html apps/web/start.js apps/web/hello.txt "$out/"
-    echo "web: $out"
+    "$bindgen" --target web --no-typescript --out-dir "$out" target/wasm32-unknown-unknown/debug/architect_sandbox_web.wasm
+    cp apps/sandbox/web/index.html apps/sandbox/web/start.js apps/sandbox/web/hello.txt "$out/"
+    echo "sandbox-web: $out"
     if [ "{{PORT}}" != "0" ]; then
         echo "serving http://localhost:{{PORT}}"
         python3 -m http.server -d "$out" -b 127.0.0.1 {{PORT}}
     fi
 
-# The web app in a real browser (apps/web/test): the Board's page file,
+# The sandbox's browser demo in a real browser (apps/sandbox/web/test): the Board's page file,
 # a runaway page and a page's reach, in a headless Chrome of its own
 # (CHROME=… names one; screenshots in target/web-shots).
-web-test:
-    just web 0
-    node --test apps/web/test/pages.test.mjs
+sandbox-web-test:
+    just sandbox-web 0
+    node --test apps/sandbox/web/test/pages.test.mjs
 
-alias lab-web := web
-alias lab-web-test := web-test
+alias lab-web := sandbox-web
+alias lab-web-test := sandbox-web-test

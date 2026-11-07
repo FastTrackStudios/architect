@@ -1,7 +1,7 @@
 // The Board's Preact page (docs/content/architecture/pages.md): Preact
 // itself, the files in vendor/ (no Node, no bundler), rendering to
 // architect/dom's document in the page's own runtime — QuickJS in the
-// app, a Web Worker in a browser (apps/web). What it does to that
+// app, a Web Worker in a browser (apps/sandbox/web). What it does to that
 // document reaches the pane as any page's edits; a click comes back to
 // its listener as a DOM event.
 import { h, render } from "./vendor/preact.js";

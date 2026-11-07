@@ -1,4 +1,4 @@
-// A page that runs away (apps/web): its render loops forever once
+// A page that runs away (apps/sandbox/web): its render loops forever once
 // "Spin" is clicked, or a click's handler does. In a browser its Web
 // Worker is terminated past its frame's time and the page starts again
 // from this file under a banner that says to use a worker; the rest of

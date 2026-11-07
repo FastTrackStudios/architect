@@ -199,7 +199,7 @@ jobs:
             -p architect -p architect-atom -p architect-form \
             -p architect-permissions -p architect-permissions-proto \
             -p auth-proto -p auth-client -p crdt -p architect-input \
-            -p architect-presence
+            -p architect-presence -p architect-web
           # The generated HTTP clients (`<Trait>HttpClient`, over reqwest's
           # fetch backend) are what a browser app signs in through, so
           # their wasm build is load-bearing.

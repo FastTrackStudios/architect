@@ -92,9 +92,10 @@ scenario(&GreeterHttpClient::at("http://127.0.0.1:4040")).await; // HTTP
 ## The Architect app
 
 Architect is also an app, built here on the framework: a desktop app
-(`apps/desktop`, `architect-desktop`), a mobile app (`apps/mobile`) and,
-later, a web app (`apps/web`), all mounting one UI crate (`apps/ui`,
-`architect-app`). It opens a vault (a folder of markdown, an Obsidian
+(`apps/desktop`, `architect-desktop`) and a mobile app (`apps/mobile`),
+both mounting one UI crate (`apps/ui`, `architect-app`), and the start of
+a web app (`apps/web`: its shell and sign-in, served with the landing page
+and the docs at architect.fasttrackstudio.app). It opens a vault (a folder of markdown, an Obsidian
 vault as it is) in the workspace and the navigator, with extensions,
 themes, ⌘K and the Action List agents drive. Its first run opens or
 creates a vault or explores the demo vault (`apps/ui/demo-vault`), then
@@ -232,7 +233,7 @@ feature crate with a passing test.
 | `examples/greeter` | The reference feature: entity, service, error, backend, server, tests over every wire |
 | `examples/scripting` | A task board scripted from Luau, saved scripts as actions, MCP |
 | `examples/extension` | A registry, a Luau extension, a process extension and the host that loads them |
-| `apps/desktop`, `apps/mobile`, `apps/web` | The Architect app on a desk, a phone and (later) the web |
+| `apps/desktop`, `apps/mobile`, `apps/web` | The Architect app on a desk, a phone and the web (the web front end: landing page, docs, the app's shell) |
 | `apps/ui` | The app's UI (`architect-app`), its tour and the demo vault |
 | `apps/sandbox` | The dev sandbox: the app on made-up data, the example extensions (Board, Clicker, WASI Counter, the registry's), the guide scenarios, goldens and films |
 | `apps/auth-server`, `apps/mock-oauth` | The identity server, and a mock OAuth provider for its tests |
