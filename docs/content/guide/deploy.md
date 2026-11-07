@@ -298,29 +298,96 @@ A release tag `vX.Y.Z` publishes it (`.github/workflows/release.yml`, job
 `node`) as `ghcr.io/fasttrackstudios/architect:X.Y.Z`, `:sha-<short>` and
 (for the highest release) `:latest`, and attaches the binary to the release.
 
-## Deploying it
+## Self-hosting with the chart
 
-ArgoCD in starcommand tracks the latest release image, as it does for Task
-(argocd-image-updater, `semver` strategy on `^[0-9]+\.[0-9]+\.[0-9]+$`). The
-pod needs:
+`deploy/chart/architect` runs Architect on Kubernetes: the headless node
+and the web front end ([the web front end](@/guide/web.md)) as two
+Deployments with two Services, each with its own `replicaCount`, on one
+host. starcommand runs architect.fasttrackstudio.app from this chart.
 
-- the image `ghcr.io/fasttrackstudios/architect`, its tag rolled by the image
-  updater;
-- port `8080` (HTTP) behind the ingress, and `7777/udp` if peers should reach
-  it directly rather than through an iroh relay;
-- a persistent volume at `/data`: its iroh key (a stable endpoint id) and its
-  documents;
-- liveness and readiness on `GET /health` (port `8080`);
-- every path of its host routed to it (share links and their sign-in are
-  under `/s/`, beside a Site at `/`), with `X-Forwarded-Proto` set so the sign-in
-  cookie is `Secure`; and, for each share with a domain of its own, that
-  host on the same ingress with a certificate;
-- `ARCHITECT_HOST_ORG` for the org's lane, which the app makes shares on,
-  and for the `org` audience;
-- `ARCHITECT_NAME`, `ARCHITECT_ISSUER`, `ARCHITECT_ORG`, `ARCHITECT_VAULTS`
-  and `ARCHITECT_SITES` as values, and the session and MCP bearer as a
-  Secret mounted as files (`ARCHITECT_SESSION_FILE`,
-  `ARCHITECT_MCP_TOKEN_FILE`).
+```sh
+kubectl create secret generic architect-node --from-file=session=./session.token
+helm install architect deploy/chart/architect \
+  --set host=architect.example.com \
+  --set node.issuer=https://auth.example.com \
+  --set node.hostOrg=my-org \
+  --set node.existingSecret=architect-node \
+  --set ingress.enabled=true --set ingress.className=nginx
+```
+
+| Values | What |
+| --- | --- |
+| `host` | the hostname both sides share |
+| `web.replicaCount`, `web.config.issuer`, `web.config.clientId` | the static front end; its `/app/config.json` comes from a ConfigMap (the issuer defaults to `node.issuer`) |
+| `node.issuer`, `node.org`, `node.hostOrg`, `node.vaults`, `node.sites`, `node.env` | the node's settings ([Configure it](#configure-it)) |
+| `node.existingSecret` | a Secret mounted as files: `session` (`ARCHITECT_SESSION_FILE`) and, with `node.mcp`, `mcp-token` |
+| `node.persistence` | the data PVC at `/data` (its iroh key and documents). A node is one device, so `node.replicaCount` above 1 needs persistence off, and the chart refuses otherwise |
+| `node.files` | the files dir at `/files` (`ARCHITECT_FILES_DIR`, held in place): `nfs: {server, path}`, `hostPath` or `existingClaim` |
+| `node.s3` | the files' bytes in a bucket too (`ARCHITECT_BLOB_S3_*`). The key id and the secret come from `credentialsSecret`, never from values |
+| `node.s3Face` | the node's own S3 face (`ARCHITECT_S3_BIND`): a Service port and, with `host`, a host of its own on the Ingress (buckets are at its root, so it can't share the path space) |
+| `node.iroh` | UDP 7777: `service: LoadBalancer` (or `NodePort`), or `hostPort: true`. Without either, peers reach the node through n0's relays |
+| `ingress` | the optional Ingress with the path split below |
+
+Probes are `GET /health` on the node and `GET /` on the web front end.
+
+### Routing
+
+One host, two backends. The node owns these prefixes (`node.paths`, plus
+`node.extraPaths` for each Site mount), and everything else goes to the
+web front end:
+
+| Prefix | On the node |
+| --- | --- |
+| `/vox` | vox over WebSocket |
+| `/org` | `/org/<slug>/vox`, the org lane (vaults, share links) |
+| `/mcp` | MCP, with its bearer |
+| `/health` | liveness and readiness |
+| `/s` | share links `/s/<code>/` and their sign-in `/s/_signin` |
+| `/node` | the node's HTTP face (`POST /node/status`, which the web app reads) |
+| `/blobs`, `/.well-known` | reserved for the node |
+
+The chart's Ingress writes exactly this, with `X-Forwarded-Proto` left to
+the controller (the share sign-in cookie is `Secure` behind `https`).
+`deploy/chart/architect/tests/routes.sh` renders it and checks that each
+prefix reaches the node and `/` the web front end (`pr.yml` runs it with
+`helm lint`). With a proxy of your own (Caddy, Traefik, nginx), route the
+same prefixes. The web front end has no single-page fallback, so a prefix
+you forget answers `404` instead of the app's page.
+
+## Without Kubernetes: systemd
+
+A server without Kubernetes runs the release binary. Each release attaches
+`architect-node-<tag>-x86_64-linux.tar.gz` (and its `.sha256`), the node
+built without the window:
+
+```sh
+v=v0.11.0   # the release
+curl -fLO https://github.com/FastTrackStudios/architect/releases/download/$v/architect-node-$v-x86_64-linux.tar.gz
+curl -fLO https://github.com/FastTrackStudios/architect/releases/download/$v/architect-node-$v-x86_64-linux.tar.gz.sha256
+sha256sum -c architect-node-$v-x86_64-linux.tar.gz.sha256
+tar xzf architect-node-$v-x86_64-linux.tar.gz
+sudo install -m755 architect-node-$v-x86_64-linux/architect-desktop /usr/local/bin/
+sudo install -Dm644 deploy/systemd/architect-node.service /etc/systemd/system/architect-node.service
+sudo install -Dm600 session.token /etc/architect/session
+printf 'ARCHITECT_NAME=home\nARCHITECT_ISSUER=https://auth.example.com\nARCHITECT_HOST_ORG=my-org\n' | sudo tee /etc/architect/node.env
+sudo systemctl enable --now architect-node
+```
+
+`deploy/systemd/architect-node.service` runs it as a dynamic user with
+its state in `/var/lib/architect`, HTTP on `127.0.0.1:8080` (put a reverse
+proxy with TLS in front, routing the prefixes above) and iroh on UDP 7777.
+The session is a systemd credential, read as a file. To serve the web
+front end too, unpack `architect-web-<X.Y.Z>.tar.gz` and serve it with
+any static server, as the proxy's default backend.
+
+## On starcommand
+
+starcommand deploys architect.fasttrackstudio.app from this chart: an Argo
+CD Application tracking the highest release tag, argocd-image-updater
+rolling both images (`semver` on `^[0-9]+\.[0-9]+\.[0-9]+$`, `helm.image-name`
+per image), and Caddy routing the node's prefixes above (its
+`modules/services/architect`). The images are on GHCR, made public once in
+the org's package settings.
 
 ## Not yet
 

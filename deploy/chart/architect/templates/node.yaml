@@ -1,0 +1,234 @@
+{{- $n := .Values.node -}}
+{{- if and (gt (int $n.replicaCount) 1) $n.persistence.enabled }}
+{{- fail "node.replicaCount > 1 needs node.persistence.enabled=false: a node is one device, its iroh key and documents on one volume" }}
+{{- end }}
+{{- if and $n.s3.enabled (not $n.s3.credentialsSecret) }}
+{{- fail "node.s3.enabled needs node.s3.credentialsSecret (an existing Secret; credentials never go in values)" }}
+{{- end }}
+{{- if and $n.files.enabled (not (or $n.files.nfs $n.files.hostPath $n.files.existingClaim)) }}
+{{- fail "node.files.enabled needs one of node.files.nfs, node.files.hostPath, node.files.existingClaim" }}
+{{- end }}
+{{- if and $n.persistence.enabled (not $n.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "architect.fullname" . }}-node
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $n.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $n.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "architect.fullname" . }}-node
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  replicas: {{ $n.replicaCount }}
+  # One writer per volume: the old pod stops before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "architect.selector" (dict "root" . "component" "node") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "architect.selector" (dict "root" . "component" "node") | nindent 8 }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: node
+          image: {{ include "architect.image" (dict "root" . "image" $n.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: ARCHITECT_NAME, value: {{ $n.name | quote }} }
+            - { name: ARCHITECT_BIND, value: "0.0.0.0:8080" }
+            - { name: ARCHITECT_DATA_DIR, value: /data }
+            - { name: ARCHITECT_IROH_BIND, value: {{ printf "0.0.0.0:%d" (int $n.iroh.port) | quote }} }
+            {{- with $n.issuer }}
+            - { name: ARCHITECT_ISSUER, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.org }}
+            - { name: ARCHITECT_ORG, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.hostOrg }}
+            - { name: ARCHITECT_HOST_ORG, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.vaults }}
+            - { name: ARCHITECT_VAULTS, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.sites }}
+            - { name: ARCHITECT_SITES, value: {{ . | quote }} }
+            {{- end }}
+            {{- if $n.existingSecret }}
+            - { name: ARCHITECT_SESSION_FILE, value: /run/secrets/architect/session }
+            {{- if $n.mcp }}
+            - { name: ARCHITECT_MCP_TOKEN_FILE, value: /run/secrets/architect/mcp-token }
+            {{- end }}
+            {{- end }}
+            {{- if $n.files.enabled }}
+            - { name: ARCHITECT_FILES_DIR, value: /files }
+            - { name: ARCHITECT_FILES_HOLD, value: "true" }
+            {{- end }}
+            {{- if $n.s3.enabled }}
+            - { name: ARCHITECT_BLOB_S3_BUCKET, value: {{ required "node.s3.bucket" $n.s3.bucket | quote }} }
+            {{- with $n.s3.endpoint }}
+            - { name: ARCHITECT_BLOB_S3_ENDPOINT, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.s3.region }}
+            - { name: ARCHITECT_BLOB_S3_REGION, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.s3.prefix }}
+            - { name: ARCHITECT_BLOB_S3_PREFIX, value: {{ . | quote }} }
+            {{- end }}
+            - { name: ARCHITECT_BLOB_PLACEMENT, value: {{ $n.s3.placement | quote }} }
+            - name: ARCHITECT_BLOB_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: { name: {{ $n.s3.credentialsSecret }}, key: {{ $n.s3.accessKeyIdKey }} }
+            - { name: ARCHITECT_BLOB_S3_SECRET_FILE, value: /run/secrets/architect-s3/secret-access-key }
+            {{- end }}
+            {{- if $n.s3Face.enabled }}
+            - { name: ARCHITECT_S3_BIND, value: {{ printf "0.0.0.0:%d" (int $n.s3Face.port) | quote }} }
+            {{- end }}
+            {{- range $k, $v := $n.env }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: iroh
+              containerPort: {{ $n.iroh.port }}
+              protocol: UDP
+              {{- if $n.iroh.hostPort }}
+              hostPort: {{ $n.iroh.port }}
+              {{- end }}
+            {{- if $n.s3Face.enabled }}
+            - name: s3
+              containerPort: {{ $n.s3Face.port }}
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            {{- if $n.existingSecret }}
+            - { name: secrets, mountPath: /run/secrets/architect, readOnly: true }
+            {{- end }}
+            {{- if $n.s3.enabled }}
+            - { name: s3-secret, mountPath: /run/secrets/architect-s3, readOnly: true }
+            {{- end }}
+            {{- if $n.files.enabled }}
+            - { name: files, mountPath: /files }
+            {{- end }}
+          {{- with $n.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          {{- if $n.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $n.persistence.existingClaim | default (printf "%s-node" (include "architect.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if $n.existingSecret }}
+        - name: secrets
+          secret:
+            secretName: {{ $n.existingSecret }}
+            defaultMode: 0400
+        {{- end }}
+        {{- if $n.s3.enabled }}
+        - name: s3-secret
+          secret:
+            secretName: {{ $n.s3.credentialsSecret }}
+            defaultMode: 0400
+            items:
+              - { key: {{ $n.s3.secretAccessKeyKey }}, path: secret-access-key }
+        {{- end }}
+        {{- if $n.files.enabled }}
+        - name: files
+          {{- if $n.files.nfs }}
+          nfs:
+            server: {{ required "node.files.nfs.server" $n.files.nfs.server }}
+            path: {{ required "node.files.nfs.path" $n.files.nfs.path }}
+          {{- else if $n.files.hostPath }}
+          hostPath:
+            path: {{ $n.files.hostPath }}
+            type: Directory
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ $n.files.existingClaim }}
+          {{- end }}
+        {{- end }}
+      {{- with $n.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $n.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $n.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "architect.fullname" . }}-node
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "architect.selector" (dict "root" . "component" "node") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    {{- if $n.s3Face.enabled }}
+    - name: s3
+      port: {{ $n.s3Face.port }}
+      targetPort: s3
+    {{- end }}
+{{- if ne $n.iroh.service "none" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "architect.fullname" . }}-iroh
+  labels:
+    {{- include "architect.labels" . | nindent 4 }}
+  {{- with $n.iroh.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $n.iroh.service }}
+  {{- with $n.iroh.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  selector:
+    {{- include "architect.selector" (dict "root" . "component" "node") | nindent 4 }}
+  ports:
+    - name: iroh
+      port: {{ $n.iroh.port }}
+      targetPort: iroh
+      protocol: UDP
+{{- end }}

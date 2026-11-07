@@ -86,7 +86,8 @@ app starts, so one bundle serves any host:
 { "issuer": "https://auth.fasttrackstudio.app", "client_id": "architect" }
 ```
 
-The Helm chart replaces it with a ConfigMap. Outside Kubernetes, edit
+The chart (`deploy/chart/architect`, `web.config`) replaces it with a
+ConfigMap. Outside Kubernetes, edit
 the file in the bundle.
 
 ## What the app does today

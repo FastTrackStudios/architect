@@ -1,0 +1,15 @@
+apiVersion: v2
+name: architect
+description: >-
+  Self-hosted Architect: the headless node (architect-desktop serve: sync,
+  share links, the org lane, MCP) and the web front end (the landing page,
+  the docs and the web app, static), each its own Deployment, on one host.
+type: application
+home: https://architect.fasttrackstudio.app
+sources:
+  - https://github.com/FastTrackStudios/architect
+# Bump `version` when the chart changes. Each image renders its image.tag,
+# else appVersion; on starcommand argocd-image-updater writes the highest
+# release X.Y.Z into both image tags.
+version: 0.1.0
+appVersion: "0.10.0"
