@@ -102,8 +102,16 @@ fn read(p: &Path) -> String {
     std::fs::read_to_string(p).unwrap_or_default()
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_project_held_on_the_always_on_node_is_pinned_on_a_laptop_and_syncs_both_ways() {
+struct Pair {
+    always: Running,
+    laptop: Running,
+    held: PathBuf,
+    doc_id: uuid::Uuid,
+    _tmp: tempfile::TempDir,
+}
+
+/// The always-on node holding a project, a laptop that knows it.
+async fn pair() -> Pair {
     let origin = issuer().await;
     let tmp = tempfile::tempdir().unwrap();
     let tree = tmp.path().join("starcommand");
@@ -169,6 +177,24 @@ async fn a_project_held_on_the_always_on_node_is_pinned_on_a_laptop_and_syncs_bo
     })
     .await;
     let doc_id = doc_id.unwrap();
+    Pair {
+        always,
+        laptop,
+        held,
+        doc_id,
+        _tmp: tmp,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_held_on_the_always_on_node_is_pinned_on_a_laptop_and_syncs_both_ways() {
+    let Pair {
+        always,
+        laptop,
+        held,
+        doc_id,
+        _tmp,
+    } = pair().await;
 
     // Pinned: a full copy, Task's store not among it.
     let copy = engine(&laptop).pin(doc_id, None).await.unwrap();
@@ -210,6 +236,126 @@ async fn a_project_held_on_the_always_on_node_is_pinned_on_a_laptop_and_syncs_bo
             && names.contains(&"Saved Right Here.RPP".to_owned()),
         "{names:?}"
     );
+
+    laptop.stop().await;
+    always.stop().await;
+}
+
+fn dav(laptop: &Running, rel: &str) -> String {
+    let path: Vec<String> = rel.split('/').map(|s| s.replace(' ', "%20")).collect();
+    format!("http://{}/dav/{}", laptop.http, path.join("/"))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unpinned_project_browses_over_webdav_and_a_file_opens_on_demand() {
+    let Pair {
+        always,
+        laptop,
+        held,
+        _tmp,
+        ..
+    } = pair().await;
+    let http = reqwest::Client::new();
+    let project = "codywright/Projects/Right Here - Cody Wright";
+
+    // Browsed from the manifest: nothing of it is on the laptop.
+    let listing = http
+        .request(
+            reqwest::Method::from_bytes(b"PROPFIND").unwrap(),
+            dav(&laptop, &format!("{project}/Right Here/Audio Files")),
+        )
+        .header("depth", "1")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(listing.status().as_u16(), 207);
+    let xml = listing.text().await.unwrap();
+    assert!(
+        xml.contains("Bass_1.wav") && xml.contains("<D:getcontentlength>2000000<"),
+        "{xml}"
+    );
+    let top = http
+        .request(
+            reqwest::Method::from_bytes(b"PROPFIND").unwrap(),
+            dav(&laptop, "codywright/Projects"),
+        )
+        .header("depth", "1")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(top.contains("Right Here - Cody Wright"), "{top}");
+
+    // Opened: fetched from the always-on node, by range too, and kept.
+    let wav = dav(
+        &laptop,
+        &format!("{project}/Right Here/Audio Files/Bass_1.wav"),
+    );
+    let part = http
+        .get(&wav)
+        .header("range", "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(part.status().as_u16(), 206);
+    assert_eq!(part.bytes().await.unwrap().as_ref(), &[1u8; 10]);
+    let whole = http.get(&wav).send().await.unwrap().bytes().await.unwrap();
+    assert_eq!(whole.len(), 2_000_000);
+    let entries: serde_json::Value = http
+        .post(format!("http://{}/files/browse", laptop.http))
+        .json(&serde_json::json!({"root": project, "path": "Right Here/Audio Files"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(entries[0]["here"], serde_json::json!(true), "{entries}");
+
+    // Written over WebDAV, unpinned: a version, in the always-on node's tree.
+    let put = http
+        .put(dav(&laptop, &format!("{project}/Right Here/Notes.txt")))
+        .body("written over WebDAV")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put.status().as_u16(), 201);
+    until("the always-on node has the WebDAV write", async || {
+        read(&held.join("Right Here/Notes.txt")) == "written over WebDAV"
+    })
+    .await;
+
+    // Pinned and unpinned through the agent's HTTP face.
+    let pinned: serde_json::Value = http
+        .post(format!("http://{}/files/pin", laptop.http))
+        .json(&serde_json::json!({"root": project, "path": null}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let copy = PathBuf::from(pinned.as_str().unwrap_or_else(|| panic!("{pinned}")));
+    until("the pinned copy is whole", async || {
+        read(&copy.join("Right Here/Notes.txt")) == "written over WebDAV"
+            && std::fs::metadata(copy.join("Right Here/Audio Files/Bass_1.wav"))
+                .is_ok_and(|m| m.len() == 2_000_000)
+    })
+    .await;
+    let unpinned = http
+        .post(format!("http://{}/files/unpin", laptop.http))
+        .json(&serde_json::json!({"root": project}))
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        unpinned.status().is_success(),
+        "{}",
+        unpinned.text().await.unwrap()
+    );
+    assert!(!copy.join("Right Here/Notes.txt").exists());
 
     laptop.stop().await;
     always.stop().await;

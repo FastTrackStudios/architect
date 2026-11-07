@@ -432,6 +432,9 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
     for (mount, out) in &sites {
         host = host.site(mount, out);
     }
+    if let Some(engine) = &files {
+        host = files::mount(host, engine, &config.bind);
+    }
     if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
         let notes = architect::layers![service::notes::NotesService].provide(state.clone());
         host = lane
@@ -446,6 +449,14 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
                 let list = ActionList::new();
                 service::node::node_actions::register(state.clone(), &list)
                     .and_then(|()| service::notes::notes_actions::register(state.clone(), &list))
+                    .and_then(|()| {
+                        files.as_ref().map_or(Ok(()), |engine| {
+                            architect_files::agent::files::files_actions::register(
+                                engine.clone(),
+                                &list,
+                            )
+                        })
+                    })
                     .map_err(|e| StartError::Other(format!("the node's actions: {e:?}")))?;
                 let server =
                     architect_mcp::Server::new("architect-node", env!("CARGO_PKG_VERSION"), list);

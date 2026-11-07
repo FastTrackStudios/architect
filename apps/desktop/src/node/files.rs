@@ -18,9 +18,12 @@ use architect::blob::{
     BlobTransferClient, BlobTransferDispatcher, Fetcher, LocalFs, Remote, VoxRemote,
     blob_transfer_service_descriptor,
 };
+use architect::host::{DavRequest, EngineHost};
 use architect::iroh_link;
+use architect::layer::Layer as _;
 use architect::layer::LayerRouter;
 use architect_devices::Admission;
+use architect_files::sync::dav::Dav;
 use architect_files::sync::{BLOB_PERMITS, Engine, EngineConfig, TreeStore};
 use crdt::DocRegistry;
 use crdt::p2p::More;
@@ -50,6 +53,31 @@ pub(super) fn engine(
             })
         }),
     )
+}
+
+/// The agent on the node's HTTP side, when it listens on loopback only (a
+/// laptop's agent: what the window and the device's `WebDAV` mount talk
+/// to). A node bound wider serves `FILES_*` only over `/mcp`, behind its
+/// bearer.
+pub(super) fn mount(host: EngineHost, engine: &Engine, bind: &str) -> EngineHost {
+    let loopback = bind
+        .parse::<std::net::SocketAddr>()
+        .is_ok_and(|a| a.ip().is_loopback());
+    if !loopback {
+        return host;
+    }
+    let agent = architect::layers![architect_files::agent::files::Service].provide_http(engine);
+    let (dav, engine) = (Dav::default(), engine.clone());
+    host.plugin(agent).dav("/dav", move |req: DavRequest| {
+        let (dav, engine) = (dav.clone(), engine.clone());
+        async move {
+            let method = req.request.method().clone();
+            let headers = req.request.headers().clone();
+            let body = req.request.into_body();
+            dav.handle(&engine, &method, &req.mount, &req.rel, &headers, body)
+                .await
+        }
+    })
 }
 
 /// `BlobTransfer` on the node's peer lane, behind its gate.

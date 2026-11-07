@@ -9,64 +9,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use facet::Facet;
 use loro::{LoroDoc, LoroValue};
 use uuid::Uuid;
 
-use crate::id::{RootId, VersionId};
+#[cfg(test)]
+use crate::id::RootId;
+use crate::id::VersionId;
+pub use crate::roots::{Checkpoint, FileVersion, RootMeta, Section};
 
 const META: &str = "meta";
 const VERSIONS: &str = "versions";
 const CHECKPOINTS: &str = "checkpoints";
 
-/// Where a root sits under an org.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Facet)]
-#[repr(C)]
-pub enum Section {
-    /// `<org>/Projects/<name>`: a project, a DAW session's tree.
-    Projects,
-    /// `<org>/Assets/<kind>`: an asset library (`Tracks`, `Setlists`, …).
-    Assets,
-}
-
-impl Section {
-    /// The folder name under the org.
-    #[must_use]
-    pub const fn dir(&self) -> &'static str {
-        match self {
-            Self::Projects => "Projects",
-            Self::Assets => "Assets",
-        }
-    }
-
-    /// The section a folder name is.
-    #[must_use]
-    pub fn from_dir(dir: &str) -> Option<Self> {
-        match dir {
-            "Projects" => Some(Self::Projects),
-            "Assets" => Some(Self::Assets),
-            _ => None,
-        }
-    }
-}
-
-/// What a root is: the same on every device that holds it.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
-pub struct RootMeta {
-    pub id: RootId,
-    pub org: String,
-    pub section: Section,
-    /// The project's folder name, or the library's kind (`Tracks`).
-    pub name: String,
-}
-
 impl RootMeta {
-    /// `<org>/<Projects|Assets>/<name>`: its place, its name on the lane.
-    #[must_use]
-    pub fn place(&self) -> String {
-        format!("{}/{}/{}", self.org, self.section.dir(), self.name)
-    }
-
     /// The manifest's document id: derived from the place, so two
     /// devices that find the same tree on their own seed one document
     /// (the second seed adopts the first's lineage, #412).
@@ -98,43 +53,6 @@ pub fn place_of(lane_name: &str) -> Option<&str> {
 }
 
 const NAMESPACE: Uuid = Uuid::from_u128(0x5e6f_3c2a_9b1d_4e8f_a7c3_1d2e_3f4a_5b6c);
-
-/// One save or delete of one path.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
-pub struct FileVersion {
-    pub id: VersionId,
-    pub path: String,
-    /// The bytes' sha-256 (hex); `None` for a delete.
-    pub content: Option<String>,
-    pub size: u64,
-    /// The device that saved it.
-    pub by: String,
-    /// When its content was written (the file's mtime), µs since the epoch:
-    /// the newest content wins a fork.
-    pub at_us: i64,
-    /// The versions this one replaced (several when it settles a fork).
-    pub base: Vec<VersionId>,
-}
-
-impl FileVersion {
-    #[must_use]
-    pub const fn is_delete(&self) -> bool {
-        self.content.is_none()
-    }
-}
-
-/// A named set of heads: a save point, an import, or one asked for.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
-pub struct Checkpoint {
-    pub id: VersionId,
-    pub name: String,
-    pub by: String,
-    pub at_us: i64,
-    /// Made by the engine (a session file saved, the first import).
-    pub auto: bool,
-    /// Every live path and the version it was at.
-    pub heads: BTreeMap<String, VersionId>,
-}
 
 /// How a path's heads settle.
 #[derive(Debug, Clone, PartialEq, Eq)]
