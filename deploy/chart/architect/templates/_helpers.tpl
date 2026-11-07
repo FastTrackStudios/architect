@@ -16,8 +16,12 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
+{{/* A repository with a "/" is a full name, used as is (argocd-image-updater
+     writes ghcr.io/fasttrackstudios/architect); a bare one gets image.registry. */}}
 {{- define "architect.image" -}}
-{{ .root.Values.image.registry }}/{{ .image.repository }}:{{ .image.tag | default .root.Chart.AppVersion }}
+{{- $repo := .image.repository -}}
+{{- if not (contains "/" $repo) }}{{ $repo = printf "%s/%s" .root.Values.image.registry $repo }}{{ end -}}
+{{ $repo }}:{{ .image.tag | default .root.Chart.AppVersion }}
 {{- end -}}
 
 {{/* Every path the node owns: node.paths + node.extraPaths. */}}

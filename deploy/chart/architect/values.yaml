@@ -24,7 +24,7 @@ image:
 web:
   enabled: true
   image:
-    repository: architect-web
+    repository: architect-web   # bare: image.registry is prefixed; a full name is used as is
     tag: ""            # empty = appVersion
   replicaCount: 2
   # /app/config.json, the web app's settings, from a ConfigMap. Empty
