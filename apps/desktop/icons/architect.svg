@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Architect's app icon: a placeholder until the designed one lands. -->
+  <rect width="1024" height="1024" rx="224" fill="#18181b"/>
+  <path d="M512 196 L812 828 H676 L612 688 H412 L348 828 H212 Z M512 404 L450 560 H574 Z" fill="#6d7cff"/>
+</svg>
