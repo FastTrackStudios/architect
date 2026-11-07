@@ -37,7 +37,10 @@ ffmpeg = ["server", "tokio/process"]
 # Synced roots (`sync`, native): projects and asset libraries as Loro
 # manifests on the peer lanes, bytes in the blob store and in place in
 # the working copies; docs/content/architecture/project-files.md.
-sync = ["http", "dep:loro", "dep:tracing", "uuid/v5", "tokio/macros", "tokio/time"]
+# The files agent's service (`agent`): FILES_* and its HTTP face; the
+# window's client turns on `architect/http-client` itself.
+agent = ["vox", "architect/action-list"]
+sync = ["http", "agent", "dep:loro", "dep:tracing", "dep:tokio-util", "dep:httpdate", "dep:percent-encoding", "uuid/v5", "tokio/macros", "tokio/time"]
 
 [dependencies]
 architect = { workspace = true }
@@ -59,6 +62,10 @@ sha2 = { workspace = true, optional = true }
 # `sync`: a root's manifest is a Loro document; the app hands the engine
 # the one its registry holds, so this crate needs loro alone, not crdt.
 loro = { workspace = true, optional = true }
+# `sync`'s WebDAV face: a `PUT` streamed into the store, dates and hrefs.
+tokio-util = { version = "0.7", features = ["io"], optional = true }
+httpdate = { version = "1", optional = true }
+percent-encoding = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 # `server`: read tickets are signed (HMAC-SHA256) with a key the server
 # holds, and travel as URL-safe base64.

@@ -43,6 +43,8 @@
 //! [`Role`]: architect_orgs::Role
 
 pub mod access;
+#[cfg(feature = "agent")]
+pub mod agent;
 #[cfg(feature = "vox")]
 mod client;
 mod error;
@@ -50,6 +52,7 @@ mod id;
 mod model;
 mod path;
 pub mod rendition;
+pub mod roots;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod server;
 #[cfg(feature = "vox")]

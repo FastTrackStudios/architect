@@ -37,6 +37,7 @@ use super::manifest::{
 use super::scan::{Index, Indexed, Scanner, Seen, Stat};
 use super::store::TreeStore;
 use crate::id::VersionId;
+pub use crate::roots::RootStatus;
 
 /// Files up to this size are copied into the store when committed, so
 /// every version of them is kept; larger ones stay in place.
@@ -99,28 +100,6 @@ impl From<std::io::Error> for EngineError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e.to_string())
     }
-}
-
-/// What a root looks like on this device.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
-pub struct RootStatus {
-    pub doc_id: String,
-    pub place: String,
-    pub org: String,
-    pub section: Section,
-    pub name: String,
-    /// The working copy, when the root is pinned (or held, on the node).
-    pub path: Option<String>,
-    pub pinned: bool,
-    pub files: u32,
-    pub bytes: u64,
-    /// Files whose bytes are not here yet (pinned roots).
-    pub missing: u32,
-    /// Every file is at its head.
-    pub synced: bool,
-    /// Task stubs met in the working copy: never synced.
-    pub stubs: Vec<String>,
-    pub error: Option<String>,
 }
 
 #[derive(Default)]
@@ -872,28 +851,101 @@ impl Engine {
         path: &str,
         bytes: &[u8],
     ) -> Result<FileVersion, EngineError> {
+        self.save_reader(doc_id, path, Box::pin(std::io::Cursor::new(bytes.to_vec())))
+            .await
+    }
+
+    /// [`Self::save_bytes`] from a stream (a `PUT`'s body), never all in memory.
+    ///
+    /// # Errors
+    ///
+    /// The root is not known, or the store cannot be written.
+    pub async fn save_reader(
+        &self,
+        doc_id: Uuid,
+        path: &str,
+        body: architect::blob::Reader,
+    ) -> Result<FileVersion, EngineError> {
         let doc = self
             .doc(doc_id)
             .await
             .ok_or_else(|| EngineError::NoRoot(doc_id.to_string()))?;
         let manifest = Manifest::new(&doc);
-        let hash = self
-            .store
-            .local
-            .put_bytes(bytes)
+        let hash = architect::blob::BlobStore::put(&self.store.local, None, body)
             .await
             .map_err(|e| EngineError::Io(e.to_string()))?;
+        let size = tokio::fs::metadata(self.store.local.path_for(&hash))
+            .await?
+            .len();
         let version = FileVersion {
             id: VersionId(Uuid::new_v4()),
             path: path.to_owned(),
             content: Some(hash.to_hex()),
-            size: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
+            size,
             by: self.config.device.clone(),
             at_us: now_us(),
             base: manifest.tree().heads(path).iter().map(|h| h.id).collect(),
         };
         manifest.push(std::slice::from_ref(&version));
         Ok(version)
+    }
+
+    /// Move or copy `from` (a file, or everything under it) to `to`: the
+    /// same bytes at the new paths, so nothing is sent again.
+    ///
+    /// # Errors
+    ///
+    /// The root is not known.
+    pub async fn relocate(
+        &self,
+        doc_id: Uuid,
+        from: &str,
+        to: &str,
+        remove: bool,
+    ) -> Result<u32, EngineError> {
+        let doc = self
+            .doc(doc_id)
+            .await
+            .ok_or_else(|| EngineError::NoRoot(doc_id.to_string()))?;
+        let manifest = Manifest::new(&doc);
+        let tree = manifest.tree();
+        let prefix = format!("{from}/");
+        let mut versions = Vec::new();
+        for (path, v) in tree.live() {
+            let rest = if path == from {
+                ""
+            } else if let Some(rest) = path.strip_prefix(&prefix) {
+                rest
+            } else {
+                continue;
+            };
+            let target = if rest.is_empty() {
+                to.to_owned()
+            } else {
+                format!("{to}/{rest}")
+            };
+            versions.push(FileVersion {
+                id: VersionId(Uuid::new_v4()),
+                path: target.clone(),
+                by: self.config.device.clone(),
+                at_us: now_us(),
+                base: tree.heads(&target).iter().map(|h| h.id).collect(),
+                ..v.clone()
+            });
+            if remove {
+                versions.push(FileVersion {
+                    id: VersionId(Uuid::new_v4()),
+                    path,
+                    content: None,
+                    size: 0,
+                    by: self.config.device.clone(),
+                    at_us: now_us(),
+                    base: vec![v.id],
+                });
+            }
+        }
+        manifest.push(&versions);
+        Ok(u32::try_from(versions.len()).unwrap_or(u32::MAX))
     }
 
     /// Delete `path` (or everything under it) in a root, as versions.
