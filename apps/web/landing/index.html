@@ -3,22 +3,543 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Architect</title>
-  <!-- Placeholder: the designed landing page (branch feat/landing-page)
-       replaces apps/web/landing/. Self-contained, relative paths. -->
-  <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; font: 16px/1.5 system-ui, sans-serif; background: #111113; color: #ececef; }
-    main { text-align: center; padding: 24px; }
-    h1 { font-size: 40px; margin: 0 0 8px; }
-    p { color: #9b9ba4; margin: 0 0 24px; }
-    a { color: inherit; margin: 0 10px; }
-  </style>
+  <title>Architect: your notes, projects and files on every device</title>
+  <meta name="description" content="Architect is a local-first app for desktop, phone and the web, and the Rust framework it is built on. Vaults of markdown, projects and files held at home and pinned where you work, synced peer to peer.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f3f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0c0e10" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="Architect">
+  <meta property="og:description" content="Your notes, projects and files on every device, local-first and in sync.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/archivo.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/osifont.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/landing.css">
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("architect-plot");
+        if (t === "plot" || t === "model") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
-  <main>
-    <h1>Architect</h1>
-    <p>Your notes, projects and files on every device, local-first and in sync.</p>
-    <nav><a href="app/">Open the app</a><a href="docs/">Docs</a><a href="https://github.com/FastTrackStudios/architect/releases/latest">Download</a></nav>
-  </main>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="bar" id="top">
+  <a class="brand" href="./" aria-label="Architect, home">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 28 L16 4 L28 28 M9 19 H23" fill="none"/><circle cx="16" cy="4" r="2.6"/><circle cx="4" cy="28" r="2.6"/><circle cx="28" cy="28" r="2.6"/></svg>
+    <span>Architect</span>
+  </a>
+  <nav class="bar-nav" aria-label="Sheets">
+    <button class="bar-toggle" type="button" aria-expanded="false" aria-controls="sheet-list">
+      <span class="bar-toggle-label">Sheets</span>
+      <span class="bar-current" data-current>A-000 Site plan</span>
+    </button>
+    <ol class="sheet-list" id="sheet-list">
+      <li><a href="#vault"><span class="sn">A-101</span> Vault</a></li>
+      <li><a href="#files"><span class="sn">A-201</span> Files</a></li>
+      <li><a href="#sync"><span class="sn">A-301</span> Sync</a></li>
+      <li><a href="#extensions"><span class="sn">A-401</span> Extensions</a></li>
+      <li><a href="#studio"><span class="sn">M-101</span> Studio</a></li>
+      <li><a href="#self-host"><span class="sn">S-101</span> Self-host</a></li>
+      <li><a href="#framework"><span class="sn">D-101</span> Framework</a></li>
+    </ol>
+  </nav>
+  <div class="bar-end">
+    <a class="bar-link" href="/guides/">Guides</a>
+    <a class="bar-link" href="/docs/">Docs</a>
+    <button class="plot-toggle" type="button" data-plot-toggle aria-pressed="false">
+      <span class="plot-toggle-a">Plot</span><span class="plot-toggle-b">Model</span>
+      <span class="visually-hidden">: switch between the light and dark drawing</span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- A-000: the site plan -->
+<section class="sheet sheet-hero" id="site-plan" aria-labelledby="hero-title" data-sheet="A-000 Site plan">
+  <div class="hero-plan">
+    <figure class="plan" aria-labelledby="plan-cap">
+      <div class="plan-scroll" tabindex="0" role="group" aria-label="Site plan, scrolls sideways on small screens">
+      <svg class="plan-svg" viewBox="0 0 760 540" role="img" aria-labelledby="plan-title plan-desc">
+        <title id="plan-title">Site plan of one person's devices</title>
+        <desc id="plan-desc">Five rooms on one plot: Desk, Laptop, Phone, Web and the Node. One sync line joins them through the Node, which is always on. The Laptop is offline, drawn dashed, and keeps working on its own copy.</desc>
+        <defs>
+          <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="8" class="hatch-line"/>
+          </pattern>
+          <marker id="tick" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+            <line x1="1" y1="9" x2="9" y2="1" class="tick-line"/>
+          </marker>
+        </defs>
+
+        <!-- property line -->
+        <rect class="property" x="16" y="16" width="728" height="508"/>
+        <text class="t-label t-dim" x="28" y="36">PROPERTY LINE · ONE ACCOUNT</text>
+        <!-- north arrow -->
+        <g class="north" transform="translate(700 58)">
+          <circle r="16"/>
+          <path d="M0 -14 L6 8 L0 3 L-6 8 Z"/>
+          <text class="t-label" y="34" text-anchor="middle">N</text>
+        </g>
+
+        <!-- the sync line: solid where peers are online -->
+        <path class="sync sync-main" pathLength="1" d="M232 128 H380 V214"/>
+        <path class="sync sync-main" pathLength="1" d="M380 346 V430 H196"/>
+        <path class="sync sync-main" pathLength="1" d="M466 280 H628 V376"/>
+        <path class="sync sync-off" d="M628 280 V186"/>
+
+        <!-- rooms -->
+        <a class="room" href="#kn-node" data-room="node" aria-describedby="kn-node">
+          <rect class="wall" x="294" y="214" width="172" height="132"/>
+          <rect class="room-fill" x="300" y="220" width="160" height="120"/>
+          <text class="t-room" x="314" y="250">NODE</text>
+          <text class="t-label" x="314" y="272">always on · headless</text>
+          <text class="t-num" x="314" y="306">27/27</text>
+          <text class="t-label" x="314" y="326">files held in full</text>
+          <g class="kn-mark" transform="translate(440 238)"><use href="#hex" x="-12" y="-11" width="24" height="22"/><text>1</text></g>
+        </a>
+        <a class="room" href="#kn-desk" data-room="desk" aria-describedby="kn-desk">
+          <rect class="wall" x="56" y="66" width="176" height="124"/>
+          <rect class="room-fill" x="62" y="72" width="164" height="112"/>
+          <text class="t-room" x="76" y="102">DESK</text>
+          <text class="t-label" x="76" y="124">studio · pinned</text>
+          <text class="t-num" x="76" y="160">2</text>
+          <text class="t-label" x="98" y="160">verified copies</text>
+          <g class="kn-mark" transform="translate(206 90)"><use href="#hex" x="-12" y="-11" width="24" height="22"/><text>2</text></g>
+        </a>
+        <a class="room room-off" href="#kn-laptop" data-room="laptop" aria-describedby="kn-laptop">
+          <rect class="wall" x="540" y="66" width="176" height="120"/>
+          <rect class="room-fill" x="546" y="72" width="164" height="108"/>
+          <text class="t-room" x="560" y="102">LAPTOP</text>
+          <text class="t-label" x="560" y="124">home · offline</text>
+          <text class="t-label" x="560" y="156">keeps working on</text>
+          <text class="t-label" x="560" y="172">its own copy</text>
+          <g class="kn-mark" transform="translate(690 90)"><use href="#hex" x="-12" y="-11" width="24" height="22"/><text>3</text></g>
+        </a>
+        <a class="room" href="#kn-phone" data-room="phone" aria-describedby="kn-phone">
+          <rect class="wall" x="56" y="376" width="140" height="124"/>
+          <rect class="room-fill" x="62" y="382" width="128" height="112"/>
+          <text class="t-room" x="76" y="412">PHONE</text>
+          <text class="t-label" x="76" y="434">same vault</text>
+          <text class="t-label" x="76" y="452">same tabs</text>
+          <g class="kn-mark" transform="translate(170 400)"><use href="#hex" x="-12" y="-11" width="24" height="22"/><text>4</text></g>
+        </a>
+        <a class="room" href="#kn-web" data-room="web" aria-describedby="kn-web">
+          <rect class="wall" x="540" y="376" width="176" height="124"/>
+          <rect class="room-fill" x="546" y="382" width="164" height="112"/>
+          <text class="t-room" x="560" y="412">WEB</text>
+          <text class="t-label" x="560" y="434">/app/ in a browser</text>
+          <text class="t-label" x="560" y="452">signed in, live</text>
+          <g class="kn-mark" transform="translate(690 400)"><use href="#hex" x="-12" y="-11" width="24" height="22"/><text>5</text></g>
+        </a>
+
+        <!-- dimension: edit to peers -->
+        <g class="dim">
+          <line x1="232" y1="104" x2="380" y2="104" marker-start="url(#tick)" marker-end="url(#tick)"/>
+          <text class="t-dimtext" x="306" y="96" text-anchor="middle">AN EDIT · WITHIN 1 s</text>
+        </g>
+        <!-- section cut marker -->
+        <g class="cut" transform="translate(500 300)">
+          <circle r="15"/>
+          <line x1="-15" y1="0" x2="15" y2="0"/>
+          <text class="t-label" y="-3" text-anchor="middle">A</text>
+          <text class="t-label" y="11" text-anchor="middle">201</text>
+        </g>
+      </svg>
+      </div>
+      <p class="plan-more" aria-hidden="true"><span>&larr; Desk · Phone</span><span>match line</span><span>Laptop · Web &rarr;</span></p>
+      <figcaption id="plan-cap" class="plan-cap">
+        <span class="t-label">Example plot</span>, from the app's demo data: one musician's devices around the always-on node. Dashed means offline.
+      </figcaption>
+    </figure>
+
+    <ol class="keynotes hero-keynotes" aria-label="Keynotes">
+      <li id="kn-node" data-room="node"><span class="kn">1</span><p><strong>Node.</strong> The Architect app run headless on a home server. One more peer, the one that is always online, holding every project in full.</p></li>
+      <li id="kn-desk" data-room="desk"><span class="kn">2</span><p><strong>Desk.</strong> Pins the projects it works on. Each copy is checked by a possession challenge, and the count is shown.</p></li>
+      <li id="kn-laptop" data-room="laptop"><span class="kn">3</span><p><strong>Laptop.</strong> Offline, and still working. Its edits merge when it is back; nothing waits on a server.</p></li>
+      <li id="kn-phone" data-room="phone"><span class="kn">4</span><p><strong>Phone.</strong> The same vault and the same workspace, on the mobile app.</p></li>
+      <li id="kn-web" data-room="web"><span class="kn">5</span><p><strong>Web.</strong> The app in a browser at <code>/app/</code>, signed in to your org.</p></li>
+    </ol>
+  </div>
+
+  <aside class="title-block" aria-label="Title block">
+    <div class="tb-row tb-project">
+      <h1 id="hero-title"><span class="h1-word">Architect</span></h1>
+    </div>
+    <p class="tb-lede">Your notes, projects and files on every device. Local-first: work stays on the device, and your devices sync with each other directly.</p>
+    <div class="tb-actions" role="group" aria-label="Get Architect">
+      <a class="act act-primary" href="https://github.com/FastTrackStudios/architect/releases/latest">
+        <span class="act-k">Download</span>
+        <span class="act-v">Linux AppImage · macOS</span>
+        <svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v13M6 11l6 6 6-6M5 20h14"/></svg>
+      </a>
+      <a class="act" href="/app/?demo">
+        <span class="act-k">Try the demo</span>
+        <span class="act-v">The demo vault, in your browser</span>
+        <svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6"/></svg>
+      </a>
+      <a class="act" href="/app/">
+        <span class="act-k">Open the web app</span>
+        <span class="act-v">Sign in to your org</span>
+        <svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+    <dl class="tb-data">
+      <div><dt>Runs on</dt><dd>Linux · macOS · mobile · web</dd></div>
+      <div><dt>Built with</dt><dd>architect, in Rust</dd></div>
+      <div><dt>Licence</dt><dd>MIT or Apache-2.0</dd></div>
+      <div><dt>Status</dt><dd>Pre-1.0</dd></div>
+    </dl>
+    <nav class="tb-index" aria-label="Sheet index">
+      <span class="tb-k">Sheet index</span>
+      <ol>
+        <li><a href="#vault"><span class="sn">A-101</span> Vault</a></li>
+        <li><a href="#files"><span class="sn">A-201</span> Files</a></li>
+        <li><a href="#sync"><span class="sn">A-301</span> Sync</a></li>
+        <li><a href="#extensions"><span class="sn">A-401</span> Extensions</a></li>
+        <li><a href="#studio"><span class="sn">M-101</span> Studio</a></li>
+        <li><a href="#self-host"><span class="sn">S-101</span> Self-host</a></li>
+        <li><a href="#framework"><span class="sn">D-101</span> Framework</a></li>
+      </ol>
+    </nav>
+    <div class="tb-sheet">
+      <span class="tb-k">Sheet</span>
+      <span class="tb-sn">A-000</span>
+      <span class="tb-st">Site plan</span>
+    </div>
+  </aside>
+</section>
+
+<!-- A-101: vault -->
+<section class="sheet" id="vault" aria-labelledby="vault-title" data-sheet="A-101 Vault">
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2 id="vault-title">A vault is a folder of markdown.</h2>
+      <p class="lede">Architect opens a folder of notes, an Obsidian vault as it is, in a workspace of tabs, splits and docks. Everything below is kept as notes in that folder, so it syncs like the rest.</p>
+    </div>
+
+    <figure class="detail detail-wide">
+      <div class="detail-frame">
+        <video class="shot" data-loop muted loop playsinline preload="none" poster="media/vault-workspace.webp" width="960" height="573" aria-label="The workspace: notes open as tabs, split side by side beside the graph and backlinks.">
+          <source src="media/workspace-vault-tour.mp4" type="video/mp4">
+        </video>
+        <button class="loop-btn" type="button" data-loop-btn aria-pressed="false">Play</button>
+      </div>
+      <figcaption><span class="bubble">1<i>A-101</i></span> The workspace. Notes open as tabs; drag one to a pane's edge to split it. What you arrange comes back the next time you open the vault.</figcaption>
+    </figure>
+
+    <ol class="keynotes keynotes-grid" aria-label="What a vault holds">
+      <li><span class="kn">1</span><p><strong>Notes and Bases.</strong> Markdown notes with properties, links and embeds. A <code>.base</code> file is a query over them, drawn as a table, cards or a list.</p></li>
+      <li><span class="kn">2</span><p><strong>Navigator.</strong> A folder tree beside the notes in the selected folder: Notebook Navigator, the Obsidian plugin, ported spec for spec.</p></li>
+      <li><span class="kn">3</span><p><strong>Calendar.</strong> Your events, and with Tasks and the Time Tracker, your tasks on their days and your tracked time. A day opens its daily note.</p></li>
+      <li><span class="kn">4</span><p><strong>Tasks and projects.</strong> A task is a note with <code>type: task</code>, in a list, Today, My tasks or a board. Projects keep goals and milestones as notes.</p></li>
+      <li><span class="kn">5</span><p><strong>Time tracking.</strong> Time your work on tasks and projects, and add it up.</p></li>
+      <li><span class="kn">6</span><p><strong>Capture.</strong> One line from anywhere: <code>[[Project]]</code>, <code>#tag</code>, <code>!high</code>, <code>next fri</code>, <code>every week</code> are read as you type.</p></li>
+      <li><span class="kn">7</span><p><strong>Threads and notifications.</strong> Conversations on any note, project or task, with mentions and resolve; notifications that reach every device.</p></li>
+    </ol>
+
+    <div class="detail-pair">
+      <figure class="detail">
+        <div class="detail-frame"><img class="shot" src="media/capture-inbox.webp" width="1280" height="750" loading="lazy" decoding="async" alt="The capture inbox: five captured lines to sort, projects in the sidebar, and the selected item's details with Open, Done and Move to."></div>
+        <figcaption><span class="bubble">2<i>A-101</i></span> The inbox, where captured lines wait to be sorted into projects.</figcaption>
+      </figure>
+      <figure class="detail detail-phone">
+        <div class="detail-frame"><img class="shot" src="media/phone-tabs.webp" width="402" height="874" loading="lazy" decoding="async" alt="The phone app's tab switcher: four open tabs as cards, Welcome, The app shell, Arrangement and Graph."></div>
+        <figcaption><span class="bubble">3<i>A-101</i></span> The same workspace on a phone.</figcaption>
+      </figure>
+    </div>
+  </div>
+  <footer class="strip" aria-hidden="true"><span class="strip-sn">A-101</span><span class="strip-t">Vault</span><span class="strip-s">Scale: not to scale</span></footer>
+</section>
+
+<!-- A-201: files -->
+<section class="sheet" id="files" aria-labelledby="files-title" data-sheet="A-201 Files">
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2 id="files-title">Every file held at home, pinned where you work.</h2>
+      <p class="lede">An org's projects and asset libraries live on the node. Each machine pins the ones it needs and fetches the rest on demand. A registry knows every file on every device, and how many verified copies of it exist.</p>
+    </div>
+
+    <figure class="section-cut" aria-labelledby="cut-cap">
+      <div class="cut-scroll" tabindex="0" role="group" aria-label="Section A, scrolls sideways on small screens">
+      <svg viewBox="0 0 900 300" role="img" aria-labelledby="cut-title cut-desc">
+        <title id="cut-title">Section A through one file</title>
+        <desc id="cut-desc">One audio file, 149-BASS DI.wav, 705.6 KB, cut through its holders. The node holds it in full, verified one second ago. The desk holds a cached copy, verified three seconds ago. The laptop holds it in full but is offline, unverified for two minutes. Policy asks for two verified copies; the file has two.</desc>
+        <text class="t-label t-dim" x="20" y="28">SECTION A · 149-BASS DI-241011_2001.WAV · 705.6 KB</text>
+        <line class="ground" x1="20" y1="244" x2="880" y2="244"/>
+        <rect class="ground-hatch" x="20" y="244" width="860" height="22" fill="url(#cut-hatch)"/>
+        <defs><pattern id="cut-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" class="hatch-line"/></pattern></defs>
+
+        <g class="holder">
+          <rect class="wall" x="40" y="70" width="230" height="174"/>
+          <text class="t-room" x="58" y="102">NODE</text>
+          <text class="t-label" x="58" y="124">starcommand · full</text>
+          <rect class="copy copy-ok" x="58" y="150" width="194" height="40"/>
+          <text class="t-label t-on" x="70" y="175">VERIFIED 1 s AGO</text>
+          <text class="t-label" x="58" y="222">reachable now</text>
+        </g>
+        <g class="holder">
+          <rect class="wall" x="335" y="70" width="230" height="174"/>
+          <text class="t-room" x="353" y="102">DESK</text>
+          <text class="t-label" x="353" y="124">studio · cached</text>
+          <rect class="copy copy-ok" x="353" y="150" width="194" height="40"/>
+          <text class="t-label t-on" x="365" y="175">VERIFIED 3 s AGO</text>
+          <text class="t-label" x="353" y="222">this device</text>
+        </g>
+        <g class="holder holder-off">
+          <rect class="wall" x="630" y="70" width="230" height="174"/>
+          <text class="t-room" x="648" y="102">LAPTOP</text>
+          <text class="t-label" x="648" y="124">home · full</text>
+          <rect class="copy copy-un" x="648" y="150" width="194" height="40"/>
+          <text class="t-label" x="660" y="175">UNVERIFIED · 2 min</text>
+          <path class="cloud" d="M640 146 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q8 -12 16 0 q12 8 0 16 q12 8 0 16 q12 8 0 16 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-8 12 -16 0 q-12 -8 0 -16 q-12 -8 0 -16 q-12 -8 0 -16 Z"/>
+          <g class="cloud-tag" transform="translate(842 140)"><path d="M0 -13 L13 9 L-13 9 Z"/><text y="5" text-anchor="middle">1</text></g>
+          <text class="t-label" x="648" y="222">offline</text>
+        </g>
+        <g class="dim">
+          <line x1="40" y1="282" x2="565" y2="282" marker-start="url(#tick)" marker-end="url(#tick)"/>
+          <text class="t-dimtext" x="302" y="276" text-anchor="middle">2 VERIFIED COPIES · POLICY 2 · MET</text>
+        </g>
+      </svg>
+      </div>
+      <figcaption id="cut-cap" class="cut-cap">Section A, drawn from the file page below. The count is of copies a holder proved it has, not copies it says it has.</figcaption>
+    </figure>
+
+    <div class="files-grid">
+      <ol class="keynotes" aria-label="How files are kept">
+        <li><span class="kn">1</span><p><strong>A real folder.</strong> The drive mounts your roots at <code>~/Architect/&lt;org&gt;/Projects/…</code>, so REAPER, a file manager or <code>rsync</code> reads and writes them like any other folder.</p></li>
+        <li><span class="kn">2</span><p><strong>Pinned, or on demand.</strong> Bytes are kept by SHA-256 and fetched from a peer or a server when opened, resuming after a dropped link.</p></li>
+        <li><span class="kn">3</span><p><strong>Versions, not a trash folder.</strong> Every save is a version, and so is a delete. Uploads resume and skip bytes the org already holds.</p></li>
+        <li><span class="kn">4</span><p><strong>Copies you can count.</strong> Holders sign what they hold, scrubs and possession challenges check it, and a policy says how many verified copies each file needs.</p></li>
+        <li><span class="kn">5</span><p><strong>S3 when you want it.</strong> Nodes can keep bytes in any S3-compatible store: Garage, MinIO, R2, AWS S3, Ceph.</p></li>
+        <li><span class="kn">6</span><p><strong>Found offline.</strong> Search finds every file on every device from the registry, even with every peer offline.</p></li>
+      </ol>
+      <div class="detail-col">
+        <figure class="detail">
+          <div class="detail-frame"><img class="shot" src="media/file-copies.webp" width="366" height="616" loading="lazy" decoding="async" alt="A project page, Crescendum Album: five audio files, and for the selected file its copies: two verified copies at two sites, desk and node, with the laptop offline and unverified."></div>
+          <figcaption><span class="bubble">1<i>A-201</i></span> A file's copies, on its project page.</figcaption>
+        </figure>
+        <figure class="detail">
+          <div class="detail-frame"><img class="shot" src="media/storage-health.webp" width="366" height="580" loading="lazy" decoding="async" alt="Storage health for an org: 7.7 MB of files, 6.5 MB under policy, 352.8 KB on one holder, nothing without a verified copy, and the holders with what each has verified."></div>
+          <figcaption><span class="bubble">2<i>A-201</i></span> Storage health: what is under policy, and on whom.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+  <footer class="strip" aria-hidden="true"><span class="strip-sn">A-201</span><span class="strip-t">Files</span><span class="strip-s">Scale: not to scale</span></footer>
+</section>
+
+<!-- A-301: sync -->
+<section class="sheet" id="sync" aria-labelledby="sync-title" data-sheet="A-301 Sync">
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2 id="sync-title">Devices sync with each other. The server is one of them.</h2>
+      <p class="lede">There is no separate Architect server. Every device is a peer, and the always-on node is just the one that never sleeps. Stop it, and every other device keeps working.</p>
+    </div>
+
+    <div class="schedule" role="table" aria-label="How Architect syncs">
+      <div class="sch-row sch-head" role="row">
+        <span role="columnheader">Mark</span><span role="columnheader">What</span><span role="columnheader">How it works</span>
+      </div>
+      <div class="sch-row" role="row">
+        <span role="cell" class="sch-mark">P-1</span><span role="cell" class="sch-what">Peer to peer</span>
+        <span role="cell">Devices exchange documents directly over iroh, finding each other on the LAN or through a relay. Each document checks who may read it.</span>
+      </div>
+      <div class="sch-row" role="row">
+        <span role="cell" class="sch-mark">P-2</span><span role="cell" class="sch-what">The always-on node</span>
+        <span role="cell">Keeps a live bridge per note with each peer it reaches, so an edit gets to the others within a second.</span>
+      </div>
+      <div class="sch-row" role="row">
+        <span role="cell" class="sch-mark">P-3</span><span role="cell" class="sch-what">Live collaboration</span>
+        <span role="cell">Presence shows who is in a document and what they point at, select and type; text merges as you both write.</span>
+      </div>
+      <div class="sch-row" role="row">
+        <span role="cell" class="sch-mark">P-4</span><span role="cell" class="sch-what">Share links</span>
+        <span role="cell">Share a vault, a folder, a tag, a few notes or what a <code>.base</code> selects, to the public, anyone with the link, your org or named people. Read-only or with comments, until it expires or you revoke it.</span>
+      </div>
+      <div class="sch-row" role="row">
+        <span role="cell" class="sch-mark">P-5</span><span role="cell" class="sch-what">Published sites</span>
+        <span role="cell">A vault becomes a static site of finished HTML, rebuilt when the vault changes. <a href="/docs/">These docs</a> are the first site built with it.</span>
+      </div>
+      <div class="sch-row" role="row">
+        <span role="cell" class="sch-mark">P-6</span><span role="cell" class="sch-what">Your devices, admitted</span>
+        <span role="cell">Your own devices, members an org enrolled with a role, and devices paired by a six-digit code or a QR code. Revoke one and its next call is refused.</span>
+      </div>
+    </div>
+  </div>
+  <footer class="strip" aria-hidden="true"><span class="strip-sn">A-301</span><span class="strip-t">Sync</span><span class="strip-s">Schedule</span></footer>
+</section>
+
+<!-- A-401: extensions -->
+<section class="sheet" id="extensions" aria-labelledby="ext-title" data-sheet="A-401 Extensions">
+  <div class="sheet-body ext-body">
+    <div class="sheet-head">
+      <h2 id="ext-title">Every feature is an extension.</h2>
+      <p class="lede">Calendar, Tasks, Projects and the Time Tracker are extensions, built the way yours would be. Turn one off and the app goes on without it. Every command is one action on the Action List, run the same way by keys, menus, ⌘K, scripts, extensions and agents over MCP.</p>
+    </div>
+    <figure class="detail detail-wide">
+      <div class="detail-frame">
+        <video class="shot" data-loop muted loop playsinline preload="none" poster="media/extensions-manager.webp" width="960" height="573" aria-label="The extensions manager: extensions, Luau scripts, workers, themes, pages, layouts and keys in one list, with the Board extension turned off and on.">
+          <source src="media/extensions-manager.mp4" type="video/mp4">
+        </video>
+        <button class="loop-btn" type="button" data-loop-btn aria-pressed="false">Play</button>
+      </div>
+      <figcaption><span class="bubble">1<i>A-401</i></span> Extensions, scripts, workers, themes, layouts and pages, in one manager.</figcaption>
+    </figure>
+    <div class="ext-side">
+      <figure class="detail">
+        <div class="detail-frame"><img class="shot" src="media/palette-actions.webp" width="418" height="404" loading="lazy" decoding="async" alt="The ⌘K palette with 'count in' typed: the Metronome extension's count-in action first, then actions from the Board, Settings and Extensions."></div>
+        <figcaption><span class="bubble">2<i>A-401</i></span> ⌘K runs any action, an extension's included.</figcaption>
+      </figure>
+    </div>
+    <ol class="keynotes ext-notes" aria-label="Kinds of extension">
+        <li><span class="kn">1</span><p><strong>Data.</strong> Declarations only: settings, keys, views.</p></li>
+        <li><span class="kn">2</span><p><strong>Luau.</strong> Actions as scripts, run as one undo step.</p></li>
+        <li><span class="kn">3</span><p><strong>Process.</strong> Its own program, with views drawn in the app's window.</p></li>
+        <li><span class="kn">4</span><p><strong>Hot reload.</strong> Loaded from a registry, reloaded as you edit it.</p></li>
+    </ol>
+  </div>
+  <footer class="strip" aria-hidden="true"><span class="strip-sn">A-401</span><span class="strip-t">Extensions</span><span class="strip-s">Scale: not to scale</span></footer>
+</section>
+
+<!-- M-101: Studio -->
+<section class="sheet sheet-studio" id="studio" aria-labelledby="studio-title" data-sheet="M-101 Studio">
+  <div class="sheet-body studio-body">
+    <div class="sheet-head">
+      <h2 id="studio-title">Built for Studio.</h2>
+      <p class="lede">FastTrackStudio's music apps, Studio, Session, Signal and Keyflow, are built on architect. The same vault holds the setlists, charts and session notes; the same drive holds the audio, where REAPER can open it.</p>
+    </div>
+    <ul class="apps" aria-label="FastTrackStudio apps on architect">
+      <li><span class="app-n">Studio</span></li>
+      <li><span class="app-n">Session</span></li>
+      <li><span class="app-n">Signal</span></li>
+      <li><span class="app-n">Keyflow</span></li>
+    </ul>
+    <figure class="detail detail-studio">
+      <div class="detail-frame">
+        <video class="shot" data-loop muted loop playsinline preload="none" poster="media/keyflow-note.webp" width="960" height="570" aria-label="A Keyflow chart in a note, drawn by the Board extension; turned off, the chart goes back to a plain code fence.">
+          <source src="media/embeds-in-a-note.mp4" type="video/mp4">
+        </video>
+        <button class="loop-btn" type="button" data-loop-btn aria-pressed="false">Play</button>
+      </div>
+      <figcaption><span class="bubble">1<i>M-101</i></span> A Keyflow chart in a note, drawn by an extension. Turn it off and the fence is plain text again.</figcaption>
+    </figure>
+    <ol class="keynotes studio-notes" aria-label="What Studio's apps share">
+      <li><span class="kn">1</span><p><strong>Charts in notes.</strong> A Keyflow fence in a note is drawn as a chart by the extension that claims it.</p></li>
+      <li><span class="kn">2</span><p><strong>Audio on the drive.</strong> Session files sit in a real folder, so REAPER opens them like any other.</p></li>
+      <li><span class="kn">3</span><p><strong>Presence.</strong> Pointers name a place, a track and a time, not pixels, so each app draws them in its own view.</p></li>
+    </ol>
+  </div>
+  <footer class="strip" aria-hidden="true"><span class="strip-sn">M-101</span><span class="strip-t">Studio</span><span class="strip-s">Scale: not to scale</span></footer>
+</section>
+
+<!-- S-101: self-host -->
+<section class="sheet" id="self-host" aria-labelledby="host-title" data-sheet="S-101 Self-host">
+  <div class="sheet-body host-body">
+    <div class="sheet-head">
+      <h2 id="host-title">Your server is the app, run headless.</h2>
+      <p class="lede">The node is the same binary with no window. Run it on a home server and it holds your org's projects, serves your sites and share links, and gives agents MCP. It is released as a container image built with Nix.</p>
+    </div>
+    <div class="notes-block">
+      <h3>General notes</h3>
+      <pre class="code" tabindex="0"><code><span class="c"># the node, from the app's own binary</span>
+architect-desktop serve --config architect.toml
+
+<span class="c"># or the image, published with each release</span>
+ghcr.io/fasttrackstudios/architect:latest</code></pre>
+      <dl class="spec">
+        <div><dt>8080/tcp</dt><dd>HTTP: sites, share links, the web lanes, MCP</dd></div>
+        <div><dt>7777/udp</dt><dd>iroh, for peers that reach it directly</dd></div>
+        <div><dt>/data</dt><dd>its key, documents and built sites</dd></div>
+        <div><dt>GET /health</dt><dd>answers <code>ok</code></dd></div>
+      </dl>
+      <p class="notes-link"><a class="text-link" href="/docs/guide/deploy/">Read the deploy guide</a></p>
+    </div>
+  </div>
+  <footer class="strip" aria-hidden="true"><span class="strip-sn">S-101</span><span class="strip-t">Self-host</span><span class="strip-s">General notes</span></footer>
+</section>
+
+<!-- D-101: framework -->
+<section class="sheet sheet-dev" id="framework" aria-labelledby="dev-title" data-sheet="D-101 Framework">
+  <div class="sheet-body dev-body">
+    <div class="sheet-head">
+      <h2 id="dev-title">The framework underneath.</h2>
+      <p class="lede">architect is the Rust framework the app is built from. Declare each service and document once, and it gives you every wire, offline and peer-to-peer sync, and one Action List that keys, menus, scripts, extensions and MCP all run.</p>
+    </div>
+    <figure class="code-detail">
+      <pre class="code" tabindex="0"><code><span class="k">#[architect::service(actions)]</span>
+<span class="k">pub trait</span> Greeter {
+    <span class="k">async fn</span> greet(&amp;self, name: String) -&gt; Result&lt;String, GreetError&gt;;
+    <span class="k">#[subscribe]</span>
+    <span class="k">fn</span> greeted(&amp;self) -&gt; String;
+}</code></pre>
+      <figcaption>From this one trait: the vox service, <code>POST /greeter/greet</code>, <code>/greeter/greeted</code> as Server-Sent Events, <code>GreeterClient</code> and <code>GreeterHttpClient</code>, and the action <code>GREETER_GREET</code> for keys, menus, scripts and MCP.</figcaption>
+    </figure>
+    <figure class="detail detail-dev">
+      <div class="detail-frame"><img class="shot" src="media/embedded-views.webp" width="960" height="573" loading="lazy" decoding="async" alt="Four embedded views in the workspace: a Dioxus component, a Frame surface with a drive knob and meter, a Luau script's immediate-mode window, and an agent's A2UI checklist."></div>
+      <figcaption><span class="bubble">1<i>D-101</i></span> Views from Dioxus, Frame, a Luau script and an agent's A2UI, side by side in one workspace.</figcaption>
+    </figure>
+    <ol class="keynotes keynotes-grid dev-notes" aria-label="What the framework gives you">
+      <li><span class="kn">1</span><p><strong>Contracts.</strong> Services and entities declared once: vox in process, over WebSocket and iroh, and HTTP with JSON and SSE.</p></li>
+      <li><span class="kn">2</span><p><strong>Documents.</strong> Loro CRDTs with kinds, migrations and named undo, in a crash-safe file per document.</p></li>
+      <li><span class="kn">3</span><p><strong>Sync.</strong> Org sync, peer to peer over iroh, presence and collaborative text.</p></li>
+      <li><span class="kn">4</span><p><strong>The shell.</strong> Tab groups in splits, docks, pop-out windows and native menus, with key bindings, chords and which-key.</p></li>
+    </ol>
+    <p class="dev-cta"><a class="act act-inline" href="/docs/"><span class="act-k">Read the docs</span><svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6"/></svg></a>
+      <a class="text-link" href="https://github.com/FastTrackStudios/architect">Source on GitHub</a></p>
+  </div>
+  <footer class="strip" aria-hidden="true"><span class="strip-sn">D-101</span><span class="strip-t">Framework</span><span class="strip-s">Pre-1.0: any release may break the API</span></footer>
+</section>
+
+<!-- Issued -->
+<section class="sheet sheet-issue" id="get" aria-labelledby="get-title" data-sheet="Issue">
+  <div class="issue">
+    <h2 id="get-title">Issued for use.</h2>
+    <div class="tb-actions issue-actions" role="group" aria-label="Get Architect">
+      <a class="act act-primary" href="https://github.com/FastTrackStudios/architect/releases/latest">
+        <span class="act-k">Download</span>
+        <span class="act-v">Linux AppImage · macOS</span>
+        <svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v13M6 11l6 6 6-6M5 20h14"/></svg>
+      </a>
+      <a class="act" href="/app/?demo">
+        <span class="act-k">Try the demo</span>
+        <span class="act-v">The demo vault, in your browser</span>
+        <svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6"/></svg>
+      </a>
+      <a class="act" href="/app/">
+        <span class="act-k">Open the web app</span>
+        <span class="act-v">Sign in to your org</span>
+        <svg class="act-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+    <div class="issue-read">
+      <a class="text-link" href="/guides/">Guides, for using the app</a>
+      <a class="text-link" href="/docs/">Docs, for building on architect</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="colophon">
+  <table class="revisions">
+    <caption>Revisions</caption>
+    <thead><tr><th scope="col">Rev</th><th scope="col">Description</th><th scope="col">By</th></tr></thead>
+    <tbody>
+      <tr><td>Latest</td><td><a href="https://github.com/FastTrackStudios/architect/releases/latest">Release notes on GitHub</a></td><td>FastTrackStudio</td></tr>
+    </tbody>
+  </table>
+  <p class="colophon-line">Architect by <a href="https://github.com/FastTrackStudios">FastTrackStudio</a> · MIT or Apache-2.0 · Set in Archivo and osifont</p>
+</footer>
+
+<svg width="0" height="0" class="defs" aria-hidden="true" focusable="false">
+  <symbol id="hex" viewBox="-12 -11 24 22"><path d="M-6 -10 H6 L11.5 0 L6 10 H-6 L-11.5 0 Z"/></symbol>
+</svg>
+
+<script src="assets/landing.js" defer></script>
 </body>
 </html>
