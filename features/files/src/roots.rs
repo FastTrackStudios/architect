@@ -133,3 +133,46 @@ pub struct FileEntry {
     /// Its bytes are on this device (a pinned copy, or fetched once).
     pub here: bool,
 }
+
+/// A file an asset plays: a stem, or a sound file in its folder.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct Media {
+    pub name: String,
+    /// Root-relative.
+    pub path: String,
+    pub size: u64,
+}
+
+/// An asset of a library: a song, a setlist, a preset.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct Asset {
+    /// The library's place (`days-to-praise/Assets/Tracks`).
+    pub root: String,
+    /// The library's kind (`Tracks`).
+    pub kind: String,
+    pub name: String,
+    /// Its folder in the library, empty for a note on its own.
+    pub folder: String,
+    /// Its note, root-relative.
+    pub note: Option<String>,
+    /// The note's frontmatter (`type`, `artist`, `key`, …).
+    pub properties: BTreeMap<String, String>,
+    pub media: Vec<Media>,
+    /// What its note links (`[[…]]`): a setlist's songs.
+    pub links: Vec<String>,
+    /// When its newest file was written, µs since the epoch.
+    pub at_us: i64,
+}
+
+/// One search result.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct Hit {
+    /// The root's place.
+    pub root: String,
+    /// Root-relative; empty for the root itself.
+    pub path: String,
+    pub name: String,
+    /// `project`, `file`, or an asset's `type` (`song`, `setlist`, `asset`).
+    pub what: String,
+    pub detail: String,
+}

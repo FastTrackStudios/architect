@@ -133,6 +133,8 @@ pub struct Engine {
     pub(super) served: Arc<std::sync::RwLock<std::collections::HashSet<Sha256>>>,
     /// The manifests as the peer lane lists them.
     pub(super) held: Arc<std::sync::RwLock<Vec<super::lane::HeldManifest>>>,
+    /// What makes peaks of anything but a WAV.
+    pub(super) transcoder: Option<Arc<dyn crate::server::Transcoder>>,
 }
 
 impl Engine {
@@ -149,7 +151,15 @@ impl Engine {
             busy: Arc::default(),
             served: Arc::default(),
             held: Arc::default(),
+            transcoder: None,
         }
+    }
+
+    /// Make peaks of non-WAV media with `transcoder` (`FfmpegTranscoder`).
+    #[must_use]
+    pub fn with_transcoder(mut self, transcoder: impl crate::server::Transcoder) -> Self {
+        self.transcoder = Some(Arc::new(transcoder));
+        self
     }
 
     #[must_use]

@@ -10,7 +10,8 @@ use super::engine::{Engine, EngineError};
 use super::manifest::{Tree, doc_id_for};
 use crate::agent::{AgentError, Files};
 use crate::id::VersionId;
-use crate::roots::{Checkpoint, FileEntry, FileVersion, RootStatus};
+use crate::rendition::Peaks;
+use crate::roots::{Asset, Checkpoint, FileEntry, FileVersion, Hit, RootStatus};
 
 impl From<EngineError> for AgentError {
     fn from(e: EngineError) -> Self {
@@ -153,5 +154,19 @@ impl Files for Engine {
         let changed = Self::restore_checkpoint(self, id, version_id(&checkpoint)?).await?;
         self.pass(id).await;
         Ok(changed)
+    }
+
+    async fn assets(&self, root: String) -> Result<Vec<Asset>, AgentError> {
+        let id = self.resolve_root(&root)?;
+        Ok(Self::assets(self, id).await?)
+    }
+
+    async fn search(&self, query: String) -> Result<Vec<Hit>, AgentError> {
+        Ok(Self::search(self, &query).await)
+    }
+
+    async fn peaks(&self, root: String, path: String) -> Result<Peaks, AgentError> {
+        let id = self.resolve_root(&root)?;
+        Ok(Self::peaks(self, id, &path).await?)
     }
 }
