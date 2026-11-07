@@ -55,13 +55,19 @@ pub(crate) fn use_calendar_revision() -> u64 {
 fn use_calendar() -> u64 {
     let mut seen = use_signal(crate::revision);
     use_future(move || async move {
+        let read_plans = || async {
+            let around = crate::shown().cursor;
+            crate::refresh_plans(around - Duration::days(30), around + Duration::days(32)).await;
+        };
         let _ = crate::refresh().await;
+        read_plans().await;
         let mut ticks = 0_u32;
         loop {
             futures_timer::Delay::new(Wait::from_millis(250)).await;
             ticks = ticks.wrapping_add(1);
             if ticks.is_multiple_of(16) {
                 let _ = crate::refresh().await;
+                read_plans().await;
             }
             let now = crate::revision();
             if *seen.peek() != now {
@@ -256,8 +262,11 @@ async fn commit(
 /// The calendar.
 #[component]
 pub fn CalendarView() -> Element {
-    let _ = use_calendar();
+    // What it knows moved on: its views draw again (their props carry it,
+    // as they read the cache, not signals).
+    let revision = use_calendar();
     let picked = use_signal(|| None::<Picked>);
+    let plan_picked = use_signal(|| None::<(NaiveDate, String)>);
     let mut problem = use_signal(|| None::<String>);
     let mut draft = use_signal(String::new);
     let s = shown();
@@ -357,6 +366,9 @@ pub fn CalendarView() -> Element {
                 }
                 button { class: "cal-new", style: "{TOOL} background: var(--primary); color: var(--primary-foreground); border: none;",
                     onclick: move |_| new_now(), "+ New" }
+                button { class: "cal-templates", style: TOOL, title: "Day templates and the rules that pick them",
+                    onclick: move |_| { spawn(async move { let _ = crate::vault::run("EXT_VIEW_OPEN", json!({ "extension": "dayplan", "view": "templates" })).await; }); },
+                    "Day templates" }
             }
             if let Some(p) = problem() {
                 div { class: "cal-problem", style: "padding: 6px 16px; color: var(--destructive);",
@@ -370,13 +382,15 @@ pub fn CalendarView() -> Element {
             div { style: "flex: 1; min-height: 0; display: flex; position: relative;",
                 div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column;",
                     match s.mode {
-                        Mode::Day | Mode::Week => rsx! { TimeGrid { shown: s, picked, problem } },
-                        Mode::Month => rsx! { MonthGrid { shown: s, picked, problem } },
-                        Mode::Agenda => rsx! { Agenda { shown: s, picked } },
+                        Mode::Day | Mode::Week => rsx! { TimeGrid { shown: s, revision, picked, plan_picked, problem } },
+                        Mode::Month => rsx! { MonthGrid { shown: s, revision, picked, problem } },
+                        Mode::Agenda => rsx! { Agenda { shown: s, revision, picked } },
                     }
                 }
                 if picked().is_some() {
                     Editor { picked, problem }
+                } else if plan_picked().is_some() {
+                    crate::plan_ui::PlanPanel { picked: plan_picked, plans: crate::plans(s.cursor - Duration::days(7), s.cursor + Duration::days(8)), problem }
                 }
             }
         }
@@ -389,15 +403,23 @@ pub fn CalendarView() -> Element {
 #[component]
 fn TimeGrid(
     shown: Shown,
+    /// The cache's revision: a change draws it again.
+    revision: u64,
     picked: Signal<Option<Picked>>,
+    plan_picked: Signal<Option<(NaiveDate, String)>>,
     problem: Signal<Option<String>>,
 ) -> Element {
+    let _ = revision;
     let settings = crate::settings();
     let days = layout::days(shown.mode, shown.cursor, settings.week_start);
     let (Some(a), Some(z)) = (days.first().copied(), days.last().copied()) else {
         return rsx! {};
     };
     let blocks = crate::blocks(layout::midnight(a), layout::midnight(z + Duration::days(1)));
+    // Each day's plan (Day Plans'), and the day before the first's for
+    // a sleep running into its morning.
+    let plans = crate::plans(a - Duration::days(1), z + Duration::days(1));
+    let plan_on = |d: NaiveDate| plans.iter().find(|p| p.date == d).cloned();
     let mounted = use_signal(|| None::<Rc<MountedData>>);
     let grid = use_box(mounted);
     let mut drag = use_signal(|| None::<Drag>);
@@ -505,6 +527,9 @@ fn TimeGrid(
                                     span { style: if is_today { "font-size: 17px; font-weight: 700; color: var(--primary-foreground); background: var(--primary); border-radius: 999px; padding: 0 7px;" } else { "font-size: 17px; font-weight: 600;" },
                                         "{number}" }
                                 }
+                                if let Some(plan) = plan_on(day) {
+                                    crate::plan_ui::TemplateBadge { day, plan, problem }
+                                }
                             }
                         }
                     }
@@ -560,6 +585,7 @@ fn TimeGrid(
                                             let minute = top0 + (y / px) as i64;
                                             drag.set(Some(Drag { block: None, grip: Grip::Sweep, from: (p.x, p.y), active: false, day, minute, minutes: 0, days: 0 }));
                                         },
+                                        crate::plan_ui::PlanLayer { day, plan: plan_on(day), before: plan_on(day - Duration::days(1)), top0, px, picked: plan_picked }
                                         if is_today {
                                             div { class: "cal-now", style: "position: absolute; left: 0; right: 0; top: {now_top}px; height: 2px; background: var(--destructive); z-index: 3; pointer-events: none;" }
                                         }
@@ -741,9 +767,12 @@ const MONTH_TRACKS: usize = 3;
 #[component]
 fn MonthGrid(
     shown: Shown,
+    /// The cache's revision: a change draws it again.
+    revision: u64,
     picked: Signal<Option<Picked>>,
     problem: Signal<Option<String>>,
 ) -> Element {
+    let _ = revision;
     let settings = crate::settings();
     let days = layout::days(Mode::Month, shown.cursor, settings.week_start);
     let Some(a) = days.first().copied() else {
@@ -883,7 +912,8 @@ fn MonthGrid(
 
 /// The agenda: the days ahead with something on them.
 #[component]
-fn Agenda(shown: Shown, picked: Signal<Option<Picked>>) -> Element {
+fn Agenda(shown: Shown, revision: u64, picked: Signal<Option<Picked>>) -> Element {
+    let _ = revision;
     let from = shown.cursor;
     let to = from + Duration::days(layout::AGENDA_DAYS);
     let blocks = crate::blocks(layout::midnight(from), layout::midnight(to));

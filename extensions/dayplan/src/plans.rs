@@ -939,3 +939,18 @@ fn stem(path: &str) -> &str {
     let name = path.rsplit('/').next().unwrap_or(path);
     name.strip_suffix(".md").unwrap_or(name)
 }
+
+/// `DAYPLAN_OPEN`: opens its view `view`: `templates` (the editor, the
+/// default) or `rules`.
+pub async fn open(args: Value) -> Result<Value, String> {
+    let view = match str_arg(&args, "view") {
+        None | Some("templates") => "templates",
+        Some("rules") => "rules",
+        Some(v) => return Err(format!("view: templates or rules ({v:?})")),
+    };
+    vault::run(
+        "EXT_VIEW_OPEN",
+        json!({ "extension": crate::ID, "view": view }),
+    )
+    .await
+}

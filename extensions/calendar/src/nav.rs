@@ -256,7 +256,7 @@ fn plan_item(p: &PlanDay) -> Item {
         .as_deref()
         .map_or_else(|| "Day plan".to_owned(), |t| format!("Day plan · {t}"));
     let mut item = Item::new(format!("plan:{}", p.date), day_node(p.date), title)
-        .dates(millis(midnight(p.date)) + 1, millis(midnight(p.date)) + 1)
+        .dates(millis(midnight(p.date)), millis(midnight(p.date)))
         .icon("layout-list")
         .property("kind", "plan")
         .preview(format!("{} · {}", p.summary(), p.reason))
@@ -358,8 +358,14 @@ pub fn snapshot_of(
         snap.items.extend(note_item(&id, kind, start));
     }
     snap.calendar = Some(grid);
-    // By time; a period's note and a day's plan first.
-    snap.items.sort_by_key(|i| i.created);
+    // By time; at a day's start its note, then its plan, then the rest
+    // (a stable sort over them put first).
+    let rank = |i: &Item| match i.id.split(':').next() {
+        Some("note") => 0,
+        Some("plan") => 1,
+        _ => 2,
+    };
+    snap.items.sort_by_key(|i| (i.created, rank(i)));
     snap
 }
 

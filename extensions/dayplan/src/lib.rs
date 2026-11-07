@@ -37,6 +37,7 @@ pub mod notes;
 pub mod plans;
 pub mod resolve;
 pub mod rules;
+pub mod ui;
 pub mod vault;
 
 pub use book::{Book, Day, assign, no_tags, planned_vs_tracked, set_span, sort};
@@ -152,13 +153,19 @@ pub async fn refresh() -> Result<Book, String> {
         .filter(|f| !f.is_empty())
         .unwrap_or_else(|| FOLDER.to_owned());
     let book = plans::read().await?;
-    {
+    let changed = {
         let mut c = cache();
+        let changed = !c.read || c.book != book || c.folder != folder;
         c.book = book.clone();
         c.folder = folder;
         c.read = true;
+        changed
+    };
+    // Only a change moves the revision on: a view that reads again when it
+    // moves would otherwise read for ever.
+    if changed {
+        bump();
     }
-    bump();
     Ok(book)
 }
 
@@ -174,7 +181,10 @@ impl Extension for DayPlans {
 
     fn build(&self, ext: &mut Builder) {
         vault::connect(ext.handle());
-        ext.action("DAYPLAN_GET", plans::get)
+        ext.view("templates", ui::TemplatesView)
+            .view("rules", ui::RulesView)
+            .action("DAYPLAN_OPEN", plans::open)
+            .action("DAYPLAN_GET", plans::get)
             .action("DAYPLAN_DAYS", plans::days_action)
             .action("DAYPLAN_UPSERT", plans::upsert)
             .action("DAYPLAN_ASSIGN", plans::assign)

@@ -149,10 +149,19 @@ It also has:
   the grid selects it and opens its daily note; an event or a task dropped
   on a day, in the tree or the grid, moves there (`move_items`). There is
   no rail button: the section is the way in.
-- **Day plans** (`plan.rs`, #444): each day's plan from the Day Plans
-  extension's `architect.dayplan` `days`, when it is there (see
-  [Day Plans](@/extensions/day-plans.md)). `refresh_plans` reads them
+- **Day plans** (`plan.rs`, `plan_ui.rs`, #444): each day's plan from the
+  Day Plans extension's `architect.dayplan` `days`, when it is there (see
+  [Day Plans](@/extensions/day-plans.md)). In the day and week views a
+  day's blocks are drawn under its events in their categories' colours
+  (`PlanLayer`; a sleep's morning on the next day), each labelled with
+  what it is given to and the time tracked in it against the time planned.
+  A day's head shows its template and why (`TemplateBadge`), with a menu
+  to choose another for that day, go back to the rules or reset an edited
+  day. A block's label opens its panel (`PlanPanel`): give it to a
+  project, a task, a recipe or a label. `refresh_plans` reads the plans
   outside `refresh`, as Day Plans reads the agenda for a rule's `#tag`.
+  The views take the cache's revision as a prop, so they draw again when
+  it moves.
 - **A settings section** (`calendar.*`).
 - **A tour** (`tours/calendar-tour.styx`).
 

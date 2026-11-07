@@ -43,6 +43,24 @@ actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
 # Destructive: "Reset to template" deletes a day's plan (VAULT_DELETE).
 effect = "destructive"
 
+[[views]]
+id = "templates"
+title = "Day templates"
+icon = "calendar-clock"
+
+[[views]]
+id = "rules"
+title = "Day template rules"
+icon = "list-ordered"
+
+[[actions]]
+id = "DAYPLAN_OPEN"
+name = "Day templates: open"
+description = "Opens the day templates' editor (`view` templates, the default) or the rules (`view` rules): the rules in order, the default, the overrides chosen by hand, and the next two weeks' templates and why."
+group = "Day plans"
+effect = "read_only"
+params = '{"type":"object","properties":{"view":{"type":"string","enum":["templates","rules"]}}}'
+
 [[actions]]
 id = "DAYPLAN_GET"
 name = "Day plan"
