@@ -11,6 +11,7 @@ Crate `architect-ui` (`features/ui/architect-ui`); house rules in `features/ui/A
 | `theme/` | `ThemeProvider`, `ThemeStoreProvider` (follows an `architect-theme` store), `ThemeScope`, `ThemeRuntimeStyle`, `ThemeSwitcher`; presets (architect-theme's built-in theme files, in light/dark pairs); CSS-var tokens | `features/ui/architect-ui/src/theme/runtime.rs` `ThemeProvider`, `ThemeStoreProvider`, `theme_preset`, `default_theme_state`; `features/ui/architect-ui/src/theme/tokens.rs` |
 | `cn` | Tailwind class merge | `features/ui/architect-ui/src/cn.rs` `merge`, `merge_slice`, `cn` |
 | Embedded CSS | `THEME_CSS`, `UTILITIES_CSS` consts | `features/ui/architect-ui/src/lib.rs` |
+| `sheet` | the phone's bottom sheet and its parts, Task's Linear-style sheets in architect's theme tokens (#445): `BottomSheet`, `SheetClose`, `SheetGroup`, `SheetSection`, `SheetRow`, `SheetSelect`, `SheetSwitch`, `SheetToggle`, `SheetChip`, `SheetSearch`, `SheetCheckRow`; `SheetTheme`, `use_sheet_theme`, `wash` | `features/ui/architect-ui/src/sheet.rs` |
 | `prelude` | flat re-export of components, theme, layout, typography | `features/ui/architect-ui/src/prelude.rs` |
 | Showcase | single-screen component board; desktop app around it | `features/ui/architect-ui/src/showcase.rs` `Showcase`; `features/ui/showcase` |
 | Stories | `#[story]` registrations | `features/ui/architect-ui/src/stories.rs` |
