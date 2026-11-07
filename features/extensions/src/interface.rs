@@ -347,7 +347,8 @@ const fn home(h: Home) -> Target {
 }
 
 /// Where `open` goes, as `WORKSPACE_OPEN`'s `at`, next to `active`.
-fn at(open: &ViewOpen, active: &str) -> Value {
+fn at(open: &ViewOpen, near: &Near) -> Value {
+    let active = near.document.as_str();
     match (open.home, open.placement) {
         (Home::Left, _) => json!({ "dock": { "side": "left" } }),
         (Home::Right, _) => json!({ "dock": { "side": "right" } }),
@@ -360,7 +361,35 @@ fn at(open: &ViewOpen, active: &str) -> Value {
             json!({ "split": { "pane": active, "side": "right" } })
         }
         _ if !active.is_empty() => json!({ "beside": { "pane": active } }),
-        _ => json!({ "float": { "rect": { "x": 120.0, "y": 90.0, "w": 480.0, "h": 360.0 } } }),
+        _ => near.main.map_or_else(
+            || json!({ "float": { "rect": { "x": 120.0, "y": 90.0, "w": 480.0, "h": 360.0 } } }),
+            |group| json!({ "group": { "group": group } }),
+        ),
+    }
+}
+
+/// Where a view of the main area opens: beside the document on show (the
+/// most recent pane in a main area, never a dock's: #442, the Projects page
+/// took the navigator's place when the navigator had the focus), else in
+/// the main window's first group.
+#[derive(Debug, Default)]
+struct Near {
+    document: String,
+    main: Option<u64>,
+}
+
+impl Near {
+    fn of(layout: &Value) -> Self {
+        Self {
+            document: layout
+                .get("current_document")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            main: layout
+                .pointer("/windows/0/groups/0/id")
+                .and_then(Value::as_u64),
+        }
     }
 }
 
@@ -373,17 +402,13 @@ async fn open_in_workspace(list: &ActionList, open: &ViewOpen) -> Result<Value, 
         .await
         .map_err(|e| format!("no workspace to open it in: {e}"))?;
     let layout: Value = serde_json::from_slice(&layout).unwrap_or(Value::Null);
-    let active = layout
-        .get("active")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
+    let near = Near::of(&layout);
     let args = json!({
         "view": open.kind,
         "id": open.kind,
         "state": open.state,
         "title": open.title,
-        "at": at(open, &active),
+        "at": at(open, &near),
         "focus": true,
     });
     let out = list

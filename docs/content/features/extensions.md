@@ -108,7 +108,9 @@ extension's namespace, capabilities and views when it loads
 
 Where a view opens is the view's own `placement` (`tab`, `split`, `overlay`,
 `popup`, `zoomed`, `float`: `features/extensions/src/manifest.rs`
-`ViewPlacement`); where it lives is its `home`. The app asks
+`ViewPlacement`); where it lives is its `home`. A `tab` or `split` view of
+the main area opens beside the document on show, never in a dock's group,
+even when a dock's pane has the focus. The app asks
 `Contributions` (`Host::contributions`) for what to draw: `tabs`, `status`,
 `menus`, `context`, `bar`, `toolbars`, `slots`, `open_path`, `open_url`.
 The full manifest syntax, with an example of each table, is in

@@ -110,7 +110,14 @@ fn is_hard_skip(path: &Path, root: &Path) -> bool {
         return false;
     };
     let first = first.as_os_str().to_string_lossy();
-    matches!(first.as_ref(), ".obsidian" | ".trash" | ".git") || first.starts_with(".DS_Store")
+    if matches!(first.as_ref(), ".obsidian" | ".trash" | ".git") {
+        return true;
+    }
+    // A dot-file or dot-folder anywhere is hidden, as Obsidian hides it
+    // (`.empty-folders`, `.DS_Store`, `.stfolder`), and as vault-live's
+    // walker skips it (#442).
+    path.file_name()
+        .is_some_and(|n| n.to_string_lossy().starts_with('.'))
 }
 
 /// Compiled user-ignore matcher. v1 = prefix / suffix only.
@@ -196,6 +203,18 @@ mod tests {
         assert!(kinds.contains(&("Charts.base".into(), VaultEntryKind::Base)));
         assert!(!kinds.iter().any(|(p, _)| p.starts_with(".obsidian")));
         assert!(!kinds.iter().any(|(p, _)| p.starts_with(".trash")));
+    }
+
+    #[test]
+    fn dot_files_and_dot_folders_are_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(&dir.path().join(".empty-folders"));
+        touch(&dir.path().join("Folder/.DS_Store"));
+        touch(&dir.path().join(".stfolder/x.md"));
+        touch(&dir.path().join("Folder/Keep.md"));
+        let entries = walk_vault(dir.path(), &ObsidianConfig::default());
+        let rels: Vec<_> = entries.iter().map(|e| e.rel_path.clone()).collect();
+        assert_eq!(rels, ["Folder/Keep.md"]);
     }
 
     #[test]
