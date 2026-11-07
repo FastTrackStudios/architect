@@ -201,6 +201,38 @@ pub fn use_capture(list: &Arc<ActionList>, config: Config) -> CaptureUi {
     use_context_provider(|| ui)
 }
 
+/// How many captures wait to be processed, read again after every change
+/// made here and every few seconds (an agent's capture): the phone's
+/// capture button carries it. 0 with no capture.
+#[must_use]
+pub fn use_to_process(capture: Option<CaptureUi>) -> usize {
+    let mut tick = use_signal(|| 0_u64);
+    use_future(move || async move {
+        if capture.is_none() {
+            return;
+        }
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_secs(10)).await;
+            let n = *tick.peek();
+            tick.set(n.wrapping_add(1));
+        }
+    });
+    let count = use_resource(move || {
+        let _ = (tick(), capture.map(|c| c.revision()));
+        async move {
+            match capture {
+                Some(c) => c
+                    .capturer()
+                    .inbox(&ActionCaller::app(), false)
+                    .await
+                    .map_or(0, |v| v.len()),
+                None => 0,
+            }
+        }
+    });
+    count.read().unwrap_or(0)
+}
+
 /// The [`CaptureUi`] above, if any.
 #[must_use]
 pub fn try_use_capture() -> Option<CaptureUi> {

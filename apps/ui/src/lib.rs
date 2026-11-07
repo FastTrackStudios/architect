@@ -48,8 +48,8 @@ use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowLeft, CalendarDays, CheckCheck, CircleQuestionMark, Command as CommandIcon, Feather,
-    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Palette, Plus, Search, Settings2, Undo2,
-    Users,
+    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Palette, Plus, Search, Settings2, Timer,
+    Undo2, Users,
 };
 
 pub use guide::builtin_tours;
@@ -1359,10 +1359,18 @@ pub fn LabApp() -> Element {
     } else {
         None
     };
+    // Task's capture button (#445): a tap captures; press and slide up
+    // starts a timer and opens its page; the captures waiting ride it.
+    let to_process = architect_capture::ui::use_to_process(capture_ui);
     let capture = shell::Action::new("Capture", icon!(Feather), move |()| match capture_ui {
         Some(c) => c.compose(""),
         None => lab.capture("inbox"),
-    });
+    })
+    .on_swipe_up("Start a timer", icon!(Timer), move |()| {
+        let _ = commands.run_with("TIME_START", "{}");
+        let _ = commands.run_with("TIME_OPEN", "{}");
+    })
+    .with_badge(to_process);
     // The sidebar's foot, above the switcher and the account (bottom to
     // top: Account, Workspace, Settings, Theme).
     let foot = vec![
