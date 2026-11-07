@@ -80,7 +80,7 @@ composer and the deck. Mount `CaptureLayer { capture }` once over the window.
   contexts), read by `Capturer::vocabulary` from whichever of `TAGS_LIST`,
   `PROJECTS_LIST`, `TASKS_LIST` and `VAULT_LIST` is on the list.
 - `features/capture/src/ui/mod.rs` (feature `ui`) has `use_capture` /
-  `CaptureUi`, `InboxDeck` and `CaptureLayer`. The capture window is an
+  `CaptureUi` (`process_now`, `process`) and `CaptureLayer`. The capture window is an
   `architect_workspace::Popout::page`, falling back to a card where there is
   no OS window.
 - The composer is Task's, ported (#445), its look and behaviour kept:
@@ -96,6 +96,20 @@ composer and the deck. Mount `CaptureLayer { capture }` once over the window.
   `features/capture/src/ui/picker.rs` `PropertyPicker`; quick add's bar
   `features/capture/src/ui/quick_add.rs` `QuickAdd`; Task's Tailwind as
   architect's theme tokens `features/capture/src/ui/style.rs` `Look`.
+- Processing is Task's too: `features/capture/src/ui/process.rs`
+  `ProcessCard`, one capture's decision in two `Mode`s, remembered on the
+  device (`capture-mode` in `ARCHITECT_CONFIG_DIR`). Fast is Task's card: do
+  it now (a task in progress through the `task` target, its clock through
+  `TIME_START`), add to a project (`TaskShape`, the capture parsed into an
+  editable title, project, contexts, due date and estimate), write a note in
+  your own words under a parent, snooze (Soon, Maybe, Someday: 1, 7 and 30
+  days), keep as reference, a project (`PROJECTS_CREATE`), already done
+  (`Capturer::done`), delete. Clarify asks first: is it actionable? Then the
+  next step (do it now, a task, waiting on someone, a project) or keep it (a
+  note, someday, delete). `ProcessDeck` (`INBOX_OPEN`) deals the inbox one
+  card at a time; `ProcessNowSheet` is "Process now" from the composer.
+  `Origin`, `OriginTile` and `ago` are for an inbox list's rows (the
+  navigator's Inbox view, #443).
 - `features/capture/src/shortcut.rs` (feature `native`, desk only) has
   `use_global_shortcut` (`global-hotkey`, registered on the event loop's
   thread as macOS requires) and `use_float_window` (the window over every
