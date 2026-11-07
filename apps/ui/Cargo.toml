@@ -48,6 +48,10 @@ architect-input = { workspace = true, features = ["udp"] }
 architect-sandbox-board = { path = "../sandbox/board" }
 # First-party extensions the app ships, on by default (#368, #375).
 architect-projects = { workspace = true }
+# Files (#347): the org's projects and libraries, a built-in extension, and
+# FILES_* over the device's files agent (`ARCHITECT_FILES_AGENT`).
+architect-files-extension = { workspace = true }
+architect-files = { workspace = true, features = ["agent"] }
 architect-tasks = { workspace = true }
 architect-time-tracker = { workspace = true }
 architect-calendar = { workspace = true }
@@ -91,7 +95,7 @@ tag = { workspace = true, features = ["actions"] }
 # Bases: a .base as a workspace view, a note's ```base fence, the
 # BASES_* actions (src/notes.rs, src/vault.rs).
 architect-bases = { workspace = true, features = ["ui"] }
-architect = { workspace = true, features = ["action-list", "settings"] }
+architect = { workspace = true, features = ["action-list", "settings", "http-client"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
 dioxus-native = { workspace = true }
@@ -119,6 +123,9 @@ blitz-dom = { workspace = true }
 blitz-traits = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
+# FILES_* (src/files.rs): the agent's HTTP client runs on a runtime of its
+# own; the window's executor is not tokio.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 architect-presence = { workspace = true, features = ["native"] }
 architect-capture = { workspace = true, features = ["native"] }
 # The first run's folder picker (`src/first_run.rs`).

@@ -134,14 +134,31 @@ same bytes share renditions; renditions survive a restart and one whose blob
 is gone is made again, alone; a failed kind is reported and not asked again.
 The ignored `ffmpeg_makes_a_proxy_a_poster_and_peaks` runs the real `ffmpeg`.
 
+## Synced roots: projects and asset libraries
+
+Feature `sync` holds an org's projects (`<org>/Projects/<project>`) and
+asset libraries (`<org>/Assets/<kind>`) in place on the headless node and
+syncs them to the devices that pin them; the rest browse on demand over
+WebDAV. Each root's manifest is a Loro document on the peer lanes, its
+bytes travel `BlobTransfer`. The spec and its six decisions:
+[Project files](@/architecture/project-files.md). Code:
+`features/files/src/sync/engine.rs` `Engine`, `features/files/src/agent.rs`
+`Files` (the `FILES_*` actions), `features/files/src/sync/dav.rs` `Dav`,
+`apps/desktop/src/node/files.rs` (the node), and the Files extension
+`features/files/extension/src/lib.rs` (navigator, pages). Tests:
+`features/files/tests/sync.rs`, `apps/desktop/tests/files.rs`.
+
 ## Status
 
 The core is done in architect, and so are the HTTP byte face, the browser's
-ranged reads and renditions. `FilesServer` refuses device (`Host`) and link
-(`Guest`) callers, so files do not reach peers yet. Not yet: client sync
-(selective sync, offline copies); a service worker that answers `Range` from
-offline copies; desktop integrations (daemon, FUSE, File Provider, WebDAV);
-filmstrips; search, review and share links; federation.
+ranged reads and renditions. Synced roots (`sync`) are done: client sync with
+pins per machine and offline copies, the node as the device's agent, WebDAV
+with fetch-on-open, versions and checkpoints, assets, search, waveforms, and
+the Files extension. `FilesServer` still refuses device (`Host`) and link
+(`Guest`) callers and does not read synced roots. Not yet: FUSE and the
+macOS File Provider (WebDAV covers both systems meanwhile); a service worker
+that answers `Range` from offline copies; filmstrips; review and share links
+of files; federation.
 
 - **Task** runs its own Files crates (`task:features/files`); moving onto
   `architect-files` comes after the gaps above.

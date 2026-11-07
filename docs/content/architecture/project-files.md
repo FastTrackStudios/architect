@@ -265,6 +265,23 @@ that leaves one set of roots.
 | Tests | 700 |
 | **Total** | **≈ 4,100** (budget 5,000), against Task's 86k |
 
+## What the stack built
+
+| Layer | Code | Tests |
+|---|---|---|
+| Store and sync engine | `features/files/src/sync/manifest.rs`, `features/files/src/sync/scan.rs`, `features/files/src/sync/store.rs`, `features/files/src/sync/engine.rs`, `features/files/src/sync/lane.rs`; `apps/desktop/src/node/files.rs`; `VaultCollab::with_plain_docs`; `crdt::p2p::node_router_with` | `features/files/tests/sync.rs`, `apps/desktop/tests/files.rs` |
+| Pinning and mounts | `features/files/src/agent.rs` `Files`, `features/files/src/sync/agent.rs`, `features/files/src/sync/dav.rs` `Dav` | `apps/desktop/tests/files.rs` `an_unpinned_project_browses_over_webdav_and_a_file_opens_on_demand` |
+| Assets | `features/files/src/sync/assets.rs` (`assets_of`, `frontmatter`, `wav_peaks`, `Engine::search`, `Engine::peaks`) | `features/files/tests/sync.rs` `a_library_s_assets_browse_search_and_draw_from_a_laptop_that_holds_none_of_it` |
+| UI | `features/files/extension/src/lib.rs`, `features/files/extension/src/nav.rs`; `apps/ui/src/files.rs` (`FILES_*` over `ARCHITECT_FILES_AGENT`) | the extension's unit tests; the live check |
+
+The live check ran on a scratch copy of one project (Right Here, 1.6 GB)
+and one asset folder (a Tracks song, 2.1 GB): a node holding the tree in
+place, a laptop node pinning the project (1.6 GB in about 3 s on loopback),
+a session save there reaching the node in 4 s and a new file on the node
+reaching the laptop in 6 s, unpin, the project mounted with `gio` over
+WebDAV and a take opened on demand (86 MB in 161 ms, kept for offline), and
+the window's Files pages with a waveform per stem.
+
 ## What is left after the stack
 
 - FUSE on Linux and the macOS File Provider, over the engine's three calls.
@@ -272,6 +289,10 @@ that leaves one set of roots.
   ticket, and per-folder grants.
 - Bases rows for assets.
 - Pinning a project pins the assets it links.
-- Background hashing order and progress for the first index of 11 TB.
+- Background hashing order and progress for the first index of 11 TB (a
+  root is indexed whole in one pass today).
+- Empty folders are not synced (the manifest holds files).
+- Two devices close a fork each, so a fork leaves two heads with the same
+  bytes; they settle, but each pass reads both.
 - Installing the agent with launchd or systemd.
 - Federation (#194's second item).
