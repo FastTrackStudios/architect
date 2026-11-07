@@ -51,6 +51,7 @@ pub mod config;
 mod files;
 mod live;
 pub mod org;
+mod s3;
 pub mod service;
 pub mod shares;
 
@@ -118,6 +119,8 @@ pub enum StartError {
 pub struct Running {
     /// Where its HTTP side listens.
     pub http: SocketAddr,
+    /// Where its S3 face listens, with [`Config::s3_bind`].
+    pub s3: Option<SocketAddr>,
     /// Its iroh endpoint.
     pub endpoint: iroh::Endpoint,
     /// What its services answer from.
@@ -444,6 +447,18 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
     if let Some(engine) = &files {
         host = files::mount(host, engine, &config.bind);
     }
+    let mut s3_addr = None;
+    if let (Some(engine), Some(bind)) = (&files, &config.s3_bind) {
+        let (addr, task) = s3::serve(engine.clone(), data, admission.clone(), bind)
+            .await
+            .map_err(|source| StartError::Bind {
+                bind: bind.clone(),
+                source,
+            })?;
+        tracing::info!(%addr, "files over S3");
+        s3_addr = Some(addr);
+        tasks.push(task);
+    }
     if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
         let notes = architect::layers![service::notes::NotesService].provide(state.clone());
         host = lane
@@ -518,6 +533,7 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
     };
     Ok(Running {
         http,
+        s3: s3_addr,
         endpoint,
         state,
         files,
@@ -538,10 +554,20 @@ pub fn main(args: impl Iterator<Item = OsString>) -> ExitCode {
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--config") => file = args.next().map(PathBuf::from),
+            Some("s3-key") => {
+                let rest: Vec<String> = args.map(|a| a.to_string_lossy().into_owned()).collect();
+                return match Config::load(file.as_deref(), |var| std::env::var(var).ok()) {
+                    Ok(config) => s3::command(&config, &rest),
+                    Err(error) => {
+                        let _ = writeln!(std::io::stderr(), "architect-desktop serve: {error}");
+                        ExitCode::from(78)
+                    }
+                };
+            }
             Some("--help" | "-h") => {
                 let _ = writeln!(
                     std::io::stdout(),
-                    "architect-desktop serve [--config <file>]\n\n\
+                    "architect-desktop serve [--config <file>] [s3-key <issue|list|revoke> …]\n\n\
                      The Architect app as an always-on node, with no window.\n\
                      Configured by the file and ARCHITECT_* variables; see\n\
                      docs/content/guide/deploy.md."

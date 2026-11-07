@@ -45,6 +45,9 @@ agent = ["vox", "architect/action-list"]
 # through the setuid `fusermount3`).
 drive = ["sync", "dep:fuser", "dep:libc"]
 sync = ["http", "agent", "dep:loro", "dep:tracing", "dep:tokio-util", "dep:httpdate", "dep:percent-encoding", "uuid/v5", "tokio/macros", "tokio/time"]
+# The S3 face over the synced roots (`sync::s3`): `s3s` speaks the API
+# and checks SigV4; hyper-util serves it on its own port.
+s3 = ["sync", "dep:s3s", "dep:bytes", "dep:async-trait", "dep:hyper-util", "dep:md-5", "tokio/net"]
 
 [dependencies]
 architect = { workspace = true }
@@ -71,6 +74,12 @@ tokio-util = { version = "0.7", features = ["io"], optional = true }
 httpdate = { version = "1", optional = true }
 percent-encoding = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
+# `s3`: the S3 API (Apache-2.0), served over hyper-util; a part's ETag is its MD5.
+s3s = { version = "0.17", default-features = false, optional = true }
+bytes = { version = "1", optional = true }
+async-trait = { workspace = true, optional = true }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio"], optional = true }
+md-5 = { version = "0.10", optional = true }
 # `server`: read tickets are signed (HMAC-SHA256) with a key the server
 # holds, and travel as URL-safe base64.
 base64 = { workspace = true, optional = true }
@@ -94,10 +103,13 @@ fuser = { version = "0.18", optional = true, features = ["macos-no-mount"] }
 
 [dev-dependencies]
 # The tests drive the server and the client: build them with both.
-architect-files = { path = ".", features = ["server", "http", "ffmpeg", "sync", "drive"] }
+architect-files = { path = ".", features = ["server", "http", "ffmpeg", "sync", "drive", "s3"] }
 architect = { workspace = true, features = ["vox", "local", "http", "http-client"] }
 architect-permissions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+# `tests/s3.rs`: a real S3 client, signing with SigV4.
+object_store = { version = "0.14", default-features = false, features = ["aws"] }
+futures = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true }
 vox = { workspace = true }

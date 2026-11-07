@@ -9,6 +9,7 @@
 //! - [`scan`]: a working copy's index, and the settled changes in it.
 //! - [`store`]: the bytes this device can serve, its working files too.
 //! - [`engine`]: each pass, scan then apply, forks, checkpoints, pins.
+//! - [`dav`] and `s3` (feature `s3`): the roots over `WebDAV` and over S3.
 
 mod agent;
 pub mod assets;
@@ -17,6 +18,8 @@ pub mod engine;
 pub mod lane;
 pub mod layout;
 pub mod manifest;
+#[cfg(feature = "s3")]
+pub mod s3;
 pub mod scan;
 pub mod store;
 

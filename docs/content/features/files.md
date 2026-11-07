@@ -148,13 +148,49 @@ bytes travel `BlobTransfer`. The spec and its six decisions:
 `features/files/extension/src/lib.rs` (navigator, pages). Tests:
 `features/files/tests/sync.rs`, `apps/desktop/tests/files.rs`.
 
+### Over S3
+
+Feature `s3` serves the same roots over the S3 API, so `rclone`, `aws s3`
+and `restic` read and write them. Set `s3_bind` (`ARCHITECT_S3_BIND`) on
+the node, then issue a key on it:
+
+```sh
+architect-desktop serve --config node.toml s3-key issue \
+  --org fts --for user:cody --role member --label laptop
+# access_key_id = AKAR…   secret_access_key = …   (shown once)
+aws --endpoint-url http://127.0.0.1:9000 s3 cp take.wav \
+  "s3://fts/Projects/Right Here/Audio Files/take.wav"
+```
+
+- **A bucket per org, keys as on disk:** `Projects/<project>/<path>` and
+  `Assets/<kind>/<path>`. A project's name is not a valid bucket name,
+  the org is what a key and a role belong to, and one bucket is the
+  org's tree as the node and the WebDAV mount show it, so a copy between
+  projects moves no bytes.
+- **Versions are the manifest's.** A `PutObject` or a completed multipart
+  upload saves a version, whose id is the S3 version id;
+  `ListObjectVersions` lists a path's history and a delete is a delete
+  marker. History is append-only, so deleting one version is refused.
+- **The `ETag` is the content's sha-256.** Clients that compare MD5s
+  (`rclone check`) fall back to size.
+- **Keys** are per person (`user:<id>`) or per device
+  (`device:<endpoint>`), in one org, with a role. On every request the
+  role is lowered to what the holder holds now (a revoked device's key
+  opens nothing), then checked by `role_capabilities` and
+  `access::resolve`, as `FilesServer`'s `Acting` checks it. `SigV4` is
+  `s3s`'s (Apache-2.0).
+
+Code: `features/files/src/sync/s3/mod.rs` `S3Face`,
+`features/files/src/sync/s3/keys.rs` `S3Keys`, `apps/desktop/src/node/s3.rs`.
+Test: `features/files/tests/s3.rs`.
+
 ## Status
 
 The core is done in architect, and so are the HTTP byte face, the browser's
 ranged reads and renditions. Synced roots (`sync`) are done: client sync with
 pins per machine and offline copies, the node as the device's agent, WebDAV
 with fetch-on-open, versions and checkpoints, assets, search, waveforms, and
-the Files extension. `FilesServer` still refuses device (`Host`) and link
+the Files extension, and the S3 face. `FilesServer` still refuses device (`Host`) and link
 (`Guest`) callers and does not read synced roots. Not yet: FUSE and the
 macOS File Provider (WebDAV covers both systems meanwhile); a service worker
 that answers `Range` from offline copies; filmstrips; review and share links
