@@ -116,6 +116,78 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
   can be dragged or right-clicked anywhere, even a pane whose view has no
   tab bar (a full-bleed rig face).
 
+## Decks: one context each, shown in a screenset
+
+> **Status: in progress (#441).** "Deck" is the working name, kept in one
+> place (`features/workspace/src/deck.rs` `NOUN`, `NOUN_PLURAL`; the
+> actions' `DECK_` prefix in `features/workspace/src/control/deck.rs`).
+
+Studio has a tab per song and Architect a tab per project, each arranged
+its own way. Two primitives, kept apart:
+
+- **A screenset** (`Screenset`, above) is a named, reusable layout:
+  splits, docks, which views go where ("Mixing", "Charts + Lyrics").
+  Screensets are the person's, kept per device (and, through
+  `store::load_split`, synced with the account). Nothing in a screenset
+  names a song or a project.
+- **A deck** (`Deck`) is one loaded **context** (`DeckContext`: a song, a
+  project, a vault, an org root: `kind`, `id`, `title`, its folder) plus
+  the screenset it is shown in, plus that context's own changes to it
+  (its **override**). The decks are the strip at the top of the main
+  window (`Decks`: their order, the active one).
+
+So two decks can show two songs in the one "Mixing" screenset. Switching
+decks switches both the content and the layout. A person who rearranges
+inside a deck changes only that deck's context: the change is kept as
+its override, so the song opens again exactly as it was left. The
+screenset itself changes only when they say so:
+
+| On a deck | Does | Action |
+|---|---|---|
+| Load onto a new deck | a context in a deck of its own (⌘-click or middle-click in the navigator) | `DECK_OPEN {context, new: true}` |
+| Load onto this deck | the context replaces the active deck's | `DECK_OPEN {context}` |
+| Switch this deck's screenset | shows it in another screenset; its override goes | `DECK_SET_SCREENSET` (or loading a screenset while it shows: ⌘⌥1–9) |
+| Save as screenset | its override becomes a named screenset it then uses | `DECK_SAVE_AS_SCREENSET` |
+| Reset to the screenset | drops its override | `DECK_RESET` |
+| Close, next, previous, move, list | | `DECK_CLOSE`, `DECK_NEXT`, `DECK_PREV`, `DECK_MOVE`, `DECK_LIST` |
+
+The strip: open, close, drag to reorder, ⌘1–9 and ⌃Tab / ⌃⇧Tab to
+switch, Duplicate and Pop out into a window from a deck's menu, and a
+marker on a deck whose layout differs from its screenset (and a badge an
+app sets: a song's unsaved session). While decks are on, ⌘1–9 switch
+decks and the screensets' slot keys move to ⌘⌥1–9. On a phone the strip
+folds into the tab switcher: a row of decks above its cards.
+
+**Each context type has a default screenset** ("Song", "Project"). An
+extension contributes one with `[[deck_templates]]` (a context type, the
+screenset, and optionally the layout it ships); the app gives its own the
+same way (`DeckTemplate`). The person can pick another default per type
+(`Decks::set_default`), which beats every template.
+
+**Where things are kept:**
+
+- the screensets: the workspace's `Store`, as before;
+- a context's override: with the context, in its folder's
+  `.architect/deck.json` (a project's), or the vault's
+  `.architect/decks/<type>/<id>.json` for a context with no folder of its
+  own (a song note) ([Interface files](@/architecture/interface-files.md));
+  `store::ContextStore` is the seam, `home::ContextFiles` the files;
+- the session (which decks are open, in what order, the active one, the
+  person's defaults): on the device, per device (`DeckSession`, through a
+  `Store`); restored at start, each deck's override read from its context.
+
+**Hidden decks stay live without drawing.** Only the active deck has a
+`WorkspaceView`; the others are values (`Deck`: context, screenset,
+override, each pane's state and history), so switching unmounts the
+outgoing deck's views and draws the incoming deck's from its own panes.
+What a context *is* (a vault's index, a project's documents, a song's DAW
+session) is the app's, and stays loaded while its deck is open: the app
+keeps one per open deck (`Decks::contexts`) and drops it when the deck
+closes, so switching never loads it again. A view reads its deck's
+context with `use_deck_context`. Budgets per deck (a song's DAW session
+is heavy) are the app's to set on that registry; the decks only say which
+contexts are open and which one shows.
+
 ## Floating windows
 
 Any pane can float — a plugin's editor, a script's panel, a meter, a

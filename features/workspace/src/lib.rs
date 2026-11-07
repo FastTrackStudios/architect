@@ -26,11 +26,33 @@
 // compare only redraws.
 #![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
+/// The one place the deck's working name is written: the words a person
+/// reads (`noun`, `title`, `plural`, `plural_title`) and the actions'
+/// prefix (`prefix`). Renaming decks is changing these.
+macro_rules! deck_word {
+    (noun) => {
+        "deck"
+    };
+    (title) => {
+        "Deck"
+    };
+    (plural) => {
+        "decks"
+    };
+    (plural_title) => {
+        "Decks"
+    };
+    (prefix) => {
+        "DECK_"
+    };
+}
+
 #[cfg(feature = "ui")]
 mod bar;
 pub mod control;
 #[cfg(feature = "ctx")]
 mod ctx;
+pub mod deck;
 mod drop;
 pub mod guide;
 #[cfg(feature = "home")]
@@ -53,6 +75,10 @@ pub mod tree;
 
 #[cfg(feature = "ui")]
 pub use bar::{TABS_COMMAND, use_tabs_button};
+pub use deck::{
+    ContextLayout, Deck, DeckContext, DeckError, DeckId, DeckState, DeckTemplate, Decks,
+    KindDefault, Load, Outcome, Unchanged,
+};
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
 #[cfg(feature = "native")]
 pub mod native;
@@ -103,5 +129,5 @@ pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color
 pub use screenset::{
     FormClass, Layout, Recall, SavedScreensets, Screenset, ScreensetOptions, Screensets,
 };
-pub use store::{MemoryStore, Store};
+pub use store::{ContextStore, MemoryContextStore, MemoryStore, Store};
 pub use switcher::{Card, CardGrid, Place, reorder_dest};

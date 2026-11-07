@@ -113,3 +113,95 @@ pub fn save_split(saved: &dyn Store, working: &dyn Store, sets: &Screensets) -> 
     working.save(&live);
     true
 }
+
+/// Keeps what each deck's context keeps ([`crate::ContextLayout`]): the
+/// screenset it was shown in and its override. A project's goes in its
+/// folder (`home::ContextFiles`); a test's in memory.
+pub trait ContextStore {
+    /// What `context` kept, if anything.
+    fn load(&self, context: &crate::DeckContext) -> Option<String>;
+    /// Keep `json` for `context`.
+    fn save(&self, context: &crate::DeckContext, json: &str);
+}
+
+/// Contexts' layouts in memory, by [`crate::DeckContext::key`].
+#[derive(Debug, Clone, Default)]
+pub struct MemoryContextStore(Rc<RefCell<std::collections::BTreeMap<String, String>>>);
+
+impl MemoryContextStore {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// How many contexts have something kept.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.borrow().len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.borrow().is_empty()
+    }
+}
+
+impl ContextStore for MemoryContextStore {
+    fn load(&self, context: &crate::DeckContext) -> Option<String> {
+        self.0.borrow().get(&context.key()).cloned()
+    }
+
+    fn save(&self, context: &crate::DeckContext, json: &str) {
+        self.0.borrow_mut().insert(context.key(), json.to_owned());
+    }
+}
+
+/// What `context` kept in `store`, if it reads.
+#[must_use]
+pub fn load_context(
+    store: &dyn ContextStore,
+    context: &crate::DeckContext,
+) -> Option<crate::ContextLayout> {
+    store
+        .load(context)
+        .and_then(|json| crate::ContextLayout::from_json(&json).ok())
+        .filter(|kept| kept.context.same(context))
+}
+
+/// Keep `deck`'s screenset and override with its context.
+pub fn save_context(store: &dyn ContextStore, deck: &crate::Deck) -> bool {
+    deck.context_layout().to_json().is_ok_and(|json| {
+        store.save(&deck.context, &json);
+        true
+    })
+}
+
+/// The decks open when the app last ran on this device.
+///
+/// From `session`, each with what its context kept (`contexts`): the
+/// screenset it was in and its override. A context's own word beats the
+/// session's (it may have been changed on another device).
+#[must_use]
+pub fn load_decks(session: &dyn Store, contexts: &dyn ContextStore) -> crate::Decks {
+    let mut decks = session
+        .load()
+        .and_then(|json| crate::Decks::from_json(&json).ok())
+        .unwrap_or_default();
+    for deck in &mut decks.decks {
+        if let Some(kept) = load_context(contexts, &deck.context) {
+            deck.screenset = kept.screenset;
+            deck.overrides = kept.layouts;
+        }
+    }
+    decks
+}
+
+/// Keep the session (the decks open, their order, the active one, the
+/// person's defaults) on this device; each deck's override goes to its
+/// context through [`save_context`].
+pub fn save_session(session: &dyn Store, decks: &crate::Decks) -> bool {
+    decks.session().to_json().is_ok_and(|json| {
+        session.save(&json);
+        true
+    })
+}

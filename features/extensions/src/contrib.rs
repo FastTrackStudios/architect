@@ -727,6 +727,36 @@ impl NavigatorProviderDecl {
     }
 }
 
+/// A context type's default screenset (`[[deck_templates]]`, #441).
+///
+/// A deck is one context (a song, a project) shown in a screenset; a new
+/// deck on a context of type `context` is shown in `screenset` unless the
+/// person picked another default. With `layout`, the extension ships the
+/// screenset too (a built-in one, the person's to change).
+///
+/// ```toml
+/// [[deck_templates]]
+/// context = "song"             # the context type
+/// screenset = "Song"           # the screenset's name
+/// layout = "layouts/song.json" # optional: WORKSPACE_EXPORT's tree, in its package
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct DeckTemplateDecl {
+    /// The context type it is the default for; unique among an
+    /// extension's templates.
+    pub context: String,
+    /// The screenset's name (its id is the name in lower case, `-` for
+    /// anything but letters and digits).
+    pub screenset: String,
+    /// A JSON file in its package: the screenset's layout as
+    /// `WORKSPACE_EXPORT` writes it.
+    pub layout: Option<String>,
+    /// `layout`'s text, read from the package when it loaded.
+    #[serde(skip_deserializing)]
+    pub layout_text: Option<String>,
+}
+
 /// A quick-add word a capture target adds (`[[capture_targets]]
 /// tokens`): one starting with `prefix` gives property `key` the rest
 /// (Keyflow's `{ prefix = "key:", key = "key" }`: `key:D` → `key: D`).
@@ -965,6 +995,8 @@ pub struct Contribution {
     /// What fills the navigator's panes while its views show
     /// (`[[navigator_providers]]`).
     pub navigator_providers: Vec<NavigatorProviderDecl>,
+    /// Context types' default screensets (`[[deck_templates]]`).
+    pub deck_templates: Vec<DeckTemplateDecl>,
     /// What a capture can become (`[[capture_targets]]`).
     pub capture_targets: Vec<CaptureTargetDecl>,
     /// Keys it binds to its actions in the app's keymap (`[[keys]]`).
@@ -1075,6 +1107,9 @@ impl Contribution {
             navigator_providers: join(&self.navigator_providers, &other.navigator_providers, |n| {
                 n.id.clone()
             }),
+            deck_templates: join(&self.deck_templates, &other.deck_templates, |d| {
+                d.context.clone()
+            }),
             capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
                 c.id.clone()
             }),
@@ -1129,6 +1164,11 @@ impl Contribution {
             self.navigator_providers
                 .iter()
                 .map(|n| format!("navigator_provider:{}", n.id)),
+        );
+        out.extend(
+            self.deck_templates
+                .iter()
+                .map(|d| format!("deck_template:{}", d.context)),
         );
         out.extend(
             self.capture_targets
@@ -1207,6 +1247,7 @@ impl Contribution {
             self.base_views.len(),
             self.project_types.len(),
             self.navigator_providers.len(),
+            self.deck_templates.len(),
             self.capture_targets.len(),
             self.key_bindings.len(),
             self.palette_views.len(),
@@ -1469,6 +1510,15 @@ impl Contribution {
             action(&what, &n.snapshot_action())?;
             for v in &n.views {
                 view(&what, v)?;
+            }
+        }
+        for d in &self.deck_templates {
+            let what = format!("deck template {}", d.context);
+            if d.context.is_empty() {
+                return refuse(what, "it needs `context`, a context type".to_owned());
+            }
+            if d.screenset.trim().is_empty() {
+                return refuse(what, "it needs `screenset`, a screenset's name".to_owned());
             }
         }
         for k in &self.key_bindings {
@@ -2257,6 +2307,18 @@ impl Contributions {
     #[must_use]
     pub fn navigator_providers(&self) -> Vec<By<NavigatorProviderDecl>> {
         self.all(|c| c.navigator_providers.clone())
+    }
+
+    /// Every context type's default screenset an extension gives
+    /// (`[[deck_templates]]`), in the order its owner came; the first for a
+    /// type wins.
+    #[must_use]
+    pub fn deck_templates(&self) -> Vec<By<DeckTemplateDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.deck_templates.clone())
+            .into_iter()
+            .filter(|d| seen.insert(d.item.context.clone()))
+            .collect()
     }
 
     /// The navigator provider that goes with view `view` of extension

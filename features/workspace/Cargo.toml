@@ -129,6 +129,10 @@ name = "actions"
 required-features = ["actions"]
 
 [[test]]
+name = "decks"
+required-features = ["actions", "home"]
+
+[[test]]
 name = "shot"
 required-features = ["native"]
 

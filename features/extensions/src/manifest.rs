@@ -1760,6 +1760,11 @@ title = "Setlists"
 icon = "list-music"
 views = ["chart"]
 actions = "LAB_CONTRIB_NAV"
+
+[[deck_templates]]
+context = "song"
+screenset = "Song"
+layout = "layouts/song.json"
 "#;
 
     #[test]
@@ -1788,6 +1793,11 @@ actions = "LAB_CONTRIB_NAV"
         assert_eq!(
             c.navigator_providers[0].snapshot_action(),
             "LAB_CONTRIB_NAV_SNAPSHOT"
+        );
+        assert_eq!(c.deck_templates[0].context, "song");
+        assert_eq!(
+            c.deck_templates[0].layout.as_deref(),
+            Some("layouts/song.json")
         );
         assert_eq!(c.embeds[0].max_height, Some(320));
         assert_eq!(m.views[0].placement, ViewPlacement::Split);

@@ -1642,6 +1642,13 @@ impl Host {
                 t.template_text = package.text(path).ok();
             }
         }
+        for d in &mut declared.deck_templates {
+            if d.layout_text.is_none()
+                && let Some(path) = &d.layout
+            {
+                d.layout_text = package.text(path).ok();
+            }
+        }
         for t in &mut declared.tours {
             if t.scenario_text.is_none() {
                 t.scenario_text = tours

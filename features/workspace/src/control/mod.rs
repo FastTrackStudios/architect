@@ -26,6 +26,7 @@
 //!   ([`crate::Aliases`]): an id read before still finds them.
 
 mod args;
+pub mod deck;
 #[cfg(feature = "actions")]
 mod list;
 mod portable;
