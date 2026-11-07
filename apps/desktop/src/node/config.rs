@@ -39,6 +39,9 @@
 //! | `ARCHITECT_BLOB_PLACEMENT` | `blob_placement` | `replicate` | `replicate`: every byte here and in the bucket; `primary`: the bucket holds them, this node keeps a cache |
 //! | `ARCHITECT_BLOB_CACHE_MB` | `blob_cache_mb` | `10240` | with `primary`, how much of the store is kept here (working copies are never evicted) |
 //! | `ARCHITECT_S3_BIND` | `s3_bind` | none | the roots over S3 (`127.0.0.1:9000`): a bucket per org, keys from `serve s3-key issue` (needs `files_dir`) |
+//! | `ARCHITECT_FILES_SITE` | `files_site` | the name | where this holder is (`home`, `starcommand`): copies at one site are not off-site |
+//! | `ARCHITECT_FILES_VERIFY_SECS` | `files_verify_secs` | `2592000` (30 days) | how long a copy's evidence (a scrub, a passed challenge) counts |
+//! | `ARCHITECT_FILES_SCRUB_MIB` | `files_scrub_mib` | `32` | MiB re-hashed per pass at most (0: only on `FILES_SCRUB`) |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -102,6 +105,9 @@ pub struct Config {
     pub blob_s3_secret_file: Option<PathBuf>,
     pub blob_placement: Placement,
     pub blob_cache_mb: u64,
+    pub files_site: Option<String>,
+    pub files_verify_secs: u64,
+    pub files_scrub_mib: u64,
 }
 
 impl Default for Config {
@@ -138,6 +144,9 @@ impl Default for Config {
             blob_s3_secret_file: None,
             blob_placement: Placement::Replicate,
             blob_cache_mb: 10_240,
+            files_site: None,
+            files_verify_secs: 30 * 24 * 3600,
+            files_scrub_mib: 32,
         }
     }
 }
@@ -318,6 +327,21 @@ impl Config {
         if let Some(v) = get("ARCHITECT_BLOB_CACHE_MB") {
             self.blob_cache_mb = v.trim().parse().map_err(|e| ConfigError::Env {
                 var: "ARCHITECT_BLOB_CACHE_MB",
+                why: format!("{e}"),
+            })?;
+        }
+        if let Some(v) = get("ARCHITECT_FILES_SITE") {
+            self.files_site = Some(v.trim().to_owned());
+        }
+        if let Some(v) = get("ARCHITECT_FILES_VERIFY_SECS") {
+            self.files_verify_secs = v.trim().parse().map_err(|e| ConfigError::Env {
+                var: "ARCHITECT_FILES_VERIFY_SECS",
+                why: format!("{e}"),
+            })?;
+        }
+        if let Some(v) = get("ARCHITECT_FILES_SCRUB_MIB") {
+            self.files_scrub_mib = v.trim().parse().map_err(|e| ConfigError::Env {
+                var: "ARCHITECT_FILES_SCRUB_MIB",
                 why: format!("{e}"),
             })?;
         }

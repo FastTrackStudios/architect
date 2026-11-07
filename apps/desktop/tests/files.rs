@@ -360,3 +360,81 @@ async fn an_unpinned_project_browses_over_webdav_and_a_file_opens_on_demand() {
     laptop.stop().await;
     always.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pin_is_a_second_verified_copy_that_the_node_counts_and_challenges() {
+    let Pair {
+        always,
+        laptop,
+        doc_id,
+        _tmp,
+        ..
+    } = pair().await;
+    let take = "Right Here/Audio Files/Bass_1.wav";
+    let hash = engine(&always)
+        .tree(doc_id)
+        .await
+        .unwrap()
+        .current(take)
+        .unwrap()
+        .content
+        .unwrap();
+    // Each holder is its iroh endpoint.
+    assert_eq!(
+        engine(&always).holder_id(),
+        architect_devices::endpoint_key(&always.endpoint.id().to_string())
+    );
+
+    // Before the pin: the node's copy only, and the laptop says so offline.
+    until("the laptop sees the node's copy", async || {
+        engine(&laptop).locations(&hash).await.verified == 1
+    })
+    .await;
+
+    engine(&laptop).pin(doc_id, None).await.unwrap();
+    until("the node counts two verified copies", async || {
+        let loc = engine(&always).locations(&hash).await;
+        loc.verified == 2
+            && loc
+                .copies
+                .iter()
+                .any(|c| c.holder.name == "laptop" && c.reachable)
+    })
+    .await;
+    // The node challenges the laptop's copy over the peer lane, and it passes.
+    until("a challenge of the laptop's copy passed", async || {
+        engine(&always)
+            .locations(&hash)
+            .await
+            .copies
+            .iter()
+            .any(|c| c.holder.name == "laptop" && c.how.starts_with("challenge by"))
+    })
+    .await;
+
+    // Two copies required. An unpin keeps the cached bytes, so it goes
+    // through and the laptop's copy turns `cached`; evicting those is
+    // refused while the node's is the only other copy.
+    engine(&laptop)
+        .set_policy(
+            "codywright",
+            Some(architect_files::copies::Policy {
+                min_verified: 2,
+                min_sites: 1,
+            }),
+        )
+        .await
+        .unwrap();
+    engine(&laptop).unpin(doc_id).await.unwrap();
+    let mine = engine(&laptop).locations(&hash).await;
+    let here = mine.copies.iter().find(|c| c.here).unwrap();
+    assert_eq!(here.state, architect_files::copies::CopyState::Cached);
+    let refused = engine(&laptop).evict(doc_id, "").await;
+    assert!(
+        matches!(
+            refused,
+            Err(architect_files::sync::EngineError::BelowPolicy(_))
+        ),
+        "{refused:?}"
+    );
+}

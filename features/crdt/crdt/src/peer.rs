@@ -265,7 +265,12 @@ impl<C: DocCatalog> DocPeerHost<C> {
 impl<C: DocCatalog + Clone> DocPeer for DocPeerHost<C> {
     async fn list(&self) -> Result<Vec<HeldDoc>, SyncError> {
         self.admit()?;
-        self.catalog.held().await
+        // Only what this caller may open: a peer is never told the names
+        // of documents it may not read, and one it lost access to drops
+        // out of the list (the files registry forgets it).
+        let mut held = self.catalog.held().await?;
+        held.retain(|d| self.registry.may_read(d.doc_id));
+        Ok(held)
     }
 
     async fn sync(

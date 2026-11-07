@@ -175,6 +175,23 @@ pub struct Hit {
     /// `project`, `file`, or an asset's `type` (`song`, `setlist`, `asset`).
     pub what: String,
     pub detail: String,
+    /// The root's org.
+    #[facet(default)]
+    pub org: String,
+    #[facet(default)]
+    pub size: u64,
+    /// The bytes' sha-256 (files), hex.
+    #[facet(default)]
+    pub content: Option<String>,
+    /// Where its bytes are: every holder with a copy (names), verified first.
+    #[facet(default)]
+    pub holders: Vec<String>,
+    /// Copies counted (verified).
+    #[facet(default)]
+    pub verified: u32,
+    /// A copy is on this device or on a holder connected now.
+    #[facet(default)]
+    pub reachable: bool,
 }
 
 /// A device's drive, for the app's status.

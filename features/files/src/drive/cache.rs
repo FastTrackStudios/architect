@@ -2,8 +2,9 @@
 //! mount, read while they arrive, and evicted.
 //!
 //! Every path that changes what this device holds goes through here
-//! ([`Cache::begin`], [`Cache::evict`]), so a holder's attestation (which
-//! blobs this device keeps, `feat/347-registry`) has one hook to add.
+//! ([`Cache::begin`], [`Cache::evict`]), so this device's attestations
+//! (`Engine::attest`, `Engine::evict_blob`) follow the mount's fetches
+//! and evictions the moment they happen.
 
 use std::collections::HashMap;
 use std::os::unix::fs::FileExt as _;
@@ -73,7 +74,13 @@ impl Cache {
         let this = self.clone();
         self.rt.spawn(async move {
             let state = match this.engine.fetcher.fetch(hash).await {
-                Ok(()) => Fetch::Done,
+                Ok(()) => {
+                    // The fetcher checked every byte: attested `cached`,
+                    // verified now, the moment it lands.
+                    this.engine.note_verified(&hash.to_hex());
+                    this.engine.attest(&[hash]).await;
+                    Fetch::Done
+                }
                 Err(e) => Fetch::Failed(e.to_string()),
             };
             this.set(hash, state);
@@ -154,21 +161,29 @@ impl Cache {
     }
 
     /// Drop `hash` from this device's cache (not a pinned root's working
-    /// file): the hook for a holder's attestation of an evicted blob.
+    /// file), through [`Engine::evict_blob`]: refused when it would leave
+    /// a file under its copy policy, attested `evicting` then withdrawn.
+    /// Blocking: call it off the runtime.
     ///
     /// # Errors
     ///
-    /// The file cannot be removed.
+    /// Under policy (`PermissionDenied`, naming the files), or the file
+    /// cannot be removed.
     pub fn evict(&self, hash: &Sha256) -> std::io::Result<()> {
-        let stored = self.engine.store.local.path_for(hash);
         self.fetches
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(hash);
-        match std::fs::remove_file(stored) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
-        }
+        let engine = self.engine.clone();
+        let hash = *hash;
+        self.rt
+            .block_on(async move { engine.evict_blob(hash).await })
+            .map_err(|e| match e {
+                crate::sync::EngineError::BelowPolicy(_) => {
+                    std::io::Error::new(std::io::ErrorKind::PermissionDenied, e.to_string())
+                }
+                other => std::io::Error::other(other.to_string()),
+            })
     }
 
     /// The bytes the cache holds (the blob store, working copies aside).

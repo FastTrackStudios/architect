@@ -377,6 +377,13 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         let bucket = files::backend(&config).await.map_err(StartError::Other)?;
         let mut fixed: Vec<Arc<dyn architect::blob::Remote>> = Vec::new();
         if let Some(s3) = bucket {
+            // The bucket is a holder in the ledger, attested as it changes.
+            let holder = architect_files::sync::BucketHolder::new(
+                engine.clone(),
+                &s3,
+                config.blob_s3_endpoint.as_deref(),
+            );
+            let s3 = s3.with_events(Arc::new(holder));
             fixed.push(Arc::new(s3.clone()));
             tasks.push(tokio::spawn(files::replicate_forever(
                 engine.clone(),
@@ -968,7 +975,21 @@ async fn sweep(
         .establish::<DocPeerClient>()
         .await
         .map_err(|e| format!("{e:?}"))?;
-    let theirs = client.list().await.map_err(|e| format!("{e:?}"))?;
+    let theirs = match client.list().await {
+        Ok(theirs) => theirs,
+        Err(e) => {
+            // Refused (not unreachable): this node was let out, so
+            // nothing that peer listed is this node's to keep.
+            let why = format!("{e:?}");
+            if matches!(e, vox::VoxError::User(_)) || why.contains("permission denied") {
+                catalog.listed_by(&peer.endpoint, &[]);
+            }
+            return Err(why);
+        }
+    };
+    // What this peer lets this node open: a root or ledger it listed
+    // before and no longer does is forgotten (access revoked).
+    catalog.listed_by(&peer.endpoint, &theirs);
     for held in &theirs {
         let at = DocAt {
             doc_id: held.doc_id,
