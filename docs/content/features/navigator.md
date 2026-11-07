@@ -53,7 +53,7 @@ use_context_provider(|| Signal::new(architect_navigator_extension::NavigatorMoun
     phone,
     columns,            // the shell sidebar's: one pane, or folders beside notes
     on_new_note,        // New note in the list's header, given the folder on show
-    on_vault: None,     // a provider's mount: shows the vault's navigator instead
+    on_vault: None,     // unused: one navigator holds the vaults and the providers
 }));
 rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), bare: true } }
 ```
@@ -63,30 +63,53 @@ directly. Its palette commands are then the view's own.
 
 ## Providers: pages and extensions fill it
 
-The navigator is the app's only left sidebar (#356). The vault fills it by
-default; a page or an extension fills it with its own containers and
-items while one of its views is on show: the Projects extension shows
-projects under their state and each one's tasks, the Tasks extension
-status groups and their tasks. A provider implements
+The navigator is the app's only left sidebar (#356), and since #443 it
+holds everything at once: every org's vault and every provider, in one
+left list with no switcher.
+
+```
+Inbox            ← top rows, no header: providers with section = "top"
+Calendar
+Projects           (and the pinned shortcuts)
+Recent Files/
+Vaults/            every org's top-level folders, one flat list,
+  ● Bible Study      each with its org's badge (and a book for a wiki)
+  ● Music Theory
+Assets/            every org's asset libraries, with their badges
+Tags/              the vaults' tags, merged by name; Untagged last
+```
+
+**Org = vault.** Each organization has one vault; its topics are its
+top-level folders, and a wiki is a folder whose folder note says
+`wiki: true`. The navigator holds them all through `Mounts`
+(`features/navigator/src/mounts.rs`): each vault under `@<org>/`, each
+provider under `~<provider>/`. Links resolve within a vault, and moving a
+note into another org's vault is refused, as it changes who owns it.
+Opening a note from any vault works without switching the app's vault.
+Tags are merged by name across the vaults; a tag lists every vault's
+notes with it.
+
+**Providers** contribute a section, not a mode. A provider implements
 `NavigatorProvider` from `architect-navigator-api` (`features/navigator-api`),
 which is MIT OR Apache-2.0, so a provider never links the GPL navigator;
-it declares `[[navigator_providers]]` in its manifest and serves the
+it declares `[[navigator_providers]]` in its manifest (with `section`,
+`position`, `visible` and `nest`, where the list shows it) and serves the
 provider as actions (`Builder::navigator`). See
 [Extensions](@/architecture/extensions.md#navigator-providers).
 
-In the app, opening a provider's view switches the sidebar to it, and a
-row over it switches back to the vault or to another provider. Each
-provider keeps its selection, open containers and widths while the app
-runs. Inside the navigator a provider is a `ProviderSource`: its
-containers are folders and its items notes, so the two panes, the phone's
-single pane, the keys, multi-select, grouping, sorting, pins and the
-search work for every provider. Opening an item does what the provider
-says (a note, a view, an action); dragging items onto a container moves
-them there; New makes one in the selected container. A provider whose
-containers have an order of their own (Today, Tomorrow, Later) says so
-(`Snapshot::ordered`), and they show in it until you order them by hand.
-A periodic note asked for while a provider shows (the Calendar's day
-heading) switches the sidebar back to the vault and opens there.
+Inside the navigator a provider is a `ProviderSource`: its containers are
+folders and its items notes, so the two panes, the phone's single pane,
+the keys, multi-select, grouping, sorting, pins and the search work for
+every provider. Opening an item does what the provider says (a note, a
+view, an action); dragging items onto a container moves them there; New
+makes one in the selected container. A provider whose containers have an
+order of their own (Today, Tomorrow, Later) says so (`Snapshot::ordered`),
+and they show in it until you order them by hand. A provider can make its
+containers the list's groups instead of rows (`Snapshot::grouped`: the
+Queue's Inbox, Today, Upcoming, Waiting), group its lists by a property in
+its own order (`Snapshot::group_by`), put a count on its row
+(`Snapshot::count`) and mark a container as another org's or shared
+(`Node::org`, `Node::shared`). A page with a provider selects its row.
 
 An item can be a whole context, loaded onto a
 [deck](@/architecture/workspace.md) of its own: a provider's

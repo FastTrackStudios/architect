@@ -549,7 +549,7 @@ impl NavigatorState {
 
     /// The list's context: what [`list::rows`] reads past the vault.
     #[must_use]
-    pub const fn list_context<'a>(&'a self, target: &'a NavTarget) -> ListContext<'a> {
+    pub fn list_context<'a>(&'a self, target: &'a NavTarget) -> ListContext<'a> {
         ListContext {
             target,
             settings: &self.effective,
@@ -560,6 +560,14 @@ impl NavigatorState {
             search: &self.search,
             full_text: self.full_text.as_ref(),
             hidden: &self.hidden,
+            group_order: match target {
+                NavTarget::Folder(f) => self
+                    .index
+                    .mount_of(f)
+                    .and_then(|m| m.group_by.as_ref())
+                    .map(|(_, order)| order.as_slice()),
+                _ => None,
+            },
         }
     }
 
@@ -866,8 +874,19 @@ impl NavigatorState {
             NavTarget::Folder(f) => self.index.mount_of(f).and_then(|m| m.list.as_ref()),
             _ => None,
         };
-        own.or_else(mounted)
-            .map_or_else(|| self.settings.clone(), |a| a.over(&self.settings))
+        let mut s = own
+            .or_else(mounted)
+            .map_or_else(|| self.settings.clone(), |a| a.over(&self.settings));
+        // A mount that groups its lists by a property of its own (a
+        // project's `section`), unless the place has its own grouping.
+        if let NavTarget::Folder(f) = target
+            && let Some((key, _)) = self.index.mount_of(f).and_then(|m| m.group_by.as_ref())
+            && own.is_none_or(|a| a.grouping.is_none())
+        {
+            s.grouping = crate::settings::Grouping::Property;
+            s.group_property.clone_from(key);
+        }
+        s
     }
 
     /// A folder row's height: the setting, 12 more on a phone.
@@ -1663,6 +1682,7 @@ impl NavigatorState {
         .with_order(self.all.orders().clone())
         .with_properties(self.all.browses_properties())
         .with_mounts(self.all.mounts().to_vec())
+        .with_folder_orgs(self.all.folder_orgs().clone())
     }
 
     /// A change in the source, as the shown vault takes it; `None` to
@@ -1912,7 +1932,7 @@ impl NavigatorState {
         match id {
             SHORTCUTS => self.shortcuts_folded = !self.shortcuts_folded,
             RECENT => self.recent_folded = !self.recent_folded,
-            tree::VAULTS | tree::ASSETS => {
+            _ if id == tree::VAULTS || id == tree::ASSETS || id.starts_with('~') => {
                 if !self.sections_folded.remove(id) {
                     self.sections_folded.insert(id.to_owned());
                 }
@@ -2015,6 +2035,15 @@ impl NavigatorState {
                 }
             }
         }
+        for m in mounts.iter().filter(|m| m.place == Place::Section) {
+            let tops = tree::ordered_children(&self.index, &m.id, &opts);
+            rows.push(section(&m.id, &m.title, !folded(&m.id), tops.len()));
+            if !folded(&m.id) {
+                for top in tops {
+                    rows.extend(tree::subtree(&self.index, &top, 0, expanded, &opts));
+                }
+            }
+        }
         let below = self.settings.include_descendants;
         if self.settings.tag_tree {
             rows.extend(tree::tag_rows(
@@ -2054,13 +2083,35 @@ impl NavigatorState {
     /// row of Vaults/) or an assets mount's container's, with several
     /// sources.
     #[must_use]
-    pub fn badge(&self, path: &str) -> Option<&crate::OrgBadge> {
+    pub fn badge(&self, path: &str) -> Option<crate::OrgBadge> {
+        // A container that says its org (an asset library, a shared
+        // project): that org's vault's badge, else its id alone.
+        if let Some(org) = self.index.folder_org(path).and_then(|o| o.org.as_ref()) {
+            let vault = self
+                .index
+                .mounts()
+                .iter()
+                .filter_map(|m| m.org.as_ref())
+                .find(|b| b.org == *org);
+            return Some(
+                vault
+                    .cloned()
+                    .unwrap_or_else(|| crate::OrgBadge::new(org, org, "#71717a")),
+            );
+        }
         let m = self.index.mount_of(path)?;
         let (_, rest) = crate::mounts::split(path)?;
         let top = !rest.is_empty() && !rest.contains('/');
         (top && matches!(m.place, Place::Vaults | Place::Assets))
-            .then_some(m.org.as_ref())
+            .then(|| m.org.clone())
             .flatten()
+    }
+
+    /// Whether the folder at `path` is shared from another org (a project
+    /// in a Space).
+    #[must_use]
+    pub fn is_shared(&self, path: &str) -> bool {
+        self.index.folder_org(path).is_some_and(|o| o.shared)
     }
 
     /// A top row's icon: its mount's (a provider's manifest `icon`), when

@@ -717,9 +717,30 @@ pub struct NavigatorProviderDecl {
     pub views: Vec<String>,
     /// Its actions' prefix (`PROJECTS_NAV`).
     pub actions: String,
+    /// Where the navigator's left list shows it (#443): `top`, a row of
+    /// its own at the top with no header (Inbox, Calendar, Projects);
+    /// `assets`, its containers in Assets/ with the other libraries;
+    /// `section` (the default), a folding section of its own.
+    pub section: String,
+    /// Its place among the providers in the same `section`, low first
+    /// (then by title).
+    pub position: Option<i32>,
+    /// Shown in the list; `false` leaves it out until the person turns it
+    /// on (Time, Files' health and find). Shown when unset.
+    pub visible: Option<bool>,
+    /// A top row's containers nest under it (Projects' projects); `false`
+    /// makes them the list's groups instead (the Queue's Inbox, Today,
+    /// Upcoming, Waiting). Nested when unset.
+    pub nest: Option<bool>,
 }
 
 impl NavigatorProviderDecl {
+    /// Whether the left list shows it ([`Self::visible`]).
+    #[must_use]
+    pub fn shown(&self) -> bool {
+        self.visible.unwrap_or(true)
+    }
+
     /// Its snapshot action (`<actions>_SNAPSHOT`), the one it must have.
     #[must_use]
     pub fn snapshot_action(&self) -> String {

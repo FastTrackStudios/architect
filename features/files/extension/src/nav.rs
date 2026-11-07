@@ -83,6 +83,94 @@ pub fn empty_state(error: Option<&str>) -> Snapshot {
         .item(connect)
 }
 
+/// Library `place`'s assets, as items in container `container`.
+async fn library_items(place: &str, container: &str) -> Vec<Item> {
+    let Ok(assets) = run("FILES_ASSETS", json!({ "root": place })).await else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for a in assets.as_array().into_iter().flatten() {
+        let name = text(a, "name");
+        let props: Vec<&str> = a
+            .get("properties")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter(|(k, _)| k.as_str() != "type")
+            .filter_map(|(_, v)| v.as_str())
+            .collect();
+        let at = millis(a);
+        let mut item = Item::new(format!("{place}|{name}"), container, name)
+            .dates(at, at)
+            .preview(props.join(" · "))
+            .opens(opens(json!({ "root": place, "asset": name })));
+        if let Some(ty) = a.pointer("/properties/type").and_then(Value::as_str) {
+            item = item.badge(ty);
+        }
+        out.push(item);
+    }
+    out
+}
+
+/// The asset libraries' provider's actions: `FILES_ASSETS_NAV_SNAPSHOT`, …
+pub const ASSETS_ACTIONS: &str = "FILES_ASSETS_NAV";
+
+/// Assets/ in the navigator (#443): every org's asset libraries in one
+/// flat list, each marked with its org, its assets on the right.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AssetsNav;
+
+/// The libraries of `roots` as nodes, by name, each its org's.
+#[must_use]
+pub fn libraries(roots: &[Value]) -> Vec<Node> {
+    let mut out: Vec<Node> = roots
+        .iter()
+        .filter(|r| text(r, "section") == "Assets")
+        .map(|r| {
+            Node::new(format!("root:{}", text(r, "place")), text(r, "name"))
+                .icon("library")
+                .org(text(r, "org"))
+        })
+        .collect();
+    out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    out
+}
+
+impl NavigatorProvider for AssetsNav {
+    fn snapshot(&self) -> ProviderFuture<Snapshot> {
+        Box::pin(async {
+            // No files here: no libraries, and nothing to say about it.
+            let roots = run("FILES_ROOTS", json!({}))
+                .await
+                .ok()
+                .and_then(|r| r.as_array().cloned())
+                .unwrap_or_default();
+            let mut snap = Snapshot::new("Assets");
+            for node in libraries(&roots) {
+                let place = node.id.trim_start_matches("root:").to_owned();
+                snap.items.extend(library_items(&place, &node.id).await);
+                snap = snap.node(node);
+            }
+            Ok(snap)
+        })
+    }
+
+    fn open(&self, item: String) -> ProviderFuture<Open> {
+        Box::pin(async move {
+            let (root, asset) = item.split_once('|').unwrap_or((&item, ""));
+            Ok(opens(json!({ "root": root, "asset": asset })))
+        })
+    }
+
+    fn move_items(&self, _items: Vec<String>, _to: String) -> ProviderFuture<()> {
+        Box::pin(async { Err("move assets in their library's folder".to_owned()) })
+    }
+
+    fn create(&self, _container: String, _title: String) -> ProviderFuture<Open> {
+        Box::pin(async { Err("add assets to their library's folder".to_owned()) })
+    }
+}
+
 impl NavigatorProvider for FilesNav {
     fn snapshot(&self) -> ProviderFuture<Snapshot> {
         Box::pin(async {
@@ -123,30 +211,8 @@ impl NavigatorProvider for FilesNav {
                 let org = text(r, "org");
                 let pinned = r.get("pinned").and_then(Value::as_bool).unwrap_or(false);
                 if text(r, "section") == "Assets" {
-                    let Ok(assets) = run("FILES_ASSETS", json!({ "root": place })).await else {
-                        continue;
-                    };
-                    for a in assets.as_array().into_iter().flatten() {
-                        let name = text(a, "name");
-                        let props: Vec<&str> = a
-                            .get("properties")
-                            .and_then(Value::as_object)
-                            .into_iter()
-                            .flatten()
-                            .filter(|(k, _)| k.as_str() != "type")
-                            .filter_map(|(_, v)| v.as_str())
-                            .collect();
-                        let at = millis(a);
-                        let mut item =
-                            Item::new(format!("{place}|{name}"), format!("root:{place}"), name)
-                                .dates(at, at)
-                                .preview(props.join(" · "))
-                                .opens(opens(json!({ "root": place, "asset": name })));
-                        if let Some(ty) = a.pointer("/properties/type").and_then(Value::as_str) {
-                            item = item.badge(ty);
-                        }
-                        snap.items.push(item);
-                    }
+                    snap.items
+                        .extend(library_items(&place, &format!("root:{place}")).await);
                 } else {
                     let entries = run("FILES_BROWSE", json!({ "root": place, "path": "" }))
                         .await
@@ -219,6 +285,27 @@ mod tests {
         );
         let down = empty_state(Some("connection refused"));
         assert_eq!(down.items[1].badges, ["offline"]);
+    }
+
+    #[test]
+    fn every_orgs_libraries_are_one_flat_list_marked_with_their_org() {
+        let roots = vec![
+            json!({"org": "days-to-praise", "section": "Assets", "place": "days-to-praise/Assets/Tracks", "name": "Tracks"}),
+            json!({"org": "codywright", "section": "Projects", "place": "codywright/Projects/Right Here", "name": "Right Here"}),
+            json!({"org": "codywright", "section": "Assets", "place": "codywright/Assets/Music", "name": "Music"}),
+        ];
+        let l = libraries(&roots);
+        let names: Vec<(&str, Option<&str>)> = l
+            .iter()
+            .map(|n| (n.title.as_str(), n.org.as_deref()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Music", Some("codywright")),
+                ("Tracks", Some("days-to-praise"))
+            ]
+        );
     }
 
     #[test]

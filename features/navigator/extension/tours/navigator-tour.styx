@@ -44,7 +44,7 @@ steps (
     {id new-2, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
     {
         id new
-        text "A new note goes in the folder you selected. Other extensions fill the sidebar too: while a Projects or Tasks view shows, it is their tree (navigator_providers)."
+        text "A new note goes in the folder you selected. Extensions add their own rows to the list: Inbox, Calendar and Projects at the top, then every vault's folders under Vaults (navigator_providers)."
         target @css"[data-testid=\"nv-new-note\"]"
     }
 )

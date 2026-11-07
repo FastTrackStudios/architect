@@ -62,13 +62,56 @@ group = "Files"
 effect = "mutating"
 params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
 
-# The sidebar while its views show: orgs, projects, libraries (src/nav.rs).
+[[actions]]
+id = "FILES_ASSETS_NAV_SNAPSHOT"
+name = "Assets: the navigator's libraries"
+description = "Its Assets/ provider's snapshot: every org's asset libraries as one flat list (each its org's), their assets as items."
+group = "Files"
+effect = "read_only"
+
+[[actions]]
+id = "FILES_ASSETS_NAV_OPEN"
+name = "Assets: open from the navigator"
+description = "What opening Assets/ item `item` (`<root>|<asset>`) does: the asset's page."
+group = "Files"
+effect = "read_only"
+params = '{"type":"object","properties":{"item":{"type":"string"}},"required":["item"]}'
+
+[[actions]]
+id = "FILES_ASSETS_NAV_MOVE"
+name = "Assets: move (refused)"
+description = "Assets move in their library's folder; the navigator does not move them."
+group = "Files"
+effect = "mutating"
+params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
+
+[[actions]]
+id = "FILES_ASSETS_NAV_CREATE"
+name = "Assets: create (refused)"
+description = "Assets are added to their library's folder; the navigator does not make them."
+group = "Files"
+effect = "mutating"
+params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
+
+# Files' own section (#443): each org, its projects and libraries, its
+# storage health and find (src/nav.rs). Off in the navigator's list (and
+# not read) until it is turned on.
 [[navigator_providers]]
 id = "files"
 title = "Files"
 icon = "hard-drive"
 views = ["root", "asset", "health", "find"]
 actions = "FILES_NAV"
+visible = false
+
+# Assets/: every org's asset libraries, flat, each with its org's badge.
+[[navigator_providers]]
+id = "assets"
+title = "Assets"
+icon = "library"
+views = []
+actions = "FILES_ASSETS_NAV"
+section = "assets"
 
 [[views]]
 id = "root"

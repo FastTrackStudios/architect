@@ -167,6 +167,8 @@ title = "Tasks"
 icon = "check"
 views = ["list", "today", "mine"]
 actions = "TASKS_NAV"
+# Folded into the Queue (Inbox) in the navigator (#443): off its list.
+visible = false
 
 [[views]]
 id = "list"

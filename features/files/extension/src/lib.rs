@@ -219,6 +219,7 @@ impl Extension for FilesExtension {
     fn build(&self, ext: &mut Builder) {
         *HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = Some(ext.handle());
         ext.navigator(nav::ACTIONS, nav::FilesNav);
+        ext.navigator(nav::ASSETS_ACTIONS, nav::AssetsNav);
         ext.view("root", RootView)
             .view("asset", AssetView)
             .view("drive", DriveView)
