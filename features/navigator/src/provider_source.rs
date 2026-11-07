@@ -308,6 +308,25 @@ impl NavigatorSource for ProviderSource {
         self.map().order.clone()
     }
 
+    fn folder_orgs(&self) -> std::collections::BTreeMap<String, crate::source::FolderOrg> {
+        let m = self.map();
+        m.snapshot
+            .nodes()
+            .into_iter()
+            .filter(|(_, n)| n.org.is_some() || n.shared)
+            .filter_map(|(_, n)| {
+                let path = m.folder_of.get(&n.id)?.clone();
+                Some((
+                    path,
+                    crate::source::FolderOrg {
+                        org: n.org.clone(),
+                        shared: n.shared,
+                    },
+                ))
+            })
+            .collect()
+    }
+
     /// An item's fields are the provider's, not a vault's properties.
     fn browses_properties(&self) -> bool {
         false

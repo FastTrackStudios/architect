@@ -352,6 +352,13 @@ pub trait NavigatorSource: Send + Sync {
     fn mounts(&self) -> Vec<crate::Mount> {
         Vec::new()
     }
+
+    /// The folders that are another org's, or shared from one, by path: a
+    /// provider's containers that say so (`Node::org`, `Node::shared`).
+    /// None by default.
+    fn folder_orgs(&self) -> std::collections::BTreeMap<String, FolderOrg> {
+        std::collections::BTreeMap::new()
+    }
     /// Calls `listener` with each change from now on, until the
     /// [`Subscription`] is dropped.
     fn subscribe(&self, listener: Listener) -> Subscription;
@@ -403,6 +410,15 @@ pub trait NavigatorSource: Send + Sync {
         let _ = path;
         None
     }
+}
+
+/// Whose a folder is ([`NavigatorSource::folder_orgs`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FolderOrg {
+    /// The org's id, when it says one.
+    pub org: Option<String>,
+    /// Shared from another org.
+    pub shared: bool,
 }
 
 /// A vault kept in memory.

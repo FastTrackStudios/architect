@@ -51,6 +51,8 @@ pub struct VaultIndex {
     no_properties: bool,
     /// The sources it is made of ([`NavigatorSource::mounts`]).
     mounts: Vec<crate::Mount>,
+    /// The folders that are another org's ([`NavigatorSource::folder_orgs`]).
+    folder_orgs: std::collections::BTreeMap<String, crate::source::FolderOrg>,
     /// Bumped by every change: what a view's memo keys on.
     revision: u64,
 }
@@ -63,6 +65,31 @@ impl VaultIndex {
             .with_order(source.child_order())
             .with_properties(source.browses_properties())
             .with_mounts(source.mounts())
+            .with_folder_orgs(source.folder_orgs())
+    }
+
+    /// With whose its folders are.
+    #[must_use]
+    pub fn with_folder_orgs(
+        mut self,
+        orgs: std::collections::BTreeMap<String, crate::source::FolderOrg>,
+    ) -> Self {
+        self.folder_orgs = orgs;
+        self
+    }
+
+    /// Whose the folder at `path` is, when its source says.
+    #[must_use]
+    pub fn folder_org(&self, path: &str) -> Option<&crate::source::FolderOrg> {
+        self.folder_orgs.get(path)
+    }
+
+    /// Every folder's org, as the source said.
+    #[must_use]
+    pub const fn folder_orgs(
+        &self,
+    ) -> &std::collections::BTreeMap<String, crate::source::FolderOrg> {
+        &self.folder_orgs
     }
 
     /// With the sources it is made of.

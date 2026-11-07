@@ -247,7 +247,18 @@ default; a page or an extension fills it while its view is on show.
   `apps/ui/src/setlists.rs` the sandbox's setlists).
 - **Serving it:** declare `[[navigator_providers]] id, title, icon, views,
   actions` and the actions it answers (`<actions>_SNAPSHOT`, `_OPEN`,
-  `_MOVE`, `_CREATE`); in `build`, `ext.navigator("<ACTIONS>", provider)`
+  `_MOVE`, `_CREATE`), and where the left list shows it (#443):
+  `section` (`top`: a row with no header, Inbox, Calendar, Projects;
+  `assets`: its containers in Assets/; else a folding section of its own),
+  `position` (low first), `visible` (`false`: left out, and never read)
+  and `nest` (`false`: its containers are the list's groups, not rows).
+  A `Snapshot` says its row's `count`, `grouped()` (its nodes the list's
+  groups, in order) and `group_by(key, order)` (its lists grouped by an
+  item property, in that order); a `Node` says its `org` and whether it is
+  `shared` (an asset library's org, a project shared through a Space: the
+  row's org badge and shared mark, `NavigatorSource::folder_orgs`,
+  `NavigatorState::badge`, `is_shared`). In `build`,
+  `ext.navigator("<ACTIONS>", provider)`
   (`features/extensions/src/linked.rs` `Builder::navigator`). A process,
   Luau or page extension answers those actions itself.
 - **The app** reads every provider through its actions
@@ -260,13 +271,20 @@ default; a page or an extension fills it while its view is on show.
   Files with no project folder on the device shows its empty state
   (`features/files/extension/src/nav.rs` `empty_state`) instead of an error.
   `ProviderSource::item_at` reads an opened path back as its item; a drag
-  onto a folder and New come back as `ProviderRequest`s. `apps/ui/src/vault.rs`
-  `FilesView` switches with the page, keeps each provider's view state, and
-  `ProviderFiles` polls the snapshot every three seconds and after each
-  request. A provider's `NavigatorMount` sets `on_vault`: the actions only
-  the vault's navigator does (`VAULT_ONLY` in
-  `features/navigator/extension/src/lib.rs`: the periodic notes and period
-  moves) switch the sidebar to the vault and run there.
+  onto a folder and New come back as `ProviderRequest`s. There is one
+  navigator, with no switcher: `apps/ui/src/vault.rs` `FilesView` mounts
+  each shown provider in the app's `Mounts` beside every org's vault
+  (`ProviderFeed` polls its snapshot every three seconds and after each
+  request, and sets its mount's count and groups); a page with a provider
+  selects its row. The org vaults come from `apps/ui/src/vaults.rs`
+  `catalog` (`vaults.json` `orgs`, or the file `ARCHITECT_ORG_VAULTS`
+  names: `[{org, name, colour, icon, dir}]`); the app's own vault is its
+  org's (`app_vault_org`). A note of another org's vault opens as the pane
+  state `@<org>/<path>` (`LabVault::vault_of`), so the app's vault never
+  switches, and its links resolve in its own vault.
+- **Assets/** is the Files extension's `assets` provider
+  (`features/files/extension/src/nav.rs` `AssetsNav`, `FILES_ASSETS_NAV`):
+  every org's libraries, flat, each its org's.
 - **Examples:** `extensions/calendar/src/nav.rs` `CalendarNav` (events by when they come; ordered),
   `extensions/projects/src/nav.rs` `ProjectsNav` (projects
   under their state, their tasks; a drag moves a task to a project) and

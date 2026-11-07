@@ -163,6 +163,8 @@ title = "Time"
 icon = "timer"
 views = ["report"]
 actions = "TIME_NAV"
+# A section of the navigator once turned on (#443).
+visible = false
 
 [[views]]
 id = "report"
