@@ -40,7 +40,7 @@
 //!   changes); [`service::Node`] over same-origin vox (`/vox`) and its
 //!   HTTP face (`POST /node/status`); and `/mcp`, with its bearer only,
 //!   serving `NODE_STATUS` and the `NOTES_*` actions.
-//! - **Share links** ([`shares`], #374): `/<code>/` serves a share's
+//! - **Share links** ([`shares`], #374): `/s/<code>/` serves a share's
 //!   scope of a vault as a Site to the audience it names, until it
 //!   expires or is revoked; the org lane serves `ShareLinks` to make,
 //!   change and revoke them.

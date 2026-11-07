@@ -2,7 +2,7 @@
 //!
 //! A [`Share`] is a scope of one vault (the whole vault, a folder, a tag,
 //! a list of notes or a base: [`ShareScope`]), a code (the link is
-//! `<node>/<code>`), who may open it ([`Audience`]), until when
+//! `<node>/s/<code>/`, [`LINKS`]), who may open it ([`Audience`]), until when
 //! ([`Share::expires_at`]) and what they may do there ([`ShareAccess`]).
 //! The always-on node serves it as a scoped Site, and refuses it once
 //! it is revoked or expired.
@@ -15,6 +15,14 @@
 //! the note's text [`crate::share_note`] (feature `server`).
 
 use facet::Facet;
+
+/// The path every share link is under: `<node>/s/<code>/`.
+///
+/// A fixed prefix keeps codes from clashing with the web front end's own paths
+/// (`/docs/`, `/app/`, its SPA fallback) on a host that serves both, and
+/// gives a reverse proxy one prefix to send to the node. The node's share
+/// sign-in is under it too (`/s/_signin`).
+pub const LINKS: &str = "/s";
 
 /// The folder of a vault its shares are kept in (one note each).
 pub const SHARES_FOLDER: &str = "_architect/shares";
@@ -56,6 +64,12 @@ pub fn code_from(bytes: [u8; 10]) -> String {
             char::from(CODE_ALPHABET.get(at).copied().unwrap_or(b'a'))
         })
         .collect()
+}
+
+/// The path of the link with this code: `/s/<code>/` ([`LINKS`]).
+#[must_use]
+pub fn link_path(code: &str) -> String {
+    format!("{LINKS}/{code}/")
 }
 
 /// Whether `s` is shaped like a code (what a link's first segment must
@@ -189,7 +203,7 @@ pub enum ShareAccess {
 /// A share link.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct Share {
-    /// The link's code: `<node>/<code>` ([`is_code`]).
+    /// The link's code: `<node>/s/<code>/` ([`is_code`]).
     pub code: String,
     /// The vault it shares from (the node's id for it).
     pub vault: String,
@@ -290,10 +304,17 @@ impl Share {
         self.access == ShareAccess::Comment
     }
 
-    /// Its link on the node at `origin` (`https://architect.example`).
+    /// Its path on the node: `/s/<code>/` ([`LINKS`]).
+    #[must_use]
+    pub fn path(&self) -> String {
+        link_path(&self.code)
+    }
+
+    /// Its link on the node at `origin` (`https://architect.example`):
+    /// `<origin>/s/<code>/`.
     #[must_use]
     pub fn url(&self, origin: &str) -> String {
-        format!("{}/{}/", origin.trim_end_matches('/'), self.code)
+        format!("{}{}", origin.trim_end_matches('/'), self.path())
     }
 }
 
@@ -441,6 +462,16 @@ mod tests {
         assert_ne!(code, code_from([0; 10]));
         assert!(!is_code("guide"));
         assert!(!is_code("ABCDEFGHJKMNPQRS"));
+    }
+
+    #[test]
+    fn links_are_under_the_share_prefix() {
+        let s = share(Audience::Link);
+        assert_eq!(s.path(), format!("/s/{}/", s.code));
+        assert_eq!(
+            s.url("https://architect.example/"),
+            format!("https://architect.example/s/{}/", s.code)
+        );
     }
 
     #[test]

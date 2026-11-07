@@ -37,7 +37,7 @@ and no GPU libraries in the image. The desktop build is unchanged.
 | **Its lanes over iroh** | The node's documents (`crdt::p2p::node_router`: `DocSync` and `DocPeer`), served to the devices its `Admission` lets in. A revoked device's connections close (`architect_devices::serve`). |
 | **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. With each peer it dials, the node keeps a live `DocSync` bridge per note (below), so an edit reaches the others within a second. Every `ARCHITECT_SWEEP_SECS` it also sweeps each peer (`crdt::peer::pull_with`), the fallback for what a bridge missed. |
 | **Sites** | Each vault in `ARCHITECT_SITES` is built as a Site ([sites](@/features/sites.md)) and rebuilt when the vault changes. |
-| **Share links** | `/<code>/`: a share's scope of a vault as a Site, to the audience it names, until it expires or is revoked ([below](#share-links)). |
+| **Share links** | `/s/<code>/`: a share's scope of a vault as a Site, to the audience it names, until it expires or is revoked ([below](#share-links)). |
 | **The HTTP face and vox** | `apps/desktop/src/node/service.rs` `Node` (`status`) over same-origin vox at `/vox`, its HTTP face (`POST /node/status`) and the Action List (`NODE_STATUS`). |
 | **MCP** | `/mcp`, only when `ARCHITECT_MCP_TOKEN_FILE` holds a bearer: `NODE_STATUS` and the `NOTES_LIST`, `NOTES_READ` and `NOTES_WRITE` actions (`apps/desktop/src/node/service.rs` `Notes`). An agent writes a note on the always-on node, and every device that syncs with it gets the note. |
 | **Health** | `GET /health` answers `ok`; `GET /version.json` gives the build. |
@@ -171,14 +171,17 @@ enrol_org = "fasttrackstudio"
 
 ## Share links
 
-A share link puts part of a vault on `https://<node>/<code>/`, the way you
-share a topic with someone (#374). The model is #197's share links
+A share link puts part of a vault on `https://<node>/s/<code>/`, the way you
+share a topic with someone (#374). Every link is under `/s/`
+(`features/spaces/src/share.rs` `LINKS`), so a reverse proxy sends one
+prefix to the node and a code never clashes with the web front end's paths
+(#431). The model is #197's share links
 (`features/spaces/src/share.rs` `Share`):
 
 | | |
 | --- | --- |
 | **Scope** | the whole vault, a folder (the link is rooted there), a tag, a list of notes, or the notes a `.base` file selects (`ShareScope`) |
-| **Code** | 16 random characters of base32, 80 bits (`code_from`): the link's first segment |
+| **Code** | 16 random characters of base32, 80 bits (`code_from`): the segment after `/s/` |
 | **Audience** | `public` (anyone, may be listed), `link` (anyone with the link, `noindex`), `org` (the org's members, signed in at the issuer), `invited:<emails>` (those people, signed in) (`Audience`) |
 | **Access** | read-only, or allowed to comment (`ShareAccess`) |
 | **Expiry** | an optional time, after which the link is `404` |
@@ -216,9 +219,9 @@ architect-desktop actions run SHARE_REVOKE --arg code=<code>
 layer, ahead of a Site mounted at `/`):
 
 - Each live share is built as a scoped Site (`architect_sites::Scope`) at
-  `/<code>/` into `<data>/shares/<code>/`. It is rebuilt whenever its vault
+  `/s/<code>/` into `<data>/shares/<code>/`. It is rebuilt whenever its vault
   changes: an edit on disk, from a peer's live bridge (#412) or from a web
-  client on the org lane. An open page reloads itself through `/<code>/_live`,
+  client on the org lane. An open page reloads itself through `/s/<code>/_live`,
   an event stream that fires after each rebuild. A revoke fires it as well,
   so the page reloads to `404`.
 - **Nothing outside the scope is in it, so nothing outside it can be
@@ -233,17 +236,17 @@ layer, ahead of a Site mounted at `/`):
   with the issuer's `whoami` and `orgs`, and caches the answer for a minute.
   With nobody signed in the link is `401` with a Sign in button, and a person
   it was not shared with gets `403`. An expired, revoked or unknown code is
-  `404`.
-- **Signing in** (`/_share/signin`) is the issuer's device sign-in. The node
+  `404`, and so is anything else under `/s/` that is not a live link.
+- **Signing in** (`/s/_signin`) is the issuer's device sign-in. The node
   starts one and links to its approval page, the person approves it there
   (signed in at the issuer), and the node sets the session as an `HttpOnly`,
   `SameSite=Lax` cookie (`Secure` behind `https`). The node never sees a
-  password. `/_share/signout` clears the cookie.
+  password. `/s/_signout` clears the cookie.
 - **Answers keep the code private:** `Referrer-Policy: no-referrer` on every
   response; `X-Robots-Tag: noindex` unless the share is public; `private,
   no-store` for a signed-in audience.
 - **Comments.** A share that takes comments shows each page's comments and a
-  form under it (`POST /<code>/_comment`). The comment is signed by the
+  form under it (`POST /s/<code>/_comment`). The comment is signed by the
   person if they are signed in, and by the name typed, marked "not signed
   in", if not. A read-only share refuses with `403`.
 
@@ -308,8 +311,8 @@ pod needs:
 - a persistent volume at `/data`: its iroh key (a stable endpoint id) and its
   documents;
 - liveness and readiness on `GET /health` (port `8080`);
-- every path of its host routed to it (share links are `/<code>/` at the
-  root, beside a Site at `/`), with `X-Forwarded-Proto` set so the sign-in
+- every path of its host routed to it (share links and their sign-in are
+  under `/s/`, beside a Site at `/`), with `X-Forwarded-Proto` set so the sign-in
   cookie is `Secure`; and, for each share with a domain of its own, that
   host on the same ingress with a certificate;
 - `ARCHITECT_HOST_ORG` for the org's lane, which the app makes shares on,

@@ -202,10 +202,27 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
             ShareAccess::Read,
         )
         .await;
-    let link = format!("/{}/", share.code);
+    let link = format!("/s/{}/", share.code);
 
     // The folder, rooted at the link: its home note and its other note.
     let home = page_with(&w.url(&link), None, "The album").await;
+    // Links are under `/s/` only (#431): the code at the root is not a
+    // share, `/s/<code>` without its slash is sent to the link, and an
+    // unknown code under `/s/` is 404 from the share layer.
+    let (status, _, body) = get(&w.url(&format!("/{}/", share.code)), None).await;
+    assert!(!body.contains("The album"), "{status}: {body}");
+    let bare = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .get(w.url(&format!("/s/{}", share.code)))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bare.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(bare.headers()["location"], link.as_str());
+    let (status, _, _) = get(&w.url("/s/abcdefghjkmnpqrs/"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let track = page_with(&w.url(&format!("{link}track/")), None, "Mix notes.").await;
     assert!(home.contains(&format!("href=\"{link}track/\"")), "{home}");
     assert!(track.contains("Track"));
@@ -337,14 +354,14 @@ async fn each_audience_lets_in_its_people_and_no_one_else() {
     // The org's members, signed in: bearer or cookie. Nobody: sign in.
     // Someone in another org: refused.
     let org = w.share(scope(), Audience::Org, ShareAccess::Read).await;
-    let link = w.url(&format!("/{}/", org.code));
+    let link = w.url(&format!("/s/{}/", org.code));
     let alan_cookie = format!("cookie:{}", w.alan);
     page_with(&link, Some(&w.alan), "Mix notes.").await;
     page_with(&link, Some(&alan_cookie), "Mix notes.").await;
     page_with(&link, Some(&w.grace), "Mix notes.").await;
     let (status, headers, body) = get(&link, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    assert!(body.contains("/_share/signin?to="), "{body}");
+    assert!(body.contains("/s/_signin?to="), "{body}");
     assert!(!body.contains("Mix notes."));
     assert_eq!(headers["cache-control"], "no-store");
     let (status, _, body) = get(&link, Some(&w.ada)).await;
@@ -365,14 +382,14 @@ async fn each_audience_lets_in_its_people_and_no_one_else() {
             ShareAccess::Read,
         )
         .await;
-    let link = w.url(&format!("/{}/", invited.code));
+    let link = w.url(&format!("/s/{}/", invited.code));
     page_with(&link, Some(&w.ada), "Mix notes.").await;
     assert_eq!(get(&link, Some(&w.alan)).await.0, StatusCode::FORBIDDEN);
     assert_eq!(get(&link, None).await.0, StatusCode::UNAUTHORIZED);
 
     // Public: anyone, and it may be listed.
     let public = w.share(scope(), Audience::Public, ShareAccess::Read).await;
-    let link = w.url(&format!("/{}/", public.code));
+    let link = w.url(&format!("/s/{}/", public.code));
     page_with(&link, None, "Mix notes.").await;
     assert!(!get(&link, None).await.1.contains_key("x-robots-tag"));
 
@@ -385,7 +402,7 @@ async fn each_audience_lets_in_its_people_and_no_one_else() {
     // Signing in starts the issuer's device sign-in: an approval link,
     // and the node never asks for a password.
     let (status, headers, body) =
-        get(&w.url(&format!("/_share/signin?to=/{}/", org.code)), None).await;
+        get(&w.url(&format!("/s/_signin?to=/s/{}/", org.code)), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.contains("Approve sign-in"), "{body}");
     assert!(!body.to_lowercase().contains("password"), "{body}");
@@ -411,7 +428,7 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
             ShareAccess::Comment,
         )
         .await;
-    let link = format!("/{}/", talk.code);
+    let link = format!("/s/{}/", talk.code);
     page_with(&w.url(&link), None, "The album").await;
     let res = reqwest::Client::new()
         .post(w.url(&format!("{link}_comment")))
@@ -443,9 +460,9 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
             ShareAccess::Read,
         )
         .await;
-    page_with(&w.url(&format!("/{}/", read.code)), None, "The album").await;
+    page_with(&w.url(&format!("/s/{}/", read.code)), None, "The album").await;
     let res = reqwest::Client::new()
-        .post(w.url(&format!("/{}/_comment", read.code)))
+        .post(w.url(&format!("/s/{}/_comment", read.code)))
         .form(&[("page", "/"), ("text", "hi")])
         .send()
         .await
@@ -490,7 +507,7 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
         })
         .await
         .unwrap();
-    let link = w.url(&format!("/{}/", soon.code));
+    let link = w.url(&format!("/s/{}/", soon.code));
     page_with(&link, None, "The album").await;
     tokio::time::sleep(Duration::from_millis(2500)).await;
     let (status, _, body) = get(&link, None).await;
@@ -553,7 +570,7 @@ async fn the_apps_share_actions_make_list_and_revoke_a_link() {
     .unwrap();
     let url = made["share"]["url"].as_str().unwrap().to_owned();
     let code = made["share"]["code"].as_str().unwrap().to_owned();
-    assert_eq!(url, format!("{host}/{code}/"));
+    assert_eq!(url, format!("{host}/s/{code}/"));
     assert_eq!(made["share"]["scope"], "the folder Shared");
     assert_eq!(made["share"]["state"], "live");
     page_with(&url, None, "The album").await;
