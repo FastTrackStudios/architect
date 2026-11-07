@@ -253,3 +253,40 @@ fn notes_take_icons_from_themselves_their_names_and_types_and_frontmatter() {
     src.write(&ops).unwrap();
     assert!(src.file("Inbox/Starred.md").unwrap().get("icon").is_none());
 }
+
+#[test]
+fn a_project_folder_draws_the_project_glyph_not_a_folder() {
+    let src = vault()
+        .with_file(NoteFile::new("Projects/Alpha/project.md", NOW, NOW))
+        .with_file(
+            NoteFile::new("Projects/Beta/project.md", NOW, NOW)
+                .property("icon", PropertyValue::Text("music".to_owned()))
+                .property("color", PropertyValue::Text("#e11d48".to_owned())),
+        );
+    let mut s = state(&src, NavigatorSettings::default());
+    let glyph = Some(Icon::Lucide(
+        architect_navigator_api::PROJECT_ICON.to_owned(),
+    ));
+    // A folder with a `project.md` is a project: its glyph, on the folder
+    // and on its note (Recent Files, the list).
+    assert_eq!(s.folder_icon("Projects/Alpha"), glyph);
+    assert_eq!(s.file_icon("Projects/Alpha/project.md"), glyph);
+    // A plain folder keeps the folder icon (none of its own); a note its
+    // type's.
+    assert_eq!(s.folder_icon("Projects"), None);
+    assert_eq!(s.folder_icon("Inbox"), None);
+    assert_ne!(s.file_icon("Projects/Alpha/Spec.md"), glyph);
+    // A project's own icon and colour replace the glyph.
+    let own = Some(Icon::Lucide("music".to_owned()));
+    assert_eq!(s.folder_icon("Projects/Beta"), own);
+    assert_eq!(s.file_icon("Projects/Beta/project.md"), own);
+    assert_eq!(s.colour("folder:Projects/Beta"), Some("#e11d48"));
+    assert_eq!(s.colour("file:Projects/Beta/project.md"), Some("#e11d48"));
+    // A person's icon on the folder beats them all.
+    s.paint(Paint::Icon, "folder:Projects/Beta", Some("LiRocket"))
+        .unwrap();
+    assert_eq!(
+        s.folder_icon("Projects/Beta"),
+        Some(Icon::Lucide("rocket".to_owned()))
+    );
+}

@@ -1706,7 +1706,7 @@ songs, notes, sub-projects and tasks on the right).
 [[navigator_providers]]
 id = "projects"
 title = "Projects"           # its row in the left list
-icon = "folder-kanban"       # the row's icon
+icon = "box"                 # the row's icon
 views = ["list", "page"]     # its own [[views]]: one on show selects its row
 actions = "PROJECTS_NAV"     # PROJECTS_NAV_SNAPSHOT (required), _OPEN, _MOVE, _CREATE
 section = "top"              # top (a row, no header) | assets (in Assets/) | section (default)

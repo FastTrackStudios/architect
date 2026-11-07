@@ -1001,6 +1001,18 @@ pub fn DeckStrip(
         let out = popped.contains(&d.id);
         let modified = d.modified(form);
         let title = d.context.title.clone();
+        // Its context's icon: a Lucide name, or an emoji.
+        let glyph = d.context.icon.clone().map(|i| {
+            let i = i.trim().trim_matches('"').to_owned();
+            i.strip_prefix("lucide:").map_or_else(|| i.clone(), str::to_owned)
+        });
+        let glyph_colour = d.context.colour.clone();
+        let lucide = glyph
+            .clone()
+            .filter(|g| architect_shell::lucide::glyphs(g).is_some());
+        let emoji = glyph
+            .filter(|g| lucide.is_none() && !g.is_ascii())
+            .map(|g| g.strip_prefix("emoji:").unwrap_or(&g).to_owned());
         let badge = d.badge.clone();
         let screenset = d.screenset.clone();
         let bg = if active { t.sheet.clone() } else { bar.clone() };
@@ -1072,6 +1084,14 @@ pub fn DeckStrip(
                 // In a window of its own: says so.
                 if out {
                     AppWindow { size: 13 }
+                }
+                if let Some(name) = lucide {
+                    span { "data-deck-icon": "{name}", style: "flex:0 0 auto; display:flex;",
+                        architect_shell::lucide::LucideIcon { name: name.clone(), size: 13, color: glyph_colour }
+                    }
+                }
+                if let Some(e) = emoji {
+                    span { "data-deck-icon": "{e}", style: "flex:0 0 auto; font-size:12px; line-height:1;", "{e}" }
                 }
                 span { style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \
                                font-size:12px; font-weight:{weight};",

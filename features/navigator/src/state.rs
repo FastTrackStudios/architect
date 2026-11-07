@@ -40,7 +40,7 @@ mod looks;
 pub use files::{
     Made, MergeSeparator, NameCheck, NewKind, NewNote, OPEN_ALL_WARNING, Reader, check_name,
 };
-pub use looks::Paint;
+pub use looks::{PROJECT_NOTE, Paint};
 
 /// A key the navigator answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -487,6 +487,18 @@ impl NavigatorState {
     pub fn colour(&self, target: &str) -> Option<&str> {
         let key = colour_key(target);
         if let Some(c) = self.frontmatter_colour(&key) {
+            return Some(c);
+        }
+        // A project's folder and its note: its project's colour, over its
+        // parents'.
+        let project = key.strip_prefix("folder:").or_else(|| {
+            key.strip_prefix("file:")?
+                .strip_suffix(&format!("/{PROJECT_NOTE}"))
+        });
+        if let Some(path) = project
+            && !self.colours.contains_key(&key)
+            && let Some(c) = self.folder_own_colour(path)
+        {
             return Some(c);
         }
         self.inherited(&self.colours, &key)

@@ -33,6 +33,15 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+/// A project's glyph, a Lucide name.
+///
+/// It shows wherever a project does: the navigator's Projects row and its
+/// projects, sub-projects, a project's folder in a vault, its
+/// `project.md`, its deck's tab. It replaces the folder icon; nothing
+/// folder-shaped is in it. A project's own `icon`
+/// (and `color`), when its `project.md` sets one, replaces it in turn.
+pub const PROJECT_ICON: &str = "box";
+
 /// Milliseconds since the Unix epoch, UTC.
 pub type Millis = i64;
 

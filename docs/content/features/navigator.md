@@ -111,6 +111,16 @@ its own order (`Snapshot::group_by`), put a count on its row
 (`Snapshot::count`) and mark a container as another org's or shared
 (`Node::org`, `Node::shared`). A page with a provider selects its row.
 
+**A project's icon replaces the folder icon.** A project shows one
+glyph, `architect_navigator_api::PROJECT_ICON` (Lucide `box`). It is
+used for the Projects row and its projects, sub-projects, a vault folder
+with a `project.md` (`Projects/Album` in Vaults/), that `project.md`
+(Recent Files, the list) and the project's deck tab. A project's own
+`icon` and `color` in its `project.md` replace the glyph and colour it
+(`NavigatorState::project_page`, `folder_icon`, `file_icon`, `colour`).
+An icon a person sets on the folder beats both. Plain folders keep the
+folder icon, and notes keep their type's.
+
 An item can be a whole context, loaded onto a
 [deck](@/architecture/workspace.md) of its own: a provider's
 `Open::Context` (a setlist's song), or a project: its folder in the vault,

@@ -79,6 +79,8 @@ pub fn notes_base() -> String {
         "area",
         "members",
         "icon",
+        "color",
+        "colour",
         "tags",
         "kind",
         "parent",

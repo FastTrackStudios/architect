@@ -333,6 +333,10 @@ default; a page or an extension fills it while its view is on show.
   - Expand and collapse. An optional root row.
   - Manual order: `NavigatorState::move_child`, `reset_order`.
   - Note counts.
+  - A project's glyph: `architect_navigator_api::PROJECT_ICON` (`box`) for
+    every project row (Projects, sub-projects, a vault folder with a
+    `project.md`, that note, a deck tab), its own `icon`/`color` over it;
+    `NavigatorState::project_page`, `FolderMeta::colour`, `Node::colour`.
   - Auto-reveal of the active note: `NavigatorState::set_active`, `reveal`.
     `set_active_with(path, false)` lights it without revealing it (a deck's
     project stays selected); `show_folder` selects a row with the rows above

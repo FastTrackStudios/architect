@@ -48,6 +48,9 @@ pub struct DeckContext {
     /// A Lucide icon's name.
     #[facet(default)]
     pub icon: Option<String>,
+    /// Its icon's colour, a CSS colour (a project's own `color`).
+    #[facet(default)]
+    pub colour: Option<String>,
     /// Its own folder, when it has one (a project's): its override is kept
     /// in the folder's `.architect/` (`home::ContextFiles`).
     #[facet(default)]
@@ -61,6 +64,7 @@ impl DeckContext {
             id: id.into(),
             title: title.into(),
             icon: None,
+            colour: None,
             folder: None,
         }
     }
@@ -68,6 +72,12 @@ impl DeckContext {
     #[must_use]
     pub fn icon(mut self, icon: impl Into<String>) -> Self {
         self.icon = Some(icon.into());
+        self
+    }
+
+    #[must_use]
+    pub fn colour(mut self, colour: impl Into<String>) -> Self {
+        self.colour = Some(colour.into());
         self
     }
 
