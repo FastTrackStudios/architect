@@ -41,6 +41,7 @@ fn main() -> std::process::ExitCode {
             args.next();
         }
         Some("files") => return architect_desktop::node::cli::files(args.skip(1)),
+        Some("agent") => return architect_desktop::node::cli::agent(args.skip(1)),
         Some(architect_desktop::node::cli::GUARD) => {
             return architect_desktop::node::cli::guard(args.skip(1));
         }
