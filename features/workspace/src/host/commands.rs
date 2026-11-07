@@ -745,14 +745,26 @@ fn to_center(host: Host) {
 }
 
 /// Opens a view of `kind` at `target` (where it lives when unset), next
-/// to the active pane, the focus going to it.
+/// to the active pane, the focus going to it. A view of the main area
+/// opens beside the document on show when the active pane is a dock's
+/// (#442: a page took the sidebar's place), else in the center.
 fn open_view(host: Host, kind: &str, target: Option<Target>) {
     let Some(home) = target.or_else(|| host.views.peek().get(kind).map(|v| v.home)) else {
         return;
     };
     let (active, first) = {
         let w = host.workspace.peek();
-        let first = w.active_group().or_else(|| {
+        let docked = |p: &crate::model::PaneId| {
+            w.locate(p)
+                .is_some_and(|l| matches!(l.area, crate::model::Area::Dock(_)))
+        };
+        let active = match w.active.clone() {
+            Some(p) if docked(&p) && !matches!(home, Target::Dock(_)) => {
+                w.current_document().cloned()
+            }
+            other => other,
+        };
+        let first = w.active_group().filter(|_| active.is_some()).or_else(|| {
             w.windows
                 .first()?
                 .center
@@ -760,7 +772,7 @@ fn open_view(host: Host, kind: &str, target: Option<Target>) {
                 .first_group()
                 .map(|g| g.id)
         });
-        (w.active.clone(), first)
+        (active, first)
     };
     let in_group = || {
         first.map(|g| At::Group {

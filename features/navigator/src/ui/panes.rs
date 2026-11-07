@@ -1186,7 +1186,9 @@ fn FileRow(
             if let Some(img) = image {
                 div { class: "nv-thumb-box", style: "flex:0 0 auto; align-self:center; display:flex; align-items:center; justify-content:center; height:{size}px; width:{image_w}; min-width:{size}px; border-radius:6px; overflow:hidden; background:var(--nv-thumb);",
                     match img {
-                        ThumbView::Url(u) => rsx! { img { class: "nv-feature-image", src: "{u}", alt: "", style: "height:{size}px; width:{image_w}; object-fit:cover; display:block;" } },
+                        // Fit, not cover: a wide image (a label, a banner) shows whole in
+                        // its box rather than as its middle (#442: "hitect l").
+                        ThumbView::Url(u) => rsx! { img { class: "nv-feature-image", src: "{u}", alt: "", style: "width:100%; height:100%; object-fit:contain; display:block;" } },
                         ThumbView::Badge(b) => {
                             // A long kind (`CANVAS`, `EXCALIDRAW`) smaller, to fit the box.
                             let font = if b.len() > 4 { 8 } else { 10 };

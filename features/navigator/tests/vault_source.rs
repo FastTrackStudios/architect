@@ -345,7 +345,8 @@ fn tag_writes_change_the_markdown_and_say_which_notes_changed() {
         "{}",
         read("Notes/Plan.md")
     );
-    // A property's key alone is written empty (`null`).
+    // A property's key alone is written empty, as Obsidian writes it
+    // (`status:`, which reads back as `null`).
     s.write(&[FileOp::SetProperty {
         path: "Notes/Plan.md".to_owned(),
         key: "status".to_owned(),
@@ -353,7 +354,7 @@ fn tag_writes_change_the_markdown_and_say_which_notes_changed() {
     }])
     .unwrap();
     assert!(
-        read("Notes/Plan.md").contains("status: null"),
+        read("Notes/Plan.md").contains("status:\n"),
         "{}",
         read("Notes/Plan.md")
     );

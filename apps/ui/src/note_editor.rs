@@ -19,6 +19,15 @@
 //! slash menu (`\`), and its toolbars of `when = "editor:note"` on the
 //! Typing Toolbar while the note is typed in.
 //!
+//! The note is drawn as the editor draws Markdown
+//! (`editor_state::markdown::live_preview_with`, Obsidian's live preview:
+//! a line's markup shows while the caret is on it), its `[[links]]`
+//! resolved against the vault ([`NoteVault`]) and its embedded images
+//! read from it. Before #442 it was given only the extensions'
+//! decorations, so a note read as its raw source in the editor's own
+//! 480px scroll box (`--ed-scroll-height`); now it grows with the note,
+//! and the pane scrolls.
+//!
 //! Its fence registry is the extensions' (`Embeds::fences`): a fenced
 //! block whose language an extension claims (the Board's ```` ```kf ````)
 //! keeps its source, and under it the extension's embed is mounted as a
@@ -35,8 +44,9 @@ use architect_extensions::editor::{DecorationSpec, EditCommand, EditorError, Edi
 use architect_extensions::embeds::{EmbedView, WidgetView};
 use architect_extensions::interface::ExtensionUi;
 use dioxus::prelude::*;
+use editor_view::editor_state::markdown::{VaultBlockHit, VaultLookup, VaultPageHit};
 use editor_view::editor_state::{
-    DecoratedRange, EditorState, History, KeySpec, Keymap, TransactionSpec, ext,
+    DecoratedRange, DecorationKind, EditorState, History, KeySpec, Keymap, TransactionSpec, ext,
 };
 use editor_view::palette::{CommandPalette, PaletteState};
 use editor_view::{DecorationSource, Editor, TransactionEvent, WidgetMounts};
@@ -244,11 +254,18 @@ fn redo(_: &EditorState) -> Option<TransactionSpec> {
 /// inside a pane does not apply in Blitz). A mark's background goes on its
 /// inner span too: Blitz paints an inline background only on the span that
 /// owns the glyphs, and a mark's text is in a tile span inside it.
+///
+/// The editor sits flush on the page (the editor's own `editor-frame
+/// editor-frame--flush`: no card, no line numbers) and is as tall as the
+/// note: `--ed-scroll-height: auto`, so the pane scrolls it, not a box of
+/// its own (every line is built then; a note is not a 100k-line file).
 const LAYOUT: &str = "
-.lab-note-editor { max-width: 640px; box-sizing: border-box; border-radius: 8px;
-  border: 1px solid var(--border); background: var(--card); color: var(--foreground);
-  padding: 10px 12px 10px 28px; font-family: ui-monospace, Menlo, monospace; font-size: 13px;
-  line-height: 1.5; position: relative; }
+.lab-note-editor { box-sizing: border-box; color: var(--foreground); position: relative;
+  max-width: 760px; width: 100%; padding: 0; min-height: 0; }
+.lab-note-editor .editor-root { --ed-scroll-height: auto; padding-left: 0; min-height: 120px;
+  font-size: 15px; line-height: 1.65; }
+.lab-note-editor .editor-root.ed-render-native { height: auto; overflow: visible; }
+.lab-note-editor .md-embed-image { max-width: 100%; height: auto; border-radius: 6px; }
 .lab-note-editor .ext-mark.ext-todo,
 .lab-note-editor .ext-mark.ext-todo span { background: var(--accent); color: var(--accent-foreground); }
 .lab-note-editor .editor-gutter { color: var(--muted-foreground); }
@@ -294,6 +311,167 @@ pub fn replace_spec(old: &str, new: &str) -> Option<TransactionSpec> {
     )
 }
 
+/// The vault a note's editor reads: its `[[links]]` resolved, its images
+/// loaded from it.
+#[derive(Clone)]
+pub struct NoteVault(pub architect_navigator::VaultSource);
+
+impl PartialEq for NoteVault {
+    /// One vault for the run: a new handle to it is no new vault.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl NoteVault {
+    /// The vault's file `name` names (`Page`, `Folder/Page`, `Page.md`, a
+    /// `.base`, an attachment): its path.
+    #[must_use]
+    pub fn file_path(&self, name: &str) -> Option<String> {
+        self.0.vault().with(|v| file_of(v, name))
+    }
+
+    /// The live preview's decorations for `s`, the vault's.
+    fn preview(&self, s: &EditorState) -> Vec<DecoratedRange> {
+        use architect_navigator::NavigatorSource as _;
+        let mut out = self
+            .0
+            .vault()
+            .with(|v| editor_view::editor_state::markdown::live_preview_with(s, Some(&Lookup(v))));
+        for d in &mut out {
+            if let DecorationKind::Widget { html } = &mut d.kind
+                && html.contains("md-embed-image")
+                && let Some(next) = with_src(html, |src| self.0.resource_url(src))
+            {
+                *html = next;
+            }
+        }
+        out
+    }
+}
+
+/// `html`'s first `src="…"` resolved by `resolve`, unless it is a URL
+/// already; `None` when it has none or it is not the vault's.
+fn with_src(html: &str, resolve: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let (head, rest) = html.split_once("src=\"")?;
+    let (src, tail) = rest.split_once('"')?;
+    let raw = src
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    if raw.contains("://") || raw.starts_with("data:") {
+        return None;
+    }
+    let url = resolve(&raw)?.replace('"', "%22");
+    Some(format!("{head}src=\"{url}\"{tail}"))
+}
+
+/// The vault's note `name` names: by its path, else by its file's name.
+fn page_of<'v>(
+    v: &'v vault::obsidian::Vault,
+    name: &str,
+) -> Option<&'v vault::obsidian::VaultPage> {
+    let name = name.trim();
+    let name = name.strip_suffix(".md").unwrap_or(name);
+    let by_path = v.pages.iter().find(|p| {
+        p.rel_path
+            .strip_suffix(".md")
+            .is_some_and(|r| r.eq_ignore_ascii_case(name))
+    });
+    by_path.or_else(|| {
+        let base = name.rsplit('/').next().unwrap_or(name);
+        v.pages
+            .iter()
+            .find(|p| p.basename.eq_ignore_ascii_case(base))
+    })
+}
+
+/// The vault's file `name` names: a note, else a `.base` or an attachment
+/// by its path or its file's name (Obsidian links any file).
+fn file_of(v: &vault::obsidian::Vault, name: &str) -> Option<String> {
+    if let Some(p) = page_of(v, name) {
+        return Some(p.rel_path.clone());
+    }
+    let name = name.trim();
+    let file = name.rsplit('/').next().unwrap_or(name);
+    let by = |rel: &str| {
+        rel.eq_ignore_ascii_case(name)
+            || rel
+                .rsplit('/')
+                .next()
+                .is_some_and(|f| f.eq_ignore_ascii_case(file))
+    };
+    v.bases
+        .iter()
+        .map(|b| b.rel_path.as_str())
+        .chain(v.attachments.iter().map(|a| a.rel_path.as_str()))
+        .find(|rel| by(rel))
+        .map(str::to_owned)
+}
+
+/// The vault, as the editor's live preview asks it about links.
+struct Lookup<'v>(&'v vault::obsidian::Vault);
+
+impl VaultLookup for Lookup<'_> {
+    fn lookup_block(&self, _: &str) -> Option<VaultBlockHit> {
+        None
+    }
+
+    fn lookup_page(&self, name: &str) -> Option<VaultPageHit> {
+        let Some(p) = page_of(self.0, name) else {
+            // A `.base` or an attachment: resolved, nothing to preview.
+            return file_of(self.0, name).map(|_| VaultPageHit {
+                preview: String::new(),
+            });
+        };
+        let body = crate::properties::split(&p.raw).1;
+        Some(VaultPageHit {
+            preview: body.chars().take(200).collect(),
+        })
+    }
+
+    fn lookup_section(&self, page: &str, heading: &str) -> Option<String> {
+        let p = page_of(self.0, page)?;
+        section(&p.raw, heading)
+    }
+
+    fn lookup_block_short(&self, _: &str, _: &str) -> Option<String> {
+        None
+    }
+}
+
+/// The section of `raw` under heading `name`: its heading line and what
+/// follows, to the next heading as high.
+fn section(raw: &str, name: &str) -> Option<String> {
+    let level = |l: &str| {
+        let n = l.chars().take_while(|c| *c == '#').count();
+        (n > 0 && l.chars().nth(n) == Some(' ')).then_some(n)
+    };
+    let mut out = String::new();
+    let mut at: Option<usize> = None;
+    for line in raw.lines() {
+        match (at, level(line)) {
+            (None, Some(n))
+                if line
+                    .trim_start_matches('#')
+                    .trim()
+                    .eq_ignore_ascii_case(name.trim()) =>
+            {
+                at = Some(n);
+            }
+            (Some(n), Some(m)) if m <= n => break,
+            _ => {}
+        }
+        if at.is_some() {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    at.map(|_| out)
+}
+
 /// A Markdown note's editor: `text` to start with; each change of its text
 /// given to `on_change`. `incoming` is the text to show instead, from
 /// outside the editor (the file changed on disk, merged with the typing),
@@ -305,6 +483,8 @@ pub fn NoteEditor(
     text: String,
     on_change: Callback<String>,
     #[props(default)] incoming: Option<(u64, String)>,
+    #[props(default)] vault: Option<NoteVault>,
+    #[props(default)] on_link: Option<Callback<String>>,
 ) -> Element {
     let state = use_signal(|| EditorState::new(text.clone()));
     let history = use_signal(History::new);
@@ -405,13 +585,18 @@ pub fn NoteEditor(
         DecorationSource::new(move |s: &EditorState| {
             let specs: Vec<DecorationSpec> = decos.read().iter().map(|(_, d)| d.clone()).collect();
             let text = s.doc.to_string();
-            let mut out = ext::decorations(&specs, &text);
+            let mut out = vault.as_ref().map_or_else(
+                || editor_view::editor_state::markdown::live_preview(s),
+                |v| v.preview(s),
+            );
+            out.extend(ext::decorations(&specs, &text));
             out.extend(
                 claimed_fences(&text, &claimed())
                     .iter()
                     .enumerate()
                     .map(|(i, f)| DecoratedRange::mount(f.at, &fence_mount(i), true)),
             );
+            out.sort_by_key(|d| d.from);
             out
         })
     });
@@ -452,7 +637,7 @@ pub fn NoteEditor(
         document::Style { {css} }
         div {
             id: "note-source",
-            class: "lab-note-editor",
+            class: "lab-note-editor editor-frame editor-frame--flush",
             "data-note-editor": "{id}",
             // The editor is a text field the host does not count as one
             // (Blitz reports an `<input>` or a `<textarea>` only, and moves
@@ -482,6 +667,11 @@ pub fn NoteEditor(
                 mounts,
                 palette,
                 on_transaction,
+                on_link_click: move |href: String| {
+                    if let Some(go) = on_link {
+                        go.call(href);
+                    }
+                },
                 on_action: move |a: String| run(a),
             }
             CommandPalette { state, palette, on_action: move |a: String| run(a) }

@@ -297,8 +297,12 @@ fn scalar(v: &Value, q: Quote, in_flow: bool) -> Option<String> {
     tries.into_iter().find(|t| reads(t)).map(str::to_owned)
 }
 
-/// A key added: written as the block is written afresh.
+/// A key added: written as the block is written afresh; an empty one as
+/// Obsidian writes it, `key:` (not `key: null`).
 fn fresh(key: &str, value: &Value, nl: &str) -> String {
+    if value.is_null() && !key.is_empty() && !key.contains([':', '#', '\n']) {
+        return format!("{key}:{nl}");
+    }
     let one = serialize_frontmatter(&[FrontmatterEntry {
         key: key.to_owned(),
         value: value.clone(),
@@ -344,6 +348,15 @@ Body #tomato here.\n";
             .collect();
         let got: Vec<&str> = lines(b).into_iter().filter(|l| keep.contains(l)).collect();
         assert_eq!(keep, got, "{b}");
+    }
+
+    #[test]
+    fn an_empty_key_added_is_written_as_obsidian_writes_it() {
+        let raw = "---\ntitle: A\n---\nbody\n";
+        let out = edit_frontmatter(raw, &[("rating".into(), serde_json::Value::Null)], &[])
+            .expect("edits")
+            .expect("changed");
+        assert_eq!(out, "---\ntitle: A\nrating:\n---\nbody\n");
     }
 
     #[test]
