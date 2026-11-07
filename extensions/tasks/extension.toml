@@ -41,7 +41,7 @@ path = "extensions/tasks"
 # It reaches notes only through the app's actions: vault reads and
 # writes, base queries, opening its views and the board.
 [capabilities]
-actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
+actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "INBOX_LIST", "INBOX_PROCESS", "CAPTURE_ADD"]
 effect = "mutating"
 
 [[actions]]
@@ -138,6 +138,37 @@ group = "Tasks"
 effect = "read_only"
 
 [[actions]]
+id = "TASKS_QUEUE_NAV_SNAPSHOT"
+name = "Queue: the navigator's Inbox"
+description = "The Queue's snapshot (#443): everything waiting on you as one list in four groups: Inbox (the captures still to process, INBOX_LIST), Today (open tasks due or scheduled today, and the overdue), Upcoming (dated later, then undated) and Waiting. Its count is the captures still to process."
+group = "Tasks"
+effect = "read_only"
+
+[[actions]]
+id = "TASKS_QUEUE_NAV_OPEN"
+name = "Queue: open from the navigator"
+description = "What opening Queue item `item` does: a capture (`capture:<path>`) opens the app's triage card (INBOX_PROCESS_CARD with its path), a task its note."
+group = "Tasks"
+effect = "read_only"
+params = '{"type":"object","properties":{"item":{"type":"string"}},"required":["item"]}'
+
+[[actions]]
+id = "TASKS_QUEUE_NAV_MOVE"
+name = "Queue: move to a group"
+description = "Items `items` dragged onto group `to` (`today`, `upcoming`, `waiting`): a capture becomes a task (INBOX_PROCESS) and is placed there; a task is scheduled today, taken off today, or put on waiting."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}},"to":{"type":"string"}},"required":["items","to"]}'
+
+[[actions]]
+id = "TASKS_QUEUE_NAV_CREATE"
+name = "Queue: new in a group"
+description = "From the navigator's New: in Inbox a capture of `title` (CAPTURE_ADD), in Today a task scheduled today, in Waiting a waiting task, in Upcoming a task."
+group = "Tasks"
+effect = "mutating"
+params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
+
+[[actions]]
 id = "TASKS_NAV_SNAPSHOT"
 name = "Tasks: the navigator's tree"
 description = "Its navigator provider's snapshot (architect-navigator-api `Snapshot`): the status groups, and every task in its own."
@@ -161,6 +192,18 @@ effect = "mutating"
 params = '{"type":"object","properties":{"container":{"type":"string"},"title":{"type":"string"}},"required":["container","title"]}'
 
 # The sidebar while its views show: statuses, then their tasks (src/nav.rs).
+# The navigator's Inbox row (#443): the Queue, captures and tasks in one
+# list, its count the captures to process (src/queue.rs).
+[[navigator_providers]]
+id = "queue"
+title = "Inbox"
+icon = "inbox"
+views = ["list", "today", "mine"]
+actions = "TASKS_QUEUE_NAV"
+section = "top"
+position = 1
+nest = false
+
 [[navigator_providers]]
 id = "tasks"
 title = "Tasks"

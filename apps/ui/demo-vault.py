@@ -194,6 +194,7 @@ def main():
     people_resources_archive()
     projects()
     inbox()
+    tasks()
     journal()
     bases()
     scroll_test()
@@ -342,7 +343,8 @@ Used by [[Modes]] and [[Voice leading]]. #music/theory
     W("Songs/Blue Moon Walk.md", {
         "title": "Blue Moon Walk", "type": "song", "artist": "Cody Wright", "key": "G", "tempo": 96,
         "tags": ["music/songs", "original"], "feature": feat("gradient-dusk.jpg"), "status": "writing",
-        "album": "[[Projects/Album/project|Album]]", **T("2026-09-30T22:10:00", "2026-11-03T23:40:00"),
+        "album": "[[Projects/Album/project|Album]]", "sort_index": 1,
+        **T("2026-09-30T22:10:00", "2026-11-03T23:40:00"),
     }, """
 # Blue Moon Walk
 
@@ -369,6 +371,7 @@ Walking bass in the verse, see [[Voice leading]]. Mix notes live in [[Mixing]].
     W("Songs/Slow River.md", {
         "title": "Slow River", "type": "song", "artist": "Traditional", "key": "D", "tempo": 68,
         "tags": ["music/songs"], "status": "learning", "performed": False,
+        "album": "[[Projects/Album/project|Album]]", "sort_index": 2,
     }, """
 # Slow River
 
@@ -649,6 +652,32 @@ def inbox():
           f"{b}\n")
 
 
+def tasks():
+    """Tasks (TaskNotes' shape, the Tasks extension's): the navigator's
+    Queue (Today, Upcoming, Waiting) and the Album's Tasks (#443)."""
+    album = Block(['"[[Projects/Album/project|Album]]"'])
+    run = Block(['"[[Half Marathon]]"'])
+    for t, props, body in [
+        ("Record guitars", {"status": "in-progress", "priority": "high", "due": "2026-11-07", "projects": album,
+                            "tags": ["task", "music"]}, "Rhythm takes first, then the solo in [[Blue Moon Walk]]."),
+        ("Book mastering", {"status": "open", "scheduled": "2026-11-12", "projects": album, "tags": ["task"]},
+         "Ask two engineers for a quote."),
+        ("Artwork from Sam", {"status": "waiting", "projects": album, "tags": ["task", "design"]},
+         "Waiting on the cover's second draft."),
+        ("Demo all songs", {"status": "done", "completedDate": "2026-10-20", "projects": album, "tags": ["task"]},
+         "Done: rough demos of all three."),
+        ("Send invoice", {"status": "open", "priority": "high", "due": "2026-11-03", "tags": ["task", "finance"]},
+         "For the October session."),
+        ("Long run, 16 km", {"status": "open", "scheduled": "2026-11-08", "projects": run, "tags": ["task", "health"]},
+         "Easy pace. See [[Half Marathon]]."),
+        ("Learn the bridge", {"status": "open", "projects": album, "tags": ["task", "music"]},
+         "Of [[Slow River]]: someday, no date yet."),
+    ]:
+        W(f"Tasks/{t}.md", {"title": t, "type": "task", **props,
+                            "dateCreated": "2026-11-01T09:00:00", "dateModified": "2026-11-04T18:00:00"},
+          f"# {t}\n\n{body}\n")
+
+
 def journal():
     rng = random.Random(7)
     lines = [
@@ -807,7 +836,8 @@ The songs live in [[Songs/Amazing Grace]]. #lab/sample
       "The shell holds the tabs, the sidebar and the toolbars. See [[Welcome]]\nand [[The workspace]].")
     W("Notes/The workspace.md", {"title": "The workspace", "tags": ["shell", "workspace"], "status": "active"},
       "Panes, docks and screensets. Back to [[The app shell]]. A link to\n[[A note nobody wrote]] resolves to nothing.")
-    W("Songs/Amazing Grace.md", {"title": "Amazing Grace", "key": "G", "bpm": 72, "tags": ["song"]},
+    W("Songs/Amazing Grace.md", {"title": "Amazing Grace", "key": "G", "bpm": 72, "tags": ["song"],
+                                 "album": "[[Projects/Album/project|Album]]", "sort_index": 3},
       "A hymn, in [[Welcome]]'s sample. Verse one in G.")
 
 

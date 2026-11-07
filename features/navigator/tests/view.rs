@@ -499,9 +499,13 @@ fn folders_tags_and_notes_draw_their_icons_and_colours() {
         ),
         1
     );
+    // A plain note draws its type's icon (on by default since #443).
     assert_eq!(
-        count(&doc, "[data-file=\"Projects/Plan.md\"] .nv-file-icon"),
-        0
+        count(
+            &doc,
+            "[data-file=\"Projects/Plan.md\"] svg[data-icon=\"file-text\"]"
+        ),
+        1
     );
 }
 

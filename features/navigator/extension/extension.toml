@@ -2796,9 +2796,9 @@ scope = "synced"
 [[sections.settings]]
 key = "navigator.file_type_icons"
 title = "Icons by type"
-description = "A file takes its type's icon (`md`, `pdf`, `canvas`, images, …)."
+description = "A file takes its type's icon (`md`, `pdf`, `canvas`, images, audio, video, sessions, …)."
 control = "switch"
-default = false
+default = true
 unit = ""
 placeholder = ""
 choices = []

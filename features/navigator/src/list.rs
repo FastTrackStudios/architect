@@ -398,6 +398,18 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
                         .unwrap_or(usize::MAX)
                 };
                 groups.sort_by_key(|g| at(&g.label));
+                // A place in its provider's order keeps each group's hand
+                // order too: the ranked first (an album's songs by
+                // `sort_index`), the rest as sorted.
+                let key = &s.manual_sort_property;
+                for g in &mut groups {
+                    g.items.sort_by(|a, b| match (rank(a, key), rank(b, key)) {
+                        (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(Ordering::Equal),
+                        (Some(_), None) => Ordering::Less,
+                        (None, Some(_)) => Ordering::Greater,
+                        (None, None) => Ordering::Equal,
+                    });
+                }
             }
             for g in groups {
                 let key = collapse_key(&scope, &mode, &g.id);
@@ -444,7 +456,11 @@ impl Rows<'_, '_> {
     fn files(&mut self, files: &[&NoteFile], pinned: bool) {
         let cx = self.cx;
         for f in files {
-            let parent_shown = shown_parent(f, cx.target, cx.settings);
+            // Its folder, as a row says it; none under a folder's own
+            // heading (grouped by folder, the heading names it).
+            let parent_shown = shown_parent(f, cx.target, cx.settings)
+                .filter(|_| cx.settings.grouping.under(cx.settings.sort) != Grouping::Folder)
+                .map(|p| self.index.display_path(&p));
             let has_preview = f.preview.as_deref().is_some_and(|p| !p.trim().is_empty());
             let thumb = thumb(self.index, f, cx.settings);
             let lines = lines(f, cx, pinned, parent_shown.is_some(), has_preview);

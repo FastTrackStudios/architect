@@ -353,10 +353,9 @@ pub trait NavigatorSource: Send + Sync {
         Vec::new()
     }
 
-    /// The folders that are another org's, or shared from one, by path: a
-    /// provider's containers that say so (`Node::org`, `Node::shared`).
-    /// None by default.
-    fn folder_orgs(&self) -> std::collections::BTreeMap<String, FolderOrg> {
+    /// A provider's containers' org, shared mark and icon, by path
+    /// (`Node::org`, `Node::shared`, `Node::icon`). None by default.
+    fn folder_meta(&self) -> std::collections::BTreeMap<String, FolderMeta> {
         std::collections::BTreeMap::new()
     }
     /// Calls `listener` with each change from now on, until the
@@ -412,13 +411,17 @@ pub trait NavigatorSource: Send + Sync {
     }
 }
 
-/// Whose a folder is ([`NavigatorSource::folder_orgs`]).
+/// What a provider says of one of its containers
+/// ([`NavigatorSource::folder_meta`]): whose it is, and its icon.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FolderOrg {
+pub struct FolderMeta {
     /// The org's id, when it says one.
     pub org: Option<String>,
     /// Shared from another org.
     pub shared: bool,
+    /// Its own icon (a project's, a library's), when no icon is set on
+    /// the folder.
+    pub icon: Option<String>,
 }
 
 /// A vault kept in memory.

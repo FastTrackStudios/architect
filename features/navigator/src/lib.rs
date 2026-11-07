@@ -83,7 +83,7 @@ pub use settings::{
     TreeSort, WeekStart, WeekendDays,
 };
 pub use source::{
-    FileOp, FolderOrg, Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue,
+    FileOp, FolderMeta, Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue,
     SourceEvent, Subscription, TaskCounts,
 };
 pub use state::{Colour, HideTarget, Key, Mods, NavigatorState, OpenIn, Outcome, Pin, ViewState};

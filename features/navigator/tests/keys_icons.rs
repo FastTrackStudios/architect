@@ -186,8 +186,20 @@ fn notes_take_icons_from_themselves_their_names_and_types_and_frontmatter() {
     );
     assert_eq!(
         s.file_icon("Inbox/scan.pdf"),
-        Some(Icon::Lucide("file-text".to_owned()))
+        Some(Icon::Lucide("file-type".to_owned()))
     );
+    // Audio, video and sessions by their type (#443).
+    for (ext, icon) in [
+        ("wav", "file-audio"),
+        ("mp4", "file-video"),
+        ("rpp", "file-sliders"),
+    ] {
+        assert_eq!(
+            architect_navigator::icons::type_icon(&format!("Mixes/take.{ext}"), &[]),
+            Some(Icon::Lucide(icon.to_owned())),
+            "{ext}"
+        );
+    }
     assert_eq!(
         s.file_icon("Projects/Plan.md"),
         Some(Icon::Lucide("file-text".to_owned()))
@@ -201,6 +213,7 @@ fn notes_take_icons_from_themselves_their_names_and_types_and_frontmatter() {
         &src,
         NavigatorSettings {
             use_frontmatter: true,
+            file_type_icons: false,
             ..NavigatorSettings::default()
         },
     );

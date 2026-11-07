@@ -290,3 +290,77 @@ fn a_top_rows_list_takes_its_mounts_look() {
     assert!(look.include_descendants);
     assert_eq!(look.grouping, architect_navigator::Grouping::Folder);
 }
+
+#[test]
+fn mounts_read_as_their_names_and_a_containers_icon_and_org_mark_its_row() {
+    let projects = ProviderSource::with(
+        Snapshot::new("Projects")
+            .node(
+                Node::new("p/crescendum", "Crescendum")
+                    .icon("disc-3")
+                    .org("fasttrackstudio")
+                    .shared(),
+            )
+            .item(Item::new("s1", "p/crescendum", "Overture")),
+    );
+    let m = mounts().with(
+        Mount::provider("projects/projects", "Projects", Place::Top).icon("folder-kanban"),
+        Arc::new(projects),
+    );
+    let mut s = state(&m);
+    let index = VaultIndex::read(&m);
+    // A mount's root by its title; a vault's folder by its path there; a
+    // provider's under its title.
+    assert_eq!(index.folder_name("@codywright"), "Cody Wright");
+    assert_eq!(
+        index.display_path("@codywright/Bible Study/Psalms"),
+        "Bible Study/Psalms"
+    );
+    assert_eq!(index.display_path("~tasks:queue/Today"), "Inbox/Today");
+    // A project's own glyph, its home org's badge (that org's vault's) and
+    // its shared mark.
+    let row = "~projects:projects/Crescendum";
+    assert_eq!(
+        s.folder_icon(row),
+        architect_navigator::Icon::parse("disc-3")
+    );
+    assert_eq!(
+        s.badge(row).map(|b| b.name),
+        Some("FastTrackStudio".to_owned())
+    );
+    assert!(s.is_shared(row));
+    // A tag's list marks each note with its vault's org; a folder's does not.
+    s.select_tag("scripture");
+    assert_eq!(
+        s.note_badge("@fasttrackstudio/Music Theory/Modes.md")
+            .map(|b| b.org),
+        Some("fasttrackstudio".to_owned())
+    );
+    s.select_folder("@codywright/Health");
+    assert!(s.note_badge("@codywright/Health/Run.md").is_none());
+}
+
+#[test]
+fn a_list_grouped_by_folder_does_not_repeat_the_folder_under_each_row() {
+    let m = Mounts::new("N").with(
+        Mount::provider("tasks/queue", "Inbox", Place::Top)
+            .flat()
+            .listed(architect_navigator::Appearance {
+                descendants: Some(true),
+                grouping: Some(architect_navigator::Grouping::Folder),
+                ..architect_navigator::Appearance::default()
+            }),
+        Arc::new(queue()),
+    );
+    let mut s = state(&m);
+    s.select_folder("~tasks:queue");
+    let parents: Vec<Option<String>> = s
+        .list_rows()
+        .iter()
+        .filter_map(|r| match &r.kind {
+            architect_navigator::ListRowKind::File { parent, .. } => Some(parent.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(parents, [None]);
+}
