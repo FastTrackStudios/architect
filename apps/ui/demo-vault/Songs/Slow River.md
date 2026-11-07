@@ -7,6 +7,8 @@ tempo: 68
 tags: [music/songs]
 status: learning
 performed: false
+album: "[[Projects/Album/project|Album]]"
+sort_index: 2
 ---
 # Slow River
 

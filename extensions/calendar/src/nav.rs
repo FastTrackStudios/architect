@@ -99,7 +99,9 @@ pub fn when_words(b: &Block) -> String {
 #[must_use]
 pub fn snapshot_of(events: &[Event], now: NaiveDateTime) -> Snapshot {
     let today = now.date();
-    let mut snap = Snapshot::new("Calendar").ordered();
+    // Its periods are the list's groups (#443): the Calendar row lists
+    // every event under Today, Tomorrow, … (#444's month grid replaces it).
+    let mut snap = Snapshot::new("Calendar").grouped();
     for (id, title, icon) in NODES {
         snap = snap.node(Node::new(id, title).icon(icon));
     }

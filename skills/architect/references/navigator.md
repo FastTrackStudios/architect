@@ -120,6 +120,11 @@ let all = Mounts::new("Navigator")
   `tree::VAULTS`), Assets/ (`tree::ASSETS`), Tags/ (the "Tags" row, from
   the vaults alone, merged by name) and the Properties. A section folds
   with `toggle_section`, kept in `ViewState::sections_folded`.
+- `VaultIndex::folder_name` names a mount's root by its title and
+  `display_path` writes a folder as a row shows it (a vault's without its
+  org, a provider's under its title); a list grouped by folder leaves the
+  folder off its rows. `NavigatorState::note_badge` marks a note's row in
+  a tag's or a property's list with its vault's org.
 - `NavigatorState::badge` is a Vaults/ or Assets/ row's `OrgBadge` (drawn
   as the org's icon or initial on its colour), `is_wiki` a folder whose
   folder note says `wiki: true` (a book mark), `mount_icon` a top row's
@@ -256,7 +261,7 @@ default; a page or an extension fills it while its view is on show.
   groups, in order) and `group_by(key, order)` (its lists grouped by an
   item property, in that order); a `Node` says its `org` and whether it is
   `shared` (an asset library's org, a project shared through a Space: the
-  row's org badge and shared mark, `NavigatorSource::folder_orgs`,
+  row's org badge and shared mark, `NavigatorSource::folder_meta`,
   `NavigatorState::badge`, `is_shared`). In `build`,
   `ext.navigator("<ACTIONS>", provider)`
   (`features/extensions/src/linked.rs` `Builder::navigator`). A process,
@@ -285,12 +290,33 @@ default; a page or an extension fills it while its view is on show.
 - **Assets/** is the Files extension's `assets` provider
   (`features/files/extension/src/nav.rs` `AssetsNav`, `FILES_ASSETS_NAV`):
   every org's libraries, flat, each its org's.
-- **Examples:** `extensions/calendar/src/nav.rs` `CalendarNav` (events by when they come; ordered),
-  `extensions/projects/src/nav.rs` `ProjectsNav` (projects
-  under their state, their tasks; a drag moves a task to a project) and
-  `extensions/tasks/src/nav.rs` `TasksNav` (status groups; a drag sets the
-  status). Tests: `features/navigator/tests/provider.rs`,
-  `features/navigator-api/src/lib.rs` `tests`.
+- **Examples:**
+  - `extensions/tasks/src/queue.rs` `QueueNav` (`TASKS_QUEUE_NAV`, the Inbox
+    row): the Queue, one list grouped Inbox (captures, `INBOX_LIST`),
+    Today (due or scheduled today, and overdue), Upcoming, Waiting; its
+    count the captures to process. A capture opens the app's triage hook
+    `INBOX_PROCESS_CARD {path}` (`apps/ui/src/capture.rs` `process_card`,
+    `ProcessCard`'s shape from #445; the inbox deck until then); dropped
+    on a task group it becomes a task there (`INBOX_PROCESS`).
+  - `extensions/projects/src/nav.rs` `ProjectsNav` (the Projects row):
+    projects nested by folder or `parent`/`up` (`parent_of`), each with its
+    icon, home `org` and shared mark (`space`); a project's contents
+    grouped by `section` in `SECTIONS` order: Songs (`type: song` or a
+    `song` tag, by `project`/`projects`/`album` or folder; in `sort_index`
+    order, loaded onto a deck), Notes, Sub-projects, Tasks (`snapshot_of`).
+    A property group in a provider's order keeps its notes' hand order
+    (`sort_index`) first.
+  - `extensions/calendar/src/nav.rs` `CalendarNav` (the Calendar row:
+    events grouped by when they come; #444's month grid takes its place).
+  - `extensions/tasks/src/nav.rs` `TasksNav` (status groups; off the
+    list, folded into the Queue).
+
+  Tests: `features/navigator/tests/provider.rs`,
+  `features/navigator/tests/mounts.rs`, `features/navigator-api/src/lib.rs`
+  `tests`, `extensions/tasks/src/queue.rs` `tests`,
+  `extensions/projects/src/nav.rs` `tests`, `features/spaces/tests/projects.rs`
+  (a project shared into another org through a Space reaches its folder
+  and nothing else of the home org's vault).
 
 ## What it does
 
@@ -480,7 +506,10 @@ default; a page or an extension fills it while its view is on show.
   `Icon::frontmatter` writes the short form. `folder_icon`, `item_icon`
   and `file_icon` (a note's own, then by name, `file_name_icons` with
   `file_name_icon_map`, then by type, `file_type_icons` with
-  `file_type_icon_map`); colours inherit by `inherit_folder_colors`,
+  `file_type_icon_map`: on by default, with built-ins for markdown,
+  canvas, base, PDF, images, audio, MIDI, video and DAW sessions; a
+  provider's item's own `Item::icon`); a provider's container's
+  `Node::icon` is its folder's (`FolderMeta::icon`); colours inherit by `inherit_folder_colors`,
   `inherit_tag_colors` and `inherit_property_colors`; `color_icon_only`.
   Lucide icons are drawn by name from `features/shell/src/lucide.rs`
   `LucideIcon` (MIT; every icon of the pinned lucide-dioxus as data,

@@ -922,6 +922,7 @@ fn ListRows(
                             .unwrap_or_default(),
                         date: date_label(at, clock),
                         parent: parent.clone(),
+                        org: s.note_badge(path),
                         selected: s.selection().is_selected(path),
                         open: active.as_deref() == Some(path.as_str()),
                         pinned: *pinned,
@@ -1047,6 +1048,8 @@ struct FileItem {
     preview_marks: Vec<std::ops::Range<usize>>,
     date: String,
     parent: Option<String>,
+    /// The org its vault is, with more than one vault on show.
+    org: Option<crate::OrgBadge>,
     selected: bool,
     open: bool,
     pinned: bool,
@@ -1084,6 +1087,7 @@ fn FileRow(
         preview_marks,
         date,
         parent,
+        org,
         selected,
         open,
         pinned,
@@ -1236,6 +1240,9 @@ fn FileRow(
                                 "{done}/{total}"
                             }
                         }
+                        if let Some(b) = org {
+                            OrgMark { badge: b }
+                        }
                         if parent_shown && let Some(p) = parent {
                             span { class: "nv-file-parent", style: "display:flex; align-items:center; gap:3px; overflow:hidden; text-overflow:ellipsis;",
                                 Folder { size: 11 }
@@ -1373,6 +1380,10 @@ fn PropertyPill(nav: Navigator, pill: Pill) -> Element {
 /// `MMM D, YYYY`).
 fn date_label(at: Millis, clock: Clock) -> String {
     use chrono::{FixedOffset, TimeZone as _};
+    // No date at all (a provider's item without one): none shown.
+    if at == 0 {
+        return String::new();
+    }
     let offset = i32::try_from(clock.offset / 1000).unwrap_or(0);
     let Some(tz) = FixedOffset::east_opt(offset) else {
         return String::new();

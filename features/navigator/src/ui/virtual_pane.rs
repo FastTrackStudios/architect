@@ -98,8 +98,11 @@ pub(super) fn VirtualPane(
                 };
                 if dy != 0.0 {
                     e.prevent_default();
+                    // The zoom read first: it reads the state, which the
+                    // write below holds (a wheel turned panicked, #443).
+                    let zoom = nav.zoom();
                     let mut state = nav.state;
-                    state.write().scroll_by(pane, dy / nav.zoom());
+                    state.write().scroll_by(pane, dy / zoom);
                 }
             },
             // The pane pressed has the keyboard; a finger drags it.

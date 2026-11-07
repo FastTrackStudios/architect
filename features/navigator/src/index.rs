@@ -51,8 +51,8 @@ pub struct VaultIndex {
     no_properties: bool,
     /// The sources it is made of ([`NavigatorSource::mounts`]).
     mounts: Vec<crate::Mount>,
-    /// The folders that are another org's ([`NavigatorSource::folder_orgs`]).
-    folder_orgs: std::collections::BTreeMap<String, crate::source::FolderOrg>,
+    /// The folders that are another org's ([`NavigatorSource::folder_meta`]).
+    folder_meta: std::collections::BTreeMap<String, crate::source::FolderMeta>,
     /// Bumped by every change: what a view's memo keys on.
     revision: u64,
 }
@@ -65,31 +65,31 @@ impl VaultIndex {
             .with_order(source.child_order())
             .with_properties(source.browses_properties())
             .with_mounts(source.mounts())
-            .with_folder_orgs(source.folder_orgs())
+            .with_folder_meta(source.folder_meta())
     }
 
     /// With whose its folders are.
     #[must_use]
-    pub fn with_folder_orgs(
+    pub fn with_folder_meta(
         mut self,
-        orgs: std::collections::BTreeMap<String, crate::source::FolderOrg>,
+        orgs: std::collections::BTreeMap<String, crate::source::FolderMeta>,
     ) -> Self {
-        self.folder_orgs = orgs;
+        self.folder_meta = orgs;
         self
     }
 
     /// Whose the folder at `path` is, when its source says.
     #[must_use]
-    pub fn folder_org(&self, path: &str) -> Option<&crate::source::FolderOrg> {
-        self.folder_orgs.get(path)
+    pub fn folder_meta_of(&self, path: &str) -> Option<&crate::source::FolderMeta> {
+        self.folder_meta.get(path)
     }
 
     /// Every folder's org, as the source said.
     #[must_use]
-    pub const fn folder_orgs(
+    pub const fn folder_meta(
         &self,
-    ) -> &std::collections::BTreeMap<String, crate::source::FolderOrg> {
-        &self.folder_orgs
+    ) -> &std::collections::BTreeMap<String, crate::source::FolderMeta> {
+        &self.folder_meta
     }
 
     /// With the sources it is made of.
@@ -351,8 +351,23 @@ impl VaultIndex {
     pub fn folder_name<'a>(&'a self, path: &'a str) -> &'a str {
         if path.is_empty() {
             &self.name
+        } else if let Some(m) = self.mounts.iter().find(|m| m.id == path) {
+            // A mount's root: its title (the org's name, the provider's).
+            &m.title
         } else {
             file_name(path)
+        }
+    }
+
+    /// A folder's path as a row shows it: within a vault, its path there
+    /// (its org is the row's badge); within a provider, under its title.
+    #[must_use]
+    pub fn display_path(&self, path: &str) -> String {
+        match (crate::mounts::split(path), self.mount_of(path)) {
+            (Some((_, "")), Some(m)) => m.title.clone(),
+            (Some((_, rest)), Some(m)) if m.is_vault() => rest.to_owned(),
+            (Some((_, rest)), Some(m)) => format!("{}/{rest}", m.title),
+            _ => path.to_owned(),
         }
     }
 

@@ -912,7 +912,7 @@ pub struct NavigatorSettings {
     #[setting(placeholder = "meeting=users, todo=list-todo")]
     pub file_name_icon_map: String,
     /// Icons by type
-    /// A file takes its type's icon (`md`, `pdf`, `canvas`, images, …).
+    /// A file takes its type's icon (`md`, `pdf`, `canvas`, images, audio, video, sessions, …).
     pub file_type_icons: bool,
     /// Type icons
     #[setting(placeholder = "pdf=book, csv=sheet")]
@@ -1124,7 +1124,7 @@ impl Default for NavigatorSettings {
             show_file_icons: true,
             file_name_icons: false,
             file_name_icon_map: String::new(),
-            file_type_icons: false,
+            file_type_icons: true,
             file_type_icon_map: String::new(),
             frontmatter_icon_field: "icon".to_owned(),
             frontmatter_color_field: "color".to_owned(),

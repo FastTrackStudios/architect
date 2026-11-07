@@ -24,6 +24,7 @@
 
 pub mod model;
 pub mod nav;
+pub mod queue;
 pub mod quick;
 pub mod vault;
 
@@ -646,6 +647,7 @@ impl Extension for Tasks {
         vault::connect(ext.handle());
         // Its navigator provider: status groups, then their tasks (`nav`).
         ext.navigator(nav::ACTIONS, nav::TasksNav);
+        ext.navigator(queue::ACTIONS, queue::QueueNav);
         ext.view("list", ListView)
             .view("today", TodayView)
             .view("mine", MineView)
