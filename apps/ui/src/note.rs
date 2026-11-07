@@ -128,7 +128,7 @@ fn heading(line: &str) -> Option<(u8, &str)> {
         .and_then(|title| u8::try_from(hashes).ok().map(|l| (l, title.trim())))
 }
 
-fn frontmatter(text: &str) -> (Vec<(String, String)>, &str) {
+pub fn frontmatter(text: &str) -> (Vec<(String, String)>, &str) {
     let Some(rest) = text.strip_prefix("---\n") else {
         return (Vec::new(), text);
     };

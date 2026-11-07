@@ -462,6 +462,8 @@ fn FolderRow(
     let (p1, p2, p3, p4) = (path.clone(), path.clone(), name.clone(), name.clone());
     let (p5, p6, p7, p8) = (path.clone(), path.clone(), path.clone(), path.clone());
     let name_flex = tree_rows::name_flex(nav, !count.is_empty() && !reorder);
+    let deck_rows = tree_rows::use_deck_rows();
+    let deck_rows_down = deck_rows.clone();
     rsx! {
         div {
             class,
@@ -473,8 +475,13 @@ fn FolderRow(
             "aria-level": "{level}",
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; \
                     gap:4px; padding-left:{pad}px; padding-right:8px; border-radius:6px; white-space:nowrap; {bg}",
-            onclick: move |_| {
+            onclick: move |e: MouseEvent| {
                 if nav.dragged.cloned() {
+                    return;
+                }
+                // ⌘-click on a folder the app loads as a deck: a new deck.
+                if mods(e.modifiers()).command && tree_rows::deck_row(deck_rows.as_ref(), &p1) {
+                    tree_rows::open_deck(&p1, on_open);
                     return;
                 }
                 let out = nav.update(|s| s.click_folder(&p1));
@@ -491,6 +498,9 @@ fn FolderRow(
             },
             // Dragged onto another folder: moved into it (the root stays).
             onpointerdown: move |e: PointerEvent| {
+                if tree_rows::middle_click(&e, deck_rows_down.as_ref(), &p6, on_open) {
+                    return;
+                }
                 if !p6.is_empty() && !renaming {
                     tree_rows::start_drag(nav, crate::state::Drag::Folder(p6.clone()), &e);
                 }
@@ -1002,6 +1012,8 @@ fn FileRow(
     item: FileItem,
     settings: NavigatorSettings,
 ) -> Element {
+    let deck_rows = tree_rows::use_deck_rows();
+    let deck_rows_down = deck_rows.clone();
     let FileItem {
         path,
         name,
@@ -1075,7 +1087,13 @@ fn FileRow(
                 if nav.dragged.cloned() {
                     return;
                 }
-                let out = nav.state.clone().write().click_file(&p1, mods(e.modifiers()));
+                let m = mods(e.modifiers());
+                // ⌘-click on a row the app loads as a deck: a new deck.
+                if m.command && tree_rows::deck_row(deck_rows.as_ref(), &p1) {
+                    tree_rows::open_deck(&p1, on_open);
+                    return;
+                }
+                let out = nav.state.clone().write().click_file(&p1, m);
                 nav.act(out, on_open);
             },
             oncontextmenu: move |e: MouseEvent| {
@@ -1086,7 +1104,7 @@ fn FileRow(
             // Dragged onto a tag or a property: the selected notes when it
             // is one of them, else it alone.
             onpointerdown: move |e: PointerEvent| {
-                if renaming {
+                if renaming || tree_rows::middle_click(&e, deck_rows_down.as_ref(), &p3, on_open) {
                     return;
                 }
                 let paths: Vec<String> = {

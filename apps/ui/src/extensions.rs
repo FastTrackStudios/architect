@@ -876,6 +876,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             {
                 extensions = with;
             }
+            // Setlists: the decks demo (#441), a setlist's songs as decks.
+            if let Ok(with) = extensions
+                .clone()
+                .with_linked(&crate::setlists::SetlistsExtension)
+            {
+                extensions = with;
+            }
         }
         // The Project Management bundle's Projects, Tasks and Time Tracker
         // (#375), and the Calendar beside them: first-party extensions the

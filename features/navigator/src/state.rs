@@ -94,6 +94,10 @@ pub enum OpenIn {
     Tab,
     /// Beside it (⌘Return).
     Split,
+    /// Onto a new deck: a ⌘-click or a middle-click on a row the app
+    /// loads as a deck's context ([`crate::ui::DeckRows`]: a project's
+    /// folder, a setlist's song).
+    NewDeck,
 }
 
 /// What the app is asked to do after an input.

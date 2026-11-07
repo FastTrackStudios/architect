@@ -2,7 +2,7 @@
 // it.
 id action-list-window
 title "The action list"
-view {width 1440, height 860}
+view {width 1440, height 940}
 capture {fps 20, width 960}
 steps (
     {

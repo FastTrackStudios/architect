@@ -21,7 +21,11 @@ that does not link it stays MIT OR Apache-2.0.
 - The navigator does not open notes. `NavigatorView`'s `on_open` asks the
   app, and the app opens the note in its workspace (`Target::Here`, `Tab`,
   `Split`, by `OpenIn`). `Open::browsing` says the arrow keys moved to
-  the note; show it in place rather than open one more tab. The app tells it which note is on show with
+  the note; show it in place rather than open one more tab. `OpenIn::NewDeck`
+  is a ⌘-click or a middle-click on a row the app loads as a deck (a
+  project's folder, a setlist's song): the app says which rows those are
+  with a `DeckRows` in context (`features/navigator/src/ui/tree_rows.rs`
+  `DeckRows`); a middle-click on any other row is `OpenIn::Tab`. The app tells it which note is on show with
   `Navigator::set_active`, which lights the note and reveals it.
 - The model is plain data (`features/navigator/src/state.rs`
   `NavigatorState`). Test behaviour against the model
@@ -198,7 +202,11 @@ default; a page or an extension fills it while its view is on show.
   Later) instead of by name, until the person orders them by hand
   (`NavigatorSource::child_order`, `VaultIndex::source_order`). `open(item)`,
   `move_items(items, to)` and `create(container, title)` default to nothing
-  or an error. Every method is async (`ProviderFuture`).
+  or an error. Every method is async (`ProviderFuture`). An item that is
+  a context (a song, a project) opens with `Open::Context {context_type,
+  id, title, folder}`: a click loads it onto the deck on show, a ⌘-click or
+  a middle-click onto a new deck (`apps/ui/src/vault.rs` `ProviderFiles`,
+  `apps/ui/src/setlists.rs` the sandbox's setlists).
 - **Serving it:** declare `[[navigator_providers]] id, title, icon, views,
   actions` and the actions it answers (`<actions>_SNAPSHOT`, `_OPEN`,
   `_MOVE`, `_CREATE`); in `build`, `ext.navigator("<ACTIONS>", provider)`

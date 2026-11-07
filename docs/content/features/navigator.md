@@ -88,6 +88,12 @@ containers have an order of their own (Today, Tomorrow, Later) says so
 A periodic note asked for while a provider shows (the Calendar's day
 heading) switches the sidebar back to the vault and opens there.
 
+An item can be a whole context, loaded onto a
+[deck](@/architecture/workspace.md) of its own: a provider's
+`Open::Context` (a setlist's song), or a project's folder in the vault.
+A click loads it onto the deck on show; a ⌘-click or a middle-click onto
+a new deck. A middle-click on any other row opens it in a new tab.
+
 ## Code tour
 
 - `features/navigator/src/source.rs`: `NavigatorSource`, `NoteFile`
