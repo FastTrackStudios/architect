@@ -550,7 +550,12 @@ impl Capturer {
 
     /// Capture `path`: a note in the inbox's folder (an `INBOX_*` never
     /// reaches a note outside it).
-    async fn item(&self, caller: &ActionCaller, path: &str) -> Result<Item, String> {
+    /// Capture `path`, read back.
+    ///
+    /// # Errors
+    ///
+    /// Not in the inbox, or no such capture.
+    pub async fn item(&self, caller: &ActionCaller, path: &str) -> Result<Item, String> {
         let folder = self.config.folder.trim_matches('/');
         if !folder.is_empty() && !path.starts_with(&format!("{folder}/")) {
             return Err(format!("{path} is not in the inbox ({folder}/)"));
@@ -575,6 +580,25 @@ impl Capturer {
         title: Option<&str>,
         chips: &Map<String, Value>,
     ) -> Result<Value, String> {
+        self.process_with(caller, path, id, title, None, chips)
+            .await
+    }
+
+    /// [`Self::process`], its body rewritten: processing's task form
+    /// ("Waiting on Sam.", the details as edited).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::process`].
+    pub async fn process_with(
+        &self,
+        caller: &ActionCaller,
+        path: &str,
+        id: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+        chips: &Map<String, Value>,
+    ) -> Result<Value, String> {
         if id == target::NOTE {
             let folder = self.config.notes.clone();
             return self.file(caller, path, &folder, chips).await;
@@ -587,7 +611,7 @@ impl Capturer {
                 .filter(|t| !t.trim().is_empty())
                 .unwrap_or_else(|| item.label())
                 .to_owned(),
-            body: item.body.clone(),
+            body: body.map_or_else(|| item.body.clone(), str::to_owned),
             properties: parse::merge(item.properties.clone(), chips),
             source: item.source.clone(),
             inbox: Some(item.path.clone()),
@@ -699,6 +723,20 @@ impl Capturer {
             .await?;
         self.changed(path);
         Ok(json!({ "path": path, "resurface_on": on }))
+    }
+
+    /// Marks capture `path` handled (`status: done`): it leaves the inbox
+    /// and stays a note, the way it was written.
+    ///
+    /// # Errors
+    ///
+    /// No such capture, or the vault refused.
+    pub async fn done(&self, caller: &ActionCaller, path: &str) -> Result<Value, String> {
+        let _ = self.item(caller, path).await?;
+        self.set(caller, path, inbox::keys::STATUS, &json!("done"))
+            .await?;
+        self.changed(path);
+        Ok(json!({ "path": path, "status": "done" }))
     }
 
     /// Deletes capture `path`.

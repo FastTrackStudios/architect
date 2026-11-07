@@ -13,7 +13,9 @@
 //!   `!priority` as live chips; a chip set by hand wins), a More menu, the
 //!   kind at the top a menu of `[[capture_targets]]`, "Create more", ⌘↩;
 //! - [`QuickAdd`], the inline bar with a live preview of what it parsed;
-//! - the [`InboxDeck`]: each capture once, its targets, Later, Discard;
+//! - the [`ProcessDeck`] (`INBOX_OPEN`): each capture once, a
+//!   [`ProcessCard`] in Fast or Clarify mode, Task's ported (#445); and
+//!   [`ProcessNowSheet`], one fresh capture processed on the spot;
 //! - the capture window: the composer alone in a small OS window of its
 //!   own, where the platform gives one (`architect_workspace::Popout::page`;
 //!   feature `native` raises it over every app and puts it where the
@@ -22,6 +24,7 @@
 mod chips;
 mod composer;
 mod picker;
+mod process;
 mod quick_add;
 mod style;
 
@@ -35,6 +38,11 @@ pub use composer::{
     project_title, resolved_kind, trigger_at_end,
 };
 pub use picker::{PickOption, PropertyPicker, filtered, match_rank};
+pub use process::{
+    ElapsedClock, LATER_DAYS, Mode, ModeSwitch, Origin, OriginTile, Outcome, ProcessCard,
+    ProcessDeck, ProcessNowSheet, TaskShape, ago, context_suggestions, fmt_interval,
+    rewritten_note, whole_text,
+};
 pub use quick_add::{QuickAdd, parsed_bits};
 pub use style::{CSS, CaptureCss, Look, use_look, wash};
 
@@ -49,8 +57,6 @@ use serde_json::{Map, Value};
 
 use crate::actions::{self, Capturer, Config, Open, Opener};
 use crate::inbox::Item;
-use crate::parse::keys as k;
-use crate::target::{self, Target};
 
 /// The capture window's id among the desk's windows.
 pub const WINDOW: &str = "capture";
@@ -68,6 +74,8 @@ pub struct CaptureUi {
     deck: Signal<bool>,
     /// The capture window, its text.
     window: Signal<Option<String>>,
+    /// A fresh capture being processed on the spot ("Process now").
+    now: Signal<Option<Item>>,
     /// Bumped after every change made here, for lists to read again.
     revision: Signal<u64>,
     capturer: CopyValue<Capturer>,
@@ -89,6 +97,33 @@ impl CaptureUi {
         self.deck.set(true);
     }
 
+    /// Processes `item` on the spot, over the window ([`ProcessNowSheet`]).
+    pub fn process(mut self, item: Item) {
+        self.now.set(Some(item));
+    }
+
+    /// "Process now": captures `text` into the inbox, then processes it on
+    /// the spot. Closing undecided leaves it there, as it was written.
+    pub fn process_now(self, text: String) {
+        let cap = self.capturer();
+        spawn(async move {
+            let app = ActionCaller::app();
+            let args = actions::AddArgs {
+                text,
+                source: Some("ui".to_owned()),
+                ..actions::AddArgs::default()
+            };
+            let Ok(v) = cap.capture(&app, args).await else {
+                return;
+            };
+            self.changed();
+            let path = v.get("path").and_then(Value::as_str).unwrap_or_default();
+            if let Ok(item) = cap.item(&app, path).await {
+                self.process(item);
+            }
+        });
+    }
+
     /// Closes the composer over the window.
     pub fn close(mut self) {
         self.sheet.set(None);
@@ -97,7 +132,10 @@ impl CaptureUi {
     /// Whether the composer, the deck or the capture window is open.
     #[must_use]
     pub fn is_open(&self) -> bool {
-        self.sheet.read().is_some() || *self.deck.read() || self.window.read().is_some()
+        self.sheet.read().is_some()
+            || *self.deck.read()
+            || self.window.read().is_some()
+            || self.now.read().is_some()
     }
 
     #[must_use]
@@ -124,6 +162,7 @@ pub fn use_capture(list: &Arc<ActionList>, config: Config) -> CaptureUi {
     let mut sheet = use_signal(|| None);
     let mut deck = use_signal(|| false);
     let mut window = use_signal(|| None);
+    let mut now = use_signal(|| None::<Item>);
     let revision = use_signal(|| 0_u64);
     // An action may run on any thread: what it asks comes here.
     let asks = use_coroutine(move |mut rx: UnboundedReceiver<Open>| async move {
@@ -135,6 +174,7 @@ pub fn use_capture(list: &Arc<ActionList>, config: Config) -> CaptureUi {
                 Open::Close => {
                     sheet.set(None);
                     deck.set(false);
+                    now.set(None);
                 }
             }
         }
@@ -154,6 +194,7 @@ pub fn use_capture(list: &Arc<ActionList>, config: Config) -> CaptureUi {
         sheet,
         deck,
         window,
+        now,
         revision,
         capturer,
     };
@@ -185,6 +226,7 @@ pub fn CaptureLayer(capture: CaptureUi) -> Element {
     let sheet = capture.sheet.read().clone();
     let window = capture.window.read().clone();
     let deck = *capture.deck.read();
+    let now = capture.now.read().clone();
     // Task's composer frame: on a phone the sheet is the screen; on a desk
     // a scrim, and a card 10vh down (`md:max-w-2xl md:max-h-[80vh]
     // md:rounded-xl md:border md:shadow-2xl`). The card does not clip, so
@@ -220,6 +262,20 @@ pub fn CaptureLayer(capture: CaptureUi) -> Element {
             t.sheet, t.rule, t.shadow_float
         )
     };
+    // The deck: Task's page, the window's ground, filling a phone, a
+    // card a desk.
+    let deck_card = if phone {
+        format!(
+            "display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; width: 100%; background: {};",
+            t.desk
+        )
+    } else {
+        format!(
+            "width: 672px; max-width: 100%; height: 76vh; display: flex; flex-direction: column; overflow: hidden; \
+             border-radius: 16px; background: {}; border: 1px solid {}; box-shadow: {};",
+            t.desk, t.rule, t.shadow_float
+        )
+    };
     let mut c = capture;
     rsx! {
         if let Some((text, target)) = sheet {
@@ -231,16 +287,20 @@ pub fn CaptureLayer(capture: CaptureUi) -> Element {
                         target,
                         source: "ui",
                         on_close: move |()| c.sheet.set(None),
+                        on_process: move |text: String| capture.process_now(text),
                     }
                 }
             }
         }
         if deck {
             div { style: "{scrim}", onclick: move |_| c.deck.set(false),
-                div { style: "{card}", onclick: move |e| e.stop_propagation(),
-                    InboxDeck { capture, on_close: move |()| c.deck.set(false) }
+                div { style: "{deck_card}", onclick: move |e| e.stop_propagation(),
+                    ProcessDeck { capture, on_exit: move |()| c.deck.set(false) }
                 }
             }
+        }
+        if let Some(item) = now {
+            ProcessNowSheet { capture, item, on_close: move |()| c.now.set(None) }
         }
         if let Some(text) = window {
             if os.is_some() {
@@ -339,46 +399,6 @@ fn WindowPage(capture: CaptureUi, text: String) -> Element {
     }
 }
 
-/// A chip: what a property says, short.
-fn chip_label(key: &str, value: &Value) -> Vec<String> {
-    let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
-    let unlink = |s: &str| {
-        s.trim_start_matches("[[")
-            .trim_end_matches("]]")
-            .rsplit('/')
-            .next()
-            .unwrap_or(s)
-            .trim_end_matches(".md")
-            .to_owned()
-    };
-    let each = |v: &Value| -> Vec<String> {
-        match v {
-            Value::Array(a) => a.iter().map(text).collect(),
-            other => vec![text(other)],
-        }
-    };
-    match key {
-        k::PROJECTS => each(value)
-            .iter()
-            .map(|p| format!("▸ {}", unlink(p)))
-            .collect(),
-        k::TAGS => each(value).iter().map(|t| format!("#{t}")).collect(),
-        k::CONTEXTS => each(value),
-        k::PRIORITY => vec![format!("! {}", text(value))],
-        k::DUE => vec![format!("Due {}", day_label(&text(value)))],
-        k::RECURRENCE => vec![format!("Repeats {}", repeat_label(&text(value)))],
-        // The note's name says it already.
-        k::RECURRENCE_ANCHOR | "title" => Vec::new(),
-        other => vec![format!("{other}: {}", text(value))],
-    }
-}
-
-/// `2026-11-06` as "Fri 6 Nov" (as it is when it is no date).
-fn day_label(ymd: &str) -> String {
-    chrono::NaiveDate::parse_from_str(ymd, "%Y-%m-%d")
-        .map_or_else(|_| ymd.to_owned(), |d| d.format("%a %-d %b").to_string())
-}
-
 /// An RRULE in words, as far as quick add writes them.
 pub(super) fn repeat_label(rule: &str) -> String {
     let part = |key: &str| {
@@ -431,226 +451,17 @@ pub(super) fn facet_of(map: &Map<String, Value>) -> Option<facet_value::Value> {
     facet_json::from_str::<facet_value::Value>(&Value::Object(map.clone()).to_string()).ok()
 }
 
-/// What the deck does with a capture.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Deal {
-    Into(String),
-    Later(i64),
-    Discard,
-}
-
-/// The inbox deck: the captures waiting, one at a time, each to make
-/// into a target's thing, file, put off or discard.
-#[component]
-pub fn InboxDeck(capture: CaptureUi, on_close: EventHandler<()>) -> Element {
-    let t = theme();
-    let mut said = use_signal(|| None::<String>);
-    let mut at = use_signal(|| 0_usize);
-    // Read again after a change here, and every few seconds while it shows
-    // (an agent's capture, an edit in the note).
-    let mut tick = use_signal(|| 0_u64);
-    use_future(move || async move {
-        loop {
-            futures_timer::Delay::new(std::time::Duration::from_secs(3)).await;
-            let n = *tick.peek();
-            tick.set(n.wrapping_add(1));
-        }
-    });
-    let items = use_resource(move || {
-        let _ = (capture.revision(), tick());
-        let cap = capture.capturer();
-        async move { cap.inbox(&ActionCaller::app(), false).await }
-    });
-    let targets = use_resource(move || {
-        let cap = capture.capturer();
-        async move { cap.targets(&ActionCaller::app()).await }
-    });
-    let (list, failed): (Vec<Item>, Option<String>) = match &*items.read() {
-        Some(Ok(v)) => (v.clone(), None),
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
-    };
-    let all = targets
-        .read()
-        .clone()
-        .unwrap_or_else(|| vec![Target::note()]);
-    let n = list.len();
-    let i = (*at.read()).min(n.saturating_sub(1));
-    let current = list.get(i).cloned();
-    let act = {
-        let current = current.clone();
-        move |what: Deal| {
-            let Some(item) = current.clone() else { return };
-            let cap = capture.capturer();
-            spawn(async move {
-                let app = ActionCaller::app();
-                let out = match &what {
-                    Deal::Into(id) => cap.process(&app, &item.path, id, None, &Map::new()).await,
-                    Deal::Later(days) => {
-                        let day = actions::day_after(*days).format("%Y-%m-%d").to_string();
-                        cap.defer(&app, &item.path, Some(&day)).await
-                    }
-                    Deal::Discard => cap.discard(&app, &item.path).await,
-                };
-                match out {
-                    Ok(v) => {
-                        let path = v.get("path").and_then(Value::as_str).unwrap_or_default();
-                        said.set(Some(match what {
-                            Deal::Into(id) if id == target::NOTE => format!("Filed as {path}"),
-                            Deal::Into(_) => format!("Made {path}"),
-                            Deal::Later(_) => format!("Put “{}” off", item.label()),
-                            Deal::Discard => format!("Discarded “{}”", item.label()),
-                        }));
-                        capture.changed();
-                    }
-                    Err(e) => said.set(Some(e)),
-                }
-            });
-        }
-    };
-    let button = {
-        let t = t.clone();
-        move |primary: bool| {
-            format!(
-                "padding: 7px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid {}; \
-                 background: {}; color: {};",
-                if primary { &t.accent } else { &t.rule },
-                if primary { &t.accent } else { &t.pill },
-                if primary { &t.accent_ink } else { &t.ink },
-            )
-        }
-    };
-    let card = current.map(|item| {
-        let chips: Vec<String> = item
-            .properties
-            .iter()
-            .flat_map(|(key, v)| chip_label(key, v))
-            .collect();
-        let when = item
-            .created
-            .get(..16)
-            .unwrap_or(&item.created)
-            .replace('T', " ");
-        (item, chips, when)
-    });
-    rsx! {
-        div {
-            style: "display: flex; flex-direction: column; gap: 12px; padding: 16px; min-height: 0;",
-            tabindex: 0,
-            onkeydown: move |e: KeyboardEvent| {
-                if e.key() == Key::Named(NamedKey::Escape) {
-                    on_close.call(());
-                }
-            },
-            div { style: "display: flex; align-items: center; gap: 8px;",
-                span { style: "font-size: 15px; font-weight: 600;", "Inbox" }
-                span { style: "font-size: 12px; color: {t.ink_3};",
-                    if n == 0 { "nothing waiting" } else { "{i + 1} of {n}" }
-                }
-                span { style: "flex: 1;" }
-                if n > 1 {
-                    button { style: "{button(false)}", onclick: move |_| at.set(i.saturating_sub(1)), "‹" }
-                    button { style: "{button(false)}", onclick: move |_| at.set((i + 1).min(n - 1)), "›" }
-                }
-                button { style: "{button(false)}", onclick: move |_| on_close.call(()), "Done" }
-            }
-            if let Some(e) = failed {
-                div { style: "font-size: 13px; color: {t.danger};", "{e}" }
-            }
-            if let Some((item, chips, when)) = card {
-                div {
-                    style: "display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 12px; \
-                            border: 1px solid {t.rule}; background: {t.sheet};",
-                    span { id: "inbox-title", style: "font-size: 16px; font-weight: 600;", "{item.label()}" }
-                    if !item.body.is_empty() {
-                        span { style: "font-size: 13px; color: {t.ink_2}; white-space: pre-wrap;", "{item.body}" }
-                    }
-                    if !chips.is_empty() {
-                        div { style: "display: flex; flex-wrap: wrap; gap: 6px;",
-                            for (j, c) in chips.into_iter().enumerate() {
-                                span {
-                                    key: "{j}",
-                                    style: "padding: 3px 8px; border-radius: 6px; font-size: 12px; background: {t.accent_soft};",
-                                    "{c}"
-                                }
-                            }
-                        }
-                    }
-                    span { style: "font-size: 11px; color: {t.ink_3};",
-                        "{when}"
-                        if !item.source.is_empty() { " · via {item.source}" }
-                    }
-                }
-                div { style: "display: flex; flex-wrap: wrap; gap: 6px;",
-                    for tg in all.iter().cloned() {
-                        button {
-                            key: "{tg.id}",
-                            id: "inbox-into-{tg.id}",
-                            style: "{button(tg.id != target::NOTE)}",
-                            title: "{tg.description}",
-                            onclick: {
-                                let act = act.clone();
-                                move |_| act(Deal::Into(tg.id.clone()))
-                            },
-                            if tg.id == target::NOTE { "File as note" } else { "Make a {tg.name.to_lowercase()}" }
-                        }
-                    }
-                    span { style: "flex: 1;" }
-                    button {
-                        style: "{button(false)}",
-                        onclick: {
-                            let act = act.clone();
-                            move |_| act(Deal::Later(1))
-                        },
-                        "Tomorrow"
-                    }
-                    button {
-                        style: "{button(false)}",
-                        onclick: {
-                            let act = act.clone();
-                            move |_| act(Deal::Later(7))
-                        },
-                        "Next week"
-                    }
-                    button {
-                        style: "{button(false)} color: {t.danger};",
-                        onclick: move |_| act(Deal::Discard),
-                        "Discard"
-                    }
-                }
-            } else {
-                div { style: "padding: 24px 0; text-align: center; color: {t.ink_2}; font-size: 13px;",
-                    "Inbox zero. Capture with ⇧⌘N, or the capture window's shortcut from any app."
-                }
-            }
-            if let Some(s) = said.read().clone() {
-                div { style: "font-size: 12px; color: {t.ink_2};", "{s}" }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
 
     #[test]
-    fn chips_say_it_short() {
-        assert_eq!(chip_label("projects", &json!(["[[Lab]]"])), ["▸ Lab"]);
-        assert_eq!(chip_label("tags", &json!(["a", "b"])), ["#a", "#b"]);
-        assert_eq!(chip_label("due", &json!("2026-11-06")), ["Due Fri 6 Nov"]);
+    fn a_repeat_in_words() {
+        assert_eq!(repeat_label("FREQ=WEEKLY;BYDAY=MO"), "every Monday");
+        assert_eq!(repeat_label("FREQ=DAILY;INTERVAL=3"), "every 3 days");
         assert_eq!(
-            chip_label("recurrence", &json!("FREQ=WEEKLY;BYDAY=MO")),
-            ["Repeats every Monday"]
+            repeat_label("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
+            "every weekday"
         );
-        assert_eq!(
-            chip_label("recurrence", &json!("FREQ=DAILY;INTERVAL=3")),
-            ["Repeats every 3 days"]
-        );
-        assert!(chip_label("recurrence_anchor", &json!("scheduled")).is_empty());
-        assert_eq!(chip_label("key", &json!("D")), ["key: D"]);
-        assert!(chip_label("title", &json!("Gift idea")).is_empty());
     }
 }
