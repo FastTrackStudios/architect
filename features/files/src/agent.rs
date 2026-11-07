@@ -8,6 +8,7 @@
 //! A root is named by its place (`codywright/Projects/Right Here`) or its
 //! manifest's id. The engine answers it (`crate::sync`).
 
+use crate::copies::{CopyReport, HolderStatus, Locations, Policy, ScrubReport, Violation};
 use crate::rendition::Peaks;
 use crate::roots::{Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus};
 
@@ -21,6 +22,10 @@ pub enum AgentError {
     #[error("not synced yet: {0}")]
     #[architect(http_status = 409)]
     NotSynced(String),
+    /// Dropping this device's copies would leave files under their copy policy.
+    #[error("under the copy policy without this device: {0}")]
+    #[architect(http_status = 409)]
+    BelowPolicy(String),
     #[error("{0}")]
     #[architect(http_status = 400)]
     Refused(String),
@@ -28,7 +33,8 @@ pub enum AgentError {
 
 pub mod files {
     use super::{
-        AgentError, Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, Peaks, RootStatus,
+        AgentError, Asset, Checkpoint, CopyReport, DriveStatus, FileEntry, FileVersion, Hit,
+        HolderStatus, Locations, Peaks, Policy, RootStatus, ScrubReport, Violation,
     };
 
     /// The agent: roots, pins, versions.
@@ -63,9 +69,38 @@ pub mod files {
         /// A library's assets: their properties, media and links.
         #[action(effect = read_only)]
         async fn assets(&self, root: String) -> Result<Vec<Asset>, AgentError>;
-        /// Projects, assets and files whose name or properties hold every word.
+        /// The registry, offline: projects, assets and files whose path,
+        /// name or properties hold every word (`sha:<hex>` by content,
+        /// `org:`, `root:`, `kind:` to narrow), each with where its bytes are.
         #[action(effect = read_only)]
         async fn search(&self, query: String) -> Result<Vec<Hit>, AgentError>;
+        /// Where a file's bytes are: every copy, its holder and site, how
+        /// sure we are of it and since when. `root` empty: `path` is a hash.
+        #[action(effect = read_only)]
+        async fn locations(&self, root: String, path: String) -> Result<Locations, AgentError>;
+        /// Copy counts of an org, a root (its place) or everything (`""`):
+        /// bytes under policy, on one holder, unverified; each holder's share.
+        #[action(effect = read_only)]
+        async fn copies(&self, scope: String) -> Result<CopyReport, AgentError>;
+        /// Set the minimum copies of an org or a root (`min_verified` 0 clears it).
+        async fn policy_set(
+            &self,
+            scope: String,
+            min_verified: u32,
+            min_sites: u32,
+        ) -> Result<Policy, AgentError>;
+        /// The files under their copy policy in an org, a root or everything.
+        #[action(effect = read_only)]
+        async fn policy_check(&self, scope: String) -> Result<Vec<Violation>, AgentError>;
+        /// Re-hash this device's copies now (an org, a root, a hash, or
+        /// everything due with `""`) and challenge reachable peers' copies.
+        async fn scrub(&self, scope: String) -> Result<ScrubReport, AgentError>;
+        /// Drop a file's (or a folder's, `""` the root's) cached bytes here,
+        /// unless that leaves a file under its policy; how many went.
+        async fn evict(&self, root: String, path: String) -> Result<u32, AgentError>;
+        /// Every holder of the orgs this device sees, and whether it is reachable now.
+        #[action(effect = read_only)]
+        async fn holders(&self) -> Result<Vec<HolderStatus>, AgentError>;
         /// A sound file's waveform (`audiowaveform` JSON v2).
         #[action(effect = read_only)]
         async fn peaks(&self, root: String, path: String) -> Result<Peaks, AgentError>;

@@ -9,6 +9,7 @@ use uuid::Uuid;
 use super::engine::{Engine, EngineError};
 use super::manifest::{Tree, doc_id_for};
 use crate::agent::{AgentError, Files};
+use crate::copies::{CopyReport, HolderStatus, Locations, Policy, ScrubReport, Violation};
 use crate::id::VersionId;
 use crate::rendition::Peaks;
 use crate::roots::{Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus};
@@ -19,8 +20,24 @@ impl From<EngineError> for AgentError {
             EngineError::NoRoot(r) => Self::NotFound(r),
             EngineError::NoVersion => Self::NotFound("the version".to_owned()),
             EngineError::NotSynced(paths) => Self::NotSynced(paths.join(", ")),
+            EngineError::BelowPolicy(paths) => Self::BelowPolicy(first_few(&paths)),
             EngineError::Io(why) => Self::Refused(why),
         }
+    }
+}
+
+/// `a, b, c and 24 more files`: a refusal stays readable at any size.
+fn first_few(paths: &[String]) -> String {
+    const SHOWN: usize = 3;
+    let head = paths
+        .iter()
+        .take(SHOWN)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    match paths.len().saturating_sub(SHOWN) {
+        0 => head,
+        more => format!("{head} and {more} more files"),
     }
 }
 
@@ -163,6 +180,69 @@ impl Files for Engine {
 
     async fn search(&self, query: String) -> Result<Vec<Hit>, AgentError> {
         Ok(Self::search(self, &query).await)
+    }
+
+    async fn locations(&self, root: String, path: String) -> Result<Locations, AgentError> {
+        if root.trim().is_empty() {
+            let hash = path.trim().trim_start_matches("sha:").to_lowercase();
+            if Sha256::from_hex(&hash).is_err() {
+                return Err(AgentError::NotFound(path));
+            }
+            return Ok(Self::locations(self, &hash).await);
+        }
+        let id = self.resolve_root(&root)?;
+        Ok(self.locations_of(id, path.trim_matches('/')).await?)
+    }
+
+    async fn copies(&self, scope: String) -> Result<CopyReport, AgentError> {
+        self.refresh_registry().await;
+        self.refresh_ledgers().await;
+        Ok(self.copy_report(scope.trim_matches('/')).await)
+    }
+
+    async fn policy_set(
+        &self,
+        scope: String,
+        min_verified: u32,
+        min_sites: u32,
+    ) -> Result<Policy, AgentError> {
+        let scope = scope.trim_matches('/');
+        let policy = (min_verified > 0).then_some(Policy {
+            min_verified,
+            min_sites: min_sites.max(1),
+        });
+        self.set_policy(scope, policy).await?;
+        let org = scope.split('/').next().unwrap_or(scope);
+        Ok(self.policy_for(org, scope))
+    }
+
+    async fn policy_check(&self, scope: String) -> Result<Vec<Violation>, AgentError> {
+        self.refresh_ledgers().await;
+        Ok(self.copy_report(scope.trim_matches('/')).await.violations)
+    }
+
+    async fn scrub(&self, scope: String) -> Result<ScrubReport, AgentError> {
+        let scope = scope.trim().trim_matches('/');
+        let mut report = if scope.is_empty() {
+            Self::scrub(self, None, u64::MAX).await
+        } else {
+            Self::scrub(self, Some(scope), u64::MAX).await
+        };
+        let hash = (Sha256::from_hex(scope).is_ok()).then_some(scope);
+        let c = self.challenge(64, hash).await;
+        report.challenged = c.challenged;
+        report.passed = c.passed;
+        report.failed = c.failed;
+        Ok(report)
+    }
+
+    async fn evict(&self, root: String, path: String) -> Result<u32, AgentError> {
+        let id = self.resolve_root(&root)?;
+        Ok(Self::evict(self, id, path.trim_matches('/')).await?)
+    }
+
+    async fn holders(&self) -> Result<Vec<HolderStatus>, AgentError> {
+        Ok(Self::holders(self).await)
     }
 
     async fn peaks(&self, root: String, path: String) -> Result<Peaks, AgentError> {

@@ -52,7 +52,7 @@ pub fn place_of(lane_name: &str) -> Option<&str> {
     (!org.is_empty() && Section::from_dir(section).is_some() && !name.is_empty()).then_some(place)
 }
 
-const NAMESPACE: Uuid = Uuid::from_u128(0x5e6f_3c2a_9b1d_4e8f_a7c3_1d2e_3f4a_5b6c);
+pub(super) const NAMESPACE: Uuid = Uuid::from_u128(0x5e6f_3c2a_9b1d_4e8f_a7c3_1d2e_3f4a_5b6c);
 
 /// How a path's heads settle.
 #[derive(Debug, Clone, PartialEq, Eq)]

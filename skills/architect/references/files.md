@@ -51,6 +51,21 @@ The spec: `docs/content/architecture/project-files.md`. A root is `<org>/Project
 
 Tests: `features/files/tests/s3.rs` (a real socket and `object_store`'s S3 client: list, range, multipart, copy, versions, roles, revoke), `features/files/tests/sync.rs` (two engines, documents exchanged by hand), `apps/desktop/tests/files.rs` (two nodes over iroh: a pinned project both ways; an unpinned one over WebDAV, opened on demand, written, pinned and unpinned over HTTP).
 
+## The registry and copies (`sync`)
+
+The spec: `docs/content/architecture/file-registry.md`. Model types (wasm-clean): `features/files/src/copies.rs` (`Holder`, `HolderKind` device/node/s3, `Attestation`, `CopyState` full/cached/partial/evicting, `Check`, `Confidence`, `confidence`, `Policy`, `Locations`, `CopyReport`, `Violation`, `ScrubReport`, `HolderStatus`).
+
+- **The registry** (`features/files/src/sync/registry.rs` `Registry`, `Query`, `RootIndex`): one row per live file of every root the device holds a manifest of, rebuilt per root when its version-vector digest moves (`Engine::refresh_registry`, every pass), persisted at `<data>/registry/<doc id>.json`, loaded on first use. `Engine::search` (`FILES_SEARCH`) answers from it: words over path, root and asset properties; `sha:<8+ hex>` or a bare 64-hex by content; `org:`, `root:`, `kind:`. Each `Hit` carries `holders`, `verified`, `reachable`.
+- **The ledger** (`features/files/src/sync/ledger.rs` `LedgerDoc`, `Identity`, `Writer`): one Loro doc per holder per org, `ledger/<org>/<holder>` on the peer lane (the catalogue registers it, `Engine::learn_ledger`), maps `holder`, `copies` (hash → `Attestation`), `checks`; `ledger/<org>/policy` holds `Policy` per scope. Records are ed25519-signed; a holder's id is its iroh endpoint id (`Engine::with_identity` with the iroh secret), an S3 bucket's records are signed by its manager (`Engine::attest_external`): a node with `blob_s3_bucket` hands its `S3Store` a `BucketHolder` (`features/files/src/sync/bucket.rs`, feature `s3`), so a put attests the bucket `full` and verified, a delete or a failed `S3Store::verify` withdraws it. A record whose signature fails is dropped on read.
+- **Attestations follow what happens.** `Engine::attest_root` after each root's pass (pins, pulls, commits, deletes), `Engine::attest` after an evict, an unpin or a fetch, `Engine::reconcile` each pass for the store and `.part`s. `verified_at` is set only when bytes were hashed (commit, fetch, scrub), never on discovery.
+- **Counted on evidence only.** `confidence`: a scrub by the holder or a passed challenge within `EngineConfig::verify_window` (default `VERIFY_WINDOW`, 30 days) and no failed challenge since. `Engine::scrub` re-hashes (sha-256 and the Merkle root over 1 MiB leaves, `features/files/src/sync/verify.rs`); bad bytes are moved to `<data>/corrupt/` and the claim withdrawn. `Engine::challenge` asks reachable holders (`Engine::set_provers`; the node dials `Possession` on its peer lane, `PossessionHost`, `POSSESSION_PERMITS`) for a random chunk and its Merkle path.
+- **Policy guards drops.** `Engine::unpin` and `Engine::evict` refuse with `EngineError::BelowPolicy(paths)` when the verified copies elsewhere would not meet `Policy` (bytes kept in this device's cache after an unpin still count).
+- **Access-scoped.** `DocPeerHost::list` keeps only what the caller may read (`DocRegistry::may_read`); a root or ledger a peer stops listing (or a refused list) is forgotten (`Engine::listed_by`, from the node's sweep).
+- **Actions:** `FILES_SEARCH`, `FILES_LOCATIONS {root, path}` (root empty: path is a hash), `FILES_COPIES {scope}`, `FILES_POLICY_SET {scope, min_verified, min_sites}`, `FILES_POLICY_CHECK`, `FILES_SCRUB {scope}`, `FILES_EVICT {root, path}`, `FILES_HOLDERS`.
+- **Node config:** `files_site`, `files_verify_secs`, `files_scrub_mib` (`ARCHITECT_FILES_SITE`, `_VERIFY_SECS`, `_SCRUB_MIB`).
+
+Tests: `features/files/tests/copies.rs` (offline search with locations, a pin from one verified copy to two, rot caught by a challenge and a scrub, stale evidence, refusal under policy, revocation; `registry_at_scale` by hand), `apps/desktop/tests/files.rs` `a_pin_is_a_second_verified_copy_that_the_node_counts_and_challenges`, `features/crdt/crdt/tests/p2p.rs` `a_peer_is_listed_only_the_documents_it_may_open`.
+
 ## Recipe: mount it
 
 ```rust

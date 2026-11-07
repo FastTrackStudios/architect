@@ -351,70 +351,12 @@ impl Engine {
         self.store.file_for(&hash)
     }
 
-    /// Search every root this device knows: projects by name, assets by
-    /// name and property, files by path. Every word must match.
+    /// Projects, assets and files matching `query` in every root this
+    /// device may see: the registry, offline; each file with where its
+    /// bytes are (`sha:<hex>`, `org:`, `root:`, `kind:` narrow it).
     pub async fn search(&self, query: &str) -> Vec<Hit> {
-        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-        if words.is_empty() {
-            return Vec::new();
-        }
-        let matches = |text: &str| {
-            let text = text.to_lowercase();
-            words.iter().all(|w| text.contains(w))
-        };
-        let mut hits = Vec::new();
-        for root in self.status().await {
-            let Ok(doc_id) = root.doc_id.parse::<Uuid>() else {
-                continue;
-            };
-            if root.section == Section::Projects && matches(&root.name) {
-                hits.push(Hit {
-                    root: root.place.clone(),
-                    path: String::new(),
-                    name: root.name.clone(),
-                    what: "project".to_owned(),
-                    detail: format!("{} files", root.files),
-                });
-            }
-            if root.section == Section::Assets
-                && let Ok(assets) = self.assets(doc_id).await
-            {
-                for a in assets {
-                    let props: Vec<String> = a.properties.values().cloned().collect();
-                    if matches(&format!("{} {}", a.name, props.join(" "))) {
-                        hits.push(Hit {
-                            root: root.place.clone(),
-                            path: a.note.clone().unwrap_or_else(|| a.folder.clone()),
-                            name: a.name.clone(),
-                            what: a
-                                .properties
-                                .get("type")
-                                .cloned()
-                                .unwrap_or_else(|| "asset".to_owned()),
-                            detail: props.join(" · "),
-                        });
-                    }
-                }
-            }
-            if let Ok(tree) = self.tree(doc_id).await {
-                for (path, v) in tree.live() {
-                    if matches(&path) {
-                        hits.push(Hit {
-                            root: root.place.clone(),
-                            name: path.rsplit('/').next().unwrap_or(&path).to_owned(),
-                            path,
-                            what: "file".to_owned(),
-                            detail: format!("{} bytes", v.size),
-                        });
-                    }
-                }
-            }
-            if hits.len() >= 200 {
-                break;
-            }
-        }
-        hits.truncate(200);
-        hits
+        self.refresh_registry().await;
+        self.registry_search(query, 200).await
     }
 
     /// A file's waveform: a WAV read here, anything else through the

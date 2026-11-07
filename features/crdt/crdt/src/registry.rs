@@ -326,6 +326,18 @@ impl DocRegistry {
         self.permissions.as_ref()
     }
 
+    /// Whether the current caller may read `doc_id`: the org's permissions
+    /// and the authorizer, as an attach would check them (admission
+    /// aside: a catalogue lists documents not opened yet).
+    #[must_use]
+    pub fn may_read(&self, doc_id: Uuid) -> bool {
+        let who = architect::permissions_gate::caller();
+        self.permissions
+            .as_ref()
+            .is_none_or(|p| p.check(who.as_ref(), doc_id, DocAccess::Read).is_ok())
+            && (self.authorizer)(who.as_ref(), doc_id)
+    }
+
     /// Admission, then the org's permissions, then the caller's
     /// authorization, for one attach.
     fn admit_caller(&self, doc_id: Uuid, access: DocAccess) -> Result<(), SyncError> {

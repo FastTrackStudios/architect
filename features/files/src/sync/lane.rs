@@ -19,6 +19,12 @@ pub const BLOB_PERMITS: ServicePermits = ServicePermits {
     ],
 };
 
+/// `Possession` for the node's gate: an admitted device asks for proofs.
+pub const POSSESSION_PERMITS: ServicePermits = ServicePermits {
+    service: "Possession",
+    methods: &[MethodPermit::new("prove", "read", "files/**")],
+};
+
 /// A manifest as the peer lane lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldManifest {
@@ -84,8 +90,17 @@ impl Engine {
             held.push(HeldManifest {
                 doc_id,
                 name: lane_name(&meta.place()),
-                digest: super::scan::hex(&sha2_of(&doc.oplog_vv().encode())),
+                digest: digest_of(&doc),
             });
+        }
+        for (doc_id, which) in self.ledgers() {
+            if let Some(doc) = self.doc(doc_id).await {
+                held.push(HeldManifest {
+                    doc_id,
+                    name: which.name(),
+                    digest: digest_of(&doc),
+                });
+            }
         }
         *self
             .held
@@ -96,6 +111,11 @@ impl Engine {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = served;
     }
+}
+
+/// A document's digest on the lane: changes when it does.
+pub(super) fn digest_of(doc: &loro::LoroDoc) -> String {
+    super::scan::hex(&sha2_of(&doc.oplog_vv().encode()))
 }
 
 fn sha2_of(bytes: &[u8]) -> Vec<u8> {

@@ -12,6 +12,9 @@ use std::sync::OnceLock;
 use architect::action::ActionList;
 use architect_files::agent::AgentError;
 use architect_files::agent::files::{Files, FilesHttpClient, files_actions};
+use architect_files::copies::{
+    CopyReport, HolderStatus, Locations, Policy, ScrubReport, Violation,
+};
 use architect_files::rendition::Peaks;
 use architect_files::roots::{
     Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus,
@@ -273,5 +276,38 @@ impl Files for Agent {
     async fn drive(&self) -> Result<DriveStatus, AgentError> {
         let c = self.0.clone();
         on_runtime(async move { Files::drive(&c).await }).await
+    }
+    async fn locations(&self, root: String, path: String) -> Result<Locations, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::locations(&c, root, path).await }).await
+    }
+    async fn copies(&self, scope: String) -> Result<CopyReport, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::copies(&c, scope).await }).await
+    }
+    async fn policy_set(
+        &self,
+        scope: String,
+        min_verified: u32,
+        min_sites: u32,
+    ) -> Result<Policy, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::policy_set(&c, scope, min_verified, min_sites).await }).await
+    }
+    async fn policy_check(&self, scope: String) -> Result<Vec<Violation>, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::policy_check(&c, scope).await }).await
+    }
+    async fn scrub(&self, scope: String) -> Result<ScrubReport, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::scrub(&c, scope).await }).await
+    }
+    async fn evict(&self, root: String, path: String) -> Result<u32, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::evict(&c, root, path).await }).await
+    }
+    async fn holders(&self) -> Result<Vec<HolderStatus>, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::holders(&c).await }).await
     }
 }

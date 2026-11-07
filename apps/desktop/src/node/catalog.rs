@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use architect_files::sync::{Engine, manifest};
+use architect_files::sync::{Engine, LedgerDoc, manifest};
 use crdt::peer::{DocAt, DocCatalog, HeldDoc};
 use crdt::sync::SyncError;
 use uuid::Uuid;
@@ -87,6 +87,13 @@ impl VaultCatalog {
     /// `at` names no vault this node holds, is not a note, or its id is
     /// not the one its name derives to.
     pub fn register(&self, at: &DocAt) -> Result<Uuid, SyncError> {
+        if let Some(which) = LedgerDoc::parse(&at.name) {
+            let files = self.files.as_ref().ok_or(SyncError::UnknownDoc)?;
+            if which.doc_id() != at.doc_id {
+                return Err(SyncError::UnknownDoc);
+            }
+            return Ok(files.learn_ledger(which));
+        }
         if let Some(place) = manifest::place_of(&at.name) {
             let files = self.files.as_ref().ok_or(SyncError::UnknownDoc)?;
             if manifest::doc_id_for(place) != at.doc_id {
@@ -115,6 +122,24 @@ impl DocCatalog for VaultCatalog {
 
     async fn resolve(&self, at: &DocAt) -> Result<Uuid, SyncError> {
         self.register(at)
+    }
+}
+
+impl VaultCatalog {
+    /// `peer` listed `theirs`: hand the engine the roots and ledgers in it,
+    /// so it forgets those the peer no longer lets this node open.
+    pub fn listed_by(&self, peer: &str, theirs: &[HeldDoc]) {
+        let Some(files) = &self.files else { return };
+        let ids: Vec<Uuid> = theirs
+            .iter()
+            .filter(|d| {
+                manifest::place_of(&d.name).is_some() || LedgerDoc::parse(&d.name).is_some()
+            })
+            .map(|d| d.doc_id)
+            .collect();
+        for id in files.listed_by(peer, &ids) {
+            tracing::info!(doc = %id, peer, "files: a root or ledger this peer no longer shares is forgotten");
+        }
     }
 }
 

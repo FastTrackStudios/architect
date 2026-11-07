@@ -32,7 +32,11 @@ use architect::layer::Layer as _;
 use architect::layer::LayerRouter;
 use architect_devices::Admission;
 use architect_files::sync::dav::Dav;
-use architect_files::sync::{BLOB_PERMITS, Engine, EngineConfig, TreeStore};
+use architect_files::sync::verify::{PossessionDispatcher, possession_service_descriptor};
+use architect_files::sync::{
+    BLOB_PERMITS, Engine, EngineConfig, POSSESSION_PERMITS, PossessionClient, PossessionHost,
+    Prover, TreeStore, VoxProver,
+};
 use crdt::DocRegistry;
 use crdt::p2p::More;
 
@@ -50,8 +54,14 @@ pub(super) fn engine(
 ) -> Engine {
     let data = config.data_dir.join("files");
     let local = LocalFs::new(data.join("blobs"));
-    Engine::new(
-        EngineConfig::new(&config.name, data, files_dir.to_owned(), config.files_hold),
+    let engine_config = EngineConfig {
+        site: config.files_site.clone().unwrap_or_default(),
+        verify_window: Duration::from_secs(config.files_verify_secs.max(1)),
+        scrub_budget: config.files_scrub_mib.saturating_mul(1 << 20),
+        ..EngineConfig::new(&config.name, data, files_dir.to_owned(), config.files_hold)
+    };
+    let engine = Engine::new(
+        engine_config,
         TreeStore::new(local.clone()),
         Fetcher::new(local),
         Arc::new(move |doc_id| {
@@ -62,7 +72,15 @@ pub(super) fn engine(
             })
         }),
     )
-    .with_transcoder(architect_files::server::FfmpegTranscoder::new())
+    .with_transcoder(architect_files::server::FfmpegTranscoder::new());
+    // Its attestations are signed with its iroh key: its holder id is its endpoint id.
+    match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {
+        Ok(key) => engine.with_identity(key.to_bytes()),
+        Err(error) => {
+            tracing::warn!(%error, "files: the iroh key is not readable; attestations use a key of their own");
+            engine
+        }
+    }
 }
 
 /// The agent on the node's HTTP side, when it listens on loopback only (a
@@ -114,11 +132,21 @@ pub(super) fn mount_drive(
 /// `BlobTransfer` on the node's peer lane, behind its gate.
 pub(super) fn more(engine: &Engine) -> More {
     More {
-        router: Some(LayerRouter::new().with(
-            blob_transfer_service_descriptor(),
-            BlobTransferDispatcher::new(engine.blob_host()),
-        )),
-        permits: vec![(blob_transfer_service_descriptor(), &BLOB_PERMITS)],
+        router: Some(
+            LayerRouter::new()
+                .with(
+                    blob_transfer_service_descriptor(),
+                    BlobTransferDispatcher::new(engine.blob_host()),
+                )
+                .with(
+                    possession_service_descriptor(),
+                    PossessionDispatcher::new(PossessionHost(engine.clone())),
+                ),
+        ),
+        permits: vec![
+            (blob_transfer_service_descriptor(), &BLOB_PERMITS),
+            (possession_service_descriptor(), &POSSESSION_PERMITS),
+        ],
     }
 }
 
@@ -231,7 +259,8 @@ async fn evict(local: LocalFs, budget: u64, there: &std::collections::HashSet<Sh
 
 /// Keep a `BlobTransfer` connection to every peer the node can dial, the
 /// engine's fetcher reading from them in turn, then from `fixed` (the
-/// node's bucket).
+/// node's bucket), and a `Possession` one, so the engine can challenge
+/// what each peer says it holds (and knows which holders are reachable now).
 pub(super) async fn dial_forever(
     engine: Engine,
     endpoint: iroh::Endpoint,
@@ -242,41 +271,57 @@ pub(super) async fn dial_forever(
 ) {
     engine.fetcher.set_remotes(fixed.clone());
     let me = architect_devices::endpoint_key(&endpoint.id().to_string());
-    let mut peers: BTreeMap<String, BlobTransferClient> = BTreeMap::new();
+    let mut peers: BTreeMap<String, (BlobTransferClient, PossessionClient)> = BTreeMap::new();
     loop {
         let mut changed = false;
         let wanted = targets(&configured, &admission, mode);
+        let wanted_ids: std::collections::BTreeSet<&str> =
+            wanted.iter().map(|p| p.endpoint.as_str()).collect();
+        let before = peers.len();
+        peers.retain(|id, _| wanted_ids.contains(id.as_str()));
+        changed |= peers.len() != before;
         for peer in &wanted {
             if peer.endpoint == me {
                 continue;
             }
-            if let Some(client) = peers.get(&peer.endpoint)
+            if let Some((client, _)) = peers.get(&peer.endpoint)
                 && client.size("0".repeat(64)).await.is_ok()
             {
                 continue;
             }
-            peers.remove(&peer.endpoint);
-            changed = true;
-            let Ok(link) = iroh_link::connect(&endpoint, peer.addr.clone()).await else {
+            changed |= peers.remove(&peer.endpoint).is_some();
+            let Some(blob) = establish::<BlobTransferClient>(&endpoint, peer).await else {
                 continue;
             };
-            if let Ok(client) = vox::initiator_on(link)
-                .establish::<BlobTransferClient>()
-                .await
-            {
-                peers.insert(peer.endpoint.clone(), client);
-            }
+            let Some(proofs) = establish::<PossessionClient>(&endpoint, peer).await else {
+                continue;
+            };
+            peers.insert(peer.endpoint.clone(), (blob, proofs));
+            changed = true;
         }
         if changed {
             let remotes: Vec<Arc<dyn Remote>> = peers
                 .values()
-                .map(|c| -> Arc<dyn Remote> { Arc::new(VoxRemote::new(c.clone())) })
+                .map(|(c, _)| -> Arc<dyn Remote> { Arc::new(VoxRemote::new(c.clone())) })
                 .chain(fixed.iter().cloned())
                 .collect();
             tracing::debug!(peers = remotes.len(), "files: blob peers");
             engine.set_online(!remotes.is_empty());
             engine.fetcher.set_remotes(remotes);
+            engine.set_provers(
+                peers
+                    .iter()
+                    .map(|(id, (_, p))| -> (String, Arc<dyn Prover>) {
+                        (id.clone(), Arc::new(VoxProver(p.clone())))
+                    })
+                    .collect(),
+            );
         }
         tokio::time::sleep(DIAL_EVERY).await;
     }
+}
+
+async fn establish<C: vox::FromVoxLane>(endpoint: &iroh::Endpoint, peer: &Dial) -> Option<C> {
+    let link = iroh_link::connect(endpoint, peer.addr.clone()).await.ok()?;
+    vox::initiator_on(link).establish::<C>().await.ok()
 }

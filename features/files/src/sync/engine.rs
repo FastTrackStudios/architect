@@ -61,7 +61,19 @@ pub struct EngineConfig {
     pub keep_inline: u64,
     /// How old a change must be before it is committed ([`super::scan::SETTLE`]).
     pub settle: std::time::Duration,
+    /// Where this device is (`home`, `starcommand`): copies at one site
+    /// are not off-site. Empty: the device's name.
+    pub site: String,
+    /// How long a copy's evidence (a scrub, a passed challenge) counts.
+    pub verify_window: std::time::Duration,
+    /// Bytes re-hashed per pass at most (0: no scrubs between `FILES_SCRUB`s).
+    pub scrub_budget: u64,
+    /// Peers' copies challenged per pass.
+    pub challenges: u32,
 }
+
+/// How long evidence of a copy counts by default: 30 days.
+pub const VERIFY_WINDOW: std::time::Duration = std::time::Duration::from_hours(30 * 24);
 
 impl EngineConfig {
     /// A device's engine with the defaults: [`KEEP_INLINE`], [`super::scan::SETTLE`].
@@ -79,6 +91,10 @@ impl EngineConfig {
             hold_all,
             keep_inline: KEEP_INLINE,
             settle: super::scan::SETTLE,
+            site: String::new(),
+            verify_window: VERIFY_WINDOW,
+            scrub_budget: 32 << 20,
+            challenges: 2,
         }
     }
 }
@@ -92,6 +108,9 @@ pub enum EngineError {
     NoVersion,
     #[error("not synced yet: {}", .0.join(", "))]
     NotSynced(Vec<String>),
+    /// Dropping this device's copies would leave these files under policy.
+    #[error("under the copy policy without this device: {}", .0.join(", "))]
+    BelowPolicy(Vec<String>),
     #[error("{0}")]
     Io(String),
 }
@@ -137,6 +156,8 @@ pub struct Engine {
     pub(super) drive: Arc<std::sync::RwLock<(Option<PathBuf>, bool)>>,
     /// What makes peaks of anything but a WAV.
     pub(super) transcoder: Option<Arc<dyn crate::server::Transcoder>>,
+    /// The registry, the ledgers, this device's attestations.
+    pub(super) books: Arc<super::replicas::Books>,
 }
 
 impl Engine {
@@ -144,8 +165,10 @@ impl Engine {
     /// (over the same `LocalFs`), and whose documents come from `docs`.
     #[must_use]
     pub fn new(config: EngineConfig, store: TreeStore, fetcher: Fetcher, docs: Docs) -> Self {
+        let books = Arc::new(super::replicas::Books::new(&config.data));
         Self {
             config: Arc::new(config),
+            books,
             store,
             fetcher,
             docs,
@@ -225,7 +248,12 @@ impl Engine {
     /// Whether `doc_id` is a root this device knows.
     #[must_use]
     pub fn knows(&self, doc_id: Uuid) -> bool {
-        self.lock().contains_key(&doc_id)
+        self.lock().contains_key(&doc_id) || self.knows_ledger(doc_id)
+    }
+
+    /// Stop keeping a root: its state here (its access was revoked).
+    pub(super) fn forget_root(&self, doc_id: Uuid) {
+        self.lock().remove(&doc_id);
     }
 
     /// A root's place, once known.
@@ -337,6 +365,10 @@ impl Engine {
             unsynced.sort();
             return Err(EngineError::NotSynced(unsynced));
         }
+        if let Some(meta) = self.meta(doc_id) {
+            let leaving = self.leaving_on_unpin(&meta.place(), &index);
+            self.guard(&meta.org, leaving).await?;
+        }
         for path in index.files.keys() {
             let _ = std::fs::remove_file(dir.join(path));
         }
@@ -347,6 +379,11 @@ impl Engine {
         if let Some(state) = self.lock().get_mut(&doc_id) {
             state.index = None;
             state.missing = 0;
+        }
+        // The working copy's attestations go now; what the cache keeps stays.
+        if let Some(meta) = self.meta(doc_id) {
+            self.attest_root(doc_id, &meta.org, &Index::default()).await;
+            self.refresh_ledgers().await;
         }
         Ok(())
     }
@@ -372,6 +409,8 @@ impl Engine {
         for doc_id in self.known() {
             self.pass(doc_id).await;
         }
+        self.refresh_lane().await;
+        self.keep_books().await;
         self.refresh_lane().await;
     }
 
@@ -464,6 +503,7 @@ impl Engine {
             self.checkpoint(manifest, &format!("Saved {name}"), true);
         }
         let _ = index.save(&self.index_path(doc_id));
+        self.attest_root(doc_id, &meta.org, &index).await;
         self.put_back(doc_id, scanner, index, missing);
         Ok(())
     }
@@ -494,6 +534,8 @@ impl Engine {
                     content,
                     stat,
                 } => {
+                    // Hashed just now by the scan: verified on arrival.
+                    self.note_verified(&content);
                     let known = index.files.get(&path).and_then(|i| i.version);
                     let heads = tree.heads(&path);
                     // Already the head's bytes (a copy that was here before
@@ -700,6 +742,8 @@ impl Engine {
                 .fetch(hash)
                 .await
                 .map_err(|e| EngineError::Io(e.to_string()))?;
+            // The fetcher checked every byte against the hash.
+            self.note_verified(content);
             self.store.local.path_for(&hash)
         };
         if let Some(parent) = at.parent() {
@@ -731,7 +775,10 @@ impl Engine {
                 && let Ok(hash) = Sha256::from_hex(content)
                 && self.store.file_for(&hash).is_none()
             {
-                let _ = self.fetcher.fetch(hash).await;
+                if self.fetcher.fetch(hash).await.is_ok() {
+                    self.note_verified(content);
+                    self.attest(&[hash]).await;
+                }
             }
         }
     }

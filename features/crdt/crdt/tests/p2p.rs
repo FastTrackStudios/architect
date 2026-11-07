@@ -77,13 +77,18 @@ async fn loopback() -> iroh::Endpoint {
 /// Serve `endpoint`'s documents: the registry admits what `NodeAccess`
 /// admits, and the node's own sweep lane (`service:self`).
 fn serve(endpoint: iroh::Endpoint) -> Node {
+    serve_hiding(endpoint, None)
+}
+
+/// [`serve`], with `hidden` a document no peer may open.
+fn serve_hiding(endpoint: iroh::Endpoint, hidden: Option<Uuid>) -> Node {
     let access = NodeAccess::new(Admission::new(), Shares::new());
     let registry = DocRegistry::new(|_| Box::pin(async { Ok(CrdtDoc::ephemeral()) }))
         .with_authorizer({
             let access = access.clone();
             move |who, doc_id| {
-                access.admits(who, doc_id)
-                    || matches!(who, Some(Principal::Service { name }) if name == "self")
+                matches!(who, Some(Principal::Service { name }) if name == "self")
+                    || (access.admits(who, doc_id) && Some(doc_id) != hidden)
             }
         });
     let serve = tokio::spawn({
@@ -456,4 +461,32 @@ async fn devices_on_one_network_find_each_other() {
     .await;
     edit(&on_phone, "key", "D");
     sees(&on_laptop, "key", "D", "the laptop gets the phone's edit").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_is_listed_only_the_documents_it_may_open() {
+    let private = Uuid::new_v4();
+    let desk = serve_hiding(loopback().await, Some(private));
+    let laptop = serve(loopback().await);
+    let (desk_id, laptop_id) = (Uuid::new_v4(), Uuid::new_v4());
+    let account = directory(&[(desk_id, &desk), (laptop_id, &laptop)]);
+    desk.access
+        .devices
+        .set_account(account_peers(&account, desk_id));
+    let shared = Uuid::new_v4();
+    edit(&desk.registry.doc(shared).await.unwrap(), "k", "a");
+    edit(&desk.registry.doc(private).await.unwrap(), "k", "b");
+    let peers = peer_client(&laptop.endpoint, &desk).await;
+    let listed: Vec<Uuid> = peers
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| d.doc_id)
+        .collect();
+    assert_eq!(
+        listed,
+        vec![shared],
+        "the private document's name stays on the desk"
+    );
 }
