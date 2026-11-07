@@ -11,6 +11,7 @@
 
 pub mod nav;
 
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
@@ -203,7 +204,11 @@ impl Extension for FilesExtension {
         ext.navigator(nav::ACTIONS, nav::FilesNav);
         ext.view("root", RootView)
             .view("asset", AssetView)
-            .action("FILES_OPEN", open);
+            .view("drive", DriveView)
+            .action("FILES_OPEN", open)
+            .action("FILES_DRIVE_OPEN", |_| async {
+                run("EXT_VIEW_OPEN", json!({ "extension": ID, "view": "drive" })).await
+            });
     }
 }
 
@@ -361,6 +366,7 @@ fn RootPage(target: Target) -> Element {
                 button { style: "{BUTTON}", onclick: checkpoint, "Checkpoint" }
             }
             if let Some(p) = problem() { div { style: "color: var(--destructive);", "{p}" } }
+            DriveLine {}
             div { style: "display: flex; flex-wrap: wrap; gap: 6px; align-items: center;",
                 for (i, (at, label)) in crumbs.into_iter().enumerate() {
                     if i > 0 { span { style: "{MUTED}", "/" } }
@@ -673,6 +679,19 @@ mod tests {
     }
 
     #[test]
+    fn the_drive_reads_in_one_line() {
+        let d = json!({"mount": "/home/a/Architect", "mounted": true, "syncing": 1, "offline": false, "cache_bytes": 1_200_000_000_u64});
+        assert_eq!(
+            drive_line(&d),
+            "Drive at /home/a/Architect · 1 syncing · cache 1.2 GB"
+        );
+        assert_eq!(
+            drive_line(&json!({"mount": null})),
+            "No drive: this device's agent has none"
+        );
+    }
+
+    #[test]
     fn peaks_reduce_to_bars() {
         let peaks = json!({"data": [-100, 100, -32768, 32767, 0, 0, -16384, 16384]});
         let b = bars(&peaks, 2);
@@ -681,5 +700,119 @@ mod tests {
             (b[0] - 1.0).abs() < 0.01 && (b[1] - 0.5).abs() < 0.01,
             "{b:?}"
         );
+    }
+}
+
+/// The drive in one line: mounted where, syncing, offline, the cache.
+#[must_use]
+pub fn drive_line(d: &Value) -> String {
+    let mount = d.get("mount").and_then(Value::as_str).unwrap_or_default();
+    if mount.is_empty() {
+        return "No drive: this device's agent has none".to_owned();
+    }
+    let mounted = d.get("mounted").and_then(Value::as_bool).unwrap_or(false);
+    let syncing = d.get("syncing").and_then(Value::as_u64).unwrap_or(0);
+    let offline = d.get("offline").and_then(Value::as_bool).unwrap_or(false);
+    let cache = size(d.get("cache_bytes").and_then(Value::as_u64).unwrap_or(0));
+    let mut out = format!(
+        "{} {mount}",
+        if mounted {
+            "Drive at"
+        } else {
+            "Drive not mounted at"
+        }
+    );
+    if syncing > 0 {
+        let _ = write!(out, " · {syncing} syncing");
+    }
+    if offline {
+        out.push_str(" · offline");
+    }
+    let _ = write!(out, " · cache {cache}");
+    out
+}
+
+#[component]
+fn DriveLine() -> Element {
+    let drive = use_read("FILES_DRIVE", &json!({}));
+    let Some(Ok(d)) = drive() else {
+        return rsx! {};
+    };
+    let line = drive_line(&d);
+    rsx! {
+        div {
+            style: "{MUTED} font-size: 12px; cursor: pointer;",
+            "data-files": "drive-line",
+            onclick: move |_| {
+                spawn(async move {
+                    let _ = run("EXT_VIEW_OPEN", json!({ "extension": ID, "view": "drive" })).await;
+                });
+            },
+            "{line}"
+        }
+    }
+}
+
+#[allow(non_snake_case)]
+fn DriveView() -> Element {
+    let drive = use_read("FILES_DRIVE", &json!({}));
+    let config = use_read("DRIVE_CONFIG", &json!({}));
+    let mut mount = use_signal(String::new);
+    let mut store = use_signal(String::new);
+    let mut note = use_signal(|| None::<String>);
+    let current = config().and_then(Result::ok);
+    use_effect(use_reactive!(|current| {
+        if let Some(c) = current {
+            if mount.peek().is_empty() {
+                mount.set(text(&c, "mount").to_owned());
+            }
+            if store.peek().is_empty() {
+                store.set(text(&c, "store").to_owned());
+            }
+        }
+    }));
+    let status = match drive() {
+        Some(Ok(d)) => drive_line(&d),
+        Some(Err(e)) => format!("The files agent: {e}"),
+        None => "Reading…".to_owned(),
+    };
+    let file = config()
+        .and_then(Result::ok)
+        .map(|c| text(&c, "config").to_owned())
+        .unwrap_or_default();
+    let save = move |_| {
+        spawn(async move {
+            let done = run(
+                "DRIVE_CONFIGURE",
+                json!({ "mount": mount(), "store": store() }),
+            )
+            .await;
+            note.set(Some(match done {
+                Ok(v) if v.get("restarted").and_then(Value::as_bool) == Some(true) => {
+                    "Saved; the agent restarted.".to_owned()
+                }
+                Ok(_) => "Saved. Restart the agent to apply it.".to_owned(),
+                Err(e) => e,
+            }));
+            bump();
+        });
+    };
+    let field = "height: 30px; box-sizing: border-box; padding: 0 10px; border-radius: 7px; border: 1px solid var(--input); background: var(--background); color: var(--foreground); font-size: 13px; flex: 1;";
+    rsx! {
+        div { style: "{PAGE}", "data-files-page": "drive",
+            span { style: "font-size: 20px; font-weight: 700;", "Drive" }
+            span { style: "{MUTED}", "{status}" }
+            div { style: "{CARD}",
+                span { style: "{HEADING}", "Mount point" }
+                input { style: "{field}", value: "{mount}", oninput: move |e| mount.set(e.value()) }
+                span { style: "{HEADING}", "Store (working copies of pinned projects)" }
+                input { style: "{field}", value: "{store}", oninput: move |e| store.set(e.value()) }
+                div { style: "display: flex; gap: 8px; align-items: center;",
+                    button { style: "{BUTTON}", onclick: save, "Save" }
+                    if let Some(n) = note() { span { style: "{MUTED}", "{n}" } }
+                }
+                if !file.is_empty() { span { style: "{MUTED} font-size: 11px;", "{file}" } }
+            }
+        }
     }
 }

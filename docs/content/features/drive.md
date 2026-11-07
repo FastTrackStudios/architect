@@ -57,7 +57,10 @@ and restarts it if it dies.
 | Agent address | `127.0.0.1:18471` (`bind`), loopback only | the same |
 
 To move the drive or the store, edit `drive` or `files_dir` in the config
-(or use the app's Drive settings), then restart the agent. The other
+and restart the agent, or use the app's **Settings → Drive**, which does
+both (`DRIVE_CONFIGURE`). The same page, and a line on every project's
+page, shows the drive's status: where it's mounted, what is syncing, offline,
+and the cache's size (`FILES_DRIVE`). The other
 commands are `agent uninstall` (its config and data stay), `agent start`
 and `agent status`.
 

@@ -320,6 +320,26 @@ pub fn start_installed() -> Result<(), String> {
     run(Command::new("systemctl").args(["--user", "start", UNIT]))
 }
 
+/// Restart the installed agent (a changed config applies).
+///
+/// # Errors
+///
+/// `systemctl`/`launchctl` failed.
+pub fn restart_installed() -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        let uid = Command::new("id")
+            .arg("-u")
+            .output()
+            .map_err(|e| e.to_string())?;
+        let target = format!(
+            "gui/{}/{LABEL}",
+            String::from_utf8_lossy(&uid.stdout).trim()
+        );
+        return run(Command::new("launchctl").args(["kickstart", "-k", &target]));
+    }
+    run(Command::new("systemctl").args(["--user", "restart", UNIT]))
+}
+
 /// Whether the service file is installed in `service_dir`.
 #[must_use]
 pub fn installed(service_dir: &Path) -> bool {
