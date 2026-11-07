@@ -114,7 +114,25 @@ pub struct Action {
     pub on_press: Callback<()>,
     /// Say the label beside the icon ("Process 5"), not just show it.
     pub show_label: bool,
+    /// What pressing and sliding it up does instead (Task's capture
+    /// button: a timer), on the round separate button.
+    pub swipe_up: Option<SwipeUp>,
+    /// A count on it ("3" captures to process), on the round button.
+    pub badge: Option<String>,
 }
+
+/// An [`Action`]'s press-and-slide-up: the round button lifts with the
+/// finger, takes this icon and the accent once it has gone far enough
+/// ([`SWIPE_UP`]), and lets go into `on_swipe` instead of a press.
+#[derive(Clone, PartialEq)]
+pub struct SwipeUp {
+    pub label: String,
+    pub icon: IconFn,
+    pub on_swipe: Callback<()>,
+}
+
+/// How far the round button travels up to mean its swipe (Task's 36pt).
+pub const SWIPE_UP: f64 = 36.0;
 
 impl Action {
     pub fn new(label: impl Into<String>, icon: IconFn, on_press: impl FnMut(()) + 'static) -> Self {
@@ -123,7 +141,38 @@ impl Action {
             icon,
             on_press: Callback::new(on_press),
             show_label: false,
+            swipe_up: None,
+            badge: None,
         }
+    }
+
+    /// Press and slide up to do `on_swipe` (the round separate button).
+    #[must_use]
+    pub fn on_swipe_up(
+        mut self,
+        label: impl Into<String>,
+        icon: IconFn,
+        on_swipe: impl FnMut(()) + 'static,
+    ) -> Self {
+        self.swipe_up = Some(SwipeUp {
+            label: label.into(),
+            icon,
+            on_swipe: Callback::new(on_swipe),
+        });
+        self
+    }
+
+    /// A count on the round button: none at 0, `99+` past 99.
+    #[must_use]
+    pub fn with_badge(mut self, count: usize) -> Self {
+        self.badge = (count > 0).then(|| {
+            if count > 99 {
+                "99+".to_owned()
+            } else {
+                count.to_string()
+            }
+        });
+        self
     }
 
     /// Say the label beside the icon.
