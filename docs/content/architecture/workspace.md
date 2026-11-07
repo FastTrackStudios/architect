@@ -137,6 +137,33 @@ demo, the Setlists extension (`apps/ui/src/setlists.rs`): a setlist in
 the navigator, each song a deck in the "Song" screenset it ships through
 `[[deck_templates]]`.
 
+A project loaded by `DECK_OPEN` with only its type and id
+(`{context: {kind: project, id: "Projects/Album"}}`) opens the same way as
+a middle-click in the navigator. The app's `DecksConfig::resolve` fills
+in its folder before what it kept is read (`apps/ui/src/decks.rs`
+`resolve`). `DecksConfig::on_fresh` is told of every context loaded with
+nothing kept, from any load, and opens the project's page.
+
+**The sidebar is shared; its selection is each deck's.** One navigator
+serves every deck: its settings, pins, folded rows, width and the vaults
+and providers in it are the same on every deck. What it has selected
+belongs to the deck on show (`apps/ui/src/vault.rs` `follow_deck`). A deck
+starts on its context's row (`deck_home`):
+
+- the vault's deck: the whole navigator, every vault and provider;
+- a project's deck: its row in Projects, which lists the project's
+  contents (Songs, Notes, Sub-projects, Tasks);
+- a provider's context (a setlist's song): the container it is in (its
+  setlist).
+
+What a person selects on a deck stays with that deck when they switch
+away and back. This lasts for the run: a relaunch starts each deck on its
+context's row again, except the first deck, which keeps what the
+navigator had open. A note inside a project's folder on show on the
+project's deck (its page, its songs) leaves the project's row selected
+and does not reveal the note in its vault folder
+(`NavigatorState::set_active_with`).
+
 An app with decks calls `use_decks` beside its `WorkspaceView` (giving
 it the same `Signal<Workspace>` and `Signal<Screensets>`, its stores, its
 templates and the decks a first run opens), draws `DeckStrip` over the

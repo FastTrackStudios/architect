@@ -334,6 +334,9 @@ default; a page or an extension fills it while its view is on show.
   - Manual order: `NavigatorState::move_child`, `reset_order`.
   - Note counts.
   - Auto-reveal of the active note: `NavigatorState::set_active`, `reveal`.
+    `set_active_with(path, false)` lights it without revealing it (a deck's
+    project stays selected); `show_folder` selects a row with the rows above
+    it opened (the row a deck starts on, `apps/ui/src/vault.rs` `follow_deck`).
   - Collapse or expand all: `collapse_or_expand_all` (with smart collapse).
   - Back and forward through the last 100 folders: `back`, `forward`.
 - **Notes** (`features/navigator/src/list.rs` `rows`).

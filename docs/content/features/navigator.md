@@ -113,9 +113,15 @@ its own order (`Snapshot::group_by`), put a count on its row
 
 An item can be a whole context, loaded onto a
 [deck](@/architecture/workspace.md) of its own: a provider's
-`Open::Context` (a setlist's song), or a project's folder in the vault.
+`Open::Context` (a setlist's song), or a project: its folder in the vault,
+or its row in Projects.
 A click loads it onto the deck on show; a ⌘-click or a middle-click onto
-a new deck. A middle-click on any other row opens it in a new tab.
+a new deck. A middle-click on any other row opens it in a new tab. The
+navigator follows the deck on show: each deck keeps its own selection,
+starting on its context's row (a project's row in Projects, a song's
+setlist). `NavigatorState::show_folder` selects a row with the rows above
+it opened, and `set_active_with(path, false)` lights the note on show
+without revealing it ([Decks](@/architecture/workspace.md)).
 
 ## Code tour
 
