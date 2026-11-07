@@ -432,6 +432,9 @@ pub struct Host {
     /// A deck strip sits over the panes: the center's top bars are not the
     /// window's title row (the strip is).
     under_strip: Signal<bool>,
+    /// The app's decks, when it has them: carried into what the shell
+    /// draws for the host.
+    decks: CopyValue<Option<deck::DeckHandle>>,
     in_shell: Signal<bool>,
     /// A phone shows its own bar over the pane (the title, the switcher).
     phone_header: Signal<bool>,
@@ -1397,6 +1400,7 @@ pub fn WorkspaceView(
         .or_else(|| shell_now.map(|s| s.theme))
         .unwrap_or_default();
     let os_windows = try_use_context::<Windows>();
+    let decks_now = deck::try_use_decks();
     let mut host = use_context_provider(|| Host {
         workspace,
         views: CopyValue::new(views.clone()),
@@ -1408,6 +1412,7 @@ pub fn WorkspaceView(
         phone: Signal::new(phone),
         title_row: Signal::new(None),
         under_strip: Signal::new(false),
+        decks: CopyValue::new(decks_now),
         in_shell: Signal::new(false),
         phone_header: Signal::new(phone_header),
         drag: Signal::new(None),
@@ -1828,5 +1833,11 @@ impl PartialEq for Host {
 #[component]
 fn HostScope(host: Host, children: Element) -> Element {
     use_context_provider(|| host);
+    // The decks too: what the shell draws for the host (its sidebar, the
+    // left dock's views) is outside the app's tree that holds them.
+    let decks = *host.decks.peek();
+    if let Some(decks) = decks {
+        use_context_provider(|| decks);
+    }
     children
 }

@@ -16,7 +16,7 @@ use std::rc::Rc;
 use architect_commands::{Command, use_command};
 use architect_shell::ShellTheme;
 use dioxus::prelude::*;
-use lucide_dioxus::{AppWindow, Layers, Plus, X};
+use lucide_dioxus::{AppWindow, Plus, X};
 
 use super::screens::WorkspaceStore;
 use super::windows::{Bridge, Popout, Windows};
@@ -71,6 +71,8 @@ pub struct DecksConfig {
     /// What the strip's `+` loads onto a new deck: the app asks (a
     /// picker), or it is the deck on show again.
     pub on_new: Option<Callback<()>>,
+    /// The app's Action List: the `DECK_*` actions go on it, run here.
+    pub actions: Option<super::WorkspaceActions>,
 }
 
 /// A deck in a window of its own: its own live layout.
@@ -96,6 +98,11 @@ pub struct DeckHandle {
     on_new: CopyValue<Option<Callback<()>>>,
     /// Bumped when what is kept should be written (settled changes).
     dirty: Signal<u64>,
+    /// The platform's windows and the shell's colours, as the app's root
+    /// has them (read where the decks are mounted: a click has no scope
+    /// to look them up from).
+    windows: CopyValue<Option<Windows>>,
+    theme: CopyValue<Option<ShellTheme>>,
 }
 
 impl PartialEq for DeckHandle {
@@ -120,6 +127,7 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
         views,
         bridge,
         on_new,
+        actions,
     } = config;
     let handle = use_context_provider(|| DeckHandle {
         decks: Signal::new(Decks::default()),
@@ -133,7 +141,17 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
         bridge: CopyValue::new(bridge.clone()),
         on_new: CopyValue::new(on_new),
         dirty: Signal::new(0),
+        windows: CopyValue::new(None),
+        theme: CopyValue::new(None),
     });
+    let windows_now = try_use_context::<Windows>();
+    if handle.windows.peek().as_ref() != windows_now.as_ref() {
+        handle.windows.clone().set(windows_now);
+    }
+    let theme_now = architect_shell::try_use_shell().map(|s| s.theme);
+    if *handle.theme.peek() != theme_now {
+        handle.theme.clone().set(theme_now);
+    }
     // Props change under a live strip: keep them current.
     if *handle.templates.peek() != templates {
         let mut t = handle.templates;
@@ -189,6 +207,9 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
             handle.act(DeckState::show);
         }
     });
+    use_deck_actions(handle, actions);
+    // Unmounted (a page switch, the app closing): kept now.
+    use_drop(move || handle.keep_all());
     // A person's rearranging, a screenset loaded: into the deck on show.
     use_effect(move || {
         let _ = (workspace.read(), screensets.read());
@@ -211,6 +232,115 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
         });
     });
     handle
+}
+
+/// What a context kept, read from the app's store (for `DECK_OPEN`).
+struct UiKept(Option<Rc<dyn ContextStore>>);
+
+impl crate::control::deck::Kept for UiKept {
+    fn kept(&self, context: &DeckContext) -> Option<ContextLayout> {
+        store::load_context(self.0.as_ref()?.as_ref(), context)
+    }
+}
+
+type DeckMirror = std::sync::Arc<std::sync::Mutex<DeckState>>;
+
+/// Runs deck writes on the window's thread; reads from the mirror.
+struct OnWindow {
+    tx: futures_channel::mpsc::UnboundedSender<crate::control::deck::DeckJob>,
+    mirror: DeckMirror,
+}
+
+impl crate::control::deck::DeckExec for OnWindow {
+    fn exec(&self, job: crate::control::deck::DeckJob) -> bool {
+        self.tx.unbounded_send(job).is_ok()
+    }
+
+    fn read(&self, f: &mut dyn FnMut(&DeckState)) {
+        let m = self
+            .mirror
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        f(&m);
+    }
+}
+
+/// Puts the `DECK_*` actions on the app's list while the decks are
+/// mounted: a write runs here as a click does ([`DeckHandle::act`]), a
+/// read answers from a mirror kept current; each change is a `decks`
+/// event.
+fn use_deck_actions(handle: DeckHandle, actions: Option<super::WorkspaceActions>) {
+    use futures_util::StreamExt as _;
+    let mirror: DeckMirror =
+        use_hook(|| std::sync::Arc::new(std::sync::Mutex::new(handle.act(|st| st.clone()))));
+    let list = actions.map(|a| a.0);
+    let runner = use_coroutine({
+        let (mirror, list) = (mirror.clone(), list.clone());
+        move |mut jobs: UnboundedReceiver<crate::control::deck::DeckJob>| {
+            let (mirror, list) = (mirror.clone(), list.clone());
+            async move {
+                while let Some(job) = jobs.next().await {
+                    let kept = UiKept(handle.stores.peek().contexts.clone());
+                    let before = handle.decks.peek().clone();
+                    let now = handle.act(|st| {
+                        job(st, &kept);
+                        st.clone()
+                    });
+                    *mirror
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = now;
+                    let after = handle.decks.peek().clone();
+                    if after != before {
+                        handle.keep_all();
+                        if let Some(list) = &list {
+                            let active = after.active.map(|a| a.0).unwrap_or_default();
+                            list.changed(crate::control::deck::TOPIC, &active);
+                        }
+                    }
+                }
+            }
+        }
+    });
+    // The mirror follows every change, whoever made it.
+    {
+        let mirror = mirror.clone();
+        use_effect(move || {
+            let _ = (
+                handle.decks.read(),
+                handle.screensets.read(),
+                handle.workspace.read(),
+            );
+            let now = handle.act(|st| st.clone());
+            *mirror
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = now;
+        });
+    }
+    let registered = use_hook(move || {
+        let list = list?;
+        let exec: std::sync::Arc<dyn crate::control::deck::DeckExec> =
+            std::sync::Arc::new(OnWindow {
+                tx: runner.tx(),
+                mirror: mirror.clone(),
+            });
+        crate::control::deck::register(&list, &exec).ok()?;
+        Some(list)
+    });
+    use_drop(move || {
+        if let Some(list) = registered {
+            for id in crate::control::deck::ids::ALL {
+                list.unregister(id);
+            }
+        }
+    });
+}
+
+/// Decks take ⌘1–9 and ⌃Tab (and the strip shows) once two or more are
+/// open; with one, the keys are the screensets' and a group's tabs' as
+/// without decks.
+#[must_use]
+pub(super) fn switching() -> bool {
+    try_use_decks().is_some_and(|h| h.decks.read().decks.len() >= 2)
 }
 
 /// The decks under [`use_decks`], if there are any.
@@ -397,14 +527,13 @@ impl DeckHandle {
     /// windows.
     #[must_use]
     pub fn can_pop_out(&self) -> bool {
-        self.views.peek().is_some() && try_consume_context::<Windows>().is_some()
+        self.views.peek().is_some() && self.windows.peek().is_some()
     }
 
     /// Deck `id` into a window of its own (or that window forward): the
     /// main window shows its neighbour.
     pub fn pop_out(&self, id: &DeckId) {
-        let (Some(views), Some(windows)) =
-            (self.views.peek().clone(), try_consume_context::<Windows>())
+        let (Some(views), Some(windows)) = (self.views.peek().clone(), self.windows.peek().clone())
         else {
             return;
         };
@@ -427,7 +556,7 @@ impl DeckHandle {
             .context::<architect_theme::ThemeHandle>()
             .context::<architect_theme::RootCss>()
             .and(&self.bridge.peek());
-        let theme = architect_shell::try_use_shell().map(|s| s.theme);
+        let theme = self.theme.peek().clone();
         let handle = *self;
         let draw: Rc<dyn Fn() -> Element> = Rc::new(move || {
             rsx! {
@@ -483,7 +612,7 @@ impl DeckHandle {
         let _ = self.act(|st| st.keep(id, &live));
         let mut all = self.popped;
         all.write().retain(|q| &*q.deck.peek() != id);
-        if let Some(windows) = try_consume_context::<Windows>() {
+        if let Some(windows) = self.windows.peek().clone() {
             windows.0.close(&WindowId(format!("{NOUN}-{}", id.0)));
         }
         self.settle();
@@ -554,7 +683,11 @@ fn DeckCommands(handle: DeckHandle) -> Element {
         );
         let mut c = Command::new(format!("DECK_SHOW_{}", i.saturating_add(1)), label)
             .group(group)
-            .shortcut(format!("⌘{}", i.saturating_add(1)));
+            .shortcut(if n >= 2 {
+                format!("⌘{}", i.saturating_add(1))
+            } else {
+                String::new()
+            });
         if title.is_none() {
             c = c.disabled(format!("no {NOUN} is there"));
         }
@@ -571,7 +704,7 @@ fn DeckCommands(handle: DeckHandle) -> Element {
         several(
             Command::new(crate::control::deck::ids::NEXT, format!("Next {NOUN}"))
                 .group(group)
-                .shortcut("⌃Tab"),
+                .shortcut(if n >= 2 { "⌃Tab" } else { "" }),
         ),
         move || handle.cycle(1),
     );
@@ -579,7 +712,7 @@ fn DeckCommands(handle: DeckHandle) -> Element {
         several(
             Command::new(crate::control::deck::ids::PREV, format!("Previous {NOUN}"))
                 .group(group)
-                .shortcut("⌃⇧Tab"),
+                .shortcut(if n >= 2 { "⌃⇧Tab" } else { "" }),
         ),
         move || handle.cycle(-1),
     );
@@ -763,6 +896,9 @@ pub fn DeckStrip(
     /// The window's title row, when the strip reaches the window's top.
     title_row: Option<TitleRow>,
     #[props(default)] phone: bool,
+    /// Shown with one deck too; else it shows once a second is open.
+    #[props(default)]
+    always: bool,
     /// Its colours; left out, the shell's.
     #[props(default, into)]
     theme: Option<ShellTheme>,
@@ -770,8 +906,9 @@ pub fn DeckStrip(
     let Some(handle) = try_use_decks() else {
         return rsx! {};
     };
+    let shown = !phone && (always || handle.decks.read().decks.len() >= 2);
     // One row on a desk: the shell's own title row gives way to it.
-    architect_shell::use_title_row(title_row.is_some() && !phone);
+    architect_shell::use_title_row(title_row.is_some() && shown);
     let t = theme
         .or_else(|| architect_shell::try_use_shell().map(|s| s.theme))
         .unwrap_or_default();
@@ -780,7 +917,7 @@ pub fn DeckStrip(
     // Where the strip starts in the window: its menu opens under the tab
     // pressed, in the strip's own points.
     let mut strip_left = use_signal(|| 0.0_f32);
-    if phone {
+    if !shown {
         return rsx! { DeckCommands { handle } };
     }
     let form = *handle.form.read();
@@ -875,10 +1012,9 @@ pub fn DeckStrip(
                     let x = x - *strip_left.peek();
                     menu.set(Some(StripMenu { deck: id_menu.clone(), x }));
                 },
+                // In a window of its own: says so.
                 if out {
                     AppWindow { size: 13 }
-                } else {
-                    Layers { size: 13 }
                 }
                 span { style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \
                                font-size:12px; font-weight:{weight};",
@@ -896,16 +1032,20 @@ pub fn DeckStrip(
                         style: "flex:0 0 auto; width:6px; height:6px; border-radius:999px; background:{t.accent};",
                     }
                 }
-                button {
-                    "aria-label": "Close {NOUN}",
-                    style: "flex:0 0 auto; width:18px; height:18px; display:flex; align-items:center; justify-content:center; \
-                            border:none; border-radius:4px; background:transparent; color:{t.ink_3}; padding:0;",
-                    onpointerdown: move |e: PointerEvent| e.stop_propagation(),
-                    onclick: move |e: MouseEvent| {
-                        e.stop_propagation();
-                        handle.close(&id_close);
-                    },
-                    X { size: 12 }
+                // The one on show has its ×; the others keep their room for
+                // their names (a middle-click closes any).
+                if active {
+                    button {
+                        "aria-label": "Close {NOUN}",
+                        style: "flex:0 0 auto; width:18px; height:18px; display:flex; align-items:center; justify-content:center; \
+                                border:none; border-radius:4px; background:transparent; color:{t.ink_3}; padding:0;",
+                        onpointerdown: move |e: PointerEvent| e.stop_propagation(),
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            handle.close(&id_close);
+                        },
+                        X { size: 12 }
+                    }
                 }
             }
         }
@@ -1096,15 +1236,13 @@ fn SwitchRow(
     }
 }
 
-/// The decks as a phone's switcher lists them: each one's id, title,
-/// whether it shows.
+/// The decks as a phone's switcher lists them (read as its menu is
+/// drawn): the decks, and each one's id, title, whether it shows.
 #[must_use]
-pub(super) fn switcher_rows() -> Vec<(DeckId, String, bool)> {
-    let Some(handle) = try_consume_context::<DeckHandle>() else {
-        return Vec::new();
-    };
+pub(super) fn switcher_rows() -> Option<(DeckHandle, Vec<(DeckId, String, bool)>)> {
+    let handle = try_consume_context::<DeckHandle>()?;
     let decks = handle.decks.peek();
-    decks
+    let rows = decks
         .decks
         .iter()
         .map(|d| {
@@ -1114,12 +1252,7 @@ pub(super) fn switcher_rows() -> Vec<(DeckId, String, bool)> {
                 decks.active.as_ref() == Some(&d.id),
             )
         })
-        .collect()
-}
-
-/// A phone's switcher row pressed: that deck shows.
-pub(super) fn switcher_activate(id: &DeckId) {
-    if let Some(handle) = try_consume_context::<DeckHandle>() {
-        handle.activate(id);
-    }
+        .collect();
+    drop(decks);
+    Some((handle, rows))
 }

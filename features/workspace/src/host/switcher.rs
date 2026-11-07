@@ -1120,7 +1120,7 @@ enum Act {
     CloseOthers,
     CloseAll,
     Open(String),
-    Deck(crate::deck::DeckId),
+    Deck(super::deck::DeckHandle, crate::deck::DeckId),
 }
 
 fn act(label: impl Into<String>, act: Act) -> Row {
@@ -1148,13 +1148,12 @@ fn tabs_rows(host: Host) -> Vec<Row> {
     let mut rows = Vec::new();
     // The decks fold in here on a phone: one row each, the one on show
     // ticked.
-    let decks = super::deck::switcher_rows();
-    if !decks.is_empty() {
+    if let Some((handle, decks)) = super::deck::switcher_rows().filter(|(_, d)| !d.is_empty()) {
         rows.push(Row::Heading(crate::deck::NOUN_PLURAL_TITLE.to_owned()));
         for (id, title, on) in decks {
             rows.push(Row::Act {
                 label: title,
-                act: Act::Deck(id),
+                act: Act::Deck(handle, id),
                 checked: on,
                 danger: false,
             });
@@ -1253,8 +1252,8 @@ fn run(host: Host, a: Act) {
             place.set(Place::Main);
             s.scroll.jump(0.0);
         }
-        Act::Deck(id) => {
-            super::deck::switcher_activate(&id);
+        Act::Deck(handle, id) => {
+            handle.activate(&id);
             place.set(Place::Main);
             s.scroll.jump(0.0);
         }

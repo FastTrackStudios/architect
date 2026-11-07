@@ -426,6 +426,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         // bar (a Mac's): the tab bars along the top are it.
         title_row: Signal::new(title_row),
         under_strip: Signal::new(false),
+        decks: CopyValue::new(None),
         in_shell: Signal::new(false),
         phone_header: Signal::new(false),
         drag: Signal::new(None),

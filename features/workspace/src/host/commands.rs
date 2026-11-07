@@ -24,7 +24,7 @@ use crate::ops::Target;
 pub(super) fn WorkspaceCommands() -> Element {
     let host = use_host();
     // Decks take ⌃Tab while they are on; a group's tabs move to ⌃⌥Tab.
-    let decks = super::deck::try_use_decks().is_some();
+    let decks = super::deck::switching();
     let w = host.workspace.read();
     let active = w.active.clone();
     let loc = active.as_ref().and_then(|p| w.locate(p));

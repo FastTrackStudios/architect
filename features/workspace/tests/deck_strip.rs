@@ -70,6 +70,7 @@ fn App() -> Element {
         views: None,
         bridge: architect_workspace::Bridge::default(),
         on_new: None,
+        actions: None,
     });
     use_hook(|| HANDLE.with(|h| *h.borrow_mut() = Some(handle)));
     let views = Views::new()
