@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Developer-ID (direct download) entitlements for Architect. The
+       hardened runtime is on (notarization requires it); these are the
+       holes it leaves open. No app-sandbox: the app opens vaults and files
+       anywhere and runs process extensions.
+
+       allow-jit and allow-unsigned-executable-memory: WASI extensions run
+       in Wasmtime, which compiles them to machine code at run time. -->
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+</dict>
+</plist>

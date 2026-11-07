@@ -1,9 +1,18 @@
 name: release
 
 # Consumers (task, fasttrackstudio) pin architect by tag, so a tag is the
-# unit of release. Push `vX.Y.Z` and this publishes the GitHub release the
-# downstream bump refers to, and (job `node`) the headless app's image on
-# GHCR with its binary attached to that release.
+# unit of release. Push `vX.Y.Z` and this publishes (#431):
+#
+#   the GitHub release, notes from .changes/                 job release
+#   ghcr.io/fasttrackstudios/architect:<v>|sha-|latest       job node (the headless node)
+#     + architect-node-<tag>-x86_64-linux.tar.gz
+#   ghcr.io/fasttrackstudios/architect-web:<v>|sha-|latest   job web (landing page, docs, web app)
+#     + architect-web-<X.Y.Z>.tar.gz
+#   Architect-linux-x86_64.AppImage + latest-linux.json      job linux
+#   Architect-macos-arm64.dmg + latest-macos.json            job macos (UNTESTED, off by default)
+#   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums
+#
+# Windows desktop builds are a follow-up (#431).
 on:
   push:
     tags: ["v*"]
@@ -127,3 +136,219 @@ jobs:
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$name.tar.gz" "$name"
           (cd "$RUNNER_TEMP" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$name.tar.gz" "$RUNNER_TEMP/$name.tar.gz.sha256" --clobber
+
+  # The web front end: the landing page at /, the docs at /docs/ and the
+  # web app at /app/ as one static site (scripts/web-bundle.sh), its own
+  # image behind static-web-server (flake.nix `architect-web-image-prebuilt`,
+  # the same contents as the pure `architect-web-image`), and the same
+  # bundle attached as architect-web-<X.Y.Z>.tar.gz. Starts PRIVATE on
+  # GHCR like `architect`: make it public once in the org's package settings.
+  #
+  #   ghcr.io/fasttrackstudios/architect-web:<X.Y.Z> | sha-<short> | latest
+  web:
+    needs: release
+    runs-on: [self-hosted, thebattleship-release]
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+    env:
+      CONTAINERS_REGISTRIES_CONF: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Plan the tags
+        id: plan
+        run: |
+          set -euo pipefail
+          git fetch --quiet --tags --force origin
+          tag="${GITHUB_REF_NAME}"
+          v="${tag#v}"
+          tags="$v sha-$(git rev-parse --short HEAD)"
+          highest="$(git -c versionsort.suffix=- tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+          [ "$tag" != "$highest" ] || tags="$tags latest"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "### architect-web image: \`$tags\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the bundle
+        id: build
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-web/$RUNNER_NAME/target"
+          mkdir -p "$CARGO_TARGET_DIR"
+          out="$RUNNER_TEMP/architect-web-${{ steps.plan.outputs.version }}"
+          devenv shell -- bash scripts/web-bundle.sh "$out"
+          echo "bundle=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Push the image
+        env:
+          ARCHITECT_WEB_BUNDLE: ${{ steps.build.outputs.bundle }}
+          ARCHITECT_BUILD_REV: ${{ github.sha }}
+          ARCHITECT_RELEASE_VERSION: ${{ steps.plan.outputs.version }}
+          TAGS: ${{ steps.plan.outputs.tags }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export REGISTRY_AUTH_FILE="$RUNNER_TEMP/ghcr-auth.json"
+          skopeo() { nix run nixpkgs#skopeo -- "$@"; }
+          printf '%s' "$GHCR_TOKEN" | skopeo login ghcr.io -u "$GHCR_USER" --password-stdin
+          read -r -a tags <<<"$TAGS"
+          dest="docker://ghcr.io/fasttrackstudios/architect-web"
+          streamer="$(nix build --impure .#architect-web-image-prebuilt --no-link --print-out-paths)"
+          "$streamer" | skopeo --insecure-policy copy docker-archive:/dev/stdin "$dest:${tags[0]}"
+          for tag in "${tags[@]:1}"; do
+            skopeo --insecure-policy copy "$dest:${tags[0]}" "$dest:$tag"
+          done
+          rm -f "$REGISTRY_AUTH_FILE"
+
+      - name: Attach the bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE: ${{ steps.build.outputs.bundle }}
+          V: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="architect-web-$V"
+          tar -C "$(dirname "$BUNDLE")" -czf "$RUNNER_TEMP/$name.tar.gz" "$(basename "$BUNDLE")"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$name.tar.gz" --clobber
+
+  # The desktop app for Linux: an AppImage (scripts/desktop/linux.sh: the
+  # Nix-built binary with its libraries, nothing pointing at /nix/store,
+  # a glibc floor it refuses to raise) and latest-linux.json, the updater's
+  # manifest: the version, the AppImage's URL on this release, its sha256.
+  linux:
+    needs: release
+    runs-on: [self-hosted, thebattleship-release]
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build the AppImage
+        id: build
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-desktop/$RUNNER_NAME/target"
+          mkdir -p "$CARGO_TARGET_DIR"
+          export VERSION="${GITHUB_REF_NAME#v}" OUT_DIR="$RUNNER_TEMP/desktop"
+          bash scripts/desktop/linux.sh
+          echo "out=$OUT_DIR" >> "$GITHUB_OUTPUT"
+        env:
+          ARCHITECT_BUILD_REV: ${{ github.sha }}
+
+      - name: Manifest and attach
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          set -euo pipefail
+          cd "$OUT"
+          app=Architect-linux-x86_64.AppImage
+          sha="$(sha256sum "$app" | awk '{print $1}')"
+          printf '{\n  "version": "%s",\n  "appimage": "https://github.com/%s/releases/download/%s/%s",\n  "sha256": "%s"\n}\n' \
+            "${GITHUB_REF_NAME#v}" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$app" "$sha" > latest-linux.json
+          cat latest-linux.json
+          gh release upload "$GITHUB_REF_NAME" "$app" latest-linux.json --clobber --repo "$GITHUB_REPOSITORY"
+          echo "### Linux: \`$app\` (glibc floor $(cat "$app-glibc-floor.txt"))" >> "$GITHUB_STEP_SUMMARY"
+
+  # The desktop app for macOS: Developer-ID signed, notarized and stapled
+  # (scripts/desktop/macos.sh, Studio's flow), and latest-macos.json.
+  #
+  # UNTESTED (#431): written while airlock was unreachable, never run. Off
+  # until the repo variable ARCHITECT_MACOS_RELEASE is `true`, so a release
+  # never waits on a runner that is not there. It needs an airlock runner
+  # registered to this repo with the `architect-release-mac` label, the
+  # Developer ID identity in its fts-build keychain and the App Store
+  # Connect key in ~/.appstoreconnect/config.env (what Task's and Studio's
+  # Mac jobs use). It never blocks the other jobs.
+  macos:
+    needs: release
+    if: ${{ vars.ARCHITECT_MACOS_RELEASE == 'true' }}
+    runs-on: [self-hosted, macos, architect-release-mac]
+    timeout-minutes: 240
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+          persist-credentials: false
+
+      - name: Build, sign and notarize
+        id: build
+        env:
+          KEYCHAIN: fts-build.keychain
+          KEYCHAIN_PW: fts-build
+        run: |
+          set -euo pipefail
+          export PATH="/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:$PATH"
+          export VERSION="${GITHUB_REF_NAME#v}" OUT_DIR="$PWD/target/dmg"
+          bash scripts/desktop/macos.sh
+          echo "out=$OUT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Manifest and attach
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OUT: ${{ steps.build.outputs.out }}
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          cd "$OUT"
+          app=Architect-macos-arm64.dmg
+          sha="$(shasum -a 256 "$app" | awk '{print $1}')"
+          printf '{\n  "version": "%s",\n  "dmg": "https://github.com/%s/releases/download/%s/%s",\n  "sha256": "%s"\n}\n' \
+            "${GITHUB_REF_NAME#v}" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$app" "$sha" > latest-macos.json
+          gh release upload "$GITHUB_REF_NAME" "$app" latest-macos.json --clobber --repo "$GITHUB_REPOSITORY"
+
+  # SHA256SUMS over every asset the release carries, signed with the org's
+  # minisign key (the one Task's and Studio's updaters pin) when the
+  # tag-only `release-signing` environment has FTS_RELEASE_MINISIGN_KEY;
+  # without it the sums go out unsigned, with a warning. Runs after the
+  # Mac job too when that one is on (and whether it passed or not).
+  sums:
+    needs: [node, web, linux, macos]
+    if: ${{ !cancelled() && needs.node.result == 'success' && needs.web.result == 'success' && needs.linux.result == 'success' }}
+    runs-on: [self-hosted, thebattleship-release]
+    environment: release-signing
+    permissions:
+      contents: write
+    env:
+      # The org key's public half (task apps/server/src/self_update.rs
+      # RELEASE_SIGNING_KEY): nothing is signed with any other key.
+      ORG_RELEASE_KEY: RWRh9Gk9qaStQMhku4THMidEYrQsmAEsm2dDprUkZxShEtqfIcroM8Od
+    steps:
+      - name: Sum and sign
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MINISIGN_KEY: ${{ secrets.FTS_RELEASE_MINISIGN_KEY }}
+        run: |
+          set -euo pipefail
+          gh() { nix run --quiet nixpkgs#gh -- "$@"; }
+          dir="$RUNNER_TEMP/assets"
+          rm -rf "$dir" && mkdir -p "$dir" && cd "$dir"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+          rm -f SHA256SUMS SHA256SUMS.minisig ./*.sha256
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          assets=(SHA256SUMS)
+          if [ -n "$MINISIGN_KEY" ]; then
+            minisign() { nix run --quiet nixpkgs#minisign -- "$@"; }
+            key="$RUNNER_TEMP/release.key"
+            ( umask 077; printf '%s\n' "$MINISIGN_KEY" > "$key" )
+            minisign -S -s "$key" -m SHA256SUMS -x SHA256SUMS.minisig -t "architect $GITHUB_REF_NAME SHA256SUMS"
+            rm -f "$key"
+            minisign -V -P "$ORG_RELEASE_KEY" -m SHA256SUMS -x SHA256SUMS.minisig
+            assets+=(SHA256SUMS.minisig)
+          else
+            echo "::warning::release-signing has no FTS_RELEASE_MINISIGN_KEY: SHA256SUMS goes out unsigned"
+          fi
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"

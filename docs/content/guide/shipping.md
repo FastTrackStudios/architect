@@ -74,12 +74,24 @@ still pins) in `GRANDFATHERED`, and that list must never grow. Tag from
 
 ## 4. The release workflow
 
-Pushing a `v*` tag runs `.github/workflows/release.yml` on a hosted
-runner. It writes the release notes from `git log` since the previous
-tag (one line per non-merge commit subject, so conventional commit
-subjects are the changelog) and publishes the GitHub release that a
-downstream bump refers to. Nothing is built or uploaded: consumers
-build from the tag.
+Pushing a `v*` tag runs `.github/workflows/release.yml` on the
+self-hosted `thebattleship-release` runners. The notes are the change
+files added since the previous tag (`scripts/release-notes.sh`, `just
+release-notes`). Architect, the app, is released from the same tag
+(#431):
+
+| Job | What the release gets |
+| --- | --- |
+| `release` | the GitHub release and its notes |
+| `node` | `ghcr.io/fasttrackstudios/architect:<X.Y.Z>`, `:sha-<short>`, `:latest` (the headless node, [deploy](@/guide/deploy.md)), and `architect-node-<tag>-x86_64-linux.tar.gz` |
+| `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the landing page, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz` |
+| `linux` | `Architect-linux-x86_64.AppImage` (`scripts/desktop/linux.sh`) and `latest-linux.json`: the version, the AppImage's URL and its sha256, for the updater |
+| `macos` | `Architect-macos-arm64.dmg`, Developer-ID signed and notarized (`scripts/desktop/macos.sh`), and `latest-macos.json`. Untested, and off until the repo variable `ARCHITECT_MACOS_RELEASE` is `true` |
+| `sums` | `SHA256SUMS` over every asset, and `SHA256SUMS.minisig` signed with the org key when the `release-signing` environment has `FTS_RELEASE_MINISIGN_KEY` |
+
+`:latest` goes only to the highest release. Packages pushed with
+`GITHUB_TOKEN` start private on GHCR, so each image is made public once
+in the org's package settings. A Windows build is a follow-up.
 
 An app that ships binaries adds its own release workflow that builds,
 checksums and signs them, and the binaries update themselves through
