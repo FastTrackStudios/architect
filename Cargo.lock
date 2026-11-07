@@ -1786,6 +1786,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-sandbox-web"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-pages",
+ "architect-workspace-hack",
+ "js-sys",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "architect-scripting"
 version = "0.1.0"
 dependencies = [
@@ -2167,11 +2182,10 @@ dependencies = [
 name = "architect-web"
 version = "0.1.0"
 dependencies = [
- "architect",
- "architect-extensions",
- "architect-pages",
  "architect-workspace-hack",
+ "auth-client",
  "js-sys",
+ "serde",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",

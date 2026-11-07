@@ -1,0 +1,33 @@
+# static-web-server for the web front end (#431): the image's config
+# (flake.nix architect-web-image, root /srv/www) and `just web`'s
+# (`--root` the local bundle). Paths are relative to the root. The root,
+# host and port are given on the command line: a value here would win
+# over the flag.
+[general]
+log-level = "info"
+# No SPA fallback: an unknown path is a real 404, so a node path a proxy
+# forgot to route answers 404 here, never 200 HTML (Task's trap).
+page404 = "./404.html"
+compression = true
+directory-listing = false
+
+[advanced]
+# The sign-in's way back (the path every first-party client is registered
+# with) is the app's page; it reads the code and moves to /app/.
+[[advanced.rewrites]]
+source = "/auth/callback"
+destination = "/app/index.html"
+
+[[advanced.rewrites]]
+source = "/auth/callback/"
+destination = "/app/index.html"
+
+# Nothing is cached: the image's files all carry the store's 1970 mtime,
+# so a Last-Modified revalidation would keep an old release's files
+# forever. The bundle is small.
+[[advanced.headers]]
+source = "/**"
+[advanced.headers.headers]
+Cache-Control = "no-store"
+X-Content-Type-Options = "nosniff"
+Referrer-Policy = "strict-origin-when-cross-origin"

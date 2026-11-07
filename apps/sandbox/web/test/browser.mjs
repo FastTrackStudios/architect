@@ -1,5 +1,5 @@
-// What the web app's browser tests share: the built lab (`just web 0`,
-// target/web) served on 127.0.0.1, and a headless Chrome of its own
+// What the web app's browser tests share: the built lab (`just sandbox-web 0`,
+// target/sandbox-web) served on 127.0.0.1, and a headless Chrome of its own
 // (its own profile, gone after) driven over the DevTools protocol with
 // node's own WebSocket — no packages.
 import { spawn } from 'node:child_process';
@@ -10,8 +10,8 @@ import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const root = resolve(here, '../../..');
-export const built = process.env.ARCHITECT_LAB_WEB ?? join(root, 'target/web');
+export const root = resolve(here, '../../../..');
+export const built = process.env.ARCHITECT_LAB_WEB ?? join(root, 'target/sandbox-web');
 
 /// Chrome: `CHROME`, else the Mac's or a Linux one on the PATH; null when
 /// there is none.
@@ -166,6 +166,6 @@ export class Tab {
 
   /// The lab's open page, as `lab_status` says it.
   status() {
-    return this.eval(`import('./architect_web.js').then((m) => JSON.parse(m.lab_status()))`);
+    return this.eval(`import('./architect_sandbox_web.js').then((m) => JSON.parse(m.lab_status()))`);
   }
 }

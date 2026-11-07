@@ -1,5 +1,5 @@
 {
-  description = "Architect: packaging only. The headless node's binary and its pure-Nix OCI image.";
+  description = "Architect: packaging only. The headless node, the web front end, and their pure-Nix OCI images.";
 
   # The dev environment is devenv (devenv.yaml, devenv.nix; `devenv shell`
   # or direnv through .envrc). This flake only packages what is deployed:
@@ -17,6 +17,14 @@
   # The release workflow (.github/workflows/release.yml) uses the
   # prebuilt one: the runner's warm target dir builds the binary in
   # minutes, and the same binary is attached to the release.
+  #
+  # The web front end (#431): the landing page, the docs and the web app
+  # (apps/web) as one static site (scripts/web-bundle.sh) behind
+  # static-web-server (apps/web/sws.toml), its own image:
+  #
+  #   nix build .#architect-web-image        # pure: the wasm and the docs' CLI built in the sandbox
+  #   ARCHITECT_WEB_BUNDLE=target/web-bundle \
+  #     nix build --impure .#architect-web-image-prebuilt  # wraps a bundle built in the dev shell
 
   inputs = {
     # The fleet's pins: nixpkgs and rust-overlay at devenv-fleet's
@@ -82,6 +90,16 @@
           # fetched by rev with a fixed hash instead. Blitz's stylo pin.
           cargoVendorDir = craneLib.vendorCargoDeps {
             inherit src;
+            # FastTrackStudios/vendor commits crates' `Cargo.toml.orig`,
+            # which `cargo package -l` (how crane lists a git crate's
+            # files) refuses as a reserved name; dropped before listing.
+            overrideVendorGitCheckout =
+              _: drv:
+              drv.overrideAttrs (old: {
+                preInstall = (old.preInstall or "") + ''
+                  find . -name Cargo.toml.orig -delete
+                '';
+              });
             outputHashes = {
               "git+https://github.com/nicoburns/stylo?rev=78734bf554bb40af9dc11c0eedbe724f6055697c#78734bf554bb40af9dc11c0eedbe724f6055697c" =
                 "sha256-lbhr0hkTHF9DHQRVWjrd5t8ZpKP6zCmK3OQ81KJVDUI=";
@@ -118,6 +136,92 @@
           architect-node-prebuilt = pkgs.runCommand "architect-node-prebuilt" { } ''
             install -Dm755 ${/. + prebuiltBin} $out/bin/architect-desktop
           '';
+
+          # ── The web front end ────────────────────────────────────────
+          # The web app's wasm (apps/web), for wasm32-unknown-unknown.
+          architect-web-wasm = craneLib.buildPackage {
+            pname = "architect-web-wasm";
+            inherit version src cargoVendorDir;
+            strictDeps = true;
+            cargoArtifacts = null;
+            doCheck = false;
+            CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+            cargoExtraArgs = "--package architect-web --lib";
+            installPhaseCommand = ''
+              install -Dm644 target/wasm32-unknown-unknown/release/architect_web.wasm $out/architect_web.wasm
+            '';
+          };
+          # The `architect` CLI (apps/cli): it builds the docs site.
+          architect-cli = craneLib.buildPackage {
+            pname = "architect-cli";
+            inherit version src cargoVendorDir;
+            strictDeps = true;
+            cargoArtifacts = null;
+            doCheck = false;
+            cargoExtraArgs = "--package architect-cli --bin architect";
+            RUSTFLAGS = "--cfg no_workspace_hack";
+            nativeBuildInputs = [ pkgs.pkg-config ];
+          };
+          # The bundle: the same script `just web` runs, given the pieces.
+          architect-web-bundle =
+            pkgs.runCommand "architect-web-bundle-${release}"
+              {
+                nativeBuildInputs = [ pkgs.wasm-bindgen-cli_0_2_127 ];
+                ARCHITECT_WEB_WASM = "${architect-web-wasm}/architect_web.wasm";
+                ARCHITECT_CLI = "${architect-cli}/bin/architect";
+                WASM_BINDGEN = "wasm-bindgen";
+              }
+              ''
+                bash ${src}/scripts/web-bundle.sh $out
+              '';
+          prebuiltBundle = fromEnv "ARCHITECT_WEB_BUNDLE";
+          architect-web-bundle-prebuilt = pkgs.runCommand "architect-web-bundle-prebuilt" { } ''
+            cp -r ${/. + prebuiltBundle} $out
+          '';
+
+          # static-web-server on :8080 with the site at /srv/www: real
+          # files, not store symlinks (it refuses a path resolving outside
+          # its root), so a ConfigMap can replace /srv/www/app/config.json.
+          mkWebImage =
+            { bundle }:
+            pkgs.dockerTools.streamLayeredImage {
+              name = "architect-web";
+              tag = "latest";
+              contents = [
+                pkgs.static-web-server
+                pkgs.cacert
+              ];
+              extraCommands = ''
+                mkdir -p srv etc/architect-web tmp
+                cp -r ${bundle} srv/www
+                chmod -R u+w srv/www
+                echo '{"rev":"${buildRev}","version":"${release}"}' > srv/www/version.json
+                cp ${./apps/web/sws.toml} etc/architect-web/sws.toml
+              '';
+              config = {
+                Entrypoint = [ "/bin/static-web-server" ];
+                Cmd = [
+                  "--config-file"
+                  "/etc/architect-web/sws.toml"
+                  "--root"
+                  "/srv/www"
+                  "--host"
+                  "0.0.0.0"
+                  "--port"
+                  "8080"
+                ];
+                ExposedPorts = {
+                  "8080/tcp" = { };
+                };
+                Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+                Labels = {
+                  "org.opencontainers.image.source" = "https://github.com/FastTrackStudios/architect";
+                  "org.opencontainers.image.revision" = buildRev;
+                  "org.opencontainers.image.version" = release;
+                  "org.opencontainers.image.description" = "Architect's web front end: the landing page, the docs and the web app, static";
+                };
+              };
+            };
 
           mkImage =
             { node }:
@@ -162,14 +266,23 @@
             };
         in
         {
-          inherit architect-node;
+          inherit
+            architect-node
+            architect-cli
+            architect-web-wasm
+            architect-web-bundle
+            ;
         }
         // lib.optionalAttrs pkgs.stdenv.isLinux (
           {
             architect-image = mkImage { node = architect-node; };
+            architect-web-image = mkWebImage { bundle = architect-web-bundle; };
           }
           // lib.optionalAttrs (prebuiltBin != null) {
             architect-image-prebuilt = mkImage { node = architect-node-prebuilt; };
+          }
+          // lib.optionalAttrs (prebuiltBundle != null) {
+            architect-web-image-prebuilt = mkWebImage { bundle = architect-web-bundle-prebuilt; };
           }
         )
       );

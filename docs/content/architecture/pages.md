@@ -248,7 +248,7 @@ worker has none of the browser's own network, storage or workers
 (`fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `indexedDB`,
 `Worker`… are taken away before the page loads), and the embedder's
 Content-Security-Policy, which the worker inherits, keeps `import()` of
-another host and eval out (the sandbox's: `apps/web/index.html`).
+another host and eval out (the sandbox's: `apps/sandbox/web/index.html`).
 
 **Limits.** A browser has no interrupt to stop one call, so the page's
 work is timed in units: a message (an event, a host call's answer,
@@ -273,13 +273,13 @@ swapped in once it has rendered.
 ports and secrets (the browser host has none), and services
 (`services.call`).
 
-**The sandbox.** `just web` builds and serves the web lab
-(`apps/web`): the Board's own `apps/sandbox/board/pages/board.tsx` (and
+**The sandbox.** `just sandbox-web` builds and serves the web lab
+(`apps/sandbox/web`): the Board's own `apps/sandbox/board/pages/board.tsx` (and
 `primes.js`, its worker) with the three Board actions it runs answered in
-the page (`apps/web/src/board.rs`; the Board's Rust extension is not
+the page (`apps/sandbox/web/src/board.rs`; the Board's Rust extension is not
 built for a browser), beside the WASI Counter; `?page=preact` is the
-Board's Preact page; `?page=runaway` and `?page=net` are checks. `just web-test` drives them in a headless
-Chrome (`apps/web/test/pages.test.mjs`): the Board renders and its
+Board's Preact page; `?page=runaway` and `?page=net` are checks. `just sandbox-web-test` drives them in a headless
+Chrome (`apps/sandbox/web/test/pages.test.mjs`): the Board renders and its
 handlers and worker run, the Preact page answers clicks and typing, a
 runaway is stopped while the main thread
 keeps drawing, a host outside the page's capabilities is refused, and a
@@ -396,5 +396,5 @@ are drawn as listeners too (Solid is not tested yet).
 Tests: `features/pages/tests/dom.rs` (Preact's tree and the edits each
 click makes; the DOM by hand: capture and bubbling, a move that keeps
 its node), `apps/sandbox/board/tests/page.rs` (the Board's Preact view), and
-the web sandbox's `apps/web/test/pages.test.mjs` (`?page=preact`, in a
+the web sandbox's `apps/sandbox/web/test/pages.test.mjs` (`?page=preact`, in a
 headless Chrome).

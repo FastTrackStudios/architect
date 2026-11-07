@@ -24,8 +24,12 @@ use dioxus::prelude::*;
 
 use crate::mode::{Mode, app_dir_or_temp};
 
-/// What the issuer's approval page calls the app.
-const CLIENT_ID: &str = "Architect";
+/// The client the issuer knows the app as: `architect`, the same public
+/// client the web app signs in with (fts-auth registers it for
+/// `architect.fasttrackstudio.app`, #431). The device grant takes any id,
+/// but one name everywhere keeps the issuer's records and its approval
+/// page consistent.
+const CLIENT_ID: &str = "architect";
 
 /// The app's accounts, `None` in the sandbox or a run that keeps nothing
 /// (`files` false: a film, a test's document).

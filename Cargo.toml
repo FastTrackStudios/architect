@@ -107,6 +107,7 @@ members = [
     "apps/sandbox/clicker",
     "apps/sandbox/board",
     "apps/sandbox/wasi-counter",
+    "apps/sandbox/web",
     "apps/sandbox/media",
     # ── first-party extensions (#368) ─────────────────────────────────
     "extensions/projects",
