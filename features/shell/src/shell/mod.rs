@@ -826,7 +826,7 @@ impl Shell {
         !self.screen.touch
     }
 
-    /// The title row's height: the window's buttons' row, or 52.
+    /// The title row's height: the window's buttons' row, or Obsidian's 40.
     #[must_use]
     pub fn title_row(&self) -> f64 {
         self.window.as_ref().map_or(TITLE_ROW, |w| w.height)
@@ -955,8 +955,10 @@ const PULL_ZONE: f64 = 80.0;
 const DOCK_RIGHT: f64 = 1100.0;
 /// Below this width the docked left sidebar starts folded to a rail.
 const FOLD_BELOW: f64 = 1000.0;
-/// A desk's title row without a window of its own: T3 Code's.
-const TITLE_ROW: f64 = 52.0;
+/// A desk's title row without window buttons of its own (full screen, the
+/// web app): Obsidian's header height (`--header-height: 40px`), the same
+/// as the row with them ([`WindowChrome::MAC_ROW`]), so the row never jumps.
+const TITLE_ROW: f64 = WindowChrome::MAC_ROW;
 /// A desk's title-row controls (the sides' buttons).
 const CONTROL: f64 = 28.0;
 /// A traffic light the shell draws: its size and the gap between two.
@@ -1830,7 +1832,7 @@ fn SidebarHead(title: Option<String>) -> Element {
         };
     }
     rsx! {
-        div { style: "height: 52px; display: flex; align-items: center; gap: 4px; padding: 0 10px;",
+        div { style: "height: {TITLE_ROW}px; display: flex; align-items: center; gap: 4px; padding: 0 10px;",
             {name}
             {fold}
         }

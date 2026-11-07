@@ -42,7 +42,7 @@ push 8
 clone
 id 7
 push 7
-attr style None "position: relative; height: 52px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; padding: 0px 10px 0 50px; background: #17171b; border-bottom: 1px solid #2b2b31;"
+attr style None "position: relative; height: 40px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; padding: 0px 10px 0 50px; background: #17171b; border-bottom: 1px solid #2b2b31;"
 pop
 push 7
 element span None
@@ -396,7 +396,7 @@ child 0
 id 62
 pop
 push 60
-attr style None "position: absolute; top: 0px; left: 12px; height: 52px; display: flex; align-items: center; z-index: 30;"
+attr style None "position: absolute; top: 0px; left: 12px; height: 40px; display: flex; align-items: center; z-index: 30;"
 pop
 push 62
 attr aria-label None "Toggle the sidebar"
@@ -442,7 +442,7 @@ child 0
 id 66
 pop
 push 65
-attr style None "position: absolute; top: 0px; right: 12px; height: 52px; display: flex; align-items: center; z-index: 30;"
+attr style None "position: absolute; top: 0px; right: 12px; height: 40px; display: flex; align-items: center; z-index: 30;"
 pop
 push 66
 attr aria-label None "Toggle the details"
