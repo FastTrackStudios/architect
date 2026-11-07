@@ -4,7 +4,7 @@
 //!
 //! A share is a scope of one of the host's vaults (`vault`, its only one
 //! when unset): `folder`, `tag`, `notes` (or one `note`), `base`, or the
-//! whole vault when none is given. Its link is `<host>/<code>/`.
+//! whole vault when none is given. Its link is `<host>/s/<code>/`.
 
 use std::sync::Arc;
 

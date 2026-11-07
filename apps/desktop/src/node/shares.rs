@@ -1,4 +1,5 @@
-//! Share links on the node: `<node>/<code>` (#374, the model is #197's).
+//! Share links on the node: `<node>/s/<code>/` (#374, the model is #197's;
+//! the `/s` prefix is [`architect_spaces::share::LINKS`], #431).
 //!
 //! A share ([`architect_spaces::Share`]) is a note of the vault it shares
 //! (`_architect/shares/<code>.md`, hidden from every Site), so it syncs
@@ -8,11 +9,11 @@
 //!   holds at start and again whenever the vault changes, so a share made
 //!   or revoked on another device reaches it with the note;
 //! - **builds each live share** as a scoped Site (`architect_sites::Scope`)
-//!   at `/<code>/` into its data dir, and again whenever the vault changes,
+//!   at `/s/<code>/` into its data dir, and again whenever the vault changes,
 //!   so an edit (from disk, a peer's live bridge or a web client) is on the
 //!   shared page within a second or so; the page reloads itself (`_live`,
 //!   an event stream);
-//! - **answers `/<code>/…`** ([`gate`]) only while the share is live:
+//! - **answers `/s/<code>/…`** ([`gate`]) only while the share is live:
 //!   expired, revoked or unknown is `404`. Every request is checked against
 //!   the share's audience: anyone for a public or link share, and for an
 //!   org or invited share a person signed in at the issuer (their session
@@ -27,7 +28,7 @@
 //! alone, its links to other notes are plain text, and an attachment is
 //! there only when a note in the scope links to it.
 //!
-//! Sign-in (`/_share/signin`) is the issuer's device sign-in: the node
+//! Sign-in (`/s/_signin`) is the issuer's device sign-in: the node
 //! starts one, the person approves it at the issuer, signed in there,
 //! and the node sets its session as an `HttpOnly` cookie. The node never
 //! sees a password.
@@ -47,8 +48,8 @@ use architect::http::axum::response::{IntoResponse, Redirect, Response};
 use architect_orgs::server::{Directory as _, IdentityServer};
 use architect_permissions::Principal;
 use architect_spaces::share::{
-    SHARES_FOLDER, code_from, comments_note_path, is_code, share_note_path, validate,
-    validate_domain,
+    LINKS, SHARES_FOLDER, code_from, comments_note_path, is_code, link_path, share_note_path,
+    validate, validate_domain,
 };
 use architect_spaces::{
     NewShare, Share, ShareChange, ShareComment, ShareFault, ShareLinks, ShareScope, ShareState,
@@ -65,8 +66,9 @@ pub const SESSION_COOKIE: &str = "architect_session";
 /// The comments section's start: its look, then its heading. The site's
 /// own tokens (`--site-*`) colour it, so it follows the theme.
 const COMMENTS_HEAD: &str = "<style>.share-comments{max-width:42rem;margin:2rem auto;padding:0 1rem}.share-comment{border-top:1px solid var(--site-rule,#8884);padding:.5rem 0}.share-comments form{display:flex;flex-direction:column;gap:.5rem;margin-top:1rem}.share-comments input,.share-comments textarea{font:inherit;padding:.5rem;border-radius:.4rem;border:1px solid var(--site-rule,#8886);background:transparent;color:inherit}.share-comments textarea{min-height:5rem}.share-comments button{align-self:flex-start;font:inherit;padding:.4rem 1rem;border-radius:.4rem;border:0;background:var(--site-accent,#3b6ef5);color:#fff}</style><section id=\"comments\" class=\"share-comments\"><h2>Comments</h2>";
-/// The cookie a sign-in in progress is kept in.
+/// The cookie a sign-in in progress is kept in, and its path.
 const SIGNIN_COOKIE: &str = "architect_signin";
+const SIGNIN_PATH: &str = "/s/_signin";
 /// How long the vault is left to settle before the shares are rebuilt.
 const SETTLE: Duration = Duration::from_millis(400);
 /// How long a resolved viewer is trusted before the issuer is asked again.
@@ -239,14 +241,14 @@ impl Shares {
         }
     }
 
-    /// Build `share`'s pages: at `/<code>/`, and at `/` for its domain.
+    /// Build `share`'s pages: at `/s/<code>/`, and at `/` for its domain.
     fn build(&self, share: &Share) {
         let Ok(root) = self.0.backend.root(&share.vault) else {
             tracing::warn!(code = %share.code, vault = %share.vault, "a share of a vault this node does not hold");
             return;
         };
         let at = self.0.out.join(&share.code);
-        let mut mounts = vec![(format!("/{}/", share.code), at.join("site"))];
+        let mut mounts = vec![(share.path(), at.join("site"))];
         if share.domain.is_some() {
             mounts.push(("/".to_owned(), at.join("domain")));
         } else {
@@ -613,8 +615,11 @@ impl ShareLinks for SharesLane {
 
 // ── HTTP ─────────────────────────────────────────────────────────────
 
-/// The node's outermost layer: `/<code>/…` and a share's own domain are
-/// answered here, `/_share/…` is sign-in; everything else goes on.
+/// The node's outermost layer: share links, their sign-in and domains.
+///
+/// `/s/<code>/…` and a share's own domain are answered here, `/s/_signin…`
+/// and `/s/_signout` are sign-in; everything else goes on (an unknown
+/// `/s/…` is `404` here, never the node's other routes).
 pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) -> Response {
     let host = request
         .headers()
@@ -627,20 +632,31 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         return serve(&shares, &code, &rest, "/", request).await;
     }
     let path = request.uri().path().to_owned();
-    if let Some(rest) = path.strip_prefix("/_share/") {
+    let Some(below) = path
+        .strip_prefix(LINKS)
+        .filter(|r| r.is_empty() || r.starts_with('/'))
+    else {
+        return next.run(request).await;
+    };
+    let below = below.trim_start_matches('/');
+    if let Some(rest) = below.strip_prefix('_') {
         return signin(&shares, rest, request).await;
     }
-    let mut parts = path.trim_start_matches('/').splitn(2, '/');
+    let mut parts = below.splitn(2, '/');
     let first = parts.next().unwrap_or_default();
-    if is_code(first) && shares.get(first).is_some() {
-        if !path.contains(&format!("/{first}/")) {
-            return Redirect::permanent(&format!("/{first}/")).into_response();
-        }
-        let rest = format!("/{}", parts.next().unwrap_or_default());
-        let mount = format!("/{first}/");
-        return serve(&shares, first, &rest, &mount, request).await;
+    if !is_code(first) || shares.get(first).is_none() {
+        return page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "<p>There is nothing at this link.</p>",
+        );
     }
-    next.run(request).await
+    let mount = link_path(first);
+    if !below.contains('/') {
+        return Redirect::permanent(&mount).into_response();
+    }
+    let rest = format!("/{}", parts.next().unwrap_or_default());
+    serve(&shares, first, &rest, &mount, request).await
 }
 
 /// Answer `rest` (a path below the link, from `/`) of share `code`,
@@ -666,7 +682,7 @@ async fn serve(shares: &Shares, code: &str, rest: &str, mount: &str, request: Re
         Verdict::SignIn => {
             let to = format!("{}{}", mount.trim_end_matches('/'), rest);
             let body = format!(
-                "<p>This link is for {}. Sign in to open it.</p><p><a class=\"button\" href=\"/_share/signin?to={}\">Sign in</a></p>",
+                "<p>This link is for {}. Sign in to open it.</p><p><a class=\"button\" href=\"{LINKS}/_signin?to={}\">Sign in</a></p>",
                 if matches!(share.audience, architect_spaces::Audience::Org) {
                     "the members of an organization"
                 } else {
@@ -680,7 +696,7 @@ async fn serve(shares: &Shares, code: &str, rest: &str, mount: &str, request: Re
             return page(
                 StatusCode::FORBIDDEN,
                 "Not shared with you",
-                "<p>This link was not shared with the account you are signed in as.</p><p><a href=\"/_share/signout?to=/\">Sign out</a></p>",
+                "<p>This link was not shared with the account you are signed in as.</p><p><a href=\"/s/_signout?to=/\">Sign out</a></p>",
             );
         }
     }
@@ -955,7 +971,8 @@ struct To {
     to: String,
 }
 
-/// `/_share/signin`, `/_share/signin/wait`, `/_share/signout`.
+/// `/s/_signin`, `/s/_signin/wait`, `/s/_signout` (`rest` is what
+/// follows the `_`).
 async fn signin(shares: &Shares, rest: &str, request: Request) -> Response {
     let query = request.uri().query().unwrap_or_default().to_owned();
     let to = serde_urlencoded_form::<To>(query.as_bytes())
@@ -1041,7 +1058,7 @@ async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
         &mut response,
         SIGNIN_COOKIE,
         &nonce,
-        "/_share",
+        SIGNIN_PATH,
         1800,
         secure,
     );
@@ -1055,7 +1072,7 @@ fn waiting_page(approve: &str, user_code: &str, interval: i64) -> Response {
         escape(user_code)
     );
     let mut response = page(StatusCode::OK, "Sign in", &body);
-    let refresh = format!("{}; url=/_share/signin/wait", interval.clamp(2, 10));
+    let refresh = format!("{}; url={SIGNIN_PATH}/wait", interval.clamp(2, 10));
     if let Ok(value) = HeaderValue::from_str(&refresh) {
         response.headers_mut().insert("refresh", value);
     }
@@ -1114,7 +1131,7 @@ async fn wait_signin(shares: &Shares, headers: &HeaderMap, secure: bool) -> Resp
                 age,
                 secure,
             );
-            set_cookie(&mut response, SIGNIN_COOKIE, "", "/_share", 0, secure);
+            set_cookie(&mut response, SIGNIN_COOKIE, "", SIGNIN_PATH, 0, secure);
             response
         }
         Err(why) if why.contains("VerificationRequired") || why.contains("slow_down") => {
@@ -1125,7 +1142,7 @@ async fn wait_signin(shares: &Shares, headers: &HeaderMap, secure: bool) -> Resp
             );
             response.headers_mut().insert(
                 "refresh",
-                HeaderValue::from_static("3; url=/_share/signin/wait"),
+                HeaderValue::from_static("3; url=/s/_signin/wait"),
             );
             response
         }
