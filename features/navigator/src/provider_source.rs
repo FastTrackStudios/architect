@@ -308,6 +308,11 @@ impl NavigatorSource for ProviderSource {
         self.map().order.clone()
     }
 
+    /// An item's fields are the provider's, not a vault's properties.
+    fn browses_properties(&self) -> bool {
+        false
+    }
+
     fn files(&self) -> Vec<NoteFile> {
         self.map().files.clone()
     }

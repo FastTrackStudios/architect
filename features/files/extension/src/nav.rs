@@ -60,11 +60,41 @@ pub fn tree(roots: &[Value]) -> Vec<Node> {
         .collect()
 }
 
+/// What Files shows with no project folder on this device: how to get one.
+///
+/// `error` is why the roots could not be read, when it is more than there
+/// being nothing to ask (no files engine is a plain empty state).
+#[must_use]
+pub fn empty_state(error: Option<&str>) -> Snapshot {
+    let why = error.filter(|e| !e.contains("no action"));
+    let mut connect = Item::new("empty:connect", "", "Connect to a node").preview(
+        "A node keeps your org's project files and copies them to your devices. \
+         Sign in and enrol this device in the org (Account → Devices).",
+    );
+    if let Some(why) = why {
+        connect = connect.badge("offline").property("error", why);
+        connect.preview = Some(format!("The node could not be reached: {why}"));
+    }
+    Snapshot::new("Files")
+        .item(Item::new("empty:add", "", "Add a project folder").preview(
+            "A project's sessions, stems and assets live in its folder on a node, \
+                 under <org>/Projects/<project>. Make one there and it shows here.",
+        ))
+        .item(connect)
+}
+
 impl NavigatorProvider for FilesNav {
     fn snapshot(&self) -> ProviderFuture<Snapshot> {
         Box::pin(async {
-            let roots = run("FILES_ROOTS", json!({})).await?;
-            let roots = roots.as_array().cloned().unwrap_or_default();
+            // No files on this device yet (no root, or no files engine to
+            // ask): what to do about it, not an error (#443).
+            let roots = match run("FILES_ROOTS", json!({})).await {
+                Ok(roots) => roots.as_array().cloned().unwrap_or_default(),
+                Err(e) => return Ok(empty_state(Some(&e))),
+            };
+            if roots.is_empty() {
+                return Ok(empty_state(None));
+            }
             let mut snap = Snapshot::new("Files");
             for node in tree(&roots) {
                 snap = snap.node(node);
@@ -177,6 +207,19 @@ impl NavigatorProvider for FilesNav {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_roots_is_an_empty_state_not_an_error() {
+        let s = empty_state(Some("FILES_NAV_SNAPSHOT: no action FILES_ROOTS"));
+        let titles: Vec<&str> = s.items.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, ["Add a project folder", "Connect to a node"]);
+        assert!(
+            s.items.iter().all(|i| i.badges.is_empty()),
+            "no engine is no error"
+        );
+        let down = empty_state(Some("connection refused"));
+        assert_eq!(down.items[1].badges, ["offline"]);
+    }
 
     #[test]
     fn orgs_hold_their_projects_and_libraries() {

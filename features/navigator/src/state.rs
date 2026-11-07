@@ -712,15 +712,16 @@ impl NavigatorState {
             TagTree::build(self.index.files())
         };
         let keys = NavigatorSettings::list(&property_keys);
-        self.property_tree = if !s.property_tree || keys.is_empty() {
-            PropertyTree::default()
-        } else if let Some(files) =
-            selected(s.scope_properties && !matches!(target, NavTarget::Property { .. }))
-        {
-            PropertyTree::build(files, &keys)
-        } else {
-            PropertyTree::build(self.index.files(), &keys)
-        };
+        self.property_tree =
+            if !s.property_tree || keys.is_empty() || !self.index.browses_properties() {
+                PropertyTree::default()
+            } else if let Some(files) =
+                selected(s.scope_properties && !matches!(target, NavTarget::Property { .. }))
+            {
+                PropertyTree::build(files, &keys)
+            } else {
+                PropertyTree::build(self.index.files(), &keys)
+            };
     }
 
     fn rebuild_nav(&mut self) {
@@ -1629,6 +1630,7 @@ impl NavigatorState {
                 .map(|f| h.shown(f)),
         )
         .with_order(self.all.orders().clone())
+        .with_properties(self.all.browses_properties())
     }
 
     /// A change in the source, as the shown vault takes it; `None` to

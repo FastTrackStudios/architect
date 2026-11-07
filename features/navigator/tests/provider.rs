@@ -178,3 +178,51 @@ fn an_ordered_snapshot_keeps_its_order() {
         ["Later", "Today", "Tomorrow"]
     );
 }
+
+/// #443: the vault's Properties section (its `property_keys`) never shows
+/// under a provider, though its items have fields of the same names.
+#[test]
+fn a_provider_never_shows_the_vaults_properties() {
+    let snap = Snapshot::new("Tasks")
+        .node(Node::new("todo", "To do"))
+        .item(Item::new("t1", "todo", "Write it").property("status", "open"));
+    let source = ProviderSource::with(snap);
+    let settings = NavigatorSettings {
+        property_keys: "status, type".to_owned(),
+        ..NavigatorSettings::default()
+    };
+    let s = NavigatorState::new(
+        VaultIndex::read(&source),
+        settings.clone(),
+        Clock {
+            now: NOW,
+            offset: 0,
+        },
+    );
+    assert!(
+        !s.nav_rows()
+            .iter()
+            .any(|r| matches!(r.kind, architect_navigator::NavRowKind::Property { .. })),
+        "a provider's tree has no Properties rows"
+    );
+    // A vault with the same notes does browse them.
+    let mut f = architect_navigator::NoteFile::new("Write.md", NOW, NOW);
+    f.properties.push((
+        "status".to_owned(),
+        architect_navigator::PropertyValue::Text("open".to_owned()),
+    ));
+    let vault = architect_navigator::MemorySource::new("Vault").with_file(f);
+    let v = NavigatorState::new(
+        VaultIndex::read(&vault),
+        settings,
+        Clock {
+            now: NOW,
+            offset: 0,
+        },
+    );
+    assert!(
+        v.nav_rows()
+            .iter()
+            .any(|r| matches!(r.kind, architect_navigator::NavRowKind::Property { .. }))
+    );
+}
