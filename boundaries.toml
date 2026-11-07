@@ -587,6 +587,12 @@ layer = "L1"
 
 [[row]]
 package = "architect-files"
+features = ["drive"]
+layer = "L1"
+note = "the drive (#347): every root a device knows mounted as a real folder over FUSE (fuser), the guard that unmounts after a crash"
+
+[[row]]
+package = "architect-files"
 features = ["sync"]
 layer = "L1"
 note = "synced roots (#347): projects and asset libraries held in place, a Loro manifest per root, the engine, WebDAV, the agent's service"

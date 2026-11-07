@@ -36,8 +36,15 @@ fn main() -> std::process::ExitCode {
 #[cfg(not(feature = "gui"))]
 fn main() -> std::process::ExitCode {
     let mut args = std::env::args_os().skip(1).peekable();
-    if args.peek().is_some_and(|a| a == "serve") {
-        args.next();
+    match args.peek().and_then(|a| a.to_str()) {
+        Some("serve") => {
+            args.next();
+        }
+        Some("files") => return architect_desktop::node::cli::files(args.skip(1)),
+        Some(architect_desktop::node::cli::GUARD) => {
+            return architect_desktop::node::cli::guard(args.skip(1));
+        }
+        _ => {}
     }
     architect_desktop::node::main(args)
 }

@@ -28,6 +28,7 @@
 //! | `ARCHITECT_LIVE_MAX` | `live_max` | `256` | how many notes it keeps live with each peer (a `DocSync` bridge each); `0` sweeps only |
 //! | `ARCHITECT_FILES_DIR` | `files_dir` | none | projects and asset libraries (`<org>/Projects/<p>`, `<org>/Assets/<kind>`): the tree held in place, or where pins go (`architect_files::sync`) |
 //! | `ARCHITECT_FILES_HOLD` | `files_hold` | `false` | hold every root found in `files_dir` (the always-on node); otherwise only pinned ones have a working copy |
+//! | `ARCHITECT_DRIVE` | `drive` | none | mount every root this device knows here, as a real folder (FUSE; `~/Architect` when the agent is installed, `architect-desktop agent install`); empty is off |
 //! | `ARCHITECT_FILES_SECS` | `files_secs` | `2` | how often each root is scanned and brought to its heads |
 
 use std::collections::BTreeMap;
@@ -71,6 +72,7 @@ pub struct Config {
     pub files_dir: Option<PathBuf>,
     pub files_hold: bool,
     pub files_secs: u64,
+    pub drive: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -97,6 +99,7 @@ impl Default for Config {
             files_dir: None,
             files_hold: false,
             files_secs: 2,
+            drive: None,
         }
     }
 }
@@ -231,6 +234,9 @@ impl Config {
         }
         if let Some(v) = get("ARCHITECT_FILES_HOLD") {
             self.files_hold = matches!(v.trim(), "1" | "true" | "yes");
+        }
+        if let Some(v) = get("ARCHITECT_DRIVE") {
+            self.drive = (!v.trim().is_empty()).then(|| PathBuf::from(v.trim()));
         }
         if let Some(v) = get("ARCHITECT_FILES_SECS") {
             self.files_secs = v.trim().parse().map_err(|e| ConfigError::Env {

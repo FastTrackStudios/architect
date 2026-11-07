@@ -260,7 +260,7 @@ icu_properties = { version = "2.4.0", default-features = false, features = ["com
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
-libc = { version = "0.2.189" }
+libc = { version = "0.2.189", features = ["extra_traits"] }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "system", "xdp"] }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 mio = { version = "1.2.3", features = ["net", "os-ext"] }
@@ -323,7 +323,7 @@ icu_normalizer = { version = "2.4.0", default-features = false, features = ["com
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
-libc = { version = "0.2.189" }
+libc = { version = "0.2.189", features = ["extra_traits"] }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
@@ -383,7 +383,7 @@ icu_normalizer = { version = "2.4.0", default-features = false, features = ["com
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
-libc = { version = "0.2.189" }
+libc = { version = "0.2.189", features = ["extra_traits"] }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
@@ -442,7 +442,7 @@ icu_normalizer = { version = "2.4.0", default-features = false, features = ["com
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
-libc = { version = "0.2.189" }
+libc = { version = "0.2.189", features = ["extra_traits"] }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 mio = { version = "1.2.3", features = ["net", "os-ext"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }

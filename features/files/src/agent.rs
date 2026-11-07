@@ -9,7 +9,7 @@
 //! manifest's id. The engine answers it (`crate::sync`).
 
 use crate::rendition::Peaks;
-use crate::roots::{Asset, Checkpoint, FileEntry, FileVersion, Hit, RootStatus};
+use crate::roots::{Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus};
 
 /// Why the agent refused.
 #[architect::error]
@@ -27,7 +27,9 @@ pub enum AgentError {
 }
 
 pub mod files {
-    use super::{AgentError, Asset, Checkpoint, FileEntry, FileVersion, Hit, Peaks, RootStatus};
+    use super::{
+        AgentError, Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, Peaks, RootStatus,
+    };
 
     /// The agent: roots, pins, versions.
     #[architect::service(actions)]
@@ -67,6 +69,9 @@ pub mod files {
         /// A sound file's waveform (`audiowaveform` JSON v2).
         #[action(effect = read_only)]
         async fn peaks(&self, root: String, path: String) -> Result<Peaks, AgentError>;
+        /// The drive: where it is mounted, what is syncing, offline, the cache's size.
+        #[action(effect = read_only)]
+        async fn drive(&self) -> Result<DriveStatus, AgentError>;
         /// Put the whole root back at a checkpoint; how many files changed.
         async fn restore_checkpoint(
             &self,

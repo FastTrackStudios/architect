@@ -47,6 +47,8 @@ pub mod access;
 pub mod agent;
 #[cfg(feature = "vox")]
 mod client;
+#[cfg(all(feature = "drive", unix))]
+pub mod drive;
 mod error;
 mod id;
 mod model;

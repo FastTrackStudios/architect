@@ -272,6 +272,10 @@ pub fn run(mode: Mode) -> ExitCode {
         }
         Some("--headless") => return serve_headless(),
         Some("serve") => return crate::node::main(std::env::args_os().skip(2)),
+        Some("files") => return crate::node::cli::files(std::env::args_os().skip(2)),
+        Some(crate::node::cli::GUARD) => {
+            return crate::node::cli::guard(std::env::args_os().skip(2));
+        }
         Some("extensions") => {
             let rest: Vec<String> = std::env::args().skip(2).collect();
             return extensions(&rest);

@@ -46,6 +46,7 @@
 //!   change and revoke them.
 
 pub mod catalog;
+pub mod cli;
 pub mod config;
 mod files;
 mod live;
@@ -123,6 +124,9 @@ pub struct Running {
     pub state: NodeState,
     /// Its files engine, with [`Config::files_dir`].
     pub files: Option<architect_files::sync::Engine>,
+    /// The drive, with [`Config::drive`]: unmounted when the node stops.
+    #[cfg(unix)]
+    pub drive: Option<architect_files::drive::Mounted>,
     tasks: Vec<JoinHandle<()>>,
     registry: crdt::DocRegistry,
     _watching: Option<vault_live::sync::WatcherHandle>,
@@ -168,6 +172,11 @@ impl Running {
 
     /// Stop it: its tasks, then its endpoint.
     pub async fn stop(mut self) {
+        // The mount's threads call into this runtime: unmount off it.
+        #[cfg(unix)]
+        if let Some(drive) = self.drive.take() {
+            let _ = tokio::task::spawn_blocking(move || drive.unmount()).await;
+        }
         for task in self.tasks.drain(..) {
             task.abort();
         }
@@ -502,11 +511,18 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         sites = sites.len(),
         "the node is up"
     );
+    #[cfg(unix)]
+    let drive = match (&files, &config.drive) {
+        (Some(engine), Some(at)) => files::mount_drive(engine, &config, at),
+        _ => None,
+    };
     Ok(Running {
         http,
         endpoint,
         state,
         files,
+        #[cfg(unix)]
+        drive,
         tasks,
         registry,
         _watching: watching,
