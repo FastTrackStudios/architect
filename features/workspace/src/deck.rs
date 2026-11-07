@@ -541,6 +541,22 @@ impl DeckState {
         changed
     }
 
+    /// Keeps `live` as deck `id`'s layout while it is not the one on show
+    /// (a deck in a window of its own): its override, or none when it is
+    /// its screenset as saved. True when the deck changed.
+    pub fn keep(&mut self, id: &DeckId, live: &Workspace) -> bool {
+        let Some(screenset) = self.decks.get(id).map(|d| d.screenset.clone()) else {
+            return false;
+        };
+        let as_saved = self
+            .saved(&screenset)
+            .is_some_and(|s| s.same_arrangement(live));
+        let form = self.form;
+        self.decks
+            .get_mut(id)
+            .is_some_and(|d| d.set_override(form, (!as_saved).then(|| live.clone())))
+    }
+
     /// Shows the active deck: its arrangement live, its screenset the
     /// active one, the screensets' working copy for this class the live
     /// layout (so their dirty mark and Reset speak for the deck).

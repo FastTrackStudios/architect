@@ -157,6 +157,10 @@ name = "tab_badge"
 required-features = ["native"]
 
 [[test]]
+name = "deck_strip"
+required-features = ["native"]
+
+[[test]]
 name = "phone_flip"
 required-features = ["native"]
 

@@ -118,9 +118,20 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
 
 ## Decks: one context each, shown in a screenset
 
-> **Status: in progress (#441).** "Deck" is the working name, kept in one
-> place (`features/workspace/src/deck.rs` `NOUN`, `NOUN_PLURAL`; the
-> actions' `DECK_` prefix in `features/workspace/src/control/deck.rs`).
+> **Status: in progress (#441).** The model is
+> `features/workspace/src/deck.rs` (`DeckState`), its actions
+> `features/workspace/src/control/deck.rs`; the strip is the `ui`
+> feature's `features/workspace/src/host/deck.rs` (`use_decks`,
+> `DeckStrip`, `DeckHandle`). "Deck" is the working name, written once:
+> `deck_word!` in `features/workspace/src/lib.rs` (the words a person
+> reads and the actions' `DECK_` prefix).
+
+An app with decks calls `use_decks` beside its `WorkspaceView` (giving
+it the same `Signal<Workspace>` and `Signal<Screensets>`, its stores, its
+templates and the decks a first run opens), draws `DeckStrip` over the
+`WorkspaceView` (given `under_strip: true`, and no `store`: the decks
+keep the screensets and the layouts), and loads contexts with
+`DeckHandle::load`.
 
 Studio has a tab per song and Architect a tab per project, each arranged
 its own way. Two primitives, kept apart:

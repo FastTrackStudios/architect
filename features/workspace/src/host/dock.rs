@@ -211,6 +211,7 @@ fn Ribbon(
     // Under a title row the ribbon starts below it, as the dock's tabs do.
     let top = (host.title_row)()
         .filter(|_| side != Side::Bottom)
+        .filter(|_| !((host.under_strip)() && !((host.in_shell)() && side == Side::Left)))
         .map_or(6.0, |r| r.height.max(s.tabs) + 6.0);
     let column = if bare {
         "display:flex; flex-direction:column; align-items:center; gap:4px;".to_owned()
