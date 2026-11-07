@@ -26,6 +26,9 @@
 //! | `ARCHITECT_MCP_TOKEN_FILE` | `mcp_token_file` | none | `/mcp` is served only with a bearer, read from this file |
 //! | `ARCHITECT_SWEEP_SECS` | `sweep_secs` | `30` | how often it sweeps its peers: the fallback for what a live bridge missed |
 //! | `ARCHITECT_LIVE_MAX` | `live_max` | `256` | how many notes it keeps live with each peer (a `DocSync` bridge each); `0` sweeps only |
+//! | `ARCHITECT_FILES_DIR` | `files_dir` | none | projects and asset libraries (`<org>/Projects/<p>`, `<org>/Assets/<kind>`): the tree held in place, or where pins go (`architect_files::sync`) |
+//! | `ARCHITECT_FILES_HOLD` | `files_hold` | `false` | hold every root found in `files_dir` (the always-on node); otherwise only pinned ones have a working copy |
+//! | `ARCHITECT_FILES_SECS` | `files_secs` | `2` | how often each root is scanned and brought to its heads |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -65,6 +68,9 @@ pub struct Config {
     pub mcp_token_file: Option<PathBuf>,
     pub sweep_secs: u64,
     pub live_max: usize,
+    pub files_dir: Option<PathBuf>,
+    pub files_hold: bool,
+    pub files_secs: u64,
 }
 
 impl Default for Config {
@@ -88,6 +94,9 @@ impl Default for Config {
             mcp_token_file: None,
             sweep_secs: 30,
             live_max: 256,
+            files_dir: None,
+            files_hold: false,
+            files_secs: 2,
         }
     }
 }
@@ -214,6 +223,18 @@ impl Config {
         if let Some(v) = get("ARCHITECT_LIVE_MAX") {
             self.live_max = v.trim().parse().map_err(|e| ConfigError::Env {
                 var: "ARCHITECT_LIVE_MAX",
+                why: format!("{e}"),
+            })?;
+        }
+        if let Some(v) = get("ARCHITECT_FILES_DIR") {
+            self.files_dir = Some(PathBuf::from(v));
+        }
+        if let Some(v) = get("ARCHITECT_FILES_HOLD") {
+            self.files_hold = matches!(v.trim(), "1" | "true" | "yes");
+        }
+        if let Some(v) = get("ARCHITECT_FILES_SECS") {
+            self.files_secs = v.trim().parse().map_err(|e| ConfigError::Env {
+                var: "ARCHITECT_FILES_SECS",
                 why: format!("{e}"),
             })?;
         }
