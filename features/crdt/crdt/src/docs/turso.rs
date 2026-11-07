@@ -19,6 +19,7 @@ use turso::Value;
 use uuid::Uuid;
 
 use super::{DocMeta, DocsError, DocsIndex, Lineage, LocalDoc};
+use crate::turso::BUSY_TIMEOUT;
 
 const SCHEMA: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS crdt_doc_index (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, parent TEXT, created_by TEXT NOT NULL, origin TEXT, created_us INTEGER NOT NULL, updated_us INTEGER NOT NULL, rev INTEGER NOT NULL, deleted INTEGER NOT NULL, pending INTEGER NOT NULL, lineage TEXT NOT NULL, seq INTEGER NOT NULL UNIQUE)",
@@ -108,6 +109,10 @@ impl TursoDocsIndex {
     /// Keep the index in `db`, creating its tables if they are missing.
     pub async fn open(db: &turso::Database) -> Result<Self, DocsError> {
         let conn = db.connect().map_err(|e| backend(&e))?;
+        // The index and the persistence open their own connections on
+        // one file, and a restart reopens it while the last writes land:
+        // wait for the lock instead of failing with "database is locked".
+        conn.busy_timeout(BUSY_TIMEOUT).map_err(|e| backend(&e))?;
         for stmt in SCHEMA {
             conn.execute(*stmt, ()).await.map_err(|e| backend(&e))?;
         }

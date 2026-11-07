@@ -27,6 +27,10 @@ use uuid::Uuid;
 
 use crate::persistence::{PersistError, Persistence};
 
+/// How long a connection waits for another (the index, the persistence, a
+/// restarted process) to release the file before an operation fails.
+pub(crate) const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 const SCHEMA: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS crdt_snapshots (doc TEXT PRIMARY KEY, bytes BLOB NOT NULL)",
     "CREATE TABLE IF NOT EXISTS crdt_updates (doc TEXT NOT NULL, seq INTEGER NOT NULL, bytes BLOB NOT NULL, PRIMARY KEY (doc, seq))",
@@ -54,6 +58,10 @@ impl TursoPersistence {
     /// Persist docs in `db`, creating the two tables if they are missing.
     pub async fn open(db: &turso::Database) -> Result<Self, PersistError> {
         let conn = db.connect().map_err(|e| backend(&e))?;
+        // The index and the persistence open their own connections on
+        // one file, and a restart reopens it while the last writes land:
+        // wait for the lock instead of failing with "database is locked".
+        conn.busy_timeout(BUSY_TIMEOUT).map_err(|e| backend(&e))?;
         for stmt in SCHEMA {
             conn.execute(*stmt, ()).await.map_err(|e| backend(&e))?;
         }
