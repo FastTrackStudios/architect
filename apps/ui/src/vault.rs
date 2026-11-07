@@ -21,8 +21,8 @@ use architect_navigator::{
 use architect_navigator_api::{ActionProvider, NavigatorProvider};
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
 use architect_workspace::{
-    Command, FormClass, MemoryStore, Pane, Ribbon, Screenset, Screensets, Side, Target, TitleRow,
-    View, ViewKind, Views, Workspace, WorkspaceStore, WorkspaceView, use_pane, use_pane_status,
+    Command, FormClass, Pane, Ribbon, Screenset, Screensets, Side, Target, TitleRow, View,
+    ViewKind, Views, Workspace, WorkspaceView, use_pane, use_pane_status,
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
@@ -333,6 +333,12 @@ fn vault_pane_of(w: &Workspace, path: &str) -> Option<architect_workspace::PaneI
 /// The vault's note at `path` on show: its pane forward when one is open,
 /// else a new one at `target`, in the main area (beside the note on show;
 /// never in the dock the navigator is in, even with no note open).
+/// Shows note `path` of the vault on disk (`target`): what loading a
+/// project onto a deck opens (`crate::decks::load`).
+pub fn show_note(workspace: Signal<Workspace>, path: &str, target: Target) {
+    show_vault_note(workspace, path, target);
+}
+
 fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
     let mut workspace = workspace;
     let mut w = workspace.write();
@@ -467,8 +473,35 @@ fn mix_workspace() -> Workspace {
     w
 }
 
+/// "Project": a project's deck starts in it: the navigator and search on
+/// the left, the outline and backlinks on the right, the project's note
+/// (opened when it loads) in the middle.
+fn project_workspace() -> Workspace {
+    let mut w = Workspace::new();
+    for (pane, side) in [
+        (Pane::new("search", "search", "Search"), Side::Left),
+        (Pane::new("files", "files", "Files"), Side::Left),
+        (Pane::new("outline", "outline", "Outline"), Side::Right),
+        (
+            Pane::new("backlinks", "backlinks", "Backlinks"),
+            Side::Right,
+        ),
+    ] {
+        let _ = w.open(pane, Target::Dock(side));
+    }
+    let _ = w.activate(&architect_workspace::PaneId::new("files"));
+    if let Some(main) = w.windows.first_mut() {
+        main.docks.left.ribbon = Some(Ribbon {
+            views: vec![ViewKind::new("files"), ViewKind::new("search")],
+            commands: vec!["new-note".to_owned(), "daily".to_owned()],
+            hidden: Vec::new(),
+        });
+    }
+    w
+}
+
 /// The vault's screensets: "Write" (where it starts), "Mix" and
-/// "Embedded views".
+/// "Embedded views"; "Project", a project's deck's.
 fn screensets() -> Screensets {
     let builtins = vec![
         Screenset::new("Write")
@@ -480,6 +513,9 @@ fn screensets() -> Screensets {
         Screenset::new("Embedded views")
             .slot(3)
             .layout(FormClass::Desk, crate::embedded::workspace()),
+        Screenset::new("Project")
+            .slot(5)
+            .layout(FormClass::Desk, project_workspace()),
     ];
     // "New Chart" (⌘K): the source editor beside its preview.
     #[cfg(feature = "keyflow-lab")]
@@ -495,18 +531,12 @@ fn screensets() -> Screensets {
     Screensets::default().with_builtins(builtins)
 }
 
-/// Where the lab keeps its workspace: in memory, for the run (a page
-/// switch and back finds it as it was left).
-#[derive(Clone)]
-struct VaultStore(WorkspaceStore);
-
 #[component]
 pub fn VaultPage() -> Element {
     let screen = use_context::<Signal<Screen>>();
     let screen = screen();
     let workspace = use_signal(first_workspace);
     let sets = use_signal(screensets);
-    let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
     // The vault the navigator shows (the ribbon's "New note" adds to it).
     let lab = use_lab_vault();
@@ -528,6 +558,18 @@ pub fn VaultPage() -> Element {
     let actions = architect_workspace::WorkspaceActions::new(use_context::<
         std::sync::Arc<architect::action::ActionList>,
     >());
+    // Decks (#441): the vault, each project, each song loaded onto a deck
+    // of its own, shown in its screenset; the session and each context's
+    // layout kept (`crate::decks`). The workspace and screensets above are
+    // the deck on show's.
+    let decks = crate::decks::use_lab_decks(
+        workspace,
+        sets,
+        screen_class(&screen),
+        &views,
+        actions.clone(),
+    );
+    let several = decks.decks.read().decks.len() >= 2;
     // A phone's action bar: the workspace's tabs button, counted.
     architect_workspace::use_tabs_button(workspace);
     // The marker lane draws over the arrangement; its tool window floats
@@ -673,6 +715,7 @@ pub fn VaultPage() -> Element {
         } else if title_row.is_none() {
             PageBar { title: "Vault" }
         }
+        architect_workspace::DeckStrip { title_row, phone }
         div { style: "flex: 1 1 0; min-height: 0; display: flex; position: relative;",
             WorkspaceView {
                 workspace,
@@ -689,13 +732,19 @@ pub fn VaultPage() -> Element {
                 phone_header: !phone,
                 switcher,
                 screensets: sets,
-                store,
+                // The decks keep the layouts and the screensets.
+                under_strip: several && !phone,
                 status: pane_status,
                 form: screen_class(&screen),
                 actions,
             }
         }
     }
+}
+
+/// The folder of a project row: the folder itself, or a `project.md`'s.
+fn project_folder(path: &str) -> &str {
+    path.strip_suffix("/project.md").unwrap_or(path)
 }
 
 /// The lab's vault and what its navigator had open, for the run: at the
@@ -1211,10 +1260,29 @@ fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
     let workspace = pane.workspace();
     let disk = use_lab_vault().disk;
     // Opens what the provider says an item opens.
-    let follow = move |open: architect_navigator_api::Open, target: Target| {
+    let decks = architect_workspace::try_use_decks();
+    let follow = move |open: architect_navigator_api::Open, target: Target, new_deck: bool| {
         use architect_navigator_api::Open as O;
         match open {
             O::Nothing => {}
+            // A song, a project: loaded onto the deck on show, or a new one.
+            O::Context {
+                context_type,
+                id,
+                title,
+                folder,
+            } => {
+                let mut context = architect_workspace::DeckContext::new(context_type, id, title);
+                context.folder = folder;
+                let how = if new_deck {
+                    architect_workspace::Load::NewDeck
+                } else {
+                    architect_workspace::Load::Here
+                };
+                if let Some(decks) = decks {
+                    crate::decks::load(&decks, workspace, context, how);
+                }
+            }
             O::File { path } => {
                 np.opened.write_unchecked().insert(path.clone());
                 if disk.peek().is_some() {
@@ -1266,7 +1334,7 @@ fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
                     match done {
                         Ok(open) => {
                             if let Some(open) = open {
-                                follow(open, Target::Tab);
+                                follow(open, Target::Tab, false);
                             }
                         }
                         Err(e) => nav.say(e),
@@ -1310,22 +1378,35 @@ fn ProviderFiles(id: String, prefix: String, title: String) -> Element {
             let target = match (o.how, o.browsing) {
                 (OpenIn::Split, _) => Target::Split(Side::Right),
                 (_, true) => Target::Here,
-                (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
+                (OpenIn::Here | OpenIn::Tab | OpenIn::NewDeck, false) => Target::Tab,
             };
+            let new_deck = o.how == OpenIn::NewDeck;
             // The item says what it opens, else the provider is asked.
             if let Some(open) = item.open {
-                follow(open, target);
+                follow(open, target, new_deck);
             } else {
                 let provider = Arc::clone(&provider);
                 spawn(async move {
                     match provider.open(item.id).await {
-                        Ok(open) => follow(open, target),
+                        Ok(open) => follow(open, target, new_deck),
                         Err(e) => nav.say(e),
                     }
                 });
             }
         }
     });
+    // Its items that load as decks: a ⌘-click or a middle-click on one
+    // loads it onto a new deck.
+    {
+        let source = source.clone();
+        use_context_provider(move || {
+            architect_navigator::ui::DeckRows(std::rc::Rc::new(move |path: &str| {
+                source.item_at(path).is_some_and(|i| {
+                    matches!(i.open, Some(architect_navigator_api::Open::Context { .. }))
+                })
+            }))
+        });
+    }
     let on_new_note = EventHandler::new({
         let source = source;
         move |folder: String| {
@@ -1500,14 +1581,36 @@ fn VaultFiles() -> Element {
     use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
     let open_pane = pane.clone();
     let menu_pane = pane;
+    // A project's folder (or its project.md) loads as a deck: a ⌘-click
+    // or a middle-click on one loads it onto a new deck.
+    let decks = architect_workspace::try_use_decks();
+    use_context_provider(|| {
+        architect_navigator::ui::DeckRows(std::rc::Rc::new(|path: &str| {
+            crate::decks::project_context(project_folder(path)).is_some()
+        }))
+    });
     let on_open = EventHandler::new(move |o: Open| {
+        if o.how == OpenIn::NewDeck {
+            if let (Some(decks), Some(context)) = (
+                decks,
+                crate::decks::project_context(project_folder(&o.path)),
+            ) {
+                crate::decks::load(
+                    &decks,
+                    open_pane.workspace(),
+                    context,
+                    architect_workspace::Load::NewDeck,
+                );
+                return;
+            }
+        }
         let markdown = std::path::Path::new(&o.path)
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("md"));
         let target = match (o.how, o.browsing) {
             (OpenIn::Split, _) => Target::Split(Side::Right),
             (_, true) => Target::Here,
-            (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
+            (OpenIn::Here | OpenIn::Tab | OpenIn::NewDeck, false) => Target::Tab,
         };
         let base = std::path::Path::new(&o.path)
             .extension()

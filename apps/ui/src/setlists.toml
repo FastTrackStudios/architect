@@ -1,0 +1,43 @@
+# The sandbox's Studio-shaped demo of decks (#441): a setlist in the
+# navigator, each song loaded onto a deck of its own, shown in the "Song"
+# screenset this extension ships ([[deck_templates]]). Linked in by the
+# sandbox only (src/extensions.rs); its code is src/setlists.rs.
+id = "setlists"
+name = "Setlists"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Setlists in the navigator, each song a deck: the song's chart and its details, laid out by the Song screenset."
+authors = ["FastTrackStudios"]
+
+[entry]
+path = "architect-sandbox"
+
+[[actions]]
+id = "SETLISTS_NAV_SNAPSHOT"
+name = "Setlists: the navigator's tree"
+description = "Its navigator provider's snapshot: each setlist, and its songs as items that load onto a deck."
+group = "Setlists"
+effect = "read_only"
+
+[[views]]
+id = "song"
+title = "Chart"
+icon = "music"
+
+[[views]]
+id = "info"
+title = "Song"
+icon = "info"
+
+[[navigator_providers]]
+id = "setlists"
+title = "Setlists"
+icon = "list-music"
+views = ["song", "info"]
+actions = "SETLISTS_NAV"
+
+[[deck_templates]]
+context = "song"
+screenset = "Song"
+layout = "song.json"

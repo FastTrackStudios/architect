@@ -173,6 +173,9 @@ pub(super) fn ItemRow(
     /// The colour paints the icon alone.
     icon_only: bool,
 ) -> Element {
+    let deck_rows = use_deck_rows();
+    let deck_rows_down = deck_rows.clone();
+    let target_down = target.clone();
     let pad = f64::from(level).mul_add(indent, 6.0);
     let name_flex = name_flex(nav, !count.is_empty() && !reorder);
     let class = match (selected, drop_here) {
@@ -252,6 +255,9 @@ pub(super) fn ItemRow(
                             nav.act(nav.state.peek().first_note(), on_open);
                         }
                     }
+                    NavTarget::Folder(f) if m.command && deck_row(deck_rows.as_ref(), f) => {
+                        open_deck(f, on_open);
+                    }
                     NavTarget::Folder(f) => {
                         let out = nav.update(|s| s.click_folder(f));
                         nav.act(out, on_open);
@@ -264,6 +270,11 @@ pub(super) fn ItemRow(
                 menu.set(Some(RowMenu { target: menu_target.clone(), top: top + height }));
             },
             onpointerdown: move |e: PointerEvent| {
+                if let NavTarget::Folder(f) = &target_down {
+                    if middle_click(&e, deck_rows_down.as_ref(), f, on_open) {
+                        return;
+                    }
+                }
                 if let Some(tag) = &draggable {
                     start_drag(nav, Drag::Tag(tag.clone()), &e);
                 }
@@ -1754,6 +1765,59 @@ pub(super) fn tooltip(nav: Navigator, path: &str) -> Option<String> {
 pub struct MenuExtra {
     pub rows: std::rc::Rc<dyn Fn(&str, &str) -> Vec<(String, String)>>,
     pub run: std::rc::Rc<dyn Fn(&str, &str, &str)>,
+}
+
+/// The rows an app loads as a deck's context, by path, in context.
+///
+/// A project's folder, a setlist's song: a ⌘-click or a middle-click on one
+/// opens it with [`crate::OpenIn::NewDeck`] (a ⌘-click on another note
+/// still selects it).
+#[derive(Clone)]
+pub struct DeckRows(pub std::rc::Rc<dyn Fn(&str) -> bool>);
+
+/// The app's [`DeckRows`], read where a row is drawn (an event handler
+/// has no scope to look it up from).
+pub(super) fn use_deck_rows() -> Option<DeckRows> {
+    try_use_context::<DeckRows>()
+}
+
+/// Whether `path` is a row the app loads as a deck.
+pub(super) fn deck_row(rows: Option<&DeckRows>, path: &str) -> bool {
+    rows.is_some_and(|d| (d.0)(path))
+}
+
+/// Opens `path` onto a new deck.
+pub(super) fn open_deck(path: &str, on_open: EventHandler<Open>) {
+    on_open.call(Open {
+        path: path.to_owned(),
+        how: crate::OpenIn::NewDeck,
+        browsing: false,
+        cursor: None,
+    });
+}
+
+/// A middle-click on row `path`: onto a new deck when it is one, else a
+/// new tab. True when it was a middle-click.
+pub(super) fn middle_click(
+    e: &PointerEvent,
+    rows: Option<&DeckRows>,
+    path: &str,
+    on_open: EventHandler<Open>,
+) -> bool {
+    if e.data().trigger_button() != Some(dioxus::html::input_data::MouseButton::Auxiliary) {
+        return false;
+    }
+    if deck_row(rows, path) {
+        open_deck(path, on_open);
+    } else if !path.is_empty() {
+        on_open.call(Open {
+            path: path.to_owned(),
+            how: crate::OpenIn::Tab,
+            browsing: false,
+            cursor: None,
+        });
+    }
+    true
 }
 
 /// A menu's target as others' rows name it: `navigator:<kind>` and its id.

@@ -126,6 +126,17 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
 > `deck_word!` in `features/workspace/src/lib.rs` (the words a person
 > reads and the actions' `DECK_` prefix).
 
+In the Architect app (`apps/ui/src/decks.rs`, `apps/ui/src/vault.rs`
+`VaultPage`) the vault is the first deck ("Write"); a project's folder
+⌘-clicked or middle-clicked in the navigator loads onto a deck of its own
+("Project", its `project.md` opened when nothing was kept). The session
+and the saved screensets are the device's (`<app folder>/decks/`), each
+deck's layout its context's. The strip shows, and ⌘1–9 and ⌃Tab become the
+decks', once a second deck is open. The sandbox adds a Studio-shaped
+demo, the Setlists extension (`apps/ui/src/setlists.rs`): a setlist in
+the navigator, each song a deck in the "Song" screenset it ships through
+`[[deck_templates]]`.
+
 An app with decks calls `use_decks` beside its `WorkspaceView` (giving
 it the same `Signal<Workspace>` and `Signal<Screensets>`, its stores, its
 templates and the decks a first run opens), draws `DeckStrip` over the
@@ -165,8 +176,10 @@ screenset itself changes only when they say so:
 The strip: open, close, drag to reorder, ⌘1–9 and ⌃Tab / ⌃⇧Tab to
 switch, Duplicate and Pop out into a window from a deck's menu, and a
 marker on a deck whose layout differs from its screenset (and a badge an
-app sets: a song's unsaved session). While decks are on, ⌘1–9 switch
-decks and the screensets' slot keys move to ⌘⌥1–9. On a phone the strip
+app sets: a song's unsaved session). The strip shows once a second deck
+is open; from then ⌘1–9 and ⌃Tab are the decks' (⌘9 the last), the
+screensets' slot keys move to ⌘⌥1–9 and a group's tabs to ⌃⌥Tab. With
+one deck the keys are as without decks. On a phone the strip
 folds into the tab switcher: a row of decks above its cards.
 
 **Each context type has a default screenset** ("Song", "Project"). An
