@@ -43,6 +43,18 @@ impl Engine {
         })
     }
 
+    /// Every hash some manifest this device holds names, as of the last
+    /// pass: what a blob backend replicates.
+    #[must_use]
+    pub fn named(&self) -> Vec<Sha256> {
+        self.served
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .copied()
+            .collect()
+    }
+
     /// The manifests this device holds, as of the last pass.
     #[must_use]
     pub fn held(&self) -> Vec<HeldManifest> {

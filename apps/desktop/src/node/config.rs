@@ -30,6 +30,14 @@
 //! | `ARCHITECT_FILES_HOLD` | `files_hold` | `false` | hold every root found in `files_dir` (the always-on node); otherwise only pinned ones have a working copy |
 //! | `ARCHITECT_DRIVE` | `drive` | none | mount every root this device knows here, as a real folder (FUSE; `~/Architect` when the agent is installed, `architect-desktop agent install`); empty is off |
 //! | `ARCHITECT_FILES_SECS` | `files_secs` | `2` | how often each root is scanned and brought to its heads |
+//! | `ARCHITECT_BLOB_S3_BUCKET` | `blob_s3_bucket` | none | the files' bytes in an S3 bucket too (Garage, MinIO, R2, AWS, Ceph RGW): turns the backend on |
+//! | `ARCHITECT_BLOB_S3_ENDPOINT` | `blob_s3_endpoint` | AWS | the S3 endpoint (`http://garage.lan:3900`) |
+//! | `ARCHITECT_BLOB_S3_REGION` | `blob_s3_region` | `us-east-1` | its region (`garage`, `auto` for R2) |
+//! | `ARCHITECT_BLOB_S3_PREFIX` | `blob_s3_prefix` | `architect` | keys go under it: `<prefix>/sha256/<hh>/<hex>` |
+//! | `ARCHITECT_BLOB_S3_ACCESS_KEY_ID` | `blob_s3_access_key_id` | none | the bucket's access key id |
+//! | `ARCHITECT_BLOB_S3_SECRET_FILE` | `blob_s3_secret_file` | none | a file holding its secret key (or `ARCHITECT_BLOB_S3_SECRET_ACCESS_KEY`, read at start and never kept in the config) |
+//! | `ARCHITECT_BLOB_PLACEMENT` | `blob_placement` | `replicate` | `replicate`: every byte here and in the bucket; `primary`: the bucket holds them, this node keeps a cache |
+//! | `ARCHITECT_BLOB_CACHE_MB` | `blob_cache_mb` | `10240` | with `primary`, how much of the store is kept here (working copies are never evicted) |
 //! | `ARCHITECT_S3_BIND` | `s3_bind` | none | the roots over S3 (`127.0.0.1:9000`): a bucket per org, keys from `serve s3-key issue` (needs `files_dir`) |
 
 use std::collections::BTreeMap;
@@ -46,6 +54,17 @@ pub enum IrohMode {
     N0,
     /// Loopback only, no relay, no lookup: peers come from `peers`.
     Local,
+}
+
+/// Where a node keeps the files' bytes when it has a bucket.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Placement {
+    /// Every byte on this node and in the bucket.
+    #[default]
+    Replicate,
+    /// The bucket holds them; the node keeps `blob_cache_mb` of its store.
+    Primary,
 }
 
 /// A node's configuration. See the module docs for each field.
@@ -75,6 +94,14 @@ pub struct Config {
     pub files_secs: u64,
     pub drive: Option<PathBuf>,
     pub s3_bind: Option<String>,
+    pub blob_s3_bucket: Option<String>,
+    pub blob_s3_endpoint: Option<String>,
+    pub blob_s3_region: String,
+    pub blob_s3_prefix: String,
+    pub blob_s3_access_key_id: Option<String>,
+    pub blob_s3_secret_file: Option<PathBuf>,
+    pub blob_placement: Placement,
+    pub blob_cache_mb: u64,
 }
 
 impl Default for Config {
@@ -103,6 +130,14 @@ impl Default for Config {
             files_secs: 2,
             drive: None,
             s3_bind: None,
+            blob_s3_bucket: None,
+            blob_s3_endpoint: None,
+            blob_s3_region: String::new(),
+            blob_s3_prefix: "architect".to_owned(),
+            blob_s3_access_key_id: None,
+            blob_s3_secret_file: None,
+            blob_placement: Placement::Replicate,
+            blob_cache_mb: 10_240,
         }
     }
 }
@@ -250,6 +285,42 @@ impl Config {
         if let Some(v) = get("ARCHITECT_S3_BIND") {
             self.s3_bind = Some(v);
         }
+        if let Some(v) = get("ARCHITECT_BLOB_S3_BUCKET") {
+            self.blob_s3_bucket = Some(v);
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_S3_ENDPOINT") {
+            self.blob_s3_endpoint = Some(v);
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_S3_REGION") {
+            self.blob_s3_region = v;
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_S3_PREFIX") {
+            self.blob_s3_prefix = v;
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_S3_ACCESS_KEY_ID") {
+            self.blob_s3_access_key_id = Some(v);
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_S3_SECRET_FILE") {
+            self.blob_s3_secret_file = Some(PathBuf::from(v));
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_PLACEMENT") {
+            self.blob_placement = match v.trim() {
+                "replicate" => Placement::Replicate,
+                "primary" => Placement::Primary,
+                other => {
+                    return Err(ConfigError::Env {
+                        var: "ARCHITECT_BLOB_PLACEMENT",
+                        why: format!("`{other}` is not `replicate` or `primary`"),
+                    });
+                }
+            };
+        }
+        if let Some(v) = get("ARCHITECT_BLOB_CACHE_MB") {
+            self.blob_cache_mb = v.trim().parse().map_err(|e| ConfigError::Env {
+                var: "ARCHITECT_BLOB_CACHE_MB",
+                why: format!("{e}"),
+            })?;
+        }
         Ok(())
     }
 
@@ -330,6 +401,31 @@ mod tests {
             Some(PathBuf::from("architect-data/vaults/notes"))
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_bucket_and_its_placement_come_from_the_environment() {
+        let env = |var: &str| match var {
+            "ARCHITECT_BLOB_S3_BUCKET" => Some("architect-blobs".to_owned()),
+            "ARCHITECT_BLOB_PLACEMENT" => Some("primary".to_owned()),
+            "ARCHITECT_BLOB_CACHE_MB" => Some("512".to_owned()),
+            "ARCHITECT_S3_BIND" => Some("127.0.0.1:9000".to_owned()),
+            _ => None,
+        };
+        let config = Config::load(None, env).ok();
+        let config = config.as_ref();
+        assert_eq!(
+            config.and_then(|c| c.blob_s3_bucket.as_deref()),
+            Some("architect-blobs")
+        );
+        assert_eq!(config.map(|c| c.blob_placement), Some(Placement::Primary));
+        assert_eq!(config.map(|c| c.blob_cache_mb), Some(512));
+        assert_eq!(
+            config.and_then(|c| c.s3_bind.as_deref()),
+            Some("127.0.0.1:9000")
+        );
+        let bad = |var: &str| (var == "ARCHITECT_BLOB_PLACEMENT").then(|| "both".to_owned());
+        assert!(Config::load(None, bad).is_err());
     }
 
     #[test]

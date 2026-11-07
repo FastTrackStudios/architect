@@ -98,8 +98,8 @@ hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.5" }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1" }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.14", default-features = false, features = ["alloc", "subtle", "zeroize"] }
-hyper = { version = "1.11.1", features = ["client", "http1", "server"] }
-hyper-util = { version = "0.1.20", features = ["http1", "server", "service", "tokio"] }
+hyper = { version = "1.11.1", features = ["client", "http1", "http2", "server"] }
+hyper-util = { version = "0.1.20", features = ["server-auto", "service", "tokio"] }
 icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
 icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
 icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
@@ -112,6 +112,7 @@ litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
 lock_api = { version = "0.4.14", features = ["arc_lock"] }
 log = { version = "0.4.34", default-features = false, features = ["std"] }
 manganis-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["dioxus"] }
+md-5-a6292c17cd707f01 = { package = "md-5", version = "0.11.0" }
 memchr = { version = "2.8.3" }
 naga-types = { version = "30.0.1", default-features = false, features = ["std"] }
 num-bigint = { version = "0.4.8" }
@@ -155,8 +156,10 @@ serde = { version = "1.0.229", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.229", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.151", features = ["alloc", "raw_value"] }
 sha2-93f6ce9d446188ac = { package = "sha2", version = "0.10.9" }
+sha2-a6292c17cd707f01 = { package = "sha2", version = "0.11.0" }
 signature = { version = "3.0.0", default-features = false, features = ["alloc", "digest", "rand_core"] }
 simd-adler32 = { version = "0.3.10" }
+simdutf8 = { version = "0.1.5", default-features = false, features = ["aarch64_neon", "std"] }
 skrifa = { version = "0.44.0", default-features = false, features = ["autohint_shaping", "std"] }
 slab = { version = "0.4.12" }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["web"] }
@@ -185,7 +188,7 @@ url = { version = "2.5.8", features = ["serde"] }
 uuid = { version = "1.26.1", features = ["js", "serde", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 web-sys = { version = "0.3.104", features = ["AbortSignal", "AnimationEvent", "BlobPropertyBag", "ClipboardEvent", "CloseEvent", "Comment", "CompositionEvent", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DragEvent", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MessageEvent", "NodeList", "PointerEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "Request", "RequestInit", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UnderlyingSink", "UnderlyingSource", "Url", "WebSocket", "WheelEvent", "Window", "Worker", "WorkerOptions", "WorkerType", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh32"] }
+xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "std", "xxh3", "xxh32", "xxh64"] }
 yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive"] }
 zerocopy = { version = "0.8.57", default-features = false, features = ["derive", "simd"] }
 zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
@@ -194,12 +197,16 @@ zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "
 zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 
 [build-dependencies]
-anstyle = { version = "1.0.14", default-features = false, features = ["std"] }
+anstyle = { version = "1.0.14" }
+bytes = { version = "1.12.1" }
+clap = { version = "4.6.7", features = ["derive"] }
+clap_builder = { version = "4.6.7", default-features = false, features = ["color", "help", "std", "suggestions", "usage"] }
 crc32fast = { version = "1.5.2", default-features = false, features = ["std"] }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["std"] }
 darling = { version = "0.20.11" }
 darling_core = { version = "0.20.11", default-features = false, features = ["suggestions"] }
 data-encoding = { version = "2.11.1", default-features = false, features = ["alloc"] }
+deranged = { version = "0.5.8" }
 derive_more = { version = "2.1.1", features = ["as_ref", "constructor", "deref", "deref_mut", "display", "from", "is_variant", "try_unwrap", "unwrap"] }
 derive_more-impl = { version = "2.1.1", features = ["add", "add_assign", "as_ref", "constructor", "debug", "deref", "deref_mut", "display", "from", "from_str", "into_iterator", "is_variant", "try_into", "try_unwrap", "unwrap"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["std"] }
@@ -220,20 +227,27 @@ phf_shared = { version = "0.14.0" }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 proc-macro2-diagnostics = { version = "0.10.1" }
 quote = { version = "1.0.47" }
-regex = { version = "1.13.1", default-features = false, features = ["std"] }
+regex = { version = "1.13.1" }
 regex-automata = { version = "0.4.18" }
 regex-syntax = { version = "0.8.11" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_core = { version = "1.0.229", default-features = false, features = ["alloc", "result", "std"] }
+serde_json = { version = "1.0.151" }
 sha2-93f6ce9d446188ac = { package = "sha2", version = "0.10.9" }
 slab = { version = "0.4.12" }
 sledgehammer_bindgen_macro = { version = "0.6.5", features = ["web"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["extra-traits", "full", "visit", "visit-mut"] }
 thiserror = { version = "2.0.20" }
+time = { version = "0.3.55", features = ["formatting"] }
 time-macros = { version = "0.2.32", default-features = false, features = ["formatting", "parsing", "serde"] }
+tokio = { version = "1.53.1", features = ["full"] }
 toml_datetime = { version = "1.1.1", features = ["serde"] }
 toml_parser = { version = "1.1.3" }
+tracing = { version = "0.1.44" }
+tracing-core = { version = "0.1.36" }
+tracing-log = { version = "0.2.0", default-features = false, features = ["log-tracer", "std"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "time"] }
 twox-hash = { version = "2.1.4", default-features = false, features = ["xxhash64"] }
 winnow = { version = "1.0.4" }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64"] }
@@ -254,9 +268,8 @@ getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", defaul
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1" }
-hyper = { version = "1.11.1", default-features = false, features = ["http2"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "ring", "tls12", "webpki-tokio"] }
-hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy", "server-auto"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
@@ -264,7 +277,7 @@ ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "system", "xdp"] }
-md-5 = { version = "0.10.6" }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 mio = { version = "1.2.3", features = ["net", "os-ext"] }
 naga = { version = "30.0.1", features = ["glsl-out", "hlsl-out", "spv-out", "wgsl-in"] }
@@ -281,8 +294,7 @@ ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "shm", "system", "time"] }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
-sha2-a6292c17cd707f01 = { package = "sha2", version = "0.11.0" }
-simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
+simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "full"] }
@@ -297,7 +309,6 @@ wayland-backend = { version = "0.3.17", default-features = false, features = ["c
 wayland-protocols = { version = "0.32.13", default-features = false, features = ["client", "staging", "unstable"] }
 wayland-sys = { version = "0.31.11", default-features = false, features = ["dlopen", "egl"] }
 winnow = { version = "1.0.4" }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["std", "xxh3", "xxh64"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
@@ -305,10 +316,10 @@ bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
 libc = { version = "0.2.189" }
+mio = { version = "1.2.3", default-features = false, features = ["net", "os-ext"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 quick-xml = { version = "0.41.0" }
-regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109" }
 toml = { version = "0.8.2", default-features = false, features = ["parse"] }
@@ -326,15 +337,14 @@ errno = { version = "0.3.14" }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }
-hyper = { version = "1.11.1", default-features = false, features = ["http2"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "ring", "tls12", "webpki-tokio"] }
-hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy", "server-auto"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
-md-5 = { version = "0.10.6" }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
@@ -355,8 +365,7 @@ ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
-sha2-a6292c17cd707f01 = { package = "sha2", version = "0.11.0" }
-simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
+simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
@@ -364,20 +373,18 @@ tower = { version = "0.5.3", default-features = false, features = ["log", "make"
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["std", "xxh3", "xxh64"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
-errno = { version = "0.3.14", default-features = false, features = ["std"] }
+errno = { version = "0.3.14" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
-regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 
 [target.x86_64-apple-darwin.dependencies]
@@ -393,15 +400,14 @@ errno = { version = "0.3.14" }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }
-hyper = { version = "1.11.1", default-features = false, features = ["http2"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "ring", "tls12", "webpki-tokio"] }
-hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy", "server-auto"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
-md-5 = { version = "0.10.6" }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
@@ -422,8 +428,7 @@ ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
-sha2-a6292c17cd707f01 = { package = "sha2", version = "0.11.0" }
-simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
+simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
@@ -431,20 +436,18 @@ tower = { version = "0.5.3", default-features = false, features = ["log", "make"
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["std", "xxh3", "xxh64"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
-errno = { version = "0.3.14", default-features = false, features = ["std"] }
+errno = { version = "0.3.14" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
-regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 
 [target.aarch64-apple-ios.dependencies]
@@ -459,15 +462,14 @@ errno = { version = "0.3.14" }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }
-hyper = { version = "1.11.1", default-features = false, features = ["http2"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "ring", "tls12", "webpki-tokio"] }
-hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy", "server-auto"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["client-legacy", "client-proxy"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
-md-5 = { version = "0.10.6" }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
 mio = { version = "1.2.3", features = ["net", "os-ext"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
@@ -490,8 +492,7 @@ rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"]
 rustls = { version = "0.23.46", default-features = false, features = ["aws-lc-rs", "aws_lc_rs"] }
 rustls-webpki = { version = "0.103.15", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
-sha2-a6292c17cd707f01 = { package = "sha2", version = "0.11.0" }
-simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
+simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
@@ -499,20 +500,19 @@ tower = { version = "0.5.3", default-features = false, features = ["log", "make"
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["std", "xxh3", "xxh64"] }
 
 [target.aarch64-apple-ios.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 bumpalo = { version = "3.20.3" }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 either = { version = "1.18.0" }
-errno = { version = "0.3.14", default-features = false, features = ["std"] }
+errno = { version = "0.3.14" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
+mio = { version = "1.2.3", default-features = false, features = ["net", "os-ext"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
-regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 
 ### END HAKARI SECTION
@@ -652,7 +652,7 @@ log = { version = "0.4.34", default-features = false, features = ["alloc", "kv",
 loro = { version = "1.16.0", features = ["counter"] }
 loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
 loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
-md-5 = { version = "0.10.6", features = ["std"] }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }
@@ -914,7 +914,7 @@ log = { version = "0.4.34", default-features = false, features = ["alloc", "kv",
 loro = { version = "1.16.0", features = ["counter"] }
 loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
 loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
-md-5 = { version = "0.10.6", features = ["std"] }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }
@@ -1171,7 +1171,7 @@ log = { version = "0.4.34", default-features = false, features = ["alloc", "kv",
 loro = { version = "1.16.0", features = ["counter"] }
 loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
 loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
-md-5 = { version = "0.10.6", features = ["std"] }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }
@@ -1433,7 +1433,7 @@ log = { version = "0.4.34", default-features = false, features = ["alloc", "kv",
 loro = { version = "1.16.0", features = ["counter"] }
 loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
 loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
-md-5 = { version = "0.10.6", features = ["std"] }
+md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }

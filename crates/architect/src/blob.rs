@@ -50,6 +50,10 @@
 //! points at and no pin keeps. Which blobs a document points at is its
 //! kind's (`crdt::DocKind::blobs`, `crdt::blobs`).
 //!
+//! [`S3Store`] (feature `blob-s3`) is a [`BlobStore`] and a [`Remote`] in
+//! any S3-compatible bucket (Garage, `MinIO`, R2, AWS, Ceph RGW), keyed by
+//! the same sha256, so nodes sharing a bucket dedup across each other.
+//!
 //! Native only for now. The wasm side (an OPFS file plus an `IndexedDB`
 //! ledger, as Signal's web packs do) is a follow-up.
 //!
@@ -75,6 +79,8 @@ mod http_remote;
 #[cfg(feature = "http")]
 mod http_serve;
 mod keep;
+#[cfg(feature = "blob-s3")]
+mod s3;
 mod stream_reader;
 #[cfg(feature = "vox")]
 mod wire;
@@ -85,6 +91,8 @@ pub use http_remote::HttpRemote;
 #[cfg(feature = "http")]
 pub use http_serve::serve_http;
 pub use keep::Collected;
+#[cfg(feature = "blob-s3")]
+pub use s3::{HolderEvents, S3Config, S3Store};
 pub use stream_reader::StreamReader;
 #[cfg(feature = "vox")]
 pub use wire::{

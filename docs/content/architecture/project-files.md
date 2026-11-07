@@ -206,6 +206,39 @@ tools, beside WebDAV.
 - **Bytes** come from the device's store or working copy, else are
   streamed from a peer as they arrive, as a WebDAV `GET` does.
 
+## Distributed storage: the bytes in S3
+
+"Distributed storage" could mean two things: several Architect nodes
+sharing one S3 cluster, or nodes replicating every byte to each other.
+**Architect uses the first, with Garage on the fleet**, and keeps the
+second only as the cache it already is.
+
+- **Durability is the cluster's.** Garage (AGPL, self-hosted, made for
+  machines on home links) spreads each object over zones with a
+  replication factor of 2 or 3: starcommand, THEBATTLESHIP, airlock.
+  Architect does not reimplement placement, healing or rebalancing.
+- **Every node is a client.** With `blob_s3_bucket` a node copies every
+  hash a manifest names into the bucket and reads from it whatever it
+  lacks, after its peers (`architect::blob::S3Store`, a `Remote`). Keys
+  are `architect/sha256/<hh>/<hex>`, so two nodes saving the same take
+  store it once.
+- **Placement per node.** `replicate` (the default) keeps every byte on
+  the node and in the bucket: starcommand serving its tree in place.
+  `primary` makes the bucket where bytes live and the node's store a
+  cache of `blob_cache_mb`; working copies are never evicted.
+- **Metadata stays on the peer lanes.** Manifests are Loro documents and
+  keep travelling `DocSync`, so offline edits merge as before; the bucket
+  holds only bytes, by hash, and needs no coordination.
+- **Peer-to-peer bytes stay a cache.** `BlobTransfer` between devices is
+  still how a laptop without the bucket's key fetches on open; it is not
+  how anything is made durable.
+- **One holder per bucket.** The bucket's id (`S3Store::holder_id`, kept
+  in the bucket) is how replica accounting names it, and put, delete and
+  verify are the only paths that change or check it (`HolderEvents`).
+
+Credentials come only from the node's config (`blob_s3_secret_file`, a
+mounted secret) or its environment, and are never logged.
+
 ## Each feature: what it reuses, what is new
 
 | Feature | Reuses in architect | New |
@@ -298,6 +331,7 @@ that leaves one set of roots.
 | Store and sync engine | `features/files/src/sync/manifest.rs`, `features/files/src/sync/scan.rs`, `features/files/src/sync/store.rs`, `features/files/src/sync/engine.rs`, `features/files/src/sync/lane.rs`; `apps/desktop/src/node/files.rs`; `VaultCollab::with_plain_docs`; `crdt::p2p::node_router_with` | `features/files/tests/sync.rs`, `apps/desktop/tests/files.rs` |
 | Pinning and mounts | `features/files/src/agent.rs` `Files`, `features/files/src/sync/agent.rs`, `features/files/src/sync/dav.rs` `Dav` | `apps/desktop/tests/files.rs` `an_unpinned_project_browses_over_webdav_and_a_file_opens_on_demand` |
 | Assets | `features/files/src/sync/assets.rs` (`assets_of`, `frontmatter`, `wav_peaks`, `Engine::search`, `Engine::peaks`) | `features/files/tests/sync.rs` `a_library_s_assets_browse_search_and_draw_from_a_laptop_that_holds_none_of_it` |
+| S3 storage | `crates/architect/src/blob/s3.rs` `S3Store`; `apps/desktop/src/node/files.rs` (`backend`, `replicate_forever`); `apps/desktop/src/node/config.rs` `Placement` | `crates/architect/tests/blob_s3.rs`; the live check |
 | S3 face | `features/files/src/sync/s3/mod.rs` `S3Face`, `features/files/src/sync/s3/keys.rs` `S3Keys`, `apps/desktop/src/node/s3.rs` | `features/files/tests/s3.rs` |
 | UI | `features/files/extension/src/lib.rs`, `features/files/extension/src/nav.rs`; `apps/ui/src/files.rs` (`FILES_*` over `ARCHITECT_FILES_AGENT`) | the extension's unit tests; the live check |
 
@@ -323,3 +357,11 @@ the window's Files pages with a waveform per stem.
   bytes; they settle, but each pass reads both.
 - Installing the agent with launchd or systemd.
 - Federation (#194's second item).
+- Over S3: a Garage layout across the fleet's machines and its deploy
+  recipe; the bucket's key in the secret store; replica accounting on
+  `HolderEvents` with a scrub schedule; collecting blobs no manifest
+  names; a `primary` node serving its peers from the bucket when its
+  cache let a blob go; keys issued from the app over the org lane, with a
+  person's role re-read from the issuer; making a project with a
+  `PutObject`; per-folder grants; `ListParts`; an MD5 `ETag` for
+  clients that check one (`rclone check` compares sizes).
