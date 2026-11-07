@@ -171,6 +171,8 @@ fn the_list_sorts_and_groups_by_date() {
     assert_eq!(date_group(NOW + DAY, c).1, "Future");
     assert_eq!(date_group(NOW - 3 * DAY, c).1, "Previous 7 days");
     assert_eq!(date_group(NOW - 20 * DAY, c).1, "Previous 30 days");
+    // No date (a provider's item without one) is not 1969's.
+    assert_eq!(date_group(0, c).1, "No date");
 }
 
 #[test]

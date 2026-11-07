@@ -1024,6 +1024,20 @@ impl NavigatorState {
         self.ask_scroll(Pane::Navigation, key, Align::Auto, RANK_NAVIGATION);
     }
 
+    /// Selects `folder` with the folders above it opened, so its row is in
+    /// view: what an app shows on its own (a deck's project, a song's
+    /// setlist).
+    pub fn show_folder(&mut self, folder: &str) {
+        if !self.index.has_folder(folder) {
+            return;
+        }
+        for a in ancestors(folder) {
+            self.expanded.insert(a.to_owned());
+        }
+        self.select_folder(folder);
+        self.rebuild_nav();
+    }
+
     /// Opens or closes `folder`.
     pub fn toggle(&mut self, folder: &str) {
         if !self.expanded.remove(folder) {
@@ -1162,6 +1176,13 @@ impl NavigatorState {
     /// The note open in the workspace changed: lit, and revealed when the
     /// settings say so.
     pub fn set_active(&mut self, path: Option<&str>) {
+        self.set_active_with(path, true);
+    }
+
+    /// [`set_active`](Self::set_active), revealing it only when `reveal`
+    /// (an app holds the selection: a deck's project stays selected while
+    /// a note of its own is on show).
+    pub fn set_active_with(&mut self, path: Option<&str>, reveal: bool) {
         if self.active.as_deref() == path {
             return;
         }
@@ -1195,6 +1216,7 @@ impl NavigatorState {
             }
         }
         if let Some(p) = path
+            && reveal
             && self.settings.auto_reveal
             && self.index.file(p).is_some()
         {
