@@ -126,8 +126,10 @@ let all = Mounts::new("Navigator")
   folder off its rows. `NavigatorState::note_badge` washes a note's row in
   a tag's or a property's list with its vault's org.
 - `NavigatorState::badge` is a Vaults/ or Assets/ row's `OrgBadge` (no
-  mark: the row is washed in the org's colour, `OrgBadge::tint`, unless it
-  has its own background; the org is its `data-org` and its description), `is_wiki` a folder whose
+  mark: the row is washed in the org's colour, `OrgBadge::tint`, at the
+  theme's `navigator.org-wash` (a share 0–1, 0.08 by default, 0 off;
+  `features/navigator/src/ui/theme.rs` `NUMBERS`), unless it has its own
+  background; the org is its `data-org` and its description), `is_wiki` a folder whose
   folder note says `wiki: true` (a book mark), `mount_icon` a top row's
   icon. `Mount::listed` is how a mount's folders list unless a person set
   their own (`settings_for`). A tag or a property lists vault notes only.

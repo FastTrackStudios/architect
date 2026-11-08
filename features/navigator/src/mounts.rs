@@ -78,27 +78,15 @@ impl OrgBadge {
         }
     }
 
-    /// The light wash its rows take: its colour at about a twelfth of its
-    /// strength (`#04785714`), so the name reads as on any row. A colour
-    /// that is not `#rgb`/`#rrggbb` is mixed with transparent instead.
+    /// The light wash its rows take: its colour mixed into transparent
+    /// at the theme's `navigator.org-wash` (`--nv-org-wash`, 8% unless a
+    /// theme says; 0 turns it off), so the name reads as on any row.
     #[must_use]
     pub fn tint(&self) -> String {
-        let c = self.colour.trim();
-        let hex = c
-            .strip_prefix('#')
-            .filter(|h| h.chars().all(|x| x.is_ascii_hexdigit()));
-        match hex.map(str::len) {
-            Some(6) => format!("{c}14"),
-            Some(3) => {
-                let long: String = hex
-                    .unwrap_or_default()
-                    .chars()
-                    .flat_map(|x| [x, x])
-                    .collect();
-                format!("#{long}14")
-            }
-            _ => format!("color-mix(in srgb, {c} 8%, transparent)"),
-        }
+        format!(
+            "color-mix(in srgb, {} var(--nv-org-wash, 8%), transparent)",
+            self.colour.trim()
+        )
     }
 
     /// The letter a badge without an icon shows: the name's first.
