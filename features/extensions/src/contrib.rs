@@ -778,6 +778,57 @@ pub struct DeckTemplateDecl {
     pub layout_text: Option<String>,
 }
 
+/// A kind of tab it adds to the tab bar (`[[tab_kinds]]`, #476).
+///
+/// A **scope** kind's tabs are scope tabs: each is one context of type
+/// `id` (a song, a project), at the tab bar's leading edge; activating one
+/// swaps the rest of the workspace to that context's own tabs and layout
+/// (its default screenset is its `[[deck_templates]]`'). Any other kind is
+/// a custom tab: the panes of its `views` draw their tab its way. Either
+/// draws a title, a `subtitle` from its context's properties, an icon, a
+/// colour, a width and a badge.
+///
+/// ```toml
+/// [[tab_kinds]]
+/// id = "song"                        # a scope kind's: the context type
+/// title = "Song"
+/// scope = true
+/// width = "wide"                     # or "compact" (the default)
+/// icon = "music"                     # when its context gives none
+/// colour = "#7c5cff"                 # likewise
+/// subtitle = "{key} · {tempo} bpm"   # its context's properties
+/// views = []                         # a custom kind's: its views' tabs
+/// menu = [{ label = "Rehearse", action = "SETLISTS_REHEARSE" }]
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TabKindDecl {
+    /// Unique among its tab kinds; a scope kind's is its context type.
+    pub id: String,
+    pub title: String,
+    pub scope: bool,
+    /// `compact` or `wide`.
+    pub width: Option<String>,
+    pub icon: Option<String>,
+    pub colour: Option<String>,
+    /// `{key}` is its context's property `key`; a ` · ` part with one
+    /// missing drops out.
+    pub subtitle: Option<String>,
+    /// A custom kind's: its own views whose tabs draw this way.
+    pub views: Vec<String>,
+    /// Its rows in its tabs' menu, each running its action with
+    /// `{context}` or `{pane}`.
+    pub menu: Vec<TabKindItemDecl>,
+}
+
+/// One of a tab kind's menu rows (`[[tab_kinds]] menu`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TabKindItemDecl {
+    pub label: String,
+    pub action: String,
+}
+
 /// A quick-add word a capture target adds (`[[capture_targets]]
 /// tokens`): one starting with `prefix` gives property `key` the rest
 /// (Keyflow's `{ prefix = "key:", key = "key" }`: `key:D` → `key: D`).
@@ -1018,6 +1069,9 @@ pub struct Contribution {
     pub navigator_providers: Vec<NavigatorProviderDecl>,
     /// Context types' default screensets (`[[deck_templates]]`).
     pub deck_templates: Vec<DeckTemplateDecl>,
+    /// Kinds of tab in the tab bar: scope tabs and custom tabs
+    /// (`[[tab_kinds]]`).
+    pub tab_kinds: Vec<TabKindDecl>,
     /// What a capture can become (`[[capture_targets]]`).
     pub capture_targets: Vec<CaptureTargetDecl>,
     /// Keys it binds to its actions in the app's keymap (`[[keys]]`).
@@ -1131,6 +1185,7 @@ impl Contribution {
             deck_templates: join(&self.deck_templates, &other.deck_templates, |d| {
                 d.context.clone()
             }),
+            tab_kinds: join(&self.tab_kinds, &other.tab_kinds, |k| k.id.clone()),
             capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
                 c.id.clone()
             }),
@@ -1191,6 +1246,7 @@ impl Contribution {
                 .iter()
                 .map(|d| format!("deck_template:{}", d.context)),
         );
+        out.extend(self.tab_kinds.iter().map(|k| format!("tab_kind:{}", k.id)));
         out.extend(
             self.capture_targets
                 .iter()
@@ -1269,6 +1325,7 @@ impl Contribution {
             self.project_types.len(),
             self.navigator_providers.len(),
             self.deck_templates.len(),
+            self.tab_kinds.len(),
             self.capture_targets.len(),
             self.key_bindings.len(),
             self.palette_views.len(),
@@ -1540,6 +1597,40 @@ impl Contribution {
             }
             if d.screenset.trim().is_empty() {
                 return refuse(what, "it needs `screenset`, a screenset's name".to_owned());
+            }
+        }
+        for k in &self.tab_kinds {
+            let what = format!("tab kind {}", k.id);
+            if k.id.is_empty() {
+                return refuse(
+                    what,
+                    "it needs an id (a scope kind's: its context type)".to_owned(),
+                );
+            }
+            if k.title.trim().is_empty() {
+                return refuse(what, "it needs a `title`".to_owned());
+            }
+            if let Some(w) = k
+                .width
+                .as_deref()
+                .filter(|w| !matches!(*w, "compact" | "wide"))
+            {
+                return refuse(what, format!("width {w:?} is neither `compact` nor `wide`"));
+            }
+            if k.scope && !k.views.is_empty() {
+                return refuse(
+                    what,
+                    "a scope kind's tabs are contexts, not views".to_owned(),
+                );
+            }
+            for v in &k.views {
+                view(&what, v)?;
+            }
+            for m in &k.menu {
+                if m.label.trim().is_empty() {
+                    return refuse(what, "a menu row needs a `label`".to_owned());
+                }
+                action(&what, &m.action)?;
             }
         }
         for k in &self.key_bindings {
@@ -2339,6 +2430,17 @@ impl Contributions {
         self.all(|c| c.deck_templates.clone())
             .into_iter()
             .filter(|d| seen.insert(d.item.context.clone()))
+            .collect()
+    }
+
+    /// Every tab kind an extension adds (`[[tab_kinds]]`), in the order
+    /// its owner came; the first for an id wins.
+    #[must_use]
+    pub fn tab_kinds(&self) -> Vec<By<TabKindDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.tab_kinds.clone())
+            .into_iter()
+            .filter(|k| seen.insert(k.item.id.clone()))
             .collect()
     }
 

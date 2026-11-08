@@ -26,24 +26,32 @@
 // compare only redraws.
 #![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
-/// The one place the deck's working name is written: the words a person
-/// reads (`noun`, `title`, `plural`, `plural_title`) and the actions'
-/// prefix (`prefix`). Renaming decks is changing these.
-macro_rules! deck_word {
+/// The one place a scope tab's name is written: the words a person reads
+/// (`noun`, `title`, `plural`, `plural_title`; the tabs on show with no
+/// scope tab active, `general` and `general_title`) and the actions'
+/// prefix (`prefix`). The code calls a scope tab a deck ([`Deck`]);
+/// renaming what a person reads is changing these.
+macro_rules! scope_word {
     (noun) => {
-        "deck"
+        "scope tab"
     };
     (title) => {
-        "Deck"
+        "Scope tab"
     };
     (plural) => {
-        "decks"
+        "scope tabs"
     };
     (plural_title) => {
-        "Decks"
+        "Scope tabs"
+    };
+    (general) => {
+        "general tabs"
+    };
+    (general_title) => {
+        "General"
     };
     (prefix) => {
-        "DECK_"
+        "SCOPE_"
     };
 }
 
@@ -71,15 +79,17 @@ mod repair;
 mod screenset;
 pub mod store;
 mod switcher;
+pub mod tab_kind;
 pub mod tree;
 
 #[cfg(feature = "ui")]
 pub use bar::{TABS_COMMAND, use_tabs_button};
 pub use deck::{
-    ContextLayout, Deck, DeckContext, DeckError, DeckId, DeckState, DeckTemplate, Decks,
-    KindDefault, Load, Outcome, Unchanged,
+    ContextLayout, ContextProperty, Deck, DeckContext, DeckError, DeckId, DeckState, DeckTemplate,
+    Decks, KindDefault, Load, Outcome, Unchanged,
 };
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
+pub use tab_kind::{TabFace, TabKind, TabKindItem, TabKinds, TabWidth};
 #[cfg(feature = "native")]
 pub mod native;
 #[cfg(feature = "native")]
