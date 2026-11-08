@@ -1,7 +1,12 @@
-//! The Vault page's decks (#441): the vault, each project and (in the
-//! sandbox) each setlist's song, loaded onto a deck of its own and shown in
-//! its type's screenset (`docs/content/architecture/workspace.md`,
-//! "Decks").
+//! The Vault page's scope tabs (#441, #476; the code's decks): each
+//! project and (in the sandbox) each setlist's song in a scope tab of its
+//! own, shown in its type's screenset, and the vault's general tabs with
+//! none active (`docs/content/architecture/workspace.md`, "Scope tabs").
+//!
+//! - The tab kinds: Architect's compact `project` kind (the project's
+//!   glyph and colour, #471) and every loaded extension's
+//!   (`[[tab_kinds]]`: the sandbox's wide `song` kind, its custom
+//!   `setlist` tab drawn by [`crate::setlists::setlist_tab`]).
 //!
 //! - The session (which decks are open, the one on show) and the saved
 //!   screensets are this device's, in the app's folder: `decks/session.json`
@@ -25,7 +30,7 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 
-/// A project's context type.
+/// A project's context type, and its scope tab kind's id.
 pub const PROJECT: &str = "project";
 /// The whole vault's.
 pub const VAULT: &str = "vault";
@@ -157,6 +162,49 @@ fn slug(name: &str) -> String {
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect()
+}
+
+/// Architect's tab kinds and every loaded extension's (`[[tab_kinds]]`),
+/// with the renderers the app links in.
+pub fn tab_kinds() -> architect_workspace::TabKindsUi {
+    use architect_workspace::{TabKind, TabKinds, TabKindsUi, TabWidth};
+    // A project's scope tab: compact, its own icon and colour (its
+    // `project.md`'s), else the project glyph.
+    let mut kinds = TabKinds::new()
+        .with(TabKind::scope(PROJECT, "Project").icon(architect_navigator_api::PROJECT_ICON));
+    if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
+        for by in ui.host().contributions().tab_kinds() {
+            let d = by.item;
+            let mut k = if d.scope {
+                TabKind::scope(d.id, d.title)
+            } else {
+                TabKind::new(d.id, d.title)
+            }
+            .width(
+                d.width
+                    .as_deref()
+                    .map_or(TabWidth::Compact, TabWidth::parse),
+            )
+            .by(by.owner.clone());
+            k.icon = d.icon;
+            k.colour = d.colour;
+            k.subtitle = d.subtitle;
+            // Its views as panes name them: `<extension>/<view>`.
+            k.views = d
+                .views
+                .iter()
+                .map(|v| format!("{}/{v}", by.owner))
+                .collect();
+            for m in d.menu {
+                k = k.item(m.label, m.action);
+            }
+            kinds.register(k);
+        }
+    }
+    TabKindsUi::new(kinds).renderer(
+        crate::setlists::SETLIST_TAB,
+        std::rc::Rc::new(crate::setlists::setlist_tab),
+    )
 }
 
 /// The Vault page's decks over its workspace and screensets.

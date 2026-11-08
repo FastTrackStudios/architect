@@ -299,6 +299,11 @@ pub enum Open {
         /// Its own folder, when it has one.
         #[serde(default)]
         folder: Option<String>,
+        /// Its properties (a song's `key`, `tempo`, `color`): what its tab
+        /// kind's subtitle and colour are made of
+        /// (`architect_workspace::DeckContext::properties`).
+        #[serde(default)]
+        properties: Vec<(String, String)>,
     },
 }
 

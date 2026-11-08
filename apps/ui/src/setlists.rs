@@ -1,10 +1,14 @@
-//! The sandbox's Studio-shaped demo of decks (#441): a linked extension
-//! with a setlist in the navigator (a provider: `SETLISTS_NAV_*`), each
-//! song an item that loads onto a deck (`Open::Context`: a click onto the
-//! deck on show, a ⌘-click or a middle-click onto a new one), and the
-//! song's two views, which read their deck's context
+//! The sandbox's Studio-shaped demo of scope tabs (#441, #476): a linked
+//! extension with a setlist in the navigator (a provider:
+//! `SETLISTS_NAV_*`), each song an item that opens in a scope tab
+//! (`Open::Context`: a click onto the one on show, or a new one from the
+//! general tabs; a ⌘-click or a middle-click onto a new one), and the
+//! song's two views, which read their scope tab's context
 //! (`use_deck_context`). Its `[[deck_templates]]` ships the "Song"
-//! screenset every song deck starts in (`setlists.toml`, `song.json`).
+//! screenset every song starts in (`setlists.toml`, `song.json`); its
+//! `[[tab_kinds]]` make a song's tab wide (its title over its key and
+//! tempo, in its colour) and a setlist's own view a custom tab, drawn by
+//! [`setlist_tab`].
 
 use architect_extensions::linked::{Builder, Extension};
 use architect_navigator_api::{Item, NavigatorProvider, Node, Open, ProviderFuture, Snapshot};
@@ -12,6 +16,16 @@ use dioxus::prelude::*;
 
 /// The context type a song loads as.
 pub const SONG: &str = "song";
+
+/// The custom tab kind a setlist's view is (`[[tab_kinds]] id`).
+pub const SETLIST_TAB: &str = "setlist";
+
+/// Each song's colour on its tab, as Studio gives a song one.
+const SONG_COLOURS: [(&str, &str); 3] = [
+    ("Songs/Amazing Grace.md", "#e8913a"),
+    ("Songs/Slow River.md", "#3f8fd1"),
+    ("Songs/Blue Moon Walk.md", "#7c5cff"),
+];
 
 /// The demo vault's songs: `(path, text)`.
 const SONGS: [(&str, &str); 3] = [
@@ -92,12 +106,27 @@ impl NavigatorProvider for Setlists {
             snap = snap.node(Node::new(id, title).icon("list-music"));
             for path in songs {
                 let props = song(path).map(|(p, _)| p).unwrap_or_default();
+                // What its scope tab says: its key, its tempo, its colour.
+                let mut tab: Vec<(String, String)> = [
+                    ("key", prop(&props, "key")),
+                    (
+                        "tempo",
+                        prop(&props, "tempo").or_else(|| prop(&props, "bpm")),
+                    ),
+                ]
+                .into_iter()
+                .filter_map(|(k, v)| v.map(|v| (k.to_owned(), v)))
+                .collect();
+                if let Some((_, c)) = SONG_COLOURS.iter().find(|(p, _)| p == path) {
+                    tab.push(("color".to_owned(), (*c).to_owned()));
+                }
                 let mut item = Item::new(format!("{id}|{path}"), id, title_of(path))
                     .opens(Open::Context {
                         context_type: SONG.to_owned(),
                         id: (*path).to_owned(),
                         title: title_of(path),
                         folder: None,
+                        properties: tab,
                     })
                     .tag("music/songs");
                 item.icon = Some("music".to_owned());
@@ -168,6 +197,67 @@ fn InfoView() -> Element {
     }
 }
 
+/// A setlist's songs, in order: the custom tab's view. Which setlist is
+/// its pane's id (`setlist-<id>`, `WORKSPACE_OPEN {view:
+/// "setlists/setlist", id: "setlist-sunday"}`).
+#[allow(non_snake_case)]
+fn SetlistView() -> Element {
+    let pane = architect_workspace::use_pane();
+    let id = pane
+        .id
+        .0
+        .strip_prefix("setlist-")
+        .unwrap_or("sunday")
+        .to_owned();
+    let Some((_, title, songs)) = SETLISTS.iter().find(|(s, _, _)| *s == id) else {
+        return rsx! { div { style: "padding: 24px; opacity: 0.7;", "No such setlist" } };
+    };
+    rsx! {
+        div { "data-setlist": "{id}",
+            style: "height: 100%; overflow: auto; padding: 20px 24px; box-sizing: border-box;",
+            h2 { style: "margin: 0 0 12px; font-size: 20px;", "{title}" }
+            for (i, path) in songs.iter().enumerate() {
+                div { key: "{path}", style: "display: flex; gap: 12px; padding: 6px 0; font-size: 13px;",
+                    span { style: "width: 20px; opacity: 0.5;", "{i + 1}" }
+                    span { style: "flex: 1;", "{title_of(path)}" }
+                    span { style: "opacity: 0.6;",
+                        {song(path).and_then(|(p, _)| prop(&p, "key")).unwrap_or_default()}
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// How a setlist's custom tab draws (its kind's renderer, #476): the
+/// setlist glyph in its colour, its title, and how many songs it has.
+#[must_use]
+pub fn setlist_tab(ctx: architect_workspace::TabRenderCtx) -> Element {
+    let t = ctx.theme;
+    let songs = SETLISTS
+        .iter()
+        .find(|(_, title, _)| *title == ctx.face.title)
+        .map_or(0, |(_, _, s)| s.len());
+    let colour = ctx
+        .face
+        .colour
+        .clone()
+        .unwrap_or_else(|| t.accent.to_string());
+    let weight = if ctx.on { 600 } else { 500 };
+    rsx! {
+        span { "data-setlist-tab": "{ctx.face.title}", style: "flex: 0 0 auto; display: flex;",
+            architect_shell::lucide::LucideIcon { name: "list-music".to_owned(), size: 14, color: Some(colour.clone()) }
+        }
+        span { style: "flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: {weight};",
+            "{ctx.face.title}"
+        }
+        span { style: "flex: 0 0 auto; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; \
+                       background: {colour}; color: #fff;",
+            "{songs} songs"
+        }
+    }
+}
+
 /// The extension, linked in by the sandbox.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SetlistsExtension;
@@ -183,7 +273,9 @@ impl Extension for SetlistsExtension {
 
     fn build(&self, ext: &mut Builder) {
         ext.navigator("SETLISTS_NAV", Setlists);
-        ext.view("song", SongView).view("info", InfoView);
+        ext.view("song", SongView)
+            .view("info", InfoView)
+            .view("setlist", SetlistView);
     }
 }
 

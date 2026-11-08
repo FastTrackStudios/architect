@@ -120,23 +120,25 @@ its own order (`Snapshot::group_by`), put a count on its row
 glyph, `architect_navigator_api::PROJECT_ICON` (Lucide `box`). It is
 used for the Projects row and its projects, sub-projects, a vault folder
 with a `project.md` (`Projects/Album` in Vaults/), that `project.md`
-(Recent Files, the list) and the project's deck tab. A project's own
+(Recent Files, the list) and the project's scope tab. A project's own
 `icon` and `color` in its `project.md` replace the glyph and colour it
 (`NavigatorState::project_page`, `folder_icon`, `file_icon`, `colour`).
 An icon a person sets on the folder beats both. Plain folders keep the
 folder icon, and notes keep their type's.
 
-An item can be a whole context, loaded onto a
-[deck](@/architecture/workspace.md) of its own: a provider's
-`Open::Context` (a setlist's song), or a project: its folder in the vault,
+An item can be a whole context, opened in a
+[scope tab](@/architecture/workspace.md) of its own: a provider's
+`Open::Context` (a setlist's song, with its `properties`: the key and
+tempo its tab shows, its `color`), or a project: its folder in the vault,
 or its row in Projects.
-A click loads it onto the deck on show; a ⌘-click or a middle-click onto
-a new deck. A middle-click on any other row opens it in a new tab. The
-navigator follows the deck on show: each deck keeps its own selection,
-starting on its context's row (a project's row in Projects, a song's
-setlist). `NavigatorState::show_folder` selects a row with the rows above
+A click opens it in the scope tab on show (from the general tabs, in a
+new one); a ⌘-click or a middle-click in a new scope tab. A middle-click
+on any other row opens it in a new tab. The navigator follows what is on
+show: each scope tab, and the general tabs, keeps its own selection,
+a scope tab starting on its context's row (a project's row in Projects, a
+song's setlist). `NavigatorState::show_folder` selects a row with the rows above
 it opened, and `set_active_with(path, false)` lights the note on show
-without revealing it ([Decks](@/architecture/workspace.md)).
+without revealing it ([Scope tabs](@/architecture/workspace.md)).
 
 ## Code tour
 

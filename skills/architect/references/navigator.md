@@ -247,8 +247,10 @@ default; a page or an extension fills it while its view is on show.
   `move_items(items, to)` and `create(container, title)` default to nothing
   or an error. Every method is async (`ProviderFuture`). An item that is
   a context (a song, a project) opens with `Open::Context {context_type,
-  id, title, folder}`: a click loads it onto the deck on show, a ⌘-click or
-  a middle-click onto a new deck (`apps/ui/src/vault.rs` `ProviderFiles`,
+  id, title, folder, properties}` (`properties`: what its tab kind's
+  subtitle reads, `color` its tab's colour): a click opens it in the scope
+  tab on show (from the general tabs, a new one), a ⌘-click or a
+  middle-click in a new scope tab (`apps/ui/src/vault.rs` `ProviderFiles`,
   `apps/ui/src/setlists.rs` the sandbox's setlists).
 - **Serving it:** declare `[[navigator_providers]] id, title, icon, views,
   actions` and the actions it answers (`<actions>_SNAPSHOT`, `_OPEN`,
