@@ -19,6 +19,8 @@ architect-extensions = { workspace = true, features = ["guest"] }
 # Its RRULEs (`architect_calendar::recur`).
 architect-calendar = { workspace = true }
 chrono = { workspace = true }
+dioxus = { workspace = true }
+futures-timer = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

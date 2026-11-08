@@ -43,6 +43,7 @@ pub mod layout;
 pub mod model;
 pub mod nav;
 pub mod plan;
+pub mod plan_ui;
 pub mod quick;
 pub mod recur;
 pub mod sync;

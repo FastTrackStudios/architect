@@ -142,6 +142,24 @@ Its actions are `DAYPLAN_*`, and its service `architect.dayplan`:
   week or a range; a template or none; `clear`), `DAYPLAN_RESOLVE` (a
   date's template and why).
 
+## 7. Its views
+
+- **Templates** (`DAYPLAN_OPEN`, `extensions/dayplan/src/ui.rs`
+  `TemplatesView`): the templates on the left; the one picked drawn as a
+  day (Task's `day_template_view.rs`: each block a bar in its category's
+  colour) beside a table of its blocks (start, end, name, category,
+  fixed) with Save. New templates by name.
+- **Rules** (`RulesView`): the rules in order, moved, added and removed;
+  the default; the overrides chosen by hand; and the next two weeks, each
+  day's template and why, an override ringed.
+- **On the calendar** (the Calendar's `plan_ui.rs`): a day's blocks under
+  its events with planned against tracked, its template on its head with
+  a menu to choose another, and a block's panel to give it to something.
+
+A view reads what Day Plans last read; `refresh` moves the revision only
+when the vault changed, so a view that reads again when the revision
+moves never loops.
+
 It reaches notes only through the host (`extensions/dayplan/src/vault.rs`),
 and the Calendar and the Time Tracker through their services when they are
 there (`[uses]`): it runs alone, with no tags and no tracked time.

@@ -291,22 +291,21 @@ pub(super) fn SectionGrid(
             style: "position:absolute; left:0; right:0; top:{top}px; height:{height}px; box-sizing:border-box; \
                     padding:{GRID_TOP}px {GRID_SIDE}px 0; display:flex; flex-direction:column; gap:{GRID_GAP}px;",
             div { class: "nv-cal-header", style: "display:flex; align-items:center; gap:2px; height:{GRID_HEADER}px;",
-                HeaderButton { head: g.month.clone(), strong: true, on_pick: move |p| open(p, OpenIn::Here) }
-                HeaderButton { head: g.year.clone(), strong: false, on_pick: move |p| open(p, OpenIn::Here) }
-                div { style: "flex:1;" }
-                button { class: "nv-tool", "aria-label": "Previous month", "data-testid": "nv-grid-prev", style: "width:22px; height:22px;",
+                HeaderButton { head: HeaderPeriod { label: format!("{} {}", g.month.label, g.year.label), ..g.month.clone() }, strong: true, on_pick: move |p| open(p, OpenIn::Here) }
+                div { style: "flex:1; min-width:0;" }
+                button { class: "nv-tool", "aria-label": "Previous month", "data-testid": "nv-grid-prev", style: "width:20px; height:22px; flex:none;",
                     onclick: move |_| nav.update(|s| s.section_move(-1)),
                     ChevronLeft { size: 15 }
                 }
                 button { class: "nv-cal-today", "aria-label": "Today", "data-testid": "nv-grid-today",
-                    style: "height:22px; padding:0 4px; border:none; border-radius:6px; background:transparent; color:var(--nv-muted); font-size:11px; cursor:pointer;",
+                    style: "height:22px; padding:0 3px; flex:none; border:none; border-radius:6px; background:transparent; color:var(--nv-muted); font-size:11px; cursor:pointer;",
                     onclick: move |_| {
                         let out = nav.update(crate::state::NavigatorState::section_today);
                         nav.act(out, on_open);
                     },
                     "Today"
                 }
-                button { class: "nv-tool", "aria-label": "Next month", "data-testid": "nv-grid-next", style: "width:22px; height:22px;",
+                button { class: "nv-tool", "aria-label": "Next month", "data-testid": "nv-grid-next", style: "width:20px; height:22px; flex:none;",
                     onclick: move |_| nav.update(|s| s.section_move(1)),
                     ChevronRight { size: 15 }
                 }
