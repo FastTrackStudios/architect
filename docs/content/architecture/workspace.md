@@ -116,26 +116,47 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
   can be dragged or right-clicked anywhere, even a pane whose view has no
   tab bar (a full-bleed rig face).
 
-## Decks: one context each, shown in a screenset
+## Scope tabs: one context each, shown in a screenset
 
-> **Status: in progress (#441).** The model is
-> `features/workspace/src/deck.rs` (`DeckState`), its actions
-> `features/workspace/src/control/deck.rs`; the strip is the `ui`
-> feature's `features/workspace/src/host/deck.rs` (`use_decks`,
-> `DeckStrip`, `DeckHandle`). "Deck" is the working name, written once:
-> `scope_word!` in `features/workspace/src/lib.rs` (the words a person
-> reads and the actions' `SCOPE_` prefix).
+> **Status: in progress (#441, #476).** A person sees a **scope tab**; the
+> code calls it a deck. The model is `features/workspace/src/deck.rs`
+> (`DeckState`), its actions `features/workspace/src/control/deck.rs`,
+> the tab kinds `features/workspace/src/tab_kind.rs`; the tab bar's part
+> is the `ui` feature's `features/workspace/src/host/deck.rs`
+> (`use_decks`, `ScopeTabs`, `DeckHandle`) and
+> `features/workspace/src/host/tab_kinds.rs` (`use_tab_kinds`). The name
+> a person reads is written once: `scope_word!` in
+> `features/workspace/src/lib.rs` (its words, "the general tabs", and the
+> actions' `SCOPE_` prefix).
+
+**In the tab bar.** Scope tabs draw in the normal tab bar, not a strip of
+their own: a group at the leading edge of the main window's first tab
+bar (the top-left group of its center), then a divider, then the tabs
+of the scope on show. Each draws its kind's way (`TabKind`, below):
+compact (an icon in its colour and a title) or wide (a title over a
+subtitle, its colour down its side). The one on show is raised, its
+colour along its foot. With no scope tab open there is no group and no
+divider: the bar is exactly as without them. A click shows a scope tab;
+a click on the one on show goes back to the general tabs; a middle-click
+closes; a drag along the group reorders. Its menu: duplicate, pop out
+into a window, its colour, switch its screenset, save as screenset,
+reset to the screenset, its kind's own rows, close.
+
+**With none active, the general tabs show** (`Decks::general`). They are
+not a scope tab: there is no "Vault" tab. A note opened from anywhere
+while a scope tab is active joins that scope's tabs (the live workspace
+is the scope's).
 
 In the Architect app (`apps/ui/src/decks.rs`, `apps/ui/src/vault.rs`
-`VaultPage`) the vault is the first deck ("Write"); a project's folder
-⌘-clicked or middle-clicked in the navigator loads onto a deck of its own
-("Project", its `project.md` opened when nothing was kept). The session
-and the saved screensets are the device's (`<app folder>/decks/`), each
-deck's layout its context's. The strip shows, and ⌘1–9 and ⌃Tab become the
-decks', once a second deck is open. The sandbox adds a Studio-shaped
-demo, the Setlists extension (`apps/ui/src/setlists.rs`): a setlist in
-the navigator, each song a deck in the "Song" screenset it ships through
-`[[deck_templates]]`.
+`VaultPage`) the general tabs are the vault's ("Write"); a project's
+folder ⌘-clicked or middle-clicked in the navigator opens in a scope tab
+of its own ("Project", its `project.md` opened when nothing was kept).
+The session and the saved screensets are the device's
+(`<app folder>/decks/`), each scope tab's layout its context's. ⌘1–9 and
+⌃Tab become the scope tabs' once one is open. The sandbox adds a
+Studio-shaped demo, the Setlists extension (`apps/ui/src/setlists.rs`): a
+setlist in the navigator, each song a scope tab in the "Song" screenset
+it ships through `[[deck_templates]]`.
 
 A project loaded by `SCOPE_OPEN` with only its type and id
 (`{context: {kind: project, id: "Projects/Album"}}`) opens the same way as
@@ -164,12 +185,15 @@ project's deck (its page, its songs) leaves the project's row selected
 and does not reveal the note in its vault folder
 (`NavigatorState::set_active_with`).
 
-An app with decks calls `use_decks` beside its `WorkspaceView` (giving
-it the same `Signal<Workspace>` and `Signal<Screensets>`, its stores, its
-templates and the decks a first run opens), draws `DeckStrip` over the
-`WorkspaceView` (given `under_strip: true`, and no `store`: the decks
-keep the screensets and the layouts), and loads contexts with
-`DeckHandle::load`.
+An app with scope tabs calls `use_decks` beside its `WorkspaceView`
+(giving it the same `Signal<Workspace>` and `Signal<Screensets>`, its
+stores, its templates, the general tabs' context (`general`) and the
+scope tabs a first run opens) and `use_tab_kinds` with its kinds (a
+`TabKindsUi`: the `TabKinds`, and a `TabRender` for a kind that draws
+its own tabs). It gives the `WorkspaceView` no `store` (the decks keep
+the screensets and the layouts), and loads contexts with
+`DeckHandle::load`. The host draws the scope tabs and puts their
+commands on.
 
 Studio has a tab per song and Architect a tab per project, each arranged
 its own way. Two primitives, kept apart:
@@ -182,8 +206,8 @@ its own way. Two primitives, kept apart:
 - **A deck** (`Deck`) is one loaded **context** (`DeckContext`: a song, a
   project, a vault, an org root: `kind`, `id`, `title`, its folder) plus
   the screenset it is shown in, plus that context's own changes to it
-  (its **override**). The decks are the strip at the top of the main
-  window (`Decks`: their order, the active one).
+  (its **override**). The scope tabs lead the tab bar (`Decks`: their
+  order, the active one, the general tabs).
 
 So two decks can show two songs in the one "Mixing" screenset. Switching
 decks switches both the content and the layout. A person who rearranges
@@ -220,14 +244,15 @@ over `DeckContext::properties`; a part whose property is missing drops
 out), an icon and a colour (the context's, else the kind's), a width
 (`compact` or `wide`), a badge, and its own menu rows.
 
-The strip: open, close, drag to reorder, ⌘1–9 and ⌃Tab / ⌃⇧Tab to
-switch, Duplicate and Pop out into a window from a deck's menu, and a
-marker on a deck whose layout differs from its screenset (and a badge an
-app sets: a song's unsaved session). The strip shows once a second deck
-is open; from then ⌘1–9 and ⌃Tab are the decks' (⌘9 the last), the
-screensets' slot keys move to ⌘⌥1–9 and a group's tabs to ⌃⌥Tab. With
-one deck the keys are as without decks. On a phone the strip
-folds into the tab switcher: a row of decks above its cards.
+Scope tabs: open, close, drag to reorder, ⌘1–9 and ⌃Tab / ⌃⇧Tab to
+switch (round the general tabs and each scope tab), Duplicate and Pop
+out into a window from a scope tab's menu, and a marker on one whose
+layout differs from its screenset (and a badge an app sets: a song's
+unsaved session). Once a scope tab is open, ⌘1–9 and ⌃Tab are the scope
+tabs' (⌘9 the last), the screensets' slot keys move to ⌘⌥1–9 and a
+group's tabs to ⌃⌥Tab. With none the keys are as without them. On a
+phone the scope tabs fold into the tab switcher's menu: the general tabs
+and each scope tab.
 
 **Each context type has a default screenset** ("Song", "Project"). An
 extension contributes one with `[[deck_templates]]` (a context type, the

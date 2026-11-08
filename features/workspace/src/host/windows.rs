@@ -425,7 +425,6 @@ fn PopoutView(props: PopoutProps) -> Element {
         // The window's own title row, when its launcher draws the title
         // bar (a Mac's): the tab bars along the top are it.
         title_row: Signal::new(title_row),
-        under_strip: Signal::new(false),
         decks: CopyValue::new(None),
         in_shell: Signal::new(false),
         phone_header: Signal::new(false),
@@ -503,6 +502,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         left: true,
         right: true,
         covered: 0.0,
+        lead: false,
     };
     let ground = format!(
         "html, body {{ margin: 0; padding: 0; height: 100%; background: {}; }}",

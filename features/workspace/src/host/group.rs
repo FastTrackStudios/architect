@@ -71,6 +71,9 @@ pub(super) struct Edges {
     pub right: bool,
     /// How much of the left clearance a ribbon or rail already covers.
     pub covered: f32,
+    /// The main window's leading group (its center's first, at the top):
+    /// its bar starts with the scope tabs.
+    pub lead: bool,
 }
 
 impl Edges {
@@ -84,12 +87,14 @@ impl Edges {
                 left: self.left && first,
                 right: self.right && last,
                 covered: self.covered,
+                lead: self.lead && first,
             },
             Axis::Column => Self {
                 top: self.top && first,
                 left: self.left,
                 right: self.right,
                 covered: self.covered,
+                lead: self.lead && first,
             },
         }
     }
@@ -340,6 +345,11 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
             if ruled {
                 div { style: "position:absolute; left:0; right:0; bottom:0; height:1px; background:{t.rule};" }
             }
+            // The scope tabs (decks), at the main window's leading edge,
+            // and their divider: nothing while none is open.
+            if edges.lead {
+                super::deck::ScopeTabs { height }
+            }
             // Above the bar's rule: positioned after it, so drawn after it
             // (no z-index: a raised strip is hit-tested ahead of its own
             // tabs, and a press on one missed it). The current tab covers
@@ -518,6 +528,20 @@ fn Tab(
         (b.0)(&kind, &pane.0)
     });
     let badged = badges.is_some() && !icons;
+    // A custom tab kind's pane: drawn its kind's way.
+    let kinds = super::try_use_tab_kinds();
+    let custom = kinds.as_ref().and_then(|k| {
+        let view = host
+            .workspace
+            .peek()
+            .pane(&pane)
+            .map(|p| p.view.0.clone())?;
+        let kind = k.kinds.for_view(&view)?.clone();
+        Some((kind.face_titled(&title, None), k.render_for(&kind.id)))
+    });
+    let wide_custom = custom
+        .as_ref()
+        .is_some_and(|(f, _)| f.width == crate::TabWidth::Wide);
     let least = if icons {
         0.0
     } else if badged {
@@ -526,7 +550,13 @@ fn Tab(
         TAB_MIN
     };
     let name_least = if badged { NAME_LEAST } else { 0.0 };
-    let (grow, most) = if icons { (0, 48.0) } else { (1, TAB_MAX) };
+    let (grow, most) = if icons {
+        (0, 48.0)
+    } else if wide_custom {
+        (1, TAB_MAX.max(220.0))
+    } else {
+        (1, TAB_MAX)
+    };
     // The current tab gives up its room last, so its name reads whole
     // while the others narrow.
     let shrink = if on { 0.2 } else { 1.0 };
@@ -598,12 +628,23 @@ fn Tab(
             if rule {
                 div { style: "position:absolute; right:0; top:25%; height:50%; width:1px; background:{hairline};" }
             }
-            if let Some(icon) = icon {
+            if let Some((face, render)) = custom.clone().filter(|_| !icons) {
+                span { "data-tab-kind": "{face.kind}", style: "position:relative; flex:1 1 0; min-width:0; display:flex; align-items:center; gap:6px; overflow:hidden;",
+                    if let Some(c) = face.colour.clone() {
+                        span { style: "position:absolute; left:0; right:0; top:0; height:2px; border-radius:2px; background:{c};" }
+                    }
+                    {render.map_or_else(
+                        || rsx! { super::deck::FaceBody { face: face.clone(), on, theme: t.clone() } },
+                        |r| r(super::TabRenderCtx { face: face.clone(), on, height: tab_h, theme: t.clone() }),
+                    )}
+                }
+                {badges.clone()}
+            } else if let Some(icon) = icon {
                 span { style: "position:relative; display:flex;",
                     {icon(architect_shell::Icon { size: icon_size, color: ink.into() })}
                 }
             }
-            if !icons || icon.is_none() {
+            if custom.is_none() && (!icons || icon.is_none()) {
                 // A long name fades out at its end (Blitz has no ellipsis).
                 span { "data-tab-name": "{tab_id}", style: "position:relative; flex:1 1 0; min-width:{name_least}px; overflow:hidden;",
                     "{title}"
@@ -1051,7 +1092,7 @@ pub(super) fn hairline(axis: Axis, grip: f32, rule: &str, cursor: &str) -> (Stri
 /// the desk's elsewhere.
 fn bar_colour(host: &super::Host) -> std::sync::Arc<str> {
     let t = host.theme.peek();
-    if host.title_row.peek().is_some() && !*host.under_strip.peek() {
+    if host.title_row.peek().is_some() {
         t.title_bar.clone()
     } else {
         t.desk.clone()

@@ -48,6 +48,7 @@ pub(super) fn DockView(
                 left: true,
                 right: dock.ribbon.is_none(),
                 covered: 0.0,
+                lead: false,
             };
             rsx! {
                 div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",
@@ -99,6 +100,7 @@ pub(super) fn DockView(
                 left: side == Side::Left,
                 right: side == Side::Right && dock.ribbon.is_none(),
                 covered: ribbon_w,
+                lead: false,
             };
             let tree = rsx! {
                 div { style: "{style} display:flex; position:relative; overflow:hidden;",
@@ -211,7 +213,6 @@ fn Ribbon(
     // Under a title row the ribbon starts below it, as the dock's tabs do.
     let top = (host.title_row)()
         .filter(|_| side != Side::Bottom)
-        .filter(|_| !((host.under_strip)() && !((host.in_shell)() && side == Side::Left)))
         .map_or(6.0, |r| r.height.max(s.tabs) + 6.0);
     let column = if bare {
         "display:flex; flex-direction:column; align-items:center; gap:4px;".to_owned()
@@ -566,6 +567,7 @@ pub(super) fn ShellLeftDock() -> Element {
         left: true,
         right: false,
         covered,
+        lead: false,
     };
     // An empty dock under the title row: the row runs on over it, as the
     // shell's would.

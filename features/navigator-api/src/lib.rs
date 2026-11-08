@@ -290,7 +290,7 @@ pub enum Open {
     },
     /// A context loaded onto a deck (a song, a project): a click loads it
     /// onto the deck on show, a ⌘-click or a middle-click onto a new one
-    /// (`architect_workspace::DeckContext`; `DECK_OPEN`).
+    /// (`architect_workspace::DeckContext`; `SCOPE_OPEN`).
     Context {
         /// Its type (`song`, `project`): its default screenset.
         context_type: String,
