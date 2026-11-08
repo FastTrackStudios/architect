@@ -196,6 +196,7 @@ def main():
     inbox()
     tasks()
     journal()
+    calendar()
     bases()
     scroll_test()
     originals()
@@ -733,6 +734,109 @@ def journal():
     W("Journal/Yearly/2026.md", {"type": "yearly", "year": 2026, "tags": ["yearly"]},
       "# 2026\n\nQuarters: [[2026-Q3]], [[2026-Q4]]. Themes: songs, running, the vault.\n\n- [ ] Year review\n")
 
+
+
+def calendar():
+    """The Calendar's events and Day Plans (#444): Cody's day templates (three
+    allocatable work/free-time blocks, meal prep, a reset, wind-down and
+    sleep), the rules that pick them, an override, and an edited Monday whose
+    first block is the Album and whose lunch prep is a recipe."""
+    def b(id, start, end, label, category, **more):
+        extra = "".join(f", {k}: {v}" for k, v in more.items())
+        return f'{{id: {id}, start: "{start}", end: "{end}", label: {label}, category: {category}{extra}}}'
+
+    workday = [
+        b("reset", "06:30", "07:00", "Morning reset", "reset"),
+        b("spiritual", "07:00", "07:30", "Quiet time", "spiritual"),
+        b("breakfast", "07:30", "08:00", "Breakfast prep", "meal"),
+        b("block-1", "08:00", "11:30", "Block 1", "allocatable", note='"Work, an event or free time"'),
+        b("walk", "11:30", "12:00", "Walk", "exercise"),
+        b("lunch", "12:00", "12:45", "Lunch prep", "meal"),
+        b("block-2", "13:00", "16:00", "Block 2", "allocatable"),
+        b("afternoon-reset", "16:00", "16:30", "Afternoon reset", "reset"),
+        b("chores", "16:30", "17:00", "Chores and admin", "maintenance"),
+        b("dinner", "17:00", "18:00", "Dinner prep", "meal"),
+        b("block-3", "18:00", "21:00", "Block 3", "allocatable"),
+        b("wind-down", "21:00", "22:00", "Wind-down", "wind_down"),
+        b("sleep", "22:00", "06:30", "Sleep", "sleep"),
+    ]
+    T_ = "Calendar/Day templates"
+    W(f"{T_}/Workday.md", {"type": "day-template", "name": "Workday", "color": '"#3b82f6"',
+                           "description": "Three allocatable blocks around meal prep, resets and sleep.",
+                           "blocks": Block(workday)},
+      "# Workday\n\nThree allocatable blocks around meal prep, resets and sleep.\n")
+    W(f"{T_}/Studio day.md", {"type": "day-template", "name": "Studio day", "color": '"#8b5cf6"',
+                              "description": "One long session, meals prepped ahead.",
+                              "blocks": Block([
+        b("reset", "07:00", "07:30", "Morning reset", "reset"),
+        b("breakfast", "07:30", "08:00", "Breakfast prep", "meal"),
+        b("session", "09:00", "13:00", "Studio session", "allocatable", fixed="true"),
+        b("lunch", "13:00", "13:45", "Lunch prep", "meal"),
+        b("block-2", "14:00", "18:00", "Block 2", "allocatable"),
+        b("dinner", "18:00", "19:00", "Dinner prep", "meal"),
+        b("wind-down", "21:30", "22:30", "Wind-down", "wind_down"),
+        b("sleep", "22:30", "07:00", "Sleep", "sleep"),
+    ])}, "# Studio day\n\nOne long session, meals prepped ahead.\n")
+    W(f"{T_}/Rest day.md", {"type": "day-template", "name": "Rest day", "color": '"#10b981"',
+                            "description": "Slow morning, a meal prep for the week, free time.",
+                            "blocks": Block([
+        b("reset", "08:00", "09:00", "Slow morning", "reset"),
+        b("brunch", "10:00", "11:00", "Brunch", "meal"),
+        b("block-1", "11:00", "14:00", "Free time", "allocatable"),
+        b("meal-prep", "15:00", "17:00", "Meal prep for the week", "meal"),
+        b("dinner", "18:00", "19:00", "Dinner", "meal"),
+        b("wind-down", "21:30", "22:30", "Wind-down", "wind_down"),
+        b("sleep", "22:30", "08:00", "Sleep", "sleep"),
+    ])}, "# Rest day\n\nSlow morning, a meal prep for the week, free time.\n")
+    W(f"{T_}/Gig day.md", {"type": "day-template", "name": "Gig day", "color": '"#f59e0b"',
+                           "description": "Load-in, soundcheck, the show.",
+                           "blocks": Block([
+        b("reset", "08:30", "09:00", "Morning reset", "reset"),
+        b("block-1", "09:30", "12:30", "Block 1", "allocatable"),
+        b("lunch", "12:30", "13:15", "Lunch prep", "meal"),
+        b("load-in", "16:00", "18:00", "Load-in and soundcheck", "other", fixed="true"),
+        b("dinner", "18:00", "18:45", "Dinner", "meal"),
+        b("sleep", "01:00", "09:00", "Sleep", "sleep"),
+    ])}, "# Gig day\n\nLoad-in, soundcheck, the show.\n")
+    W("Calendar/Day rules.md", {"type": "day-template-rules", "rules": Block([
+        "{template: Gig day, tag: gig}",
+        '{template: Studio day, rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA", start: 2026-10-31}',
+        "{template: Workday, weekdays: [mon, tue, wed, thu, fri]}",
+    ]), "fallback": "Rest day", "overrides": Block([
+        "{from: 2026-11-12, to: 2026-11-12, span: day, template: Studio day}",
+    ])}, "# Day rules\n\nWhich day template each day uses: the first rule that matches, unless an override says otherwise.\n")
+    # Monday's plan, edited: Block 1 is the Album, Block 2 a task, lunch a recipe.
+    plan = [w.replace("}", "") for w in workday]
+    assign = {
+        "block-1": "assignment: {kind: project, title: Album, path: Projects/Album/project.md}",
+        "block-2": 'assignment: {kind: task, title: Book mastering, path: "Tasks/Book mastering.md"}',
+        "lunch": 'assignment: {kind: recipe, title: Lentil soup, path: "Resources/Recipes/Lentil soup.md"}',
+        "dinner": 'assignment: {kind: recipe, title: Sheet-pan chicken, path: "Resources/Recipes/Sheet-pan chicken.md"}',
+    }
+    blocks = []
+    for w in plan:
+        bid = w.split("id: ", 1)[1].split(",", 1)[0]
+        blocks.append(w + (", " + assign[bid] if bid in assign else "") + "}")
+    W("Calendar/Day plans/2026-11-09.md", {"type": "day-plan", "date": "2026-11-09", "template": "Workday",
+                                          "reason": "Rule 3: Mon–Fri", "blocks": Block(blocks)},
+      "# Plan for Monday, 9 November 2026\n\nFrom the Workday template. Block 1 is the [[Album]]; lunch is [[Lentil soup]].\n")
+    for name, body in [("Lentil soup", "Red lentils, carrot, cumin. Makes four lunches."),
+                       ("Sheet-pan chicken", "Thighs, potatoes, lemon. Forty minutes at 220°C.")]:
+        W(f"Resources/Recipes/{name}.md", {"type": "recipe", "tags": ["recipe"], "servings": 4},
+          f"# {name}\n\n{body}\n")
+    # Events: a gig (its #gig picks the Gig day), a mix review, a weekly sync.
+    for title, start, end, extra in [
+        ("Show at The Hall", "2026-11-14T20:00:00", "2026-11-14T23:00:00",
+         {"location": "The Hall", "tags": ["gig"], "color": "warning"}),
+        ("Mix review", "2026-11-10T10:00:00", "2026-11-10T11:00:00",
+         {"projects": Block(['"[[Projects/Album/project|Album]]"']), "color": "info"}),
+        ("Team sync", "2026-11-02T14:00:00", "2026-11-02T14:30:00",
+         {"recurrence": '"FREQ=WEEKLY;BYDAY=MO,TH"', "color": "primary"}),
+        ("Mastering call", "2026-11-12T15:00:00", "2026-11-12T15:45:00", {"color": "success"}),
+    ]:
+        W(f"Calendar/{title}.md", {"type": "scheduling-cal-event", "id": title.lower().replace(" ", "-"),
+                                   "title": title, "start": start, "end": end, "all_day": False, **extra},
+          f"# {title}\n")
 
 def bases():
     W("Bases/Projects.base", None, """

@@ -1069,7 +1069,21 @@ pub async fn agenda(args: Value) -> Result<Value, String> {
             model::Source::Time { .. } => want_time,
             model::Source::Event { .. } | model::Source::Booking { .. } => true,
         })
-        .map(block_json)
+        .map(|b| {
+            let mut v = block_json(b);
+            // An event's tags: a day plan's rule can match one (`#gig`).
+            if let model::Source::Event { path, .. } = &b.source {
+                v["tags"] = json!(
+                    cache()
+                        .events
+                        .iter()
+                        .find(|e| &e.path == path)
+                        .map(|e| e.tags.clone())
+                        .unwrap_or_default()
+                );
+            }
+            v
+        })
         .collect();
     let c = cache();
     Ok(json!({

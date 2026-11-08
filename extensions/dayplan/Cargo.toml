@@ -9,12 +9,30 @@ publish = false
 [lib]
 doctest = false
 
+[[bin]]
+name = "architect-dayplan"
+path = "src/main.rs"
+
 [dependencies]
+# The trait and the guest (its process copy); the app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
 # Its RRULEs (`architect_calendar::recur`).
 architect-calendar = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+# The app's side in a test: a vault's actions and Bases' over a folder.
+architect-bases = { workspace = true, features = ["actions"] }
+vault = { workspace = true, features = ["actions"] }
+# The Time Tracker beside it, to test tracked time against a block.
+architect-time-tracker = { workspace = true }
+futures = "0.3"
+tempfile = "3"
 
 [lints]
 workspace = true
