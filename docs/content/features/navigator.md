@@ -123,7 +123,10 @@ with a `project.md` (`Projects/Album` in Vaults/), that `project.md`
 (Recent Files, the list) and the project's scope tab. A project's own
 `icon` and `color` in its `project.md` replace the glyph and colour it
 (`NavigatorState::project_page`, `folder_icon`, `file_icon`, `colour`).
-An icon a person sets on the folder beats both. Plain folders keep the
+An icon a person sets on the folder beats both. A project's note is
+titled by its project, never "project": its `title`, else its folder's
+name ("Album"), in Recent Files and the lists (`NoteFile::project_name`),
+on its tab and on its scope tab (`apps/ui/src/vault.rs` `tab_title`). Plain folders keep the
 folder icon, and notes keep their type's.
 
 An item can be a whole context, opened in a
