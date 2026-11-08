@@ -104,19 +104,25 @@ fn a_providers_grid_is_mapped_to_its_days_folders() {
 }
 
 #[test]
-fn the_grid_sits_under_its_row_and_a_day_picked_lists_whats_on_it() {
+fn the_grid_sits_under_its_row_at_the_foot_and_a_day_picked_lists_whats_on_it() {
     let (mut s, _m) = state();
-    let rows: Vec<String> = s
-        .nav_rows()
-        .iter()
-        .take(4)
-        .map(|r| match &r.kind {
-            NavRowKind::Folder { name, .. } => name.clone(),
-            NavRowKind::MonthGrid { mount } => format!("grid {mount}"),
-            other => format!("{other:?}").chars().take(9).collect(),
-        })
-        .collect();
-    assert_eq!(rows[1..3], ["Calendar".to_owned(), format!("grid {ID}")]);
+    let name = |r: &architect_navigator::NavRow| match &r.kind {
+        NavRowKind::Folder { name, .. } => name.clone(),
+        NavRowKind::MonthGrid { mount } => format!("grid {mount}"),
+        other => format!("{other:?}").chars().take(9).collect(),
+    };
+    // Pinned at the sidebar's foot, out of the tree (Notebook Navigator's
+    // calendar place): the row, then its grid.
+    let foot: Vec<String> = s.foot_rows().iter().map(name).collect();
+    assert_eq!(foot, ["Calendar".to_owned(), format!("grid {ID}")]);
+    assert!(
+        !s.nav_rows()
+            .iter()
+            .map(name)
+            .any(|n| n == "Calendar" || n.starts_with("grid ")),
+        "not in the tree too"
+    );
+    assert!(s.row_by_key(&format!("grid:{ID}")).is_some());
 
     // The month shown is today's, and pages.
     assert_eq!(s.section_cursor(), d("2026-11-05"));

@@ -149,8 +149,109 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>, calendar: boo
                     tree_rows::Menu { nav, on_open, menu }
                 }
             }
+            FootRows { nav, on_open }
             if calendar {
                 Calendar { nav, on_open }
+            }
+        }
+    }
+}
+
+/// The Calendar section pinned at the sidebar's foot, under the tree
+/// (Notebook Navigator's calendar place): its row, then its month grid.
+#[component]
+fn FootRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
+    let mut mounted: Signal<Option<std::rc::Rc<MountedData>>> = use_signal(|| None);
+    // Its place, measured while mounted (Blitz fires no resize): where a
+    // drop on its row or a day lands.
+    use_future(move || async move {
+        loop {
+            if let Some(m) = mounted.peek().clone()
+                && let Ok(r) = m.get_client_rect().await
+            {
+                let at = Some((r.origin.x, r.origin.y, r.size.width, r.size.height));
+                if *nav.foot_box.peek() != at {
+                    let mut b = nav.foot_box;
+                    b.set(at);
+                }
+            }
+            futures_timer::Delay::new(std::time::Duration::from_millis(250)).await;
+        }
+    });
+    let s = nav.state.read();
+    let rows: Vec<NavRow> = s.foot_rows().to_vec();
+    if rows.is_empty() {
+        drop(s);
+        if nav.foot_box.peek().is_some() {
+            let mut b = nav.foot_box;
+            b.set(None);
+        }
+        return rsx! {};
+    }
+    let h = s.nav_item_height();
+    let indent = f64::from(s.settings().indent);
+    let selected = s.selection().folder().map(str::to_owned);
+    let icon_only = s.settings().color_icon_only;
+    let (show_count, separate) = (
+        s.settings().show_note_count,
+        s.settings().separate_note_counts,
+    );
+    let folder = rows.iter().find_map(|r| match &r.kind {
+        NavRowKind::Folder { path, .. } => Some(path.clone()),
+        _ => None,
+    });
+    let (icon, colour, background) = folder.as_deref().map_or((None, None, None), |p| {
+        (
+            s.folder_icon(p).or_else(|| s.mount_icon(p)),
+            s.colour(&format!("folder:{p}")).map(str::to_owned),
+            s.background(&format!("folder:{p}")).map(str::to_owned),
+        )
+    });
+    drop(s);
+    let over = nav.drag.read().as_ref().and_then(|d| d.over.clone());
+    let total = h + crate::tree::MONTH_GRID_HEIGHT + 6.0;
+    rsx! {
+        div { class: "nv-foot", "data-testid": "nv-foot",
+            style: "flex:0 0 auto; position:relative; height:{total}px;",
+            onmounted: move |e| mounted.set(Some(e.data())),
+            // Notebook Navigator's separator (`--nn-theme-nav-separator-*`):
+            // a 1px line in the text's colour that fades out at both ends,
+            // at 0.3.
+            div { class: "nv-separator", "aria-hidden": "true",
+                style: "position:absolute; left:0; right:0; top:0; height:1px; opacity:0.3; \
+                        background:linear-gradient(90deg, transparent 0%, var(--nv-text) 15%, var(--nv-text) 85%, transparent 100%);",
+            }
+            for row in rows {
+                if let NavRowKind::Folder { path, name, count, .. } = row.kind.clone() {
+                    FolderRow {
+                        key: "{row.key}",
+                        nav,
+                        on_open,
+                        note: false,
+                        badge: None,
+                        wiki: false,
+                        shared: false,
+                        icon: icon.clone(),
+                        colour: colour.clone(),
+                        background: background.clone(),
+                        icon_only,
+                        drop_here: over.as_deref() == Some(row.key.as_str()),
+                        renaming: false,
+                        selected: selected.as_deref() == Some(path.as_str()),
+                        path,
+                        name,
+                        level: 0,
+                        has_children: false,
+                        expanded: false,
+                        count: count_label(count, show_count, separate),
+                        top: 3.0,
+                        height: h,
+                        indent,
+                        reorder: false,
+                    }
+                } else if let NavRowKind::MonthGrid { mount } = row.kind.clone() {
+                    super::calendar::SectionGrid { key: "{row.key}", nav, on_open, mount, top: h + 3.0, height: crate::tree::MONTH_GRID_HEIGHT }
+                }
             }
         }
     }

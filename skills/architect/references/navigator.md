@@ -265,7 +265,8 @@ default; a page or an extension fills it while its view is on show.
   A `Snapshot` says its row's `count`, `grouped()` (its nodes the list's
   groups, in order) and `group_by(key, order)` (its lists grouped by an
   item property, in that order) and `calendar(CalendarGrid)` (a month grid
-  under its top row, over its tree: each day's `GridDay` names the day
+  under its top row; that section is pinned at the sidebar's foot, out of
+  the tree, `NavigatorState::foot_rows` / `row_by_key`, `FootRows`: each day's `GridDay` names the day
   node a click selects, its `count` of dots, its `label` and `colour`;
   `ProviderSource::section_calendar` maps it to folders as
   `Mount::calendar`, drawn by `features/navigator/src/ui/calendar.rs`

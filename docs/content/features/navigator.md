@@ -69,7 +69,6 @@ left list with no switcher.
 
 ```
 Inbox            ← top rows, no header: providers with section = "top"
-Calendar
 Projects           (and the pinned shortcuts)
 Recent Files/
 Vaults/            every org's top-level folders, one flat list,
@@ -78,6 +77,8 @@ Vaults/            every org's top-level folders, one flat list,
   Music Theory       for a wiki); its org's name in its description
 Assets/            every org's asset libraries, washed the same way
 Tags/              the vaults' tags, merged by name; Untagged last
+── pinned at the foot, under the tree ──
+Calendar           the section with a month grid: its row, then the grid
 ```
 
 **Org = vault.** Each organization has one vault; its topics are its
@@ -106,7 +107,11 @@ view, an action); dragging items onto a container moves them there; New
 makes one in the selected container. A provider whose containers have an
 order of their own (Today, Tomorrow, Later) says so (`Snapshot::ordered`),
 and they show in it until you order them by hand. A provider can draw a month grid under its
-row (`Snapshot::calendar`, the Calendar section, #444): each day names its
+row (`Snapshot::calendar`, the Calendar section, #444). That section is
+pinned at the sidebar's foot, out of the scrolling tree, where Notebook
+Navigator keeps its calendar (`NavigatorState::foot_rows`,
+`features/navigator/src/ui/panes.rs` `FootRows`): its row, then the grid.
+Each day names its
 node, a click selects it (and opens the daily note), a drop on a day moves
 items there, and the calendar at the foot of a pane gives way to it
 (`NavigatorState::section_grid`, `pick_section_day`, `section_move`;
@@ -265,7 +270,7 @@ without revealing it ([Scope tabs](@/architecture/workspace.md)).
   onto a tag.
 
 - `features/navigator/tests/section_calendar.rs`: a provider's month grid
-  under its row, a day picked and listed, the foot calendar giving way.
+  under its row at the foot, a day picked and listed, the foot calendar giving way.
 - `features/navigator/tests/calendar.rs`: the calendar and the periodic
   notes. It covers Moment's tokens and weeks, the default and the demo
   vault's paths read back, kinds turned off, the grid, opening and making

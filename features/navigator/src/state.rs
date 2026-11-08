@@ -321,6 +321,10 @@ pub struct NavigatorState {
     rainbow: BTreeMap<String, String>,
     /// The rows pinned over the tree (`pinShortcuts`).
     pinned_rows: Vec<NavRow>,
+    /// The rows pinned under the tree, at the sidebar's foot: the Calendar
+    /// section's row and its month grid (where Notebook Navigator keeps
+    /// its calendar).
+    foot_rows: Vec<NavRow>,
     property_order: Vec<String>,
     /// The search box's search (⌘/Ctrl-clicks write to it too); the list
     /// shows what it matches.
@@ -424,6 +428,7 @@ impl NavigatorState {
             property_value_order: BTreeMap::new(),
             rainbow: BTreeMap::new(),
             pinned_rows: Vec::new(),
+            foot_rows: Vec::new(),
             property_order: Vec::new(),
         };
         s.index = s.visible();
@@ -763,6 +768,7 @@ impl NavigatorState {
         } else {
             self.nav_rows = self.mounted_rows();
             self.pinned_rows.clear();
+            self.foot_rows = self.calendar_foot();
         }
         self.measure_nav();
     }
@@ -776,6 +782,7 @@ impl NavigatorState {
             expanded.insert(String::new());
         }
         self.nav_rows = tree::flatten(&self.index, &expanded, &self.tree_options());
+        self.foot_rows.clear();
         let mut top = self.top_rows(!self.shortcuts_folded);
         // Pinned shortcuts (`pinShortcuts`), and the recent notes with
         // them (`pinRecentNotesWithShortcuts`): over the tree, not in it.
@@ -1489,6 +1496,23 @@ impl NavigatorState {
         &self.pinned_rows
     }
 
+    /// The rows pinned at the sidebar's foot, under the tree: the Calendar
+    /// section's row, then its month grid (Notebook Navigator's calendar
+    /// place). Empty with no section that has a calendar.
+    #[must_use]
+    pub fn foot_rows(&self) -> &[NavRow] {
+        &self.foot_rows
+    }
+
+    /// The row with `key`, in the tree or pinned at its foot.
+    #[must_use]
+    pub fn row_by_key(&self, key: &str) -> Option<&NavRow> {
+        self.nav_rows
+            .iter()
+            .chain(&self.foot_rows)
+            .find(|r| r.key == key)
+    }
+
     /// Whether the navigator is on a phone.
     #[must_use]
     pub const fn touch(&self) -> bool {
@@ -1980,10 +2004,49 @@ impl NavigatorState {
         self.rebuild_nav();
     }
 
+    /// The Calendar section at the sidebar's foot: its row (no tree under
+    /// it; its days and periods are the grid's) and its month grid.
+    fn calendar_foot(&self) -> Vec<NavRow> {
+        let mounts = self.index.mounts();
+        let Some(m) = mounts
+            .iter()
+            .find(|m| m.place == Place::Top && m.calendar.is_some())
+        else {
+            return Vec::new();
+        };
+        if self.index.folder(&m.id).is_none() {
+            return Vec::new();
+        }
+        vec![
+            NavRow {
+                key: format!("folder:{}", m.id),
+                level: 0,
+                kind: NavRowKind::Folder {
+                    path: m.id.clone(),
+                    name: m.title.clone(),
+                    has_children: false,
+                    expanded: false,
+                    count: crate::NoteCount {
+                        current: m.count.unwrap_or(0),
+                        descendants: 0,
+                    },
+                },
+            },
+            NavRow {
+                key: format!("grid:{}", m.id),
+                level: 1,
+                kind: NavRowKind::MonthGrid {
+                    mount: m.id.clone(),
+                },
+            },
+        ]
+    }
+
     /// The left list over several sources ([`crate::Mounts`], #443):
     ///
     /// - top rows with no header: each [`Place::Top`] mount (Inbox,
-    ///   Calendar, Projects; its containers nest under it), then the
+    ///   Projects; its containers nest under it) but the one with a
+    ///   calendar, which is at the foot ([`Self::foot_rows`]), then the
     ///   pinned shortcuts;
     /// - Recent Files/;
     /// - Vaults/: every vault's top-level folders in one flat list, by
@@ -1999,7 +2062,11 @@ impl NavigatorState {
             kind: NavRowKind::TopSpacer,
         }];
         let mounts = self.index.mounts();
-        for m in mounts.iter().filter(|m| m.place == Place::Top) {
+        // A section with a calendar is at the foot (`calendar_foot`).
+        for m in mounts
+            .iter()
+            .filter(|m| m.place == Place::Top && m.calendar.is_none())
+        {
             let Some(folder) = self.index.folder(&m.id) else {
                 continue;
             };
@@ -2019,16 +2086,6 @@ impl NavigatorState {
                     },
                 },
             });
-            // Its month grid, always under its row; its tree below it.
-            if m.calendar.is_some() {
-                rows.push(NavRow {
-                    key: format!("grid:{}", m.id),
-                    level: 1,
-                    kind: NavRowKind::MonthGrid {
-                        mount: m.id.clone(),
-                    },
-                });
-            }
             if open {
                 for child in tree::ordered_children(&self.index, &m.id, &opts) {
                     rows.extend(tree::subtree(&self.index, &child, 1, expanded, &opts));
