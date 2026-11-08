@@ -147,9 +147,14 @@ impl NoteFile {
 
     /// Its title: the first of `fields` (frontmatter keys) with a text
     /// value, else its name (Notebook Navigator's `frontmatterNameField`,
-    /// a comma list, the first one set wins).
+    /// a comma list, the first one set wins). A project's note
+    /// (`<folder>/project.md`) is titled by its project: its `title`, else
+    /// its folder's name ("Album", never "project").
     #[must_use]
     pub fn title<'a>(&'a self, fields: &[&str]) -> &'a str {
+        if let Some(project) = self.project_name() {
+            return project;
+        }
         for key in fields {
             if let Some(PropertyValue::Text(t)) = self.get(key) {
                 let t = t.trim();
@@ -159,6 +164,23 @@ impl NoteFile {
             }
         }
         self.name()
+    }
+
+    /// The name of the project whose note it is (`<folder>/project.md`):
+    /// its `title`, else its folder's name. None for any other file.
+    #[must_use]
+    pub fn project_name(&self) -> Option<&str> {
+        if !self.file_name().eq_ignore_ascii_case("project.md") {
+            return None;
+        }
+        let folder = file_name(self.folder());
+        if folder.is_empty() {
+            return None;
+        }
+        match self.get("title") {
+            Some(PropertyValue::Text(t)) if !t.trim().is_empty() => Some(t.trim()),
+            _ => Some(folder),
+        }
     }
 
     /// Whether it is a Markdown note.
@@ -1059,5 +1081,29 @@ impl std::fmt::Debug for MemorySource {
         f.debug_struct("MemorySource")
             .field("name", &self.name())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod project_name {
+    use super::{NoteFile, PropertyValue};
+
+    #[test]
+    fn a_projects_note_is_titled_by_its_project() {
+        let bare = NoteFile::new("Projects/Album/project.md", 0, 0);
+        assert_eq!(bare.title(&[]), "Album", "its folder's name");
+        let titled = NoteFile::new("Projects/Album/project.md", 0, 0)
+            .property("title", PropertyValue::Text("The Album".to_owned()));
+        assert_eq!(
+            titled.title(&[]),
+            "The Album",
+            "its title, names from frontmatter or not"
+        );
+        // Any other note keeps its name; a root `project.md` has no project.
+        assert_eq!(
+            NoteFile::new("Projects/Album/Tracklist.md", 0, 0).title(&[]),
+            "Tracklist"
+        );
+        assert_eq!(NoteFile::new("project.md", 0, 0).title(&[]), "project");
     }
 }

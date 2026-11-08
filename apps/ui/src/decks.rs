@@ -49,7 +49,7 @@ fn vault_context() -> DeckContext {
 }
 
 /// The project whose folder is `folder` (vault-relative), when it has a
-/// `project.md`: its title is the folder's name.
+/// `project.md`: its title is the project's name (`crate::vault::tab_title`).
 #[must_use]
 pub fn project_context(folder: &str) -> Option<DeckContext> {
     let vault = crate::notes::open_vault()?;
@@ -58,7 +58,6 @@ pub fn project_context(folder: &str) -> Option<DeckContext> {
     if folder.is_empty() || !root.join(folder).join("project.md").is_file() {
         return None;
     }
-    let title = folder.rsplit('/').next().unwrap_or(folder).to_owned();
     // Its own icon and colour (its `project.md`'s), else the project
     // glyph: as the navigator draws it.
     let text = std::fs::read_to_string(root.join(folder).join("project.md")).unwrap_or_default();
@@ -70,6 +69,9 @@ pub fn project_context(folder: &str) -> Option<DeckContext> {
             .map(|(_, v)| v.trim().trim_matches('"').to_owned())
             .filter(|v| !v.is_empty())
     };
+    // Its name: its `title`, else its folder's (as its tab and Recent
+    // Files say it).
+    let title = crate::vault::tab_title(&format!("{folder}/project.md"));
     let mut context = DeckContext::new(PROJECT, folder, title)
         .icon(prop("icon").unwrap_or_else(|| architect_navigator_api::PROJECT_ICON.to_owned()))
         .folder(folder);

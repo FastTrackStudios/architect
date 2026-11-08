@@ -317,7 +317,7 @@ fn vault_note(path: &str) -> Pane {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let mut pane = Pane::new(format!("vault-{n}"), VAULT_NOTE, title_of(path));
+    let mut pane = Pane::new(format!("vault-{n}"), VAULT_NOTE, tab_title(path));
     path.clone_into(&mut pane.state);
     pane
 }
@@ -1055,6 +1055,29 @@ fn note_of(path: &str) -> Option<(String, String)> {
         .and_then(|rest| rest.strip_suffix(".md"))
         .filter(|n| n.parse::<u32>().is_ok())?;
     Some((format!("note-new-{made}"), "Untitled".to_owned()))
+}
+
+/// What note `path`'s tab says: a project's note (`<folder>/project.md`)
+/// its project's name (its `title`, else its folder's: "Album", never
+/// "project"); any other its file's name.
+#[must_use]
+pub fn tab_title(path: &str) -> String {
+    let Some((folder, name)) = path.rsplit_once('/') else {
+        return title_of(path);
+    };
+    if !name.eq_ignore_ascii_case("project.md") {
+        return title_of(path);
+    }
+    let text = crate::notes::open_vault()
+        .and_then(|v| std::fs::read_to_string(v.root().join(path)).ok())
+        .unwrap_or_default();
+    let (props, _) = crate::note::frontmatter(&text);
+    props
+        .iter()
+        .find(|(k, _)| k == "title")
+        .map(|(_, v)| v.trim().trim_matches('"').to_owned())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| folder.rsplit('/').next().unwrap_or(folder).to_owned())
 }
 
 fn title_of(path: &str) -> String {
@@ -2298,7 +2321,7 @@ fn VaultNote(path: String) -> Element {
                     SourceEvent::FileRenamed { from, file } if from == here => {
                         at.set(file.path.clone());
                         pane.set_state(state_of(&file.path));
-                        pane.set_title(title_of(&file.path));
+                        pane.set_title(tab_title(&file.path));
                     }
                     SourceEvent::FileDeleted(p) if p == here => gone.set(true),
                     _ => {}
@@ -2310,6 +2333,15 @@ fn VaultNote(path: String) -> Element {
     let _ = &sub;
     let here = at();
     let title = title_of(&here);
+    // Its tab says its name (a project's note: its project's), a pane
+    // kept from before too.
+    let tab = tab_title(&here);
+    let titled = pane.clone();
+    use_effect(use_reactive!(|tab| {
+        if titled.title() != tab {
+            titled.set_title(tab);
+        }
+    }));
     let mut draft = use_signal(|| None::<String>);
     let rename = move || {
         let mut draft = draft;
