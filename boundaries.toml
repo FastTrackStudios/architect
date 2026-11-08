@@ -420,6 +420,11 @@ layer = "L4"
 note = "the Calendar, a first-party extension (#336, #350): events as vault notes with repeats and exceptions, day/week/month/agenda views, calendar and timeline base views, tasks and tracked time on it; linked in, or its own process (guest)"
 
 [[row]]
+package = "architect-dayplan"
+layer = "L4"
+note = "Day Plans, a first-party extension (#444): Task's day templates, the rules and overrides that pick each day's, per-date plans and Task's resolver, as vault notes; its template editor and rules views; linked in, or its own process (guest)"
+
+[[row]]
 package = "architect-theme-picker"
 layer = "L4"
 note = "the theme picker, a built-in extension: linked in, or its own process (guest)"

@@ -1,0 +1,23 @@
+[package]
+name = "architect-dayplan"
+description = "Day Plans, a first-party architect extension: Task's day templates as vault notes (time blocks in categories: three allocatable work/free-time blocks, meals, reset, sleep), rules that pick a day's template (weekday, RRULE, date range, an event's tag) with overrides, per-date plans whose blocks are given to a task, a project, a label or a recipe, and Task's resolver; a change reaches only today and after (extensions/dayplan)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+# Its RRULEs (`architect_calendar::recur`).
+architect-calendar = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

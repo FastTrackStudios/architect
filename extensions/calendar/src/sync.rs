@@ -127,6 +127,7 @@ fn event_of(v: &VEvent, folder: &str, color: &str) -> Option<Event> {
         links: Vec::new(),
         external_ref: Some(v.reference()),
         tombstone: v.cancelled.then(|| ics::stamp(Utc::now())),
+        tags: Vec::new(),
     })
 }
 
