@@ -117,6 +117,9 @@ pub struct Navigator {
     pub drag: Signal<Option<tree_rows::DragNow>>,
     /// The navigation pane's place on screen (x, y, width, height): where
     /// a drag finds the row under it.
+    /// The foot's place on screen (the Calendar section pinned under the
+    /// tree): where a drop on its row or a day of its grid lands.
+    pub(crate) foot_box: CopyValue<Option<(f64, f64, f64, f64)>>,
     pub(crate) nav_box: CopyValue<Option<(f64, f64, f64, f64)>>,
 }
 
@@ -154,6 +157,7 @@ pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navig
         menu: use_signal(|| None),
         drag: use_signal(|| None),
         nav_box: use_hook(|| CopyValue::new(None)),
+        foot_box: use_hook(|| CopyValue::new(None)),
     };
     // The settings page's changes.
     use_effect(move || {

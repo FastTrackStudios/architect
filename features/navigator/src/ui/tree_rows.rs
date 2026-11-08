@@ -452,6 +452,16 @@ fn spring(nav: Navigator, key: String, springs: u32) {
 /// key. Folders take notes and folders; tags and properties take notes
 /// and tags; the shortcuts take anything, a shortcut only them.
 fn drop_row(nav: Navigator, what: &Drag, x: f64, y: f64) -> Option<String> {
+    // The foot (the Calendar section pinned under the tree): its row
+    // takes notes as a folder does; a day of its grid, an event or a task.
+    if let Some((fx, fy, fw, fh)) = *nav.foot_box.peek()
+        && x >= fx
+        && x <= fx + fw
+        && y >= fy
+        && y <= fy + fh
+    {
+        return foot_target(nav, what, (fx, fy, fw), (x, y));
+    }
     let (bx, by, bw, bh) = (*nav.nav_box.peek())?;
     if x < bx || x > bx + bw || y < by || y > by + bh {
         return None;
@@ -494,6 +504,46 @@ fn drop_row(nav: Navigator, what: &Drag, x: f64, y: f64) -> Option<String> {
     takes.then(|| row.key.clone())
 }
 
+/// What a drag over the foot (`ui/panes.rs` `FootRows`) is over: its
+/// folder row (notes), or a day of its month grid that takes them.
+fn foot_target(
+    nav: Navigator,
+    what: &Drag,
+    (fx, fy, fw): (f64, f64, f64),
+    (x, y): (f64, f64),
+) -> Option<String> {
+    if !matches!(what, Drag::Notes(_)) {
+        return None;
+    }
+    let zoom = nav.zoom();
+    let s = nav.state.peek();
+    let local_y = (y - fy) / zoom - 3.0;
+    let row_h = s.nav_item_height();
+    let rows = s.foot_rows();
+    if local_y < row_h {
+        return rows
+            .iter()
+            .find(|r| matches!(r.kind, NavRowKind::Folder { .. }))
+            .map(|r| r.key.clone());
+    }
+    let mount = rows.iter().find_map(|r| match &r.kind {
+        NavRowKind::MonthGrid { mount } => Some(mount.clone()),
+        _ => None,
+    })?;
+    let weeks = s.section_grid().weeks;
+    let date = super::calendar::grid_day_at(
+        &weeks,
+        s.settings().calendar_week_numbers,
+        fw / zoom,
+        (x - fx) / zoom,
+        local_y - row_h,
+    )?;
+    let (_, cal) = s.section_calendar()?;
+    cal.days
+        .contains_key(&date)
+        .then(|| format!("grid:{mount}|{date}"))
+}
+
 /// The press let go: a drag ends on the row under it.
 pub(super) fn drag_end(nav: Navigator, on_open: EventHandler<Open>) {
     let mut drag = nav.drag;
@@ -518,13 +568,7 @@ pub(super) fn drag_end(nav: Navigator, on_open: EventHandler<Open>) {
         }
         return;
     }
-    let row = nav
-        .state
-        .peek()
-        .nav_rows()
-        .iter()
-        .find(|r| r.key == key)
-        .cloned();
+    let row = nav.state.peek().row_by_key(&key).cloned();
     let Some(row) = row else { return };
     // Among the shortcuts: moved or added there.
     let at = match &row.kind {
