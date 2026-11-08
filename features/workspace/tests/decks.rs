@@ -1,6 +1,6 @@
 //! Decks: one context each, shown in a screenset, with the context's own
 //! changes kept as its override (`docs/content/architecture/workspace.md`,
-//! "Decks"). The model, its stores across a restart, and the `DECK_*`
+//! "Decks"). The model, its stores across a restart, and the `SCOPE_*`
 //! actions over MCP.
 #![allow(
     clippy::unwrap_used,
@@ -16,7 +16,7 @@ use architect_workspace::control::deck::{HeadlessDecks, ids};
 use architect_workspace::home::{ContextFiles, FileStore};
 use architect_workspace::store::{self, ContextStore};
 use architect_workspace::{
-    DeckContext, DeckId, DeckState, DeckTemplate, Decks, FormClass, Load, MemoryContextStore,
+    Deck, DeckContext, DeckId, DeckState, DeckTemplate, Decks, FormClass, Load, MemoryContextStore,
     MemoryStore, Pane, Screenset, Screensets, Side, Target, Unchanged, Workspace,
 };
 use serde_json::{Value, json};
@@ -125,7 +125,9 @@ fn two_decks_on_one_screenset_show_different_contexts_each_as_left() {
     // Back: as it was left.
     st.activate(&b).unwrap().unwrap();
     assert!(st.live.same_arrangement(&slow_river));
-    // ⌃Tab round the end.
+    // ⌃Tab round the end: the general tabs, then the first scope tab.
+    st.cycle(1).unwrap().unwrap();
+    assert!(st.decks.general_shown());
     st.cycle(1).unwrap().unwrap();
     assert_eq!(st.decks.active.as_ref(), Some(&a));
     assert_eq!(
@@ -449,8 +451,12 @@ fn the_deck_actions_over_mcp() {
         list["defaults"][0],
         json!({"kind": "song", "screenset": "mixing", "by": "app"})
     );
-    // Next and previous, round the ends.
+    // Next and previous, round the ends through the general tabs.
+    let out = m.run(ids::NEXT, json!({}));
+    assert_eq!(out["list"]["active"], Value::Null);
+    assert_eq!(out["list"]["general"]["active"], true);
     assert_eq!(m.run(ids::NEXT, json!({}))["list"]["active"], a.as_str());
+    assert_eq!(m.run(ids::PREV, json!({}))["list"]["active"], Value::Null);
     assert_eq!(m.run(ids::PREV, json!({}))["list"]["active"], b.as_str());
     let out = m.run(ids::MOVE, json!({"deck": b, "index": 0}));
     assert_eq!(out["list"]["decks"][0]["id"], b.as_str());
@@ -482,7 +488,148 @@ fn the_deck_actions_over_mcp() {
     let out = m.run(ids::ACTIVATE, json!({"index": 0}));
     assert_eq!(out["list"]["active"], a.as_str());
     assert_eq!(m.decks.state().decks.decks.len(), 3);
+    // The general tabs: shown by SCOPE_GENERAL, never closed.
+    let out = m.run(ids::GENERAL, json!({}));
+    assert_eq!(out["list"]["active"], Value::Null);
+    assert_eq!(m.run(ids::GENERAL, json!({}))["reason"], "already_active");
+    assert!(
+        m.fails(ids::CLOSE, json!({"deck": "general"}))
+            .contains("general")
+    );
     let _ = DeckId::new("x");
+}
+
+#[test]
+fn the_general_tabs_show_with_no_scope_tab_and_keep_their_own_layout() {
+    let mut st = state();
+    st.set_general(DeckContext::new("vault", "vault", "Vault"));
+    st.show();
+    assert!(st.decks.general_shown());
+    assert_eq!(st.decks.general.screenset, "mixing");
+    // A note opened on the general tabs is theirs.
+    arrange(&mut st);
+    let general = st.live.clone();
+    // A project's scope tab: its own tabs; a note opened there is its.
+    let a = st
+        .open(song("a", "A"), Load::Here, None, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        st.decks.decks.len(),
+        1,
+        "Here on the general tabs opens a new scope tab"
+    );
+    assert!(st.live.same_arrangement(&mixing()));
+    // Back to the general tabs: as they were left.
+    st.show_general().unwrap();
+    assert!(st.live.same_arrangement(&general));
+    assert!(st.decks.general.modified(FormClass::Desk));
+    // Closing the last scope tab shows the general tabs.
+    st.activate(&a).unwrap().unwrap();
+    st.close(&a).unwrap().unwrap();
+    assert!(st.decks.general_shown());
+    assert!(st.live.same_arrangement(&general));
+    assert_eq!(
+        st.cycle(1).unwrap(),
+        Err((DeckId::new("general"), Unchanged::OnlyDeck))
+    );
+    assert_eq!(
+        st.close(&DeckId::new("general")),
+        Err(architect_workspace::DeckError::General)
+    );
+    // Opening the general tabs' own context shows them.
+    let b = st
+        .open(song("b", "B"), Load::NewDeck, None, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(st.decks.active.as_ref(), Some(&b));
+    st.open(
+        DeckContext::new("vault", "vault", "Vault"),
+        Load::NewDeck,
+        None,
+        None,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(st.decks.general_shown());
+}
+
+#[test]
+fn the_general_tabs_layout_survives_a_restart_and_an_old_vault_deck_folds_into_them() {
+    let session = MemoryStore::new();
+    let contexts = MemoryContextStore::new();
+    let mut st = state();
+    st.show();
+    arrange(&mut st);
+    st.record();
+    keep(&st, &session, &contexts);
+    let again = restart(&session, &contexts);
+    assert!(again.decks.general.modified(FormClass::Desk));
+    assert!(again.live.same_arrangement(&st.live));
+
+    // A session from before the general tabs were apart: the vault's deck
+    // first, a song's after it, the vault's on show.
+    let mut old = Decks::default();
+    let vault = Deck {
+        id: DeckId::new("deck-1"),
+        context: DeckContext::new("vault", "vault", "Vault"),
+        screenset: "charts---lyrics".to_owned(),
+        overrides: Vec::new(),
+        badge: None,
+    };
+    let song_deck = Deck {
+        id: DeckId::new("deck-2"),
+        context: song("a", "A"),
+        ..vault.clone()
+    };
+    old.decks = vec![vault, song_deck];
+    old.active = Some(DeckId::new("deck-1"));
+    assert!(old.fold_general("vault"));
+    assert_eq!(old.decks.len(), 1);
+    assert_eq!(old.general.screenset, "charts---lyrics");
+    assert_eq!(old.general.id, DeckId::new("general"));
+    assert!(old.general_shown());
+    assert!(!old.fold_general("vault"));
+}
+
+#[test]
+fn a_tab_kinds_face_reads_its_contexts_properties() {
+    use architect_workspace::{TabKind, TabKinds, TabWidth};
+    let kinds = TabKinds::new()
+        .with(
+            TabKind::scope("song", "Song")
+                .width(TabWidth::Wide)
+                .icon("music")
+                .subtitle("{key} · {tempo} bpm"),
+        )
+        .with(TabKind::scope("project", "Project"))
+        .with(TabKind::new("mixer", "Mixer").view("studio/mixer"));
+    let song = song("a", "Slow River")
+        .colour("#e05a47")
+        .property("key", "G")
+        .property("tempo", "96");
+    let face = kinds.face(&song, Some("●".to_owned()));
+    assert_eq!(face.subtitle.as_deref(), Some("G · 96 bpm"));
+    assert_eq!(face.width, TabWidth::Wide);
+    assert_eq!(face.icon.as_deref(), Some("music"));
+    assert_eq!(face.colour.as_deref(), Some("#e05a47"));
+    // A missing property drops its part.
+    let no_key = DeckContext::new("song", "b", "B").property("tempo", "120");
+    assert_eq!(
+        kinds.face(&no_key, None).subtitle.as_deref(),
+        Some("120 bpm")
+    );
+    // No kind for its type: a plain compact face.
+    let other = DeckContext::new("board", "x", "X");
+    assert_eq!(kinds.face(&other, None).width, TabWidth::Compact);
+    assert_eq!(
+        kinds.for_view("studio/mixer").map(|k| k.id.as_str()),
+        Some("mixer")
+    );
+    assert!(kinds.scope("mixer").is_none());
+    // The first registered for an id wins.
+    let mut k = kinds;
+    assert!(!k.register(TabKind::new("song", "Other")));
 }
 
 /// What an extension ships with `[[deck_templates]] layout`.

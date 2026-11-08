@@ -1,5 +1,9 @@
-//! Decks: one loaded context each (a song, a project, a vault), shown in a
+//! Decks: one loaded context each (a song, a project), shown in a
 //! screenset, with that context's own changes to it.
+//!
+//! A person sees a deck as a **scope tab** at the leading edge of the tab
+//! bar (a scope tab kind's, [`crate::TabKind`]); the tabs they open while
+//! it shows are its.
 //!
 //! Two primitives, kept apart (`docs/content/architecture/workspace.md`,
 //! "Decks"):
@@ -10,15 +14,18 @@
 //!   plus the context's **override** of it: what the person rearranged
 //!   inside the deck, kept per context so it opens again as it was left.
 //!
-//! [`DeckState`] is what the operations change: the [`Decks`] (the strip),
-//! the screensets, and the live [`Workspace`] the active deck draws into.
+//! [`DeckState`] is what the operations change: the [`Decks`] (the scope
+//! tabs, and the general tabs' own deck, [`Decks::general`], on show when
+//! no scope tab is), the screensets, and the live [`Workspace`] the deck
+//! on show draws into.
 //! Switching records the live layout into the outgoing deck
 //! ([`DeckState::record`]) and puts the incoming deck's in its place
 //! ([`DeckState::show`]). Pure data: no Dioxus, no I/O, no clock.
 //!
-//! "Deck" is a working name: every word a person reads and every action id
-//! comes from the crate's `deck_word!` (its words here: [`NOUN`],
-//! [`NOUN_TITLE`], [`NOUN_PLURAL`]; the actions' prefix:
+//! "Deck" is the code's name only: every word a person reads ("scope
+//! tab") and every action id (`SCOPE_*`) comes from the crate's one
+//! `scope_word!` (its words here: [`NOUN`], [`NOUN_TITLE`],
+//! [`NOUN_PLURAL`]; the actions' prefix:
 //! [`crate::control::deck::ids::PREFIX`]).
 
 use facet::Facet;
@@ -26,14 +33,28 @@ use facet::Facet;
 use crate::model::Workspace;
 use crate::screenset::{FormClass, Layout, Screensets};
 
-/// What a person calls a deck, in a sentence ("Load onto a new deck").
-pub const NOUN: &str = deck_word!(noun);
-/// The same at the start of a label ("Deck").
-pub const NOUN_TITLE: &str = deck_word!(title);
-/// More than one ("decks").
-pub const NOUN_PLURAL: &str = deck_word!(plural);
-/// More than one, at the start of a label ("Decks").
-pub const NOUN_PLURAL_TITLE: &str = deck_word!(plural_title);
+/// What a person calls a deck, in a sentence ("Open in a new scope tab").
+pub const NOUN: &str = scope_word!(noun);
+/// The same at the start of a label ("Scope tab").
+pub const NOUN_TITLE: &str = scope_word!(title);
+/// More than one ("scope tabs").
+pub const NOUN_PLURAL: &str = scope_word!(plural);
+/// More than one, at the start of a label ("Scope tabs").
+pub const NOUN_PLURAL_TITLE: &str = scope_word!(plural_title);
+/// What a person calls the tabs on show when no scope tab is ("the
+/// general tabs").
+pub const GENERAL_NOUN: &str = scope_word!(general);
+
+/// The general tabs' deck's id ([`Decks::general`]).
+pub const GENERAL: &str = "general";
+
+/// One of a context's properties, as its tab kind's subtitle reads it
+/// (`key` `G`, `tempo` `96`).
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct ContextProperty {
+    pub key: String,
+    pub value: String,
+}
 
 /// What a deck holds open: a song, a project, a vault, an org root.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
@@ -55,6 +76,10 @@ pub struct DeckContext {
     /// in the folder's `.architect/` (`home::ContextFiles`).
     #[facet(default)]
     pub folder: Option<String>,
+    /// Its properties (a song's `key` and `tempo`): what its tab kind's
+    /// subtitle is made of ([`crate::TabKind::subtitle`]).
+    #[facet(default)]
+    pub properties: Vec<ContextProperty>,
 }
 
 impl DeckContext {
@@ -66,7 +91,29 @@ impl DeckContext {
             icon: None,
             colour: None,
             folder: None,
+            properties: Vec::new(),
         }
+    }
+
+    /// With property `key` (another value for it replaces the old one).
+    #[must_use]
+    pub fn property(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        let key = key.into();
+        self.properties.retain(|p| p.key != key);
+        self.properties.push(ContextProperty {
+            key,
+            value: value.into(),
+        });
+        self
+    }
+
+    /// Property `key`'s value.
+    #[must_use]
+    pub fn get_property(&self, key: &str) -> Option<&str> {
+        self.properties
+            .iter()
+            .find(|p| p.key == key)
+            .map(|p| p.value.as_str())
     }
 
     #[must_use]
@@ -128,7 +175,38 @@ pub struct Deck {
     pub badge: Option<String>,
 }
 
+impl Default for Deck {
+    /// The general tabs' deck: [`GENERAL`], on a `general` context, shown
+    /// in no screenset until its type's default is given.
+    fn default() -> Self {
+        Self::general(DeckContext::new(
+            GENERAL,
+            GENERAL,
+            scope_word!(general_title),
+        ))
+    }
+}
+
 impl Deck {
+    /// The general tabs' deck over `context` (its type picks its default
+    /// screenset: the app's `vault`).
+    #[must_use]
+    pub fn general(context: DeckContext) -> Self {
+        Self {
+            id: DeckId::new(GENERAL),
+            context,
+            screenset: String::new(),
+            overrides: Vec::new(),
+            badge: None,
+        }
+    }
+
+    /// The general tabs' own deck, not a scope tab.
+    #[must_use]
+    pub fn is_general(&self) -> bool {
+        self.id.0 == GENERAL
+    }
+
     /// Its override for `class`.
     #[must_use]
     pub fn override_for(&self, class: FormClass) -> Option<&Workspace> {
@@ -246,13 +324,22 @@ pub struct KindDefault {
     pub screenset: String,
 }
 
-/// The strip: every open deck in order, the active one, and the person's
-/// defaults. Kept per device as the session ([`Decks::session`]); each
-/// deck's override is kept with its context.
+/// The scope tabs: every open deck in order, and the one on show.
+///
+/// The active one is none while the general tabs show; then the general
+/// tabs' own deck, and the person's defaults. Kept per device as the
+/// session ([`Decks::session`]); each scope tab's override is kept with
+/// its context, the general tabs' in the session.
 #[derive(Debug, Clone, PartialEq, Default, Facet)]
 pub struct Decks {
+    /// The scope tabs, in the bar's order.
     pub decks: Vec<Deck>,
+    /// The scope tab on show; none: the general tabs.
     pub active: Option<DeckId>,
+    /// The general tabs: what shows with no scope tab active (its id
+    /// [`GENERAL`]). Not a scope tab: it has no tab and never closes.
+    #[facet(default)]
+    pub general: Deck,
     /// The next deck id's number.
     #[facet(default)]
     pub next_id: u64,
@@ -268,13 +355,67 @@ impl Decks {
     /// How many closed decks are kept to reopen.
     pub const CLOSED_KEPT: usize = 20;
 
+    /// Scope tab `id`, or the general tabs' deck for [`GENERAL`].
     #[must_use]
     pub fn get(&self, id: &DeckId) -> Option<&Deck> {
+        if id.0 == GENERAL {
+            return Some(&self.general);
+        }
         self.decks.iter().find(|d| &d.id == id)
     }
 
     pub fn get_mut(&mut self, id: &DeckId) -> Option<&mut Deck> {
+        if id.0 == GENERAL {
+            return Some(&mut self.general);
+        }
         self.decks.iter_mut().find(|d| &d.id == id)
+    }
+
+    /// The deck on show: the active scope tab's, else the general tabs'.
+    #[must_use]
+    pub fn shown(&self) -> &Deck {
+        self.active_deck().unwrap_or(&self.general)
+    }
+
+    /// The id of the deck on show ([`GENERAL`] for the general tabs).
+    #[must_use]
+    pub fn shown_id(&self) -> DeckId {
+        self.shown().id.clone()
+    }
+
+    /// The general tabs show: no scope tab is active.
+    #[must_use]
+    pub fn general_shown(&self) -> bool {
+        self.active_deck().is_none()
+    }
+
+    /// Folds an older session's decks on contexts of type `kind` (the
+    /// app's vault, a deck before the general tabs were apart) into the
+    /// general tabs: the first becomes them, layout and all; the rest go.
+    /// True when there were any.
+    pub fn fold_general(&mut self, kind: &str) -> bool {
+        let Some(at) = self.decks.iter().position(|d| d.context.kind == kind) else {
+            return false;
+        };
+        let was = self.decks.remove(at);
+        let folded: Vec<DeckId> = std::iter::once(was.id.clone())
+            .chain(
+                self.decks
+                    .iter()
+                    .filter(|d| d.context.kind == kind)
+                    .map(|d| d.id.clone()),
+            )
+            .collect();
+        self.decks.retain(|d| d.context.kind != kind);
+        self.general = Deck {
+            id: DeckId::new(GENERAL),
+            badge: None,
+            ..was
+        };
+        if self.active.as_ref().is_some_and(|a| folded.contains(a)) {
+            self.active = None;
+        }
+        true
     }
 
     #[must_use]
@@ -282,7 +423,7 @@ impl Decks {
         self.decks.iter().position(|d| &d.id == id)
     }
 
-    /// The deck on show.
+    /// The scope tab on show (none while the general tabs show).
     #[must_use]
     pub fn active_deck(&self) -> Option<&Deck> {
         self.active.as_ref().and_then(|id| self.get(id))
@@ -294,11 +435,11 @@ impl Decks {
         self.decks.iter().find(|d| d.context.same(context))
     }
 
-    /// Every open context, once each, in the strip's order: what the app
-    /// keeps loaded.
+    /// Every open context, once each, the general tabs' first, then the
+    /// scope tabs' in the bar's order: what the app keeps loaded.
     #[must_use]
     pub fn contexts(&self) -> Vec<&DeckContext> {
-        let mut out: Vec<&DeckContext> = Vec::new();
+        let mut out: Vec<&DeckContext> = vec![&self.general.context];
         for d in &self.decks {
             if !out.iter().any(|c| c.same(&d.context)) {
                 out.push(&d.context);
@@ -332,14 +473,15 @@ impl Decks {
         loop {
             self.next_id = self.next_id.saturating_add(1);
             let id = DeckId(format!("deck-{}", self.next_id));
-            if self.get(&id).is_none() {
+            if self.get(&id).is_none() && id.0 != GENERAL {
                 return id;
             }
         }
     }
 
-    /// What is kept per device: the decks without their overrides (those
-    /// are their contexts') and nothing closed.
+    /// What is kept per device: the scope tabs without their overrides
+    /// (those are their contexts'), the general tabs with theirs (they
+    /// have no context of their own to keep them), and nothing closed.
     #[must_use]
     pub fn session(&self) -> Self {
         let mut out = self.clone();
@@ -347,6 +489,7 @@ impl Decks {
             d.overrides.clear();
             d.badge = None;
         }
+        out.general.badge = None;
         out.closed.clear();
         out
     }
@@ -360,15 +503,24 @@ impl Decks {
         facet_json::to_string(self).map_err(|e| e.to_string())
     }
 
-    /// From JSON; an active id that names no deck is dropped.
+    /// From JSON; an active id that names no scope tab is dropped (the
+    /// general tabs show).
     ///
     /// # Errors
     ///
     /// JSON that is not decks.
     pub fn from_json(json: &str) -> Result<Self, String> {
         let mut out: Self = facet_json::from_str(json).map_err(|e| e.to_string())?;
-        if out.active.as_ref().is_some_and(|a| out.get(a).is_none()) {
-            out.active = out.decks.first().map(|d| d.id.clone());
+        if out
+            .active
+            .as_ref()
+            .is_some_and(|a| a.0 == GENERAL || out.get(a).is_none())
+        {
+            out.active = None;
+        }
+        out.general.id = DeckId::new(GENERAL);
+        for l in &mut out.general.overrides {
+            l.workspace.repair();
         }
         for d in &mut out.decks {
             for l in &mut d.overrides {
@@ -382,11 +534,13 @@ impl Decks {
 /// Where a context opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Load {
-    /// Onto the deck on show (its context replaced); a context open in
-    /// another deck already brings that deck forward instead.
+    /// Onto the scope tab on show (its context replaced); a context open
+    /// in another scope tab already brings that one forward instead. With
+    /// the general tabs on show, a new scope tab (they are never
+    /// replaced).
     #[default]
     Here,
-    /// Onto a new deck, after the one on show (⌘-click, middle-click).
+    /// Onto a new scope tab, after the one on show (⌘-click, middle-click).
     NewDeck,
 }
 
@@ -431,6 +585,10 @@ pub enum DeckError {
     NoScreenset(String),
     #[error("no {noun} is open", noun = NOUN)]
     NoActive,
+    /// The general tabs are not a scope tab: they do not close, move or
+    /// duplicate.
+    #[error("the {general} are not a {noun}", general = GENERAL_NOUN, noun = NOUN)]
+    General,
 }
 
 /// What the deck operations change: the decks, the screensets, and the
@@ -512,14 +670,13 @@ impl DeckState {
             .unwrap_or_default()
     }
 
-    /// Keeps the live layout in the active deck: as its override, or none
+    /// Keeps the live layout in the deck on show (a scope tab's, else the
+    /// general tabs'): as its override, or none
     /// when it is the screenset's as saved. A screenset loaded while the
     /// deck showed (⌘⌥1–9, `WORKSPACES_LOAD`) becomes the deck's, its old
     /// override gone. True when the deck changed.
     pub fn record(&mut self) -> bool {
-        let Some(id) = self.decks.active.clone() else {
-            return false;
-        };
+        let id = self.decks.shown_id();
         let loaded = self
             .screensets
             .active
@@ -571,9 +728,7 @@ impl DeckState {
     /// active one, the screensets' working copy for this class the live
     /// layout (so their dirty mark and Reset speak for the deck).
     pub fn show(&mut self) {
-        let Some(id) = self.decks.active.clone() else {
-            return;
-        };
+        let id = self.decks.shown_id();
         self.live = self.arrangement(&id);
         let screenset = self
             .decks
@@ -589,6 +744,36 @@ impl DeckState {
             .get(id)
             .map(|_| ())
             .ok_or_else(|| DeckError::NoDeck(id.0.clone()))
+    }
+
+    /// `id` is a scope tab (not the general tabs).
+    fn require_scope(&self, id: &DeckId) -> Result<(), DeckError> {
+        if id.0 == GENERAL {
+            return Err(DeckError::General);
+        }
+        self.require(id)
+    }
+
+    /// The general tabs' type and its default screenset: what an app sets
+    /// before the first show (the app's `vault`, shown in "Write"). A
+    /// screenset already picked stays.
+    pub fn set_general(&mut self, context: DeckContext) {
+        if self.decks.general.screenset.is_empty() {
+            self.decks.general.screenset = self.screenset_for(&context.kind);
+        }
+        self.decks.general.context = context;
+    }
+
+    /// Shows the general tabs (no scope tab active).
+    pub fn show_general(&mut self) -> Outcome {
+        let general = DeckId::new(GENERAL);
+        if self.decks.general_shown() {
+            return Err((general, Unchanged::AlreadyActive));
+        }
+        self.record();
+        self.decks.active = None;
+        self.show();
+        Ok(general)
     }
 
     /// Loads `context` ([`Load`]): onto the deck on show, or a new deck.
@@ -608,6 +793,9 @@ impl DeckState {
     ) -> Result<Outcome, DeckError> {
         if let Some(s) = screenset.filter(|s| self.screensets.get(s).is_none()) {
             return Err(DeckError::NoScreenset(s.to_owned()));
+        }
+        if self.decks.general.context.same(&context) {
+            return Ok(self.show_general());
         }
         self.record();
         if load == Load::Here {
@@ -666,13 +854,16 @@ impl DeckState {
         Ok(Ok(id))
     }
 
-    /// Shows deck `id`.
+    /// Shows deck `id` ([`GENERAL`]: the general tabs).
     ///
     /// # Errors
     ///
     /// No deck `id`.
     pub fn activate(&mut self, id: &DeckId) -> Result<Outcome, DeckError> {
         self.require(id)?;
+        if id.0 == GENERAL {
+            return Ok(self.show_general());
+        }
         if self.decks.active.as_ref() == Some(id) {
             return Ok(Err((id.clone(), Unchanged::AlreadyActive)));
         }
@@ -682,35 +873,30 @@ impl DeckState {
         Ok(Ok(id.clone()))
     }
 
-    /// Shows the deck `by` places along the strip from the one on show
-    /// (round the ends): ⌃Tab is 1, ⌃⇧Tab -1.
+    /// Shows the deck `by` places along the ring of the general tabs and
+    /// then each scope tab (round the ends): ⌃Tab is 1, ⌃⇧Tab -1.
     ///
     /// # Errors
     ///
-    /// No deck is open.
+    /// Never; with no scope tab open it answers `only_deck`.
     pub fn cycle(&mut self, by: isize) -> Result<Outcome, DeckError> {
-        let n = self.decks.decks.len();
-        let at = self
-            .decks
-            .active
-            .as_ref()
-            .and_then(|a| self.decks.index_of(a))
-            .ok_or(DeckError::NoActive)?;
-        let len = isize::try_from(n).unwrap_or(isize::MAX);
+        let ring: Vec<DeckId> = std::iter::once(DeckId::new(GENERAL))
+            .chain(self.decks.decks.iter().map(|d| d.id.clone()))
+            .collect();
+        let shown = self.decks.shown_id();
+        if ring.len() < 2 {
+            return Ok(Err((shown, Unchanged::OnlyDeck)));
+        }
+        let at = ring.iter().position(|d| *d == shown).unwrap_or(0);
+        let len = isize::try_from(ring.len()).unwrap_or(isize::MAX);
         let next = isize::try_from(at)
             .unwrap_or(0)
             .saturating_add(by)
             .rem_euclid(len.max(1));
-        let next = usize::try_from(next).unwrap_or(0);
-        let id = self
-            .decks
-            .decks
-            .get(next)
-            .map(|d| d.id.clone())
+        let id = ring
+            .get(usize::try_from(next).unwrap_or(0))
+            .cloned()
             .ok_or(DeckError::NoActive)?;
-        if n < 2 {
-            return Ok(Err((id, Unchanged::OnlyDeck)));
-        }
         self.activate(&id)
     }
 
@@ -736,15 +922,16 @@ impl DeckState {
         self.activate(&id)
     }
 
-    /// Closes deck `id`: its neighbour on the right (else the left) shows
-    /// if it was on show. It is kept to reopen.
+    /// Closes scope tab `id`: its neighbour on the right (else the left,
+    /// else the general tabs) shows if it was on show. It is kept to
+    /// reopen.
     ///
     /// # Errors
     ///
-    /// No deck `id`.
+    /// No scope tab `id` (the general tabs do not close).
     pub fn close(&mut self, id: &DeckId) -> Result<Outcome, DeckError> {
-        self.require(id)?;
-        let showing = self.decks.active.as_ref() == Some(id);
+        self.require_scope(id)?;
+        let showing = self.decks.shown_id() == *id;
         if showing {
             self.record();
         }
@@ -791,7 +978,7 @@ impl DeckState {
     ///
     /// No deck `id`.
     pub fn move_to(&mut self, id: &DeckId, index: usize) -> Result<Outcome, DeckError> {
-        self.require(id)?;
+        self.require_scope(id)?;
         let from = self.decks.index_of(id).unwrap_or(0);
         let to = index.min(self.decks.decks.len().saturating_sub(1));
         if from == to {
@@ -809,7 +996,7 @@ impl DeckState {
     ///
     /// No deck `id`.
     pub fn duplicate(&mut self, id: &DeckId) -> Result<Outcome, DeckError> {
-        self.require(id)?;
+        self.require_scope(id)?;
         self.record();
         let at = self.decks.index_of(id).unwrap_or(0);
         let mut copy = self
@@ -837,7 +1024,7 @@ impl DeckState {
         if self.screensets.get(screenset).is_none() {
             return Err(DeckError::NoScreenset(screenset.to_owned()));
         }
-        let showing = self.decks.active.as_ref() == Some(id);
+        let showing = self.decks.shown_id() == *id;
         if showing {
             self.record();
         }
@@ -864,7 +1051,7 @@ impl DeckState {
     /// No deck `id`.
     pub fn save_as_screenset(&mut self, id: &DeckId, name: &str) -> Result<String, DeckError> {
         self.require(id)?;
-        if self.decks.active.as_ref() == Some(id) {
+        if self.decks.shown_id() == *id {
             self.record();
         }
         let deck = self
@@ -900,7 +1087,7 @@ impl DeckState {
             d.screenset.clone_from(&new);
             d.overrides.clear();
         }
-        if self.decks.active.as_ref() == Some(id) {
+        if self.decks.shown_id() == *id {
             self.show();
         }
         Ok(new)
@@ -913,7 +1100,7 @@ impl DeckState {
     /// No deck `id`.
     pub fn reset(&mut self, id: &DeckId) -> Result<Outcome, DeckError> {
         self.require(id)?;
-        let showing = self.decks.active.as_ref() == Some(id);
+        let showing = self.decks.shown_id() == *id;
         if showing {
             self.record();
         }

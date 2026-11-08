@@ -1765,6 +1765,19 @@ actions = "LAB_CONTRIB_NAV"
 context = "song"
 screenset = "Song"
 layout = "layouts/song.json"
+
+[[tab_kinds]]
+id = "song"
+title = "Song"
+scope = true
+width = "wide"
+subtitle = "{key} · {tempo} bpm"
+
+[[tab_kinds]]
+id = "chart-tab"
+title = "Chart"
+views = ["chart"]
+menu = [{ label = "Transpose", action = "LAB_CONTRIB_PIN" }]
 "#;
 
     #[test]
@@ -1795,6 +1808,15 @@ layout = "layouts/song.json"
             "LAB_CONTRIB_NAV_SNAPSHOT"
         );
         assert_eq!(c.deck_templates[0].context, "song");
+        assert_eq!(c.tab_kinds.len(), 2);
+        assert!(c.tab_kinds[0].scope);
+        assert_eq!(c.tab_kinds[0].width.as_deref(), Some("wide"));
+        assert_eq!(
+            c.tab_kinds[0].subtitle.as_deref(),
+            Some("{key} · {tempo} bpm")
+        );
+        assert_eq!(c.tab_kinds[1].views, ["chart"]);
+        assert_eq!(c.tab_kinds[1].menu[0].action, "LAB_CONTRIB_PIN");
         assert_eq!(
             c.deck_templates[0].layout.as_deref(),
             Some("layouts/song.json")

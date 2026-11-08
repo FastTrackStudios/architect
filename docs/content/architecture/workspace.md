@@ -123,8 +123,8 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
 > `features/workspace/src/control/deck.rs`; the strip is the `ui`
 > feature's `features/workspace/src/host/deck.rs` (`use_decks`,
 > `DeckStrip`, `DeckHandle`). "Deck" is the working name, written once:
-> `deck_word!` in `features/workspace/src/lib.rs` (the words a person
-> reads and the actions' `DECK_` prefix).
+> `scope_word!` in `features/workspace/src/lib.rs` (the words a person
+> reads and the actions' `SCOPE_` prefix).
 
 In the Architect app (`apps/ui/src/decks.rs`, `apps/ui/src/vault.rs`
 `VaultPage`) the vault is the first deck ("Write"); a project's folder
@@ -137,7 +137,7 @@ demo, the Setlists extension (`apps/ui/src/setlists.rs`): a setlist in
 the navigator, each song a deck in the "Song" screenset it ships through
 `[[deck_templates]]`.
 
-A project loaded by `DECK_OPEN` with only its type and id
+A project loaded by `SCOPE_OPEN` with only its type and id
 (`{context: {kind: project, id: "Projects/Album"}}`) opens the same way as
 a middle-click in the navigator. The app's `DecksConfig::resolve` fills
 in its folder before what it kept is read (`apps/ui/src/decks.rs`
@@ -193,12 +193,32 @@ screenset itself changes only when they say so:
 
 | On a deck | Does | Action |
 |---|---|---|
-| Load onto a new deck | a context in a deck of its own (⌘-click or middle-click in the navigator) | `DECK_OPEN {context, new: true}` |
-| Load onto this deck | the context replaces the active deck's | `DECK_OPEN {context}` |
-| Switch this deck's screenset | shows it in another screenset; its override goes | `DECK_SET_SCREENSET` (or loading a screenset while it shows: ⌘⌥1–9) |
-| Save as screenset | its override becomes a named screenset it then uses | `DECK_SAVE_AS_SCREENSET` |
-| Reset to the screenset | drops its override | `DECK_RESET` |
-| Close, next, previous, move, list | | `DECK_CLOSE`, `DECK_NEXT`, `DECK_PREV`, `DECK_MOVE`, `DECK_LIST` |
+| Load onto a new deck | a context in a deck of its own (⌘-click or middle-click in the navigator) | `SCOPE_OPEN {context, new: true}` |
+| Load onto this deck | the context replaces the active deck's | `SCOPE_OPEN {context}` |
+| Switch this deck's screenset | shows it in another screenset; its override goes | `SCOPE_SET_SCREENSET` (or loading a screenset while it shows: ⌘⌥1–9) |
+| Save as screenset | its override becomes a named screenset it then uses | `SCOPE_SAVE_AS_SCREENSET` |
+| Reset to the screenset | drops its override | `SCOPE_RESET` |
+| Show the general tabs | no scope tab active | `SCOPE_GENERAL` |
+| Close, next, previous, move, list | | `SCOPE_CLOSE`, `SCOPE_NEXT`, `SCOPE_PREV`, `SCOPE_MOVE`, `SCOPE_LIST` |
+| The tab kinds | every kind registered, the app's and the extensions' | `TAB_KINDS` |
+
+**The general tabs** are what shows with no scope tab active
+(`Decks::general`): a deck of their own with no tab, which never closes.
+They keep their screenset and their own changes to it in the session.
+`SCOPE_NEXT` and `SCOPE_PREV` go round the general tabs and then each
+scope tab; closing the last scope tab shows them; `SCOPE_OPEN` without
+`new` while they show opens a new scope tab (they are never replaced). An
+older session's vault deck folds into them (`Decks::fold_general`).
+
+**Tab kinds** (`features/workspace/src/tab_kind.rs`): the app registers a
+`TabKind` in Rust (`TabKinds::register`), an extension with
+`[[tab_kinds]]`. A scope kind's id is its context type; its tabs are
+scope tabs. A custom kind names views (`views`), and their panes' tabs
+draw its way. Each says how its tabs draw (`TabFace`): the context's
+title, a subtitle from its properties (`subtitle = "{key} · {tempo} bpm"`
+over `DeckContext::properties`; a part whose property is missing drops
+out), an icon and a colour (the context's, else the kind's), a width
+(`compact` or `wide`), a badge, and its own menu rows.
 
 The strip: open, close, drag to reorder, ⌘1–9 and ⌃Tab / ⌃⇧Tab to
 switch, Duplicate and Pop out into a window from a deck's menu, and a

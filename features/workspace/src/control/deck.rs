@@ -1,13 +1,15 @@
-//! The deck actions (`DECK_*`).
+//! The scope tab actions (`SCOPE_*`), over the decks.
 //!
-//! Open a context onto a deck, close, switch, move, list, and a deck's
-//! screenset (switch it, save its layout as one, reset to it). Each is a function over a [`DeckState`] here (no Dioxus,
-//! no I/O); feature `actions` puts them on an Action List
-//! ([`register`]), run where the decks live: [`HeadlessDecks`] for a test
-//! or a server, the app's window for the strip (`host/deck.rs`).
+//! Open a context in a scope tab, close, switch (the general tabs too),
+//! move, list, and a scope tab's screenset (switch it, save its layout as
+//! one, reset to it); and `TAB_KINDS`, every tab kind registered. Each is
+//! a function over a [`DeckState`] here (no Dioxus, no I/O); feature
+//! `actions` puts them on an Action List ([`register`]), run where the
+//! decks live: [`HeadlessDecks`] for a test or a server, the app's window
+//! for the tab bar (`host/deck.rs`).
 //!
 //! The prefix and the words a person reads come from the crate's one
-//! `deck_word!` (the name may change).
+//! `scope_word!`.
 
 // The facet derive's generated code trips the arithmetic lint.
 #![allow(clippy::arithmetic_side_effects)]
@@ -19,20 +21,23 @@ use crate::deck::{ContextLayout, DeckContext, DeckId, DeckState, Load, Outcome};
 /// The actions' ids.
 pub mod ids {
     /// What every deck action's id starts with.
-    pub const PREFIX: &str = deck_word!(prefix);
-    pub const LIST: &str = concat!(deck_word!(prefix), "LIST");
-    pub const OPEN: &str = concat!(deck_word!(prefix), "OPEN");
-    pub const CLOSE: &str = concat!(deck_word!(prefix), "CLOSE");
-    pub const NEXT: &str = concat!(deck_word!(prefix), "NEXT");
-    pub const PREV: &str = concat!(deck_word!(prefix), "PREV");
-    pub const MOVE: &str = concat!(deck_word!(prefix), "MOVE");
-    pub const ACTIVATE: &str = concat!(deck_word!(prefix), "ACTIVATE");
-    pub const DUPLICATE: &str = concat!(deck_word!(prefix), "DUPLICATE");
-    pub const REOPEN: &str = concat!(deck_word!(prefix), "REOPEN");
-    pub const SET_SCREENSET: &str = concat!(deck_word!(prefix), "SET_SCREENSET");
-    pub const SAVE_AS_SCREENSET: &str = concat!(deck_word!(prefix), "SAVE_AS_SCREENSET");
-    pub const RESET: &str = concat!(deck_word!(prefix), "RESET");
-    pub const SET_DEFAULT: &str = concat!(deck_word!(prefix), "SET_DEFAULT");
+    pub const PREFIX: &str = scope_word!(prefix);
+    pub const LIST: &str = concat!(scope_word!(prefix), "LIST");
+    pub const OPEN: &str = concat!(scope_word!(prefix), "OPEN");
+    pub const CLOSE: &str = concat!(scope_word!(prefix), "CLOSE");
+    pub const NEXT: &str = concat!(scope_word!(prefix), "NEXT");
+    pub const PREV: &str = concat!(scope_word!(prefix), "PREV");
+    pub const MOVE: &str = concat!(scope_word!(prefix), "MOVE");
+    pub const ACTIVATE: &str = concat!(scope_word!(prefix), "ACTIVATE");
+    pub const DUPLICATE: &str = concat!(scope_word!(prefix), "DUPLICATE");
+    pub const REOPEN: &str = concat!(scope_word!(prefix), "REOPEN");
+    pub const SET_SCREENSET: &str = concat!(scope_word!(prefix), "SET_SCREENSET");
+    pub const SAVE_AS_SCREENSET: &str = concat!(scope_word!(prefix), "SAVE_AS_SCREENSET");
+    pub const RESET: &str = concat!(scope_word!(prefix), "RESET");
+    pub const SET_DEFAULT: &str = concat!(scope_word!(prefix), "SET_DEFAULT");
+    pub const GENERAL: &str = concat!(scope_word!(prefix), "GENERAL");
+    /// Every tab kind (not a deck action: on the list beside them).
+    pub const TAB_KINDS: &str = "TAB_KINDS";
 
     /// Every id [`super::register`] puts on a list.
     pub const ALL: &[&str] = &[
@@ -49,11 +54,12 @@ pub mod ids {
         SAVE_AS_SCREENSET,
         RESET,
         SET_DEFAULT,
+        GENERAL,
     ];
 }
 
 /// The change event's topic: each write that changed something.
-pub const TOPIC: &str = deck_word!(plural);
+pub const TOPIC: &str = scope_word!(plural);
 
 /// One deck, as an answer lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
@@ -87,15 +93,19 @@ pub struct DefaultRow {
     pub by: String,
 }
 
-/// `DECK_LIST`: the strip.
+/// `SCOPE_LIST`: the scope tabs, and the general tabs.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeckList {
+    /// The scope tab on show; none while the general tabs show.
     pub active: Option<String>,
     pub decks: Vec<DeckRow>,
+    /// The general tabs (id `general`): what shows with no scope tab
+    /// active.
+    pub general: DeckRow,
     pub screensets: Vec<ScreensetRow>,
     /// Each context type's default screenset.
     pub defaults: Vec<DefaultRow>,
-    /// How many closed decks `DECK_REOPEN` can bring back.
+    /// How many closed decks `SCOPE_REOPEN` can bring back.
     pub closed: u32,
 }
 
@@ -110,13 +120,13 @@ pub struct DeckAnswer {
     /// The deck acted on.
     #[facet(default)]
     pub deck: Option<String>,
-    /// A screenset made (`DECK_SAVE_AS_SCREENSET`).
+    /// A screenset made (`SCOPE_SAVE_AS_SCREENSET`).
     #[facet(default)]
     pub screenset: Option<String>,
     pub list: DeckList,
 }
 
-/// `DECK_OPEN`.
+/// `SCOPE_OPEN`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeckOpenArgs {
     /// The context: `kind` (`song`, `project`), `id`, `title`, and
@@ -139,7 +149,7 @@ pub struct DeckArgs {
     pub deck: Option<String>,
 }
 
-/// `DECK_ACTIVATE`: a deck by `deck`, or by place (`index`, from 0).
+/// `SCOPE_ACTIVATE`: a deck by `deck`, or by place (`index`, from 0).
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeckActivateArgs {
     #[facet(default)]
@@ -148,15 +158,15 @@ pub struct DeckActivateArgs {
     pub index: Option<u32>,
 }
 
-/// `DECK_MOVE`.
+/// `SCOPE_MOVE`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeckMoveArgs {
     pub deck: String,
-    /// Its new place in the strip, from 0.
+    /// Its new place among the scope tabs, from 0.
     pub index: u32,
 }
 
-/// `DECK_SET_SCREENSET`.
+/// `SCOPE_SET_SCREENSET`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeckScreensetArgs {
     #[facet(default)]
@@ -165,7 +175,7 @@ pub struct DeckScreensetArgs {
     pub screenset: String,
 }
 
-/// `DECK_SAVE_AS_SCREENSET`.
+/// `SCOPE_SAVE_AS_SCREENSET`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeckSaveAsArgs {
     #[facet(default)]
@@ -174,7 +184,7 @@ pub struct DeckSaveAsArgs {
     pub name: String,
 }
 
-/// `DECK_SET_DEFAULT`.
+/// `SCOPE_SET_DEFAULT`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeckDefaultArgs {
     /// The context type.
@@ -202,7 +212,7 @@ impl Kept for () {
     }
 }
 
-/// The strip as it is.
+/// The scope tabs and the general tabs as they are.
 #[must_use]
 pub fn list(st: &DeckState) -> DeckList {
     let active = st.decks.active.clone();
@@ -217,8 +227,19 @@ pub fn list(st: &DeckState) -> DeckList {
     kinds.extend(st.decks.decks.iter().map(|d| d.context.kind.clone()));
     kinds.sort();
     kinds.dedup();
+    let g = &st.decks.general;
     DeckList {
         active: active.as_ref().map(|a| a.0.clone()),
+        general: DeckRow {
+            id: g.id.0.clone(),
+            index: 0,
+            context: g.context.clone(),
+            screenset: g.screenset.clone(),
+            screenset_name: name(&g.screenset),
+            modified: g.modified(st.form),
+            badge: None,
+            active: active.is_none(),
+        },
         decks: st
             .decks
             .decks
@@ -280,13 +301,29 @@ fn answer(st: &DeckState, out: Outcome) -> DeckAnswer {
     }
 }
 
+/// `deck`, else the scope tab on show; else (for what the general tabs
+/// can take too: a screenset, a reset) the general tabs.
 fn target(st: &DeckState, deck: Option<String>) -> Result<DeckId, String> {
     deck.map(DeckId)
         .or_else(|| st.decks.active.clone())
         .ok_or_else(|| format!("no {} is open", crate::deck::NOUN))
 }
 
-/// `DECK_OPEN`.
+fn target_or_general(st: &DeckState, deck: Option<String>) -> DeckId {
+    deck.map_or_else(|| st.decks.shown_id(), DeckId)
+}
+
+/// `SCOPE_GENERAL`.
+///
+/// # Errors
+///
+/// Never.
+pub fn general(st: &mut DeckState) -> Result<DeckAnswer, String> {
+    let out = st.show_general();
+    Ok(answer(st, out))
+}
+
+/// `SCOPE_OPEN`.
 ///
 /// # Errors
 ///
@@ -301,7 +338,7 @@ pub fn open(st: &mut DeckState, kept: &dyn Kept, a: DeckOpenArgs) -> Result<Deck
     Ok(answer(st, out))
 }
 
-/// `DECK_CLOSE`.
+/// `SCOPE_CLOSE`.
 ///
 /// # Errors
 ///
@@ -312,7 +349,7 @@ pub fn close(st: &mut DeckState, a: DeckArgs) -> Result<DeckAnswer, String> {
     Ok(answer(st, out))
 }
 
-/// `DECK_NEXT` (`by` 1) and `DECK_PREV` (-1).
+/// `SCOPE_NEXT` (`by` 1) and `SCOPE_PREV` (-1).
 ///
 /// # Errors
 ///
@@ -322,7 +359,7 @@ pub fn cycle(st: &mut DeckState, by: isize) -> Result<DeckAnswer, String> {
     Ok(answer(st, out))
 }
 
-/// `DECK_ACTIVATE`.
+/// `SCOPE_ACTIVATE`.
 ///
 /// # Errors
 ///
@@ -337,7 +374,7 @@ pub fn activate(st: &mut DeckState, a: DeckActivateArgs) -> Result<DeckAnswer, S
     Ok(answer(st, out))
 }
 
-/// `DECK_MOVE`.
+/// `SCOPE_MOVE`.
 ///
 /// # Errors
 ///
@@ -350,7 +387,7 @@ pub fn move_deck(st: &mut DeckState, a: DeckMoveArgs) -> Result<DeckAnswer, Stri
     Ok(answer(st, out))
 }
 
-/// `DECK_DUPLICATE`.
+/// `SCOPE_DUPLICATE`.
 ///
 /// # Errors
 ///
@@ -361,7 +398,7 @@ pub fn duplicate(st: &mut DeckState, a: DeckArgs) -> Result<DeckAnswer, String> 
     Ok(answer(st, out))
 }
 
-/// `DECK_REOPEN`.
+/// `SCOPE_REOPEN`.
 ///
 /// # Errors
 ///
@@ -380,20 +417,20 @@ pub fn reopen(st: &mut DeckState, (): ()) -> Result<DeckAnswer, String> {
     ))
 }
 
-/// `DECK_SET_SCREENSET`.
+/// `SCOPE_SET_SCREENSET`.
 ///
 /// # Errors
 ///
 /// No such deck or screenset.
 pub fn set_screenset(st: &mut DeckState, a: DeckScreensetArgs) -> Result<DeckAnswer, String> {
-    let id = target(st, a.deck)?;
+    let id = target_or_general(st, a.deck);
     let out = st
         .set_screenset(&id, &a.screenset)
         .map_err(|e| e.to_string())?;
     Ok(answer(st, out))
 }
 
-/// `DECK_SAVE_AS_SCREENSET`.
+/// `SCOPE_SAVE_AS_SCREENSET`.
 ///
 /// # Errors
 ///
@@ -402,7 +439,7 @@ pub fn save_as_screenset(st: &mut DeckState, a: DeckSaveAsArgs) -> Result<DeckAn
     if a.name.trim().is_empty() {
         return Err("give the screenset a `name`".to_owned());
     }
-    let id = target(st, a.deck)?;
+    let id = target_or_general(st, a.deck);
     let made = st
         .save_as_screenset(&id, a.name.trim())
         .map_err(|e| e.to_string())?;
@@ -411,18 +448,18 @@ pub fn save_as_screenset(st: &mut DeckState, a: DeckSaveAsArgs) -> Result<DeckAn
     Ok(out)
 }
 
-/// `DECK_RESET`.
+/// `SCOPE_RESET`.
 ///
 /// # Errors
 ///
 /// No such deck.
 pub fn reset(st: &mut DeckState, a: DeckArgs) -> Result<DeckAnswer, String> {
-    let id = target(st, a.deck)?;
+    let id = target_or_general(st, a.deck);
     let out = st.reset(&id).map_err(|e| e.to_string())?;
     Ok(answer(st, out))
 }
 
-/// `DECK_SET_DEFAULT`.
+/// `SCOPE_SET_DEFAULT`.
 ///
 /// # Errors
 ///
@@ -474,7 +511,7 @@ pub fn template_screenset(
 }
 
 #[cfg(feature = "actions")]
-pub use on_list::{DeckExec, DeckJob, HeadlessDecks, register};
+pub use on_list::{DeckExec, DeckJob, HeadlessDecks, register, register_tab_kinds};
 
 #[cfg(feature = "actions")]
 mod on_list {
@@ -511,7 +548,7 @@ mod on_list {
                 display_name: $display,
                 description: $desc,
                 category: "Workspace",
-                group: deck_word!(plural_title),
+                group: scope_word!(plural_title),
                 shortcut: "",
                 toggleable: false,
                 undo: false,
@@ -520,32 +557,34 @@ mod on_list {
     }
 
     metas! {
-        LIST = LIST, deck_word!(plural_title),
-            concat!("Every open ", deck_word!(noun), " in the strip's order (its id, context, screenset, whether its layout differs from the screenset's, its badge), the one on show, the screensets one can be shown in, each context type's default screenset, and how many closed ones can be reopened.");
-        OPEN = OPEN, concat!("Load onto a ", deck_word!(noun)),
-            concat!("Loads a context (`context`: kind, id, title) onto the ", deck_word!(noun), " on show, or with `new: true` onto a new ", deck_word!(noun), " after it. A context open already brings its ", deck_word!(noun), " forward (`already_open` when it shows). It is shown in `screenset`, else the screenset and changes its context kept, else its type's default.");
-        CLOSE = CLOSE, concat!("Close a ", deck_word!(noun)),
-            "Closes `deck` (the one on show when unset); its neighbour shows. Its context keeps its layout, and DECK_REOPEN brings it back.";
-        NEXT = NEXT, concat!("Next ", deck_word!(noun)),
-            concat!("Shows the next ", deck_word!(noun), " along the strip (round the end). One alone answers `only_deck`.");
-        PREV = PREV, concat!("Previous ", deck_word!(noun)),
-            concat!("Shows the previous ", deck_word!(noun), " along the strip (round the start).");
-        MOVE = MOVE, concat!("Move a ", deck_word!(noun)),
-            "Moves `deck` to place `index` (from 0) in the strip.";
-        ACTIVATE = ACTIVATE, concat!("Show a ", deck_word!(noun)),
+        LIST = LIST, scope_word!(plural_title),
+            concat!("Every open ", scope_word!(noun), " in the tab bar's order (its id, context, screenset, whether its layout differs from the screenset's, its badge), the one on show (none: the ", scope_word!(general), "), the ", scope_word!(general), " (`general`), the screensets one can be shown in, each context type's default screenset, and how many closed ones can be reopened.");
+        OPEN = OPEN, concat!("Load onto a ", scope_word!(noun)),
+            concat!("Opens a context (`context`: kind, id, title, and optionally icon, colour, folder, properties) in the ", scope_word!(noun), " on show, or with `new: true` (or while the ", scope_word!(general), " show) in a new ", scope_word!(noun), " after it. A context open already brings its ", scope_word!(noun), " forward (`already_open` when it shows). It is shown in `screenset`, else the screenset and changes its context kept, else its type's default.");
+        CLOSE = CLOSE, concat!("Close a ", scope_word!(noun)),
+            concat!("Closes `deck` (the one on show when unset); its neighbour shows, else the ", scope_word!(general), ". Its context keeps its layout, and ", scope_word!(prefix), "REOPEN brings it back.");
+        NEXT = NEXT, concat!("Next ", scope_word!(noun)),
+            concat!("Shows the next along the ", scope_word!(general), " and then each ", scope_word!(noun), " (round the end). With none open it answers `only_deck`.");
+        PREV = PREV, concat!("Previous ", scope_word!(noun)),
+            concat!("Shows the previous along the ", scope_word!(general), " and each ", scope_word!(noun), " (round the start).");
+        MOVE = MOVE, concat!("Move a ", scope_word!(noun)),
+            concat!("Moves `deck` to place `index` (from 0) among the ", scope_word!(plural), ".");
+        ACTIVATE = ACTIVATE, concat!("Show a ", scope_word!(noun)),
             "Shows `deck`, or the one at `index` (from 0; 8 and past is the last, as ⌘9 is).";
-        DUPLICATE = DUPLICATE, concat!("Duplicate a ", deck_word!(noun)),
-            concat!("A second ", deck_word!(noun), " on the same context, laid out as `deck` is now, after it and on show.");
-        REOPEN = REOPEN, concat!("Reopen a closed ", deck_word!(noun)),
-            concat!("Brings back the last closed ", deck_word!(noun), " as it was, on show.");
-        SET_SCREENSET = SET_SCREENSET, concat!("Switch this ", deck_word!(noun), "'s screenset"),
-            "Shows `deck` in screenset `screenset` (an id from DECK_LIST); its own changes to the old one go.";
+        DUPLICATE = DUPLICATE, concat!("Duplicate a ", scope_word!(noun)),
+            concat!("A second ", scope_word!(noun), " on the same context, laid out as `deck` is now, after it and on show.");
+        REOPEN = REOPEN, concat!("Reopen a closed ", scope_word!(noun)),
+            concat!("Brings back the last closed ", scope_word!(noun), " as it was, on show.");
+        SET_SCREENSET = SET_SCREENSET, concat!("Switch this ", scope_word!(noun), "'s screenset"),
+            concat!("Shows `deck` (the one on show when unset; `general` for the ", scope_word!(general), ") in screenset `screenset` (an id from ", scope_word!(prefix), "LIST); its own changes to the old one go.");
         SAVE_AS_SCREENSET = SAVE_AS_SCREENSET, "Save as screenset",
-            concat!("Saves `deck`'s layout as a new screenset called `name`, which the ", deck_word!(noun), " is then shown in; other ", deck_word!(plural), " can use it.");
+            concat!("Saves `deck`'s layout as a new screenset called `name`, which the ", scope_word!(noun), " is then shown in; other ", scope_word!(plural), " can use it.");
         RESET = RESET, "Reset to the screenset",
             "Drops `deck`'s own changes: it shows its screenset as saved. One with none answers `not_modified`.";
+        GENERAL = GENERAL, concat!("Show the ", scope_word!(general)),
+            concat!("Shows the ", scope_word!(general), ": no ", scope_word!(noun), " active. Answers `already_active` when they show.");
         SET_DEFAULT = SET_DEFAULT, "Set a context type's default screenset",
-            concat!("New ", deck_word!(plural), " on contexts of type `kind` (`song`, `project`) are shown in `screenset`; unset goes back to the app's or an extension's template.");
+            concat!("New ", scope_word!(plural), " on contexts of type `kind` (`song`, `project`) are shown in `screenset`; unset goes back to the app's or an extension's template.");
     }
 
     fn write<A>(
@@ -620,7 +659,39 @@ mod on_list {
         write::<DeckDefaultArgs>(list, e, &SET_DEFAULT, Mutating, |st, _, a| {
             super::set_default(st, &a)
         })?;
+        write::<()>(list, e, &GENERAL, Mutating, |st, _, ()| super::general(st))?;
         Ok(())
+    }
+
+    static TAB_KINDS: ActionMeta = ActionMeta {
+        id: ids::TAB_KINDS,
+        trait_name: "",
+        method_name: "",
+        display_name: "Tab kinds",
+        description: concat!(
+            "Every tab kind the app and its extensions registered: its id, title, whether its tabs are ",
+            scope_word!(plural),
+            " (`scope`), its width (`compact`, `wide`), icon, colour, subtitle template, the views a custom kind's tabs are, its menu rows, and who registered it."
+        ),
+        category: "Workspace",
+        group: scope_word!(plural_title),
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    };
+
+    /// Puts `TAB_KINDS` on `list`, answering what `kinds` reads.
+    ///
+    /// # Errors
+    ///
+    /// The id already on `list`.
+    pub fn register_tab_kinds(
+        list: &ActionList,
+        kinds: Arc<dyn Fn() -> crate::TabKinds + Send + Sync>,
+    ) -> Result<(), architect::action::ActionError> {
+        list.register(&TAB_KINDS, Effect::ReadOnly, move |(): ()| {
+            Ok::<_, String>(kinds())
+        })
     }
 
     /// Decks with no window, behind a lock: for a test, a server, a model.
