@@ -1,13 +1,15 @@
-# The sandbox's Studio-shaped demo of decks (#441): a setlist in the
-# navigator, each song loaded onto a deck of its own, shown in the "Song"
-# screenset this extension ships ([[deck_templates]]). Linked in by the
+# The sandbox's Studio-shaped demo of scope tabs (#441, #476): a setlist
+# in the navigator, each song in a scope tab of its own (wide: its title
+# over its key and tempo, in its colour; [[tab_kinds]]), shown in the
+# "Song" screenset this extension ships ([[deck_templates]]); a setlist's
+# own view is a custom tab. Linked in by the
 # sandbox only (src/extensions.rs); its code is src/setlists.rs.
 id = "setlists"
 name = "Setlists"
 version = "0.1.0"
 kind = "process"
 api = "0.1"
-description = "Setlists in the navigator, each song a deck: the song's chart and its details, laid out by the Song screenset."
+description = "Setlists in the navigator, each song a scope tab: the song's chart and its details, laid out by the Song screenset."
 authors = ["FastTrackStudios"]
 
 [entry]
@@ -30,6 +32,11 @@ id = "info"
 title = "Song"
 icon = "info"
 
+[[views]]
+id = "setlist"
+title = "Setlist"
+icon = "list-music"
+
 [[navigator_providers]]
 id = "setlists"
 title = "Setlists"
@@ -41,3 +48,20 @@ actions = "SETLISTS_NAV"
 context = "song"
 screenset = "Song"
 layout = "song.json"
+
+# A song's scope tab: wide, its title over its key and tempo.
+[[tab_kinds]]
+id = "song"
+title = "Song"
+scope = true
+width = "wide"
+icon = "music"
+subtitle = "{key} · {tempo} bpm"
+
+# A setlist's own view: a custom tab, drawn by the extension's renderer.
+[[tab_kinds]]
+id = "setlist"
+title = "Setlist"
+icon = "list-music"
+colour = "#4fa36b"
+views = ["setlist"]

@@ -580,6 +580,9 @@ pub fn VaultPage() -> Element {
         &views,
         actions.clone(),
     );
+    // The tab kinds (#476): a project's compact scope tab, and every
+    // extension's (the sandbox's wide song tabs, its setlist tab).
+    architect_workspace::use_tab_kinds(crate::decks::tab_kinds(), Some(actions.clone()));
     // A phone's action bar: the workspace's tabs button, counted.
     architect_workspace::use_tabs_button(workspace);
     // The marker lane draws over the arrangement; its tool window floats
@@ -1385,9 +1388,18 @@ fn follow(open: architect_navigator_api::Open, how: &Opening) {
             id,
             title,
             folder,
+            properties,
         } => {
             let mut context = architect_workspace::DeckContext::new(context_type, id, title);
             context.folder = folder;
+            // Its properties make its tab (a song's key and tempo); its
+            // `color` is its tab's colour.
+            for (k, v) in properties {
+                if k == "color" || k == "colour" {
+                    context.colour = Some(v.clone());
+                }
+                context = context.property(k, v);
+            }
             let how = if new_deck {
                 architect_workspace::Load::NewDeck
             } else {
@@ -1695,11 +1707,11 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
     let decks = architect_workspace::try_use_decks();
     // The navigator follows the deck on show (#468): each deck has its own
     // selection, its context's row to begin with.
-    let on_deck = decks.and_then(|d| {
-        d.decks
-            .read()
-            .active_deck()
-            .map(|x| (x.id.clone(), x.context.clone()))
+    // The general tabs are the vault's: their selection is theirs too.
+    let on_deck = decks.map(|d| {
+        let decks = d.decks.read();
+        let x = decks.shown();
+        (x.id.clone(), x.context.clone())
     });
     // A page with a provider selects its row: once each time it comes on
     // show, so a click elsewhere holds. Not on a context's deck: there the

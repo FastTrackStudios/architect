@@ -201,12 +201,22 @@ fn content_item(row: &crate::vault::Row, project: &Project) -> Item {
             item = item.preview(parts.join(" · "));
         }
         item.icon = Some("music".to_owned());
-        // A song loads onto a deck (#441), in its project's folder.
+        // A song opens in a scope tab (#441, #476), in its project's
+        // folder; its key and tempo are what its tab says.
+        let properties: Vec<(String, String)> = [
+            ("key", v.get("key")),
+            ("tempo", v.get("bpm").or_else(|| v.get("tempo"))),
+            ("color", v.get("color").or_else(|| v.get("colour"))),
+        ]
+        .into_iter()
+        .filter_map(|(k, x)| x.map(|x| (k.to_owned(), shown(x))))
+        .collect();
         item = item.opens(Open::Context {
             context_type: "song".to_owned(),
             id: row.path.clone(),
             title: title.to_owned(),
             folder: Some(project.folder.clone()),
+            properties,
         });
     } else {
         item = item.opens(Open::File {
