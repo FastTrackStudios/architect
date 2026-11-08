@@ -59,7 +59,8 @@ pub struct OrgBadge {
     pub org: String,
     /// Its name (`Cody Wright`): the badge's tooltip.
     pub name: String,
-    /// The badge's fill, a CSS colour (`#047857`).
+    /// The org's colour, a CSS colour (`#047857`): its rows are lightly
+    /// washed in it ([`OrgBadge::tint`]).
     pub colour: String,
     /// Its own icon (a Lucide name, an emoji), drawn instead of the
     /// initial.
@@ -75,6 +76,17 @@ impl OrgBadge {
             colour: colour.into(),
             icon: None,
         }
+    }
+
+    /// The light wash its rows take: its colour mixed into transparent
+    /// at the theme's `navigator.org-wash` (`--nv-org-wash`, 8% unless a
+    /// theme says; 0 turns it off), so the name reads as on any row.
+    #[must_use]
+    pub fn tint(&self) -> String {
+        format!(
+            "color-mix(in srgb, {} var(--nv-org-wash, 8%), transparent)",
+            self.colour.trim()
+        )
     }
 
     /// The letter a badge without an icon shows: the name's first.

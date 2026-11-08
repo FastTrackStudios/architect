@@ -123,10 +123,13 @@ let all = Mounts::new("Navigator")
 - `VaultIndex::folder_name` names a mount's root by its title and
   `display_path` writes a folder as a row shows it (a vault's without its
   org, a provider's under its title); a list grouped by folder leaves the
-  folder off its rows. `NavigatorState::note_badge` marks a note's row in
+  folder off its rows. `NavigatorState::note_badge` washes a note's row in
   a tag's or a property's list with its vault's org.
-- `NavigatorState::badge` is a Vaults/ or Assets/ row's `OrgBadge` (drawn
-  as the org's icon or initial on its colour), `is_wiki` a folder whose
+- `NavigatorState::badge` is a Vaults/ or Assets/ row's `OrgBadge` (no
+  mark: the row is washed in the org's colour, `OrgBadge::tint`, at the
+  theme's `navigator.org-wash` (a share 0–1, 0.08 by default, 0 off;
+  `features/navigator/src/ui/theme.rs` `NUMBERS`), unless it has its own
+  background; the org is its `data-org` and its description), `is_wiki` a folder whose
   folder note says `wiki: true` (a book mark), `mount_icon` a top row's
   icon. `Mount::listed` is how a mount's folders list unless a person set
   their own (`settings_for`). A tag or a property lists vault notes only.
@@ -268,7 +271,7 @@ default; a page or an extension fills it while its view is on show.
   `Mount::calendar`, drawn by `features/navigator/src/ui/calendar.rs`
   `SectionGrid`, its days taking drops; the Calendar's, #444); a `Node` says its `org` and whether it is
   `shared` (an asset library's org, a project shared through a Space: the
-  row's org badge and shared mark, `NavigatorSource::folder_meta`,
+  row's org wash and shared mark, `NavigatorSource::folder_meta`,
   `NavigatorState::badge`, `is_shared`). In `build`,
   `ext.navigator("<ACTIONS>", provider)`
   (`features/extensions/src/linked.rs` `Builder::navigator`). A process,

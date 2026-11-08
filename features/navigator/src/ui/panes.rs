@@ -420,27 +420,6 @@ fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     }
 }
 
-/// Where a row's vault comes from: the org's icon, or its initial on its
-/// colour, with its name to hover.
-#[component]
-pub(super) fn OrgMark(badge: crate::OrgBadge) -> Element {
-    let initial = badge.initial();
-    let colour = badge.colour.clone();
-    rsx! {
-        span { class: "nv-org", "data-org": "{badge.org}", title: "{badge.name}", "aria-label": "From {badge.name}",
-            style: "flex:0 0 auto; width:14px; height:14px; border-radius:4px; display:flex; align-items:center; justify-content:center; \
-                    font-size:9px; font-weight:700; color:#fff; background:{colour};",
-            match badge.icon.as_deref().and_then(crate::Icon::parse) {
-                Some(crate::Icon::Lucide(name)) => rsx! {
-                    architect_shell::lucide::LucideIcon { name, size: 10, color: Some("#fff".to_owned()) }
-                },
-                Some(crate::Icon::Emoji(e)) => rsx! { "{e}" },
-                _ => rsx! { "{initial}" },
-            }
-        }
-    }
-}
-
 /// A folder's count as Notebook Navigator writes it: "3 • 12" (its own,
 /// then below), "• 12" with none of its own, nothing at zero.
 fn count_label(c: NoteCount, show: bool, separate: bool) -> String {
@@ -504,7 +483,12 @@ fn FolderRow(
     let icon_colour = colour
         .clone()
         .unwrap_or_else(|| "var(--nv-faint)".to_owned());
+    // Its own background, else its org's light wash (a row of Vaults/ or
+    // Assets/): where it comes from, without a mark.
+    let org_name = badge.as_ref().map(|b| format!("From {}", b.name));
+    let org_id = badge.as_ref().map(|b| b.org.clone());
     let bg = background
+        .or_else(|| badge.as_ref().map(crate::OrgBadge::tint))
         .filter(|_| !selected && !drop_here)
         .map_or_else(String::new, |b| format!("background:{b};"));
     let class = match (selected, drop_here) {
@@ -523,6 +507,8 @@ fn FolderRow(
             class,
             role: "treeitem",
             "data-folder": "{path}",
+            "data-org": org_id,
+            "aria-description": org_name,
             "data-drop-zone": "folder",
             "aria-selected": if selected { "true" } else { "false" },
             "aria-expanded": if has_children { if expanded { "true" } else { "false" } } else { "" },
@@ -596,9 +582,6 @@ fn FolderRow(
             }
             if shared {
                 span { class: "nv-shared", "aria-label": "Shared", title: "Shared with this org through a Space", style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", Users { size: 12 } }
-            }
-            if let Some(b) = badge {
-                OrgMark { badge: b }
             }
             if reorder {
                 button { class: "nv-tool", "aria-label": "Move {p3} up", style: "width:20px; height:20px;",
@@ -1114,7 +1097,11 @@ fn FileRow(
         .as_ref()
         .filter(|_| !icon_only)
         .map_or_else(|| "var(--nv-text)".to_owned(), Clone::clone);
+    // Its own background, else its org's light wash: where it comes from.
+    let org_name = org.as_ref().map(|b| format!("From {}", b.name));
+    let org_id = org.as_ref().map(|b| b.org.clone());
     let bg = background
+        .or_else(|| org.as_ref().map(crate::OrgBadge::tint))
         .filter(|_| !selected)
         .map_or_else(String::new, |b| format!("background:{b};"));
     let p4 = path.clone();
@@ -1142,6 +1129,8 @@ fn FileRow(
             class,
             role: "option",
             "data-file": "{path}",
+            "data-org": org_id,
+            "aria-description": org_name,
             "data-pinned": if pinned { "true" } else { "false" },
             "aria-selected": if selected { "true" } else { "false" },
             "aria-current": if open { "page" } else { "false" },
@@ -1241,9 +1230,6 @@ fn FileRow(
                                 }
                                 "{done}/{total}"
                             }
-                        }
-                        if let Some(b) = org {
-                            OrgMark { badge: b }
                         }
                         if parent_shown && let Some(p) = parent {
                             span { class: "nv-file-parent", style: "display:flex; align-items:center; gap:3px; overflow:hidden; text-overflow:ellipsis;",

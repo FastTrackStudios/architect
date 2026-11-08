@@ -73,9 +73,10 @@ Calendar
 Projects           (and the pinned shortcuts)
 Recent Files/
 Vaults/            every org's top-level folders, one flat list,
-  ● Bible Study      each with its org's badge (and a book for a wiki)
-  ● Music Theory
-Assets/            every org's asset libraries, with their badges
+  Bible Study        each washed lightly in its org's colour, as strongly as
+                     the theme's navigator.org-wash says (and a book
+  Music Theory       for a wiki); its org's name in its description
+Assets/            every org's asset libraries, washed the same way
 Tags/              the vaults' tags, merged by name; Untagged last
 ```
 

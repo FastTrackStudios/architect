@@ -61,8 +61,17 @@ pub const ROLES: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// The roles that are numbers, not colours: (name, default). Written as
+/// percentages (`--nv-org-wash: 8%`).
+///
+/// - `navigator.org-wash`: how strongly a row from an org is washed in
+///   the org's colour, 0 (off) to 1 (Notebook Navigator's custom row
+///   backgrounds, `navitem-custom-*`).
+pub const NUMBERS: &[(&str, f32)] = &[("navigator.org-wash", 0.08)];
+
 /// The roles as `(name, default)`, for an app's `App` layer.
 pub const TOKENS: &[(&str, &str)] = &[
+    ("navigator.org-wash", "0.08"),
     ("navigator.background", "$sheet"),
     ("navigator.list-background", "$sheet"),
     ("navigator.text", "$ink"),
@@ -101,20 +110,26 @@ pub struct NavigatorColours(Vec<(String, String)>);
 
 impl FromResolved for NavigatorColours {
     fn from_resolved(r: &Resolved) -> Self {
-        Self(
-            ROLES
-                .iter()
-                .map(|(name, _, fallback)| {
-                    let value = if r.get(name).is_some() {
-                        r.color(name)
-                    } else {
-                        r.color(fallback)
-                    };
-                    let var = name.strip_prefix("navigator.").unwrap_or(name);
-                    (format!("--nv-{var}"), value.to_string())
-                })
-                .collect(),
-        )
+        let var = |name: &str| format!("--nv-{}", name.strip_prefix("navigator.").unwrap_or(name));
+        let colours = ROLES.iter().map(|(name, _, fallback)| {
+            let value = if r.get(name).is_some() {
+                r.color(name)
+            } else {
+                r.color(fallback)
+            };
+            (var(name), value.to_string())
+        });
+        // A number the theme lacks, or not a number: its default.
+        let numbers = NUMBERS.iter().map(|(name, default)| {
+            let n = if r.get(name).is_some() {
+                r.number(name)
+            } else {
+                *default
+            };
+            let n = if n.is_finite() { n } else { *default }.clamp(0.0, 1.0);
+            (var(name), format!("{}%", (n * 100.0).round()))
+        });
+        Self(colours.chain(numbers).collect())
     }
 }
 
@@ -130,5 +145,34 @@ impl NavigatorColours {
             out.push(';');
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use architect_theme::{FromResolved, Resolved, Scheme};
+
+    use super::NavigatorColours;
+
+    fn vars(tokens: &[(&str, &str)]) -> String {
+        let map: BTreeMap<String, String> = tokens
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        NavigatorColours::from_resolved(&Resolved::new("t", Scheme::Dark, map)).vars()
+    }
+
+    #[test]
+    fn the_org_wash_is_the_themes_share_else_eight_percent() {
+        assert!(vars(&[]).contains("--nv-org-wash:8%;"));
+        assert!(vars(&[("navigator.org-wash", "0.2")]).contains("--nv-org-wash:20%;"));
+        assert!(
+            vars(&[("navigator.org-wash", "0")]).contains("--nv-org-wash:0%;"),
+            "off"
+        );
+        assert!(vars(&[("navigator.org-wash", "3")]).contains("--nv-org-wash:100%;"));
+        assert!(vars(&[("navigator.org-wash", "lots")]).contains("--nv-org-wash:8%;"));
     }
 }
