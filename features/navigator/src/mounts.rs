@@ -59,7 +59,8 @@ pub struct OrgBadge {
     pub org: String,
     /// Its name (`Cody Wright`): the badge's tooltip.
     pub name: String,
-    /// The badge's fill, a CSS colour (`#047857`).
+    /// The org's colour, a CSS colour (`#047857`): its rows are lightly
+    /// washed in it ([`OrgBadge::tint`]).
     pub colour: String,
     /// Its own icon (a Lucide name, an emoji), drawn instead of the
     /// initial.
@@ -74,6 +75,29 @@ impl OrgBadge {
             name: name.into(),
             colour: colour.into(),
             icon: None,
+        }
+    }
+
+    /// The light wash its rows take: its colour at about a twelfth of its
+    /// strength (`#04785714`), so the name reads as on any row. A colour
+    /// that is not `#rgb`/`#rrggbb` is mixed with transparent instead.
+    #[must_use]
+    pub fn tint(&self) -> String {
+        let c = self.colour.trim();
+        let hex = c
+            .strip_prefix('#')
+            .filter(|h| h.chars().all(|x| x.is_ascii_hexdigit()));
+        match hex.map(str::len) {
+            Some(6) => format!("{c}14"),
+            Some(3) => {
+                let long: String = hex
+                    .unwrap_or_default()
+                    .chars()
+                    .flat_map(|x| [x, x])
+                    .collect();
+                format!("#{long}14")
+            }
+            _ => format!("color-mix(in srgb, {c} 8%, transparent)"),
         }
     }
 
