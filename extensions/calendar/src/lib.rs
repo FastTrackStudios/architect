@@ -42,6 +42,7 @@ pub mod ics;
 pub mod layout;
 pub mod model;
 pub mod nav;
+pub mod plan;
 pub mod quick;
 pub mod recur;
 pub mod sync;
@@ -118,6 +119,8 @@ struct Cache {
     event_types: Vec<booking::EventType>,
     schedules: Vec<booking::Schedule>,
     bookings: Vec<booking::Booking>,
+    /// Each day's plan around the day shown, from Day Plans ([`plan`]).
+    plans: Vec<plan::PlanDay>,
     /// Properties the vault has besides an event's own: read too, as a
     /// link can be under any key.
     extra_keys: Vec<String>,
@@ -136,6 +139,7 @@ static CACHE: Mutex<Cache> = Mutex::new(Cache {
     event_types: Vec::new(),
     schedules: Vec::new(),
     bookings: Vec::new(),
+    plans: Vec::new(),
     extra_keys: Vec::new(),
     tasks_found: false,
     time_found: false,
@@ -426,6 +430,30 @@ pub fn blocks(from: NaiveDateTime, to: NaiveDateTime) -> Vec<Block> {
     out.extend(time.into_iter().filter(|b| b.overlaps(from, to)));
     model::sort(&mut out);
     out
+}
+
+/// Reads each day's plan again, from Day Plans, over `from..to` (at most
+/// 62 days). Not part of [`refresh`]: Day Plans reads the Calendar's
+/// agenda for a rule's `#tag`, and the agenda refreshes.
+pub async fn refresh_plans(from: NaiveDate, to: NaiveDate) {
+    let plans = plan::days(from, to).await.unwrap_or_default();
+    let mut c = cache();
+    if c.plans != plans {
+        c.plans = plans;
+        drop(c);
+        bump();
+    }
+}
+
+/// Each day's plan of `from..to` as last read (none without Day Plans).
+#[must_use]
+pub fn plans(from: NaiveDate, to: NaiveDate) -> Vec<plan::PlanDay> {
+    cache()
+        .plans
+        .iter()
+        .filter(|p| p.date >= from && p.date < to)
+        .cloned()
+        .collect()
 }
 
 /// The event `args` names by `path`, `id` or `external_ref`.

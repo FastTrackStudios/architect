@@ -228,6 +228,13 @@ impl Item {
         self
     }
 
+    /// A Lucide icon's name for its row (`calendar`, `timer`).
+    #[must_use]
+    pub fn icon(mut self, icon: impl Into<String>) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+
     #[must_use]
     pub fn tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.push(tag.into());
@@ -317,6 +324,34 @@ pub struct Snapshot {
     /// [`Self::group_order`] first.
     pub group_by: Option<String>,
     pub group_order: Vec<String>,
+    /// A month grid under its row, over its tree (the Calendar's, #444):
+    /// a day clicked selects that day's node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar: Option<CalendarGrid>,
+}
+
+/// One day of a provider's month grid ([`Snapshot::calendar`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GridDay {
+    /// The node a click on it selects (`d:2026-11-07`).
+    pub node: String,
+    /// How many things are on it: its dots (at most three drawn).
+    pub count: u32,
+    /// A word for it, its tooltip and its mark (the day's template:
+    /// `Workday`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// A CSS colour for the mark.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
+}
+
+/// A provider's month grid: its days, by ISO date (`2026-11-07`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CalendarGrid {
+    pub days: std::collections::BTreeMap<String, GridDay>,
 }
 
 impl Snapshot {
@@ -371,6 +406,13 @@ impl Snapshot {
     ) -> Self {
         self.group_by = Some(key.into());
         self.group_order = order.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// A month grid under its row ([`Self::calendar`]).
+    #[must_use]
+    pub fn calendar(mut self, grid: CalendarGrid) -> Self {
+        self.calendar = Some(grid);
         self
     }
 

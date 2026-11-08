@@ -113,6 +113,27 @@ pub struct Mount {
     /// Its folders' lists grouped by this property, its groups in this
     /// order (a project's `section`: Songs, Notes, Sub-projects, Tasks).
     pub group_by: Option<(String, Vec<String>)>,
+    /// A month grid under its row (a provider's `Snapshot::calendar`,
+    /// #444): its days, each the folder a click selects.
+    pub calendar: Option<SectionCalendar>,
+}
+
+/// A day of a mount's month grid ([`Mount::calendar`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SectionDay {
+    /// The folder a click on it selects (`~calendar:calendar/2026/…`).
+    pub folder: String,
+    /// How many things are on it: its dots.
+    pub count: u32,
+    /// Its word (the day's template) and the mark's colour.
+    pub label: Option<String>,
+    pub colour: Option<String>,
+}
+
+/// A mount's month grid: its days by date.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SectionCalendar {
+    pub days: std::collections::BTreeMap<chrono::NaiveDate, SectionDay>,
 }
 
 impl Mount {
@@ -130,6 +151,7 @@ impl Mount {
             nests: true,
             list: None,
             group_by: None,
+            calendar: None,
         }
     }
 
@@ -147,6 +169,7 @@ impl Mount {
             nests: true,
             list: None,
             group_by: None,
+            calendar: None,
         }
     }
 

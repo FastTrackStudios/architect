@@ -104,7 +104,12 @@ every provider. Opening an item does what the provider says (a note, a
 view, an action); dragging items onto a container moves them there; New
 makes one in the selected container. A provider whose containers have an
 order of their own (Today, Tomorrow, Later) says so (`Snapshot::ordered`),
-and they show in it until you order them by hand. A provider can make its
+and they show in it until you order them by hand. A provider can draw a month grid under its
+row (`Snapshot::calendar`, the Calendar section, #444): each day names its
+node, a click selects it (and opens the daily note), a drop on a day moves
+items there, and the calendar at the foot of a pane gives way to it
+(`NavigatorState::section_grid`, `pick_section_day`, `section_move`;
+`features/navigator/src/ui/calendar.rs` `SectionGrid`). A provider can make its
 containers the list's groups instead of rows (`Snapshot::grouped`: the
 Queue's Inbox, Today, Upcoming, Waiting), group its lists by a property in
 its own order (`Snapshot::group_by`), put a count on its row
@@ -253,6 +258,8 @@ without revealing it ([Decks](@/architecture/workspace.md)).
   tags to markdown on disk; `features/navigator/tests/view.rs` drags a note
   onto a tag.
 
+- `features/navigator/tests/section_calendar.rs`: a provider's month grid
+  under its row, a day picked and listed, the foot calendar giving way.
 - `features/navigator/tests/calendar.rs`: the calendar and the periodic
   notes. It covers Moment's tokens and weeks, the default and the demo
   vault's paths read back, kinds turned off, the grid, opening and making

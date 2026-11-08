@@ -259,7 +259,12 @@ default; a page or an extension fills it while its view is on show.
   and `nest` (`false`: its containers are the list's groups, not rows).
   A `Snapshot` says its row's `count`, `grouped()` (its nodes the list's
   groups, in order) and `group_by(key, order)` (its lists grouped by an
-  item property, in that order); a `Node` says its `org` and whether it is
+  item property, in that order) and `calendar(CalendarGrid)` (a month grid
+  under its top row, over its tree: each day's `GridDay` names the day
+  node a click selects, its `count` of dots, its `label` and `colour`;
+  `ProviderSource::section_calendar` maps it to folders as
+  `Mount::calendar`, drawn by `features/navigator/src/ui/calendar.rs`
+  `SectionGrid`, its days taking drops; the Calendar's, #444); a `Node` says its `org` and whether it is
   `shared` (an asset library's org, a project shared through a Space: the
   row's org badge and shared mark, `NavigatorSource::folder_meta`,
   `NavigatorState::badge`, `is_shared`). In `build`,

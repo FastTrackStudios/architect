@@ -68,7 +68,7 @@ pub use index::{NoteCount, VaultIndex};
 pub use keys::{Hotkey, KeyAction, KeyBinding, KeyEvent, KeyMap, KeyScope};
 pub use layout::{Pane, PaneLayout};
 pub use list::{Clock, Lines, ListContext, ListRow, ListRowKind, PinIn, Thumb};
-pub use mounts::{Mount, MountKind, Mounts, OrgBadge, Place};
+pub use mounts::{Mount, MountKind, Mounts, OrgBadge, Place, SectionCalendar, SectionDay};
 pub use pattern::Pattern;
 pub use period::{DateField, DateFilter, DayMonthOrder, Period, PeriodKind, WeekRules};
 pub use profiles::{Profiles, Shortcut, ShortcutKind, VaultProfile};

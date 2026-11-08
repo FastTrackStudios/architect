@@ -91,6 +91,11 @@ pub enum NavRowKind {
         path: String,
         name: String,
     },
+    /// A provider's month grid under its row (the Calendar section's,
+    /// #444): mount `mount`'s days.
+    MonthGrid {
+        mount: String,
+    },
     TopSpacer,
     BottomSpacer,
 }
@@ -105,6 +110,9 @@ pub const VAULTS: &str = "vaults";
 pub const ASSETS: &str = "assets";
 /// The banner's height.
 pub const BANNER_HEIGHT: f64 = 96.0;
+/// A section's month grid's height: its header, the weekdays and six
+/// weeks.
+pub const MONTH_GRID_HEIGHT: f64 = 236.0;
 
 /// One row of the navigation pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
