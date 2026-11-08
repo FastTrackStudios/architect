@@ -1,15 +1,20 @@
 name: devenv
-description: Put the pinned devenv on PATH (the same pin as shared-rust), for jobs that call `devenv shell` without the shared Rust setup.
+description: Put the pinned devenv on PATH (the same pin as shared-rust), plus the tools the release jobs call that the release runners don't carry (gh, minisign, patchelf).
 runs:
   using: composite
   steps:
     # devenv 2.4.0 from the nixpkgs revision devenv-fleet's pins.json names;
-    # keep it the same as .github/actions/shared-rust's `devenv` step.
-    - name: devenv
+    # keep it the same as .github/actions/shared-rust's `devenv` step. The
+    # release runners' PATH is bare (git, nix, skopeo, curl, tar, jq): v0.11.0
+    # failed on devenv, v0.11.1 on gh, and minisign and patchelf come next.
+    - name: devenv and release tools
       shell: bash
       run: |
         set -euo pipefail
-        out=$(nix build --no-link --print-out-paths \
-          github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980#devenv)
-        echo "$out/bin" >> "$GITHUB_PATH"
-        "$out/bin/devenv" version
+        rev=github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980
+        for pkg in devenv gh minisign patchelf; do
+          out=$(nix build --no-link --print-out-paths "$rev#$pkg")
+          echo "$out/bin" >> "$GITHUB_PATH"
+        done
+        out=$(nix build --no-link --print-out-paths "$rev#devenv"); "$out/bin/devenv" version
+        out=$(nix build --no-link --print-out-paths "$rev#gh"); "$out/bin/gh" --version | head -1
