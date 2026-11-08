@@ -573,14 +573,13 @@ pub fn VaultPage() -> Element {
     // of its own, shown in its screenset; the session and each context's
     // layout kept (`crate::decks`). The workspace and screensets above are
     // the deck on show's.
-    let decks = crate::decks::use_lab_decks(
+    let _decks = crate::decks::use_lab_decks(
         workspace,
         sets,
         screen_class(&screen),
         &views,
         actions.clone(),
     );
-    let several = decks.decks.read().decks.len() >= 2;
     // A phone's action bar: the workspace's tabs button, counted.
     architect_workspace::use_tabs_button(workspace);
     // The marker lane draws over the arrangement; its tool window floats
@@ -726,7 +725,6 @@ pub fn VaultPage() -> Element {
         } else if title_row.is_none() {
             PageBar { title: "Vault" }
         }
-        architect_workspace::DeckStrip { title_row, phone }
         div { style: "flex: 1 1 0; min-height: 0; display: flex; position: relative;",
             WorkspaceView {
                 workspace,
@@ -744,7 +742,6 @@ pub fn VaultPage() -> Element {
                 switcher,
                 screensets: sets,
                 // The decks keep the layouts and the screensets.
-                under_strip: several && !phone,
                 status: pane_status,
                 form: screen_class(&screen),
                 actions,

@@ -157,7 +157,7 @@ name = "tab_badge"
 required-features = ["native"]
 
 [[test]]
-name = "deck_strip"
+name = "scope_tabs"
 required-features = ["native"]
 
 [[test]]

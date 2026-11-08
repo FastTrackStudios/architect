@@ -20,8 +20,8 @@ use std::rc::Rc;
 
 use architect_workspace::home::{ContextFiles, FileStore};
 use architect_workspace::{
-    Bridge, DeckContext, DeckHandle, DeckStores, DeckTemplate, DecksConfig, FormClass, Load,
-    Screensets, Target, Views, Workspace, WorkspaceActions, WorkspaceStore, use_decks,
+    Bridge, DeckContext, DeckHandle, DeckStores, DeckTemplate, DecksConfig, FormClass, Screensets,
+    Target, Views, Workspace, WorkspaceActions, WorkspaceStore, use_decks,
 };
 use dioxus::prelude::*;
 
@@ -177,22 +177,19 @@ pub fn use_lab_decks(
         }
         templates
     });
-    let mut on_new = use_signal(|| None::<DeckHandle>);
-    let handle = use_decks(DecksConfig {
+    use_decks(DecksConfig {
         workspace,
         screensets: sets,
         form,
         stores,
         templates,
-        start: vec![vault_context()],
+        // No scope tab on a first run: the general tabs, as without them.
+        start: Vec::new(),
+        // The general tabs are the vault's (shown in "Write"); an older
+        // session's vault deck folds into them.
+        general: Some(vault_context()),
         views: Some(views.clone()),
         bridge: Bridge::default(),
-        // `+`: the vault again, on a deck of its own.
-        on_new: Some(Callback::new(move |()| {
-            if let Some(h) = *on_new.peek() {
-                h.load(vault_context(), Load::NewDeck);
-            }
-        })),
         actions: Some(actions),
         resolve: Some(Rc::new(resolve)),
         // A project with nothing kept starts on its page: its
@@ -204,15 +201,11 @@ pub fn use_lab_decks(
                 crate::vault::show_note(workspace, &format!("{folder}/project.md"), Target::Tab);
             }
         })),
-    });
-    if on_new.peek().is_none() {
-        on_new.set(Some(handle));
-    }
-    handle
+    })
 }
 
 /// A context as the app knows it: a project given by its id alone
-/// (`DECK_OPEN {context: {kind: project, id: "Projects/Album"}}`) gets
+/// (`SCOPE_OPEN {context: {kind: project, id: "Projects/Album"}}`) gets
 /// its folder, icon and, when it has none, its title.
 fn resolve(mut context: DeckContext) -> DeckContext {
     if context.kind != PROJECT || context.folder.is_some() {

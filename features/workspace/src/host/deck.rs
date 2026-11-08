@@ -1,6 +1,7 @@
-//! Decks in the app: the strip at the top of the main window, its keys
-//! and menus, a deck popped out into a window of its own, and the decks'
-//! part in a phone's switcher.
+//! Decks in the app, as scope tabs: their group at the leading edge of
+//! the main window's first tab bar ([`ScopeTabs`]), their keys and menus,
+//! a scope tab popped out into a window of its own, and their part in a
+//! phone's switcher.
 //!
 //! [`use_decks`] holds the [`Decks`] beside the app's `Signal<Workspace>`
 //! and `Signal<Screensets>` (the same ones its [`super::WorkspaceView`]
@@ -16,11 +17,11 @@ use std::rc::Rc;
 use architect_commands::{Command, use_command};
 use architect_shell::ShellTheme;
 use dioxus::prelude::*;
-use lucide_dioxus::{AppWindow, Plus, X};
+use lucide_dioxus::{AppWindow, X};
 
+use super::Views;
 use super::screens::WorkspaceStore;
 use super::windows::{Bridge, Popout, Windows};
-use super::{TitleRow, Views};
 use crate::deck::{ContextLayout, DeckContext, DeckId, DeckState, DeckTemplate, Decks, Load, NOUN};
 use crate::model::{WindowId, Workspace};
 use crate::screenset::{FormClass, Screensets};
@@ -62,24 +63,25 @@ pub struct DecksConfig {
     /// Each context type's default screenset, the app's and the
     /// extensions' (`[[deck_templates]]`).
     pub templates: Vec<DeckTemplate>,
-    /// The decks a first run (nothing kept) opens with.
+    /// The scope tabs a first run (nothing kept) opens with.
     pub start: Vec<DeckContext>,
+    /// The general tabs' context: its type picks their default screenset
+    /// (the app's `vault`, shown in "Write"), and an older session's deck
+    /// of that type folds into them ([`Decks::fold_general`]).
+    pub general: Option<DeckContext>,
     /// The views and contexts a deck popped out into a window draws with;
     /// without `views` a deck does not pop out.
     pub views: Option<Views>,
     pub bridge: Bridge,
-    /// What the strip's `+` loads onto a new deck: the app asks (a
-    /// picker), or it is the deck on show again.
-    pub on_new: Option<Callback<()>>,
-    /// The app's Action List: the `DECK_*` actions go on it, run here.
+    /// The app's Action List: the `SCOPE_*` actions go on it, run here.
     pub actions: Option<super::WorkspaceActions>,
     /// Fills in what a context loaded by its type and id alone lacks
-    /// (`DECK_OPEN {context: {kind: project, id}}`: a project's folder),
+    /// (`SCOPE_OPEN {context: {kind: project, id}}`: a project's folder),
     /// before what it kept is read.
     pub resolve: Option<DeckResolve>,
     /// A context loaded onto a deck with nothing kept, its first time: the
     /// app opens what its deck starts on (a project's page). Told for
-    /// every load, the navigator's and `DECK_OPEN`'s alike.
+    /// every load, the navigator's and `SCOPE_OPEN`'s alike.
     pub on_fresh: Option<Callback<DeckContext>>,
 }
 
@@ -106,7 +108,6 @@ pub struct DeckHandle {
     popped: Signal<Vec<Popped>>,
     views: CopyValue<Option<Views>>,
     bridge: CopyValue<Bridge>,
-    on_new: CopyValue<Option<Callback<()>>>,
     resolve: CopyValue<Option<DeckResolve>>,
     on_fresh: CopyValue<Option<Callback<DeckContext>>>,
     /// Bumped when what is kept should be written (settled changes).
@@ -137,9 +138,9 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
         stores,
         templates,
         start,
+        general,
         views,
         bridge,
-        on_new,
         actions,
         resolve,
         on_fresh,
@@ -154,7 +155,6 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
         popped: Signal::new(Vec::new()),
         views: CopyValue::new(views.clone()),
         bridge: CopyValue::new(bridge.clone()),
-        on_new: CopyValue::new(on_new),
         resolve: CopyValue::new(resolve.clone()),
         on_fresh: CopyValue::new(on_fresh),
         dirty: Signal::new(0),
@@ -181,7 +181,6 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
     }
     handle.views.clone().set(views);
     handle.bridge.clone().set(bridge);
-    handle.on_new.clone().set(on_new);
     handle.resolve.clone().set(resolve);
     handle.on_fresh.clone().set(on_fresh);
     // What was kept, once.
@@ -210,21 +209,28 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
             }
             _ => Decks::default(),
         };
-        let first = decks.decks.is_empty();
+        let mut decks = decks;
+        if let Some(g) = &general {
+            decks.fold_general(&g.kind);
+        }
+        let first = decks.decks.is_empty() && decks.general.screenset.is_empty();
         let mut d = handle.decks;
         d.set(decks);
+        if let Some(g) = general {
+            handle.act(|st| st.set_general(g));
+        }
+        // What was kept on show first: a load records the live layout into
+        // the deck on show, which must be its own by then.
+        handle.act(DeckState::show);
         if first {
             for context in start {
                 let kept = handle.kept(&context);
                 let _ = handle.act(|st| st.open(context, Load::NewDeck, None, kept));
             }
-            let first = handle.decks.peek().decks.first().map(|d| d.id.clone());
-            if let Some(id) = first {
-                let _ = handle.act(|st| st.activate(&id));
-            }
-        } else {
-            handle.act(DeckState::show);
+            // The first run starts on the general tabs.
+            let _ = handle.act(DeckState::show_general);
         }
+        handle.act(DeckState::show);
     });
     use_deck_actions(handle, actions);
     // Unmounted (a page switch, the app closing): kept now.
@@ -254,7 +260,7 @@ pub fn use_decks(config: DecksConfig) -> DeckHandle {
 }
 
 /// What a context kept, read from the app's store, and the app's
-/// [`DecksConfig::resolve`] (for `DECK_OPEN`).
+/// [`DecksConfig::resolve`] (for `SCOPE_OPEN`).
 struct UiKept(Option<Rc<dyn ContextStore>>, Option<DeckResolve>);
 
 impl crate::control::deck::Kept for UiKept {
@@ -292,7 +298,7 @@ impl crate::control::deck::DeckExec for OnWindow {
     }
 }
 
-/// Puts the `DECK_*` actions on the app's list while the decks are
+/// Puts the `SCOPE_*` actions on the app's list while the decks are
 /// mounted: a write runs here as a click does ([`DeckHandle::act`]), a
 /// read answers from a mirror kept current; each change is a `decks`
 /// event.
@@ -366,12 +372,11 @@ fn use_deck_actions(handle: DeckHandle, actions: Option<super::WorkspaceActions>
     });
 }
 
-/// Decks take ⌘1–9 and ⌃Tab (and the strip shows) once two or more are
-/// open; with one, the keys are the screensets' and a group's tabs' as
-/// without decks.
+/// Scope tabs take ⌘1–9 and ⌃Tab (and show) once one is open; with
+/// none, the keys are the screensets' and a group's tabs' as without them.
 #[must_use]
 pub(super) fn switching() -> bool {
-    try_use_decks().is_some_and(|h| h.decks.read().decks.len() >= 2)
+    try_use_decks().is_some_and(|h| !h.decks.read().decks.is_empty())
 }
 
 /// The decks under [`use_decks`], if there are any.
@@ -381,12 +386,13 @@ pub fn try_use_decks() -> Option<DeckHandle> {
 }
 
 /// The context of the deck on show: what a view reads to show its song or
-/// project (its deck's while that deck shows).
+/// project (its scope tab's while that one shows; the general tabs' while
+/// they do).
 #[must_use]
 pub fn use_deck_context() -> Option<DeckContext> {
     let handle = try_use_decks()?;
     let decks = handle.decks.read();
-    decks.active_deck().map(|d| d.context.clone())
+    Some(decks.shown().context.clone())
 }
 
 impl DeckHandle {
@@ -490,6 +496,27 @@ impl DeckHandle {
             .collect();
         for c in fresh {
             on_fresh.call(c);
+        }
+    }
+
+    /// Shows the general tabs: no scope tab active.
+    pub fn show_general(&self) {
+        let _ = self.act(DeckState::show_general);
+    }
+
+    /// Scope tab `id`'s colour (`None`: its context's own again is gone,
+    /// its kind's shows).
+    pub fn set_colour(&self, id: &DeckId, colour: Option<String>) {
+        let mut decks = self.decks;
+        if decks
+            .peek()
+            .get(id)
+            .is_some_and(|d| d.context.colour != colour)
+        {
+            if let Some(d) = decks.write().get_mut(id) {
+                d.context.colour = colour;
+            }
+            self.settle();
         }
     }
 
@@ -704,11 +731,12 @@ fn DeckWindow(
     }
 }
 
-/// The deck commands, in the palette and on their keys while the strip is
-/// mounted: ⌘1–9, ⌃Tab and ⌃⇧Tab, close, reopen, duplicate, the deck's
-/// screenset (switch, save as, reset), pop out.
+/// The scope tab commands, in the palette and on their keys while the
+/// decks are mounted (the host draws them): ⌘1–9, ⌃Tab and ⌃⇧Tab, the
+/// general tabs, close, reopen, duplicate, the screenset (switch, save
+/// as, reset), pop out.
 #[component]
-fn DeckCommands(handle: DeckHandle) -> Element {
+pub(super) fn DeckCommands(handle: DeckHandle) -> Element {
     let decks = handle.decks.read();
     let n = decks.decks.len();
     let active = decks.active.clone();
@@ -738,30 +766,37 @@ fn DeckCommands(handle: DeckHandle) -> Element {
             || format!("Show {NOUN} {}", i.saturating_add(1)),
             |t| format!("Show {NOUN}: {t}"),
         );
-        let mut c = Command::new(format!("DECK_SHOW_{}", i.saturating_add(1)), label)
-            .group(group)
-            .shortcut(if n >= 2 {
-                format!("⌘{}", i.saturating_add(1))
-            } else {
-                String::new()
-            });
+        let mut c = Command::new(
+            format!(
+                "{}SHOW_{}",
+                crate::control::deck::ids::PREFIX,
+                i.saturating_add(1)
+            ),
+            label,
+        )
+        .group(group)
+        .shortcut(if n >= 1 {
+            format!("⌘{}", i.saturating_add(1))
+        } else {
+            String::new()
+        });
         if title.is_none() {
             c = c.disabled(format!("no {NOUN} is there"));
         }
         use_command(c, move || handle.activate_nth(i));
     }
     let several = |c: Command| {
-        if n > 1 {
+        if n >= 1 {
             c
         } else {
-            c.disabled(format!("one {NOUN} is open"))
+            c.disabled(format!("no {NOUN} is open"))
         }
     };
     use_command(
         several(
             Command::new(crate::control::deck::ids::NEXT, format!("Next {NOUN}"))
                 .group(group)
-                .shortcut(if n >= 2 { "⌃Tab" } else { "" }),
+                .shortcut(if n >= 1 { "⌃Tab" } else { "" }),
         ),
         move || handle.cycle(1),
     );
@@ -769,9 +804,23 @@ fn DeckCommands(handle: DeckHandle) -> Element {
         several(
             Command::new(crate::control::deck::ids::PREV, format!("Previous {NOUN}"))
                 .group(group)
-                .shortcut(if n >= 2 { "⌃⇧Tab" } else { "" }),
+                .shortcut(if n >= 1 { "⌃⇧Tab" } else { "" }),
         ),
         move || handle.cycle(-1),
+    );
+    let general_shown = active.is_none();
+    let general = Command::new(
+        crate::control::deck::ids::GENERAL,
+        format!("Show the {}", crate::deck::GENERAL_NOUN),
+    )
+    .group(group);
+    use_command(
+        if general_shown {
+            general.disabled(format!("the {} show", crate::deck::GENERAL_NOUN))
+        } else {
+            general
+        },
+        move || handle.show_general(),
     );
     let on_active = |c: Command| {
         if active.is_some() {
@@ -863,12 +912,19 @@ fn DeckCommands(handle: DeckHandle) -> Element {
     use_command(
         if handle.can_pop_out() {
             on_active(
-                Command::new("DECK_POP_OUT", format!("Pop {NOUN} out into a window")).group(group),
+                Command::new(
+                    concat!(scope_word!(prefix), "POP_OUT"),
+                    format!("Pop {NOUN} out into a window"),
+                )
+                .group(group),
             )
         } else {
-            Command::new("DECK_POP_OUT", format!("Pop {NOUN} out into a window"))
-                .group(group)
-                .disabled("windows do not open here")
+            Command::new(
+                concat!(scope_word!(prefix), "POP_OUT"),
+                format!("Pop {NOUN} out into a window"),
+            )
+            .group(group)
+            .disabled("windows do not open here")
         },
         move || {
             if let Some(id) = &a5 {
@@ -923,128 +979,118 @@ fn SwitchCommand(
     rsx! {}
 }
 
-/// What the strip's menu is open on.
+/// What a scope tab's menu is open on.
 #[derive(Clone, PartialEq)]
-struct StripMenu {
+struct ScopeMenuAt {
     deck: DeckId,
     x: f32,
+    y: f32,
 }
 
-/// A drag along the strip: the deck held, and where it started.
+/// A drag along the scope tabs: the one held, and where it started.
 #[derive(Clone, PartialEq)]
-struct StripDrag {
+struct ScopeDrag {
     deck: DeckId,
     from_x: f32,
     moved: bool,
 }
 
-const TAB_W: f32 = 176.0;
+const COMPACT_MAX: f32 = 180.0;
+const WIDE_W: f32 = 196.0;
 const SLOP: f32 = 6.0;
 
-/// The strip of decks at the top of the main window, above the panes'
-/// tab groups: a tab per deck (its title, a mark when its layout differs
-/// from its screenset's, the app's badge, a ×), `+`, and a menu per deck.
-/// Under a title row it is the window's title row (as tall, clear of the
-/// window's buttons, its empty part moving the window). On a phone it
-/// draws nothing (the switcher's menu lists the decks); its commands are
-/// on either way.
+/// The colours a person can give a scope tab from its menu.
+const SWATCHES: [&str; 7] = [
+    "#e05a47", "#e8913a", "#d9b23a", "#4fa36b", "#3f8fd1", "#7c5cff", "#c2569e",
+];
+
+/// The scope tabs, at the leading edge of the main window's first tab bar
+/// (`docs/content/architecture/workspace.md`, "Decks"): one per deck, drawn
+/// its kind's way ([`crate::TabKind`]), then a divider before the tabs of
+/// the scope on show. Nothing with no scope tab open, so the bar is as
+/// without them. A click shows one (the one on show again: the general
+/// tabs); a middle-click closes; a drag reorders; its menu has close,
+/// colour, the screenset's rows and its kind's own.
 #[component]
-pub fn DeckStrip(
-    /// The window's title row, when the strip reaches the window's top.
-    title_row: Option<TitleRow>,
-    #[props(default)] phone: bool,
-    /// Shown with one deck too; else it shows once a second is open.
-    #[props(default)]
-    always: bool,
-    /// Its colours; left out, the shell's.
-    #[props(default, into)]
-    theme: Option<ShellTheme>,
-) -> Element {
-    let Some(handle) = try_use_decks() else {
+pub(super) fn ScopeTabs(height: f32) -> Element {
+    let host = super::use_host();
+    let Some(handle) = *host.decks.peek() else {
         return rsx! {};
     };
-    let shown = !phone && (always || handle.decks.read().decks.len() >= 2);
-    // One row on a desk: the shell's own title row gives way to it.
-    architect_shell::use_title_row(title_row.is_some() && shown);
-    let t = theme
-        .or_else(|| architect_shell::try_use_shell().map(|s| s.theme))
-        .unwrap_or_default();
-    let mut menu = use_signal(|| None::<StripMenu>);
-    let mut drag = use_signal(|| None::<StripDrag>);
-    // Where the strip starts in the window: its menu opens under the tab
-    // pressed, in the strip's own points.
-    let mut strip_left = use_signal(|| 0.0_f32);
-    if !shown {
-        return rsx! { DeckCommands { handle } };
-    }
-    let form = *handle.form.read();
+    let t = host.theme.read().clone();
+    let mut menu = use_signal(|| None::<ScopeMenuAt>);
+    let mut drag = use_signal(|| None::<ScopeDrag>);
     let decks = handle.decks.read().clone();
+    if decks.decks.is_empty() {
+        return rsx! {};
+    }
+    let kinds = super::try_use_tab_kinds().unwrap_or_default();
+    let form = *handle.form.read();
     let popped: Vec<DeckId> = handle
         .popped
         .read()
         .iter()
         .map(|p| p.deck.peek().clone())
         .collect();
-    let height = title_row.map_or(34.0, |r| r.height.max(30.0));
-    let pad_left = title_row.map_or(6.0, |r| r.left.max(6.0));
-    let pad_right = title_row.map_or(6.0, |r| r.right.max(6.0));
-    let on_drag = title_row.and_then(|r| r.on_drag);
-    let on_zoom = title_row.and_then(|r| r.on_zoom);
-    let bar = if title_row.is_some() {
-        t.title_bar.clone()
-    } else {
-        t.desk.clone()
-    };
     let tabs = decks.decks.iter().enumerate().map(|(i, d)| {
         let id = d.id.clone();
         let active = decks.active.as_ref() == Some(&d.id);
-        let out = popped.contains(&d.id);
+        let face = kinds.kinds.face(&d.context, d.badge.clone());
+        let wide = face.width == crate::TabWidth::Wide;
+        let render = kinds.render_for(&face.kind);
+        let pill_h = if wide { (height - 6.0).min(36.0) } else { (height - 10.0).min(28.0) };
         let modified = d.modified(form);
-        let title = d.context.title.clone();
-        // Its context's icon: a Lucide name, or an emoji.
-        let glyph = d.context.icon.clone().map(|i| {
-            let i = i.trim().trim_matches('"').to_owned();
-            i.strip_prefix("lucide:").map_or_else(|| i.clone(), str::to_owned)
-        });
-        let glyph_colour = d.context.colour.clone();
-        let lucide = glyph
-            .clone()
-            .filter(|g| architect_shell::lucide::glyphs(g).is_some());
-        let emoji = glyph
-            .filter(|g| lucide.is_none() && !g.is_ascii())
-            .map(|g| g.strip_prefix("emoji:").unwrap_or(&g).to_owned());
-        let badge = d.badge.clone();
-        let screenset = d.screenset.clone();
-        let bg = if active { t.sheet.clone() } else { bar.clone() };
-        let edge = if active { t.rule.clone() } else { bar.clone() };
-        let weight = if active { 600 } else { 500 };
-        let ink = if active { t.ink.clone() } else { t.ink_3.clone() };
-        let (id_click, id_close, id_menu, id_down, id_move) =
-            (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
+        let out = popped.contains(&d.id);
+        let title = face.title.clone();
+        let colour = face.colour.clone().unwrap_or_else(|| t.accent.to_string());
+        let (bg, edge, ink) = if active {
+            (t.sheet.to_string(), t.rule.to_string(), t.ink.to_string())
+        } else {
+            ("transparent".to_owned(), "transparent".to_owned(), t.ink_2.to_string())
+        };
         let lifted = drag.read().as_ref().is_some_and(|g| g.moved && g.deck == id);
         let shadow = if lifted { format!("box-shadow:{};", t.shadow_lift) } else { String::new() };
+        // They keep their room: the scope's own tabs give way first.
+        let size = if wide {
+            format!("flex:0 0 {WIDE_W}px; width:{WIDE_W}px;")
+        } else {
+            format!("flex:0 0 auto; max-width:{COMPACT_MAX}px;")
+        };
+        let hint = if active {
+            format!("{title} — click again for the {}", crate::deck::GENERAL_NOUN)
+        } else if modified {
+            format!("{title} — changed from its screenset")
+        } else {
+            title.clone()
+        };
         let label = format!("{title}, {NOUN}");
+        let inner = render.map_or_else(
+            || rsx! { FaceBody { face: face.clone(), on: active, theme: t.clone() } },
+            |r| r(super::TabRenderCtx { face: face.clone(), on: active, height: pill_h, theme: t.clone() }),
+        );
+        let (id_click, id_close, id_menu, id_down, id_move) =
+            (id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
         rsx! {
             div {
                 key: "{id.0}",
                 role: "tab",
                 "aria-selected": if active { "true" } else { "false" },
                 "aria-label": "{label}",
-                "data-deck": "{id.0}",
-                "data-screenset": "{screenset}",
-                title: if modified { format!("{title} — changed from its screenset") } else { title },
-                style: "position:relative; flex:0 1 {TAB_W}px; min-width:72px; height:{height - 6.0}px; margin-top:6px; \
-                        box-sizing:border-box; display:flex; align-items:center; gap:6px; padding:0 6px 0 10px; \
-                        border-radius:8px 8px 0 0; background:{bg}; color:{ink}; cursor:default; {shadow} \
-                        border:1px solid {edge}; border-bottom:none;",
+                "data-scope-tab": "{id.0}",
+                "data-tab-kind": "{face.kind}",
+                "data-tab-width": face.width.as_str(),
+                "data-screenset": "{d.screenset}",
+                title: "{hint}",
+                style: "position:relative; {size} height:{pill_h}px; align-self:center; box-sizing:border-box; \
+                        display:flex; align-items:center; gap:6px; padding:0 6px 0 8px; overflow:hidden; \
+                        border-radius:8px; border:1px solid {edge}; background:{bg}; color:{ink}; \
+                        cursor:default; user-select:none; touch-action:none; {shadow}",
                 onpointerdown: move |e: PointerEvent| {
                     e.stop_propagation();
                     match e.data().trigger_button() {
-                        Some(dioxus::html::input_data::MouseButton::Auxiliary) => {
-                            handle.close(&id_down);
-                        }
+                        Some(dioxus::html::input_data::MouseButton::Auxiliary) => handle.close(&id_down),
                         Some(dioxus::html::input_data::MouseButton::Primary) | None => {
-                            drag.set(Some(StripDrag {
+                            drag.set(Some(ScopeDrag {
                                 deck: id_down.clone(),
                                 from_x: super::narrow(e.data().client_coordinates().x),
                                 moved: false,
@@ -1061,9 +1107,9 @@ pub fn DeckStrip(
                         return;
                     }
                     if !g.moved {
-                        drag.set(Some(StripDrag { moved: true, ..g.clone() }));
+                        drag.set(Some(ScopeDrag { moved: true, ..g.clone() }));
                     }
-                    // Over another deck's tab: the held one takes its place.
+                    // Over another scope tab: the held one takes its place.
                     if g.deck != id_move {
                         handle.move_to(&g.deck, i);
                     }
@@ -1072,48 +1118,41 @@ pub fn DeckStrip(
                     let held = drag.peek().clone();
                     drag.set(None);
                     if held.is_some_and(|g| !g.moved) {
-                        handle.activate(&id_click);
+                        // The one on show again: back to the general tabs.
+                        if handle.decks.peek().active.as_ref() == Some(&id_click) {
+                            handle.show_general();
+                        } else {
+                            handle.activate(&id_click);
+                        }
                     }
                 },
                 oncontextmenu: move |e: MouseEvent| {
                     e.prevent_default();
-                    let x = super::narrow(e.data().client_coordinates().x);
-                    let x = x - *strip_left.peek();
-                    menu.set(Some(StripMenu { deck: id_menu.clone(), x }));
+                    e.stop_propagation();
+                    let p = e.data().client_coordinates();
+                    menu.set(Some(ScopeMenuAt { deck: id_menu.clone(), x: super::narrow(p.x), y: super::narrow(p.y) }));
                 },
-                // In a window of its own: says so.
+                // Its colour along its foot while it shows (a wide one's
+                // runs down its side always).
+                if wide {
+                    span { style: "flex:0 0 3px; width:3px; align-self:stretch; margin:5px 0; border-radius:2px; background:{colour};" }
+                } else if active {
+                    span { style: "position:absolute; left:10px; right:10px; bottom:0; height:2px; border-radius:2px; background:{colour};" }
+                }
                 if out {
-                    AppWindow { size: 13 }
+                    span { style: "flex:0 0 auto; display:flex;", AppWindow { size: 12 } }
                 }
-                if let Some(name) = lucide {
-                    span { "data-deck-icon": "{name}", style: "flex:0 0 auto; display:flex;",
-                        architect_shell::lucide::LucideIcon { name: name.clone(), size: 13, color: glyph_colour }
-                    }
-                }
-                if let Some(e) = emoji {
-                    span { "data-deck-icon": "{e}", style: "flex:0 0 auto; font-size:12px; line-height:1;", "{e}" }
-                }
-                span { style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; \
-                               font-size:12px; font-weight:{weight};",
-                    "{title}"
-                }
-                if let Some(b) = badge {
-                    span { style: "flex:0 0 auto; padding:0 6px; border-radius:999px; background:{t.accent}; \
-                                   color:{t.accent_ink}; font-size:10px; font-weight:700;",
-                        "{b}"
-                    }
-                }
+                {inner}
                 if modified {
                     span {
                         "aria-label": "changed from its screenset",
                         style: "flex:0 0 auto; width:6px; height:6px; border-radius:999px; background:{t.accent};",
                     }
                 }
-                // The one on show has its ×; the others keep their room for
-                // their names (a middle-click closes any).
                 if active {
                     button {
-                        "aria-label": "Close {NOUN}",
+                        "aria-label": "Close {title}",
+                        title: "Close {title}",
                         style: "flex:0 0 auto; width:18px; height:18px; display:flex; align-items:center; justify-content:center; \
                                 border:none; border-radius:4px; background:transparent; color:{t.ink_3}; padding:0;",
                         onpointerdown: move |e: PointerEvent| e.stop_propagation(),
@@ -1129,61 +1168,81 @@ pub fn DeckStrip(
     });
     let open_menu = menu.read().clone();
     rsx! {
-        DeckCommands { handle }
         div {
             role: "tablist",
             "aria-label": crate::deck::NOUN_PLURAL_TITLE,
-            "data-deck-strip": "true",
-            style: "position:relative; flex:0 0 {height}px; height:{height}px; box-sizing:border-box; display:flex; \
-                    align-items:stretch; gap:2px; padding:0 {pad_right}px 0 {pad_left}px; background:{bar}; \
-                    border-bottom:1px solid {t.rule}; font-family:{t.font}; z-index:{architect_shell::layer::STATUS};",
-            onpointerdown: move |_| {
-                if let Some(drag) = on_drag {
-                    drag.call(());
-                }
-            },
-            ondoubleclick: move |_| {
-                if let Some(zoom) = on_zoom {
-                    zoom.call(());
-                }
-            },
+            "data-scope-tabs": "{decks.decks.len()}",
+            style: "flex:0 0 auto; height:{height}px; display:flex; align-items:center; gap:3px; \
+                    position:relative;",
             onpointerup: move |_| drag.set(None),
             onpointerleave: move |_| drag.set(None),
-            onmounted: move |e| async move {
-                if let Ok(r) = e.data().get_client_rect().await {
-                    strip_left.set(super::narrow(r.origin.x));
-                }
-            },
             {tabs}
-            button {
-                "aria-label": "Load onto a new {NOUN}",
-                title: "Load onto a new {NOUN}",
-                style: "flex:0 0 auto; width:28px; height:{height - 10.0}px; margin-top:5px; display:flex; align-items:center; \
-                        justify-content:center; border:none; border-radius:6px; background:transparent; color:{t.ink_3};",
-                onpointerdown: move |e: PointerEvent| e.stop_propagation(),
-                onclick: move |_| {
-                    let on_new = *handle.on_new.peek();
-                    if let Some(on_new) = on_new {
-                        on_new.call(());
-                    } else {
-                        let active = handle.decks.peek().active.clone();
-                        if let Some(id) = active {
-                            handle.duplicate(&id);
-                        }
-                    }
-                },
-                Plus { size: 14 }
+        }
+        // The divider between the scope tabs and the scope's own tabs.
+        div {
+            "data-scope-divider": "true",
+            style: "flex:0 0 1px; width:1px; height:{(height * 0.5).max(14.0)}px; align-self:center; margin:0 8px 0 6px; \
+                    background:{t.rule};",
+        }
+        if let Some(m) = open_menu {
+            ScopeMenu { handle, menu: m, on_done: move |()| menu.set(None) }
+        }
+    }
+}
+
+/// What a tab of a kind with no renderer shows: its icon in its colour,
+/// its title, a wide kind's subtitle under it, its badge.
+#[component]
+pub(super) fn FaceBody(face: crate::TabFace, on: bool, theme: ShellTheme) -> Element {
+    let t = theme;
+    let wide = face.width == crate::TabWidth::Wide;
+    let glyph = face.icon.clone().map(|i| {
+        let i = i.trim().trim_matches('"').to_owned();
+        i.strip_prefix("lucide:")
+            .map_or_else(|| i.clone(), str::to_owned)
+    });
+    let lucide = glyph
+        .clone()
+        .filter(|g| architect_shell::lucide::glyphs(g).is_some());
+    let emoji = glyph
+        .filter(|g| lucide.is_none() && !g.is_ascii())
+        .map(|g| g.strip_prefix("emoji:").unwrap_or(&g).to_owned());
+    let weight = if on { 600 } else { 500 };
+    let icon_colour = face.colour.clone();
+    rsx! {
+        if let Some(name) = lucide {
+            span { "data-tab-icon": "{name}", style: "flex:0 0 auto; display:flex;",
+                architect_shell::lucide::LucideIcon { name: name.clone(), size: if wide { 15 } else { 14 }, color: icon_colour }
             }
-            if let Some(m) = open_menu {
-                DeckMenu { handle, menu: m, top: height, on_done: move |()| menu.set(None) }
+        }
+        if let Some(e) = emoji {
+            span { "data-tab-icon": "{e}", style: "flex:0 0 auto; font-size:13px; line-height:1;", "{e}" }
+        }
+        span { style: "flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; overflow:hidden;",
+            span { style: "white-space:nowrap; overflow:hidden; font-size:12px; font-weight:{weight}; line-height:1.25;",
+                "{face.title}"
+            }
+            if let Some(sub) = face.subtitle.clone().filter(|_| wide) {
+                span { "data-tab-subtitle": "{sub}",
+                    style: "white-space:nowrap; overflow:hidden; font-size:10.5px; color:{t.ink_3}; line-height:1.25;",
+                    "{sub}"
+                }
+            }
+        }
+        if let Some(b) = face.badge {
+            span { style: "flex:0 0 auto; padding:0 6px; border-radius:999px; background:{t.accent}; \
+                           color:{t.accent_ink}; font-size:10px; font-weight:700;",
+                "{b}"
             }
         }
     }
 }
 
-/// A deck's menu, under its tab.
+/// A scope tab's menu, where it was opened: duplicate, pop out, its
+/// colour, its screenset (switch, save as, reset), its kind's own rows,
+/// close.
 #[component]
-fn DeckMenu(handle: DeckHandle, menu: StripMenu, top: f32, on_done: EventHandler<()>) -> Element {
+fn ScopeMenu(handle: DeckHandle, menu: ScopeMenuAt, on_done: EventHandler<()>) -> Element {
     let t = architect_shell::try_use_shell()
         .map(|s| s.theme)
         .unwrap_or_default();
@@ -1192,6 +1251,7 @@ fn DeckMenu(handle: DeckHandle, menu: StripMenu, top: f32, on_done: EventHandler
     let Some(deck) = deck else {
         return rsx! {};
     };
+    let kind = super::try_use_tab_kinds().and_then(|k| k.kinds.scope(&deck.context.kind).cloned());
     let form = *handle.form.read();
     let sets: Vec<(String, String)> = handle
         .screensets
@@ -1210,14 +1270,15 @@ fn DeckMenu(handle: DeckHandle, menu: StripMenu, top: f32, on_done: EventHandler
         id.clone(),
         id.clone(),
         id.clone(),
-        id,
+        id.clone(),
     );
-    let left = (menu.x - 40.0).max(4.0);
     let reset_ink = if deck.modified(form) {
         t.ink.clone()
     } else {
         t.ink_3.clone()
     };
+    let items = kind.map(|k| k.menu).unwrap_or_default();
+    let context_json = facet_json::to_string(&deck.context).unwrap_or_default();
     rsx! {
         div {
             style: "position:fixed; inset:0; z-index:{architect_shell::layer::MENU};",
@@ -1229,9 +1290,10 @@ fn DeckMenu(handle: DeckHandle, menu: StripMenu, top: f32, on_done: EventHandler
         div {
             role: "menu",
             "aria-label": "{deck.context.title}",
-            style: "position:absolute; left:{left}px; top:{top}px; min-width:220px; padding:4px 0; border-radius:8px; \
-                    background:{t.sheet}; color:{t.ink}; border:1px solid {t.rule}; box-shadow:{t.shadow_float}; \
-                    z-index:{architect_shell::layer::MENU}; font-family:{t.font};",
+            "data-scope-menu": "{id.0}",
+            style: "position:fixed; left:{(menu.x - 20.0).max(4.0)}px; top:{menu.y + 6.0}px; min-width:220px; padding:4px 0; \
+                    border-radius:8px; background:{t.sheet}; color:{t.ink}; border:1px solid {t.rule}; \
+                    box-shadow:{t.shadow_float}; z-index:{architect_shell::layer::MENU}; font-family:{t.font};",
             onpointerdown: move |e: PointerEvent| e.stop_propagation(),
             button { role: "menuitem", style: "{row} color:{t.ink};",
                 onclick: move |_| { handle.duplicate(&i1); on_done.call(()); },
@@ -1243,7 +1305,24 @@ fn DeckMenu(handle: DeckHandle, menu: StripMenu, top: f32, on_done: EventHandler
                         if popped { handle.dock_back(&i2) } else { handle.pop_out(&i2) }
                         on_done.call(());
                     },
-                    if popped { "Back into the strip" } else { "Pop out into a window" }
+                    if popped { "Back into the tab bar" } else { "Pop out into a window" }
+                }
+            }
+            div { style: "height:1px; margin:4px 0; background:{t.rule};" }
+            div { style: "padding:4px 12px; font-size:11px; color:{t.ink_3};", "Colour" }
+            div { style: "display:flex; gap:6px; padding:2px 12px 6px;",
+                for c in SWATCHES {
+                    button {
+                        key: "{c}",
+                        role: "menuitemradio",
+                        "aria-label": "Colour {c}",
+                        "aria-checked": if deck.context.colour.as_deref() == Some(c) { "true" } else { "false" },
+                        style: "width:16px; height:16px; border-radius:999px; border:1px solid {t.rule}; background:{c}; padding:0;",
+                        onclick: {
+                            let id = i6.clone();
+                            move |_| { handle.set_colour(&id, Some(c.to_owned())); on_done.call(()); }
+                        },
+                    }
                 }
             }
             div { style: "height:1px; margin:4px 0; background:{t.rule};" }
@@ -1276,9 +1355,30 @@ fn DeckMenu(handle: DeckHandle, menu: StripMenu, top: f32, on_done: EventHandler
                 onclick: move |_| { handle.reset(&i5); on_done.call(()); },
                 "Reset to the screenset"
             }
+            if !items.is_empty() {
+                div { style: "height:1px; margin:4px 0; background:{t.rule};" }
+                for item in items {
+                    button { key: "{item.action}", role: "menuitem", style: "{row} color:{t.ink};",
+                        onclick: {
+                            let (action, args, on) = (item.action, format!("{{\"context\":{context_json}}}"), id.0.clone());
+                            move |_| {
+                                if let Some(c) = architect_commands::try_use_commands() {
+                                    let invocation = architect::action::Invocation::new(
+                                        architect::action::InvocationSource::ContextMenu,
+                                    )
+                                    .on("scope", &on);
+                                    let _ = c.run_invoked(&action, Some(&args), invocation);
+                                }
+                                on_done.call(());
+                            }
+                        },
+                        "{item.label}"
+                    }
+                }
+            }
             div { style: "height:1px; margin:4px 0; background:{t.rule};" }
             button { role: "menuitem", style: "{row} color:{t.danger};",
-                onclick: move |_| { handle.close(&i6); on_done.call(()); },
+                onclick: move |_| { handle.close(&id); on_done.call(()); },
                 "Close {NOUN}"
             }
         }
@@ -1313,13 +1413,14 @@ fn SwitchRow(
     }
 }
 
-/// The decks as a phone's switcher lists them (read as its menu is
-/// drawn): the decks, and each one's id, title, whether it shows.
+/// The scope tabs as a phone's switcher lists them (read as its menu is
+/// drawn): the general tabs and each scope tab, its id, title, whether it
+/// shows.
 #[must_use]
 pub(super) fn switcher_rows() -> Option<(DeckHandle, Vec<(DeckId, String, bool)>)> {
     let handle = try_consume_context::<DeckHandle>()?;
     let decks = handle.decks.peek();
-    let rows = decks
+    let mut rows: Vec<(DeckId, String, bool)> = decks
         .decks
         .iter()
         .map(|d| {
@@ -1330,6 +1431,17 @@ pub(super) fn switcher_rows() -> Option<(DeckHandle, Vec<(DeckId, String, bool)>
             )
         })
         .collect();
+    // The general tabs first, once a scope tab is open.
+    if !rows.is_empty() {
+        rows.insert(
+            0,
+            (
+                decks.general.id.clone(),
+                scope_word!(general_title).to_owned(),
+                decks.general_shown(),
+            ),
+        );
+    }
     drop(decks);
     Some((handle, rows))
 }
