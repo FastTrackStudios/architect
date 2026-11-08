@@ -1657,6 +1657,14 @@ pub(super) fn RecentRow(
         "nv-row nv-recent"
     };
     let p = path.clone();
+    // Its own icon or its type's (a project's note: the project's glyph).
+    let (icon, colour) = {
+        let s = nav.state.read();
+        (
+            s.file_icon(&path),
+            s.colour(&format!("file:{path}")).map(str::to_owned),
+        )
+    };
     rsx! {
         div { class, role: "treeitem", "data-recent": "{path}",
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{height}px; display:flex; align-items:center; gap:6px; \
@@ -1665,7 +1673,13 @@ pub(super) fn RecentRow(
                 let out = nav.state.peek().open_recent(&p);
                 nav.act(out, on_open);
             },
-            span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", FileText { size: 15 } }
+            span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);",
+                if let Some(icon) = icon {
+                    super::icon::IconView { nav, icon, size: 15, colour }
+                } else {
+                    FileText { size: 15 }
+                }
+            }
             span { class: "nv-name", style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;", "{name}" }
         }
     }

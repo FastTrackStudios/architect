@@ -54,11 +54,22 @@ pub fn project_context(folder: &str) -> Option<DeckContext> {
         return None;
     }
     let title = folder.rsplit('/').next().unwrap_or(folder).to_owned();
-    Some(
-        DeckContext::new(PROJECT, folder, title)
-            .icon("folder-kanban")
-            .folder(folder),
-    )
+    // Its own icon and colour (its `project.md`'s), else the project
+    // glyph: as the navigator draws it.
+    let text = std::fs::read_to_string(root.join(folder).join("project.md")).unwrap_or_default();
+    let (props, _) = crate::note::frontmatter(&text);
+    let prop = |k: &str| {
+        props
+            .iter()
+            .find(|(key, _)| key == k)
+            .map(|(_, v)| v.trim().trim_matches('"').to_owned())
+            .filter(|v| !v.is_empty())
+    };
+    let mut context = DeckContext::new(PROJECT, folder, title)
+        .icon(prop("icon").unwrap_or_else(|| architect_navigator_api::PROJECT_ICON.to_owned()))
+        .folder(folder);
+    context.colour = prop("color").or_else(|| prop("colour"));
+    Some(context)
 }
 
 /// The decks kept in memory for the run (the sandbox without a vault on
@@ -212,6 +223,9 @@ fn resolve(mut context: DeckContext) -> DeckContext {
         context.folder = p.folder;
         if context.icon.is_none() {
             context.icon = p.icon;
+        }
+        if context.colour.is_none() {
+            context.colour = p.colour;
         }
         if context.title.trim().is_empty() {
             context.title = p.title;

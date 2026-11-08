@@ -422,6 +422,8 @@ pub struct FolderMeta {
     /// Its own icon (a project's, a library's), when no icon is set on
     /// the folder.
     pub icon: Option<String>,
+    /// Its own colour (a project's), when none is set on the folder.
+    pub colour: Option<String>,
 }
 
 /// A vault kept in memory.

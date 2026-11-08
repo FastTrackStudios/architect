@@ -691,7 +691,7 @@ pub struct ProjectTypeDecl {
 /// [[navigator_providers]]
 /// id = "projects"
 /// title = "Projects"
-/// icon = "folder-kanban"
+/// icon = "box"
 /// views = ["list", "page"]   # its own [[views]] it goes with
 /// actions = "PROJECTS_NAV"   # PROJECTS_NAV_SNAPSHOT, _OPEN, _MOVE, _CREATE
 /// ```

@@ -93,6 +93,8 @@ pub struct Project {
     pub up: Option<String>,
     pub members: Vec<String>,
     pub icon: Option<String>,
+    /// Its icon's colour (`color`, or `colour`), a CSS colour.
+    pub colour: Option<String>,
     pub tags: Vec<String>,
     /// Its parent project, as linked (`parent`): a sub-project's.
     pub parent: Option<String>,
@@ -130,6 +132,7 @@ impl Project {
             up: text("up").or_else(|| text("area")),
             members: values.get("members").map(list_of).unwrap_or_default(),
             icon: text("icon"),
+            colour: text("color").or_else(|| text("colour")),
             tags: values.get("tags").map(list_of).unwrap_or_default(),
             parent: text("parent"),
             org: text("org"),

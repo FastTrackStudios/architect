@@ -304,7 +304,8 @@ fn mounts_read_as_their_names_and_a_containers_icon_and_org_mark_its_row() {
             .item(Item::new("s1", "p/crescendum", "Overture")),
     );
     let m = mounts().with(
-        Mount::provider("projects/projects", "Projects", Place::Top).icon("folder-kanban"),
+        Mount::provider("projects/projects", "Projects", Place::Top)
+            .icon(architect_navigator_api::PROJECT_ICON),
         Arc::new(projects),
     );
     let mut s = state(&m);

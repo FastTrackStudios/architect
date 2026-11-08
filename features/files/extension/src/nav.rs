@@ -2,7 +2,9 @@
 //! the left; a project's top folders and files, or a library's assets, on
 //! the right. Every item opens its page through `FILES_OPEN`.
 
-use architect_navigator_api::{Item, NavigatorProvider, Node, Open, ProviderFuture, Snapshot};
+use architect_navigator_api::{
+    Item, NavigatorProvider, Node, Open, PROJECT_ICON, ProviderFuture, Snapshot,
+};
 use serde_json::{Value, json};
 
 use crate::{run, summary, text};
@@ -35,8 +37,7 @@ pub fn tree(roots: &[Value]) -> Vec<Node> {
     orgs.dedup();
     orgs.into_iter()
         .map(|org| {
-            let mut projects =
-                Node::new(format!("projects:{org}"), "Projects").icon("folder-kanban");
+            let mut projects = Node::new(format!("projects:{org}"), "Projects").icon(PROJECT_ICON);
             let mut assets = Node::new(format!("assets:{org}"), "Assets").icon("library");
             for r in roots.iter().filter(|r| text(r, "org") == org) {
                 let place = text(r, "place");
@@ -44,8 +45,9 @@ pub fn tree(roots: &[Value]) -> Vec<Node> {
                     assets = assets
                         .child(Node::new(format!("root:{place}"), text(r, "name")).icon("library"));
                 } else {
-                    projects = projects
-                        .child(Node::new(format!("root:{place}"), text(r, "name")).icon("folder"));
+                    projects = projects.child(
+                        Node::new(format!("root:{place}"), text(r, "name")).icon(PROJECT_ICON),
+                    );
                 }
             }
             let mut node = Node::new(format!("org:{org}"), &org).icon("building");

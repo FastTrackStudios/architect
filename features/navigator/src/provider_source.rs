@@ -317,7 +317,7 @@ impl NavigatorSource for ProviderSource {
         m.snapshot
             .nodes()
             .into_iter()
-            .filter(|(_, n)| n.org.is_some() || n.shared || n.icon.is_some())
+            .filter(|(_, n)| n.org.is_some() || n.shared || n.icon.is_some() || n.colour.is_some())
             .filter_map(|(_, n)| {
                 let path = m.folder_of.get(&n.id)?.clone();
                 Some((
@@ -326,6 +326,7 @@ impl NavigatorSource for ProviderSource {
                         org: n.org.clone(),
                         shared: n.shared,
                         icon: n.icon.clone(),
+                        colour: n.colour.clone(),
                     },
                 ))
             })

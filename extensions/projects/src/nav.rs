@@ -29,7 +29,7 @@
 //! - **New** in a project: a task in it (`architect.tasks` `create`).
 
 use architect_navigator_api::{
-    Item, NavigatorProvider, Node, Open, ProviderFuture, Snapshot, date_millis,
+    Item, NavigatorProvider, Node, Open, PROJECT_ICON, ProviderFuture, Snapshot, date_millis,
 };
 use serde_json::{Value, json};
 
@@ -106,7 +106,9 @@ pub fn parent_of<'a>(p: &Project, projects: &'a [Project]) -> Option<&'a Project
 
 /// `p`'s node, with the projects under it.
 fn project_node(p: &Project, projects: &[Project]) -> Node {
-    let mut n = Node::new(&p.path, &p.title).icon(p.icon.as_deref().unwrap_or("folder-kanban"));
+    // Its own icon, else the project glyph: never a folder's.
+    let mut n = Node::new(&p.path, &p.title).icon(p.icon.as_deref().unwrap_or(PROJECT_ICON));
+    n.colour.clone_from(&p.colour);
     if let Some(org) = &p.org {
         n = n.org(org);
     }
@@ -267,7 +269,7 @@ pub fn snapshot_of(
                 .opens(Open::File {
                     path: c.path.clone(),
                 });
-            item.icon = Some(c.icon.clone().unwrap_or_else(|| "folder-kanban".to_owned()));
+            item.icon = Some(c.icon.clone().unwrap_or_else(|| PROJECT_ICON.to_owned()));
             snap.items.push(item);
         }
     }

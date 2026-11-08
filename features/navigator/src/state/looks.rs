@@ -10,6 +10,9 @@ use super::{NavigatorState, Outcome, colour_key};
 use crate::icons::{self, Icon};
 use crate::source::{FileOp, PropertyValue, ancestors};
 
+/// The note that makes its folder a project (the Projects extension's).
+pub const PROJECT_NOTE: &str = "project.md";
+
 /// What is painted on a row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Paint {
@@ -83,22 +86,74 @@ impl NavigatorState {
             .or_else(|| self.icons.get(&key).and_then(|i| Icon::parse(i)))
     }
 
+    /// The `project.md` that makes vault folder `folder` a project, when
+    /// it has one (the Projects extension's project note).
+    #[must_use]
+    pub fn project_page(&self, folder: &str) -> Option<String> {
+        if folder.is_empty() {
+            return None;
+        }
+        let page = format!("{folder}/{PROJECT_NOTE}");
+        (self.index.in_vault(&page) && self.index.file(&page).is_some()).then_some(page)
+    }
+
+    /// A project's own `icon`, `color` (or `colour`) in its `project.md`:
+    /// the Projects extension's, read whatever the frontmatter settings.
+    fn project_prop(&self, page: &str, keys: &[&str]) -> Option<&str> {
+        let file = self.index.file(page)?;
+        keys.iter().find_map(|k| match file.get(k)? {
+            PropertyValue::Text(t) => Some(t.as_str()).filter(|t| !t.trim().is_empty()),
+            _ => None,
+        })
+    }
+
+    /// A project's icon: one set on its note, else its `project.md`'s own
+    /// (`icon`), else the project glyph
+    /// ([`architect_navigator_api::PROJECT_ICON`]).
+    fn project_icon(&self, page: &str) -> Option<Icon> {
+        self.own_icon(&format!("file:{page}"))
+            .or_else(|| self.project_prop(page, &["icon"]).and_then(Icon::parse))
+            .or_else(|| Icon::parse(architect_navigator_api::PROJECT_ICON))
+    }
+
     /// The icon a folder's row draws, when the settings show folder icons
-    /// and it has one.
+    /// and it has one: its own; a project's (a vault folder with a
+    /// `project.md`, which replaces the folder icon); a provider's
+    /// container's (a project in Projects).
     #[must_use]
     pub fn folder_icon(&self, path: &str) -> Option<Icon> {
         self.settings
             .show_folder_icons
             .then(|| {
-                self.own_icon(&format!("folder:{path}")).or_else(|| {
-                    // A provider's container's own (a project's glyph).
-                    self.index
-                        .folder_meta_of(path)
-                        .and_then(|m| m.icon.as_deref())
-                        .and_then(Icon::parse)
-                })
+                self.own_icon(&format!("folder:{path}"))
+                    .or_else(|| {
+                        self.project_page(path)
+                            .and_then(|page| self.project_icon(&page))
+                    })
+                    .or_else(|| {
+                        self.index
+                            .folder_meta_of(path)
+                            .and_then(|m| m.icon.as_deref())
+                            .and_then(Icon::parse)
+                    })
             })
             .flatten()
+    }
+
+    /// A folder's own colour where a person set none: its project's
+    /// (`project.md`'s `color`), or its provider's (a project in
+    /// Projects).
+    pub(super) fn folder_own_colour(&self, path: &str) -> Option<&str> {
+        if let Some(page) = self.project_page(path)
+            && let Some(c) = self
+                .frontmatter_colour(&format!("file:{page}"))
+                .or_else(|| self.project_prop(&page, &["color", "colour"]))
+        {
+            return Some(c);
+        }
+        self.index
+            .folder_meta_of(path)
+            .and_then(|m| m.colour.as_deref())
     }
 
     /// The icon a tag's or a property's row draws.
@@ -123,6 +178,11 @@ impl NavigatorState {
         }
         if let Some(own) = self.own_icon(&format!("file:{path}")) {
             return Some(own);
+        }
+        // A project's note: its project's glyph, not a page's.
+        let (folder, name) = path.rsplit_once('/').unwrap_or(("", path));
+        if name == PROJECT_NOTE && self.project_page(folder).is_some() {
+            return self.project_icon(path);
         }
         let file = self.index.file(path)?;
         // A provider's item's own icon (a song's, a capture's).
