@@ -142,8 +142,8 @@ fn hits_inside(doc: &DioxusDocument, x: f64, y: f64, selector: &str) -> bool {
 #[test]
 fn the_panes_tab_bars_are_the_title_row_one_row() {
     let doc = laid_out(board_app);
-    // No window of its own here: the shell's row is 52pt.
-    let row = 52.0;
+    // No window of its own here: the shell's row is still Obsidian's 40pt.
+    let row = 40.0;
     let bars = rects(&doc, "[data-tab-bar]");
     assert_eq!(bars.len(), 2, "two panes, two tab bars: {bars:?}");
     for (x, y, _, h) in &bars {
@@ -198,7 +198,7 @@ fn a_page_with_one_tab_keeps_it_in_the_shells_row() {
     let tab = rects(&doc, "[data-desk-tab=\"Inbox\"]");
     assert_eq!(tab.len(), 1, "the page's tab: {tab:?}");
     let (_, y, _, h) = tab[0];
-    assert!(y >= 0.0 && y + h <= 52.5, "in the title row: {tab:?}");
+    assert!(y >= 0.0 && y + h <= 40.5, "in the title row: {tab:?}");
     assert!(rects(&doc, "[data-tab-bar]").is_empty());
     // The app's sidebar is open beside it; the account stays a mark on
     // the ribbon, not a row in it.
