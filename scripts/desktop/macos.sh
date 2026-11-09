@@ -5,9 +5,6 @@
 #
 #   scripts/desktop/macos.sh     # -> $OUT_DIR/Architect-macos-arm64.dmg
 #
-# UNTESTED: written from Studio's scripts/desktop/macos.sh (the same Blitz
-# app shape) while airlock was unreachable; it has not run yet.
-#
 # Runs on airlock (Apple silicon), where the Developer ID identity lives in
 # the build keychain and the App Store Connect API key is in
 # ~/.appstoreconnect/config.env, which notarytool reads. Nothing comes from
