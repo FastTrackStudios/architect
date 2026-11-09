@@ -274,17 +274,17 @@ jobs:
   # The desktop app for macOS: Developer-ID signed, notarized and stapled
   # (scripts/desktop/macos.sh, Studio's flow), and latest-macos.json.
   #
-  # UNTESTED (#431): written while airlock was unreachable, never run. Off
-  # until the repo variable ARCHITECT_MACOS_RELEASE is `true`, so a release
-  # never waits on a runner that is not there. It needs an airlock runner
-  # registered to this repo with the `architect-release-mac` label, the
-  # Developer ID identity in its fts-build keychain and the App Store
-  # Connect key in ~/.appstoreconnect/config.env (what Task's and Studio's
-  # Mac jobs use). It never blocks the other jobs.
+  # Runs on airlock's generic org runner (`airlock` label, user rat, kache
+  # on the build disk), which has the Developer ID identity in its
+  # fts-build keychain and the App Store Connect key in
+  # ~/.appstoreconnect/config.env (what Task's and Studio's Mac jobs use).
+  # On while the repo variable ARCHITECT_MACOS_RELEASE is `true`; set it to
+  # anything else to release without waiting on airlock. It never blocks the
+  # other jobs.
   macos:
     needs: release
     if: ${{ vars.ARCHITECT_MACOS_RELEASE == 'true' }}
-    runs-on: [self-hosted, macos, architect-release-mac]
+    runs-on: [self-hosted, macOS, airlock]
     timeout-minutes: 240
     continue-on-error: true
     permissions:

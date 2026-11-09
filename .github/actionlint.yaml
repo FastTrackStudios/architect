@@ -3,5 +3,5 @@ self-hosted-runner:
   labels:
     - thebattleship
     - thebattleship-release
-    # airlock (macOS), for release.yml `macos`: not registered yet (#431).
-    - architect-release-mac
+    # airlock (macOS), the org's generic Mac runner: release.yml `macos`.
+    - airlock
