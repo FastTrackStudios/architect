@@ -34,6 +34,9 @@ run = [
     "ui",
     "dep:blitz-traits",
     "architect-workspace/ui",
+    # A window's document, offscreen (`architect_workspace::native::offscreen_document`):
+    # the app's stylesheets, assets and HTML parser, as its desk window has them.
+    "architect-workspace/native",
     "dep:architect-commands",
 ]
 story = ["run", "dep:architect-story-runtime"]

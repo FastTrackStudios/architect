@@ -21,6 +21,8 @@ futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+# The film's document, read: its head, its icon buttons (`tests/fidelity.rs`).
+blitz-dom = { workspace = true }
 
 [lints]
 workspace = true

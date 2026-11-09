@@ -127,14 +127,7 @@ fn document(
     fonts: &'static [&'static [u8]],
 ) -> DioxusDocument {
     let waker: Arc<dyn blitz_traits::net::NetWaker> = Arc::new(proxy.clone());
-    let net: Arc<dyn NetProvider> = Arc::new(Assets {
-        data: blitz_shell::DataUriNetProvider::shared(Some(waker)),
-    });
-    vdom.provide_root_context(Arc::clone(&net));
-    let config = document_config(Some(net), fonts);
-    if let Some(html) = &config.html_parser_provider {
-        vdom.provide_root_context(Arc::clone(html));
-    }
+    let config = wire(&vdom, assets(Some(waker)), fonts_context(fonts));
     DioxusDocument::new(vdom, config)
 }
 
@@ -150,8 +143,116 @@ pub fn document_config(net: Option<Arc<dyn NetProvider>>, fonts: &[&[u8]]) -> Do
     DocumentConfig {
         net_provider: net,
         html_parser_provider: Some(Arc::new(blitz_html::HtmlProvider)),
-        font_ctx: (!fonts.is_empty()).then(|| font_context(fonts)),
+        font_ctx: fonts_context(fonts),
         ..Default::default()
+    }
+}
+
+/// [`document_config`] for `vdom`, its `net` and its HTML parser put in
+/// `vdom`'s root context too (as dioxus-native's launcher does), so a
+/// component reaches them.
+fn wire(
+    vdom: &VirtualDom,
+    net: Arc<dyn NetProvider>,
+    font_ctx: Option<dioxus_native::FontContext>,
+) -> DocumentConfig {
+    vdom.provide_root_context(Arc::clone(&net));
+    let config = DocumentConfig {
+        font_ctx,
+        ..document_config(Some(net), &[])
+    };
+    if let Some(html) = &config.html_parser_provider {
+        vdom.provide_root_context(Arc::clone(html));
+    }
+    config
+}
+
+/// The bundle's assets, `file:` URLs and `data:` URIs, waking `waker`
+/// (none: the caller polls).
+fn assets(waker: Option<Arc<dyn blitz_traits::net::NetWaker>>) -> Arc<dyn NetProvider> {
+    Arc::new(Assets {
+        data: blitz_shell::DataUriNetProvider::shared(waker),
+    })
+}
+
+fn fonts_context(fonts: &[&[u8]]) -> Option<dioxus_native::FontContext> {
+    (!fonts.is_empty()).then(|| font_context(fonts))
+}
+
+/// A window's document with no window: what a guide film, a test and
+/// `--headless` mount the app in.
+///
+/// Made as the main window's is (the same [`document_config`]: the
+/// bundle's assets, `file:` and `data:` URLs, the HTML parser), at
+/// `viewport`, laid out with `fonts`, and with a document head: what
+/// `document::Style` and `document::Link` ask for is kept by the
+/// returned [`OffscreenHead`] and goes into the document at its next
+/// [`OffscreenHead::apply`]. Without one, Dioxus's no-op document drops
+/// every app stylesheet (the shell's `.tip` rule among them, which hides
+/// an icon button's name: a film then drew the names beside the icons).
+#[must_use]
+pub fn offscreen_document(
+    vdom: VirtualDom,
+    viewport: blitz_traits::shell::Viewport,
+    fonts: Option<dioxus_native::FontContext>,
+) -> (DioxusDocument, OffscreenHead) {
+    let head = OffscreenHead::default();
+    let shared: Rc<dyn dioxus::document::Document> = Rc::new(head.clone());
+    vdom.provide_root_context(shared);
+    let config = DocumentConfig {
+        viewport: Some(viewport),
+        ..wire(&vdom, assets(None), fonts)
+    };
+    (DioxusDocument::new(vdom, config), head)
+}
+
+/// A head element asked for: its name, attributes and contents.
+type HeadElement = (String, Vec<(String, String)>, Option<String>);
+
+/// An [`offscreen_document`]'s head: what its components asked to put in
+/// `<head>` (stylesheets, links), until [`Self::apply`] moves it in.
+#[derive(Clone, Default)]
+pub struct OffscreenHead(Rc<RefCell<Vec<HeadElement>>>);
+
+impl OffscreenHead {
+    /// Puts what was asked for since into `doc`'s head; true when any was.
+    pub fn apply(&self, doc: &mut DioxusDocument) -> bool {
+        let asked = std::mem::take(&mut *self.0.borrow_mut());
+        let any = !asked.is_empty();
+        for (name, attributes, contents) in asked {
+            doc.create_head_element(&name, &attributes, &contents);
+        }
+        any
+    }
+}
+
+impl dioxus::document::Document for OffscreenHead {
+    fn eval(&self, js: String) -> dioxus::document::Eval {
+        dioxus::document::NoOpDocument.eval(js)
+    }
+
+    fn create_head_element(
+        &self,
+        name: &str,
+        attributes: &[(&str, String)],
+        contents: Option<String>,
+    ) {
+        // No window to title.
+        if name == "title" {
+            return;
+        }
+        self.0.borrow_mut().push((
+            name.to_owned(),
+            attributes
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                .collect(),
+            contents,
+        ));
+    }
+
+    fn create_head_component(&self) -> bool {
+        true
     }
 }
 

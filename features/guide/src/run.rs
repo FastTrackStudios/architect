@@ -35,8 +35,9 @@ use std::time::{Duration, Instant};
 
 use architect::action::{ActionError, ActionList};
 use architect_shell::motion::VirtualClock;
+use architect_workspace::native::{OffscreenHead, offscreen_document};
 use architect_workspace::{Popout, Rect, WindowId, WindowSystem, Windows};
-use blitz_dom::{Document as _, DocumentConfig, FontContext};
+use blitz_dom::{Document as _, FontContext};
 use blitz_traits::events::{
     BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent, KeyState,
     MouseEventButton, MouseEventButtons, PointerCoords, PointerDetails, UiEvent,
@@ -187,6 +188,9 @@ pub struct Window {
     /// Its content, in desktop points.
     pub rect: Rect,
     pub doc: DioxusDocument,
+    /// What its components asked to put in `<head>` (their stylesheets),
+    /// moved into `doc` as it settles: as a window's document has them.
+    head: OffscreenHead,
 }
 
 /// Every window the app has open, headless: the main one and each
@@ -267,13 +271,14 @@ impl Desktop {
         }
         let rect = content_rect(&view);
         let scale = view.scale;
-        let doc = document(vdom, rect, scale, app.fonts.clone());
+        let (doc, head) = document(vdom, rect, scale, app.fonts.clone());
         let desk = Self {
             windows: vec![Window {
                 id: WindowId::main(),
                 title: title.to_owned(),
                 rect,
                 doc,
+                head,
             }],
             shared,
             fonts: app.fonts.clone(),
@@ -323,12 +328,13 @@ impl Desktop {
                     let rect = popout
                         .bounds()
                         .unwrap_or_else(|| Rect::new(main.x + dx, main.y + dy, w, h));
-                    let doc = document(popout.dom(), rect, self.scale, self.fonts.clone());
+                    let (doc, head) = document(popout.dom(), rect, self.scale, self.fonts.clone());
                     self.windows.push(Window {
                         id: popout.id().clone(),
                         title: popout.title().to_owned(),
                         rect,
                         doc,
+                        head,
                     });
                 }
                 Ask::Close(id) => self
@@ -348,6 +354,7 @@ impl Desktop {
             let mut progressed = false;
             for w in &mut self.windows {
                 progressed |= w.doc.poll(None);
+                progressed |= w.head.apply(&mut w.doc);
             }
             if !progressed {
                 break;
@@ -432,28 +439,25 @@ impl Headless {
 /// them out (a signal written in one redraws another).
 const SETTLE_ROUNDS: usize = 16;
 
+/// A window's document, as the app's desk window makes it
+/// ([`offscreen_document`]: its assets, HTML parser and head), at
+/// `rect`'s size, built, its first stylesheets in.
 fn document(
     vdom: VirtualDom,
     rect: Rect,
     scale: f32,
     fonts: Option<FontContext>,
-) -> DioxusDocument {
+) -> (DioxusDocument, OffscreenHead) {
     let viewport = Viewport::new(
         device_px(rect.w, scale),
         device_px(rect.h, scale),
         scale,
         ColorScheme::Dark,
     );
-    let mut doc = DioxusDocument::new(
-        vdom,
-        DocumentConfig {
-            viewport: Some(viewport),
-            font_ctx: fonts,
-            ..Default::default()
-        },
-    );
+    let (mut doc, head) = offscreen_document(vdom, viewport, fonts);
     doc.initial_build();
-    doc
+    head.apply(&mut doc);
+    (doc, head)
 }
 
 /// Plays `scenario` over `app`, showing each frame kept to `film` (none:

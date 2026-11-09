@@ -188,3 +188,13 @@ checking `GUIDE_TOUR_STATE` after each step:
 - ffmpeg and gifski come from the dev shell (`devenv.nix`).
 - Media never go on `main`: `just media-publish` commits them to the orphan
   `media` branch; docs embed `raw.githubusercontent.com/FastTrackStudios/architect/media/<id>.gif`.
+
+## A film is the window's document
+
+The runner mounts each window in `architect_workspace::native::offscreen_document`
+(the desk window's `document_config`, plus an `OffscreenHead` that takes
+`document::Style`/`document::Link`), so films carry every app stylesheet.
+Make any other headless document of an app the same way; a bare
+`DioxusDocument::new` has no head, and Dioxus silently drops every
+`document::Style`. `apps/sandbox/media/tests/fidelity.rs` guards it (the head's
+golden, icons centred in icon buttons and icon-only tabs).

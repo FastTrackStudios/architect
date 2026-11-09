@@ -93,8 +93,9 @@ pub fn size_live(mounted: &MountedData) -> Option<(f32, f32)> {
     Some((narrow(r.width), narrow(r.height)))
 }
 
-/// The element whose whole text, trimmed, is `text` and that has a size:
-/// the last in the page, which is the innermost of a chain of them nested
+/// The element whose whole text, trimmed, is `text`, that has a size and
+/// is seen ([`seen`]: a hidden one, such as an icon button's name kept
+/// for its tip, is not what a person reads): the last in the page, which is the innermost of a chain of them nested
 /// (a button, its label) and, of the rest, the one drawn over the others
 /// (a menu or a popover comes after the page it opens over).
 fn by_text(doc: &BaseDocument, text: &str, outside: Option<NodeId>) -> Option<NodeId> {
@@ -109,7 +110,29 @@ fn by_text(doc: &BaseDocument, text: &str, outside: Option<NodeId>) -> Option<No
                 && doc
                     .get_client_bounding_rect(*id)
                     .is_some_and(|r| r.width > 0.0 && r.height > 0.0)
+                && seen(doc, *id)
         })
+}
+
+/// Whether node `id` is drawn to be seen: not `visibility: hidden` (or
+/// `collapse`), and neither it nor anything it is in fully transparent.
+fn seen(doc: &BaseDocument, id: NodeId) -> bool {
+    if matches!(
+        doc.resolved_style_value(id, "visibility").as_str(),
+        "hidden" | "collapse"
+    ) {
+        return false;
+    }
+    let mut at = Some(id);
+    while let Some(n) = at.and_then(|n| doc.get_node(n)) {
+        if n.primary_styles()
+            .is_some_and(|s| s.get_effects().opacity <= 0.0)
+        {
+            return false;
+        }
+        at = n.parent;
+    }
+    true
 }
 
 /// Whether node `id` is `ancestor` or inside it.
