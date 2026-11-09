@@ -518,6 +518,8 @@ fn Tab(
     let ink = if on { &*t.ink } else { &*t.ink_3 };
     let fill = if on { &*t.sheet } else { "transparent" };
     let (pad_l, pad_r) = if icons { (8.0, 8.0) } else { (12.0, 6.0) };
+    // An icon-only tab is wider than its icon: the icon sits in its middle.
+    let justify = if icons { "center" } else { "flex-start" };
     // What extensions put on it (`TabBadges`), after its name.
     let badges = try_use_context::<super::TabBadges>().and_then(|b| {
         let kind = host
@@ -589,7 +591,7 @@ fn Tab(
     rsx! {
         div {
             style: "flex:{grow} {shrink} {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
-                    box-sizing:border-box; display:flex; align-items:center; gap:6px; \
+                    box-sizing:border-box; display:flex; align-items:center; justify-content:{justify}; gap:6px; \
                     padding:0 {pad_r}px 0 {pad_l}px; overflow:hidden; \
                     border-radius:8px 8px 0 0; white-space:nowrap; touch-action:none; \
                     user-select:none; color:{ink}; background:{plain_fill}; \

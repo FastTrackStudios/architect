@@ -95,6 +95,17 @@ its `Arc<ActionList>`, its fonts, its resolvers). It opens a
 `ui-snapshot` do, with the Action List, the window's size (`ViewSize`) and
 the desktop's windows (`architect_workspace::Windows`) in root context.
 
+- **The window's document, offscreen**: each document is made by
+  `architect_workspace::native::offscreen_document` (`features/workspace/src/native.rs`),
+  from the desk window's own `document_config` (assets, `file:` and `data:`
+  URLs, the HTML parser), with a document head (`OffscreenHead`): what
+  `document::Style` asks for goes into the document as it settles, so a
+  film draws with every app stylesheet the window has. Without a head
+  Dioxus drops them, and a film drew each icon button's hidden name beside
+  its icon. `apps/sandbox/media/tests/fidelity.rs` holds this: the head
+  against `tests/golden/head.txt`, and every icon button's and icon-only
+  tab's icon centred within a point. A text target skips hidden text
+  (`visibility: hidden`, `opacity: 0`): a tip's name is not what a person reads.
 - **Actions** run on the list. An id the list does not have goes through
   `COMMANDS_RUN` (`features/commands/src/bridge.rs` `use_command_actions`),
   which runs any command on the window's thread, a view's own included.

@@ -90,7 +90,7 @@ media-test *IDS:
     cargo run -q -p architect-sandbox-media -- {{IDS}} --test
 
 # Regenerate every scenario's media and commit them to the orphan `media`
-# branch (only the generated files; README and docs embed them from
+# branch (only the generated files, its folders kept; README and docs embed them from
 # raw.githubusercontent.com/FastTrackStudios/architect/media/<id>.gif).
 # Works in a temporary worktree: this checkout and its branch are never
 # touched. PUSH=1 pushes the branch too.
@@ -112,7 +112,9 @@ media-publish PUSH="0":
         git -C "$tree" rm -rq --cached . >/dev/null
         git -C "$tree" clean -fdxq
     fi
-    find "$tree" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+    # The generated files only: folders on the branch (a PR's own evidence,
+    # 443-navigator/, landing-page/) are not regenerated here and are kept.
+    find "$tree" -mindepth 1 -maxdepth 1 -type f ! -name .git -exec rm -f {} +
     find "$out" -maxdepth 1 -type f \( -name '*.gif' -o -name '*.webm' -o -name '*.mp4' -o -name '*.png' \) -exec cp {} "$tree"/ \;
     git -C "$tree" add -A
     if git -C "$tree" diff --cached --quiet; then

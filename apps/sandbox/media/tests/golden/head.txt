@@ -1,0 +1,5 @@
+style [] html, body { margin: 0; padding: 0; background: #09090b; }button { curso
+style [] :root { --accent: #26243a;--accent-foreground: #c7d2fe;--active: rgba(25
+style [] .fts-theme-root, .fts-theme-scope { font-family: var(--default-font-fami
+style [] button, [role=tab], [role=button] { cursor: pointer; } :focus-visible { 
+style [] @keyframes architect-motion-frames { from { opacity: 0; } to { opacity: 
