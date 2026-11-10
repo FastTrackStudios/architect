@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use architect::action::{ActionError, ActionList, ActionMeta, Effect};
 use crdt::presence::{Coord, Place, Roster};
 use facet::Facet;
 
@@ -483,6 +484,146 @@ impl PresenceBoard {
     }
 }
 
+// ── the actions ─────────────────────────────────────────────────────────
+
+/// The presence actions' ids.
+pub mod ids {
+    /// Who else is here, and where their pointers are.
+    pub const ROSTER: &str = "PRESENCE_ROSTER";
+    /// A pane's view declares its space.
+    pub const SPACE_SET: &str = "PRESENCE_SPACE_SET";
+    /// A pane goes back to its default space.
+    pub const SPACE_CLEAR: &str = "PRESENCE_SPACE_CLEAR";
+    /// Publish this person's pointer at a place.
+    pub const HERE: &str = "PRESENCE_HERE";
+    pub const ALL: &[&str] = &[ROSTER, SPACE_SET, SPACE_CLEAR, HERE];
+}
+
+const fn meta(
+    id: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+) -> ActionMeta {
+    ActionMeta {
+        id,
+        trait_name: "",
+        method_name: "",
+        display_name,
+        description,
+        category: "Workspace",
+        group: "Presence",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    }
+}
+
+static ROSTER_META: ActionMeta = meta(
+    ids::ROSTER,
+    "Who is here",
+    "Everyone else on this document or vault: each person's id, name, colour, what they look at (`looking_at`, a space) and where their pointer is (`pointer`, a place: a space and named coordinates). `space` keeps only the people looking at or pointing in that space. `revision` goes up when anything changed: ask again when it differs.",
+);
+static SPACE_SET_META: ActionMeta = meta(
+    ids::SPACE_SET,
+    "Declare a pane's space",
+    "Says how pane `pane`'s pixels map to the coordinates of `space`, so the others' pointers and selections are drawn on the same item at any zoom and scroll. `x` and `y` are axes: a number (`coord`, `at_zero` the value at the pane's edge, `per_px` how much it grows a pixel) or lanes (`coord`, `keys` in order, `first_px`, `lane_px`). Run it again when the view scrolls or zooms. Without it a pane's space is its own box.",
+);
+static SPACE_CLEAR_META: ActionMeta = meta(
+    ids::SPACE_CLEAR,
+    "Clear a pane's space",
+    "Pane `pane` goes back to its default space: its own box, as fractions.",
+);
+static HERE_META: ActionMeta = meta(
+    ids::HERE,
+    "Point at a place",
+    "Publishes this person's pointer at `place` (a space and its coordinates) for everyone else to draw; with no `place` the pointer is withdrawn. For a view that draws its own surface and knows where the pointer is in its own coordinates. A pane publishes its pointer by itself; most views never run this.",
+);
+
+/// `PRESENCE_ROSTER`'s arguments.
+#[derive(Debug, Clone, Default, Facet)]
+pub struct RosterArgs {
+    #[facet(default)]
+    pub space: Option<String>,
+}
+
+/// `PRESENCE_SPACE_SET`'s arguments.
+#[derive(Debug, Clone, Default, Facet)]
+pub struct SpaceArgs {
+    pub pane: String,
+    pub space: String,
+    pub x: Axis,
+    pub y: Axis,
+}
+
+/// `PRESENCE_SPACE_CLEAR`'s arguments.
+#[derive(Debug, Clone, Default, Facet)]
+pub struct PaneArg {
+    pub pane: String,
+}
+
+/// `PRESENCE_HERE`'s arguments.
+#[derive(Debug, Clone, Default, Facet)]
+pub struct HereArgs {
+    #[facet(default)]
+    pub place: Option<PlaceArg>,
+}
+
+/// What a presence write answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub struct Done {
+    pub ok: bool,
+}
+
+fn checked(axis: &Axis, which: &str) -> Result<(), String> {
+    if axis.coord.is_empty() {
+        return Err(format!("{which}.coord is empty: name the coordinate"));
+    }
+    if axis.keys.is_empty() && axis.per_px == 0.0 {
+        return Err(format!(
+            "{which} is neither a number (per_px is 0) nor lanes (keys is empty)"
+        ));
+    }
+    if !axis.keys.is_empty() && axis.lane_px <= 0.0 {
+        return Err(format!("{which}.lane_px must be above 0 for lanes"));
+    }
+    Ok(())
+}
+
+/// Puts the presence actions ([`ids::ALL`]) on `list`, over `board`.
+///
+/// # Errors
+///
+/// [`ActionError::Duplicate`] when one is already there.
+pub fn register(list: &ActionList, board: &PresenceBoard) -> Result<(), ActionError> {
+    let b = board.clone();
+    list.register(&ROSTER_META, Effect::ReadOnly, move |args: RosterArgs| {
+        Ok(b.roster(args.space.as_deref()))
+    })?;
+    let b = board.clone();
+    list.register(&SPACE_SET_META, Effect::Mutating, move |args: SpaceArgs| {
+        if args.pane.is_empty() || args.space.is_empty() {
+            return Err("pane and space are both needed".to_owned());
+        }
+        checked(&args.x, "x")?;
+        checked(&args.y, "y")?;
+        b.declare(&args.pane, ViewSpace::mapped(args.space, args.x, args.y));
+        Ok(Done { ok: true })
+    })?;
+    let b = board.clone();
+    list.register(&SPACE_CLEAR_META, Effect::Mutating, move |args: PaneArg| {
+        b.undeclare(&args.pane);
+        Ok(Done { ok: true })
+    })?;
+    let b = board.clone();
+    list.register(&HERE_META, Effect::Mutating, move |args: HereArgs| {
+        if args.place.as_ref().is_some_and(|p| p.space.is_empty()) {
+            return Err("place.space is empty: name the space".to_owned());
+        }
+        b.publish(args.place.as_ref().map(Place::from));
+        Ok(Done { ok: true })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -685,5 +826,66 @@ mod tests {
         assert_eq!(sent.len(), 2);
         assert!(sent[1].is_none());
         assert!(board.take_published().is_empty());
+    }
+    #[test]
+    fn an_extension_declares_a_space_points_and_reads_who_is_here_by_action() {
+        let list = ActionList::new();
+        let board = PresenceBoard::default();
+        register(&list, &board).expect("registered");
+        for id in ids::ALL {
+            assert!(list.info(id).is_some(), "{id}");
+        }
+
+        list.run_json(
+            ids::SPACE_SET,
+            br#"{"pane":"p1","space":"session.arrange",
+                "x":{"coord":"time","at_zero":8.0,"per_px":0.02},
+                "y":{"coord":"track","keys":["Kick","Snare"],"first_px":20.0,"lane_px":100.0}}"#,
+        )
+        .expect("declared");
+        let space = board.declared("p1").expect("on the board");
+        let (x, y) = space
+            .from_place(
+                &Place::new("session.arrange").with("time", 12.5).with("track", "Snare").with("track.f", 0.25),
+                BIG,
+            )
+            .unwrap();
+        assert!(close(x, 225.0) && close(y, 145.0));
+
+        list.run_json(
+            ids::HERE,
+            br#"{"place":{"space":"session.arrange","at":[{"name":"time","num":3.0},{"name":"track","key":"Kick"}]}}"#,
+        )
+        .expect("pointed");
+        list.run_json(ids::HERE, b"{}").expect("withdrawn");
+        let sent = board.take_published();
+        assert_eq!(sent[0].as_ref().and_then(|p| p.key("track")), Some("Kick"));
+        assert!(sent[1].is_none());
+
+        let channel = Channel::default();
+        let ann = Here::new(channel.clone(), "ann", PeerState::new("ann", "Ann"));
+        ann.pointer(Place::new("session.arrange").with("time", 3.0), 0.0);
+        board.saw(&roster_of(&channel, "bob", 0.0));
+        let out = list
+            .run_json(ids::ROSTER, br#"{"space":"session.arrange"}"#)
+            .expect("read");
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"Ann\"") && text.contains("session.arrange"), "{text}");
+
+        list.run_json(ids::SPACE_CLEAR, br#"{"pane":"p1"}"#).expect("cleared");
+        assert!(board.declared("p1").is_none());
+    }
+
+    #[test]
+    fn a_space_that_maps_nothing_is_refused_with_the_reason() {
+        let list = ActionList::new();
+        register(&list, &PresenceBoard::default()).expect("registered");
+        let err = list
+            .run_json(
+                ids::SPACE_SET,
+                br#"{"pane":"p1","space":"s","x":{"coord":"time"},"y":{"coord":"track","keys":["a"],"lane_px":10.0}}"#,
+            )
+            .expect_err("x maps nothing");
+        assert!(format!("{err:?}").contains("per_px"), "{err:?}");
     }
 }
