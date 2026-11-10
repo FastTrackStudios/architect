@@ -235,6 +235,9 @@ jobs:
           repository: FastTrackStudios/architect
           ref: ${{ inputs.architect-ref }}
           path: .architect
+      # architect's .cargo/config.toml links with mold.
+      - name: mold
+        run: sudo apt-get install -y --no-install-recommends mold
       - name: Prepare
         if: inputs.prepare != ''
         env:
@@ -288,6 +291,9 @@ jobs:
         with:
           name: ext-unsigned
           path: ${{ runner.temp }}/dist
+      # architect's .cargo/config.toml links with mold.
+      - name: mold
+        run: sudo apt-get install -y --no-install-recommends mold
       - name: Build xtask
         working-directory: .architect
         run: cargo build -q -p xtask
@@ -313,8 +319,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
           REPO: ${{ github.repository }}
+          TITLE: ${{ needs.plan.outputs.id }} ${{ needs.plan.outputs.version }}
+          NOTES: ${{ inputs.changelog }}
         run: |
           set -euo pipefail
+          # The tag's Release, made here when the repository's own release
+          # workflow makes none for this tag (an extension's own tag).
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TITLE" \
+              --notes "${NOTES:-$TITLE}"
+          fi
           a="$(ls "$RUNNER_TEMP"/dist/*.archext)"
           name="$(basename "$a")"
           gh release upload "$TAG" "$a" --clobber --repo "$REPO"
