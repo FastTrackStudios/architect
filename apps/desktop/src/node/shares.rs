@@ -33,6 +33,16 @@
 //! attaches it). Anything else of the share is `404` there, on the page
 //! route and the byte route alike, whatever is on disk.
 //!
+//! Every link has a files page (`<link>_files/`, #510): what the link
+//! lists, read from the vault when it is asked for, in list order, by
+//! note or by a property (`?by=order|note|property:<key>`), each view a
+//! link on the page. "Download all" there, and on each group, is
+//! `<link>_archive.zip?by=…[&group=…]`: a zip of the files in view, in
+//! folders by that grouping and numbered in list order, written to the
+//! response as the files are read ([`architect_sites::archive`]): never
+//! whole in memory, never on disk. An audience's lists and archives are
+//! its filter's, as its pages are.
+//!
 //! Nothing outside a share's scope is ever built into it, so nothing
 //! outside it can be served: the site is built from the scope's notes
 //! alone, its links to other notes are plain text, and an attachment is
@@ -58,7 +68,8 @@ use architect::http::axum::response::sse::{Event, KeepAlive, Sse};
 use architect::http::axum::response::{IntoResponse, Redirect, Response};
 use architect_orgs::server::{Directory as _, IdentityServer};
 use architect_permissions::Principal;
-use architect_sites::listing::{self, Entry, Vault};
+use architect_sites::archive::ZipWriter;
+use architect_sites::listing::{self, Entry, Group, Grouping, Vault};
 use architect_spaces::share::{
     LINKS, SHARES_FOLDER, code_from, comments_note_path, is_code, link_path, share_note_path,
     validate, validate_audience, validate_domain,
@@ -144,6 +155,14 @@ impl Manifest {
             manifest.files.insert(format!("/{file}"), file.clone());
         }
         manifest
+    }
+
+    /// The path below the link of `note`'s page.
+    fn page_of(&self, note: &str) -> Option<&str> {
+        self.pages
+            .iter()
+            .find(|(_, n)| n.as_str() == note)
+            .map(|(path, _)| path.as_str())
     }
 }
 
@@ -443,6 +462,7 @@ impl Shares {
             listings: Mutex::new(HashMap::new()),
         });
         *held = Some(Arc::clone(&view));
+        drop(held);
         Some(view)
     }
 
@@ -459,32 +479,30 @@ impl Shares {
             audience.map_or(&share.code, |a| &a.code),
             share.scope
         );
-        let mut listings = view.listings.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(found) = listings.get(&key) {
-            return Arc::clone(found);
+        let listings = || view.listings.lock().unwrap_or_else(PoisonError::into_inner);
+        let found = listings().get(&key).cloned();
+        if let Some(found) = found {
+            return found;
         }
         // A filter that does not parse holds for nothing.
         let entries = listing::parse_filter(filter)
             .map(|filter| listing::select(&view.vault, &scope(&share.scope), &filter))
             .unwrap_or_default();
         let entries = Arc::new(entries);
-        listings.insert(key, Arc::clone(&entries));
+        listings().insert(key, Arc::clone(&entries));
         entries
     }
 
     /// Whether `audience`'s link answers `rest` (a path below it), in
     /// the vault as it is now. Blocking ([`Self::view`]).
     fn guard(&self, share: &Share, audience: &ShareAudience, rest: &str) -> Guard {
-        let (own, whole) = {
+        let manifest = |code: &str| {
             let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
-            let Some(held) = table.get(&share.code) else {
-                return Guard::Refused;
-            };
-            (
-                held.manifests.get(&audience.code).cloned(),
-                held.manifests.get(&share.code).cloned(),
-            )
+            let found = table.get(&share.code)?.manifests.get(code).cloned();
+            drop(table);
+            found
         };
+        let (own, whole) = (manifest(&audience.code), manifest(&share.code));
         let Some(own) = own else {
             return Guard::Building;
         };
@@ -1071,8 +1089,16 @@ async fn serve(
         |a| shares.audience_dir(code, &a.code).join("site"),
     );
     let method = request.method().clone();
+    let link = Link {
+        share: &share,
+        audience: audience.as_ref(),
+        mount,
+    };
+    let query = request.uri().query().unwrap_or_default().to_owned();
     match rest {
         "/_live" => live(shares, code),
+        "/_files" | "/_files/" => private(&share, files_page(shares, &link, &query).await),
+        "/_archive.zip" => private(&share, archive(shares, &link, &query).await),
         "/_comment" if method == architect::http::axum::http::Method::POST => {
             comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
         }
@@ -1085,13 +1111,11 @@ async fn serve(
                 }
             }
             let mut response = file(&dir, rest).await;
-            if share.comments()
-                && response
-                    .headers()
-                    .get(header::CONTENT_TYPE)
-                    .is_some_and(|t| t.as_bytes().starts_with(b"text/html"))
-            {
+            if share.comments() && is_html(&response) {
                 response = with_comments(shares, &share, rest, mount, response).await;
+            }
+            if response.status() == StatusCode::OK && is_html(&response) {
+                response = with_files_bar(shares, &link, response).await;
             }
             private(&share, response)
         }
@@ -1366,6 +1390,16 @@ async fn with_comments(
         escape(mount),
         escape(&key)
     );
+    before_main_end(parts, &html, &section)
+}
+
+/// `html` with `section` put before its `</main>` (else its `</body>`,
+/// else at its end), as the response `parts` began.
+fn before_main_end(
+    parts: architect::http::axum::http::response::Parts,
+    html: &str,
+    section: &str,
+) -> Response {
     let at = html.rfind("</main>").or_else(|| html.rfind("</body>"));
     let out = at.map_or_else(
         || format!("{html}{section}"),
@@ -1380,6 +1414,371 @@ async fn with_comments(
     let mut response = Response::from_parts(parts, Body::from(out));
     response.headers_mut().remove(header::CONTENT_LENGTH);
     response
+}
+
+fn is_html(response: &Response) -> bool {
+    response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .is_some_and(|t| t.as_bytes().starts_with(b"text/html"))
+}
+
+// ── Files: the views and the archive (#510) ─────────────────────────
+
+/// One link being answered: a share's own, or one audience's.
+struct Link<'a> {
+    share: &'a Share,
+    audience: Option<&'a ShareAudience>,
+    /// Where it is served: `/s/<code>/`, or `/` on a domain.
+    mount: &'a str,
+}
+
+impl Link<'_> {
+    /// The link's code: the audience's, else the share's.
+    fn code(&self) -> &str {
+        self.audience.map_or(&self.share.code, |a| &a.code)
+    }
+
+    /// What the files page and the archive are called.
+    fn title(&self) -> String {
+        match (self.audience, self.share.title.as_deref()) {
+            (Some(audience), Some(title)) => format!("{title}: {}", audience.name),
+            (Some(audience), None) => audience.name.clone(),
+            (None, Some(title)) => title.to_owned(),
+            (None, None) => "Shared files".to_owned(),
+        }
+    }
+}
+
+/// What a link lists now, grouped.
+struct Listed {
+    entries: Arc<Vec<Entry>>,
+    groups: Vec<Group>,
+    /// Each listed note's page, as a path below the link.
+    pages: HashMap<String, String>,
+    /// The vault's folder: where the files are read from.
+    root: PathBuf,
+}
+
+impl Shares {
+    /// What `link` lists now, grouped `by`, read from the vault as it
+    /// is. Blocking ([`Self::view`]).
+    fn listed(&self, share: &Share, audience: Option<&ShareAudience>, by: &Grouping) -> Listed {
+        let entries = self.listing(share, audience);
+        let manifest = {
+            let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
+            table.get(&share.code).and_then(|held| {
+                held.manifests
+                    .get(audience.map_or(&share.code, |a| &a.code))
+                    .cloned()
+            })
+        };
+        let pages = entries
+            .iter()
+            .filter_map(|e| {
+                let page = manifest.as_ref()?.page_of(&e.path)?;
+                Some((e.path.clone(), page.to_owned()))
+            })
+            .collect();
+        Listed {
+            groups: listing::groups(&entries, by),
+            entries,
+            pages,
+            root: self.0.backend.root(&share.vault).unwrap_or_default(),
+        }
+    }
+
+    async fn listed_for(&self, link: &Link<'_>, by: &Grouping) -> Option<Listed> {
+        let (shares, share, audience, by) = (
+            self.clone(),
+            link.share.clone(),
+            link.audience.cloned(),
+            by.clone(),
+        );
+        blocking(move || shares.listed(&share, audience.as_ref(), &by)).await
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ViewQuery {
+    #[serde(default)]
+    by: String,
+    group: Option<String>,
+}
+
+/// The view a files page or an archive was asked in: `?by=` (`order`
+/// when unset) and `?group=`; `None` for a `by` that is no grouping.
+fn view_of(query: &str) -> Option<(Grouping, Option<String>)> {
+    let asked = serde_urlencoded_form::<ViewQuery>(query.as_bytes()).ok()?;
+    Some((Grouping::parse(&asked.by)?, asked.group))
+}
+
+/// The look of the files page and of the bar pages link to it with: the
+/// site's own tokens (`--site-*`), so both follow its theme.
+const FILES_STYLE: &str = "<style>.share-files{max-width:46rem;margin:2rem auto;padding:0 1rem;font:16px/1.5 system-ui,sans-serif}.share-files h1{margin:.2rem 0 1rem}.share-views{display:flex;flex-wrap:wrap;gap:.4rem;margin:1rem 0}.share-views a{padding:.3rem .8rem;border-radius:999px;border:1px solid var(--site-rule,#8886);text-decoration:none;color:inherit}.share-views a[aria-current]{background:var(--site-accent,#3b6ef5);border-color:transparent;color:#fff}.share-download{display:inline-block;padding:.4rem 1rem;border-radius:.4rem;background:var(--site-accent,#3b6ef5);color:#fff;text-decoration:none}.share-group{border-top:1px solid var(--site-rule,#8884);margin-top:1.2rem;padding-top:.6rem}.share-group header{display:flex;align-items:baseline;justify-content:space-between;gap:1rem}.share-group h2{font-size:1.1rem;margin:.2rem 0}.share-group ol{padding-left:1.6rem}.share-group ul{list-style:none;padding-left:0;margin:.1rem 0 .5rem}.share-group ul a{font-size:.95em}.share-files-bar{max-width:42rem;margin:2rem auto 1rem;padding:.6rem 1rem;border-top:1px solid var(--site-rule,#8884);display:flex;gap:1rem;align-items:center}@media(prefers-color-scheme:dark){body.share-files-page{background:#111;color:#eee}}</style>";
+
+/// `<link>_files/`: what the link lists, in the view asked for, with
+/// the other views a click away and "Download all" on the page and on
+/// each group.
+async fn files_page(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
+    let Some((by, _)) = view_of(query) else {
+        return page(
+            StatusCode::BAD_REQUEST,
+            "No such view",
+            "<p>A view is <code>order</code>, <code>note</code> or <code>property:&lt;name&gt;</code>.</p>",
+        );
+    };
+    let Some(listed) = shares.listed_for(link, &by).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let here = format!("{}_files/", link.mount);
+    let zip = format!("{}_archive.zip", link.mount);
+    let title = link.title();
+    let mut html = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\"><title>Files · {t}</title>{FILES_STYLE}</head><body class=\"share-files-page\"><main class=\"share-files\" data-view=\"{view}\"><p><a href=\"{home}\">← {t}</a></p><h1>Files</h1>",
+        t = escape(&title),
+        view = escape(&by.label()),
+        home = escape(link.mount),
+    );
+    // The views, each a link: in order, by note, by each property.
+    let mut views = vec![
+        (Grouping::Order, "In order".to_owned()),
+        (Grouping::Note, "By note".to_owned()),
+    ];
+    views.extend(
+        listing::property_keys(&listed.entries)
+            .into_iter()
+            .take(12)
+            .map(|key| (Grouping::Property(key.clone()), format!("By {key}"))),
+    );
+    if !views.iter().any(|(view, _)| *view == by) {
+        views.push((by.clone(), by.label()));
+    }
+    html.push_str("<nav class=\"share-views\" aria-label=\"View\">");
+    for (view, name) in &views {
+        let _ = write!(
+            html,
+            "<a href=\"{}?by={}\"{}>{}</a>",
+            escape(&here),
+            escape(&encode(&view.label())),
+            if *view == by {
+                " aria-current=\"page\""
+            } else {
+                ""
+            },
+            escape(name)
+        );
+    }
+    html.push_str("</nav>");
+    let files: usize = listed.groups.iter().map(|g| g.files.len()).sum();
+    if files == 0 {
+        html.push_str("<p class=\"share-files-none\">No files are attached here.</p>");
+    } else {
+        let _ = write!(
+            html,
+            "<p><a class=\"share-download\" href=\"{}?by={}\" download>Download all ({files} {})</a></p>",
+            escape(&zip),
+            escape(&encode(&by.label())),
+            if files == 1 { "file" } else { "files" }
+        );
+    }
+    for group in &listed.groups {
+        html.push_str("<section class=\"share-group\">");
+        if by != Grouping::Order {
+            let name = match (&by, group.label.is_empty()) {
+                (Grouping::Property(key), true) => format!("No {key}"),
+                _ => group.label.clone(),
+            };
+            let _ = write!(html, "<header><h2>{}</h2>", escape(&name));
+            if !group.files.is_empty() {
+                let _ = write!(
+                    html,
+                    "<a href=\"{}?by={}&amp;group={}\" download>Download ({})</a>",
+                    escape(&zip),
+                    escape(&encode(&by.label())),
+                    escape(&encode(&group.label)),
+                    group.files.len()
+                );
+            }
+            html.push_str("</header>");
+        }
+        html.push_str("<ol>");
+        for &i in &group.entries {
+            let Some(entry) = listed.entries.get(i) else {
+                continue;
+            };
+            html.push_str("<li>");
+            match listed.pages.get(&entry.path) {
+                Some(path) => {
+                    let _ = write!(
+                        html,
+                        "<a href=\"{}{}\">{}</a>",
+                        escape(link.mount.trim_end_matches('/')),
+                        escape(&encode(path)),
+                        escape(&entry.title)
+                    );
+                }
+                None => html.push_str(&escape(&entry.title)),
+            }
+            if !entry.files.is_empty() {
+                html.push_str("<ul>");
+                for file in &entry.files {
+                    let _ = write!(
+                        html,
+                        "<li><a href=\"{}{}\">{}</a></li>",
+                        escape(link.mount),
+                        escape(&encode(file)),
+                        escape(file.rsplit('/').next().unwrap_or(file))
+                    );
+                }
+                html.push_str("</ul>");
+            }
+            html.push_str("</li>");
+        }
+        html.push_str("</ol></section>");
+    }
+    html.push_str("</main></body></html>");
+    let mut response = (StatusCode::OK, html).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response
+}
+
+/// A page of the link, with a bar to its files page and its archive
+/// when it lists any file.
+async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) -> Response {
+    let listed = shares.listed_for(link, &Grouping::Order).await;
+    let files: usize = listed
+        .iter()
+        .flat_map(|l| l.groups.iter())
+        .map(|g| g.files.len())
+        .sum();
+    if files == 0 {
+        return response;
+    }
+    let (parts, body) = response.into_parts();
+    let Ok(bytes) = architect::http::axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
+        return Response::from_parts(parts, Body::empty());
+    };
+    let section = format!(
+        "{FILES_STYLE}<nav class=\"share-files-bar\" aria-label=\"Files\"><a href=\"{m}_files/\">Files ({files})</a><a class=\"share-download\" href=\"{m}_archive.zip?by=note\" download>Download all</a></nav>",
+        m = escape(link.mount)
+    );
+    before_main_end(parts, &String::from_utf8_lossy(&bytes), &section)
+}
+
+/// How much of a file is read, and sent, at a time.
+const ARCHIVE_CHUNK: usize = 64 * 1024;
+
+/// `<link>_archive.zip`: the files the link lists, or of one group of
+/// the view asked for, as a zip written to the response while the files
+/// are read.
+async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
+    let Some((by, group)) = view_of(query) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let Some(listed) = shares.listed_for(link, &by).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let files: Vec<(String, PathBuf)> = listed
+        .groups
+        .iter()
+        .filter(|g| group.as_ref().is_none_or(|want| *want == g.label))
+        .flat_map(|g| g.files.iter())
+        .map(|f| (f.archive.clone(), listed.root.join(&f.file)))
+        .collect();
+    if files.is_empty() {
+        return page(
+            StatusCode::NOT_FOUND,
+            "No files",
+            "<p>There are no files to download here.</p>",
+        );
+    }
+    let name = group.as_deref().filter(|g| !g.is_empty()).map_or_else(
+        || link.title(),
+        |group| format!("{} - {group}", link.title()),
+    );
+    let code = link.code().to_owned();
+    let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Vec<u8>>>(4);
+    tokio::spawn(async move {
+        if let Err(error) = write_archive(files, &tx).await {
+            tracing::warn!(%code, %error, "a share archive stopped");
+            // The download ends short of its directory: an archive that
+            // does not open, never one that looks whole and is not.
+            let _ = tx.send(Err(error)).await;
+        }
+    });
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|piece| (piece, rx))
+    });
+    let mut response = Response::new(Body::from_stream(stream));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/zip"),
+    );
+    if let Ok(value) = HeaderValue::from_str(&attachment(&format!("{name}.zip"))) {
+        headers.insert(header::CONTENT_DISPOSITION, value);
+    }
+    response
+}
+
+/// Write `files` (each: its path in the archive, the file to read) to
+/// `to` as a zip, a piece at a time. A file that is gone is left out.
+///
+/// # Errors
+///
+/// A file could not be read through, or nobody is reading any more.
+async fn write_archive(
+    files: Vec<(String, PathBuf)>,
+    to: &tokio::sync::mpsc::Sender<std::io::Result<Vec<u8>>>,
+) -> std::io::Result<()> {
+    use tokio::io::AsyncReadExt as _;
+    let gone = |_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the reader left");
+    let mut zip = ZipWriter::new();
+    for (name, path) in files {
+        let Ok(mut file) = tokio::fs::File::open(&path).await else {
+            tracing::debug!(path = %path.display(), "a shared file is gone; left out of the archive");
+            continue;
+        };
+        let modified = file.metadata().await.ok().and_then(|m| m.modified().ok());
+        to.send(Ok(zip.start(&name, modified)))
+            .await
+            .map_err(gone)?;
+        loop {
+            let mut chunk = vec![0_u8; ARCHIVE_CHUNK];
+            let read = file.read(&mut chunk).await?;
+            if read == 0 {
+                break;
+            }
+            chunk.truncate(read);
+            zip.data(&chunk);
+            to.send(Ok(chunk)).await.map_err(gone)?;
+        }
+        to.send(Ok(zip.end())).await.map_err(gone)?;
+    }
+    to.send(Ok(zip.finish())).await.map_err(gone)
+}
+
+/// A `Content-Disposition` that saves as `name`: plain for old readers,
+/// UTF-8 for the rest.
+fn attachment(name: &str) -> String {
+    let plain: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii() && !c.is_ascii_control() && c != '"' && c != '\\' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!(
+        "attachment; filename=\"{plain}\"; filename*=UTF-8''{}",
+        encode(name).replace('/', "%2F")
+    )
 }
 
 // ── Sign-in ──────────────────────────────────────────────────────────
@@ -1723,6 +2122,19 @@ mod tests {
         );
         assert_eq!(cookie(&headers, SESSION_COOKIE).as_deref(), Some("tok"));
         assert_eq!(decode("/a%20b/"), "/a b/");
+        assert_eq!(
+            view_of("by=property%3Ainstrument&group=violin"),
+            Some((
+                Grouping::Property("instrument".to_owned()),
+                Some("violin".to_owned())
+            ))
+        );
+        assert_eq!(view_of(""), Some((Grouping::Order, None)));
+        assert_eq!(view_of("by=shuffle"), None);
+        assert_eq!(
+            attachment("Carols: violín.zip"),
+            "attachment; filename=\"Carols: viol_n.zip\"; filename*=UTF-8''Carols%3A%20viol%C3%ADn.zip"
+        );
         assert_eq!(encode("/a b/"), "/a%20b/");
     }
 }

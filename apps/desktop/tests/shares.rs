@@ -20,6 +20,12 @@
 //!   files: the other audience's page and file are `404` on its link,
 //!   nothing of them is listed there, a note that leaves an audience's
 //!   filter is `404` there, and an audience is removed alone.
+//! - A link's files page switches between the views (in order, by note,
+//!   by a property), each with the audience's filter applied; its
+//!   "Download all" zip, streamed by the node, holds exactly the
+//!   audience's files, in list order, in folders by the view; one group
+//!   downloads alone. `SHARE_AUDIENCE_ADD` / `SHARE_AUDIENCES` /
+//!   `SHARE_ARCHIVE` / `SHARE_AUDIENCE_REMOVE` do the same from the app.
 //! - From the app (`architect-accounts`' Action List, signed in as Grace):
 //!   `SHARE_CREATE` makes a link that opens, `SHARE_LIST` lists it,
 //!   `PUBLISH_DOMAIN` gives it a domain, `SHARE_REVOKE` takes it down.
@@ -728,7 +734,7 @@ async fn two_audiences_are_each_served_only_their_own_notes_and_files() {
         for file in theirs_files {
             for path in [
                 format!("Set/charts/{file}.pdf"),
-                format!("Set/charts/{}%2Epdf", file),
+                format!("Set/charts/{file}%2Epdf"),
                 format!("Set/charts/../charts/{file}.pdf"),
             ] {
                 let url = w.url(&format!("{link}{path}"));
@@ -824,6 +830,338 @@ async fn two_audiences_are_each_served_only_their_own_notes_and_files() {
     assert_eq!(
         status(w.url(&format!("{cello}04-noel-cello/"))).await,
         StatusCode::NOT_FOUND
+    );
+
+    w.host.stop().await;
+}
+
+/// GET `url`; status, headers and the body's bytes.
+async fn get_bytes(url: &str) -> (StatusCode, reqwest::header::HeaderMap, Vec<u8>) {
+    let res = reqwest::Client::new().get(url).send().await.unwrap();
+    let (status, headers) = (res.status(), res.headers().clone());
+    (status, headers, res.bytes().await.unwrap().to_vec())
+}
+
+/// The zip at `url`: each file's path and text, in the archive's order.
+async fn zip_at(url: &str) -> Vec<(String, String)> {
+    let (status, headers, bytes) = get_bytes(url).await;
+    assert_eq!(status, StatusCode::OK, "{url}");
+    assert_eq!(headers["content-type"], "application/zip");
+    // Streamed: the node never knew its length.
+    assert!(headers.get("content-length").is_none(), "{headers:?}");
+    architect_sites::archive::read_stored(&bytes)
+        .unwrap_or_else(|| panic!("{url}: not a zip ({} bytes)", bytes.len()))
+        .into_iter()
+        .map(|(name, bytes)| (name, String::from_utf8(bytes).unwrap()))
+        .collect()
+}
+
+fn pairs(files: &[(&str, &str)]) -> Vec<(String, String)> {
+    files
+        .iter()
+        .map(|(name, text)| ((*name).to_owned(), (*text).to_owned()))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_links_files_page_switches_views_and_its_zip_holds_exactly_its_files_in_order() {
+    let w = world().await;
+    let (share, violin, cello) = setlist(&w).await;
+    let whole = share.path();
+    page_with(
+        &w.url(&format!("{violin}03-silent-violin/")),
+        None,
+        "part of",
+    )
+    .await;
+    page_with(&w.url(&format!("{cello}04-noel-cello/")), None, "part of").await;
+
+    // A page of the link points at its files page and its archive.
+    let (_, _, chart) = get(&w.url(&format!("{violin}01-joy-violin/")), None).await;
+    assert!(
+        chart.contains(&format!("href=\"{violin}_files/\"")),
+        "{chart}"
+    );
+    assert!(
+        chart.contains(&format!("href=\"{violin}_archive.zip?by=note\"")),
+        "{chart}"
+    );
+
+    // The files page, in list order: the violins' charts and no others,
+    // each linked to its page and its file; the other views a click away.
+    let files = format!("{violin}_files/");
+    let (status, _, order) = get(&w.url(&files), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(order.contains("data-view=\"order\""), "{order}");
+    for view in ["order", "note", "property%3Ainstrument", "property%3Asong"] {
+        assert!(
+            order.contains(&format!("href=\"{files}?by={view}\"")),
+            "{view}: {order}"
+        );
+    }
+    assert!(order.contains(&format!("href=\"{files}?by=order\" aria-current=\"page\"")));
+    let at = |html: &str, what: &str| {
+        html.find(what)
+            .unwrap_or_else(|| panic!("nothing says {what} in {html}"))
+    };
+    assert!(at(&order, "Joy to the World (violin)") < at(&order, "Silent Night (violin)"));
+    assert!(
+        order.contains(&format!("href=\"{violin}01-joy-violin/\"")),
+        "{order}"
+    );
+    assert!(
+        order.contains(&format!("href=\"{violin}Set/charts/joy-violin.pdf\"")),
+        "{order}"
+    );
+    assert!(order.contains("Download all (2 files)"), "{order}");
+    assert!(!order.to_lowercase().contains("cello"), "{order}");
+
+    // By note: a group per chart, each with its own download.
+    let (_, _, by_note) = get(&w.url(&format!("{files}?by=note")), None).await;
+    assert!(by_note.contains("data-view=\"note\""));
+    assert!(
+        by_note.contains("<h2>Silent Night (violin)</h2>"),
+        "{by_note}"
+    );
+    assert!(
+        by_note.contains("_archive.zip?by=note&amp;group=Silent%20Night%20%28violin%29"),
+        "{by_note}"
+    );
+    // By a property: a group per value, of this audience's notes only.
+    let (_, _, by_song) = get(&w.url(&format!("{files}?by=property:song")), None).await;
+    assert!(by_song.contains("data-view=\"property:song\""));
+    assert!(
+        by_song.contains("<h2>Joy to the World</h2>") && by_song.contains("<h2>Silent Night</h2>")
+    );
+    assert!(!by_song.contains("<h2>Noel</h2>") && !by_song.to_lowercase().contains("cello"));
+    // The share's own link groups everyone.
+    let (_, _, everyone) = get(
+        &w.url(&format!("{whole}_files/?by=property:instrument")),
+        None,
+    )
+    .await;
+    assert!(everyone.contains("<h2>violin</h2>") && everyone.contains("<h2>cello</h2>"));
+    assert!(everyone.contains("Download all (4 files)"), "{everyone}");
+    let (status, _, _) = get(&w.url(&format!("{files}?by=shuffle")), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // The violins' zip: exactly their files, a numbered folder per chart
+    // in list order, each file's own bytes.
+    let joy = "%PDF Joy to the World for violin";
+    let silent = "%PDF Silent Night for violin";
+    assert_eq!(
+        zip_at(&w.url(&format!("{violin}_archive.zip?by=note"))).await,
+        pairs(&[
+            ("01 Joy to the World (violin)/joy-violin.pdf", joy),
+            ("02 Silent Night (violin)/silent-violin.pdf", silent),
+        ])
+    );
+    // In order: numbered files. By a property: a folder per value.
+    assert_eq!(
+        zip_at(&w.url(&format!("{violin}_archive.zip"))).await,
+        pairs(&[("01 joy-violin.pdf", joy), ("02 silent-violin.pdf", silent)])
+    );
+    assert_eq!(
+        zip_at(&w.url(&format!("{violin}_archive.zip?by=property:song"))).await,
+        pairs(&[
+            (
+                "Joy to the World/01 Joy to the World (violin)/joy-violin.pdf",
+                joy
+            ),
+            (
+                "Silent Night/01 Silent Night (violin)/silent-violin.pdf",
+                silent
+            ),
+        ])
+    );
+    // The cellos' holds theirs, and none of the violins'.
+    assert_eq!(
+        zip_at(&w.url(&format!("{cello}_archive.zip?by=note"))).await,
+        pairs(&[
+            (
+                "01 Joy to the World (cello)/joy-cello.pdf",
+                "%PDF Joy to the World for cello"
+            ),
+            ("02 Noel (cello)/noel-cello.pdf", "%PDF Noel for cello"),
+        ])
+    );
+    // One group alone: one song of the whole set, both parts, in order.
+    let (status, headers, bytes) = get_bytes(&w.url(&format!(
+        "{whole}_archive.zip?by=property:song&group=Joy%20to%20the%20World"
+    )))
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        headers["content-disposition"]
+            .to_str()
+            .unwrap()
+            .contains("Joy to the World.zip"),
+        "{headers:?}"
+    );
+    let names: Vec<String> = architect_sites::archive::read_stored(&bytes)
+        .unwrap()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Joy to the World/01 Joy to the World (violin)/joy-violin.pdf",
+            "Joy to the World/02 Joy to the World (cello)/joy-cello.pdf"
+        ]
+    );
+    // A group the audience does not have is not there to download, and
+    // a group of another audience's is no way round its filter.
+    for group in ["Nowhere", "Noel"] {
+        let url = w.url(&format!(
+            "{violin}_archive.zip?by=property:song&group={group}"
+        ));
+        assert_eq!(get_bytes(&url).await.0, StatusCode::NOT_FOUND, "{url}");
+    }
+
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_audience_actions_add_list_archive_and_remove() {
+    use std::sync::Arc;
+
+    use architect::action::ActionList;
+    use architect_accounts::{AccountStore, Accounts, MemorySecrets};
+    use serde_json::{Value, json};
+
+    let w = world().await;
+    let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));
+    let accounts = Accounts::new(store, Issuer::new(&w.issuer), "architect-test").without_browser();
+    let list = Arc::new(ActionList::new());
+    architect_accounts::actions::register(&list, &accounts).unwrap();
+    accounts
+        .sign_in_password("grace@local.test", auth_server::dev::DEV_PASSWORD)
+        .await
+        .unwrap();
+    accounts.refresh_orgs().await.unwrap();
+    list.run_json("ORG_SWITCH", br#"{"org":"indie"}"#).unwrap();
+    let run = |id: &'static str, args: Value| {
+        let list = Arc::clone(&list);
+        async move {
+            list.run_json_async(id, args.to_string().as_bytes())
+                .await
+                .map(|out| serde_json::from_slice::<Value>(&out).unwrap())
+                .map_err(|e| format!("{e:?}"))
+        }
+    };
+    let host = format!("http://{}", w.host.http);
+    let made = run(
+        "SHARE_CREATE",
+        json!({"folder": "Set", "title": "Carols", "host": host}),
+    )
+    .await
+    .unwrap();
+    let code = made["share"]["code"].as_str().unwrap().to_owned();
+    assert_eq!(made["share"]["audiences"], json!([]));
+
+    let added = run(
+        "SHARE_AUDIENCE_ADD",
+        json!({"code": code, "name": "violin", "filter": "instrument == \"violin\""}),
+    )
+    .await
+    .unwrap();
+    let url = added["audience"]["url"].as_str().unwrap().to_owned();
+    let audience_code = added["audience"]["code"].as_str().unwrap();
+    assert_eq!(url, format!("{host}/s/{audience_code}/"));
+    assert_ne!(audience_code, code);
+    assert_eq!(added["share"]["audiences"][0]["name"], "violin");
+    run(
+        "SHARE_AUDIENCE_ADD",
+        json!({"code": code, "name": "everyone"}),
+    )
+    .await
+    .unwrap();
+    assert!(
+        run(
+            "SHARE_AUDIENCE_ADD",
+            json!({"code": code, "name": "bad", "filter": "=="})
+        )
+        .await
+        .is_err()
+    );
+    let listed = run("SHARE_AUDIENCES", json!({"code": code})).await.unwrap();
+    let names: Vec<&str> = listed["audiences"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["violin", "everyone"]);
+    assert_eq!(listed["audiences"][0]["filter"], "instrument == \"violin\"");
+    page_with(&format!("{url}03-silent-violin/"), None, "part of").await;
+    assert_eq!(
+        get(&format!("{url}04-noel-cello/"), None).await.0,
+        StatusCode::NOT_FOUND
+    );
+
+    // The same zip the link gives, saved by the app.
+    let tmp = tempfile::tempdir().unwrap();
+    let to = tmp.path().join("violins.zip");
+    let saved = run(
+        "SHARE_ARCHIVE",
+        json!({"code": code, "audience": "violin", "to": to.to_string_lossy()}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved["files"], 2, "{saved}");
+    let bytes = std::fs::read(&to).unwrap();
+    assert_eq!(saved["bytes"], bytes.len());
+    assert_eq!(
+        bytes,
+        get_bytes(&format!("{url}_archive.zip?by=note")).await.2
+    );
+    let names: Vec<String> = architect_sites::archive::read_stored(&bytes)
+        .unwrap()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "01 Joy to the World (violin)/joy-violin.pdf",
+            "02 Silent Night (violin)/silent-violin.pdf"
+        ]
+    );
+    // The whole share's, one group of it.
+    let one = tmp.path().join("noel.zip");
+    let saved = run(
+        "SHARE_ARCHIVE",
+        json!({"code": code, "by": "property:song", "group": "Noel", "to": one.to_string_lossy()}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved["files"], 1, "{saved}");
+    // No such audience or group: an error, and no file left behind.
+    let none = tmp.path().join("none.zip");
+    for args in [
+        json!({"code": code, "audience": "brass", "to": none.to_string_lossy()}),
+        json!({"code": code, "by": "property:song", "group": "Nowhere", "to": none.to_string_lossy()}),
+    ] {
+        assert!(run("SHARE_ARCHIVE", args).await.is_err());
+        assert!(!none.exists());
+    }
+
+    let left = run(
+        "SHARE_AUDIENCE_REMOVE",
+        json!({"code": code, "name": "violin"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(left["audiences"].as_array().unwrap().len(), 1, "{left}");
+    assert_eq!(get(&url, None).await.0, StatusCode::NOT_FOUND);
+    assert!(
+        run(
+            "SHARE_AUDIENCE_REMOVE",
+            json!({"code": code, "name": "violin"})
+        )
+        .await
+        .is_err()
     );
 
     w.host.stop().await;
