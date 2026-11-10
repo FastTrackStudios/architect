@@ -74,6 +74,8 @@ mod model;
 mod ops;
 #[cfg(feature = "paint")]
 pub mod paint;
+#[cfg(feature = "presence")]
+pub mod pane_space;
 mod presence;
 mod repair;
 mod screenset;
