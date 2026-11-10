@@ -96,6 +96,44 @@ fn touch(root: &Path, rel: &str, body: &str) {
     std::fs::write(path, body).unwrap();
 }
 
+/// An extension installed on the node (`<data dir>/extensions`) whose
+/// embed page draws a ```chart fence as an SVG that follows the playhead:
+/// a transparent rect per bar with its time, as keyflow#59 engraves. It
+/// also tries what must never reach a reader: a handler, a script, a
+/// `<foreignObject>`, a `javascript:` link.
+fn install_chart(pkg: &Path) {
+    touch(
+        pkg,
+        "extension.toml",
+        "id = \"demo.chart\"\nname = \"Chart\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n\
+         [[embeds]]\nid = \"chart\"\npage = \"pages/chart.tsx\"\nclaims = { fence = [\"chart\"] }\n",
+    );
+    touch(
+        pkg,
+        "pages/chart.tsx",
+        r#"import { h, useEmbed } from "architect";
+export default function Chart() {
+  const embed = useEmbed();
+  const bars = (embed?.source ?? "").split("|").map((b) => b.trim()).filter((b) => b !== "");
+  const w = 60;
+  return (
+    <svg class="demo-chart" viewBox={`0 0 ${bars.length * w} 40`} width={`${bars.length * w}`} height="40" data-follow-playhead="" onClick={() => {}}>
+      {bars.map((b, i) => (
+        <g key={`${i}`}>
+          <rect class="demo-bar" data-at={`${i * 2}`} x={`${i * w}`} y="0" width={`${w}`} height="40" fill="transparent" />
+          <text x={`${i * w + 8}`} y="26">{b}</text>
+        </g>
+      ))}
+      <script>{"alert(1)"}</script>
+      <foreignObject><div>html inside</div></foreignObject>
+      <a href="javascript:alert(1)"><text>bad link</text></a>
+    </svg>
+  );
+}
+"#,
+    );
+}
+
 struct World {
     host: Running,
     issuer: String,
@@ -141,6 +179,19 @@ async fn world() -> World {
             &format!("%PDF {song} for {part}"),
         );
     }
+    // Charts (#488): a ```chart fence in each, claimed by an extension
+    // installed on the node.
+    touch(
+        &vault,
+        "Charts/joy.md",
+        "---\ntitle: Joy chart\ninstrument: violin\n---\n```chart\n| C | G | Am |\n```\n",
+    );
+    touch(
+        &vault,
+        "Charts/noel.md",
+        "---\ntitle: Noel chart\ninstrument: cello\n---\n```chart\n| F | Bb | Dm7 |\n```\n",
+    );
+    install_chart(&dir.join("data/extensions/demo.chart"));
     let grace = session_of(&origin, &dir, "grace@local.test").await;
     let config = Config {
         name: "indie-host".to_owned(),
@@ -1352,4 +1403,120 @@ async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_orde
     }
     let (code, _, _) = get_range(&w.url(&format!("{band}02-noel/")), None).await;
     assert_eq!(code, StatusCode::NOT_FOUND);
+}
+
+/// #488's done-when: a note with a fence an installed extension claims
+/// shows the extension's drawing at `/s/<code>/`, made safe, rebuilt live
+/// as the note changes; an audience that cannot see a note never gets its
+/// drawing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audience() {
+    use crdt::sync::{DocSyncClient, SyncedDoc};
+    let w = world().await;
+    let share = w
+        .share(
+            ShareScope::Folder("Charts".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let link = share.path();
+
+    // The fence is the extension's SVG, not a code block.
+    let joy = page_with(&w.url(&format!("{link}joy/")), None, "demo-chart").await;
+    assert!(
+        joy.contains("data-claim=\"fence:chart\" data-by=\"demo.chart\""),
+        "{joy}"
+    );
+    for kept in [
+        "<svg class=\"demo-chart\" viewBox=\"0 0 180 40\" width=\"180\" height=\"40\" data-follow-playhead=\"\">",
+        "<rect class=\"demo-bar\" data-at=\"0\" x=\"0\" y=\"0\" width=\"60\" height=\"40\" fill=\"transparent\"></rect>",
+        "data-at=\"4\"",
+        ">Am</text>",
+    ] {
+        assert!(joy.contains(kept), "lost {kept}: {joy}");
+    }
+    assert!(!joy.contains("language-chart"), "{joy}");
+    for never in [
+        "alert(1)",
+        "foreignObject",
+        "html inside",
+        "javascript:",
+        "onclick",
+    ] {
+        assert!(!joy.contains(never), "`{never}` on the page: {joy}");
+    }
+
+    // Rebuilt live: the fence edited from a signed-in client is drawn
+    // again on the link.
+    let sync: DocSyncClient = w.lane(&w.alan).await;
+    let doc_id = vault_proto::collab_doc_id("notes", "Charts/joy.md");
+    let replica = crdt::CrdtDoc::ephemeral();
+    let mut synced = SyncedDoc::new(doc_id, replica.clone());
+    let session = tokio::spawn(async move {
+        let _ = synced.run(&sync).await;
+    });
+    let text = replica.loro().get_text(vault_proto::COLLAB_BODY_CONTAINER);
+    for _ in 0..200 {
+        if text.to_string().contains("| Am |") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let body = text.to_string();
+    let at = body.find("| Am |").expect("the fence's last bar");
+    text.insert(
+        body[..at + "| Am ".len()].chars().count(),
+        "| E7 ",
+    )
+    .unwrap();
+    replica.loro().commit();
+    let joy = page_with(&w.url(&format!("{link}joy/")), None, ">E7</text>").await;
+    assert!(joy.contains("viewBox=\"0 0 240 40\""), "{joy}");
+    assert!(joy.contains("data-at=\"6\""), "{joy}");
+    session.abort();
+
+    // Each audience gets the drawings of its own notes only.
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    for (name, filter) in [
+        ("violin", "instrument == \"violin\""),
+        ("cello", "instrument == \"cello\""),
+    ] {
+        links
+            .add_audience(
+                share.code.clone(),
+                NewAudience {
+                    name: name.to_owned(),
+                    filter: filter.to_owned(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+    let share = links
+        .shares()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.code == share.code)
+        .unwrap();
+    let violin = share.audience_named("violin").unwrap().path();
+    let cello = share.audience_named("cello").unwrap().path();
+    let mine = page_with(&w.url(&format!("{violin}joy/")), None, "demo-chart").await;
+    assert!(mine.contains(">E7</text>"), "{mine}");
+    let theirs = page_with(&w.url(&format!("{cello}noel/")), None, "demo-chart").await;
+    assert!(theirs.contains(">Bb</text>"), "{theirs}");
+    for (link, other) in [(&violin, "noel"), (&cello, "joy")] {
+        let (status, _, body) = get(&w.url(&format!("{link}{other}/")), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{link}{other}/: {body}");
+    }
+    let mut seen = String::new();
+    for path in ["", "joy/", "tags/"] {
+        seen.push_str(&get(&w.url(&format!("{violin}{path}")), None).await.2);
+    }
+    for leak in [">Bb</text>", "Dm7", "Noel chart"] {
+        assert!(!seen.contains(leak), "`{leak}` on the violin link: {seen}");
+    }
+
+    w.host.stop().await;
 }

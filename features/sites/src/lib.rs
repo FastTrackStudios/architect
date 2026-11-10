@@ -42,6 +42,7 @@ mod bases;
 mod blocks;
 mod element_html;
 mod frontmatter;
+mod installed;
 pub mod listing;
 pub mod lyrics;
 mod markdown;
@@ -61,6 +62,7 @@ pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
+pub use installed::InstalledBlocks;
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]

@@ -195,7 +195,8 @@ impl Drop for Running {
     }
 }
 
-/// Start the node `config` describes, drawing no extension blocks.
+/// Start the node `config` describes, drawing the blocks of the
+/// extensions installed in [`Config::extensions_dir`] and no others.
 ///
 /// Inside a multi-thread tokio runtime.
 ///
@@ -209,8 +210,11 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
 
 /// Start the node `config` describes, drawing the fences `blocks` claim.
 ///
-/// Its share links and Sites draw them (#488): a distribution's
-/// compiled-in extensions' (`Distribution::blocks`), or an embedder's own
+/// Its share links and Sites draw them (#488): first those the extensions
+/// installed in [`Config::extensions_dir`] claim (an embed page, a WASI
+/// component's embed view; `architect_sites::InstalledBlocks`, read again
+/// when the folder changes), then `blocks`: a distribution's compiled-in
+/// extensions' (`Distribution::blocks`), or an embedder's own
 /// (`architect_sites::FnBlock`). Inside a multi-thread tokio runtime.
 ///
 /// # Errors
@@ -218,9 +222,16 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
 /// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
 pub async fn start_with(
     config: Config,
-    blocks: architect_sites::Blocks,
+    given: architect_sites::Blocks,
 ) -> Result<Running, StartError> {
     let data = &config.data_dir;
+    // An installed extension draws over a compiled-in one claiming the
+    // same fence, as its development copy does in the app.
+    let mut blocks = architect_sites::Blocks::new();
+    blocks.add(Arc::new(architect_sites::InstalledBlocks::new(
+        config.extensions_dir(),
+    )));
+    blocks.add(Arc::new(given));
     let made = |path: &Path| {
         std::fs::create_dir_all(path).map_err(|source| StartError::Data {
             path: path.to_owned(),

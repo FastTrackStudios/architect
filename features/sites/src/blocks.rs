@@ -66,6 +66,14 @@ pub trait BlockRenderer: Send + Sync {
     /// Whether it draws `claim`.
     fn claims(&self, claim: &Claim) -> bool;
 
+    /// Who draws `claim`, when it is a set of renderers (a distribution's,
+    /// the installed extensions'): the one of them that does. Its
+    /// [`name`](Self::name) otherwise.
+    fn drawn_by(&self, claim: &Claim) -> String {
+        let _ = claim;
+        self.name().to_owned()
+    }
+
     /// Draw `block`.
     ///
     /// # Errors
@@ -114,13 +122,47 @@ impl Blocks {
         self.renderers.is_empty()
     }
 
+    /// Whether a renderer claims `claim`.
+    #[must_use]
+    pub fn claims(&self, claim: &Claim) -> bool {
+        self.renderers.iter().any(|r| r.claims(claim))
+    }
+
     /// The first renderer claiming `block`'s claim: its name and what it
     /// drew. `None` when nobody claims it.
     #[must_use]
     pub fn draw(&self, block: &Block<'_>) -> Option<(String, Result<String, String>)> {
         let renderer = self.renderers.iter().find(|r| r.claims(block.claim))?;
         let drawn = renderer.render(block).map(Drawn::into_html);
-        Some((renderer.name().to_owned(), drawn))
+        Some((renderer.drawn_by(block.claim), drawn))
+    }
+}
+
+/// A set is a renderer too: the first of its own that claims a block
+/// draws it. So a set handed over (a distribution's, an embedder's) is
+/// asked in its place among others.
+impl BlockRenderer for Blocks {
+    fn name(&self) -> &'static str {
+        "blocks"
+    }
+
+    fn claims(&self, claim: &Claim) -> bool {
+        Self::claims(self, claim)
+    }
+
+    fn drawn_by(&self, claim: &Claim) -> String {
+        self.renderers
+            .iter()
+            .find(|r| r.claims(claim))
+            .map_or_else(|| self.name().to_owned(), |r| r.drawn_by(claim))
+    }
+
+    fn render(&self, block: &Block<'_>) -> Result<Drawn, String> {
+        match self.draw(block) {
+            // Already made safe by `draw`; written as it is.
+            Some((_, drawn)) => drawn.map(Drawn::Html),
+            None => Err(format!("nothing claims {}", block.claim)),
+        }
     }
 }
 
