@@ -133,8 +133,12 @@
           # shell), copied in; Nix finds its store references (glibc) and
           # carries them into the image.
           prebuiltBin = fromEnv "ARCHITECT_PREBUILT_BIN";
+          # Another distribution's node (#491, `cargo xtask dist node-image`):
+          # its binary's name, and the image's.
+          imageBin = let v = fromEnv "ARCHITECT_IMAGE_BIN"; in if v == null then "architect-desktop" else v;
+          imageName = fromEnv "ARCHITECT_IMAGE_NAME";
           architect-node-prebuilt = pkgs.runCommand "architect-node-prebuilt" { } ''
-            install -Dm755 ${/. + prebuiltBin} $out/bin/architect-desktop
+            install -Dm755 ${/. + prebuiltBin} $out/bin/${imageBin}
           '';
 
           # ── The web front end ────────────────────────────────────────
@@ -162,7 +166,9 @@
             RUSTFLAGS = "--cfg no_workspace_hack";
             nativeBuildInputs = [ pkgs.pkg-config ];
           };
-          # The bundle: the same script `just web` runs, given the pieces.
+          # The bundle: the same script `just web` runs, given the pieces;
+          # which distribution it is (`/app/distribution.json`), from the
+          # Architect app's node (`architect-desktop distribution`, #491).
           architect-web-bundle =
             pkgs.runCommand "architect-web-bundle-${release}"
               {
@@ -172,7 +178,8 @@
                 WASM_BINDGEN = "wasm-bindgen";
               }
               ''
-                bash ${src}/scripts/web-bundle.sh $out
+                ${architect-node}/bin/architect-desktop distribution > distribution.json
+                ARCHITECT_DISTRIBUTION=$PWD/distribution.json bash ${src}/scripts/web-bundle.sh $out
               '';
           prebuiltBundle = fromEnv "ARCHITECT_WEB_BUNDLE";
           architect-web-bundle-prebuilt = pkgs.runCommand "architect-web-bundle-prebuilt" { } ''
@@ -183,9 +190,12 @@
           # files, not store symlinks (it refuses a path resolving outside
           # its root), so a ConfigMap can replace /srv/www/app/config.json.
           mkWebImage =
-            { bundle }:
+            {
+              bundle,
+              name ? "architect-web",
+            }:
             pkgs.dockerTools.streamLayeredImage {
-              name = "architect-web";
+              inherit name;
               tag = "latest";
               contents = [
                 pkgs.static-web-server
@@ -224,9 +234,13 @@
             };
 
           mkImage =
-            { node }:
+            {
+              node,
+              name ? "architect",
+              bin ? "architect-desktop",
+            }:
             pkgs.dockerTools.streamLayeredImage {
-              name = "architect";
+              inherit name;
               tag = "latest";
               contents = [
                 node
@@ -237,7 +251,7 @@
               '';
               config = {
                 Entrypoint = [
-                  "/bin/architect-desktop"
+                  "/bin/${bin}"
                   "serve"
                 ];
                 Env = [
@@ -279,10 +293,17 @@
             architect-web-image = mkWebImage { bundle = architect-web-bundle; };
           }
           // lib.optionalAttrs (prebuiltBin != null) {
-            architect-image-prebuilt = mkImage { node = architect-node-prebuilt; };
+            architect-image-prebuilt = mkImage {
+              node = architect-node-prebuilt;
+              name = if imageName == null then "architect" else imageName;
+              bin = imageBin;
+            };
           }
           // lib.optionalAttrs (prebuiltBundle != null) {
-            architect-web-image-prebuilt = mkWebImage { bundle = architect-web-bundle-prebuilt; };
+            architect-web-image-prebuilt = mkWebImage {
+              bundle = architect-web-bundle-prebuilt;
+              name = if imageName == null then "architect-web" else imageName;
+            };
           }
         )
       );

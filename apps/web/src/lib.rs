@@ -22,6 +22,13 @@
 //! is at the issuer; the session is kept in `localStorage` and renewed
 //! with its refresh token before it runs out.
 //!
+//! **Which distribution** it is (#491) comes from `/app/distribution.json`
+//! ([`Distribution`]), what the distribution's binary printed when the
+//! bundle was built (`cargo xtask dist web`): its name, and the extensions
+//! compiled into it, which the app lists (the deployment's node, the same
+//! binary running `serve`, draws their blocks on share links). Without
+//! one it is the Architect app.
+//!
 //! **Settings** come from `/app/config.json` ([`Config`]), read at start,
 //! so one bundle serves any host: the chart's `ConfigMap` replaces the
 //! file with the deployment's issuer.
@@ -32,6 +39,8 @@
 
 #[cfg(target_arch = "wasm32")]
 mod browser;
+
+use std::fmt::Write as _;
 
 use serde::Deserialize;
 
@@ -47,6 +56,8 @@ pub const SCOPE: &str = "openid email profile offline_access";
 /// The node's status, over its HTTP face, on this origin
 /// (`apps/desktop/src/node/service.rs` `Node`).
 pub const NODE_STATUS: &str = "/node/status";
+/// Which distribution this bundle is (#491), beside the app.
+pub const DISTRIBUTION: &str = "/app/distribution.json";
 /// Where the desktop app is downloaded.
 pub const DOWNLOADS: &str = "https://github.com/FastTrackStudios/architect/releases/latest";
 
@@ -83,6 +94,80 @@ impl Config {
     #[must_use]
     pub fn redirect_uri(origin: &str) -> String {
         format!("{}{CALLBACK}", origin.trim_end_matches('/'))
+    }
+}
+
+/// `/app/distribution.json`: the distribution this bundle was built for
+/// (`architect_distribution::Distribution::describe`), the fields the app
+/// shows.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Distribution {
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    /// Its compiled-in extensions.
+    #[serde(default)]
+    pub extensions: Vec<BuiltIn>,
+}
+
+/// An extension compiled into the distribution.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct BuiltIn {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    /// The bundle it came in.
+    #[serde(default)]
+    pub bundle: Option<String>,
+}
+
+impl Default for Distribution {
+    /// The Architect app, with no built-ins listed: a bundle built
+    /// without a `distribution.json`.
+    fn default() -> Self {
+        Self {
+            name: "Architect".to_owned(),
+            version: String::new(),
+            extensions: Vec::new(),
+        }
+    }
+}
+
+impl Distribution {
+    /// Read `/app/distribution.json`.
+    ///
+    /// # Errors
+    ///
+    /// Not JSON, or no `name`.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let d: Self = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        if d.name.trim().is_empty() {
+            return Err("distribution.json names no app".to_owned());
+        }
+        Ok(d)
+    }
+
+    /// Its compiled-in extensions as a card's section; nothing with none.
+    #[must_use]
+    pub fn built_in(&self) -> String {
+        if self.extensions.is_empty() {
+            return String::new();
+        }
+        let mut rows = String::new();
+        for e in &self.extensions {
+            let _ = write!(
+                rows,
+                "<li data-extension=\"{}\"><strong>{}</strong> <span class=\"muted\">{}</span><br><span class=\"muted\">{}</span></li>",
+                escape(&e.id),
+                escape(&e.name),
+                escape(&e.version),
+                escape(&e.description)
+            );
+        }
+        format!("<section class=\"built-in\"><h3>Built in</h3><ul>{rows}</ul></section>")
     }
 }
 
@@ -202,14 +287,17 @@ pub enum Screen {
     Broken(String),
 }
 
-/// The HTML of `screen`, for the app's root. Buttons carry
-/// `data-action` (`sign-in`, `sign-out`), which the browser half wires.
+/// The HTML of `screen` in distribution `dist`, for the app's root.
+/// Buttons carry `data-action` (`sign-in`, `sign-out`), which the browser
+/// half wires.
 #[must_use]
-pub fn view(screen: &Screen) -> String {
+pub fn view(screen: &Screen, dist: &Distribution) -> String {
+    let name = escape(&dist.name);
+    let built_in = dist.built_in();
     match screen {
         Screen::Loading => "<p class=\"muted\">Loading…</p>".to_owned(),
         Screen::Broken(why) => format!(
-            "<section class=\"card\"><h2>Architect can't start here</h2><p class=\"problem\">{}</p></section>",
+            "<section class=\"card\"><h2>{name} can't start here</h2><p class=\"problem\">{}</p></section>",
             escape(why)
         ),
         Screen::SignedOut { problem } => {
@@ -218,9 +306,9 @@ pub fn view(screen: &Screen) -> String {
                 .map(|p| format!("<p class=\"problem\">{}</p>", escape(p)))
                 .unwrap_or_default();
             format!(
-                "<section class=\"card\"><h2>Sign in to Architect</h2>\
+                "<section class=\"card\"><h2>Sign in to {name}</h2>\
                  <p>Your notes, projects and files, on every device and in sync.</p>{problem}\
-                 <p><button class=\"primary\" data-action=\"sign-in\">Sign in</button></p></section>"
+                 <p><button class=\"primary\" data-action=\"sign-in\">Sign in</button></p>{built_in}</section>"
             )
         }
         Screen::SignedIn { person, node } => {
@@ -257,7 +345,7 @@ pub fn view(screen: &Screen) -> String {
                  <p>The full app is the desktop app for now; its views come to the browser here.</p>\
                  <p class=\"row\"><a class=\"button primary\" href=\"{DOWNLOADS}\">Download the desktop app</a>\
                  <a class=\"button\" href=\"/docs/\">Docs</a>\
-                 <button data-action=\"sign-out\">Sign out</button></p></section>",
+                 <button data-action=\"sign-out\">Sign out</button></p>{built_in}</section>",
                 escape(who)
             )
         }
@@ -308,24 +396,55 @@ mod tests {
 
     #[test]
     fn screens_escape_what_they_show() {
-        let html = view(&Screen::SignedIn {
-            person: Person {
-                name: Some("<b>Ada</b>".into()),
-                email: Some("ada@x.test".into()),
+        let html = view(
+            &Screen::SignedIn {
+                person: Person {
+                    name: Some("<b>Ada</b>".into()),
+                    email: Some("ada@x.test".into()),
+                },
+                node: Some(Ok(NodeStatus {
+                    name: "home".into(),
+                    version: "0.30.0".into(),
+                    org: None,
+                    vaults: 2,
+                    notes: 9,
+                    devices: 3,
+                })),
             },
-            node: Some(Ok(NodeStatus {
-                name: "home".into(),
-                version: "0.30.0".into(),
-                org: None,
-                vaults: 2,
-                notes: 9,
-                devices: 3,
-            })),
-        });
+            &Distribution::default(),
+        );
         assert!(html.contains("&lt;b&gt;Ada&lt;/b&gt;"), "{html}");
         assert!(html.contains("ada@x.test"));
         assert!(html.contains("2 (9 notes)"));
         assert!(html.contains("data-action=\"sign-out\""));
-        assert!(view(&Screen::SignedOut { problem: None }).contains("data-action=\"sign-in\""));
+        assert!(
+            view(
+                &Screen::SignedOut { problem: None },
+                &Distribution::default()
+            )
+            .contains("data-action=\"sign-in\"")
+        );
+    }
+
+    #[test]
+    fn a_distribution_names_the_app_and_lists_what_is_compiled_in() {
+        let d = Distribution::parse(
+            r#"{"name":"Studio","version":"0.12.0","extensions":[{"id":"studio-setlists","name":"Set<lists>","version":"0.1.0","description":"Songs.","bundle":null}],"bundles":[]}"#,
+        )
+        .unwrap();
+        let html = view(&Screen::SignedOut { problem: None }, &d);
+        assert!(html.contains("Sign in to Studio"), "{html}");
+        assert!(
+            html.contains("data-extension=\"studio-setlists\""),
+            "{html}"
+        );
+        assert!(html.contains("Set&lt;lists&gt;"), "escaped: {html}");
+        let plain = view(
+            &Screen::SignedOut { problem: None },
+            &Distribution::default(),
+        );
+        assert!(plain.contains("Sign in to Architect"));
+        assert!(!plain.contains("built-in"), "none listed: {plain}");
+        assert!(Distribution::parse(r#"{"name":" "}"#).is_err());
     }
 }

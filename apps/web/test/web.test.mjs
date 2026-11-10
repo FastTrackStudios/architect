@@ -134,3 +134,25 @@ test('a path the node owns is a 404 here, never the app', { skip }, async () => 
     assert.equal(res.status, 404, path);
   }
 });
+
+// A distribution's bundle (`cargo xtask dist web`, #491) names its app
+// and lists the extensions compiled into it; a bundle without
+// distribution.json is the Architect app's, with none listed.
+test('the app is the distribution its bundle was built for', { skip }, async () => {
+  const res = await fetch(`${origin}/app/distribution.json`);
+  const dist = res.ok ? await res.json() : { name: 'Architect', extensions: [] };
+  const { tab, close } = await open();
+  try {
+    await tab.go(`${origin}/app/`);
+    await tab.until('!!document.querySelector("[data-action=sign-in]")', 'the sign-in button');
+    assert.match(await tab.eval('document.querySelector("#app h2").textContent'), new RegExp(`Sign in to ${dist.name}`));
+    if (res.ok) {
+      assert.equal(await tab.eval('document.title'), dist.name);
+      assert.equal(await tab.eval('document.querySelector("header .brand").textContent'), dist.name);
+    }
+    const listed = await tab.eval('JSON.stringify([...document.querySelectorAll("#app [data-extension]")].map((e) => e.dataset.extension))');
+    assert.deepEqual(JSON.parse(listed), dist.extensions.map((e) => e.id));
+  } finally {
+    close();
+  }
+});

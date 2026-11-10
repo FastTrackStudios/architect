@@ -68,3 +68,6 @@ at the larger code that does the same thing for real
 14. [Scripts, extensions and canvases](@/guide/extending.md): Luau over
     the Action List, extensions with manifests and hot reload, process
     extensions with remote views, and canvases over a view.
+15. [Your own Architect](@/guide/your-own-architect.md): a distribution
+    as code, the extensions you choose compiled in, built for desktop,
+    the web and the node with `cargo xtask dist`.

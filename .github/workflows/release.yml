@@ -97,10 +97,11 @@ jobs:
           set -euo pipefail
           dir="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-node/$RUNNER_NAME/target"
           mkdir -p "$dir"
-          devenv shell -- cargo build --release -p architect-desktop --bin architect-desktop \
-            --no-default-features --features vox --target-dir "$dir" \
-            --config 'target.x86_64-unknown-linux-gnu.rustflags=["--cfg","no_workspace_hack"]'
-          bin="$dir/release/architect-desktop"
+          # The Architect distribution's node, as any distribution's is
+          # built (xtask/src/dist.rs: --no-default-features, no_workspace_hack).
+          devenv shell -- cargo xtask dist node --target-dir "$dir" --out "$RUNNER_TEMP/dist" \
+            | tee "$RUNNER_TEMP/dist-node.txt"
+          bin="$(sed -n 's/^node=//p' "$RUNNER_TEMP/dist-node.txt")"
           "$bin" serve --help > /dev/null
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
         env:
@@ -189,7 +190,12 @@ jobs:
           export CARGO_TARGET_DIR="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-web/$RUNNER_NAME/target"
           mkdir -p "$CARGO_TARGET_DIR"
           out="$RUNNER_TEMP/architect-web-${{ steps.plan.outputs.version }}"
-          devenv shell -- bash scripts/web-bundle.sh "$out"
+          # The Architect distribution's bundle, as any distribution's is
+          # built: its node says which distribution it is
+          # (/app/distribution.json), then scripts/web-bundle.sh.
+          devenv shell -- cargo xtask dist web --out "$RUNNER_TEMP/dist-web" \
+            | tee "$RUNNER_TEMP/dist-web.txt"
+          mv "$(sed -n 's/^web=//p' "$RUNNER_TEMP/dist-web.txt")" "$out"
           echo "bundle=$out" >> "$GITHUB_OUTPUT"
 
       - name: Push the image
@@ -251,7 +257,9 @@ jobs:
           export CARGO_TARGET_DIR="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-desktop/$RUNNER_NAME/target"
           mkdir -p "$CARGO_TARGET_DIR"
           export VERSION="${GITHUB_REF_NAME#v}" OUT_DIR="$RUNNER_TEMP/desktop"
-          bash scripts/desktop/linux.sh
+          # The Architect distribution, as any distribution's desktop app
+          # is built: the window's build, then scripts/desktop/linux.sh.
+          devenv shell -- cargo xtask dist desktop --out "$OUT_DIR" --version "$VERSION"
           echo "out=$OUT_DIR" >> "$GITHUB_OUTPUT"
         env:
           ARCHITECT_BUILD_REV: ${{ github.sha }}
@@ -304,7 +312,9 @@ jobs:
           set -euo pipefail
           export PATH="/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:$PATH"
           export VERSION="${GITHUB_REF_NAME#v}" OUT_DIR="$PWD/target/dmg"
-          bash scripts/desktop/macos.sh
+          # The Architect distribution, as any distribution's desktop app
+          # is built: the window's build, then scripts/desktop/macos.sh.
+          devenv shell -- cargo xtask dist desktop --out "$OUT_DIR" --version "$VERSION"
           echo "out=$OUT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Manifest and attach

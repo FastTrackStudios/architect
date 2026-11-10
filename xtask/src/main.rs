@@ -6,6 +6,7 @@
 
 mod boundaries;
 mod builtins;
+mod dist;
 mod docs;
 mod ext;
 mod feature_tests;
@@ -164,6 +165,37 @@ enum Command {
     /// control protocol's `Method::TOOLS`. See
     /// `docs/content/guide/cli-and-mcp.md`.
     Surfaces,
+    /// Build a distribution of Architect (#491): its desktop app (an
+    /// `AppImage`, a dmg on a Mac), its node binary and image, its web bundle
+    /// and image, through the release's own scripts and flake images.
+    /// From a distribution crate (`--manifest-path`, its `main`
+    /// `architect_desktop::run(..)`), else the Architect app. See
+    /// `docs/content/guide/your-own-architect.md`.
+    Dist {
+        /// What to build.
+        #[arg(required = true, value_enum)]
+        targets: Vec<dist::Target>,
+        /// The distribution crate's `Cargo.toml` (default: this repo's
+        /// `architect-desktop`).
+        #[arg(long)]
+        manifest_path: Option<PathBuf>,
+        /// Its binary, when the crate has more than one.
+        #[arg(long)]
+        bin: Option<String>,
+        /// Where the artifacts go.
+        #[arg(long, default_value = "target/dist")]
+        out: PathBuf,
+        /// The cargo profile.
+        #[arg(long, default_value = "release")]
+        profile: String,
+        /// Cargo's target dir (default: cargo's own).
+        #[arg(long)]
+        target_dir: Option<PathBuf>,
+        /// The version written into the desktop entry and Info.plist
+        /// (default: the workspace's).
+        #[arg(long)]
+        version: Option<String>,
+    },
     /// Check that every built-in extension crate builds both ways: linked
     /// in (`--lib`) and as a process (`--bin`), WASI once its runner
     /// lands.
@@ -280,6 +312,23 @@ fn main() -> ExitCode {
             let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             surfaces::run_cli(&root)
         }
+        Command::Dist {
+            targets,
+            manifest_path,
+            bin,
+            out,
+            profile,
+            target_dir,
+            version,
+        } => dist::run_cli(&dist::Options {
+            targets,
+            manifest_path,
+            bin,
+            out,
+            profile,
+            target_dir,
+            version,
+        }),
         Command::Builtins => {
             let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             builtins::run_cli(&root)
