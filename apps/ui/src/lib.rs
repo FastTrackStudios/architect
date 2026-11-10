@@ -16,6 +16,7 @@ mod accounts;
 mod arrange;
 mod capture;
 mod confirm;
+mod cursors;
 mod decks;
 pub mod distribution;
 mod embedded;

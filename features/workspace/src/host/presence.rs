@@ -50,7 +50,13 @@ pub fn use_presence_overlay() -> PresenceOverlay {
 /// pointers with their names.
 #[component]
 pub fn PresenceLayer(overlay: PresenceOverlay) -> Element {
-    let marks = overlay.marks();
+    rsx! { PresenceMarksLayer { marks: overlay.marks() } }
+}
+
+/// Draws `marks` over the pane: what [`PresenceLayer`] draws, for a
+/// caller that has the marks already.
+#[component]
+pub fn PresenceMarksLayer(marks: PresenceMarks) -> Element {
     if marks.is_empty() {
         return rsx! {};
     }
@@ -75,6 +81,7 @@ pub fn PresenceLayer(overlay: PresenceOverlay) -> Element {
             for pointer in marks.pointers {
                 div {
                     key: "pointer-{pointer.peer}",
+                    "data-presence-pointer": "{pointer.peer}",
                     style: "position:absolute; left:{pointer.x}px; top:{pointer.y}px; display:flex; \
                             align-items:flex-start; gap:4px;",
                     div { style: "width:10px; height:10px; margin:-5px 0 0 -5px; border-radius:5px; \

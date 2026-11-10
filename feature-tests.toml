@@ -48,3 +48,12 @@ name = "lab-keyflow"
 workspace = true
 packages = ["architect-app"]
 features = ["architect-app/keyflow-lab"]
+
+# The editor's highlighting through the language registry (#512):
+# `architect-editor`'s `syntax` feature links the editor repo's
+# tree-sitter grammars, which the default (wasm-clean contract) build
+# leaves out.
+[[pass]]
+name = "editor-syntax"
+packages = ["architect-editor"]
+features = ["architect-editor/syntax"]

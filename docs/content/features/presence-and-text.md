@@ -58,6 +58,48 @@ In Dioxus: `use_presence_channel_keyed(doc_id, 30_000)`, then `use_here`,
 the roster into `PresenceMarks`, `use_presence_overlay().set(marks)`, and put
 `PresenceLayer { overlay }` as the view's last child.
 
+## Cursors come with the pane
+
+A view does not have to do any of the above to have cursors. Inside a
+`PaneRoom` (`use_pane_room`, provided once by the app over the presence
+channel of what it has open) every workspace pane publishes this person's
+pointer and draws everyone else's, and each tab shows a dot for every person
+whose pane it is. The feature is `architect-workspace/presence`.
+
+- **No code:** a pane's space is its own box, `pane:<view kind>:<title>`, with
+  the pointer as fractions of it. Two people's panes of one kind and title are
+  one place, whatever their sizes.
+- **One line, for a view that shows a thing:** `use_pane_subject(path)` names
+  what the pane shows (a note's path, a setlist's id) in place of its title.
+- **A view that scrolls or zooms** declares its space on every render, and a
+  pointer then stays on the same bar of the same track at any zoom:
+
+```rust
+use architect_workspace::pane_space::{Axis, ViewSpace};
+use architect_workspace::use_pane_space;
+
+use_pane_space(ViewSpace::mapped(
+    "session.arrange",
+    Axis::linear("time", scroll_seconds, seconds_per_px),
+    Axis::lanes("track", track_ids, ruler_px, lane_px),
+));
+```
+
+- **An extension in any runtime** (a process, a WASI component, a page, Luau)
+  does the same with actions, under the capability `actions = ["CURSORS_"]`:
+  `CURSORS_SPACE_SET {pane, space, x, y}` and `CURSORS_SPACE_CLEAR {pane}`
+  declare a pane's space, `CURSORS_HERE {place}` publishes a pointer from a
+  view that draws its own surface, and `CURSORS_ROSTER {space?}` reads who is
+  here, with a `revision` to poll on. The app puts them on its list with
+  `architect_workspace::pane_space::register`.
+
+Selections with a range in a declared space are washed in the person's colour
+the same way. Not yet: a roster-changed event (poll `CURSORS_ROSTER`'s
+revision), remote carets in an extension's own editor, and the navigator's
+"who has this open". The Architect app mounts the room
+(`apps/ui/src/cursors.rs` `use_app_cursors`) over a channel of its own until
+it joins a vault's presence channel, so nobody else is on it yet.
+
 ## Code tour
 
 1. `features/crdt/crdt/src/presence.rs` `Place` (`new`, `with`, `num`): a
@@ -77,6 +119,9 @@ the roster into `PresenceMarks`, `use_presence_overlay().set(marks)`, and put
    `use_roster`, `use_presence_frame`.
 8. `features/workspace/src/host/presence.rs` `PresenceLayer`,
    `use_presence_overlay`, and `features/workspace/src/presence.rs` `PresenceMarks`.
+9. `features/workspace/src/pane_space.rs` `ViewSpace`, `Axis`, `marks`,
+   `PresenceBoard`, `register`; `features/workspace/src/host/pane_presence.rs`
+   `PaneRoom`, `use_pane_room`, `use_pane_space`, `use_pane_subject`.
 
 An editor reports its edits as `TextOp`s to `on_local`. The binding
 transforms them against remote operations it has queued and commits with its
@@ -103,7 +148,8 @@ pixels.
 Done in architect, including the workspace overlay. Not yet: a shared clock,
 follow mode, an org-wide roster, `editor-crdt` implementing `EditorBinding`.
 Positions are Unicode scalar offsets; an editor that counts UTF-16 converts at
-its edge. `PresenceLayer` has no test.
+its edge. The pane's own cursors are tested headlessly
+(`features/workspace/tests/pane_cursors.rs`).
 
 - **Task** uses the presence channel hooks (`task:crates/ui/src/collab.rs`)
   with its own roster UI; `Here`, `Roster`, `TextBinding` and `crdt(text)` are

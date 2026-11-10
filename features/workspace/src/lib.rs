@@ -74,6 +74,8 @@ mod model;
 mod ops;
 #[cfg(feature = "paint")]
 pub mod paint;
+#[cfg(feature = "presence")]
+pub mod pane_space;
 mod presence;
 mod repair;
 mod screenset;
@@ -115,11 +117,14 @@ pub const CONTEXT_TARGETS: [(&str, &str); 3] = [
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, ContextEntries, ContextEntry, DeckHandle, DeckResolve, DeckStores,
-    DecksConfig, HeaderTools, Host, Opened, PaneHandle, Popout, PresenceLayer, PresenceOverlay,
-    TabBadges, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions, WorkspaceStore,
-    WorkspaceView, context_invocation, try_use_decks, try_use_pane_of, use_deck_context, use_decks,
-    use_host, use_pane, use_pane_of, use_pane_status, use_presence_overlay,
+    DecksConfig, HeaderTools, Host, Opened, PaneHandle, Popout, PresenceLayer, PresenceMarksLayer,
+    PresenceOverlay, TabBadges, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions,
+    WorkspaceStore, WorkspaceView, context_invocation, try_use_decks, try_use_pane_of,
+    use_deck_context, use_decks, use_host, use_pane, use_pane_of, use_pane_status,
+    use_presence_overlay,
 };
+#[cfg(all(feature = "ui", feature = "presence"))]
+pub use host::{PaneRoom, use_pane_room, use_pane_space, use_pane_subject};
 #[cfg(feature = "ui")]
 pub use host::{TabKindsUi, TabRender, TabRenderCtx, try_use_tab_kinds, use_tab_kinds};
 pub use kinds::{

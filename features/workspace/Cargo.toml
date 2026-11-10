@@ -25,6 +25,10 @@ default = []
 # The contract a view kind mounts through (`ViewCtx`): the host's Action
 # List, a document and its history. Wasm-clean, no Dioxus.
 ctx = ["dep:architect", "dep:crdt", "dep:architect-theme"]
+# Cursors that come with the pane (`pane_space`): the spaces others'
+# pointers are placed in, and the `CURSORS_*` actions. With `ui`, every
+# pane publishes and draws pointers when the app provides a `PaneRoom`.
+presence = ["actions", "dep:crdt"]
 # Every operation as an Action List action with an explicit target
 # (src/control/list.rs): on a headless workspace, or under `ui` the host's.
 actions = ["dep:architect", "dep:futures-channel"]
@@ -105,7 +109,9 @@ doctest = false
 
 [dev-dependencies]
 # The kind contract's own tests (src/ctx.rs, src/paint/).
-architect-workspace = { path = ".", features = ["ctx", "paint", "home"] }
+architect-workspace = { path = ".", features = ["ctx", "paint", "home", "presence"] }
+# A test presence channel's values (src/pane_space.rs).
+loro = { workspace = true }
 # The interface files' tests (src/home.rs).
 tempfile = "3"
 # A paint view's scene rasterised to check it against its hit test.
@@ -151,6 +157,10 @@ required-features = ["native"]
 [[test]]
 name = "title_row"
 required-features = ["native"]
+
+[[test]]
+name = "pane_cursors"
+required-features = ["native", "presence"]
 
 [[test]]
 name = "tab_badge"

@@ -569,6 +569,8 @@ pub fn VaultPage() -> Element {
     let actions = architect_workspace::WorkspaceActions::new(use_context::<
         std::sync::Arc<architect::action::ActionList>,
     >());
+    // Cursors come with the panes (#509), and `PRESENCE_*` is on the list.
+    let _cursors = crate::cursors::use_app_cursors(&actions.0);
     // Decks (#441): the vault, each project, each song loaded onto a deck
     // of its own, shown in its screenset; the session and each context's
     // layout kept (`crate::decks`). The workspace and screensets above are
