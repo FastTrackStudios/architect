@@ -989,6 +989,17 @@ mod client {
             let err = Self::off(path);
             async move { Err(err) }
         }
+        pub fn download<'a, F>(
+            &'a self,
+            path: &str,
+            _sink: F,
+        ) -> impl ::core::future::Future<Output = Result<u64, ClientError<()>>> + 'a
+        where
+            F: FnMut(&[u8]) -> std::io::Result<()> + 'a,
+        {
+            let err = Self::off(path);
+            async move { Err(err) }
+        }
     }
 }
 
@@ -1183,6 +1194,46 @@ mod client {
                 let body = encoded?;
                 self.stream_encoded(path, body).await
             }
+        }
+
+        /// Fetch bytes: `GET <base>/<path>` (its query in `path`), each
+        /// piece of the reply handed to `sink` as it arrives, so a large
+        /// reply (an archive, a file) is never held whole. Answers how
+        /// many bytes came.
+        ///
+        /// A non-2xx reply is a `Transport` error carrying the status; so
+        /// is a `sink` that fails (a full disk), after which nothing more
+        /// is read.
+        pub async fn download<F>(&self, path: &str, mut sink: F) -> Result<u64, ClientError<()>>
+        where
+            F: FnMut(&[u8]) -> std::io::Result<()>,
+        {
+            use futures::StreamExt as _;
+            let fail =
+                |detail: String, retryable: bool| ClientError::Transport { detail, retryable };
+            let mut request = self.http.get(format!("{}{path}", self.base_url));
+            if let Some(token) = &self.bearer {
+                request = request.bearer_auth(token);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|err| fail(format!("{path}: {err}"), true))?;
+            let status = response.status();
+            if !status.is_success() {
+                return Err(fail(
+                    format!("{path}: HTTP {}", status.as_u16()),
+                    status.is_server_error(),
+                ));
+            }
+            let mut bytes = response.bytes_stream();
+            let mut total = 0_u64;
+            while let Some(chunk) = bytes.next().await {
+                let chunk = chunk.map_err(|err| fail(format!("{path}: {err}"), true))?;
+                sink(&chunk).map_err(|err| fail(format!("{path}: {err}"), false))?;
+                total = total.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+            }
+            Ok(total)
         }
 
         async fn stream_encoded<T>(

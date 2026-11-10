@@ -5,17 +5,24 @@
 //! A share is a scope of one of the host's vaults (`vault`, its only one
 //! when unset): `folder`, `tag`, `notes` (or one `note`), `base`, or the
 //! whole vault when none is given. Its link is `<host>/s/<code>/`.
+//!
+//! A share for many people has named audiences (#510): each a Bases
+//! filter over the scope on a link of its own (`SHARE_AUDIENCE_ADD`,
+//! `SHARE_AUDIENCE_REMOVE`, `SHARE_AUDIENCES`). `SHARE_ARCHIVE` saves the
+//! zip a link's "Download all" gives.
 
 use std::sync::Arc;
 
 use architect::action::{
     ActionCaller, ActionError, ActionList, ActionMeta, Effect, InvocationSource,
 };
-use architect_spaces::{Audience, NewShare, Share, ShareAccess, ShareChange, ShareScope};
+use architect_spaces::{
+    Audience, NewAudience, NewShare, Share, ShareAccess, ShareAudience, ShareChange, ShareScope,
+};
 use facet::Facet;
 
 use crate::controller::{Accounts, Sheet};
-use crate::shares::ShareDraft;
+use crate::shares::{ArchiveAsk, ShareDraft};
 
 /// The actions' ids.
 pub mod ids {
@@ -26,8 +33,12 @@ pub mod ids {
     pub const SHARE_COMMENTS: &str = "SHARE_COMMENTS";
     pub const SHARE_SHEET: &str = "SHARE_SHEET";
     pub const PUBLISH_DOMAIN: &str = "PUBLISH_DOMAIN";
+    pub const SHARE_AUDIENCE_ADD: &str = "SHARE_AUDIENCE_ADD";
+    pub const SHARE_AUDIENCE_REMOVE: &str = "SHARE_AUDIENCE_REMOVE";
+    pub const SHARE_AUDIENCES: &str = "SHARE_AUDIENCES";
+    pub const SHARE_ARCHIVE: &str = "SHARE_ARCHIVE";
     /// Every id, in menu order.
-    pub const ALL: [&str; 7] = [
+    pub const ALL: [&str; 11] = [
         SHARE_SHEET,
         SHARE_CREATE,
         SHARE_LIST,
@@ -35,6 +46,10 @@ pub mod ids {
         SHARE_REVOKE,
         SHARE_COMMENTS,
         PUBLISH_DOMAIN,
+        SHARE_AUDIENCE_ADD,
+        SHARE_AUDIENCE_REMOVE,
+        SHARE_AUDIENCES,
+        SHARE_ARCHIVE,
     ];
 }
 
@@ -62,6 +77,10 @@ metas! { "Share";
     SHARE_UPDATE = SHARE_UPDATE, "Change a share link", "Changes share `code`: `audience`, `access`, `expires` (never, 1h, 24h, 7d, 30d, YYYY-MM-DD) or `title`. The next request to the link is answered by the change.";
     SHARE_REVOKE = SHARE_REVOKE, "Revoke a share link", "Takes share `code` down: its link answers 404 from the next request on. Final.";
     SHARE_COMMENTS = SHARE_COMMENTS, "Share comments", "The comments left on share `code` (page, by, text, when).";
+    SHARE_AUDIENCE_ADD = SHARE_AUDIENCE_ADD, "Add a share audience", "Adds a named audience to share `code`: `name` (violin), and `filter`, a Bases filter expression over the notes of the share's scope (`instrument == \"violin\"`, `file.hasTag(\"rhythm\")`; empty: every note). The audience gets a link of its own, `<host>/s/<its code>/`, that shows and serves only the notes the filter holds for and the files they attach; the share's own link stays the whole scope. Answers the share and the audience's `url`.";
+    SHARE_AUDIENCE_REMOVE = SHARE_AUDIENCE_REMOVE, "Remove a share audience", "Removes audience `name` from share `code`: its link answers 404 from the next request on. The share's own link and its other audiences stay.";
+    SHARE_AUDIENCES = SHARE_AUDIENCES, "Share audiences", "The named audiences of share `code`: name, filter, code and url of each.";
+    SHARE_ARCHIVE = SHARE_ARCHIVE, "Download a share's files", "Saves the zip a share link's Download all gives to the file `to`: the files of share `code`, or of its `audience` alone, in folders by `by` (order: numbered files; note (default): a numbered folder per note; property:<key>: a folder per value), all of them or one `group` (a note's title or a property's value). Streamed from the host; answers the file, its bytes and how many files it holds.";
     PUBLISH_DOMAIN = PUBLISH_DOMAIN, "Publish at a domain", "Serves share `code` at the root of `domain` (album.example.com) too, as its own site; no `domain` stops it. Point the domain's DNS at the host and add it to its ingress.";
 }
 
@@ -145,6 +164,111 @@ pub struct DomainArgs {
     pub host: Option<String>,
 }
 
+/// What [`ids::SHARE_AUDIENCE_ADD`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct AudienceAddArgs {
+    pub code: String,
+    pub name: String,
+    /// A Bases filter expression; none: every note of the scope.
+    pub filter: Option<String>,
+    pub host: Option<String>,
+}
+
+/// What [`ids::SHARE_AUDIENCE_REMOVE`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct AudienceRemoveArgs {
+    pub code: String,
+    pub name: String,
+    pub host: Option<String>,
+}
+
+/// What [`ids::SHARE_ARCHIVE`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct ArchiveArgs {
+    pub code: String,
+    /// The file to write (`~/Downloads/violins.zip`).
+    pub to: String,
+    pub audience: Option<String>,
+    /// order, note (default) or property:<key>.
+    pub by: Option<String>,
+    pub group: Option<String>,
+    pub host: Option<String>,
+}
+
+/// What [`ids::SHARE_ARCHIVE`] answers.
+#[derive(Debug, Clone, Facet)]
+pub struct ArchiveOut {
+    /// The file written.
+    pub path: String,
+    pub bytes: u64,
+    /// How many files the archive holds.
+    pub files: u64,
+    /// Where it came from.
+    pub url: String,
+}
+
+/// One audience of a share, as the actions answer it.
+#[derive(Debug, Clone, Facet)]
+pub struct AudienceRow {
+    pub name: String,
+    /// Its Bases filter expression.
+    pub filter: String,
+    pub code: String,
+    /// Its own link, on the host.
+    pub url: Option<String>,
+}
+
+impl AudienceRow {
+    fn of(audience: &ShareAudience, accounts: &Accounts) -> Self {
+        Self {
+            name: audience.name.clone(),
+            filter: audience.filter.clone(),
+            code: audience.code.clone(),
+            url: accounts.org_host().map(|host| audience.url(&host)),
+        }
+    }
+}
+
+/// What [`ids::SHARE_AUDIENCES`] and [`ids::SHARE_AUDIENCE_REMOVE`] answer.
+#[derive(Debug, Clone, Facet)]
+pub struct AudiencesOut {
+    pub code: String,
+    pub audiences: Vec<AudienceRow>,
+}
+
+/// What [`ids::SHARE_AUDIENCE_ADD`] answers.
+#[derive(Debug, Clone, Facet)]
+pub struct AudienceOut {
+    pub share: ShareRow,
+    pub audience: AudienceRow,
+}
+
+/// How many files a zip's directory says it holds (its last 22 bytes,
+/// when it has no comment).
+fn zip_count(path: &std::path::Path) -> u64 {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut end = [0_u8; 22];
+    let read = std::fs::File::open(path).and_then(|mut f| {
+        f.seek(SeekFrom::End(-22))?;
+        f.read_exact(&mut end)
+    });
+    match (read, end) {
+        (Ok(()), [0x50, 0x4b, 0x05, 0x06, _, _, _, _, _, _, lo, hi, ..]) => {
+            u64::from(u16::from_le_bytes([lo, hi]))
+        }
+        _ => 0,
+    }
+}
+
+/// `~/x` under the home folder.
+fn expand(path: &str) -> std::path::PathBuf {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    match (path.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
+}
+
 /// What [`ids::SHARE_LIST`] takes.
 #[derive(Debug, Clone, Facet)]
 pub struct HostArgs {
@@ -170,6 +294,8 @@ pub struct ShareRow {
     /// live, expired or revoked.
     pub state: String,
     pub domain: Option<String>,
+    /// Its named audiences, each with its own link.
+    pub audiences: Vec<AudienceRow>,
 }
 
 impl ShareRow {
@@ -190,6 +316,11 @@ impl ShareRow {
             }
             .to_owned(),
             domain: share.domain.clone(),
+            audiences: share
+                .audiences
+                .iter()
+                .map(|a| AudienceRow::of(a, accounts))
+                .collect(),
         }
     }
 }
@@ -458,6 +589,94 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
                 .collect::<Vec<_>>())
         }
     })?;
+    let a = accounts.clone();
+    list.register_async(
+        &SHARE_AUDIENCE_ADD,
+        Effect::Mutating,
+        move |args: AudienceAddArgs| {
+            let a = a.clone();
+            async move {
+                let new = NewAudience {
+                    name: args.name.clone(),
+                    filter: args.filter.unwrap_or_default(),
+                };
+                let share = a
+                    .share_audience_add(args.host.as_deref(), &args.code, new)
+                    .await?;
+                let audience = share
+                    .audience_named(&args.name)
+                    .map(|made| AudienceRow::of(made, &a))
+                    .ok_or_else(|| "the audience was not added".to_owned())?;
+                Ok(AudienceOut {
+                    share: ShareRow::of(&share, &a),
+                    audience,
+                })
+            }
+        },
+    )?;
+    let a = accounts.clone();
+    list.register_async(
+        &SHARE_AUDIENCE_REMOVE,
+        Effect::Destructive,
+        move |args: AudienceRemoveArgs| {
+            let a = a.clone();
+            async move {
+                let share = a
+                    .share_audience_remove(args.host.as_deref(), &args.code, &args.name)
+                    .await?;
+                Ok(AudiencesOut {
+                    code: share.code.clone(),
+                    audiences: share
+                        .audiences
+                        .iter()
+                        .map(|x| AudienceRow::of(x, &a))
+                        .collect(),
+                })
+            }
+        },
+    )?;
+    let a = accounts.clone();
+    list.register_async(&SHARE_AUDIENCES, Effect::ReadOnly, move |args: CodeArgs| {
+        let a = a.clone();
+        async move {
+            let share = a.share(args.host.as_deref(), &args.code).await?;
+            Ok(AudiencesOut {
+                code: share.code.clone(),
+                audiences: share
+                    .audiences
+                    .iter()
+                    .map(|x| AudienceRow::of(x, &a))
+                    .collect(),
+            })
+        }
+    })?;
+    let a = accounts.clone();
+    list.register_async(
+        &SHARE_ARCHIVE,
+        Effect::Mutating,
+        move |args: ArchiveArgs| {
+            let a = a.clone();
+            async move {
+                if args.to.trim().is_empty() {
+                    return Err("say where to save it: `to`".to_owned());
+                }
+                let to = expand(args.to.trim());
+                let ask = ArchiveAsk {
+                    code: args.code.clone(),
+                    audience: args.audience.clone(),
+                    by: args.by.clone().unwrap_or_else(|| "note".to_owned()),
+                    group: args.group.clone(),
+                };
+                let (url, bytes) = a.share_archive(args.host.as_deref(), &ask, &to).await?;
+                Ok(ArchiveOut {
+                    files: zip_count(&to),
+                    path: to.to_string_lossy().into_owned(),
+                    bytes,
+                    url,
+                })
+            }
+        },
+    )?;
     let a = accounts.clone();
     list.register_async(
         &PUBLISH_DOMAIN,

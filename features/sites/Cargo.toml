@@ -33,6 +33,8 @@ toml = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The checksum of each file of a streamed archive (`archive`, #510).
+crc32fast = "1"
 tracing = { workspace = true }
 # The site's light and dark themes: architect's tokens as CSS variables.
 architect-theme = { workspace = true }

@@ -187,6 +187,7 @@ prefix to the node and a code never clashes with the web front end's paths
 | **Expiry** | an optional time, after which the link is `404` |
 | **Revoke** | final; the link is `404` from the next request on, and its pages are deleted |
 | **Domain** | optional: the same share at the root of a host of its own |
+| **Audiences** | optional: named slices of the scope, each a filter on a link of its own ([below](#one-share-many-audiences)) (`ShareAudience`) |
 
 A share's pages, and a Site's, draw the fences the build's compiled-in
 extensions claim, as the app draws them (#488): each linked extension's
@@ -207,8 +208,8 @@ app over the org lane is held at once. Comments go in a note beside it,
 
 **Made from the app.** The node that hosts the org (`ARCHITECT_HOST_ORG`)
 serves `architect_spaces::ShareLinks` on its org lane (`/org/<slug>/vox`,
-the issuer session as the bearer): `create`, `shares`, `update`, `revoke` and
-`comments`. Any member lists shares. A member or above makes, changes and
+the issuer session as the bearer): `create`, `shares`, `update`, `revoke`,
+`add_audience`, `remove_audience` and `comments`. Any member lists shares. A member or above makes, changes and
 revokes them (`SHARE_PERMITS`). The app's `SHARE_*` and `PUBLISH_DOMAIN`
 actions call it (`features/accounts/src/share_actions.rs` `register`), and so
 does its Share sheet, which `SHARE_SHEET` opens. The Organization menu has
@@ -260,7 +261,85 @@ layer, ahead of a Site mounted at `/`):
 
 `apps/desktop/tests/shares.rs` tests all of it against the in-process issuer:
 the scope never leaks, each audience, expiry and revoke, a live edit on the
-shared page, comments, and a domain.
+shared page, comments, a domain, named audiences, the files page and the
+archive.
+
+### One share, many audiences
+
+A setlist goes to a whole band, and each player needs a different slice of
+it: the violins their charts, the leader everything (#510). A share carries
+**named audiences** (`features/spaces/src/share.rs` `ShareAudience`), each a
+filter over the share's scope:
+
+| | |
+| --- | --- |
+| **Name** | `violin`, `rhythm`: once per share, any case |
+| **Filter** | a Bases filter expression over a note's properties and file, the language of a `.base` file's `filters:` (`instrument == "violin"`, `instrument.contains("violin")`, `file.hasTag("rhythm")`); empty holds for every note. The Bases engine evaluates it (`features/sites/src/listing.rs` `parse_filter`, `select`); there is no second filter language |
+| **Link** | its own code: `https://<node>/s/<the audience's code>/`. Knowing one audience's link tells nothing about another's, or about the share's own |
+
+```sh
+architect-desktop actions run SHARE_AUDIENCE_ADD --arg code=<code> --arg name=violin --arg 'filter=instrument == "violin"'
+architect-desktop actions run SHARE_AUDIENCES --arg code=<code>      # name, filter, code, url of each
+architect-desktop actions run SHARE_AUDIENCE_REMOVE --arg code=<code> --arg name=violin
+```
+
+- **The share's own link stays the whole scope** (the leader's link).
+  *Who* may open any of its links is still the share's `Audience` (public,
+  link, org, invited), its expiry and its revoke: an audience here is which
+  part a link shows, not who is let in.
+- **Nothing else is listed.** Each audience is built as its own site, of
+  the notes its filter holds for alone (`architect_sites::Options::filter`),
+  so no page, nav entry, backlink, base row, tag page or search entry names
+  a note outside it.
+- **Nothing else is served, checked when the request comes.** The node
+  reads the vault again whenever it has changed, and answers a request to
+  an audience's link only if the note asked for is in the scope and the
+  filter holds for it now (`apps/desktop/src/node/shares.rs` `Guard`). A
+  file is served only if a note the filter holds for attaches it. Another
+  audience's page or file is `404` there, on the page route and the byte
+  route alike, whatever is on disk. A note whose property changes leaves
+  the link with that change.
+- **Removed alone.** `SHARE_AUDIENCE_REMOVE` takes one audience's link
+  down (`404` from the next request); the share and its other audiences
+  stay. Revoking the share takes every link with it.
+- **Kept in the share's note.** Audiences are part of the share
+  (`Share::audiences`), so they sync with it. A share note written before
+  audiences reads as a share with none.
+
+A filter is over **notes**: attachments carry no properties of their own
+on today's vault, so a file belongs to the notes that link or embed it. Give
+each part its own note (`instrument: violin`, `song: Joy to the World`, the
+PDF embedded) and a filter on the note is a filter on its file.
+
+### The files page and Download all
+
+Every link has a files page, `<link>_files/`, and each page of a link that
+lists files points to it. It lists what the link shows, read from the vault
+when it is asked for, with an audience's filter applied, and switches
+between three views with a click (`?by=`):
+
+| View | `by` | In the archive |
+| --- | --- | --- |
+| **In order**: the list as it is ordered | `order` | `01 Violin I.pdf`, numbered file by file |
+| **By note**: a group per note | `note` | `01 Joy to the World/Violin I.pdf`: a folder per note, numbered by its place in the list |
+| **By a property**: a group per value (a note with several values is in each) | `property:<key>` | `violin/01 Joy to the World/Violin I.pdf`: a folder per value, its notes numbered in it |
+
+List order is the scope's: a note list's own order, a base's rows in its
+views' order, otherwise by path (`architect_sites::Scope::ordered`). The
+page offers a view for every property some listed note gives a plain value.
+
+**Download all**, on the page and on each group, is
+`<link>_archive.zip?by=<view>[&group=<label>]`: a zip of the files in view,
+in the folders above. The node writes it to the response while it reads the
+files (`features/sites/src/archive.rs` `ZipWriter`): it is never whole in
+memory and never on disk, files are stored as they are, and it carries no
+`Content-Length` (and takes no ranges). An audience's archive holds exactly
+its files. From the app or an agent:
+
+```sh
+architect-desktop actions run SHARE_ARCHIVE --arg code=<code> --arg audience=violin --arg to=~/Downloads/violins.zip
+architect-desktop actions run SHARE_ARCHIVE --arg code=<code> --arg by=property:song --arg 'group=Joy to the World' --arg to=/tmp/joy.zip
+```
 
 ## Its own deployment
 
