@@ -43,7 +43,9 @@ mod blocks;
 mod element_html;
 mod frontmatter;
 pub mod listing;
+pub mod lyrics;
 mod markdown;
+pub mod media;
 #[cfg(feature = "pages")]
 mod page_blocks;
 mod scope;
@@ -58,13 +60,14 @@ pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
+pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
 pub use page_blocks::PageBlocks;
 pub use scope::Scope;
 pub use search::SearchEntry;
 pub use site::{Crumb, NavNode, Options, Page, Problem, Site, SiteError};
-pub use url::{fragment_id, slug_segment};
+pub use url::{encode_path, fragment_id, slug_segment};
 pub use write::{Report, WriteError, write};
 
 /// Read the vault in `opts.vault`, draw it with `blocks`, and write the

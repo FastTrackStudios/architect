@@ -14,8 +14,14 @@ use architect_theme::{Registry, Scheme, resolve};
 pub const SITE_CSS: &str = include_str!("../assets/site.css");
 
 /// What a reader does on the page: search, the theme toggle, the phone
-/// menu, the contents' current heading.
-pub const SITE_JS: &str = include_str!("../assets/site.js");
+/// menu, the contents' current heading; and the player (#511): media,
+/// a share link's queue, and the playhead blocks follow
+/// (`assets/player.js`, inert on a page with neither).
+pub const SITE_JS: &str = concat!(
+    include_str!("../assets/site.js"),
+    "\n",
+    include_str!("../assets/player.js")
+);
 
 /// The theme family `theme`'s light and dark tokens as CSS variables: the
 /// system picks one, and a reader's choice (`data-theme` on `<html>`, set

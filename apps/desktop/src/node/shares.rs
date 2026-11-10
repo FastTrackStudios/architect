@@ -43,6 +43,14 @@
 //! whole in memory, never on disk. An audience's lists and archives are
 //! its filter's, as its pages are.
 //!
+//! A link plays (#511): every file but a page is streamed with ranges
+//! (`206`, `Accept-Ranges`, `Content-Range`), behind the same checks as
+//! any request to the link, so a page's `<audio>` and `<video>` seek
+//! without fetching the file. Each page carries its link's queue
+//! ([`queue`]: the audio and video of the notes it lists, in list
+//! order, read per request), which the site's player
+//! (`features/sites/assets/player.js`) plays through.
+//!
 //! Nothing outside a share's scope is ever built into it, so nothing
 //! outside it can be served: the site is built from the scope's notes
 //! alone, its links to other notes are plain text, and an attachment is
@@ -1095,6 +1103,7 @@ async fn serve(
         mount,
     };
     let query = request.uri().query().unwrap_or_default().to_owned();
+    let headers = request.headers().clone();
     match rest {
         "/_live" => live(shares, code),
         "/_files" | "/_files/" => private(&share, files_page(shares, &link, &query).await),
@@ -1110,7 +1119,7 @@ async fn serve(
                     return private(&share, refusal);
                 }
             }
-            let mut response = file(&dir, rest).await;
+            let mut response = file(&dir, rest, &headers).await;
             if share.comments() && is_html(&response) {
                 response = with_comments(shares, &share, rest, mount, response).await;
             }
@@ -1183,8 +1192,11 @@ fn private(share: &Share, mut response: Response) -> Response {
     response
 }
 
-/// The built file at `rest` under `dir`, or the site's 404 page.
-async fn file(dir: &Path, rest: &str) -> Response {
+/// The built file at `rest` under `dir`, or the site's 404 page. A page
+/// is read whole (comments and the bar go into it); any other file is
+/// streamed and answers `Range` (`206`, `Accept-Ranges`), so a page's
+/// `<audio>` and `<video>` seek without downloading the file (#511).
+async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
     let decoded = decode(rest);
     let safe = !decoded
         .split('/')
@@ -1195,6 +1207,12 @@ async fn file(dir: &Path, rest: &str) -> Response {
     let mut path = dir.join(decoded.trim_start_matches('/'));
     if decoded.ends_with('/') || path.is_dir() {
         path = path.join("index.html");
+    }
+    let kind = content_type(&path);
+    if !kind.starts_with("text/html") && path.is_file() {
+        if let Ok(response) = architect::http::ranged::serve_file(headers, &path, kind).await {
+            return response;
+        }
     }
     match tokio::fs::read(&path).await {
         Ok(bytes) => {
@@ -1226,6 +1244,9 @@ async fn file(dir: &Path, rest: &str) -> Response {
 }
 
 fn content_type(path: &Path) -> &'static str {
+    if let Some(media) = architect_sites::media::media_type(&path.to_string_lossy()) {
+        return media;
+    }
     match path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -1236,7 +1257,7 @@ fn content_type(path: &Path) -> &'static str {
         Some("js") => "text/javascript; charset=utf-8",
         Some("json") => "application/json",
         Some("xml") => "application/xml",
-        Some("txt" | "md") => "text/plain; charset=utf-8",
+        Some("txt" | "md" | "lrc") => "text/plain; charset=utf-8",
         Some("svg") => "image/svg+xml",
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
@@ -1244,9 +1265,6 @@ fn content_type(path: &Path) -> &'static str {
         Some("webp") => "image/webp",
         Some("pdf") => "application/pdf",
         Some("woff2") => "font/woff2",
-        Some("mp3") => "audio/mpeg",
-        Some("wav") => "audio/wav",
-        Some("mp4") => "video/mp4",
         _ => "application/octet-stream",
     }
 }
@@ -1647,7 +1665,8 @@ async fn files_page(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
 }
 
 /// A page of the link, with a bar to its files page and its archive
-/// when it lists any file.
+/// when it lists any file, and its queue ([`queue`]) when any of them
+/// plays.
 async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) -> Response {
     let listed = shares.listed_for(link, &Grouping::Order).await;
     let files: usize = listed
@@ -1655,18 +1674,71 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
         .flat_map(|l| l.groups.iter())
         .map(|g| g.files.len())
         .sum();
-    if files == 0 {
+    let tracks = listed
+        .as_ref()
+        .map(|l| queue(l, link.mount))
+        .unwrap_or_default();
+    if files == 0 && tracks.is_empty() {
         return response;
     }
     let (parts, body) = response.into_parts();
     let Ok(bytes) = architect::http::axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
         return Response::from_parts(parts, Body::empty());
     };
-    let section = format!(
-        "{FILES_STYLE}<nav class=\"share-files-bar\" aria-label=\"Files\"><a href=\"{m}_files/\">Files ({files})</a><a class=\"share-download\" href=\"{m}_archive.zip?by=note\" download>Download all</a></nav>",
-        m = escape(link.mount)
-    );
+    let mut section = if files > 0 {
+        format!(
+            "{FILES_STYLE}<nav class=\"share-files-bar\" aria-label=\"Files\"><a href=\"{m}_files/\">Files ({files})</a><a class=\"share-download\" href=\"{m}_archive.zip?by=note\" download>Download all</a></nav>",
+            m = escape(link.mount)
+        )
+    } else {
+        String::new()
+    };
+    if !tracks.is_empty() {
+        let json = serde_json::json!({ "scope": link.mount, "tracks": tracks });
+        // JSON in a script element: `</` must not close it.
+        let json = json.to_string().replace("</", "<\\/");
+        let _ = write!(
+            section,
+            "<script type=\"application/json\" id=\"site-queue\">{json}</script>"
+        );
+    }
     before_main_end(parts, &String::from_utf8_lossy(&bytes), &section)
+}
+
+/// A link's queue (#511): every audio or video file of the notes it
+/// lists, in list order (a note's own in the order it names them), each
+/// with the page of its note, as the page's player reads it (`src`,
+/// `page`, `title`, `kind`). Read per request, so an audience's queue
+/// is its filter's.
+fn queue(listed: &Listed, mount: &str) -> Vec<serde_json::Value> {
+    let base = mount.trim_end_matches('/');
+    let mut tracks = Vec::new();
+    for entry in listed.entries.iter() {
+        let page = listed
+            .pages
+            .get(&entry.path)
+            .map_or_else(|| format!("{base}/"), |p| format!("{base}{p}"));
+        let media: Vec<_> = entry
+            .files
+            .iter()
+            .filter_map(|f| Some((f, architect_sites::media::media_kind(f)?)))
+            .collect();
+        for (file, kind) in &media {
+            let name = file.rsplit('/').next().unwrap_or(file);
+            let title = if media.len() > 1 {
+                format!("{}: {name}", entry.title)
+            } else {
+                entry.title.clone()
+            };
+            tracks.push(serde_json::json!({
+                "src": format!("{base}/{}", architect_sites::encode_path(file)),
+                "page": page,
+                "title": title,
+                "kind": kind.tag(),
+            }));
+        }
+    }
+    tracks
 }
 
 /// How much of a file is read, and sent, at a time.
@@ -2106,6 +2178,54 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_queue_is_the_lists_order_and_only_its_media() {
+        let entry = |path: &str, title: &str, files: &[&str]| Entry {
+            path: path.to_owned(),
+            title: title.to_owned(),
+            properties: serde_json::Map::new(),
+            files: files.iter().map(|f| (*f).to_owned()).collect(),
+        };
+        // List order is the listing's, not the names': b before a.
+        let entries = vec![
+            entry("Set/b.md", "Bee", &["Set/b chart.pdf", "Set/b take.mp3"]),
+            entry("Set/a.md", "Ay", &["Set/a.mp3", "Set/a.mp4", "Set/a.lrc"]),
+            entry("Set/c.md", "Sea", &["Set/c.pdf"]),
+        ];
+        let listed = Listed {
+            groups: Vec::new(),
+            entries: Arc::new(entries),
+            pages: [
+                ("Set/b.md".to_owned(), "/b/".to_owned()),
+                ("Set/a.md".to_owned(), "/a/".to_owned()),
+            ]
+            .into(),
+            root: PathBuf::new(),
+        };
+        let tracks = queue(&listed, "/s/abc/");
+        let got: Vec<(&str, &str, &str, &str)> = tracks
+            .iter()
+            .map(|t| {
+                (
+                    t["src"].as_str().unwrap_or_default(),
+                    t["page"].as_str().unwrap_or_default(),
+                    t["title"].as_str().unwrap_or_default(),
+                    t["kind"].as_str().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("/s/abc/Set/b%20take.mp3", "/s/abc/b/", "Bee", "audio"),
+                ("/s/abc/Set/a.mp3", "/s/abc/a/", "Ay: a.mp3", "audio"),
+                ("/s/abc/Set/a.mp4", "/s/abc/a/", "Ay: a.mp4", "video"),
+            ]
+        );
+        // On a domain, at the root.
+        assert_eq!(queue(&listed, "/")[0]["src"], "/Set/b%20take.mp3");
+    }
 
     #[test]
     fn paths_and_cookies() {

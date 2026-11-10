@@ -352,3 +352,24 @@ details[open] > summary > .site-tree-chevron { transform: scale(0.45) rotate(45d
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* The player (#511): media on the page, synced lyrics, the queue's bar. */
+.site-media { display: block; width: 100%; margin: 0 0 1.3em; }
+video.site-media { max-height: 70vh; background: #000; border-radius: 6px; }
+.site-lyrics { list-style: none; margin: 0 0 1.3em; padding: 6px 0; max-height: 60vh; overflow: auto; position: relative; }
+.site-lyrics li { margin: 0; }
+.site-lyric { all: unset; display: block; cursor: pointer; padding: 3px 10px; border-radius: 6px; color: var(--site-faint); line-height: 1.5; }
+.site-lyric:hover { background: var(--site-code-bg); }
+.site-lyric:focus-visible { outline: 2px solid var(--ring, currentColor); }
+.site-lyrics [aria-current="time"] .site-lyric { color: var(--foreground); font-weight: 650; background: var(--site-code-bg); }
+[data-follow-playhead] [data-at][aria-current="time"] { scroll-margin: 40px; }
+body.site-has-player { padding-bottom: 64px; }
+.site-player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--background); color: var(--foreground); border-top: 1px solid var(--border, #8884); font: 14px/1.3 system-ui, sans-serif; }
+.site-player button { font: inherit; min-width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--border, #8886); background: transparent; color: inherit; cursor: pointer; }
+.site-player-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.site-player-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-weight: 600; }
+.site-player-note { font-size: 12px; opacity: .75; }
+.site-player-time { font-variant-numeric: tabular-nums; opacity: .8; }
+.site-player-follow { display: flex; gap: 4px; align-items: center; font-size: 12px; }
+.site-player-audio { display: none; }
+@media (max-width: 520px) { .site-player-follow { display: none; } }

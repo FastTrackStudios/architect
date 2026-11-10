@@ -21,6 +21,8 @@ use pulldown_cmark::{
 
 use crate::blocks::{Block, Blocks};
 use crate::element_html::escape;
+use crate::lyrics::{lyrics_html, parse_lrc};
+use crate::media::{MediaKind, is_lyrics, media_kind};
 use crate::url::fragment_id;
 
 /// One heading in a page.
@@ -73,6 +75,11 @@ pub struct Input<'a> {
     pub resolve: &'a dyn Fn(&str, bool) -> Target,
     /// Who draws claimed fences.
     pub blocks: &'a Blocks,
+    /// The text of the attachment a link's destination names (as
+    /// written; `true` for a wikilink), for one the page draws from its
+    /// text: a synced-lyrics file (`![[Joy.lrc]]`). `None` draws it as
+    /// a link.
+    pub text: &'a dyn Fn(&str, bool) -> Option<String>,
 }
 
 /// What [`render`] made.
@@ -123,6 +130,9 @@ pub fn render(input: &Input<'_>) -> Rendered {
     // Per image: whether it was dropped (it names a note outside the
     // scope), with all it holds.
     let mut images: Vec<bool> = Vec::new();
+    // Per kept image: what closes it when it was drawn as our own markup
+    // (an `<audio>` or `<video>`), else `None` (the parser's `<img>`).
+    let mut image_close: Vec<Option<&'static str>> = Vec::new();
     let mut used_ids: BTreeMap<String, u32> = BTreeMap::new();
     let mut section = Section::default();
     let mut seen_content = false;
@@ -223,7 +233,10 @@ pub fn render(input: &Input<'_>) -> Rendered {
             }
             Event::End(TagEnd::Image) => {
                 if images.pop() != Some(true) {
-                    events.push(Event::End(TagEnd::Image));
+                    match image_close.pop().flatten() {
+                        Some(close) => events.push(Event::Html(close.into())),
+                        None => events.push(Event::End(TagEnd::Image)),
+                    }
                 }
             }
             Event::End(TagEnd::Link) => {
@@ -241,7 +254,10 @@ pub fn render(input: &Input<'_>) -> Rendered {
             }) => {
                 seen_content = true;
                 let wiki = matches!(link_type, LinkType::WikiLink { .. });
-                let dest_url = match (input.resolve)(&dest_url, wiki) {
+                let original = dest_url.to_string();
+                let resolved = (input.resolve)(&dest_url, wiki);
+                let is_file = matches!(resolved, Target::File(_));
+                let dest_url = match resolved {
                     Target::Page(url) | Target::File(url) => CowStr::from(url),
                     Target::Broken => {
                         out.broken.push(dest_url.to_string());
@@ -253,7 +269,41 @@ pub fn render(input: &Input<'_>) -> Rendered {
                         continue;
                     }
                 };
+                // An embedded lyrics file: its lines, drawn from its
+                // text; nothing of the embed itself (#511).
+                if is_file && is_lyrics(&dest_url) {
+                    if let Some(lyrics) = (input.text)(&original, wiki) {
+                        events.push(Event::Html(lyrics_html(&parse_lrc(&lyrics), None).into()));
+                        images.push(true);
+                        continue;
+                    }
+                }
                 images.push(false);
+                // Audio or video: a native element the page's player
+                // follows (`data-site-media`); the alt text is its
+                // fallback.
+                if let Some(kind) = media_kind(&dest_url).filter(|_| is_file) {
+                    let tag = kind.tag();
+                    let extra = if kind == MediaKind::Video {
+                        " playsinline"
+                    } else {
+                        ""
+                    };
+                    events.push(Event::Html(
+                        format!(
+                            "<{tag} class=\"site-media\" controls preload=\"metadata\"{extra} data-site-media=\"{tag}\" src=\"{}\">",
+                            escape(&dest_url)
+                        )
+                        .into(),
+                    ));
+                    image_close.push(Some(if kind == MediaKind::Video {
+                        "</video>"
+                    } else {
+                        "</audio>"
+                    }));
+                    continue;
+                }
+                image_close.push(None);
                 events.push(Event::Start(Tag::Image {
                     link_type,
                     dest_url,
@@ -463,6 +513,9 @@ mod tests {
         match path {
             "Shell" | "@/features/shell.md" => Target::Page("/features/shell/".into()),
             "pic.png" => Target::File("/pic.png".into()),
+            "take.mp3" => Target::File("/Set/take.mp3".into()),
+            "clip.mp4" => Target::File("/clip.mp4".into()),
+            "Joy.lrc" | "Gone.lrc" => Target::File(format!("/{path}")),
             _ if wiki || is_md(path) => Target::Broken,
             _ => Target::Keep,
         }
@@ -475,7 +528,44 @@ mod tests {
             title: "The UI",
             resolve: &resolve,
             blocks,
+            text: &|_, _| None,
         })
+    }
+
+    #[test]
+    fn media_embeds_are_native_players_and_lyrics_are_lines() {
+        let text = |dest: &str, _wiki: bool| {
+            (dest == "Joy.lrc").then(|| "[00:01.25]Hello\n[00:03]World".to_owned())
+        };
+        let r = render(&Input {
+            body: "![[take.mp3|The take]]\n\n![[clip.mp4]]\n\n![[Joy.lrc]]\n\n![[Gone.lrc]]\n\n![[missing.mp3]]",
+            page: "guide/ui.md",
+            title: "The UI",
+            resolve: &resolve,
+            blocks: &Blocks::new(),
+            text: &text,
+        });
+        assert!(
+            r.html.contains("<audio class=\"site-media\" controls preload=\"metadata\" data-site-media=\"audio\" src=\"/Set/take.mp3\">"),
+            "{}",
+            r.html
+        );
+        assert!(r.html.contains("</audio>"), "{}", r.html);
+        assert!(
+            r.html.contains("<video class=\"site-media\" controls preload=\"metadata\" playsinline data-site-media=\"video\" src=\"/clip.mp4\">"),
+            "{}",
+            r.html
+        );
+        assert!(
+            r.html.contains("<li data-at=\"1.250\"><button type=\"button\" class=\"site-lyric\">Hello</button></li>"),
+            "{}",
+            r.html
+        );
+        // A lyrics file whose text is not there stays an image link.
+        assert!(r.html.contains("src=\"/Gone.lrc\""), "{}", r.html);
+        // A media name that resolves to nothing is no player.
+        assert!(!r.html.contains("missing.mp3\" data-site"), "{}", r.html);
+        assert_eq!(r.html.matches("data-site-media").count(), 2, "{}", r.html);
     }
 
     #[test]
