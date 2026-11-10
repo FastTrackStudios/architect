@@ -72,6 +72,29 @@ views:
     limit: 4
 ```
 
+**Media plays, and lyrics follow it.** An embedded audio or video
+attachment (`![[take.mp3]]`) is the browser's own player, marked
+`data-site-media`. A ```` ```lrc ```` fence, or an embedded `.lrc`
+attachment, is synced lyrics: parsed at build time
+(`architect_sites::lyrics::parse_lrc`: `[mm:ss.xx]` stamps, several to a
+line, `[offset:]`, word stamps dropped) and drawn as lines, each with the
+second it starts. The page's script plays them: the line at the playhead
+is marked and scrolled into view, a click on a line seeks. This one
+follows nothing, as there is no audio on this page; click a line and it
+waits:
+
+```lrc
+[00:00.00]Joy to the world
+[00:03.20]The Lord is come
+[00:06.40]Let earth receive her King
+```
+
+Every block on a page can follow the same playhead, an extension's too
+(`architect.playhead`; [views that follow
+playback](@/architecture/extensions.md#views-that-follow-playback)). A share
+link adds a queue across its notes ([a link that
+plays](@/guide/deploy.md#a-link-that-plays)).
+
 **The layout is pure components.** Each Dioxus component in
 `architect_sites::ui` depends only on the built site. None has hooks,
 state or I/O. A pre-rendered route and a hydrated one therefore always
@@ -175,11 +198,16 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
    the script and the search index go under `_site/`, named by content. The
    site is built beside `--out` and swapped in whole. A folder the command
    did not write is never replaced.
-6. **`crates/architect/src/host/site.rs`**: `EngineHost::site`, `site_router`
+6. **`features/sites/src/media.rs`** and **`features/sites/src/lyrics.rs`**:
+   which attachments play, and synced lyrics (`LyricsBlocks`, after the
+   caller's renderers, so an extension claiming `fence:lrc` wins). The
+   player is `features/sites/assets/player.js`, shipped in the site's one
+   script.
+7. **`crates/architect/src/host/site.rs`**: `EngineHost::site`, `site_router`
    and `cache_policy`. Pages get `no-cache`, `_site/` assets
    `public, max-age=31536000, immutable`, and other files an hour. A
    missing path gets the site's `404.html` with a 404 status.
-7. **`apps/cli/src/main.rs`**: the `architect` command. `site serve` serves
+8. **`apps/cli/src/main.rs`**: the `architect` command. `site serve` serves
    `site_router` and pushes one event per rebuild on `/_architect/reload`.
 
 ## Tests to read
@@ -191,6 +219,9 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
   replaces another folder.
 - `features/sites/src/markdown.rs` (its tests): code stays verbatim,
   headings get unique ids, and a failed block is reported.
+- `features/sites/src/lyrics.rs` (its tests): LRC stamps, offsets and the
+  lines' markup; `features/sites/src/markdown.rs`
+  `media_embeds_are_native_players_and_lyrics_are_lines`.
 - `crates/architect/tests/host_site.rs`: a site served at the root and
   nested, with its cache headers, its 404 page, and the host's own routes
   still winning.

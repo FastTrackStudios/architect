@@ -26,6 +26,11 @@
 //!   audience's files, in list order, in folders by the view; one group
 //!   downloads alone. `SHARE_AUDIENCE_ADD` / `SHARE_AUDIENCES` /
 //!   `SHARE_ARCHIVE` / `SHARE_AUDIENCE_REMOVE` do the same from the app.
+//! - The player (#511): a song's audio and video are native players
+//!   streamed with ranges (`206`, `Content-Range`, `416` past the end),
+//!   its `.lrc` attachment and an `lrc` fence are timed lines, and each
+//!   page carries its link's queue in list order. An audience's link
+//!   streams its own media and is `404` for the other's, ranged or not.
 //! - From the app (`architect-accounts`' Action List, signed in as Grace):
 //!   `SHARE_CREATE` makes a link that opens, `SHARE_LIST` lists it,
 //!   `PUBLISH_DOMAIN` gives it a domain, `SHARE_REVOKE` takes it down.
@@ -97,7 +102,7 @@ struct World {
     grace: String,
     alan: String,
     ada: String,
-    _tmp: tempfile::TempDir,
+    tmp: tempfile::TempDir,
 }
 
 /// Grace's node hosting `indie`, its vault seeded; Alan's and Ada's sessions.
@@ -158,7 +163,7 @@ async fn world() -> World {
         grace,
         alan,
         ada,
-        _tmp: tmp,
+        tmp,
     }
 }
 
@@ -1165,4 +1170,186 @@ async fn the_apps_audience_actions_add_list_archive_and_remove() {
     );
 
     w.host.stop().await;
+}
+
+// ── The player (#511) ────────────────────────────────────────────────
+
+/// GET `url` with `range` as its `Range` header; status, headers, bytes.
+async fn get_range(
+    url: &str,
+    range: Option<&str>,
+) -> (StatusCode, reqwest::header::HeaderMap, Vec<u8>) {
+    let mut req = reqwest::Client::new().get(url);
+    if let Some(range) = range {
+        req = req.header("range", range);
+    }
+    let res = req.send().await.unwrap();
+    let (status, headers) = (res.status(), res.headers().clone());
+    (status, headers, res.bytes().await.unwrap().to_vec())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    // A gig: two songs in list order, one for the band alone.
+    touch(
+        &vault,
+        "Gig/01-joy.md",
+        "---\ntitle: Joy\nsection: band\n---\n![[media/joy.mp3]]\n\n![[media/joy.lrc]]\n",
+    );
+    touch(
+        &vault,
+        "Gig/02-noel.md",
+        "---\ntitle: Noel\nsection: crew\n---\n![[media/clip.mp4]]\n\n```lrc\n[00:02.00]Noel <b>\n[00:04.50]Born is the King\n```\n",
+    );
+    touch(
+        &vault,
+        "Gig/media/joy.lrc",
+        "[ti:Joy]\n[00:01.50]Joy to the world\n[00:03.25]The Lord is come\n",
+    );
+    let audio: Vec<u8> = (0..1000_u32)
+        .map(|i| u8::try_from(i % 251).unwrap())
+        .collect();
+    std::fs::write(vault.join("Gig/media/joy.mp3"), &audio).unwrap();
+    std::fs::write(vault.join("Gig/media/clip.mp4"), &audio[..500]).unwrap();
+
+    let share = w
+        .share(
+            ShareScope::Folder("Gig".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let share = links
+        .add_audience(
+            share.code.clone(),
+            NewAudience {
+                name: "band".to_owned(),
+                filter: "section == \"band\"".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    let whole = share.path();
+    let band = share.audience_named("band").unwrap().path();
+
+    // The song's page: a native player, its lyrics as timed lines, and
+    // the link's queue, in list order.
+    let joy = page_with(&w.url(&format!("{whole}01-joy/")), None, "site-queue").await;
+    assert!(
+        joy.contains(&format!(
+            "<audio class=\"site-media\" controls preload=\"metadata\" data-site-media=\"audio\" src=\"{whole}Gig/media/joy.mp3\">"
+        )),
+        "{joy}"
+    );
+    assert!(
+        joy.contains("<ol class=\"site-lyrics\" data-follow-playhead>"),
+        "{joy}"
+    );
+    assert!(
+        joy.contains("<li data-at=\"1.500\"><button type=\"button\" class=\"site-lyric\">Joy to the world</button></li>"),
+        "{joy}"
+    );
+    assert!(joy.contains("<li data-at=\"3.250\">"), "{joy}");
+    let queue = |html: &str| -> serde_json::Value {
+        let json = html
+            .split("id=\"site-queue\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</script>").next())
+            .expect("a queue");
+        serde_json::from_str(json).unwrap()
+    };
+    let q = queue(&joy);
+    assert_eq!(q["scope"], whole.as_str());
+    let srcs: Vec<&str> = q["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["src"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        srcs,
+        [
+            format!("{whole}Gig/media/joy.mp3"),
+            format!("{whole}Gig/media/clip.mp4"),
+        ]
+    );
+    assert_eq!(q["tracks"][0]["page"], format!("{whole}01-joy/"));
+    assert_eq!(q["tracks"][1]["kind"], "video");
+    assert_eq!(q["tracks"][1]["title"], "Noel");
+
+    // A fence of LRC is drawn the same, escaped; a video is a <video>.
+    let noel = page_with(&w.url(&format!("{whole}02-noel/")), None, "site-lyrics").await;
+    assert!(noel.contains("<li data-at=\"2.000\"><button type=\"button\" class=\"site-lyric\">Noel &lt;b&gt;</button></li>"), "{noel}");
+    assert!(noel.contains("<video class=\"site-media\""), "{noel}");
+
+    // The page's script carries the player and its playhead.
+    let script = joy
+        .split('"')
+        .find(|s| s.contains("_site/site.") && Path::new(s).extension().is_some_and(|e| e == "js"))
+        .expect("the site's script")
+        .to_owned();
+    let (code, _, js) = get(&w.url(&script), None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(
+        js.contains("arch.playhead = playhead"),
+        "no player in {script}"
+    );
+
+    // Ranges: a slice, the tail, the whole, and one past the end.
+    let mp3 = w.url(&format!("{whole}Gig/media/joy.mp3"));
+    let (code, headers, body) = get_range(&mp3, Some("bytes=100-199")).await;
+    assert_eq!(code, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(headers["content-range"], "bytes 100-199/1000");
+    assert_eq!(headers["accept-ranges"], "bytes");
+    assert_eq!(headers["content-type"], "audio/mpeg");
+    assert_eq!(headers["content-length"], "100");
+    assert_eq!(body, audio[100..200]);
+    let (code, headers, body) = get_range(&mp3, Some("bytes=-10")).await;
+    assert_eq!(code, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(headers["content-range"], "bytes 990-999/1000");
+    assert_eq!(body, audio[990..]);
+    let (code, headers, body) = get_range(&mp3, Some("bytes=900-")).await;
+    assert_eq!(code, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(headers["content-range"], "bytes 900-999/1000");
+    assert_eq!(body.len(), 100);
+    let (code, headers, body) = get_range(&mp3, None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(headers["accept-ranges"], "bytes");
+    assert_eq!(body, audio);
+    let (code, headers, _) = get_range(&mp3, Some("bytes=2000-")).await;
+    assert_eq!(code, StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(headers["content-range"], "bytes */1000");
+    // Still the share's: no-referrer and its cache rule on a 206.
+    let (_, headers, _) = get_range(&mp3, Some("bytes=0-1")).await;
+    assert_eq!(headers["referrer-policy"], "no-referrer");
+    let lrc = w.url(&format!("{whole}Gig/media/joy.lrc"));
+    let (code, headers, _) = get_range(&lrc, None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(headers["content-type"], "text/plain; charset=utf-8");
+
+    // The band's link: its song plays with ranges; the crew's video is
+    // 404 there, ranged or not, and is not in its queue.
+    let band_joy = page_with(&w.url(&format!("{band}01-joy/")), None, "site-queue").await;
+    let q = queue(&band_joy);
+    assert_eq!(q["scope"], band.as_str());
+    assert_eq!(q["tracks"].as_array().unwrap().len(), 1, "{q}");
+    assert_eq!(q["tracks"][0]["src"], format!("{band}Gig/media/joy.mp3"));
+    let (code, headers, body) = get_range(
+        &w.url(&format!("{band}Gig/media/joy.mp3")),
+        Some("bytes=10-19"),
+    )
+    .await;
+    assert_eq!(code, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(headers["content-range"], "bytes 10-19/1000");
+    assert_eq!(body, audio[10..20]);
+    for range in [None, Some("bytes=0-99"), Some("bytes=-1")] {
+        let (code, _, body) = get_range(&w.url(&format!("{band}Gig/media/clip.mp4")), range).await;
+        assert_eq!(code, StatusCode::NOT_FOUND, "{range:?}");
+        assert_ne!(body, audio[..500], "{range:?}");
+    }
+    let (code, _, _) = get_range(&w.url(&format!("{band}02-noel/")), None).await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
 }

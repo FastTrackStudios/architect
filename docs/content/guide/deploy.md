@@ -341,6 +341,57 @@ architect-desktop actions run SHARE_ARCHIVE --arg code=<code> --arg audience=vio
 architect-desktop actions run SHARE_ARCHIVE --arg code=<code> --arg by=property:song --arg 'group=Joy to the World' --arg to=/tmp/joy.zip
 ```
 
+### A link that plays
+
+A setlist shared as a link plays in the browser, with nothing to install
+(#511, first part). Give each song its own note, its recording embedded
+(`![[media/joy.mp3]]`) and its synced lyrics beside it (`![[media/joy.lrc]]`,
+or an `lrc` fence in the note):
+
+- **Native players, streamed with ranges.** An embedded audio or video file
+  (`mp3`, `m4a`, `aac`, `wav`, `ogg`, `opus`, `flac`; `mp4`, `m4v`, `webm`,
+  `mov`) is drawn as the browser's own `<audio>` or `<video>`
+  (`features/sites/src/media.rs` `media_kind`). The node serves every file of
+  a link but its pages with HTTP ranges: `206` with `Content-Range` and
+  `Accept-Ranges: bytes`, `416` past the end
+  (`architect::http::ranged::serve_file`), so a player seeks without fetching
+  the file. A range is a request like any other: the audience and the
+  audience's filter are checked first, and the other audience's file is
+  `404` on a link, ranged or not.
+- **A queue in list order.** Each page of a link carries the link's queue:
+  every audio and video file of the notes the link lists, in list order (the
+  order the files page uses), read per request, so an audience's queue is
+  its filter's (`apps/desktop/src/node/shares.rs` `queue`). A bar at the
+  foot of the page plays it: previous, play, next, the song (a link to its
+  page) and the time. When a song ends the next one starts.
+- **Across pages.** A link's pages are separate documents, so moving between
+  songs loads a new page. The player keeps the song, the time and whether it
+  was playing in the tab's `sessionStorage` and picks up where it was on the
+  next page, the same when a rebuild reloads the page (`_live`). With
+  **Follow** on (the default), the next song is played on its own page, so
+  its chart and lyrics are the ones on screen; off, it plays on in the bar
+  while you read another page. A browser that will not start sound without a
+  click leaves the player paused at that time, saying so, until you press
+  play. There is a short gap at each hand-over: playback is not gapless.
+- **Lyrics that follow.** An `.lrc` file or fence is drawn as its lines; the
+  line at the playhead is marked and scrolled into view inside the block,
+  and a click on a line seeks there. The LRC is read when the link is built
+  (`features/sites/src/lyrics.rs` `parse_lrc`); the page only reads the
+  seconds on each line.
+- **Blocks follow the same playhead.** The page's player is
+  `architect.playhead`, the contract every block on the page follows, the
+  extensions' too ([views that follow playback](@/architecture/extensions.md#views-that-follow-playback)).
+
+Not yet: streaming from `architect-files` and its renditions (a small proxy
+before the full file, #490; today the files are the vault's own, copied into
+the link), a gapless hand-over, and the same queue in the app's setlist pane.
+
+Tested on a headless node (`apps/desktop/tests/shares.rs`
+`media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order`)
+and in a headless Firefox (`apps/web/test/share-player.test.mjs`, `just
+share-player-test`): the lyric line advances while a song plays, a click
+seeks, and the queue goes on to the next song's page and plays it.
+
 ## Its own deployment
 
 A share, or a whole vault, can also live at a URL of its own. There are two
