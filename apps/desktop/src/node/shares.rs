@@ -23,6 +23,16 @@
 //! - **serves [`ShareLinks`]** on the org lane, for the app: make, list,
 //!   change and revoke. A revoke takes the link down before it answers.
 //!
+//! A share's named audiences (#510) are each a filter over its scope on a
+//! link of their own (`/s/<the audience's code>/`). Each is built as its
+//! own site, of the notes its filter holds for alone, so nothing else is
+//! listed on it (pages, nav, backlinks, base rows, search, tags). And
+//! each request to it is checked when it comes ([`Guard`]): the page or
+//! file asked for is served only if, in the vault as it is now, its note
+//! is in the scope and the filter holds for it (a file: for a note that
+//! attaches it). Anything else of the share is `404` there, on the page
+//! route and the byte route alike, whatever is on disk.
+//!
 //! Nothing outside a share's scope is ever built into it, so nothing
 //! outside it can be served: the site is built from the scope's notes
 //! alone, its links to other notes are plain text, and an attachment is
@@ -36,6 +46,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -47,13 +58,15 @@ use architect::http::axum::response::sse::{Event, KeepAlive, Sse};
 use architect::http::axum::response::{IntoResponse, Redirect, Response};
 use architect_orgs::server::{Directory as _, IdentityServer};
 use architect_permissions::Principal;
+use architect_sites::listing::{self, Entry, Vault};
 use architect_spaces::share::{
     LINKS, SHARES_FOLDER, code_from, comments_note_path, is_code, link_path, share_note_path,
-    validate, validate_domain,
+    validate, validate_audience, validate_domain,
 };
 use architect_spaces::{
-    NewShare, Share, ShareChange, ShareComment, ShareFault, ShareLinks, ShareScope, ShareState,
-    Verdict, Viewer, comments_note, parse_comments, parse_share_note, share_note,
+    NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment, ShareFault, ShareLinks,
+    ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments, parse_share_note,
+    share_note,
 };
 use tokio::sync::{Notify, watch};
 use vault_live::Backend;
@@ -91,6 +104,71 @@ pub fn now() -> i64 {
 struct Held {
     share: Share,
     built: watch::Sender<u64>,
+    /// What each of its links' built pages are of, by the link's code
+    /// (its own, and each audience's).
+    manifests: HashMap<String, Arc<Manifest>>,
+}
+
+impl Held {
+    fn new(share: Share) -> Self {
+        Self {
+            share,
+            built: watch::channel(0).0,
+            manifests: HashMap::new(),
+        }
+    }
+}
+
+/// What a built link's files are of: which note each page is, which
+/// attachment each copied file. A request is checked through it.
+#[derive(Default)]
+struct Manifest {
+    /// A page's path below the link (`/joy/`) to its note's vault path.
+    pages: HashMap<String, String>,
+    /// A file's path below the link (`/Set/joy.pdf`) to its vault path.
+    files: HashMap<String, String>,
+}
+
+impl Manifest {
+    fn of(site: &architect_sites::Site) -> Self {
+        let mut manifest = Self::default();
+        for page in &site.pages {
+            if let Some(note) = &page.rel_path {
+                let below = page.url.strip_prefix(&site.base).unwrap_or(&page.url);
+                manifest
+                    .pages
+                    .insert(format!("/{}", below.trim_start_matches('/')), note.clone());
+            }
+        }
+        for file in &site.attachments {
+            manifest.files.insert(format!("/{file}"), file.clone());
+        }
+        manifest
+    }
+}
+
+/// A vault as requests are checked against it: read once per change.
+struct VaultView {
+    generation: u64,
+    vault: Vault,
+    /// What each link lists in this vault, once asked.
+    listings: Mutex<HashMap<String, Arc<Vec<Entry>>>>,
+}
+
+/// A vault's view, and the lock one reader holds while it reads it.
+type ViewSlot = Arc<Mutex<Option<Arc<VaultView>>>>;
+
+/// What a request to an audience's link is answered with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Guard {
+    /// Serve it.
+    Open,
+    /// A note or a file the audience's filter does not hold for.
+    Refused,
+    /// Its pages are not built yet.
+    Building,
+    /// Its filter holds for nothing.
+    Empty,
 }
 
 /// The node's share links. Cheap to clone.
@@ -111,6 +189,10 @@ struct Inner {
     kick: Mutex<HashMap<String, Arc<Notify>>>,
     /// What draws the fences extensions claim (#488).
     blocks: architect_sites::Blocks,
+    /// Per vault: how many times it has changed. A view of it older
+    /// than this is read again before a request is checked against it.
+    moved: Mutex<HashMap<String, Arc<AtomicU64>>>,
+    views: Mutex<HashMap<String, ViewSlot>>,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -143,6 +225,8 @@ impl Shares {
             signins: Mutex::new(HashMap::new()),
             kick: Mutex::new(HashMap::new()),
             blocks,
+            moved: Mutex::new(HashMap::new()),
+            views: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -197,7 +281,13 @@ impl Shares {
                 match parse_share_note(&String::from_utf8_lossy(&bytes.0)) {
                     // A note claiming another vault, or another code, is
                     // not that share.
-                    Some(share) if share.code == name && share.vault == vault => {
+                    Some(mut share) if share.code == name && share.vault == vault => {
+                        // An audience's link is its own: never a code
+                        // that is not one, the share's, or one twice.
+                        let mut seen = std::collections::HashSet::new();
+                        share.audiences.retain(|a| {
+                            is_code(&a.code) && a.code != name && seen.insert(a.code.clone())
+                        });
                         found.insert(share.code.clone(), share);
                     }
                     _ => tracing::debug!(%vault, path = %file.path, "not a share note"),
@@ -210,13 +300,7 @@ impl Shares {
             match table.get_mut(&code) {
                 Some(held) => held.share = share,
                 None => {
-                    table.insert(
-                        code,
-                        Held {
-                            share,
-                            built: watch::channel(0).0,
-                        },
-                    );
+                    table.insert(code, Held::new(share));
                 }
             }
         }
@@ -259,38 +343,209 @@ impl Shares {
             return;
         };
         let at = self.0.out.join(&share.code);
-        let mut mounts = vec![(share.path(), at.join("site"))];
-        if share.domain.is_some() {
-            mounts.push(("/".to_owned(), at.join("domain")));
-        } else {
-            let _ = std::fs::remove_dir_all(at.join("domain"));
-        }
-        for (base, out) in mounts {
+        let mut manifests: HashMap<String, Arc<Manifest>> = HashMap::new();
+        let options = |base: String, filter: Option<String>| {
             let mut opts =
                 architect_sites::Options::new(&root, share.title.clone().unwrap_or_default());
             opts.live_reload = Some(format!("{base}_live"));
             opts.base = base;
             opts.scope = scope(&share.scope);
-            match architect_sites::build(&opts, &self.0.blocks, &out) {
-                Ok(report) => {
-                    tracing::debug!(code = %share.code, pages = report.pages, "a share built");
-                }
-                Err(error) => {
-                    tracing::warn!(code = %share.code, %error, "a share did not build");
-                    let _ = std::fs::remove_dir_all(&out);
+            opts.filter = filter;
+            opts
+        };
+        // Its own link: the whole scope. And its domain's root.
+        if let Some(manifest) =
+            self.build_one(share, &options(share.path(), None), &at.join("site"))
+        {
+            manifests.insert(share.code.clone(), Arc::new(manifest));
+        }
+        if share.domain.is_some() {
+            self.build_one(share, &options("/".to_owned(), None), &at.join("domain"));
+        } else {
+            let _ = std::fs::remove_dir_all(at.join("domain"));
+        }
+        // Each audience: the notes its filter holds for, and no others.
+        for audience in &share.audiences {
+            let out = self.audience_dir(&share.code, &audience.code).join("site");
+            let opts = options(audience.path(), Some(audience.filter.clone()));
+            // An audience nothing is in has no pages, and says so.
+            let manifest = self.build_one(share, &opts, &out).unwrap_or_default();
+            manifests.insert(audience.code.clone(), Arc::new(manifest));
+        }
+        if let Ok(dirs) = std::fs::read_dir(at.join("audiences")) {
+            for dir in dirs.flatten() {
+                let name = dir.file_name().to_string_lossy().into_owned();
+                if share.audience_at(&name).is_none() {
+                    let _ = std::fs::remove_dir_all(dir.path());
                 }
             }
         }
-        let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
-        if let Some(held) = table.get(&share.code) {
+        let mut table = self.0.table.write().unwrap_or_else(PoisonError::into_inner);
+        if let Some(held) = table.get_mut(&share.code) {
+            held.manifests = manifests;
             held.built.send_modify(|v| *v = v.wrapping_add(1));
+        }
+    }
+
+    /// Build one site of `share` into `out`; what its files are of. A
+    /// site that does not build (nothing in it) leaves no pages there.
+    fn build_one(
+        &self,
+        share: &Share,
+        opts: &architect_sites::Options,
+        out: &Path,
+    ) -> Option<Manifest> {
+        let built = architect_sites::Site::read(opts, &self.0.blocks)
+            .map_err(|e| e.to_string())
+            .and_then(|site| {
+                let report = architect_sites::write(&site, out).map_err(|e| e.to_string())?;
+                Ok((Manifest::of(&site), report.pages))
+            });
+        match built {
+            Ok((manifest, pages)) => {
+                tracing::debug!(code = %share.code, base = %opts.base, pages, "a share built");
+                Some(manifest)
+            }
+            Err(error) => {
+                tracing::warn!(code = %share.code, base = %opts.base, %error, "a share did not build");
+                let _ = std::fs::remove_dir_all(out);
+                None
+            }
+        }
+    }
+
+    /// How many times `vault` has changed, as this node has heard.
+    fn moved(&self, vault: &str) -> Arc<AtomicU64> {
+        let mut moved = self.0.moved.lock().unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(moved.entry(vault.to_owned()).or_default())
+    }
+
+    /// `vault` as it is now: read again if it has changed since it was
+    /// last read. Blocking (it reads the vault's notes).
+    fn view(&self, vault: &str) -> Option<Arc<VaultView>> {
+        let slot: ViewSlot = {
+            let mut views = self.0.views.lock().unwrap_or_else(PoisonError::into_inner);
+            Arc::clone(views.entry(vault.to_owned()).or_default())
+        };
+        // One reader at a time: the rest wait for its view.
+        let mut held = slot.lock().unwrap_or_else(PoisonError::into_inner);
+        let generation = self.moved(vault).load(Ordering::SeqCst);
+        if let Some(view) = held.as_ref().filter(|v| v.generation == generation) {
+            return Some(Arc::clone(view));
+        }
+        let root = self.0.backend.root(vault).ok()?;
+        let read = listing::open(&root)
+            .map_err(|error| tracing::warn!(%vault, %error, "a shared vault could not be read"))
+            .ok()?;
+        let view = Arc::new(VaultView {
+            generation,
+            vault: read,
+            listings: Mutex::new(HashMap::new()),
+        });
+        *held = Some(Arc::clone(&view));
+        Some(view)
+    }
+
+    /// What a link of `share` lists now: its scope's notes, or the ones
+    /// `audience`'s filter holds for, in list order, each with its
+    /// files. Blocking ([`Self::view`]).
+    fn listing(&self, share: &Share, audience: Option<&ShareAudience>) -> Arc<Vec<Entry>> {
+        let Some(view) = self.view(&share.vault) else {
+            return Arc::default();
+        };
+        let filter = audience.map(|a| a.filter.as_str()).unwrap_or_default();
+        let key = format!(
+            "{}\n{:?}\n{filter}",
+            audience.map_or(&share.code, |a| &a.code),
+            share.scope
+        );
+        let mut listings = view.listings.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(found) = listings.get(&key) {
+            return Arc::clone(found);
+        }
+        // A filter that does not parse holds for nothing.
+        let entries = listing::parse_filter(filter)
+            .map(|filter| listing::select(&view.vault, &scope(&share.scope), &filter))
+            .unwrap_or_default();
+        let entries = Arc::new(entries);
+        listings.insert(key, Arc::clone(&entries));
+        entries
+    }
+
+    /// Whether `audience`'s link answers `rest` (a path below it), in
+    /// the vault as it is now. Blocking ([`Self::view`]).
+    fn guard(&self, share: &Share, audience: &ShareAudience, rest: &str) -> Guard {
+        let (own, whole) = {
+            let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
+            let Some(held) = table.get(&share.code) else {
+                return Guard::Refused;
+            };
+            (
+                held.manifests.get(&audience.code).cloned(),
+                held.manifests.get(&share.code).cloned(),
+            )
+        };
+        let Some(own) = own else {
+            return Guard::Building;
+        };
+        let decoded = decode(rest);
+        let key = decoded
+            .strip_suffix("index.html")
+            .filter(|dir| dir.ends_with('/'))
+            .unwrap_or(&decoded);
+        let dir = format!("{}/", key.trim_end_matches('/'));
+        let note = |m: &Manifest| m.pages.get(key).or_else(|| m.pages.get(&dir)).cloned();
+        let listed = || self.listing(share, Some(audience));
+        if let Some(note) = note(&own) {
+            return if listed().iter().any(|e| e.path == note) {
+                Guard::Open
+            } else {
+                Guard::Refused
+            };
+        }
+        if let Some(file) = own.files.get(key) {
+            return if listed().iter().any(|e| e.files.contains(file)) {
+                Guard::Open
+            } else {
+                Guard::Refused
+            };
+        }
+        // A note or a file of the share that is not this audience's.
+        let others = whole.is_some_and(|w| note(&w).is_some() || w.files.contains_key(key));
+        if others {
+            Guard::Refused
+        } else if own.pages.is_empty() {
+            Guard::Empty
+        } else {
+            // A page of the audience's own site that is no note's: its
+            // tags, its assets, its 404.
+            Guard::Open
         }
     }
 
     /// Keep `vault`'s shares read and built: now, then whenever the vault
     /// changes or a share of it is made or changed here.
     pub async fn keep_built(self, vault: String) {
-        let mut changes = self.0.backend.channel(&vault).await.subscribe();
+        let channel = self.0.backend.channel(&vault).await;
+        let mut changes = channel.subscribe();
+        // Heard apart from the rebuilds, which take a while: a request
+        // that comes after a change is checked against the vault read
+        // again, built or not.
+        let watch = {
+            let (moved, mut heard) = (self.moved(&vault), channel.subscribe());
+            tokio::spawn(async move {
+                use tokio::sync::broadcast::error::RecvError;
+                loop {
+                    match heard.recv().await {
+                        Ok(_) | Err(RecvError::Lagged(_)) => {
+                            moved.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(RecvError::Closed) => return,
+                    }
+                }
+            })
+        };
+        let _stop = AbortOnDrop(watch);
         let kick = self.kick(&vault);
         let pass = {
             let (me, vault) = (self.clone(), vault.clone());
@@ -325,18 +580,13 @@ impl Shares {
             share_note(&share),
         );
         put(backend, vault, path, text).await?;
+        self.moved(&share.vault).fetch_add(1, Ordering::SeqCst);
         {
             let mut table = self.0.table.write().unwrap_or_else(PoisonError::into_inner);
             match table.get_mut(&share.code) {
                 Some(held) => held.share = share.clone(),
                 None => {
-                    table.insert(
-                        share.code.clone(),
-                        Held {
-                            share: share.clone(),
-                            built: watch::channel(0).0,
-                        },
-                    );
+                    table.insert(share.code.clone(), Held::new(share.clone()));
                 }
             }
         }
@@ -373,17 +623,8 @@ impl Shares {
                 new.vault
             )));
         }
-        let code = loop {
-            let random = uuid::Uuid::new_v4();
-            let mut bytes = [0_u8; 10];
-            bytes.copy_from_slice(random.as_bytes().get(..10).unwrap_or(&[0; 10]));
-            let code = code_from(bytes);
-            if self.get(&code).is_none() {
-                break code;
-            }
-        };
         self.save(Share {
-            code,
+            code: self.new_code(),
             vault: new.vault,
             scope: new.scope,
             title: new.title.filter(|t| !t.trim().is_empty()),
@@ -394,6 +635,7 @@ impl Shares {
             created_at: at,
             created_by: by.to_owned(),
             domain: new.domain.map(|d| d.trim().to_lowercase()),
+            audiences: Vec::new(),
         })
         .await
     }
@@ -448,6 +690,85 @@ impl Shares {
             share.revoked_at = Some(now());
         }
         self.save(share).await
+    }
+
+    /// A code no share and no audience has.
+    fn new_code(&self) -> String {
+        loop {
+            let random = uuid::Uuid::new_v4();
+            let mut bytes = [0_u8; 10];
+            bytes.copy_from_slice(random.as_bytes().get(..10).unwrap_or(&[0; 10]));
+            let code = code_from(bytes);
+            if self.link(&code).is_none() {
+                return code;
+            }
+        }
+    }
+
+    /// The share a link's code opens, and its audience when the code is
+    /// one audience's (#510); a share's own code is the whole scope.
+    #[must_use]
+    pub fn link(&self, code: &str) -> Option<(Share, Option<ShareAudience>)> {
+        let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
+        if let Some(held) = table.get(code) {
+            return Some((held.share.clone(), None));
+        }
+        table.values().find_map(|held| {
+            let audience = held.share.audience_at(code)?.clone();
+            Some((held.share.clone(), Some(audience)))
+        })
+    }
+
+    /// Add a named audience to share `code` (#510): a filter over its
+    /// scope, on a link of its own.
+    ///
+    /// # Errors
+    ///
+    /// No such share, a share that is not live, a name it already has,
+    /// or a filter that is not a Bases filter expression.
+    pub async fn add_audience(&self, code: &str, new: NewAudience) -> Result<Share, ShareFault> {
+        let mut share = self
+            .get(code)
+            .ok_or_else(|| ShareFault::NotFound(code.to_owned()))?;
+        if share.state(now()) != ShareState::Live {
+            return Err(ShareFault::Invalid(
+                "only a live share takes an audience".to_owned(),
+            ));
+        }
+        validate_audience(&share, &new)?;
+        let filter = new.filter.trim().to_owned();
+        architect_sites::listing::parse_filter(&filter)
+            .map_err(|why| ShareFault::Invalid(format!("the filter `{filter}`: {why}")))?;
+        share.audiences.push(ShareAudience {
+            name: new.name.trim().to_owned(),
+            filter,
+            code: self.new_code(),
+            created_at: now(),
+        });
+        self.save(share).await
+    }
+
+    /// Remove audience `name` from share `code`: its link is `404` from
+    /// now on, the share's own link and its other audiences stay.
+    ///
+    /// # Errors
+    ///
+    /// No such share or audience, or its note could not be written.
+    pub async fn remove_audience(&self, code: &str, name: &str) -> Result<Share, ShareFault> {
+        let mut share = self
+            .get(code)
+            .ok_or_else(|| ShareFault::NotFound(code.to_owned()))?;
+        let Some(gone) = share.audience_named(name).cloned() else {
+            return Err(ShareFault::NotFound(format!("{code}: audience {name}")));
+        };
+        share.audiences.retain(|a| a.code != gone.code);
+        let _ = std::fs::remove_dir_all(self.audience_dir(&share.code, &gone.code));
+        self.save(share).await
+    }
+
+    /// Where an audience's pages are built.
+    fn audience_dir(&self, share: &str, audience: &str) -> PathBuf {
+        self.0.out.join(share).join("audiences").join(audience)
     }
 
     /// The comments on share `code`, oldest first.
@@ -554,6 +875,15 @@ impl Shares {
     }
 }
 
+/// A task stopped when this is dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Write `text` to `path` in `vault`, off the runtime's workers (the
 /// write announces itself under a blocking lock).
 async fn put(
@@ -615,6 +945,16 @@ impl ShareLinks for SharesLane {
         self.0.revoke(&code).await
     }
 
+    async fn add_audience(&self, code: String, new: NewAudience) -> Result<Share, ShareFault> {
+        caller()?;
+        self.0.add_audience(&code, new).await
+    }
+
+    async fn remove_audience(&self, code: String, name: String) -> Result<Share, ShareFault> {
+        caller()?;
+        self.0.remove_audience(&code, &name).await
+    }
+
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault> {
         caller()?;
         if self.0.get(&code).is_none() {
@@ -638,9 +978,9 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         .and_then(|h| h.to_str().ok())
         .unwrap_or_default()
         .to_owned();
-    if let Some(code) = shares.at_host(&host) {
+    if let Some(share) = shares.at_host(&host).and_then(|code| shares.get(&code)) {
         let rest = request.uri().path().to_owned();
-        return serve(&shares, &code, &rest, "/", request).await;
+        return serve(&shares, share, None, &rest, "/", request).await;
     }
     let path = request.uri().path().to_owned();
     let Some(below) = path
@@ -655,27 +995,9 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
     }
     let mut parts = below.splitn(2, '/');
     let first = parts.next().unwrap_or_default();
-    if !is_code(first) || shares.get(first).is_none() {
-        return page(
-            StatusCode::NOT_FOUND,
-            "Not found",
-            "<p>There is nothing at this link.</p>",
-        );
-    }
-    let mount = link_path(first);
-    if !below.contains('/') {
-        return Redirect::permanent(&mount).into_response();
-    }
-    let rest = format!("/{}", parts.next().unwrap_or_default());
-    serve(&shares, first, &rest, &mount, request).await
-}
-
-/// Answer `rest` (a path below the link, from `/`) of share `code`,
-/// whose link is at `mount`.
-async fn serve(shares: &Shares, code: &str, rest: &str, mount: &str, request: Request) -> Response {
-    let Some(share) = shares
-        .get(code)
-        .filter(|s| s.state(now()) == ShareState::Live)
+    let Some((share, audience)) = Some(first)
+        .filter(|code| is_code(code))
+        .and_then(|code| shares.link(code))
     else {
         return page(
             StatusCode::NOT_FOUND,
@@ -683,6 +1005,38 @@ async fn serve(shares: &Shares, code: &str, rest: &str, mount: &str, request: Re
             "<p>There is nothing at this link.</p>",
         );
     };
+    let mount = link_path(first);
+    if !below.contains('/') {
+        return Redirect::permanent(&mount).into_response();
+    }
+    let rest = format!("/{}", parts.next().unwrap_or_default());
+    serve(&shares, share, audience, &rest, &mount, request).await
+}
+
+/// `work` on the blocking pool (it reads a vault).
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    tokio::task::spawn_blocking(work).await.ok()
+}
+
+/// Answer `rest` (a path below the link, from `/`) of `share`, or of
+/// its `audience` when the link is one audience's; the link is at
+/// `mount`.
+async fn serve(
+    shares: &Shares,
+    share: Share,
+    audience: Option<ShareAudience>,
+    rest: &str,
+    mount: &str,
+    request: Request,
+) -> Response {
+    let code = share.code.as_str();
+    if share.state(now()) != ShareState::Live {
+        return page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "<p>There is nothing at this link.</p>",
+        );
+    }
     let viewer = if share.audience.signed_in() {
         shares.viewer(request.headers()).await
     } else {
@@ -712,14 +1066,24 @@ async fn serve(shares: &Shares, code: &str, rest: &str, mount: &str, request: Re
         }
     }
     let base = if mount == "/" { "domain" } else { "site" };
-    let dir = shares.0.out.join(code).join(base);
+    let dir = audience.as_ref().map_or_else(
+        || shares.0.out.join(code).join(base),
+        |a| shares.audience_dir(code, &a.code).join("site"),
+    );
     let method = request.method().clone();
     match rest {
         "/_live" => live(shares, code),
         "/_comment" if method == architect::http::axum::http::Method::POST => {
-            comment(shares, &share, &viewer, mount, request).await
+            comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
         }
         _ => {
+            // An audience's link: checked now, against the vault as it
+            // is, whatever was built.
+            if let Some(audience) = &audience {
+                if let Some(refusal) = refuse(shares, &share, audience, rest).await {
+                    return private(&share, refusal);
+                }
+            }
             let mut response = file(&dir, rest).await;
             if share.comments()
                 && response
@@ -731,6 +1095,43 @@ async fn serve(shares: &Shares, code: &str, rest: &str, mount: &str, request: Re
             }
             private(&share, response)
         }
+    }
+}
+
+/// The answer to a request an audience's link does not serve; `None`
+/// when it does ([`Guard`]).
+async fn refuse(
+    shares: &Shares,
+    share: &Share,
+    audience: &ShareAudience,
+    rest: &str,
+) -> Option<Response> {
+    let asked = {
+        let (shares, share, audience, rest) = (
+            shares.clone(),
+            share.clone(),
+            audience.clone(),
+            rest.to_owned(),
+        );
+        blocking(move || shares.guard(&share, &audience, &rest)).await
+    };
+    match asked.unwrap_or(Guard::Refused) {
+        Guard::Open => None,
+        Guard::Refused => Some(page(
+            StatusCode::NOT_FOUND,
+            "Not found",
+            "<p>No such page.</p>",
+        )),
+        Guard::Building => Some(page(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Being built",
+            "<p>This link's pages are being built. Try again in a moment.</p>",
+        )),
+        Guard::Empty => Some(page(
+            StatusCode::NOT_FOUND,
+            "Nothing here yet",
+            "<p>Nothing is shared on this link yet.</p>",
+        )),
     }
 }
 
@@ -856,6 +1257,7 @@ struct CommentForm {
 async fn comment(
     shares: &Shares,
     share: &Share,
+    audience: Option<&ShareAudience>,
     viewer: &Viewer,
     mount: &str,
     request: Request,
@@ -877,6 +1279,12 @@ async fn comment(
     let text = form.text.trim();
     if text.is_empty() || text.chars().count() > MAX_COMMENT || !form.page.starts_with('/') {
         return StatusCode::BAD_REQUEST.into_response();
+    }
+    // An audience comments on its own pages only.
+    if let Some(audience) = audience {
+        if let Some(refusal) = refuse(shares, share, audience, &page_key(&form.page)).await {
+            return refusal;
+        }
     }
     let by = match viewer {
         Viewer::Person { email, user_id, .. } => email.clone().unwrap_or_else(|| user_id.clone()),

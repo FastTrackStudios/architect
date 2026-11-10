@@ -58,7 +58,7 @@ pub fn parse_comments(text: &str) -> Vec<ShareComment> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::share::{Audience, ShareAccess, ShareScope, code_from};
+    use crate::share::{Audience, ShareAccess, ShareAudience, ShareScope, code_from};
 
     #[test]
     fn a_share_round_trips_through_its_note() {
@@ -74,6 +74,12 @@ mod tests {
             created_at: 1,
             created_by: "u".into(),
             domain: None,
+            audiences: vec![ShareAudience {
+                name: "violin".into(),
+                filter: "instrument == \"violin\"".into(),
+                code: code_from([4; 10]),
+                created_at: 2,
+            }],
         };
         let note = share_note(&share);
         assert!(note.starts_with("---\npublish: false\n---\n"), "{note}");
@@ -90,5 +96,23 @@ mod tests {
             parse_comments(&comments_note("x", &[c.clone(), c.clone()])),
             vec![c.clone(), c]
         );
+    }
+
+    /// The note of a share made before audiences (#510), byte for byte
+    /// what `share_note` wrote then: it still reads, with no audiences.
+    #[test]
+    fn a_share_note_written_before_audiences_still_reads() {
+        let code = code_from([5; 10]);
+        let note = format!(
+            "---\npublish: false\n---\n# Share {code}\n\nA share link, kept by Architect (`SHARE_*`): the folder Album of `notes`, for link. Change it with `SHARE_UPDATE` or `SHARE_REVOKE`.\n\n```json\n{{\"code\":\"{code}\",\"vault\":\"notes\",\"scope\":{{\"Folder\":\"Album\"}},\"title\":null,\"audience\":\"Link\",\"access\":\"Read\",\"expires_at\":null,\"revoked_at\":null,\"created_at\":7,\"created_by\":\"u1\",\"domain\":null}}\n```\n"
+        );
+        let share = parse_share_note(&note).expect("an old note reads");
+        assert_eq!(share.code, code);
+        assert_eq!(share.scope, ShareScope::Folder("Album".into()));
+        assert_eq!(share.audience, Audience::Link);
+        assert_eq!(share.created_at, 7);
+        assert!(share.audiences.is_empty());
+        // And written again it carries the (empty) list, and reads the same.
+        assert_eq!(parse_share_note(&share_note(&share)), Some(share));
     }
 }

@@ -7,6 +7,13 @@
 //! The always-on node serves it as a scoped Site, and refuses it once
 //! it is revoked or expired.
 //!
+//! A share for many people carries named slices of its scope (#510,
+//! [`ShareAudience`]: `violin`, `rhythm`), each a filter over the scope's
+//! notes in the Bases filter language, each on a link of its own
+//! (`<node>/s/<its code>/`) that is removed alone. The share's own link
+//! stays the whole scope. Who may open any of them is still the share's
+//! [`Audience`].
+//!
 //! A share is org data: it is a note of the vault it shares
 //! ([`share_note_path`], hidden from every Site), so it syncs to every
 //! device that holds the vault, the way any note does, and the node that
@@ -190,6 +197,87 @@ fn split_emails(s: &str) -> Vec<String> {
     out
 }
 
+/// The longest name a [`ShareAudience`] may have.
+pub const AUDIENCE_NAME_MAX: usize = 48;
+/// The most named audiences one share carries.
+pub const AUDIENCES_MAX: usize = 64;
+
+/// A named slice of a share (#510): the notes of the share's scope that
+/// `filter` holds for, on a link of its own.
+///
+/// Not who may open it (that is the share's [`Audience`]): which part of
+/// the share its link shows. A note the filter does not hold for, and an
+/// attachment only such notes link, is neither listed nor served on its
+/// link.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+pub struct ShareAudience {
+    /// Its name in the share (`violin`): unique there, any case.
+    pub name: String,
+    /// A Bases filter expression over a note's properties and file
+    /// (`instrument == "violin"`, `file.hasTag("rhythm")`); empty: every
+    /// note of the scope.
+    pub filter: String,
+    /// Its own link's code: `<node>/s/<code>/` ([`is_code`]).
+    pub code: String,
+    pub created_at: i64,
+}
+
+impl ShareAudience {
+    /// Its path on the node: `/s/<code>/` ([`LINKS`]).
+    #[must_use]
+    pub fn path(&self) -> String {
+        link_path(&self.code)
+    }
+
+    /// Its link on the node at `origin`.
+    #[must_use]
+    pub fn url(&self, origin: &str) -> String {
+        format!("{}{}", origin.trim_end_matches('/'), self.path())
+    }
+}
+
+/// A [`ShareAudience`] before it has a code
+/// ([`crate::ShareLinks::add_audience`]).
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct NewAudience {
+    pub name: String,
+    pub filter: String,
+}
+
+/// Check a new audience's name against the ones `share` has (the filter
+/// is the node's to parse: the Bases filter language is not in this
+/// crate).
+///
+/// # Errors
+///
+/// An empty or over-long name, one with a control character or a slash,
+/// one the share already has, or a share with [`AUDIENCES_MAX`].
+pub fn validate_audience(share: &Share, new: &NewAudience) -> Result<(), ShareFault> {
+    let bad = |why: String| Err(ShareFault::Invalid(why));
+    let name = new.name.trim();
+    if name.is_empty() {
+        return bad("name the audience".to_owned());
+    }
+    if name.chars().count() > AUDIENCE_NAME_MAX {
+        return bad(format!(
+            "an audience's name is at most {AUDIENCE_NAME_MAX} characters"
+        ));
+    }
+    if name
+        .chars()
+        .any(|c| c.is_control() || c == '/' || c == '\\')
+    {
+        return bad("an audience's name has no slash or control character".to_owned());
+    }
+    if share.audience_named(name).is_some() {
+        return bad(format!("this share already has an audience `{name}`"));
+    }
+    if share.audiences.len() >= AUDIENCES_MAX {
+        return bad(format!("a share has at most {AUDIENCES_MAX} audiences"));
+    }
+    Ok(())
+}
+
 /// What the people a share lets in may do there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
 #[repr(u8)]
@@ -222,6 +310,10 @@ pub struct Share {
     /// A domain of its own (`album.example.com`): the node serves the
     /// share at that host's root too.
     pub domain: Option<String>,
+    /// Its named slices, each on a link of its own (#510). A share
+    /// written before them reads as having none.
+    #[facet(default)]
+    pub audiences: Vec<ShareAudience>,
 }
 
 /// Where a share stands at one moment.
@@ -296,6 +388,21 @@ impl Share {
                 }
             }
         }
+    }
+
+    /// Its audience called `name` (any case, trimmed).
+    #[must_use]
+    pub fn audience_named(&self, name: &str) -> Option<&ShareAudience> {
+        let name = name.trim();
+        self.audiences
+            .iter()
+            .find(|a| a.name.trim().eq_ignore_ascii_case(name))
+    }
+
+    /// Its audience whose link has `code`.
+    #[must_use]
+    pub fn audience_at(&self, code: &str) -> Option<&ShareAudience> {
+        self.audiences.iter().find(|a| a.code == code)
     }
 
     /// Whether the people it lets in may comment.
@@ -444,6 +551,7 @@ mod tests {
             created_at: 0,
             created_by: "u1".into(),
             domain: None,
+            audiences: Vec::new(),
         }
     }
 
@@ -491,6 +599,31 @@ mod tests {
         assert_eq!(invited.admits(&anon), Verdict::SignIn);
         assert_eq!(invited.admits(&outsider), Verdict::Open);
         assert_eq!(invited.admits(&member), Verdict::Denied);
+    }
+
+    #[test]
+    fn audiences_are_named_once_and_found_by_name_or_code() {
+        let mut s = share(Audience::Link);
+        let new = |name: &str| NewAudience {
+            name: name.into(),
+            filter: "instrument == \"violin\"".into(),
+        };
+        assert!(validate_audience(&s, &new("violin")).is_ok());
+        assert!(validate_audience(&s, &new("  ")).is_err());
+        assert!(validate_audience(&s, &new("a/b")).is_err());
+        assert!(validate_audience(&s, &new(&"x".repeat(AUDIENCE_NAME_MAX + 1))).is_err());
+        s.audiences.push(ShareAudience {
+            name: "Violin".into(),
+            filter: new("").filter,
+            code: code_from([9; 10]),
+            created_at: 1,
+        });
+        assert!(validate_audience(&s, &new(" violin ")).is_err());
+        let found = s.audience_named("VIOLIN").unwrap();
+        assert_eq!(s.audience_at(&found.code), Some(found));
+        assert_eq!(found.path(), format!("/s/{}/", found.code));
+        assert_ne!(found.path(), s.path());
+        assert!(s.audience_at(&s.code).is_none());
     }
 
     #[test]

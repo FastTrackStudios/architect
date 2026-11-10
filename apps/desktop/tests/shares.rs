@@ -16,6 +16,10 @@
 //!   is on the shared page within seconds, and its `_live` stream fires.
 //! - A share that takes comments takes them; a read-only one refuses.
 //! - A share with a domain of its own is served at that host's root.
+//! - A share with two audiences (#510) serves each only its notes and
+//!   files: the other audience's page and file are `404` on its link,
+//!   nothing of them is listed there, a note that leaves an audience's
+//!   filter is `404` there, and an audience is removed alone.
 //! - From the app (`architect-accounts`' Action List, signed in as Grace):
 //!   `SHARE_CREATE` makes a link that opens, `SHARE_LIST` lists it,
 //!   `PUBLISH_DOMAIN` gives it a domain, `SHARE_REVOKE` takes it down.
@@ -35,7 +39,7 @@ use architect_accounts::Issuer;
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use architect_desktop::node::{self, Config, IrohMode, Running};
 use architect_spaces::{
-    Audience, NewShare, Share, ShareAccess, ShareChange, ShareLinksClient, ShareScope,
+    Audience, NewAudience, NewShare, Share, ShareAccess, ShareChange, ShareLinksClient, ShareScope,
 };
 use auth_server::{ServerConfig, server};
 use reqwest::StatusCode;
@@ -105,6 +109,27 @@ async fn world() -> World {
     touch(&vault, "Shared/art.png", "shared png");
     touch(&vault, "Private/plan.md", "# Plan\n\nThe secret plan.\n");
     touch(&vault, "Private/cover.png", "private png");
+    // A setlist (#510): a chart per part, each attaching its file.
+    for (n, song, part) in [
+        (1, "Joy to the World", "violin"),
+        (2, "Joy to the World", "cello"),
+        (3, "Silent Night", "violin"),
+        (4, "Noel", "cello"),
+    ] {
+        let slug = song.split(' ').next().unwrap().to_lowercase();
+        touch(
+            &vault,
+            &format!("Set/0{n}-{slug}-{part}.md"),
+            &format!(
+                "---\ntitle: {song} ({part})\nsong: {song}\ninstrument: {part}\n---\nThe {part} part of {song}.\n\n![[charts/{slug}-{part}.pdf]]\n"
+            ),
+        );
+        touch(
+            &vault,
+            &format!("Set/charts/{slug}-{part}.pdf"),
+            &format!("%PDF {song} for {part}"),
+        );
+    }
     let grace = session_of(&origin, &dir, "grace@local.test").await;
     let config = Config {
         name: "indie-host".to_owned(),
@@ -604,6 +629,202 @@ async fn the_apps_share_actions_make_list_and_revoke_a_link() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     let listed = run("SHARE_LIST", json!({})).await.unwrap();
     assert_eq!(listed["shares"][0]["state"], "revoked");
+
+    w.host.stop().await;
+}
+
+/// The setlist shared with two audiences; the share, the violins' link
+/// and the cellos' (each `/s/<code>/`).
+async fn setlist(w: &World) -> (Share, String, String) {
+    let share = w
+        .share(
+            ShareScope::Folder("Set".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let add = |name: &str, filter: &str| {
+        links.add_audience(
+            share.code.clone(),
+            NewAudience {
+                name: name.to_owned(),
+                filter: filter.to_owned(),
+            },
+        )
+    };
+    add("violin", "instrument == \"violin\"").await.unwrap();
+    let share = add("cello", "instrument == \"cello\"").await.unwrap();
+    let path = |name: &str| share.audience_named(name).unwrap().path();
+    let (violin, cello) = (path("violin"), path("cello"));
+    (share, violin, cello)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_audiences_are_each_served_only_their_own_notes_and_files() {
+    let w = world().await;
+    let (share, violin, cello) = setlist(&w).await;
+    let whole = share.path();
+    assert_ne!(violin, cello);
+    assert_ne!(violin, whole);
+    let status = |url: String| async move { get(&url, None).await.0 };
+
+    // The share's own link is the whole set: every chart and every file.
+    page_with(&w.url(&format!("{whole}04-noel-cello/")), None, "Noel").await;
+    for page in ["01-joy-violin", "02-joy-cello", "03-silent-violin"] {
+        assert_eq!(
+            status(w.url(&format!("{whole}{page}/"))).await,
+            StatusCode::OK
+        );
+    }
+    for file in ["joy-violin", "joy-cello", "silent-violin", "noel-cello"] {
+        let url = w.url(&format!("{whole}Set/charts/{file}.pdf"));
+        assert_eq!(status(url).await, StatusCode::OK, "{file}");
+    }
+
+    // Each audience's link serves its charts and their files…
+    let mine = [
+        (
+            &violin,
+            ["01-joy-violin", "03-silent-violin"],
+            ["joy-violin", "silent-violin"],
+        ),
+        (
+            &cello,
+            ["02-joy-cello", "04-noel-cello"],
+            ["joy-cello", "noel-cello"],
+        ),
+    ];
+    for (link, pages, _) in &mine {
+        page_with(&w.url(&format!("{link}{}/", pages[1])), None, "part of").await;
+    }
+    for (i, (link, pages, files)) in mine.iter().enumerate() {
+        let (_, theirs_pages, theirs_files) = &mine[1 - i];
+        let mut seen = String::new();
+        for page in pages {
+            let (code, _, body) = get(&w.url(&format!("{link}{page}/")), None).await;
+            assert_eq!(code, StatusCode::OK, "{link}{page}");
+            seen.push_str(&body);
+        }
+        for file in files {
+            let url = w.url(&format!("{link}Set/charts/{file}.pdf"));
+            let (code, headers, body) = get(&url, None).await;
+            assert_eq!(code, StatusCode::OK, "{url}");
+            assert_eq!(headers["content-type"], "application/pdf");
+            assert!(body.starts_with("%PDF"), "{body}");
+        }
+        // …and the other audience's are 404 on it: the page route (with
+        // and without its slash, and by its file), and the byte route.
+        for page in theirs_pages {
+            for path in [
+                format!("{page}/"),
+                page.to_string(),
+                format!("{page}/index.html"),
+            ] {
+                let url = w.url(&format!("{link}{path}"));
+                assert_eq!(status(url.clone()).await, StatusCode::NOT_FOUND, "{url}");
+            }
+        }
+        for file in theirs_files {
+            for path in [
+                format!("Set/charts/{file}.pdf"),
+                format!("Set/charts/{}%2Epdf", file),
+                format!("Set/charts/../charts/{file}.pdf"),
+            ] {
+                let url = w.url(&format!("{link}{path}"));
+                assert_eq!(status(url.clone()).await, StatusCode::NOT_FOUND, "{url}");
+            }
+        }
+        // Nothing of the other audience is listed: not in a page, its
+        // nav, the tags or the search index.
+        let (code, _, tags) = get(&w.url(&format!("{link}tags/")), None).await;
+        assert_eq!(code, StatusCode::OK);
+        seen.push_str(&tags);
+        let asset = seen
+            .split('"')
+            .find(|s| s.contains("_site/search."))
+            .expect("a search index")
+            .to_owned();
+        let (code, _, index) = get(&w.url(&asset), None).await;
+        assert_eq!(code, StatusCode::OK, "{asset}");
+        seen.push_str(&index);
+        let other = if i == 0 { "cello" } else { "violin" };
+        assert!(
+            !seen.to_lowercase().contains(other),
+            "{other} in {link}: {seen}"
+        );
+    }
+
+    // A chart that leaves an audience's filter is 404 on its link, and
+    // the audience it joins has it.
+    let root = w.host.state.vault_root("notes").unwrap();
+    touch(
+        &root,
+        "Set/03-silent-violin.md",
+        "---\ntitle: Silent Night (cello)\nsong: Silent Night\ninstrument: cello\n---\nNow the cello part of Silent Night.\n\n![[charts/silent-violin.pdf]]\n",
+    );
+    page_with(
+        &w.url(&format!("{cello}03-silent-violin/")),
+        None,
+        "Now the cello",
+    )
+    .await;
+    assert_eq!(
+        status(w.url(&format!("{cello}Set/charts/silent-violin.pdf"))).await,
+        StatusCode::OK
+    );
+    for path in ["03-silent-violin/", "Set/charts/silent-violin.pdf"] {
+        let url = w.url(&format!("{violin}{path}"));
+        assert_eq!(status(url.clone()).await, StatusCode::NOT_FOUND, "{url}");
+    }
+    assert_eq!(
+        status(w.url(&format!("{violin}01-joy-violin/"))).await,
+        StatusCode::OK
+    );
+
+    // An audience is removed alone: its link is 404 on the next request,
+    // the other's and the share's own stay.
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let left = links
+        .remove_audience(share.code.clone(), "Violin".to_owned())
+        .await
+        .unwrap();
+    assert_eq!(left.audiences.len(), 1);
+    assert_eq!(status(w.url(&violin)).await, StatusCode::NOT_FOUND);
+    assert_eq!(
+        status(w.url(&format!("{violin}01-joy-violin/"))).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        status(w.url(&format!("{cello}04-noel-cello/"))).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        status(w.url(&format!("{whole}01-joy-violin/"))).await,
+        StatusCode::OK
+    );
+    // A name is free again, a name taken is refused, and so is a filter
+    // that is not a Bases filter.
+    let bad = |name: &str, filter: &str| {
+        links.add_audience(
+            share.code.clone(),
+            NewAudience {
+                name: name.to_owned(),
+                filter: filter.to_owned(),
+            },
+        )
+    };
+    assert!(bad("cello", "instrument == \"cello\"").await.is_err());
+    assert!(bad("brass", "instrument ==").await.is_err());
+    let again = bad("violin", "instrument == \"violin\"").await.unwrap();
+    assert_ne!(again.audience_named("violin").unwrap().path(), violin);
+
+    // The whole share revoked takes every audience's link with it.
+    links.revoke(share.code.clone()).await.unwrap();
+    assert_eq!(
+        status(w.url(&format!("{cello}04-noel-cello/"))).await,
+        StatusCode::NOT_FOUND
+    );
 
     w.host.stop().await;
 }
