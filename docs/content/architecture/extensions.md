@@ -3135,13 +3135,17 @@ The Architect app (not only the sandbox) searches and installs from
 registries kept by `Registries` (`features/extensions/src/registries.rs`,
 `Extensions::with_registries`):
 
-- **the store's index**, FastTrackStudios' registry
-  (`apps/ui/src/extensions.rs` `STORE_REGISTRY`, given with
-  `Registries::with_builtin`: always there, never written, never removed),
-  whose archives are signed with the org key;
+- **the store's index**, `extensions/index.toml` in architect's own
+  repository, beside the first-party extensions (`apps/ui/src/extensions.rs`
+  `STORE_REGISTRY`, `STORE_DIR`; given with `Registries::with_builtin`:
+  always there, never written, never removed). It is a git registry in a
+  folder of a repository (`GitRegistry::in_dir`, `Registry::in_dir`): only
+  that folder is checked out (sparse, about 3 MB). A publisher lists its
+  extension there by pull request; its archives are signed with the org
+  key, or a publisher key the entry's registry trusts;
 - **registries a person adds** in Settings → Extensions (the manager
   page's "Registries and development installs") or with
-  `EXT_REGISTRY_ADD {name, git | folder, keys}`, kept in
+  `EXT_REGISTRY_ADD {name, git [+ dir] | folder, keys}`, kept in
   `<app dir>/extension-registries.json`.
 
 Each `Registry` carries its **publishers' keys** (`Publisher`: a name and

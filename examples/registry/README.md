@@ -1,8 +1,8 @@
 # Extension registry (skeleton)
 
-The skeleton of the FastTrackStudios extension registry: copy this folder
-to the root of a new repository (`FastTrackStudios/extensions`) and it is
-one. An app adds it as a `GitRegistry` and installs from its index; the
+The skeleton of an extension registry: copy this folder to the root of a
+repository (or a folder of one) and it is one. The FastTrackStudios store's
+own index is `extensions/index.toml` in this repository. An app adds it as a `GitRegistry` and installs from its index; the
 reusable workflow `.github/workflows/extension-release.yml` in architect
 opens a pull request here each time an extension is released.
 
