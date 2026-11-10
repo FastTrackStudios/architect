@@ -5,6 +5,7 @@
 // Nothing is `Send` in a browser.
 #![allow(clippy::future_not_send)]
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use auth_client::oidc::{self, Pkce, Refresh};
@@ -14,7 +15,10 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Element, Request, RequestInit, Response, Storage, Window};
 
-use crate::{APP, Config, NODE_STATUS, NodeStatus, Person, Route, SCOPE, Screen, route, view};
+use crate::{
+    APP, Config, DISTRIBUTION, Distribution, NODE_STATUS, NodeStatus, Person, Route, SCOPE, Screen,
+    route, view,
+};
 
 /// The session, in `localStorage`.
 const SESSION_KEY: &str = "architect.session";
@@ -126,14 +130,38 @@ async fn token_post(config: &Config, body: String) -> Result<String, String> {
     .map(|(_, text)| text)
 }
 
+thread_local! {
+    /// Which distribution this bundle is (`/app/distribution.json`), read
+    /// once at start.
+    static DIST: RefCell<Distribution> = RefCell::new(Distribution::default());
+}
+
 fn draw(screen: &Screen) {
     if let Some(root) = window()
         .ok()
         .and_then(|w| w.document())
         .and_then(|d| d.get_element_by_id("app"))
     {
-        root.set_inner_html(&view(screen));
+        DIST.with(|d| root.set_inner_html(&view(screen, &d.borrow())));
     }
+}
+
+/// Reads `/app/distribution.json` into [`DIST`], and names the page and
+/// its header after it. Missing, the bundle is the Architect app's.
+async fn read_distribution() {
+    let Ok((200, text)) = fetch("GET", DISTRIBUTION, None, &[]).await else {
+        return;
+    };
+    let Ok(dist) = Distribution::parse(&text) else {
+        return;
+    };
+    if let Some(doc) = window().ok().and_then(|w| w.document()) {
+        doc.set_title(&dist.name);
+        if let Ok(Some(brand)) = doc.query_selector("header .brand") {
+            brand.set_text_content(Some(&dist.name));
+        }
+    }
+    DIST.with(|d| *d.borrow_mut() = dist);
 }
 
 #[wasm_bindgen(start)]
@@ -146,6 +174,7 @@ pub fn start() {
 }
 
 async fn run() -> Result<(), String> {
+    read_distribution().await;
     draw(&Screen::Loading);
     let (status, text) = fetch("GET", &format!("{APP}config.json"), None, &[]).await?;
     if status != 200 {

@@ -19,11 +19,21 @@
 #   NOTARIZE    1 (default) notarize + staple; 0 signs only (not distributable)
 #   SKIP_BUILD  1 reuses target/$PROFILE/architect-desktop
 #
+# Another distribution of Architect (#491; `cargo xtask dist desktop`
+# sets these from `<bin> distribution`), all defaulting to the Architect app:
+#   APP_BIN_PATH  its built binary (implies SKIP_BUILD=1)
+#   APP_BIN       the binary's name in the bundle (default architect-desktop)
+#   APP_TITLE     its name (default Architect)
+#   APP_FILE      the dmg's file name before -macos (default APP_TITLE)
+#   APP_ID        its bundle id; the Mac's is APP_ID.mac
+#   APP_ICON      its icon's SVG (default apps/desktop/icons/architect.svg)
+#
 # arm64 only (a universal build is a lipo away: x86_64-apple-darwin is in
 # the toolchain).
 set -euo pipefail
-crate=architect-desktop; bin=architect-desktop; title=Architect
-icon_svg=apps/desktop/icons/architect.svg
+crate=architect-desktop; bin="${APP_BIN:-architect-desktop}"; title="${APP_TITLE:-Architect}"
+file="${APP_FILE:-$title}"
+icon_svg="${APP_ICON:-apps/desktop/icons/architect.svg}"
 category=public.app-category.productivity
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -34,7 +44,7 @@ BUILD_NO="${BUILD_NO:-$(date +%s)}"
 OUT_DIR="${OUT_DIR:-$ROOT/target/desktop}"
 PROFILE="${PROFILE:-release}"
 NOTARIZE="${NOTARIZE:-1}"
-BUNDLE_ID="app.fasttrackstudio.architect.mac"
+BUNDLE_ID="${APP_ID:-app.fasttrackstudio.architect}.mac"
 mkdir -p "$OUT_DIR"
 # ── Tools ───────────────────────────────────────────────────────────────────
 NIX="${NIX:-}"
@@ -67,8 +77,8 @@ if [ "$NOTARIZE" = 1 ]; then
 fi
 
 # ── Build ───────────────────────────────────────────────────────────────────
-BIN="$ROOT/target/$PROFILE/$bin"
-if [ "${SKIP_BUILD:-}" = 1 ]; then
+BIN="${APP_BIN_PATH:-$ROOT/target/$PROFILE/$bin}"
+if [ -n "${APP_BIN_PATH:-}" ] || [ "${SKIP_BUILD:-}" = 1 ]; then
     echo "=== SKIP_BUILD=1: reusing $BIN ==="
 else
     echo "=== cargo build --profile $PROFILE -p $crate ==="
@@ -149,7 +159,7 @@ codesign --force --keychain "$KEYCHAIN" --timestamp --options runtime \
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 # ── The disk image ──────────────────────────────────────────────────────────
-DMG="$OUT_DIR/$title-macos-arm64.dmg"
+DMG="$OUT_DIR/$file-macos-arm64.dmg"
 DMGROOT="$STAGE/dmg"
 mkdir -p "$DMGROOT"
 cp -R "$APP" "$DMGROOT/"

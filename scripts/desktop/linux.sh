@@ -25,10 +25,22 @@
 #   PROFILE     cargo profile (default release)
 #   MAX_GLIBC   default 2.42 (the Nix toolchain's today; a ratchet)
 #   SKIP_BUILD  1 reuses $CARGO_TARGET_DIR (or target)/$PROFILE/architect-desktop
+#
+# Another distribution of Architect (#491; `cargo xtask dist desktop`
+# sets these from `<bin> distribution`), all defaulting to the Architect app:
+#   APP_BIN_PATH  its built binary (implies SKIP_BUILD=1)
+#   APP_BIN       the binary's name in the bundle (default architect-desktop)
+#   APP_TITLE     its name (default Architect)
+#   APP_FILE      the AppImage's file name before -linux (default APP_TITLE)
+#   APP_ID        its bundle id (default app.fasttrackstudio.architect)
+#   APP_ICON      its icon's SVG (default apps/desktop/icons/architect.svg)
+#   APP_COMMENT   the desktop entry's comment
 set -euo pipefail
 
-bin=architect-desktop; title=Architect; slug=app.fasttrackstudio.architect
-comment="Notes, projects and files on every device, local-first and in sync"
+bin="${APP_BIN:-architect-desktop}"; title="${APP_TITLE:-Architect}"; slug="${APP_ID:-app.fasttrackstudio.architect}"
+file="${APP_FILE:-$title}"
+icon_svg="${APP_ICON:-apps/desktop/icons/architect.svg}"
+comment="${APP_COMMENT:-Notes, projects and files on every device, local-first and in sync}"
 categories="Office;Utility;"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -39,7 +51,7 @@ OUT_DIR="${OUT_DIR:-$ROOT/target/desktop}"
 PROFILE="${PROFILE:-release}"
 MAX_GLIBC="${MAX_GLIBC:-2.42}"
 mkdir -p "$OUT_DIR"
-OUT="$OUT_DIR/$title-linux-x86_64.AppImage"
+OUT="$OUT_DIR/$file-linux-x86_64.AppImage"
 
 # In the repo's dev shell (devenv), then with the packaging tools from the
 # nixpkgs the flake pins.
@@ -54,8 +66,8 @@ if [ -z "${DESKTOP_IN_TOOLS:-}" ]; then
 fi
 
 # ── Build ───────────────────────────────────────────────────────────────────
-BIN="${CARGO_TARGET_DIR:-$ROOT/target}/$PROFILE/$bin"
-if [ "${SKIP_BUILD:-}" = 1 ]; then
+BIN="${APP_BIN_PATH:-${CARGO_TARGET_DIR:-$ROOT/target}/$PROFILE/$bin}"
+if [ -n "${APP_BIN_PATH:-}" ] || [ "${SKIP_BUILD:-}" = 1 ]; then
     echo "=== SKIP_BUILD=1: reusing $BIN ==="
 else
     echo "=== cargo build --profile $PROFILE -p architect-desktop ==="
@@ -66,7 +78,7 @@ fi
 # ── The AppDir ──────────────────────────────────────────────────────────────
 WORK="$(mktemp -d -p "$OUT_DIR" .appdir.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
-AD="$WORK/$title.AppDir"
+AD="$WORK/$file.AppDir"
 mkdir -p "$AD/usr/bin" "$AD/usr/lib" "$AD/usr/share/applications" "$AD/usr/share/icons/hicolor/256x256/apps"
 cp "$BIN" "$AD/usr/bin/$bin"
 chmod u+w "$AD/usr/bin/$bin"
@@ -122,7 +134,7 @@ echo "=== glibc floor: ${floor:-none} (limit $MAX_GLIBC) ==="
 if [ -n "$floor" ] && [ "$(printf '%s\n%s\n' "$floor" "$MAX_GLIBC" | sort -V | tail -1)" != "$MAX_GLIBC" ]; then
     echo "ERROR: needs glibc $floor, over the limit $MAX_GLIBC" >&2; exit 1
 fi
-echo "$floor" > "$OUT_DIR/$title-linux-x86_64.AppImage-glibc-floor.txt"
+echo "$floor" > "$OUT_DIR/$file-linux-x86_64.AppImage-glibc-floor.txt"
 
 # The bundle runs without /nix/store: through the system's loader (or, on
 # NixOS, the toolchain's) with only the bundle's libraries.
@@ -145,7 +157,7 @@ StartupWMClass=$bin
 X-AppImage-Version=$VERSION
 DESKTOP
 cp "$AD/$slug.desktop" "$AD/usr/share/applications/$slug.desktop"
-rsvg-convert -w 256 -h 256 apps/desktop/icons/architect.svg -o "$AD/$slug.png"
+rsvg-convert -w 256 -h 256 "$icon_svg" -o "$AD/$slug.png"
 cp "$AD/$slug.png" "$AD/usr/share/icons/hicolor/256x256/apps/$slug.png"
 cp "$AD/$slug.png" "$AD/.DirIcon"
 

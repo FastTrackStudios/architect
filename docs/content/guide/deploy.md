@@ -188,6 +188,14 @@ prefix to the node and a code never clashes with the web front end's paths
 | **Revoke** | final; the link is `404` from the next request on, and its pages are deleted |
 | **Domain** | optional: the same share at the root of a host of its own |
 
+A share's pages, and a Site's, draw the fences the build's compiled-in
+extensions claim, as the app draws them (#488): each linked extension's
+`[[embeds]] page` and the distribution's own renderers
+(`apps/distribution/src/lib.rs` `Distribution::blocks`, given to
+`apps/desktop/src/node/mod.rs` `start_with`). A build of your own with
+Studio's charts compiled in draws a `kf` fence as the chart
+([your own Architect](@/guide/your-own-architect.md)).
+
 **Kept as org data.** A share is a note of the vault it shares,
 `_architect/shares/<code>.md` (`share_note_path`), with `publish: false`, so
 no Site ever shows it. It syncs to every device that holds the vault like
@@ -288,6 +296,9 @@ sandbox. `architect-image-prebuilt` wraps a binary built in the dev shell
 (`ARCHITECT_PREBUILT_BIN`, `nix build --impure`). The image runs
 `architect-desktop serve` as its entrypoint, exposes `8080/tcp` (HTTP) and
 `7777/udp` (iroh), and keeps its state in the `/data` volume.
+Another distribution's image is the same, with its binary and its name
+(`ARCHITECT_IMAGE_BIN`, `ARCHITECT_IMAGE_NAME`); `cargo xtask dist
+node-image` builds it ([your own Architect](@/guide/your-own-architect.md)).
 
 ```sh
 nix build .#architect-image

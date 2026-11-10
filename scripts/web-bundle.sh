@@ -17,6 +17,11 @@
 #   ARCHITECT_CLI        the `architect` CLI binary (apps/cli)
 #   WASM_BINDGEN         a wasm-bindgen at Cargo.lock's version
 # ARCHITECT_WEB_URL      the site's public URL (default https://architect.fasttrackstudio.app)
+# ARCHITECT_DISTRIBUTION which distribution it is (#491): what its binary's
+#                        `distribution` printed, served as
+#                        /app/distribution.json (its name and its compiled-in
+#                        extensions, which the app shows); none, the Architect
+#                        app with none listed. `cargo xtask dist web` sets it.
 set -euo pipefail
 out="${1:?usage: web-bundle.sh OUT}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -46,6 +51,9 @@ cp "$root"/apps/web/site/* "$out/"
 # The landing page, as is.
 cp -r "$root/apps/web/landing/." "$out/"
 cp "$root"/apps/web/app/* "$out/app/"
+if [ -n "${ARCHITECT_DISTRIBUTION:-}" ]; then
+    cp "$ARCHITECT_DISTRIBUTION" "$out/app/distribution.json"
+fi
 "$bindgen" --target web --no-typescript --out-dir "$out/app" "$wasm"
 
 cli="${ARCHITECT_CLI:-}"
