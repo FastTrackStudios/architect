@@ -48,7 +48,12 @@ architect-server = ["server-seaorm"]
 # 2026-11-06 (+1, #400): architect-accounts' `http` dials the node hosting
 # an org over vox WebSocket for ORG_DEVICES/ORG_ENROL/ORG_REVOKE
 # (architect/connect, tokio-tungstenite client-side); still no server stack.
-ui-reach = 13
+# 2026-11-10 (+2, #487): architect-guide's `capture` and `story` mount a
+# film's window with `architect-workspace/native` (the desk window's own
+# document: stylesheets, HTML parser), which unifies workspace-hack's
+# features to include tower-http, like the story crates above; the guide
+# itself reaches no server stack.
+ui-reach = 15
 transport-host = 4
 lints = 1
 
