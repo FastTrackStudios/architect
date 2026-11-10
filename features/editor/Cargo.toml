@@ -28,6 +28,10 @@ syntax = ["dep:editor-syntax"]
 ui = ["state", "dep:editor-view"]
 web = ["ui", "editor-view/web"]
 native = ["ui", "editor-view/native"]
+# The editor's LSP client (`lsp`): `editor-lsp`'s client and the
+# diagnostics types. Native only: on wasm the feature compiles to
+# nothing.
+lsp = ["state", "dep:editor-lsp"]
 # The editor's Typst and Mermaid fence renderers are not offered here yet:
 # they would put a Typst compiler in every consumer's lockfile.
 
@@ -37,6 +41,9 @@ editor-state = { workspace = true, optional = true }
 editor-syntax = { workspace = true, optional = true }
 editor-view = { workspace = true, optional = true }
 serde = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+editor-lsp = { workspace = true, optional = true }
 
 [dev-dependencies]
 # tests/theme.rs: the syntax tokens resolved by a theme store.

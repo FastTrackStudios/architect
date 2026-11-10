@@ -72,7 +72,7 @@ dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.
 dioxus-vdom-template = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
 ed25519 = { version = "3.0.0", default-features = false, features = ["pem", "serde"] }
 ed25519-dalek = { version = "3.0.0", features = ["pem", "rand_core", "serde"] }
-editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0", default-features = false, features = ["native", "web"] }
+editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528", default-features = false, features = ["native", "web"] }
 either = { version = "1.18.0", features = ["serde", "use_std"] }
 euclid = { version = "0.22.14", features = ["libm", "serde"] }
 event-listener = { version = "5.4.2" }
@@ -274,7 +274,7 @@ icu_normalizer = { version = "2.4.0", default-features = false, features = ["com
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
-itertools = { version = "0.12.1" }
+itertools = { version = "0.10.5" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "system", "xdp"] }
 md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
@@ -343,7 +343,7 @@ hyper-util = { version = "0.1.20", default-features = false, features = ["client
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
-itertools = { version = "0.12.1" }
+itertools = { version = "0.10.5" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
 md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
 md-5-a6292c17cd707f01 = { package = "md-5", version = "0.11.0" }
@@ -407,7 +407,7 @@ hyper-util = { version = "0.1.20", default-features = false, features = ["client
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
-itertools = { version = "0.12.1" }
+itertools = { version = "0.10.5" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
 md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
 md-5-a6292c17cd707f01 = { package = "md-5", version = "0.11.0" }
@@ -470,7 +470,7 @@ hyper-util = { version = "0.1.20", default-features = false, features = ["client
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_properties = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 ipnet = { version = "2.12.2", features = ["serde"] }
-itertools = { version = "0.12.1" }
+itertools = { version = "0.10.5" }
 libc = { version = "0.2.189", features = ["extra_traits"] }
 md-5-93f6ce9d446188ac = { package = "md-5", version = "0.10.6" }
 md-5-a6292c17cd707f01 = { package = "md-5", version = "0.11.0" }
