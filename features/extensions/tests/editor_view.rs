@@ -56,7 +56,8 @@ fn Source() -> Element {
     // door for them: it reaches the sink as the person's typing does.
     use_hook(|| {
         let at = SOURCE.find("main").unwrap();
-        let spec = TransactionSpec::new().changes(Changes::replace(at..at + 4, "start"));
+        let spec =
+            TransactionSpec::new().changes(Changes::replace(at..at.saturating_add(4), "start"));
         dispatch_spec(state, spec, Some(on_transaction));
     });
     rsx! {
