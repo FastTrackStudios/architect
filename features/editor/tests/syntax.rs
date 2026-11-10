@@ -61,7 +61,12 @@ fn what_the_editor_cannot_highlight_says_why() {
         .highlights_query("(no_such_node) @keyword");
     languages.set(
         "lab",
-        vec![file, unlinked, bad_query, Language::linked("cobol", "COBOL")],
+        vec![
+            file,
+            unlinked,
+            bad_query,
+            Language::linked("cobol", "COBOL"),
+        ],
     );
     let file = highlight(&languages, "kf", "x").unwrap_err();
     assert!(matches!(file, Unsupported::GrammarFile { .. }));

@@ -58,7 +58,13 @@ pub fn code_editor_rust() -> Element {
             "unused variable: `unused`",
         )]
     });
-    let sheet = use_hook(|| format!("{EDITOR_CSS}\n{}\n.story-code {{ {} }}", css(), syntax_vars()));
+    let sheet = use_hook(|| {
+        format!(
+            "{EDITOR_CSS}\n{}\n.story-code {{ {} }}",
+            css(),
+            syntax_vars()
+        )
+    });
     rsx! {
         document::Style { {sheet} }
         div { class: "story-code", "data-story": "code-rust",

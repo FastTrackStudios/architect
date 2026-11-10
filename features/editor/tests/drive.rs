@@ -62,7 +62,11 @@ fn a_language_set_in_architects_registry_is_the_editors_until_withdrawn() {
     // The app links it (a Rust grammar standing in, with its query): now
     // the fence is highlighted and a `.chart` file has a language.
     let before = syntax::languages_revision();
-    syntax::link_grammar("chart", Lang::Rust.grammar(), Some(Lang::Rust.highlights_query()));
+    syntax::link_grammar(
+        "chart",
+        Lang::Rust.grammar(),
+        Some(Lang::Rust.highlights_query()),
+    );
     assert!(syntax::languages_revision() > before);
     assert!(syntax::problems().is_empty());
     assert!(syntax::language_for_path("songs/a.chart").is_some());
@@ -71,7 +75,12 @@ fn a_language_set_in_architects_registry_is_the_editors_until_withdrawn() {
         marks.contains(&("\"verse\"".to_owned(), "md-tok-s".to_owned())),
         "{marks:?}"
     );
-    assert!(heard.lock().unwrap().contains(&syntax::languages_revision()));
+    assert!(
+        heard
+            .lock()
+            .unwrap()
+            .contains(&syntax::languages_revision())
+    );
 
     // The extension goes: plain again, and no language for the file.
     assert!(languages.withdraw("lab.chart"));
@@ -81,7 +90,11 @@ fn a_language_set_in_architects_registry_is_the_editors_until_withdrawn() {
     // Back on: highlighted again.
     languages.set(
         "lab.chart",
-        vec![Language::linked("chart", "Chart").fences(&["chart"]).host_grammar("chart")],
+        vec![
+            Language::linked("chart", "Chart")
+                .fences(&["chart"])
+                .host_grammar("chart"),
+        ],
     );
     assert!(!token_marks(doc).is_empty());
     // The grammar unlinked: withdrawn from the editor, a problem again.

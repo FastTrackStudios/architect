@@ -44,12 +44,12 @@ pub use editor_state::diagnostic::{Diagnostic, Severity};
 pub use editor_lsp as lsp;
 
 pub mod languages;
-#[cfg(feature = "syntax")]
-pub mod syntax;
 #[cfg(feature = "stories")]
 pub mod stories;
+#[cfg(feature = "syntax")]
+pub mod syntax;
+pub mod theme;
 #[cfg(feature = "ui")]
 pub mod ui;
-pub mod theme;
 
 pub use languages::{Grammar, Language, Languages, Registered, Server};
