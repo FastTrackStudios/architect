@@ -73,7 +73,7 @@ on:
         description: "The runner per target triple (a JSON object); the default maps the four platforms to GitHub-hosted runners (x86_64 macOS cross-built on Apple silicon)."
         type: string
         required: false
-        default: '{"aarch64-apple-darwin":"macos-14","x86_64-apple-darwin":"macos-14","x86_64-unknown-linux-gnu":"ubuntu-24.04","aarch64-unknown-linux-gnu":"ubuntu-24.04-arm"}'
+        default: '{"aarch64-apple-darwin":"macos-15","x86_64-apple-darwin":"macos-15","x86_64-unknown-linux-gnu":"ubuntu-24.04","aarch64-unknown-linux-gnu":"ubuntu-24.04-arm"}'
       prepare:
         description: "A command run in the package job before packing (build a WASI component into the package, generate files). No secret is in that job."
         type: string
