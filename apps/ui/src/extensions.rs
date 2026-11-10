@@ -612,9 +612,15 @@ async fn frame_binding(lab: Arc<ActionList>, extensions: Arc<ActionList>) {
 /// How often a loaded extension's files are checked for a save.
 const POLL: Duration = Duration::from_millis(500);
 
-/// The store's index: `FastTrackStudios`' registry, its archives signed
-/// with the org release key (`Trust::org`, trusted everywhere).
-pub const STORE_REGISTRY: &str = "https://github.com/FastTrackStudios/extensions";
+/// The store's index: `extensions/index.toml` in architect's own
+/// repository (`STORE_DIR`), beside the first-party extensions. A third
+/// party lists its extension there by pull request; archives it lists are
+/// signed with the org release key (`Trust::org`, trusted everywhere) or
+/// a publisher key its entry names.
+pub const STORE_REGISTRY: &str = "https://github.com/FastTrackStudios/architect";
+
+/// The store's folder in [`STORE_REGISTRY`].
+pub const STORE_DIR: &str = "extensions";
 
 /// The Architect app's registries (#493): the store's, then the ones a
 /// person adds in Settings → Extensions or with `EXT_REGISTRY_ADD`, kept
@@ -627,7 +633,7 @@ pub fn app_registries(root: &Path) -> architect_extensions::registries::Registri
         root.join("extension-registries.json"),
         root.join("registries"),
     )
-    .with_builtin(Registry::git("FastTrackStudios", STORE_REGISTRY))
+    .with_builtin(Registry::git("FastTrackStudios", STORE_REGISTRY).in_dir(STORE_DIR))
     .with_dev_forced(cfg!(debug_assertions))
 }
 

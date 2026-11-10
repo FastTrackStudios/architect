@@ -50,6 +50,10 @@ pub struct Registry {
     /// Its folder, used where it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// With `git`: the folder of the repository holding its `index.toml`
+    /// (the repository's root when none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
     /// The publishers whose archives it may list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<Publisher>,
@@ -62,6 +66,7 @@ impl Registry {
             name: name.into(),
             git: Some(url.into()),
             folder: None,
+            dir: None,
             keys: Vec::new(),
         }
     }
@@ -72,8 +77,17 @@ impl Registry {
             name: name.into(),
             git: None,
             folder: Some(folder.as_ref().display().to_string()),
+            dir: None,
             keys: Vec::new(),
         }
+    }
+
+    /// A git registry whose index is folder `dir` of the repository
+    /// (`GitRegistry::in_dir`).
+    #[must_use]
+    pub fn in_dir(mut self, dir: impl Into<String>) -> Self {
+        self.dir = Some(dir.into());
+        self
     }
 
     /// Also trusts archives it lists signed by `key` (the base64 line of
@@ -132,7 +146,13 @@ impl Registry {
             (Some(url), _) => Arc::new(Named {
                 name: self.name.clone(),
                 inner: keys.into_iter().fold(
-                    GitRegistry::new(url.clone(), checkouts.join(slug(&self.name))),
+                    {
+                        let git = GitRegistry::new(url.clone(), checkouts.join(slug(&self.name)));
+                        match self.dir.as_deref().filter(|d| !d.trim().is_empty()) {
+                            Some(dir) => git.in_dir(dir),
+                            None => git,
+                        }
+                    },
                     |r, (n, k)| r.trusting(n, k),
                 ),
             }),

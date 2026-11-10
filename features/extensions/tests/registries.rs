@@ -259,9 +259,79 @@ fn a_registry_with_a_bad_key_or_no_place_is_not_added() {
             name: "Y".into(),
             git: None,
             folder: None,
+            dir: None,
             keys: vec![]
         })
         .is_err()
     );
     assert!(r.list().is_empty());
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn a_git_registry_in_a_folder_of_a_repository_installs_from_that_folder() {
+    // A repository that is more than a registry (architect's own, its
+    // index in `extensions/`): only that folder is read and checked out.
+    let tmp = tempfile::tempdir().unwrap();
+    let studio = SecretKey::generate().unwrap();
+    let repo = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let folder = registry_folder(
+        &repo,
+        "extensions",
+        &signed(&package(tmp.path(), "src"), &studio),
+    );
+    assert!(folder.join("index.toml").is_file());
+    std::fs::create_dir_all(repo.join("crates")).unwrap();
+    std::fs::write(repo.join("crates/lib.rs"), "not the registry").unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(
+        &repo,
+        &["-c", "user.name=t", "-c", "user.email=t@t", "add", "."],
+    );
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "registry",
+        ],
+    );
+    let url = format!("file://{}", repo.display());
+    let registries = Registries::memory(tmp.path().join("checkouts")).with_builtin(
+        Registry::git("FastTrackStudios", &url)
+            .in_dir("extensions")
+            .trusting("Studio", studio.public()),
+    );
+    let (list, ext) = app(tmp.path(), registries);
+    let refreshed = run(&list, "EXT_REGISTRY_REFRESH", &json!({})).unwrap();
+    assert_eq!(refreshed["ok"], true, "{refreshed}");
+    let clone = tmp.path().join("checkouts/fasttrackstudios");
+    assert!(clone.join("extensions/index.toml").is_file());
+    assert!(
+        !clone.join("crates").exists(),
+        "only the registry's folder is checked out"
+    );
+    assert_eq!(ext.search("hello")[0].source, "FastTrackStudios");
+    let out = run(&list, "EXT_INSTALL", &json!({ "id": ID })).unwrap();
+    assert_eq!(out["loaded"], true, "{out}");
+    let listed = run(&list, "EXT_REGISTRIES", &json!(null)).unwrap();
+    assert_eq!(listed["registries"][0]["dir"], "extensions", "{listed}");
 }

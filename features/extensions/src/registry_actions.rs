@@ -4,7 +4,7 @@
 //! | action | what it does |
 //! |---|---|
 //! | `EXT_REGISTRIES` | every registry (the app's own first): its name, git URL or folder, publishers' keys, whether it is the app's; and whether development installs are on |
-//! | `EXT_REGISTRY_ADD` | adds `{name, git \| folder, keys?: [{name, key}]}` (or replaces the one of that name), kept in the app's settings, then fetches its index; a caller from outside needs a person's yes to add keys |
+//! | `EXT_REGISTRY_ADD` | adds `{name, git [+ dir] \| folder, keys?: [{name, key}]}` (or replaces the one of that name), kept in the app's settings, then fetches its index; a caller from outside needs a person's yes to add keys |
 //! | `EXT_REGISTRY_REMOVE` | removes `{name}` (not the app's own) |
 //! | `EXT_REGISTRY_REFRESH` | pulls every registry's index (`{name?}`: one): the ones that failed, and why |
 //! | `EXT_DEV` | loads `{folder}` as a development copy, unsigned, reloaded on save, kept across restarts; only with development installs on |
@@ -100,6 +100,8 @@ pub struct AddArgs {
     pub git: Option<String>,
     /// A folder with an `index.toml`.
     pub folder: Option<String>,
+    /// With `git`: the repository's folder holding its `index.toml`.
+    pub dir: Option<String>,
     /// The publishers whose archives it may list.
     pub keys: Option<Vec<KeyArg>>,
 }
@@ -144,6 +146,7 @@ fn listing(r: &Registries) -> Value {
                 "name": l.registry.name,
                 "git": l.registry.git,
                 "folder": l.registry.folder,
+                "dir": l.registry.dir,
                 "keys": l.registry.keys.iter().map(|k| json!({ "name": k.name, "key": k.key })).collect::<Vec<_>>(),
                 "builtin": l.builtin,
             })
@@ -285,6 +288,7 @@ impl Extensions {
                 name: a.name.trim().to_owned(),
                 git: a.git.filter(|g| !g.trim().is_empty()),
                 folder: a.folder.filter(|f| !f.trim().is_empty()),
+                dir: a.dir.filter(|d| !d.trim().is_empty()),
                 keys: a
                     .keys
                     .unwrap_or_default()
