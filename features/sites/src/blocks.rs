@@ -38,17 +38,22 @@ pub struct Block<'a> {
 pub enum Drawn {
     /// An element tree, as a page draws one (`architect_pages::Element`).
     Elements(Vec<Element>),
-    /// Finished markup (HTML, or inline SVG), written as is.
+    /// Finished markup (HTML, or inline SVG), written once it is made
+    /// safe ([`crate::sanitize()`]).
     Html(String),
 }
 
 impl Drawn {
-    /// As HTML.
+    /// As HTML, with nothing in it that runs: a tree is written by
+    /// [`elements_to_html`]'s rules, markup is re-written by
+    /// [`crate::sanitize()`]'s (an inline SVG keeps its drawing, its
+    /// classes and its `data-*`; never a script, an `on…` handler, a
+    /// `javascript:` URL or a `<foreignObject>`).
     #[must_use]
     pub fn into_html(self) -> String {
         match self {
             Self::Elements(elements) => elements_to_html(&elements),
-            Self::Html(html) => html,
+            Self::Html(html) => crate::sanitize::sanitize(&html),
         }
     }
 }

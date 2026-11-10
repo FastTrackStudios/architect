@@ -5,15 +5,14 @@
 //! anyone reads. So it is written defensively: text and attribute values
 //! escaped, handlers (`on`, and any `on…` attribute) dropped, a
 //! `javascript:` URL dropped, and an element whose tag is not a plain
-//! name skipped with everything in it.
+//! name skipped with everything in it. What is kept and dropped is the
+//! same as for a renderer's finished markup (`crate::sanitize`): an SVG
+//! keeps its geometry, classes and `data-*`, never a `<script>` or a
+//! `<foreignObject>`.
 
 use architect_pages::Element;
 
-/// Elements that have no closing tag.
-const VOID: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
-    "wbr",
-];
+use crate::sanitize::{VOID, drops_element, is_name, keeps_attr};
 
 /// `elements`, as HTML.
 #[must_use]
@@ -30,23 +29,17 @@ fn write_element(out: &mut String, element: &Element) {
         out.push_str(&escape(element.text.as_deref().unwrap_or_default()));
         return;
     }
-    if !is_name(&element.tag) || element.tag.eq_ignore_ascii_case("script") {
+    let attrs = element
+        .attrs
+        .iter()
+        .map(|a| (a.name.as_str(), a.value.as_str()));
+    if !is_name(&element.tag) || drops_element(&element.tag, attrs) {
         return;
     }
     out.push('<');
     out.push_str(&element.tag);
     for attr in &element.attrs {
-        let name = attr.name.to_ascii_lowercase();
-        if !is_name(&attr.name) || name.starts_with("on") {
-            continue;
-        }
-        if matches!(name.as_str(), "href" | "src" | "action")
-            && attr
-                .value
-                .trim_start()
-                .to_ascii_lowercase()
-                .starts_with("javascript:")
-        {
+        if !keeps_attr(&element.tag, &attr.name, &attr.value) {
             continue;
         }
         out.push(' ');
@@ -70,29 +63,11 @@ fn write_element(out: &mut String, element: &Element) {
     out.push('>');
 }
 
-/// A tag or attribute name: letters, digits, `-`, `_`, `:` and `.`,
-/// starting with a letter.
-fn is_name(name: &str) -> bool {
-    name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
-}
-
 /// `text` safe in HTML text and in a double-quoted attribute.
 #[must_use]
 pub fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            other => out.push(other),
-        }
-    }
+    crate::sanitize::escape(text, &mut out);
     out
 }
 
@@ -169,6 +144,51 @@ mod tests {
         assert_eq!(
             elements_to_html(&[tree]),
             "<div id=\"kf-chart\"><div class=\"kf-bar\" style=\"border: 1px solid var(--border)\">C &lt;maj&gt;</div><br></div>"
+        );
+    }
+
+    /// An SVG drawn as a tree (keyflow#59's chart, from a page): its
+    /// geometry, classes and `data-*` come through; a `<foreignObject>`,
+    /// a script inside the SVG and a `<set>` writing a link do not.
+    #[test]
+    fn an_svg_tree_keeps_its_drawing_and_loses_what_runs() {
+        let rect = |at: &str, x: &str| {
+            el(
+                "rect",
+                &[
+                    ("class", "kf-bar"),
+                    ("data-at", at),
+                    ("x", x),
+                    ("width", "100"),
+                    ("height", "40"),
+                ],
+                vec![],
+            )
+        };
+        let tree = el(
+            "svg",
+            &[
+                ("viewBox", "0 0 200 40"),
+                ("data-follow-playhead", ""),
+                ("data-media", "/s/x/joy.mp3"),
+                ("onload", "x()"),
+            ],
+            vec![
+                rect("0", "0"),
+                rect("2.5", "100"),
+                el("foreignObject", &[], vec![el("div", &[], vec![text("html")])]),
+                el("script", &[], vec![text("x()")]),
+                el(
+                    "set",
+                    &[("attributeName", "href"), ("to", "javascript:x()")],
+                    vec![],
+                ),
+                el("a", &[("xlink:href", "javascript:x()")], vec![text("a")]),
+            ],
+        );
+        assert_eq!(
+            elements_to_html(&[tree]),
+            "<svg viewBox=\"0 0 200 40\" data-follow-playhead=\"\" data-media=\"/s/x/joy.mp3\"><rect class=\"kf-bar\" data-at=\"0\" x=\"0\" width=\"100\" height=\"40\"></rect><rect class=\"kf-bar\" data-at=\"2.5\" x=\"100\" width=\"100\" height=\"40\"></rect><a>a</a></svg>"
         );
     }
 
