@@ -1685,13 +1685,14 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
     let Ok(bytes) = architect::http::axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
         return Response::from_parts(parts, Body::empty());
     };
-    let mut section = String::new();
-    if files > 0 {
-        section = format!(
+    let mut section = if files > 0 {
+        format!(
             "{FILES_STYLE}<nav class=\"share-files-bar\" aria-label=\"Files\"><a href=\"{m}_files/\">Files ({files})</a><a class=\"share-download\" href=\"{m}_archive.zip?by=note\" download>Download all</a></nav>",
             m = escape(link.mount)
-        );
-    }
+        )
+    } else {
+        String::new()
+    };
     if !tracks.is_empty() {
         let json = serde_json::json!({ "scope": link.mount, "tracks": tracks });
         // JSON in a script element: `</` must not close it.

@@ -14,6 +14,7 @@
 //! (`<mm:ss.xx>`, "enhanced" LRC) are dropped from the text. Any other
 //! tag, and a line without a stamp, is skipped.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use crate::blocks::{Block, BlockRenderer, Drawn};
@@ -58,7 +59,11 @@ fn stamp(tag: &str) -> Option<i64> {
     let seconds: i64 = seconds.parse().ok()?;
     // The first three digits of the fraction, as milliseconds.
     let millis: i64 = format!("{fraction:0<3}").get(..3)?.parse().ok()?;
-    Some((minutes * 60 + seconds) * 1000 + millis)
+    minutes
+        .checked_mul(60)?
+        .checked_add(seconds)?
+        .checked_mul(1000)?
+        .checked_add(millis)
 }
 
 /// `text` without its word stamps (`<00:12.30>`).
@@ -68,13 +73,12 @@ fn without_word_stamps(text: &str) -> String {
     while let Some(open) = rest.find('<') {
         let (before, after) = rest.split_at(open);
         out.push_str(before);
-        match after.find('>') {
-            Some(close) if stamp(after.get(1..close).unwrap_or_default()).is_some() => {
-                rest = after.get(close + 1..).unwrap_or_default();
-            }
+        let inner = after.get(1..).unwrap_or_default();
+        match inner.split_once('>') {
+            Some((tag, beyond)) if stamp(tag).is_some() => rest = beyond,
             _ => {
                 out.push('<');
-                rest = after.get(1..).unwrap_or_default();
+                rest = inner;
             }
         }
     }
@@ -92,11 +96,10 @@ pub fn parse_lrc(source: &str) -> Lyrics {
         let mut rest = line.trim();
         let mut stamps = Vec::new();
         while let Some(inner) = rest.strip_prefix('[') {
-            let Some(close) = inner.find(']') else {
+            let Some((tag, beyond)) = inner.split_once(']') else {
                 break;
             };
-            let tag = inner.get(..close).unwrap_or_default();
-            rest = inner.get(close + 1..).unwrap_or_default();
+            rest = beyond;
             if let Some(at) = stamp(tag) {
                 stamps.push(at);
                 continue;
@@ -121,23 +124,26 @@ pub fn parse_lrc(source: &str) -> Lyrics {
     lyrics.lines = timed
         .into_iter()
         .map(|(at, text)| LyricLine {
-            #[allow(clippy::cast_precision_loss)] // milliseconds of a song
-            at: (at - offset_ms).max(0) as f64 / 1000.0,
+            // Past i32's milliseconds (24 days) is no song: clamped.
+            at: f64::from(i32::try_from(at.saturating_sub(offset_ms).max(0)).unwrap_or(i32::MAX))
+                / 1000.0,
             text,
         })
         .collect();
     lyrics
 }
 
-/// `lyrics` as the markup the page's player follows: an `<ol>` marked
-/// `data-follow-playhead`, a line per `<li data-at="…">` (seconds), each
-/// a button that seeks there. `media` ties it to one media file's URL
+/// `lyrics` as the markup the page's player follows.
+///
+/// An `<ol>` marked `data-follow-playhead`, a line per `<li data-at="…">`
+/// (seconds), each a button that seeks there. `media` ties it to one
+/// media file's URL
 /// (`data-media`); without it, it follows whatever plays from its page.
 #[must_use]
 pub fn lyrics_html(lyrics: &Lyrics, media: Option<&str>) -> String {
     let mut html = String::from("<ol class=\"site-lyrics\" data-follow-playhead");
     if let Some(media) = media {
-        html.push_str(&format!(" data-media=\"{}\"", escape(media)));
+        let _ = write!(html, " data-media=\"{}\"", escape(media));
     }
     html.push('>');
     for line in &lyrics.lines {
@@ -146,10 +152,11 @@ pub fn lyrics_html(lyrics: &Lyrics, media: Option<&str>) -> String {
         } else {
             escape(&line.text)
         };
-        html.push_str(&format!(
+        let _ = write!(
+            html,
             "<li data-at=\"{:.3}\"><button type=\"button\" class=\"site-lyric\">{text}</button></li>",
             line.at
-        ));
+        );
     }
     html.push_str("</ol>\n");
     html
@@ -170,7 +177,7 @@ impl LyricsBlocks {
 }
 
 impl BlockRenderer for LyricsBlocks {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "architect.lyrics"
     }
 

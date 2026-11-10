@@ -124,6 +124,29 @@ mod tests {
         }
     }
 
+    /// The playhead contract (#511): an extension's block follows the
+    /// page's player with attributes alone, since its scripts are never
+    /// written. They come through as drawn.
+    #[test]
+    fn a_blocks_playhead_attributes_come_through() {
+        let bar = |at: &str| {
+            el(
+                "div",
+                &[("class", "kf-bar"), ("data-at", at)],
+                vec![text("C")],
+            )
+        };
+        let tree = el(
+            "div",
+            &[("data-follow-playhead", ""), ("data-media", "/s/x/joy.mp3")],
+            vec![bar("0"), bar("2.5"), el("script", &[], vec![text("x()")])],
+        );
+        assert_eq!(
+            elements_to_html(&[tree]),
+            "<div data-follow-playhead=\"\" data-media=\"/s/x/joy.mp3\"><div class=\"kf-bar\" data-at=\"0\">C</div><div class=\"kf-bar\" data-at=\"2.5\">C</div></div>"
+        );
+    }
+
     #[test]
     fn writes_a_tree_with_its_styles_and_escapes_it() {
         let mut bar = el(

@@ -102,7 +102,7 @@ struct World {
     grace: String,
     alan: String,
     ada: String,
-    _tmp: tempfile::TempDir,
+    tmp: tempfile::TempDir,
 }
 
 /// Grace's node hosting `indie`, its vault seeded; Alan's and Ada's sessions.
@@ -163,7 +163,7 @@ async fn world() -> World {
         grace,
         alan,
         ada,
-        _tmp: tmp,
+        tmp,
     }
 }
 
@@ -1191,7 +1191,7 @@ async fn get_range(
 #[tokio::test(flavor = "multi_thread")]
 async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order() {
     let w = world().await;
-    let vault = w._tmp.path().join("host/data/vaults/notes");
+    let vault = w.tmp.path().join("host/data/vaults/notes");
     // A gig: two songs in list order, one for the band alone.
     touch(
         &vault,
@@ -1208,7 +1208,9 @@ async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_orde
         "Gig/media/joy.lrc",
         "[ti:Joy]\n[00:01.50]Joy to the world\n[00:03.25]The Lord is come\n",
     );
-    let audio: Vec<u8> = (0..1000_u32).map(|i| (i % 251) as u8).collect();
+    let audio: Vec<u8> = (0..1000_u32)
+        .map(|i| u8::try_from(i % 251).unwrap())
+        .collect();
     std::fs::write(vault.join("Gig/media/joy.mp3"), &audio).unwrap();
     std::fs::write(vault.join("Gig/media/clip.mp4"), &audio[..500]).unwrap();
 
@@ -1252,9 +1254,12 @@ async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_orde
     );
     assert!(joy.contains("<li data-at=\"3.250\">"), "{joy}");
     let queue = |html: &str| -> serde_json::Value {
-        let at = html.find("id=\"site-queue\">").expect("a queue") + "id=\"site-queue\">".len();
-        let end = at + html[at..].find("</script>").unwrap();
-        serde_json::from_str(&html[at..end]).unwrap()
+        let json = html
+            .split("id=\"site-queue\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</script>").next())
+            .expect("a queue");
+        serde_json::from_str(json).unwrap()
     };
     let q = queue(&joy);
     assert_eq!(q["scope"], whole.as_str());
@@ -1283,7 +1288,7 @@ async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_orde
     // The page's script carries the player and its playhead.
     let script = joy
         .split('"')
-        .find(|s| s.contains("_site/site.") && s.ends_with(".js"))
+        .find(|s| s.contains("_site/site.") && Path::new(s).extension().is_some_and(|e| e == "js"))
         .expect("the site's script")
         .to_owned();
     let (code, _, js) = get(&w.url(&script), None).await;
