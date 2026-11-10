@@ -366,7 +366,8 @@ impl Site {
             };
             blocks.add(std::sync::Arc::new(bases));
         }
-        let blocks = &blocks;
+        // Synced lyrics (```` ```lrc ````), after the caller's too (#511).
+        let blocks = &crate::LyricsBlocks::added_to(&blocks);
 
         // Draw every note, its links resolved by the vault's index.
         let index = LinkIndex::build(&vault);
@@ -405,12 +406,29 @@ impl Site {
                 }
                 other => other,
             };
+            // An embedded `.lrc` the scope holds: its text, to draw its
+            // lines (#511).
+            let text = |dest: &str, _wiki: bool| {
+                let decoded = decode_percent(dest);
+                let wanted = decoded.split('#').next().unwrap_or_default().trim();
+                let target = outgoing
+                    .iter()
+                    .find(|l| l.linkpath == dest || l.linkpath == decoded || l.linkpath == wanted)
+                    .and_then(|l| l.resolved)
+                    .filter(|t| {
+                        crate::media::is_lyrics(t)
+                            && attachments.contains(t)
+                            && opts.scope.holds_file(t)
+                    })?;
+                std::fs::read_to_string(opts.vault.join(target)).ok()
+            };
             let rendered = markdown::render(&Input {
                 body: frontmatter::body(&note.page.raw),
                 page: rel,
                 title: &note.title,
                 resolve: &resolve,
                 blocks,
+                text: &text,
             });
             for broken in &rendered.broken {
                 site.problems.push(Problem {
