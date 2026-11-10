@@ -220,7 +220,6 @@ impl PaneTrack {
         let place = space_of(&room, pane, kind, title).to_place(x - m.x, y - m.y, m.size);
         (room.send)(place);
     }
-
 }
 
 /// The pointer left a pane.
@@ -273,7 +272,8 @@ fn Cursors(pane: PaneId, kind: String, title: String, track: PaneTrack) -> Eleme
                 // their pointer is right after a split moved.
                 ticks = ticks.wrapping_add(1);
                 let unmeasured = track.rect.peek().is_none();
-                if (unmeasured || ticks.is_multiple_of(20)) && !room.roster.peek().peers.is_empty() {
+                if (unmeasured || ticks.is_multiple_of(20)) && !room.roster.peek().peers.is_empty()
+                {
                     track.measure(now);
                 }
                 let wait = if moving { 16 } else { 50 };

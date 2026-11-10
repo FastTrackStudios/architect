@@ -63,6 +63,11 @@ pub fn use_app_cursors(list: &Arc<ActionList>) -> PaneRoom {
             .map_or(0, |d| d.subsec_nanos());
         let me = format!("local-{}-{nanos}", std::process::id());
         let state = PeerState::new(&me, "Me");
-        PaneRoom::new(Here::new(Alone::default(), me, state), roster, board, clock_ms)
+        PaneRoom::new(
+            Here::new(Alone::default(), me, state),
+            roster,
+            board,
+            clock_ms,
+        )
     })
 }

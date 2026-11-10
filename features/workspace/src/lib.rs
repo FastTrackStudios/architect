@@ -118,10 +118,10 @@ pub const CONTEXT_TARGETS: [(&str, &str); 3] = [
 pub use host::{
     Bridge, Command, ContextEntries, ContextEntry, DeckHandle, DeckResolve, DeckStores,
     DecksConfig, HeaderTools, Host, Opened, PaneHandle, Popout, PresenceLayer, PresenceMarksLayer,
-    PresenceOverlay,
-    TabBadges, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions, WorkspaceStore,
-    WorkspaceView, context_invocation, try_use_decks, try_use_pane_of, use_deck_context, use_decks,
-    use_host, use_pane, use_pane_of, use_pane_status, use_presence_overlay,
+    PresenceOverlay, TabBadges, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions,
+    WorkspaceStore, WorkspaceView, context_invocation, try_use_decks, try_use_pane_of,
+    use_deck_context, use_decks, use_host, use_pane, use_pane_of, use_pane_status,
+    use_presence_overlay,
 };
 #[cfg(all(feature = "ui", feature = "presence"))]
 pub use host::{PaneRoom, use_pane_room, use_pane_space, use_pane_subject};

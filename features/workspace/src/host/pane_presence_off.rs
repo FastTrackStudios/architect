@@ -15,7 +15,10 @@ pub(super) const fn use_pane_track() -> PaneTrack {
 }
 
 // The same calls as the real one's, so the pane slot is written once.
-#[expect(clippy::unused_self, reason = "the shape of `pane_presence::PaneTrack`")]
+#[expect(
+    clippy::unused_self,
+    reason = "the shape of `pane_presence::PaneTrack`"
+)]
 impl PaneTrack {
     pub(super) fn mounted(self, _data: Rc<MountedData>) {}
     pub(super) const fn moved(self, _pane: &PaneId, _kind: &str, _title: &str, _x: f64, _y: f64) {}

@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use architect_workspace::pane_space::{PresenceBoard, Size, ViewSpace, pane_space};
 use architect_workspace::{
-    PaneRoom, Pane, Target, View, Views, Workspace, WorkspaceView, use_pane_room,
+    Pane, PaneRoom, Target, View, Views, Workspace, WorkspaceView, use_pane_room,
 };
 use blitz_dom::Document as _;
 use blitz_traits::shell::{ColorScheme, Viewport};

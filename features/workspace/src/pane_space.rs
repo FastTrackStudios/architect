@@ -141,9 +141,7 @@ fn lane_index(along: f64, count: usize) -> Option<usize> {
     if along < 0.0 {
         return None;
     }
-    (0..count).find(|&lane| {
-        u32::try_from(lane).is_ok_and(|n| along < f64::from(n) + 1.0)
-    })
+    (0..count).find(|&lane| u32::try_from(lane).is_ok_and(|n| along < f64::from(n) + 1.0))
 }
 
 /// How a pane's pixels and a space's coordinates meet.
@@ -195,7 +193,11 @@ impl ViewSpace {
                         .with("y", y / size.h),
                 )
             }
-            Self::Mapped { space, x: ax, y: ay } => {
+            Self::Mapped {
+                space,
+                x: ax,
+                y: ay,
+            } => {
                 let place = ax.write(x, Place::new(space.clone()))?;
                 ay.write(y, place)
             }
@@ -653,7 +655,10 @@ mod tests {
         roster
     }
 
-    const BIG: Size = Size { w: 1000.0, h: 600.0 };
+    const BIG: Size = Size {
+        w: 1000.0,
+        h: 600.0,
+    };
     const SMALL: Size = Size { w: 500.0, h: 300.0 };
 
     fn close(a: f64, b: f64) -> bool {
@@ -751,8 +756,15 @@ mod tests {
     fn off_the_lanes_there_is_no_place() {
         let space = arrange(0.0, 0.1, 20.0, 40.0);
         assert!(space.to_place(10.0, 5.0, BIG).is_none(), "the ruler");
-        assert!(space.to_place(10.0, 500.0, BIG).is_none(), "under the last track");
-        assert!(ViewSpace::fractions("p").to_place(1.0, 1.0, Size::default()).is_none());
+        assert!(
+            space.to_place(10.0, 500.0, BIG).is_none(),
+            "under the last track"
+        );
+        assert!(
+            ViewSpace::fractions("p")
+                .to_place(1.0, 1.0, Size::default())
+                .is_none()
+        );
     }
 
     #[test]
@@ -803,14 +815,23 @@ mod tests {
         board.declare("p1", space.clone());
         let after_first = board.spaces_revision();
         board.declare("p1", space.clone());
-        assert_eq!(board.spaces_revision(), after_first, "the same again is no change");
+        assert_eq!(
+            board.spaces_revision(),
+            after_first,
+            "the same again is no change"
+        );
         assert_eq!(board.declared("p1"), Some(space));
         board.undeclare("p1");
         assert!(board.declared("p1").is_none());
 
         let channel = Channel::default();
         let ann = Here::new(channel.clone(), "ann", PeerState::new("ann", "Ann"));
-        ann.pointer(Place::new("session.arrange").with("time", 3.0).with("track", "Kick"), 0.0);
+        ann.pointer(
+            Place::new("session.arrange")
+                .with("time", 3.0)
+                .with("track", "Kick"),
+            0.0,
+        );
         board.saw(&roster_of(&channel, "bob", 0.0));
         let all = board.roster(None);
         assert_eq!(all.people.len(), 1);
@@ -845,7 +866,10 @@ mod tests {
         let space = board.declared("p1").expect("on the board");
         let (x, y) = space
             .from_place(
-                &Place::new("session.arrange").with("time", 12.5).with("track", "Snare").with("track.f", 0.25),
+                &Place::new("session.arrange")
+                    .with("time", 12.5)
+                    .with("track", "Snare")
+                    .with("track.f", 0.25),
                 BIG,
             )
             .unwrap();
@@ -869,9 +893,13 @@ mod tests {
             .run_json(ids::ROSTER, br#"{"space":"session.arrange"}"#)
             .expect("read");
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains("\"Ann\"") && text.contains("session.arrange"), "{text}");
+        assert!(
+            text.contains("\"Ann\"") && text.contains("session.arrange"),
+            "{text}"
+        );
 
-        list.run_json(ids::SPACE_CLEAR, br#"{"pane":"p1"}"#).expect("cleared");
+        list.run_json(ids::SPACE_CLEAR, br#"{"pane":"p1"}"#)
+            .expect("cleared");
         assert!(board.declared("p1").is_none());
     }
 
