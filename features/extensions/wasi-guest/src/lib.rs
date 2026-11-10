@@ -71,7 +71,7 @@ use dioxus::html::{
     SerializedFormData, SerializedHtmlEventConverter, SerializedKeyboardData, SerializedMouseData,
     set_event_converter,
 };
-use dioxus::prelude::Element;
+use dioxus::prelude::{Element, ScopeId, Signal, WritableExt as _, try_consume_context};
 use serde_json::Value as Json;
 
 #[doc(hidden)]
@@ -1150,6 +1150,10 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
             .get(&view)
             .ok_or_else(|| format!("no view {view}"))?;
         let mut vdom = VirtualDom::new(root);
+        // An inline embed's input ([`embed`]): none in a pane, the host's
+        // `architect-embed` event fills it when it mounts the view as one.
+        let input = vdom.in_scope(ScopeId::ROOT, || Signal::new(None::<Embed>));
+        vdom.provide_root_context(EmbedSlot(input));
         let mut writer = Writer::default();
         let before = CURRENT.with(|c| c.replace(Some(pane)));
         vdom.rebuild(&mut writer);
@@ -1165,7 +1169,15 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
             .with(|p| p.borrow_mut().remove(&pane))
             .ok_or_else(|| format!("no view open in pane {pane}"))?;
         let before = CURRENT.with(|c| c.replace(Some(pane)));
-        dispatch(&vdom, event);
+        if let Some(input) = embed_input(&event) {
+            if let Some(EmbedSlot(mut slot)) =
+                vdom.in_scope(ScopeId::ROOT, try_consume_context::<EmbedSlot>)
+            {
+                vdom.in_runtime(|| slot.set(Some(input)));
+            }
+        } else {
+            dispatch(&vdom, event);
+        }
         let edits = settle(&mut vdom);
         CURRENT.with(|c| c.set(before));
         PANES.with(|p| p.borrow_mut().insert(pane, vdom));
@@ -1287,6 +1299,60 @@ macro_rules! export {
 }
 
 /// Hands `event` to its element's handlers.
+/// The event the host sends a view it mounts as an inline embed, on its
+/// root (`architect_extensions::wire::EMBED_EVENT`), its data the input as
+/// JSON.
+const EMBED_EVENT: &str = "architect-embed";
+
+/// What the host gave a view it mounts as an inline embed: the block it
+/// draws ([`embed`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Embed {
+    /// What claims it (`fence:kf`).
+    pub claim: String,
+    /// The block's text: a fence's body, a note's.
+    pub source: String,
+    /// The host's properties for it (a site's: `info`, `page`); `null`
+    /// when none.
+    pub props: Json,
+}
+
+#[derive(Clone, Copy)]
+struct EmbedSlot(Signal<Option<Embed>>);
+
+/// The block this view draws when the host mounts it as an inline embed
+/// (an `[[embeds]] view`: a claimed fence in a note, on a share link or a
+/// Site built by the node); `None` in a pane. Read in a component, it
+/// re-renders when the input comes or changes.
+///
+/// ```ignore
+/// fn Chart() -> Element {
+///     let source = embed().map(|e| e.source).unwrap_or_default();
+///     rsx! { svg { "data-follow-playhead": "", /* … */ } }
+/// }
+/// ```
+#[must_use]
+pub fn embed() -> Option<Embed> {
+    try_consume_context::<EmbedSlot>().and_then(|EmbedSlot(slot)| slot())
+}
+
+/// The input of `event`, when it is the host's [`EMBED_EVENT`].
+fn embed_input(event: &wit::ViewEvent) -> Option<Embed> {
+    if event.element != 0 || event.name != EMBED_EVENT {
+        return None;
+    }
+    let wit::EventData::Form(json) = &event.data else {
+        return None;
+    };
+    let value: Json = serde_json::from_str(json).ok()?;
+    let text = |k: &str| value.get(k).and_then(Json::as_str).unwrap_or("").to_owned();
+    Some(Embed {
+        claim: text("claim"),
+        source: text("source"),
+        props: value.get("props").cloned().unwrap_or(Json::Null),
+    })
+}
+
 fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
     let Ok(element) = usize::try_from(event.element) else {
         return;

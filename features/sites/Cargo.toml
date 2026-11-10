@@ -13,6 +13,8 @@ repository.workspace = true
 #
 #   default — read a vault, render it, write the site. Blocks come from
 #             `BlockRenderer`s the caller registers (Rust).
+#   wasi    — `ComponentBlocks`: a WASI component's embed views, drawn
+#             once per block in Wasmtime (see the feature below).
 #   pages   — `PageBlocks`: an extension's embed pages (`[[embeds]] page`,
 #             TSX/JS on QuickJS) drawn once per block at build time,
 #             through the same element tree pages draw a pane with.
@@ -20,6 +22,17 @@ repository.workspace = true
 [features]
 default = []
 pages = ["architect-pages/js", "dep:architect", "dep:architect-scripting"]
+# `ComponentBlocks`: a WASI component's `[[embeds]] view` mounted once per
+# block in the extensions host's `wasi` runner (Wasmtime), its edits
+# applied without a window and written as HTML. A Rust renderer
+# (Keyflow's engraver) draws a node's blocks without being linked in.
+wasi = [
+    "architect-extensions/wasi",
+    "architect-extensions/process",
+    "dep:architect",
+    "dep:architect-settings",
+    "dep:futures",
+]
 
 [dependencies]
 # The vault: its walker reads the folder, its link index resolves every
@@ -48,9 +61,15 @@ dioxus-ssr = { workspace = true }
 # `pages`: an embed page's host and its stop.
 architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-scripting = { workspace = true, optional = true }
+# `wasi`: the host a component is loaded in, and its view's frames.
+architect-settings = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# Its own embed renderers, so `cargo test --workspace` builds the tests
+# with them: tests/wasi.rs mounts a real component's embed view.
+architect-sites = { path = ".", features = ["pages", "wasi"] }
 
 [lints]
 workspace = true

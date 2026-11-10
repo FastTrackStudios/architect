@@ -107,8 +107,9 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
         cmd.arg("--no-default-features");
         if opts.manifest_path.is_none() {
             // A distribution crate depends on architect-desktop with
-            // `vox` (its node's services) itself.
-            cmd.args(["--features", "vox"]);
+            // `vox` (its node's services) itself. `node-wasi`: installed
+            // WASI components draw a share's blocks (#488).
+            cmd.args(["--features", "vox,node-wasi"]);
         }
         cmd.arg("--config").arg(format!(
             "target.{}.rustflags=[\"--cfg\",\"no_workspace_hack\"]",

@@ -40,6 +40,8 @@ pub mod archive;
 mod assets;
 mod bases;
 mod blocks;
+#[cfg(feature = "wasi")]
+mod component_blocks;
 mod element_html;
 mod frontmatter;
 mod installed;
@@ -60,6 +62,8 @@ mod write;
 pub use architect_extensions::contrib::Claim;
 pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
+#[cfg(feature = "wasi")]
+pub use component_blocks::{ComponentBlocks, DRAW_TIMEOUT};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
 pub use installed::InstalledBlocks;
