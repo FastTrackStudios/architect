@@ -4,7 +4,7 @@ The dev sandbox is the Architect app on made-up data, for framework demos,
 goldens, scenarios and films. It is the same UI (`apps/ui`,
 `architect-app`) and the same desk runner as the Architect app
 (`apps/desktop`, `architect_desktop::run`), started as
-`architect_app::Mode::Sandbox` by this crate's `src/main.rs`. It paints
+the sandbox distribution (`apps/ui/src/distribution.rs` `sandbox`) by this crate's `src/main.rs`. It paints
 through Blitz, as the FastTrackStudio apps do, and is meant to be run with
 `dx serve`: an `rsx!` edit in `apps/ui` or in `features/shell` shows in
 the running app without a rebuild (a change to Rust logic rebuilds).

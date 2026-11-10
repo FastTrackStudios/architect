@@ -28,26 +28,10 @@
 //! written from its live list (`architect_control::guide`). The dev
 //! sandbox, on made-up data, is `architect-sandbox` (`apps/sandbox`).
 
-#[cfg(feature = "gui")]
+/// The Architect app: architect's own distribution
+/// (`architect_distribution::architect`). Built without the window
+/// (`--no-default-features`), the binary is its node: `serve`, or the same
+/// with `serve` left out.
 fn main() -> std::process::ExitCode {
-    architect_desktop::run(architect_app::Mode::Architect)
-}
-
-/// Built without the window (`--no-default-features`), the binary is the
-/// node: `architect-desktop serve`, or the same with `serve` left out.
-#[cfg(not(feature = "gui"))]
-fn main() -> std::process::ExitCode {
-    let mut args = std::env::args_os().skip(1).peekable();
-    match args.peek().and_then(|a| a.to_str()) {
-        Some("serve") => {
-            args.next();
-        }
-        Some("files") => return architect_desktop::node::cli::files(args.skip(1)),
-        Some("agent") => return architect_desktop::node::cli::agent(args.skip(1)),
-        Some(architect_desktop::node::cli::GUARD) => {
-            return architect_desktop::node::cli::guard(args.skip(1));
-        }
-        _ => {}
-    }
-    architect_desktop::node::main(args)
+    architect_desktop::run(architect_distribution::architect())
 }

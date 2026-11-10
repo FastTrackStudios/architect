@@ -436,7 +436,7 @@ fn first_workspace() -> Workspace {
     // The Architect app opens the person's vault alone: its Welcome note
     // when it has one, the sidebars' views; the made-up notes, the
     // arrangement, the graph and the Clicker are the sandbox's.
-    let sandbox = crate::Mode::current().is_sandbox();
+    let sandbox = crate::distribution().is_sandbox();
     let has_welcome =
         crate::notes::open_vault().is_some_and(|v| v.root().join("Welcome.md").is_file());
     let opens = opens.into_iter().filter(|(pane, _)| {
@@ -807,7 +807,7 @@ fn use_lab_vault() -> LabVault {
         let disk = crate::notes::open_vault().map(|open| {
             // The sandbox's is the demo vault; the Architect app's is the
             // person's, by its folder's name.
-            let name = if crate::Mode::current().is_sandbox() {
+            let name = if crate::distribution().is_sandbox() {
                 "Demo vault".to_owned()
             } else {
                 let root = open.root();
@@ -863,7 +863,7 @@ fn use_lab_vault() -> LabVault {
 fn view_store() -> Option<architect::settings::Store<ViewState>> {
     let dir = crate::app_dir()?;
     Some(architect::settings::Store::in_dir(
-        crate::Mode::current().folder(),
+        crate::distribution().folder_name(),
         "navigator-view",
         dir,
     ))

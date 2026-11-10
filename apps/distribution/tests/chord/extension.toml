@@ -1,0 +1,13 @@
+# A test's linked extension: a ```chord fence drawn by its embed page.
+id = "test.chord"
+name = "Chord"
+version = "0.1.0"
+kind = "data"
+api = "0.1"
+description = "Draws a chord fence."
+
+[[embeds]]
+id = "chord"
+title = "Chord"
+page = "pages/chord.tsx"
+claims = { fence = ["chord"] }

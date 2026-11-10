@@ -1,0 +1,38 @@
+[package]
+name = "architect-distribution"
+description = "A distribution of Architect as code: its name, bundle id, icon and config folder, and the extensions and bundles compiled into it. The Architect app and the dev sandbox are two; a downstream build (Studio's) is another, run by `architect_desktop::run` and built by `cargo xtask dist`."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+# Its linked extensions' embed pages draw the fences they claim on the
+# node's share links and Sites (`Distribution::blocks`, #488): QuickJS.
+pages = ["architect-sites/pages"]
+
+[dependencies]
+architect = { workspace = true, features = ["settings"] }
+architect-extensions = { workspace = true, features = ["linked"] }
+architect-sites = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+# The default Architect app's own extensions (#368): its list.
+architect-projects = { workspace = true }
+architect-tasks = { workspace = true }
+architect-time-tracker = { workspace = true }
+architect-calendar = { workspace = true }
+architect-dayplan = { workspace = true }
+architect-threads = { workspace = true }
+architect-notify = { workspace = true }
+architect-files-extension = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

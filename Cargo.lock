@@ -826,16 +826,14 @@ dependencies = [
  "architect-capture",
  "architect-command-palette",
  "architect-commands",
- "architect-dayplan",
+ "architect-distribution",
  "architect-extensions",
  "architect-files",
- "architect-files-extension",
  "architect-guide",
  "architect-input",
  "architect-navigator",
  "architect-navigator-api",
  "architect-navigator-extension",
- "architect-notify",
  "architect-orgs",
  "architect-pages",
  "architect-presence",
@@ -849,7 +847,6 @@ dependencies = [
  "architect-tasks",
  "architect-theme",
  "architect-theme-picker",
- "architect-threads",
  "architect-time-tracker",
  "architect-ui",
  "architect-workspace",
@@ -1150,6 +1147,7 @@ dependencies = [
  "architect-auth",
  "architect-control",
  "architect-devices",
+ "architect-distribution",
  "architect-extensions",
  "architect-files",
  "architect-guide",
@@ -1215,6 +1213,27 @@ dependencies = [
  "tracing",
  "uuid",
  "vox",
+]
+
+[[package]]
+name = "architect-distribution"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-calendar",
+ "architect-dayplan",
+ "architect-extensions",
+ "architect-files-extension",
+ "architect-notify",
+ "architect-projects",
+ "architect-sites",
+ "architect-tasks",
+ "architect-threads",
+ "architect-time-tracker",
+ "architect-workspace-hack",
+ "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -1284,6 +1303,7 @@ dependencies = [
  "blitz-traits",
  "crdt",
  "dioxus",
+ "dioxus-html",
  "dioxus-native-dom",
  "dioxus-ssr",
  "editor-ext",

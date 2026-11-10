@@ -124,7 +124,7 @@ fn folder() -> Option<PathBuf> {
     if let Some(dir) = named_folder() {
         return Some(dir);
     }
-    if !crate::Mode::current().is_sandbox() {
+    if !crate::distribution().is_sandbox() {
         return crate::vaults::remembered();
     }
     let dir = crate::app_dir()?.join("vault");
@@ -150,7 +150,7 @@ static OPEN: OnceLock<vault::actions::OpenVault> = OnceLock::new();
 /// or film keeps its notes in memory and looks as it always did.
 #[must_use]
 pub fn open_vault() -> Option<vault::actions::OpenVault> {
-    if crate::Mode::current().is_sandbox() {
+    if crate::distribution().is_sandbox() {
         env_either("ARCHITECT_VAULT", "ARCHITECT_LAB_VAULT")?;
     }
     OPEN.get().cloned()

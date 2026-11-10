@@ -72,20 +72,18 @@ fn main() {
     // safe area it is handed (`use_window_screen`), as an iOS app does.
     // SAFETY: first thing in main, before any thread starts.
     unsafe { std::env::set_var("BLITZ_SAFE_AREA", "0") };
-    let mode = if std::env::var_os("ARCHITECT_SANDBOX").is_some_and(|v| v == "1") {
-        architect_app::Mode::Sandbox
+    let dist = if std::env::var_os("ARCHITECT_SANDBOX").is_some_and(|v| v == "1") {
+        architect_app::sandbox()
     } else {
-        architect_app::Mode::Architect
-    };
-    mode.set();
-    if mode == architect_app::Mode::Architect {
-        let _ = architect_app::mode::migrate_lab_folder();
+        architect_app::distribution::architect()
     }
+    .install();
+    let _ = dist.adopt_folder();
     #[cfg(target_os = "ios")]
     scene::register();
     // The keyboard's height from UIKit, for the bar that rides it.
     architect_shell::install_keyboard();
-    let window = WindowAttributes::default().with_title(mode.name());
+    let window = WindowAttributes::default().with_title(dist.name());
     launch_cfg(
         App,
         vec![],

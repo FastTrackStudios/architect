@@ -4,7 +4,7 @@
 //! hot reload — an `rsx!` edit here or in `architect-shell` shows in the
 //! running window at once.
 //!
-//! Which app it is comes from [`Mode`]. The Architect app opens the
+//! Which app it is comes from its [`distribution`]. The Architect app opens the
 //! person's vault (its first run asks for one, `first_run`) in the Vault
 //! tab. The sandbox is the old lab, Task's shape (the shell's reference):
 //! made-up Inbox, Tasks, Schedule and Vault as the tabs, Capture as the
@@ -17,6 +17,7 @@ mod arrange;
 mod capture;
 mod confirm;
 mod decks;
+pub mod distribution;
 mod embedded;
 mod extensions;
 mod files;
@@ -25,7 +26,6 @@ mod guide;
 mod items;
 #[cfg(feature = "keyflow-lab")]
 mod keyflow;
-pub mod mode;
 mod note;
 mod note_editor;
 mod notes;
@@ -52,8 +52,8 @@ use lucide_dioxus::{
     Undo2, Users,
 };
 
+pub use distribution::{app_dir, app_dir_or_temp, distribution, sandbox};
 pub use guide::builtin_tours;
-pub use mode::{Mode, app_dir, app_dir_or_temp};
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
 /// `EXT_CHECK` as the lab runs it — its view kinds, process extensions,
@@ -129,7 +129,7 @@ const ALL_TABS: [(&str, &str, &str); 4] = [
 /// (its Inbox, Tasks and Schedule come with capture and projects, #352,
 /// #344).
 fn tabs() -> &'static [(&'static str, &'static str, &'static str)] {
-    if Mode::current().is_sandbox() {
+    if crate::distribution().is_sandbox() {
         &ALL_TABS
     } else {
         ALL_TABS.get(3..).unwrap_or_default()
@@ -791,7 +791,9 @@ pub fn LabApp() -> Element {
     // changes the person's own.
     let store = use_hook(|| {
         windowed
-            .then(|| architect_settings::DeviceValues::open(Mode::current().folder()).ok())
+            .then(|| {
+                architect_settings::DeviceValues::open(crate::distribution().folder_name()).ok()
+            })
             .flatten()
             .map(std::rc::Rc::new)
     });
@@ -801,7 +803,7 @@ pub fn LabApp() -> Element {
         windowed
             .then(|| {
                 architect_settings::DeviceValues::open_named(
-                    Mode::current().folder(),
+                    crate::distribution().folder_name(),
                     "settings-synced",
                 )
                 .ok()
@@ -844,7 +846,7 @@ pub fn LabApp() -> Element {
     let lab = use_context_provider(|| {
         // The sandbox's made-up lists; the Architect app's are empty (its
         // tabs are the Vault's).
-        let sandbox = Mode::current().is_sandbox();
+        let sandbox = crate::distribution().is_sandbox();
         let lists = if sandbox {
             items::Lists::sample()
         } else {
@@ -977,7 +979,7 @@ pub fn LabApp() -> Element {
     // The Architect app's first run: no vault yet, so the Vault tab asks
     // for one (`first_run`), and the tour is offered once it is open.
     let mut needs_vault =
-        use_signal(move || windowed && !Mode::current().is_sandbox() && !notes::has_vault());
+        use_signal(move || windowed && !crate::distribution().is_sandbox() && !notes::has_vault());
     use_hook(move || {
         if windowed && !needs_vault() && guide::tour_place() == guide::TourPlace::Never {
             take_tour();
@@ -1036,7 +1038,7 @@ pub fn LabApp() -> Element {
             let c = architect_commands::Command::new("LAB_CAPTURE", "Capture")
                 .group("Inbox")
                 .shortcut("⇧⌘N");
-            if Mode::current().is_sandbox() || capture_ui.is_some() {
+            if crate::distribution().is_sandbox() || capture_ui.is_some() {
                 c
             } else {
                 c.disabled("capture needs a vault")
@@ -1193,7 +1195,7 @@ pub fn LabApp() -> Element {
     // Palette extension's (COMMAND_PALETTE_OPEN, _OPEN_ANYTHING; #381):
     // turned off, they are gone from the menus and the keys.
     // The menu bar: a view of the commands, labels and keys and all.
-    let menus = architect_commands::MenuBar::standard(Mode::current().name())
+    let menus = architect_commands::MenuBar::standard(crate::distribution().name())
         .menu("File", |m| {
             let m = m.command("LAB_CAPTURE");
             // The inbox deck and the capture window, where capture is.
@@ -1283,7 +1285,7 @@ pub fn LabApp() -> Element {
         // below loads it into the Vault.
         shell::Tab::new("embedded", "Embedded", icon!(LayoutGrid)),
     ];
-    let tabs: Vec<shell::Tab> = if Mode::current().is_sandbox() {
+    let tabs: Vec<shell::Tab> = if crate::distribution().is_sandbox() {
         all_tabs.into()
     } else {
         all_tabs.into_iter().filter(|t| t.id == "vault").collect()
@@ -1303,7 +1305,7 @@ pub fn LabApp() -> Element {
         Some(accounts) => accounts::use_account_orgs(accounts, caps),
         None => architect_orgs::use_orgs_provider(
             || {
-                if !Mode::current().is_sandbox() {
+                if !crate::distribution().is_sandbox() {
                     return Orgs::new(vec![architect_accounts::device_org()]);
                 }
                 Orgs::new(vec![
@@ -1390,7 +1392,7 @@ pub fn LabApp() -> Element {
     ];
     // The made-up sync and people are the sandbox's: the Architect app
     // has neither until sign-in and sync (#188, #343).
-    if !Mode::current().is_sandbox() {
+    if !crate::distribution().is_sandbox() {
         status.retain(|s| s.id == "commands");
     }
     // ⌘K is the Command Palette extension's: off, no hint for it.
@@ -1451,7 +1453,7 @@ pub fn LabApp() -> Element {
     // person, or no one where a run keeps nothing.
     let account = match accounts {
         Some(accounts) => accounts.shell_account(account_menu),
-        None if Mode::current().is_sandbox() => shell::Account::new("Cody Wright")
+        None if crate::distribution().is_sandbox() => shell::Account::new("Cody Wright")
             .detail("cody@fasttrackstudio.app")
             .presence("#22c55e")
             .menu(account_menu),
@@ -1481,7 +1483,7 @@ pub fn LabApp() -> Element {
                     AppShell {
                         screen: screen(),
                         style: (lab.style)(),
-                        title: Mode::current().name(),
+                        title: crate::distribution().name(),
                         tabs,
                         // The help is over a tab, not one of them.
                         current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
@@ -1498,14 +1500,14 @@ pub fn LabApp() -> Element {
                                 lab.jump(Route::Tab(id));
                             }
                         },
-                        separate: (Mode::current().is_sandbox() || capture_ui.is_some()).then_some(capture),
+                        separate: (crate::distribution().is_sandbox() || capture_ui.is_some()).then_some(capture),
                         brand: rsx! { Brand {} },
                         account,
                         workspaces,
                         foot,
                         // The sandbox's made-up projects; the Architect app's
                         // sidebar is the Vault's navigator.
-                        left: Mode::current().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
+                        left: crate::distribution().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
                         right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault" && !ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
@@ -1572,7 +1574,7 @@ fn Brand() -> Element {
                 "A"
             }
             span { style: "font-size: 19px; font-weight: 750; letter-spacing: -0.03em; color: {t.ink};", "Architect" }
-            if Mode::current().is_sandbox() {
+            if crate::distribution().is_sandbox() {
                 span { style: "font-size: 19px; font-weight: 500; letter-spacing: -0.03em; color: {t.ink_3};", "Sandbox" }
             }
         }

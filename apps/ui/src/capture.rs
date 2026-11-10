@@ -16,8 +16,6 @@ use architect_capture::actions::Config;
 use architect_capture::ui::{CaptureUi, use_capture};
 use dioxus::prelude::*;
 
-use crate::Mode;
-
 /// The command that opens the capture window (the menu-bar item's).
 pub const WINDOW_COMMAND: &str = "LAB_CAPTURE_WINDOW";
 
@@ -52,7 +50,7 @@ fn shown(spec: &str) -> String {
 /// system-wide shortcut is registered.
 pub fn use_app_capture(list: &Arc<ActionList>, files: bool, windowed: bool) -> Option<CaptureUi> {
     // Fixed for the process: the hooks below run on every render or never.
-    if Mode::current().is_sandbox() || !files {
+    if crate::distribution().is_sandbox() || !files {
         return None;
     }
     let capture = use_capture(list, Config::default());

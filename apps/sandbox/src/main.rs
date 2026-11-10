@@ -13,5 +13,5 @@
 //! the Architect app and never touches the person's settings.
 
 fn main() -> std::process::ExitCode {
-    architect_desktop::run(architect_app::Mode::Sandbox)
+    architect_desktop::run(architect_app::sandbox())
 }

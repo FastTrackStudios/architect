@@ -195,12 +195,28 @@ impl Drop for Running {
     }
 }
 
-/// Start the node `config` describes. Inside a multi-thread tokio runtime.
+/// Start the node `config` describes, drawing no extension blocks.
+/// Inside a multi-thread tokio runtime.
 ///
 /// # Errors
 ///
 /// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
 pub async fn start(config: Config) -> Result<Running, StartError> {
+    start_with(config, architect_sites::Blocks::new()).await
+}
+
+/// Start the node `config` describes, its share links and Sites drawing
+/// the fences `blocks` claim (#488): a distribution's compiled-in
+/// extensions' (`Distribution::blocks`), or an embedder's own
+/// (`architect_sites::FnBlock`). Inside a multi-thread tokio runtime.
+///
+/// # Errors
+///
+/// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
+pub async fn start_with(
+    config: Config,
+    blocks: architect_sites::Blocks,
+) -> Result<Running, StartError> {
     let data = &config.data_dir;
     let made = |path: &Path| {
         std::fs::create_dir_all(path).map_err(|source| StartError::Data {
@@ -429,6 +445,7 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
         data,
         node_org.clone(),
         config.issuer.as_deref(),
+        blocks.clone(),
     );
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
@@ -449,6 +466,7 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
             root,
             out.clone(),
             base,
+            blocks.clone(),
         )));
         sites.push((mount.clone(), out));
     }
@@ -566,9 +584,15 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
     })
 }
 
-/// `architect-desktop serve [--config <file>]`: the node until it is stopped.
+/// `architect-desktop serve [--config <file>]`: the node of `dist` until
+/// it is stopped, its share links and Sites drawing what its compiled-in
+/// extensions claim (`Distribution::blocks`, their packages under
+/// `<data dir>/linked`).
 #[must_use]
-pub fn main(args: impl Iterator<Item = OsString>) -> ExitCode {
+pub fn main(
+    args: impl Iterator<Item = OsString>,
+    dist: &architect_distribution::Distribution,
+) -> ExitCode {
     let mut file = std::env::var_os("ARCHITECT_CONFIG").map(PathBuf::from);
     let mut args = args;
     while let Some(arg) = args.next() {
@@ -622,8 +646,9 @@ pub fn main(args: impl Iterator<Item = OsString>) -> ExitCode {
             return ExitCode::from(70);
         }
     };
+    let blocks = dist.blocks(&config.data_dir.join("linked"));
     runtime.block_on(async move {
-        match start(config).await {
+        match start_with(config, blocks).await {
             Ok(running) => {
                 let _ = writeln!(
                     std::io::stdout(),
@@ -1017,11 +1042,12 @@ async fn keep_site_built(
     root: PathBuf,
     out: PathBuf,
     base: String,
+    blocks: architect_sites::Blocks,
 ) {
     let build = move || {
         let mut opts = architect_sites::Options::new(&root, String::new());
         opts.base.clone_from(&base);
-        match architect_sites::build(&opts, &architect_sites::Blocks::new(), &out) {
+        match architect_sites::build(&opts, &blocks, &out) {
             Ok(report) => tracing::debug!(?report, "a Site built"),
             Err(error) => tracing::warn!(%error, "a Site did not build"),
         }
