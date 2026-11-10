@@ -21,6 +21,15 @@ use crate::actions::event_json;
 use crate::extensions::Extensions;
 use crate::registries::{Publisher, Registries, Registry};
 
+/// A publisher's key in `EXT_REGISTRY_ADD`'s arguments.
+#[derive(Debug, Facet)]
+pub struct KeyArg {
+    /// Who signs with it.
+    pub name: String,
+    /// The base64 line of its minisign `.pub`.
+    pub key: String,
+}
+
 const fn meta(id: &'static str, name: &'static str, description: &'static str) -> ActionMeta {
     ActionMeta {
         id,
@@ -92,7 +101,7 @@ pub struct AddArgs {
     /// A folder with an `index.toml`.
     pub folder: Option<String>,
     /// The publishers whose archives it may list.
-    pub keys: Option<Vec<Publisher>>,
+    pub keys: Option<Vec<KeyArg>>,
 }
 
 /// `EXT_REGISTRY_REMOVE`'s arguments.
@@ -232,9 +241,11 @@ impl Extensions {
             .registries()
             .ok_or("this app keeps no development installs")?;
         if !registries.dev_installs() {
-            return Err("development installs are off: turn them on in Settings → Extensions \
+            return Err(
+                "development installs are off: turn them on in Settings → Extensions \
                         (EXT_DEV_INSTALLS {\"on\": true}) or use a debug build"
-                .to_owned());
+                    .to_owned(),
+            );
         }
         let dir = package_folder(folder)?;
         let id = std::fs::read_to_string(dir.join(crate::manifest::MANIFEST))
@@ -243,7 +254,9 @@ impl Extensions {
             .map(|m| m.id);
         let events = self.dev(dir.clone());
         registries.keep_dev(&dir, true)?;
-        let loaded = id.as_deref().is_some_and(|id| self.host().get(id).is_some());
+        let loaded = id
+            .as_deref()
+            .is_some_and(|id| self.host().get(id).is_some());
         Ok(json!({
             "id": id,
             "folder": dir.display().to_string(),
@@ -260,9 +273,11 @@ impl Extensions {
         };
         let list = self.host().list().clone();
         let r = registries.clone();
-        list.register_with(&REGISTRIES, Effect::ReadOnly, move |_: &ActionCaller, (): ()| {
-            Ok::<_, String>(raw(&listing(&r)))
-        })?;
+        list.register_with(
+            &REGISTRIES,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, (): ()| Ok::<_, String>(raw(&listing(&r))),
+        )?;
         let me = self.clone();
         let r = registries.clone();
         list.register_async(&ADD, Effect::Mutating, move |a: AddArgs| {
@@ -270,7 +285,15 @@ impl Extensions {
                 name: a.name.trim().to_owned(),
                 git: a.git.filter(|g| !g.trim().is_empty()),
                 folder: a.folder.filter(|f| !f.trim().is_empty()),
-                keys: a.keys.unwrap_or_default(),
+                keys: a
+                    .keys
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|k| Publisher {
+                        name: k.name,
+                        key: k.key.trim().to_owned(),
+                    })
+                    .collect(),
             };
             let name = registry.name.clone();
             let added = r.add(registry);
@@ -281,36 +304,49 @@ impl Extensions {
             }
         })?;
         let r = registries.clone();
-        list.register_with(&REMOVE, Effect::Mutating, move |_: &ActionCaller, a: NameArgs| {
-            let removed = r.remove(&a.name)?;
-            Ok::<_, String>(raw(&json!({ "removed": removed })))
-        })?;
+        list.register_with(
+            &REMOVE,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: NameArgs| {
+                let removed = r.remove(&a.name)?;
+                Ok::<_, String>(raw(&json!({ "removed": removed })))
+            },
+        )?;
         let me = self.clone();
         list.register_async(&REFRESH, Effect::Mutating, move |a: RefreshArgs| {
             refreshed(me.clone(), a.name)
         })?;
         let me = self.clone();
-        list.register_with(&DEV, Effect::Mutating, move |_: &ActionCaller, a: FolderArgs| {
-            me.dev_install(&a.folder).map(|v| raw(&v))
-        })?;
+        list.register_with(
+            &DEV,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: FolderArgs| me.dev_install(&a.folder).map(|v| raw(&v)),
+        )?;
         let me = self.clone();
         let r = registries.clone();
-        list.register_with(&DEV_END, Effect::Mutating, move |_: &ActionCaller, a: FolderArgs| {
-            let dir = std::fs::canonicalize(&a.folder).unwrap_or_else(|_| PathBuf::from(&a.folder));
-            let events = me.end_dev(&dir);
-            r.keep_dev(&dir, false)?;
-            Ok::<_, String>(raw(&json!({
-                "folder": dir.display().to_string(),
-                "events": events.iter().map(event_json).collect::<Vec<_>>(),
-            })))
-        })?;
+        list.register_with(
+            &DEV_END,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: FolderArgs| {
+                let dir =
+                    std::fs::canonicalize(&a.folder).unwrap_or_else(|_| PathBuf::from(&a.folder));
+                let events = me.end_dev(&dir);
+                r.keep_dev(&dir, false)?;
+                Ok::<_, String>(raw(&json!({
+                    "folder": dir.display().to_string(),
+                    "events": events.iter().map(event_json).collect::<Vec<_>>(),
+                })))
+            },
+        )?;
         let r = registries;
         list.register_with(
             &DEV_INSTALLS,
             Effect::Mutating,
             move |_: &ActionCaller, a: OnArgs| {
                 r.set_dev_installs(a.on)?;
-                Ok::<_, String>(raw(&json!({ "dev_installs": r.dev_installs(), "dev_setting": a.on })))
+                Ok::<_, String>(raw(
+                    &json!({ "dev_installs": r.dev_installs(), "dev_setting": a.on }),
+                ))
             },
         )?;
         Ok(())

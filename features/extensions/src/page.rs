@@ -887,7 +887,12 @@ fn RegistriesPanel(browse: Browse) -> Element {
     let add = {
         let (ext, registries) = (ext.clone(), registries.clone());
         move |_| {
-            let (n, p, kn, k) = (name.peek().trim().to_owned(), place.peek().trim().to_owned(), key_name.peek().trim().to_owned(), key.peek().trim().to_owned());
+            let (n, p, kn, k) = (
+                name.peek().trim().to_owned(),
+                place.peek().trim().to_owned(),
+                key_name.peek().trim().to_owned(),
+                key.peek().trim().to_owned(),
+            );
             let is_git = p.contains("://") || p.starts_with("git@");
             let mut r = if is_git {
                 crate::registries::Registry::git(n.clone(), p)
@@ -897,25 +902,24 @@ fn RegistriesPanel(browse: Browse) -> Element {
             if !k.is_empty() {
                 r = r.trusting(if kn.is_empty() { n.clone() } else { kn }, k);
             }
-            match registries.add(r) {
-                Err(e) => say(s, false, e),
-                Ok(()) => {
-                    say(s, true, format!("Added {n}; fetching its index…"));
+            if let Err(e) = registries.add(r) {
+                say(s, false, e);
+            } else {
+                say(s, true, format!("Added {n}; fetching its index…"));
+                bump(s);
+                let ext = ext.clone();
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = std::thread::Builder::new()
+                    .name("ext-registry-add".to_owned())
+                    .spawn(move || drop(tx.send(ext.refresh_registries(Some(&n)))));
+                spawn(async move {
+                    let failed = rx.await.unwrap_or_default();
+                    match failed.first() {
+                        Some((n, e)) => say(s, false, format!("{n}: {e}")),
+                        None => say(s, true, "Its index is fetched: its extensions are listed."),
+                    }
                     bump(s);
-                    let ext = ext.clone();
-                    let (tx, rx) = futures::channel::oneshot::channel();
-                    let _ = std::thread::Builder::new()
-                        .name("ext-registry-add".to_owned())
-                        .spawn(move || drop(tx.send(ext.refresh_registries(Some(&n)))));
-                    spawn(async move {
-                        let failed = rx.await.unwrap_or_default();
-                        match failed.first() {
-                            Some((n, e)) => say(s, false, format!("{n}: {e}")),
-                            None => say(s, true, "Its index is fetched: its extensions are listed."),
-                        }
-                        bump(s);
-                    });
-                }
+                });
             }
         }
     };
@@ -923,7 +927,19 @@ fn RegistriesPanel(browse: Browse) -> Element {
         let ext = ext.clone();
         move |_| match ext.dev_install(dev_folder.peek().trim()) {
             Ok(v) => {
-                say(s, v["loaded"] == true, format!("{}: {}", v["id"].as_str().unwrap_or("?"), if v["loaded"] == true { "loaded as a development copy" } else { "did not load (see its log)" }));
+                say(
+                    s,
+                    v["loaded"] == true,
+                    format!(
+                        "{}: {}",
+                        v["id"].as_str().unwrap_or("?"),
+                        if v["loaded"] == true {
+                            "loaded as a development copy"
+                        } else {
+                            "did not load (see its log)"
+                        }
+                    ),
+                );
                 bump(s);
             }
             Err(e) => say(s, false, e),
@@ -951,7 +967,7 @@ fn RegistriesPanel(browse: Browse) -> Element {
                         div { key: "{l.registry.name}", style: "display: flex; gap: 8px; align-items: center;",
                             div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column;",
                                 Line { text: format!("{}{}", l.registry.name, if l.builtin { " · the app's" } else { "" }) }
-                                Muted { text: l.registry.git.clone().or(l.registry.folder.clone()).unwrap_or_default() }
+                                Muted { text: l.registry.git.clone().or_else(|| l.registry.folder.clone()).unwrap_or_default() }
                                 if !l.registry.keys.is_empty() {
                                     Muted { text: format!("Trusts {}", l.registry.keys.iter().map(|k| k.name.as_str()).collect::<Vec<_>>().join(", ")) }
                                 }

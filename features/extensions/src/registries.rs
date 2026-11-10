@@ -1,3 +1,5 @@
+//! Registries with their publishers' keys, and development installs.
+//!
 //! Where an app's extensions come from past what it links in (feature
 //! `host`, #493): the registries it searches and installs from, each with
 //! its publishers' keys, and the folders it runs as development copies.
@@ -28,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use crate::install::{FolderRegistry, GitRegistry, Source};
 
 /// A publisher's key, as a registry entry carries it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Publisher {
     /// Who signs with it (`Studio`).
     pub name: String,
@@ -38,21 +40,18 @@ pub struct Publisher {
 
 /// One registry: a git repository or a folder with an `index.toml`, and
 /// the keys its archives may be signed by.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Registry {
     /// What the person calls it; unique among the app's registries.
     pub name: String,
     /// Its git repository's URL (cloned under the app's folder).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[facet(default)]
     pub git: Option<String>,
     /// Its folder, used where it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[facet(default)]
     pub folder: Option<String>,
     /// The publishers whose archives it may list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[facet(default)]
     pub keys: Vec<Publisher>,
 }
 
@@ -169,7 +168,11 @@ fn slug(name: &str) -> String {
         })
         .collect();
     let s = s.trim_matches('-').to_owned();
-    if s.is_empty() { "registry".to_owned() } else { s }
+    if s.is_empty() {
+        "registry".to_owned()
+    } else {
+        s
+    }
 }
 
 /// A source under the name the person gave it (the index's own name may
@@ -307,22 +310,25 @@ impl Registries {
     /// Every registry, the app's own first.
     #[must_use]
     pub fn list(&self) -> Vec<Listed> {
-        let s = lock(&self.state);
-        let builtin = s.builtin.iter().cloned().map(|registry| Listed {
-            registry,
-            builtin: true,
-        });
-        let kept = s
-            .kept
-            .registries
-            .iter()
-            .filter(|r| !s.builtin.iter().any(|b| b.name == r.name))
-            .cloned()
+        let (own, kept) = {
+            let s = lock(&self.state);
+            (s.builtin.clone(), s.kept.registries.clone())
+        };
+        let kept = kept
+            .into_iter()
+            .filter(|r| !own.iter().any(|b| b.name == r.name))
             .map(|registry| Listed {
                 registry,
                 builtin: false,
-            });
-        builtin.chain(kept).collect()
+            })
+            .collect::<Vec<_>>();
+        own.into_iter()
+            .map(|registry| Listed {
+                registry,
+                builtin: true,
+            })
+            .chain(kept)
+            .collect()
     }
 
     /// Adds `registry` (or replaces the kept one of its name) and writes
@@ -334,13 +340,17 @@ impl Registries {
     /// app's own, or the file cannot be written.
     pub fn add(&self, registry: Registry) -> Result<(), String> {
         registry.check()?;
-        let mut s = lock(&self.state);
-        if s.builtin.iter().any(|b| b.name == registry.name) {
-            return Err(format!("{} is one of the app's own registries", registry.name));
-        }
-        s.kept.registries.retain(|r| r.name != registry.name);
-        s.kept.registries.push(registry);
-        save(&s)
+        self.change(|s| {
+            if s.builtin.iter().any(|b| b.name == registry.name) {
+                return Err(format!(
+                    "{} is one of the app's own registries",
+                    registry.name
+                ));
+            }
+            s.kept.registries.retain(|r| r.name != registry.name);
+            s.kept.registries.push(registry);
+            Ok(())
+        })
     }
 
     /// Removes the kept registry `name`; false when there was none.
@@ -349,17 +359,14 @@ impl Registries {
     ///
     /// It is one of the app's own, or the file cannot be written.
     pub fn remove(&self, name: &str) -> Result<bool, String> {
-        let mut s = lock(&self.state);
-        if s.builtin.iter().any(|b| b.name == name) {
-            return Err(format!("{name} is one of the app's own registries"));
-        }
-        let before = s.kept.registries.len();
-        s.kept.registries.retain(|r| r.name != name);
-        if s.kept.registries.len() == before {
-            return Ok(false);
-        }
-        save(&s)?;
-        Ok(true)
+        self.change(|s| {
+            if s.builtin.iter().any(|b| b.name == name) {
+                return Err(format!("{name} is one of the app's own registries"));
+            }
+            let before = s.kept.registries.len();
+            s.kept.registries.retain(|r| r.name != name);
+            Ok(s.kept.registries.len() != before)
+        })
     }
 
     /// Each registry as a source, in [`Self::list`]'s order.
@@ -409,20 +416,17 @@ impl Registries {
     ///
     /// The file cannot be written.
     pub fn set_dev_installs(&self, on: bool) -> Result<(), String> {
-        let mut s = lock(&self.state);
-        s.kept.dev_installs = on;
-        save(&s)
+        self.change(|s| {
+            s.kept.dev_installs = on;
+            Ok(())
+        })
     }
 
     /// The folders kept as development copies.
     #[must_use]
     pub fn dev_folders(&self) -> Vec<PathBuf> {
-        lock(&self.state)
-            .kept
-            .dev
-            .iter()
-            .map(PathBuf::from)
-            .collect()
+        let dev = lock(&self.state).kept.dev.clone();
+        dev.into_iter().map(PathBuf::from).collect()
     }
 
     /// Keeps `folder` as a development copy (or forgets it).
@@ -432,21 +436,33 @@ impl Registries {
     /// The file cannot be written.
     pub fn keep_dev(&self, folder: &Path, keep: bool) -> Result<(), String> {
         let folder = folder.display().to_string();
+        self.change(|s| {
+            s.kept.dev.retain(|d| *d != folder);
+            if keep {
+                s.kept.dev.push(folder);
+            }
+            Ok(())
+        })
+    }
+
+    /// Runs `f` on the state, then writes the file (outside the lock)
+    /// when it succeeded.
+    fn change<R>(&self, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
         let mut s = lock(&self.state);
-        s.kept.dev.retain(|d| *d != folder);
-        if keep {
-            s.kept.dev.push(folder);
-        }
-        save(&s)
+        let out = f(&mut s)?;
+        let (file, kept) = (s.file.clone(), s.kept.clone());
+        drop(s);
+        save(file.as_deref(), &kept)?;
+        Ok(out)
     }
 }
 
-fn save(s: &State) -> Result<(), String> {
-    let Some(file) = &s.file else { return Ok(()) };
+fn save(file: Option<&Path>, kept: &Kept) -> Result<(), String> {
+    let Some(file) = file else { return Ok(()) };
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    let text = serde_json::to_string_pretty(&s.kept).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(kept).map_err(|e| e.to_string())?;
     let tmp = file.with_extension("json.tmp");
     std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, file).map_err(|e| format!("{}: {e}", file.display()))

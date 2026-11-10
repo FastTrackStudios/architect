@@ -120,12 +120,12 @@ pub mod ports;
 pub mod process;
 #[cfg(feature = "vox")]
 pub mod proto;
-#[cfg(all(feature = "remote", unix))]
-pub mod remote;
 #[cfg(feature = "host")]
 pub mod registries;
 #[cfg(feature = "host")]
 mod registry_actions;
+#[cfg(all(feature = "remote", unix))]
+pub mod remote;
 #[cfg(feature = "host")]
 pub mod source;
 #[cfg(feature = "host")]

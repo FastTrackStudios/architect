@@ -71,7 +71,8 @@ fn registry_folder(tmp: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 fn app(tmp: &Path, registries: Registries) -> (ActionList, Extensions) {
     let list = ActionList::new();
     let host = Host::new(list.clone(), SharedSections::new(Sections::new()));
-    let ext = Extensions::new(host, Installs::new(tmp.join("installs"))).with_registries(registries);
+    let ext =
+        Extensions::new(host, Installs::new(tmp.join("installs"))).with_registries(registries);
     ext.install_actions().unwrap();
     (list, ext)
 }
@@ -113,7 +114,10 @@ fn a_package_signed_by_a_key_its_registry_trusts_installs() {
 #[test]
 fn an_untrusted_publisher_is_refused_from_its_registry_alone() {
     let tmp = tempfile::tempdir().unwrap();
-    let (studio, stranger) = (SecretKey::generate().unwrap(), SecretKey::generate().unwrap());
+    let (studio, stranger) = (
+        SecretKey::generate().unwrap(),
+        SecretKey::generate().unwrap(),
+    );
     let root = registry_folder(
         tmp.path(),
         "studio",
@@ -132,7 +136,10 @@ fn an_untrusted_publisher_is_refused_from_its_registry_alone() {
 #[test]
 fn a_files_archive_is_checked_against_the_registered_publishers() {
     let tmp = tempfile::tempdir().unwrap();
-    let (studio, stranger) = (SecretKey::generate().unwrap(), SecretKey::generate().unwrap());
+    let (studio, stranger) = (
+        SecretKey::generate().unwrap(),
+        SecretKey::generate().unwrap(),
+    );
     let src = package(tmp.path(), "src");
     let good = tmp.path().join("good.archext");
     std::fs::write(&good, signed(&src, &studio)).unwrap();
@@ -148,7 +155,10 @@ fn a_files_archive_is_checked_against_the_registered_publishers() {
         &json!({ "path": bad.display().to_string() }),
     )
     .unwrap_err();
-    assert!(refused.contains("trust") || refused.contains("key"), "{refused}");
+    assert!(
+        refused.contains("trust") || refused.contains("key"),
+        "{refused}"
+    );
     let out = run(
         &list,
         "EXT_INSTALL_FILE",
@@ -165,14 +175,23 @@ fn registries_and_development_installs_round_trip_through_the_settings_file() {
     let key = SecretKey::generate().unwrap();
     let dev = package(tmp.path(), "dev-hello");
     {
-        let registries = Registries::open(&file, tmp.path().join("checkouts"))
-            .with_builtin(Registry::git("FastTrackStudios", "https://example.invalid/x.git"));
+        let registries = Registries::open(&file, tmp.path().join("checkouts")).with_builtin(
+            Registry::git("FastTrackStudios", "https://example.invalid/x.git"),
+        );
         registries
-            .add(Registry::git("Studio", "https://example.invalid/studio.git").trusting("Studio", key.public()))
+            .add(
+                Registry::git("Studio", "https://example.invalid/studio.git")
+                    .trusting("Studio", key.public()),
+            )
             .unwrap();
         registries.set_dev_installs(true).unwrap();
         let (list, ext) = app(tmp.path(), registries);
-        let out = run(&list, "EXT_DEV", &json!({ "folder": dev.display().to_string() })).unwrap();
+        let out = run(
+            &list,
+            "EXT_DEV",
+            &json!({ "folder": dev.display().to_string() }),
+        )
+        .unwrap();
         assert_eq!(out["id"], ID, "{out}");
         assert_eq!(out["loaded"], true, "{out}");
         assert!(ext.host().get(ID).is_some());
@@ -186,11 +205,17 @@ fn registries_and_development_installs_round_trip_through_the_settings_file() {
     assert_eq!(listed[0].registry.name, "Studio");
     assert_eq!(listed[0].registry.keys[0].key, key.public());
     assert!(again.dev_installs());
-    assert_eq!(again.dev_folders(), vec![std::fs::canonicalize(&dev).unwrap()]);
+    assert_eq!(
+        again.dev_folders(),
+        vec![std::fs::canonicalize(&dev).unwrap()]
+    );
     // On the next start the development copy loads again.
     let (list, ext) = app(&tmp.path().join("next"), again);
     let _ = ext.sync();
-    assert!(ext.host().get(ID).is_some(), "the development copy loads on start");
+    assert!(
+        ext.host().get(ID).is_some(),
+        "the development copy loads on start"
+    );
     let listed = run(&list, "EXT_REGISTRIES", &json!(null)).unwrap();
     assert_eq!(listed["registries"][0]["name"], "Studio", "{listed}");
     assert_eq!(listed["dev_installs"], true);
@@ -201,13 +226,23 @@ fn ext_dev_is_refused_with_development_installs_off() {
     let tmp = tempfile::tempdir().unwrap();
     let dev = package(tmp.path(), "dev-hello");
     let (list, ext) = app(tmp.path(), Registries::memory(tmp.path().join("checkouts")));
-    let e = run(&list, "EXT_DEV", &json!({ "folder": dev.display().to_string() })).unwrap_err();
+    let e = run(
+        &list,
+        "EXT_DEV",
+        &json!({ "folder": dev.display().to_string() }),
+    )
+    .unwrap_err();
     assert!(e.contains("development installs are off"), "{e}");
     assert!(ext.host().get(ID).is_none());
     // A debug build has them on whatever the setting says.
     let forced = Registries::memory(tmp.path().join("checkouts")).with_dev_forced(true);
     let (list, ext) = app(&tmp.path().join("forced"), forced);
-    run(&list, "EXT_DEV", &json!({ "folder": dev.display().to_string() })).unwrap();
+    run(
+        &list,
+        "EXT_DEV",
+        &json!({ "folder": dev.display().to_string() }),
+    )
+    .unwrap();
     assert!(ext.host().get(ID).is_some());
 }
 
@@ -215,7 +250,18 @@ fn ext_dev_is_refused_with_development_installs_off() {
 fn a_registry_with_a_bad_key_or_no_place_is_not_added() {
     let tmp = tempfile::tempdir().unwrap();
     let r = Registries::memory(tmp.path());
-    assert!(r.add(Registry::git("X", "https://x").trusting("X", "not a key")).is_err());
-    assert!(r.add(Registry { name: "Y".into(), git: None, folder: None, keys: vec![] }).is_err());
+    assert!(
+        r.add(Registry::git("X", "https://x").trusting("X", "not a key"))
+            .is_err()
+    );
+    assert!(
+        r.add(Registry {
+            name: "Y".into(),
+            git: None,
+            folder: None,
+            keys: vec![]
+        })
+        .is_err()
+    );
     assert!(r.list().is_empty());
 }

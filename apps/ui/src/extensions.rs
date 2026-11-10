@@ -612,7 +612,7 @@ async fn frame_binding(lab: Arc<ActionList>, extensions: Arc<ActionList>) {
 /// How often a loaded extension's files are checked for a save.
 const POLL: Duration = Duration::from_millis(500);
 
-/// The store's index: FastTrackStudios' registry, its archives signed
+/// The store's index: `FastTrackStudios`' registry, its archives signed
 /// with the org release key (`Trust::org`, trusted everywhere).
 pub const STORE_REGISTRY: &str = "https://github.com/FastTrackStudios/extensions";
 
