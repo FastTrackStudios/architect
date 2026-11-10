@@ -190,7 +190,10 @@ impl PaneTrack {
                     },
                     at_ms: now_ms,
                 };
-                if *rect.peek() != Some(measured) {
+                // Measured before its first layout a pane has no size:
+                // that is not a measure, and the next tick asks again.
+                if measured.size.w > 0.0 && measured.size.h > 0.0 && *rect.peek() != Some(measured)
+                {
                     rect.set(Some(measured));
                 }
             }
@@ -268,7 +271,8 @@ fn Cursors(pane: PaneId, kind: String, title: String, track: PaneTrack) -> Eleme
                 // Somebody is here: keep the pane's size current, so
                 // their pointer is right after a split moved.
                 ticks = ticks.wrapping_add(1);
-                if ticks % 20 == 0 && !room.roster.peek().peers.is_empty() {
+                let unmeasured = track.rect.peek().is_none();
+                if (unmeasured || ticks % 20 == 0) && !room.roster.peek().peers.is_empty() {
                     track.measure(now);
                 }
                 let wait = if moving { 16 } else { 50 };

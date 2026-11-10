@@ -81,6 +81,7 @@ pub fn PresenceMarksLayer(marks: PresenceMarks) -> Element {
             for pointer in marks.pointers {
                 div {
                     key: "pointer-{pointer.peer}",
+                    "data-presence-pointer": "{pointer.peer}",
                     style: "position:absolute; left:{pointer.x}px; top:{pointer.y}px; display:flex; \
                             align-items:flex-start; gap:4px;",
                     div { style: "width:10px; height:10px; margin:-5px 0 0 -5px; border-radius:5px; \

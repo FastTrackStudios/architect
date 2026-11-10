@@ -495,6 +495,7 @@ fn Tab(
     rule_bar: bool,
 ) -> Element {
     let tab_id = pane.0.clone();
+    let people_pane = pane.clone();
     let mut host = use_host();
     // Its shift along the bar while a tab is dragged (`super::slide`).
     let shift = use_hook(|| super::slide::tab_motion(host, &pane));
@@ -655,6 +656,7 @@ fn Tab(
                 }
                 {badges}
             }
+            super::pane_presence::TabPeople { pane: people_pane }
             if !icons {
                 if pinned {
                     span { style: "position:relative; display:flex;",

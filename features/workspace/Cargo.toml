@@ -159,6 +159,10 @@ name = "title_row"
 required-features = ["native"]
 
 [[test]]
+name = "pane_cursors"
+required-features = ["native", "presence"]
+
+[[test]]
 name = "tab_badge"
 required-features = ["native"]
 
