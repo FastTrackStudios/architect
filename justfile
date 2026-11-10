@@ -360,6 +360,15 @@ web-test PORT="18080":
     for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:{{PORT}}/" && break; sleep 0.1; done
     ARCHITECT_WEB_ORIGIN="http://127.0.0.1:{{PORT}}" node --test apps/web/test/web.test.mjs
 
+# A share link's player in a real browser (#511): the headless node
+# (`architect-desktop serve`, built without the window) on a vault of its
+# own with a link share of a two-song gig, in a headless Firefox
+# (FIREFOX=… names one): the lyric line follows playback, a click seeks,
+# and the queue goes on to the next song's page.
+share-player-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop
+    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" node --test apps/web/test/share-player.test.mjs
+
 # The sandbox's browser demo (apps/sandbox/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page
 # built for wasm32-unknown-unknown, into target/sandbox-web; then served on
