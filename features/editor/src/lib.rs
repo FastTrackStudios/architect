@@ -13,6 +13,7 @@
 //! | `state` | [`state`]: the document model, transactions and the markdown pass |
 //! | `syntax` | [`syntax`]: the registry made the editor's ([`syntax::drive`]), grammars linked by the app ([`syntax::link_grammar`]), a registered language's highlighting |
 //! | `ui` (+ `web` or `native`) | [`ui`]: the Dioxus components (`TextEditor`, `CodeEditor`), their helpers, and hooks that follow the registry |
+//! | `stories` | [`stories`]: `CodeEditor` in the story gallery |
 //! | `lsp` | [`lsp`]: the editor's LSP client (native only; nothing on wasm) |
 //!
 //! Nothing here is the editor's code: the modules are re-exports, the
@@ -45,6 +46,8 @@ pub use editor_lsp as lsp;
 pub mod languages;
 #[cfg(feature = "syntax")]
 pub mod syntax;
+#[cfg(feature = "stories")]
+pub mod stories;
 #[cfg(feature = "ui")]
 pub mod ui;
 pub mod theme;

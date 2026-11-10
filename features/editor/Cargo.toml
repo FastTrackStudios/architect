@@ -30,6 +30,9 @@ syntax = ["state", "dep:editor-syntax"]
 ui = ["state", "syntax", "dep:editor-view", "dep:dioxus", "dep:futures"]
 web = ["ui", "editor-view/web"]
 native = ["ui", "editor-view/native"]
+# The editor's stories (`stories`): `CodeEditor` on a Rust buffer, in the
+# story gallery (`architect-story`); its golden is `tests/story.rs`.
+stories = ["ui", "dep:architect-story-runtime", "dep:architect-theme", "dep:linkme"]
 # The editor's LSP client (`lsp`): `editor-lsp`'s client and the
 # diagnostics types. Native only: on wasm the feature compiles to
 # nothing.
@@ -44,12 +47,19 @@ editor-syntax = { workspace = true, optional = true }
 editor-view = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+architect-story-runtime = { workspace = true, optional = true }
+# The `#[story]` macro emits `#[linkme::distributed_slice]`: a direct dep.
+linkme = { workspace = true, optional = true }
+architect-theme = { workspace = true, optional = true }
 serde = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 editor-lsp = { workspace = true, optional = true }
 
 [dev-dependencies]
+# tests/story.rs: the story played headlessly on Blitz.
+architect-guide = { workspace = true, features = ["story"] }
+tempfile = "3"
 # tests/theme.rs: the syntax tokens resolved by a theme store.
 architect-theme = { workspace = true }
 serde_json = { workspace = true }
@@ -57,6 +67,10 @@ toml = { workspace = true }
 
 [lib]
 doctest = false
+
+[[test]]
+name = "story"
+required-features = ["stories", "native"]
 
 [lints]
 workspace = true

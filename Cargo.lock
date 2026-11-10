@@ -1240,6 +1240,8 @@ dependencies = [
 name = "architect-editor"
 version = "0.1.0"
 dependencies = [
+ "architect-guide",
+ "architect-story-runtime",
  "architect-theme",
  "architect-workspace-hack",
  "dioxus",
@@ -1249,8 +1251,10 @@ dependencies = [
  "editor-syntax",
  "editor-view",
  "futures",
+ "linkme",
  "serde",
  "serde_json",
+ "tempfile",
  "toml 0.8.2",
 ]
 
