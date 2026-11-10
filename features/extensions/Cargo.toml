@@ -243,6 +243,9 @@ web-sys = { version = "0.3", optional = true, features = [
 ] }
 
 [dev-dependencies]
+# tests/editor_view.rs: a linked extension's view holds the editor's
+# component, through architect's door (#512).
+architect-editor = { workspace = true, features = ["native"] }
 # tests/distribution.rs: archives signed with a throwaway key.
 architect-extension-archive = { workspace = true, features = ["sign"] }
 sha2 = { workspace = true }
