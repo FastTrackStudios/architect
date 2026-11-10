@@ -1636,6 +1636,68 @@ would be drawn by the extension's own Dioxus tree into an element of the
 page (linked views work as they are), or a page's tree rendered into
 a shadow root, its height read with a `ResizeObserver`.
 
+### Views that follow playback
+
+A chart whose bar is marked as the song plays, lyrics whose line is: a
+block that follows a playhead (#511). On a published page (a Site, a
+share link) the page has one player, and it is the only clock. How a
+view maps the playhead to its content (a tempo map, LRC timestamps) is
+the view's; the host supplies a monotonic playhead and a seek, nothing
+more.
+
+**Declare it in the markup.** A block drawn at build time (an `[[embeds]]
+page`'s element tree, written out as HTML by `elements_to_html`, or a
+Rust `BlockRenderer`) has no script of its own on the page: scripts and
+handlers are dropped (`features/sites/src/element_html.rs`). It follows
+with attributes alone, which come through as drawn:
+
+| Attribute | On | Means |
+| --- | --- | --- |
+| `data-follow-playhead` | the block's element | its `[data-at]` children follow the playhead |
+| `data-at="12.5"` | a child (a bar, a line) | it starts at this second of the track |
+| `data-media="<url>"` | the block's element, optional | follow this media file only; without it, whatever plays from the block's own page |
+
+The page marks the last child whose `data-at` has passed with
+`aria-current="time"` (style it: `[aria-current="time"]`), scrolls it
+into view inside the block (never the page), and seeks to its second on a
+click. Keyflow's chart drawn this way needs only a `data-at` per bar from
+its tempo map:
+
+```tsx
+// pages/kf.tsx, an [[embeds]] page: the seconds come from the chart's tempo map.
+<div data-follow-playhead>
+  {bars.map((bar) => <div class="kf-bar" data-at={String(bar.seconds)}>{bar.chord}</div>)}
+</div>
+```
+
+The synced-lyrics block is built this way
+(`features/sites/src/lyrics.rs` `lyrics_html`).
+
+**Or subscribe in script.** A view with a script of its own on the page
+(a view mounted live there later, #488) reads the same player,
+`architect.playhead` (`features/sites/assets/player.js`):
+
+| | |
+| --- | --- |
+| `time`, `playing`, `rate`, `duration` | the playhead now (seconds; `duration` `null` while unknown) |
+| `src`, `page`, `here` | the track playing, its note's page, and whether that page is this one |
+| `seek(t, {src}?)` | go to `t` seconds, of `src` when given (else of this page's media), and play |
+| `play()`, `pause()`, `next()`, `previous()` | the queue |
+| `subscribe(fn)` | `fn(snapshot)` at once and on every change, at most once a frame while playing; returns the unsubscribe |
+| `architect:playhead` | the same snapshot as an event on `document` |
+
+**What is not there yet.** The node draws the claimed fences of the
+extensions a build links (#488); a block drawn so follows the playhead
+with the attributes above and needs nothing more. A view mounted live on
+a share page (a WASI component or a page given the playhead as a host
+signal, as the issue has it) is not built: when it is, its host signal is
+`architect.playhead` above. The app's setlist pane has its own player
+still; the same queue and playhead there would need the queue
+(`apps/desktop/src/node/shares.rs` `queue`) and the follower moved into a
+crate both sides use, a pane-side clock in place of the page's media
+element, and the embed context (`features/extensions/src/linked.rs`
+`EmbedContext`) carrying the playhead to a linked view.
+
 ## Base view types
 
 Bases (`features/bases`, [Bases](@/features/bases.md)) draws a base's
