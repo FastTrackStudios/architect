@@ -30,6 +30,9 @@ pub fn sandbox() -> Distribution {
         .bundle_id("app.fasttrackstudio.architect-sandbox")
         .icon(Icon::ARCHITECT.tray("testtube.2", "applications-science"))
         .sandbox()
+        // Its own registry folder and example extensions; never the
+        // store's or the person's registries (#493).
+        .without_installs()
         .linked(&architect_sandbox_board::Board)
         // Setlists: the decks demo (#441), a setlist's songs as decks.
         .linked(&crate::setlists::SetlistsExtension)

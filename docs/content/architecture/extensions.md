@@ -3136,8 +3136,10 @@ registries kept by `Registries` (`features/extensions/src/registries.rs`,
 `Extensions::with_registries`):
 
 - **the store's index**, `extensions/index.toml` in architect's own
-  repository, beside the first-party extensions (`apps/ui/src/extensions.rs`
-  `STORE_REGISTRY`, `STORE_DIR`; given with `Registries::with_builtin`:
+  repository, beside the first-party extensions (`apps/distribution/src/lib.rs`
+  `STORE_REGISTRY`, `STORE_DIR`, `store`: every distribution's unless it says
+  otherwise, `Distribution::registry` adding its own; given with
+  `Registries::with_builtin` by `apps/ui/src/extensions.rs` `app_registries`:
   always there, never written, never removed). It is a git registry in a
   folder of a repository (`GitRegistry::in_dir`, `Registry::in_dir`): only
   that folder is checked out (sparse, about 3 MB). A publisher lists its

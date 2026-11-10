@@ -612,29 +612,25 @@ async fn frame_binding(lab: Arc<ActionList>, extensions: Arc<ActionList>) {
 /// How often a loaded extension's files are checked for a save.
 const POLL: Duration = Duration::from_millis(500);
 
-/// The store's index: `extensions/index.toml` in architect's own
-/// repository (`STORE_DIR`), beside the first-party extensions. A third
-/// party lists its extension there by pull request; archives it lists are
-/// signed with the org release key (`Trust::org`, trusted everywhere) or
-/// a publisher key its entry names.
-pub const STORE_REGISTRY: &str = "https://github.com/FastTrackStudios/architect";
-
-/// The store's folder in [`STORE_REGISTRY`].
-pub const STORE_DIR: &str = "extensions";
-
-/// The Architect app's registries (#493): the store's, then the ones a
-/// person adds in Settings → Extensions or with `EXT_REGISTRY_ADD`, kept
-/// in `<app dir>/extension-registries.json` with the development switch
-/// and folders (on regardless in a debug build).
+/// A distribution's registries (#493, #491): its own
+/// (`Distribution::registries`, the store's unless it says otherwise),
+/// then the ones a person adds in Settings → Extensions or with
+/// `EXT_REGISTRY_ADD`, kept in `<app dir>/extension-registries.json` with
+/// the development switch and folders (on regardless in a debug build).
 #[must_use]
-pub fn app_registries(root: &Path) -> architect_extensions::registries::Registries {
-    use architect_extensions::registries::{Registries, Registry};
-    Registries::open(
-        root.join("extension-registries.json"),
-        root.join("registries"),
+pub fn app_registries(
+    root: &Path,
+    dist: &crate::distribution::Distribution,
+) -> architect_extensions::registries::Registries {
+    use architect_extensions::registries::Registries;
+    dist.registries().iter().cloned().fold(
+        Registries::open(
+            root.join("extension-registries.json"),
+            root.join("registries"),
+        )
+        .with_dev_forced(cfg!(debug_assertions)),
+        Registries::with_builtin,
     )
-    .with_builtin(Registry::git("FastTrackStudios", STORE_REGISTRY).in_dir(STORE_DIR))
-    .with_dev_forced(cfg!(debug_assertions))
 }
 
 /// The lab's registry folder.
@@ -958,9 +954,11 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         }
         // The store's index and the registries a person adds, each
         // trusting its publishers' keys, and development installs
-        // (`EXT_DEV`): the Architect app's (#493).
-        if !sandbox {
-            extensions = extensions.with_registries(app_registries(&root));
+        // (`EXT_DEV`): the distribution's (#493), none for one without
+        // installs (the sandbox).
+        let dist = crate::distribution();
+        if dist.installs() {
+            extensions = extensions.with_registries(app_registries(&root, dist));
         }
         let found = registry().filter(|_| sandbox);
         match &found {

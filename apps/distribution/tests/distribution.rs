@@ -124,8 +124,10 @@ fn no_old_folder_means_nothing_to_copy() {
 }
 
 /// A linked extension whose embed page draws `chord` fences.
+#[cfg(feature = "pages")]
 struct Chord;
 
+#[cfg(feature = "pages")]
 impl architect_extensions::linked::Extension for Chord {
     fn manifest(&self) -> &'static str {
         include_str!("chord/extension.toml")
@@ -138,6 +140,9 @@ impl architect_extensions::linked::Extension for Chord {
     fn build(&self, _: &mut architect_extensions::linked::Builder) {}
 }
 
+/// Needs feature `pages` (QuickJS): on in the workspace's build, through
+/// architect-desktop.
+#[cfg(feature = "pages")]
 #[test]
 fn a_compiled_in_extensions_embed_page_draws_its_fence_on_a_site() {
     let vault = tempfile::tempdir().unwrap();
@@ -165,4 +170,32 @@ fn a_compiled_in_extensions_embed_page_draws_its_fence_on_a_site() {
     .unwrap();
     let page = std::fs::read_to_string(out.join("song/index.html")).unwrap();
     assert!(page.contains("chord Am7"), "drawn by the page: {page}");
+}
+
+#[test]
+fn every_distribution_installs_from_the_store_unless_it_says_otherwise() {
+    let names = |d: &Distribution| -> Vec<String> {
+        d.registries().iter().map(|r| r.name.clone()).collect()
+    };
+    let store = architect_distribution::store();
+    assert_eq!(
+        store.git.as_deref(),
+        Some(architect_distribution::STORE_REGISTRY)
+    );
+    assert_eq!(names(&architect()), ["FastTrackStudios"]);
+    assert_eq!(names(&Distribution::new("Plain")), ["FastTrackStudios"]);
+    assert!(architect().installs());
+    let studio = architect().named("Studio").registry(
+        architect_extensions::registries::Registry::git("Studio", "https://example.test/studio")
+            .in_dir("extensions"),
+    );
+    assert_eq!(names(&studio), ["FastTrackStudios", "Studio"]);
+    assert_eq!(studio.describe()["registries"][1], "Studio");
+    let own = architect().without_registries();
+    assert!(
+        own.registries().is_empty() && own.installs(),
+        "the person's still"
+    );
+    let closed = architect().without_installs();
+    assert!(closed.registries().is_empty() && !closed.installs());
 }

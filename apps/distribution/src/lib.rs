@@ -33,6 +33,7 @@ use std::sync::{Arc, OnceLock};
 
 use architect_extensions::Manifest;
 use architect_extensions::linked::Extension;
+use architect_extensions::registries::Registry;
 use architect_sites::{BlockRenderer, Blocks};
 use serde_json::json;
 
@@ -158,6 +159,8 @@ pub struct Distribution {
     bundles: Vec<Bundle>,
     blocks: Vec<Arc<dyn BlockRenderer>>,
     adopts: Option<Adopted>,
+    registries: Vec<Registry>,
+    dev_installs: bool,
 }
 
 impl std::fmt::Debug for Distribution {
@@ -171,6 +174,10 @@ impl std::fmt::Debug for Distribution {
             .field("linked", &ids(&self.linked))
             .field("bundles", &self.bundles)
             .field("blocks", &self.blocks.len())
+            .field(
+                "registries",
+                &self.registries.iter().map(|r| &r.name).collect::<Vec<_>>(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -225,6 +232,8 @@ impl Distribution {
             bundles: Vec::new(),
             blocks: Vec::new(),
             adopts: None,
+            registries: vec![store()],
+            dev_installs: true,
         }
     }
 
@@ -317,6 +326,34 @@ impl Distribution {
         self
     }
 
+    /// Also installs from `registry` (#493): listed after the ones before
+    /// it, never written to the person's file, never removed. Every
+    /// distribution starts with the store's ([`store`]).
+    #[must_use]
+    pub fn registry(mut self, registry: Registry) -> Self {
+        self.registries.retain(|r| r.name != registry.name);
+        self.registries.push(registry);
+        self
+    }
+
+    /// Without the registries it was given, the store's too: a build that
+    /// installs only from the registries a person adds.
+    #[must_use]
+    pub fn without_registries(mut self) -> Self {
+        self.registries.clear();
+        self
+    }
+
+    /// With no registries and no development installs at all (`EXT_DEV`,
+    /// Settings → Extensions' registries): what it compiles in and what
+    /// it finds itself is all it runs. The sandbox is such a build.
+    #[must_use]
+    pub fn without_installs(mut self) -> Self {
+        self.registries.clear();
+        self.dev_installs = false;
+        self
+    }
+
     /// Takes over `folder` once (`$env` its override): when this
     /// distribution's own folder is empty, the old one is copied in
     /// ([`Distribution::adopt_folder`]), and `$env` is read as this one's
@@ -365,6 +402,20 @@ impl Distribution {
     #[must_use]
     pub const fn icons(&self) -> Icon {
         self.icon
+    }
+
+    /// The registries it installs from beside the person's
+    /// ([`registry`](Self::registry)).
+    #[must_use]
+    pub fn registries(&self) -> &[Registry] {
+        &self.registries
+    }
+
+    /// Whether it installs from registries and development folders at
+    /// all ([`without_installs`](Self::without_installs)).
+    #[must_use]
+    pub const fn installs(&self) -> bool {
+        self.dev_installs
     }
 
     /// On made-up data ([`sandbox`](Self::sandbox)).
@@ -527,6 +578,7 @@ impl Distribution {
             "sandbox": self.sandbox,
             "extensions": extensions,
             "bundles": bundles,
+            "registries": self.registries.iter().map(|r| &r.name).collect::<Vec<_>>(),
         })
     }
 }
@@ -538,6 +590,25 @@ static INSTALLED: OnceLock<Distribution> = OnceLock::new();
 #[must_use]
 pub fn current() -> Option<&'static Distribution> {
     INSTALLED.get()
+}
+
+/// The store's repository.
+///
+/// `extensions/index.toml` ([`STORE_DIR`]) in architect's own, beside the
+/// first-party extensions. A third party
+/// lists its extension there by pull request; the archives it lists are
+/// signed with the org release key (`Trust::org`) or a publisher key its
+/// entry names.
+pub const STORE_REGISTRY: &str = "https://github.com/FastTrackStudios/architect";
+
+/// The store's folder in [`STORE_REGISTRY`].
+pub const STORE_DIR: &str = "extensions";
+
+/// The store's registry (#493): in every distribution unless it says
+/// otherwise ([`Distribution::without_registries`]).
+#[must_use]
+pub fn store() -> Registry {
+    Registry::git("FastTrackStudios", STORE_REGISTRY).in_dir(STORE_DIR)
 }
 
 /// The lab's folder before it became the Architect app: the Architect
