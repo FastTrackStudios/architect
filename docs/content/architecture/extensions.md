@@ -3142,7 +3142,13 @@ registries kept by `Registries` (`features/extensions/src/registries.rs`,
   folder of a repository (`GitRegistry::in_dir`, `Registry::in_dir`): only
   that folder is checked out (sparse, about 3 MB). A publisher lists its
   extension there by pull request; its archives are signed with the org
-  key, or a publisher key the entry's registry trusts;
+  key, or a publisher key the entry's registry trusts. A release lands
+  there through the reusable
+  `.github/workflows/extension-release.yml` (`registry:
+  FastTrackStudios/architect`, `registry-dir: extensions`), and every pull
+  request that changes the index is checked by
+  `.github/workflows/extension-index.yml` (`cargo xtask ext-index
+  extensions`: each archive's hash, signature and platforms);
 - **registries a person adds** in Settings → Extensions (the manager
   page's "Registries and development installs") or with
   `EXT_REGISTRY_ADD {name, git [+ dir] | folder, keys}`, kept in

@@ -1,0 +1,44 @@
+# The extension store's index (extensions/index.toml): a pull request that
+# changes it — a publisher's new entry, opened by extension-release.yml or
+# by hand — is checked with `cargo xtask ext-index extensions`: the schema,
+# each archive fetched and its sha256 compared with the entry's, its
+# signature checked against the org release key, and its id, version,
+# kind and platforms compared with the entry's
+# (features/extensions/archive/src/registry.rs `check`).
+#
+# A publisher signing with its own key adds `--key <its .pub line>` here
+# in the same pull request (the app trusts it for this registry only once
+# `apps/ui/src/extensions.rs` `app_registries` names it too).
+
+name: extension-index
+
+on:
+  pull_request:
+    paths:
+      - "extensions/index.toml"
+      - "extensions/archives/**"
+      - ".github/workflows/extension-index.yml"
+  push:
+    branches: [main]
+    paths:
+      - "extensions/index.toml"
+      - "extensions/archives/**"
+
+concurrency:
+  group: extension-index-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  index:
+    name: ext-index
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build xtask
+        run: cargo build -q -p xtask
+      - name: ext-index extensions
+        run: cargo run -q -p xtask -- ext-index extensions

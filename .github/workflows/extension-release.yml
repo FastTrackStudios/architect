@@ -15,8 +15,11 @@
 #          refused), `ext-verify`, then uploads the archive to the release;
 #          runs nothing of the caller's;
 #   index  opens a pull request on the registry adding the version's entry
-#          (archive URL, sha256, platforms, changelog); the registry's own
-#          CI checks it with `cargo xtask ext-index`.
+#          (archive URL, sha256, platforms, changelog) to its index
+#          (`<registry-dir>/index.toml`); the registry's own CI checks it
+#          with `cargo xtask ext-index`. The FastTrackStudios store is
+#          `registry: FastTrackStudios/architect`, `registry-dir: extensions`
+#          (architect's `extension-index.yml` checks it).
 #
 # A caller (in the extension's repository, on its release tag):
 #
@@ -28,6 +31,8 @@
 #         build: cargo build --release --locked --target "$TARGET" -p studio-extension
 #         binary: target/$TARGET/release/studio-extension
 #         architect-ref: <architect tag>
+#         registry: FastTrackStudios/architect
+#         registry-dir: extensions
 #       secrets:
 #         EXT_SIGNING_KEY: ${{ secrets.TASK_RELEASE_MINISIGN_KEY }}
 #         REGISTRY_TOKEN: ${{ secrets.FTS_REGISTRY_TOKEN }}
@@ -104,6 +109,11 @@ on:
         type: string
         required: false
         default: FastTrackStudios/extensions
+      registry-dir:
+        description: "The folder of `registry` holding its index.toml (the store's: `extensions`). Empty = the repository's root."
+        type: string
+        required: false
+        default: ""
       registry-branch:
         description: "The registry's branch the pull request targets."
         type: string
@@ -400,6 +410,7 @@ jobs:
         if: steps.token.outputs.present == 'true'
         working-directory: registry
         env:
+          INDEX: ${{ inputs.registry-dir && format('{0}/index.toml', inputs.registry-dir) || 'index.toml' }}
           GH_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           ID: ${{ needs.plan.outputs.id }}
           VERSION: ${{ needs.plan.outputs.version }}
@@ -410,7 +421,7 @@ jobs:
         run: |
           set -euo pipefail
           listed="$(python3 -c 'import os, tomllib
-          i = tomllib.load(open("index.toml", "rb"))
+          i = tomllib.load(open(os.environ["INDEX"], "rb"))
           print(any(e.get("id") == os.environ["ID"] and e.get("version") == os.environ["VERSION"] for e in i.get("extensions", [])))')"
           if [ "$listed" = "True" ]; then
             echo "::notice::$ID $VERSION is already in the index"
@@ -418,7 +429,8 @@ jobs:
           fi
           branch="ext/$ID-$VERSION"
           git switch -c "$branch"
-          cat "$RUNNER_TEMP/entry.toml" >> index.toml
+          [ -f "$INDEX" ] || { echo "::error::$REGISTRY has no $INDEX"; exit 1; }
+          cat "$RUNNER_TEMP/entry.toml" >> "$INDEX"
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -qam "$ID $VERSION"
           git push -q origin "$branch"
@@ -427,4 +439,9 @@ jobs:
             --body "Released from $SOURCE $TAG by extension-release.yml. The registry's CI checks the archive's hash and signature."
       - name: No registry token
         if: steps.token.outputs.present != 'true'
-        run: echo "::warning::REGISTRY_TOKEN was not passed, so no pull request was opened on ${{ inputs.registry }}; the entry is in this run's summary"
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          INDEX: ${{ inputs.registry-dir && format('{0}/index.toml', inputs.registry-dir) || 'index.toml' }}
+        run: |
+          echo "::warning::REGISTRY_TOKEN was not passed, so no pull request was opened on $REGISTRY; add this entry to its $INDEX by hand (it is in this run's summary too):"
+          cat "$RUNNER_TEMP/entry.toml"
