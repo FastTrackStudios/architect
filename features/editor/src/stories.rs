@@ -1,6 +1,7 @@
-//! The editor's stories (feature `stories`): `CodeEditor` on a Rust
-//! buffer, highlighted in the theme's `syntax.*` tokens, with one
-//! diagnostic. Linked into any binary that turns the feature on, as
+//! The editor's stories (feature `stories`).
+//!
+//! `CodeEditor` on a Rust buffer, highlighted in the theme's `syntax.*`
+//! tokens, with one diagnostic. Linked into any binary that turns the feature on, as
 //! `architect-ui`'s are; `tests/story.rs` keeps its golden.
 
 use architect_story_runtime::story;
@@ -74,4 +75,4 @@ pub fn code_editor_rust() -> Element {
 }
 
 /// Links the stories into a binary that names nothing else here.
-pub fn force_link() {}
+pub const fn force_link() {}

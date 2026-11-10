@@ -113,9 +113,10 @@ fn grammars() -> &'static Mutex<(HashMap<String, Linked>, u64)> {
     GRAMMARS.get_or_init(Mutex::default)
 }
 
-/// Hands the editor a grammar linked into this binary under `name`: what
-/// a language with `grammar = "linked:<name>"` is highlighted with. The
-/// app calls it for its own grammars, a linked extension for its (before
+/// Hands the editor a grammar linked into this binary under `name`.
+///
+/// It is what a language with `grammar = "linked:<name>"` is highlighted
+/// with. The app calls it for its own grammars, a linked extension for its (before
 /// its `[[languages]]` load, or after: the registry [`drive`]n is brought
 /// up to date). `highlights` is the query used when the language gives
 /// none.
@@ -208,12 +209,14 @@ pub fn syntax_of(language: &Language) -> Result<Syntax, Unsupported> {
                 language: id(),
                 grammar: "linked".to_owned(),
             })?;
-            match &language.highlights_text {
-                None => Ok(Syntax::Builtin(lang)),
-                Some(query) => HostLanguage::new(&language.id, lang.grammar(), query)
-                    .map(Syntax::from)
-                    .map_err(refused),
-            }
+            language.highlights_text.as_ref().map_or_else(
+                || Ok(Syntax::Builtin(lang)),
+                |query| {
+                    HostLanguage::new(&language.id, lang.grammar(), query)
+                        .map(Syntax::from)
+                        .map_err(refused)
+                },
+            )
         }
         Grammar::Host(name) => {
             let linked =
@@ -250,8 +253,10 @@ fn driven() -> &'static Mutex<Option<Driven>> {
     DRIVEN.get_or_init(Mutex::default)
 }
 
-/// Makes `languages` the editor's (one registry per process: the app's,
-/// the one its extension host keeps). Now and after each change, every
+/// Makes `languages` the editor's.
+///
+/// One registry per process: the app's, the one its extension host
+/// keeps. Now and after each change, every
 /// language in it is registered in `editor_state::languages` under its
 /// id, fences and extensions, and what went is withdrawn. A language that
 /// cannot be highlighted is left out and kept in [`problems`].

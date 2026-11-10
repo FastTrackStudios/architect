@@ -1,5 +1,6 @@
-//! The Dioxus view (`editor-view`), re-exported whole: [`TextEditor`]
-//! (prose and markdown, what notes use), [`CodeEditor`] (a source file in
+//! The Dioxus view (`editor-view`), re-exported whole.
+//!
+//! [`TextEditor`] (prose and markdown, what notes use), [`CodeEditor`] (a source file in
 //! one language: line numbers, bracket matching, indentation, diagnostics),
 //! [`Editor`], [`EDITOR_CSS`], [`dispatch_with_history`], the palette,
 //! hover and completion helpers. Plus hooks that follow the language
@@ -13,8 +14,9 @@ use futures::StreamExt;
 
 use crate::syntax::{self, Syntax};
 
-/// The editor's language registry revision
-/// ([`syntax::languages_revision`]), as a signal that moves when
+/// The editor's language registry revision, as a signal.
+///
+/// It is [`syntax::languages_revision`], and moves when
 /// [`syntax::drive`] registers or withdraws a language. Read it in a
 /// component (or a memo) that draws highlighted text, and it draws again.
 pub fn use_languages_revision() -> ReadSignal<u64> {
@@ -41,6 +43,7 @@ pub fn use_languages_revision() -> ReadSignal<u64> {
 /// let language = use_language("src/main.rs".to_owned());
 /// rsx! { CodeEditor { state, language } }
 /// ```
+#[must_use]
 pub fn use_language(name: String) -> Memo<Option<Syntax>> {
     let revision = use_languages_revision();
     use_memo(move || {

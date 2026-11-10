@@ -93,6 +93,6 @@ fn a_built_in_grammar_takes_the_languages_own_query() {
     let source = "fn main() { \"hi\" }";
     let spans = highlight(&languages, "rust", source).unwrap();
     assert_eq!(spans.len(), 1, "{spans:?}");
-    assert_eq!(&source[spans[0].start..spans[0].end], "\"hi\"");
+    assert_eq!(source.get(spans[0].start..spans[0].end), Some("\"hi\""));
     assert_eq!(spans[0].token, "syntax.keyword");
 }
