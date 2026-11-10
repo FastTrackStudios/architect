@@ -85,7 +85,7 @@ else
     devenv shell -- cargo build --profile "$PROFILE" -p "$crate" --bin "$bin"
 fi
 [ -x "$BIN" ] || { echo "ERROR: the build produced no $BIN" >&2; exit 1; }
-file -b "$BIN" | grep -q 'Mach-O 64-bit executable arm64' \
+file -b "$BIN" | grep -Eq 'Mach-O 64-bit (executable arm64|arm64 executable)' \
     || { echo "ERROR: $BIN is not an arm64 Mach-O: $(file -b "$BIN")" >&2; exit 1; }
 
 # ── The bundle ──────────────────────────────────────────────────────────────
