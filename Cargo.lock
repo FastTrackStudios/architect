@@ -1242,11 +1242,13 @@ version = "0.1.0"
 dependencies = [
  "architect-theme",
  "architect-workspace-hack",
+ "dioxus",
  "editor-ext",
  "editor-lsp",
  "editor-state",
  "editor-syntax",
  "editor-view",
+ "futures",
  "serde",
  "serde_json",
  "toml 0.8.2",

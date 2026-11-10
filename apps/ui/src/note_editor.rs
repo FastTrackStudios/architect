@@ -587,8 +587,12 @@ pub fn NoteEditor(
     // The fence languages extensions claim now: the editor's fence
     // registry, as they load and unload.
     let claimed = move || ui.map(|ui| ui.host().embeds().fences()).unwrap_or_default();
+    // The editor's languages: read below, so a fence in a language that
+    // came or went (an extension's `[[languages]]`) is drawn again.
+    let languages = architect_editor::ui::use_languages_revision();
     let decorations = use_hook(|| {
         DecorationSource::new(move |s: &EditorState| {
+            let _ = *languages.read();
             let specs: Vec<DecorationSpec> = decos.read().iter().map(|(_, d)| d.clone()).collect();
             let text = s.doc.to_string();
             let mut out = vault.as_ref().map_or_else(

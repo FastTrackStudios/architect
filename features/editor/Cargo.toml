@@ -20,12 +20,14 @@ default = []
 # The document model (`state`: `EditorState`, transactions, the markdown
 # pass). It links the editor's tree-sitter grammars (`editor-syntax`).
 state = ["dep:editor-state"]
-# Highlighting through the registry (`syntax`): a registered language's
-# spans, named by theme token.
-syntax = ["dep:editor-syntax"]
-# The Dioxus component (`ui`). Pick the renderer with `web` or `native`
-# (one per binary, as `editor-view` has it).
-ui = ["state", "dep:editor-view"]
+# The registry made the editor's (`syntax::drive`), grammars the app links
+# (`syntax::link_grammar`), a registered language's spans named by theme
+# token.
+syntax = ["state", "dep:editor-syntax"]
+# The Dioxus components (`ui`: `TextEditor`, `CodeEditor`) and hooks that
+# follow the registry. Pick the renderer with `web` or `native` (one per
+# binary, as `editor-view` has it).
+ui = ["state", "syntax", "dep:editor-view", "dep:dioxus", "dep:futures"]
 web = ["ui", "editor-view/web"]
 native = ["ui", "editor-view/native"]
 # The editor's LSP client (`lsp`): `editor-lsp`'s client and the
@@ -40,6 +42,8 @@ editor-ext = { workspace = true }
 editor-state = { workspace = true, optional = true }
 editor-syntax = { workspace = true, optional = true }
 editor-view = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 serde = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
