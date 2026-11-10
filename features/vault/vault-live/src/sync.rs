@@ -50,7 +50,7 @@ use vault_proto::{
 use crate::vault::Vault;
 use crate::watcher::{self, WatchError};
 use crate::write_guard::{WriteGuard, current_caller};
-use editor_state::markdown::{FrontMatter, PropValue, parse_frontmatter};
+use architect_editor::state::markdown::{FrontMatter, PropValue, parse_frontmatter};
 
 /// Debounce window for the FS watcher attached by
 /// [`Backend::start_watcher`]. Coalesces editor swap-file dances

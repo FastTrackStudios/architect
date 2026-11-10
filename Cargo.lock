@@ -827,6 +827,7 @@ dependencies = [
  "architect-command-palette",
  "architect-commands",
  "architect-distribution",
+ "architect-editor",
  "architect-extensions",
  "architect-files",
  "architect-guide",
@@ -858,7 +859,6 @@ dependencies = [
  "dioxus",
  "dioxus-native",
  "editor-keyflow",
- "editor-view",
  "facet",
  "futures-channel",
  "futures-timer",
@@ -1237,6 +1237,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-editor"
+version = "0.1.0"
+dependencies = [
+ "architect-theme",
+ "architect-workspace-hack",
+ "editor-ext",
+ "editor-state",
+ "editor-syntax",
+ "editor-view",
+ "serde",
+ "serde_json",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "architect-extension-archive"
 version = "0.1.0"
 dependencies = [
@@ -1283,6 +1298,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-editor",
  "architect-extension-archive",
  "architect-extensions",
  "architect-guide",
@@ -1306,7 +1322,6 @@ dependencies = [
  "dioxus-html",
  "dioxus-native-dom",
  "dioxus-ssr",
- "editor-ext",
  "facet",
  "futures",
  "futures-timer",
@@ -2392,6 +2407,7 @@ dependencies = [
  "downcast-rs",
  "ed25519",
  "ed25519-dalek",
+ "editor-view",
  "either",
  "env_filter",
  "env_logger",
@@ -19120,10 +19136,10 @@ name = "vault-live"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-editor",
  "architect-permissions",
  "architect-workspace-hack",
  "chrono",
- "editor-state",
  "facet",
  "indexmap",
  "notify",

@@ -18,6 +18,7 @@
 //! | `EXT_ENABLE` / `EXT_DISABLE` | turns `{id}` on or off: loaded or unloaded at once, everything it adds with it |
 //! | `EXT_EMBEDS` | every inline embed and what it claims, or `{claim}`'s (`fence:kf`): which extension draws it, and how |
 //! | `EXT_PROJECT_TYPES` | every project type loaded extensions add (`[[project_types]]`), or `{id}`'s: its properties, template, folders, views and owner |
+//! | `EXT_LANGUAGES` | the editor's language registry (#512): the app's languages and every loaded extension's `[[languages]]`, or the one `{id}`, `{fence}` or `{path}` names: its file types, fences, grammar, highlights query, comment token, LSP server command and who registered it (`from`) |
 //! | `EXT_CAPTURE_TARGETS` | every capture target loaded extensions add (`[[capture_targets]]`): its chips, tokens, action and owner |
 //! | `EXT_PALETTE` | the palette slot (#381): which extension's view draws each overlay (`[[palette_views]]`), the keys extensions bind (`[[keys]]`) and the palette's sources (`[[palette_sources]]`) |
 
@@ -111,6 +112,16 @@ static PROJECT_TYPES: ActionMeta = meta(
      each one's id, name, icon, the properties it adds to `project`, its `project.md` template's \
      text, the folders a new project gets, its views and the extension it is from. With `id`, \
      that one (`null` when no loaded extension adds it).",
+);
+static LANGUAGES: ActionMeta = meta(
+    "EXT_LANGUAGES",
+    "Languages",
+    "The editor's language registry: the app's own languages and the ones loaded extensions add \
+     (`[[languages]]`). Each has its id, name, file extensions, fence names, grammar (`linked` or \
+     a file in its package), highlights query, comment token, its LSP server's command and args \
+     when it has one (carried, never started by this), and `from` (`app` or the extension). \
+     With `id`, `fence` (a code fence's name) or `path` (a file's), the one language it names \
+     (`null` when none is registered).",
 );
 static CAPTURE_TARGETS: ActionMeta = meta(
     "EXT_CAPTURE_TARGETS",
@@ -209,6 +220,17 @@ pub struct ProjectTypesArgs {
     pub id: Option<String>,
 }
 
+/// `EXT_LANGUAGES`' arguments: none for every language, or one way of
+/// naming one.
+#[derive(Debug, Default, Facet)]
+pub struct LanguagesArgs {
+    pub id: Option<String>,
+    /// A code fence's name (`rs`).
+    pub fence: Option<String>,
+    /// A file's path or name (`src/main.rs`).
+    pub path: Option<String>,
+}
+
 /// `EXT_ENABLE` / `EXT_DISABLE`'s arguments.
 #[derive(Debug, Facet)]
 pub struct IdArgs {
@@ -259,7 +281,7 @@ impl Extensions {
     /// Puts the contribution actions (`EXT_CONTRIBUTIONS`, `EXT_OPEN`,
     /// `EXT_VIEW_OPEN`, `EXT_STATE_SET`, `EXT_STATE_CLEAR`, `EXT_EMIT`,
     /// `EXT_ENABLE`, `EXT_DISABLE`, `EXT_EMBEDS`, `EXT_PROJECT_TYPES`,
-    /// `EXT_CAPTURE_TARGETS`) on the host's list.
+    /// `EXT_LANGUAGES`, `EXT_CAPTURE_TARGETS`) on the host's list.
     ///
     /// # Errors
     ///
@@ -422,6 +444,32 @@ impl Extensions {
                     })
                 });
                 Ok(RawJson::from(answer.to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &LANGUAGES,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, a: LanguagesArgs| {
+                let languages = me.host().languages();
+                let one = |r: architect_editor::Registered| {
+                    let mut v = serde_json::to_value(&r.language).unwrap_or(Value::Null);
+                    v.as_object_mut()
+                        .map(|map| map.insert("from".to_owned(), json!(r.owner)));
+                    v
+                };
+                let named = if let Some(id) = &a.id {
+                    Some(languages.get(id))
+                } else if let Some(fence) = &a.fence {
+                    Some(languages.for_fence(fence))
+                } else {
+                    a.path.as_ref().map(|path| languages.for_path(path))
+                };
+                let answer = named.map_or_else(
+                    || Value::Array(languages.all().into_iter().map(one).collect()),
+                    |found| found.map_or(Value::Null, one),
+                );
+                Ok::<_, String>(RawJson::from(answer.to_string()))
             },
         )?;
         let me = self.clone();

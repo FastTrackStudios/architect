@@ -50,7 +50,7 @@ use std::sync::{Mutex, PoisonError};
 use architect::action::Principal;
 use serde::{Deserialize, Serialize};
 
-pub use editor_ext::{
+pub use architect_editor::ext::{
     Cell, DecorationSpec, EditCommand, ExtError, KeyChord, KeymapEntry, NodeAt, NodeKind, Scope,
     SelRange, SlashEntry, Snapshot, TextChange, node_at,
 };
@@ -163,7 +163,7 @@ pub fn key_action(
     node: &NodeAt,
 ) -> Option<By<KeymapEntry>> {
     let all = contributions.keymaps();
-    editor_ext::resolve(&all, press, node).cloned()
+    architect_editor::ext::resolve(&all, press, node).cloned()
 }
 
 /// The widgets of `decorations` that name neither one of `embeds` nor of

@@ -725,6 +725,7 @@ const FORWARDED: &[&str] = &[
     "EXT_CONTRIBUTIONS",
     "EXT_EMBEDS",
     "EXT_PROJECT_TYPES",
+    "EXT_LANGUAGES",
     "EXT_CAPTURE_TARGETS",
     "EXT_PALETTE",
     "EXT_OPEN",
@@ -796,8 +797,14 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     });
     let extensions = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
-        let mut host =
-            Host::new((*list).clone(), sections.clone()).with_view_kinds(crate::embedded::kinds());
+        let mut host = Host::new((*list).clone(), sections.clone())
+            .with_view_kinds(crate::embedded::kinds())
+            // The editor's languages (#512): the ones compiled into the
+            // editor as the app's own, and each extension's
+            // `[[languages]]` while it is on (`EXT_LANGUAGES`).
+            .with_languages(architect_editor::Languages::with_app(
+                architect_editor::languages::builtin(),
+            ));
         // Extensions' themes and tokens into the lab's store; the theme,
         // as data, to its processes.
         if let Some(store) = &themes {

@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Try one specific lookup that the seed mentions.
     let uuid = "01950000-0000-7000-8000-000000000001";
     let view = vault_live::VaultLookupView::new(&vault, &idx);
-    use editor_state::markdown::VaultLookup;
+    use architect_editor::state::markdown::VaultLookup;
     match view.lookup_block(uuid) {
         Some(hit) => println!("  ✓ ((:{uuid})) → {} : {}", hit.page, hit.preview),
         None => println!("  ✗ {uuid} not found"),

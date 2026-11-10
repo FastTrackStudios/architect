@@ -1,0 +1,54 @@
+[package]
+name = "architect-editor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The editor, offered by architect: FastTrackStudios/editor's document model and components re-exported behind architect's feature conventions, the language registry the editor is given, and the syntax theme tokens."
+
+# docs/content/features/editor.md (#512). The editor stays in its own repo
+# (FastTrackStudios/editor); this crate is the one door to it. A consumer
+# (an app, an extension, Keyflow) names `architect-editor` and never pins
+# the editor repo itself: the one pin is the workspace's `editor-*`
+# entries in the root Cargo.toml.
+
+[features]
+# The contract, wasm-clean: the editor's extension surface as data
+# (`ext`), the language registry (`languages`) and the syntax tokens
+# (`theme`). No tree-sitter, no Dioxus.
+default = []
+# The document model (`state`: `EditorState`, transactions, the markdown
+# pass). It links the editor's tree-sitter grammars (`editor-syntax`).
+state = ["dep:editor-state"]
+# Highlighting through the registry (`syntax`): a registered language's
+# spans, named by theme token.
+syntax = ["dep:editor-syntax"]
+# The Dioxus component (`ui`). Pick the renderer with `web` or `native`
+# (one per binary, as `editor-view` has it).
+ui = ["state", "dep:editor-view"]
+web = ["ui", "editor-view/web"]
+native = ["ui", "editor-view/native"]
+# The editor's Typst and Mermaid fence renderers are not offered here yet:
+# they would put a Typst compiler in every consumer's lockfile.
+
+[dependencies]
+editor-ext = { workspace = true }
+editor-state = { workspace = true, optional = true }
+editor-syntax = { workspace = true, optional = true }
+editor-view = { workspace = true, optional = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+# tests/theme.rs: the syntax tokens resolved by a theme store.
+architect-theme = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

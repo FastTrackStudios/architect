@@ -748,6 +748,13 @@ impl NavigatorProviderDecl {
     }
 }
 
+/// A language for the editor (`[[languages]]`, #512).
+///
+/// It is architect-editor's registry entry, as a manifest writes it. Its
+/// `highlights` query is read from the package when the extension loads
+/// (`architect_editor::Language::highlights_text`).
+pub type LanguageDecl = architect_editor::Language;
+
 /// A context type's default screenset (`[[deck_templates]]`, #441).
 ///
 /// A deck is one context (a song, a project) shown in a screenset; a new
@@ -1069,6 +1076,25 @@ pub struct Contribution {
     pub navigator_providers: Vec<NavigatorProviderDecl>,
     /// Context types' default screensets (`[[deck_templates]]`).
     pub deck_templates: Vec<DeckTemplateDecl>,
+    /// Languages for the editor (`[[languages]]`, #512): what a file type
+    /// or a fence name is highlighted as, and its LSP server's command.
+    /// They go into the app's registry while the extension is on
+    /// (`Host::languages`, `EXT_LANGUAGES`).
+    ///
+    /// ```toml
+    /// [[languages]]
+    /// id = "keyflow"
+    /// name = "Keyflow chart"
+    /// extensions = ["kf"]
+    /// fences = ["kf"]
+    /// grammar = "grammars/keyflow.wasm"   # or "linked" for one compiled in
+    /// highlights = "queries/highlights.scm"
+    /// comment = "//"
+    /// [languages.server]                  # optional; carried, not started
+    /// command = "kf-lsp"
+    /// args = ["--stdio"]
+    /// ```
+    pub languages: Vec<LanguageDecl>,
     /// Kinds of tab in the tab bar: scope tabs and custom tabs
     /// (`[[tab_kinds]]`).
     pub tab_kinds: Vec<TabKindDecl>,
@@ -1085,10 +1111,10 @@ pub struct Contribution {
     pub tours: Vec<TourDecl>,
     /// Keys in the editor that run its actions (`[[keymaps]]`,
     /// `crate::editor`): `capabilities.writes = ["editor"]`.
-    pub keymaps: Vec<editor_ext::KeymapEntry>,
+    pub keymaps: Vec<architect_editor::ext::KeymapEntry>,
     /// Rows of the editor's slash menu that run its actions (`[[slash]]`):
     /// `capabilities.writes = ["editor"]`.
-    pub slash: Vec<editor_ext::SlashEntry>,
+    pub slash: Vec<architect_editor::ext::SlashEntry>,
 }
 
 /// What a contribution is checked against: its owner's namespace and
@@ -1185,6 +1211,7 @@ impl Contribution {
             deck_templates: join(&self.deck_templates, &other.deck_templates, |d| {
                 d.context.clone()
             }),
+            languages: join(&self.languages, &other.languages, |l| l.id.clone()),
             tab_kinds: join(&self.tab_kinds, &other.tab_kinds, |k| k.id.clone()),
             capture_targets: join(&self.capture_targets, &other.capture_targets, |c| {
                 c.id.clone()
@@ -1246,6 +1273,7 @@ impl Contribution {
                 .iter()
                 .map(|d| format!("deck_template:{}", d.context)),
         );
+        out.extend(self.languages.iter().map(|l| format!("language:{}", l.id)));
         out.extend(self.tab_kinds.iter().map(|k| format!("tab_kind:{}", k.id)));
         out.extend(
             self.capture_targets
@@ -1325,6 +1353,7 @@ impl Contribution {
             self.project_types.len(),
             self.navigator_providers.len(),
             self.deck_templates.len(),
+            self.languages.len(),
             self.tab_kinds.len(),
             self.capture_targets.len(),
             self.key_bindings.len(),
@@ -1599,6 +1628,16 @@ impl Contribution {
                 return refuse(what, "it needs `screenset`, a screenset's name".to_owned());
             }
         }
+        let mut language_ids = BTreeSet::new();
+        for l in &self.languages {
+            let what = format!("language {}", l.id);
+            if let Err(why) = l.check() {
+                return refuse(what, why);
+            }
+            if !language_ids.insert(l.id.as_str()) {
+                return refuse(what, "it is declared twice".to_owned());
+            }
+        }
         for k in &self.tab_kinds {
             let what = format!("tab kind {}", k.id);
             if k.id.is_empty() {
@@ -1754,7 +1793,7 @@ impl Contribution {
 }
 
 /// A keymap entry's key in a diff and a merge: its scope and key.
-fn keymap_key(k: &editor_ext::KeymapEntry) -> String {
+fn keymap_key(k: &architect_editor::ext::KeymapEntry) -> String {
     format!("{}/{}", k.when, k.key)
 }
 
@@ -2190,13 +2229,13 @@ impl Contributions {
     /// Every extension's keys in the editor (`[[keymaps]]`), in load
     /// order: `crate::editor::key_action` picks the one a key runs.
     #[must_use]
-    pub fn keymaps(&self) -> Vec<By<editor_ext::KeymapEntry>> {
+    pub fn keymaps(&self) -> Vec<By<architect_editor::ext::KeymapEntry>> {
         self.all(|c| c.keymaps.clone())
     }
 
     /// Every extension's slash-menu rows (`[[slash]]`).
     #[must_use]
-    pub fn slash(&self) -> Vec<By<editor_ext::SlashEntry>> {
+    pub fn slash(&self) -> Vec<By<architect_editor::ext::SlashEntry>> {
         self.all(|c| c.slash.clone())
     }
 
@@ -2430,6 +2469,18 @@ impl Contributions {
         self.all(|c| c.deck_templates.clone())
             .into_iter()
             .filter(|d| seen.insert(d.item.context.clone()))
+            .collect()
+    }
+
+    /// Every language an extension adds (`[[languages]]`), in the order
+    /// its owner came; the first for an id wins. The registry the editor
+    /// asks, with the app's own languages in it too, is `Host::languages`.
+    #[must_use]
+    pub fn languages(&self) -> Vec<By<LanguageDecl>> {
+        let mut seen = BTreeSet::new();
+        self.all(|c| c.languages.clone())
+            .into_iter()
+            .filter(|l| seen.insert(l.item.id.clone()))
             .collect()
     }
 

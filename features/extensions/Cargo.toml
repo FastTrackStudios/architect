@@ -149,9 +149,11 @@ pickers = ["ui", "dep:rfd"]
 remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
-# The editor's extension surface as data (`editor`): snapshots, edit
-# commands, keymaps, decorations, slash rows. serde only.
-editor-ext = { workspace = true }
+# The editor, through architect's door (#512): its extension surface as
+# data (`editor`: snapshots, edit commands, keymaps, decorations, slash
+# rows) and the language registry `[[languages]]` fills. The contract
+# only: serde, no tree-sitter, no Dioxus.
+architect-editor = { workspace = true }
 # Its theme tokens checked (the model); its themes into the app's store
 # (`host`), the theme to a process (`process`, `guest`), the host's
 # theme into a process view's document (`remote`).

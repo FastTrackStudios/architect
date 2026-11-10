@@ -802,6 +802,9 @@ struct Inner {
     themes: Mutex<Option<ThemeStore>>,
     /// Hears the theme change, for `theme.changed` hooks.
     theme_heard: Mutex<Option<architect_theme::Subscription>>,
+    /// The editor's language registry: the app's own languages
+    /// ([`Host::with_languages`]) and loaded extensions' `[[languages]]`.
+    languages: Mutex<architect_editor::Languages>,
     /// What loaded extensions add to the interface.
     contributions: Contributions,
     /// What starts an extension's tour: the app's ([`Host::on_tour`]).
@@ -885,6 +888,7 @@ impl Host {
                 listeners: Mutex::new(Vec::new()),
                 themes: Mutex::new(None),
                 theme_heard: Mutex::new(None),
+                languages: Mutex::new(architect_editor::Languages::new()),
                 contributions: Contributions::new(),
                 tour: Mutex::new(None),
                 toolbars: crate::toolbars::Toolbars::new(),
@@ -1361,6 +1365,32 @@ impl Host {
         self
     }
 
+    /// Puts loaded extensions' languages (`[[languages]]`) in `registry`,
+    /// the app's (with its own languages already in it, owner
+    /// `architect_editor::languages::APP`): in as each loads, replaced on
+    /// a reload, out as it unloads or is turned off. Without it the host
+    /// keeps a registry of its own.
+    #[must_use]
+    pub fn with_languages(self, registry: architect_editor::Languages) -> Self {
+        *self
+            .inner
+            .languages
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = registry;
+        self
+    }
+
+    /// The language registry the editor asks by file type or fence name:
+    /// the app's languages and every loaded extension's.
+    #[must_use]
+    pub fn languages(&self) -> architect_editor::Languages {
+        self.inner
+            .languages
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
     /// The theme store it puts extensions' themes in, when it has one.
     #[must_use]
     pub fn themes(&self) -> Option<ThemeStore> {
@@ -1642,6 +1672,17 @@ impl Host {
                 t.template_text = package.text(path).ok();
             }
         }
+        // A language's highlights query too; then its languages are the
+        // registry's, in place of what it registered before.
+        for l in &mut declared.languages {
+            if l.highlights_text.is_none()
+                && let Some(path) = &l.highlights
+            {
+                l.highlights_text = package.text(path).ok();
+            }
+        }
+        self.languages()
+            .set(&manifest.id, declared.languages.clone());
         for d in &mut declared.deck_templates {
             if d.layout_text.is_none()
                 && let Some(path) = &d.layout
@@ -1998,6 +2039,7 @@ impl Host {
         if let Some(store) = self.themes() {
             store.withdraw(id);
         }
+        self.languages().withdraw(id);
         self.inner.contributions.withdraw(id);
         self.inner.windows.close_all(id);
         self.services().forget(id);

@@ -67,6 +67,7 @@ members = [
     "features/navigator/extension",
     "features/navigator-api",
     "features/palette",
+    "features/editor",
     "features/palette/extension",
     "features/attachments",
     "features/spaces",
@@ -147,13 +148,20 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/FastTrackStudios/architect"
 
 [workspace.dependencies]
-# The editor's extension surface as data (FastTrackStudios/editor's
-# crates/editor-ext): what `architect-extensions`' editor calls carry, at
-# FastTrackStudios/editor#30's head (main after #28, with a task's
-# checkbox and a link pressed on Blitz), like the rest of the editor below.
+# The editor (FastTrackStudios/editor), which stays in its own repo. This
+# is the one pin of it: `architect-editor` (features/editor) re-exports
+# these crates, and everything else in architect, and every consumer of
+# architect, names `architect-editor` and not the editor repo (#512). The
+# revision is FastTrackStudios/editor#30's head (main after #28, with a
+# task's checkbox and a link pressed on Blitz). Move all four together,
+# with the `[patch]` table at the foot of this file.
+architect-editor = { path = "features/editor" }
+# Its extension surface as data: what extensions' editor calls carry.
 editor-ext = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-# The editor's view, for the lab's note editor (native, on Blitz). Its
-# source is patched to the pinned editor below, like Keyflow's.
+# Its tree-sitter highlighter (`architect-editor`'s `syntax`).
+editor-syntax = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
+# Its view (native, on Blitz, in the app's note editor). Its source is
+# patched to the pinned editor below, like Keyflow's.
 editor-view = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0", default-features = false }
 # SMTP for the auth server's verification and password-reset mail.
 # rustls, not native-tls, so the build carries no OpenSSL dependency.
@@ -182,8 +190,8 @@ links = { path = "features/links/links" }
 links-proto = { path = "features/links/links-proto", default-features = false }
 tag = { path = "features/tags/tag" }
 tag-proto = { path = "features/tags/tag-proto" }
-# The editor's markdown model (frontmatter, the vault lookup the editor
-# resolves links through), at the editor pin above.
+# The editor's document model and markdown pass, at the editor pin above
+# (through `architect-editor`'s `state`).
 editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0", default-features = false }
 walkdir = "2"
 futures = "0.3"

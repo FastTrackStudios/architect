@@ -1117,3 +1117,143 @@ fn a_window_opens_as_a_sheet_and_as_an_os_window() {
     assert!(ext.host().unload("lab.panels"));
     assert!(ext.host().open_windows().is_empty());
 }
+
+// ---- languages (#512) ---------------------------------------------------
+
+const LANGS: &str = r#"
+id = "lab.langs"
+name = "Languages"
+version = "0.1.0"
+kind = "data"
+
+[[languages]]
+id = "keyflow"
+name = "Keyflow chart"
+extensions = ["kf"]
+fences = ["kf"]
+grammar = "grammars/keyflow.wasm"
+highlights = "queries/highlights.scm"
+comment = "//"
+[languages.server]
+command = "kf-lsp"
+args = ["--stdio"]
+
+[[languages]]
+id = "ron"
+extensions = ["ron"]
+"#;
+
+#[test]
+fn languages_are_registered_while_the_extension_is_on() {
+    use architect_editor::languages::{APP, Grammar, Languages, builtin};
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    // The app's registry, with its own languages in it.
+    let registry = Languages::with_app(builtin());
+    let ext = Extensions::new(
+        host(&list).with_languages(registry.clone()),
+        Installs::new(tmp.path().join("i")),
+    );
+    ext.install_contribution_actions().unwrap();
+    assert!(registry.for_fence("kf").is_none());
+    let dir = tmp.path().join("langs");
+    std::fs::create_dir_all(dir.join("queries")).unwrap();
+    std::fs::write(dir.join("extension.toml"), LANGS).unwrap();
+    std::fs::write(dir.join("queries/highlights.scm"), "(comment) @comment\n").unwrap();
+    let _ = ext.dev(&dir);
+
+    // On: the editor's registry has it, by fence name and by file type.
+    let kf = registry
+        .for_fence("kf")
+        .expect("its language is registered");
+    assert_eq!(kf.owner, "lab.langs");
+    assert_eq!(kf.language.name, "Keyflow chart");
+    assert_eq!(
+        kf.language.grammar,
+        Grammar::File("grammars/keyflow.wasm".to_owned())
+    );
+    assert_eq!(
+        kf.language.highlights_text.as_deref(),
+        Some("(comment) @comment\n"),
+        "its query is read from its package when it loads"
+    );
+    assert_eq!(kf.language.comment.as_deref(), Some("//"));
+    let server = kf.language.server.expect("its server's command is carried");
+    assert_eq!(
+        (server.command.as_str(), server.args),
+        ("kf-lsp", vec!["--stdio".to_owned()])
+    );
+    assert_eq!(
+        registry.for_path("songs/a.kf").unwrap().language.id,
+        "keyflow"
+    );
+    assert_eq!(registry.for_path("x.ron").unwrap().owner, "lab.langs");
+    assert_eq!(ext.host().languages().get("rust").unwrap().owner, APP);
+    // The same through the action, beside the app's.
+    let all = run(&list, "EXT_LANGUAGES", Value::Null).unwrap();
+    let ids: Vec<&str> = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|l| l["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&"rust") && ids.contains(&"keyflow") && ids.contains(&"ron"),
+        "{ids:?}"
+    );
+    let one = run(&list, "EXT_LANGUAGES", json!({ "fence": "kf" })).unwrap();
+    assert_eq!(one["from"], "lab.langs");
+    assert_eq!(one["grammar"], "grammars/keyflow.wasm");
+    assert_eq!(one["server"]["command"], "kf-lsp");
+    assert_eq!(
+        run(&list, "EXT_LANGUAGES", json!({ "path": "main.rs" })).unwrap()["from"],
+        "app"
+    );
+    assert!(
+        ext.host()
+            .contributions()
+            .languages()
+            .iter()
+            .any(|l| l.item.id == "ron")
+    );
+
+    // Off: its languages go with it; the app's stay.
+    let before = registry.revision();
+    let _ = ext.disable("lab.langs");
+    assert!(
+        registry.for_fence("kf").is_none(),
+        "withdrawn when it is turned off"
+    );
+    assert!(registry.for_path("x.ron").is_none());
+    assert!(registry.revision() > before);
+    assert!(registry.get("rust").is_some());
+    assert!(
+        run(&list, "EXT_LANGUAGES", json!({ "id": "keyflow" }))
+            .unwrap()
+            .is_null()
+    );
+    assert!(ext.host().contributions().languages().is_empty());
+    // On again: back.
+    let _ = ext.enable("lab.langs");
+    assert_eq!(registry.for_fence("kf").unwrap().owner, "lab.langs");
+
+    // Checked at parse: an id it can write, files inside its package, a
+    // server with a command, an id once.
+    for (good, bad) in [
+        ("id = \"keyflow\"", "id = \"Key Flow\""),
+        (
+            "grammar = \"grammars/keyflow.wasm\"",
+            "grammar = \"../keyflow.wasm\"",
+        ),
+        (
+            "highlights = \"queries/highlights.scm\"",
+            "highlights = \"/etc/passwd\"",
+        ),
+        ("command = \"kf-lsp\"", "command = \"\""),
+        ("id = \"ron\"", "id = \"keyflow\""),
+    ] {
+        assert!(LANGS.contains(good), "{good}");
+        let text = LANGS.replacen(good, bad, 1);
+        assert!(Manifest::parse(&text).is_err(), "{bad}");
+    }
+}
