@@ -21,7 +21,9 @@
 #          `registry: FastTrackStudios/architect`, `registry-dir: extensions`
 #          (architect's `extension-index.yml` checks it).
 #
-# A caller (in the extension's repository, on its release tag):
+# A caller (in the extension's repository, on its release tag: an app's
+# own v* tags work, since a version the registry already lists is skipped
+# in seconds and only a version bump in extension.toml is released):
 #
 #   jobs:
 #     extension:
@@ -148,6 +150,7 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       matrix: ${{ steps.plan.outputs.matrix }}
       native: ${{ steps.plan.outputs.native }}
+      listed: ${{ steps.listed.outputs.listed }}
     steps:
       - uses: actions/checkout@v4
       - name: Read the manifest
@@ -187,10 +190,37 @@ jobs:
           print("matrix=" + json.dumps({"include": include}))
           PY
           cat "$GITHUB_OUTPUT"
+      # Released with every release of its repository (an app's v* tags):
+      # a version the registry already lists is not built, signed or
+      # uploaded again, so only a version bump in extension.toml ships.
+      - name: Already in the registry?
+        id: listed
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          BRANCH: ${{ inputs.registry-branch }}
+          DIR: ${{ inputs.registry-dir }}
+          ID: ${{ steps.plan.outputs.id }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          listed=false
+          if [ -n "$REGISTRY" ]; then
+            index="${DIR:+$DIR/}index.toml"
+            if curl -fsSL --retry 3 -o "$RUNNER_TEMP/index.toml" \
+                "https://raw.githubusercontent.com/$REGISTRY/$BRANCH/$index"; then
+              listed="$(python3 -c 'import os, tomllib
+          i = tomllib.load(open(os.environ["RUNNER_TEMP"] + "/index.toml", "rb"))
+          print(str(any(e.get("id") == os.environ["ID"] and e.get("version") == os.environ["VERSION"] for e in i.get("extensions", []))).lower())')"
+            fi
+          fi
+          echo "listed=$listed" >> "$GITHUB_OUTPUT"
+          if [ "$listed" = true ]; then
+            echo "::notice::$ID $VERSION is already in $REGISTRY's index: nothing to release (bump its version in extension.toml to ship a new one)"
+          fi
 
   build:
     needs: plan
-    if: needs.plan.outputs.native == 'true'
+    if: needs.plan.outputs.native == 'true' && needs.plan.outputs.listed != 'true'
     strategy:
       fail-fast: true
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -226,7 +256,7 @@ jobs:
   pack:
     needs: [plan, build]
     # `build` is skipped for a platform-neutral extension.
-    if: always() && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.listed != 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -331,8 +361,13 @@ jobs:
           NOTES: ${{ inputs.changelog }}
         run: |
           set -euo pipefail
-          # The tag's Release, made here when the repository's own release
-          # workflow makes none for this tag (an extension's own tag).
+          # The tag's Release: the repository's own release workflow's (an
+          # app's v* tag) when it makes one, waited for; made here when
+          # there is still none after ten minutes (an extension's own tag).
+          for _ in $(seq 1 20); do
+            gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 && break
+            sleep 30
+          done
           if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TITLE" \
               --notes "${NOTES:-$TITLE}"
