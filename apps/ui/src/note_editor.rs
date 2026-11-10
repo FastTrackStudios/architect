@@ -1,5 +1,5 @@
 //! The lab's note editor (#312): a Vault note's Markdown in the
-//! `FastTrackStudios` editor (`editor_view::Editor`, native), worked by
+//! `FastTrackStudios` editor (`architect_editor::ui::Editor`, native), worked by
 //! extensions through the host service's editor calls
 //! (`architect_extensions::editor`).
 //!
@@ -7,20 +7,20 @@
 //! being edited, kept in step with it ([`LiveEditor`]); a command an
 //! extension sends is made a transaction against it at once (so it answers
 //! with the editor after), then applied in the editor through the history
-//! the editor was given (`editor_view::dispatch_with_history`): one undo
+//! the editor was given (`architect_editor::ui::dispatch_with_history`): one undo
 //! step beside the person's own typing. Its decorations are kept here,
 //! moved through every edit, and drawn by the editor
-//! (`editor_state::ext::decorations`); a widget mounts the extension's
+//! (`architect_editor::state::ext::decorations`); a widget mounts the extension's
 //! embed (`architect_extensions::embeds::WidgetView`).
 //!
 //! The editor asks for every key it would handle first: an extension's
 //! `[[keymaps]]` entry for it at the cursor runs its action
-//! (`editor_state::ext::resolve_key`). Its `[[slash]]` rows are in the
+//! (`architect_editor::state::ext::resolve_key`). Its `[[slash]]` rows are in the
 //! slash menu (`\`), and its toolbars of `when = "editor:note"` on the
 //! Typing Toolbar while the note is typed in.
 //!
 //! The note is drawn as the editor draws Markdown
-//! (`editor_state::markdown::live_preview_with`, Obsidian's live preview:
+//! (`architect_editor::state::markdown::live_preview_with`, Obsidian's live preview:
 //! a line's markup shows while the caret is on it), its `[[links]]`
 //! resolved against the vault ([`NoteVault`]) and its embedded images
 //! read from it. Before #442 it was given only the extensions'
@@ -39,17 +39,17 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effect, Principal};
+use architect_editor::state::markdown::{VaultBlockHit, VaultLookup, VaultPageHit};
+use architect_editor::state::{
+    DecoratedRange, DecorationKind, EditorState, History, KeySpec, Keymap, TransactionSpec, ext,
+};
+use architect_editor::ui::palette::{CommandPalette, PaletteState};
+use architect_editor::ui::{DecorationSource, Editor, TransactionEvent, WidgetMounts};
 use architect_extensions::contrib::Claim;
 use architect_extensions::editor::{DecorationSpec, EditCommand, EditorError, EditorView, Editors};
 use architect_extensions::embeds::{EmbedView, WidgetView};
 use architect_extensions::interface::ExtensionUi;
 use dioxus::prelude::*;
-use editor_view::editor_state::markdown::{VaultBlockHit, VaultLookup, VaultPageHit};
-use editor_view::editor_state::{
-    DecoratedRange, DecorationKind, EditorState, History, KeySpec, Keymap, TransactionSpec, ext,
-};
-use editor_view::palette::{CommandPalette, PaletteState};
-use editor_view::{DecorationSource, Editor, TransactionEvent, WidgetMounts};
 use facet::Facet;
 use futures_util::StreamExt as _;
 
@@ -169,9 +169,9 @@ impl LiveEditor {
     fn select(&self, anchor: usize, head: usize) -> Result<(), EditorError> {
         let mut i = lock(&self.inner);
         let len = i.state.as_ref().ok_or(EditorError::NoEditor)?.doc.len();
-        let range = editor_view::editor_state::Range::new(anchor.min(len), head.min(len));
+        let range = architect_editor::state::Range::new(anchor.min(len), head.min(len));
         let spec =
-            TransactionSpec::new().selection(editor_view::editor_state::Selection::single(range));
+            TransactionSpec::new().selection(architect_editor::state::Selection::single(range));
         let out = Self::push(&mut i, spec);
         drop(i);
         out
@@ -239,13 +239,19 @@ impl Editors for Live {
 }
 
 /// The person's undo and redo, through the editor's history (a keymap's
-/// command: `editor_state::Command` returns an `Option`).
-#[expect(clippy::unnecessary_wraps, reason = "an editor_state::Command")]
+/// command: `architect_editor::state::Command` returns an `Option`).
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "an architect_editor::state::Command"
+)]
 fn undo(_: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().user_event("undo"))
 }
 
-#[expect(clippy::unnecessary_wraps, reason = "an editor_state::Command")]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "an architect_editor::state::Command"
+)]
 fn redo(_: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().user_event("redo"))
 }
@@ -303,7 +309,7 @@ pub fn replace_spec(old: &str, new: &str) -> Option<TransactionSpec> {
     let inserted = new.get(start..new_end)?;
     Some(
         TransactionSpec::new()
-            .changes(editor_view::editor_state::Changes::replace(
+            .changes(architect_editor::state::Changes::replace(
                 start..old_end,
                 inserted,
             ))
@@ -337,7 +343,7 @@ impl NoteVault {
         let mut out = self
             .0
             .vault()
-            .with(|v| editor_view::editor_state::markdown::live_preview_with(s, Some(&Lookup(v))));
+            .with(|v| architect_editor::state::markdown::live_preview_with(s, Some(&Lookup(v))));
         for d in &mut out {
             if let DecorationKind::Widget { html } = &mut d.kind
                 && html.contains("md-embed-image")
@@ -497,7 +503,7 @@ pub fn NoteEditor(
             applied.set(n);
             let now = state.peek().doc.to_string();
             if let Some(spec) = replace_spec(&now, &new) {
-                editor_view::dispatch_with_history(state, history, spec, None);
+                architect_editor::ui::dispatch_with_history(state, history, spec, None);
             }
         }
     }));
@@ -511,7 +517,7 @@ pub fn NoteEditor(
             let (pending, flat) = LIVE.take();
             let edited = !pending.is_empty();
             for spec in pending {
-                editor_view::dispatch_with_history(state, history, spec, None);
+                architect_editor::ui::dispatch_with_history(state, history, spec, None);
             }
             decos.set(flat);
             if edited {
@@ -542,7 +548,7 @@ pub fn NoteEditor(
         .unwrap_or_default();
     let mut registered = use_signal(Vec::<ext::SlashEntry>::new);
     if *registered.peek() != slash {
-        editor_view::palette::register_actions(&slash);
+        architect_editor::ui::palette::register_actions(&slash);
         registered.set(slash);
     }
     let run = move |action: String| {
@@ -586,7 +592,7 @@ pub fn NoteEditor(
             let specs: Vec<DecorationSpec> = decos.read().iter().map(|(_, d)| d.clone()).collect();
             let text = s.doc.to_string();
             let mut out = vault.as_ref().map_or_else(
-                || editor_view::editor_state::markdown::live_preview(s),
+                || architect_editor::state::markdown::live_preview(s),
                 |v| v.preview(s),
             );
             out.extend(ext::decorations(&specs, &text));
@@ -630,7 +636,15 @@ pub fn NoteEditor(
         .with("Mod-z", undo)
         .with("Mod-Shift-z", redo)
         .with("Mod-y", redo);
-    let css = use_hook(|| format!("{}\n{LAYOUT}", editor_view::EDITOR_CSS));
+    // The editor's sheet, then its token classes pointed at the theme's
+    // `syntax.*` tokens, so a fence's highlighting follows the theme.
+    let css = use_hook(|| {
+        format!(
+            "{}\n{}\n{LAYOUT}",
+            architect_editor::ui::EDITOR_CSS,
+            architect_editor::theme::css()
+        )
+    });
     // Gone (Done, another note): typing is what the host says again.
     use_drop(|| architect_shell::set_typing(dioxus_native::text_input_focused()));
     rsx! {
