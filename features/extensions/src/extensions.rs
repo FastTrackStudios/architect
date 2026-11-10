@@ -43,6 +43,9 @@ struct Inner {
     failed: Arc<Mutex<std::collections::BTreeMap<String, LoadError>>>,
     /// Development copies built from source (`crate::source`).
     builds: crate::source::Builds,
+    /// The registries a person adds and the development switch
+    /// (`crate::registries`), when the app keeps them.
+    registries: Mutex<Option<crate::registries::Registries>>,
 }
 
 /// The topic of the `Changed` event a person installing or turning on an
@@ -112,6 +115,7 @@ impl Extensions {
                 dev_root: Mutex::new(None),
                 failed,
                 builds: crate::source::Builds::default(),
+                registries: Mutex::new(None),
             }),
         }
     }
@@ -125,6 +129,42 @@ impl Extensions {
 
     pub fn add_source(&self, source: impl Source + 'static) {
         lock(&self.inner.sources).push(Arc::new(source));
+    }
+
+    /// Searches and installs from `registries` too (the store's index and
+    /// the ones a person adds, each trusting its own publishers' keys),
+    /// and puts `EXT_REGISTRY_*` and `EXT_DEV` on the list
+    /// ([`Self::install_actions`]); the development folders it keeps are
+    /// loaded when development installs are on.
+    #[must_use]
+    pub fn with_registries(self, registries: crate::registries::Registries) -> Self {
+        if registries.dev_installs() {
+            lock(&self.inner.dev).extend(
+                registries
+                    .dev_folders()
+                    .into_iter()
+                    .filter(|d| d.join(crate::manifest::MANIFEST).is_file()),
+            );
+        }
+        *lock(&self.inner.registries) = Some(registries);
+        self
+    }
+
+    /// The registries the app keeps, when it keeps them.
+    #[must_use]
+    pub fn registries(&self) -> Option<crate::registries::Registries> {
+        lock(&self.inner.registries).clone()
+    }
+
+    /// Every publisher key a registry trusts: what a `.archext` from a
+    /// file is checked against, past [`Installs::trust`].
+    #[must_use]
+    pub fn publishers(&self) -> architect_extension_archive::Trust {
+        self.sources()
+            .iter()
+            .fold(architect_extension_archive::Trust::none(), |t, s| {
+                t.and(&s.trust())
+            })
     }
 
     /// A first-party extension linked into the build: it runs unless a
@@ -172,7 +212,11 @@ impl Extensions {
     }
 
     fn sources(&self) -> Vec<Arc<dyn Source>> {
-        lock(&self.inner.sources).clone()
+        let mut sources = lock(&self.inner.sources).clone();
+        if let Some(r) = self.registries() {
+            sources.extend(r.sources());
+        }
+        sources
     }
 
     /// Brings every registry up to date: the ones that failed, and why.

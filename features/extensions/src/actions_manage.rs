@@ -306,6 +306,20 @@ impl Extensions {
         };
         list.set_confirm("EXT_INSTALL", grants);
         list.set_confirm("EXT_INSTALL_FILE", grants);
+        // A new publisher's key, or unsigned code allowed in (#493).
+        list.set_confirm("EXT_REGISTRY_ADD", |args: &[u8]| {
+            serde_json::from_slice::<Value>(args)
+                .ok()
+                .and_then(|v| v.get("keys").cloned())
+                .and_then(|k| k.as_array().map(|a| !a.is_empty()))
+                .unwrap_or(false)
+        });
+        list.set_confirm("EXT_DEV_INSTALLS", |args: &[u8]| {
+            serde_json::from_slice::<Value>(args)
+                .ok()
+                .and_then(|v| v.get("on").and_then(Value::as_bool))
+                .unwrap_or(false)
+        });
     }
 
     /// Puts the management actions on the host's list.

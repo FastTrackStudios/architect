@@ -11,6 +11,11 @@
 //! | `EXT_RELOAD` | reloads every extension whose files changed |
 //! | `EXT_CHECK` | loads a folder once on its own and renders its views once: `ok`, or the exact error (`crate::check`) |
 //! | `EXT_CLONE` | copies a built-in or installed one into the development folder under a new id (`crate::clone`) |
+//!
+//! Where the app keeps registries (`Extensions::with_registries`), also
+//! `EXT_REGISTRIES`, `EXT_REGISTRY_ADD`, `EXT_REGISTRY_REMOVE`,
+//! `EXT_REGISTRY_REFRESH`, `EXT_DEV`, `EXT_DEV_END` and
+//! `EXT_DEV_INSTALLS` (`crate::registries`).
 
 use architect::action::{ActionCaller, ActionError, ActionMeta, Effect, RawJson};
 use facet::Facet;
@@ -252,6 +257,7 @@ impl Extensions {
             },
         )?;
         self.install_manage_actions()?;
+        self.install_registry_actions()?;
         let me = self.clone();
         list.register_with(
             &RELOAD,

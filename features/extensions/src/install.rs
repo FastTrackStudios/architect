@@ -571,6 +571,7 @@ pub struct Installs {
 struct OneArchive {
     from: String,
     bytes: Vec<u8>,
+    trust: Trust,
 }
 
 impl Source for OneArchive {
@@ -588,6 +589,10 @@ impl Source for OneArchive {
 
     fn fetch(&self, _: &Listing, _: &Path) -> Result<Fetched, InstallError> {
         Ok(Fetched::Archive(self.bytes.clone()))
+    }
+
+    fn trust(&self) -> Trust {
+        self.trust.clone()
     }
 }
 
@@ -662,11 +667,27 @@ impl Installs {
         bytes: &[u8],
         from: &str,
     ) -> Result<(Verified, Manifest, Listing), InstallError> {
+        self.read_archive_trusting(bytes, from, &Trust::none())
+    }
+
+    /// [`Self::read_archive`], trusting `publishers` too (the keys the
+    /// app's registries carry, `crate::registries`).
+    ///
+    /// # Errors
+    ///
+    /// It is refused ([`InstallError::Archive`]), or its manifest is.
+    pub fn read_archive_trusting(
+        &self,
+        bytes: &[u8],
+        from: &str,
+        publishers: &Trust,
+    ) -> Result<(Verified, Manifest, Listing), InstallError> {
         let v = self.open_archive(
             bytes,
             &OneArchive {
                 from: from.to_owned(),
                 bytes: Vec::new(),
+                trust: publishers.clone(),
             },
         )?;
         let text = v
@@ -686,11 +707,26 @@ impl Installs {
     /// It is refused, has no build for this platform, or cannot be
     /// written.
     pub fn install_archive(&self, bytes: Vec<u8>, from: &str) -> Result<Install, InstallError> {
-        let (_, _, listing) = self.read_archive(&bytes, from)?;
+        self.install_archive_trusting(bytes, from, &Trust::none())
+    }
+
+    /// [`Self::install_archive`], trusting `publishers` too.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::install_archive`].
+    pub fn install_archive_trusting(
+        &self,
+        bytes: Vec<u8>,
+        from: &str,
+        publishers: &Trust,
+    ) -> Result<Install, InstallError> {
+        let (_, _, listing) = self.read_archive_trusting(&bytes, from, publishers)?;
         self.install(
             &OneArchive {
                 from: from.to_owned(),
                 bytes,
+                trust: publishers.clone(),
             },
             &listing,
         )
