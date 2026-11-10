@@ -37,6 +37,11 @@ mod dock;
 mod group;
 mod manage;
 mod overlay;
+#[cfg(feature = "presence")]
+mod pane_presence;
+#[cfg(not(feature = "presence"))]
+#[path = "pane_presence_off.rs"]
+mod pane_presence;
 mod presence;
 mod screens;
 mod slide;
@@ -63,7 +68,9 @@ use crate::screenset::{FormClass, Screensets};
 use dock::DockView;
 use group::NodeView;
 use overlay::{DragLayer, DropHighlight, FloatView, MenuLayer, PhoneBody, SheetLayer};
-pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
+#[cfg(feature = "presence")]
+pub use pane_presence::{PaneRoom, use_pane_room, use_pane_space, use_pane_subject};
+pub use presence::{PresenceLayer, PresenceMarksLayer, PresenceOverlay, use_presence_overlay};
 
 pub use actions::{Opened, WorkspaceActions};
 pub use deck::{

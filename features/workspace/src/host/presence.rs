@@ -50,7 +50,13 @@ pub fn use_presence_overlay() -> PresenceOverlay {
 /// pointers with their names.
 #[component]
 pub fn PresenceLayer(overlay: PresenceOverlay) -> Element {
-    let marks = overlay.marks();
+    rsx! { PresenceMarksLayer { marks: overlay.marks() } }
+}
+
+/// Draws `marks` over the pane: what [`PresenceLayer`] draws, for a
+/// caller that has the marks already.
+#[component]
+pub fn PresenceMarksLayer(marks: PresenceMarks) -> Element {
     if marks.is_empty() {
         return rsx! {};
     }

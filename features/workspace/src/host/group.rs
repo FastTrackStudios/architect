@@ -993,6 +993,18 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
         current.set(pane.clone());
     }
     let kind = host.workspace.read().pane(&pane).map(|p| p.view.0.clone());
+    // The others' pointers over it, and this person's in it (feature
+    // `presence`, inside a `PaneRoom`; nothing otherwise).
+    let track = super::pane_presence::use_pane_track();
+    let shown_kind = kind.clone().unwrap_or_default();
+    let shown_title = host
+        .workspace
+        .read()
+        .pane(&pane)
+        .map(|p| p.title.clone())
+        .unwrap_or_default();
+    let (over, over_kind, over_title) = (pane.clone(), shown_kind.clone(), shown_title.clone());
+    let under = pane.clone();
     // While a field in it is typed in, its view kind is a context the
     // phone's Typing Toolbar is in (a toolbar's `when = "view:<kind>"`).
     let typing =
@@ -1036,7 +1048,14 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
             },
             onfocusin: move |_| typing.focus(),
             onfocusout: move |_| typing.blur(),
+            onmounted: move |e| track.mounted(e.data()),
+            onpointermove: move |e| {
+                let p = e.data().client_coordinates();
+                track.moved(&over, &over_kind, &over_title, p.x, p.y);
+            },
+            onpointerleave: move |_| track.left(),
             {body}
+            super::pane_presence::PaneCursors { pane: under, kind: shown_kind, title: shown_title, track }
         }
     }
 }
