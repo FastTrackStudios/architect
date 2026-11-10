@@ -26,7 +26,7 @@ default = []
 # List, a document and its history. Wasm-clean, no Dioxus.
 ctx = ["dep:architect", "dep:crdt", "dep:architect-theme"]
 # Cursors that come with the pane (`pane_space`): the spaces others'
-# pointers are placed in, and the `PRESENCE_*` actions. With `ui`, every
+# pointers are placed in, and the `CURSORS_*` actions. With `ui`, every
 # pane publishes and draws pointers when the app provides a `PaneRoom`.
 presence = ["actions", "dep:crdt"]
 # Every operation as an Action List action with an explicit target

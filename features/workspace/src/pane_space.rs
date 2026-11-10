@@ -11,7 +11,7 @@
 //!
 //! No Dioxus here: [`marks`] turns a [`Roster`] into the [`PresenceMarks`]
 //! a pane draws, and [`PresenceBoard`] is what the Action List's
-//! `PRESENCE_*` actions and the host share, so an extension in any runtime
+//! `CURSORS_*` actions and the host share, so an extension in any runtime
 //! (process, WASI, a page, Luau) declares a space, publishes a place and
 //! reads who is here by running actions.
 
@@ -112,7 +112,7 @@ impl Axis {
         if along < 0.0 {
             return None;
         }
-        let key = self.keys.iter().nth(lane_index(along)?)?;
+        let key = self.keys.get(lane_index(along, self.keys.len())?)?;
         Some(
             place
                 .with(self.coord.clone(), key.as_str())
@@ -136,18 +136,14 @@ impl Axis {
     }
 }
 
-/// The lane a distance (in lanes) falls in.
-fn lane_index(along: f64) -> Option<usize> {
-    // A pane is never millions of lanes tall; past that it is not a lane.
-    if !(0.0..1_000_000.0).contains(&along) {
+/// The lane of `count` a distance (in lanes) falls in.
+fn lane_index(along: f64, count: usize) -> Option<usize> {
+    if along < 0.0 {
         return None;
     }
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "checked to be in 0..1e6 just above"
-    )]
-    Some(along.floor() as usize)
+    (0..count).find(|&lane| {
+        u32::try_from(lane).is_ok_and(|n| along < f64::from(n) + 1.0)
+    })
 }
 
 /// How a pane's pixels and a space's coordinates meet.
@@ -342,7 +338,7 @@ impl From<&PlaceArg> for Place {
     }
 }
 
-/// One person, as `PRESENCE_ROSTER` tells them.
+/// One person, as `CURSORS_ROSTER` tells them.
 #[derive(Debug, Clone, PartialEq, Default, Facet)]
 pub struct PersonHere {
     pub peer: String,
@@ -354,7 +350,7 @@ pub struct PersonHere {
     pub pointer: Option<PlaceArg>,
 }
 
-/// Everyone else, as `PRESENCE_ROSTER` answers.
+/// Everyone else, as `CURSORS_ROSTER` answers.
 #[derive(Debug, Clone, PartialEq, Default, Facet)]
 pub struct RosterAnswer {
     /// Goes up whenever the people or their places change: ask again
@@ -401,8 +397,9 @@ struct Board {
     outbox: Vec<Option<Place>>,
 }
 
-/// What the `PRESENCE_*` actions and the host that draws the panes share:
-/// the spaces views declared (by action or by hook), the roster as last
+/// What the `CURSORS_*` actions and the host that draws the panes share.
+///
+/// The spaces views declared (by action or by hook), the roster as last
 /// seen, and the places an action asked to publish. Cloning shares it.
 #[derive(Clone, Default)]
 pub struct PresenceBoard(Arc<Mutex<Board>>);
@@ -417,7 +414,7 @@ impl PresenceBoard {
         let mut board = self.lock();
         if board.spaces.get(pane) != Some(&space) {
             board.spaces.insert(pane.to_owned(), space);
-            board.spaces_revision += 1;
+            board.spaces_revision = board.spaces_revision.wrapping_add(1);
         }
     }
 
@@ -425,7 +422,7 @@ impl PresenceBoard {
     pub fn undeclare(&self, pane: &str) {
         let mut board = self.lock();
         if board.spaces.remove(pane).is_some() {
-            board.spaces_revision += 1;
+            board.spaces_revision = board.spaces_revision.wrapping_add(1);
         }
     }
 
@@ -441,13 +438,13 @@ impl PresenceBoard {
         self.lock().spaces_revision
     }
 
-    /// The host saw `roster`: what `PRESENCE_ROSTER` answers from now.
+    /// The host saw `roster`: what `CURSORS_ROSTER` answers from now.
     pub fn saw(&self, roster: &Roster) {
         let people = people(roster, None);
         let mut board = self.lock();
         if board.people != people {
             board.people = people;
-            board.people_revision += 1;
+            board.people_revision = board.people_revision.wrapping_add(1);
         }
     }
 
@@ -486,16 +483,18 @@ impl PresenceBoard {
 
 // ── the actions ─────────────────────────────────────────────────────────
 
-/// The presence actions' ids.
+/// The cursor actions' ids. `CURSORS_`, not `PRESENCE_`: that prefix is
+/// `architect-presence`'s (the app in the Dock and the tray), and an
+/// extension granted one must not get the other.
 pub mod ids {
     /// Who else is here, and where their pointers are.
-    pub const ROSTER: &str = "PRESENCE_ROSTER";
+    pub const ROSTER: &str = "CURSORS_ROSTER";
     /// A pane's view declares its space.
-    pub const SPACE_SET: &str = "PRESENCE_SPACE_SET";
+    pub const SPACE_SET: &str = "CURSORS_SPACE_SET";
     /// A pane goes back to its default space.
-    pub const SPACE_CLEAR: &str = "PRESENCE_SPACE_CLEAR";
+    pub const SPACE_CLEAR: &str = "CURSORS_SPACE_CLEAR";
     /// Publish this person's pointer at a place.
-    pub const HERE: &str = "PRESENCE_HERE";
+    pub const HERE: &str = "CURSORS_HERE";
     pub const ALL: &[&str] = &[ROSTER, SPACE_SET, SPACE_CLEAR, HERE];
 }
 
@@ -511,7 +510,7 @@ const fn meta(
         display_name,
         description,
         category: "Workspace",
-        group: "Presence",
+        group: "Cursors",
         shortcut: "",
         toggleable: false,
         undo: false,
@@ -539,14 +538,14 @@ static HERE_META: ActionMeta = meta(
     "Publishes this person's pointer at `place` (a space and its coordinates) for everyone else to draw; with no `place` the pointer is withdrawn. For a view that draws its own surface and knows where the pointer is in its own coordinates. A pane publishes its pointer by itself; most views never run this.",
 );
 
-/// `PRESENCE_ROSTER`'s arguments.
+/// `CURSORS_ROSTER`'s arguments.
 #[derive(Debug, Clone, Default, Facet)]
 pub struct RosterArgs {
     #[facet(default)]
     pub space: Option<String>,
 }
 
-/// `PRESENCE_SPACE_SET`'s arguments.
+/// `CURSORS_SPACE_SET`'s arguments.
 #[derive(Debug, Clone, Default, Facet)]
 pub struct SpaceArgs {
     pub pane: String,
@@ -555,13 +554,13 @@ pub struct SpaceArgs {
     pub y: Axis,
 }
 
-/// `PRESENCE_SPACE_CLEAR`'s arguments.
+/// `CURSORS_SPACE_CLEAR`'s arguments.
 #[derive(Debug, Clone, Default, Facet)]
 pub struct PaneArg {
     pub pane: String,
 }
 
-/// `PRESENCE_HERE`'s arguments.
+/// `CURSORS_HERE`'s arguments.
 #[derive(Debug, Clone, Default, Facet)]
 pub struct HereArgs {
     #[facet(default)]

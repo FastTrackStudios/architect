@@ -7,7 +7,7 @@
 //! zooms declares its space ([`use_pane_space`]); one that only needs the
 //! others to land on the same thing names its subject
 //! ([`use_pane_subject`]). An extension in another runtime does the same
-//! with the `PRESENCE_*` actions ([`crate::pane_space::register`]).
+//! with the `CURSORS_*` actions ([`crate::pane_space::register`]).
 //!
 //! ```ignore
 //! let room = use_pane_room(|| PaneRoom::new(here, roster, board, crdt::presence::clock_ms));
@@ -44,7 +44,7 @@ pub struct PaneRoom {
 
 impl PaneRoom {
     /// A room over `here` (this person on a presence channel) and
-    /// `roster` (everyone else on it). `board` is what the `PRESENCE_*`
+    /// `roster` (everyone else on it). `board` is what the `CURSORS_*`
     /// actions were registered over; `clock` the local clock in
     /// milliseconds (`crdt::presence::clock_ms`).
     pub fn new<S: PresenceSink + Clone + 'static>(
@@ -90,8 +90,8 @@ impl PaneRoom {
 }
 
 /// Provide `make`'s room to every pane under the caller, and keep the
-/// actions' side current: what `PRESENCE_HERE` published is sent, and
-/// `PRESENCE_ROSTER` answers from the roster as it is.
+/// actions' side current: what `CURSORS_HERE` published is sent, and
+/// `CURSORS_ROSTER` answers from the roster as it is.
 pub fn use_pane_room(make: impl FnOnce() -> PaneRoom) -> PaneRoom {
     let room = use_context_provider(make);
     let driven = room.clone();
@@ -119,7 +119,7 @@ pub fn use_pane_space(space: ViewSpace) {
         return;
     };
     room.board.declare(&pane.0, space);
-    let board = room.board.clone();
+    let board = room.board;
     use_drop(move || board.undeclare(&pane.0));
 }
 
@@ -221,11 +221,12 @@ impl PaneTrack {
         (room.send)(place);
     }
 
-    /// The pointer left the pane.
-    pub(super) fn left(self) {
-        if let Some(room) = try_consume_context::<PaneRoom>() {
-            (room.send)(None);
-        }
+}
+
+/// The pointer left a pane.
+pub(super) fn pointer_left() {
+    if let Some(room) = try_consume_context::<PaneRoom>() {
+        (room.send)(None);
     }
 }
 
@@ -260,7 +261,7 @@ fn Cursors(pane: PaneId, kind: String, title: String, track: PaneTrack) -> Eleme
                 let revision = room.board.spaces_revision();
                 if moving || revision != spaces {
                     spaces = revision;
-                    frame += 1;
+                    frame.with_mut(|f| *f = f.wrapping_add(1));
                 }
                 // The pane this person is in is what they look at.
                 let (pane, kind, title) = shown.peek().clone();
@@ -272,7 +273,7 @@ fn Cursors(pane: PaneId, kind: String, title: String, track: PaneTrack) -> Eleme
                 // their pointer is right after a split moved.
                 ticks = ticks.wrapping_add(1);
                 let unmeasured = track.rect.peek().is_none();
-                if (unmeasured || ticks % 20 == 0) && !room.roster.peek().peers.is_empty() {
+                if (unmeasured || ticks.is_multiple_of(20)) && !room.roster.peek().peers.is_empty() {
                     track.measure(now);
                 }
                 let wait = if moving { 16 } else { 50 };

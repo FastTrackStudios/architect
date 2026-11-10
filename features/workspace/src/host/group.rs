@@ -1055,7 +1055,7 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
                 let p = e.data().client_coordinates();
                 track.moved(&over, &over_kind, &over_title, p.x, p.y);
             },
-            onpointerleave: move |_| track.left(),
+            onpointerleave: move |_| super::pane_presence::pointer_left(),
             {body}
             super::pane_presence::PaneCursors { pane: under, kind: shown_kind, title: shown_title, track }
         }
