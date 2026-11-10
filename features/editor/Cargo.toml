@@ -36,7 +36,10 @@ stories = ["ui", "dep:architect-story-runtime", "dep:architect-theme", "dep:link
 # The editor's LSP client (`lsp`): `editor-lsp`'s client and the
 # diagnostics types. Native only: on wasm the feature compiles to
 # nothing.
-lsp = ["state", "dep:editor-lsp"]
+lsp = ["state", "dep:editor-lsp", "dep:tokio", "dep:futures"]
+# A stub language server for tests (`lsp::stub`): initialize, one
+# diagnostic, one hover, one completion, a format, a rename, a definition.
+lsp-stub = ["lsp", "dep:serde_json"]
 # The editor's Typst and Mermaid fence renderers are not offered here yet:
 # they would put a Typst compiler in every consumer's lockfile.
 
@@ -55,11 +58,19 @@ serde = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 editor-lsp = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 # tests/story.rs: the story played headlessly on Blitz.
 architect-guide = { workspace = true, features = ["story"] }
 tempfile = "3"
+# tests/lsp_view.rs: the guide's app takes an Action List.
+architect = { workspace = true, features = ["action-list"] }
+dioxus = { workspace = true }
+# tests/lsp.rs: the servers' runtime, and the stub server's watch streams.
+tokio = { workspace = true }
+futures = { workspace = true }
 # tests/theme.rs: the syntax tokens resolved by a theme store.
 architect-theme = { workspace = true }
 serde_json = { workspace = true }
@@ -67,6 +78,16 @@ toml = { workspace = true }
 
 [lib]
 doctest = false
+
+[[test]]
+name = "lsp"
+harness = false
+required-features = ["lsp-stub"]
+
+[[test]]
+name = "lsp_view"
+harness = false
+required-features = ["lsp-stub", "native"]
 
 [[test]]
 name = "story"
