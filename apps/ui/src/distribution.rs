@@ -17,10 +17,11 @@ use std::sync::OnceLock;
 
 pub use architect_distribution::{Bundle, Distribution, Icon, architect};
 
-/// The dev sandbox: the Architect app on made-up data (the Inbox, Tasks,
-/// Schedule, the Board and the Clicker), for framework demos, goldens,
-/// scenarios and films. Compiled in: the Board (`apps/sandbox/board`)
-/// and the setlists decks demo (#441).
+/// The dev sandbox: the Architect app on made-up data.
+///
+/// Its Inbox, Tasks, Schedule, the Board and the Clicker, for framework
+/// demos, goldens, scenarios and films. Compiled in: the Board
+/// (`apps/sandbox/board`) and the setlists decks demo (#441).
 #[must_use]
 pub fn sandbox() -> Distribution {
     Distribution::new("Architect Sandbox")

@@ -123,7 +123,7 @@ fn no_old_folder_means_nothing_to_copy() {
     assert!(!app.exists());
 }
 
-/// A linked extension whose embed page draws ```chord fences.
+/// A linked extension whose embed page draws `chord` fences.
 struct Chord;
 
 impl architect_extensions::linked::Extension for Chord {

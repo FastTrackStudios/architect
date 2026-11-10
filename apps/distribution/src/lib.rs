@@ -478,7 +478,7 @@ impl Distribution {
                 Ok(Some(renderer)) => blocks.add(Arc::new(renderer)),
                 Ok(None) => {}
                 Err(error) => {
-                    tracing::warn!(%error, "a linked extension's embed pages did not load")
+                    tracing::warn!(%error, "a linked extension's embed pages did not load");
                 }
             }
         }

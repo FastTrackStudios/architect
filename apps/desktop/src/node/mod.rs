@@ -196,18 +196,21 @@ impl Drop for Running {
 }
 
 /// Start the node `config` describes, drawing no extension blocks.
+///
 /// Inside a multi-thread tokio runtime.
 ///
 /// # Errors
 ///
 /// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
 pub async fn start(config: Config) -> Result<Running, StartError> {
-    start_with(config, architect_sites::Blocks::new()).await
+    // Boxed: its callers' futures stay the size they were.
+    Box::pin(start_with(config, architect_sites::Blocks::new())).await
 }
 
-/// Start the node `config` describes, its share links and Sites drawing
-/// the fences `blocks` claim (#488): a distribution's compiled-in
-/// extensions' (`Distribution::blocks`), or an embedder's own
+/// Start the node `config` describes, drawing the fences `blocks` claim.
+///
+/// Its share links and Sites draw them (#488): a distribution's
+/// compiled-in extensions' (`Distribution::blocks`), or an embedder's own
 /// (`architect_sites::FnBlock`). Inside a multi-thread tokio runtime.
 ///
 /// # Errors
@@ -585,9 +588,10 @@ pub async fn start_with(
 }
 
 /// `architect-desktop serve [--config <file>]`: the node of `dist` until
-/// it is stopped, its share links and Sites drawing what its compiled-in
-/// extensions claim (`Distribution::blocks`, their packages under
-/// `<data dir>/linked`).
+/// it is stopped.
+///
+/// Its share links and Sites draw what its compiled-in extensions claim
+/// (`Distribution::blocks`, their packages under `<data dir>/linked`).
 #[must_use]
 pub fn main(
     args: impl Iterator<Item = OsString>,
