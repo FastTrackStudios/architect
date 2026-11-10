@@ -113,6 +113,29 @@ package = "architect-commands"
 layer = "L0"
 
 [[row]]
+package = "architect-editor"
+layer = "L0"
+note = "the one door to FastTrackStudios/editor (#512): its extension surface as data, the language registry, the syntax.* theme tokens; serde only"
+
+[[row]]
+package = "architect-editor"
+features = ["state"]
+layer = "L0"
+note = "the editor's document model and markdown pass, re-exported (it links the editor's tree-sitter grammars)"
+
+[[row]]
+package = "architect-editor"
+features = ["syntax"]
+layer = "L0"
+note = "a registered language highlighted by the editor's tree-sitter, each span named by its theme token"
+
+[[row]]
+package = "architect-editor"
+features = ["native"]
+layer = "L4"
+note = "the editor's Dioxus component, re-exported (`ui`, with the Blitz renderer)"
+
+[[row]]
 package = "architect-palette"
 layer = "L0"
 note = "the palette and launcher engine: sources, items, ranking, recents; MIT, no UI"

@@ -48,6 +48,11 @@ pub struct Options {
     /// Which notes are published ([`Scope`]): the whole vault by
     /// default. A link to a note outside it is plain text.
     pub scope: Scope,
+    /// A Bases filter expression over the scope's notes (#510,
+    /// [`crate::listing::parse_filter`]): only the notes it holds for
+    /// are published, the rest are outside the site as notes outside
+    /// the scope are. None: every note of the scope.
+    pub filter: Option<String>,
 }
 
 impl Options {
@@ -67,6 +72,7 @@ impl Options {
             static_dirs: Vec::new(),
             bases: true,
             scope: Scope::Vault,
+            filter: None,
         }
     }
 }
@@ -138,6 +144,8 @@ pub enum SiteError {
     Empty(PathBuf),
     #[error("{} problem(s) in a strict build:\n{}", .0.len(), .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
     Problems(Vec<Problem>),
+    #[error("the filter is not a Bases filter expression: {0}")]
+    Filter(String),
 }
 
 /// A built site.
@@ -204,18 +212,29 @@ impl Site {
             .iter()
             .map(|page| {
                 let meta = Meta::of(page);
-                let title = meta
-                    .title
-                    .clone()
-                    .or_else(|| first_h1(frontmatter::body(&page.raw)))
-                    .unwrap_or_else(|| deslug(&page.basename));
+                let title = title_of(page, &meta);
                 Note { page, meta, title }
             })
             .filter(|n| !n.meta.hidden)
             .collect();
-        let scoped = !opts.scope.is_vault();
+        let filter = opts
+            .filter
+            .as_deref()
+            .map(crate::listing::parse_filter)
+            .transpose()
+            .map_err(SiteError::Filter)?
+            .filter(|f| *f != vault::bases::FilterNode::None);
+        let scoped = !opts.scope.is_vault() || filter.is_some();
         let notes = if scoped {
-            let wanted = opts.scope.notes(&vault);
+            let wanted: BTreeSet<String> = filter.as_ref().map_or_else(
+                || opts.scope.notes(&vault),
+                |filter| {
+                    crate::listing::select(&vault, &opts.scope, filter)
+                        .into_iter()
+                        .map(|e| e.path)
+                        .collect()
+                },
+            );
             notes
                 .into_iter()
                 .filter(|n| wanted.contains(&n.page.rel_path))
@@ -679,6 +698,15 @@ fn loose(name: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// A note's title: its frontmatter's, else its first heading, else its
+/// file name as words.
+pub fn title_of(page: &VaultPage, meta: &Meta) -> String {
+    meta.title
+        .clone()
+        .or_else(|| first_h1(frontmatter::body(&page.raw)))
+        .unwrap_or_else(|| deslug(&page.basename))
 }
 
 /// A note's first `# heading`, as its title when it names none.

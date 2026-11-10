@@ -6,7 +6,7 @@
 //! chart and song card); the plain block when none does, or once it
 //! unloads.
 //!
-//! The `FastTrackStudios` editor's fence plugins (`editor_state::plugin`)
+//! The `FastTrackStudios` editor's fence plugins (`architect_editor::state::plugin`)
 //! render a fence to an HTML string, synchronously; an embed is a live
 //! view with its own size, so it needs an editor-side hook the editor does
 //! not have yet: a widget decoration that mounts a Dioxus element (or

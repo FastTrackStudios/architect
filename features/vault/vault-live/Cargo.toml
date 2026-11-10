@@ -29,10 +29,11 @@ serde_json = { workspace = true }
 # rather than gated behind a feature since the parsers are
 # default in vault-live.
 facet = { workspace = true }
-# `editor-state::markdown::parse_frontmatter` + the block-id
-# parser. We depend on the editor for the *parsing*; the vault
-# owns the file storage + index layer above it.
-editor-state = { workspace = true }
+# The editor's `markdown::parse_frontmatter` + the block-id parser,
+# through architect's door (`architect_editor::state`, #512). We depend
+# on the editor for the *parsing*; the vault owns the file storage +
+# index layer above it.
+architect-editor = { workspace = true, features = ["state"] }
 # Used by the migrated `property_schema` module (preserves
 # frontmatter key order across round-trips) and YAML serialization
 # in the `bases` query DSL parser.

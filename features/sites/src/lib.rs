@@ -36,11 +36,13 @@
 //!
 //! [`build`] does all of it: [`Site::read`] then [`write()`].
 
+pub mod archive;
 mod assets;
 mod bases;
 mod blocks;
 mod element_html;
 mod frontmatter;
+pub mod listing;
 mod markdown;
 #[cfg(feature = "pages")]
 mod page_blocks;

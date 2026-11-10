@@ -8,7 +8,7 @@
 
 use architect_permissions::{MethodPermit, ServicePermits};
 
-use crate::share::{NewShare, Share, ShareChange, ShareComment, ShareFault};
+use crate::share::{NewAudience, NewShare, Share, ShareChange, ShareComment, ShareFault};
 
 #[architect::rpc]
 pub trait ShareLinks {
@@ -27,6 +27,17 @@ pub trait ShareLinks {
     /// its built pages are removed. A revoke is final.
     async fn revoke(&self, code: String) -> Result<Share, ShareFault>;
 
+    /// Add a named audience to share `code` (#510): the notes of its
+    /// scope `new.filter` holds for (a Bases filter expression), on a
+    /// link of its own, whose code is new and random. Answers the share,
+    /// the audience in it.
+    async fn add_audience(&self, code: String, new: NewAudience) -> Result<Share, ShareFault>;
+
+    /// Remove the audience called `name` from share `code`: its link
+    /// answers 404 from the next request on; the share's own link and
+    /// its other audiences stay.
+    async fn remove_audience(&self, code: String, name: String) -> Result<Share, ShareFault>;
+
     /// The comments left on a share, oldest first.
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault>;
 }
@@ -39,6 +50,8 @@ pub const SHARE_PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("shares", "read", "vaults/**"),
         MethodPermit::new("update", "write", "vaults/**").audited(),
         MethodPermit::new("revoke", "write", "vaults/**").audited(),
+        MethodPermit::new("add_audience", "write", "vaults/**").audited(),
+        MethodPermit::new("remove_audience", "write", "vaults/**").audited(),
         MethodPermit::new("comments", "read", "vaults/**"),
     ],
 };

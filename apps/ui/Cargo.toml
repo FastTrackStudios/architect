@@ -19,8 +19,10 @@ keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "33784
 editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native"], optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
 # The note editor (src/note_editor.rs): the FastTrackStudios editor on
-# Blitz, worked by extensions through architect_extensions::editor.
-editor-view = { workspace = true, features = ["native"] }
+# Blitz, through architect's door (#512), worked by extensions through
+# architect_extensions::editor; the language registry and the `syntax.*`
+# tokens (src/extensions.rs, src/theme.rs).
+architect-editor = { workspace = true, features = ["native"] }
 # Runtime themes: the store, its files and watcher, THEME_* (src/theme.rs).
 architect-theme = { workspace = true, features = ["fs", "actions", "dioxus"] }
 # architect-ui's root: its CSS variables follow the store.

@@ -52,11 +52,39 @@ impl Scope {
         }
     }
 
+    /// The vault paths of the notes in the scope, in list order (#510):
+    /// a note list's own order, a base's rows in its views' order,
+    /// otherwise by path.
+    #[must_use]
+    pub fn ordered(&self, vault: &Vault) -> Vec<String> {
+        let within = self.notes(vault);
+        let wanted: Vec<String> = match self {
+            Self::Notes(paths) => paths
+                .iter()
+                .map(|p| p.trim_matches('/'))
+                .map(|p| {
+                    if within.contains(p) {
+                        p.to_owned()
+                    } else {
+                        format!("{p}.md")
+                    }
+                })
+                .collect(),
+            Self::Base(name) => base_paths(vault, name),
+            _ => return within.into_iter().collect(),
+        };
+        let mut seen = BTreeSet::new();
+        wanted
+            .into_iter()
+            .filter(|p| within.contains(p) && seen.insert(p.clone()))
+            .collect()
+    }
+
     /// The vault paths of the notes in the scope.
     #[must_use]
     pub fn notes(&self, vault: &Vault) -> BTreeSet<String> {
-        let base_rows = match self {
-            Self::Base(name) => Some(base_paths(vault, name)),
+        let base_rows: Option<BTreeSet<String>> = match self {
+            Self::Base(name) => Some(base_paths(vault, name).into_iter().collect()),
             _ => None,
         };
         vault
@@ -133,8 +161,9 @@ impl Scope {
     }
 }
 
-/// The vault paths every view of base `name` selects.
-fn base_paths(vault: &Vault, name: &str) -> BTreeSet<String> {
+/// The vault paths every view of base `name` selects, in the views'
+/// order (a path once per view that has it).
+fn base_paths(vault: &Vault, name: &str) -> Vec<String> {
     let name = name.trim().trim_matches('/');
     let file = vault.bases.iter().find(|b| {
         b.rel_path == name
@@ -143,7 +172,7 @@ fn base_paths(vault: &Vault, name: &str) -> BTreeSet<String> {
             || b.rel_path.strip_suffix(".base") == Some(name)
     });
     let Some(Ok(base)) = file.map(|b| &b.parsed) else {
-        return BTreeSet::new();
+        return Vec::new();
     };
     let rows = vault_to_rows(vault);
     base.views

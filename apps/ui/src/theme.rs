@@ -74,12 +74,17 @@ pub fn use_lab_theme(
 }
 
 /// The lab's own tokens, as its `App` layer: the defaults of its views'
-/// roles (the navigator's `navigator.*`, the Keyflow editor's `editor.*`),
+/// roles (the navigator's `navigator.*`, the editor's `syntax.*`, the
+/// Keyflow editor's `editor.*`),
 /// expressions over the palette so they follow the theme showing.
 #[must_use]
 pub fn app_layer() -> architect_theme::Layer {
     // The navigator's roles (`navigator.*`).
     let layer = architect_navigator::ui::with_tokens(architect_theme::Layer::default());
+    // The editor's highlight colours (`syntax.*`, #512).
+    let layer = architect_editor::theme::TOKENS
+        .iter()
+        .fold(layer, |layer, (name, value)| layer.token(*name, *value));
     #[cfg(feature = "keyflow-lab")]
     let layer = crate::keyflow::EDITOR_TOKENS
         .iter()

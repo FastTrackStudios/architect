@@ -1,10 +1,10 @@
 //! Adapter from a [`Vault`] + [`BlockIndex`] to the editor's
-//! `VaultLookup` trait. Lets `editor_view::Editor` resolve
+//! `VaultLookup` trait. Lets `architect_editor::ui::Editor` resolve
 //! `((uuid))`, `[[Page]]`, `![[Page#Heading]]`, and
 //! `![[Page#^short-id]]` against the full vault while staying
 //! ignorant of vault internals.
 
-use editor_state::markdown::{VaultBlockHit, VaultLookup, VaultPageHit};
+use architect_editor::state::markdown::{VaultBlockHit, VaultLookup, VaultPageHit};
 
 use crate::{BlockIndex, Vault};
 

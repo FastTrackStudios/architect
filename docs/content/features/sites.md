@@ -107,6 +107,17 @@ it, and under a folder scope only when it is in the folder. A one-note scope
 makes that note the home page. A share link is a scoped site
 ([deploy](@/guide/deploy.md)).
 
+A filter narrows a scope further (`Options::filter`, #510): a Bases filter
+expression, as in a `.base` file's `filters:` (`instrument == "violin"`).
+Only the notes it holds for are published, and the rest are outside the
+site exactly as notes outside the scope are. `features/sites/src/listing.rs`
+gives the same selection as a list: `select` (the notes in list order, each
+with the files it attaches), `groups` (by order, by note or by a property,
+with each file's path in an archive) and `property_keys`.
+`features/sites/src/archive.rs` `ZipWriter` writes such an archive as a
+stream, with no I/O of its own. A share's named audiences, its files page
+and its "Download all" are built from these.
+
 ```sh
 cargo run -p architect-cli -- site build --vault ~/notes --folder Album --base /album/ --out /tmp/album
 # or --tag mix, --note Album/track.md (repeatable), --base-scope Mixes.base

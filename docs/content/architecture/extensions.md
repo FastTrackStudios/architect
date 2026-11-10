@@ -2565,7 +2565,8 @@ calls).
 What Advanced Tables, Outliner and Editing Toolbar need (#312, gap
 `G-editor`): the live editor the person is typing in, not the document
 behind it. The editor's own surface is data, in the editor repository
-(`editor:crates/editor-ext`, `editor_ext`): a `Snapshot` of the editor,
+(`editor:crates/editor-ext`, `editor_ext`, re-exported as
+`architect_editor::ext`): a `Snapshot` of the editor,
 an `EditCommand`, `KeymapEntry`s, `DecorationSpec`s and `SlashEntry`s, so
 an extension in another process, in Luau, in a WASI component or in a
 page sends and receives the same values a compiled-in one would.
@@ -2684,6 +2685,60 @@ note's golden, `note-editor-marked.html`),
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls); in the editor repository, `editor:features/ui/tests/native_ext.rs`
 and `editor:crates/editor-state/src/ext.rs`'s tests.
+
+## Languages for the editor
+
+Languages are installed, not linked (#512). The editor asks a registry by
+file type or fence name (`features/editor/src/languages.rs` `Languages`,
+[the Editor page](@/features/editor.md)); the app puts its own languages
+in it and gives it to the host (`Host::with_languages`), and an extension
+adds to it:
+
+```toml
+[[languages]]
+id = "keyflow"                            # lowercase letters, digits, - and _
+name = "Keyflow chart"
+extensions = ["kf"]                       # file extensions, no dot
+fences = ["kf"]                           # fence names; its id is always one
+grammar = "grammars/keyflow.wasm"        # a tree-sitter grammar in its package, or "linked"
+highlights = "queries/highlights.scm"    # its highlights query, in its package
+comment = "//"
+[languages.server]                        # optional LSP
+command = "kf-lsp"
+args = ["--stdio"]
+```
+
+A language is a contribution like the rest
+(`features/extensions/src/contrib.rs` `LanguageDecl`, which is
+architect-editor's `Language`): checked at load (its id; no empty
+extension or fence; its grammar and query inside its package; a server has
+a command; an id once per extension), its query's text read from the
+package when it loads (`Language::highlights_text`), in the registry while
+the extension is on, and withdrawn when it is turned off or unloads
+(`features/extensions/tests/interop.rs`). A language two owners register
+is the first's, and the app's come first. `EXT_LANGUAGES` answers every
+language, the app's too, each with `from` (`app` or the extension's id);
+with `id`, `fence` or `path` it answers the one that names, or `null`.
+
+Highlighting is drawn in theme tokens (`syntax.keyword`, `syntax.string`,
+…: `features/editor/src/theme.rs` `TOKENS`), so an extension's `[tokens]`
+or `[[themes]]` restyle every language, and a language never ships
+colours.
+
+What is carried and not yet used: a grammar file and a query of its own
+(the editor highlights only the grammars compiled into it today; the
+[Editor page](@/features/editor.md) says what it lacks), and the server's
+command (the host starts no language server yet).
+
+### An editor in your view
+
+A linked extension mounts the editor's component from `architect-editor`
+(features `ui` and a renderer) in its view, over a document of its own,
+and hears its changes through `on_transaction`
+(`features/extensions/tests/editor_view.rs`). A process extension's remote
+view, a WASI view and a page have no way to mount one yet: they draw
+through the edit stream into `features/extensions/src/remote.rs`
+`RemoteDocument`, which has no host-drawn elements (#512).
 
 ## The network and secrets
 

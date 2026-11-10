@@ -1477,7 +1477,7 @@ pub fn LabApp() -> Element {
             // its height off the top, the shell the rest. Under
             // architect-ui's root, its CSS variables the theme's (the
             // clicker's `clicker.*` tokens too, for its process view).
-            architect_ui::theme::ThemeStoreProvider { css_namespaces: vec!["clicker".to_owned()],
+            architect_ui::theme::ThemeStoreProvider { css_namespaces: vec!["clicker".to_owned(), architect_editor::theme::NAMESPACE.to_owned()],
             div { style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column;",
                 NativeMenus { bar: menus, windowed }
                 div { style: "position: relative; flex: 1 1 0; min-height: 0;",
