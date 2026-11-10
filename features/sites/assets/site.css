@@ -254,7 +254,11 @@ details[open] > summary > .site-tree-chevron { transform: scale(0.45) rotate(45d
 .site-base-empty { color: var(--site-faint); font-size: 14px; }
 
 /* A block an extension drew. */
-.site-block { margin: 0 0 1.3em; }
+/* A drawing wider than the page (a chart) scrolls inside its own box. */
+.site-block { margin: 0 0 1.3em; max-width: 100%; overflow-x: auto; }
+/* A block's own SVG is a drawing, not one of the site's icons (the `svg`
+   rule above): its size from its attributes, its ink the page's. */
+.site-block svg { width: auto; height: auto; max-width: none; fill: currentColor; stroke: none; stroke-width: 1; stroke-linecap: butt; stroke-linejoin: miter; }
 .site-block-failed .site-block-why { color: var(--destructive, #d33); font-size: 14px; margin: 0 0 6px; }
 
 /* ── listings, links here, previous and next ────────────────────────── */
@@ -363,6 +367,11 @@ video.site-media { max-height: 70vh; background: #000; border-radius: 6px; }
 .site-lyric:focus-visible { outline: 2px solid var(--ring, currentColor); }
 .site-lyrics [aria-current="time"] .site-lyric { color: var(--foreground); font-weight: 650; background: var(--site-code-bg); }
 [data-follow-playhead] [data-at][aria-current="time"] { scroll-margin: 40px; }
+/* An SVG that follows (a chart's transparent rect per bar): the bar at
+   the playhead is filled from the theme, a bar under the pointer hinted. */
+[data-follow-playhead] svg [data-at], svg[data-follow-playhead] [data-at] { cursor: pointer; }
+[data-follow-playhead] svg [data-at]:hover, svg[data-follow-playhead] [data-at]:hover { fill: var(--primary, var(--accent)); fill-opacity: .12; }
+[data-follow-playhead] svg [data-at][aria-current="time"], svg[data-follow-playhead] [data-at][aria-current="time"] { fill: var(--primary, var(--accent)); fill-opacity: .28; }
 body.site-has-player { padding-bottom: 64px; }
 .site-player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--background); color: var(--foreground); border-top: 1px solid var(--border, #8884); font: 14px/1.3 system-ui, sans-serif; }
 .site-player button { font: inherit; min-width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--border, #8886); background: transparent; color: inherit; cursor: pointer; }

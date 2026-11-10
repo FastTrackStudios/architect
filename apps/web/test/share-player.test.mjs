@@ -49,7 +49,28 @@ const CODE = 'gigabcdefhjkmnpq';
 /// A node serving a link share of `Gig/`, two songs in list order.
 async function node(dir) {
   const vault = join(dir, 'vault');
-  put(vault, 'Gig/01-joy.md', '---\ntitle: Joy\n---\n![[media/joy.wav]]\n\n![[media/joy.lrc]]\n');
+  put(vault, 'Gig/01-joy.md', '---\ntitle: Joy\n---\n![[media/joy.wav]]\n\n![[media/joy.lrc]]\n\n```chart\n| C | G | Am | F | C | G | C |\n```\n');
+  // An extension installed on the node draws the ```chart fence as an
+  // SVG wider than the page, a transparent rect per bar with its time
+  // (keyflow#59's shape): the player follows it as it does lyrics.
+  const ext = join(dir, 'data', 'extensions', 'demo.chart');
+  put(ext, 'extension.toml', 'id = "demo.chart"\nname = "Chart"\nversion = "0.1.0"\nkind = "data"\n\n[[embeds]]\nid = "chart"\npage = "pages/chart.tsx"\nclaims = { fence = ["chart"] }\n');
+  put(ext, 'pages/chart.tsx', `import { h, useEmbed } from "architect";
+export default function Chart() {
+  const bars = (useEmbed()?.source ?? "").split("|").map((b) => b.trim()).filter((b) => b !== "");
+  const w = 500;
+  return (
+    <svg class="demo-chart" viewBox={\`0 0 \${bars.length * w} 60\`} width={\`\${bars.length * w}\`} height="60" data-follow-playhead="">
+      {bars.map((b, i) => (
+        <g key={\`\${i}\`}>
+          <rect class="demo-bar" data-at={\`\${i * 0.5}\`} x={\`\${i * w}\`} y="0" width={\`\${w}\`} height="60" fill="transparent" />
+          <text x={\`\${i * w + 8}\`} y="36">{b}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+`);
   put(vault, 'Gig/02-noel.md', '---\ntitle: Noel\n---\n![[media/noel.wav]]\n\n```lrc\n[00:00.00]Noel\n[00:00.80]Noel\n[00:01.60]Born is the King\n```\n');
   put(vault, 'Gig/media/joy.lrc', '[00:00.00]Joy to the world\n[00:00.60]The Lord is come\n[00:01.20]Let earth\n[00:01.80]Receive her King\n[00:02.40]Let every heart\n');
   put(vault, 'Gig/media/joy.wav', wav(3.5));
@@ -135,6 +156,7 @@ async function open() {
 }
 
 const current = 'document.querySelector(".site-lyrics [aria-current=time]")?.dataset.at';
+const bar = 'document.querySelector("svg.demo-chart [aria-current=time]")?.getAttribute("data-at")';
 
 test('the lyric line follows playback, a click seeks, and the queue goes on to the next song', { skip, timeout: 90000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'architect-gig-'));
@@ -161,6 +183,42 @@ test('the lyric line follows playback, a click seeks, and the queue goes on to t
     await tab.until('location.pathname.endsWith("/02-noel/")', 'the second song\'s page', 15000);
     await tab.until('architect.playhead.here && architect.playhead.playing', 'the second song playing', 8000);
     await tab.until(`Number(${current}) >= 0.8`, 'its lines following', 6000);
+  } finally {
+    close();
+    proc.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an SVG block follows playback: its bar marked and filled, scrolled into its box, a click seeks', { skip, timeout: 60000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'architect-gig-'));
+  const { proc, origin } = await node(dir);
+  const { tab, close } = await open();
+  try {
+    await tab.go(`${origin}/s/${CODE}/01-joy/`);
+    await tab.until('document.querySelector("svg.demo-chart rect[data-at]")', 'the chart drawn by the installed extension', 5000);
+    // The block's box scrolls; the page does not.
+    const box = 'document.querySelector("svg.demo-chart").closest(".site-block")';
+    assert.ok(await tab.eval(`${box}.scrollWidth > ${box}.clientWidth`), 'the chart is wider than its box');
+    assert.equal(await tab.eval(`${box}.scrollLeft`), 0);
+
+    // Playing: the first bar, then a later one.
+    await tab.eval('architect.playhead.play()');
+    await tab.until(`(${bar}) === "0"`, 'the first bar', 5000);
+    await tab.until(`Number(${bar}) >= 1`, 'a later bar', 6000);
+    await tab.eval('architect.playhead.pause()');
+
+    // A click on a bar seeks to its time; the bar is marked, filled from
+    // the theme, and scrolled into the middle of its box.
+    await tab.eval('document.querySelector(\'svg.demo-chart rect[data-at="3"]\').dispatchEvent(new MouseEvent("click", { bubbles: true }))');
+    await tab.until('Math.abs(architect.playhead.time - 3) < 0.4', 'the seek to 3 s', 4000);
+    await tab.until(`(${bar}) === "3"`, 'the clicked bar marked', 4000);
+    const fill = await tab.eval('getComputedStyle(document.querySelector(\'svg.demo-chart rect[aria-current="time"]\')).fillOpacity');
+    assert.equal(Number(fill), 0.28);
+    await tab.until(`${box}.scrollLeft > 2000`, 'the bar scrolled into its box', 4000);
+    assert.equal(await tab.eval('window.scrollX'), 0);
+    // The lyrics still follow the same playhead.
+    assert.ok(Number(await tab.eval(current)) >= 1.8);
   } finally {
     close();
     proc.kill();
