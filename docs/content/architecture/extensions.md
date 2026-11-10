@@ -3129,6 +3129,48 @@ hash and signature, and that the archive is what its entry says
 (`features/extensions/archive/src/registry.rs` `check`) — and is the
 registry's CI.
 
+### A third party's extension in the Architect app
+
+The Architect app (not only the sandbox) searches and installs from
+registries kept by `Registries` (`features/extensions/src/registries.rs`,
+`Extensions::with_registries`):
+
+- **the store's index**, FastTrackStudios' registry
+  (`apps/ui/src/extensions.rs` `STORE_REGISTRY`, given with
+  `Registries::with_builtin`: always there, never written, never removed),
+  whose archives are signed with the org key;
+- **registries a person adds** in Settings → Extensions (the manager
+  page's "Registries and development installs") or with
+  `EXT_REGISTRY_ADD {name, git | folder, keys}`, kept in
+  `<app dir>/extension-registries.json`.
+
+Each `Registry` carries its **publishers' keys** (`Publisher`: a name and
+the base64 line of a minisign `.pub`). They are that registry's
+`Source::trust`: a third party (Studio) signs its `.archext` with its own
+key (`cargo xtask ext-keygen`, `ext-sign`), its registry entry carries the
+public half, and the app installs an archive from that registry signed by
+that key while refusing one signed by any other (`UntrustedKey`). An
+archive installed from a file (`EXT_INSTALL_FILE`) is checked against the
+org key and every registered publisher's (`Extensions::publishers`,
+`Installs::read_archive_trusting`). Adding keys from outside the app (an
+agent, the CLI) needs a person's yes (`confirmation_required`).
+
+`EXT_REGISTRY_REFRESH` pulls the indexes (the app does once at start, off
+the window's thread), `EXT_REGISTRY_REMOVE` drops one the person added,
+`EXT_REGISTRIES` lists them.
+
+**A development install** loads a package folder (its `extension.toml`
+and, for a process extension, its program) into the running app,
+unsigned, as a development copy (`Extensions::dev`): `EXT_DEV {folder}`,
+or from a shell `architect-desktop extensions dev <folder>` (over the
+running app's control socket; `undev` ends it). It shadows every other
+copy of its id, reloads on save, and is loaded again on the next start.
+It is refused unless development installs are on: the switch in
+Settings → Extensions (`EXT_DEV_INSTALLS {on}`; turning it on from outside
+needs a person's yes), or a debug build (`Registries::with_dev_forced`).
+
+Tests: `features/extensions/tests/registries.rs`.
+
 ## Compared with REAPER
 
 REAPER's extension SDK declares 878 functions (`reaper_plugin_functions.h`),
