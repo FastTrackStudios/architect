@@ -43,7 +43,7 @@ fn vault_context() -> DeckContext {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
         })
-        .filter(|_| !crate::Mode::current().is_sandbox())
+        .filter(|_| !crate::distribution().is_sandbox())
         .unwrap_or_else(|| "Vault".to_owned());
     DeckContext::new(VAULT, "vault", name).icon("library")
 }
@@ -88,7 +88,7 @@ struct InMemory(DeckStores);
 /// a vault on disk.
 fn stores() -> DeckStores {
     let vault = crate::notes::open_vault();
-    if vault.is_none() && crate::Mode::current().is_sandbox() {
+    if vault.is_none() && crate::distribution().is_sandbox() {
         return use_root_context(|| {
             let contexts: Rc<dyn architect_workspace::ContextStore> =
                 Rc::new(architect_workspace::MemoryContextStore::new());

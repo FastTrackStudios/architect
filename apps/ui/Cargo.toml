@@ -46,18 +46,16 @@ architect-extensions = { workspace = true, features = ["ui", "remote", "page", "
 architect-input = { workspace = true, features = ["udp"] }
 # The lab's example extension, linked in (apps/sandbox/board).
 architect-sandbox-board = { path = "../sandbox/board" }
+# Which distribution runs, and what it compiles in (#491).
+architect-distribution = { workspace = true }
 # First-party extensions the app ships, on by default (#368, #375).
 architect-projects = { workspace = true }
 # Files (#347): the org's projects and libraries, a built-in extension, and
 # FILES_* over the device's files agent (`ARCHITECT_FILES_AGENT`).
-architect-files-extension = { workspace = true }
 architect-files = { workspace = true, features = ["agent"] }
 architect-tasks = { workspace = true }
 architect-time-tracker = { workspace = true }
-architect-dayplan = { workspace = true }
 architect-calendar = { workspace = true }
-architect-threads = { workspace = true }
-architect-notify = { workspace = true }
 # The theme picker, architect's built-in extension.
 architect-theme-picker = { workspace = true }
 # ⌘K and ⌘O: the Command Palette, a linked extension (#381).

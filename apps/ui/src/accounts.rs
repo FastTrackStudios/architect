@@ -22,7 +22,7 @@ use architect_accounts::{AccountStore, Accounts, Issuer, Keychain};
 use architect_orgs::{Capabilities, OrgHandle, Orgs, Selection};
 use dioxus::prelude::*;
 
-use crate::mode::{Mode, app_dir_or_temp};
+use crate::distribution::app_dir_or_temp;
 
 /// The client the issuer knows the app as: `architect`, the same public
 /// client the web app signs in with (fts-auth registers it for
@@ -35,7 +35,7 @@ const CLIENT_ID: &str = "architect";
 /// (`files` false: a film, a test's document).
 pub fn use_app_accounts(list: &Arc<ActionList>, files: bool) -> Option<AccountsUi> {
     // Fixed for the process: the hooks below run on every render or never.
-    if Mode::current().is_sandbox() || !files {
+    if crate::distribution().is_sandbox() || !files {
         return None;
     }
     let list = list.clone();

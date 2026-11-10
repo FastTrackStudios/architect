@@ -107,7 +107,7 @@ fn watch_folder(_: &ThemeStore) -> Option<ThemeWatch> {
 fn keep(store: &ThemeStore) -> Option<Persist> {
     Persist::local(
         store,
-        crate::Mode::current().folder(),
+        crate::distribution().folder_name(),
         std::time::Duration::from_millis(250),
     )
 }

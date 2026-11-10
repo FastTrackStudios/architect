@@ -612,29 +612,25 @@ async fn frame_binding(lab: Arc<ActionList>, extensions: Arc<ActionList>) {
 /// How often a loaded extension's files are checked for a save.
 const POLL: Duration = Duration::from_millis(500);
 
-/// The store's index: `extensions/index.toml` in architect's own
-/// repository (`STORE_DIR`), beside the first-party extensions. A third
-/// party lists its extension there by pull request; archives it lists are
-/// signed with the org release key (`Trust::org`, trusted everywhere) or
-/// a publisher key its entry names.
-pub const STORE_REGISTRY: &str = "https://github.com/FastTrackStudios/architect";
-
-/// The store's folder in [`STORE_REGISTRY`].
-pub const STORE_DIR: &str = "extensions";
-
-/// The Architect app's registries (#493): the store's, then the ones a
-/// person adds in Settings → Extensions or with `EXT_REGISTRY_ADD`, kept
-/// in `<app dir>/extension-registries.json` with the development switch
-/// and folders (on regardless in a debug build).
+/// A distribution's registries (#493, #491): its own
+/// (`Distribution::registries`, the store's unless it says otherwise),
+/// then the ones a person adds in Settings → Extensions or with
+/// `EXT_REGISTRY_ADD`, kept in `<app dir>/extension-registries.json` with
+/// the development switch and folders (on regardless in a debug build).
 #[must_use]
-pub fn app_registries(root: &Path) -> architect_extensions::registries::Registries {
-    use architect_extensions::registries::{Registries, Registry};
-    Registries::open(
-        root.join("extension-registries.json"),
-        root.join("registries"),
+pub fn app_registries(
+    root: &Path,
+    dist: &crate::distribution::Distribution,
+) -> architect_extensions::registries::Registries {
+    use architect_extensions::registries::Registries;
+    dist.registries().iter().cloned().fold(
+        Registries::open(
+            root.join("extension-registries.json"),
+            root.join("registries"),
+        )
+        .with_dev_forced(cfg!(debug_assertions)),
+        Registries::with_builtin,
     )
-    .with_builtin(Registry::git("FastTrackStudios", STORE_REGISTRY).in_dir(STORE_DIR))
-    .with_dev_forced(cfg!(debug_assertions))
 }
 
 /// The lab's registry folder.
@@ -888,7 +884,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // Counter, Frame's surface, the registry's metronome, tidy,
         // outline and surface) are the sandbox's; the Architect app runs
         // architect's own and what the person installs.
-        let sandbox = crate::Mode::current().is_sandbox();
+        let sandbox = crate::distribution().is_sandbox();
         let clicker = clicker(&root).filter(|_| sandbox);
         let frame = frame_dev(&root).filter(|_| sandbox);
         let wasi = wasi_counter(&root).filter(|_| sandbox);
@@ -900,50 +896,16 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if let Some(checkout) = checkout() {
             extensions = extensions.with_vendored(ARCHITECT_GIT, checkout);
         }
-        // The Board: one Rust value, linked in as a built-in. The theme
-        // picker and the extensions manager are architect's.
-        if sandbox {
-            if let Ok(with) = extensions
-                .clone()
-                .with_linked(&architect_sandbox_board::Board)
-            {
-                extensions = with;
-            }
-            // Setlists: the decks demo (#441), a setlist's songs as decks.
-            if let Ok(with) = extensions
-                .clone()
-                .with_linked(&crate::setlists::SetlistsExtension)
-            {
-                extensions = with;
-            }
-        }
-        // The Project Management bundle's Projects, Tasks and Time Tracker
-        // (#375), and the Calendar beside them: first-party extensions the
-        // app ships, on by default. Each runs alone; together a project's
-        // page shows its tasks and their time, a task its timer, and the
-        // calendar the tasks' days and the time tracked. The sandbox's
-        // made-up data and goldens stay as they were.
-        if !sandbox {
-            let bundle: [&dyn architect_extensions::linked::Extension; 8] = [
-                &architect_projects::Projects,
-                &architect_tasks::Tasks,
-                &architect_time_tracker::TimeTracker,
-                &architect_calendar::Calendar,
-                // Day Plans (#444): day templates, their rules, each day's
-                // plan, drawn under the Calendar's events.
-                &architect_dayplan::DayPlans,
-                // Threads (#348): comments on notes and anything else.
-                &architect_threads::Threads,
-                // Notify (#348): the bell, the centre, mentions and
-                // assignments, joined with the extensions' toasts.
-                &architect_notify::Notify,
-                // Files (#347): projects and asset libraries, over FILES_*.
-                &architect_files_extension::FilesExtension,
-            ];
-            for linked in bundle {
-                if let Ok(with) = extensions.clone().with_linked(linked) {
-                    extensions = with;
-                }
+        // What this distribution compiles in (#491): the sandbox's Board
+        // and setlists demo, the Architect app's first-party extensions
+        // (#368), a downstream build's own. Each the store's extension,
+        // same id, a development copy overriding it (#272). The core
+        // below (Bases, the theme picker, the Command Palette, Navigator,
+        // the manager, the settings page) is in every build.
+        for linked in crate::distribution().extensions() {
+            match extensions.clone().with_linked(linked) {
+                Ok(with) => extensions = with,
+                Err(error) => tracing::warn!(%error, "a compiled-in extension did not load"),
             }
         }
         // Bases: a note's ```base fence, drawn as a base.
@@ -992,9 +954,11 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         }
         // The store's index and the registries a person adds, each
         // trusting its publishers' keys, and development installs
-        // (`EXT_DEV`): the Architect app's (#493).
-        if !sandbox {
-            extensions = extensions.with_registries(app_registries(&root));
+        // (`EXT_DEV`): the distribution's (#493), none for one without
+        // installs (the sandbox).
+        let dist = crate::distribution();
+        if dist.installs() {
+            extensions = extensions.with_registries(app_registries(&root, dist));
         }
         let found = registry().filter(|_| sandbox);
         match &found {
@@ -1141,7 +1105,7 @@ pub fn documents() -> CrdtDocuments {
     static DOCS: LazyLock<CrdtDocuments> = LazyLock::new(|| {
         let docs = CrdtDocuments::new().with_space(NOTES).with_space(ARCHIVE);
         let lab = architect::action::Principal::Service {
-            name: crate::Mode::current().folder().to_owned(),
+            name: crate::distribution().folder_name().to_owned(),
         };
         let _ = docs.create(
             &format!("{NOTES}/Welcome.md"),

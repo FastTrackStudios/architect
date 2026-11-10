@@ -100,6 +100,7 @@ members = [
     # ── the Architect app (apps/ui, its desktop, mobile and web) ──────
     "apps/ui",
     "apps/desktop",
+    "apps/distribution",
     "apps/mobile",
     "apps/web",
     # ── the dev sandbox: made-up data and example extensions ──────────
@@ -359,6 +360,7 @@ architect-attachments = { path = "features/attachments" }
 architect-devices = { path = "features/devices" }
 architect-spaces = { path = "features/spaces" }
 architect-app = { path = "apps/ui" }
+architect-distribution = { path = "apps/distribution" }
 # iOS: the UIScene lifecycle the mobile app adopts (apps/mobile).
 objc2 = "0.6"
 objc2-ui-kit = "0.3"

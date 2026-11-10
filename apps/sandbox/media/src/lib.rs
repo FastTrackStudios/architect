@@ -49,7 +49,7 @@ pub fn app() -> App {
 ///
 /// What its own tours play over (Projects, Tasks, capture:
 /// `architect_app::builtin_tours`). The first call makes this process the Architect app
-/// (`architect_app::Mode`, for good: run it in a process of its own, as
+/// (`architect_app::distribution`, for good: run it in a process of its own, as
 /// `tests/architect_tours.rs` is) on a folder of its own and a copy of the
 /// demo vault (`$ARCHITECT_CONFIG_DIR`, `$ARCHITECT_VAULT`, unless the
 /// caller set them), both made fresh and never the person's. `sandbox-media`
@@ -72,7 +72,7 @@ pub fn architect_app() -> App {
         if let Some(vault) = std::env::var_os("ARCHITECT_VAULT") {
             let _ = architect_app::vaults::write_demo(std::path::Path::new(&vault));
         }
-        architect_app::Mode::Architect.set();
+        let _ = architect_app::distribution::architect().install();
     });
     App::new(Root, Arc::new(ActionList::new())).fonts(architect_app::font_context())
 }

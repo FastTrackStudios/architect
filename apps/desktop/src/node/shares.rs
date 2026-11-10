@@ -109,6 +109,8 @@ struct Inner {
     signins: Mutex<HashMap<String, Pending>>,
     /// Per vault: rebuild now.
     kick: Mutex<HashMap<String, Arc<Notify>>>,
+    /// What draws the fences extensions claim (#488).
+    blocks: architect_sites::Blocks,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -119,9 +121,17 @@ struct Pending {
 }
 
 impl Shares {
-    /// The shares of `backend`'s vaults, built under `data/shares`.
+    /// The shares of `backend`'s vaults, built under `data/shares`, their
+    /// pages drawing the fences `blocks` claim as the app draws them
+    /// (#488).
     #[must_use]
-    pub fn new(backend: Backend, data: &Path, org: Option<NodeOrg>, issuer: Option<&str>) -> Self {
+    pub fn new(
+        backend: Backend,
+        data: &Path,
+        org: Option<NodeOrg>,
+        issuer: Option<&str>,
+        blocks: architect_sites::Blocks,
+    ) -> Self {
         Self(Arc::new(Inner {
             backend,
             out: data.join("shares"),
@@ -132,6 +142,7 @@ impl Shares {
             viewers: Mutex::new(HashMap::new()),
             signins: Mutex::new(HashMap::new()),
             kick: Mutex::new(HashMap::new()),
+            blocks,
         }))
     }
 
@@ -260,7 +271,7 @@ impl Shares {
             opts.live_reload = Some(format!("{base}_live"));
             opts.base = base;
             opts.scope = scope(&share.scope);
-            match architect_sites::build(&opts, &architect_sites::Blocks::new(), &out) {
+            match architect_sites::build(&opts, &self.0.blocks, &out) {
                 Ok(report) => {
                     tracing::debug!(code = %share.code, pages = report.pages, "a share built");
                 }

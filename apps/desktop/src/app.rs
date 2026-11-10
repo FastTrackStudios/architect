@@ -9,10 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use architect::action::{ActionList, Principal};
-use architect_app::{Device, LabApp, Mode, use_window_screen};
+use architect_app::{Device, LabApp, use_window_screen};
 use architect_control::Surface;
 use architect_control::cli::{Cli, Headless};
 use architect_control::server::{Control, Serving};
+use architect_distribution::Distribution;
 use architect_guide::ViewSize;
 use dioxus_native::WindowAttributes;
 use dioxus_native::winit::dpi::LogicalSize;
@@ -22,15 +23,12 @@ use dioxus::prelude::*;
 
 use crate::mcp_port;
 
-/// The app's name to `--app`, its socket's and its guide's:
-/// `architect-desktop` for the Architect app, `architect-sandbox` for the
-/// sandbox (each binary's own name).
+/// The app's name to `--app`, its socket's and its guide's: its
+/// distribution's (`architect-desktop` for the Architect app,
+/// `architect-sandbox` for the sandbox, each binary's own name).
 #[must_use]
 pub fn app() -> &'static str {
-    match Mode::current() {
-        Mode::Architect => "architect-desktop",
-        Mode::Sandbox => "architect-sandbox",
-    }
+    architect_app::distribution().app_name()
 }
 
 /// The lab's list as the CLI and MCP ask it, as `service:cli`.
@@ -281,14 +279,16 @@ fn Window() -> Element {
     rsx! { LabApp {} }
 }
 
-/// The whole of a desk binary's `main`, as `mode`.
+/// The whole of a desk binary's `main`: the app `distribution` is.
 ///
-/// The Action List's CLI, MCP, the headless app or the window. The
-/// Architect app copies the lab's old folder into its own before its
-/// window opens (`architect_app::mode::migrate_lab_folder`).
+/// The Action List's CLI, MCP, the headless app, the node (`serve`, with
+/// the distribution's block renderers), `distribution` (what it is, as
+/// JSON) or the window. A distribution that adopts an older folder (the
+/// Architect app, the lab's) copies it into its own before its window
+/// opens (`Distribution::adopt_folder`).
 #[must_use]
-pub fn run(mode: Mode) -> ExitCode {
-    mode.set();
+pub fn run(distribution: Distribution) -> ExitCode {
+    let dist = distribution.install();
     let first = std::env::args().nth(1);
     match first.as_deref() {
         Some("actions") => return cli().main(std::env::args_os().skip(1)),
@@ -302,7 +302,7 @@ pub fn run(mode: Mode) -> ExitCode {
             return mcp(args.iter().any(|a| a == "--headless"), socket);
         }
         Some("--headless") => return serve_headless(),
-        Some("serve") => return crate::node::main(std::env::args_os().skip(2)),
+        Some("serve") => return crate::node::main(std::env::args_os().skip(2), dist),
         Some("files") => return crate::node::cli::files(std::env::args_os().skip(2)),
         Some("agent") => return crate::node::cli::agent(std::env::args_os().skip(2)),
         Some(crate::node::cli::GUARD) => {
@@ -312,6 +312,9 @@ pub fn run(mode: Mode) -> ExitCode {
             let rest: Vec<String> = std::env::args().skip(2).collect();
             return extensions(&rest);
         }
+        Some("distribution") => {
+            return crate::distribution_command(dist, std::env::args().nth(2).as_deref());
+        }
         _ => {}
     }
     if architect_presence::single_instance(architect_app::presence::id())
@@ -319,12 +322,10 @@ pub fn run(mode: Mode) -> ExitCode {
     {
         return ExitCode::SUCCESS;
     }
-    if mode == Mode::Architect {
-        let _ = architect_app::mode::migrate_lab_folder();
-    }
+    let _ = dist.adopt_folder();
     let (w, h) = first_device().size().unwrap_or((1280.0, 820.0));
     let window = WindowAttributes::default()
-        .with_title(mode.name())
+        .with_title(dist.name())
         .with_surface_size(LogicalSize::new(w, h))
         .with_visible(!architect_presence::launched_in_background());
     // The shell draws the title bar: the content runs under a transparent

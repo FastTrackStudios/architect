@@ -96,6 +96,10 @@ guest = [
     "dep:vox-stream",
     "dep:tokio",
     "dep:dioxus",
+    # Its views' events arrive serialised (`guest.rs`): dioxus-html's
+    # `serialize`, which only the workspace-hack gave it before (a build
+    # with `--cfg no_workspace_hack`, the node's, failed).
+    "dep:dioxus-html",
     "dep:tracing",
 ]
 # WASI components (`wasi`, desktop, Android and iOS): Wasmtime with the
@@ -202,6 +206,7 @@ thiserror = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
+dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"], optional = true }
 futures-timer = { workspace = true, optional = true }
 wasmtime = { version = "50.0.1", optional = true, default-features = false, features = [
     "std",

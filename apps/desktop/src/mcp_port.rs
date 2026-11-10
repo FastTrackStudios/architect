@@ -37,11 +37,14 @@ pub fn serve(list: &Arc<ActionList>) {
                 return;
             };
             runtime.block_on(async move {
-                let server =
-                    architect_mcp::Server::new(architect_app::Mode::current().folder(), "0", list)
-                        .with_principal(Principal::Service {
-                            name: "mcp".to_owned(),
-                        });
+                let server = architect_mcp::Server::new(
+                    architect_app::distribution().folder_name(),
+                    "0",
+                    list,
+                )
+                .with_principal(Principal::Service {
+                    name: "mcp".to_owned(),
+                });
                 match server.serve_loopback(port_env, token_env).await {
                     Ok(Some(serving)) => {
                         tracing::info!(url = %serving.url, "the app serves MCP");

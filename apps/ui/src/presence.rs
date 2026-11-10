@@ -10,13 +10,13 @@ use architect_presence::{
 };
 use dioxus::prelude::*;
 
-use crate::{Lab, Mode, Route, tabs};
+use crate::{Lab, Route, tabs};
 
-/// The running app's bundle identifier (`Mode::bundle_id`): its one
+/// The running app's bundle identifier (its distribution's): its one
 /// instance, its login item.
 #[must_use]
 pub fn id() -> &'static str {
-    Mode::current().bundle_id()
+    crate::distribution().id()
 }
 
 /// What the lab declares: its menus read the tab on show, live. With
@@ -37,8 +37,8 @@ pub fn declare(lab: Lab, inbox: usize, capture: bool) -> Presence {
         .section("Tabs", tabs)
         .separator()
         .command(TOGGLE_BACKGROUND);
-    let mode = Mode::current();
-    let tray = Menu::new(mode.name())
+    let dist = crate::distribution();
+    let tray = Menu::new(dist.name())
         .command(SHOW_WINDOW)
         .command(if capture {
             crate::capture::WINDOW_COMMAND
@@ -52,17 +52,14 @@ pub fn declare(lab: Lab, inbox: usize, capture: bool) -> Presence {
         .commands([TOGGLE_BACKGROUND, TOGGLE_LOGIN])
         .separator()
         .command(QUIT);
-    // A placeholder mark until the brand's own icons come.
-    let icon = if mode.is_sandbox() {
-        TrayIcon::symbol("testtube.2").icon_name("applications-science")
-    } else {
-        TrayIcon::symbol("building.columns").icon_name("accessories-text-editor")
-    };
-    Presence::new(id(), mode.name())
+    // The distribution's marks (`architect_distribution::Icon`).
+    let icons = dist.icons();
+    let icon = TrayIcon::symbol(icons.tray_symbol).icon_name(icons.tray_name);
+    Presence::new(id(), dist.name())
         .dock_menu(dock)
         .tray(
             Tray::new(icon, tray)
-                .tooltip(mode.name())
+                .tooltip(dist.name())
                 .title((inbox > 0).then(|| inbox.to_string())),
         )
         .background(true)

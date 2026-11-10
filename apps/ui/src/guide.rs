@@ -159,7 +159,7 @@ pub fn tours(remember: bool) -> architect_guide::tour::TourSet {
         include_str!("../../sandbox/scenarios/palette-run.styx"),
         include_str!("../../sandbox/scenarios/stacked-tabs.styx"),
     ];
-    if !crate::Mode::current().is_sandbox() {
+    if !crate::distribution().is_sandbox() {
         sources.push(architect_capture::TOUR);
     }
     let set = architect_guide::tour::TourSet::from_sources(sources)
@@ -638,7 +638,7 @@ fn pick(rows: &[TourRow], a: &StartArgs) -> Result<TourRow, String> {
 /// A built-in's tour that does not read, named.
 pub fn builtin_tours() -> Result<Vec<(String, architect_guide::Scenario)>, String> {
     use architect_extensions::linked::Extension;
-    let sandbox = crate::Mode::current().is_sandbox();
+    let sandbox = crate::distribution().is_sandbox();
     let mut linked: Vec<&dyn Extension> = vec![
         &architect_bases::ui::Bases,
         &architect_theme_picker::ThemePicker,
