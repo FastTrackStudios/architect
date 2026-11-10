@@ -418,3 +418,124 @@ fn a_tag_a_note_list_and_a_base_scope_publish_only_their_notes() {
         Err(BuildError::Read(SiteError::Empty(_)))
     ));
 }
+
+/// A setlist: charts with an `instrument`, each attaching its part.
+fn setlist() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let v = dir.path();
+    touch(v, "Set/index.md", "---\ntitle: Carols\n---\nThe set.\n");
+    touch(
+        v,
+        "Set/02 silent.md",
+        "---\ntitle: Silent Night\ninstrument: violin\n---\n![[silent-violin.pdf]]\n",
+    );
+    touch(
+        v,
+        "Set/01 joy.md",
+        "---\ntitle: Joy to the World\ninstrument: [violin, cello]\n---\n![[joy-violin.pdf]] and [the cello part](joy-cello.pdf)\n",
+    );
+    touch(
+        v,
+        "Set/03 noel.md",
+        "---\ntitle: Noel\ninstrument: cello\n---\n![[noel-cello.pdf]] see [[01 joy]]\n",
+    );
+    touch(
+        v,
+        "Set/draft.md",
+        "---\npublish: false\ninstrument: violin\n---\nNot yet.\n",
+    );
+    for file in ["silent-violin", "joy-violin", "joy-cello", "noel-cello"] {
+        touch(v, &format!("Set/{file}.pdf"), file);
+    }
+    touch(
+        v,
+        "Elsewhere/other.md",
+        "---\ninstrument: violin\n---\nNot in the set.\n",
+    );
+    dir
+}
+
+#[test]
+fn a_listing_is_the_scopes_notes_a_filter_holds_for_in_list_order() {
+    use architect_sites::listing::{parse_filter, select};
+    let dir = setlist();
+    let vault = vault::obsidian::Vault::open(dir.path()).expect("vault");
+    let scope = Scope::Folder("Set".to_owned());
+    let titles = |scope: &Scope, filter: &str| -> Vec<String> {
+        select(&vault, scope, &parse_filter(filter).expect("filter"))
+            .into_iter()
+            .map(|e| e.title)
+            .collect()
+    };
+    // By path under a folder; the hidden note never; nothing outside.
+    assert_eq!(
+        titles(&scope, ""),
+        ["Joy to the World", "Silent Night", "Noel", "Carols"]
+    );
+    assert_eq!(
+        titles(&scope, "instrument.contains(\"violin\")"),
+        ["Joy to the World", "Silent Night"]
+    );
+    assert_eq!(titles(&scope, "instrument == \"cello\""), ["Noel"]);
+    // A note list is in its own order.
+    let list = Scope::Notes(vec![
+        "Set/03 noel.md".to_owned(),
+        "Set/01 joy".to_owned(),
+        "Set/03 noel.md".to_owned(),
+    ]);
+    assert_eq!(titles(&list, ""), ["Noel", "Joy to the World"]);
+    // Each note with the files it attaches, in the order it names them.
+    let joy = select(
+        &vault,
+        &scope,
+        &parse_filter("file.name == \"01 joy\"").expect("filter"),
+    );
+    assert_eq!(joy.len(), 1);
+    assert_eq!(joy[0].files, ["Set/joy-violin.pdf", "Set/joy-cello.pdf"]);
+}
+
+#[test]
+fn a_filter_publishes_only_the_notes_it_holds_for() {
+    let dir = setlist();
+    let out = tempfile::tempdir().expect("out");
+    let site = out.path().join("site");
+    let mut opts = Options::new(dir.path(), "Cellos");
+    opts.scope = Scope::Folder("Set".to_owned());
+    opts.filter = Some("instrument == \"cello\"".to_owned());
+    let built = Site::read(&opts, &blocks()).expect("read");
+    let notes: Vec<&str> = built
+        .pages
+        .iter()
+        .filter_map(|p| p.rel_path.as_deref())
+        .collect();
+    assert_eq!(notes, ["Set/03 noel.md"]);
+    assert_eq!(built.attachments, ["Set/noel-cello.pdf"]);
+    architect_sites::write(&built, &site).expect("write");
+    let html = all_html(&site);
+    assert!(html.contains("Noel"), "{html}");
+    // The violins' notes and files are outside it: no page, no file, no
+    // title in a link, the nav or the search index.
+    assert!(
+        !html.contains("Silent Night") && !html.contains("Joy to the World"),
+        "{html}"
+    );
+    assert!(site.join("Set/noel-cello.pdf").exists());
+    assert!(!site.join("Set/joy-violin.pdf").exists());
+    assert!(!site.join("Set/joy-cello.pdf").exists());
+    let index = std::fs::read_dir(site.join("_site"))
+        .expect("assets")
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with("search."))
+        .map(|e| std::fs::read_to_string(e.path()).expect("index"))
+        .expect("a search index");
+    assert!(
+        !index.contains("Joy") && !index.contains("Silent"),
+        "{index}"
+    );
+
+    opts.filter = Some("instrument ==".to_owned());
+    assert!(matches!(
+        Site::read(&opts, &blocks()),
+        Err(SiteError::Filter(_))
+    ));
+}

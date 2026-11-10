@@ -1944,6 +1944,7 @@ dependencies = [
  "architect-scripting",
  "architect-theme",
  "architect-workspace-hack",
+ "crc32fast",
  "dioxus",
  "dioxus-ssr",
  "pulldown-cmark",
