@@ -612,6 +612,25 @@ async fn frame_binding(lab: Arc<ActionList>, extensions: Arc<ActionList>) {
 /// How often a loaded extension's files are checked for a save.
 const POLL: Duration = Duration::from_millis(500);
 
+/// The store's index: FastTrackStudios' registry, its archives signed
+/// with the org release key (`Trust::org`, trusted everywhere).
+pub const STORE_REGISTRY: &str = "https://github.com/FastTrackStudios/extensions";
+
+/// The Architect app's registries (#493): the store's, then the ones a
+/// person adds in Settings → Extensions or with `EXT_REGISTRY_ADD`, kept
+/// in `<app dir>/extension-registries.json` with the development switch
+/// and folders (on regardless in a debug build).
+#[must_use]
+pub fn app_registries(root: &Path) -> architect_extensions::registries::Registries {
+    use architect_extensions::registries::{Registries, Registry};
+    Registries::open(
+        root.join("extension-registries.json"),
+        root.join("registries"),
+    )
+    .with_builtin(Registry::git("FastTrackStudios", STORE_REGISTRY))
+    .with_dev_forced(cfg!(debug_assertions))
+}
+
 /// The lab's registry folder.
 fn registry() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("ARCHITECT_LAB_EXTENSIONS") {
@@ -957,6 +976,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         {
             extensions = with;
         }
+        // The store's index and the registries a person adds, each
+        // trusting its publishers' keys, and development installs
+        // (`EXT_DEV`): the Architect app's (#493).
+        if !sandbox {
+            extensions = extensions.with_registries(app_registries(&root));
+        }
         let found = registry().filter(|_| sandbox);
         match &found {
             Some(dir) => extensions = extensions.with_source(FolderRegistry::new(dir)),
@@ -1016,6 +1041,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             let _ = extensions.dev(dir);
         }
         let _ = extensions.sync();
+        // The registries' indexes, pulled once off the window's thread.
+        if !sandbox {
+            let pulled = extensions.clone();
+            let _ = std::thread::Builder::new()
+                .name("ext-registries".to_owned())
+                .spawn(move || drop(pulled.refresh_registries(None)));
+        }
         // The base view types loaded extensions add, for BASES_VIEW_TYPES.
         let types_host = extensions.host().clone();
         crate::notes::view_types()

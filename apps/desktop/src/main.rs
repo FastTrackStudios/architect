@@ -19,6 +19,8 @@
 //! architect-desktop mcp --app <socket>         # MCP over another running app (the iOS app)
 //! architect-desktop actions shot /tmp/app.png  # the window, drawn by the app (APP_SHOT)
 //! architect-desktop extensions check <folder>  # EXT_CHECK with no window; nonzero when it fails
+//! architect-desktop extensions dev <folder>    # EXT_DEV: the folder as a development copy in the running app
+//! architect-desktop extensions registries      # EXT_REGISTRIES: the store's and the person's registries
 //! architect-desktop serve [--config <file>]    # the always-on node, no window (src/node/)
 //! ```
 //!
