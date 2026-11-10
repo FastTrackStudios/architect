@@ -82,25 +82,56 @@ pub fn keep_guide_written(list: &ActionList) -> Option<architect_control::guide:
     Some(guide().keep_written(surface(list), dir, Duration::from_millis(1500)))
 }
 
-/// `architect-desktop extensions check <folder>`: the extension checked
-/// as the lab would load it, its report printed as JSON; nonzero when it
-/// does not pass.
+const EXTENSIONS_USAGE: &str = "usage: architect-desktop extensions check <folder>\n\
+       architect-desktop extensions dev <folder> [--app <socket>]      # EXT_DEV in the running app\n\
+       architect-desktop extensions undev <folder> [--app <socket>]    # EXT_DEV_END\n\
+       architect-desktop extensions registries [--app <socket>]        # EXT_REGISTRIES";
+
+/// `architect-desktop extensions …`: check a folder, or load it into the
+/// running app.
+///
+/// `check <folder>`, the extension checked as the lab would load it, its report printed as JSON (nonzero
+/// when it does not pass); `dev <folder>` / `undev <folder>`, a package
+/// folder loaded into (or taken out of) the running app as a development
+/// copy (`EXT_DEV`, `EXT_DEV_END`, over its control socket); `registries`,
+/// `EXT_REGISTRIES`.
 #[must_use]
 pub fn extensions(args: &[String]) -> ExitCode {
-    let [verb, folder] = args else {
-        let _ = writeln!(
-            std::io::stderr(),
-            "usage: architect-desktop extensions check <folder>"
-        );
-        return ExitCode::from(2);
+    let usage = || {
+        let _ = writeln!(std::io::stderr(), "{EXTENSIONS_USAGE}");
+        ExitCode::from(2)
     };
-    if verb != "check" {
-        let _ = writeln!(
-            std::io::stderr(),
-            "usage: architect-desktop extensions check <folder>"
-        );
-        return ExitCode::from(2);
+    let Some((verb, rest)) = args.split_first() else {
+        return usage();
+    };
+    // `--app <socket>` and the like go to the actions CLI as they are.
+    let (folder, flags) = match rest.split_first() {
+        Some((f, flags)) if !f.starts_with("--") => (Some(f.as_str()), flags),
+        _ => (None, rest),
+    };
+    let on_app = |id: &str, pair: Option<String>| {
+        let mut command: Vec<String> = vec!["actions".into(), "run".into(), id.into()];
+        if let Some(pair) = pair {
+            command.extend(["--arg".to_owned(), pair]);
+        }
+        command.extend(flags.iter().cloned());
+        cli().main(command)
+    };
+    let absolute = |f: &str| {
+        std::fs::canonicalize(f).map_or_else(|_| f.to_owned(), |p| p.display().to_string())
+    };
+    match (verb.as_str(), folder) {
+        ("check", Some(folder)) if flags.is_empty() => check_extension(folder),
+        ("dev", Some(folder)) => on_app("EXT_DEV", Some(format!("folder={}", absolute(folder)))),
+        ("undev", Some(folder)) => {
+            on_app("EXT_DEV_END", Some(format!("folder={}", absolute(folder))))
+        }
+        ("registries", None) => on_app("EXT_REGISTRIES", None),
+        _ => usage(),
     }
+}
+
+fn check_extension(folder: &str) -> ExitCode {
     let report =
         architect_app::extension_checker().check(&architect_extensions::check::folder(folder));
     let json = facet_json::to_string(&report).unwrap_or_default();

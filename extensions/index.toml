@@ -1,0 +1,14 @@
+#:schema ../examples/registry/index.schema.json
+# The extension store's index: the registry every Architect app searches
+# and installs from (`apps/ui/src/extensions.rs` `STORE_REGISTRY`,
+# `STORE_DIR`), read from this folder of architect's repository. One
+# `[[extensions]]` entry per version (the shape is `examples/registry/`'s;
+# `cargo xtask ext-index extensions` checks it).
+#
+# A publisher lists its extension by pull request: a signed `.archext`
+# (`archive`, a release asset's URL, and its `sha256`), signed with the
+# org release key or with its own key, the public half of which the app
+# trusts for this registry. Architect's own extensions in this folder
+# (projects, tasks, time-tracker, calendar, dayplan) are linked into the
+# app and are not listed here.
+name = "FastTrackStudios"

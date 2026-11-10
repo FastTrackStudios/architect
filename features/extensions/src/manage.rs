@@ -548,7 +548,10 @@ impl Extensions {
         grant: Option<Scope>,
         by: &str,
     ) -> Result<Installed, InstallError> {
-        let (v, manifest, listing) = self.installs().read_archive(&bytes, from)?;
+        let publishers = self.publishers();
+        let (v, manifest, listing) =
+            self.installs()
+                .read_archive_trusting(&bytes, from, &publishers)?;
         let mut preview = self.preview_of(&manifest, &listing, from);
         preview.signed_by = Some(v.signer);
         if let Some(why) = preview.cannot_run {
@@ -579,7 +582,9 @@ impl Extensions {
                 }
             }
         }
-        let install = self.installs().install_archive(bytes, from)?;
+        let install = self
+            .installs()
+            .install_archive_trusting(bytes, from, &publishers)?;
         let _ = self.sync();
         self.turned_on(&install.id);
         Ok(Installed::Done {

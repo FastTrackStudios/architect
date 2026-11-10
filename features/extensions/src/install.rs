@@ -292,16 +292,44 @@ fn check_sha256(url: &str, bytes: &[u8], want: Option<&str>) -> Result<(), Insta
 #[derive(Clone, Debug)]
 pub struct GitRegistry {
     url: String,
+    /// Where the repository is cloned.
+    clone: PathBuf,
+    /// The folder in it holding `index.toml` (the clone's root unless
+    /// [`GitRegistry::in_dir`]).
     checkout: FolderRegistry,
+    /// That folder, relative to the repository's root; only it is
+    /// checked out (sparse).
+    dir: Option<String>,
 }
 
 impl GitRegistry {
     /// The registry at `url`, checked out in `checkout`.
     pub fn new(url: impl Into<String>, checkout: impl Into<PathBuf>) -> Self {
+        let clone = checkout.into();
         Self {
             url: url.into(),
-            checkout: FolderRegistry::new(checkout),
+            checkout: FolderRegistry::new(clone.clone()),
+            clone,
+            dir: None,
         }
+    }
+
+    /// The registry is folder `dir` of the repository (its `index.toml`
+    /// and packages there), not its root: a repository that holds other
+    /// things too, such as architect's `extensions/`. Only that folder is
+    /// checked out.
+    #[must_use]
+    pub fn in_dir(mut self, dir: impl Into<String>) -> Self {
+        let dir = dir.into().trim_matches('/').to_owned();
+        let trust = self.checkout.trust.clone();
+        let http = self.checkout.http.clone();
+        self.checkout = FolderRegistry {
+            root: self.clone.join(&dir),
+            trust,
+            http,
+        };
+        self.dir = (!dir.is_empty()).then_some(dir);
+        self
     }
 
     /// Also trusts archives it lists signed by `key` (the base64 line of a
@@ -331,7 +359,7 @@ impl Source for GitRegistry {
     }
 
     fn refresh(&self) -> Result<(), InstallError> {
-        let dir = self.checkout.root();
+        let dir = self.clone.as_path();
         if dir.join(".git").exists() {
             git(Some(dir), &["fetch", "--depth", "1", "origin"])?;
             git(Some(dir), &["reset", "--hard", "FETCH_HEAD"])
@@ -340,7 +368,26 @@ impl Source for GitRegistry {
                 std::fs::create_dir_all(parent).map_err(io(parent))?;
             }
             let target = dir.display().to_string();
-            git(None, &["clone", "--depth", "1", &self.url, &target])
+            match &self.dir {
+                None => git(None, &["clone", "--depth", "1", &self.url, &target]),
+                // Only the registry's folder: the rest of the repository
+                // is neither fetched nor written.
+                Some(sub) => {
+                    git(
+                        None,
+                        &[
+                            "clone",
+                            "--depth",
+                            "1",
+                            "--filter=blob:none",
+                            "--sparse",
+                            &self.url,
+                            &target,
+                        ],
+                    )?;
+                    git(Some(dir), &["sparse-checkout", "set", sub])
+                }
+            }
         }
     }
 
@@ -571,6 +618,7 @@ pub struct Installs {
 struct OneArchive {
     from: String,
     bytes: Vec<u8>,
+    trust: Trust,
 }
 
 impl Source for OneArchive {
@@ -588,6 +636,10 @@ impl Source for OneArchive {
 
     fn fetch(&self, _: &Listing, _: &Path) -> Result<Fetched, InstallError> {
         Ok(Fetched::Archive(self.bytes.clone()))
+    }
+
+    fn trust(&self) -> Trust {
+        self.trust.clone()
     }
 }
 
@@ -662,11 +714,27 @@ impl Installs {
         bytes: &[u8],
         from: &str,
     ) -> Result<(Verified, Manifest, Listing), InstallError> {
+        self.read_archive_trusting(bytes, from, &Trust::none())
+    }
+
+    /// [`Self::read_archive`], trusting `publishers` too (the keys the
+    /// app's registries carry, `crate::registries`).
+    ///
+    /// # Errors
+    ///
+    /// It is refused ([`InstallError::Archive`]), or its manifest is.
+    pub fn read_archive_trusting(
+        &self,
+        bytes: &[u8],
+        from: &str,
+        publishers: &Trust,
+    ) -> Result<(Verified, Manifest, Listing), InstallError> {
         let v = self.open_archive(
             bytes,
             &OneArchive {
                 from: from.to_owned(),
                 bytes: Vec::new(),
+                trust: publishers.clone(),
             },
         )?;
         let text = v
@@ -686,11 +754,26 @@ impl Installs {
     /// It is refused, has no build for this platform, or cannot be
     /// written.
     pub fn install_archive(&self, bytes: Vec<u8>, from: &str) -> Result<Install, InstallError> {
-        let (_, _, listing) = self.read_archive(&bytes, from)?;
+        self.install_archive_trusting(bytes, from, &Trust::none())
+    }
+
+    /// [`Self::install_archive`], trusting `publishers` too.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::install_archive`].
+    pub fn install_archive_trusting(
+        &self,
+        bytes: Vec<u8>,
+        from: &str,
+        publishers: &Trust,
+    ) -> Result<Install, InstallError> {
+        let (_, _, listing) = self.read_archive_trusting(&bytes, from, publishers)?;
         self.install(
             &OneArchive {
                 from: from.to_owned(),
                 bytes,
+                trust: publishers.clone(),
             },
             &listing,
         )

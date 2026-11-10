@@ -265,6 +265,11 @@ pub fn ManagerPage(
                     }
                 }
             }
+            if let Some(browse) = browse.clone().filter(|b| b.extensions().registries().is_some()) {
+                div { style: "{LIFT} flex: none;",
+                    RegistriesPanel { browse }
+                }
+            }
             div { style: "{LIFT} flex: none; max-width: 100%; overflow-x: auto;",
                 SegmentedControl {
                     value: kind.clone().unwrap_or_default(),
@@ -853,6 +858,155 @@ fn GrantLine(ext: crate::extensions::Extensions, grant: crate::consent::Grant) -
                     bump(s);
                 },
                 "Revoke"
+            }
+        }
+    }
+}
+
+/// Settings → Extensions' registries (#493): the store's and the ones
+/// the person added, each with its publishers' keys; a git repository or
+/// a folder added with a key; development installs and a folder loaded
+/// as a development copy. Shown where the app keeps registries.
+#[component]
+fn RegistriesPanel(browse: Browse) -> Element {
+    let s = state();
+    let _ = (s.rev)();
+    let ext = browse.extensions().clone();
+    let Some(registries) = ext.registries() else {
+        return rsx! {};
+    };
+    let mut open = use_signal(|| false);
+    let name = use_signal(String::new);
+    let place = use_signal(String::new);
+    let key_name = use_signal(String::new);
+    let key = use_signal(String::new);
+    let dev_folder = use_signal(String::new);
+    let dev_on = use_signal(|| registries.dev_installs());
+    let listed = registries.list();
+    let forced = registries.dev_installs() && !registries.dev_setting();
+    let add = {
+        let (ext, registries) = (ext.clone(), registries.clone());
+        move |_| {
+            let (n, p, kn, k) = (
+                name.peek().trim().to_owned(),
+                place.peek().trim().to_owned(),
+                key_name.peek().trim().to_owned(),
+                key.peek().trim().to_owned(),
+            );
+            let is_git = p.contains("://") || p.starts_with("git@");
+            let mut r = if is_git {
+                crate::registries::Registry::git(n.clone(), p)
+            } else {
+                crate::registries::Registry::folder(n.clone(), p)
+            };
+            if !k.is_empty() {
+                r = r.trusting(if kn.is_empty() { n.clone() } else { kn }, k);
+            }
+            if let Err(e) = registries.add(r) {
+                say(s, false, e);
+            } else {
+                say(s, true, format!("Added {n}; fetching its index…"));
+                bump(s);
+                let ext = ext.clone();
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _ = std::thread::Builder::new()
+                    .name("ext-registry-add".to_owned())
+                    .spawn(move || drop(tx.send(ext.refresh_registries(Some(&n)))));
+                spawn(async move {
+                    let failed = rx.await.unwrap_or_default();
+                    match failed.first() {
+                        Some((n, e)) => say(s, false, format!("{n}: {e}")),
+                        None => say(s, true, "Its index is fetched: its extensions are listed."),
+                    }
+                    bump(s);
+                });
+            }
+        }
+    };
+    let load_dev = {
+        let ext = ext.clone();
+        move |_| match ext.dev_install(dev_folder.peek().trim()) {
+            Ok(v) => {
+                say(
+                    s,
+                    v["loaded"] == true,
+                    format!(
+                        "{}: {}",
+                        v["id"].as_str().unwrap_or("?"),
+                        if v["loaded"] == true {
+                            "loaded as a development copy"
+                        } else {
+                            "did not load (see its log)"
+                        }
+                    ),
+                );
+                bump(s);
+            }
+            Err(e) => say(s, false, e),
+        }
+    };
+    let set_dev = {
+        let registries = registries.clone();
+        move |on: bool| {
+            if let Err(e) = registries.set_dev_installs(on) {
+                say(s, false, e);
+            }
+            bump(s);
+        }
+    };
+    rsx! {
+        div { style: "display: flex; flex-direction: column; gap: 8px;",
+            Button {
+                variant: ButtonVariant::Ghost,
+                on_click: move |_| { let now = *open.peek(); open.set(!now); },
+                if open() { "▾ Registries and development installs" } else { "▸ Registries and development installs" }
+            }
+            if open() {
+                Section { title: "Registries".to_owned(),
+                    for l in listed {
+                        div { key: "{l.registry.name}", style: "display: flex; gap: 8px; align-items: center;",
+                            div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column;",
+                                Line { text: format!("{}{}", l.registry.name, if l.builtin { " · the app's" } else { "" }) }
+                                Muted { text: l.registry.git.clone().or_else(|| l.registry.folder.clone()).unwrap_or_default() }
+                                if !l.registry.keys.is_empty() {
+                                    Muted { text: format!("Trusts {}", l.registry.keys.iter().map(|k| k.name.as_str()).collect::<Vec<_>>().join(", ")) }
+                                }
+                            }
+                            if !l.builtin {
+                                Button {
+                                    variant: ButtonVariant::Ghost,
+                                    on_click: {
+                                        let (registries, n) = (registries.clone(), l.registry.name.clone());
+                                        move |_| {
+                                            match registries.remove(&n) {
+                                                Ok(_) => say(s, true, format!("Removed {n}")),
+                                                Err(e) => say(s, false, e),
+                                            }
+                                            bump(s);
+                                        }
+                                    },
+                                    "Remove"
+                                }
+                            }
+                        }
+                    }
+                    Input { value: name, placeholder: "Name (Studio)".to_owned() }
+                    Input { value: place, placeholder: "Git URL or folder".to_owned() }
+                    Input { value: key_name, placeholder: "Publisher (optional)".to_owned() }
+                    Input { value: key, placeholder: "Publisher's key: the base64 line of its minisign .pub".to_owned() }
+                    Button { on_click: add, "Add registry" }
+                }
+                Section { title: "Development installs".to_owned(),
+                    div { style: "display: flex; gap: 8px; align-items: center;",
+                        Switch { checked: dev_on, on_change: set_dev }
+                        Line { text: if forced { "On (a debug build)".to_owned() } else { "Load unsigned folders as development copies".to_owned() } }
+                    }
+                    Input { value: dev_folder, placeholder: "A package folder (its extension.toml in it)".to_owned() }
+                    Button { on_click: load_dev, disabled: !registries.dev_installs(), "Load for development" }
+                    for d in registries.dev_folders() {
+                        Muted { key: "{d.display()}", text: d.display().to_string() }
+                    }
+                }
             }
         }
     }
