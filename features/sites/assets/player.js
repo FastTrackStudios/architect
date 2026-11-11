@@ -1,6 +1,7 @@
 // architect-sites: the player (#511). Plays the page's audio and video
 // (`[data-site-media]`), and on a share link the link's media in list
-// order (`<script id="site-queue">`, written by the node per request),
+// order (`<script type="application/json" id="site-queue">`, written by
+// the node per request; only that element, never a block's `#site-queue`),
 // and gives every block on the page the playhead:
 //
 //   architect.playhead.time / playing / rate / duration / src / page / here
@@ -36,7 +37,7 @@
 
   // The queue: the link's, else this page's media in document order.
   var tracks = [];
-  var queueEl = doc.getElementById("site-queue");
+  var queueEl = doc.querySelector('script#site-queue[type="application/json"]');
   var scope = here;
   if (queueEl) {
     try {
