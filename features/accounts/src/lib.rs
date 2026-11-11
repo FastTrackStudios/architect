@@ -56,6 +56,8 @@ pub use keychain::{DEFAULT_SERVICE, Keychain, SERVICE_ENV};
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use controller::{Accounts, BrowserWait, Sheet, Status};
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
+pub use enrolment::{ORG_HOST_ENV, org_host_from_env};
+#[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use issuer::{DEFAULT_ISSUER, ISSUER_ENV, Issuer, IssuerError, SignedIn, issuer_from_env};
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use shares::ShareDraft;

@@ -3,14 +3,39 @@
 //! at `/org/{slug}/vox`, signed in as the active account.
 //!
 //! The org is the account's current one; the host is the one given last
-//! for that org ([`crate::Account::org_host`]). The issuer keeps no
-//! enrolments: they live on the hosting node, in its device table.
+//! for that org ([`crate::Account::org_host`]), else the node
+//! `ARCHITECT_ORG_HOST` names ([`ORG_HOST_ENV`]: `devenv up`'s local node,
+//! #541). The issuer keeps no enrolments: they live on the hosting node, in
+//! its device table.
 
 use architect::connect::{Endpoint, Pool};
 use architect_devices::{DeviceEnrolmentClient, Enrolment, Peer};
 use architect_orgs::{Org, Role};
 
 use crate::controller::Accounts;
+
+/// The variable naming the node every org of the account is hosted on
+/// until one is given for it (`devenv up` points the app at its local
+/// node with it).
+pub const ORG_HOST_ENV: &str = "ARCHITECT_ORG_HOST";
+
+/// The node [`ORG_HOST_ENV`] names, if any.
+#[must_use]
+pub fn org_host_from_env() -> Option<String> {
+    std::env::var(ORG_HOST_ENV)
+        .ok()
+        .and_then(|v| clean_host(&v))
+}
+
+/// The host kept for an org, else the default one.
+fn host_or_default(kept: Option<&str>, default: Option<String>) -> Option<String> {
+    kept.and_then(clean_host).or(default)
+}
+
+fn clean_host(host: &str) -> Option<String> {
+    let host = host.trim().trim_end_matches('/');
+    (!host.is_empty()).then(|| host.to_owned())
+}
 
 /// The `/org/{slug}/vox` lane of the node at `host` (`https://x` →
 /// `wss://x/org/{slug}/vox`).
@@ -47,12 +72,9 @@ impl Accounts {
                     .map_err(|e| e.to_string())?;
                 host.trim_end_matches('/').to_owned()
             }
-            None => account
-                .org_host(&org.id.0)
-                .map(str::to_owned)
-                .ok_or_else(|| {
-                    format!("no node hosts {}'s devices yet: give its address", org.name)
-                })?,
+            None => host_or_default(account.org_host(&org.id.0), org_host_from_env()).ok_or_else(
+                || format!("no node hosts {}'s devices yet: give its address", org.name),
+            )?,
         };
         Ok((org, host))
     }
@@ -61,7 +83,7 @@ impl Accounts {
     #[must_use]
     pub fn org_host(&self) -> Option<String> {
         let org = self.orgs().current()?.id.0.clone();
-        self.active()?.org_host(&org).map(str::to_owned)
+        host_or_default(self.active()?.org_host(&org), org_host_from_env())
     }
 
     async fn enrolment(&self, host: Option<&str>) -> Result<(Org, DeviceEnrolmentClient), String> {
@@ -162,5 +184,20 @@ mod tests {
             super::lane("http://127.0.0.1:9", "acme"),
             "ws://127.0.0.1:9/org/acme/vox"
         );
+    }
+
+    #[test]
+    fn a_host_kept_for_the_org_beats_the_default() {
+        use super::host_or_default;
+        let default = || Some("http://127.0.0.1:7412".to_owned());
+        assert_eq!(
+            host_or_default(Some("https://node.example/"), default()).as_deref(),
+            Some("https://node.example")
+        );
+        assert_eq!(
+            host_or_default(None, default()).as_deref(),
+            Some("http://127.0.0.1:7412")
+        );
+        assert_eq!(host_or_default(Some("  "), None), None);
     }
 }
