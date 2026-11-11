@@ -306,7 +306,27 @@
             };
           }
         )
+        # The desktop app from the release's AppImage, compiling nothing
+        # (nix/desktop/package.nix, #523): `nix run github:FastTrackStudios/architect`.
+        // lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") rec {
+          architect-desktop = pkgs.callPackage ./nix/desktop/package.nix { };
+          default = architect-desktop;
+        }
       );
+
+      apps.x86_64-linux = rec {
+        architect-desktop = {
+          type = "app";
+          program = nixpkgs.lib.getExe self.packages.x86_64-linux.architect-desktop;
+          meta.description = "Architect's desktop app (the release AppImage)";
+        };
+        default = architect-desktop;
+      };
+
+      # The launcher's choice between the store's AppImage and a downloaded
+      # update (nix/desktop/test-choose.sh).
+      checks.x86_64-linux.architect-desktop-choose =
+        self.packages.x86_64-linux.architect-desktop.passthru.tests.choose;
     };
 
   nixConfig = {
