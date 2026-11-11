@@ -6,21 +6,35 @@
 //   node features/extensions/web/transpile.mjs <component.wasm> <out-dir> [name]
 //
 // (`npm ci` in features/extensions/web first: jco is pinned in its
-// package.json.) The world's imports that wait for the host are async,
+// package.json; installed as @fasttrackstudio/architect, jco comes with
+// it, and `architect build-web` runs this.) The world's imports that wait for the host are async,
 // through JS Promise Integration (JSPI): the component is suspended while
 // the main thread answers. So is every export, since any may reach one.
 import { execFileSync } from 'node:child_process';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = dirname(fileURLToPath(import.meta.url));
+/// jco's command line, wherever npm put jco (beside this file in the
+/// repo, hoisted in an embedder's node_modules).
+function jco() {
+  return fileURLToPath(new URL('./jco.js', import.meta.resolve('@bytecodealliance/jco')));
+}
+
+/// The host's imports that wait for the page to answer (every one but
+/// `theme`, `log` and `now`): instance.js answers each through the host
+/// service, so each must suspend the component (a synchronous import
+/// handed a Promise lowers it as its answer).
+export const HOST_ASYNC = [
+  'run-action', 'setting', 'set-setting', 'call', 'call-service', 'notify', 'clipboard-read', 'clipboard-write',
+  'pick', 'prompt', 'menu', 'decorate', 'subscribe', 'unsubscribe', 'list-documents', 'read-document',
+  'create-document', 'edit-document', 'rename-document', 'move-document', 'delete-document', 'watch-documents',
+  'editor-state', 'edit-editor', 'decorate-editor', 'fetch', 'read-body', 'close-body', 'secret-set', 'ask-secret',
+  'ports', 'open-port', 'port-send', 'port-receive', 'close-port',
+];
 
 /// The imports that wait: the host service, a worker's messages, a sleep.
 export const ASYNC_IMPORTS = [
-  'architect:extension/host#run-action',
-  'architect:extension/host#setting',
-  'architect:extension/host#set-setting',
-  'architect:extension/host#call',
+  ...HOST_ASYNC.map((f) => `architect:extension/host#${f}`),
   'architect:extension/worker#spawn',
   'architect:extension/worker#post',
   'architect:extension/worker#receive',
@@ -37,10 +51,10 @@ export const ASYNC_EXPORTS = [
 ];
 
 export function transpile(component, out, name = basename(component, '.wasm')) {
-  const jco = join(here, 'node_modules/.bin/jco');
   execFileSync(
-    jco,
+    process.execPath,
     [
+      jco(),
       'transpile', component, '-o', out, '--name', name,
       '--instantiation', 'async', '--no-typescript', '--quiet',
       '--async-mode', 'jspi',

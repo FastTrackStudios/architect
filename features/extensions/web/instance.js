@@ -303,6 +303,20 @@ function world() {
         const r = await fields('ask_secret', JSON.stringify({ name }));
         return r.tag === 'ok' ? ok(Boolean(JSON.parse(r.val))) : r;
       },
+      // The editor being typed in, and MIDI and OSC ports: whatever the
+      // browser's host answers (`WebHost`: not in the browser yet).
+      editorState: () => fields('editor_state', ''),
+      editEditor: (command) => fields('edit_editor', command),
+      decorateEditor: (decorations) => unit({ op: 'decorate_editor', decorations: jsonArg(decorations) ?? [] }),
+      ports: (kind) => fields('ports', JSON.stringify({ kind: kind || null })),
+      openPort: (request) => fields('open_port', request),
+      portSend: (port, message) => unit({ op: 'port_send', port, message: jsonArg(message) }),
+      portReceive: (port, max) => fields('port_receive', JSON.stringify({ port, max: max || null })),
+      closePort: async (port) => {
+        if (worker) return false;
+        const r = await service({ op: 'close_port', port });
+        return r.tag === 'ok' && Boolean(JSON.parse(r.val));
+      },
     },
     'architect:extension/worker': {
       spawn: async (name, args) => {

@@ -107,7 +107,9 @@ async function coreModule(url, name, memory, load) {
 
 async function fetchBytes(url) {
   if (url.startsWith('file:')) {
-    const fs = await import('node:fs/promises');
+    // Under node only: named so a page's bundler leaves it out.
+    const fsModule = 'node:fs/promises';
+    const fs = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
     return fs.readFile(new URL(url));
   }
   const r = await fetch(url);
