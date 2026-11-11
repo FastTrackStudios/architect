@@ -67,12 +67,6 @@ impl Engine {
     /// bytes" while they are being dropped.
     pub async fn keep_store(&self) {
         let _busy = self.busy().await;
-        if !self
-            .links_checked
-            .swap(true, std::sync::atomic::Ordering::SeqCst)
-        {
-            self.check_links().await;
-        }
         let running = self.fetcher.running();
         for area in self.store.areas() {
             area.clean_orphans(ORPHAN_GRACE, &running).await;
@@ -86,7 +80,12 @@ impl Engine {
         let (Ok(all), Ok(pinned)) = (local.list().await, local.pinned().await) else {
             return;
         };
-        let old = self.old_contents().await;
+        let Some(old) = self.old_contents().await else {
+            // A root's history cannot be read: none of its old versions is
+            // known, so nothing is dropped this pass.
+            tracing::warn!("files: a root's history cannot be read: no eviction this pass");
+            return;
+        };
         let mut duplicates: Vec<(SystemTime, u64, Sha256)> = all
             .into_iter()
             .filter(|h| {
@@ -129,6 +128,37 @@ impl Engine {
         );
     }
 
+    /// The working files holding `hash`: their index entries and the
+    /// in-place record take the file's stat as it is now, if it is the
+    /// same file (only its ctime moved: a link to it came or went).
+    pub(super) fn restat(&self, hash: Sha256) {
+        let hex = hash.to_hex();
+        for doc_id in self.known() {
+            let Some(dir) = self.working_dir(doc_id) else {
+                continue;
+            };
+            self.with_index(doc_id, |index| {
+                let mut changed = false;
+                for (path, known) in &mut index.files {
+                    if known.content != hex {
+                        continue;
+                    }
+                    let file = dir.join(path);
+                    let Ok(meta) = std::fs::metadata(&file) else {
+                        continue;
+                    };
+                    let now = super::scan::Stat::of(&meta);
+                    if now.same_file(&known.stat) {
+                        known.stat = now;
+                        self.store.in_place.insert(hash, file, now);
+                        changed = true;
+                    }
+                }
+                changed
+            });
+        }
+    }
+
     /// Once per start: a file in a store area that shares its inode with
     /// another name (a hard link left by a run that died between linking
     /// a version aside and the swap, or between a swap and removing the
@@ -151,6 +181,9 @@ impl Engine {
                     };
                     if copied.await.is_ok() {
                         split = split.saturating_add(1);
+                        // The split moved the ctime of the working file
+                        // that shared the inode: re-read its stat.
+                        self.restat(hash);
                     }
                 }
                 _ => {

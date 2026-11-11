@@ -1777,12 +1777,13 @@ impl Engine {
     /// Every content that is an old version somewhere (not what a path's
     /// current version holds): never evicted for space, whatever else
     /// holds the same bytes now.
-    pub(super) async fn old_contents(&self) -> HashSet<String> {
+    /// `None` when any root's history cannot be read: then none of its
+    /// old versions is known, and nothing may be evicted (closed, not open).
+    pub(super) async fn old_contents(&self) -> Option<HashSet<String>> {
         let mut out = HashSet::new();
         for id in self.known() {
             let Ok(tree) = self.tree(id).await else {
-                // A root it cannot read: nothing of it is known to be safe.
-                continue;
+                return None;
             };
             for path in tree.paths() {
                 let current = tree.current(path).map(|v| v.id);
@@ -1795,7 +1796,7 @@ impl Engine {
                 }
             }
         }
-        out
+        Some(out)
     }
 
     /// Drop one blob from the store to make room (the store's budget,
@@ -1818,7 +1819,11 @@ impl Engine {
     /// file holds these bytes now; or the file cannot be read or removed.
     pub async fn evict_for_space(&self, hash: Sha256) -> Result<(), EngineError> {
         let _busy = self.busy().await;
-        let old = self.old_contents().await;
+        let Some(old) = self.old_contents().await else {
+            return Err(EngineError::BelowPolicy(vec![format!(
+                "{hash} (a root's history cannot be read: nothing is evicted)"
+            )]));
+        };
         self.evict_for_space_locked(hash, &old).await
     }
 

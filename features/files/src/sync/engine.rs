@@ -134,6 +134,11 @@ pub enum EngineError {
     /// the replacement waits until it can be, and says why.
     #[error("cannot keep history: {0}")]
     NoHistory(String),
+    /// The kept versions are at their bound (`files_history_max`, or the
+    /// tree filesystem's floor): the replacement or delete waits until the
+    /// bound is raised or room appears. Nothing frees history by itself.
+    #[error("history is full: {0}")]
+    HistoryFull(String),
     /// The working file changed while it was being replaced: left as the
     /// user made it, for the next scan to commit (a fork, not a loss).
     #[error("{0} changed while it was being replaced; left as it is")]
@@ -248,6 +253,9 @@ struct Waiting {
     /// and the first reason.
     no_history: u32,
     history_error: Option<String>,
+    /// Replacements and deletes waiting because the kept versions are at
+    /// their bound.
+    history_full: u32,
 }
 
 impl Waiting {
@@ -256,6 +264,9 @@ impl Waiting {
         match e {
             EngineError::NoRoom(_) => self.deferred = self.deferred.saturating_add(1),
             EngineError::TooLarge(_) => self.too_large = self.too_large.saturating_add(1),
+            EngineError::HistoryFull(_) => {
+                self.history_full = self.history_full.saturating_add(1);
+            }
             EngineError::NoHistory(why) => {
                 self.no_history = self.no_history.saturating_add(1);
                 if self.history_error.is_none() {
@@ -302,6 +313,8 @@ pub struct Engine {
     swap_hook: Arc<Mutex<Option<SwapHook>>>,
     /// Store areas checked for shared (hard-linked) files since start.
     pub(super) links_checked: Arc<std::sync::atomic::AtomicBool>,
+    /// Why history cannot be kept here at all, if so.
+    history_off: Arc<Mutex<Option<String>>>,
 }
 
 impl Engine {
@@ -315,6 +328,7 @@ impl Engine {
             pending,
             swap_hook: Arc::default(),
             links_checked: Arc::default(),
+            history_off: Arc::default(),
             config: Arc::new(config),
             books,
             store,
@@ -551,6 +565,24 @@ impl Engine {
         Ok(meta)
     }
 
+    /// Run `f` on a root's index (the cached one, else the saved one,
+    /// saved back when `f` says it changed it).
+    pub(super) fn with_index(&self, doc_id: Uuid, f: impl FnOnce(&mut Index) -> bool) {
+        let file = self.index_path(doc_id);
+        let mut f = Some(f);
+        let cached = self.with_root(doc_id, |state| {
+            state.index.as_mut().map(|i| f.take().is_some_and(|f| f(i)))
+        });
+        if cached.is_none()
+            && let Some(f) = f
+        {
+            let mut index = Index::load(&file);
+            if f(&mut index) {
+                let _ = index.save(&file);
+            }
+        }
+    }
+
     /// Test seam: `hook` runs right before every write swaps its file in.
     #[doc(hidden)]
     pub fn set_swap_hook(&self, hook: Option<SwapHook>) {
@@ -588,6 +620,14 @@ impl Engine {
     /// One pass over one root (see the module docs).
     pub async fn pass(&self, doc_id: Uuid) {
         let _busy = self.busy.lock().await;
+        // Before any write: a store file sharing its inode with a working
+        // file must not be linked from again.
+        if !self
+            .links_checked
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            self.check_links().await;
+        }
         let result = self.pass_inner(doc_id).await;
         self.with_root(doc_id, |state| {
             state.error = result.err().map(|e| e.to_string());
@@ -698,6 +738,18 @@ impl Engine {
         let before = self.with_root(doc_id, |state| {
             std::mem::replace(&mut state.waiting, now.clone())
         });
+        if now.history_full > 0 && before.history_full == 0 {
+            let usage = self.store.history.budget().map(|b| b.usage());
+            tracing::warn!(
+                files.root = %doc_id,
+                files.history_full = now.history_full,
+                history.used = usage.map(|u| u.used),
+                history.max = usage.map(|u| u.max),
+                fs.free = usage.and_then(|u| u.space).map(|s| s.free),
+                fs.keep_free = usage.map(|u| u.keep_free),
+                "files: kept versions are at their bound: replacements and deletes wait"
+            );
+        }
         if now.no_history > 0 && before.no_history == 0 {
             tracing::warn!(
                 files.root = %doc_id,
@@ -736,12 +788,37 @@ impl Engine {
     /// over every root, and the first reason ("cannot keep history").
     #[must_use]
     pub fn history_blocked(&self) -> (u32, Option<String>) {
-        self.lock().values().fold((0, None), |(n, why), s| {
+        let off = self
+            .history_off
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        self.lock().values().fold((0, off), |(n, why), s| {
             (
                 n.saturating_add(s.waiting.no_history),
                 why.or_else(|| s.waiting.history_error.clone()),
             )
         })
+    }
+
+    /// Replacements and deletes waiting because the kept versions are at
+    /// their bound, over every root.
+    #[must_use]
+    pub fn history_full(&self) -> u32 {
+        self.lock()
+            .values()
+            .map(|s| s.waiting.history_full)
+            .fold(0, u32::saturating_add)
+    }
+
+    /// History cannot be kept on this device at all (`why`: a read-only
+    /// share). Every replacement and delete then waits, and says why;
+    /// reads are served as before.
+    pub fn set_history_off(&self, why: Option<String>) {
+        *self
+            .history_off
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = why;
     }
 
     /// Files more than the store's whole limit, over every root: they
@@ -882,6 +959,7 @@ impl Engine {
         let mut missing = 0u32;
         let mut waiting = Waiting::default();
         let mut closing = Vec::new();
+        let mut deletes: Vec<(String, PathBuf, Indexed)> = Vec::new();
         let paths: Vec<String> = tree.paths().map(str::to_owned).collect();
         for path in paths {
             let Some(settled) = tree.settled(&path) else {
@@ -926,15 +1004,13 @@ impl Engine {
                 _ => {}
             }
             let Some(content) = &target.content else {
-                // A delete: only of bytes the line once held.
+                // A delete: only of bytes the line once held, and after
+                // every write (a move whose new name sorts later writes it
+                // from this file first).
                 if let Some(k) = known
                     && tree.ever_held(&path, &k.content)
                 {
-                    let _ = std::fs::remove_file(&file);
-                    index.files.remove(&path);
-                    if let Some(parent) = file.parent() {
-                        remove_empty_up_to(parent, dir);
-                    }
+                    deletes.push((path, file, k));
                 }
                 continue;
             };
@@ -973,8 +1049,60 @@ impl Engine {
                 }
             }
         }
+        // Deletes last, each keeping its bytes first (a peer's delete, a
+        // WebDAV or S3 DELETE, a checkpoint restore, the old name of a move).
+        for (path, file, k) in deletes {
+            match self.remove_kept(&file, &k).await {
+                Ok(()) => {
+                    index.files.remove(&path);
+                    if let Some(parent) = file.parent() {
+                        remove_empty_up_to(parent, dir);
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(%path, %e, "files: not deleted yet");
+                    missing = missing.saturating_add(1);
+                    waiting.count(&e);
+                }
+            }
+        }
         manifest.push(&closing);
         (missing, waiting)
+    }
+
+    /// Remove the working file `file` (the version `known` says it is),
+    /// its bytes kept first ([`Self::keep_old`]). A file that changed is
+    /// left ([`EngineError::Changed`]); with nowhere to keep its bytes it
+    /// stays, and waits.
+    async fn remove_kept(&self, file: &Path, known: &Indexed) -> Result<(), EngineError> {
+        let unchanged = |linked: bool| {
+            std::fs::metadata(file).is_ok_and(|m| {
+                let now = Stat::of(&m);
+                if linked {
+                    now.same_file(&known.stat)
+                } else {
+                    now == known.stat
+                }
+            })
+        };
+        if !unchanged(false) {
+            return Err(EngineError::Changed(file.display().to_string()));
+        }
+        let kept = self.keep_old(file, known).await?;
+        let linked = kept.as_ref().is_some_and(|k| k.linked);
+        if !unchanged(linked) {
+            if let Some(k) = kept {
+                k.undo();
+            }
+            return Err(EngineError::Changed(file.display().to_string()));
+        }
+        if let Err(e) = tokio::fs::remove_file(file).await {
+            if let Some(k) = kept {
+                k.undo();
+            }
+            return Err(e.into());
+        }
+        Ok(())
     }
 
     /// The bytes of `hash` from somewhere on this device, and the area
@@ -1057,6 +1185,11 @@ impl Engine {
                 .map_err(architect::blob::BlobError::NoRoom)?
         };
         let staging = architect::blob::staging_path(at);
+        // Something already there that the engine did not write is a
+        // user's file with that name: left alone, and this write waits.
+        if staging.exists() && !self.pending.owns(&staging) {
+            return Err(EngineError::Changed(staging.display().to_string()));
+        }
         self.pending.add(&staging)?;
         let staged = match architect::blob::stage(&source, at, hash, transient.is_some()).await {
             Ok(s) => s.path,
@@ -1177,11 +1310,19 @@ impl Engine {
         {
             return Ok(None);
         }
+        let off = self
+            .history_off
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(why) = off {
+            return Err(EngineError::NoHistory(why));
+        }
         let area = self.store.history.clone();
         let adopted = match area.adopt(at, &hash, true).await {
             Ok(a) => a,
             Err(architect::blob::BlobError::NoRoom(no)) => {
-                return Err(architect::blob::BlobError::NoRoom(no).into());
+                return Err(EngineError::HistoryFull(no.to_string()));
             }
             Err(e) => return Err(EngineError::NoHistory(e.to_string())),
         };
@@ -1572,6 +1713,7 @@ impl Engine {
             deferred: waiting.deferred,
             too_large: waiting.too_large,
             no_history: waiting.no_history,
+            history_full: waiting.history_full,
             history_error: waiting.history_error,
             strays,
             synced,

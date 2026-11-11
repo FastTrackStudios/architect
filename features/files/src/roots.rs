@@ -121,6 +121,9 @@ pub struct RootStatus {
     /// cannot be kept, and why ("cannot keep history: …").
     pub no_history: u32,
     pub history_error: Option<String>,
+    /// Of those, replacements and deletes waiting because the kept
+    /// versions are at their bound (`files_history_max` or the floor).
+    pub history_full: u32,
     /// Files named like the engine's temp files that it did not write:
     /// never synced, never removed, listed here.
     pub strays: Vec<String>,

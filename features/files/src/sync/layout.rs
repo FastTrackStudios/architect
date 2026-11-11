@@ -35,36 +35,88 @@ versions/  the previous versions of files it replaced (history), by sha-256\n\
 Anyone who mounts this share sees it. Do not edit or delete what is in it:\n\
 the versions are the only copy of some old versions.\n";
 
-/// Make `<files_dir>/.architect` the node's own folder, or say why it
-/// cannot be: something else already has that name (a file, a link, a
-/// folder without the node's mark). A holding node does not start then.
+/// What [`claim_area`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Claimed {
+    /// `.architect` is the node's own folder.
+    Ready,
+    /// The share cannot be written here (read-only, root-squashed): the
+    /// node starts and serves reads, keeps no history, and every
+    /// replacement or delete waits and says this.
+    Unwritable(String),
+}
+
+/// Make `<files_dir>/.architect` the node's own folder.
+///
+/// An absent or empty folder is claimed: its mark is written beside it
+/// and renamed in, so a crash leaves either no mark (claimed again next
+/// start) or a whole one. A share the node cannot write is
+/// [`Claimed::Unwritable`].
 ///
 /// # Errors
 ///
-/// What is in the way, or why the folder cannot be made.
-pub fn claim_area(files_dir: &Path) -> Result<(), String> {
+/// Something else already has that name (a file, a link, a folder with
+/// other things in it and no mark of the node's): a holding node refuses
+/// to start, and the message names what to move.
+pub fn claim_area(files_dir: &Path) -> Result<Claimed, String> {
     let area = files_dir.join(AREA);
     let mark = area.join(AREA_MARK);
+    let unwritable = |e: &std::io::Error| {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::PermissionDenied
+        )
+    };
+    let write_mark = || -> std::io::Result<()> {
+        let tmp = area.join(format!("{AREA_MARK}{PART}"));
+        {
+            use std::io::Write as _;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(AREA_MARK_TEXT.as_bytes())?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, &mark)
+    };
+    let claim = |made: std::io::Result<()>| match made.and_then(|()| write_mark()) {
+        Ok(()) => Ok(Claimed::Ready),
+        Err(e) if unwritable(&e) => Ok(Claimed::Unwritable(format!(
+            "{} cannot be written ({e}): no history is kept, replacements and deletes wait",
+            area.display()
+        ))),
+        Err(e) => Err(format!(
+            "{}: cannot make the node's folder: {e}",
+            area.display()
+        )),
+    };
     match std::fs::symlink_metadata(&area) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir_all(&area)
-            .and_then(|()| std::fs::write(&mark, AREA_MARK_TEXT))
-            .map_err(|e| format!("{}: cannot make the node's folder: {e}", area.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => claim(std::fs::create_dir_all(&area)),
         Err(e) => Err(format!("{}: {e}", area.display())),
         Ok(m) if m.file_type().is_symlink() || !m.is_dir() => Err(format!(
             "{} exists and is not a folder of the node's (a file or a link): move it away, \
              the node keeps its history there",
             area.display()
         )),
-        Ok(_) => match std::fs::read_to_string(&mark) {
-            Ok(text) if text.starts_with(AREA_MARK_TEXT.lines().next().unwrap_or_default()) => {
-                Ok(())
+        Ok(_) => {
+            if std::fs::read_to_string(&mark).is_ok_and(|text| {
+                text.starts_with(AREA_MARK_TEXT.lines().next().unwrap_or_default())
+            }) {
+                return Ok(Claimed::Ready);
             }
-            _ => Err(format!(
+            // Empty but for a half-written mark: a claim a crash cut short.
+            let empty = std::fs::read_dir(&area).is_ok_and(|entries| {
+                entries
+                    .flatten()
+                    .all(|e| e.file_name().to_string_lossy().starts_with(AREA_MARK))
+            });
+            if empty {
+                return claim(Ok(()));
+            }
+            Err(format!(
                 "{} exists and is not the node's own folder (no {AREA_MARK} of its own): \
                  move it away, the node keeps its history there",
                 area.display()
-            )),
-        },
+            ))
+        }
     }
 }
 
@@ -250,12 +302,26 @@ mod tests {
     #[test]
     fn the_node_s_folder_is_its_own_or_it_does_not_start() {
         let tmp = tempfile::tempdir().unwrap();
-        claim_area(tmp.path()).unwrap();
-        claim_area(tmp.path()).unwrap();
+        assert_eq!(claim_area(tmp.path()), Ok(Claimed::Ready));
+        assert_eq!(claim_area(tmp.path()), Ok(Claimed::Ready));
         assert!(tmp.path().join(AREA).join(AREA_MARK).is_file());
+
+        // A claim a crash cut short: an empty folder, or a half mark.
+        let cut = tempfile::tempdir().unwrap();
+        std::fs::create_dir(cut.path().join(AREA)).unwrap();
+        assert_eq!(claim_area(cut.path()), Ok(Claimed::Ready));
+        let half = tempfile::tempdir().unwrap();
+        std::fs::create_dir(half.path().join(AREA)).unwrap();
+        std::fs::write(
+            half.path().join(AREA).join("README.txt.architect-part"),
+            b"Th",
+        )
+        .unwrap();
+        assert_eq!(claim_area(half.path()), Ok(Claimed::Ready));
 
         let theirs = tempfile::tempdir().unwrap();
         std::fs::create_dir(theirs.path().join(AREA)).unwrap();
+        std::fs::write(theirs.path().join(AREA).join("notes.md"), b"mine").unwrap();
         assert!(
             claim_area(theirs.path())
                 .unwrap_err()

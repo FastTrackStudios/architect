@@ -42,8 +42,18 @@ impl Pending {
         }
         let list: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         let tmp = self.file.with_extension("json.tmp");
-        std::fs::write(&tmp, facet_json::to_string(&list).unwrap_or_default())?;
-        std::fs::rename(tmp, &self.file)
+        {
+            use std::io::Write as _;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(facet_json::to_string(&list).unwrap_or_default().as_bytes())?;
+            f.sync_all()?;
+        }
+        std::fs::rename(tmp, &self.file)?;
+        // The rename is durable only once its directory is.
+        if let Some(dir) = self.file.parent() {
+            std::fs::File::open(dir)?.sync_all()?;
+        }
+        Ok(())
     }
 
     /// `path` is about to be written.

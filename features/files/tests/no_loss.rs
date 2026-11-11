@@ -436,7 +436,12 @@ async fn kept_versions_at_their_floor_defer_the_replacement_and_delete_nothing()
         old,
         "not replaced while its version cannot be kept"
     );
-    assert_eq!(node.engine.status().await[0].deferred, 1);
+    let s = &node.engine.status().await[0];
+    assert_eq!(
+        (s.history_full, s.deferred),
+        (1, 0),
+        "reported as history, not a fetch"
+    );
 
     free.store(10_000_000, Ordering::SeqCst);
     passes(&node, 2).await;
@@ -448,7 +453,7 @@ async fn kept_versions_at_their_floor_defer_the_replacement_and_delete_nothing()
             .map(|p| std::fs::read(p).unwrap()),
         Some(old)
     );
-    assert_eq!(node.engine.status().await[0].deferred, 0);
+    assert_eq!(node.engine.status().await[0].history_full, 0);
 }
 
 /// M4: with the store on another filesystem (tmpfs) than the tree, a
@@ -564,7 +569,9 @@ async fn a_full_store_never_leaves_a_path_empty() {
         "the path keeps its file"
     );
     let status = laptop.engine.status().await;
-    assert_eq!((status[0].missing, status[0].deferred), (1, 1));
+    // On a device the store is where its history goes: no room to keep
+    // the old version is "history full", and the file waits.
+    assert_eq!((status[0].missing, status[0].history_full), (1, 1));
 }
 
 /// S2: a file larger than the whole store limit is "too large", not
@@ -928,4 +935,250 @@ async fn a_file_changed_during_its_replacement_becomes_a_conflict_copy() {
     }
     assert_eq!(contents.len(), 2, "the file and its conflict copy");
     assert!(contents.contains(&mine) && contents.contains(&theirs));
+}
+
+/// The version of `path` whose bytes are `x`, who holds them, and that
+/// they can be restored (written back at `path`, then read).
+async fn held_and_restorable(d: &Device, path: &str, x: &[u8]) {
+    let hash = Sha256::of(x);
+    let id = Uuid::parse_str(&d.engine.status().await[0].doc_id).unwrap();
+    let tree = d.engine.tree(id).await.unwrap();
+    let v = tree
+        .history(path)
+        .iter()
+        .find(|v| v.content.as_deref() == Some(&*hash.to_hex()))
+        .cloned()
+        .unwrap_or_else(|| panic!("{path} has a version with these bytes"));
+    let bytes = d.engine.version_bytes(v.id, &hash.to_hex()).await;
+    assert!(bytes.here, "{path}: the bytes are held: {bytes:?}");
+    let file = d.engine.store.file_for(&hash).expect("held");
+    assert_eq!(std::fs::read(file).unwrap(), x);
+    d.engine.restore(id, path, v.id).await.unwrap();
+    passes(d, 2).await;
+    let at = std::path::PathBuf::from(tree_dir(d).await).join(path);
+    assert_eq!(std::fs::read(&at).unwrap(), x, "{path} restored");
+}
+
+async fn tree_dir(d: &Device) -> String {
+    d.engine.status().await[0].path.clone().unwrap()
+}
+
+/// M1 (fourth review): a move on the node, to a name that sorts after
+/// the old one and to one before it. The writes now come before the
+/// deletes, and the delete keeps its bytes anyway.
+async fn move_to(name: &str) {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+    let to = format!("Audio/{name}");
+    node.engine
+        .relocate(id, "Audio/take.wav", &to, true)
+        .await
+        .unwrap();
+    passes(&node, 2).await;
+    assert_eq!(std::fs::read(p.join(&to)).unwrap(), old, "{name}: moved");
+    assert!(!p.join("Audio/take.wav").exists());
+    let s = &node.engine.status().await[0];
+    assert_eq!(s.missing, 0, "{name}: {s:?}");
+    held_and_restorable(&node, "Audio/take.wav", &old).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_on_a_holding_node_never_loses_the_file() {
+    move_to("zz-take.wav").await;
+    move_to("a-take.wav").await;
+}
+
+/// M1: a checkpoint restore that removes a file added since, then a
+/// restore forward that brings it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_checkpoint_restore_that_removes_a_file_can_be_undone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, _) = project(&tree);
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+    let before = node.engine.make_checkpoint(id, "before").await.unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    let new = vec![42u8; 6_000];
+    std::fs::write(p.join("Audio/new.wav"), &new).unwrap();
+    passes(&node, 2).await;
+    let after = node.engine.make_checkpoint(id, "after").await.unwrap();
+
+    node.engine.restore_checkpoint(id, before.id).await.unwrap();
+    passes(&node, 2).await;
+    assert!(!p.join("Audio/new.wav").exists());
+    let x = Sha256::of(&new);
+    let file = node
+        .engine
+        .store
+        .file_for(&x)
+        .expect("new.wav's bytes are kept");
+    assert_eq!(std::fs::read(file).unwrap(), new);
+
+    node.engine.restore_checkpoint(id, after.id).await.unwrap();
+    passes(&node, 2).await;
+    assert_eq!(std::fs::read(p.join("Audio/new.wav")).unwrap(), new, "back");
+}
+
+/// M1: a peer's delete, and a WebDAV/S3 DELETE (`delete_path`), keep the
+/// bytes they remove.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delete_from_a_peer_or_webdav_keeps_its_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+
+    // WebDAV DELETE of song.rpp.
+    let session = std::fs::read(p.join("song.rpp")).unwrap();
+    node.engine.delete_path(id, "song.rpp").await.unwrap();
+    passes(&node, 2).await;
+    assert!(!p.join("song.rpp").exists());
+    held_and_restorable(&node, "song.rpp", &session).await;
+
+    // A peer deletes take.wav from its copy.
+    let laptop = plain(
+        "laptop",
+        tmp.path(),
+        tmp.path().join("laptop-files"),
+        false,
+        Some(&node.engine.store),
+    );
+    node.engine
+        .fetcher
+        .add_remote(Arc::new(laptop.engine.store.clone()));
+    exchange(&node, &laptop);
+    let copy = laptop.engine.pin(id, None).await.unwrap();
+    passes(&laptop, 2).await;
+    std::fs::remove_file(copy.join("Audio/take.wav")).unwrap();
+    passes(&laptop, 2).await;
+    exchange(&node, &laptop);
+    passes(&node, 2).await;
+    assert!(
+        !p.join("Audio/take.wav").exists(),
+        "the peer's delete applied"
+    );
+    held_and_restorable(&node, "Audio/take.wav", &old).await;
+}
+
+/// S1: a user's hard link to the file the node replaces: the kept
+/// version is a copy, so a write through the other name never reaches it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_kept_version_never_shares_an_inode_with_a_user_s_hard_link() {
+    use std::io::Write as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    std::fs::hard_link(p.join("Audio/take.wav"), p.join("Audio/alias.wav")).unwrap();
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+    let mut new = old.clone();
+    new[1] ^= 0xff;
+    node.engine
+        .save_bytes(id, "Audio/take.wav", &new)
+        .await
+        .unwrap();
+    passes(&node, 2).await;
+    assert_eq!(std::fs::read(p.join("Audio/take.wav")).unwrap(), new);
+
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(p.join("Audio/alias.wav"))
+        .unwrap();
+    f.write_all(b"through the alias").unwrap();
+    drop(f);
+    let kept = node.engine.store.file_for(&Sha256::of(&old)).expect("kept");
+    assert_eq!(
+        std::fs::read(kept).unwrap(),
+        old,
+        "the kept version is its own"
+    );
+}
+
+/// S2 and S6: a crash left an incoming copy hard-linked to `take.wav`.
+/// At start (before any write) it gets an inode of its own, `take.wav`
+/// is still known as itself, and a new path with the same bytes never
+/// shares an inode with it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_crash_leftover_never_makes_two_working_files_share_an_inode() {
+    use std::os::unix::fs::MetadataExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    let first = holding_node(tmp.path(), &tree, None);
+    passes(&first, 2).await;
+    let x = Sha256::of(&old);
+    let (incoming, _) = layout::areas(&tree);
+    let leftover = LocalFs::new(&incoming).path_for(&x);
+    std::fs::create_dir_all(leftover.parent().unwrap()).unwrap();
+    std::fs::hard_link(p.join("Audio/take.wav"), &leftover).unwrap();
+    drop(first);
+
+    // Restart.
+    let node = holding_node(tmp.path(), &tree, None);
+    node.engine.pass_all().await;
+    assert!(
+        node.engine.store.in_place.find(&x).is_some(),
+        "take.wav is still known as itself after the split"
+    );
+    // A second path with the same bytes, saved on the node.
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+    node.engine
+        .save_bytes(id, "Audio/twin.wav", &old)
+        .await
+        .unwrap();
+    passes(&node, 2).await;
+    let ino = |name: &str| std::fs::metadata(p.join(name)).unwrap().ino();
+    assert_eq!(std::fs::read(p.join("Audio/twin.wav")).unwrap(), old);
+    assert_ne!(ino("Audio/take.wav"), ino("Audio/twin.wav"));
+    assert_eq!(
+        std::fs::metadata(p.join("Audio/take.wav")).unwrap().nlink(),
+        1
+    );
+}
+
+/// S3: when a root's history cannot be read, nothing is evicted for
+/// space (its old versions are not known).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_root_stops_eviction() {
+    let tmp = tempfile::tempdir().unwrap();
+    let files = tmp.path().join("files");
+    let (_, old) = project(&files);
+    let blobs = tmp.path().join("d/blobs");
+    let local = LocalFs::new(&blobs).with_budget(Arc::new(StoreBudget::new(&blobs, 10_500, 0)));
+    let docs: DocMap = Arc::default();
+    let source = docs.clone();
+    let unreadable = Uuid::new_v4();
+    let engine = Engine::new(
+        EngineConfig {
+            settle: Duration::ZERO,
+            ..EngineConfig::new("d", tmp.path().join("d/data"), files, true)
+        },
+        TreeStore::new(local.clone()),
+        Fetcher::new(local),
+        Arc::new(move |id| {
+            let doc =
+                (id != unreadable).then(|| source.lock().unwrap().entry(id).or_default().clone());
+            Box::pin(async move { doc })
+        }),
+    );
+    let d = Device { engine, docs };
+    passes(&d, 2).await;
+    let x = d.engine.store.local.put_bytes(&old).await.unwrap();
+    d.engine.learn(unreadable);
+    let refused = d.engine.evict_for_space(x).await;
+    assert!(refused.is_err(), "{refused:?}");
+    d.engine.pass_all().await;
+    assert!(
+        d.engine.store.local.path_for(&x).is_file(),
+        "nothing dropped"
+    );
 }
