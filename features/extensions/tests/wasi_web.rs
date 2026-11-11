@@ -57,11 +57,14 @@ fn tool(program: &str) -> Option<Command> {
     }
     let mut cmd = Command::new("devenv");
     cmd.args(["--profile", "wasi", "shell", "--", program]);
-    let found = Command::new("devenv")
-        .args(["--profile", "wasi", "shell", "--", program, "--version"])
-        .current_dir(root())
-        .output()
-        .is_ok_and(|o| o.status.success());
+    let found = {
+        let _devenv = devenv_lock();
+        Command::new("devenv")
+            .args(["--profile", "wasi", "shell", "--", program, "--version"])
+            .current_dir(root())
+            .output()
+            .is_ok_and(|o| o.status.success())
+    };
     found.then_some(cmd)
 }
 
@@ -93,7 +96,10 @@ fn guests() -> Option<PathBuf> {
     ] {
         cmd.env_remove(var);
     }
-    let exit = cmd.current_dir(root()).status();
+    let exit = {
+        let _devenv = devenv_lock();
+        cmd.current_dir(root()).status()
+    };
     match exit {
         Ok(s) if s.success() => Some(target.join("wasm32-wasip2/debug")),
         other => {
@@ -191,4 +197,17 @@ fn bounded(mut cmd: Command, limit: Duration) -> Output {
         stdout,
         stderr,
     }
+}
+
+/// Held while `devenv` runs. Under nextest every test is a process of its
+/// own, and each `devenv` run rewrites its profile's bootstrap files: two
+/// at once and one reads a half-written `resolve-lock.nix` ("unexpected
+/// end of file"), so the components "did not build". One lock file for
+/// every test binary that enters the `wasi` profile.
+fn devenv_lock() -> Option<std::fs::File> {
+    let dir = root().join("target");
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = std::fs::File::create(dir.join(".devenv-wasi.lock")).ok()?;
+    file.lock().ok()?;
+    Some(file)
 }

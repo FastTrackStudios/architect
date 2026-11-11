@@ -72,7 +72,11 @@ fn guests() -> Option<&'static Path> {
             ] {
                 cmd.env_remove(var);
             }
-            match cmd.current_dir(root()).status() {
+            let exit = {
+                let _devenv = devenv_lock();
+                cmd.current_dir(root()).status()
+            };
+            match exit {
                 Ok(s) if s.success() => Some(target.join("wasm32-wasip2/debug")),
                 other => {
                     let why = format!("the WASI counter did not build ({other:?})");
@@ -145,4 +149,17 @@ fn a_components_embed_view_draws_a_fence_as_an_svg_that_follows() {
     let installed = InstalledBlocks::new(tmp.path());
     assert!(installed.claims(&bars));
     assert_eq!(installed.drawn_by(&bars), "lab.wasi-counter");
+}
+
+/// Held while `devenv` runs. Under nextest every test is a process of its
+/// own, and each `devenv` run rewrites its profile's bootstrap files: two
+/// at once and one reads a half-written `resolve-lock.nix` ("unexpected
+/// end of file"), so the components "did not build". One lock file for
+/// every test binary that enters the `wasi` profile.
+fn devenv_lock() -> Option<std::fs::File> {
+    let dir = root().join("target");
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = std::fs::File::create(dir.join(".devenv-wasi.lock")).ok()?;
+    file.lock().ok()?;
+    Some(file)
 }
