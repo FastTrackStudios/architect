@@ -676,3 +676,41 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
 
     host.stop().await;
 }
+
+/// `ARCHITECT_IROH=local` (what `devenv up`'s node runs with, #541): read
+/// from the environment, the node's iroh endpoint has no relay and is
+/// bound to loopback alone, so it can neither find nor be found by a peer
+/// anywhere else; its status says so to anyone who asks.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_local_node_has_no_relay_and_listens_on_loopback_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let env = [
+        ("ARCHITECT_IROH", "local"),
+        ("ARCHITECT_BIND", "127.0.0.1:0"),
+    ];
+    let mut config = Config::load(None, |k| {
+        env.iter()
+            .find(|(n, _)| *n == k)
+            .map(|(_, v)| (*v).to_owned())
+    })
+    .unwrap();
+    config.data_dir = tmp.path().join("data");
+    assert_eq!(config.iroh, IrohMode::Local);
+    assert!(config.peers.is_empty() && config.enrol_at.is_none());
+    let node = node::start(config).await.unwrap();
+    assert!(node.endpoint.addr().relay_urls().next().is_none());
+    let bound = node.endpoint.bound_sockets();
+    assert!(!bound.is_empty());
+    assert!(bound.iter().all(|a| a.ip().is_loopback()), "{bound:?}");
+    let shown = status(&node).await;
+    assert!(shown.relays.is_empty(), "{:?}", shown.relays);
+    assert!(
+        shown.iroh_addrs.iter().all(|a| a
+            .parse::<std::net::SocketAddr>()
+            .unwrap()
+            .ip()
+            .is_loopback()),
+        "{:?}",
+        shown.iroh_addrs
+    );
+}
