@@ -162,9 +162,9 @@ impl Feature {
         }
     }
 
-    fn offered(self, caps: &types::ServerCapabilities) -> bool {
+    const fn offered(self, caps: &types::ServerCapabilities) -> bool {
         use types::{HoverProviderCapability, OneOf};
-        fn one<T>(o: Option<&OneOf<bool, T>>) -> bool {
+        const fn one<T>(o: Option<&OneOf<bool, T>>) -> bool {
             !matches!(o, None | Some(OneOf::Left(false)))
         }
         match self {
@@ -248,7 +248,7 @@ pub fn file_uri(path: &Path) -> Result<Uri, LspError> {
         if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
             out.push(char::from(b));
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            let _ = std::fmt::Write::write_fmt(&mut out, format_args!("%{b:02X}"));
         }
     }
     Uri::from_str(&out).map_err(|e| LspError::Server(format!("{}: {e}", path.display())))
@@ -266,9 +266,9 @@ struct DocState {
 }
 
 impl DocState {
-    fn publish(&self, diagnostics: Vec<Diagnostic>) {
-        *lock(&self.diagnostics) = diagnostics.clone();
-        lock(&self.diagnostic_watchers).retain(|w| w.unbounded_send(diagnostics.clone()).is_ok());
+    fn publish(&self, diagnostics: &[Diagnostic]) {
+        diagnostics.clone_into(&mut lock(&self.diagnostics));
+        lock(&self.diagnostic_watchers).retain(|w| w.unbounded_send(diagnostics.to_vec()).is_ok());
     }
 }
 
@@ -377,6 +377,10 @@ impl LanguageServers {
     ///
     /// # Errors
     /// [`LspError::NoServer`] when the language has no server.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "found or started and counted under one lock, so a close cannot stop it between"
+    )]
     pub fn open(
         &self,
         language: &Registered,
@@ -560,9 +564,17 @@ impl Drop for Document {
         let Some(shared) = self.servers.upgrade() else {
             return;
         };
-        let mut servers = lock(&shared.servers);
-        if server.open.fetch_sub(1, Ordering::SeqCst) == 1 {
-            servers.retain(|s| !Arc::ptr_eq(s, server));
+        // Counted under the servers' lock, so an open of the same
+        // language and root either finds it still counted or starts anew.
+        let last = {
+            let mut servers = lock(&shared.servers);
+            let last = server.open.fetch_sub(1, Ordering::SeqCst) == 1;
+            if last {
+                servers.retain(|s| !Arc::ptr_eq(s, server));
+            }
+            last
+        };
+        if last {
             let _ = server.ops.send(Op::Stop);
         }
     }
@@ -981,7 +993,7 @@ async fn run(server: Arc<Server>, mut ops: mpsc::UnboundedReceiver<Op>, restart:
             Err(error) => error,
         };
         for (state, _) in docs.values() {
-            state.publish(Vec::new());
+            state.publish(&[]);
         }
         attempt = attempt.saturating_add(1);
         if attempt > restart.attempts {
@@ -1060,7 +1072,7 @@ async fn serve(
                     if let Some((state, doc)) = docs.get(&key)
                         && store.apply(&published, client.version_of(&published.uri), doc)
                     {
-                        state.publish(store.get(&published.uri).to_vec());
+                        state.publish(store.get(&published.uri));
                     }
                 }
                 Some(ServerMessage::Notification { .. }) => {}
@@ -1105,7 +1117,7 @@ async fn online(
                     .map_err(|e| e.to_string())?;
                 *doc = after;
                 store.map_through(&uri, &changes);
-                state.publish(store.get(&uri).to_vec());
+                state.publish(store.get(&uri));
             }
         }
         Op::Close(uri) => {
@@ -1156,7 +1168,7 @@ fn offline(op: Op, docs: &mut Docs, why: &str) {
 fn stopped(server: &Server, docs: &Docs, ops: &mut mpsc::UnboundedReceiver<Op>) {
     server.set(State::Stopped);
     for (state, _) in docs.values() {
-        state.publish(Vec::new());
+        state.publish(&[]);
     }
     ops.close();
     while let Ok(op) = ops.try_recv() {

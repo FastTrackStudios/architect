@@ -33,7 +33,7 @@ const NAME: &str = "an_extensions_language_server_runs_through_the_host";
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(at) = args.iter().position(|a| a == "--stub-lsp") {
-        stub::serve(&args[at + 1..]);
+        stub::serve(args.get(at.saturating_add(1)..).unwrap_or_default());
         return;
     }
     if args.iter().any(|a| a == "--list") {
@@ -71,7 +71,7 @@ fn until(what: &str, ok: impl Fn() -> bool) {
 }
 
 fn manifest(capability: bool) -> String {
-    let exe = std::env::current_exe().unwrap();
+    let exe = std::env::current_exe().unwrap().display().to_string();
     let caps = if capability {
         "[capabilities]\nlanguages = [\"servers\"]\n"
     } else {
@@ -88,7 +88,7 @@ id = "stubby"
 name = "Stub"
 extensions = ["stub"]
 [languages.server]
-command = {exe:?}
+command = "{exe}"
 args = ["--stub-lsp"]
 "#
     )

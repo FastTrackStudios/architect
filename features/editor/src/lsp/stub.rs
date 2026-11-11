@@ -1,5 +1,6 @@
-//! A stub language server for tests (feature `lsp-stub`): it speaks
-//! `initialize`, publishes one diagnostic for each document it is sent
+//! A stub language server for tests (feature `lsp-stub`).
+//!
+//! It speaks `initialize`, publishes one diagnostic for each document it is sent
 //! (a warning over the first two bytes, `stub: a warning`), and answers
 //! one hover (`stub hover`), one completion (`stub_completion`), a
 //! format (a comment line put first), a rename (the first two bytes) and
@@ -10,6 +11,11 @@
 //! the server (`harness = false`, a `--stub-lsp` argument). With
 //! `--die-once <file>` it exits after its first document while `<file>`
 //! does not exist, creating it: one crash, for restart tests.
+
+#![expect(
+    clippy::indexing_slicing,
+    reason = "a JSON value indexed by a key is Null when the key is missing; it never panics"
+)]
 
 use std::io::{BufRead, BufReader, Write};
 
@@ -112,6 +118,7 @@ pub fn serve(args: &[String]) {
                     && !marker.exists()
                 {
                     let _ = std::fs::write(marker, "died");
+                    #[expect(clippy::exit, reason = "the stub's one crash, as a server dies")]
                     std::process::exit(3);
                 }
             }

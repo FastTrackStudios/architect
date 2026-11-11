@@ -78,7 +78,9 @@ pub struct CodeDocument {
 }
 
 /// Opens the editor's file in its language's server, once, and keeps it
-/// open while the component lives: `open` is called on mount (the
+/// open while the component lives.
+///
+/// `open` is called on mount (the
 /// extension host's `Host::open_code`, which checks the language may run
 /// its server, or `LanguageServers::open`). Diagnostics come back into
 /// `diagnostics`; a format or a rename's edits are applied to `state` as
@@ -103,7 +105,7 @@ pub fn use_code_document(
             return;
         };
         if event.changes.iter().next().is_some() {
-            doc.change(event.changes.clone(), event.doc_after.clone());
+            doc.change(event.changes.clone(), event.doc_after);
         }
         doc.set_caret(state.peek().selection.primary().head);
         doc.focus();

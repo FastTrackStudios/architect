@@ -8,7 +8,10 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::print_stdout
+    clippy::print_stdout,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::redundant_closure_for_method_calls
 )]
 
 use std::path::PathBuf;
@@ -34,13 +37,14 @@ struct Setup {
 
 static SETUP: OnceLock<Setup> = OnceLock::new();
 
+const NAME: &str = "a_code_editor_shows_its_servers_diagnostics_and_takes_its_format";
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(at) = args.iter().position(|a| a == "--stub-lsp") {
         stub::serve(&args[at + 1..]);
         return;
     }
-    const NAME: &str = "a_code_editor_shows_its_servers_diagnostics_and_takes_its_format";
     if args.iter().any(|a| a == "--list") {
         if !args.iter().any(|a| a == "--ignored") {
             println!("{NAME}: test");

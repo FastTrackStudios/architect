@@ -14,7 +14,12 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::print_stdout
+    clippy::print_stdout,
+    clippy::arithmetic_side_effects,
+    clippy::single_match_else,
+    clippy::redundant_closure_for_method_calls,
+    clippy::indexing_slicing,
+    clippy::unreachable
 )]
 
 use std::path::Path;
