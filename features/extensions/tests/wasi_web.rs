@@ -3,7 +3,8 @@
 //! component that misbehaves on purpose, built for `wasm32-wasip2` as
 //! `tests/wasi.rs` builds them, transpiled by jco, each instance in a
 //! worker thread standing in for a Web Worker. The checks are
-//! `features/extensions/web/test/web.test.mjs`: the view and its clicks,
+//! `features/extensions/web/test/web.test.mjs`: the view and its clicks, a
+//! view mounted as an inline embed,
 //! actions and the host service, a refused call, both limits (a terminated
 //! worker, a capped memory), workers, cancellation and both queues'
 //! back-pressure.
@@ -14,11 +15,20 @@
 //! toolchain lacks `wasm32-wasip2`). Without them, or without the
 //! components, it says so and passes; `ARCHITECT_WASI_WEB_REQUIRED=1`
 //! (main CI) makes that a failure.
+//!
+//! The node run is bounded ([`NODE_LIMIT`]): past it the run is killed and
+//! the test fails with what it printed, instead of holding main CI's
+//! Tests job to its timeout (#520).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+/// How long the node tests may take: about 5 s when they pass.
+const NODE_LIMIT: Duration = Duration::from_secs(120);
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -112,12 +122,10 @@ fn components_run_in_the_browsers_shape() {
         }
     }
     let Some(guests) = guests() else { return };
-    let out = node
-        .args(["--test", "--test-reporter=tap", "test/web.test.mjs"])
+    node.args(["--test", "--test-reporter=tap", "test/web.test.mjs"])
         .env("ARCHITECT_WASI_GUESTS", &guests)
-        .current_dir(&web)
-        .output()
-        .unwrap();
+        .current_dir(&web);
+    let out = bounded(node, NODE_LIMIT);
     let tap = String::from_utf8_lossy(&out.stdout);
     let failed: Vec<&str> = tap.lines().filter(|l| l.starts_with("not ok")).collect();
     assert!(
@@ -126,9 +134,61 @@ fn components_run_in_the_browsers_shape() {
         String::from_utf8_lossy(&out.stderr)
     );
     let passed = tap.lines().filter(|l| l.starts_with("ok ")).count();
-    assert!(passed >= 13, "{passed} of the node tests ran:\n{tap}");
+    assert!(passed >= 14, "{passed} of the node tests ran:\n{tap}");
     assert!(
         !tap.contains("# SKIP"),
         "the node tests skipped: the components were not where they looked\n{tap}"
     );
+}
+
+/// Runs `cmd` to its end, or kills it (and what it started: `devenv`
+/// runs node as its child) after `limit` and fails with its output.
+fn bounded(mut cmd: Command, limit: Duration) -> Output {
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let drain = |mut r: Box<dyn std::io::Read + Send>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = r.read_to_end(&mut buf);
+            buf
+        })
+    };
+    let stdout = drain(Box::new(child.stdout.take().unwrap()));
+    let stderr = drain(Box::new(child.stderr.take().unwrap()));
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if start.elapsed() >= limit {
+            #[cfg(unix)]
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", &format!("-{}", child.id())])
+                .status();
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let stdout = stdout.join().unwrap();
+    let stderr = stderr.join().unwrap();
+    let Some(status) = status else {
+        panic!(
+            "the node tests did not end in {limit:?}; killed:\n{}\n{}",
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
+        );
+    };
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
 }

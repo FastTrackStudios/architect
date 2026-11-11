@@ -7,7 +7,7 @@
 //
 // Run by features/extensions/tests/wasi_web.rs (`cargo test`), or
 // `npm test` here once the components are built.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { Component, Pool, QUEUE, MAX_WORKERS, limitMemory } from '../runner.js';
 import { guests, transpiled, spawn } from './harness.mjs';
@@ -26,6 +26,13 @@ async function until(what, f, ms = 20000) {
     await sleep(10);
   }
 }
+
+/// Every component a test started: stopped once the file's tests end, so
+/// a test that fails before its own `c.stop()` fails instead of leaving
+/// its worker thread alive and node running (main CI hung 60 minutes on
+/// one, #520).
+const started = [];
+after(() => started.forEach((c) => c.stop()));
 
 /// A component with a host that answers THEME_LIST and refuses the rest,
 /// as a `WebHost` would outside its capabilities.
@@ -48,6 +55,7 @@ function component(name, opts = {}) {
     frame: (pane, f) => frames.push({ pane, ...f }),
     ...opts,
   });
+  started.push(c);
   return { c, logs, frames, asked };
 }
 
@@ -104,7 +112,7 @@ const click = (element) => ({
 test('the counter renders, a click and its actions change it, it asks the app', { skip }, async () => {
   const { c, frames, asked, logs } = counter();
   const info = await c.start();
-  assert.deepEqual(info.views, ['counter']);
+  assert.deepEqual(info.views, ['bars', 'counter']);
   assert.ok(info.actions.includes('LAB_WASI_COUNTER_ADD'));
   await c.render(1, 'counter');
   assert.equal(frames[0].pane, 1);
@@ -122,6 +130,19 @@ test('the counter renders, a click and its actions change it, it asks the app', 
   assert.deepEqual(JSON.parse(said), ['light', 'dark', 'mocha']);
   assert.deepEqual(asked[0], { op: 'run', action: 'THEME_LIST', args: null });
   assert.ok(logs.some((l) => l.text === 'The app has 3 themes'));
+  c.stop();
+});
+
+test('a view mounted as an inline embed draws the input the host sends it', { skip }, async () => {
+  const { c, frames } = counter();
+  await c.start();
+  await c.render(2, 'bars');
+  assert.ok(!texts(frames).includes('Am'), 'no bars before its input');
+  // What the host sends a view it mounts as an embed (remote.rs `embed_event`).
+  const input = { claim: 'fence:bars', source: '| C | G | Am |', props: null };
+  await c.event(2, { element: 0, name: 'architect-embed', bubbles: false, data: { tag: 'form', val: JSON.stringify(input) } });
+  for (const bar of ['C', 'G', 'Am']) assert.ok(texts(frames).includes(bar), `it draws ${bar}`);
+  assert.ok(idOf(frames, 'wasi-bars') !== null, 'an svg.wasi-bars');
   c.stop();
 });
 
