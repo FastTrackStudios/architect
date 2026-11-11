@@ -255,8 +255,11 @@ impl Tree {
     }
 
     /// `frame`'s edits, by `deadline`. Memory is bounded by [`MAX_NODES`]
-    /// and [`MAX_BYTES`], time by `deadline` (checked before every edit,
-    /// and no edit costs more than a pass over the drawing's nodes).
+    /// and [`MAX_BYTES`], time by `deadline`, checked before every edit.
+    /// One edit costs at most [`MAX_DEPTH`] steps up from where it puts
+    /// nodes, one step per node it puts there, and one pass over the nodes
+    /// below them (never more than [`MAX_NODES`]): no tree is ever deeper
+    /// than [`MAX_DEPTH`] ([`Tree::insert`]), so no walk up is longer.
     fn apply(&mut self, frame: Frame, deadline: Instant) -> Result<(), String> {
         let edits = match frame {
             Frame::Edits { edits } => edits,
@@ -350,22 +353,6 @@ impl Tree {
         }
     }
 
-    /// Whether `node` is `inside` or below it. The walk up is bounded by
-    /// the node count, so even a broken tree cannot loop it.
-    fn within(&self, node: usize, inside: usize) -> bool {
-        let mut at = Some(node);
-        for _ in 0..=self.nodes.len() {
-            let Some(n) = at else {
-                return false;
-            };
-            if n == inside {
-                return true;
-            }
-            at = self.nodes.get(n).and_then(|n| n.parent);
-        }
-        true
-    }
-
     /// Puts `kids` under `parent` at `at` (its index among the children).
     ///
     /// The drawing stays a tree: every node has one parent and is among
@@ -373,8 +360,26 @@ impl Tree {
     /// twice in `kids` (the same id pushed twice) is refused: put twice
     /// under one parent, every level of such nodes would double what is
     /// written, 2^levels elements from a few edits (#520's review).
+    ///
+    /// And no tree, the view's or one not yet in it, is ever deeper than
+    /// [`MAX_DEPTH`], what a page writes: an edit that would make one is
+    /// refused. So the walk up from `parent` is at most that long. Without
+    /// it a chain 25,000 deep and one `AppendChildren { m: 24000 }` under
+    /// its deepest node walked 25,000 levels per node, 1.8 s in one edit,
+    /// where the deadline is not looked at (#520's second review).
     fn insert(&mut self, parent: usize, at: usize, kids: &[usize]) -> Result<(), String> {
-        if kids.iter().any(|&k| self.within(parent, k) || k == ROOT) {
+        let too_deep = || format!("a drawing over {MAX_DEPTH} levels deep");
+        // `parent` and its ancestors: the tree's invariant keeps them at
+        // most `MAX_DEPTH + 1`; a walk longer than that stops.
+        let mut above = std::collections::HashSet::new();
+        let mut up = Some(parent);
+        while let Some(n) = up {
+            if above.len() > MAX_DEPTH || !above.insert(n) {
+                return Err(too_deep());
+            }
+            up = self.node(n)?.parent;
+        }
+        if kids.iter().any(|k| *k == ROOT || above.contains(k)) {
             return Err("an edit would put a node inside itself".to_owned());
         }
         let mut seen = std::collections::HashSet::with_capacity(kids.len());
@@ -383,6 +388,17 @@ impl Tree {
         }
         for &kid in kids {
             self.detach(kid);
+        }
+        // Detached, the kids' subtrees are apart: each node below them is
+        // looked at once. A kid lands `above.len()` levels down.
+        let room = MAX_DEPTH.checked_sub(above.len()).ok_or_else(too_deep)?;
+        let mut todo: Vec<(usize, usize)> = kids.iter().map(|&k| (k, 0)).collect();
+        while let Some((n, depth)) = todo.pop() {
+            if depth > room {
+                return Err(too_deep());
+            }
+            let below = depth.saturating_add(1);
+            todo.extend(self.node(n)?.children.iter().map(|&c| (c, below)));
         }
         let mut at = at.min(self.node(parent)?.children.len());
         for &kid in kids {
@@ -428,7 +444,7 @@ impl Tree {
     }
 
     fn drop_node(&mut self, node: usize) -> Result<(), String> {
-        if self.within(ROOT, node) {
+        if node == ROOT {
             return Err("an edit reached outside the view".to_owned());
         }
         self.detach(node);
@@ -830,19 +846,40 @@ mod tests {
         assert!(err.contains("bytes"), "{err}");
     }
 
-    /// A chain of elements deeper than a page writes: written to
-    /// [`MAX_DEPTH`], cloned not at all.
+    /// A chain of elements as deep as a page writes comes through whole;
+    /// one level deeper is refused as it is built, and a deep chain is
+    /// not cloned.
     #[test]
     fn a_deep_drawing_is_cut_at_the_depth_a_page_writes() {
-        let mut tree = Tree::new();
-        let n = 5_000;
-        let mut edits = vec![element("svg")];
-        edits.extend((0..n).map(|_| element("g")));
-        edits.extend((0..=n).map(|_| Edit::AppendChildren { m: 1 }));
-        tree.apply(Frame::Edits { edits }, later()).unwrap();
-        let html = elements_to_html(&tree.into_elements(later()).unwrap()).unwrap();
+        let chain = |n: usize| {
+            let mut edits = vec![element("svg")];
+            edits.extend((0..n).map(|_| element("g")));
+            edits.extend((0..=n).map(|_| Edit::AppendChildren { m: 1 }));
+            edits
+        };
         // The `<svg>` is the first level.
+        let mut tree = Tree::new();
+        tree.apply(
+            Frame::Edits {
+                edits: chain(MAX_DEPTH - 1),
+            },
+            later(),
+        )
+        .unwrap();
+        let html = elements_to_html(&tree.into_elements(later()).unwrap()).unwrap();
         assert_eq!(html.matches("<g>").count(), MAX_DEPTH - 1);
+        let mut tree = Tree::new();
+        let err = tree
+            .apply(
+                Frame::Edits {
+                    edits: chain(MAX_DEPTH),
+                },
+                later(),
+            )
+            .unwrap_err();
+        assert!(err.contains("levels deep"), "{err}");
+
+        let n = 5_000;
 
         let mut tree = Tree::new();
         let mut edits: Vec<Edit> = (0..n).map(|_| element("g")).collect();
@@ -850,6 +887,39 @@ mod tests {
         edits.push(Edit::Clone);
         let err = tree.apply(Frame::Edits { edits }, later()).unwrap_err();
         assert!(err.contains("levels"), "{err}");
+    }
+
+    /// #520's second review, finding 5: a chain 25,000 deep, then one
+    /// `AppendChildren { m: 24000 }` under its deepest node, took 1.8 s in
+    /// a single edit (each node walked the chain up). The chain is now
+    /// refused at [`MAX_DEPTH`] as it is built, so no walk is longer.
+    #[test]
+    fn a_chain_deeper_than_a_page_is_refused_as_it_is_built() {
+        let deep = 25_000u64;
+        let mut edits = vec![element("g"), Edit::SetId { id: 1 }];
+        for id in 2..=deep {
+            edits.extend([
+                element("g"),
+                Edit::SetId { id },
+                Edit::AppendChildren { m: 1 },
+                Edit::PushId { id },
+            ]);
+        }
+        edits.extend((0..24_000).map(|_| element("rect")));
+        edits.push(Edit::AppendChildren { m: 24_000 });
+        let mut tree = Tree::new();
+        let err = tree.apply(Frame::Edits { edits }, later()).unwrap_err();
+        assert!(err.contains("levels deep"), "{err}");
+        // No node in what was built is deeper than a page writes.
+        for start in 0..tree.nodes.len() {
+            let mut depth = 0usize;
+            let mut at = tree.nodes[start].parent;
+            while let Some(p) = at {
+                depth += 1;
+                assert!(depth <= MAX_DEPTH, "node {start} is deeper than {MAX_DEPTH}");
+                at = tree.nodes[p].parent;
+            }
+        }
     }
 
     #[test]
