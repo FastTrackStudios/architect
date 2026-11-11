@@ -571,6 +571,72 @@ and in a headless Firefox (`apps/web/test/share-player.test.mjs`, `just
 share-player-test`): the lyric line advances while a song plays, a click
 seeks, and the queue goes on to the next song's page and plays it.
 
+### How far a link plays
+
+A song can go out at three depths (#528), and the sharer says how deep each
+link goes (`features/spaces/src/share.rs` `Listen`):
+
+| Layer | `listen` | What the link serves |
+| --- | --- | --- |
+| **Page** | `page` | the pages, and every file no extension places higher (charts, lyrics, downloads) |
+| **Reference** | `reference` | also what a player needs for the song's mix with a live click and guide, the project shown read-only (Studio's Reference Mode) |
+| **Full** | `full` | every file: the stems, for the full multitrack engine |
+
+- **The sharer sets the most.** `listen` is on the share (its own link and
+  its domain) and on each audience, which only narrows it: an audience set
+  higher than its share plays to the share's
+  (`features/spaces/src/share.rs` `Share::listen_for`). A new link plays to **Reference** unless told
+  otherwise. The orchestra's audience gets Reference, the band's Full.
+- **The viewer opts in within it.** A page plays what is on it; a player
+  that loads deeper (Studio's "Load multitracks") offers it only when the
+  link allows.
+- **The node holds it, per file.** Architect does not know a song's folder
+  layout: the extension that owns the note type places its files with
+  `[[share_layers]]` rules ([share layers](@/architecture/extensions.md#share-layers)).
+  A file above the link's layer is `403` with the layer it needs in the
+  body and in `x-architect-layer`, by its name and by any other spelling of
+  the same file on disk (another case, another Unicode form, `//`): the
+  node compares what the request opens with the files it holds back
+  (`apps/desktop/src/node/shares.rs` `Shares::above`). Another audience's
+  file is still `404` first, so nothing about it shows. The files page, the
+  archive and the page's queue leave such files out; ranges keep working
+  for the rest. A file no rule places is a page file, served as it was.
+  When there are rules and the node cannot read the vault, it holds every
+  file back rather than guess.
+- **A share written before layers** served every file its notes attach, so
+  it reads as Full, and its audiences as the share's.
+
+```sh
+architect-desktop actions run SHARE_CREATE --arg folder=Songs --arg listen=reference
+architect-desktop actions run SHARE_UPDATE --arg code=<code> --arg listen=full
+architect-desktop actions run SHARE_AUDIENCE_ADD --arg code=<code> --arg name=orchestra --arg listen=reference
+architect-desktop actions run SHARE_AUDIENCE_UPDATE --arg code=<code> --arg name=orchestra --arg listen=share   # back to the share's
+```
+
+The Share sheet shows the same as one choice per link and per audience.
+
+**The listing, for a client.** `<link>_files.json` is what a link serves,
+for a program that opens a song over it (Studio's `SongSource` over an
+Architect link):
+
+```json
+{
+  "link": "/s/<code>/", "title": "Songs",
+  "listen": "reference", "max": "full",
+  "notes": [{ "path": "Songs/Joy/Joy.md", "title": "Joy", "type": "song", "page": "/s/<code>/joy/joy/", "files": ["…"] }],
+  "files": [{ "path": "Songs/Joy/Joy.session", "url": "/s/<code>/Songs/Joy/Joy.session",
+              "size": 18211, "sha256": "…", "layer": "reference", "note": "Songs/Joy/Joy.md" }]
+}
+```
+
+`max` is the most the link plays; `listen` is the layer listed, the link's
+unless `?listen=` asks for less (never more). Each file is listed once, in
+list order, with its vault's size and sha256 (`null` until the vault has
+hashed it). Tested on a headless node (`apps/desktop/tests/shares.rs`
+`a_links_layer_is_held_by_the_node_on_every_route`,
+`a_share_written_before_layers_serves_what_it_served`,
+`the_apps_share_actions_set_and_read_how_far_a_link_plays`).
+
 ## Its own deployment
 
 A share, or a whole vault, can also live at a URL of its own. There are two
