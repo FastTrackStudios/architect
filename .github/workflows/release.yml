@@ -12,6 +12,8 @@ name: release
 #   a PR bumping nix/desktop/source.json (the flake's app)     job nix-bump
 #   Architect-macos-arm64.dmg + latest-macos.json            job macos (UNTESTED, off by default)
 #   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums
+#   @fasttrackstudio/architect on npm (features/extensions/web) job publish-npm
+#     (inert until the NPM_TOKEN secret is set)
 #
 # Windows desktop builds are a follow-up (#431).
 on:
@@ -432,3 +434,58 @@ jobs:
             echo "::warning::release-signing has no FTS_RELEASE_MINISIGN_KEY: SHA256SUMS goes out unsigned"
           fi
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+
+  # @fasttrackstudio/architect, the npm package that runs Architect's
+  # extensions in any web app (features/extensions/web;
+  # docs/content/guide/extensions-in-your-web-app.md): its version is the
+  # tag's, a pre-release (`v1.2.0-rc.1`) goes out under the `next`
+  # dist-tag, never `latest`. Provenance needs a GitHub-hosted runner and
+  # `id-token: write`. Without the NPM_TOKEN secret it says so and stops;
+  # it never fails the release. After the first publish (by hand: npm needs
+  # the package to exist), switch to trusted publishing and drop the token.
+  publish-npm:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Token
+        id: token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::notice::NPM_TOKEN is not set: @fasttrackstudio/architect was not published for $GITHUB_REF_NAME"
+            echo "### npm: not published (no NPM_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.token.outputs.go == 'true' }}
+
+      - uses: actions/setup-node@v4
+        if: ${{ steps.token.outputs.go == 'true' }}
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish
+        if: ${{ steps.token.outputs.go == 'true' }}
+        working-directory: features/extensions/web
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          npm ci --no-audit --no-fund
+          npm version "$version" --no-git-tag-version --allow-same-version
+          npm run test:unit
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
+          npm publish --provenance --access public --tag "$tag"
+          echo "### npm: @fasttrackstudio/architect@$version (\`$tag\`)" >> "$GITHUB_STEP_SUMMARY"
