@@ -1,0 +1,38 @@
+{
+	"name": "architect-site",
+	"private": true,
+	"type": "module",
+	"imports": {
+		"#/*": "./src/*"
+	},
+	"scripts": {
+		"data": "bun scripts/data.ts",
+		"assets": "bash scripts/assets.sh",
+		"dev": "bash scripts/assets.sh && vite dev --port 3000",
+		"build": "bash scripts/assets.sh && vite build",
+		"preview": "vite preview",
+		"links": "bun scripts/check-links.ts .output/public",
+		"assemble": "bash scripts/assemble.sh",
+		"serve": "bun scripts/serve.ts .vercel/output",
+		"format": "biome format",
+		"lint": "biome lint",
+		"check": "biome check"
+	},
+	"dependencies": {
+		"@tanstack/react-router": "1.170.32",
+		"@tanstack/react-start": "1.168.49",
+		"nitro": "3.0.260610-beta",
+		"react": "19.2.8",
+		"react-dom": "19.2.8"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.5",
+		"@types/node": "22.20.1",
+		"@types/react": "19.2.18",
+		"@types/react-dom": "19.2.5",
+		"@vitejs/plugin-react": "6.1.0",
+		"marked": "18.1.2",
+		"typescript": "6.0.3",
+		"vite": "8.2.2"
+	}
+}
