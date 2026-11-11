@@ -19,12 +19,19 @@ use crate::sanitize::{VOID, drops_element, is_name, keeps_attr};
 pub fn elements_to_html(elements: &[Element]) -> String {
     let mut out = String::new();
     for element in elements {
-        write_element(&mut out, element);
+        write_element(&mut out, element, 0);
     }
     out
 }
 
-fn write_element(out: &mut String, element: &Element) {
+/// How deep an element tree is written: what is below is left out, so a
+/// tree an extension drew cannot overflow the stack writing it.
+pub(crate) const MAX_DEPTH: usize = 256;
+
+fn write_element(out: &mut String, element: &Element, depth: usize) {
+    if depth >= MAX_DEPTH {
+        return;
+    }
     if element.tag == "#text" {
         out.push_str(&escape(element.text.as_deref().unwrap_or_default()));
         return;
@@ -56,7 +63,7 @@ fn write_element(out: &mut String, element: &Element) {
         out.push_str(&escape(text));
     }
     for child in &element.children {
-        write_element(out, child);
+        write_element(out, child, depth + 1);
     }
     out.push_str("</");
     out.push_str(&element.tag);

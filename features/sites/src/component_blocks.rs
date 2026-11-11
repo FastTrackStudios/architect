@@ -30,12 +30,22 @@ use architect_extensions::{Origin, Package};
 use architect_pages::{Attr, Element};
 
 use crate::blocks::{Block, BlockRenderer, Drawn};
+use crate::element_html::MAX_DEPTH;
 
 /// How long a block's view has to draw it.
 pub const DRAW_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How many edits one block's drawing may take.
 const MAX_EDITS: usize = 200_000;
+
+/// How many nodes one block's drawing may hold. Edits alone do not bound
+/// it: a `Clone` appended next to its original doubles a subtree per two
+/// edits.
+const MAX_NODES: usize = 50_000;
+
+/// How many bytes of tags, text and attributes one block's drawing may
+/// hold, counted as they are written (a value set twice counts twice).
+const MAX_BYTES: usize = 16 << 20;
 
 /// A WASI component's embed views, as a [`BlockRenderer`] for the fences
 /// they claim.
@@ -149,7 +159,7 @@ impl BlockRenderer for ComponentBlocks {
         let deadline = Instant::now()
             .checked_add(DRAW_TIMEOUT)
             .unwrap_or_else(Instant::now);
-        tree.apply(next(&mut session.frames, deadline)?)?;
+        tree.apply(next(&mut session.frames, deadline)?, deadline)?;
         let input = EmbedInput {
             claim: block.claim.to_string(),
             source: block.source.to_owned(),
@@ -165,7 +175,7 @@ impl BlockRenderer for ComponentBlocks {
             })
             .map_err(|_| format!("{} stopped", self.id))?;
         // Every event is answered with a frame (wire 5), empty or not.
-        tree.apply(next(&mut session.frames, deadline)?)?;
+        tree.apply(next(&mut session.frames, deadline)?, deadline)?;
         Ok(Drawn::Elements(tree.into_elements()))
     }
 }
@@ -197,6 +207,8 @@ struct Tree {
     stack: Vec<usize>,
     ids: HashMap<u64, usize>,
     edits: usize,
+    /// What the drawing holds so far, against [`MAX_BYTES`].
+    bytes: usize,
 }
 
 #[derive(Clone, Default)]
@@ -209,6 +221,13 @@ struct Node {
     style: Vec<(String, String)>,
     children: Vec<usize>,
     parent: Option<usize>,
+}
+
+/// What a node holds, against [`MAX_BYTES`].
+fn node_bytes(node: &Node) -> usize {
+    let pairs =
+        |list: &[(String, String)]| list.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>();
+    node.tag.len() + node.text.len() + pairs(&node.attrs) + pairs(&node.style)
 }
 
 /// The root: the view's element 0.
@@ -224,10 +243,14 @@ impl Tree {
             stack: vec![ROOT],
             ids: HashMap::from([(0, ROOT)]),
             edits: 0,
+            bytes: 0,
         }
     }
 
-    fn apply(&mut self, frame: Frame) -> Result<(), String> {
+    /// `frame`'s edits, by `deadline`. Memory is bounded by [`MAX_NODES`]
+    /// and [`MAX_BYTES`], time by `deadline` (checked before every edit,
+    /// and no edit costs more than a pass over the drawing's nodes).
+    fn apply(&mut self, frame: Frame, deadline: Instant) -> Result<(), String> {
         let edits = match frame {
             Frame::Edits { edits } => edits,
             Frame::Failed(why) => return Err(why),
@@ -236,7 +259,21 @@ impl Tree {
         if self.edits > MAX_EDITS {
             return Err(format!("a drawing of over {MAX_EDITS} edits"));
         }
-        edits.into_iter().try_for_each(|e| self.edit(e))
+        edits.into_iter().try_for_each(|e| {
+            if Instant::now() >= deadline {
+                return Err(format!("it drew nothing in {} s", DRAW_TIMEOUT.as_secs()));
+            }
+            self.edit(e)
+        })
+    }
+
+    /// Counts `n` more bytes against [`MAX_BYTES`].
+    fn charge(&mut self, n: usize) -> Result<(), String> {
+        self.bytes = self.bytes.saturating_add(n);
+        if self.bytes > MAX_BYTES {
+            return Err(format!("a drawing of over {MAX_BYTES} bytes"));
+        }
+        Ok(())
     }
 
     fn node(&self, at: usize) -> Result<&Node, String> {
@@ -288,10 +325,14 @@ impl Tree {
         Ok(())
     }
 
-    fn add(&mut self, node: Node) -> usize {
+    fn add(&mut self, node: Node) -> Result<usize, String> {
+        if self.nodes.len() >= MAX_NODES {
+            return Err(format!("a drawing of over {MAX_NODES} nodes"));
+        }
+        self.charge(node_bytes(&node))?;
         let at = self.nodes.len();
         self.nodes.push(node);
-        at
+        Ok(at)
     }
 
     /// `node` out of its parent's children.
@@ -347,13 +388,18 @@ impl Tree {
         Ok((parent, index))
     }
 
-    fn copy(&mut self, node: usize) -> Result<usize, String> {
+    /// A copy of `node` and everything below it, `depth` levels down from
+    /// the edit's node.
+    fn copy(&mut self, node: usize, depth: usize) -> Result<usize, String> {
+        if depth >= MAX_DEPTH {
+            return Err(format!("a clone over {MAX_DEPTH} levels deep"));
+        }
         let mut fresh = self.node(node)?.clone();
         fresh.parent = None;
         let kids = std::mem::take(&mut fresh.children);
-        let at = self.add(fresh);
+        let at = self.add(fresh)?;
         for kid in kids {
-            let c = self.copy(kid)?;
+            let c = self.copy(kid, depth + 1)?;
             self.node_mut(c)?.parent = Some(at);
             self.node_mut(at)?.children.push(c);
         }
@@ -365,16 +411,16 @@ impl Tree {
             return Err("an edit reached outside the view".to_owned());
         }
         self.detach(node);
-        // Its ids, and those of everything below it, name nothing now.
-        let gone: Vec<u64> = self
-            .ids
-            .iter()
-            .filter(|&(_, &n)| n != ROOT && self.within(n, node))
-            .map(|(&id, _)| id)
-            .collect();
-        for id in gone {
-            self.ids.remove(&id);
+        // Its ids, and those of everything below it, name nothing now:
+        // one walk of its subtree and one pass over the ids.
+        let mut gone = std::collections::HashSet::new();
+        let mut todo = vec![node];
+        while let Some(n) = todo.pop() {
+            if gone.insert(n) {
+                todo.extend(self.node(n)?.children.iter().copied());
+            }
         }
+        self.ids.retain(|_, n| !gone.contains(n));
         Ok(())
     }
 
@@ -409,7 +455,7 @@ impl Tree {
                 let node = self.add(Node {
                     tag,
                     ..Node::default()
-                });
+                })?;
                 self.stack.push(node);
             }
             Edit::CreateText { value } => {
@@ -417,12 +463,12 @@ impl Tree {
                     tag: "#text".to_owned(),
                     text: value,
                     ..Node::default()
-                });
+                })?;
                 self.stack.push(node);
             }
             Edit::Clone => {
                 let node = self.top()?;
-                let copy = self.copy(node)?;
+                let copy = self.copy(node, 0)?;
                 self.set_top(copy)?;
             }
             Edit::AppendChildren { m } => {
@@ -451,6 +497,7 @@ impl Tree {
                 value,
             } => {
                 let node = self.top()?;
+                self.charge(name.len())?;
                 let value = match value {
                     Value::None => None,
                     Value::Bool(false) if name == "checked" => None,
@@ -459,6 +506,7 @@ impl Tree {
                     Value::Int(i) => Some(i.to_string()),
                     Value::Bool(b) => Some(b.to_string()),
                 };
+                self.charge(value.as_ref().map_or(0, String::len))?;
                 let n = self.node_mut(node)?;
                 let list = if namespace.as_deref() == Some("style") {
                     &mut n.style
@@ -472,6 +520,7 @@ impl Tree {
             }
             Edit::SetText { value } => {
                 let node = self.top()?;
+                self.charge(value.len())?;
                 self.node_mut(node)?.text = value;
             }
             // Nothing listens here: the drawing is written once.
@@ -491,13 +540,18 @@ impl Tree {
             .map(|root| {
                 root.children
                     .iter()
-                    .filter_map(|&c| self.element(c))
+                    .filter_map(|&c| self.element(c, 0))
                     .collect()
             })
             .unwrap_or_default()
     }
 
-    fn element(&self, at: usize) -> Option<Element> {
+    /// Node `at`, `depth` levels below the root's children, as an element;
+    /// nothing past [`MAX_DEPTH`], as a page writes no deeper.
+    fn element(&self, at: usize, depth: usize) -> Option<Element> {
+        if depth >= MAX_DEPTH {
+            return None;
+        }
         let n = self.nodes.get(at)?;
         if n.tag == "#text" {
             return Some(Element {
@@ -537,7 +591,11 @@ impl Tree {
             tag: n.tag.clone(),
             attrs,
             text: (!n.text.is_empty()).then(|| n.text.clone()),
-            children: n.children.iter().filter_map(|&c| self.element(c)).collect(),
+            children: n
+                .children
+                .iter()
+                .filter_map(|&c| self.element(c, depth + 1))
+                .collect(),
             ..Element::default()
         })
     }
@@ -547,6 +605,10 @@ impl Tree {
 mod tests {
     use super::*;
     use crate::elements_to_html;
+
+    fn later() -> Instant {
+        Instant::now() + DRAW_TIMEOUT
+    }
 
     fn text(t: &str) -> Value {
         Value::Text(t.to_owned())
@@ -599,7 +661,7 @@ mod tests {
             Edit::AppendChildren { m: 1 },
             Edit::AppendChildren { m: 1 },
         ];
-        tree.apply(Frame::Edits { edits: first }).unwrap();
+        tree.apply(Frame::Edits { edits: first }, later()).unwrap();
         let update = vec![
             Edit::PushId { id: 4 },
             attr("data-at", "2.5"),
@@ -613,7 +675,7 @@ mod tests {
             Edit::InsertBefore { m: 1 },
             Edit::Pop,
         ];
-        tree.apply(Frame::Edits { edits: update }).unwrap();
+        tree.apply(Frame::Edits { edits: update }, later()).unwrap();
         assert_eq!(
             elements_to_html(&tree.into_elements()),
             "<svg viewBox=\"0 0 20 10\" data-follow-playhead=\"\">C<rect data-at=\"0\"></rect><rect data-at=\"2.5\" style=\"fill: red;\"></rect></svg>"
@@ -624,19 +686,111 @@ mod tests {
     fn edits_that_reach_outside_are_refused() {
         let mut tree = Tree::new();
         assert!(
-            tree.apply(Frame::Edits {
-                edits: vec![Edit::Pop]
-            })
+            tree.apply(
+                Frame::Edits {
+                    edits: vec![Edit::Pop]
+                },
+                later()
+            )
             .is_err()
         );
         let mut tree = Tree::new();
         assert!(
-            tree.apply(Frame::Edits {
-                edits: vec![Edit::PushId { id: 0 }, Edit::Remove]
-            })
+            tree.apply(
+                Frame::Edits {
+                    edits: vec![Edit::PushId { id: 0 }, Edit::Remove]
+                },
+                later()
+            )
             .is_err()
         );
         let mut tree = Tree::new();
-        assert!(tree.apply(Frame::Failed("it trapped".to_owned())).is_err());
+        assert!(
+            tree.apply(Frame::Failed("it trapped".to_owned()), later())
+                .is_err()
+        );
+    }
+
+    fn element(tag: &str) -> Edit {
+        Edit::CreateElement {
+            tag: tag.to_owned(),
+            namespace: None,
+        }
+    }
+
+    /// A component that clones its drawing into itself, over and over,
+    /// doubles it every round of four edits: refused at [`MAX_NODES`],
+    /// long before the edit limit.
+    #[test]
+    fn a_drawing_that_doubles_itself_is_refused() {
+        let mut tree = Tree::new();
+        let mut edits = vec![
+            element("g"),
+            Edit::SetId { id: 1 },
+            Edit::AppendChildren { m: 1 },
+        ];
+        for _ in 0..40 {
+            edits.extend([
+                Edit::PushId { id: 1 },
+                Edit::PushId { id: 1 },
+                Edit::Clone,
+                Edit::AppendChildren { m: 1 },
+                Edit::Pop,
+            ]);
+        }
+        let err = tree.apply(Frame::Edits { edits }, later()).unwrap_err();
+        assert!(err.contains("nodes"), "{err}");
+        assert!(tree.nodes.len() <= MAX_NODES);
+    }
+
+    /// Text and attribute values count against [`MAX_BYTES`].
+    #[test]
+    fn a_drawing_of_too_many_bytes_is_refused() {
+        let mut tree = Tree::new();
+        let big = "x".repeat(1 << 20);
+        let mut edits = vec![element("g")];
+        for _ in 0..20 {
+            edits.push(Edit::SetAttribute {
+                name: "data-x".to_owned(),
+                namespace: None,
+                value: text(&big),
+            });
+        }
+        let err = tree.apply(Frame::Edits { edits }, later()).unwrap_err();
+        assert!(err.contains("bytes"), "{err}");
+    }
+
+    /// A chain of elements deeper than a page writes: written to
+    /// [`MAX_DEPTH`], cloned not at all.
+    #[test]
+    fn a_deep_drawing_is_cut_at_the_depth_a_page_writes() {
+        let mut tree = Tree::new();
+        let n = 5_000;
+        let mut edits: Vec<Edit> = (0..n).map(|_| element("g")).collect();
+        edits.extend((0..n).map(|_| Edit::AppendChildren { m: 1 }));
+        tree.apply(Frame::Edits { edits }, later()).unwrap();
+        let html = elements_to_html(&tree.into_elements());
+        assert_eq!(html.matches("<g>").count(), MAX_DEPTH);
+
+        let mut tree = Tree::new();
+        let mut edits: Vec<Edit> = (0..n).map(|_| element("g")).collect();
+        edits.extend((0..n - 1).map(|_| Edit::AppendChildren { m: 1 }));
+        edits.push(Edit::Clone);
+        let err = tree.apply(Frame::Edits { edits }, later()).unwrap_err();
+        assert!(err.contains("levels"), "{err}");
+    }
+
+    #[test]
+    fn edits_past_the_deadline_are_refused() {
+        let mut tree = Tree::new();
+        let err = tree
+            .apply(
+                Frame::Edits {
+                    edits: vec![element("g")],
+                },
+                Instant::now(),
+            )
+            .unwrap_err();
+        assert!(err.contains("drew nothing"), "{err}");
     }
 }

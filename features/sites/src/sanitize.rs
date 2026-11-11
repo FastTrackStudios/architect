@@ -132,30 +132,41 @@ pub(crate) fn is_name(name: &str) -> bool {
 
 /// `markup` (HTML or inline SVG), with only what [`drops_element`] and
 /// [`keeps_attr`] keep, re-written well formed.
+///
+/// It takes time and space linear in `markup` on any input: block markup
+/// comes from extensions and notes, so a sanitiser that could be made to
+/// loop or to allocate without bound would be a way to take a node down.
 #[must_use]
 pub fn sanitize(markup: &str) -> String {
+    sanitize_counting(markup).0
+}
+
+/// [`sanitize`], and how many passes its loop made (never more than the
+/// bytes in `markup`).
+fn sanitize_counting(markup: &str) -> (String, usize) {
     let mut w = Writer::default();
     let mut rest = markup;
+    let mut passes = 0usize;
+    // Termination: every pass consumes at least one byte of `rest` (the
+    // text before a `<`, or the `<` itself and what `Writer::markup`
+    // reads after it), so the loop runs at most `markup.len()` times.
+    // Linearity: no scanner reads past what its pass consumes, except
+    // `find_ci` and `skip_element`, which stop at the first match and
+    // whose pass consumes through it, and the bounded look-ahead of
+    // `entity` (`MAX_ENTITY` bytes). Output: at most six bytes per input
+    // byte (`"` → `&quot;`), and an end tag per start tag read.
     while !rest.is_empty() {
-        if w.in_style() {
-            // A style sheet is raw text up to its end tag.
-            let (text, tail) = cut(rest, find_ci(rest, "</style").unwrap_or(rest.len()));
-            w.text(text);
-            rest = if tail.is_empty() {
-                tail
-            } else {
-                w.markup(tail)
-            };
-            continue;
-        }
-        let Some((text, tail)) = rest.split_once('<') else {
-            w.text(rest);
+        passes += 1;
+        let before = rest.len();
+        rest = w.step(rest);
+        if rest.len() >= before {
+            // Unreachable by the argument above; were it ever reached, the
+            // rest is dropped rather than looped on.
+            debug_assert!(false, "sanitize made no progress at {before} bytes left");
             break;
-        };
-        w.text(text);
-        rest = w.markup(tail);
+        }
     }
-    w.finish()
+    (w.finish(), passes)
 }
 
 /// `s` split at byte `at`; all of it before when `at` is past its end or
@@ -163,6 +174,11 @@ pub fn sanitize(markup: &str) -> String {
 fn cut(s: &str, at: usize) -> (&str, &str) {
     s.split_at_checked(at).unwrap_or((s, ""))
 }
+
+/// How many elements may be open at once. A start tag deeper than this
+/// writes nothing (its text still does), which keeps [`Writer::close`]'s
+/// search and the end tags written at most this long.
+const MAX_OPEN: usize = 256;
 
 #[derive(Default)]
 struct Writer {
@@ -176,6 +192,29 @@ impl Writer {
         self.open
             .last()
             .is_some_and(|t| t.eq_ignore_ascii_case("style"))
+    }
+
+    /// One pass of [`sanitize`]: text up to the next `<` and the markup
+    /// after it. Returns the rest, always shorter than `rest`.
+    fn step<'a>(&mut self, rest: &'a str) -> &'a str {
+        if self.in_style() {
+            // A style sheet is raw text up to its end tag.
+            let (text, tail) = cut(rest, find_ci(rest, "</style").unwrap_or(rest.len()));
+            self.text(text);
+            // `tail` is empty, or starts with the `<` of `</style`, which
+            // this pass consumes: `markup` reads what follows a `<`.
+            return tail.get(1..).map_or("", |after| self.markup(after));
+        }
+        match rest.split_once('<') {
+            None => {
+                self.text(rest);
+                ""
+            }
+            Some((text, after)) => {
+                self.text(text);
+                self.markup(after)
+            }
+        }
     }
 
     /// Text, its entities kept when well formed.
@@ -223,7 +262,9 @@ impl Writer {
                 skip_element(name, rest)
             };
         }
-        if !is_name(name) {
+        let lower = name.to_ascii_lowercase();
+        let void = VOID.contains(&lower.as_str());
+        if !is_name(name) || (!void && !self_closing && self.open.len() >= MAX_OPEN) {
             return rest;
         }
         self.out.push('<');
@@ -238,8 +279,7 @@ impl Writer {
             }
         }
         self.out.push('>');
-        let lower = name.to_ascii_lowercase();
-        if VOID.contains(&lower.as_str()) {
+        if void {
             return rest;
         }
         if self_closing {
@@ -342,23 +382,36 @@ fn take_attrs(mut s: &str) -> (Vec<(String, String)>, bool, &str) {
 /// rest is dropped.
 fn skip_element<'a>(name: &str, mut rest: &'a str) -> &'a str {
     let mut depth = 1usize;
+    // Each pass moves `rest` past one more `<`, and reads after it only up
+    // to the next `<` (a name, then the tag up to its `>`): every byte is
+    // read at most twice, so a run of unterminated `<script` tags stays
+    // linear.
     loop {
         let Some((_, after)) = rest.split_once('<') else {
             return "";
         };
         rest = after;
         let closing = after.starts_with('/');
-        let (found, tail) = take_name(after.trim_start_matches('/'));
-        if found.eq_ignore_ascii_case(name) {
-            let (tag, past) = tail.split_once('>').unwrap_or((tail, ""));
-            if closing {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return past;
-                }
-            } else if !tag.ends_with('/') {
-                depth = depth.saturating_add(1);
+        let (found, tail) = take_name(after.strip_prefix('/').unwrap_or(after));
+        if !found.eq_ignore_ascii_case(name) {
+            continue;
+        }
+        let Some(end) = tail.find(['>', '<']) else {
+            return "";
+        };
+        let Some(past) = tail.get(end..).and_then(|t| t.strip_prefix('>')) else {
+            // A `<` before any `>`: not a tag (a browser reads
+            // `</script<b>` as the end tag `script<b`).
+            continue;
+        };
+        let tag = &tail[..end];
+        if closing {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return past;
             }
+        } else if !tag.ends_with('/') {
+            depth = depth.saturating_add(1);
         }
     }
 }
@@ -382,10 +435,17 @@ fn escape_keeping_entities(text: &str, out: &mut String) {
     escape(rest, out);
 }
 
+/// The longest character reference kept: a 32-byte name and its `;`.
+const MAX_ENTITY: usize = 33;
+
 /// The character reference that follows a `&` at the start of `s`
 /// (`amp;`, `#9;`, `#x9;`): its name, and what follows its `;`.
+///
+/// It looks at most [`MAX_ENTITY`] bytes ahead, so text full of `&` with
+/// no `;` stays linear.
 fn entity(s: &str) -> Option<(&str, &str)> {
-    let (name, rest) = s.split_once(';')?;
+    let semi = s.bytes().take(MAX_ENTITY).position(|b| b == b';')?;
+    let (name, rest) = (s.get(..semi)?, s.get(semi + 1..)?);
     let ok = match numeric(name) {
         Some((digits, 16)) => {
             !digits.is_empty() && digits.len() <= 6 && digits.chars().all(|c| c.is_ascii_hexdigit())
@@ -588,5 +648,107 @@ mod tests {
         assert!(!keeps_attr("a", "href", "\tjavascript:x"));
         assert!(keeps_attr("img", "src", "data:image/png;base64,AA"));
         assert!(!keeps_attr("use", "href", "other.svg#x"));
+    }
+
+    /// `markup` sanitised, checked for the linear bound: at most one loop
+    /// pass per input byte and six output bytes per input byte (plus the
+    /// end tags of what was left open).
+    fn bounded(markup: &str) -> String {
+        let (out, passes) = sanitize_counting(markup);
+        assert!(
+            passes <= markup.len(),
+            "{passes} passes over {} bytes",
+            markup.len()
+        );
+        assert!(
+            out.len() <= 6 * markup.len() + MAX_OPEN * 3,
+            "{} bytes out of {}",
+            out.len(),
+            markup.len()
+        );
+        out
+    }
+
+    /// The input that took a node's test run to 89 GB: a closed
+    /// `<style>`. The style branch handed `Writer::markup` the end tag's
+    /// own `<`, which it wrote as `&lt;` and returned unread, forever.
+    #[test]
+    fn a_closed_style_sheet_ends() {
+        assert_eq!(bounded("<style>a{}</style>b"), "<style>a{}</style>b");
+        assert_eq!(
+            bounded("<svg><style>.x{}</style><rect/></svg>"),
+            "<svg><style>.x{}</style><rect></rect></svg>"
+        );
+        // An end tag that only starts like one, and one never ended.
+        assert_eq!(bounded("<style>a</styles>b</style"), "<style>ab</style>");
+        bounded(&"<style></style>".repeat(10_000));
+    }
+
+    #[test]
+    fn adversarial_markup_ends_and_stays_linear() {
+        for markup in [
+            "<",
+            "a<",
+            "<<<<",
+            "<a",
+            "<a b",
+            "<a b=",
+            "<a b=\"",
+            "<a b='x",
+            "<a b=\"x\" c",
+            "</",
+            "</a",
+            "<!--",
+            "<![CDATA[",
+            "<!",
+            "<?",
+            "&",
+            "&amp",
+            "&#",
+            "&#x",
+            "a&b&c&",
+            "<svg><g><rect>",
+            "<svg><svg><svg>",
+            "<script>",
+            "<script><script",
+            "<script></script",
+            "<style>",
+            "<style></",
+            "<p title=\"&amp\">&lt",
+        ] {
+            let out = bounded(markup);
+            assert!(!out.to_ascii_lowercase().contains("<script"), "{out}");
+        }
+        assert_eq!(bounded("&amp"), "&amp;amp");
+        assert_eq!(bounded("<svg><g><rect>"), "<svg><g><rect></rect></g></svg>");
+    }
+
+    /// Inputs that would be quadratic in a scanner that reads to the end
+    /// for every token, at sizes where that would show as passes or
+    /// output, never as time.
+    #[test]
+    fn long_inputs_stay_linear() {
+        let n = 50_000;
+        for markup in [
+            "&".repeat(n),
+            "&amp".repeat(n / 4),
+            "<".repeat(n),
+            "<a ".repeat(n / 3),
+            format!("<p title=\"{}\">x</p>", "\"'&".repeat(n / 3)),
+            format!("<rect data-at=\"{}", "9".repeat(n)),
+            format!("<script>{}", "<script".repeat(n / 7)),
+            format!("<script>{}>", "</script<b".repeat(n / 10)),
+            "<g>".repeat(n / 3),
+            format!("{}{}", "<g>".repeat(n / 6), "</x>".repeat(n / 8)),
+            "<svg><foreignObject>".repeat(n / 20),
+            "<!--".repeat(n / 4),
+        ] {
+            let out = bounded(&markup);
+            assert!(!out.to_ascii_lowercase().contains("<script"));
+        }
+        // Nesting past `MAX_OPEN` writes no more start tags.
+        let deep = bounded(&"<g>".repeat(n / 3));
+        assert_eq!(deep.matches("<g>").count(), MAX_OPEN);
+        assert_eq!(deep.matches("</g>").count(), MAX_OPEN);
     }
 }
