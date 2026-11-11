@@ -1827,15 +1827,23 @@ full = ["Media/Proxies/**"]                          # the stems
 (`features/extensions/src/share_layers.rs` `ShareLayersDecl`, checked by
 `Manifest::check`.) A pattern matches an attached file's path relative to
 the folder of the note that attaches it (a file outside it: its vault
-path), whole: `*` and `?` within one segment, `**` any number of them.
-The lists are tried `page`, `reference`, `full`, and the first that matches
+path), whole and in any ASCII case (as `note_type` is): `*` and `?`
+within one segment, `**` any number of them. Matching is linear in the
+pattern times the path, and a rule has at most 64 patterns, each at most
+256 bytes with at most 8 `*` (`MAX_PATTERNS`, `MAX_PATTERN_LEN`,
+`MAX_STARS`); a manifest past them does not load. Within one rule the
+lists are tried `page`, `reference`, `full`, and the first that matches
 places the file, so a narrow `reference` pattern carves the reference out
-of a broad `full` one. A file is in the highest layer any note of the
-vault that links it places it in, inside the share's scope or not, hidden
-or not, so a plain note linking a stem never brings it down to the page; a
-note with a list of types (`type: [song, live]`) takes the first rule for
-any of them. A rule governs a file's bytes: what a page draws inline when
-the link is built (synced lyrics read from an `.lrc`) is the page's. The node reads the rules of the extensions installed on it
+of a broad `full` one. Across rules (two extensions for one note type,
+or a note with a list of types, `type: [song, live]`) the highest layer
+wins: no rule lowers another's. A file is in the highest layer any note of
+the vault that links it places it in, inside the share's scope or not,
+hidden or not, so a plain note linking a stem never brings it down to the
+page. A held-back file is named in nothing built for the link (the page
+draws no player, link or lyrics of it). While a manifest in the
+extensions folder does not read, placement is unknown and every attached
+file is held back below Full; an uninstalled extension's rules are kept
+until the owner forgets them (`SHARE_LAYERS_FORGET`). The node reads the rules of the extensions installed on it
 (`features/sites/src/installed.rs` `InstalledLayers`, again when the
 folder changes), then a distribution's compiled-in ones
 (`apps/distribution/src/lib.rs` `Distribution::share_layers`, passed to
