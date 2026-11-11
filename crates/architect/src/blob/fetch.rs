@@ -95,6 +95,10 @@ pub enum Progress {
     /// Every remote that has it failed; the `.part` is kept for the next
     /// try.
     Failed(String),
+    /// The store's budget has no room for it ([`super::StoreBudget`]):
+    /// deferred, nothing fetched. Fetching again once there is room
+    /// resumes.
+    NoRoom(super::NoRoom),
 }
 
 // ── Fetcher ─────────────────────────────────────────────────────────
@@ -280,6 +284,12 @@ impl Fetcher {
             blob = %hash,
             outcome = tracing::field::Empty,
             failures = tracing::field::Empty,
+            // Set when the fetch is deferred for space (the wide event).
+            store.need = tracing::field::Empty,
+            store.used = tracing::field::Empty,
+            store.max = tracing::field::Empty,
+            fs.free = tracing::field::Empty,
+            fs.keep_free = tracing::field::Empty,
         );
         let task = async move {
             let end = transfer(&inner, hash, &tx).await;
@@ -309,6 +319,7 @@ fn finished(hash: Sha256, progress: &Progress) -> Option<Result<(), BlobError>> 
             hash,
             reason: reason.clone(),
         })),
+        Progress::NoRoom(no) => Some(Err(BlobError::NoRoom(no.clone()))),
     }
 }
 
@@ -336,6 +347,18 @@ async fn transfer(inner: &Inner, hash: Sha256, tx: &watch::Sender<Progress>) -> 
         };
         match fetch_from(inner, hash, size, remote.as_ref(), tx, &mut restarts).await {
             Ok(()) => return Progress::Done,
+            // No other remote changes that: deferred until there is room.
+            Err(BlobError::NoRoom(no)) => {
+                let span = tracing::Span::current();
+                span.record("store.need", no.need);
+                span.record("store.used", no.used.saturating_add(no.reserved));
+                span.record("store.max", no.max);
+                if let Some(free) = no.free {
+                    span.record("fs.free", free);
+                }
+                span.record("fs.keep_free", no.keep_free);
+                return Progress::NoRoom(no);
+            }
             Err(e) => failures.push(e.to_string()),
         }
     }
@@ -359,24 +382,40 @@ async fn fetch_from(
 ) -> Result<(), BlobError> {
     let staged = inner.store.partial_path(&hash);
     let job = ResumableFetch::new(&staged, size).sha256(hash);
-    let mut last = job.partial_len();
+    let before = job.partial_len();
+    // The bytes still to come, reserved before any is asked for.
+    let mut reservation = inner
+        .store
+        .reserve(size.saturating_sub(before))
+        .map_err(BlobError::NoRoom)?;
+    let mut last = before;
     tx.send_replace(Progress::Fetching {
         have: last,
         size,
         restarts: *restarts,
     });
-    job.run(&HashSource { remote, hash }, |have| {
-        if have < last {
-            *restarts = restarts.saturating_add(1);
-        }
-        last = have;
-        tx.send_replace(Progress::Fetching {
-            have,
-            size,
-            restarts: *restarts,
-        });
-    })
-    .await?;
+    let ran = job
+        .run(&HashSource { remote, hash }, |have| {
+            if have < last {
+                *restarts = restarts.saturating_add(1);
+            }
+            last = have;
+            tx.send_replace(Progress::Fetching {
+                have,
+                size,
+                restarts: *restarts,
+            });
+        })
+        .await;
+    // What the `.part` grew (or shrank) by is now the store's.
+    let now = if ran.is_ok() { size } else { job.partial_len() };
+    if let Some(r) = reservation.as_mut() {
+        r.wrote(now.saturating_sub(before));
+    }
+    if let Some(b) = inner.store.budget() {
+        b.removed(before.saturating_sub(now));
+    }
+    ran?;
     let dest = inner.store.path_for(&hash);
     if let Some(dir) = dest.parent() {
         tokio::fs::create_dir_all(dir)
@@ -450,6 +489,9 @@ async fn tail_inner(
             Progress::Missing => return Err(io::Error::from(io::ErrorKind::NotFound)),
             Progress::Failed(reason) => {
                 return Err(io::Error::new(io::ErrorKind::ConnectionAborted, reason));
+            }
+            Progress::NoRoom(no) => {
+                return Err(io::Error::new(io::ErrorKind::StorageFull, no.to_string()));
             }
         };
         if pos < avail {

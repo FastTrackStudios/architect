@@ -267,7 +267,7 @@ capability = ["dep:ed25519-dalek", "dep:base64", "dep:getrandom", "dep:zeroize"]
 # `BlobTransfer` with `vox`, a server's route with `http-client`, served
 # by `serve_http` with `http`), pins and collection. Native only for now;
 # the wasm OPFS ledger is a follow-up.
-blob = ["dep:sha2", "dep:tracing", "tokio/rt"]
+blob = ["dep:sha2", "dep:tracing", "dep:rustix", "tokio/rt"]
 # `blob::S3Store`: blobs in any S3-compatible bucket (Garage, MinIO, R2,
 # AWS, Ceph RGW), as a `BlobStore` and a fetch `Remote`; `object_store`
 # (MIT/Apache-2.0) signs and streams.
@@ -585,3 +585,8 @@ workspace = true
 
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+# `blob`: the store budget's keep-free floor asks `statvfs` (safe, and
+# already in the graph through tempfile and tokio's io-uring).
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", default-features = false, features = ["std", "fs"], optional = true }
