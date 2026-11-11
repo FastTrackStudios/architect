@@ -56,6 +56,17 @@ const DIAL_EVERY: Duration = Duration::from_secs(3);
 /// The store's limit when the filesystem cannot be asked: 10 GiB.
 const FALLBACK_MAX: u64 = 10 << 30;
 
+/// The default bound on a holding node's kept versions, on a tree
+/// filesystem of `total` bytes: a tenth of it, at most 500 GiB. They live
+/// on the share people record to; at the bound a replacement waits and is
+/// reported, nothing is deleted.
+#[must_use]
+pub const fn default_history_max(total: u64) -> u64 {
+    let tenth = total / 10;
+    let cap = 500 << 30;
+    if tenth < cap { tenth } else { cap }
+}
+
 /// Which budget a [`budget`] is for.
 #[derive(Clone, Copy)]
 enum Area {
@@ -84,7 +95,11 @@ fn budget(config: &Config, area: Area, root: &Path) -> StoreBudget {
             total.map(architect::blob::default_max),
             "default: a quarter of the filesystem, at most 100 GiB",
         ),
-        (Area::Incoming | Area::History, _, _) => (Some(u64::MAX), "none: the floor bounds it"),
+        (Area::History, _, None) => (
+            total.map(default_history_max),
+            "default: a tenth of the tree's filesystem, at most 500 GiB",
+        ),
+        (Area::Incoming, _, _) => (Some(u64::MAX), "none: the floor bounds it"),
     };
     let (max, max_from) = max.map_or(
         (FALLBACK_MAX, "fallback: the filesystem cannot be read"),
@@ -97,7 +112,8 @@ fn budget(config: &Config, area: Area, root: &Path) -> StoreBudget {
             1,
             "ARCHITECT_FILES_KEEP_FREE, unreadable filesystem: writes refused",
         ),
-        None => total.map_or((0, "none: the filesystem cannot be read"), |t| {
+        // Unreadable: refuse what needs the floor (closed, not open).
+        None => total.map_or((1, "unreadable filesystem: writes refused"), |t| {
             (
                 architect::blob::default_keep_free(t),
                 "default: 15%, at most 64 GiB",
@@ -130,7 +146,7 @@ pub(super) fn engine(
     config: &Config,
     files_dir: &Path,
     registry: Arc<OnceLock<DocRegistry>>,
-) -> Engine {
+) -> Result<Engine, String> {
     let data = config.data_dir.join("files");
     let blobs = data.join("blobs");
     let local = LocalFs::new(&blobs).with_budget(Arc::new(budget(config, Area::Store, &blobs)));
@@ -139,6 +155,7 @@ pub(super) fn engine(
         // Fetches land, and replaced versions are kept, on the tree's own
         // filesystem: renamed in and linked aside, never copied through
         // the data volume.
+        architect_files::sync::layout::claim_area(files_dir)?;
         let (incoming, versions) = architect_files::sync::layout::areas(files_dir);
         let inbox = LocalFs::new(&incoming).with_budget(Arc::new(budget(
             config,
@@ -170,13 +187,15 @@ pub(super) fn engine(
     )
     .with_transcoder(architect_files::server::FfmpegTranscoder::new());
     // Its attestations are signed with its iroh key: its holder id is its endpoint id.
-    match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {
-        Ok(key) => engine.with_identity(key.to_bytes()),
-        Err(error) => {
-            tracing::warn!(%error, "files: the iroh key is not readable; attestations use a key of their own");
-            engine
-        }
-    }
+    Ok(
+        match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {
+            Ok(key) => engine.with_identity(key.to_bytes()),
+            Err(error) => {
+                tracing::warn!(%error, "files: the iroh key is not readable; attestations use a key of their own");
+                engine
+            }
+        },
+    )
 }
 
 /// The agent on the node's HTTP side, when it listens on loopback only (a

@@ -82,6 +82,11 @@ pub struct FilesStore {
     pub deferred: u32,
     pub too_large: u32,
     pub refused: u64,
+    /// Replacements waiting because the versions they replace cannot be
+    /// kept, and why ("cannot keep history: …": a read-only share, a
+    /// `.architect` the node cannot write).
+    pub no_history: u32,
+    pub history_error: Option<String>,
     /// A holding node's kept versions, beside its tree: bytes, limit
     /// (`files_history_max`; none is `u64::MAX`) and the tree
     /// filesystem's free bytes. Not counted in `used`.
@@ -195,6 +200,7 @@ impl NodeState {
             files_store: self.files.as_ref().and_then(|engine| {
                 let usage = engine.store_usage()?;
                 let history = engine.history_usage();
+                let blocked = engine.history_blocked();
                 Some(FilesStore {
                     used: usage.used,
                     reserved: usage.reserved,
@@ -205,6 +211,8 @@ impl NodeState {
                     deferred: engine.deferred(),
                     too_large: engine.too_large(),
                     refused: usage.refused,
+                    no_history: blocked.0,
+                    history_error: blocked.1,
                     history_used: history.map(|h| h.used),
                     history_max: history.map(|h| h.max),
                     tree_fs_free: history.and_then(|h| h.space).map(|s| s.free),

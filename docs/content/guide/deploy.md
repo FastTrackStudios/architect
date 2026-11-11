@@ -72,7 +72,7 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_LIVE_MAX` | `256` | how many notes it keeps live with each peer; `0` sweeps only |
 | `ARCHITECT_FILES_STORE_MAX` | a quarter of the filesystem under the data dir, at most 100 GiB (75% of the data volume with the chart) | the hard limit on the files' blob store, `<data dir>/files/blobs`: bytes, `16Gi`/`500M`, or `40%` of that filesystem ([below](#the-blob-store-s-budget)) |
 | `ARCHITECT_FILES_KEEP_FREE` | 15% of that filesystem, at most 64 GiB | free space the store (and a holding node's tree-side areas) never writes into, whoever else filled the disk; `100%` is refused |
-| `ARCHITECT_FILES_HISTORY_MAX` | none: keep every replaced version | a holding node's kept versions, beside its tree: at the limit a replacement waits ([below](#the-blob-store-s-budget)) |
+| `ARCHITECT_FILES_HISTORY_MAX` | a tenth of the tree's filesystem, at most 500 GiB | a holding node's kept versions, beside its tree: at the limit a replacement waits ([below](#the-blob-store-s-budget)) |
 
 The other `ARCHITECT_FILES_*` and `ARCHITECT_BLOB_*` settings (the files
 engine, the drive, a bucket) are in `apps/desktop/src/node/config.rs`'s
@@ -90,43 +90,83 @@ room.
   that would cross either is refused. A file that has to be fetched waits and
   is tried again on every pass. A file larger than the whole limit is
   reported as *too large*: it arrives only once the limit is raised. If the
-  free space cannot be read, writes that need the floor are refused.
+  free space cannot be read, at start or later, writes that need the floor
+  are refused (closed, not open).
 - **A holding node** (`ARCHITECT_FILES_HOLD`) keeps almost nothing in that
-  store. Its fetches land beside its tree, in `<files_dir>/.architect/incoming`,
-  and are renamed into place, so a 30 GiB file needs no room on the data
-  volume. A version it replaces is linked aside into
-  `<files_dir>/.architect/versions`, on the tree's own disk. That area is
-  bounded by `ARCHITECT_FILES_HISTORY_MAX` (by default it keeps everything)
-  and by the tree filesystem's own floor (`ARCHITECT_FILES_KEEP_FREE` again).
-  At either limit the replacement waits and is reported; nothing is deleted.
-  Scans, WebDAV and S3 never see `.architect`.
-- **Eviction.** Over 90% of its limit, the store drops only blobs whose bytes
-  the same device holds in a working file, re-hashed just before the delete.
-  It never drops an old version and never relies on another holder's copy
-  (#530).
+  store.
+  - Its fetches land beside its tree, in `<files_dir>/.architect/incoming`,
+    and are renamed into place, so a 30 GiB file needs no room on the data
+    volume.
+  - Every version it replaces is kept in `<files_dir>/.architect/versions`,
+    on the tree's own disk, unless that area or the store already holds
+    those bytes. Another working file with the same bytes does not count: a
+    working file can change.
+  - That area is bounded by `ARCHITECT_FILES_HISTORY_MAX` (by default a tenth
+    of the tree's filesystem, at most 500 GiB) and by the tree filesystem's
+    floor (`ARCHITECT_FILES_KEEP_FREE` again). At either, the replacement
+    waits and is reported; nothing is deleted.
+  - A version is kept by a hard link taken right before its file is swapped
+    out, so it costs no copy. Once the swap has happened, the link is the
+    file's only name, and nothing can write to it in place.
+  - A run that dies between the link and the swap leaves a shared file. At
+    start, every store file with another name is re-hashed: changed bytes go
+    to `<data dir>/files/corrupt/` (or the area's `.corrupt/`) and the claim
+    is withdrawn; unchanged ones are given an inode of their own.
+- **`.architect` on the share.** It is visible to anyone who mounts the
+  share's root. It holds `incoming/` (bytes about to be renamed into the
+  tree), `versions/` (previous versions by sha-256: for some old versions the
+  only copy) and a `README.txt` saying so, which is also the node's mark. If
+  `.architect` exists and is not the node's own (a file, a link, or a folder
+  without that mark), a holding node refuses to start and says why. If the
+  node cannot write there (a read-only or root-squashed share), replacements
+  wait. The root then reports `no_history` with the reason ("cannot keep
+  history: …") and logs one warning when it starts.
+- **Eviction.** Over 90% of its limit, the store drops only blobs that a
+  working file on the same device holds, re-hashed just before the delete,
+  and only blobs that are no old version anywhere. It never relies on
+  another holder's copy (#530).
+  - Eviction holds the same lock as a pass, so a write that decided "the
+    store keeps these bytes" never races it.
+  - It re-reads at most 2 GiB of working files per pass and logs its
+    progress, so a node that starts over budget (one that ran an older build
+    that copied the tree) catches up over several passes without stalling
+    sync.
+  - **The store copies it drops this way are what protected small files
+    against direct edits.** Once one is dropped, a later direct edit of that
+    file loses its previous version.
 - **Writes are staged.** Every file the node writes (a fetched version, a
   conflict copy, a WebDAV or S3 write applied to the tree) is staged beside
-  its target under one temp suffix, `.architect-part`. Across filesystems it
-  is copied, synced, read back and checked against its sha-256. The target is
-  checked again just before the swap: a file the user changed meanwhile is
-  never overwritten, and the next scan makes it a fork. Temp files from a
-  run that died are removed at start.
+  its target as `<name>.architect-part`, recorded first in the node's
+  journal (`<data dir>/files/pending-writes.json`).
+  - A copy is synced, read back and checked against its sha-256; on a
+    holding node it counts against the tree filesystem's floor while it
+    exists.
+  - The target is checked again just before the swap: a file the user
+    changed meanwhile is never overwritten, and the next scan makes the two
+    a fork with a conflict copy.
+  - At start, only temp files the journal names are removed. Any other file
+    ending in `.architect-part` is a user's: left alone, never synced, and
+    listed in the root's `strays`.
 
-**Which edits keep their previous version.** The ones the node makes itself
-keep it: a newer version from a peer, a restore, or a WebDAV or S3 write.
-Edits made directly on the tree behind the node's back (a DAW on the NFS
-share, `rsync` into it) cannot keep it. The node sees such an edit only at
-its next scan, when the old bytes are already overwritten on disk. Such a
-version stays in the list, and `FILES_HELD` (`Files::held`) says whether
-anyone holds its bytes. A store copy the node already had (main kept one of
-every small file) is kept rather than dropped as a duplicate, so those files
-do keep their previous version. A device that pins roots keeps every file up
-to 64 MiB in its store as it commits it, as before.
+**Which edits keep their previous version.**
+- **Kept:** the edits the node makes itself (a newer version from a peer, a
+  restore, a WebDAV or S3 write).
+- **Not kept:** edits made directly on the tree behind the node's back (a
+  DAW on the NFS share, `rsync` into it). The node sees such an edit only at
+  its next scan, when the old bytes are already overwritten on disk. The
+  exception is a file whose bytes the node still has a store copy of; an
+  older build copied every small file, until space pressure drops that copy
+  (above).
+- Such a version stays in the list, and `FILES_HELD` (`Files::held`) says
+  whether anyone holds its bytes.
+- A device that pins roots keeps every file up to 64 MiB in its store as it
+  commits it, as before.
 
 `POST /node/status` (`NODE_STATUS`) answers `files_store`:
 - bytes used and in flight, the limit and the floor, the filesystem's free
   bytes and size;
-- files deferred now and files too large, and writes refused since start;
+- files deferred now, files too large and replacements blocked on history
+  (`no_history`, `history_error`), and writes refused since start;
 - on a holding node, `history_used`, `history_max`, `tree_fs_free` and
   `incoming_used`.
 

@@ -253,7 +253,9 @@ pub async fn start_with(
     let files = config
         .files_dir
         .as_ref()
-        .map(|dir| files::engine(&config, dir, files_registry.clone()));
+        .map(|dir| files::engine(&config, dir, files_registry.clone()))
+        .transpose()
+        .map_err(StartError::Other)?;
     let collab = vault_collab::VaultCollab::new(backend.clone(), data.join("crdt"));
     let collab = match &files {
         Some(engine) => {

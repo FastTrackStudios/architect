@@ -45,7 +45,7 @@
 //! | `ARCHITECT_FILES_SCRUB_MIB` | `files_scrub_mib` | `32` | MiB re-hashed per pass at most (0: only on `FILES_SCRUB`) |
 //! | `ARCHITECT_FILES_STORE_MAX` | `files_store_max` | a quarter of the filesystem holding the store, at most 100 GiB | the hard limit on `<data dir>/files/blobs` ([`Size`]: `20000000000`, `16Gi`, `40%`): a write past it is refused before a byte lands, a fetch waits until there is room |
 //! | `ARCHITECT_FILES_KEEP_FREE` | `files_keep_free` | 15% of that filesystem, at most 64 GiB | the store never writes into this floor of free space (`statvfs`), whoever else filled the disk; on a holding node, also the floor kept on the tree's filesystem. If the free space cannot be read, writes that need the floor are refused |
-//! | `ARCHITECT_FILES_HISTORY_MAX` | `files_history_max` | none: every replaced version is kept | on a holding node, how much of the replaced versions kept beside the tree (`<files_dir>/.architect/versions`) may hold; at the limit, or at the tree filesystem's floor, a replacement waits and is reported, nothing is deleted |
+//! | `ARCHITECT_FILES_HISTORY_MAX` | `files_history_max` | a tenth of the tree's filesystem, at most 500 GiB | on a holding node, how much of the replaced versions kept beside the tree (`<files_dir>/.architect/versions`) may hold; at the limit, or at the tree filesystem's floor, a replacement waits and is reported, nothing is deleted |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

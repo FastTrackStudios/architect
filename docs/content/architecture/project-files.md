@@ -59,13 +59,18 @@ full, so it is not an option.
     kept.
   - On the node that holds its tree in place, `keep_inline` is 0: the tree is
     the copy. Copying the tree on its first scan is what filled starcommand's
-    disk (#525). A store copy it already has is kept, not dropped as a
-    duplicate.
+    disk (#525). A store copy it already has stays until space pressure: then
+    it may be dropped if a working file holds the same bytes and no root
+    lists them as an old version. Those copies are what protected small
+    files against direct edits.
   - A version the engine replaces itself (a peer's newer version, a restore,
-    a WebDAV or S3 write) is kept before it is replaced. On a holding node it
-    is linked aside into `<files_dir>/.architect/versions`, on the tree's own
-    filesystem; on a device it goes into the store. With no room, the
-    replacement waits.
+    a WebDAV or S3 write) is kept before it is replaced, unless the versions
+    area or the store already holds its bytes. Another working file with the
+    same bytes never counts. On a holding node it is linked aside into
+    `<files_dir>/.architect/versions` (bounded by `files_history_max`, a
+    tenth of the tree's filesystem by default); on a device it goes into the
+    store. With no room, or nowhere writable to keep it, the replacement
+    waits and says why.
   - An edit made on the tree behind the node's back cannot keep its previous
     bytes unless a copy existed: the scan sees it after the fact. The version
     stays listed, and `Files::held` says no one holds its bytes.
@@ -76,12 +81,17 @@ full, so it is not an option.
     both checked before a byte is written. A fetch with no room waits and is
     tried again each pass; a file larger than the limit is reported too
     large.
-  - Over 90% of the limit, the store drops only blobs a working file on the
-    same device holds, re-hashed just before the delete (#530 covers
-    cross-holder eviction).
-  - Writes are staged under `.architect-part` (`layout::ignored`), copied,
-    synced and verified across filesystems, re-checked before the swap, and
-    never put over a file that appeared meanwhile.
+  - Over 90% of the limit, the store drops only blobs that a working file
+    on the same device holds and that are no old version anywhere,
+    re-hashed just before the delete. It does so under the pass's lock, at
+    most 2 GiB of re-reading per pass (#530 covers cross-holder eviction).
+  - Writes are staged as `<name>.architect-part`, recorded in a journal
+    first (`features/files/src/sync/pending.rs`). A copy is synced and
+    verified; the target is re-checked before the swap, and a staged file
+    is never put over a file that appeared meanwhile.
+  - At start, only the journal's temp files are removed, and store files
+    sharing an inode with another name are re-hashed (changed ones are
+    quarantined, unchanged ones split).
 - **`.fts-files` is ignored**: not read, not migrated, not deleted. It is
   skipped by every scan, and Cody deletes it once Architect holds the roots.
   Its history (jj commits in a custom content-addressed backend) is not

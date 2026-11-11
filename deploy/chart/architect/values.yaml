@@ -84,9 +84,11 @@ node:
     max: ""
     keepFree: "15%"
     # A holding node keeps the versions it replaces beside its tree
-    # (/files/.architect/versions, not on /data). Empty = keep them all;
-    # at a limit, or at the files volume's own 15% floor, a replacement
-    # waits and is reported. Nothing is deleted. (ARCHITECT_FILES_HISTORY_MAX)
+    # (/files/.architect/versions, not on /data; anyone mounting the
+    # share's root sees it). Empty = a tenth of the files volume, at most
+    # 500 GiB; at the limit, or at the files volume's own 15% floor, a
+    # replacement waits and is reported. Nothing is deleted.
+    # (ARCHITECT_FILES_HISTORY_MAX)
     historyMax: ""
 
   # The container's own ephemeral storage (its writable layer and logs;
