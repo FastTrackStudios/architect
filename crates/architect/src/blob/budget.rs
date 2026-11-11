@@ -99,14 +99,19 @@ impl fmt::Display for NoRoom {
             "no room for {} bytes: the store has {} (+{} in flight) of {}",
             self.need, self.used, self.reserved, self.max
         )?;
-        if let Some(free) = self.free {
-            write!(
+        match self.free {
+            Some(free) => write!(
                 f,
                 ", the filesystem {free} free of a {} floor",
                 self.keep_free
-            )?;
+            ),
+            None if self.keep_free > 0 => write!(
+                f,
+                "; the filesystem's free space cannot be read, so a write that needs its {} floor is refused",
+                self.keep_free
+            ),
+            None => Ok(()),
         }
-        Ok(())
     }
 }
 
