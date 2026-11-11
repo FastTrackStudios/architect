@@ -225,9 +225,16 @@ struct Node {
 
 /// What a node holds, against [`MAX_BYTES`].
 fn node_bytes(node: &Node) -> usize {
-    let pairs =
-        |list: &[(String, String)]| list.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>();
-    node.tag.len() + node.text.len() + pairs(&node.attrs) + pairs(&node.style)
+    let pairs = |list: &[(String, String)]| {
+        list.iter().fold(0usize, |n, (k, v)| {
+            n.saturating_add(k.len()).saturating_add(v.len())
+        })
+    };
+    node.tag
+        .len()
+        .saturating_add(node.text.len())
+        .saturating_add(pairs(&node.attrs))
+        .saturating_add(pairs(&node.style))
 }
 
 /// The root: the view's element 0.
@@ -399,7 +406,7 @@ impl Tree {
         let kids = std::mem::take(&mut fresh.children);
         let at = self.add(fresh)?;
         for kid in kids {
-            let c = self.copy(kid, depth + 1)?;
+            let c = self.copy(kid, depth.saturating_add(1))?;
             self.node_mut(c)?.parent = Some(at);
             self.node_mut(at)?.children.push(c);
         }
@@ -594,7 +601,7 @@ impl Tree {
             children: n
                 .children
                 .iter()
-                .filter_map(|&c| self.element(c, depth + 1))
+                .filter_map(|&c| self.element(c, depth.saturating_add(1)))
                 .collect(),
             ..Element::default()
         })
@@ -607,7 +614,7 @@ mod tests {
     use crate::elements_to_html;
 
     fn later() -> Instant {
-        Instant::now() + DRAW_TIMEOUT
+        Instant::now().checked_add(DRAW_TIMEOUT).unwrap()
     }
 
     fn text(t: &str) -> Value {

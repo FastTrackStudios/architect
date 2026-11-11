@@ -26,7 +26,7 @@ pub fn elements_to_html(elements: &[Element]) -> String {
 
 /// How deep an element tree is written: what is below is left out, so a
 /// tree an extension drew cannot overflow the stack writing it.
-pub(crate) const MAX_DEPTH: usize = 256;
+pub const MAX_DEPTH: usize = 256;
 
 fn write_element(out: &mut String, element: &Element, depth: usize) {
     if depth >= MAX_DEPTH {
@@ -63,7 +63,7 @@ fn write_element(out: &mut String, element: &Element, depth: usize) {
         out.push_str(&escape(text));
     }
     for child in &element.children {
-        write_element(out, child, depth + 1);
+        write_element(out, child, depth.saturating_add(1));
     }
     out.push_str("</");
     out.push_str(&element.tag);

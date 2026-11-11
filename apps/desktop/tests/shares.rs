@@ -97,7 +97,7 @@ fn touch(root: &Path, rel: &str, body: &str) {
 }
 
 /// An extension installed on the node (`<data dir>/extensions`) whose
-/// embed page draws a ```chart fence as an SVG that follows the playhead:
+/// embed page draws a `chart` fence as an SVG that follows the playhead:
 /// a transparent rect per bar with its time, as keyflow#59 engraves. It
 /// also tries what must never reach a reader: a handler, a script, a
 /// `<foreignObject>`, a `javascript:` link.
@@ -1475,8 +1475,8 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let body = text.to_string();
-    let at = body.find("| Am |").expect("the fence's last bar");
-    text.insert(body[..at + "| Am ".len()].chars().count(), "| E7 ")
+    let (before, _) = body.split_once("| Am |").expect("the fence's last bar");
+    text.insert(before.chars().count() + "| Am ".len(), "| E7 ")
         .unwrap();
     replica.loro().commit();
     let joy = page_with(&w.url(&format!("{link}joy/")), None, ">E7</text>").await;
@@ -1568,8 +1568,8 @@ async fn an_embedders_own_blocks_draw_on_a_link_after_the_installed_ones() {
         assert!(song.contains(kept), "lost {kept}: {song}");
     }
     assert!(!song.contains("language-kf"), "{song}");
-    let start = song.find("data-by=\"studio.kf\"").unwrap();
-    let block = &song[start..start + song[start..].find("</div>").unwrap()];
+    let (_, from) = song.split_once("data-by=\"studio.kf\"").unwrap();
+    let (block, _) = from.split_once("</div>").unwrap();
     for never in ["alert(", "onload", "<script"] {
         assert!(!block.contains(never), "`{never}` in the block: {block}");
     }

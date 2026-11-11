@@ -156,7 +156,7 @@ fn sanitize_counting(markup: &str) -> (String, usize) {
     // `entity` (`MAX_ENTITY` bytes). Output: at most six bytes per input
     // byte (`"` → `&quot;`), and an end tag per start tag read.
     while !rest.is_empty() {
-        passes += 1;
+        passes = passes.saturating_add(1);
         let before = rest.len();
         rest = w.step(rest);
         if rest.len() >= before {
@@ -404,7 +404,7 @@ fn skip_element<'a>(name: &str, mut rest: &'a str) -> &'a str {
             // `</script<b>` as the end tag `script<b`).
             continue;
         };
-        let tag = &tail[..end];
+        let tag = tail.get(..end).unwrap_or_default();
         if closing {
             depth = depth.saturating_sub(1);
             if depth == 0 {
@@ -445,7 +445,8 @@ const MAX_ENTITY: usize = 33;
 /// no `;` stays linear.
 fn entity(s: &str) -> Option<(&str, &str)> {
     let semi = s.bytes().take(MAX_ENTITY).position(|b| b == b';')?;
-    let (name, rest) = (s.get(..semi)?, s.get(semi + 1..)?);
+    let (name, rest) = s.split_at_checked(semi)?;
+    let rest = rest.strip_prefix(';')?;
     let ok = match numeric(name) {
         Some((digits, 16)) => {
             !digits.is_empty() && digits.len() <= 6 && digits.chars().all(|c| c.is_ascii_hexdigit())
@@ -661,7 +662,11 @@ mod tests {
             markup.len()
         );
         assert!(
-            out.len() <= 6 * markup.len() + MAX_OPEN * 3,
+            out.len()
+                <= markup
+                    .len()
+                    .saturating_mul(6)
+                    .saturating_add(MAX_OPEN.saturating_mul(3)),
             "{} bytes out of {}",
             out.len(),
             markup.len()
