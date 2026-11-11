@@ -1720,6 +1720,57 @@ The synced-lyrics block is built this way
 | `play()`, `pause()`, `next()`, `previous()` | the queue |
 | `subscribe(fn)` | `fn(snapshot)` at once and on every change, at most once a frame while playing; returns the unsubscribe |
 | `architect:playhead` | the same snapshot as an event on `document` |
+| `attach(source)` | an outside clock as the playhead's source (below); returns `{ from, changed(), detach() }` |
+
+The snapshot also says `source`: the attached source's `name`, or `null`
+while the page's own media drive it.
+
+**An engine as the clock.** An audio engine running on the page (Studio's,
+in a share link's Reference or Full layer, #528) attaches as the
+playhead's source instead of playing a media element. While it is
+attached, the chart and the lyrics follow it exactly as they follow a
+media element, a click on a bar or a line seeks it, and the page's own
+player yields: its media are paused (one started by hand is paused again)
+and its bar is hidden, since the engine brings its own transport.
+
+```js
+const engine = {
+  name: "studio.engine",
+  time: () => transport.seconds(),     // read each frame while it plays
+  playing: () => transport.isPlaying(),
+  rate: 1,                             // a value or a function, as each of these
+  duration: () => song.seconds,        // null while unknown
+  src: "/s/<code>/Songs/Joy/Media/Proxies/Reference.ogg", // the media it stands in for (optional)
+  seek: (t) => transport.seek(t),      // asked by the page: a click, a block's script
+  play: () => transport.play(),
+  pause: () => transport.pause(),
+  detached: () => {},                  // optional: another source took its place
+};
+const handle = architect.playhead.attach(engine);
+transport.seek(handle.from.time);      // where the page's player was
+transport.on("state", () => handle.changed()); // after a play, pause, seek or end of its own
+// …
+handle.detach();                       // the page's player takes over, at the engine's time
+```
+
+| | |
+| --- | --- |
+| `time`, `playing`, `rate`, `duration` | the clock: values or functions, read on each `changed()` and each frame while it plays |
+| `seek(t)`, `play()`, `pause()` | what the page asks of it; the playhead is read again after each |
+| `src` | the media it stands in for: a block with `data-media` follows it only when that is this; without `src`, the blocks of this page follow it |
+| `name` | in each snapshot's `source` |
+| `detached()` | called when another source is attached in its place (one at a time: an engine's development copy reloading attaches again) |
+
+The handle's `from` is where the page's player was when the source
+attached (`src`, `time`, `playing`), so the song goes on from there.
+`changed()` is the engine's to call when its state changes on its own (a
+play, a pause, a seek from its transport, the end); the page reads it
+each frame while it plays. `next()` and `previous()` do nothing while a
+source is attached. `detach()` gives the clock back: when `src` is one of
+the page's tracks, the page's player selects it at the engine's last time,
+paused. A handle of a source no longer attached does nothing. Tested under
+node with a fake engine (`features/sites/test/player-source.test.mjs`,
+run by `features/sites/tests/player_source.rs`).
 
 **What is not there yet.** The node draws the claimed fences of the
 extensions a build links and of those installed on it, page embeds and
@@ -1727,7 +1778,9 @@ WASI components (#488); a block drawn so follows the playhead with the
 attributes above and needs nothing more. A view mounted live on a share
 page (a WASI component or a page given the playhead as a host signal) is
 not built: when it is, its host signal is
-`architect.playhead` above. The app's setlist pane has its own player
+`architect.playhead` above, and an engine it runs drives it through
+`attach`. No engine is in Architect: Studio's attaches from its own
+code. The app's setlist pane has its own player
 still; the same queue and playhead there would need the queue
 (`apps/desktop/src/node/shares.rs` `queue`) and the follower moved into a
 crate both sides use, a pane-side clock in place of the page's media

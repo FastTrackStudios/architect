@@ -8,6 +8,15 @@
 //   architect.playhead.seek(t[, {src}]), .play(), .pause(), .next(), .previous()
 //   architect.playhead.subscribe(fn) -> unsubscribe   (fn(snapshot), at once and on change)
 //   document "architect:playhead" event, detail = the same snapshot
+//   architect.playhead.attach(source) -> { from, changed(), detach() }
+//
+// An outside clock (an audio engine running on the page, #528) attaches
+// as the playhead's source: its `time`, `playing`, `rate`, `duration`
+// (values, or functions read each frame while it plays) are the
+// playhead, `seek(t)`, `play()`, `pause()` are asked of it, and `src`
+// says which media it stands in for. While it is attached the page's
+// own player yields (its media paused, its bar hidden); detached, the
+// page's player takes over where the source was.
 //
 // A block needs no script to follow it: a `[data-follow-playhead]`
 // element's `[data-at]` children (seconds) are marked aria-current="time"
@@ -80,6 +89,8 @@
   var el = null;
   var own = null;
   var listeners = [];
+  // The outside clock attached, if any: { of: the source }.
+  var source = null;
 
   function inlineFor(src) {
     for (var i = 0; i < inline.length; i++) {
@@ -102,7 +113,32 @@
     return own;
   }
 
+  function read(s, key, fallback) {
+    var v = s[key];
+    if (typeof v === "function") {
+      try { v = v.call(s); } catch (e) { console.error(e); v = undefined; }
+    }
+    return v === undefined || v === null ? fallback : v;
+  }
   function snapshot() {
+    if (source) {
+      var s = source.of;
+      var src = s.src ? path(s.src) : null;
+      var d = Number(read(s, "duration", NaN));
+      var at = Number(read(s, "time", 0));
+      return {
+        time: isFinite(at) ? Math.max(0, at) : 0,
+        playing: !!read(s, "playing", false),
+        rate: Number(read(s, "rate", 1)) || 1,
+        duration: isFinite(d) ? d : null,
+        src: src,
+        page: here,
+        here: true,
+        index: src ? indexOf(src) : -1,
+        tracks: tracks.length,
+        source: String(s.name || "source"),
+      };
+    }
     var t = tracks[cur];
     return {
       time: el ? el.currentTime || 0 : 0,
@@ -114,6 +150,7 @@
       here: !!(t && t.page === here),
       index: cur,
       tracks: tracks.length,
+      source: null,
     };
   }
   var last = "";
@@ -135,6 +172,8 @@
     if (!force && now - saving < 1000) return;
     saving = now;
     var s = snapshot();
+    // A source standing in for no track of the page keeps what was kept.
+    if (source && !s.src) return;
     store({ src: s.src, time: s.time, playing: s.playing, follow: follow });
   }
 
@@ -142,11 +181,19 @@
   function tick() {
     frame = 0;
     emit(false);
-    if (el && !el.paused) frame = requestAnimationFrame(tick);
+    if (source ? snapshot().playing : el && !el.paused) frame = requestAnimationFrame(tick);
+  }
+  function kick() {
+    if (!frame && snapshot().playing) frame = requestAnimationFrame(tick);
   }
   function wire(media) {
     ["play", "pause", "seeked", "ratechange", "durationchange", "timeupdate", "loadedmetadata"].forEach(function (name) {
       media.addEventListener(name, function () {
+        if (source) {
+          // A source holds the clock: the page's media stays quiet.
+          if (name === "play") media.pause();
+          return;
+        }
         if (media !== el) {
           // A player on the page started by hand: it is the current one.
           if (name === "play") adopt(media);
@@ -158,7 +205,7 @@
       });
     });
     media.addEventListener("ended", function () {
-      if (media === el) next(true);
+      if (media === el && !source) next(true);
     });
   }
   inline.forEach(wire);
@@ -223,6 +270,18 @@
     return tracks.length ? 0 : -1;
   }
 
+  // Ask the source to `what` (seek, play, pause), then show where it is.
+  function ask(what, arg) {
+    var s = source.of;
+    var out;
+    if (typeof s[what] === "function") {
+      try { out = s[what](arg); } catch (e) { console.error(e); }
+    }
+    emit(true);
+    kick();
+    return out;
+  }
+
   var playhead = {
     get time() { return snapshot().time; },
     get playing() { return snapshot().playing; },
@@ -233,6 +292,7 @@
     get here() { return snapshot().here; },
     snapshot: snapshot,
     seek: function (t, opts) {
+      if (source) return ask("seek", Math.max(0, Number(t) || 0));
       var src = opts && opts.src ? path(opts.src) : null;
       var want = src ? indexOf(src) : cur >= 0 && tracks[cur].page === here ? cur : firstHere();
       if (want < 0) return;
@@ -243,12 +303,54 @@
       }
     },
     play: function () {
+      if (source) return ask("play");
       if (el) return el.play();
       if (tracks.length) select(firstHere(), 0, true, true);
     },
-    pause: function () { if (el) el.pause(); },
-    next: function () { next(false); },
-    previous: previous,
+    pause: function () {
+      if (source) return ask("pause");
+      if (el) el.pause();
+    },
+    next: function () { if (!source) next(false); },
+    previous: function () { if (!source) previous(); },
+    // An outside clock as the playhead's source (#528): see the top.
+    attach: function (spec) {
+      if (!spec || spec.time === undefined || typeof spec.seek !== "function") {
+        throw new TypeError("a playhead source has a time and a seek(t)");
+      }
+      var from = snapshot();
+      if (source) {
+        var old = source.of;
+        source = null;
+        if (typeof old.detached === "function") {
+          try { old.detached(); } catch (e) { console.error(e); }
+        }
+      }
+      if (el && !el.paused) el.pause();
+      var mine = { of: spec };
+      source = mine;
+      yieldBar(true);
+      emit(true);
+      kick();
+      return {
+        from: { src: from.src, time: from.time, playing: from.playing },
+        changed: function () {
+          if (source !== mine) return;
+          emit(true);
+          save(true);
+          kick();
+        },
+        detach: function () {
+          if (source !== mine) return;
+          var last = snapshot();
+          source = null;
+          yieldBar(false);
+          var i = last.src ? indexOf(last.src) : -1;
+          if (i >= 0) select(i, last.time, false, true);
+          else emit(true);
+        },
+      };
+    },
     subscribe: function (fn) {
       listeners.push(fn);
       try { fn(snapshot()); } catch (e) { console.error(e); }
@@ -363,6 +465,13 @@
     });
     doc.body.appendChild(bar);
     doc.body.classList.add("site-has-player");
+  }
+  // The bar steps aside while a source holds the clock: the engine
+  // brings its own transport.
+  function yieldBar(away) {
+    if (!bar) return;
+    bar.hidden = away;
+    doc.body.classList.toggle("site-has-player", !away);
   }
   function clock(t) {
     if (t == null || !isFinite(t)) return "–:––";
