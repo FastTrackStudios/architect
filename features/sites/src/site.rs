@@ -53,6 +53,12 @@ pub struct Options {
     /// are published, the rest are outside the site as notes outside
     /// the scope are. None: every note of the scope.
     pub filter: Option<String>,
+    /// Attachments (vault paths) the site holds but never names (#528: a
+    /// share link's files above its layer): each is copied, so the node
+    /// can refuse it by name, but no link, embed, player, lyrics, search
+    /// entry or listing of the site mentions it; a link to one is
+    /// dropped with its text.
+    pub hold_back: BTreeSet<String>,
 }
 
 impl Options {
@@ -73,6 +79,7 @@ impl Options {
             bases: true,
             scope: Scope::Vault,
             filter: None,
+            hold_back: BTreeSet::new(),
         }
     }
 }
@@ -397,6 +404,7 @@ impl Site {
                 &attachments,
                 &base,
                 &opts.scope,
+                &opts.hold_back,
             ) {
                 Target::Broken if wiki => {
                     let name = dest.split('#').next().unwrap_or_default();
@@ -419,6 +427,7 @@ impl Site {
                         crate::media::is_lyrics(t)
                             && attachments.contains(t)
                             && opts.scope.holds_file(t)
+                            && !opts.hold_back.contains(*t)
                     })?;
                 std::fs::read_to_string(opts.vault.join(target)).ok()
             };
@@ -672,6 +681,7 @@ fn resolve_link(
     attachments: &BTreeSet<&str>,
     base: &str,
     scope: &Scope,
+    hold_back: &BTreeSet<String>,
 ) -> Target {
     let scoped = !scope.is_vault();
     let decoded = decode_percent(dest);
@@ -688,6 +698,9 @@ fn resolve_link(
         if attachments.contains(target) {
             if !scope.holds_file(target) {
                 return Target::Outside;
+            }
+            if hold_back.contains(target) {
+                return Target::Held;
             }
             return Target::File(format!("{base}{}", encode_path(target)));
         }
