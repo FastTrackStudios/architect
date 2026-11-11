@@ -2,14 +2,23 @@
 //! name, filled by the app and by extensions (`[[languages]]`).
 //!
 //! A [`Language`] is data: its id and name, the file extensions and fence
-//! names it answers to, where its tree-sitter grammar and highlights query
-//! come from, its comment token, and the command of its LSP server when it
-//! has one. [`Languages`] keeps them by owner (the app, or an extension's
-//! id), so an owner's languages are replaced together and go together
-//! when it is turned off.
+//! names it answers to, which tree-sitter grammar it is highlighted with
+//! and its highlights query, its comment token, and the command of its
+//! LSP server when it has one. [`Languages`] keeps them by owner (the app,
+//! or an extension's id), so an owner's languages are replaced together
+//! and go together when it is turned off.
 //!
-//! The registry carries a server's command; it never starts one (#512,
-//! step (e)).
+//! A grammar is always linked into the binary: one compiled into the
+//! editor (`grammar = "linked"`), or one the app or a linked extension
+//! hands over in Rust under a name (`grammar = "linked:<name>"`,
+//! `syntax::link_grammar`). A grammar file (`grammar = "x.wasm"`) is
+//! refused by [`Language::check`]: the tree-sitter the editor uses cannot
+//! load a grammar at run time (`docs/content/features/editor.md`).
+//!
+//! The registry is data only. With feature `syntax`, `syntax::drive`
+//! makes it the editor's: every language set here is registered in the
+//! editor's own registry, so fences and `CodeEditor` highlight it. The
+//! extension host runs a language's server (`server`).
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -18,16 +27,24 @@ use serde::{Deserialize, Serialize};
 /// The owner the app registers its own languages as.
 pub const APP: &str = "app";
 
-/// Where a language's tree-sitter grammar comes from.
+/// What `grammar = "linked:<name>"` starts with.
+pub const LINKED_PREFIX: &str = "linked:";
+
+/// Where a language's tree-sitter grammar comes from. Every grammar is
+/// linked into the binary.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum Grammar {
     /// Compiled into the editor (`grammar = "linked"`, the default): one
-    /// of the grammars `editor-syntax` was built with.
+    /// of the grammars `editor-syntax` was built with, found by the
+    /// language's id or a fence name.
     #[default]
     Linked,
-    /// A grammar file in the owner's package, a tree-sitter `.wasm`
-    /// (`grammar = "grammars/keyflow.wasm"`).
+    /// A grammar the app or a linked extension links in and hands over
+    /// under this name (`grammar = "linked:toml"`; `syntax::link_grammar`).
+    Host(String),
+    /// A grammar file in the owner's package (`grammar = "x.wasm"`).
+    /// Never loaded: [`Language::check`] refuses it.
     File(String),
 }
 
@@ -35,6 +52,8 @@ impl From<String> for Grammar {
     fn from(text: String) -> Self {
         if text.is_empty() || text == "linked" {
             Self::Linked
+        } else if let Some(name) = text.strip_prefix(LINKED_PREFIX) {
+            Self::Host(name.to_owned())
         } else {
             Self::File(text)
         }
@@ -45,13 +64,14 @@ impl From<Grammar> for String {
     fn from(grammar: Grammar) -> Self {
         match grammar {
             Grammar::Linked => "linked".to_owned(),
+            Grammar::Host(name) => format!("{LINKED_PREFIX}{name}"),
             Grammar::File(path) => path,
         }
     }
 }
 
-/// A language's LSP server: the command the host would run. Carried, not
-/// started.
+/// A language's LSP server: the command the extension host runs, one per
+/// language and workspace root, while an editor of the language is open.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Server {
@@ -67,7 +87,7 @@ pub struct Server {
 /// name = "Keyflow chart"
 /// extensions = ["kf"]
 /// fences = ["kf"]
-/// grammar = "grammars/keyflow.wasm"   # or "linked" for one compiled in
+/// grammar = "linked:keyflow"         # one the app links; "linked" for the editor's own
 /// highlights = "queries/highlights.scm"
 /// comment = "//"
 /// [languages.server]                  # optional
@@ -88,8 +108,8 @@ pub struct Language {
     pub fences: Vec<String>,
     pub grammar: Grammar,
     /// Its highlights query, a file in the owner's package
-    /// (`queries/highlights.scm`). None for a linked grammar that brings
-    /// its own.
+    /// (`queries/highlights.scm`). None to use the one the grammar comes
+    /// with (the editor's, or the one given to `syntax::link_grammar`).
     pub highlights: Option<String>,
     /// `highlights`' text, read from the package when its owner loaded.
     #[serde(skip_deserializing)]
@@ -129,6 +149,20 @@ impl Language {
     #[must_use]
     pub fn comment(mut self, token: &str) -> Self {
         self.comment = Some(token.to_owned());
+        self
+    }
+
+    /// With a grammar the host links under `name` (`linked:<name>`).
+    #[must_use]
+    pub fn host_grammar(mut self, name: &str) -> Self {
+        self.grammar = Grammar::Host(name.to_owned());
+        self
+    }
+
+    /// With this highlights query, as text.
+    #[must_use]
+    pub fn highlights_query(mut self, query: &str) -> Self {
+        self.highlights_text = Some(query.to_owned());
         self
     }
 
@@ -172,8 +206,9 @@ impl Language {
 
     /// What is wrong with it as written, if anything: an id that is not
     /// lowercase letters, digits, `-` and `_`; an empty extension or
-    /// fence; a grammar or query path that leaves its package; a server
-    /// with no command.
+    /// fence; a grammar file (grammars are linked, never loaded); a
+    /// `linked:` grammar with no name; a query path that leaves its
+    /// package; a server with no command.
     ///
     /// # Errors
     /// The reason, as a sentence fragment (`its id is …`).
@@ -189,10 +224,21 @@ impl Language {
         if !self.fences.iter().all(name_like) {
             return Err("a fence name is empty or has a space".to_owned());
         }
-        if let Grammar::File(path) = &self.grammar
-            && !inside(path)
-        {
-            return Err(format!("{path} is outside the package"));
+        match &self.grammar {
+            Grammar::Linked => {}
+            Grammar::Host(name) if !name.is_empty() && name.chars().all(plain) => {}
+            Grammar::Host(name) => {
+                return Err(format!(
+                    "its grammar linked:{name} is not a name (lowercase letters, digits, - and _)"
+                ));
+            }
+            Grammar::File(path) => {
+                return Err(format!(
+                    "its grammar is the file {path}, and grammars are linked into the app, \
+                     not loaded at run time: write grammar = \"linked:<name>\" for one the app \
+                     links, or \"linked\" for one the editor has"
+                ));
+            }
         }
         if let Some(path) = &self.highlights
             && !inside(path)
@@ -227,11 +273,25 @@ pub struct Registered {
     pub language: Language,
 }
 
-#[derive(Debug, Default)]
+/// What [`Languages::on_change`] calls.
+pub type Listener = Arc<dyn Fn(&Languages) + Send + Sync>;
+
+#[derive(Default)]
 struct Inner {
     /// In the order each owner first registered.
     owners: Vec<(String, Vec<Language>)>,
     revision: u64,
+    listeners: Vec<Listener>,
+}
+
+impl std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("owners", &self.owners)
+            .field("revision", &self.revision)
+            .field("listeners", &self.listeners.len())
+            .finish()
+    }
 }
 
 /// The registry. Cloning shares it.
@@ -285,10 +345,29 @@ impl Languages {
                 differs
             }),
         };
-        if changed {
+        let listeners = if changed {
             inner.revision = inner.revision.wrapping_add(1);
+            inner.listeners.clone()
+        } else {
+            Vec::new()
+        };
+        drop(inner);
+        for listener in &listeners {
+            listener(self);
         }
         changed
+    }
+
+    /// Calls `listener` after every change, outside the registry's lock
+    /// (it may read the registry). On the thread that made the change.
+    pub fn on_change(&self, listener: Listener) {
+        self.lock().listeners.push(listener);
+    }
+
+    /// Whether `other` is this registry (a clone of it), not just equal.
+    #[must_use]
+    pub fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 
     /// Takes everything `owner` registered out. True when it had any.

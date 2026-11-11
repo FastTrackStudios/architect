@@ -158,6 +158,11 @@ pub struct Capabilities {
     /// `osc:<host>:<port>` (`osc:<host>:*`, `osc:*`) where it sends, and
     /// `osc:listen:<port>` where it hears.
     pub ports: Vec<String>,
+    /// What of its languages (`[[languages]]`) the host may do past
+    /// highlighting them (`crate::capabilities::LANGUAGES`): `servers`
+    /// (run a language's server, a program on this computer, while a
+    /// file of the language is open).
+    pub languages: Vec<String>,
 }
 
 /// One action it adds.
@@ -820,6 +825,17 @@ impl Manifest {
             return Err(ManifestError::BadCapability(format!(
                 "ui {bad:?}: not one of {}",
                 crate::capabilities::UI.join(", ")
+            )));
+        }
+        if let Some(bad) = self
+            .capabilities
+            .languages
+            .iter()
+            .find(|l| !crate::capabilities::LANGUAGES.contains(&l.as_str()))
+        {
+            return Err(ManifestError::BadCapability(format!(
+                "languages {bad:?}: not one of {}",
+                crate::capabilities::LANGUAGES.join(", ")
             )));
         }
         if let Some(bad) = self.capabilities.events.iter().find(|e| {

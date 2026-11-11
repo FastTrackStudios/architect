@@ -1131,7 +1131,7 @@ id = "keyflow"
 name = "Keyflow chart"
 extensions = ["kf"]
 fences = ["kf"]
-grammar = "grammars/keyflow.wasm"
+grammar = "linked:keyflow"
 highlights = "queries/highlights.scm"
 comment = "//"
 [languages.server]
@@ -1168,10 +1168,7 @@ fn languages_are_registered_while_the_extension_is_on() {
         .expect("its language is registered");
     assert_eq!(kf.owner, "lab.langs");
     assert_eq!(kf.language.name, "Keyflow chart");
-    assert_eq!(
-        kf.language.grammar,
-        Grammar::File("grammars/keyflow.wasm".to_owned())
-    );
+    assert_eq!(kf.language.grammar, Grammar::Host("keyflow".to_owned()));
     assert_eq!(
         kf.language.highlights_text.as_deref(),
         Some("(comment) @comment\n"),
@@ -1203,7 +1200,7 @@ fn languages_are_registered_while_the_extension_is_on() {
     );
     let one = run(&list, "EXT_LANGUAGES", json!({ "fence": "kf" })).unwrap();
     assert_eq!(one["from"], "lab.langs");
-    assert_eq!(one["grammar"], "grammars/keyflow.wasm");
+    assert_eq!(one["grammar"], "linked:keyflow");
     assert_eq!(one["server"]["command"], "kf-lsp");
     assert_eq!(
         run(&list, "EXT_LANGUAGES", json!({ "path": "main.rs" })).unwrap()["from"],
@@ -1242,8 +1239,8 @@ fn languages_are_registered_while_the_extension_is_on() {
     for (good, bad) in [
         ("id = \"keyflow\"", "id = \"Key Flow\""),
         (
+            "grammar = \"linked:keyflow\"",
             "grammar = \"grammars/keyflow.wasm\"",
-            "grammar = \"../keyflow.wasm\"",
         ),
         (
             "highlights = \"queries/highlights.scm\"",
@@ -1256,4 +1253,12 @@ fn languages_are_registered_while_the_extension_is_on() {
         let text = LANGS.replacen(good, bad, 1);
         assert!(Manifest::parse(&text).is_err(), "{bad}");
     }
+    // A grammar file is refused saying why: grammars are linked.
+    let file = LANGS.replacen(
+        "grammar = \"linked:keyflow\"",
+        "grammar = \"grammars/keyflow.wasm\"",
+        1,
+    );
+    let why = Manifest::parse(&file).unwrap_err().to_string();
+    assert!(why.contains("linked into the app"), "{why}");
 }

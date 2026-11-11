@@ -802,9 +802,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             // The editor's languages (#512): the ones compiled into the
             // editor as the app's own, and each extension's
             // `[[languages]]` while it is on (`EXT_LANGUAGES`).
-            .with_languages(architect_editor::Languages::with_app(
-                architect_editor::languages::builtin(),
-            ));
+            .with_languages(app_languages());
+        // Languages' servers (#512): run while a code editor of the
+        // language is open, stopped with their extension; desk only.
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        if let Some(servers) = language_servers() {
+            host = host.with_language_servers(servers);
+        }
         // Extensions' themes and tokens into the lab's store; the theme,
         // as data, to its processes.
         if let Some(store) = &themes {
@@ -979,6 +983,8 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         let _ = extensions.install_actions();
         let _ = architect_extensions::views::install_view_actions(&list, meters.clone());
         let _ = extensions.install_contribution_actions();
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+        let _ = extensions.host().install_editor_actions();
         // What is wrong with them is in the lab's `APP_STATUS`, and their
         // `EXT_*` actions on the lab's list (the CLI's and MCP's).
         extensions.report_problems(lab.problems());
@@ -1390,4 +1396,31 @@ pub fn ExtensionTab(ui: ExtensionUi, id: &'static str) -> Element {
             }
         }
     }
+}
+
+/// The editor's languages (#512): the ones compiled into the editor as the
+/// app's own, made the editor's (`syntax::drive`), so each extension's
+/// `[[languages]]` is highlighted in fences and code editors while it is
+/// on, and withdrawn when it goes.
+fn app_languages() -> architect_editor::Languages {
+    let languages = architect_editor::Languages::with_app(architect_editor::languages::builtin());
+    architect_editor::syntax::drive(&languages);
+    languages
+}
+
+/// The language servers' runtime and handle (#512): a runtime of their
+/// own, as the window's executor is not tokio. None when it cannot start.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+fn language_servers() -> Option<architect_editor::lsp::LanguageServers> {
+    static RT: std::sync::OnceLock<Option<tokio::runtime::Runtime>> = std::sync::OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("language-servers")
+            .enable_all()
+            .build()
+            .ok()
+    })
+    .as_ref()
+    .map(|rt| architect_editor::lsp::LanguageServers::new(rt.handle().clone()))
 }

@@ -55,20 +55,44 @@ fn what_the_editor_cannot_highlight_says_why() {
         grammar: Grammar::File("grammars/keyflow.wasm".to_owned()),
         ..Language::linked("keyflow", "Keyflow").fences(&["kf"])
     };
-    let query = Language {
-        highlights_text: Some("(comment) @comment".to_owned()),
-        ..Language::linked("toml", "TOML")
-    };
-    languages.set("lab", vec![file, query, Language::linked("cobol", "COBOL")]);
-    assert!(matches!(
-        highlight(&languages, "kf", "x").unwrap_err(),
-        Unsupported::GrammarFile { .. }
-    ));
+    let unlinked = Language::linked("toml", "TOML").host_grammar("toml-nowhere");
+    let bad_query = Language::linked("rusty", "Rusty")
+        .fences(&["rs"])
+        .highlights_query("(no_such_node) @keyword");
+    languages.set(
+        "lab",
+        vec![
+            file,
+            unlinked,
+            bad_query,
+            Language::linked("cobol", "COBOL"),
+        ],
+    );
+    let file = highlight(&languages, "kf", "x").unwrap_err();
+    assert!(matches!(file, Unsupported::GrammarFile { .. }));
+    assert!(file.to_string().contains("linked into the app"), "{file}");
     assert!(matches!(
         highlight(&languages, "toml", "x").unwrap_err(),
-        Unsupported::OwnQuery { .. }
+        Unsupported::NotLinked { .. }
+    ));
+    assert!(matches!(
+        highlight(&languages, "rusty", "x").unwrap_err(),
+        Unsupported::Refused { .. }
     ));
     let none = highlight(&languages, "cobol", "x").unwrap_err();
     assert!(matches!(none, Unsupported::NotLinked { .. }));
     assert!(none.to_string().contains("cobol"));
+}
+
+#[test]
+fn a_built_in_grammar_takes_the_languages_own_query() {
+    let languages = Languages::new();
+    // Only strings are captured, and as keywords.
+    let own = Language::linked("rust", "Rust").highlights_query("(string_literal) @keyword");
+    languages.set("lab", vec![own]);
+    let source = "fn main() { \"hi\" }";
+    let spans = highlight(&languages, "rust", source).unwrap();
+    assert_eq!(spans.len(), 1, "{spans:?}");
+    assert_eq!(source.get(spans[0].start..spans[0].end), Some("\"hi\""));
+    assert_eq!(spans[0].token, "syntax.keyword");
 }

@@ -1087,10 +1087,10 @@ pub struct Contribution {
     /// name = "Keyflow chart"
     /// extensions = ["kf"]
     /// fences = ["kf"]
-    /// grammar = "grammars/keyflow.wasm"   # or "linked" for one compiled in
+    /// grammar = "linked:keyflow"         # one the app links; "linked": the editor's own
     /// highlights = "queries/highlights.scm"
     /// comment = "//"
-    /// [languages.server]                  # optional; carried, not started
+    /// [languages.server]                  # optional
     /// command = "kf-lsp"
     /// args = ["--stdio"]
     /// ```

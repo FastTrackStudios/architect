@@ -2261,8 +2261,10 @@ may change (`effect`: read-only, mutating, destructive), what of the
 app's state it may read (`reads`: `org`, `selection`, `documents`,
 `editor`) and change (`writes`: `documents`, `editor`, below), the
 app's interface it may use (`ui`: below), the folders past its own,
-the network hosts, and the MIDI ports and OSC endpoints (`ports`: "MIDI,
-OSC and control surfaces", below)
+the network hosts, the MIDI ports and OSC endpoints (`ports`: "MIDI,
+OSC and control surfaces", below), and what the host may do with its
+languages (`languages = ["servers"]`: run their servers, "Languages for
+the editor", below)
 (`features/extensions/src/manifest.rs` `Capabilities`;
 `features/extensions/src/capabilities.rs` turns them into the lines a
 person reads, `Capabilities::grows_from`, and into what may run,
@@ -2776,7 +2778,8 @@ and `editor:crates/editor-state/src/ext.rs`'s tests.
 
 ## Languages for the editor
 
-Languages are installed, not linked (#512). The editor asks a registry by
+Languages are installed by extensions while they are on; their grammars
+are linked into the app (#512). The editor asks a registry by
 file type or fence name (`features/editor/src/languages.rs` `Languages`,
 [the Editor page](@/features/editor.md)); the app puts its own languages
 in it and gives it to the host (`Host::with_languages`), and an extension
@@ -2788,7 +2791,7 @@ id = "keyflow"                            # lowercase letters, digits, - and _
 name = "Keyflow chart"
 extensions = ["kf"]                       # file extensions, no dot
 fences = ["kf"]                           # fence names; its id is always one
-grammar = "grammars/keyflow.wasm"        # a tree-sitter grammar in its package, or "linked"
+grammar = "linked:keyflow"               # a grammar linked into the app; "linked": the editor's own
 highlights = "queries/highlights.scm"    # its highlights query, in its package
 comment = "//"
 [languages.server]                        # optional LSP
@@ -2799,7 +2802,7 @@ args = ["--stdio"]
 A language is a contribution like the rest
 (`features/extensions/src/contrib.rs` `LanguageDecl`, which is
 architect-editor's `Language`): checked at load (its id; no empty
-extension or fence; its grammar and query inside its package; a server has
+extension or fence; no grammar file; its query inside its package; a server has
 a command; an id once per extension), its query's text read from the
 package when it loads (`Language::highlights_text`), in the registry while
 the extension is on, and withdrawn when it is turned off or unloads
@@ -2813,10 +2816,49 @@ Highlighting is drawn in theme tokens (`syntax.keyword`, `syntax.string`,
 or `[[themes]]` restyle every language, and a language never ships
 colours.
 
-What is carried and not yet used: a grammar file and a query of its own
-(the editor highlights only the grammars compiled into it today; the
-[Editor page](@/features/editor.md) says what it lacks), and the server's
-command (the host starts no language server yet).
+The app drives the editor's own registry from it
+(`architect_editor::syntax::drive`), so a language is highlighted in
+fences and in `CodeEditor` from the moment its extension is on until it
+is turned off, and editors on screen draw again.
+
+### Adding a language
+
+1. **The grammar.** It is linked into the binary: a grammar file
+   (`grammar = "x.wasm"`) is refused at load, saying so, because the
+   editor's tree-sitter cannot load a grammar at run time ([the Editor
+   page](@/features/editor.md) says why). Pick one:
+   - one the editor has compiled in (Rust, TypeScript, JavaScript, Python,
+     JSON, Bash, Markdown): `grammar = "linked"` (the default) and an id or
+     a fence that names it;
+   - one the app links: `grammar = "linked:<name>"`, the name the app gave
+     `architect_editor::syntax::link_grammar(name, grammar, query)`;
+   - your own, from a linked extension: depend on the grammar's crate,
+     call `architect_editor::syntax::link_grammar("<name>",
+     <crate>::LANGUAGE, Some(<crate>::HIGHLIGHTS_QUERY))` when it is built
+     (any `LanguageFn` converts), and write `grammar = "linked:<name>"`.
+2. **The query**, optional: `highlights = "queries/highlights.scm"` in the
+   package, used in place of the grammar's own. Use the standard capture
+   names (`@keyword`, `@string`, `@comment`, …): each is drawn in its
+   `syntax.*` token.
+3. **What it answers to:** `extensions` and `fences`.
+4. **A server**, optional: `[languages.server] command, args`.
+
+Read `EXT_LANGUAGES {id}` to see it registered. A language the editor
+cannot highlight (a `linked:` name nothing linked, a query tree-sitter
+refuses) stays in the registry but is left out of the editor's, and
+`architect_editor::syntax::problems` says why.
+
+**A language's server** (`[languages.server] command, args`) runs only
+when the extension asks `[capabilities] languages = ["servers"]` and a
+person granted it (a server is a program on their computer): the host
+starts it, one per language and workspace root, while a code editor of
+the language is open, restarts it with backoff when it dies, and stops
+it when the last editor closes or the extension is turned off
+(`features/extensions/src/lsp.rs`, `Host::open_code`; the
+[Editor page](@/features/editor.md) "Language servers"). Its
+diagnostics are drawn in the code editor; hover, completions, go to
+definition, format and rename are the `EDITOR_*` actions, for keys, ⌘K
+and agents (`features/extensions/tests/language_servers.rs`).
 
 ### An editor in your view
 

@@ -20,14 +20,26 @@ default = []
 # The document model (`state`: `EditorState`, transactions, the markdown
 # pass). It links the editor's tree-sitter grammars (`editor-syntax`).
 state = ["dep:editor-state"]
-# Highlighting through the registry (`syntax`): a registered language's
-# spans, named by theme token.
-syntax = ["dep:editor-syntax"]
-# The Dioxus component (`ui`). Pick the renderer with `web` or `native`
-# (one per binary, as `editor-view` has it).
-ui = ["state", "dep:editor-view"]
+# The registry made the editor's (`syntax::drive`), grammars the app links
+# (`syntax::link_grammar`), a registered language's spans named by theme
+# token.
+syntax = ["state", "dep:editor-syntax"]
+# The Dioxus components (`ui`: `TextEditor`, `CodeEditor`) and hooks that
+# follow the registry. Pick the renderer with `web` or `native` (one per
+# binary, as `editor-view` has it).
+ui = ["state", "syntax", "dep:editor-view", "dep:dioxus", "dep:futures"]
 web = ["ui", "editor-view/web"]
 native = ["ui", "editor-view/native"]
+# The editor's stories (`stories`): `CodeEditor` on a Rust buffer, in the
+# story gallery (`architect-story`); its golden is `tests/story.rs`.
+stories = ["ui", "dep:architect-story-runtime", "dep:architect-theme", "dep:linkme"]
+# The editor's LSP client (`lsp`): `editor-lsp`'s client and the
+# diagnostics types. Native only: on wasm the feature compiles to
+# nothing.
+lsp = ["state", "dep:editor-lsp", "dep:tokio", "dep:futures"]
+# A stub language server for tests (`lsp::stub`): initialize, one
+# diagnostic, one hover, one completion, a format, a rename, a definition.
+lsp-stub = ["lsp", "dep:serde_json"]
 # The editor's Typst and Mermaid fence renderers are not offered here yet:
 # they would put a Typst compiler in every consumer's lockfile.
 
@@ -36,9 +48,29 @@ editor-ext = { workspace = true }
 editor-state = { workspace = true, optional = true }
 editor-syntax = { workspace = true, optional = true }
 editor-view = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+architect-story-runtime = { workspace = true, optional = true }
+# The `#[story]` macro emits `#[linkme::distributed_slice]`: a direct dep.
+linkme = { workspace = true, optional = true }
+architect-theme = { workspace = true, optional = true }
 serde = { workspace = true }
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+editor-lsp = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
 [dev-dependencies]
+# tests/story.rs: the story played headlessly on Blitz.
+architect-guide = { workspace = true, features = ["story"] }
+tempfile = "3"
+# tests/lsp_view.rs: the guide's app takes an Action List.
+architect = { workspace = true, features = ["action-list"] }
+dioxus = { workspace = true }
+# tests/lsp.rs: the servers' runtime, and the stub server's watch streams.
+tokio = { workspace = true }
+futures = { workspace = true }
 # tests/theme.rs: the syntax tokens resolved by a theme store.
 architect-theme = { workspace = true }
 serde_json = { workspace = true }
@@ -46,6 +78,20 @@ toml = { workspace = true }
 
 [lib]
 doctest = false
+
+[[test]]
+name = "lsp"
+harness = false
+required-features = ["lsp-stub"]
+
+[[test]]
+name = "lsp_view"
+harness = false
+required-features = ["lsp-stub", "native"]
+
+[[test]]
+name = "story"
+required-features = ["stories", "native"]
 
 [lints]
 workspace = true

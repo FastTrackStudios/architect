@@ -11,7 +11,7 @@ id = "keyflow"
 name = "Keyflow chart"
 extensions = ["kf"]
 fences = ["kf"]
-grammar = "grammars/keyflow.wasm"
+grammar = "linked:keyflow"
 highlights = "queries/highlights.scm"
 comment = "//"
 [languages.server]
@@ -30,9 +30,10 @@ fn a_languages_table_reads_as_the_issue_writes_it() {
     let kf = &tables.languages[0];
     assert_eq!(kf.id, "keyflow");
     assert_eq!(kf.title(), "Keyflow chart");
+    assert_eq!(kf.grammar, Grammar::Host("keyflow".to_owned()));
     assert_eq!(
-        kf.grammar,
-        Grammar::File("grammars/keyflow.wasm".to_owned())
+        serde_json::to_value(kf).unwrap()["grammar"],
+        "linked:keyflow"
     );
     assert_eq!(kf.highlights.as_deref(), Some("queries/highlights.scm"));
     assert_eq!(kf.comment.as_deref(), Some("//"));
@@ -60,7 +61,13 @@ fn a_language_is_checked_as_written() {
     assert!(bad(|l| l.id = "Key Flow".to_owned()).contains("id"));
     assert!(bad(|l| l.extensions = vec![String::new()]).contains("extension"));
     assert!(bad(|l| l.fences = vec!["a b".to_owned()]).contains("fence"));
-    assert!(bad(|l| l.grammar = Grammar::File("../g.wasm".to_owned())).contains("outside"));
+    // A grammar file is refused, saying grammars are linked.
+    let file = bad(|l| l.grammar = Grammar::File("grammars/keyflow.wasm".to_owned()));
+    assert!(file.contains("grammars/keyflow.wasm"), "{file}");
+    assert!(file.contains("linked into the app"), "{file}");
+    assert!(file.contains("linked:<name>"), "{file}");
+    assert!(bad(|l| l.grammar = Grammar::Host("Key Flow".to_owned())).contains("not a name"));
+    assert!(bad(|l| l.grammar = Grammar::Host(String::new())).contains("not a name"));
     assert!(bad(|l| l.highlights = Some("/etc/q.scm".to_owned())).contains("outside"));
     assert!(bad(|l| l.server = Some(architect_editor::Server::default())).contains("command"));
 }
