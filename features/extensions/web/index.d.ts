@@ -57,9 +57,9 @@ export interface Manifest {
   [key: string]: unknown;
 }
 
-/** What `architect build-web` writes beside the transpiled module (`architect.json`). */
+/** What `architect-ext build-web` writes beside the transpiled module (`architect.json`). */
 export interface Metadata {
-  /** The transpiled module, relative to the metadata. */
+  /** The transpiled module: a file inside its folder (relative; no scheme, no `..`). */
   module: string;
   /** The `architect:extension` world it was built for. */
   world: string;
@@ -71,6 +71,17 @@ export interface Metadata {
 /** Typed actions: each action id and what it takes and answers (`architect build-web` writes one per extension). */
 export interface ActionMap {
   [id: string]: { args: unknown; result: unknown; effect?: Effect };
+}
+
+/** A loadExtension source given as its metadata: `folder` is the folder's URL. */
+export interface MetadataSource extends Metadata {
+  folder: string | URL;
+}
+
+/** `architect.lock.json`: each file's `sha256-<base64>`, by its path in the folder. */
+export interface Lock {
+  lockfileVersion: 1;
+  files: Record<string, string>;
 }
 
 /** Untyped actions: any id, any arguments. */
@@ -106,10 +117,26 @@ export interface LogLine {
   text: string;
 }
 
-/** What one instance may use: memory in bytes, one call's own time in ms. */
+/** What one instance may use, and what keeps it from flooding the page (defaults in `LIMITS`). */
 export interface Limits {
+  /** Its memory, in bytes. */
   memory?: number;
+  /** One call's own time, in ms. */
   call?: number;
+  /** Log lines a second; past it they are dropped and counted. */
+  logLines?: number;
+  /** A log line's length, at most. */
+  logLength?: number;
+  /** Its views' shortest timer, in ms. */
+  tick?: number;
+  /** Restarts a minute (each after a longer wait); past it, it stays stopped. */
+  restarts?: number;
+  /** Edits in one frame of a view. */
+  editsPerFrame?: number;
+  /** Nodes a mounted view may make. */
+  nodesPerPane?: number;
+  /** A mounted view's height, at most, in CSS px. */
+  viewHeight?: number;
 }
 
 /** What it runs now. */
@@ -153,8 +180,6 @@ export declare class ArchitectError extends Error {
   toJSON(): HostError;
 }
 
-/** A host error's words. */
-export declare function describe(error: HostError): string;
 
 /** One edit of a document's text. */
 export type DocEdit =
@@ -238,11 +263,29 @@ export type HostOp = keyof HostRequests;
 /** Request `K`, as a handler gets it. */
 export type HostRequest<K extends HostOp = HostOp> = { [P in K]: { op: P } & HostRequests[P] }[K];
 
-/** Who asks: the extension's id and manifest. */
+/** Who asks: the extension's id, its manifest, and what it may reach (frozen). */
 export interface HostContext {
-  extension: string;
-  manifest: Manifest;
+  readonly extension: string;
+  readonly manifest: Manifest;
+  /**
+   * Its capabilities within the grant. The package checked the request against them already; a handler
+   * checks what only it can know: a path against `folders` (`read_file`, `write_file`), a stream, port or
+   * hook being the extension's own, a service's or window's own rules.
+   */
+  readonly capabilities: Readonly<Required<Capabilities>>;
 }
+
+/**
+ * Handlers for `fetch`, `read_body` and `close_body` that make an extension's requests the safe way:
+ * `credentials: "omit"`, never to the page's own origin, only to `allow` (on top of its
+ * `capabilities.hosts`), no redirect followed, a time and a size limit. Spread into `handle`.
+ */
+export declare function fetchHandler(options?: {
+  allow?: string[];
+  maxBytes?: number;
+  timeoutMs?: number;
+  fetch?: typeof fetch;
+}): Pick<HostHandlers, 'fetch' | 'read_body' | 'close_body'>;
 
 /**
  * A handler for each `op` the embedder answers: what it returns is the answer; what it throws (an
@@ -310,10 +353,18 @@ export interface WorkerLike {
   onerror: ((e: unknown) => void) | null;
   postMessage(message: unknown): void;
   terminate(): void;
+  /** Under node: keep the process alive (while it starts or runs a call), or not. */
+  ref?(): void;
+  unref?(): void;
 }
 
 /** `loadExtension`'s options. */
 export interface LoadOptions {
+  /**
+   * Pins its files: the `integrity` `build-web` printed (the lock's own `sha256-…`), or the lock itself.
+   * Each file's bytes are checked before use; a mismatch refuses it. Without it nothing is checked.
+   */
+  integrity?: string | Lock;
   /** What answers its requests of the app. */
   host?: Host;
   /** What it may reach: its manifest's capabilities within this. Nothing by default. */
@@ -324,12 +375,13 @@ export interface LoadOptions {
   workerLimits?: Limits;
   /** Its log, in place of `host.log`. */
   log?(line: LogLine): void;
-  /** An instance's worker script: its source, or its URL (a strict CSP without `blob:` workers). */
-  instance?: string | URL;
-  /** How an instance's worker is made (under node: `spawn` from `@fasttrackstudio/architect/node`). */
-  spawn?(instance: string | URL): WorkerLike;
-  /** How a core module's bytes are fetched. */
-  load?(url: string): Promise<ArrayBuffer | Uint8Array>;
+  /** An instance's worker script, as source (the package's own by default). */
+  instance?: string;
+  /**
+   * How an instance's worker is made: under node, `spawn` from `@fasttrackstudio/architect/node` (no
+   * sandbox: node trusts the extension's JS). In a page, leave it out: the sandbox frame makes them.
+   */
+  spawn?(instance: string): WorkerLike;
 }
 
 /** A loaded extension. */
@@ -338,17 +390,16 @@ export declare class Extension<A extends ActionMap = AnyActions> {
   readonly manifest: Manifest;
   /** The `architect:extension` world it was built for. */
   readonly world: string;
-  readonly metadata: Metadata;
-  /** What it may reach: its manifest's capabilities within the grant. */
-  readonly capabilities: Required<Capabilities>;
+  /** What it may reach: its manifest's capabilities within the grant (frozen). */
+  readonly capabilities: Readonly<Required<Capabilities>>;
   /** The actions it runs (each its manifest declares). */
-  readonly actions: ActionInfo[];
+  readonly actions: readonly ActionInfo[];
   /** The views it draws. */
-  readonly views: ViewInfo[];
+  readonly views: readonly ViewInfo[];
   /** Runs action `id`: its answer. A destructive one runs only when the host's `confirm` says yes. */
   run<K extends keyof A & string>(id: K, ...args: RunArgs<A, K>): Promise<A[K]['result']>;
   report(): Report;
-  /** Unloads it: its instance, workers and views end. */
+  /** Unloads it: its instance, workers, sandbox frame and views end. */
   stop(): void;
 }
 
@@ -357,7 +408,7 @@ export declare class Extension<A extends ActionMap = AnyActions> {
  * `architect.json`'s URL, or that metadata with `module` an absolute URL.
  */
 export declare function loadExtension<A extends ActionMap = AnyActions>(
-  source: string | URL | Metadata,
+  source: string | URL | MetadataSource,
   options?: LoadOptions,
 ): Promise<Extension<A>>;
 
@@ -371,22 +422,27 @@ export interface MountedView {
   unmount(): void;
 }
 
-/** Draws `extension`'s view `viewId` into `element` (emptied first), in a box of its own. */
-export declare function mountView(extension: Extension<any>, viewId: string, element: Element): MountedView;
+/** `mountView`'s options. */
+export interface MountOptions {
+  /**
+   * URL prefixes (absolute `https:` or `blob:`) its images and media may load from. None by default:
+   * then only `data:` raster images; never a relative URL.
+   */
+  urls?: string[];
+}
 
-/** `id`'s actions' namespace (`lab.wasi-counter` → `LAB_WASI_COUNTER_`). */
-export declare function actionPrefix(id: string): string;
-/** What an extension asking `asked` may reach when `granted` is granted. */
-export declare function within(asked: Capabilities, granted: Capabilities): Required<Capabilities>;
-/** No capabilities: the default grant. */
-export declare function noCapabilities(): Required<Capabilities>;
-/** Whether `manifest`'s extension, reaching `may`, may make `request`: null, or `[capability, why]`. */
-export declare function check(
-  manifest: Manifest,
-  may: Required<Capabilities>,
-  request: HostRequest,
-  effect?: Effect,
-): null | [string, string];
+/** Draws `extension`'s view `viewId` into `element` (emptied first), in a shadow root of its own. */
+export declare function mountView(extension: Extension<any>, viewId: string, element: Element, options?: MountOptions): MountedView;
+
+/** Whether this browser (or node) can run an extension: JS Promise Integration. Safari cannot yet. */
+export declare function isSupported(): boolean;
+
+/** The sandbox frame script's hash: an embedder's CSP `script-src` names it. */
+export declare const SANDBOX_HASH: string;
+/** The sandbox frame's own CSP. */
+export declare const SANDBOX_CSP: string;
+/** The lock file `build-web` writes. */
+export declare const LOCK: 'architect.lock.json';
 
 /** The `architect:extension` world this package runs. */
 export declare const WORLD: string;

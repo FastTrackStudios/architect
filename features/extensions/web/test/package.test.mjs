@@ -6,12 +6,13 @@
 // actions and `confirm`, an unhandled request, the time limit.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadExtension, memoryHost, ArchitectError } from '../index.js';
 import { spawn } from '../node.js';
-import { build } from '../cli.mjs';
+import { build } from '../cli/cli.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const root = resolve(here, '../../../..');
@@ -35,12 +36,14 @@ const loaded = [];
 after(() => loaded.forEach((e) => e.stop()));
 
 const built = new Map();
+const integrities = new Map();
 function ready(name, opts) {
   if (!built.has(name)) {
     const out = join(root, 'target/wasi-web-package', name);
     mkdirSync(out, { recursive: true });
-    build(join(dir, `${name}.wasm`), out, opts);
+    const { integrity } = build(join(dir, `${name}.wasm`), out, opts);
     built.set(name, pathToFileURL(`${out}/`).href);
+    integrities.set(name, integrity);
   }
   return built.get(name);
 }
@@ -85,6 +88,11 @@ test('load the counter and run an action with typed arguments', { skip }, async 
   assert.equal(await ext.run('LAB_WASI_COUNTER_ADD'), 6);
   const { bind } = await import(new URL('actions.js', counterSource()).href);
   assert.equal(await bind(ext).add({ by: 4 }), 10);
+  // Only what the .d.ts says; nothing of its insides.
+  assert.deepEqual(Object.keys(ext).sort(), ['actions', 'capabilities', 'manifest', 'views', 'world']);
+  for (const k of ['component', 'host', 'frame', 'panes']) assert.equal(ext[k], undefined, k);
+  assert.ok(Object.isFrozen(ext.capabilities) && Object.isFrozen(ext.capabilities.actions));
+  assert.throws(() => ext.capabilities.actions.push('*'));
 });
 
 test('a capability the embedder did not grant is refused, as the native host refuses it', { skip }, async () => {
@@ -159,11 +167,75 @@ test('a component past its time limit is stopped, starts again, and can be loade
 test('a component built for a newer world is refused, with why', { skip }, async () => {
   const at = new URL('architect.json', counterSource());
   const metadata = JSON.parse(await (await import('node:fs/promises')).readFile(at, 'utf8'));
-  const newer = { ...metadata, world: '0.2.0', module: new URL(metadata.module, at).href };
+  const newer = { ...metadata, world: '0.2.0', folder: new URL('.', at).href };
   await assert.rejects(
     loadExtension(newer, { spawn }),
     /built for architect:extension@0\.2\.0, newer than this host's 0\.1\.0: update @fasttrackstudio\/architect/,
   );
   const noWorld = { ...newer, world: undefined };
   await assert.rejects(loadExtension(noWorld, { spawn }), /does not say which architect:extension world/);
+});
+
+// P6 (review of #539): nothing tied the files a page loads to what was
+// built; a compromised CDN got everything.
+test('P6: pinned files load; a changed core module, glue or lock is refused before it runs', { skip }, async () => {
+  const good = counterSource();
+  const integrity = integrities.get('architect_sandbox_wasi_counter');
+  assert.match(integrity, /^sha256-[A-Za-z0-9+/]+=*$/);
+  const pinned = await load(good, { host: memoryHost(), integrity });
+  assert.equal(await pinned.run('LAB_WASI_COUNTER_ADD', { by: 2 }), 2);
+  const evil = join(root, 'target/wasi-web-package/evil-counter');
+  const fresh = () => {
+    cpSync(fileURLToPath(good), evil, { recursive: true });
+    return pathToFileURL(`${evil}/`).href;
+  };
+  // A core module changed by one byte.
+  let at = fresh();
+  const core = join(evil, 'architect_sandbox_wasi_counter.core.wasm');
+  const bytes = readFileSync(core);
+  bytes[bytes.length - 1] ^= 1;
+  writeFileSync(core, bytes);
+  await assert.rejects(loadExtension(at, { spawn, integrity }), /architect_sandbox_wasi_counter\.core\.wasm is not the file its lock names/);
+  // The glue swapped for the attacker's.
+  at = fresh();
+  writeFileSync(join(evil, 'architect_sandbox_wasi_counter.js'), 'globalThis.PWNED = true; export async function instantiate() {}');
+  await assert.rejects(loadExtension(at, { spawn, integrity }), /architect_sandbox_wasi_counter\.js is not the file its lock names/);
+  // A lock rewritten to match: not the lock pinned.
+  at = fresh();
+  writeFileSync(join(evil, 'architect.lock.json'), '{"lockfileVersion":1,"files":{}}\n');
+  await assert.rejects(loadExtension(at, { spawn, integrity }), /its lock is not the one pinned/);
+});
+
+test('P1/P6: the module is a file inside the extension’s folder, nothing else', { skip }, async () => {
+  const at = new URL('architect.json', counterSource());
+  const metadata = JSON.parse(readFileSync(at, 'utf8'));
+  for (const module of ['../evil.js', 'https://evil.example/glue.js', '/abs/glue.js', 'data:text/javascript,1', 'a/./b.js', '%2e%2e/x.js', 'x.js?y']) {
+    await assert.rejects(
+      loadExtension({ ...metadata, module, folder: new URL('.', at).href }, { spawn }),
+      /is not a file inside its folder/,
+      module,
+    );
+  }
+});
+
+test('floods: past its restarts a minute it is not started again', { skip, timeout: 60000 }, async () => {
+  const ext = await load(hazardsSource(), { host: memoryHost(), limits: { call: 200, restarts: 2 } });
+  for (let i = 0; i < 3; i++) await assert.rejects(ext.run('TEST_HAZARDS_SPIN'), /interrupted/);
+  assert.match(ext.report().lastTrap, /it is not started again: 3 restarts in a minute/);
+  await assert.rejects(ext.run('TEST_HAZARDS_SPIN'), /it is not running/);
+});
+
+test('node exits with an idle extension it did not stop', { skip, timeout: 60000 }, () => {
+  const script = `
+    import { loadExtension, memoryHost } from ${JSON.stringify(pathToFileURL(join(here, '../index.js')).href)};
+    import { spawn } from ${JSON.stringify(pathToFileURL(join(here, '../node.js')).href)};
+    const ext = await loadExtension(${JSON.stringify(counterSource())}, { spawn, host: memoryHost() });
+    console.log(await ext.run('LAB_WASI_COUNTER_ADD', { by: 1 }));
+  `;
+  const t = performance.now();
+  const file = join(root, 'target/wasi-web-package/exits.mjs');
+  writeFileSync(file, script);
+  const out = execFileSync(process.execPath, [file], { timeout: 30000 }).toString();
+  assert.equal(out.trim(), '1');
+  assert.ok(performance.now() - t < 30000, 'it exited by itself');
 });

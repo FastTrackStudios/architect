@@ -29,9 +29,11 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 };
 
-/// Serves folder `root` on a free local port: `{ origin, close }`.
-export async function serve(root) {
+/// Serves folder `root` on a free local port: `{ origin, close }`;
+/// `onRequest(req)` hears every request.
+export async function serve(root, onRequest = () => {}) {
   const server = createServer((req, res) => {
+    onRequest(req);
     let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (path.endsWith('/')) path += 'index.html';
     const file = normalize(join(root, path));

@@ -93,9 +93,11 @@ export function within(asked, granted) {
 }
 
 /// Whether it may run action `id` of `effect` past its own namespace
-/// `own`: `null`, or `[capability, why]` (`Capabilities::may_run`).
+/// `own`: `null`, or `[capability, why]` (`Capabilities::may_run`). `own`
+/// null: the action is not its own whatever its name (an app action the
+/// embedder offers).
 export function mayRun(may, own, id, effect) {
-  if (id.startsWith(own)) return null;
+  if (own && id.startsWith(own)) return null;
   if (!prefixIn(id, may.actions)) return ['actions', `${id} is not in a namespace this extension may run`];
   if (rank(effect) > rank(may.effect))
     return ['effect', `${id} is ${reachName(effect)}: this extension may run ${reachName(may.effect)} actions at most`];
@@ -129,6 +131,11 @@ export function secretRefs(value) {
 
 const DEFAULT_PORTS = { 'http:': 80, 'https:': 443 };
 
+/// Whether `path` is `folders`' or under one (`capabilities::folder_in`).
+export function inFolders(path, folders) {
+  return folderIn(String(path), folders);
+}
+
 function mayReachUrl(may, url) {
   let parsed;
   try {
@@ -138,7 +145,8 @@ function mayReachUrl(may, url) {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
     return [null, ['hosts', `${url}: only http and https are fetched`]];
-  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  // An IPv6 host keeps its brackets, as `url::Url::host_str` does.
+  const host = parsed.hostname;
   const port = parsed.port ? Number(parsed.port) : DEFAULT_PORTS[parsed.protocol];
   if (reachesHost(may.hosts, host, port)) return [parsed, null];
   return [null, ['hosts', `this extension may not reach ${host} (capabilities.hosts)`]];
@@ -203,7 +211,9 @@ function opensPort(of, kind, name, listen) {
 /// Whether an extension of `manifest` that may reach `may` may make
 /// `request` (a `hostcall::HostRequest`, its `op` in snake case), `effect`
 /// the reach of the action a `run` names: `null`, or `[capability, why]`.
-export function check(manifest, may, request, effect = 'read_only') {
+/// `appAction`: a `run` names an action of the app's (never its own, even
+/// in its namespace).
+export function check(manifest, may, request, effect = 'read_only', appAction = false) {
   const reads = (what) =>
     may.reads.includes(what) ? null : [`reads.${what}`, `this extension may not read the app's ${what} (capabilities.reads)`];
   const writes = (what) =>
@@ -211,7 +221,7 @@ export function check(manifest, may, request, effect = 'read_only') {
   const uses = (what) =>
     may.ui.includes(what) ? null : [`ui.${what}`, `this extension may not use the app's ${what} (capabilities.ui)`];
   const op = request.op;
-  if (op === 'run') return mayRun(may, actionPrefix(manifest.id), String(request.action ?? ''), effect);
+  if (op === 'run') return mayRun(may, appAction ? null : actionPrefix(manifest.id), String(request.action ?? ''), effect);
   if (op === 'org') return reads('org');
   if (op === 'selection') return reads('selection');
   if (DOC_READS.includes(op)) return reads('documents');

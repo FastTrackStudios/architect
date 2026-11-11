@@ -5,7 +5,7 @@
 // and only then reaches the embedder's handler for its `op`. An `op` with
 // no handler answers "not available in this host": the component gets an
 // error it can show, never a throw and never a hang.
-import { check, HOST_OPS } from './check.js';
+import { check, HOST_OPS, inFolders } from './check.js';
 
 /// The kinds of `hostcall::HostError`.
 export const ERROR_KINDS = ['refused', 'confirmation_required', 'not_loaded', 'not_found', 'failed', 'unsupported'];
@@ -76,8 +76,13 @@ export function answerer({ manifest, may, host = {}, log }) {
   const settings = new Map();
   const data = new Map();
   const defaults = settingDefaults(manifest);
-  const ctx = { extension: manifest.id, manifest };
+  const frozen = (o) => {
+    for (const v of Object.values(o)) if (v && typeof v === 'object') frozen(v);
+    return Object.freeze(o);
+  };
+  const ctx = Object.freeze({ extension: manifest.id, manifest, capabilities: frozen(structuredClone(may)) });
   const handlers = host.handle ?? {};
+  const own = (o, k) => o != null && Object.hasOwn(o, k);
 
   const builtIn = {
     log: (r) => {
@@ -97,12 +102,7 @@ export function answerer({ manifest, may, host = {}, log }) {
       return null;
     },
     run: async (r) => {
-      const action = host.actions?.[r.action];
-      if ((action.effect ?? 'mutating') === 'destructive') {
-        const yes = host.confirm ? await host.confirm({ id: r.action, effect: 'destructive', by: manifest.id }, r.args ?? null) : false;
-        if (!yes) throw { kind: 'confirmation_required', action: r.action, ticket: '' };
-      }
-      const out = await action.run(r.args ?? null, ctx);
+      const out = await host.actions[r.action].run(r.args ?? null, ctx);
       return out === undefined ? null : out;
     },
   };
@@ -113,16 +113,28 @@ export function answerer({ manifest, may, host = {}, log }) {
     const op = request.op;
     let effect = 'read_only';
     if (op === 'run') {
-      const action = host.actions?.[request.action];
-      if (!action) return { error: { kind: 'not_found', what: `action ${request.action}` } };
-      effect = action.effect ?? 'mutating';
+      // Only an action the embedder offers, and never the extension's own
+      // whatever its name: an extension `vault` does not own the page's
+      // VAULT_EMPTY_TRASH.
+      if (!own(host.actions, request.action) && !own(handlers, 'run'))
+        return { error: { kind: 'not_found', what: `action ${request.action}` } };
+      effect = own(host.actions, request.action) ? (host.actions[request.action].effect ?? 'mutating') : 'mutating';
     }
-    const refused = check(manifest, may, request, effect);
+    const refused = check(manifest, may, request, effect, true);
     if (refused) {
       log('warn', 'host', `${op}: refused (${refused[0]}): ${refused[1]}`);
       return { error: { kind: 'refused', capability: refused[0], why: refused[1] } };
     }
-    const handler = handlers[op] ?? builtIn[op];
+    // A destructive app action needs a yes, whoever answers it.
+    if (op === 'run' && effect === 'destructive') {
+      const yes = host.confirm ? await host.confirm({ id: request.action, effect, by: manifest.id }, request.args ?? null) : false;
+      if (yes !== true) {
+        const error = { kind: 'confirmation_required', action: request.action, ticket: '' };
+        log('warn', 'host', `run: ${describe(error)}`);
+        return { error };
+      }
+    }
+    const handler = own(handlers, op) ? handlers[op] : own(builtIn, op) ? builtIn[op] : null;
     if (!handler) {
       const error = { kind: 'unsupported', what: `${op} is not available in this host` };
       log('warn', 'host', `${op}: ${describe(error)}`);
@@ -184,6 +196,11 @@ function applyEdit(text, edit) {
   throw { kind: 'failed', message: `not a document edit: ${JSON.stringify(edit)}` };
 }
 
+function folderOk(path, ctx) {
+  if (!inFolders(path, ctx.capabilities.folders))
+    throw { kind: 'refused', capability: 'folders', why: `${path} is not in a folder this extension may reach (capabilities.folders)` };
+}
+
 /// A host in memory, enough for a demo: documents and files from what the
 /// embedder hands it, in `Map`s; the organization and selection it is
 /// given; app actions it is given; notifications collected; no network,
@@ -234,11 +251,15 @@ export function memoryHost(options = {}) {
       documents.delete(r.path);
       return null;
     },
-    read_file: (r) => {
+    // Files: only under a folder it was granted (`capabilities.folders`),
+    // and only those the page handed it.
+    read_file: (r, ctx) => {
+      folderOk(r.path, ctx);
       if (!files.has(r.path)) throw { kind: 'not_found', what: `file ${r.path}` };
       return files.get(r.path);
     },
-    write_file: (r) => {
+    write_file: (r, ctx) => {
+      folderOk(r.path, ctx);
       if (!files.has(r.path))
         throw { kind: 'refused', capability: 'folders', why: `${r.path} is not a file this page handed it` };
       files.set(r.path, String(r.text ?? ''));
@@ -260,5 +281,89 @@ export function memoryHost(options = {}) {
     documents,
     files,
     notifications,
+  };
+}
+
+// ---- fetchHandler ------------------------------------------------------------
+
+const b64 = (bytes) => {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+
+/// Handlers for `fetch`, `read_body` and `close_body` that make an
+/// extension's requests the safe way: never with the page's credentials
+/// (`credentials: "omit"`), never to the page's own origin, only to
+/// `allow` (host names, `*.domain`, `host:port`; on top of the
+/// extension's `capabilities.hosts`, which the host checked already), no
+/// redirect followed (where it goes is hidden from a page, so it cannot be
+/// checked), a time and a size limit. Spread them into a host's `handle`.
+export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 30000, fetch: doFetch = globalThis.fetch } = {}) {
+  const streams = new Map();
+  let next = 0;
+  const allowed = (url) => {
+    const host = url.hostname.toLowerCase();
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+    return allow.some((a) => {
+      a = a.toLowerCase();
+      return a === host || a === `${host}:${port}` || (a.startsWith('*.') && (host === a.slice(2) || host.endsWith(a.slice(1))));
+    });
+  };
+  return {
+    fetch: async (r) => {
+      let url;
+      try {
+        url = new URL(r.url);
+      } catch {
+        throw { kind: 'failed', message: `${r.url} is not a URL` };
+      }
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') throw { kind: 'refused', capability: 'hosts', why: `${r.url}: only http and https` };
+      if (globalThis.location && url.origin === globalThis.location.origin)
+        throw { kind: 'refused', capability: 'hosts', why: `${url.host} is this page's own origin: an extension never reaches it` };
+      if (!allowed(url)) throw { kind: 'refused', capability: 'hosts', why: `${url.host} is not a host this page lets extensions reach` };
+      const signal = AbortSignal.timeout(Math.min(Number(r.timeout_ms ?? timeoutMs), 300000));
+      let res;
+      try {
+        res = await doFetch(url.href, {
+          method: String(r.method ?? 'GET').toUpperCase(),
+          headers: r.headers ?? {},
+          body: r.body ?? undefined,
+          credentials: 'omit',
+          redirect: 'manual',
+          referrerPolicy: 'no-referrer',
+          mode: 'cors',
+          cache: 'no-store',
+          signal,
+        });
+      } catch (e) {
+        throw { kind: 'unsupported', what: `the browser refused to fetch ${url.href} (CORS, or the network): ${e?.message ?? e}` };
+      }
+      if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400))
+        throw { kind: 'unsupported', what: `${url.href} redirects: it is not followed` };
+      const cap = Math.min(Number(r.max_bytes ?? maxBytes), maxBytes);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.length > cap) throw { kind: 'failed', message: `the response is past the most it takes (${cap} bytes)` };
+      const headers = {};
+      res.headers.forEach((v, k) => (headers[k.toLowerCase()] = v));
+      const out = { status: res.status, url: url.href, headers };
+      if (r.stream) {
+        const id = `s${++next}`;
+        streams.set(id, { bytes, at: 0, binary: !!r.binary, decoder: new TextDecoder() });
+        out.stream = id;
+      } else out.body = r.binary ? b64(bytes) : new TextDecoder().decode(bytes);
+      return out;
+    },
+    read_body: (r) => {
+      const s = streams.get(r.stream);
+      if (!s) throw { kind: 'not_found', what: `stream ${r.stream}` };
+      const end = Math.min(s.bytes.length, s.at + Math.max(1, Number(r.max ?? 65536)));
+      const part = s.bytes.subarray(s.at, end);
+      s.at = end;
+      const done = s.at >= s.bytes.length;
+      if (done) streams.delete(r.stream);
+      return { chunk: s.binary ? b64(part) : s.decoder.decode(part, { stream: !done }), done };
+    },
+    close_body: (r) => streams.delete(r.stream),
   };
 }

@@ -16,6 +16,15 @@
 // request (`hostcall::HostRequest` JSON), answered with `hostcall::HostAnswer`
 // JSON: the embedder checks it against the extension's capabilities
 // (features/extensions/src/web.rs `WebHost`).
+//
+// In a page, every instance's Web Worker is started inside a sandbox: a
+// hidden `<iframe sandbox="allow-scripts">` (no `allow-same-origin`, so
+// an opaque origin) whose own CSP lets nothing load or connect. The
+// extension's JS (jco's glue, which ships with the extension) runs there,
+// never with the page's origin: no cookies, no storage, no channels of
+// the page's, no network. The page fetches its files and hands them in,
+// the glue as text and the core modules as bytes; everything crosses on a
+// MessageChannel of the sandbox's own.
 
 /// Each way, a worker's queue holds this many messages (`wasi::QUEUE`).
 export const QUEUE = 64;
@@ -23,8 +32,22 @@ export const QUEUE = 64;
 export const MAX_WORKERS = 8;
 /// News reaches an owner at most this often, in ms (`wasi::NEWS_EVERY`).
 export const NEWS_EVERY = 16;
-/// An instance's limits (`wasi::Limits`): 64 MiB, 5 s a call.
-export const LIMITS = { memory: 64 << 20, call: 5000 };
+/// An instance's limits (`wasi::Limits`): 64 MiB, 5 s a call; and what
+/// keeps a misbehaving one from flooding the page: log lines a second and
+/// their length, the shortest timer, restarts a minute (each after a
+/// longer wait), and for each mounted view (view.js) edits a frame, nodes
+/// and its box's height in CSS px.
+export const LIMITS = {
+  memory: 64 << 20,
+  call: 5000,
+  logLines: 200,
+  logLength: 4096,
+  tick: 16,
+  restarts: 5,
+  editsPerFrame: 10000,
+  nodesPerPane: 20000,
+  viewHeight: 4096,
+};
 /// A worker's: 64 MiB, 60 s for its whole run (`Limits::worker`).
 export const WORKER_LIMITS = { memory: 64 << 20, call: 60000 };
 
@@ -117,6 +140,188 @@ async function fetchBytes(url) {
   return r.arrayBuffer();
 }
 
+/// What `coreModule` keeps uncompiled, for a sandbox: the bytes with the
+/// memory limit in them.
+const patched = new Map();
+
+function coreBytes(url, name, memory, load) {
+  const key = `${url}#${name}#${memory}`;
+  if (!patched.has(key)) {
+    patched.set(
+      key,
+      Promise.resolve(load(new URL(name, url).href)).then((bytes) => limitMemory(bytes, Math.floor(memory / PAGE))),
+    );
+  }
+  return patched.get(key);
+}
+
+const text = (bytes) => new TextDecoder().decode(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes);
+
+// ---- the sandbox -----------------------------------------------------------
+
+/// The sandbox frame's script, inline in its document: it starts each
+/// instance's Web Worker (from instance.js, as a blob of the frame's own
+/// opaque origin) and passes messages between it and the page's
+/// MessageChannel. Under Trusted Types it makes a policy of this name that
+/// passes only blob: URLs. A string, not a function, so a page's bundler
+/// cannot change it: an embedder's CSP names its hash (`SANDBOX_HASH`).
+export const SANDBOX_SCRIPT = `(() => {
+  let tt = null;
+  try {
+    if (self.trustedTypes && self.trustedTypes.createPolicy) {
+      tt = self.trustedTypes.createPolicy('fasttrackstudio-architect', {
+        createScriptURL: (u) => { if (!String(u).startsWith('blob:')) throw new TypeError('not a blob: URL'); return u; },
+      });
+    }
+  } catch (e) {}
+  addEventListener('message', function first(e) {
+    if (e.source !== parent || e.data !== 'architect' || !e.ports[0]) return;
+    removeEventListener('message', first);
+    const port = e.ports[0];
+    const workers = new Map();
+    let instance = null;
+    port.onmessage = ({ data: m }) => {
+      if (m.t === 'instance') {
+        instance = URL.createObjectURL(new Blob([m.source], { type: 'text/javascript' }));
+        return;
+      }
+      if (m.t === 'spawn') {
+        let w;
+        try {
+          w = new Worker(tt ? tt.createScriptURL(instance) : instance, { type: 'module' });
+        } catch (err) {
+          port.postMessage({ t: 'error', id: m.id, message: String(err && err.message || err) });
+          return;
+        }
+        w.onmessage = (x) => port.postMessage({ t: 'from', id: m.id, data: x.data });
+        w.onerror = (x) => {
+          x.preventDefault();
+          port.postMessage({ t: 'error', id: m.id, message: String(x.message || 'it failed') });
+        };
+        w.onmessageerror = () => port.postMessage({ t: 'error', id: m.id, message: 'a message it could not read' });
+        workers.set(m.id, w);
+        return;
+      }
+      const w = workers.get(m.id);
+      if (!w) return;
+      if (m.t === 'to') w.postMessage(m.data);
+      else if (m.t === 'terminate') {
+        w.terminate();
+        workers.delete(m.id);
+      }
+    };
+    port.postMessage({ t: 'booted' });
+  });
+})();`;
+
+/// `sha256-…` of `SANDBOX_SCRIPT`: what an embedder's CSP `script-src`
+/// names when it has one (test/sandbox.test.mjs keeps it current).
+export const SANDBOX_HASH = 'sha256-2Ozk1xYt6pOOhdNqjDWTnCfSTbCchEDao3pk8Fj3xes=';
+
+/// The sandbox frame's own CSP: its script, blob: workers and modules of
+/// its own origin, wasm; nothing to fetch, connect to, frame or show.
+export const SANDBOX_CSP = `default-src 'none'; script-src '${SANDBOX_HASH}' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; font-src 'none'; frame-src 'none'; child-src blob:; base-uri 'none'; form-action 'none'`;
+
+const SANDBOX_HTML = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"><script>${SANDBOX_SCRIPT}</script>`;
+
+let pagePolicy;
+/// The frame's document, through a Trusted Types policy where the page
+/// enforces them (`trusted-types fasttrackstudio-architect`).
+function sandboxHtml() {
+  const tt = globalThis.trustedTypes;
+  if (!tt?.createPolicy) return SANDBOX_HTML;
+  if (pagePolicy === undefined) {
+    try {
+      pagePolicy = tt.createPolicy('fasttrackstudio-architect', {
+        createHTML: (h) => {
+          if (h !== SANDBOX_HTML) throw new TypeError('not the sandbox frame');
+          return h;
+        },
+      });
+    } catch {
+      pagePolicy = null;
+    }
+  }
+  return pagePolicy ? pagePolicy.createHTML(SANDBOX_HTML) : SANDBOX_HTML;
+}
+
+/// A sandbox frame: its instances' Web Workers, each a `spawn()`.
+export class Sandbox {
+  constructor(instanceSource, parent = null) {
+    const doc = globalThis.document;
+    this.workers = new Map();
+    this.next = 0;
+    this.frame = doc.createElement('iframe');
+    this.frame.setAttribute('sandbox', 'allow-scripts');
+    this.frame.setAttribute('aria-hidden', 'true');
+    this.frame.setAttribute('tabindex', '-1');
+    this.frame.setAttribute('title', 'extension sandbox');
+    this.frame.style.setProperty('display', 'none', 'important');
+    const channel = new MessageChannel();
+    this.port = channel.port1;
+    this.ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('its sandbox frame did not start (a CSP without its hash, or Trusted Types without its policy?)')), 15000);
+      this.port.onmessage = ({ data: m }) => {
+        if (m?.t === 'booted') {
+          clearTimeout(timer);
+          this.port.postMessage({ t: 'instance', source: instanceSource });
+          resolve();
+        } else this.dispatch(m);
+      };
+      this.frame.addEventListener(
+        'load',
+        // The frame's origin is opaque: no origin to name; what crosses
+        // here is only the port, and the frame takes it only from its
+        // parent.
+        () => this.frame.contentWindow?.postMessage('architect', '*', [channel.port2]),
+        { once: true },
+      );
+    });
+    this.ready.catch(() => {});
+    this.frame.srcdoc = sandboxHtml();
+    (parent ?? doc.body ?? doc.documentElement).append(this.frame);
+  }
+
+  dispatch(m) {
+    const w = this.workers.get(m?.id);
+    if (!w) return;
+    if (m.t === 'from') w.onmessage?.({ data: m.data });
+    else if (m.t === 'error') w.onerror?.({ message: m.message });
+  }
+
+  /// A Web Worker in the frame, in a Web Worker's shape.
+  spawn() {
+    const id = ++this.next;
+    const send = (m) =>
+      this.ready.then(
+        () => this.port.postMessage(m),
+        () => {},
+      );
+    const shaped = {
+      onmessage: null,
+      onerror: null,
+      postMessage: (data) => send({ t: 'to', id, data }),
+      terminate: () => {
+        this.workers.delete(id);
+        send({ t: 'terminate', id });
+      },
+    };
+    this.workers.set(id, shaped);
+    this.ready.then(
+      () => this.port.postMessage({ t: 'spawn', id }),
+      (e) => shaped.onerror?.({ message: e.message }),
+    );
+    return shaped;
+  }
+
+  close() {
+    for (const id of this.workers.keys()) this.port.postMessage({ t: 'terminate', id });
+    this.workers.clear();
+    this.port.close();
+    this.frame.remove();
+  }
+}
+
 // ---- the pool --------------------------------------------------------------
 
 /// How many workers run at once (`wasi::Pool`): one fewer than the
@@ -176,15 +381,34 @@ class Instance {
     this.ready = new Promise((resolve, reject) => {
       this.started = { resolve, reject };
     });
+    this.booted = false;
     this.worker.onmessage = (e) => this.message(e.data ?? e);
     this.worker.onerror = (e) => this.kill(`it failed: ${e.message ?? e}`);
-    this.worker.postMessage({
+    this.hold();
+    const start = {
       t: 'start',
       url: opts.url,
       role,
       memory: limits.memory,
       theme: opts.theme ? opts.theme() : null,
-    });
+    };
+    if (opts.inlineGlue) {
+      // The glue as text the page read (and checked): the worker makes
+      // it a module of its own origin.
+      Promise.resolve((opts.load ?? fetchBytes)(opts.url))
+        .then((bytes) => {
+          if (!this.dead) this.worker.postMessage({ ...start, glue: text(bytes) });
+        })
+        .catch((e) => this.kill(`its module could not be read: ${e?.message ?? e}`));
+    } else this.worker.postMessage(start);
+  }
+
+  /// Under node, the worker keeps the process alive only while it starts
+  /// or runs a call (`ref`/`unref` where the worker has them).
+  hold() {
+    const busy = !this.dead && (!this.booted || this.calls.size > 0);
+    if (busy) this.worker.ref?.();
+    else this.worker.unref?.();
   }
 
   /// Its own time so far, in ms.
@@ -218,6 +442,7 @@ class Instance {
     this.run();
     return new Promise((resolve, reject) => {
       this.calls.set(id, { resolve, reject });
+      this.hold();
       this.worker.postMessage({ t: 'call', id, iface, fn, args, ...extra });
     });
   }
@@ -226,12 +451,15 @@ class Instance {
     const c = this.calls.get(id);
     this.calls.delete(id);
     if (!this.calls.size) this.pause();
+    this.hold();
     return c;
   }
 
   async message(m) {
     switch (m.t) {
       case 'ready':
+        this.booted = true;
+        this.hold();
         this.started.resolve();
         break;
       case 'failed':
@@ -239,8 +467,18 @@ class Instance {
         this.kill(m.why);
         break;
       case 'module': {
-        const module = await coreModule(this.opts.url, m.name, this.limits.memory, this.opts.load ?? fetchBytes);
-        this.worker.postMessage({ t: 'answer', id: m.id, value: { module } });
+        // A sandbox's worker is of another origin: a compiled module does
+        // not cross to it, its bytes do.
+        let value;
+        try {
+          value = this.opts.bytesOnly
+            ? { bytes: await coreBytes(this.opts.url, m.name, this.limits.memory, this.opts.load ?? fetchBytes) }
+            : { module: await coreModule(this.opts.url, m.name, this.limits.memory, this.opts.load ?? fetchBytes) };
+        } catch (e) {
+          this.kill(`its module ${m.name} could not be read: ${e?.message ?? e}`);
+          break;
+        }
+        this.worker.postMessage({ t: 'answer', id: m.id, value });
         break;
       }
       case 'reply': {
@@ -278,6 +516,7 @@ class Instance {
     if (this.dead) return;
     this.dead = why;
     this.pause();
+    this.worker.unref?.();
     this.worker.terminate();
     this.started.reject(new Error(why));
     for (const c of this.calls.values()) c.reject({ trap: why });
@@ -314,10 +553,36 @@ export class Component {
     this.stopped = false;
     this.stats = { calls: 0, traps: 0, lastTrap: null, alive: false, generation: 0 };
     this.info = { actions: [], views: [] };
+    this.logWindow = { at: 0, lines: 0, dropped: 0 };
+    this.restarts = [];
+    // In a page (no `spawn` of the embedder's), its instances run in a
+    // sandbox frame; `sandbox: false` only where the page trusts its JS.
+    this.sandbox = null;
+    this.runOpts = opts;
+    if (opts.sandbox !== false && !opts.spawn && globalThis.document && globalThis.MessageChannel) {
+      this.sandbox = new Sandbox(typeof opts.instance === 'string' ? opts.instance : String(opts.instance), opts.sandboxParent);
+      this.runOpts = { ...opts, spawn: () => this.sandbox.spawn(), bytesOnly: true, inlineGlue: true };
+    }
   }
 
+  /// A line of its log: at most `limits.logLines` a second, each at most
+  /// `limits.logLength` long; what is dropped is counted, then said.
   log(level, source, text) {
-    this.opts.log?.(level, source, text);
+    const now = performance.now();
+    const w = this.logWindow;
+    if (now - w.at >= 1000) {
+      if (w.dropped) this.opts.log?.('warn', 'host', `${w.dropped} log line(s) dropped: past ${this.limits.logLines} a second`);
+      w.at = now;
+      w.lines = 0;
+      w.dropped = 0;
+    }
+    if (++w.lines > this.limits.logLines) {
+      w.dropped++;
+      return;
+    }
+    let line = String(text);
+    if (line.length > this.limits.logLength) line = `${line.slice(0, this.limits.logLength)}… (${line.length} characters)`;
+    this.opts.log?.(level, source, line);
   }
 
   /// Starts it (with what the copy it replaces saved): its actions and views.
@@ -327,7 +592,7 @@ export class Component {
 
   async instantiate(state) {
     const live = new Instance(
-      this.opts,
+      this.runOpts,
       'owner',
       this.limits,
       (m) => this.ownerAsks(m),
@@ -440,7 +705,8 @@ export class Component {
     try {
       const next = await this.on((i) => i.call('guest', 'tick'));
       if (next != null && !this.stopped) {
-        this.timer = setTimeout(() => this.job(() => this.timers()), Math.max(4, Number(next)));
+        this.timer = setTimeout(() => this.job(() => this.timers()), Math.max(this.limits.tick, Number(next)));
+        this.timer?.unref?.();
       }
     } catch {
       return; // trapped: started again
@@ -480,6 +746,18 @@ export class Component {
     this.panes.clear();
     for (const p of panes) this.opts.frame?.(p, { failed: why });
     if (this.stopped) return;
+    // At most `limits.restarts` a minute, each after a longer wait.
+    const now = performance.now();
+    this.restarts = this.restarts.filter((t) => now - t < 60000);
+    this.restarts.push(now);
+    if (this.restarts.length > this.limits.restarts) {
+      this.stats.lastTrap = `${why}; it is not started again: ${this.restarts.length} restarts in a minute`;
+      this.log('error', 'wasi', this.stats.lastTrap);
+      return;
+    }
+    const wait = this.restarts.length > 1 ? Math.min(10000, 250 * 2 ** (this.restarts.length - 2)) : 0;
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    if (this.stopped) return;
     try {
       await this.instantiate(null);
       this.opts.restarted?.(why);
@@ -497,6 +775,8 @@ export class Component {
     this.live?.kill('it was unloaded');
     this.live = null;
     this.stats.alive = false;
+    this.sandbox?.close();
+    this.sandbox = null;
   }
 
   /// What it runs: its instance and each worker.
@@ -572,7 +852,7 @@ export class Component {
   begin(w) {
     if (w.status !== 'waiting') return this.pool.leave();
     w.status = 'running';
-    const opts = { ...this.opts, url: w.url };
+    const opts = { ...this.runOpts, url: w.url };
     w.instance = new Instance(
       opts,
       'worker',
@@ -695,6 +975,7 @@ export class Component {
       this.newsTimer = null;
       this.job(() => this.hear());
     }, wait);
+    this.newsTimer?.unref?.();
   }
 
   /// Its workers' news, between its calls: every message in order, the

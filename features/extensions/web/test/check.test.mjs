@@ -5,7 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { actionPrefix, capabilities, check, mayRun, noCapabilities, within } from '../check.js';
-import { answerer } from '../host.js';
+import { answerer, memoryHost } from '../host.js';
+import { actionPrefix as cliPrefix } from '../cli/manifest.mjs';
 import { newer, refusal, WORLD, worldsIn } from '../world.js';
 
 const caps = (actions, effect, reads) => capabilities({ actions, effect, reads });
@@ -134,4 +135,72 @@ test("the world's version is extension.wit's, and a newer one is refused", () =>
   assert.match(refusal('0.2.0', '0.1', 'x'), /built for architect:extension@0\.2\.0, newer than this host's 0\.1\.0/);
   assert.match(refusal('0.1.0', '0.2', 'x'), /written for extension API 0\.2, newer than this host's 0\.1/);
   assert.deepEqual(worldsIn("'architect:extension/guest@0.1.0#init' 'architect:extension/host@0.1.0'"), ['0.1.0']);
+});
+
+test('an action the embedder offers is never the extension’s own, whatever its name', async () => {
+  // The review of #539: an extension `vault`, granted nothing, ran the
+  // page's mutating VAULT_EMPTY_TRASH.
+  const ran = [];
+  const ask = answerer({
+    manifest: { id: 'vault' },
+    may: within({}, {}),
+    host: { actions: { VAULT_EMPTY_TRASH: { effect: 'mutating', run: () => ran.push('emptied') } } },
+    log: () => {},
+  });
+  const a = JSON.parse(await ask(JSON.stringify({ op: 'run', action: 'VAULT_EMPTY_TRASH' })));
+  assert.deepEqual(a, { error: { kind: 'refused', capability: 'actions', why: 'VAULT_EMPTY_TRASH is not in a namespace this extension may run' } });
+  assert.deepEqual(ran, []);
+});
+
+test('a destructive app action needs confirm, even through handle.run', async () => {
+  const ran = [];
+  const make = (confirm) =>
+    answerer({
+      manifest: { id: 'x' },
+      may: within({ actions: ['APP_'], effect: 'destructive' }, { actions: ['APP_'], effect: 'destructive' }),
+      host: {
+        actions: { APP_WIPE: { effect: 'destructive', run: () => 'unused' } },
+        handle: { run: (r) => ran.push(r.action) },
+        confirm,
+      },
+      log: () => {},
+    });
+  const req = JSON.stringify({ op: 'run', action: 'APP_WIPE' });
+  assert.equal(JSON.parse(await make(undefined)(req)).error.kind, 'confirmation_required');
+  assert.equal(JSON.parse(await make(() => 'yes')(req)).error.kind, 'confirmation_required', 'only true is a yes');
+  assert.deepEqual(ran, []);
+  assert.deepEqual(JSON.parse(await make(() => true)(req)), { ok: 1 });
+  assert.deepEqual(ran, ['APP_WIPE']);
+});
+
+test('handlers see the capabilities; memoryHost keeps files to the granted folders', async () => {
+  let seen;
+  const may = within({ folders: ['/data'], reads: ['org'] }, { folders: ['/data'], reads: ['org'] });
+  const host = memoryHost({ files: { '/data/a.txt': 'A', '/etc/passwd': 'root' }, handle: { org: (_, ctx) => ((seen = ctx), 'o') } });
+  const ask = answerer({ manifest: { id: 'x' }, may, host, log: () => {} });
+  const a = async (r) => JSON.parse(await ask(JSON.stringify(r)));
+  assert.deepEqual(await a({ op: 'org' }), { ok: 'o' });
+  assert.deepEqual(seen.capabilities.folders, ['/data']);
+  assert.ok(Object.isFrozen(seen) && Object.isFrozen(seen.capabilities.folders));
+  assert.deepEqual(await a({ op: 'read_file', path: '/data/a.txt' }), { ok: 'A' });
+  assert.equal((await a({ op: 'read_file', path: '/etc/passwd' })).error.capability, 'folders');
+  assert.equal((await a({ op: 'write_file', path: '/etc/passwd', text: 'x' })).error.capability, 'folders');
+  assert.equal(host.files.get('/etc/passwd'), 'root');
+});
+
+test('prototype keys are no actions or handlers; IPv6 hosts keep their brackets, as the Rust check', async () => {
+  const ask = answerer({ manifest: { id: 'x' }, may: within({ actions: ['*'] }, { actions: ['*'] }), host: { actions: {} }, log: () => {} });
+  for (const action of ['constructor', '__proto__', 'toString'])
+    assert.equal(JSON.parse(await ask(JSON.stringify({ op: 'run', action }))).error.kind, 'not_found', action);
+  assert.equal(JSON.parse(await ask(JSON.stringify({ op: 'hasOwnProperty' }))).error.kind, 'failed');
+  const may = within({ hosts: ['[::1]'] }, { hosts: ['[::1]'] });
+  assert.equal(check({ id: 'x' }, may, { op: 'fetch', url: 'http://[::1]:8080/' }), null);
+  assert.deepEqual(check({ id: 'x' }, within({ hosts: ['::1'] }, { hosts: ['::1'] }), { op: 'fetch', url: 'http://[::1]/' }), [
+    'hosts',
+    'this extension may not reach [::1] (capabilities.hosts)',
+  ]);
+});
+
+test('the CLI’s action namespace is the runtime’s', () => {
+  for (const id of ['lab.wasi-counter', 'vault', 'a..b', 'x-y_z.9']) assert.equal(cliPrefix(id), actionPrefix(id));
 });

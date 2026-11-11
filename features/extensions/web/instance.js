@@ -365,7 +365,15 @@ async function start(m) {
   role = m.role;
   memoryLimit = m.memory;
   if (m.theme) theme = { ...m.theme, revision: BigInt(m.theme.revision ?? 0) };
-  const { instantiate } = await import(m.url);
+  // The glue as text (a sandbox's page read it): a module of this
+  // worker's own origin; under node, a data: URL.
+  let url = m.url;
+  if (m.glue != null) {
+    url = globalThis.process?.versions?.node
+      ? `data:text/javascript;base64,${globalThis.Buffer.from(m.glue).toString('base64')}`
+      : URL.createObjectURL(new Blob([m.glue], { type: 'text/javascript' }));
+  }
+  const { instantiate } = await import(url);
   const imports = { ...wasi(), ...world() };
   let refused = null;
   const guarded = new Proxy(imports, {
@@ -375,7 +383,9 @@ async function start(m) {
     },
   });
   root = await instantiate(
-    (name) => ask({ t: 'module', name }).then((a) => a.module),
+    // A compiled module from the page, or (from a sandbox's page, another
+    // origin) its bytes, compiled here.
+    (name) => ask({ t: 'module', name }).then((a) => a.module ?? WebAssembly.compile(a.bytes)),
     guarded,
     async (module, linked) => {
       const instance = await WebAssembly.instantiate(module, linked);
