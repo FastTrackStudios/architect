@@ -5,3 +5,8 @@
 fail-fast = false
 status-level = "fail"
 final-status-level = "fail"
+# A hung test fails with its name after 8 minutes instead of holding the
+# Tests job to its 60-minute timeout (#520's hang). The slowest test of a
+# green main run takes 60–90 s (the WASI tests build their components
+# in-test, longer on a cold cache); flagged slow at 60 s, killed at 8 min.
+slow-timeout = { period = "60s", terminate-after = 8 }
