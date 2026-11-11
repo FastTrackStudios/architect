@@ -9,7 +9,8 @@
 
 use architect::connect::{Endpoint, Pool};
 use architect_spaces::{
-    Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareLinksClient, ShareScope,
+    KeptLayers, Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareLinksClient,
+    ShareScope,
 };
 
 use crate::controller::{Accounts, Sheet};
@@ -205,6 +206,35 @@ impl Accounts {
             .map_err(|e| e.to_string())?;
         let _ = self.shares(None).await;
         Ok(share)
+    }
+
+    /// The layer rules the host keeps for extensions no longer installed
+    /// (#528): they still place files until forgotten.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`].
+    pub async fn share_layers_kept(&self, host: Option<&str>) -> Result<Vec<KeptLayers>, String> {
+        let (_, client) = self.share_links(host).await?;
+        client.kept_layers().await.map_err(|e| e.to_string())
+    }
+
+    /// Forget the kept layer rules of `extension` on the host: its files
+    /// are placed by the rules installed now. What is kept after.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`], an installed extension, or nothing kept of it.
+    pub async fn share_layers_forget(
+        &self,
+        host: Option<&str>,
+        extension: &str,
+    ) -> Result<Vec<KeptLayers>, String> {
+        let (_, client) = self.share_links(host).await?;
+        client
+            .forget_layers(extension.to_owned())
+            .await
+            .map_err(|e| e.to_string())
     }
 
     /// Share `code` as the host has it now.
