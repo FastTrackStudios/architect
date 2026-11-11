@@ -20,6 +20,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use architect_extensions::contrib::Claim;
+use architect_extensions::manifest::Manifest;
+use architect_extensions::share_layers::ShareLayersDecl;
 
 use crate::blocks::{Block, BlockRenderer, Blocks, Drawn};
 
@@ -103,6 +105,68 @@ impl BlockRenderer for InstalledBlocks {
             Some((_, drawn)) => drawn.map(Drawn::Html),
             None => Err(format!("no extension claims {}", block.claim)),
         }
+    }
+}
+
+/// The `[[share_layers]]` rules (#528) of the extensions installed in a
+/// folder: which layer of a share link each file of their note types is
+/// in. Read again when what is in the folder changes.
+pub struct InstalledLayers {
+    dir: PathBuf,
+    held: Mutex<HeldLayers>,
+}
+
+/// What a folder was when its rules were read, and the rules.
+type HeldLayers = (
+    Option<Vec<(String, Option<SystemTime>)>>,
+    Arc<Vec<ShareLayersDecl>>,
+);
+
+impl std::fmt::Debug for InstalledLayers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstalledLayers")
+            .field("dir", &self.dir)
+            .finish_non_exhaustive()
+    }
+}
+
+impl InstalledLayers {
+    /// The extensions installed in `dir` (missing: none yet).
+    #[must_use]
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            dir: dir.into(),
+            held: Mutex::default(),
+        }
+    }
+
+    /// Every rule, as the folder is now, in its packages' order.
+    #[must_use]
+    pub fn rules(&self) -> Arc<Vec<ShareLayersDecl>> {
+        let stamp = stamp(&self.dir);
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.0.as_ref() != Some(&stamp) {
+            let mut rules = Vec::new();
+            for (name, written) in &stamp {
+                if written.is_none() || name.starts_with('.') {
+                    continue;
+                }
+                let path = self.dir.join(name).join("extension.toml");
+                match std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|text| Manifest::parse(&text).map_err(|e| e.to_string()))
+                {
+                    Ok(manifest) => rules.extend(manifest.share_layers),
+                    Err(error) => tracing::warn!(
+                        path = %path.display(),
+                        %error,
+                        "an installed extension's share layers did not read"
+                    ),
+                }
+            }
+            *held = (Some(stamp), Arc::new(rules));
+        }
+        Arc::clone(&held.1)
     }
 }
 
