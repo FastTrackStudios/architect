@@ -24,6 +24,28 @@ app.kubernetes.io/component: {{ .component }}
 {{ $repo }}:{{ .image.tag | default .root.Chart.AppVersion }}
 {{- end -}}
 
+{{/* A Kubernetes quantity (10Gi, 500M, 1T, 2048) in bytes. */}}
+{{- define "architect.bytes" -}}
+{{- $q := toString . -}}
+{{- $num := regexFind "^[0-9]+" $q -}}
+{{- if not $num }}{{ fail (printf "%q is not a size" $q) }}{{ end -}}
+{{- $unit := trimPrefix $num $q -}}
+{{- $mult := get (dict "" 1 "k" 1000 "K" 1000 "M" 1000000 "G" 1000000000 "T" 1000000000000 "Ki" 1024 "Mi" 1048576 "Gi" 1073741824 "Ti" 1099511627776) $unit -}}
+{{- if not $mult }}{{ fail (printf "%q: unknown unit %q" $q $unit) }}{{ end -}}
+{{- mul (int64 $num) (int64 $mult) -}}
+{{- end -}}
+
+{{/* The node's store limit: node.store.max, else 75% of its data volume. */}}
+{{- define "architect.storeMax" -}}
+{{- $n := .Values.node -}}
+{{- if $n.store.max -}}
+{{- $n.store.max -}}
+{{- else -}}
+{{- $volume := ternary $n.persistence.size $n.persistence.emptyDirSizeLimit $n.persistence.enabled -}}
+{{- div (mul (include "architect.bytes" $volume | int64) 3) 4 -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Every path the node owns: node.paths + node.extraPaths. */}}
 {{- define "architect.nodePaths" -}}
 {{- toJson (concat .Values.node.paths .Values.node.extraPaths) -}}

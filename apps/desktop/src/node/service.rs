@@ -58,6 +58,27 @@ pub struct NodeStatus {
     pub sites: Vec<String>,
     /// The devices it lets in.
     pub devices: u32,
+    /// Its blob store against its budget, when it runs the files engine.
+    pub files_store: Option<FilesStore>,
+}
+
+/// The files engine's blob store against its budget (#525).
+#[architect::wire]
+#[derive(Eq)]
+pub struct FilesStore {
+    /// Bytes in the store, and promised to writes in flight.
+    pub used: u64,
+    pub reserved: u64,
+    /// Its limit (`files_store_max`).
+    pub max: u64,
+    /// The floor kept free on its filesystem (`files_keep_free`), and
+    /// that filesystem's free bytes and size, when it can be asked.
+    pub keep_free: u64,
+    pub fs_free: Option<u64>,
+    pub fs_total: Option<u64>,
+    /// Fetches waiting for room now, and writes refused for space since start.
+    pub deferred: u32,
+    pub refused: u64,
 }
 
 /// A note in a vault.
@@ -76,7 +97,8 @@ pub mod node {
     /// What this node is.
     #[architect::service(actions)]
     pub trait Node {
-        /// This node: its name, endpoint, org, vaults, Sites and devices.
+        /// This node: its name, endpoint, org, vaults, Sites, devices, and
+        /// its blob store against its budget.
         #[action(effect = read_only)]
         async fn status(&self) -> Result<NodeStatus, NodeError>;
     }
@@ -123,6 +145,7 @@ pub struct NodeState {
     pub(crate) sites: Vec<String>,
     pub(crate) admission: Admission,
     pub(crate) account: Arc<Mutex<AccountView>>,
+    pub(crate) files: Option<architect_files::sync::Engine>,
 }
 
 impl NodeState {
@@ -157,6 +180,19 @@ impl NodeState {
             notes: count(self.catalog().notes().len()),
             sites: self.sites.clone(),
             devices: count(self.admission.list().len()),
+            files_store: self.files.as_ref().and_then(|engine| {
+                let usage = engine.store_usage()?;
+                Some(FilesStore {
+                    used: usage.used,
+                    reserved: usage.reserved,
+                    max: usage.max,
+                    keep_free: usage.keep_free,
+                    fs_free: usage.space.map(|s| s.free),
+                    fs_total: usage.space.map(|s| s.total),
+                    deferred: engine.deferred(),
+                    refused: usage.refused,
+                })
+            }),
         }
     }
 }

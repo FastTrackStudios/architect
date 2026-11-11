@@ -1,0 +1,7 @@
+---
+"architect" = "minor"
+"architect-desktop" = "minor"
+"architect-files" = "minor"
+---
+
+Fixed the files engine's unbounded blob store (#525) and added its budget. A node that holds its tree in place (`hold_all`) no longer copies the tree into `<data dir>/files/blobs` when it scans it (`EngineConfig::keep_inline` is 0 there) and no longer leaves fetched bytes in the store once they are in the tree. Added `architect::blob::StoreBudget` (`LocalFs::with_budget`, `reserve`, `has_room`, `reconcile`, `remove`, `move_out`, `adopt`, `fs_space`, `SpaceProbe`): a size limit and a keep-free floor checked before any byte is written, shared by concurrent writers. A write with no room is `BlobError::NoRoom` (`Progress::NoRoom`, `EngineError::NoRoom`, `AgentError::NoRoom`, HTTP 507); the engine defers such fetches (`RootStatus::deferred`, `Engine::deferred`) and retries each pass, and `Engine::keep_store` drops duplicates and, over 90% of the limit, evicts through `Engine::evict_for_space` (copy policy, never a last copy). The node takes `ARCHITECT_FILES_STORE_MAX` and `ARCHITECT_FILES_KEEP_FREE` (bytes, `16Gi`, or `40%`; defaults a quarter of the filesystem up to 100 GiB, and 15% up to 64 GiB) and reports `files_store` in `NODE_STATUS`. The chart sets both (75% of the data volume, 15%), an `ephemeral-storage` limit and an `emptyDir` `sizeLimit`. A `match` over `BlobError`, `Progress`, `EngineError` or `AgentError` needs an arm for the new `NoRoom` variant.

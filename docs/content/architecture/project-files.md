@@ -53,12 +53,23 @@ full, so it is not an option.
   node's data dir, not on the mount. Each file is hashed once. After that a
   scan is a stat walk, which is also the only change detection that works on
   NFS (inotify does not see other clients' writes).
-- **Current bytes** are the working file. Past versions go in the blob store
-  on the same filesystem:
-  - A file up to `keep_inline` (64 MiB) is copied into the store when it is
-    indexed, so every version of a session file is kept.
-  - A larger file keeps the versions that sync replaced. It is renamed into
-    the store, so no second copy is made.
+- **Current bytes** are the working file. Past versions go in the blob store:
+  - On a device that pins roots, a file up to `keep_inline` (64 MiB) is copied
+    into the store when it is indexed, so every version of a session file is
+    kept.
+  - On the node that holds its tree in place, `keep_inline` is 0: the tree is
+    the copy, and nothing it holds is also kept in the store. Copying the tree
+    on its first scan is what filled starcommand's disk (#525).
+  - A file keeps the versions that sync replaced: it is moved into the store
+    (renamed, or copied and removed across filesystems), so no second copy is
+    made.
+- **The store is bounded** (`features/files/src/sync/space.rs`,
+  `crates/architect/src/blob/budget.rs` `StoreBudget`): a hard limit and a
+  floor of free space on its filesystem, both checked before a byte is
+  written. A fetch with no room waits and is tried again each pass. Over 90%
+  of the limit the store drops what a working file also holds, then the
+  oldest blobs another holder has a verified copy of (`Engine::evict_for_space`,
+  under the copy policy), down to 80%; never a last copy, never a pinned blob.
 - **`.fts-files` is ignored**: not read, not migrated, not deleted. It is
   skipped by every scan, and Cody deletes it once Architect holds the roots.
   Its history (jj commits in a custom content-addressed backend) is not

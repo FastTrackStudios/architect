@@ -16,6 +16,11 @@
 //! the bucket share its bytes, deduped by hash. With
 //! [`Placement::Primary`] the bucket is where the bytes live and this
 //! node's store is a cache.
+//!
+//! The store is bounded ([`budget`], #525): `files_store_max` and a
+//! keep-free floor `files_keep_free` on its filesystem, checked before a
+//! byte is written; a holding node keeps nothing there that its tree
+//! holds (`architect_files::sync::space`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -24,7 +29,7 @@ use std::time::Duration;
 
 use architect::blob::{
     BlobTransferClient, BlobTransferDispatcher, Fetcher, LocalFs, Remote, S3Config, S3Store,
-    Sha256, VoxRemote, blob_transfer_service_descriptor,
+    Sha256, StoreBudget, VoxRemote, blob_transfer_service_descriptor,
 };
 use architect::host::{DavRequest, EngineHost};
 use architect::iroh_link;
@@ -46,6 +51,37 @@ use super::{Config, Dial, IrohMode, read_secret, targets};
 /// How often the blob connections are looked at.
 const DIAL_EVERY: Duration = Duration::from_secs(3);
 
+/// The store's limit when the filesystem cannot be asked: 10 GiB.
+const FALLBACK_MAX: u64 = 10 << 30;
+
+/// The budget of the store at `root`: `files_store_max` and
+/// `files_keep_free` of the filesystem holding it, else the defaults
+/// ([`architect::blob::default_max`], [`architect::blob::default_keep_free`]).
+/// Its total starts from a walk of what is there.
+pub(super) fn budget(config: &Config, root: &Path) -> StoreBudget {
+    let total = architect::blob::fs_space(root).map(|s| s.total);
+    let max = config
+        .files_store_max
+        .and_then(|s| s.of(total))
+        .or_else(|| total.map(architect::blob::default_max))
+        .unwrap_or(FALLBACK_MAX);
+    let keep_free = config
+        .files_keep_free
+        .and_then(|s| s.of(total))
+        .or_else(|| total.map(architect::blob::default_keep_free))
+        .unwrap_or(0);
+    let budget = StoreBudget::new(root, max, keep_free);
+    budget.reconcile(architect::blob::dir_size(root));
+    tracing::info!(
+        store.used = budget.usage().used,
+        store.max = max,
+        fs.keep_free = keep_free,
+        fs.total = total,
+        "files: the store's budget"
+    );
+    budget
+}
+
 /// The engine for `config`, whose documents come from `registry` once set.
 pub(super) fn engine(
     config: &Config,
@@ -53,7 +89,8 @@ pub(super) fn engine(
     registry: Arc<OnceLock<DocRegistry>>,
 ) -> Engine {
     let data = config.data_dir.join("files");
-    let local = LocalFs::new(data.join("blobs"));
+    let blobs = data.join("blobs");
+    let local = LocalFs::new(&blobs).with_budget(Arc::new(budget(config, &blobs)));
     let engine_config = EngineConfig {
         site: config.files_site.clone().unwrap_or_default(),
         verify_window: Duration::from_secs(config.files_verify_secs.max(1)),
@@ -243,15 +280,15 @@ async fn evict(local: LocalFs, budget: u64, there: &std::collections::HashSet<Sh
         total = total.saturating_add(meta.len());
         let at = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
         if there.contains(&hash) && !pinned.contains(&hash) {
-            held.push((at, meta.len(), path));
+            held.push((at, meta.len(), hash));
         }
     }
     held.sort();
-    for (_, len, path) in held {
+    for (_, len, hash) in held {
         if total <= budget {
             break;
         }
-        if tokio::fs::remove_file(&path).await.is_ok() {
+        if local.remove(&hash).is_ok() {
             total = total.saturating_sub(len);
         }
     }

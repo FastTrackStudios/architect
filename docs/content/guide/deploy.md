@@ -70,6 +70,31 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_MCP_TOKEN_FILE` | none | `/mcp` is served only with this bearer |
 | `ARCHITECT_SWEEP_SECS` | `30` | how often it sweeps its peers, the fallback for what a live bridge missed |
 | `ARCHITECT_LIVE_MAX` | `256` | how many notes it keeps live with each peer; `0` sweeps only |
+| `ARCHITECT_FILES_STORE_MAX` | a quarter of the filesystem under the data dir, at most 100 GiB (75% of the data volume with the chart) | the hard limit on the files' blob store, `<data dir>/files/blobs`: bytes, `16Gi`/`500M`, or `40%` of that filesystem ([below](#the-blob-store-s-budget)) |
+| `ARCHITECT_FILES_KEEP_FREE` | 15% of that filesystem, at most 64 GiB | free space the store never writes into, whoever else filled the disk |
+
+The other `ARCHITECT_FILES_*` and `ARCHITECT_BLOB_*` settings (the files
+engine, the drive, a bucket) are in `apps/desktop/src/node/config.rs`'s
+module docs.
+
+### The blob store's budget
+
+The files engine keeps past versions, and the bytes it is still fetching, in
+`<data dir>/files/blobs`. A node that holds its tree in place
+(`ARCHITECT_FILES_HOLD`) keeps nothing there that the tree holds. Every write
+into the store is checked first against `ARCHITECT_FILES_STORE_MAX` and against
+`ARCHITECT_FILES_KEEP_FREE` on the filesystem under it (`statvfs`): one that
+would cross either is refused, and a fetch waits until there is room, then
+goes ahead on a later pass. Over 90% of the limit the store drops what is safe
+to drop (bytes a working file holds, then the oldest blobs another holder has a
+verified copy of, under the copy policy), never a last copy.
+
+`POST /node/status` (`NODE_STATUS`) answers `files_store`: bytes used and in
+flight, the limit, the floor, the filesystem's free bytes and size, fetches
+deferred now and writes refused since start. When a root starts waiting for
+room the node logs one `files: fetches deferred for space` event with the same
+numbers; a fetch refused for space ends its `blob.fetch` span with
+`store.need`, `store.used`, `store.max`, `fs.free`, `fs.keep_free`.
 
 ```toml
 name = "fasttrackstudio"
@@ -508,7 +533,9 @@ helm install architect deploy/chart/architect \
 | `web.replicaCount`, `web.config.issuer`, `web.config.clientId` | the static front end; its `/app/config.json` comes from a ConfigMap (the issuer defaults to `node.issuer`) |
 | `node.issuer`, `node.org`, `node.hostOrg`, `node.vaults`, `node.sites`, `node.env` | the node's settings ([Configure it](#configure-it)) |
 | `node.existingSecret` | a Secret mounted as files: `session` (`ARCHITECT_SESSION_FILE`) and, with `node.mcp`, `mcp-token` |
-| `node.persistence` | the data PVC at `/data` (its iroh key and documents). A node is one device, so `node.replicaCount` above 1 needs persistence off, and the chart refuses otherwise |
+| `node.persistence` | the data PVC at `/data` (its iroh key and documents). A node is one device, so `node.replicaCount` above 1 needs persistence off, and the chart refuses otherwise. With it off, `/data` is an `emptyDir` of at most `emptyDirSizeLimit` (10Gi) |
+| `node.store` | the blob store's budget: `max` (`ARCHITECT_FILES_STORE_MAX`; empty is 75% of the data volume) and `keepFree` (`ARCHITECT_FILES_KEEP_FREE`, `15%`) |
+| `node.ephemeralStorage` | the container's `ephemeral-storage` limit (2Gi): its writable layer, logs and `emptyDir` volumes. Past it the kubelet evicts this pod, not the host's others |
 | `node.files` | the files dir at `/files` (`ARCHITECT_FILES_DIR`, held in place): `nfs: {server, path}`, `hostPath` or `existingClaim` |
 | `node.s3` | the files' bytes in a bucket too (`ARCHITECT_BLOB_S3_*`). The key id and the secret come from `credentialsSecret`, never from values |
 | `node.s3Face` | the node's own S3 face (`ARCHITECT_S3_BIND`): a Service port and, with `host`, a host of its own on the Ingress (buckets are at its root, so it can't share the path space) |
@@ -516,6 +543,17 @@ helm install architect deploy/chart/architect \
 | `ingress` | the optional Ingress with the path split below |
 
 Probes are `GET /health` on the node and `GET /` on the web front end.
+
+**What bounds the node's disk.** A PVC's size is a request: the `local-path`
+provisioner (k3s's default) and `hostPath` volumes are plain directories on
+the host and enforce nothing, and the kubelet's `ephemeral-storage` limits do
+not count a PVC. What bounds the node's writes to `/data` there is the node
+itself: `node.store.max` and `node.store.keepFree` (the keep-free floor
+default, 15%, is above the kubelet's 10% disk-pressure threshold, so the node
+stops writing before the host is tainted). The kubelet does evict this pod for
+its writable layer, its logs and an `emptyDir` `/data` past their limits. A
+storage class that enforces quotas (a block device per claim, or a filesystem
+with project quotas) bounds the PVC as well.
 
 ### Routing
 

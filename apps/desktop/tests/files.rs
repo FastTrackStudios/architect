@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use architect_accounts::Issuer;
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
-use architect_desktop::node::{self, Config, IrohMode, Running};
+use architect_desktop::node::{self, Config, IrohMode, Running, Size};
 use architect_files::sync::Engine;
 use auth_server::{ServerConfig, server};
 use sea_orm::Database;
@@ -80,6 +80,9 @@ fn config(
         files_dir: Some(files),
         files_hold: hold,
         files_secs: 1,
+        // Not the real disk's floor: the test must not depend on it.
+        files_store_max: Some(Size::Bytes(64 << 20)),
+        files_keep_free: Some(Size::Bytes(0)),
         ..Config::default()
     }
 }
@@ -236,6 +239,15 @@ async fn a_project_held_on_the_always_on_node_is_pinned_on_a_laptop_and_syncs_bo
             && names.contains(&"Saved Right Here.RPP".to_owned()),
         "{names:?}"
     );
+    // The node's store holds none of its 2.5 MB tree (#525): at most the
+    // session file's replaced version.
+    let store = always.state.snapshot().files_store.unwrap();
+    assert_eq!(
+        (store.max, store.keep_free, store.deferred),
+        (64 << 20, 0, 0)
+    );
+    assert!(store.used < 100_000, "{store:?}");
+    assert!(store.fs_total.is_some());
 
     laptop.stop().await;
     always.stop().await;
