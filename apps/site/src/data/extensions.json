@@ -1,0 +1,29 @@
+{
+	"registry": "FastTrackStudios (example)",
+	"source": "fixture",
+	"file": "examples/registry/index.toml",
+	"entries": [
+		{
+			"id": "example.hello",
+			"name": "Hello",
+			"version": "0.1.0",
+			"kind": "luau",
+			"description": "Greets you, has two settings, and draws a ruler over the timeline with a tool window.",
+			"category": "Examples",
+			"publisher": "example",
+			"source": {
+				"type": "archive",
+				"archive": "archives/example.hello-0.1.0.archext",
+				"sha256": "6e63e776f0d68235e20f6355d5c9da949e3fec468dcdb64190be9ca576a761f4"
+			},
+			"platforms": [],
+			"changelog": "First release.",
+			"versions": [
+				{
+					"version": "0.1.0",
+					"changelog": "First release."
+				}
+			]
+		}
+	]
+}

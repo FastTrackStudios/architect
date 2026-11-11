@@ -385,6 +385,15 @@ jobs:
   # tag-only `release-signing` environment has FTS_RELEASE_MINISIGN_KEY;
   # without it the sums go out unsigned, with a warning. Runs after the
   # Mac job too when that one is on (and whether it passed or not).
+  # The site (#534): landing, download, changelog, the store and the docs,
+  # deployed to Vercel by site.yml once the desktop manifests it reads are
+  # up. Without the Vercel secrets its deploy skips with a notice.
+  site:
+    needs: [web, linux, macos]
+    if: ${{ !cancelled() && needs.linux.result == 'success' }}
+    uses: ./.github/workflows/site.yml
+    secrets: inherit
+
   sums:
     needs: [node, web, linux, macos]
     if: ${{ !cancelled() && needs.node.result == 'success' && needs.web.result == 'success' && needs.linux.result == 'success' }}
