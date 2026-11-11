@@ -97,30 +97,51 @@ room.
   - Its fetches land beside its tree, in `<files_dir>/.architect/incoming`,
     and are renamed into place, so a 30 GiB file needs no room on the data
     volume.
-  - Every version it replaces is kept in `<files_dir>/.architect/versions`,
-    on the tree's own disk, unless that area or the store already holds
-    those bytes. Another working file with the same bytes does not count: a
-    working file can change.
-  - That area is bounded by `ARCHITECT_FILES_HISTORY_MAX` (by default a tenth
-    of the tree's filesystem, at most 500 GiB) and by the tree filesystem's
-    floor (`ARCHITECT_FILES_KEEP_FREE` again). At either, the replacement
-    waits and is reported; nothing is deleted.
+  - Every version it replaces or deletes is kept in
+    `<files_dir>/.architect/versions`, on the tree's own disk, unless that
+    area or the store already holds those bytes. Another working file with
+    the same bytes does not count: a working file can change. Deletes are
+    the moves' old names, a peer's delete, a WebDAV or S3 DELETE, and a
+    checkpoint restore that removes files. They are applied after every
+    write in the same pass, so a move writes its new name before its old
+    one goes.
+  - That area is bounded by `ARCHITECT_FILES_HISTORY_MAX` and by the tree
+    filesystem's floor (`ARCHITECT_FILES_KEEP_FREE` again). The default is a
+    tenth of the tree's filesystem, at most 500 GiB, worked out at start from
+    the share's `statvfs`: on a pooled export whose reported size changes,
+    it can change between restarts.
+  - At either bound, replacements and deletes wait. They are reported as
+    `history_full` (in the root and in `files_store`), with one
+    `files: kept versions are at their bound` warning that carries the
+    history area's numbers. Nothing frees history by itself: raise the bound
+    or make room. Nothing is deleted.
   - A version is kept by a hard link taken right before its file is swapped
     out, so it costs no copy. Once the swap has happened, the link is the
-    file's only name, and nothing can write to it in place.
+    file's only name, and nothing can write to it in place. A file that
+    already has another name (a user's hard link) is never linked: it is
+    cloned where the filesystem can (`FICLONE`: btrfs, XFS), else copied and
+    verified, so a write through the other name never reaches the kept
+    version.
   - A run that dies between the link and the swap leaves a shared file. At
-    start, every store file with another name is re-hashed: changed bytes go
-    to `<data dir>/files/corrupt/` (or the area's `.corrupt/`) and the claim
-    is withdrawn; unchanged ones are given an inode of their own.
+    start, before any write, every store file with another name is
+    re-hashed: changed bytes go to `<data dir>/files/corrupt/` (or the area's
+    `.corrupt/`) and the claim is withdrawn; unchanged ones are given an
+    inode of their own, and the working file that shared it is known again
+    by its new ctime.
 - **`.architect` on the share.** It is visible to anyone who mounts the
   share's root. It holds `incoming/` (bytes about to be renamed into the
   tree), `versions/` (previous versions by sha-256: for some old versions the
-  only copy) and a `README.txt` saying so, which is also the node's mark. If
-  `.architect` exists and is not the node's own (a file, a link, or a folder
-  without that mark), a holding node refuses to start and says why. If the
-  node cannot write there (a read-only or root-squashed share), replacements
-  wait. The root then reports `no_history` with the reason ("cannot keep
-  history: …") and logs one warning when it starts.
+  only copy) and a `README.txt` saying so, which is also the node's mark.
+  - The mark is written to a temp name and renamed in. An empty folder (a
+    claim a crash cut short) is claimed again.
+  - If `.architect` exists and is not the node's own (a file, a link, or a
+    folder with other things in it and no mark), a holding node refuses to
+    start and names what to move.
+  - **A share the node cannot write** (read-only, root-squashed): the node
+    starts and serves reads, keeps no history, and every replacement or
+    delete waits. It reports `history_error` ("cannot keep history: … cannot
+    be written") and logs one warning at start. Nothing is written to the
+    tree, so nothing can be lost; making the share writable resumes it.
 - **Eviction.** Over 90% of its limit, the store drops only blobs that a
   working file on the same device holds, re-hashed just before the delete,
   and only blobs that are no old version anywhere. It never relies on
@@ -150,7 +171,8 @@ room.
 
 **Which edits keep their previous version.**
 - **Kept:** the edits the node makes itself (a newer version from a peer, a
-  restore, a WebDAV or S3 write).
+  restore, a WebDAV or S3 write), and every delete it applies (a move's old
+  name, a peer's delete, a WebDAV or S3 DELETE, a checkpoint restore).
 - **Not kept:** edits made directly on the tree behind the node's back (a
   DAW on the NFS share, `rsync` into it). The node sees such an edit only at
   its next scan, when the old bytes are already overwritten on disk. The
@@ -165,8 +187,9 @@ room.
 `POST /node/status` (`NODE_STATUS`) answers `files_store`:
 - bytes used and in flight, the limit and the floor, the filesystem's free
   bytes and size;
-- files deferred now, files too large and replacements blocked on history
-  (`no_history`, `history_error`), and writes refused since start;
+- files deferred now, files too large, replacements and deletes blocked on
+  history (`no_history`, `history_error`, `history_full`), and writes
+  refused since start;
 - on a holding node, `history_used`, `history_max`, `tree_fs_free` and
   `incoming_used`.
 

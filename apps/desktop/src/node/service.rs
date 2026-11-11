@@ -87,6 +87,11 @@ pub struct FilesStore {
     /// `.architect` the node cannot write).
     pub no_history: u32,
     pub history_error: Option<String>,
+    /// Replacements and deletes waiting because the kept versions are at
+    /// their bound (`history_used` against `history_max`, or the tree
+    /// filesystem's floor). Nothing frees history by itself: raise the
+    /// bound or make room.
+    pub history_full: u32,
     /// A holding node's kept versions, beside its tree: bytes, limit
     /// (`files_history_max`; none is `u64::MAX`) and the tree
     /// filesystem's free bytes. Not counted in `used`.
@@ -212,6 +217,7 @@ impl NodeState {
                     too_large: engine.too_large(),
                     refused: usage.refused,
                     no_history: blocked.0,
+                    history_full: engine.history_full(),
                     history_error: blocked.1,
                     history_used: history.map(|h| h.used),
                     history_max: history.map(|h| h.max),

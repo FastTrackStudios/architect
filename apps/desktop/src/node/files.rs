@@ -151,11 +151,17 @@ pub(super) fn engine(
     let blobs = data.join("blobs");
     let local = LocalFs::new(&blobs).with_budget(Arc::new(budget(config, Area::Store, &blobs)));
     let mut store = TreeStore::new(local);
+    let mut history_off = None;
     if config.files_hold {
         // Fetches land, and replaced versions are kept, on the tree's own
         // filesystem: renamed in and linked aside, never copied through
         // the data volume.
-        architect_files::sync::layout::claim_area(files_dir)?;
+        if let architect_files::sync::layout::Claimed::Unwritable(why) =
+            architect_files::sync::layout::claim_area(files_dir)?
+        {
+            tracing::warn!(files.history_off = %why, "files: the tree cannot be written: no history is kept");
+            history_off = Some(why);
+        }
         let (incoming, versions) = architect_files::sync::layout::areas(files_dir);
         let inbox = LocalFs::new(&incoming).with_budget(Arc::new(budget(
             config,
@@ -186,6 +192,7 @@ pub(super) fn engine(
         }),
     )
     .with_transcoder(architect_files::server::FfmpegTranscoder::new());
+    engine.set_history_off(history_off);
     // Its attestations are signed with its iroh key: its holder id is its endpoint id.
     Ok(
         match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {

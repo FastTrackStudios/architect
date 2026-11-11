@@ -63,8 +63,9 @@ full, so it is not an option.
     it may be dropped if a working file holds the same bytes and no root
     lists them as an old version. Those copies are what protected small
     files against direct edits.
-  - A version the engine replaces itself (a peer's newer version, a restore,
-    a WebDAV or S3 write) is kept before it is replaced, unless the versions
+  - A version the engine replaces or deletes itself (a peer's newer version
+    or delete, a restore, a move, a WebDAV or S3 write or DELETE) is kept
+    before it goes (deletes are applied after every write in a pass), unless the versions
     area or the store already holds its bytes. Another working file with the
     same bytes never counts. On a holding node it is linked aside into
     `<files_dir>/.architect/versions` (bounded by `files_history_max`, a
