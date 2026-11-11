@@ -71,3 +71,10 @@ at the larger code that does the same thing for real
 15. [Your own Architect](@/guide/your-own-architect.md): a distribution
     as code, the extensions you choose compiled in, built for desktop,
     the web and the node with `cargo xtask dist`.
+
+## On your machine
+
+[The whole stack on your machine](@/guide/local-stack.md): `devenv up`
+starts the auth server, a headless node and the app, wired to each other
+and to nothing else, filled from a sanitised mirror of production on a
+credentialed machine and from the demo seed everywhere else.
