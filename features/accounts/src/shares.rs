@@ -9,7 +9,7 @@
 
 use architect::connect::{Endpoint, Pool};
 use architect_spaces::{
-    NewAudience, NewShare, Share, ShareChange, ShareComment, ShareLinksClient, ShareScope,
+    Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareLinksClient, ShareScope,
 };
 
 use crate::controller::{Accounts, Sheet};
@@ -179,6 +179,28 @@ impl Accounts {
         let (_, client) = self.share_links(host).await?;
         let share = client
             .remove_audience(code.to_owned(), name.to_owned())
+            .await
+            .map_err(|e| e.to_string())?;
+        let _ = self.shares(None).await;
+        Ok(share)
+    }
+
+    /// How far audience `name`'s link of share `code` plays (#528):
+    /// `listen`, never past the share's; None: the share's.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`], or no such share or audience.
+    pub async fn share_audience_listen(
+        &self,
+        host: Option<&str>,
+        code: &str,
+        name: &str,
+        listen: Option<Listen>,
+    ) -> Result<Share, String> {
+        let (_, client) = self.share_links(host).await?;
+        let share = client
+            .audience_listen(code.to_owned(), name.to_owned(), listen)
             .await
             .map_err(|e| e.to_string())?;
         let _ = self.shares(None).await;
