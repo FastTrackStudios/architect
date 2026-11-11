@@ -66,10 +66,13 @@ await bind(ext).ask();
 await mountView(ext, 'counter', document.getElementById('counter')!).rendered;
 ```
 
-**Pin what you load.** With `integrity`, the page fetches the lock, checks it against the digest
-you pinned, and checks every file's bytes against the lock before anything uses it. A file that
-differs, is missing from the lock, or lies outside the folder is refused. Without `integrity`,
-nothing is checked: whoever serves the folder decides what runs in the sandbox.
+**Pin what you load.** `integrity` is required. With a digest (or the lock itself), the page checks
+the lock against it and checks every file's bytes against the lock before anything uses it. This
+works whether the source is a URL or the metadata object. A file that differs, is missing from the
+lock, or lies outside the folder is refused, and so is a wrong or malformed `integrity`.
+
+`{ integrity: false }` loads the files unchecked and says so in the log. Use it only for a folder you
+build and serve yourself: whoever serves it decides what runs in the sandbox.
 
 The module named in `architect.json` must be a relative path inside the folder: no scheme, no `..`,
 no leading `/`.
@@ -96,6 +99,12 @@ another browser.
 - **The page hands it everything.** The page fetches the files (and checks them, above) and hands in
   the glue as text and the core modules as bytes. Everything else crosses on a `MessageChannel` port
   the frame takes only from its parent.
+- **It asks the page only for files beside its module.** The core modules its JS requests must be
+  relative paths that resolve inside the extension's folder: no scheme, no leading `/`, no `..`.
+  They're read without credentials (`credentials: "omit"`) and at most `LIMITS.modules` of them,
+  each at most `LIMITS.moduleBytes`. This lives in `runner.js` itself, so Architect's own pages get it
+  too. Nothing it sends is parsed on the page's main thread: the page hands the bytes to the
+  sandbox's worker, which writes the memory limit in.
 - **It reaches no cookie, storage, channel or network of yours.** It has no cookie-bearing request,
   no IndexedDB, Cache Storage or BroadcastChannel of your origin, no `fetch`, XHR, WebSocket or
   beacon, and no script import from your origin. `features/extensions/web/test/glue.test.mjs` runs a
@@ -136,15 +145,21 @@ Everything an extension asks of its app reaches your page as a host-service requ
 3. **An op you don't handle answers `unsupported`** ("… is not available in this host"). The
    extension gets an error it can show, never a throw and never a hang.
 
-**App actions** (`run-action`) are `host.actions`, each with its `effect` (`mutating` if you leave it
-out), and the grant's `effect` is checked against it. An action you offer is never the extension's
+**App actions** (`run-action`) are `host.actions`, each with its `effect`, and the grant's `effect` is
+checked against it. An action whose effect you don't state is taken as `destructive`, whether it's
+in `host.actions` without one or answered by `handle.run` alone. It then needs both a grant of
+`effect: "destructive"` and a yes from `confirm`. An action you offer is never the extension's
 own, whatever its name. An extension `vault` granted nothing cannot run your `VAULT_EMPTY_TRASH`.
 The native hosts still treat the namespace as the extension's own (#545).
 
-**Destructive actions need a yes.** An action declared `effect = "destructive"`, whether the
-extension's own run by your page or an app action it runs, runs only when `host.confirm(action,
-args)` resolves to exactly `true`. This applies even when `handle.run` answers the request. Without
-`confirm`, none of them runs.
+**Destructive actions need a yes.** A destructive action runs only when `host.confirm(action, args)`
+resolves to exactly `true`. That covers an extension's own action declared
+`effect = "destructive"` that your page runs, and an app action it runs that is destructive or has no
+stated effect. The check happens before any handler, `handle.run` included. Without `confirm`, none
+of them runs.
+
+**Its data is bounded.** One `set_data`/`set_setting` value is at most `LIMITS.dataBytes`, all of
+them together at most `LIMITS.dataTotal`, and one host request at most `LIMITS.messageBytes`.
 
 **What your handler must still check itself**, because only it knows:
 
@@ -153,11 +168,17 @@ args)` resolves to exactly `true`. This applies even when `handle.run` answers t
   `port_receive`, `close_port`, `unsubscribe`, `raise`);
 - a service's, point's or window's own rules (`service`, `point`, `window`).
 
-**The network.** Use `fetchHandler({ allow })` and spread it into `handle`. It never sends your
-credentials (`credentials: "omit"`), never reaches your page's own origin, and goes only to `allow`
-(host names, `*.domain`, `host:port`), on top of the extension's `capabilities.hosts`. It follows no
-redirect (a page cannot see where one goes, so it could not check it), and has a time and a size
-limit. If you write your own `fetch` handler, keep all of those.
+**The network.** Use `fetchHandler({ allow })` and spread it into `handle`. It:
+
+- never sends your credentials (`credentials: "omit"`);
+- never reaches your page's own origin;
+- goes only to `allow` (host names, `*.domain`, `host:port`), on top of the extension's
+  `capabilities.hosts`;
+- follows no redirect (a page can't see where one goes, so it couldn't check it);
+- uses the smaller of your timeout and the one the extension asks for;
+- stops reading a body at the size cap rather than buffering it first.
+
+If you write your own `fetch` handler, keep all of those.
 
 `memoryHost(options)` is for demos. It keeps documents and files in `Map`s seeded from what you
 hand it (files only under granted `folders`, and only those you handed it). It answers `org` and
@@ -200,12 +221,17 @@ It follows the share pages' rules (`features/sites/src/sanitize.rs`, ported to
 - **No code.** No `<script>`, frames, `<object>`, `<foreignObject>`, SMIL animation or `<form>`. No
   `on…` handler or `dangerous_inner_html` (the frame fails).
 - **No network it wasn't allowed.**
-  - An image or media URL loads only if it starts with one of the `urls` you pass (absolute `https:`
-    or `blob:` prefixes; none by default), or if it is a `data:` raster image.
-  - A relative URL is always refused: it would be a request to your origin with your cookies.
+  - An image or media URL loads only if it parses as an absolute `https://` URL on its own, with no
+    base. The URL parser must not rewrite it (no `..`, `%2e`, case, IDN or trailing-dot changes) and
+    it must carry no userinfo or backslash. Its origin must equal an allowed entry's exactly, and its
+    path must sit under that entry's path on a `/` boundary.
+  - Allowed entries are the `urls` you pass (none by default). A `blob:` URL is allowed only if you
+    listed it exactly; a `data:` raster image is always allowed. The parsed URL is what gets set.
+  - Anything a browser would resolve against your page is refused: `https:host/x` (relative on an
+    https page), `//host`, `/x`, `x`. Such a request would go to your origin with your cookies.
   - CSS that loads anything (`url(…)`, `image-set`, …) is refused.
-  - A link goes only to `https:`, `mailto:` or one of the view's own fragments, and opens in a new tab
-    with `noopener noreferrer`.
+  - A link goes only to an absolute `https://` URL (parsed the same way), `mailto:` or one of the
+    view's own fragments, and opens in a new tab with `noopener noreferrer`.
 - **Fields that read like nothing.** `input`, `textarea`, `select` and `label` are kept, since the
   view is interactive.
   - They get no `name`, `form` or `autocomplete` (forced `off`).
@@ -219,7 +245,9 @@ It follows the share pages' rules (`features/sites/src/sanitize.rs`, ported to
 - **A box it stays in.** No `position` but `static` or `relative`, CSS containment, and a capped
   height (`LIMITS.viewHeight`, 4096 px). Its CSS stays out of your page and yours stays out of it.
 - **Limits on frames.** At most `LIMITS.editsPerFrame` edits per frame and `LIMITS.nodesPerPane`
-  nodes per pane. Mouse events don't say where the screen is.
+  nodes per pane.
+- **Pointer events** give positions relative to the view's own box (`clientX`/`clientY`) and its
+  scrolled content (`pageX`/`pageY`), never the page's or the screen's (`screenX`/`screenY` are 0).
 
 Because `var(…)` is refused, a view's theme variables fall back to their defaults. A view does not
 follow your page's theme yet.
@@ -229,17 +257,39 @@ follow your page's theme yet.
 Each instance has limits (`limits`, `workerLimits`; defaults in `LIMITS`):
 
 - **Memory and time.** 64 MiB and 5 s per call by default, and 64 MiB and 60 s for a worker's whole
-  run. The memory limit is written into each core module. A call past its time has its worker
-  terminated, and the extension starts again.
-- **Floods.**
+  run. A call past its time has its worker terminated, and the extension starts again.
+  - The memory limit is its **wasm's**, written into each core module.
+  - The extension's own JS (jco's glue) in the sandbox frame uses whatever CPU and memory the browser
+    gives a worker until it is stopped.
+- **Start.** It must finish starting, core modules included, within `LIMITS.start` (15 s).
+- **Floods.** These cover the extension's own lines and its host-service `log` alike:
   - At most 200 log lines a second, each up to 4096 characters; the rest are counted and reported.
+  - A line's level is one of four, and its source is set by the host, never the extension.
   - A view's timers are at least 16 ms apart.
   - At most 5 restarts a minute, each after a longer wait (up to 10 s). After that it stays stopped,
     and `report().lastTrap` says why.
+- **A watchdog** (`limits.idle`, off by default). After that many ms with no call, no mounted view and
+  no running worker, it is stopped and its sandbox frame removed, which ends whatever its JS was
+  doing. Its next call starts it again.
 
 Under node, an idle extension doesn't keep the process alive, and `stop()` ends everything at once.
 The details and how they differ from the native runner are in
 [extensions, "On the web"](@/architecture/extensions.md).
+
+## What an embedder accepts today
+
+Even with all of the above, a page that loads an extension accepts that:
+
+- **It reads what you give it.** It sees whatever your host answers, and everything in its own views.
+- **It can phish inside its own box.** A view can draw a convincing form or message inside its
+  shadow root. It can't reach your page's fields, but a person may type into its own.
+- **It uses CPU and memory.** Its JS in the sandbox can use a worker's worth of both until you call
+  `stop()` (or `limits.idle` stops it). The wasm memory limit doesn't cover that JS.
+- **Node gives no protection.** A node host runs its JS with node's full access.
+- **Unpinned files are whatever the server sends.** With `integrity: false`, whoever serves the
+  folder decides what runs in the sandbox.
+- **It is tested in Firefox only**, in headless Firefox here. Chromium hasn't been run, and Safari
+  lacks JS Promise Integration.
 
 ## Your CSP
 
@@ -261,9 +311,12 @@ base-uri 'none'; form-action 'none'; object-src 'none'
 - **`'SANDBOX_HASH'`** is the runtime's `SANDBOX_HASH` export, the hash of the sandbox frame's
   script. It changes with the runtime's version, so put it in from the package: the example's Vite
   config does. The frame is a `srcdoc` document, which inherits your policy.
-- **`blob:` and `'wasm-unsafe-eval'`** in `script-src`, and **`worker-src blob:`**, are for the
-  sandbox frame's workers, its blob modules and its wasm. These run in the frame's opaque origin, and
-  each inherits your policy as well as the frame's own.
+- **`blob:` and `'wasm-unsafe-eval'`** in `script-src`, and **`worker-src blob:`**, must be added by
+  every embedder. They are for the sandbox frame's workers, its blob modules and its wasm, which run
+  in the frame's opaque origin and inherit your policy as well as the frame's own.
+  - **What this loosens:** script already running in *your* page (an XSS) could start workers and
+    import modules from `blob:` URLs it makes, and compile wasm. It still needs a way to run in the
+    first place: `blob:` lets no outside script in.
 - **`frame-src 'none'`** still allows the sandbox's `srcdoc` frame (Firefox checked).
 - **`connect-src`** must cover where the extension's files are served from: the page fetches them,
   never the extension.
