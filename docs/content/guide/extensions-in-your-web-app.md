@@ -340,7 +340,7 @@ What a page downloads for the sandbox's WASI Counter, a release build (`build-we
 | five small adapter modules | 0.9 KiB | 0.7 KiB | 0.6 KiB |
 | **the extension, in all** | **1444.1 KiB** | **366.2 KiB** | **273.3 KiB** |
 
-A debug build of the same component is 990 KiB brotli. The runtime's own code adds about 35 KiB
+A debug build of the same component is 990 KiB brotli. The runtime's own code adds about 40 KiB
 brotli before your bundler minifies it. Most of an extension's size is its core module: build it
 with `--release`.
 
