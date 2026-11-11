@@ -153,6 +153,7 @@ pub struct Distribution {
     folder: String,
     bundle_id: String,
     version: String,
+    release: Option<String>,
     icon: Icon,
     sandbox: bool,
     linked: Vec<Linked>,
@@ -226,6 +227,7 @@ impl Distribution {
             bundle_id: format!("app.{slug}"),
             name,
             version: env!("CARGO_PKG_VERSION").to_owned(),
+            release: None,
             icon: Icon::ARCHITECT,
             sandbox: false,
             linked: Vec::new(),
@@ -282,6 +284,17 @@ impl Distribution {
     #[must_use]
     pub fn version(mut self, version: impl Into<String>) -> Self {
         self.version = version.into();
+        self
+    }
+
+    /// The release version stamped into this build (`X.Y.Z`), which
+    /// becomes its version too; `None`: a development build.
+    #[must_use]
+    pub fn release_version(mut self, release: Option<String>) -> Self {
+        if let Some(v) = &release {
+            self.version.clone_from(v);
+        }
+        self.release = release;
         self
     }
 
@@ -575,6 +588,7 @@ impl Distribution {
             "folder": self.folder,
             "bundle_id": self.bundle_id,
             "version": self.version,
+            "release_version": self.release,
             "sandbox": self.sandbox,
             "extensions": extensions,
             "bundles": bundles,
@@ -646,6 +660,9 @@ pub fn architect() -> Distribution {
         .linked(&architect_notify::Notify)
         // Files (#347): projects and asset libraries, over FILES_*.
         .linked(&architect_files_extension::FilesExtension)
+        // Updates (#523): checks, installs on Install, restart to finish.
+        .linked(&architect_updates::Updates)
+        .release_version(architect_updates::release_version())
 }
 
 /// The Project Management bundle (#375): Projects, Tasks and the Time

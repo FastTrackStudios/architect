@@ -47,8 +47,38 @@ pub struct Options {
     pub out: PathBuf,
     pub profile: String,
     pub target_dir: Option<PathBuf>,
-    /// The version written into the desktop entry and Info.plist.
+    /// The version written into the desktop entry and Info.plist, and
+    /// stamped into the binary (`ARCHITECT_RELEASE_VERSION`).
     pub version: Option<String>,
+}
+
+/// The build-time env `architect-updates` reads as the app's release
+/// version (`RELEASE_VERSION`).
+const RELEASE_VERSION_ENV: &str = "ARCHITECT_RELEASE_VERSION";
+
+/// The version to stamp, a leading `v` dropped: exactly `X.Y.Z`, or a
+/// nightly's `X.Y.Z-nightly.YYYYMMDD` (the forms the updater and the Nix
+/// launcher, `nix/desktop/choose.sh`, rank). Anything else would build an
+/// app that never updates, so it is refused.
+fn stamp(version: &str) -> Result<String, String> {
+    let v = version.trim().trim_start_matches('v');
+    let digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    let (core, tail) = v.split_once('-').map_or((v, None), |(c, t)| (c, Some(t)));
+    let core_ok = {
+        let parts: Vec<&str> = core.split('.').collect();
+        parts.len() == 3 && parts.iter().all(|p| digits(p))
+    };
+    let tail_ok = tail.is_none_or(|t| {
+        t.strip_prefix("nightly.")
+            .is_some_and(|d| d.len() == 8 && digits(d))
+    });
+    if core_ok && tail_ok {
+        Ok(v.to_owned())
+    } else {
+        Err(format!(
+            "--version {version}: give X.Y.Z or X.Y.Z-nightly.YYYYMMDD; any other form builds an app that never updates"
+        ))
+    }
 }
 
 /// The repo: the scripts and the flake are read from here wherever the
@@ -99,6 +129,14 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
     }
     if let Some(dir) = &opts.target_dir {
         cmd.arg("--target-dir").arg(dir);
+    }
+    // The release version, stamped into the binary for its updater
+    // (`architect-updates` `RELEASE_VERSION`); without `--version` the
+    // build is a development build, which never updates itself.
+    if let Some(v) = &opts.version {
+        cmd.env(RELEASE_VERSION_ENV, stamp(v)?);
+    } else {
+        cmd.env_remove(RELEASE_VERSION_ENV);
     }
     if node {
         // Without the window (no Blitz, wgpu or wayland), and without the
@@ -370,5 +408,17 @@ mod tests {
     fn a_title_makes_a_file_name_without_spaces() {
         assert_eq!(super::file_title("Architect Sandbox"), "ArchitectSandbox");
         assert_eq!(super::file_title("Studio"), "Studio");
+    }
+
+    #[test]
+    fn only_a_release_or_a_nightly_version_is_stamped() {
+        assert_eq!(super::stamp("v0.13.0").as_deref(), Ok("0.13.0"));
+        assert_eq!(
+            super::stamp("0.13.0-nightly.20261111").as_deref(),
+            Ok("0.13.0-nightly.20261111")
+        );
+        for bad in ["0.13.0-rc.1", "0.13", "0.13.0-nightly.2026111", "main", ""] {
+            assert!(super::stamp(bad).is_err(), "{bad}");
+        }
     }
 }

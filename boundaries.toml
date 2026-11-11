@@ -450,6 +450,11 @@ layer = "L4"
 note = "Notify, a built-in extension (#348): notifications with a typed source in each person's note, the bell and the centre, joined with the toasts; linked in, or its own process (guest)"
 
 [[row]]
+package = "architect-updates"
+layer = "L4"
+note = "Updates, a built-in extension (#523): the updater's state, plan, actions and settings view; its network half is feature `release`, which the app (apps/distribution) turns on; linked in, or its own process (guest)"
+
+[[row]]
 package = "architect-time-tracker"
 layer = "L4"
 note = "the Time Tracker, a first-party extension (#375): timers and time entries on vault notes, totals, a timesheet base view and a report; linked in, or its own process (guest)"

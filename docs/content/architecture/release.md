@@ -42,7 +42,7 @@ one-line report.
 | Find | The newest `<prefix>X.Y.Z` release (default prefix `v`; `.tag_prefix("desktop-v")`) that is not a draft or prerelease and carries the asset and `SHA256SUMS`. With `--to`, exactly that version. | `NotFound` (only with `--to`) |
 | Key | A build with `key: None` stops here, before downloading anything. | `NoSigningKey` |
 | Signature | `SHA256SUMS.minisig` must be by the key, and its trusted comment must be `<app> <tag> SHA256SUMS` (`trusted_comment`), so a real signature copied from an older release is refused. | `Unsigned`, `BadSignature`, `BadKey` |
-| Checksum | The asset streams into a staging file beside the binary (random name, `O_EXCL`, `0700`) and must hash to what the signed sums list. | `NotListed`, `ChecksumMismatch` |
+| Checksum | The asset streams into a staging file beside the binary (random name, `O_EXCL`, `0600`, made executable only once verified) and must hash to what the signed sums list. | `NotListed`, `ChecksumMismatch` |
 | Smoke test | The staged binary runs with `--version` (30 s limit) and must print exactly `<app> <version>`. | `SmokeTest` |
 | Swap | The staged file is renamed over the binary: one atomic step on one filesystem. | `Io` |
 | Hook | `--then` runs only after a new binary went in. | `Hook` (the new binary **is** installed) |
@@ -67,6 +67,30 @@ assets can replace the binary and its sums together.
 `key: None` is the explicit "this build pins no key" (a dev build). It is
 never a silent skip: `--check` still reports updates, and installing fails
 with `NoSigningKey`.
+
+## Pieces, for an updater of its own
+
+An app that installs something other than a bare binary (an `AppImage`
+into a launcher's folder: `updates.md`) uses the pieces `run` is made of:
+
+- `Updater::find(want)`: the newest release (or exactly `want`), as a
+  `Candidate` (`tag`, `version`, `sig_url` (none: unsigned), `notes_url`,
+  the release's page). Changes nothing.
+- `Updater::fetch_verified(&candidate, key, dir, &mut progress)`: the
+  signature and the sums checked, the asset streamed into a new
+  owner-only file in `dir` (`staging_in`), hashed as it lands, `progress`
+  told `(received, total)`. Removed when dropped; nothing is left in
+  `dir` on any error.
+- `persist_executable(staged, dest)`: 0755 and one rename (no smoke
+  test); `write_atomic(dir, name, text)`: a small file by temp and rename.
+- `sweep_staging(dir, name)`: removes the `.<name>.update-*` files a run
+  that died left behind (`fetch_verified` runs it first).
+- Caps: the asset at `MAX_ASSET_BYTES` (1 GiB), the sums and signature at
+  `MAX_SMALL_BYTES` (1 MiB), refused as `TooLarge` (`Updater::limits` sets
+  others); a download gives up after `STALL_TIMEOUT` (60 s) without a byte,
+  with no overall limit.
+- `ORG_KEY`: the org release key's public half, the one
+  `.github/workflows/release.yml` checks its signature against.
 
 ## The GitHub token
 
