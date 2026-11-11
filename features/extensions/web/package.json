@@ -61,9 +61,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "prepack": "node scripts/build.mjs",
-    "test": "node --test test/web.test.mjs",
-    "test:unit": "npm run build && node --test --test-concurrency=1 test/check.test.mjs test/sanitize.test.mjs test/sandbox.test.mjs test/limits.test.mjs test/surface.test.mjs test/pack.test.mjs cli/test/typegen.test.mjs cli/test/pack.test.mjs",
-    "test:package": "npm run build && node --test --test-concurrency=1 test/package.test.mjs",
+    "test": "npm run build && node --test --test-concurrency=1 test/web.test.mjs test/package.test.mjs test/publish-components.test.mjs",
+    "test:unit": "npm run build && node --test --test-concurrency=1 test/check.test.mjs test/sanitize.test.mjs test/sandbox.test.mjs test/limits.test.mjs test/publish.test.mjs test/surface.test.mjs test/pack.test.mjs cli/test/typegen.test.mjs cli/test/pack.test.mjs",
+    "test:package": "npm run build && node --test --test-concurrency=1 test/package.test.mjs test/publish-components.test.mjs",
     "test:browser": "npm run build && node --test --test-concurrency=1 test/view.test.mjs test/glue.test.mjs test/rust-host.test.mjs"
   },
   "peerDependencies": {

@@ -257,8 +257,10 @@ test('a hostile manifest is refused or emits only data: same AST shape, nothing 
 test('S6: a schema that grows as a power of its depth is refused in time', () => {
   // `type` lists nested in themselves: 773 bytes took 9 s and crashed.
   let schema = { type: 'string' };
-  for (let i = 0; i < 12; i++) schema = { type: ['object', 'array', 'string', 'null'], properties: { a: schema, b: schema }, items: schema };
+  // Six levels: about 12^6 types unbounded, a small params text.
+  for (let i = 0; i < 6; i++) schema = { type: ['object', 'array', 'string', 'null'], properties: { a: schema, b: schema }, items: schema };
   const params = JSON.stringify(schema);
+  assert.ok(params.length < 200000, `${params.length} bytes of params`);
   const m = { ...counter, actions: [{ id: 'LAB_WASI_COUNTER_ADD', name: 'Add', params }] };
   const t = performance.now();
   assert.throws(() => typegen(m), /the manifest is refused: a params schema/);

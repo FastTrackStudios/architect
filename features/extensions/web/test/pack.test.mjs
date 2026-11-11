@@ -40,10 +40,28 @@ test('N4: release.yml reads NPM_TOKEN only in npm-publish, in the npm environmen
   const yml = readFileSync(new URL('../../../../.github/workflows/release.yml', import.meta.url), 'utf8');
   const jobs = yml.slice(yml.indexOf('\n  npm-pack:'));
   const publish = jobs.slice(jobs.indexOf('\n  npm-publish:'));
-  const pack = jobs.slice(0, jobs.indexOf('\n  npm-publish:'));
+  const before = jobs.slice(0, jobs.indexOf('\n  npm-publish:'));
   assert.match(publish, /\n    environment: npm\n/);
-  assert.ok(!pack.includes('NPM_TOKEN') && !pack.includes('id-token'), 'npm-pack has no token');
-  assert.equal(yml.split('secrets.NPM_TOKEN').length - 1, publish.split('secrets.NPM_TOKEN').length - 1, 'read nowhere else');
+  assert.ok(!before.includes('NPM_TOKEN') && !before.includes('id-token'), 'npm-pack and npm-test have no token');
+  assert.equal(yml.split('secrets.NPM_TOKEN').length - 1, 1, 'read once, in one step');
+  assert.ok(publish.includes('secrets.NPM_TOKEN'));
   for (const uses of jobs.matchAll(/uses: ([^\s]+)/g)) assert.match(uses[1], /^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/, uses[1]);
   assert.ok(!/continue-on-error/.test(publish), 'a failed publish shows red');
+});
+
+// SF5 (third review of #539): the tarballs were packed after tests and
+// dev dependencies had run; nothing tied what was published to what was
+// packed.
+test('SF5: the tarballs are packed before anything else runs, and published only if their digests match', () => {
+  const yml = readFileSync(new URL('../../../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const jobs = yml.slice(yml.indexOf('\n  npm-pack:'));
+  const pack = jobs.slice(0, jobs.indexOf('\n  npm-test:'));
+  const publish = jobs.slice(jobs.indexOf('\n  npm-publish:'));
+  assert.ok(pack.includes('npm pack --ignore-scripts'));
+  assert.ok(!/npm (ci|install|test|run)\b/.test(pack), 'nothing installed or run before the pack');
+  assert.match(pack, /outputs:\n\s+runtime_sha256: .*\n\s+cli_sha256:/);
+  assert.match(publish, /needs: \[npm-pack, npm-test\]/);
+  assert.match(publish, /RUNTIME_SHA256: \$\{\{ needs\.npm-pack\.outputs\.runtime_sha256 \}\}/);
+  assert.match(publish, /sha256sum -c -[\s\S]*npm publish/, 'checked before it is published');
+  assert.ok(!/npm (ci|install|run)\b/.test(publish), 'nothing installed or run where the token is');
 });
