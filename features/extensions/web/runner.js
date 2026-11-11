@@ -125,7 +125,8 @@ export function limitMemory(bytes, pages) {
       while (count--) {
         if (p >= end) throw new Error('not a wasm module: a memory runs past its section');
         const flags = b[p++];
-        if (flags & 0x04) return b; // memory64: left alone
+        // A 64-bit memory's limit is not written here: such a module is refused.
+        if (flags & 0x04) throw new Error('a memory64 module: its memory cannot be limited, so it is refused');
         let min;
         let max = Infinity;
         [min, p] = leb(b, p, end);
@@ -144,33 +145,67 @@ export function limitMemory(bytes, pages) {
   return b;
 }
 
-/// Compiled core modules, shared by every instance of a component (the
-/// native compile cache's part): by resolved URL and memory limit.
-const compiled = new Map();
-
-async function coreModule(href, memory, load) {
-  const key = `${href}#${memory}`;
-  if (!compiled.has(key)) {
-    compiled.set(
+/// A compiled core module, shared by every instance of its component (the
+/// native compile cache's part), in the component's `cache` (emptied when
+/// it stops): by resolved URL and memory limit.
+async function coreModule(cache, href, memory, load, cap) {
+  const key = `module ${href}#${memory}`;
+  if (!cache.has(key)) {
+    cache.set(
       key,
-      Promise.resolve(load(href)).then((bytes) => WebAssembly.compile(limitMemory(bytes, Math.floor(memory / PAGE)))),
+      loadCapped(load, href, cap).then((bytes) => WebAssembly.compile(limitMemory(bytes, Math.floor(memory / PAGE)))),
     );
   }
-  return compiled.get(key);
+  return cache.get(key);
 }
 
+const tooBig = (url, cap) => new Error(`${url} is past ${cap} bytes`);
+
 /// A file of the extension's, read by the page: never with the page's
-/// credentials.
-async function fetchBytes(url) {
+/// credentials, and never past `cap` bytes (it stops reading there).
+export async function fetchBytes(url, cap = Infinity) {
   if (url.startsWith('file:')) {
     // Under node only: named so a page's bundler leaves it out.
     const fsModule = 'node:fs/promises';
     const fs = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
+    if ((await fs.stat(new URL(url))).size > cap) throw tooBig(url, cap);
     return fs.readFile(new URL(url));
   }
   const r = await fetch(url, { credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
-  return r.arrayBuffer();
+  const declared = Number(r.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > cap) {
+    await r.body?.cancel().catch(() => {});
+    throw tooBig(url, cap);
+  }
+  if (!r.body) return new ArrayBuffer(0);
+  const reader = r.body.getReader();
+  const parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.length;
+    if (n > cap) {
+      await reader.cancel().catch(() => {});
+      throw tooBig(url, cap);
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out.buffer;
+}
+
+/// `load(href, cap)`, held to `cap` whatever the loader does.
+async function loadCapped(load, href, cap) {
+  const bytes = await load(href, cap);
+  if ((bytes?.byteLength ?? 0) > cap) throw tooBig(href, cap);
+  return bytes;
 }
 
 /// A core module `name` the extension's JS asks for, beside its module
@@ -182,17 +217,18 @@ export function besideModule(url, name) {
   if (!n || n.length > 256 || /^[a-z][a-z0-9+.-]*:/i.test(n) || n.startsWith('/') || /[\\?#%\u0000-\u001f]/.test(n)) return null;
   if (n.split('/').some((s) => s === '' || s === '.' || s === '..')) return null;
   const folder = new URL('.', url).href;
+  // A glue at a site's root would make every file of the site its own.
+  if (new URL(folder).pathname === '/') return null;
   const href = new URL(n, folder).href;
   return href.startsWith(folder) ? href : null;
 }
 
 /// The bytes of a core module the sandbox's worker asked for, unread
-/// (read in the worker): by resolved URL.
-const raw = new Map();
-
-function coreBytes(href, load) {
-  if (!raw.has(href)) raw.set(href, Promise.resolve(load(href)));
-  return raw.get(href);
+/// (read in the worker), in its component's `cache`: by resolved URL.
+function coreBytes(cache, href, load, cap) {
+  const key = `bytes ${href}`;
+  if (!cache.has(key)) cache.set(key, loadCapped(load, href, cap));
+  return cache.get(key);
 }
 
 const text = (bytes) => new TextDecoder().decode(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes);
@@ -441,7 +477,7 @@ class Instance {
     if (opts.inlineGlue) {
       // The glue as text the page read (and checked): the worker makes
       // it a module of its own origin.
-      Promise.resolve((opts.load ?? fetchBytes)(opts.url))
+      loadCapped(opts.load ?? fetchBytes, opts.url, limits.moduleBytes ?? 64 << 20)
         .then((bytes) => {
           if (!this.dead) this.worker.postMessage({ ...start, glue: text(bytes) });
         })
@@ -534,11 +570,12 @@ class Instance {
         const load = this.opts.load ?? fetchBytes;
         let value;
         try {
+          const cap = this.limits.moduleBytes ?? 64 << 20;
+          const cache = this.opts.cache ?? new Map();
           if (this.opts.bytesOnly) {
-            const bytes = await coreBytes(href, load);
-            if (bytes.byteLength > (this.limits.moduleBytes ?? 64 << 20)) throw new Error(`past ${this.limits.moduleBytes ?? 64 << 20} bytes`);
+            const bytes = await coreBytes(cache, href, load, cap);
             value = { bytes, memory: Math.floor(this.limits.memory / PAGE) };
-          } else value = { module: await coreModule(href, this.limits.memory, load) };
+          } else value = { module: await coreModule(cache, href, this.limits.memory, load, cap) };
         } catch (e) {
           this.kill(`its module ${name} could not be read: ${e?.message ?? e}`);
           break;
@@ -623,10 +660,12 @@ export class Component {
     // In a page (no `spawn` of the embedder's), its instances run in a
     // sandbox frame; `sandbox: false` only where the page trusts its JS.
     this.sandbox = null;
-    this.runOpts = opts;
+    // Its core modules (bytes, compiled), its own: emptied when it stops.
+    this.cache = new Map();
+    this.runOpts = { ...opts, cache: this.cache };
     this.sandboxed = opts.sandbox !== false && !opts.spawn && !!globalThis.document && !!globalThis.MessageChannel;
     if (this.sandboxed) {
-      this.runOpts = { ...opts, spawn: () => this.ensureSandbox().spawn(), bytesOnly: true, inlineGlue: true };
+      this.runOpts = { ...this.runOpts, spawn: () => this.ensureSandbox().spawn(), bytesOnly: true, inlineGlue: true };
     }
     this.idled = false;
     this.lastUsed = performance.now();
@@ -640,9 +679,11 @@ export class Component {
     return this.sandbox;
   }
 
-  /// `limits.idle` after its last call, with no view mounted and no
-  /// worker running, it is stopped and its sandbox taken down: whatever
-  /// its own JS was doing ends. Its next call starts it again.
+  /// `limits.idle` after the embedder's last call (`invoke`, `render`,
+  /// `event`: never the extension's own timers, news or workers, which it
+  /// could keep going forever), with no view mounted, it is stopped and
+  /// its sandbox taken down: whatever its own JS was doing, its workers
+  /// included, ends. Its next call starts it again.
   watch() {
     const idle = this.limits.idle;
     if (!idle || this.stopped) return;
@@ -650,7 +691,8 @@ export class Component {
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
       if (this.stopped || !this.live) return;
-      if (performance.now() - this.lastUsed < idle || this.panes.size || this.alive()) return this.watch();
+      if (performance.now() - this.lastUsed < idle || this.panes.size) return this.watch();
+      this.cancelAll();
       this.log('info', 'wasi', `idle for ${idle} ms: stopped until its next call`);
       clearTimeout(this.timer);
       this.live.kill('it was idle');
@@ -710,8 +752,13 @@ export class Component {
   }
 
   /// One call at a time, as the native actor's queue: `f` after the last.
-  job(f) {
+  /// The embedder used it: what the idle watchdog counts.
+  used() {
     this.lastUsed = performance.now();
+    this.watch();
+  }
+
+  job(f) {
     const run = this.queue.then(f, f);
     this.queue = run.then(
       () => this.afterJob(),
@@ -722,8 +769,6 @@ export class Component {
 
   afterJob() {
     this.stats.calls++;
-    this.lastUsed = performance.now();
-    this.watch();
     if (this.newsDue) this.scheduleNews();
   }
 
@@ -752,6 +797,7 @@ export class Component {
   /// Runs action `action` (JSON `args`, the invocation as JSON); then what
   /// its views changed.
   invoke(action, args, invocation) {
+    this.used();
     return this.job(async () => {
       try {
         return await this.on((i) => i.call('guest', 'invoke', [action, args, invocation]));
@@ -763,6 +809,7 @@ export class Component {
 
   /// Mounts view `view` as `pane`: its first frame to `frame`.
   render(pane, view) {
+    this.used();
     return this.job(async () => {
       try {
         const edits = await this.on((i) => i.call('guest', 'render', [pane, view], { big: [0] }));
@@ -778,6 +825,7 @@ export class Component {
 
   /// An event in `pane`'s view (the world's `view-event`, ids as numbers).
   event(pane, event) {
+    this.used();
     return this.job(async () => {
       if (!this.live || !this.panes.has(pane)) return;
       try {
@@ -806,7 +854,8 @@ export class Component {
   async timers() {
     clearTimeout(this.timer);
     this.timer = null;
-    if (!this.live) return;
+    // Its timers are its views': with none mounted, none runs.
+    if (!this.live || !this.panes.size) return;
     try {
       const next = await this.on((i) => i.call('guest', 'tick'));
       if (next != null && !this.stopped) {
@@ -883,6 +932,7 @@ export class Component {
     this.stats.alive = false;
     this.sandbox?.close();
     this.sandbox = null;
+    this.cache.clear();
   }
 
   /// What it runs: its instance and each worker.

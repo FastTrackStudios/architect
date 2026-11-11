@@ -398,7 +398,8 @@ export function limitMemory(bytes, pages) {
       while (count--) {
         if (p >= end) throw new Error('not a wasm module: a memory runs past its section');
         const flags = b[p++];
-        if (flags & 0x04) return b; // memory64: left alone
+        // A 64-bit memory's limit is not written here: such a module is refused.
+        if (flags & 0x04) throw new Error('a memory64 module: its memory cannot be limited, so it is refused');
         let min;
         let max = Infinity;
         [min, p] = leb(b, p, end);
