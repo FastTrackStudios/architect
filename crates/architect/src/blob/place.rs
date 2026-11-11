@@ -1,7 +1,6 @@
 //! Putting bytes in place so none is lost on the way.
 //!
-//! Every move or copy that ends with a source being removed goes through
-//! here: the bytes are **staged** beside the target under one temp name
+//! Every copy that ends with a source being removed goes through here: the bytes are **staged** beside the target under one temp name
 //! ([`staging_path`], the suffix [`STAGING`]), synced, read back and
 //! checked against their length and sha-256, then **committed** by a
 //! rename (or a no-clobber link) and the directory synced. Only then may
@@ -228,24 +227,6 @@ async fn sync_dir(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Move `from` (whose bytes hash to `hash`) to `to`: a rename, or across
-/// filesystems a verified copy committed before `from` is removed.
-///
-/// # Errors
-///
-/// The move failed; `from` is untouched and nothing is left at `to`'s
-/// staging name.
-pub async fn move_file(from: &Path, to: &Path, hash: Sha256) -> io::Result<()> {
-    match tokio::fs::rename(from, to).await {
-        Ok(()) => return sync_dir(to).await,
-        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {}
-        Err(e) => return Err(e),
-    }
-    let staged = stage(from, to, hash, false).await?;
-    commit(&staged.path, to, false).await?;
-    tokio::fs::remove_file(from).await
-}
-
 impl LocalFs {
     /// Keep the file at `from` (whose bytes hash to `hash`) in the store
     /// too, within the budget: linked when `link` and the filesystem
@@ -449,10 +430,12 @@ mod tests {
                 "the source is untouched"
             );
         }
-        // The same copy without a fault lands, and only then is it moved.
-        move_file(&from, &to, hash).await.unwrap();
+        // The same copy without a fault lands, and the source stays until
+        // the caller removes it.
+        let staged = stage(&from, &to, hash, false).await.unwrap();
+        commit(&staged.path, &to, false).await.unwrap();
         assert_eq!(std::fs::read(&to).unwrap(), bytes);
-        assert!(!from.exists());
+        assert!(from.exists());
     }
 
     #[tokio::test]

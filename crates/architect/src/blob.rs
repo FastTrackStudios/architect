@@ -98,8 +98,7 @@ pub use http_remote::HttpRemote;
 pub use http_serve::serve_http;
 pub use keep::Collected;
 pub use place::{
-    STAGING, Sink, Staged, commit, copy_verified_with, hash_file, is_staging, move_file, stage,
-    staging_path,
+    STAGING, Sink, Staged, commit, copy_verified_with, hash_file, is_staging, stage, staging_path,
 };
 #[cfg(feature = "blob-s3")]
 pub use s3::{HolderEvents, S3Config, S3Store};
