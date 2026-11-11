@@ -943,6 +943,8 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
     let plays = share.listen.label();
     let code = share.code.clone();
     let plays_code = share.code.clone();
+    // Why changing how far it plays failed, shown under it.
+    let mut plays_problem = use_signal(|| None::<String>);
     rsx! {
         div { "data-share": "{share.code}", "data-share-state": "{state}",
             style: "display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; opacity: {dim};",
@@ -968,11 +970,16 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
                     onpick: move |v: String| {
                         let (a, c) = (ui.accounts(), plays_code.clone());
                         spawn(async move {
-                            if let Ok(l) = architect_spaces::Listen::parse(&v) {
-                                let _ = a.share_update(None, &c, architect_spaces::ShareChange::Listen(l)).await;
-                            }
+                            let changed = match architect_spaces::Listen::parse(&v) {
+                                Ok(l) => a.share_update(None, &c, architect_spaces::ShareChange::Listen(l)).await.map(|_| ()),
+                                Err(why) => Err(why),
+                            };
+                            plays_problem.set(changed.err());
                         });
                     }
+                }
+                if let Some(why) = plays_problem() {
+                    div { role: "alert", style: "font-size: 12px; color: {t.danger};", "{why}" }
                 }
                 for audience in share.audiences.iter() {
                     AudiencePlays { key: "{audience.code}", code: share.code.clone(), name: audience.name.clone(), audience_code: audience.code.clone(), now: share.listen_for(Some(audience)).label().to_owned() }
@@ -991,6 +998,7 @@ fn AudiencePlays(code: String, name: String, audience_code: String, now: String)
     };
     let t = theme();
     let label = name.clone();
+    let mut problem = use_signal(|| None::<String>);
     rsx! {
         div { "data-share-audience": "{label}",
             style: "display: flex; align-items: center; gap: 8px; font-size: 12px;",
@@ -999,12 +1007,17 @@ fn AudiencePlays(code: String, name: String, audience_code: String, now: String)
                 onpick: move |v: String| {
                     let (a, c, n) = (ui.accounts(), code.clone(), name.clone());
                     spawn(async move {
-                        if let Ok(l) = architect_spaces::Listen::parse(&v) {
-                            let _ = a.share_audience_listen(None, &c, &n, Some(l)).await;
-                        }
+                        let changed = match architect_spaces::Listen::parse(&v) {
+                            Ok(l) => a.share_audience_listen(None, &c, &n, Some(l)).await.map(|_| ()),
+                            Err(why) => Err(why),
+                        };
+                        problem.set(changed.err());
                     });
                 }
             }
+        }
+        if let Some(why) = problem() {
+            div { role: "alert", style: "font-size: 12px; color: {t.danger};", "{why}" }
         }
     }
 }
