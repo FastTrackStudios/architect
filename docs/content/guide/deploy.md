@@ -224,10 +224,14 @@ drawn there. What a block draws is made safe before it is written
 (`features/sites/src/sanitize.rs`, by allow-lists): an inline SVG keeps
 its drawing, classes and `data-*` (the player's `data-follow-playhead` /
 `data-at`), HTML keeps text, lists, tables, links, images and media,
-and URLs are only relative, `#…`, `https:`, `mailto:` or a raster
-`data:` image; scripts, handlers, forms, SMIL animation,
-`<foreignObject>` and CSS that loads anything or pins a box over the page
-are dropped ([Sites](@/features/sites.md) has the lists). Every page of a
+and URLs are only relative, `#…`, `https:` (links and media) or
+`mailto:`, and an image only relative or a raster `data:` image;
+scripts, handlers, forms, SMIL animation, `<foreignObject>`, and CSS with
+a string, comment, escape, `var()`, custom property, at-rule, anything
+that loads, or a `position` other than `static`/`relative` are dropped.
+Each block sits in a box the site draws (`contain`, `overflow`), and its
+SVG sheet is scoped to that box ([Sites](@/features/sites.md) has the
+lists). Every page of a
 share or a Site the node serves carries a Content-Security-Policy
 (`apps/desktop/src/node/shares.rs` `content_security_policy`): scripts
 from the node and the site's theme script by hash only, images also from

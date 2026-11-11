@@ -194,7 +194,8 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
    is a folder of installed extensions, both kinds, read again when it
    changes (the node's, #488). **`features/sites/src/element_html.rs`**,
    `elements_to_html`, writes a page's element tree out as markup and
-   hands it to **`features/sites/src/sanitize.rs`**, `sanitize`, which
+   hands it to **`features/sites/src/sanitize.rs`**, `sanitize` (for a
+   block, `sanitize_block`, with the block's scope class), which
    re-writes whatever a renderer drew by allow-lists, deciding on decoded
    values:
    - **Elements:** inside an `<svg>`, its drawing elements (`svg`, `g`,
@@ -209,28 +210,57 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
      their contents; any other element is left out, its contents kept.
    - **Attributes:** `class`, `title`, `lang`, `dir`, `role`, `aria-*`,
      `data-*` and `id` (but not the page's own: `site-*`, `share-*`,
-     `comments`, `data-site-*`, `data-act`), an SVG's geometry and
-     presentation, a few per element (`alt`, `controls`, `colspan`, …)
-     and a sanitised `style`. Never `on…`, `srcset`, `ping`, `action`.
+     `comments`, `data-site-*`, `data-act`, nor a name the page's scripts
+     read off `window`: `architect`, `addEventListener`, `EventSource`,
+     `matchMedia`, …), an SVG's geometry and presentation, a few per
+     element (`alt`, `controls`, `colspan`, …) and a sanitised `style`.
+     Never `on…`, `srcset`, `ping`, `action`.
    - **URLs:** relative, `#…`, `https:` and `mailto:` for a link,
-     `https:` for media, and raster `data:image/…` for an image; `<use>`
-     only `#id`; a presentation attribute only `url(#id)`.
-   - **CSS:** a `<style>` sheet only inside an `<svg>`. A sheet is dropped
-     whole, and a `style` attribute loses the declaration, that holds
-     `url(`, `@import`, `expression(`, `image-set(`, `src(`,
-     `-moz-binding`, `behavior:`, a CSS escape or `position: fixed` /
-     `sticky`. A sheet is not scoped to its drawing and can restyle the
-     page's classes; the node's Content-Security-Policy keeps it from
-     loading or sending anything.
+     relative or `https:` for media, and for an image (`<img src>`, an
+     SVG `<image href>`) only relative or a raster `data:image/…`: a block
+     loads no image from another site, which would be a beacon (a note's
+     own images are the site's content and may). `<use>` only `#id`.
+   - **CSS,** deliberately blunt. Nothing a block writes as CSS (a sheet,
+     a `style` attribute, a presentation attribute) may hold a quote, a
+     comment, a CSS escape, `var(`, a custom property (`--name`) or an
+     at-rule (`@…`), so the text checked is the text a browser reads;
+     nor `url(`, `image-set(`, `image(`, `src(`, `cross-fade(`,
+     `element(`, `paint(`, `expression(`, `-moz-binding` or `behavior`;
+     nor a `position` other than `static` or `relative`. A presentation
+     attribute may use exactly `url(#id)`, pointing into its own drawing.
+     A `style` attribute holding a quote, comment, escape or brace is
+     dropped whole; otherwise it loses each declaration refused. A
+     `<style>` sheet is kept only inside an `<svg>` of a block, only as
+     flat `selector { declarations }` rules, and every selector is put
+     under the block's own scope class (`.site-block-… sel`); a sheet
+     with a nested or unbalanced brace, a selector naming `:root`,
+     `html`, `body` or `:host` or starting with a combinator, or any
+     declaration refused is dropped whole.
+   - **The box.** The site, not the block, wraps each block in
+     `<div class="site-block site-block-…" style="…">`
+     (`features/sites/src/markdown.rs`; the class is `Block::scope`, the
+     style `BLOCK_BOX_STYLE`: `contain: layout paint style`,
+     `overflow: auto`, `position: relative`, `isolation: isolate`, the
+     first three `!important`). Whatever a block draws is laid out,
+     painted and stacked inside it: a block cannot cover or restyle the
+     page, and what overflows scrolls inside the box.
+
+   For extension authors: style a block with plain declarations, colours
+   as values (`#f5a623`, `currentColor`), unquoted generic font families
+   and attribute selectors (`[aria-current=time]`), or with presentation
+   attributes on the SVG; theme variables (`var(--…)`) and `@font-face`
+   do not come through, nor images from other sites (embed them as
+   `data:` or ship them with the note).
 
    A block's markup comes from extensions and notes, so neither can be
    made to run away: `sanitize` takes time and space linear in its input
    on any input (one loop pass per byte at most, at most 256 elements open
    at once), an element tree is written no deeper than 256 levels and to
    at most 100,000 elements and 16 MiB, and a component's drawing stays a
-   tree (an edit that puts one node in two places is refused), holds at
-   most 50,000 nodes and 16 MiB as built and as written, is cloned no
-   deeper than 256 levels and stops at the 10 s draw deadline.
+   tree (an edit that puts one node in two places, or that would make a
+   tree deeper than 256 levels, is refused, so no edit walks further up
+   than that), holds at most 50,000 nodes and 16 MiB as built and as
+   written, and stops at the 10 s draw deadline.
    **`features/sites/src/bases.rs`**, `BaseBlocks`, draws a ```` ```base ````
    fence's views with `vault::bases::view_table`.
 4. **`features/sites/src/ui.rs`**: the pure components (the header, the

@@ -1661,10 +1661,15 @@ component's embed view, or a Rust `BlockRenderer`'s HTML or inline SVG)
 has no script of its own on the page: what it draws is kept by
 allow-lists (`features/sites/src/sanitize.rs`: SVG drawing elements,
 basic HTML, `class`, `aria-*`, `data-*`, geometry, URLs only relative,
-`https:`, `mailto:` or a raster `data:` image), and scripts, handlers,
-forms, SMIL animation and `<foreignObject>` are dropped. The page's own
-ids and data attributes (`site-*`, `share-*`, `data-site-*`) are not a
-block's to use.
+`https:` or `mailto:`, an image only relative or a raster `data:` image),
+and scripts, handlers, forms, SMIL animation and `<foreignObject>` are
+dropped. Its CSS is plain declarations only: no quotes, comments,
+escapes, `var()`, custom properties, at-rules or `position` but
+`static`/`relative`; an SVG `<style>` sheet is flat rules, put under the
+block's own box class (the site wraps every block in a contained box).
+The page's own ids and data attributes (`site-*`, `share-*`,
+`data-site-*`), and ids shadowing the page script's globals
+(`architect`, …), are not a block's to use.
 It follows with attributes alone, which come through as drawn, on HTML
 elements or SVG ones:
 
