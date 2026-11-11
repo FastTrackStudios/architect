@@ -64,6 +64,8 @@ fn statvfs(_path: &Path) -> Option<Space> {
 /// A write refused for space: what it needed and what there was.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoRoom {
+    /// The area that refused (its root).
+    pub area: PathBuf,
     /// Bytes the write asked for.
     pub need: u64,
     /// Bytes in the store, and promised to writes in flight.
@@ -87,27 +89,28 @@ impl NoRoom {
 
 impl fmt::Display for NoRoom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let area = self.area.display();
         if self.too_large() {
             return write!(
                 f,
-                "{} bytes are more than the store's whole limit of {}",
+                "{} bytes are more than the whole limit of {} of {area}",
                 self.need, self.max
             );
         }
         write!(
             f,
-            "no room for {} bytes: the store has {} (+{} in flight) of {}",
+            "no room for {} bytes in {area}: it has {} (+{} in flight) of {}",
             self.need, self.used, self.reserved, self.max
         )?;
         match self.free {
             Some(free) => write!(
                 f,
-                ", the filesystem {free} free of a {} floor",
+                ", its filesystem {free} free of a {} floor",
                 self.keep_free
             ),
             None if self.keep_free > 0 => write!(
                 f,
-                "; the filesystem's free space cannot be read, so a write that needs its {} floor is refused",
+                "; its filesystem's free space cannot be read, so a write that needs its {} floor is refused",
                 self.keep_free
             ),
             None => Ok(()),
@@ -239,6 +242,7 @@ impl StoreBudget {
         if over_max || under_floor {
             self.refused.fetch_add(1, Ordering::Relaxed);
             return Err(NoRoom {
+                area: self.root.clone(),
                 need,
                 used: books.used,
                 reserved: books.reserved,

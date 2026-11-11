@@ -158,17 +158,80 @@ pub async fn stage(from: &Path, to: &Path, hash: Sha256, link: bool) -> io::Resu
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
-    if link && tokio::fs::hard_link(from, &staged).await.is_ok() {
+    // A link shares the bytes with every other name of `from`: only when
+    // it has no other (a user's hard link, a leftover of a crash), or a
+    // write through that name would change these bytes too.
+    if link && single_name(from).await && tokio::fs::hard_link(from, &staged).await.is_ok() {
         return Ok(Staged {
             path: staged,
             linked: true,
         });
+    }
+    if reflink(from, &staged).await.is_ok() {
+        // A clone shares nothing a write can reach; its bytes are checked
+        // like a copy's.
+        match hash_file(&staged).await {
+            Ok((_, actual)) if actual == hash => {
+                return Ok(Staged {
+                    path: staged,
+                    linked: false,
+                });
+            }
+            _ => {
+                let _ = tokio::fs::remove_file(&staged).await;
+            }
+        }
     }
     copy_verified_with(from, &staged, hash, |p| tokio::fs::File::create(p)).await?;
     Ok(Staged {
         path: staged,
         linked: false,
     })
+}
+
+/// Whether `path` has exactly one name (its link count is 1).
+async fn single_name(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        tokio::fs::metadata(path)
+            .await
+            .is_ok_and(|m| m.nlink() == 1)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// Clone `from` into a new file at `to` (`FICLONE`: btrfs, XFS, bcachefs
+/// share extents, copy on write), synced. Fails where it is not offered
+/// (leaving nothing at `to`).
+async fn reflink(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let (from, to) = (from.to_owned(), to.to_owned());
+        tokio::task::spawn_blocking(move || {
+            let src = std::fs::File::open(&from)?;
+            let dst = std::fs::File::create(&to)?;
+            let done = rustix::fs::ioctl_ficlone(&dst, &src)
+                .map_err(io::Error::from)
+                .and_then(|()| dst.sync_all());
+            if done.is_err() {
+                drop(dst);
+                let _ = std::fs::remove_file(&to);
+            }
+            done
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (from, to);
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
 }
 
 /// Put staged bytes at `to` and sync the directory. With `no_clobber`, a
@@ -461,6 +524,34 @@ mod tests {
         assert_eq!(refused.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read(&to).unwrap(), b"the user's");
         assert!(!staged.path.exists());
+    }
+
+    /// A source with a second name (a user's hard link) is never linked:
+    /// a write through that name would change the staged bytes too.
+    #[tokio::test]
+    async fn a_file_with_another_name_is_copied_not_linked() {
+        use std::os::unix::fs::MetadataExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let take = tmp.path().join("take.wav");
+        std::fs::write(&take, b"the take").unwrap();
+        std::fs::hard_link(&take, tmp.path().join("alias.wav")).unwrap();
+        let kept = tmp.path().join("kept");
+        let staged = stage(&take, &kept, Sha256::of(b"the take"), true)
+            .await
+            .unwrap();
+        assert!(!staged.linked);
+        assert_eq!(std::fs::metadata(&staged.path).unwrap().nlink(), 1);
+        assert_ne!(
+            std::fs::metadata(&staged.path).unwrap().ino(),
+            std::fs::metadata(&take).unwrap().ino()
+        );
+        // With one name it is linked.
+        std::fs::remove_file(tmp.path().join("alias.wav")).unwrap();
+        std::fs::remove_file(&staged.path).unwrap();
+        let again = stage(&take, &kept, Sha256::of(b"the take"), true)
+            .await
+            .unwrap();
+        assert!(again.linked);
     }
 
     #[test]
