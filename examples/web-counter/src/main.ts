@@ -2,17 +2,26 @@
 // API only: load it, run its actions with their generated types, mount
 // its views. `npm run extension` writes public/counter and src/counter.
 import { loadExtension, memoryHost, mountView, type Extension } from '@fasttrackstudio/architect';
-import { bind, type Actions } from './counter/actions.js';
+import { bind, integrity, type Actions } from './counter/actions.js';
+
+import { isSupported } from '@fasttrackstudio/architect';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-async function main(): Promise<Extension<Actions>> {
+async function main(): Promise<Extension<Actions> | null> {
+  if (!isSupported()) {
+    $('status').textContent = 'This browser cannot run Architect extensions yet (it lacks WebAssembly JS Promise Integration: Safari, for now).';
+    document.body.dataset.ready = 'unsupported';
+    return null;
+  }
   const host = memoryHost({
     // An app action the page offers extensions: they run it only if granted.
     actions: { THEME_LIST: { effect: 'read_only', run: () => ['light', 'dark', 'sepia'] } },
     log: (line) => console.debug(`[${line.source}] ${line.text}`),
   });
   const ext = await loadExtension<Actions>('/counter/', {
+    // Its files pinned: the lock build-web wrote, by its digest.
+    integrity,
     host,
     // Its manifest asks for THEME_LIST; the page grants it. Nothing else.
     grant: { actions: ['THEME_LIST'] },
