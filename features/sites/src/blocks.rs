@@ -18,7 +18,7 @@ use std::sync::Arc;
 use architect_extensions::contrib::Claim;
 use architect_pages::Element;
 
-use crate::element_html::elements_to_html;
+use crate::element_html::{elements_to_html, elements_to_markup};
 
 /// One block to draw.
 #[derive(Debug, Clone, Copy)]
@@ -33,23 +33,67 @@ pub struct Block<'a> {
     pub page: &'a str,
 }
 
+impl Block<'_> {
+    /// The class of the box the site wraps this block in
+    /// (`site-block-` and 16 hex digits, from what the block is): its SVG
+    /// `<style>` sheets are put under it ([`crate::sanitize_block`]), so
+    /// they style this block and nothing else on the page. The same block
+    /// always gets the same class, so a page built twice is the same.
+    #[must_use]
+    pub fn scope(&self) -> String {
+        // FNV-1a: stable across builds and Rust versions.
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let claim = self.claim.to_string();
+        for part in [claim.as_str(), self.info, self.source, self.page] {
+            for byte in part.bytes().chain([0xff]) {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        format!("site-block-{hash:016x}")
+    }
+}
+
 /// What a renderer drew.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Drawn {
     /// An element tree, as a page draws one (`architect_pages::Element`).
     Elements(Vec<Element>),
-    /// Finished markup (HTML, or inline SVG), written as is.
+    /// Finished markup (HTML, or inline SVG), written once it is made
+    /// safe ([`crate::sanitize()`]).
     Html(String),
 }
 
 impl Drawn {
-    /// As HTML.
-    #[must_use]
-    pub fn into_html(self) -> String {
+    /// As HTML, with only what [`crate::sanitize()`]'s allow-lists keep
+    /// (an inline SVG keeps its drawing, its classes and its `data-*`;
+    /// never a script, an `on…` handler, a URL of another scheme than
+    /// `https:`, a form or a `<foreignObject>`). A tree is written by
+    /// [`elements_to_html`] first.
+    ///
+    /// # Errors
+    ///
+    /// A tree too big to write ([`elements_to_html`]).
+    pub fn into_html(self) -> Result<String, String> {
         match self {
             Self::Elements(elements) => elements_to_html(&elements),
-            Self::Html(html) => html,
+            Self::Html(html) => Ok(crate::sanitize::sanitize(&html)),
         }
+    }
+
+    /// [`Self::into_html`] for a block in the box the site wraps it in, of
+    /// class `scope` ([`Block::scope`]): an SVG's `<style>` sheet is kept,
+    /// put under that class ([`crate::sanitize_block`]).
+    ///
+    /// # Errors
+    ///
+    /// A tree too big to write ([`elements_to_html`]).
+    pub fn into_block_html(self, scope: &str) -> Result<String, String> {
+        let markup = match self {
+            Self::Elements(elements) => elements_to_markup(&elements)?,
+            Self::Html(html) => html,
+        };
+        Ok(crate::sanitize::sanitize_block(&markup, scope))
     }
 }
 
@@ -60,6 +104,14 @@ pub trait BlockRenderer: Send + Sync {
 
     /// Whether it draws `claim`.
     fn claims(&self, claim: &Claim) -> bool;
+
+    /// Who draws `claim`, when it is a set of renderers (a distribution's,
+    /// the installed extensions'): the one of them that does. Its
+    /// [`name`](Self::name) otherwise.
+    fn drawn_by(&self, claim: &Claim) -> String {
+        let _ = claim;
+        self.name().to_owned()
+    }
 
     /// Draw `block`.
     ///
@@ -109,13 +161,50 @@ impl Blocks {
         self.renderers.is_empty()
     }
 
+    /// Whether a renderer claims `claim`.
+    #[must_use]
+    pub fn claims(&self, claim: &Claim) -> bool {
+        self.renderers.iter().any(|r| r.claims(claim))
+    }
+
     /// The first renderer claiming `block`'s claim: its name and what it
     /// drew. `None` when nobody claims it.
     #[must_use]
     pub fn draw(&self, block: &Block<'_>) -> Option<(String, Result<String, String>)> {
         let renderer = self.renderers.iter().find(|r| r.claims(block.claim))?;
-        let drawn = renderer.render(block).map(Drawn::into_html);
-        Some((renderer.name().to_owned(), drawn))
+        let scope = block.scope();
+        let drawn = renderer
+            .render(block)
+            .and_then(|drawn| drawn.into_block_html(&scope));
+        Some((renderer.drawn_by(block.claim), drawn))
+    }
+}
+
+/// A set is a renderer too: the first of its own that claims a block
+/// draws it. So a set handed over (a distribution's, an embedder's) is
+/// asked in its place among others.
+impl BlockRenderer for Blocks {
+    fn name(&self) -> &'static str {
+        "blocks"
+    }
+
+    fn claims(&self, claim: &Claim) -> bool {
+        Self::claims(self, claim)
+    }
+
+    fn drawn_by(&self, claim: &Claim) -> String {
+        self.renderers
+            .iter()
+            .find(|r| r.claims(claim))
+            .map_or_else(|| self.name().to_owned(), |r| r.drawn_by(claim))
+    }
+
+    fn render(&self, block: &Block<'_>) -> Result<Drawn, String> {
+        match self.draw(block) {
+            // Already made safe by `draw`; written as it is.
+            Some((_, drawn)) => drawn.map(Drawn::Html),
+            None => Err(format!("nothing claims {}", block.claim)),
+        }
     }
 }
 

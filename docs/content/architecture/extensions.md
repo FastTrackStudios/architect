@@ -1582,6 +1582,16 @@ extension draws one.
 | linked in | a component in the host's own document; its events are the document's | laid out by the host's document, up to `max_height` | `linked::use_embed` |
 | a page (TSX/JS on `QuickJS`, Luau) | a `RemoteDocument` sub-document (`features/pages/src/ui.rs` `PageEmbed`, provided by `use_embed_pages`) | its content's, measured | `useEmbed()`; Luau `embed()` |
 | a process's | a `RemoteDocument` sub-document (`features/extensions/src/remote.rs` `RemoteEmbed`) | its content's, measured | `linked::use_embed`, sent as `wire::EMBED_EVENT` to its root |
+| a WASI component's | as a process's | its content's, measured | `architect_extension_wasi::embed()` (`features/extensions/wasi-guest/src/lib.rs` `embed`), the same `wire::EMBED_EVENT` |
+
+**Outside the app.** A share link or a Site the node builds draws the
+same claims once per block, at build time (#488, `docs/content/guide/deploy.md`
+"Blocks extensions draw"): a page embed by `architect_sites::PageBlocks`, a
+WASI component's embed view by `architect_sites::ComponentBlocks`, which
+mounts the view in the component's sandbox, sends it the block, and writes
+the edits it answers with as HTML. The sandbox's WASI counter draws a
+```` ```bars ```` fence this way (`apps/sandbox/wasi-counter/src/lib.rs`
+`Bars`; `features/sites/tests/wasi.rs`).
 
 **Content-sized.** A pane's sub-document is as tall as its pane; an
 embed's is laid out at the host's width with its own height left to its
@@ -1646,10 +1656,22 @@ the view's; the host supplies a monotonic playhead and a seek, nothing
 more.
 
 **Declare it in the markup.** A block drawn at build time (an `[[embeds]]
-page`'s element tree, written out as HTML by `elements_to_html`, or a
-Rust `BlockRenderer`) has no script of its own on the page: scripts and
-handlers are dropped (`features/sites/src/element_html.rs`). It follows
-with attributes alone, which come through as drawn:
+page`'s element tree, written out as HTML by `elements_to_html`, a WASI
+component's embed view, or a Rust `BlockRenderer`'s HTML or inline SVG)
+has no script of its own on the page: what it draws is kept by
+allow-lists (`features/sites/src/sanitize.rs`: SVG drawing elements,
+basic HTML, `class`, `aria-*`, `data-*`, geometry, URLs only relative,
+`https:` or `mailto:`, an image only relative or a raster `data:` image),
+and scripts, handlers, forms, SMIL animation and `<foreignObject>` are
+dropped. Its CSS is plain declarations only: no quotes, comments,
+escapes, `var()`, custom properties, at-rules or `position` but
+`static`/`relative`; an SVG `<style>` sheet is flat rules, put under the
+block's own box class (the site wraps every block in a contained box).
+The page's own ids and data attributes (`site-*`, `share-*`,
+`data-site-*`), and ids shadowing the page script's globals
+(`architect`, …), are not a block's to use.
+It follows with attributes alone, which come through as drawn, on HTML
+elements or SVG ones:
 
 | Attribute | On | Means |
 | --- | --- | --- |
@@ -1658,16 +1680,29 @@ with attributes alone, which come through as drawn:
 | `data-media="<url>"` | the block's element, optional | follow this media file only; without it, whatever plays from the block's own page |
 
 The page marks the last child whose `data-at` has passed with
-`aria-current="time"` (style it: `[aria-current="time"]`), scrolls it
-into view inside the block (never the page), and seeks to its second on a
-click. Keyflow's chart drawn this way needs only a `data-at` per bar from
-its tempo map:
+`aria-current="time"` (style it: `[aria-current="time"]`), centres it in
+the nearest box that scrolls it (its bounding rectangle, so an SVG element
+works too; never the page), and seeks to its second on a click. A block's
+box scrolls sideways when its drawing is wider than the page. An SVG
+element marked current is filled from the theme (`--primary`, at 28%; a
+transparent rect per bar is enough), and hinted under the pointer.
+Keyflow's chart drawn this way needs only a `data-at` per bar from its
+tempo map, as HTML or as its engraved SVG (keyflow#59):
 
 ```tsx
 // pages/kf.tsx, an [[embeds]] page: the seconds come from the chart's tempo map.
 <div data-follow-playhead>
   {bars.map((bar) => <div class="kf-bar" data-at={String(bar.seconds)}>{bar.chord}</div>)}
 </div>
+```
+
+```svg
+<!-- the engraver's SVG: a transparent rect over each played bar -->
+<svg viewBox="0 0 1200 400" data-follow-playhead>
+  <rect class="kf-bar" data-at="0" x="40" y="20" width="270" height="80" fill="transparent"/>
+  <rect class="kf-bar" data-at="2.5" x="310" y="20" width="270" height="80" fill="transparent"/>
+  …
+</svg>
 ```
 
 The synced-lyrics block is built this way
@@ -1687,10 +1722,11 @@ The synced-lyrics block is built this way
 | `architect:playhead` | the same snapshot as an event on `document` |
 
 **What is not there yet.** The node draws the claimed fences of the
-extensions a build links (#488); a block drawn so follows the playhead
-with the attributes above and needs nothing more. A view mounted live on
-a share page (a WASI component or a page given the playhead as a host
-signal, as the issue has it) is not built: when it is, its host signal is
+extensions a build links and of those installed on it, page embeds and
+WASI components (#488); a block drawn so follows the playhead with the
+attributes above and needs nothing more. A view mounted live on a share
+page (a WASI component or a page given the playhead as a host signal) is
+not built: when it is, its host signal is
 `architect.playhead` above. The app's setlist pane has its own player
 still; the same queue and playhead there would need the queue
 (`apps/desktop/src/node/shares.rs` `queue`) and the follower moved into a

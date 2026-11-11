@@ -36,7 +36,11 @@ gui = [
 ]
 keyflow-lab = ["gui", "architect-app/keyflow-lab"]
 # WASI component extensions: Wasmtime and Cranelift in the binary.
-wasi = ["gui", "architect-app/wasi"]
+wasi = ["gui", "architect-app/wasi", "node-wasi"]
+# The node draws the fences an installed WASI component's embed view
+# claims on share links and Sites (#488): Wasmtime in the node, without
+# the window. The release's node and its image have it.
+node-wasi = ["architect-sites/wasi"]
 
 [dependencies]
 architect-app = { workspace = true, optional = true }

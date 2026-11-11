@@ -56,3 +56,17 @@ entry = "count-primes"
 id = "counter"
 title = "WASI Counter"
 icon = "cpu"
+
+# A ```bars fence in a note, drawn by its `bars` view as an inline embed:
+# in the app's note, and at build time on a node's share links and Sites
+# (#488), the component run in its sandbox there too.
+[[views]]
+id = "bars"
+title = "Bars"
+icon = "music"
+
+[[embeds]]
+id = "bars"
+title = "Bars"
+view = "bars"
+claims = { fence = ["bars"] }

@@ -283,6 +283,17 @@ async fn a_note_syncs_between_two_headless_nodes_through_the_always_on_one() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(page.contains("And by an agent."), "{page}");
+    // A Site's pages carry the shares' Content-Security-Policy (#520).
+    let res = http
+        .get(format!("http://{}/hello/", always.http))
+        .send()
+        .await
+        .unwrap();
+    let csp = res.headers()["content-security-policy"].to_str().unwrap();
+    assert!(
+        csp.starts_with("default-src 'self'; script-src 'self' 'sha256-"),
+        "{csp}"
+    );
 
     laptop.stop().await;
     always.stop().await;

@@ -17,14 +17,15 @@ they all keep working while it is stopped.
 ```sh
 cargo run -p architect-desktop -- serve --config architect.toml
 # without the window's crates at all, as the image builds it:
-cargo run -p architect-desktop --no-default-features --features vox -- serve
+cargo run -p architect-desktop --no-default-features --features vox,node-wasi -- serve
 ```
 
 `serve` is a run mode of the app's own binary (`apps/desktop/src/main.rs`),
 beside `actions`, `mcp` and `--headless`, so it is one product with one
 binary and one version. Built with `--no-default-features --features vox`
 (no `gui` feature), the binary is the node alone: no Blitz, wgpu or wayland,
-and no GPU libraries in the image. The desktop build is unchanged.
+and no GPU libraries in the image. `node-wasi` adds Wasmtime, so installed
+WASI components draw a share's blocks ([below](#blocks-extensions-draw)). The desktop build is unchanged.
 
 ## What it does
 
@@ -55,6 +56,7 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_DATA_DIR` | `architect-data` (`/data` in the image) | its iroh key, device id, documents and built Sites |
 | `ARCHITECT_VAULTS` | none | `id=path,…`: the vaults it holds (a relative path is under the data dir) |
 | `ARCHITECT_SITES` | none | `/mount=vault,…`: vaults published as Sites |
+| `ARCHITECT_EXTENSIONS` | `<data dir>/extensions` | installed extensions, a package folder each (`<id>/extension.toml`): the fences they claim are drawn on share links and Sites ([below](#blocks-extensions-draw)) |
 | `ARCHITECT_ISSUER` | none | the account server, `https://auth.fasttrackstudio.app` |
 | `ARCHITECT_SESSION_FILE` | none | a file holding the account's session token |
 | `ARCHITECT_ORG` | none | the org it offers the account while the account shares none |
@@ -189,13 +191,57 @@ prefix to the node and a code never clashes with the web front end's paths
 | **Domain** | optional: the same share at the root of a host of its own |
 | **Audiences** | optional: named slices of the scope, each a filter on a link of its own ([below](#one-share-many-audiences)) (`ShareAudience`) |
 
-A share's pages, and a Site's, draw the fences the build's compiled-in
-extensions claim, as the app draws them (#488): each linked extension's
-`[[embeds]] page` and the distribution's own renderers
-(`apps/distribution/src/lib.rs` `Distribution::blocks`, given to
-`apps/desktop/src/node/mod.rs` `start_with`). A build of your own with
-Studio's charts compiled in draws a `kf` fence as the chart
-([your own Architect](@/guide/your-own-architect.md)).
+### Blocks extensions draw
+
+A share's pages, and a Site's, draw the fences extensions claim, as the
+app draws them in a note (#488): a ```` ```kf ```` fence is the chart on
+`/s/<code>/`, not its source. The node asks, in this order:
+
+1. **The extensions installed on it**, a package folder each under
+   `ARCHITECT_EXTENSIONS` (`<data dir>/extensions/<id>/extension.toml`, as
+   an install writes them; `features/sites/src/installed.rs`
+   `InstalledBlocks`). An `[[embeds]] page` draws its fence with its page
+   (`PageBlocks`); a WASI component's `[[embeds]] view` is mounted once
+   per block in the extensions host's sandbox, its memory and time
+   limited, and given the block as its input
+   (`features/sites/src/component_blocks.rs` `ComponentBlocks`), so a
+   renderer written in Rust runs on the node without being linked into
+   it. The folder is read again when a package is added, removed or its
+   manifest written; the next build draws with it.
+2. **The extensions compiled into the build**: each linked extension's
+   `[[embeds]] page` and the distribution's own renderers
+   (`apps/distribution/src/lib.rs` `Distribution::blocks`, given to
+   `apps/desktop/src/node/mod.rs` `start_with`). An embedder that starts
+   the node from Rust hands it its own `architect_sites::Blocks`
+   (`FnBlock`). A build of your own with Studio's charts compiled in
+   draws a `kf` fence as the chart
+   ([your own Architect](@/guide/your-own-architect.md)).
+
+A block is drawn when the page is built, so it is rebuilt live with the
+rest of the page, and only into the pages an audience can see: a note
+outside a link's scope or another audience's filter never has its block
+drawn there. What a block draws is made safe before it is written
+(`features/sites/src/sanitize.rs`, by allow-lists): an inline SVG keeps
+its drawing, classes and `data-*` (the player's `data-follow-playhead` /
+`data-at`), HTML keeps text, lists, tables, links, images and media,
+and URLs are only relative, `#…`, `https:` (links and media) or
+`mailto:`, and an image only relative or a raster `data:` image;
+scripts, handlers, forms, SMIL animation, `<foreignObject>`, and CSS with
+a string, comment, escape, `var()`, custom property, at-rule, anything
+that loads, or a `position` other than `static`/`relative` are dropped.
+Each block sits in a box the site draws (`contain`, `overflow`), and its
+SVG sheet is scoped to that box ([Sites](@/features/sites.md) has the
+lists). Every page of a
+share or a Site the node serves carries a Content-Security-Policy
+(`apps/desktop/src/node/shares.rs` `content_security_policy`): scripts
+from the node and the site's theme script by hash only, images also from
+`https:` and `data:`, forms posted only to the node, no plugins or
+`<base>`. WASI components are drawn by a node built with
+feature `node-wasi` (the release's node and its image are); without it,
+only page embeds and compiled-in renderers draw. Tests:
+`apps/desktop/tests/shares.rs`
+`a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audience`
+and `an_embedders_own_blocks_draw_on_a_link_after_the_installed_ones`.
 
 **Kept as org data.** A share is a note of the vault it shares,
 `_architect/shares/<code>.md` (`share_note_path`), with `publish: false`, so

@@ -210,9 +210,52 @@ fn Primes() -> Element {
     }
 }
 
+/// A ```bars fence (`| C | G | Am |`) drawn as an SVG, as an inline
+/// embed (`[[embeds]] view = "bars"`): a transparent rect per bar with its
+/// time in seconds, so a share page's player follows it (#488, #511). On a
+/// node it is drawn at build time, the component run in its sandbox.
+#[component]
+fn Bars() -> Element {
+    let source = architect_extension_wasi::embed()
+        .map(|e| e.source)
+        .unwrap_or_default();
+    let bars: Vec<String> = source
+        .split('|')
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let w = 80;
+    let width = bars.len() * w;
+    rsx! {
+        svg {
+            class: "wasi-bars",
+            "viewBox": "0 0 {width} 40",
+            width: "{width}",
+            height: "40",
+            "data-follow-playhead": "",
+            for (i, bar) in bars.iter().enumerate() {
+                g { key: "{i}",
+                    rect {
+                        class: "wasi-bar",
+                        "data-at": "{i}",
+                        x: "{i * w}",
+                        y: "0",
+                        width: "{w}",
+                        height: "40",
+                        fill: "transparent",
+                    }
+                    text { x: "{i * w + 8}", y: "26", "{bar}" }
+                }
+            }
+        }
+    }
+}
+
 fn build() -> Extension {
     Extension::new()
         .view("counter", Counter)
+        .view("bars", Bars)
         .action("LAB_WASI_COUNTER_ADD", |args: Value| {
             let by = args.get("by").and_then(Value::as_i64).unwrap_or(1);
             Ok(json!(add(by)))

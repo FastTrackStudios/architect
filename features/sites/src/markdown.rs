@@ -442,8 +442,13 @@ fn draw_fence(input: &Input<'_>, info: &str, body: &str, out: &mut Rendered) -> 
         None => code(Some(&lang)),
         Some((by, Ok(html))) => {
             out.drawn.push((claim.to_string(), by.clone()));
+            // The site's box, not the block's: its inline style (which no
+            // sheet of the block's can outrank, and which the block's own
+            // markup cannot reach) keeps what the block draws inside it.
             format!(
-                "<div class=\"site-block\" data-claim=\"{}\" data-by=\"{}\">{html}</div>\n",
+                "<div class=\"site-block {}\" style=\"{}\" data-claim=\"{}\" data-by=\"{}\">{html}</div>\n",
+                block.scope(),
+                crate::sanitize::BLOCK_BOX_STYLE,
                 escape(&claim.to_string()),
                 escape(&by)
             )
@@ -614,12 +619,71 @@ mod tests {
             Ok(Drawn::Html(format!("<b>{}</b>", b.source.trim())))
         }));
         let r = go("```kf\n| C |\n```\n\n```rust\nfn x() {}\n```\n", &blocks);
-        assert!(r.html.contains("<div class=\"site-block\" data-claim=\"fence:kf\" data-by=\"demo\"><b>| C |</b></div>"), "{}", r.html);
+        let drawn = format!(
+            "\" style=\"{}\" data-claim=\"fence:kf\" data-by=\"demo\"><b>| C |</b></div>",
+            crate::BLOCK_BOX_STYLE
+        );
+        assert!(
+            r.html.contains("<div class=\"site-block site-block-"),
+            "{}",
+            r.html
+        );
+        assert!(r.html.contains(&drawn), "{}", r.html);
         assert!(
             r.html
                 .contains("<pre class=\"site-code\" data-lang=\"rust\">")
         );
         assert_eq!(r.drawn, vec![("fence:kf".to_owned(), "demo".to_owned())]);
+    }
+
+    /// #520's second review, finding 2: the site wraps every block in a
+    /// box of its own class and style, and a block's sheet is put under
+    /// that class, so it styles the block and nothing else on the page.
+    #[test]
+    fn a_block_is_boxed_and_its_sheet_scoped_to_its_box() {
+        let blocks = Blocks::new().with(FnBlock::new("demo", &["kf", "x"], |b| {
+            Ok(Drawn::Html(format!(
+                "<svg><style>.kf-bar{{fill:red}} rect, g > .a {{ opacity: 0.5 }}</style><rect class=\"kf-bar\"/><text>{}</text></svg>",
+                b.source.trim()
+            )))
+        }));
+        let r = go("```kf\n| C |\n```\n\n```x\nbody\n```\n", &blocks);
+        let scopes: Vec<&str> = r
+            .html
+            .match_indices("<div class=\"site-block ")
+            .filter_map(|(at, found)| {
+                let rest = r.html.get(at + found.len()..)?;
+                rest.split_once('"').map(|(scope, _)| scope)
+            })
+            .collect();
+        assert_eq!(scopes.len(), 2, "{}", r.html);
+        assert_ne!(scopes[0], scopes[1], "each block has its own scope");
+        for scope in &scopes {
+            assert!(
+                scope.starts_with("site-block-") && scope.len() == 27,
+                "{scope}"
+            );
+            assert!(
+                r.html.contains(&format!(
+                    "<div class=\"site-block {scope}\" style=\"{}\"",
+                    crate::BLOCK_BOX_STYLE
+                )),
+                "{}",
+                r.html
+            );
+            assert!(
+                r.html.contains(&format!(
+                    "<style>.{scope} .kf-bar {{ fill:red }} .{scope} rect, .{scope} g > .a {{ opacity: 0.5 }}</style>"
+                )),
+                "{}",
+                r.html
+            );
+        }
+        // Built again, the page is the same.
+        assert_eq!(
+            go("```kf\n| C |\n```\n\n```x\nbody\n```\n", &blocks).html,
+            r.html
+        );
     }
 
     #[test]

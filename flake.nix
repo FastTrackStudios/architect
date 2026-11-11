@@ -123,7 +123,7 @@
             strictDeps = true;
             cargoArtifacts = null;
             doCheck = false;
-            cargoExtraArgs = "--package architect-desktop --bin architect-desktop --no-default-features --features vox";
+            cargoExtraArgs = "--package architect-desktop --bin architect-desktop --no-default-features --features vox,node-wasi";
             RUSTFLAGS = "--cfg no_workspace_hack";
             ARCHITECT_BUILD_REV = buildRev;
             nativeBuildInputs = [ pkgs.pkg-config ];

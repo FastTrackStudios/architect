@@ -57,8 +57,13 @@ pub fn render(site: &Rc<Site>, view: View, assets: &Rc<Assets>) -> String {
 }
 
 /// Before first paint: the reader's saved theme, so a dark page never
-/// flashes light.
-const THEME_BOOT: &str = "try{var t=localStorage.getItem('site-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}";
+/// flashes light. The page's one inline script; a Content-Security-Policy
+/// allows it by [`THEME_BOOT_HASH`].
+pub const THEME_BOOT: &str = "try{var t=localStorage.getItem('site-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}";
+
+/// [`THEME_BOOT`]'s hash as a CSP source (`script-src 'self'
+/// 'sha256-…'`): the one inline script a site's page runs.
+pub const THEME_BOOT_HASH: &str = "'sha256-deQKU2EOWf3ZNuWj0YOr9gSGJkEEn27H0aM2lBzWZlA='";
 
 const ICON_MENU: &str =
     r#"<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>"#;
@@ -102,10 +107,6 @@ pub fn Head(site: Rc<Site>, view: View, assets: Rc<Assets>) -> Element {
         ),
         View::NotFound => (format!("Not found · {}", site.title), None),
     };
-    let reload = site
-        .live_reload
-        .as_ref()
-        .map(|url| format!("new EventSource({url:?}).onmessage=function(){{location.reload()}}"));
     rsx! {
         meta { charset: "utf-8" }
         meta { name: "viewport", content: "width=device-width, initial-scale=1" }
@@ -119,8 +120,8 @@ pub fn Head(site: Rc<Site>, view: View, assets: Rc<Assets>) -> Element {
         script { dangerous_inner_html: THEME_BOOT }
         link { rel: "stylesheet", href: "{assets.css}" }
         script { src: "{assets.js}", defer: true }
-        if let Some(reload) = reload {
-            script { dangerous_inner_html: "{reload}" }
+        if let Some(live) = &site.live_reload {
+            meta { name: "site-live", content: "{live}" }
         }
     }
 }

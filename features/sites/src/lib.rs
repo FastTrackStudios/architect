@@ -40,14 +40,18 @@ pub mod archive;
 mod assets;
 mod bases;
 mod blocks;
+#[cfg(feature = "wasi")]
+mod component_blocks;
 mod element_html;
 mod frontmatter;
+mod installed;
 pub mod listing;
 pub mod lyrics;
 mod markdown;
 pub mod media;
 #[cfg(feature = "pages")]
 mod page_blocks;
+pub mod sanitize;
 mod scope;
 mod search;
 mod site;
@@ -58,12 +62,16 @@ mod write;
 pub use architect_extensions::contrib::Claim;
 pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
+#[cfg(feature = "wasi")]
+pub use component_blocks::{ComponentBlocks, DRAW_TIMEOUT};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
+pub use installed::InstalledBlocks;
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
 pub use page_blocks::PageBlocks;
+pub use sanitize::{BLOCK_BOX_STYLE, sanitize, sanitize_block};
 pub use scope::Scope;
 pub use search::SearchEntry;
 pub use site::{Crumb, NavNode, Options, Page, Problem, Site, SiteError};

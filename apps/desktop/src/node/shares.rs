@@ -996,8 +996,75 @@ impl ShareLinks for SharesLane {
 ///
 /// `/s/<code>/…` and a share's own domain are answered here, `/s/_signin…`
 /// and `/s/_signout` are sign-in; everything else goes on (an unknown
-/// `/s/…` is `404` here, never the node's other routes).
+/// `/s/…` is `404` here, never the node's other routes). Every answer
+/// given here carries [`content_security_policy`].
 pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) -> Response {
+    match answer(shares, request).await {
+        Ok(response) => with_policy(response),
+        Err(request) => next.run(*request).await,
+    }
+}
+
+/// The Content-Security-Policy of every page of a share or a Site the node
+/// serves (#520's review).
+///
+/// It is the second line of defence behind `architect_sites::sanitize`.
+/// Scripts and everything else from the node
+/// alone, plus the site's one inline script by its hash
+/// (`architect_sites::ui::THEME_BOOT_HASH`); images also `data:` and
+/// `https:`; no plugins, no `<base>`, forms posted only to the node, no
+/// framing by other sites. Inline styles stay allowed (a block's SVG
+/// sheet, the share pages' own); with `default-src 'self'` no style can
+/// load or send anything off the node.
+pub fn content_security_policy() -> HeaderValue {
+    static POLICY: std::sync::OnceLock<HeaderValue> = std::sync::OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            let policy = format!(
+                "default-src 'self'; script-src 'self' {}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; img-src 'self' data: https:; media-src 'self'; style-src 'self' 'unsafe-inline'",
+                architect_sites::ui::THEME_BOOT_HASH
+            );
+            HeaderValue::from_str(&policy).unwrap_or_else(|_| HeaderValue::from_static("default-src 'self'"))
+        })
+        .clone()
+}
+
+/// `response` with [`content_security_policy`] and `nosniff`.
+fn with_policy(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
+/// A node's Sites (`Config::sites`, mounted at `mounts`): every answer
+/// under a mount carries [`content_security_policy`], as a share's does.
+pub async fn sites_policy(
+    State(mounts): State<Arc<Vec<String>>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    let under = mounts.iter().any(|m| {
+        let m = m.trim_end_matches('/');
+        m.is_empty()
+            || path
+                .strip_prefix(m)
+                .is_some_and(|r| r.is_empty() || r.starts_with('/'))
+    });
+    let response = next.run(request).await;
+    if under {
+        with_policy(response)
+    } else {
+        response
+    }
+}
+
+/// What [`gate`] answers; the request back when it is not a share's.
+async fn answer(shares: Shares, request: Request) -> Result<Response, Box<Request>> {
     let host = request
         .headers()
         .get(header::HOST)
@@ -1006,18 +1073,18 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         .to_owned();
     if let Some(share) = shares.at_host(&host).and_then(|code| shares.get(&code)) {
         let rest = request.uri().path().to_owned();
-        return serve(&shares, share, None, &rest, "/", request).await;
+        return Ok(serve(&shares, share, None, &rest, "/", request).await);
     }
     let path = request.uri().path().to_owned();
     let Some(below) = path
         .strip_prefix(LINKS)
         .filter(|r| r.is_empty() || r.starts_with('/'))
     else {
-        return next.run(request).await;
+        return Err(Box::new(request));
     };
     let below = below.trim_start_matches('/');
     if let Some(rest) = below.strip_prefix('_') {
-        return signin(&shares, rest, request).await;
+        return Ok(signin(&shares, rest, request).await);
     }
     let mut parts = below.splitn(2, '/');
     let first = parts.next().unwrap_or_default();
@@ -1025,18 +1092,18 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         .filter(|code| is_code(code))
         .and_then(|code| shares.link(code))
     else {
-        return page(
+        return Ok(page(
             StatusCode::NOT_FOUND,
             "Not found",
             "<p>There is nothing at this link.</p>",
-        );
+        ));
     };
     let mount = link_path(first);
     if !below.contains('/') {
-        return Redirect::permanent(&mount).into_response();
+        return Ok(Redirect::permanent(&mount).into_response());
     }
     let rest = format!("/{}", parts.next().unwrap_or_default());
-    serve(&shares, share, audience, &rest, &mount, request).await
+    Ok(serve(&shares, share, audience, &rest, &mount, request).await)
 }
 
 /// `work` on the blocking pool (it reads a vault).

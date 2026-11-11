@@ -539,3 +539,41 @@ fn a_filter_publishes_only_the_notes_it_holds_for() {
         Err(SiteError::Filter(_))
     ));
 }
+
+/// The page's Content-Security-Policy (the node's) runs no inline script
+/// but the theme's, by its hash: every other `<script>` is a file, and
+/// live reload is a `<meta>` the site's script reads.
+#[test]
+fn a_page_runs_no_inline_script_but_the_hashed_theme() {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let hash = base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(
+        architect_sites::ui::THEME_BOOT.as_bytes(),
+    ));
+    assert_eq!(
+        architect_sites::ui::THEME_BOOT_HASH,
+        format!("'sha256-{hash}'")
+    );
+
+    let vault = vault();
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = out_dir.path().join("site");
+    let mut opts = Options::new(vault.path(), "");
+    opts.live_reload = Some("/s/abc/_live".to_owned());
+    build(&opts, &blocks(), &out).expect("build");
+    let page = read(&out, "guide/start/index.html");
+    let inline = format!("<script>{}</script>", architect_sites::ui::THEME_BOOT);
+    assert_eq!(page.matches(&inline).count(), 1, "{page}");
+    for (at, _) in page.match_indices("<script") {
+        let tag = page.get(at..).unwrap_or_default();
+        assert!(
+            tag.starts_with(&inline) || tag.starts_with("<script src="),
+            "an inline script: {}",
+            tag.get(..80).unwrap_or(tag)
+        );
+    }
+    assert!(
+        page.contains("<meta name=\"site-live\" content=\"/s/abc/_live\""),
+        "{page}"
+    );
+}

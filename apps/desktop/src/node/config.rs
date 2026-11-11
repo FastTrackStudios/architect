@@ -13,6 +13,7 @@
 //! | `ARCHITECT_DATA_DIR` | `data_dir` | `architect-data` | the node's state: its iroh key, device id, documents, built sites |
 //! | `ARCHITECT_VAULTS` | `[vaults]` | none | `id=path,…`: the vaults it holds (a relative path is under the data dir) |
 //! | `ARCHITECT_SITES` | `[sites]` | none | `/mount=vault,…`: vaults published as Sites |
+//! | `ARCHITECT_EXTENSIONS` | `extensions` | `<data dir>/extensions` | installed extensions, a package folder each (`<id>/extension.toml`): the fences they claim are drawn on share links and Sites (a relative path is under the data dir) |
 //! | `ARCHITECT_ISSUER` | `issuer` | none | the account server (`https://auth.fasttrackstudio.app`) |
 //! | `ARCHITECT_SESSION_FILE` | `session_file` | none | a file holding the account's session token |
 //! | `ARCHITECT_ORG` | `org` | none | the org (slug) it offers the account when the account shares none yet |
@@ -79,6 +80,7 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub vaults: BTreeMap<String, PathBuf>,
     pub sites: BTreeMap<String, String>,
+    pub extensions: Option<PathBuf>,
     pub issuer: Option<String>,
     pub session_file: Option<PathBuf>,
     pub org: Option<String>,
@@ -118,6 +120,7 @@ impl Default for Config {
             data_dir: PathBuf::from("architect-data"),
             vaults: BTreeMap::new(),
             sites: BTreeMap::new(),
+            extensions: None,
             issuer: None,
             session_file: None,
             org: None,
@@ -276,6 +279,9 @@ impl Config {
                 why: format!("{e}"),
             })?;
         }
+        if let Some(v) = get("ARCHITECT_EXTENSIONS") {
+            self.extensions = Some(PathBuf::from(v));
+        }
         if let Some(v) = get("ARCHITECT_FILES_DIR") {
             self.files_dir = Some(PathBuf::from(v));
         }
@@ -353,6 +359,15 @@ impl Config {
     #[must_use]
     pub fn vault_org(&self) -> Option<&str> {
         self.host_org.as_deref().or(self.enrol_org.as_deref())
+    }
+
+    /// Where the extensions it draws blocks with are installed.
+    #[must_use]
+    pub fn extensions_dir(&self) -> PathBuf {
+        self.extensions.as_deref().map_or_else(
+            || self.data_dir.join("extensions"),
+            |path| self.vault_root(path),
+        )
     }
 
     /// Where vault `path` lives: under the data dir when relative.

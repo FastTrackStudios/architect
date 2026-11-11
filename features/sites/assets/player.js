@@ -1,6 +1,7 @@
 // architect-sites: the player (#511). Plays the page's audio and video
 // (`[data-site-media]`), and on a share link the link's media in list
-// order (`<script id="site-queue">`, written by the node per request),
+// order (`<script type="application/json" id="site-queue">`, written by
+// the node per request; only that element, never a block's `#site-queue`),
 // and gives every block on the page the playhead:
 //
 //   architect.playhead.time / playing / rate / duration / src / page / here
@@ -10,7 +11,9 @@
 //
 // A block needs no script to follow it: a `[data-follow-playhead]`
 // element's `[data-at]` children (seconds) are marked aria-current="time"
-// at the playhead, scrolled to inside it, and seek there on a click.
+// at the playhead, scrolled to inside the nearest box that scrolls them,
+// and seek there on a click. They may be HTML or SVG elements (a chart's
+// `<rect data-at>` per bar, keyflow#59).
 //
 // Pages are separate documents: the player keeps where it is (track,
 // time, playing) in sessionStorage and resumes on the next page; a
@@ -34,7 +37,7 @@
 
   // The queue: the link's, else this page's media in document order.
   var tracks = [];
-  var queueEl = doc.getElementById("site-queue");
+  var queueEl = doc.querySelector('script#site-queue[type="application/json"]');
   var scope = here;
   if (queueEl) {
     try {
@@ -292,13 +295,37 @@
       f.current = found;
       if (!found) return;
       found.setAttribute("aria-current", "time");
-      // Into view inside the block, never moving the page.
-      var box = f.box;
-      if (box.scrollHeight > box.clientHeight) {
-        var top = found.offsetTop - box.offsetTop - box.clientHeight / 2 + found.offsetHeight / 2;
-        box.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-      }
+      intoView(found);
     });
+  }
+
+  // The nearest box that scrolls `el`, below the page itself: a lyrics
+  // list, or whatever holds an SVG (an SVG is not a scroll box).
+  function scroller(el) {
+    for (var n = el.parentElement; n && n !== doc.body && n !== doc.documentElement; n = n.parentElement) {
+      var st = window.getComputedStyle(n);
+      var y = /auto|scroll/.test(st.overflowY) && n.scrollHeight > n.clientHeight;
+      var x = /auto|scroll/.test(st.overflowX) && n.scrollWidth > n.clientWidth;
+      if (x || y) return n;
+    }
+    return null;
+  }
+  // `el` (HTML or SVG: both have a bounding rect, an SVG element has no
+  // offsetTop) centred in its scroll box, never moving the page.
+  function intoView(el) {
+    var box = scroller(el);
+    if (!box) return;
+    var r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+    var top = box.scrollTop + (r.top - b.top) - (box.clientHeight - r.height) / 2;
+    var left = box.scrollLeft + (r.left - b.left) - (box.clientWidth - r.width) / 2;
+    box.scrollTo({
+      top: Math.max(0, top),
+      left: Math.max(0, left),
+      behavior: reduced() ? "auto" : "smooth",
+    });
+  }
+  function reduced() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 
   // The bar: shown for a link's queue, or two players or more on a page.
