@@ -15,13 +15,25 @@
 //!
 //! Each pattern is matched against an attached file's path relative to
 //! the folder of the note that attaches it (a file outside that folder:
-//! its vault path), whole: `*` and `?` stay within one segment, `**` is
-//! any number of segments. The lists are tried `page`, `reference`,
-//! `full`, and the first that matches is the file's layer, so a narrow
-//! `reference` pattern can carve a file out of a broad `full` one. A file
-//! no rule matches is a page file, served as before.
+//! its vault path), whole, in any ASCII case (as `note_type` is): `*` and
+//! `?` stay within one segment, `**` is any number of segments. Matching
+//! takes time linear in the pattern times the path, never exponential,
+//! and [`ShareLayersDecl::check`] bounds what a manifest may ask
+//! ([`MAX_PATTERNS`], [`MAX_PATTERN_LEN`], [`MAX_STARS`]). Within one
+//! rule the lists are tried `page`, `reference`, `full`, and the first
+//! that matches is the file's layer, so a narrow `reference` pattern can
+//! carve a file out of a broad `full` one. Across rules (several
+//! extensions for one note type) the node takes the highest: no rule
+//! lowers another's. A file no rule matches is a page file.
 
 use serde::{Deserialize, Serialize};
+
+/// The most patterns one rule may give, its three lists together.
+pub const MAX_PATTERNS: usize = 64;
+/// The longest pattern, in bytes.
+pub const MAX_PATTERN_LEN: usize = 256;
+/// The most `*` in one pattern (a `**` is two).
+pub const MAX_STARS: usize = 8;
 
 /// One `[[share_layers]]` rule: the files of notes of `note_type`, by
 /// layer.
@@ -68,17 +80,37 @@ impl ShareLayersDecl {
         self.note_type.eq_ignore_ascii_case(note_type.trim())
     }
 
-    /// Its note type named, and each pattern a relative path.
+    /// Its note type named, and each pattern a relative path within the
+    /// limits.
     ///
     /// # Errors
     ///
-    /// No note type, or a pattern that is empty, absolute, has a `..` or
-    /// `.` segment or a backslash.
+    /// No note type; more than [`MAX_PATTERNS`] patterns; a pattern that
+    /// is empty, absolute, longer than [`MAX_PATTERN_LEN`], has more than
+    /// [`MAX_STARS`] `*`, a `..` or `.` segment or a backslash.
     pub fn check(&self) -> Result<(), String> {
         if self.note_type.trim().is_empty() {
             return Err("name its note_type".to_owned());
         }
+        let count = self
+            .page
+            .len()
+            .saturating_add(self.reference.len())
+            .saturating_add(self.full.len());
+        if count > MAX_PATTERNS {
+            return Err(format!(
+                "{:?}: {count} patterns; at most {MAX_PATTERNS}",
+                self.note_type
+            ));
+        }
         for pattern in self.page.iter().chain(&self.reference).chain(&self.full) {
+            let stars = pattern.matches('*').count();
+            if pattern.len() > MAX_PATTERN_LEN || stars > MAX_STARS {
+                return Err(format!(
+                    "{:?}: {pattern:?} is longer than {MAX_PATTERN_LEN} bytes or has more than {MAX_STARS} `*`",
+                    self.note_type
+                ));
+            }
             let bad = pattern.is_empty()
                 || pattern.starts_with('/')
                 || pattern.contains('\\')
@@ -96,38 +128,61 @@ impl ShareLayersDecl {
     }
 }
 
-/// Whether `path` matches `pattern`, whole, segment by segment.
+/// Whether `path` matches `pattern`, whole, segment by segment, in any
+/// ASCII case. Linear in the pattern times the path: one wildcard is
+/// retried at a time, never a tree of them.
 #[must_use]
 pub fn glob(pattern: &str, path: &str) -> bool {
     let pattern: Vec<&str> = pattern.split('/').collect();
     let path: Vec<&str> = path.split('/').collect();
-    segments(&pattern, &path)
+    wildcard(&pattern, &path, |p| *p == "**", |p, n| one(p, n))
 }
 
-fn segments(pattern: &[&str], path: &[&str]) -> bool {
-    match pattern.split_first() {
-        None => path.is_empty(),
-        Some((&"**", rest)) => {
-            (0..=path.len()).any(|skip| path.get(skip..).is_some_and(|tail| segments(rest, tail)))
-        }
-        Some((first, rest)) => path.split_first().is_some_and(|(segment, tail)| {
-            one(first.as_bytes(), segment.as_bytes()) && segments(rest, tail)
-        }),
-    }
+/// One segment against one pattern segment: `*` any run, `?` one
+/// character.
+fn one(pattern: &str, name: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+    wildcard(
+        &pattern,
+        &name,
+        |c| *c == '*',
+        |p, n| *p == '?' || p.eq_ignore_ascii_case(n),
+    )
 }
 
-/// One segment against one pattern segment: `*` any run, `?` one byte.
-fn one(pattern: &[u8], name: &[u8]) -> bool {
-    match pattern.split_first() {
-        None => name.is_empty(),
-        Some((b'*', rest)) => {
-            (0..=name.len()).any(|skip| name.get(skip..).is_some_and(|tail| one(rest, tail)))
+/// `items` matched whole by `pattern`, where `star(p)` matches any run
+/// and `fits(p, i)` matches one item: the two-pointer match that, on a
+/// mismatch, retries from the last star only.
+fn wildcard<P, I>(
+    pattern: &[P],
+    items: &[I],
+    star: impl Fn(&P) -> bool,
+    fits: impl Fn(&P, &I) -> bool,
+) -> bool {
+    let (mut p, mut i) = (0, 0);
+    let mut retry: Option<(usize, usize)> = None;
+    while i < items.len() {
+        match (pattern.get(p), items.get(i)) {
+            (Some(at), _) if star(at) => {
+                retry = Some((p, i));
+                p = p.saturating_add(1);
+            }
+            (Some(at), Some(item)) if fits(at, item) => {
+                p = p.saturating_add(1);
+                i = i.saturating_add(1);
+            }
+            _ => match retry {
+                Some((sp, si)) => {
+                    p = sp.saturating_add(1);
+                    i = si.saturating_add(1);
+                    retry = Some((sp, i));
+                }
+                None => return false,
+            },
         }
-        Some((b'?', rest)) => name.split_first().is_some_and(|(_, tail)| one(rest, tail)),
-        Some((c, rest)) => name
-            .split_first()
-            .is_some_and(|(n, tail)| n == c && one(rest, tail)),
     }
+    pattern.get(p..).is_some_and(|rest| rest.iter().all(&star))
 }
 
 #[cfg(test)]
@@ -192,6 +247,64 @@ mod tests {
         );
         let bad = text.replace("Media/**", "../Media/**");
         assert!(crate::manifest::Manifest::parse(&bad).is_err());
+    }
+
+    /// A hostile pattern is refused when the manifest is read, and
+    /// matching stays linear for the patterns that are let in.
+    #[test]
+    fn a_pathological_pattern_is_refused_and_matching_is_linear() {
+        let twelve = format!("{}b", "*a".repeat(12));
+        let manifest = format!(
+            "id = \"x.y\"\nname = \"X\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n[[share_layers]]\nnote_type = \"song\"\nfull = [\"{twelve}\"]\n"
+        );
+        assert!(crate::manifest::Manifest::parse(&manifest).is_err());
+        let long = ShareLayersDecl {
+            full: vec!["a".repeat(MAX_PATTERN_LEN + 1)],
+            ..song()
+        };
+        assert!(long.check().is_err());
+        let many = ShareLayersDecl {
+            full: vec!["x".to_owned(); MAX_PATTERNS + 1],
+            ..song()
+        };
+        assert!(many.check().is_err());
+        let deep = ShareLayersDecl {
+            full: vec!["**/".repeat(MAX_STARS) + "x"],
+            ..song()
+        };
+        assert!(deep.check().is_err());
+        // The worst the limits let in, against long names: fast.
+        let worst = format!("{}b", "*a".repeat(MAX_STARS));
+        let name = "a".repeat(200);
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            assert!(!glob(&worst, &name));
+            assert!(!glob(
+                &format!("{}x", "**/".repeat(MAX_STARS / 2)),
+                &"a/".repeat(100)
+            ));
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(500),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    /// A note type and a pattern both match in any ASCII case.
+    #[test]
+    fn note_types_and_patterns_ignore_ascii_case() {
+        let rule = song();
+        assert!(rule.is_for("SONG"));
+        assert_eq!(
+            rule.layer_of("Joy/Joy.md", "Joy/media/proxies/bass.ogg"),
+            Some("full")
+        );
+        assert_eq!(
+            rule.layer_of("Joy/Joy.md", "Joy/JOY.SESSION"),
+            Some("reference")
+        );
+        assert!(glob("Media/*.OGG", "media/bass.ogg"));
     }
 
     #[test]

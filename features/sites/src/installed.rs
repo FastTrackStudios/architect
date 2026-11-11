@@ -113,14 +113,21 @@ impl BlockRenderer for InstalledBlocks {
 /// in. Read again when what is in the folder changes.
 pub struct InstalledLayers {
     dir: PathBuf,
-    held: Mutex<HeldLayers>,
+    held: Mutex<(Option<Vec<(String, Option<SystemTime>)>>, Arc<Installed>)>,
 }
 
-/// What a folder was when its rules were read, and the rules.
-type HeldLayers = (
-    Option<Vec<(String, Option<SystemTime>)>>,
-    Arc<Vec<ShareLayersDecl>>,
-);
+/// The installed extensions' layer rules, as the folder was when read.
+#[derive(Debug, Default)]
+pub struct Installed {
+    /// Counts up each time the folder is read again (it changed).
+    pub generation: u64,
+    /// Each extension read, by its id, with its rules (none: it declares
+    /// none).
+    pub packages: Vec<(String, Vec<ShareLayersDecl>)>,
+    /// Each manifest that could not be read or is not a manifest, and
+    /// why. While there is one, which layer a file is in is not known.
+    pub broken: Vec<(PathBuf, String)>,
+}
 
 impl std::fmt::Debug for InstalledLayers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -140,31 +147,42 @@ impl InstalledLayers {
         }
     }
 
-    /// Every rule, as the folder is now, in its packages' order.
+    /// What the folder holds now: read again if it changed. A manifest
+    /// that does not read is warned of once, naming the file.
     #[must_use]
-    pub fn rules(&self) -> Arc<Vec<ShareLayersDecl>> {
+    pub fn read(&self) -> Arc<Installed> {
         let stamp = stamp(&self.dir);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
         if held.0.as_ref() != Some(&stamp) {
-            let mut rules = Vec::new();
+            let mut read = Installed {
+                generation: held.1.generation.wrapping_add(1),
+                ..Installed::default()
+            };
             for (name, written) in &stamp {
-                if written.is_none() || name.starts_with('.') {
+                if name.starts_with('.') {
                     continue;
                 }
                 let path = self.dir.join(name).join("extension.toml");
+                if written.is_none() {
+                    // A folder with no manifest (yet): nothing installed.
+                    continue;
+                }
                 match std::fs::read_to_string(&path)
                     .map_err(|e| e.to_string())
                     .and_then(|text| Manifest::parse(&text).map_err(|e| e.to_string()))
                 {
-                    Ok(manifest) => rules.extend(manifest.share_layers),
-                    Err(error) => tracing::warn!(
-                        path = %path.display(),
-                        %error,
-                        "an installed extension's share layers did not read"
-                    ),
+                    Ok(manifest) => read.packages.push((manifest.id, manifest.share_layers)),
+                    Err(error) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            %error,
+                            "an installed extension's manifest does not read: until it is fixed, share links below Full hold back every attached file"
+                        );
+                        read.broken.push((path, error));
+                    }
                 }
             }
-            *held = (Some(stamp), Arc::new(rules));
+            *held = (Some(stamp), Arc::new(read));
         }
         Arc::clone(&held.1)
     }

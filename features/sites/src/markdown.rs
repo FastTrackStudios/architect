@@ -61,6 +61,9 @@ pub enum Target {
     /// A note of the vault outside a scoped site ([`crate::Scope`]):
     /// drawn as plain text, with no URL, no title and no report.
     Outside,
+    /// An attachment the site holds back (`Options::hold_back`): nothing
+    /// of it, not its name nor a link's text.
+    Held,
 }
 
 /// What [`render`] needs.
@@ -130,6 +133,8 @@ pub fn render(input: &Input<'_>) -> Rendered {
     // Per image: whether it was dropped (it names a note outside the
     // scope), with all it holds.
     let mut images: Vec<bool> = Vec::new();
+    // How deep inside a link to a held-back file: nothing of it is drawn.
+    let mut held_link: usize = 0;
     // Per kept image: what closes it when it was drawn as our own markup
     // (an `<audio>` or `<video>`), else `None` (the parser's `<img>`).
     let mut image_close: Vec<Option<&'static str>> = Vec::new();
@@ -138,6 +143,14 @@ pub fn render(input: &Input<'_>) -> Rendered {
     let mut seen_content = false;
 
     for event in Parser::new_ext(input.body, options) {
+        if held_link > 0 {
+            match event {
+                Event::Start(Tag::Link { .. }) => held_link = held_link.saturating_add(1),
+                Event::End(TagEnd::Link) => held_link = held_link.saturating_sub(1),
+                _ => {}
+            }
+            continue;
+        }
         // Inside an embed of something outside the scope: nothing of it,
         // not even its alt text.
         if images.contains(&true) && !matches!(event, Event::End(TagEnd::Image)) {
@@ -227,6 +240,10 @@ pub fn render(input: &Input<'_>) -> Rendered {
                 ..
             }) => {
                 let wiki = matches!(link_type, LinkType::WikiLink { .. });
+                if matches!((input.resolve)(&dest_url, wiki), Target::Held) {
+                    held_link = 1;
+                    continue;
+                }
                 let (open, close) = link_markup(input, &dest_url, wiki, &mut out);
                 events.push(Event::Html(open.into()));
                 links.push(Some(close));
@@ -264,7 +281,7 @@ pub fn render(input: &Input<'_>) -> Rendered {
                         dest_url
                     }
                     Target::Keep => dest_url,
-                    Target::Outside => {
+                    Target::Outside | Target::Held => {
                         images.push(true);
                         continue;
                     }
@@ -402,7 +419,7 @@ fn link_markup(
                 "</span>",
             )
         }
-        Target::Outside => ("<span class=\"site-outside\">".to_owned(), "</span>"),
+        Target::Outside | Target::Held => ("<span class=\"site-outside\">".to_owned(), "</span>"),
         Target::Keep => {
             let external = dest.contains("://") || dest.starts_with("mailto:");
             let rel = if external { " rel=\"noopener\"" } else { "" };

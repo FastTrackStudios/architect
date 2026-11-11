@@ -67,7 +67,7 @@ pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
 pub use component_blocks::{ComponentBlocks, DRAW_TIMEOUT};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
-pub use installed::{InstalledBlocks, InstalledLayers};
+pub use installed::{Installed, InstalledBlocks, InstalledLayers};
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
