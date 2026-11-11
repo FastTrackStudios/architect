@@ -176,7 +176,11 @@ mod tests {
             vec![
                 rect("0", "0"),
                 rect("2.5", "100"),
-                el("foreignObject", &[], vec![el("div", &[], vec![text("html")])]),
+                el(
+                    "foreignObject",
+                    &[],
+                    vec![el("div", &[], vec![text("html")])],
+                ),
                 el("script", &[], vec![text("x()")]),
                 el(
                     "set",

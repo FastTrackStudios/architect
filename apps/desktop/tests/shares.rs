@@ -1465,11 +1465,8 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
     }
     let body = text.to_string();
     let at = body.find("| Am |").expect("the fence's last bar");
-    text.insert(
-        body[..at + "| Am ".len()].chars().count(),
-        "| E7 ",
-    )
-    .unwrap();
+    text.insert(body[..at + "| Am ".len()].chars().count(), "| E7 ")
+        .unwrap();
     replica.loro().commit();
     let joy = page_with(&w.url(&format!("{link}joy/")), None, ">E7</text>").await;
     assert!(joy.contains("viewBox=\"0 0 240 40\""), "{joy}");

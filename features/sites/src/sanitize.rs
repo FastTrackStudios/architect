@@ -139,23 +139,29 @@ pub fn sanitize(markup: &str) -> String {
     while !rest.is_empty() {
         if w.in_style() {
             // A style sheet is raw text up to its end tag.
-            let end = find_ci(rest, "</style").unwrap_or(rest.len());
-            w.text(&rest[..end]);
-            rest = &rest[end..];
-            if !rest.is_empty() {
-                rest = w.markup(rest);
-            }
+            let (text, tail) = cut(rest, find_ci(rest, "</style").unwrap_or(rest.len()));
+            w.text(text);
+            rest = if tail.is_empty() {
+                tail
+            } else {
+                w.markup(tail)
+            };
             continue;
         }
-        let Some(lt) = rest.find('<') else {
+        let Some((text, tail)) = rest.split_once('<') else {
             w.text(rest);
             break;
         };
-        w.text(&rest[..lt]);
-        rest = &rest[lt..];
-        rest = w.markup(rest);
+        w.text(text);
+        rest = w.markup(tail);
     }
     w.finish()
+}
+
+/// `s` split at byte `at`; all of it before when `at` is past its end or
+/// inside a character.
+fn cut(s: &str, at: usize) -> (&str, &str) {
+    s.split_at_checked(at).unwrap_or((s, ""))
 }
 
 #[derive(Default)]
@@ -183,25 +189,22 @@ impl Writer {
         }
     }
 
-    /// What starts at `<` in `rest`; the rest after it.
-    fn markup<'a>(&mut self, rest: &'a str) -> &'a str {
-        let after = &rest[1..];
+    /// What follows a `<`; the rest after it.
+    fn markup<'a>(&mut self, after: &'a str) -> &'a str {
         if let Some(body) = after.strip_prefix("!--") {
-            return body.find("-->").map_or("", |end| &body[end + 3..]);
+            return body.split_once("-->").map_or("", |(_, rest)| rest);
         }
         if let Some(body) = after.strip_prefix("![CDATA[") {
-            let end = body.find("]]>").unwrap_or(body.len());
-            let mut text = String::new();
-            escape(&body[..end], &mut text);
-            self.out.push_str(&text);
-            return body.get(end + 3..).unwrap_or("");
+            let (text, rest) = body.split_once("]]>").unwrap_or((body, ""));
+            escape(text, &mut self.out);
+            return rest;
         }
         if after.starts_with('!') || after.starts_with('?') {
-            return after.find('>').map_or("", |end| &after[end + 1..]);
+            return after.split_once('>').map_or("", |(_, rest)| rest);
         }
         if let Some(body) = after.strip_prefix('/') {
             let (name, tail) = take_name(body);
-            let rest = tail.find('>').map_or("", |end| &tail[end + 1..]);
+            let rest = tail.split_once('>').map_or("", |(_, rest)| rest);
             if !name.is_empty() {
                 self.close(name);
             }
@@ -252,11 +255,7 @@ impl Writer {
     /// Close `name` and what is open inside it; nothing when it is not
     /// open.
     fn close(&mut self, name: &str) {
-        let Some(at) = self
-            .open
-            .iter()
-            .rposition(|t| t.eq_ignore_ascii_case(name))
-        else {
+        let Some(at) = self.open.iter().rposition(|t| t.eq_ignore_ascii_case(name)) else {
             return;
         };
         for tag in self.open.split_off(at).iter().rev() {
@@ -289,7 +288,7 @@ fn take_name(s: &str) -> (&str, &str) {
     let end = s
         .find(|c: char| c.is_ascii_whitespace() || matches!(c, '/' | '>' | '=' | '<'))
         .unwrap_or(s.len());
-    (&s[..end], &s[end..])
+    cut(s, end)
 }
 
 /// A start tag's attributes (values as written), whether it ends `/>`,
@@ -307,14 +306,10 @@ fn take_attrs(mut s: &str) -> (Vec<(String, String)>, bool, &str) {
         if let Some(rest) = s.strip_prefix('>') {
             return (attrs, false, rest);
         }
-        if let Some(rest) = s.strip_prefix('/') {
-            s = rest;
-            continue;
-        }
         let (name, tail) = take_name(s);
         if name.is_empty() {
-            // A stray `=`: skip it.
-            s = &s[1..];
+            // A stray `/`, `=` or `<` (ASCII, one byte): skip it.
+            s = cut(s, 1).1;
             continue;
         }
         let tail = tail.trim_start_matches(|c: char| c.is_ascii_whitespace());
@@ -324,18 +319,18 @@ fn take_attrs(mut s: &str) -> (Vec<(String, String)>, bool, &str) {
             continue;
         };
         let value_at = value_at.trim_start_matches(|c: char| c.is_ascii_whitespace());
-        let (value, rest) = match value_at.chars().next() {
-            Some(q @ ('"' | '\'')) => {
-                let body = &value_at[1..];
-                let end = body.find(q).unwrap_or(body.len());
-                (&body[..end], body.get(end + 1..).unwrap_or(""))
-            }
-            _ => {
-                let end = value_at
+        let quoted = value_at
+            .strip_prefix('"')
+            .map(|b| (b, '"'))
+            .or_else(|| value_at.strip_prefix('\'').map(|b| (b, '\'')));
+        let (value, rest) = match quoted {
+            Some((body, q)) => body.split_once(q).unwrap_or((body, "")),
+            None => cut(
+                value_at,
+                value_at
                     .find(|c: char| c.is_ascii_whitespace() || c == '>')
-                    .unwrap_or(value_at.len());
-                (&value_at[..end], &value_at[end..])
-            }
+                    .unwrap_or(value_at.len()),
+            ),
         };
         attrs.push((name.to_owned(), value.to_owned()));
         s = rest;
@@ -346,23 +341,23 @@ fn take_attrs(mut s: &str) -> (Vec<(String, String)>, bool, &str) {
 /// matching end tag, nested ones of the same name counted. Unclosed, the
 /// rest is dropped.
 fn skip_element<'a>(name: &str, mut rest: &'a str) -> &'a str {
-    let lower = name.to_ascii_lowercase();
     let mut depth = 1usize;
     loop {
-        let Some(lt) = rest.find('<') else { return "" };
-        rest = &rest[lt + 1..];
-        let closing = rest.starts_with('/');
-        let (found, tail) = take_name(rest.trim_start_matches('/'));
-        if found.eq_ignore_ascii_case(&lower) {
-            let end = tail.find('>').map_or(tail.len(), |e| e + 1);
-            let self_closing = tail[..end].trim_end_matches('>').ends_with('/');
+        let Some((_, after)) = rest.split_once('<') else {
+            return "";
+        };
+        rest = after;
+        let closing = after.starts_with('/');
+        let (found, tail) = take_name(after.trim_start_matches('/'));
+        if found.eq_ignore_ascii_case(name) {
+            let (tag, past) = tail.split_once('>').unwrap_or((tail, ""));
             if closing {
-                depth -= 1;
+                depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    return &tail[end..];
+                    return past;
                 }
-            } else if !self_closing {
-                depth += 1;
+            } else if !tag.ends_with('/') {
+                depth = depth.saturating_add(1);
             }
         }
     }
@@ -372,32 +367,48 @@ fn skip_element<'a>(name: &str, mut rest: &'a str) -> &'a str {
 /// formed character reference (`&amp;`, `&#38;`, `&#x26;`) kept as it is.
 fn escape_keeping_entities(text: &str, out: &mut String) {
     let mut rest = text;
-    while let Some(amp) = rest.find('&') {
-        escape(&rest[..amp], out);
-        let after = &rest[amp..];
-        match entity_len(after) {
-            Some(len) => out.push_str(&after[..len]),
-            None => out.push_str("&amp;"),
+    while let Some((before, after)) = rest.split_once('&') {
+        escape(before, out);
+        if let Some((name, past)) = entity(after) {
+            out.push('&');
+            out.push_str(name);
+            out.push(';');
+            rest = past;
+        } else {
+            out.push_str("&amp;");
+            rest = after;
         }
-        rest = &after[entity_len(after).unwrap_or(1)..];
     }
     escape(rest, out);
 }
 
-/// The length of the character reference `s` starts with (`&name;`,
-/// `&#9;`, `&#x9;`), if it is one.
-fn entity_len(s: &str) -> Option<usize> {
-    let body = s.strip_prefix('&')?;
-    let end = body.find(';')?;
-    let name = &body[..end];
-    let ok = if let Some(hex) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
-        !hex.is_empty() && hex.len() <= 6 && hex.chars().all(|c| c.is_ascii_hexdigit())
-    } else if let Some(dec) = name.strip_prefix('#') {
-        !dec.is_empty() && dec.len() <= 7 && dec.chars().all(|c| c.is_ascii_digit())
-    } else {
-        !name.is_empty() && name.len() <= 32 && name.chars().all(|c| c.is_ascii_alphanumeric())
+/// The character reference that follows a `&` at the start of `s`
+/// (`amp;`, `#9;`, `#x9;`): its name, and what follows its `;`.
+fn entity(s: &str) -> Option<(&str, &str)> {
+    let (name, rest) = s.split_once(';')?;
+    let ok = match numeric(name) {
+        Some((digits, 16)) => {
+            !digits.is_empty() && digits.len() <= 6 && digits.chars().all(|c| c.is_ascii_hexdigit())
+        }
+        Some((digits, _)) => {
+            !digits.is_empty() && digits.len() <= 7 && digits.chars().all(|c| c.is_ascii_digit())
+        }
+        None => {
+            !name.is_empty() && name.len() <= 32 && name.chars().all(|c| c.is_ascii_alphanumeric())
+        }
     };
-    ok.then_some(end + 2)
+    ok.then_some((name, rest))
+}
+
+/// A numeric reference's digits and radix (`#x26` → `26`, 16; `#38` →
+/// `38`, 10); `None` for a named one.
+fn numeric(name: &str) -> Option<(&str, u32)> {
+    let digits = name.strip_prefix('#')?;
+    Some(
+        digits
+            .strip_prefix(['x', 'X'])
+            .map_or((digits, 10), |hex| (hex, 16)),
+    )
 }
 
 /// `value` with its character references decoded, for checking a URL.
@@ -405,21 +416,18 @@ fn entity_len(s: &str) -> Option<usize> {
 fn decode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut rest = value;
-    while let Some(amp) = rest.find('&') {
-        out.push_str(&rest[..amp]);
-        let after = &rest[amp..];
-        let Some(len) = entity_len(after) else {
+    while let Some((before, after)) = rest.split_once('&') {
+        out.push_str(before);
+        let Some((name, past)) = entity(after) else {
             out.push('&');
-            rest = &after[1..];
+            rest = after;
             continue;
         };
-        let name = &after[1..len - 1];
-        let ch = if let Some(hex) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
-            u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
-        } else if let Some(dec) = name.strip_prefix('#') {
-            dec.parse().ok().and_then(char::from_u32)
-        } else {
-            match name {
+        let ch = match numeric(name) {
+            Some((digits, radix)) => u32::from_str_radix(digits, radix)
+                .ok()
+                .and_then(char::from_u32),
+            None => match name {
                 "amp" => Some('&'),
                 "lt" => Some('<'),
                 "gt" => Some('>'),
@@ -430,10 +438,10 @@ fn decode(value: &str) -> String {
                 "NewLine" => Some('\n'),
                 "nbsp" => Some('\u{a0}'),
                 _ => None,
-            }
+            },
         };
         out.push(ch.unwrap_or('\u{fffd}'));
-        rest = &after[len..];
+        rest = past;
     }
     out.push_str(rest);
     out
@@ -569,7 +577,10 @@ mod tests {
             "set",
             [("attributeName", "xlink:href")].into_iter()
         ));
-        assert!(!drops_element("animate", [("attributeName", "x")].into_iter()));
+        assert!(!drops_element(
+            "animate",
+            [("attributeName", "x")].into_iter()
+        ));
         assert!(!drops_element("rect", std::iter::empty()));
         assert!(keeps_attr("rect", "data-at", "1.5"));
         assert!(keeps_attr("svg", "viewBox", "0 0 1 1"));

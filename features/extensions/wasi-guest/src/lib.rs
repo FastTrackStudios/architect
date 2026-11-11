@@ -1306,7 +1306,7 @@ const EMBED_EVENT: &str = "architect-embed";
 
 /// What the host gave a view it mounts as an inline embed: the block it
 /// draws ([`embed`]).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Embed {
     /// What claims it (`fence:kf`).
     pub claim: String,
@@ -1320,9 +1320,10 @@ pub struct Embed {
 #[derive(Clone, Copy)]
 struct EmbedSlot(Signal<Option<Embed>>);
 
-/// The block this view draws when the host mounts it as an inline embed
-/// (an `[[embeds]] view`: a claimed fence in a note, on a share link or a
-/// Site built by the node); `None` in a pane. Read in a component, it
+/// The block this view draws as an inline embed; `None` in a pane.
+///
+/// The host mounts an `[[embeds]] view` for a claimed fence in a note, on
+/// a share link or a Site built by the node. Read in a component, it
 /// re-renders when the input comes or changes.
 ///
 /// ```ignore

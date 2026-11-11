@@ -219,7 +219,10 @@ mod tests {
         let Drawn::Html(html) = installed.render(&block).unwrap() else {
             panic!("html");
         };
-        assert!(html.contains("<svg viewBox=\"0 0 10 10\" data-follow-playhead=\"\">"), "{html}");
+        assert!(
+            html.contains("<svg viewBox=\"0 0 10 10\" data-follow-playhead=\"\">"),
+            "{html}"
+        );
         assert!(html.contains("data-at=\"1.5\""), "{html}");
         assert!(html.contains("HEY"), "{html}");
 

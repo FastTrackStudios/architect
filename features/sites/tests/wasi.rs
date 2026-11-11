@@ -104,7 +104,9 @@ fn a_components_embed_view_draws_a_fence_as_an_svg_that_follows() {
     let Some(built) = guests() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let pkg = install(tmp.path(), built);
-    let blocks = ComponentBlocks::load(&pkg).unwrap().expect("it draws a fence");
+    let blocks = ComponentBlocks::load(&pkg)
+        .unwrap()
+        .expect("it draws a fence");
     assert_eq!(blocks.id(), "lab.wasi-counter");
     assert_eq!(blocks.fences(), vec!["bars".to_owned()]);
 
@@ -117,10 +119,7 @@ fn a_components_embed_view_draws_a_fence_as_an_svg_that_follows() {
         source,
         page: "Songs/joy.md",
     };
-    let html = blocks
-        .render(&block("| C | G | Am |"))
-        .unwrap()
-        .into_html();
+    let html = blocks.render(&block("| C | G | Am |")).unwrap().into_html();
     assert!(html.starts_with("<svg class=\"wasi-bars\""), "{html}");
     assert!(html.ends_with("</svg>"), "{html}");
     for kept in [

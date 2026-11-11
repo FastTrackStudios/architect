@@ -149,9 +149,12 @@ cargo run -p architect-cli -- site build --vault ~/notes --folder Album --base /
 From Rust, register what draws your blocks and build:
 
 ```rust,ignore
-use architect_sites::{Blocks, Drawn, FnBlock, Options, PageBlocks};
+use architect_sites::{Blocks, Drawn, FnBlock, InstalledBlocks, Options, PageBlocks};
 
 let blocks = Blocks::new()
+    // Every extension installed in a folder: embed pages, and (feature
+    // `wasi`) a WASI component's embed views (`ComponentBlocks`).
+    .with(InstalledBlocks::new("/srv/architect/extensions"))
     // An extension's embed pages, for the fences they claim.
     .with(PageBlocks::load("apps/sandbox/board".as_ref())?)
     // Or a Rust function, for a fence of your own.
@@ -184,9 +187,17 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
    written for Zola still land) and hands each claimed fence to `Blocks`.
 3. **`features/sites/src/blocks.rs`**: `BlockRenderer`, `Blocks`, `Drawn`
    and `FnBlock`. **`features/sites/src/page_blocks.rs`**, `PageBlocks`, is
-   an extension's embed page drawing a block. **`features/sites/src/element_html.rs`**,
-   `elements_to_html`, writes a page's element tree out as HTML. It escapes
-   text, and drops handlers, scripts and `javascript:` URLs.
+   an extension's embed page drawing a block. **`features/sites/src/component_blocks.rs`**,
+   `ComponentBlocks` (feature `wasi`), mounts a WASI component's embed view
+   once per block, in the extensions host's sandbox, and applies its edits
+   without a window. **`features/sites/src/installed.rs`**, `InstalledBlocks`,
+   is a folder of installed extensions, both kinds, read again when it
+   changes (the node's, #488). **`features/sites/src/element_html.rs`**,
+   `elements_to_html`, writes a page's element tree out as HTML, and
+   **`features/sites/src/sanitize.rs`**, `sanitize`, re-writes a renderer's
+   finished markup; by the same rules both escape text and drop scripts,
+   `on…` handlers, `javascript:` URLs, frames and `<foreignObject>`, while
+   an inline SVG keeps its geometry, classes and `data-*`.
    **`features/sites/src/bases.rs`**, `BaseBlocks`, draws a ```` ```base ````
    fence's views with `vault::bases::view_table`.
 4. **`features/sites/src/ui.rs`**: the pure components (the header, the

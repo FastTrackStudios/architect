@@ -146,7 +146,9 @@ impl BlockRenderer for ComponentBlocks {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut session = process.open(view)?;
         let mut tree = Tree::new();
-        let deadline = Instant::now() + DRAW_TIMEOUT;
+        let deadline = Instant::now()
+            .checked_add(DRAW_TIMEOUT)
+            .unwrap_or_else(Instant::now);
         tree.apply(next(&mut session.frames, deadline)?)?;
         let input = EmbedInput {
             claim: block.claim.to_string(),
@@ -180,10 +182,7 @@ fn next(
                 return Err("its view closed".to_owned());
             }
             Err(_) if Instant::now() >= deadline => {
-                return Err(format!(
-                    "it drew nothing in {} s",
-                    DRAW_TIMEOUT.as_secs()
-                ));
+                return Err(format!("it drew nothing in {} s", DRAW_TIMEOUT.as_secs()));
             }
             Err(_) => std::thread::sleep(Duration::from_millis(2)),
         }
@@ -233,11 +232,23 @@ impl Tree {
             Frame::Edits { edits } => edits,
             Frame::Failed(why) => return Err(why),
         };
-        self.edits += edits.len();
+        self.edits = self.edits.saturating_add(edits.len());
         if self.edits > MAX_EDITS {
             return Err(format!("a drawing of over {MAX_EDITS} edits"));
         }
         edits.into_iter().try_for_each(|e| self.edit(e))
+    }
+
+    fn node(&self, at: usize) -> Result<&Node, String> {
+        self.nodes
+            .get(at)
+            .ok_or_else(|| "a node that is not there".to_owned())
+    }
+
+    fn node_mut(&mut self, at: usize) -> Result<&mut Node, String> {
+        self.nodes
+            .get_mut(at)
+            .ok_or_else(|| "a node that is not there".to_owned())
     }
 
     fn top(&self) -> Result<usize, String> {
@@ -251,9 +262,9 @@ impl Tree {
         if self.stack.len() <= 1 {
             return Err("an edit took more nodes than there are".to_owned());
         }
-        self.top().inspect(|_| {
-            self.stack.pop();
-        })
+        self.stack
+            .pop()
+            .ok_or_else(|| "an edit on an empty stack".to_owned())
     }
 
     fn pop(&mut self, m: u32) -> Result<Vec<usize>, String> {
@@ -278,55 +289,57 @@ impl Tree {
     }
 
     fn add(&mut self, node: Node) -> usize {
+        let at = self.nodes.len();
         self.nodes.push(node);
-        self.nodes.len() - 1
+        at
     }
 
     /// `node` out of its parent's children.
     fn detach(&mut self, node: usize) {
-        if let Some(parent) = self.nodes[node].parent.take() {
-            self.nodes[parent].children.retain(|&c| c != node);
+        let parent = self.nodes.get_mut(node).and_then(|n| n.parent.take());
+        if let Some(parent) = parent.and_then(|p| self.nodes.get_mut(p)) {
+            parent.children.retain(|&c| c != node);
         }
     }
 
     /// Whether `node` is `inside` or below it.
-    fn within(&self, mut node: usize, inside: usize) -> bool {
-        loop {
-            if node == inside {
+    fn within(&self, node: usize, inside: usize) -> bool {
+        let mut at = Some(node);
+        while let Some(n) = at {
+            if n == inside {
                 return true;
             }
-            match self.nodes[node].parent {
-                Some(p) => node = p,
-                None => return false,
-            }
+            at = self.nodes.get(n).and_then(|n| n.parent);
         }
+        false
     }
 
     /// Puts `kids` under `parent` at `at` (its index among the children).
     fn insert(&mut self, parent: usize, at: usize, kids: &[usize]) -> Result<(), String> {
-        if kids
-            .iter()
-            .any(|&k| self.within(parent, k) || k == ROOT)
-        {
+        if kids.iter().any(|&k| self.within(parent, k) || k == ROOT) {
             return Err("an edit would put a node inside itself".to_owned());
         }
         for &kid in kids {
             self.detach(kid);
         }
-        let at = at.min(self.nodes[parent].children.len());
-        for (i, &kid) in kids.iter().enumerate() {
-            self.nodes[kid].parent = Some(parent);
-            self.nodes[parent].children.insert(at + i, kid);
+        let mut at = at.min(self.node(parent)?.children.len());
+        for &kid in kids {
+            self.node_mut(kid)?.parent = Some(parent);
+            self.node_mut(parent)?.children.insert(at, kid);
+            at = at.saturating_add(1);
         }
         Ok(())
     }
 
+    /// `anchor`'s parent and its index there.
     fn place(&self, anchor: usize) -> Result<(usize, usize), String> {
-        let parent = self.nodes[anchor]
+        let parent = self
+            .node(anchor)?
             .parent
             .filter(|_| anchor != ROOT)
             .ok_or("an edit reached outside the view")?;
-        let index = self.nodes[parent]
+        let index = self
+            .node(parent)?
             .children
             .iter()
             .position(|&c| c == anchor)
@@ -334,17 +347,17 @@ impl Tree {
         Ok((parent, index))
     }
 
-    fn copy(&mut self, node: usize) -> usize {
-        let mut fresh = self.nodes[node].clone();
+    fn copy(&mut self, node: usize) -> Result<usize, String> {
+        let mut fresh = self.node(node)?.clone();
         fresh.parent = None;
         let kids = std::mem::take(&mut fresh.children);
         let at = self.add(fresh);
         for kid in kids {
-            let c = self.copy(kid);
-            self.nodes[c].parent = Some(at);
-            self.nodes[at].children.push(c);
+            let c = self.copy(kid)?;
+            self.node_mut(c)?.parent = Some(at);
+            self.node_mut(at)?.children.push(c);
         }
-        at
+        Ok(at)
     }
 
     fn drop_node(&mut self, node: usize) -> Result<(), String> {
@@ -368,7 +381,10 @@ impl Tree {
     fn edit(&mut self, edit: Edit) -> Result<(), String> {
         match edit {
             Edit::PushId { id } => {
-                let node = *self.ids.get(&id).ok_or_else(|| format!("no element {id}"))?;
+                let node = *self
+                    .ids
+                    .get(&id)
+                    .ok_or_else(|| format!("no element {id}"))?;
                 self.stack.push(node);
             }
             Edit::SetId { id } => {
@@ -382,7 +398,7 @@ impl Tree {
                 let node = self.top()?;
                 let child = usize::try_from(index)
                     .ok()
-                    .and_then(|i| self.nodes[node].children.get(i).copied())
+                    .and_then(|i| self.nodes.get(node)?.children.get(i).copied())
                     .ok_or("a child that is not there")?;
                 self.set_top(child)?;
             }
@@ -406,14 +422,13 @@ impl Tree {
             }
             Edit::Clone => {
                 let node = self.top()?;
-                let copy = self.copy(node);
+                let copy = self.copy(node)?;
                 self.set_top(copy)?;
             }
             Edit::AppendChildren { m } => {
                 let kids = self.pop(m)?;
                 let parent = self.top()?;
-                let end = self.nodes[parent].children.len();
-                self.insert(parent, end, &kids)?;
+                self.insert(parent, usize::MAX, &kids)?;
             }
             Edit::ReplaceWith { m } => {
                 let kids = self.pop(m)?;
@@ -427,7 +442,8 @@ impl Tree {
                 let kids = self.pop(m)?;
                 let anchor = self.top()?;
                 let (parent, at) = self.place(anchor)?;
-                self.insert(parent, if after { at + 1 } else { at }, &kids)?;
+                let at = if after { at.saturating_add(1) } else { at };
+                self.insert(parent, at, &kids)?;
             }
             Edit::SetAttribute {
                 name,
@@ -443,7 +459,7 @@ impl Tree {
                     Value::Int(i) => Some(i.to_string()),
                     Value::Bool(b) => Some(b.to_string()),
                 };
-                let n = &mut self.nodes[node];
+                let n = self.node_mut(node)?;
                 let list = if namespace.as_deref() == Some("style") {
                     &mut n.style
                 } else {
@@ -456,7 +472,7 @@ impl Tree {
             }
             Edit::SetText { value } => {
                 let node = self.top()?;
-                self.nodes[node].text = value;
+                self.node_mut(node)?.text = value;
             }
             // Nothing listens here: the drawing is written once.
             Edit::Listen { .. } | Edit::Unlisten { .. } => {}
@@ -470,21 +486,25 @@ impl Tree {
 
     /// The root's children, as a page's element tree.
     fn into_elements(self) -> Vec<Element> {
-        self.nodes[ROOT]
-            .children
-            .iter()
-            .map(|&c| self.element(c))
-            .collect()
+        self.nodes
+            .first()
+            .map(|root| {
+                root.children
+                    .iter()
+                    .filter_map(|&c| self.element(c))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
-    fn element(&self, at: usize) -> Element {
-        let n = &self.nodes[at];
+    fn element(&self, at: usize) -> Option<Element> {
+        let n = self.nodes.get(at)?;
         if n.tag == "#text" {
-            return Element {
+            return Some(Element {
                 tag: "#text".to_owned(),
                 text: Some(n.text.clone()),
                 ..Element::default()
-            };
+            });
         }
         let mut attrs: Vec<Attr> = n
             .attrs
@@ -503,20 +523,23 @@ impl Tree {
                 .map(|(_, v)| format!("{}; ", v.trim_end_matches(';')))
                 .unwrap_or_default();
             for (k, v) in &n.style {
-                css.push_str(&format!("{k}: {v}; "));
+                css.push_str(k);
+                css.push_str(": ");
+                css.push_str(v);
+                css.push_str("; ");
             }
             attrs.push(Attr {
                 name: "style".to_owned(),
                 value: css.trim_end().to_owned(),
             });
         }
-        Element {
+        Some(Element {
             tag: n.tag.clone(),
             attrs,
             text: (!n.text.is_empty()).then(|| n.text.clone()),
-            children: n.children.iter().map(|&c| self.element(c)).collect(),
+            children: n.children.iter().filter_map(|&c| self.element(c)).collect(),
             ..Element::default()
-        }
+        })
     }
 }
 
@@ -600,7 +623,12 @@ mod tests {
     #[test]
     fn edits_that_reach_outside_are_refused() {
         let mut tree = Tree::new();
-        assert!(tree.apply(Frame::Edits { edits: vec![Edit::Pop] }).is_err());
+        assert!(
+            tree.apply(Frame::Edits {
+                edits: vec![Edit::Pop]
+            })
+            .is_err()
+        );
         let mut tree = Tree::new();
         assert!(
             tree.apply(Frame::Edits {
@@ -609,9 +637,6 @@ mod tests {
             .is_err()
         );
         let mut tree = Tree::new();
-        assert!(
-            tree.apply(Frame::Failed("it trapped".to_owned()))
-                .is_err()
-        );
+        assert!(tree.apply(Frame::Failed("it trapped".to_owned())).is_err());
     }
 }
