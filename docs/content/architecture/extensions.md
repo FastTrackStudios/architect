@@ -1808,6 +1808,40 @@ crate both sides use, a pane-side clock in place of the page's media
 element, and the embed context (`features/extensions/src/linked.rs`
 `EmbedContext`) carrying the playhead to a linked view.
 
+### Share layers
+
+A share link plays to a layer its sharer sets (page, reference, full;
+[how far a link plays](@/guide/deploy.md#how-far-a-link-plays)), and the
+node refuses a file above it. Which files of a song are its reference
+and which its stems is the song's extension's to say, as data, so the
+node needs no code of it:
+
+```toml
+[[share_layers]]
+note_type = "song"                                   # notes with `type: song`
+reference = ["*.session", "Media/Proxies/Reference*", "Media/Peaks/**"]
+full = ["Media/Proxies/**"]                          # the stems
+# page = ["Charts/**"]                               # on every link (as a file no rule names)
+```
+
+(`features/extensions/src/share_layers.rs` `ShareLayersDecl`, checked by
+`Manifest::check`.) A pattern matches an attached file's path relative to
+the folder of the note that attaches it (a file outside it: its vault
+path), whole: `*` and `?` within one segment, `**` any number of them.
+The lists are tried `page`, `reference`, `full`, and the first that matches
+places the file, so a narrow `reference` pattern carves the reference out
+of a broad `full` one. A file is in the highest layer any note of the
+vault that links it places it in, inside the share's scope or not, hidden
+or not, so a plain note linking a stem never brings it down to the page; a
+note with a list of types (`type: [song, live]`) takes the first rule for
+any of them. A rule governs a file's bytes: what a page draws inline when
+the link is built (synced lyrics read from an `.lrc`) is the page's. The node reads the rules of the extensions installed on it
+(`features/sites/src/installed.rs` `InstalledLayers`, again when the
+folder changes), then a distribution's compiled-in ones
+(`apps/distribution/src/lib.rs` `Distribution::share_layers`, passed to
+`apps/desktop/src/node/mod.rs` `start_with_layers`) and places each file
+(`apps/desktop/src/node/share_layers.rs` `LayerRules`).
+
 ## Base view types
 
 Bases (`features/bases`, [Bases](@/features/bases.md)) draws a base's
