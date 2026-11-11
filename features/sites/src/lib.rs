@@ -60,13 +60,14 @@ mod url;
 mod write;
 
 pub use architect_extensions::contrib::Claim;
+pub use architect_extensions::share_layers::ShareLayersDecl;
 pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
 #[cfg(feature = "wasi")]
 pub use component_blocks::{ComponentBlocks, DRAW_TIMEOUT};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
-pub use installed::InstalledBlocks;
+pub use installed::{InstalledBlocks, InstalledLayers};
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
