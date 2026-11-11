@@ -1264,6 +1264,10 @@ fn a_component_makes_edits_lists_and_reads_a_document() {
 /// at once and one reads a half-written `resolve-lock.nix` ("unexpected
 /// end of file"), so the components "did not build". One lock file for
 /// every test binary that enters the `wasi` profile.
+#[allow(
+    clippy::incompatible_msrv,
+    reason = "a test: it builds with the workspace toolchain, not the MSRV"
+)]
 fn devenv_lock() -> Option<std::fs::File> {
     let dir = root().join("target");
     std::fs::create_dir_all(&dir).ok()?;
