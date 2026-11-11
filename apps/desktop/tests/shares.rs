@@ -1772,10 +1772,11 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
         Listen::Full
     );
     for at in [&full, &orchestra, &page_only] {
-        page_with(&format!("{at}Joy/Joy/"), None, "Joy").await;
+        page_with(&format!("{at}joy/joy/"), None, "Joy").await;
     }
-    let bass = "Joy/Joy/Media/Proxies/Bass.ogg";
-    let bass = bass.replacen("Joy/Joy", "Songs/Joy", 1);
+    // Pages are at lower-case slugs (`joy/joy/`); files keep their vault
+    // path's case.
+    let bass = "Songs/Joy/Media/Proxies/Bass.ogg".to_owned();
     let reference = "Songs/Joy/Media/Proxies/Reference.ogg";
     let session = "Songs/Joy/Joy.session";
     let chart = "Songs/Joy/Charts/Joy.pdf";
@@ -1852,10 +1853,11 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
             assert!(!text.contains("STEM"), "{trick} leaked: {text}");
         }
     }
-    // Where the file system opens the stem by another spelling (macOS:
-    // any case, either Unicode form), the node knows it for the stem by
-    // what it is on disk and says so.
-    let proxies = vault.join("Songs/Joy/Media/Proxies");
+    // On macOS the file system opens the stem by another spelling (any
+    // case, either Unicode form): the node knows it for the stem by what
+    // it is on disk and says so. (Elsewhere they are not there: 404,
+    // checked above.)
+    #[cfg(target_os = "macos")]
     for (spelling, asked) in [
         ("bass.ogg", "Songs/Joy/Media/Proxies/bass.ogg"),
         (
@@ -1863,10 +1865,14 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
             "Songs/Joy/Media/Proxies/Ga%CC%88nse.ogg",
         ),
     ] {
-        if proxies.join(spelling).exists() {
-            let (status, text) = raw_get(addr, &path(&orchestra, asked), "127.0.0.1").await;
-            assert_eq!(status, 403, "{asked}: {text}");
-        }
+        assert!(
+            vault
+                .join("Songs/Joy/Media/Proxies")
+                .join(spelling)
+                .exists()
+        );
+        let (status, text) = raw_get(addr, &path(&orchestra, asked), "127.0.0.1").await;
+        assert_eq!(status, 403, "{asked}: {text}");
     }
     // The same request on the Full link does reach the stem (the tricks
     // above are refused for its layer, not for being odd), where the file
@@ -1923,13 +1929,13 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
     );
     let names = zip_names(&format!("{full}_archive.zip?by=order")).await;
     assert!(names.iter().any(|n| n.contains("Bass")), "{names:?}");
-    let song = page_with(&format!("{orchestra}Joy/Joy/"), None, "site-queue").await;
+    let song = page_with(&format!("{orchestra}joy/joy/"), None, "site-queue").await;
     let queue = song.split("id=\"site-queue\">").nth(1).unwrap();
     assert!(
         queue.contains("Reference.ogg") && !queue.contains("Bass.ogg"),
         "{queue}"
     );
-    let song = page_with(&format!("{full}Joy/Joy/"), None, "site-queue").await;
+    let song = page_with(&format!("{full}joy/joy/"), None, "site-queue").await;
     assert!(song.contains("Bass.ogg"));
 
     // The JSON listing: what the link serves, its layer and the most it
@@ -2035,7 +2041,7 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
         .unwrap();
     let mut seen = 0;
     for _ in 0..200 {
-        let (status, _) = raw_get(addr, "/Joy/Joy/", "songs.example.test").await;
+        let (status, _) = raw_get(addr, "/joy/joy/", "songs.example.test").await;
         if status == 200 {
             break;
         }
@@ -2055,19 +2061,24 @@ async fn a_links_layer_is_held_by_the_node_on_every_route() {
     let (status, _) = raw_get(addr, &format!("/{reference}"), "songs.example.test").await;
     assert_eq!(status, 200);
 
-    // With no rule for a file (the extension gone), it is a page file
-    // again: what a link served before layers.
+    // The extension gone, its rules are kept: the stem stays held back
+    // (#540's review; `an_uninstalled_extensions_rules_are_kept_until_forgotten`).
     std::fs::remove_dir_all(w.tmp.path().join("host/data/extensions/demo.songs")).unwrap();
     assert_eq!(
         get(&format!("{page_only}{bass}"), None).await.0,
-        StatusCode::OK
+        StatusCode::FORBIDDEN
     );
 
     w.host.stop().await;
 }
 
+/// A share note with no `listen` (one written before layers, or one that
+/// lost the field) plays to Reference, the default, and its audience to
+/// the share's: access fails closed. Links from before layers are lowered;
+/// none was handed out (the hosted node was off), so nothing in use
+/// changes.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_share_written_before_layers_serves_what_it_served() {
+async fn a_share_note_without_a_layer_plays_to_reference() {
     let w = world().await;
     let vault = w.tmp.path().join("host/data/vaults/notes");
     install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
@@ -2088,13 +2099,18 @@ async fn a_share_written_before_layers_serves_what_it_served() {
     let stem = "Songs/Joy/Media/Proxies/Bass.ogg";
     for at in [&code, &band] {
         let url = w.url(&format!("/s/{at}/"));
-        page_with(&format!("{url}Joy/Joy/"), None, "Joy").await;
-        let (status, _, bytes) = get_range(&format!("{url}{stem}"), Some("bytes=0-3")).await;
+        page_with(&format!("{url}joy/joy/"), None, "Joy").await;
+        let (status, headers, bytes) = get_range(&format!("{url}{stem}"), Some("bytes=0-3")).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{at}");
+        assert_eq!(headers["x-architect-layer"], "full");
+        assert!(!String::from_utf8_lossy(&bytes).contains("STEM"));
+        let reference = "Songs/Joy/Media/Proxies/Reference.ogg";
+        let (status, _, bytes) = get_range(&format!("{url}{reference}"), Some("bytes=0-8")).await;
         assert_eq!(status, StatusCode::PARTIAL_CONTENT, "{at}");
-        assert_eq!(bytes, b"STEM");
+        assert_eq!(bytes, b"REFERENCE");
         let listing = json_at(&format!("{url}_files.json")).await;
-        assert_eq!(listing["max"], "full");
-        assert!(listed_paths(&listing).contains(&stem.to_owned()));
+        assert_eq!(listing["max"], "reference");
+        assert!(!listed_paths(&listing).contains(&stem.to_owned()));
     }
     let links: ShareLinksClient = w.lane(&w.grace).await;
     let old = links
@@ -2104,8 +2120,9 @@ async fn a_share_written_before_layers_serves_what_it_served() {
         .into_iter()
         .find(|s| s.code == code)
         .unwrap();
-    assert_eq!(old.listen, Listen::Full);
+    assert_eq!(old.listen, Listen::Reference);
     assert_eq!(old.audiences[0].listen, None);
+    assert_eq!(old.listen_for(Some(&old.audiences[0])), Listen::Reference);
 
     w.host.stop().await;
 }
@@ -2193,6 +2210,14 @@ async fn the_apps_share_actions_set_and_read_how_far_a_link_plays() {
     );
     let rows = run("SHARE_AUDIENCES", json!({"code": code})).await.unwrap();
     assert_eq!(rows["audiences"][0]["listen"], "full");
+    // Kept layer rules: none here; forgetting one that is not kept fails.
+    let kept = run("SHARE_LAYERS_KEPT", json!({})).await.unwrap();
+    assert_eq!(kept["kept"], json!([]));
+    assert!(
+        run("SHARE_LAYERS_FORGET", json!({"extension": "demo.nothing"}))
+            .await
+            .is_err()
+    );
 
     w.host.stop().await;
 }
@@ -2257,5 +2282,533 @@ async fn a_file_is_placed_by_every_note_that_links_it() {
             StatusCode::OK
         );
     }
+    w.host.stop().await;
+}
+
+// ── Layers: what must never open a link (#540's review) ──────────────
+
+/// The owner's manifest for `demo.songs`, written whole.
+const SONG_LAYERS: &str = "id = \"demo.songs\"\nname = \"Songs\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n\
+     [[share_layers]]\nnote_type = \"song\"\n\
+     reference = [\"*.session\", \"Media/Proxies/Reference*\"]\n\
+     full = [\"Media/Proxies/**\"]\n";
+
+/// A Reference link of `Songs` (the songs seeded, the owner's rules
+/// installed); its URL once its pages are built.
+async fn reference_link(w: &World) -> (Share, String) {
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
+    seed_songs(&vault);
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let share = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Folder("Songs".to_owned()),
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: None,
+            listen: Listen::Reference,
+        })
+        .await
+        .unwrap();
+    let url = w.url(&format!("/s/{}/", share.code));
+    page_with(&format!("{url}joy/joy/"), None, "Joy").await;
+    (share, url)
+}
+
+/// What the link answers for the Full stem (and that a refusal hands
+/// out none of its bytes).
+async fn stem_status(url: &str) -> StatusCode {
+    let (status, _, bytes) = get_range(
+        &format!("{url}Songs/Joy/Media/Proxies/Bass.ogg"),
+        Some("bytes=0-3"),
+    )
+    .await;
+    if status != StatusCode::PARTIAL_CONTENT && status != StatusCode::OK {
+        assert!(!String::from_utf8_lossy(&bytes).contains("STEM"));
+    }
+    status
+}
+
+/// Install `aaa.other` (asked before `demo.songs`) with `rules`.
+fn install_other(w: &World, rules: &str) {
+    touch(
+        &w.tmp.path().join("host/data/extensions/aaa.other"),
+        "extension.toml",
+        &format!(
+            "id = \"aaa.other\"\nname = \"Other\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n{rules}"
+        ),
+    );
+}
+
+/// The owner's manifest.
+fn owner(w: &World) -> PathBuf {
+    w.tmp
+        .path()
+        .join("host/data/extensions/demo.songs/extension.toml")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_extensions_page_rule_never_lowers_a_file() {
+    let w = world().await;
+    let (_, url) = reference_link(&w).await;
+    assert_eq!(
+        stem_status(&url).await,
+        StatusCode::FORBIDDEN,
+        "the baseline"
+    );
+    install_other(
+        &w,
+        "[[share_layers]]\nnote_type = \"song\"\npage = [\"**\"]\n",
+    );
+    assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_extensions_rule_that_matches_nothing_never_lowers_a_file() {
+    let w = world().await;
+    let (_, url) = reference_link(&w).await;
+    install_other(
+        &w,
+        "[[share_layers]]\nnote_type = \"song\"\nreference = [\"nothing\"]\n",
+    );
+    assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
+    w.host.stop().await;
+}
+
+/// With the owner's manifest unreadable, where the stem is is unknown:
+/// every attached file is held back below Full, and the listings name
+/// none of them, until it is fixed.
+async fn an_unreadable_owner_holds_everything_back(broken: &str) {
+    let w = world().await;
+    let (_, url) = reference_link(&w).await;
+    std::fs::write(owner(&w), broken).unwrap();
+    assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
+    let (status, headers, _) = get(&format!("{url}Songs/Joy/Joy.session"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "unknown: held back too");
+    assert_eq!(headers["x-architect-layer"], "full");
+    assert_eq!(
+        get(&format!("{url}_files.json"), None).await.0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let (_, _, files) = get(&format!("{url}_files/"), None).await;
+    assert!(
+        !files.contains("Bass.ogg") && !files.contains("Joy.session"),
+        "{files}"
+    );
+    let (status, _, zip) = get_bytes(&format!("{url}_archive.zip?by=order")).await;
+    assert!(
+        status != StatusCode::OK || !String::from_utf8_lossy(&zip).contains("STEM"),
+        "{status}"
+    );
+    let (_, _, page) = get(&format!("{url}joy/joy/"), None).await;
+    assert!(
+        !page.contains("site-queue") || !page.contains("Bass.ogg"),
+        "{page}"
+    );
+    // Fixed: as before.
+    std::fs::write(owner(&w), SONG_LAYERS).unwrap();
+    assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        get(&format!("{url}Songs/Joy/Joy.session"), None).await.0,
+        StatusCode::OK
+    );
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_owners_manifest_with_a_bad_kind_holds_everything_back() {
+    an_unreadable_owner_holds_everything_back(
+        &SONG_LAYERS.replace("kind = \"data\"", "kind = \"bogus\""),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_half_written_manifest_holds_everything_back() {
+    an_unreadable_owner_holds_everything_back(SONG_LAYERS.get(..SONG_LAYERS.len() / 2).unwrap())
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_uninstalled_extensions_rules_are_kept_until_forgotten() {
+    let w = world().await;
+    let (_, url) = reference_link(&w).await;
+    std::fs::remove_dir_all(w.tmp.path().join("host/data/extensions/demo.songs")).unwrap();
+    assert_eq!(
+        stem_status(&url).await,
+        StatusCode::FORBIDDEN,
+        "uninstalled"
+    );
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let kept = links.kept_layers().await.unwrap();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(kept[0].extension, "demo.songs");
+    assert_eq!(kept[0].note_types, ["song"]);
+    assert!(
+        links
+            .forget_layers("demo.nothing".to_owned())
+            .await
+            .is_err()
+    );
+    // Kept across a restart of the node: they are in its data dir.
+    let kept_file = w.tmp.path().join("host/data/share-layers.json");
+    assert!(
+        std::fs::read_to_string(&kept_file)
+            .unwrap()
+            .contains("demo.songs")
+    );
+    links.forget_layers("demo.songs".to_owned()).await.unwrap();
+    assert!(links.kept_layers().await.unwrap().is_empty());
+    assert_eq!(
+        stem_status(&url).await,
+        StatusCode::PARTIAL_CONTENT,
+        "forgotten: a page file"
+    );
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reinstalled_extension_places_exactly_what_it_declares() {
+    let w = world().await;
+    let (_, url) = reference_link(&w).await;
+    let dir = w.tmp.path().join("host/data/extensions/demo.songs");
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
+    // Back, declaring the Bass stem part of the reference now.
+    touch(
+        &dir,
+        "extension.toml",
+        &SONG_LAYERS.replace(
+            "reference = [\"*.session\", \"Media/Proxies/Reference*\"]",
+            "reference = [\"*.session\", \"Media/Proxies/Reference*\", \"Media/Proxies/Bass*\"]",
+        ),
+    );
+    assert_eq!(stem_status(&url).await, StatusCode::PARTIAL_CONTENT);
+    let (status, headers, _) = get(
+        &format!("{url}Songs/Joy/Media/Proxies/G%C3%A4nse.ogg"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(headers["x-architect-layer"], "full");
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    // Installed, its rules are its manifest's: nothing kept, nothing to
+    // forget.
+    assert!(links.kept_layers().await.unwrap().is_empty());
+    assert!(links.forget_layers("demo.songs".to_owned()).await.is_err());
+    w.host.stop().await;
+}
+
+/// The status, the layer header and the body of a raw answer.
+fn answer_of(text: &str) -> (u16, bool, String) {
+    let status = text
+        .split(' ')
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let (head, body) = text.split_once("\r\n\r\n").unwrap_or((text, ""));
+    (
+        status,
+        head.to_ascii_lowercase().contains("x-architect-layer"),
+        body.to_owned(),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_says_nothing_about_files_outside_it() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
+    seed_songs(&vault);
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    // Joy alone, at Reference: Noel's stem is in the vault, not the link.
+    let joy = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Folder("Songs/Joy".to_owned()),
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: Some("joy.example.test".to_owned()),
+            listen: Listen::Reference,
+        })
+        .await
+        .unwrap();
+    let joy = links
+        .add_audience(
+            joy.code.clone(),
+            NewAudience {
+                name: "all".to_owned(),
+                filter: String::new(),
+                listen: None,
+            },
+        )
+        .await
+        .unwrap();
+    // Every song, its strings audience at Reference: Joy's stem is the
+    // share's, not the audience's.
+    let all = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Folder("Songs".to_owned()),
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Comment,
+            expires_at: None,
+            domain: None,
+            listen: Listen::Full,
+        })
+        .await
+        .unwrap();
+    let all = links
+        .add_audience(
+            all.code.clone(),
+            NewAudience {
+                name: "strings".to_owned(),
+                filter: "section == \"strings\"".to_owned(),
+                listen: Some(Listen::Reference),
+            },
+        )
+        .await
+        .unwrap();
+    let addr = w.host.http;
+    let (joy_own, joy_all, strings) = (
+        format!("/s/{}/", joy.code),
+        format!("/s/{}/", joy.audience_named("all").unwrap().code),
+        format!("/s/{}/", all.audience_named("strings").unwrap().code),
+    );
+    for at in [&joy_own, &joy_all, &strings] {
+        page_with(&w.url(at), None, "<!DOCTYPE html>").await;
+    }
+    let mut domain_up = false;
+    for _ in 0..200 {
+        if raw_get(addr, "/", "joy.example.test").await.0 == 200 {
+            domain_up = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(domain_up);
+    let cases = [
+        // (host, link, a file outside it that exists, one that does not)
+        (
+            "127.0.0.1",
+            joy_own.as_str(),
+            "Songs/Noel/Media/Proxies/Bass.ogg",
+            "Songs/Nope/Media/Proxies/Bass.ogg",
+        ),
+        (
+            "127.0.0.1",
+            joy_all.as_str(),
+            "Songs/Noel/Media/Proxies/Bass.ogg",
+            "Songs/Nope/Media/Proxies/Bass.ogg",
+        ),
+        (
+            "joy.example.test",
+            "/",
+            "Songs/Noel/Media/Proxies/Bass.ogg",
+            "Songs/Nope/Media/Proxies/Bass.ogg",
+        ),
+        (
+            "127.0.0.1",
+            strings.as_str(),
+            "Songs/Joy/Media/Proxies/Bass.ogg",
+            "Songs/Nope/Media/Proxies/Bass.ogg",
+        ),
+        (
+            "127.0.0.1",
+            strings.as_str(),
+            "Songs/Joy/Joy.session",
+            "Songs/Nope/Nope.session",
+        ),
+        ("127.0.0.1", strings.as_str(), "joy/joy/", "nope/nope/"),
+    ];
+    for (host, link, there, nowhere) in cases {
+        let (status, layer, body) =
+            answer_of(&raw_get(addr, &format!("{link}{there}"), host).await.1);
+        let (status2, layer2, body2) =
+            answer_of(&raw_get(addr, &format!("{link}{nowhere}"), host).await.1);
+        assert_eq!(status, 404, "{host}{link}{there}: {body}");
+        assert_eq!(
+            (status, layer, &body),
+            (status2, layer2, &body2),
+            "{host}{link}{there}"
+        );
+    }
+    // A comment on another audience's page and on a page that is nowhere:
+    // answered the same.
+    let comment = |page: &'static str| {
+        let url = w.url(&format!("{strings}_comment"));
+        async move {
+            let res = reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap()
+                .post(url)
+                .form(&[("page", page), ("text", "hi")])
+                .send()
+                .await
+                .unwrap();
+            (res.status(), res.text().await.unwrap())
+        }
+    };
+    let (theirs, nowhere) = (comment("/joy/joy/").await, comment("/nope/nope/").await);
+    assert_eq!(theirs.0, StatusCode::NOT_FOUND);
+    assert_eq!(theirs, nowhere);
+    // Its own page takes one.
+    assert_eq!(comment("/noel/noel/").await.0, StatusCode::SEE_OTHER);
+    // In the link, above it: still 403 with the layer it needs.
+    let (status, layer, _) = answer_of(
+        &raw_get(
+            addr,
+            &format!("{joy_own}Songs/Joy/Media/Proxies/Bass.ogg"),
+            "127.0.0.1",
+        )
+        .await
+        .1,
+    );
+    assert_eq!((status, layer), (403, true));
+
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_thousand_requests_place_the_files_once() {
+    let w = world().await;
+    let (_, url) = reference_link(&w).await;
+    let reference = format!("{url}Songs/Joy/Media/Proxies/Reference.ogg");
+    let stem = format!("{url}Songs/Joy/Media/Proxies/Bass.ogg");
+    assert_eq!(get(&stem, None).await.0, StatusCode::FORBIDDEN);
+    // Settled first: the share's own note reaches the vault a moment after
+    // it is made, and a vault change is placed again (once), as it must be.
+    let mut settled = false;
+    for _ in 0..50 {
+        let at = architect_desktop::node::share_layers::placements();
+        let _ = get(&stem, None).await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        let _ = get(&stem, None).await;
+        if architect_desktop::node::share_layers::placements() == at {
+            settled = true;
+            break;
+        }
+    }
+    assert!(settled, "placement never settled");
+    let before = architect_desktop::node::share_layers::placements();
+    let client = reqwest::Client::new();
+    for i in 0..1000 {
+        let at = if i % 2 == 0 { &reference } else { &stem };
+        let res = client
+            .get(at)
+            .header("range", format!("bytes={}-{}", i % 5, i % 5 + 2))
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            res.status() == StatusCode::PARTIAL_CONTENT || res.status() == StatusCode::FORBIDDEN
+        );
+    }
+    let placed = architect_desktop::node::share_layers::placements() - before;
+    assert!(placed <= 1, "{placed} placements for 1000 requests");
+
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_files_name_is_in_nothing_built_for_its_link() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
+    seed_songs(&vault);
+    // A plain link to the stem too, and lyrics held for Full.
+    touch(
+        &vault,
+        "Songs/Joy/Joy.md",
+        "---\ntitle: Joy\ntype: song\nsection: band\n---\n# Joy\n\n![[Joy.session]]\n\n![[Media/Proxies/Reference.ogg]]\n\n![[Media/Proxies/Bass.ogg]]\n\nThe [[Media/Proxies/Bass.ogg|bass stem]] and [the other stem](Media/Proxies/Bass.ogg).\n\n![[Charts/Joy.pdf]]\n",
+    );
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let share = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Folder("Songs".to_owned()),
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: None,
+            listen: Listen::Full,
+        })
+        .await
+        .unwrap();
+    let share = links
+        .add_audience(
+            share.code.clone(),
+            NewAudience {
+                name: "orchestra".to_owned(),
+                filter: String::new(),
+                listen: Some(Listen::Reference),
+            },
+        )
+        .await
+        .unwrap();
+    let orchestra = share.audience_named("orchestra").unwrap().code.clone();
+    let full = w.url(&format!("/s/{}/", share.code));
+    let low = w.url(&format!("/s/{orchestra}/"));
+    page_with(&format!("{full}joy/joy/"), None, "Bass.ogg").await;
+    let page = page_with(&format!("{low}joy/joy/"), None, "Reference.ogg").await;
+    for name in ["Bass", "nse.ogg", "bass stem", "the other stem"] {
+        assert!(!page.contains(name), "{name} in the page: {page}");
+    }
+    let built = w.tmp.path().join("host/data/shares").join(&share.code);
+    let named = |dir: &Path| -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_owned()];
+        while let Some(at) = stack.pop() {
+            for entry in std::fs::read_dir(&at).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if let Ok(text) = std::fs::read_to_string(&path) {
+                    if [
+                        "Bass.ogg",
+                        "G\u{e4}nse.ogg",
+                        "Ga\u{308}nse.ogg",
+                        "bass stem",
+                    ]
+                    .iter()
+                    .any(|n| text.contains(n))
+                    {
+                        out.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        out
+    };
+    let held = named(&built.join("audiences").join(&orchestra));
+    assert!(held.is_empty(), "held files named in {held:?}");
+    assert!(
+        !named(&built.join("site")).is_empty(),
+        "the Full link names them"
+    );
+    // Lowered, the share's own link is built again without them.
+    links
+        .update(share.code.clone(), ShareChange::Listen(Listen::Reference))
+        .await
+        .unwrap();
+    let mut gone = false;
+    for _ in 0..200 {
+        if named(&built.join("site")).is_empty() {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(gone, "still named: {:?}", named(&built.join("site")));
+
     w.host.stop().await;
 }
