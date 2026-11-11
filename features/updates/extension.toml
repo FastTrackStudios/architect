@@ -1,0 +1,110 @@
+# Updates (features/updates/src/lib.rs, #523): the Architect app keeps
+# itself on the newest signed release. Checks at start and daily (when
+# automatic checks are on), installs only when asked: verified against the
+# org-signed SHA256SUMS, written to the Nix launcher's $ARCHITECT_UPDATE_DIR
+# or over $APPIMAGE, else reported with its download page. One Rust value
+# (`Updates`, a linked::Extension): linked in, or its program (src/main.rs)
+# as a development copy (EXT_CLONE {"id":"updates"}).
+id = "updates"
+name = "Updates"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Keeps Architect up to date: tells you when a new release is out, downloads and verifies it when you choose Install, and runs it on the next start."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-updates"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/updates"
+
+[capabilities]
+actions = ["PRESENCE_QUIT"]
+effect = "mutating"
+reads = ["documents"]
+
+[[actions]]
+id = "UPDATES_CHECK"
+name = "Check for updates"
+description = "Asks for the newest release on the update channel now and answers the updater's state (as UPDATES_STATE). Downloads nothing. A development build (no release version stamped in) never checks."
+group = "Updates"
+effect = "read_only"
+
+[[actions]]
+id = "UPDATES_INSTALL"
+name = "Install the update"
+description = "Downloads the available update, verifies it against the release's signed SHA256SUMS, and installs it for the next start (into $ARCHITECT_UPDATE_DIR under the Nix launcher, else over $APPIMAGE). Refused for an unsigned release, a development build, or where Architect cannot replace itself (macOS, Windows, a distro package): then it says where to download it. Answers at once; the download runs in the background (UPDATES_STATE)."
+group = "Updates"
+effect = "mutating"
+
+[[actions]]
+id = "UPDATES_STATE"
+name = "Updates: state"
+description = "The updater's state: `current` (the running release version, null for a development build), `development_build`, `channel`, `last_check`, and `update` {state: idle, development_build, checking, up_to_date, available {version, notes_url, signed, plan}, downloading {version, received, total}, ready {version, plan}, failed {reason}}."
+group = "Updates"
+effect = "read_only"
+
+[[actions]]
+id = "UPDATES_RESTART"
+name = "Restart to finish updating"
+description = "Once an update is installed: quits Architect and, for a replaced AppImage, starts it again on the new version (under the Nix launcher, open Architect again)."
+group = "Updates"
+effect = "mutating"
+
+[[actions]]
+id = "UPDATES_PAGE"
+name = "Open the release page"
+description = "Opens the available release's page (its notes and downloads), else every release's."
+group = "Updates"
+effect = "read_only"
+
+[[actions]]
+id = "UPDATES_SCHEDULED"
+name = "Updates: scheduled check"
+description = "Checks for updates when automatic checks are on (Settings → Updates); does nothing otherwise. Its hooks run it at start and every 24 hours."
+group = "Updates"
+effect = "read_only"
+
+[[views]]
+id = "settings"
+title = "Updates"
+icon = "download"
+
+[[menus]]
+menu = "Help"
+action = "UPDATES_CHECK"
+
+[[hooks]]
+on = "startup"
+action = "UPDATES_SCHEDULED"
+
+[[hooks]]
+every = "24h"
+action = "UPDATES_SCHEDULED"
+
+[[sections]]
+id = "updates"
+title = "Updates"
+icon = "download"
+view = "settings"
+
+[[sections.settings]]
+key = "updates.channel"
+title = "Update channel"
+description = "Which releases to follow. Nightly is not available yet."
+control = "select"
+default = "stable"
+choices = [
+    { value = "stable", label = "Stable" },
+    { value = "nightly", label = "Nightly" },
+]
+
+[[sections.settings]]
+key = "updates.auto"
+title = "Check automatically"
+description = "Check for a new release at start and once a day. An update downloads only when you choose Install."
+control = "switch"
+default = true

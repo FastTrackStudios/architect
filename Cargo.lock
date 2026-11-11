@@ -1230,6 +1230,7 @@ dependencies = [
  "architect-tasks",
  "architect-threads",
  "architect-time-tracker",
+ "architect-updates",
  "architect-workspace-hack",
  "serde_json",
  "tempfile",
@@ -2250,6 +2251,29 @@ dependencies = [
  "architect-workspace-hack",
  "chrono",
  "dioxus",
+]
+
+[[package]]
+name = "architect-updates"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-settings",
+ "architect-workspace-hack",
+ "axum",
+ "base64 0.22.1",
+ "blake2",
+ "chrono",
+ "dioxus",
+ "ed25519-dalek",
+ "futures",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
