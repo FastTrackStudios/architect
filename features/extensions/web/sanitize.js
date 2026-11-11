@@ -3,13 +3,25 @@
 // `attr_rule`, `css_inert`), applied to the remote-view edit stream one
 // element and one attribute at a time, instead of to markup.
 //
-// The same rules, with one difference a live view needs: a mounted view
-// is interactive (its events go back to the extension), so the form
-// fields a static share page drops (`input`, `textarea`, `select`,
-// `option`, `label`) are kept, with only the attributes they need. No
-// `<form>` comes through, so nothing submits, and a `<button>` is always
-// `type="button"`. The cases are test/sanitize.test.mjs, ported from
-// sanitize.rs's tests.
+// Stricter than share pages where a live view in someone else's page
+// needs it:
+// - **No network** but what the embedder allows: an image or media URL
+//   only when it starts with one of `mountView`'s `urls` (none by
+//   default), or is a `data:` raster image. Never a relative URL (it would
+//   be a request to the embedder's own origin, with its cookies). A link
+//   (`<a href>`) only to `https:`, `mailto:` or a fragment of the view's
+//   own.
+// - **Fields** a static share page drops (`input`, `textarea`, `select`,
+//   `option`, `label`) are kept, since a mounted view is interactive, with
+//   only what they show: no `name`, `form` or `autocomplete` (forced
+//   off), input types from a short list (never `hidden`, `password` or
+//   `file`). No `<form>` comes through and a `<button>` is always
+//   `type="button"`; the view is in a shadow root, so its fields belong
+//   to no form of the embedder's.
+// - **Ids are the view's own**: each id, and every reference to one
+//   (`for`, the ARIA id lists, `href="#…"`, `url(#…)`), gets the pane's
+//   prefix, so nothing the view names reaches an element of the page's.
+// The cases are test/sanitize.test.mjs, ported from sanitize.rs's tests.
 
 const SVG_ELEMENTS = [
   'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'textPath',
@@ -109,6 +121,28 @@ const isFragment = (url) => {
   return s.startsWith('#') && s.length > 1;
 };
 
+/// Whether `url` may be loaded as an image or media: a `data:` raster
+/// image, or a URL starting with one of `allow` (absolute `https:` or
+/// `blob:` prefixes the embedder passed to `mountView`).
+export function loadOk(url, used, allow = []) {
+  const s = squeeze(url);
+  if (used === 'image' && urlOk(s, 'image')) return true;
+  let href;
+  try {
+    href = new URL(String(url).trim()).href;
+  } catch {
+    return false;
+  }
+  return allow.some((a) => {
+    try {
+      const prefix = new URL(a).href;
+      return /^(https|blob):/.test(prefix) && href.startsWith(prefix);
+    } catch {
+      return false;
+    }
+  });
+}
+
 /// Whether `url` may be used as a link, an image or media (`url_ok`).
 export function urlOk(url, used) {
   // Set with `setAttribute`, a value is not HTML-decoded: what is checked
@@ -116,7 +150,8 @@ export function urlOk(url, used) {
   url = squeeze(url);
   if (url.startsWith('#')) return used === 'link';
   const end = url.search(/[:/?#]/);
-  if (end < 0 || url[end] !== ':') return !url.startsWith('//');
+  // No scheme: relative to the embedder's page, its origin: never.
+  if (end < 0 || url[end] !== ':') return false;
   const scheme = url.slice(0, end);
   const rest = url.slice(end);
   switch (scheme) {
@@ -210,10 +245,9 @@ function reservedId(id) {
   return lower.startsWith('site-') || lower.startsWith('share-') || RESERVED_IDS.includes(lower);
 }
 
-const INPUT_TYPES = [
-  'text', 'search', 'number', 'range', 'checkbox', 'radio', 'color', 'date', 'time', 'datetime-local', 'month',
-  'week', 'email', 'tel', 'url', 'password', 'hidden',
-];
+/// The input types a view may make: none that a browser fills from what
+/// it remembers, none hidden, none that reads a file.
+const INPUT_TYPES = ['text', 'search', 'number', 'range', 'checkbox', 'radio', 'color', 'date', 'time'];
 
 function htmlAttr(tag, lower, value, live) {
   const t = String(tag).toLowerCase();
@@ -233,44 +267,67 @@ function htmlAttr(tag, lower, value, live) {
   if (lower === 'disabled' && ['button', 'input', 'textarea', 'select', 'option', 'optgroup'].includes(t)) return true;
   if (t === 'input') {
     if (lower === 'type') return INPUT_TYPES.includes(value.toLowerCase());
-    return ['value', 'checked', 'placeholder', 'min', 'max', 'step', 'readonly', 'maxlength', 'minlength', 'size', 'name', 'autocomplete', 'spellcheck', 'inputmode'].includes(lower);
+    return ['value', 'checked', 'placeholder', 'min', 'max', 'step', 'readonly', 'maxlength', 'minlength', 'size', 'spellcheck'].includes(lower);
   }
-  if (t === 'textarea') return ['value', 'placeholder', 'rows', 'cols', 'readonly', 'maxlength', 'wrap', 'spellcheck', 'name'].includes(lower);
-  if (t === 'select') return ['multiple', 'size', 'name', 'value'].includes(lower);
+  if (t === 'textarea') return ['value', 'placeholder', 'rows', 'cols', 'readonly', 'maxlength', 'wrap', 'spellcheck'].includes(lower);
+  if (t === 'select') return ['multiple', 'size', 'value'].includes(lower);
   if (t === 'option') return ['value', 'selected', 'label'].includes(lower);
   if (t === 'optgroup') return lower === 'label';
-  if (t === 'label') return lower === 'for';
   if (t === 'progress' || t === 'meter') return ['value', 'max', 'min', 'low', 'high', 'optimum'].includes(lower);
   if (lower === 'tabindex') return /^-?\d+$/.test(value.trim());
   return false;
 }
 
+const ID_REFS = [
+  'aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns', 'aria-activedescendant', 'aria-details',
+  'aria-errormessage', 'aria-flowto',
+];
+
+const ID_TOKEN = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/;
+
+/// `#id` with the pane's prefix, or null.
+function fragment(value, prefix) {
+  const v = String(value).trim();
+  if (!v.startsWith('#') || !ID_TOKEN.test(v.slice(1))) return null;
+  return `#${prefix}${v.slice(1)}`;
+}
+
 /// Attribute `name` = `value` on element `tag`: the value it keeps, or
-/// `null` when it is left out (`attr_rule`).
-export function attrRule(tag, name, value, inSvg, live = true) {
+/// `null` when it is left out (`attr_rule`). `view`: in a mounted view,
+/// `{ prefix, urls }`: the pane's id prefix and the URLs it may load.
+export function attrRule(tag, name, value, inSvg, live = true, view = { prefix: '', urls: [] }) {
   if (!isName(name)) return null;
   const lower = name.toLowerCase();
+  const prefix = view.prefix ?? '';
   value = [...String(value)].filter((c) => !isControl(c) || c === '\t' || c === '\n' || c === '\r').join('');
   switch (lower) {
     case 'style':
       return cleanStyle(value);
     case 'id':
-      return value && !reservedId(value) ? value : null;
+      return value && ID_TOKEN.test(value) && !reservedId(value) ? `${prefix}${value}` : null;
+    case 'for':
+      return String(tag).toLowerCase() === 'label' && ID_TOKEN.test(value) ? `${prefix}${value}` : null;
     case 'href':
     case 'xlink:href': {
       const t = String(tag);
-      const ok = t === 'use' ? isFragment(value) : t === 'a' ? urlOk(value, 'link') : t === 'image' ? urlOk(value, 'image') : false;
-      return ok ? value : null;
+      if (t === 'use') return fragment(value, prefix);
+      if (t === 'a') return value.trim().startsWith('#') ? fragment(value, prefix) : urlOk(value, 'link') ? value : null;
+      if (t === 'image') return loadOk(value, 'image', view.urls) ? value : null;
+      return null;
     }
     case 'src': {
       const t = String(tag).toLowerCase();
-      const ok = t === 'img' ? urlOk(value, 'image') : ['audio', 'video', 'source'].includes(t) ? urlOk(value, 'media') : false;
+      const ok = t === 'img' ? loadOk(value, 'image', view.urls) : ['audio', 'video', 'source'].includes(t) ? loadOk(value, 'media', view.urls) : false;
       return ok ? value : null;
     }
     case 'xmlns':
       return inSvg && value === SVG_NS ? value : null;
     case 'xmlns:xlink':
       return inSvg && value === XLINK_NS ? value : null;
+  }
+  if (ID_REFS.includes(lower)) {
+    const ids = value.split(/\s+/).filter(Boolean);
+    return ids.length && ids.every((i) => ID_TOKEN.test(i)) ? ids.map((i) => `${prefix}${i}`).join(' ') : null;
   }
   if (lower.startsWith('aria-') && lower.length > 5) return value;
   if (lower.startsWith('data-')) {
@@ -279,6 +336,10 @@ export function attrRule(tag, name, value, inSvg, live = true) {
     return rest && !rest.startsWith('site-') && rest !== 'act' && rest !== 'dioxus-id' ? value : null;
   }
   if (GLOBAL_ATTRS.includes(lower) || htmlAttr(tag, lower, value, live)) return value;
-  if (inSvg && SVG_ATTRS.includes(lower)) return presentationOk(value) ? value : null;
+  if (inSvg && SVG_ATTRS.includes(lower)) {
+    if (!presentationOk(value)) return null;
+    // Its own drawing's ids, with the pane's prefix.
+    return value.replace(/url\(#([A-Za-z0-9._-]+)\)/gi, (_, id) => `url(#${prefix}${id})`);
+  }
   return null;
 }

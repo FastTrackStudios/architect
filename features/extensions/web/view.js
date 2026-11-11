@@ -3,14 +3,23 @@
 // shape `{tag, val}`), a port of features/extensions/src/web.rs `Pane`,
 // the applier Architect's own web app draws views with.
 //
-// What an edit may do is held to the share pages' rules (sanitize.js):
-// a view draws inside a box of its own under the embedder's element and
-// never reaches outside it; elements and attributes outside the
+// What an edit may do is held to the share pages' rules (sanitize.js),
+// stricter where a live view needs it: a view draws inside a shadow root
+// of its own under the embedder's element (its ids, `for` and `url(#…)`
+// with the pane's prefix too, its fields in no form of the page's, no
+// page CSS in, none of its out) and never reaches outside it; elements and attributes outside the
 // allow-lists are left out; no `on…` handler and no `dangerous_inner_html`
 // (the frame fails, as `Pane` fails it); no URL but a safe one; no CSS
 // that loads, binds or positions itself over the page. Events on its
 // elements go back to it as the world's `view-event`s.
 import { attrRule, elementRule, styleProperty, SVG_NS, VIEW_BOX_STYLE } from './sanitize.js';
+
+/// Each pane's id prefix: its own, page-wide.
+let panes = 0;
+
+/// What a pane takes when not told: its view's network allow-list (none)
+/// and runner.js `LIMITS`' view caps.
+const DEFAULTS = { editsPerFrame: 10000, nodesPerPane: 20000, viewHeight: 4096 };
 
 /// The attribute an element a view listens on carries its id in (as
 /// Dioxus's own renderers, and `Pane`).
@@ -28,23 +37,37 @@ const fail = (why) => {
 
 /// One mounted view over `element`, its events to `onEvent`.
 export class Pane {
-  constructor(element, onEvent) {
+  constructor(element, onEvent, options = {}) {
     this.element = element;
     this.doc = element.ownerDocument;
     this.onEvent = onEvent;
     this.listening = new Map();
+    this.view = { prefix: options.prefix ?? `av${++panes}-`, urls: [...(options.urls ?? [])] };
+    this.limits = { ...DEFAULTS, ...options.limits };
     this.reset();
   }
 
-  /// Empties it, for a first render: a fresh box under its element.
+  /// Empties it, for a first render: a fresh shadow root and box under
+  /// its element.
   reset() {
     for (const [name, f] of this.listening) this.root?.removeEventListener(name, f);
     this.listening.clear();
     this.element.replaceChildren();
+    this.count = 0;
+    const host = this.doc.createElement('div');
+    host.setAttribute('class', 'architect-view-host');
+    setStyle(host, `display:block!important;max-height:${Number(this.limits.viewHeight)}px!important;overflow:hidden!important`);
+    // Open: the page may look in (the sandbox protects the page from the
+    // view, not the view from the page).
+    const shadow = host.attachShadow({ mode: 'open' });
     this.root = this.doc.createElement('div');
     this.root.setAttribute('class', 'architect-view');
-    setStyle(this.root, VIEW_BOX_STYLE);
-    this.element.append(this.root);
+    setStyle(
+      this.root,
+      `${VIEW_BOX_STYLE};max-height:${Number(this.limits.viewHeight)}px!important;max-width:100%!important`,
+    );
+    shadow.append(this.root);
+    this.element.append(host);
     meta.set(this.root, { svg: false, tag: 'div', sealed: false });
     this.nodes = new Map([[0, this.root]]);
     this.stack = [];
@@ -52,7 +75,24 @@ export class Pane {
 
   /// Applies a frame's edits, in order; the first it cannot apply throws.
   apply(edits) {
+    if (edits.length > this.limits.editsPerFrame)
+      fail(`a frame of ${edits.length} edits: past its limit of ${this.limits.editsPerFrame}`);
     for (const e of edits) this.edit(e);
+  }
+
+  /// Takes it out of the page.
+  unmount() {
+    for (const [name, f] of this.listening) this.root?.removeEventListener(name, f);
+    this.listening.clear();
+    this.nodes?.clear();
+    this.stack = [];
+    this.element.replaceChildren();
+  }
+
+  /// Counts `n` more nodes made: past its limit, the frame fails.
+  made(n = 1) {
+    this.count += n;
+    if (this.count > this.limits.nodesPerPane) fail(`more than ${this.limits.nodesPerPane} nodes: past its limit`);
   }
 
   /// Shows why it stopped, in place of the view.
@@ -97,6 +137,11 @@ export class Pane {
       if (rule === 'drop') el.setAttribute(svg ? 'display' : 'hidden', svg ? 'none' : '');
     }
     if (rule === 'keep' && name === 'button') el.setAttribute('type', 'button');
+    if (rule === 'keep' && ['input', 'textarea', 'select'].includes(name)) el.setAttribute('autocomplete', 'off');
+    if (rule === 'keep' && name === 'a') {
+      el.setAttribute('rel', 'noopener noreferrer');
+      el.setAttribute('target', '_blank');
+    }
     meta.set(el, { svg, tag: rule === 'keep' ? name : String(tag), sealed: rule !== 'keep' });
     return el;
   }
@@ -128,13 +173,20 @@ export class Pane {
         if (!this.stack.pop()) fail('an edit on an empty stack');
         break;
       case 'create-element':
+        this.made();
         this.stack.push({ node: this.create(val.tag, val.namespace ?? null), id: null });
         break;
       case 'create-text':
+        this.made();
         this.stack.push({ node: this.doc.createTextNode(String(val ?? '')), id: null });
         break;
       case 'clone': {
         const top = this.top();
+        if (top.node === this.root) fail('an edit reached outside the view');
+        let n = 1;
+        const walk = this.doc.createTreeWalker(top.node);
+        while (walk.nextNode()) n++;
+        this.made(n);
         const copy = top.node.cloneNode(true);
         copyMeta(top.node, copy);
         this.stack[this.stack.length - 1] = { node: copy, id: null };
@@ -234,8 +286,10 @@ export class Pane {
       if (name === 'checked' && 'checked' in el) el.checked = false;
       return;
     }
-    const kept = attrRule(m.tag, name, text, m.svg, true);
+    const kept = attrRule(m.tag, name, text, m.svg, true, this.view);
     if (kept === null) return;
+    // What the pane sets itself, a view does not change.
+    if (['autocomplete', 'rel', 'target'].includes(name.toLowerCase())) return;
     // A field's value and a box's tick are what it shows, not only its
     // attribute (which stops counting once it is typed in).
     if (name === 'value' && 'value' in el) el.value = kept;
@@ -303,7 +357,8 @@ export function viewEvent(element, e) {
       tag: 'mouse',
       val: {
         clientX: e.clientX, clientY: e.clientY, pageX: e.pageX ?? 0, pageY: e.pageY ?? 0,
-        screenX: e.screenX ?? 0, screenY: e.screenY ?? 0, elementX: e.offsetX ?? 0, elementY: e.offsetY ?? 0,
+        // Where the screen is, not the view's to know.
+        screenX: 0, screenY: 0, elementX: e.offsetX ?? 0, elementY: e.offsetY ?? 0,
         button: e.button ?? 0, buttons: e.buttons ?? 0, mods: mods(e),
       },
     };

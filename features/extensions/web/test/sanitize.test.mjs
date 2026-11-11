@@ -3,7 +3,7 @@
 // stream needs them in.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attrRule, cleanStyle, cssInert, elementRule, styleProperty, urlOk } from '../sanitize.js';
+import { attrRule, cleanStyle, cssInert, elementRule, loadOk, styleProperty, urlOk } from '../sanitize.js';
 
 test('elements: a drawing and basic HTML kept, what runs or hides markup dropped, the rest unwrapped', () => {
   for (const t of ['svg', 'g', 'path', 'rect', 'text', 'linearGradient', 'use', 'a']) assert.equal(elementRule(t, true)[0], 'keep', t);
@@ -27,7 +27,7 @@ test('attributes: never a handler, a frame or a form action; ids and data-* not 
   for (const name of ['onclick', 'ONLOAD', 'onmouseover', 'srcdoc', 'srcset', 'ping', 'action', 'formaction', 'form'])
     assert.equal(attrRule('div', name, 'x', false), null, name);
   assert.equal(attrRule('div', 'class', 'a b', false), 'a b');
-  assert.equal(attrRule('div', 'id', 'mine', false), 'mine');
+  assert.equal(attrRule('div', 'id', 'mine', false), 'mine', 'no prefix outside a pane');
   for (const id of ['site-header', 'share-x', 'comments', 'architect', 'addEventListener']) assert.equal(attrRule('div', 'id', id, false), null, id);
   assert.equal(attrRule('div', 'data-at', '1.5', false), '1.5');
   for (const n of ['data-site-x', 'data-act', 'data-dioxus-id', 'data-']) assert.equal(attrRule('div', n, '1', false), null, n);
@@ -45,8 +45,8 @@ test('attributes: never a handler, a frame or a form action; ids and data-* not 
   assert.equal(attrRule('div', 'title', 'a\u0000b', false), 'ab', 'controls taken out');
 });
 
-test('URLs: as a browser reads them; relative, #fragment, https and mailto for a link, no image from another site', () => {
-  for (const u of ['/s/abc/joy.mp3', 'page.html', '#bar-2', 'https://example.com', 'mailto:a@b.c']) assert.ok(urlOk(u, 'link'), u);
+test('URLs: links only to https, mailto or its own fragment; nothing relative', () => {
+  for (const u of ['https://example.com', 'mailto:a@b.c']) assert.ok(urlOk(u, 'link'), u);
   for (const u of [
     'javascript:alert(1)',
     'JaVaScRiPt:alert(1)',
@@ -57,18 +57,66 @@ test('URLs: as a browser reads them; relative, #fragment, https and mailto for a
     'http://example.com',
     '//evil.com/x',
     '\\\\evil.com/x',
+    '/csrf-get?action=delete',
+    'page.html',
   ])
     assert.ok(!urlOk(u, 'link'), u);
-  assert.ok(urlOk('data:image/png;base64,AA', 'image'));
-  assert.ok(urlOk('/a.png', 'image'));
-  for (const u of ['https://tracker.example/pixel.gif', 'data:image/svg+xml,<svg onload=alert(1)>', '#x', '//evil.com/a.png'])
-    assert.ok(!urlOk(u, 'image'), u);
-  assert.ok(urlOk('https://cdn.example/a.mp3', 'media'));
   assert.equal(attrRule('a', 'href', 'javascript:alert(1)', false), null);
-  assert.equal(attrRule('use', 'href', '#g', true), '#g');
-  assert.equal(attrRule('use', 'href', 'https://evil/x.svg#g', true), null, 'a <use> refers only to its own document');
-  assert.equal(attrRule('img', 'src', 'https://tracker/p.gif', false), null);
+  assert.equal(attrRule('a', 'href', '#bar-2', false, true, { prefix: 'av1-', urls: [] }), '#av1-bar-2');
   assert.equal(attrRule('div', 'href', '/x', false), null, 'no href but a link’s');
+});
+
+// P2 (review of #539): a view could make requests its capabilities do not
+// allow. Its payloads: media from any https host, and relative URLs that
+// are cookie-bearing GETs to the embedder's own origin.
+test('P2: a view loads nothing from the network unless the embedder allows that URL', () => {
+  const none = { prefix: 'av1-', urls: [] };
+  const cdn = { prefix: 'av1-', urls: ['https://cdn.example/media/'] };
+  assert.equal(attrRule('video', 'src', 'https://evil.example/?d=secret-document-text', false, true, none), null);
+  assert.equal(attrRule('audio', 'src', 'https://evil.example/a.mp3', false, true, none), null);
+  assert.equal(attrRule('source', 'src', 'https://evil.example/a.mp4', false, true, none), null);
+  assert.equal(attrRule('img', 'src', '/csrf-get?action=delete', false, true, none), null);
+  assert.equal(attrRule('img', 'src', 'csrf-get?action=delete', false, true, none), null);
+  assert.equal(attrRule('image', 'href', '/csrf-get?action=delete', true, true, none), null);
+  assert.equal(attrRule('video', 'src', '/csrf-get?action=delete', false, true, none), null);
+  assert.equal(attrRule('img', 'src', 'https://tracker.example/pixel.gif', false, true, none), null);
+  // Inline rasters need no network.
+  assert.equal(attrRule('img', 'src', 'data:image/png;base64,AA', false, true, none), 'data:image/png;base64,AA');
+  assert.equal(attrRule('img', 'src', 'data:image/svg+xml,<svg onload=alert(1)>', false, true, none), null);
+  // What the embedder allows, and only that.
+  assert.equal(attrRule('video', 'src', 'https://cdn.example/media/a.mp4', false, true, cdn), 'https://cdn.example/media/a.mp4');
+  assert.equal(attrRule('video', 'src', 'https://cdn.example/other/a.mp4', false, true, cdn), null);
+  assert.equal(attrRule('video', 'src', 'https://cdn.example.evil/media/a.mp4', false, true, cdn), null);
+  assert.equal(attrRule('img', 'src', '/media/a.png', false, true, cdn), null, 'relative never, even with an allow-list');
+  assert.ok(!loadOk('http://cdn.example/media/a', 'media', ['http://cdn.example/media/']), 'an http: prefix is no allow-list entry');
+});
+
+// P3: form injection and password phishing.
+test('P3: a view’s fields carry nothing a form or the browser’s autofill reads', () => {
+  for (const t of ['hidden', 'password', 'file', 'email', 'image', 'submit', 'HIDDEN'])
+    assert.equal(attrRule('input', 'type', t, false), null, t);
+  for (const t of ['text', 'checkbox', 'range']) assert.equal(attrRule('input', 'type', t, false), t);
+  for (const [tag, name] of [
+    ['input', 'name'], ['input', 'form'], ['input', 'autocomplete'], ['textarea', 'name'], ['textarea', 'form'],
+    ['select', 'name'], ['select', 'autocomplete'], ['button', 'form'], ['button', 'formaction'], ['button', 'name'],
+  ])
+    assert.equal(attrRule(tag, name, 'role', false), null, `${tag} ${name}`);
+  assert.equal(attrRule('input', 'value', 'admin', false), 'admin', 'what it shows');
+});
+
+// P4: id hijacking and DOM clobbering.
+test('P4: a view’s ids and every reference to one are its pane’s own', () => {
+  const v = { prefix: 'av7-', urls: [] };
+  assert.equal(attrRule('input', 'id', 'pw', false, true, v), 'av7-pw');
+  assert.equal(attrRule('div', 'id', 'config', false, true, v), 'av7-config');
+  assert.equal(attrRule('label', 'for', 'pw', false, true, v), 'av7-pw');
+  assert.equal(attrRule('div', 'aria-labelledby', 'a b', false, true, v), 'av7-a av7-b');
+  assert.equal(attrRule('div', 'aria-describedby', 'a "b"', false, true, v), null);
+  assert.equal(attrRule('use', 'href', '#logo', true, true, v), '#av7-logo');
+  assert.equal(attrRule('use', 'href', 'https://evil/x.svg#g', true, true, v), null);
+  assert.equal(attrRule('rect', 'fill', 'url(#grad)', true, true, v), 'url(#av7-grad)');
+  assert.equal(attrRule('rect', 'clip-path', 'url(#c)', true, true, v), 'url(#av7-c)');
+  assert.equal(attrRule('div', 'id', 'x y', false, true, v), null, 'one token');
 });
 
 test('CSS: blunt; nothing that loads, binds, escapes or positions itself over the page', () => {
