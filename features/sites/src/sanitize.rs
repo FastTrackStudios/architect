@@ -16,22 +16,33 @@
 //!   in it; any other element is left out and its contents kept.
 //! - **Attributes.** `class`, `title`, `lang`, `dir`, `role`, `aria-*`,
 //!   `data-*` (but not the page's own: `data-site-*`, `data-act`), `id`
-//!   (but not the page's own: `site-*`, `share-*`, `comments`), a
-//!   sanitised `style`, an SVG's geometry and presentation
-//!   ([`SVG_ATTRS`]), and a few per element ([`html_attr`]). Never `on…`,
+//!   (but not the page's own: `site-*`, `share-*`, `comments`, nor a name
+//!   the page's scripts read off `window`, [`RESERVED_IDS`]), a sanitised
+//!   `style`, an SVG's geometry and presentation ([`SVG_ATTRS`], each value
+//!   checked as CSS), and a few per element ([`html_attr`]). Never `on…`,
 //!   `srcdoc`, `srcset`, `ping`, `action`, `formaction`.
 //! - **URLs** (`href`, `xlink:href`, `src`), checked as a browser reads
 //!   them (entities decoded, controls and whitespace ignored): a relative
-//!   URL, a `#fragment`, `https:` and `mailto:` for a link, `https:` for
-//!   media, and also `data:image/(png|jpeg|gif|webp)` for an image. An
-//!   SVG `<use>` refers only to its own document (`#id`).
-//! - **CSS.** A `<style>` sheet only inside an `<svg>`, dropped whole when
-//!   it holds `url(`, `@import`, `expression(`, `-moz-binding`,
-//!   `behavior:`, `image-set(`, `src(`, `position: fixed|sticky`, a CSS
-//!   escape (`\`), `&` or `<`; a `style` attribute loses each declaration
-//!   that holds one of those. A sheet is not scoped to its drawing: it can
-//!   restyle the page's own classes. The page's Content-Security-Policy
-//!   (the node's) keeps that from loading or sending anything.
+//!   URL, a `#fragment`, `https:` and `mailto:` for a link, relative or
+//!   `https:` for media, and only relative or
+//!   `data:image/(png|jpeg|gif|webp)` for an image: a block loads no image
+//!   from another site (a beacon). An SVG `<use>` refers only to its own
+//!   document (`#id`).
+//! - **CSS**, deliberately blunt ([`css_inert`]): no quote, comment,
+//!   escape (`\`), `var(`, custom property (`--`) or at-rule (`@`) at all,
+//!   so what is checked is what a browser reads; then nothing that loads
+//!   or binds (`url(`, `image-set(`, `image(`, `src(`, `cross-fade(`,
+//!   `element(`, `paint(`, `expression(`, `-moz-binding`, `behavior`) and
+//!   no `position` but `static` or `relative`. A `style` attribute holding
+//!   a quote, a comment, an escape or a brace is dropped whole; otherwise
+//!   it loses each declaration refused. A presentation attribute may point
+//!   only at its own drawing (`url(#id)`). A `<style>` sheet is kept only
+//!   inside an `<svg>` of a block, as flat `selector { declarations }`
+//!   rules, each selector rewritten under the block's own scope class
+//!   ([`scope_sheet`]); one that is not is dropped whole.
+//!
+//! The site, not the block, wraps each block in a box it cannot style its
+//! way out of (`features/sites/src/markdown.rs`, [`BLOCK_BOX_STYLE`]).
 //!
 //! [`sanitize`] reads the markup into its own model and writes that model
 //! out again: every text escaped, every attribute value decoded, checked,
@@ -280,24 +291,56 @@ const SVG_ATTRS: &[&str] = &[
 /// are checked further; `aria-*` and `data-*` by prefix).
 const GLOBAL_ATTRS: &[&str] = &["class", "id", "title", "lang", "dir", "role", "style"];
 
-/// What CSS may not hold, looked for in lower case with comments and
-/// whitespace taken out: anything that loads, binds or runs, and a box
-/// pinned over the page.
+/// What no CSS of a block may hold anywhere, in lower case: each lets
+/// the text a browser reads differ from the text checked (strings,
+/// comments and escapes hide or spell a needle, `var()` and custom
+/// properties carry a value in from elsewhere), or is an at-rule.
+const CSS_BLUNT: &[&str] = &["\"", "'", "/*", "\\", "var(", "--", "@", "<", "&"];
+
+/// What no CSS of a block may hold, looked for in lower case with all
+/// whitespace taken out: anything that loads, binds or runs.
 const CSS_REFUSED: &[&str] = &[
     "url(",
-    "@import",
-    "expression(",
-    "-moz-binding",
-    "behavior:",
-    "behaviour:",
     "image-set(",
     "image(",
+    "src(",
     "cross-fade(",
     "element(",
-    "src(",
+    "paint(",
+    "expression(",
+    "-moz-binding",
+    "behavior",
+    "behaviour",
     "javascript:",
-    "position:fixed",
-    "position:sticky",
+];
+
+/// The `position`s a block's CSS may use: none that takes a box out of
+/// the flow (`absolute`, `fixed`, `sticky`) to lay it over the page.
+const POSITIONS: &[&str] = &["static", "relative"];
+
+/// What a selector of a block's sheet may not name: the page above the
+/// block.
+const SELECTOR_REFUSED: &[&str] = &[":root", "html", "body", ":host"];
+
+/// The inline style of the box the site wraps each block in: whatever a
+/// block's CSS does, its paint, layout and counters stay inside it, and
+/// what overflows scrolls inside it (a chart wider than the page, scrolled
+/// to its playhead by `player.js`) or is clipped.
+pub const BLOCK_BOX_STYLE: &str = "contain:layout paint style!important;overflow:auto!important;position:relative!important;isolation:isolate!important";
+
+/// Names the page's scripts read off `window` (`features/sites/assets/*.js`)
+/// that an element's `id` could shadow (named access on `window` comes
+/// before `EventTarget`'s methods and anything a script sets later):
+/// `player.js`'s `window.architect`, and the globals both scripts call.
+const RESERVED_IDS: &[&str] = &[
+    "architect",
+    "addeventlistener",
+    "removeeventlistener",
+    "dispatchevent",
+    "eventsource",
+    "matchmedia",
+    "getcomputedstyle",
+    "comments",
 ];
 
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
@@ -373,9 +416,10 @@ pub(crate) fn attr_rule(tag: &str, name: &str, value: &str, in_svg: bool) -> Opt
         return Some(value);
     }
     if in_svg && SVG_ATTRS.contains(&lower.as_str()) {
-        // A presentation attribute is CSS: it may point at the drawing's
-        // own gradients (`url(#g)`), never at anything else.
-        return (!value.contains('\\') && local_refs_only(&value)).then_some(value);
+        // A presentation attribute is CSS: checked as a `style` value is,
+        // and it may point at the drawing's own gradients (`url(#g)`),
+        // never at anything else.
+        return presentation_ok(&value).then_some(value);
     }
     None
 }
@@ -397,11 +441,13 @@ fn html_attr(tag: &str, lower: &str, value: &str) -> bool {
 }
 
 /// An `id` the page's own script looks up (`site-queue`, `site-nav`,
-/// `site-search`, `site-results`, `site-main`, `site-result-*`) or the
-/// share page writes (`share-*`, `comments`): a block's would win.
+/// `site-search`, `site-results`, `site-main`, `site-result-*`), the
+/// share page writes (`share-*`, `comments`), or that would shadow a name
+/// the page's scripts read off `window` ([`RESERVED_IDS`]): a block's
+/// would win.
 fn reserved_id(id: &str) -> bool {
     let lower = id.trim().to_ascii_lowercase();
-    lower.starts_with("site-") || lower.starts_with("share-") || lower == "comments"
+    lower.starts_with("site-") || lower.starts_with("share-") || RESERVED_IDS.contains(&lower.as_str())
 }
 
 /// What a URL is for.
@@ -409,7 +455,8 @@ fn reserved_id(id: &str) -> bool {
 enum Url {
     /// `<a href>`: relative, `#…`, `https:`, `mailto:`.
     Link,
-    /// `<img src>`, `<image href>`: relative, `https:`, a raster `data:`.
+    /// `<img src>`, `<image href>`: relative, a raster `data:`. Never
+    /// another site: a block's image would be a beacon.
     Image,
     /// `<audio>`/`<video>`/`<source>` `src`: relative, `https:`.
     Media,
@@ -446,7 +493,7 @@ fn url_ok(url: &str, used: Url) -> bool {
     };
     let (scheme, rest) = url.split_at(colon);
     match scheme {
-        "https" => true,
+        "https" => used != Url::Image,
         "mailto" => used == Url::Link,
         "data" => {
             used == Url::Image
@@ -460,62 +507,179 @@ fn url_ok(url: &str, used: Url) -> bool {
     }
 }
 
-/// Whether every `url(…)` in a CSS value names a part of this document
-/// (`url(#g)`).
-fn local_refs_only(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    lower.match_indices("url(").all(|(at, _)| {
-        lower
-            .get(at.saturating_add(4)..)
-            .unwrap_or_default()
-            .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '"' || c == '\'')
-            .starts_with('#')
+/// Whether `css` (a sheet, a `style` value, or a declaration) is inert:
+/// nothing of [`CSS_BLUNT`] anywhere, nothing of [`CSS_REFUSED`] with its
+/// whitespace taken out, and no `position` but [`POSITIONS`].
+///
+/// Strings, comments, escapes and `var()` are refused rather than
+/// understood, so the text looked at is the text a browser reads: a sheet
+/// `a{content:"/*"} *{background:url(…)} b{content:"*/"}` cannot hide its
+/// middle rule from a comment stripper, and `position:/**/fixed` is not
+/// `position:` and something else.
+fn css_inert(css: &str) -> bool {
+    let lower = css.to_ascii_lowercase();
+    if CSS_BLUNT.iter().any(|bad| lower.contains(bad)) {
+        return false;
+    }
+    let squeezed: String = lower
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    !CSS_REFUSED.iter().any(|bad| squeezed.contains(bad)) && positions_ok(&squeezed)
+}
+
+/// Whether every `position` declaration in `squeezed` (lower case, no
+/// whitespace) is one of [`POSITIONS`]. A `position:` counts where a
+/// declaration starts (`background-position:` is another property).
+fn positions_ok(squeezed: &str) -> bool {
+    squeezed.match_indices("position:").all(|(at, found)| {
+        let starts = squeezed
+            .get(..at)
+            .is_none_or(|before| before.is_empty() || before.ends_with([';', '{']));
+        let value = squeezed
+            .get(at.saturating_add(found.len())..)
+            .unwrap_or_default();
+        let value = value.split([';', '}', '!']).next().unwrap_or_default();
+        !starts || POSITIONS.contains(&value)
     })
 }
 
-/// `css` without its comments; an unclosed one runs to the end.
-fn strip_css_comments(css: &str) -> String {
-    let mut out = String::with_capacity(css.len());
-    let mut rest = css;
-    while let Some((before, after)) = rest.split_once("/*") {
-        out.push_str(before);
-        rest = after.split_once("*/").map_or("", |(_, r)| r);
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Whether `css` holds nothing of [`CSS_REFUSED`] and no CSS escape (which
-/// would spell any of it another way).
-fn css_ok(css: &str) -> bool {
-    if css.contains('\\') {
+/// One declaration (`name: value`) a block may write: a plain property
+/// name (no custom property), a value with no brace or `;`, and inert.
+fn declaration_ok(decl: &str) -> bool {
+    let Some((name, value)) = decl.split_once(':') else {
         return false;
-    }
-    let squeezed: String = strip_css_comments(css)
-        .chars()
-        .filter(|c| !c.is_whitespace() && !c.is_control())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    !CSS_REFUSED.iter().any(|bad| squeezed.contains(bad))
+    };
+    let name = name.trim();
+    !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+        && !name.starts_with("--")
+        && !value.trim().is_empty()
+        && !value.contains(['{', '}', ';'])
+        && css_inert(decl)
 }
 
-/// A `style` attribute without the declarations [`css_ok`] refuses;
-/// `None` when nothing is left.
+/// A `style` attribute with only the declarations [`declaration_ok`]
+/// keeps; `None` when nothing is left. One holding a quote, a comment, an
+/// escape or a brace is dropped whole: where its declarations end can no
+/// longer be told.
 fn clean_style(value: &str) -> Option<String> {
+    if value.contains(['"', '\'', '\\', '{', '}']) || value.contains("/*") {
+        return None;
+    }
     let kept: Vec<&str> = value
         .split(';')
         .map(str::trim)
-        .filter(|d| !d.is_empty() && css_ok(d))
+        .filter(|d| !d.is_empty() && declaration_ok(d))
         .collect();
     let out = kept.join("; ");
-    (!out.is_empty() && css_ok(&out)).then_some(out)
+    (!out.is_empty() && css_inert(&out)).then_some(out)
 }
 
-/// Whether a `<style>` sheet comes through, whole: [`css_ok`], and no `<`
-/// or `&`, which an SVG's sheet (not raw text) would read as markup or a
-/// character reference.
-fn sheet_ok(css: &str) -> bool {
-    !css.contains(['<', '&']) && css_ok(css)
+/// Whether an SVG presentation attribute's value is inert CSS, its only
+/// `url()`s pointing into its own drawing, exactly `url(#id)`.
+fn presentation_ok(value: &str) -> bool {
+    let mut rest = value;
+    let mut left = String::with_capacity(value.len());
+    while let Some(at) = find_ci(rest, "url(#") {
+        let (before, from) = cut(rest, at);
+        let id_and_after = from.get("url(#".len()..).unwrap_or_default();
+        let id_len = id_and_after
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+            .unwrap_or(id_and_after.len());
+        let (id, after) = cut(id_and_after, id_len);
+        let Some(after) = after.strip_prefix(')').filter(|_| !id.is_empty()) else {
+            return false;
+        };
+        left.push_str(before);
+        // A mark no needle holds, so what is left cannot join into one.
+        left.push('#');
+        rest = after;
+    }
+    left.push_str(rest);
+    css_inert(&left)
+}
+
+/// `css`, a block's `<style>` sheet, with every rule under `.{scope}`,
+/// the class of the box the site wraps the block in; `None` when it is not
+/// flat `selector { declarations }` rules, each declaration
+/// [`declaration_ok`], each selector one that can be put under the scope.
+///
+/// A selector already under the scope (`.{scope} x`, as a sheet comes out
+/// of here) is kept as it is, so writing a block again changes nothing.
+fn scope_sheet(css: &str, scope: &str) -> Option<String> {
+    if !css_inert(css) {
+        return None;
+    }
+    let mut out = String::with_capacity(css.len());
+    let mut rest = css.trim();
+    while !rest.is_empty() {
+        let (selectors, after) = rest.split_once('{')?;
+        let (body, after) = after.split_once('}')?;
+        if selectors.contains(['}', ';']) || body.contains('{') {
+            return None;
+        }
+        let declarations: Vec<&str> = body
+            .split(';')
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .collect();
+        if !declarations.iter().all(|d| declaration_ok(d)) {
+            return None;
+        }
+        rest = after.trim_start();
+        if declarations.is_empty() {
+            continue;
+        }
+        let scoped = selectors
+            .split(',')
+            .map(|sel| scope_selector(sel, scope))
+            .collect::<Option<Vec<_>>>()?;
+        out.push_str(&scoped.join(", "));
+        out.push_str(" { ");
+        out.push_str(&declarations.join("; "));
+        out.push_str(" } ");
+    }
+    let out = out.trim_end().to_owned();
+    (!out.is_empty()).then_some(out)
+}
+
+/// One selector of a list, under `.{scope}`; `None` for one that names the
+/// page above the block ([`SELECTOR_REFUSED`]), starts with a combinator,
+/// or whose brackets do not pair (a `,` inside `:is(…)` split it).
+fn scope_selector(selector: &str, scope: &str) -> Option<String> {
+    let sel = selector.trim();
+    let lower = sel.to_ascii_lowercase();
+    let pairs = |open: char, close: char| {
+        sel.chars().filter(|&c| c == open).count() == sel.chars().filter(|&c| c == close).count()
+    };
+    if sel.is_empty()
+        || sel.starts_with(['>', '+', '~'])
+        || SELECTOR_REFUSED.iter().any(|bad| lower.contains(bad))
+        || !pairs('(', ')')
+        || !pairs('[', ']')
+    {
+        return None;
+    }
+    let prefix = format!(".{scope}");
+    let already = sel
+        .strip_prefix(&prefix)
+        .and_then(|r| r.strip_prefix(|c: char| c.is_ascii_whitespace()))
+        .is_some_and(|r| !r.trim().is_empty());
+    Some(if already {
+        sel.to_owned()
+    } else {
+        format!("{prefix} {sel}")
+    })
+}
+
+/// Whether `scope` is a class name a sheet can be put under: `site-block`
+/// and ASCII letters, digits and `-`.
+fn scope_ok(scope: &str) -> bool {
+    scope.starts_with("site-block")
+        && scope
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// A tag or attribute name: letters, digits, `-`, `_`, `:` and `.`,
@@ -533,15 +697,30 @@ pub(crate) fn is_name(name: &str) -> bool {
 /// It takes time and space linear in `markup` on any input: block markup
 /// comes from extensions and notes, so a sanitiser that could be made to
 /// loop or to allocate without bound would be a way to take a node down.
+///
+/// An SVG's `<style>` sheet is dropped: only a block, in the box the site
+/// wraps it in, keeps one ([`sanitize_block`]).
 #[must_use]
 pub fn sanitize(markup: &str) -> String {
-    sanitize_counting(markup).0
+    sanitize_counting(markup, None).0
 }
 
-/// [`sanitize`], and how many passes its loop made (never more than the
-/// bytes in `markup`).
-fn sanitize_counting(markup: &str) -> (String, usize) {
-    let mut w = Writer::default();
+/// [`sanitize`] for a block the site wraps in a box of class `scope`
+/// (`site-block-…`): an SVG's `<style>` sheet is kept when each of its
+/// rules can be put under `.{scope}` ([`scope_sheet`]). A `scope` that is
+/// not such a class keeps no sheet.
+#[must_use]
+pub fn sanitize_block(markup: &str, scope: &str) -> String {
+    sanitize_counting(markup, scope_ok(scope).then_some(scope)).0
+}
+
+/// [`sanitize`] (sheets under `scope`), and how many passes its loop made
+/// (never more than the bytes in `markup`).
+fn sanitize_counting(markup: &str, scope: Option<&str>) -> (String, usize) {
+    let mut w = Writer {
+        scope,
+        ..Writer::default()
+    };
     let mut rest = markup;
     let mut passes = 0usize;
     // Termination: every pass consumes at least one byte of `rest` (the
@@ -578,7 +757,9 @@ fn cut(s: &str, at: usize) -> (&str, &str) {
 const MAX_OPEN: usize = 256;
 
 #[derive(Default)]
-struct Writer {
+struct Writer<'s> {
+    /// The class the block's sheets are put under; none, none kept.
+    scope: Option<&'s str>,
     out: String,
     /// The elements open, by the name written.
     open: Vec<&'static str>,
@@ -586,7 +767,7 @@ struct Writer {
     svgs: usize,
 }
 
-impl Writer {
+impl Writer<'_> {
     const fn in_svg(&self) -> bool {
         self.svgs > 0
     }
@@ -690,17 +871,18 @@ impl Writer {
     }
 
     /// An SVG's `<style>` sheet, whose start tag was just read: written
-    /// whole when [`sheet_ok`], else not at all. The rest after its end
-    /// tag.
+    /// under the block's scope when [`scope_sheet`] can, else not at all.
+    /// The rest after its end tag.
     fn sheet<'a>(&mut self, self_closing: bool, rest: &'a str) -> &'a str {
         if self_closing {
             return rest;
         }
         let (css, tail) = cut(rest, find_end_tag(rest, "</style").unwrap_or(rest.len()));
         let after = tail.split_once('>').map_or("", |(_, r)| r);
-        if sheet_ok(css) && self.open.len() < MAX_OPEN {
+        let scoped = self.scope.and_then(|scope| scope_sheet(css, scope));
+        if let Some(css) = scoped.filter(|_| self.open.len() < MAX_OPEN) {
             self.out.push_str("<style>");
-            self.out.push_str(css);
+            self.out.push_str(&css);
             self.out.push_str("</style>");
         }
         after
@@ -977,27 +1159,36 @@ pub(crate) fn escape(text: &str, out: &mut String) {
 mod tests {
     use super::*;
 
-    /// Keyflow's engraving (keyflow#59): an SVG whose root follows the
-    /// playhead, a transparent rect per played bar. All of it comes
-    /// through: geometry, classes, `data-*`, a style sheet, gradients
-    /// referenced by `#id`, text.
-    const CHART: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 400 120" width="400" height="120" class="kf-chart" data-follow-playhead="" data-media="/s/abc/joy.mp3"><style>.kf-bar { fill: transparent } .kf-bar[aria-current] { fill: var(--accent) }</style><defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect class="kf-bar" data-at="0" x="0" y="0" width="100" height="120"/><rect class="kf-bar" data-at="2.5" x="100" y="0" width="100" height="120" fill="url(#g)"/><path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"/><use href="#g"/><text x="4" y="20" font-size="12">C &amp; G</text><a href="#bar-2"><circle cx="5" cy="5" r="2"/></a></svg>"##;
+    /// The class the tests' blocks are boxed in.
+    const SCOPE: &str = "site-block-t";
+
+    /// Keyflow's engraving (keyflow#59), as its follow export writes it
+    /// (`keyflow:features/engraver/src/engraver/export/follow.rs`), but
+    /// with its sheet's attribute selector unquoted (`[aria-current=time]`,
+    /// what keyflow has to write for the sheet to come through): an SVG
+    /// whose root follows the playhead, a transparent rect per played bar,
+    /// fonts named by presentation attributes. All of it comes through:
+    /// geometry, classes, `data-*`, the sheet (under the block's scope),
+    /// gradients referenced by `#id`, text.
+    const CHART: &str = r##"<svg data-follow-playhead="" data-media="/s/abc/joy.mp3" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" viewBox="0 0 400 120" width="400" height="120" overflow="hidden" class="kf-chart">  <style>.kf-bar{fill:#f5a623;fill-opacity:0;pointer-events:all;cursor:pointer}.kf-bar[aria-current=time]{fill-opacity:0.18}</style>
+<defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect class="kf-bar" data-at="0.000" data-bar="1" data-pass="1" x="0" y="0" width="100" height="120" rx="2"/><rect class="kf-bar" data-at="2.500" x="100" y="0" width="100" height="120" fill="url(#g)"/><path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"/><use href="#g"/><text x="4" y="20" font-size="12" font-family="Bravura" fill="#000000">C &amp; G</text><text x="40" y="20" font-size="12" font-family="FreeSerif" font-weight="bold" text-anchor="middle">Am</text><a href="#bar-2"><circle cx="5" cy="5" r="2"/></a></svg>"##;
 
     #[test]
     fn an_svg_drawing_comes_through_whole() {
-        let out = sanitize(CHART);
+        let out = sanitize_block(CHART, SCOPE);
         for kept in [
             r#"viewBox="0 0 400 120""#,
             r#"class="kf-chart""#,
             r#"data-follow-playhead="""#,
             r#"data-media="/s/abc/joy.mp3""#,
-            r#"<rect class="kf-bar" data-at="0" x="0" y="0" width="100" height="120"></rect>"#,
-            r#"data-at="2.5" x="100" y="0" width="100" height="120" fill="url(#g)""#,
+            r#"<rect class="kf-bar" data-at="0.000" data-bar="1" data-pass="1" x="0" y="0" width="100" height="120" rx="2"></rect>"#,
+            r#"data-at="2.500" x="100" y="0" width="100" height="120" fill="url(#g)""#,
             r#"<path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"></path>"#,
             r##"<linearGradient id="g"><stop offset="0" stop-color="#fff"></stop></linearGradient>"##,
             r##"<use href="#g"></use>"##,
-            "C &amp; G",
-            ".kf-bar[aria-current] { fill: var(--accent) }",
+            r##"<text x="4" y="20" font-size="12" font-family="Bravura" fill="#000000">C &amp; G</text>"##,
+            r#"font-family="FreeSerif" font-weight="bold" text-anchor="middle">Am</text>"#,
+            "<style>.site-block-t .kf-bar { fill:#f5a623; fill-opacity:0; pointer-events:all; cursor:pointer } .site-block-t .kf-bar[aria-current=time] { fill-opacity:0.18 }</style>",
             r##"<a href="#bar-2"><circle cx="5" cy="5" r="2"></circle></a>"##,
             r#"xmlns:xlink="http://www.w3.org/1999/xlink""#,
         ] {
@@ -1005,8 +1196,84 @@ mod tests {
         }
         assert!(out.ends_with("</svg>"), "{out}");
         // Written again, it is the same: nothing left to take out.
-        assert_eq!(sanitize(&out), out);
+        assert_eq!(sanitize_block(&out, SCOPE), out);
         assert_safe(&out, CHART);
+        // Outside a block's box, no sheet comes through.
+        assert!(!sanitize(CHART).contains("<style"));
+    }
+
+    /// Keyflow's sheet as `keyflow:features/engraver/src/engraver/export/follow.rs`
+    /// writes it today quotes its attribute selector (`[aria-current="time"]`),
+    /// and the embedded-font export (`export/svg.rs`) writes `@font-face`
+    /// with `url('data:…')`: both sheets are dropped whole, the drawing
+    /// kept (the site's own CSS marks the bar at the playhead).
+    #[test]
+    fn keyflow_sheets_as_written_today_are_dropped_and_the_drawing_kept() {
+        let follow = "<svg data-follow-playhead=\"\"><style>.kf-bar{fill:#f5a623;fill-opacity:0;pointer-events:all;cursor:pointer}.kf-bar[aria-current=\"time\"]{fill-opacity:0.18}</style><rect class=\"kf-bar\" data-at=\"0.000\"/></svg>";
+        assert_eq!(
+            sanitize_block(follow, SCOPE),
+            "<svg data-follow-playhead=\"\"><rect class=\"kf-bar\" data-at=\"0.000\"></rect></svg>"
+        );
+        let fonts = "<svg><style type=\"text/css\">@font-face {\n  font-family: 'Bravura';\n  src: url('data:font/otf;base64,AA') format('opentype');\n}\n</style><text font-family=\"Bravura\">x</text></svg>";
+        assert_eq!(
+            sanitize_block(fonts, SCOPE),
+            "<svg><text font-family=\"Bravura\">x</text></svg>"
+        );
+    }
+
+    /// The sheet rewriter by itself: flat rules only, every selector put
+    /// under the scope, nothing that names the page above it.
+    #[test]
+    fn a_sheet_is_put_under_its_block_or_dropped() {
+        let scoped = |css: &str| scope_sheet(css, SCOPE);
+        assert_eq!(
+            scoped(".a{fill:red} g > .b, text:hover { opacity : 0.5 ; }").as_deref(),
+            Some(".site-block-t .a { fill:red } .site-block-t g > .b, .site-block-t text:hover { opacity : 0.5 }")
+        );
+        // Already under the scope: kept as it is, so it is stable.
+        assert_eq!(
+            scoped(".site-block-t .a { fill:red }").as_deref(),
+            Some(".site-block-t .a { fill:red }")
+        );
+        // The box itself is not the block's to style.
+        assert_eq!(
+            scoped(".site-block-t{margin-top:-500px}").as_deref(),
+            Some(".site-block-t .site-block-t { margin-top:-500px }")
+        );
+        assert_eq!(scoped(".a{}"), None, "nothing to keep");
+        for refused in [
+            "body{display:none}",
+            "html .a{fill:red}",
+            ":root{color:red}",
+            ":host .a{fill:red}",
+            "> .a{fill:red}",
+            "+ .a{fill:red}",
+            "~ .a{fill:red}",
+            ".a, body .b{fill:red}",
+            ".a:is(.b, .c){fill:red}",
+            ".a{fill:red}}body{display:none}",
+            ".a{.b{fill:red}}",
+            ".a{fill:red",
+            ".a fill:red}",
+            "@media screen{.a{fill:red}}",
+            ".a{--x:fixed}",
+            ".a{position:absolute}",
+            ".a{color:red;position:fixed}",
+            ".a{fill:var(--accent)}",
+            ".a{fill:red} .b{background:url(x.png)}",
+            ".a{content:\"x\"}",
+            ".a{fill:red}/* */",
+            ".a{fill:r\\65 d}",
+            ".a;.b{fill:red}",
+        ] {
+            assert_eq!(scoped(refused), None, "{refused}");
+        }
+        // A scope that is not the site's box class keeps no sheet.
+        assert_eq!(
+            sanitize_block("<svg><style>.a{fill:red}</style></svg>", "x y"),
+            "<svg></svg>"
+        );
+        assert!(scope_ok(SCOPE) && !scope_ok("site-block x") && !scope_ok("other"));
     }
 
     /// The first-party blocks: the lyrics block's list and an HTML block
@@ -1059,7 +1326,7 @@ mod tests {
             ),
             (
                 "<svg><style>.a{fill:red}</style><style>.b{background:u\\72l(https://evil.example/)}</style></svg>",
-                Some("<svg><style>.a{fill:red}</style></svg>"),
+                Some("<svg><style>.site-block-t .a { fill:red }</style></svg>"),
             ),
             (
                 "<div style=\"position:fixed;inset:0;background:url(https://evil.example/x.png)\">x</div>",
@@ -1067,6 +1334,10 @@ mod tests {
             ),
             (
                 "<div style=\"position : sticky; color: red; background: u\\72l(https://evil.example/)\">x</div>",
+                Some("<div>x</div>"),
+            ),
+            (
+                "<div style=\"position : sticky; color: red\">x</div>",
                 Some("<div style=\"color: red\">x</div>"),
             ),
             (
@@ -1190,8 +1461,8 @@ mod tests {
                 Some("<svg><use></use><use></use><use href=\"#a\"></use></svg>"),
             ),
             (
-                "<svg><rect fill=\"url(https://evil.example/x.svg#p)\"/><rect fill=\"url( '#p')\" mask=\"u\\72l(x)\"/></svg>",
-                Some("<svg><rect></rect><rect fill=\"url( &#39;#p&#39;)\"></rect></svg>"),
+                "<svg><rect fill=\"url(https://evil.example/x.svg#p)\"/><rect fill=\"url( '#p')\" mask=\"u\\72l(x)\"/><rect fill=\"url(#p)\" clip-path=\"url(#c) \"/><rect fill=\"url(#p)url(x)\"/></svg>",
+                Some("<svg><rect></rect><rect></rect><rect fill=\"url(#p)\" clip-path=\"url(#c) \"></rect><rect></rect></svg>"),
             ),
             // Handlers, frames, the rest.
             (
@@ -1207,6 +1478,64 @@ mod tests {
                 Some("ok"),
             ),
             ("<image src=\"https://ok.example/a.png\">", Some("")),
+            // The second review of #520 (of 2a46d49e). Finding 1: CSS
+            // strings and comments desynced the comment stripper.
+            (
+                "<svg><style>a{content:\"/*\"} *{background:url(https://evil.example/)} b{content:\"*/\"}</style></svg>",
+                Some("<svg></svg>"),
+            ),
+            (
+                "<li style='list-style:\"/*\" url(https://evil.example/li) inside'>x</li>",
+                Some("<li>x</li>"),
+            ),
+            (
+                "<li style=\"color:red; list-style:url(https://evil.example/li) inside\">x</li>",
+                Some("<li style=\"color:red\">x</li>"),
+            ),
+            (
+                "<p style=\"background:image-set(https://evil.example/a 1x); border-image:paint(x); color:red\">x</p>",
+                Some("<p style=\"color:red\">x</p>"),
+            ),
+            // Finding 2: covering or restyling the page.
+            (
+                "<div style=\"--p:fixed; position:var(--p); inset:0; z-index:99999; background:white\">x</div>",
+                Some("<div style=\"inset:0; z-index:99999; background:white\">x</div>"),
+            ),
+            (
+                "<div style=\"position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:99999\">x</div>",
+                Some("<div style=\"top:0; left:0; width:100vw; height:100vh; z-index:99999\">x</div>"),
+            ),
+            (
+                "<div style=\"position:relative; background-position:0 0\">x</div>",
+                Some("<div style=\"position:relative; background-position:0 0\">x</div>"),
+            ),
+            (
+                "<svg><style>body{display:none} .site-player{display:none}</style></svg>",
+                Some("<svg></svg>"),
+            ),
+            (
+                "<svg><style>.site-player{display:none}</style></svg>",
+                Some("<svg><style>.site-block-t .site-player { display:none }</style></svg>"),
+            ),
+            (
+                "<svg><style>:root{--accent:red} .a{fill:red}</style><style>.a{position:absolute}</style></svg>",
+                Some("<svg></svg>"),
+            ),
+            // Finding 3: presentation attributes are CSS, all of it.
+            (
+                "<svg><rect mask=\"image-set('https://evil.example/m' 1x)\"/><rect mask=\"image-set(https://evil.example/m 1x)\" fill=\"var(--x)\"/></svg>",
+                Some("<svg><rect></rect><rect></rect></svg>"),
+            ),
+            // Finding 4: a block's image comes from the share, not elsewhere.
+            (
+                "<img src=\"https://evil.example/b.png\" alt=\"b\"><svg><image href=\"https://evil.example/i.png\"/><image xlink:href=\"/s/x/i.png\"/></svg>",
+                Some("<img alt=\"b\"><svg><image></image><image xlink:href=\"/s/x/i.png\"></image></svg>"),
+            ),
+            // Finding 6: an id shadowing a global the page's scripts read.
+            (
+                "<div id=\"architect\">x</div><p id=\"addEventListener\">y</p><b id=\"EventSource\">z</b><i id=\"chart-1\">w</i>",
+                Some("<div>x</div><p>y</p><b>z</b><i id=\"chart-1\">w</i>"),
+            ),
             (
                 "<rect/><div><svg><div>x</div></svg></div>",
                 Some("<div><svg>x</svg></div>"),
@@ -1231,6 +1560,11 @@ mod tests {
             "action=",
             "site-queue",
             "data-site",
+            "position:fixed",
+            "position:absolute",
+            "var(",
+            "image-set",
+            "id=\"architect\"",
         ];
         for (markup, expected) in table {
             let out = bounded(markup);
@@ -1242,7 +1576,7 @@ mod tests {
                 assert!(!lower.contains(bad), "{bad} in {out}\n  from {markup}");
             }
             assert_safe(&out, markup);
-            assert_eq!(sanitize(&out), out, "not stable: {markup}");
+            assert_eq!(sanitize_block(&out, SCOPE), out, "not stable: {markup}");
         }
     }
 
@@ -1276,7 +1610,27 @@ mod tests {
             if name == "style" {
                 let (css, past) = after_tag.split_once("</style>").expect("a closed sheet");
                 assert!(!css.contains('<') && !css.contains('&'), "{out}");
-                assert!(css_ok(css), "a sheet that loads: {out}\n  from {from}");
+                assert!(
+                    inert_by_own_reading(css, false),
+                    "a sheet that loads or moves: {out}\n  from {from}"
+                );
+                // Every rule is under the block's scope, and flat.
+                for rule in css.split('}').map(str::trim).filter(|r| !r.is_empty()) {
+                    let (selectors, body) = rule.split_once('{').expect("a rule");
+                    assert!(!body.contains('{'), "a nested rule: {out}");
+                    for sel in selectors.split(',') {
+                        let sel = sel.trim();
+                        let under = sel
+                            .strip_prefix(".site-block-t ")
+                            .is_some_and(|r| !r.trim().is_empty());
+                        assert!(under, "{sel} not under the scope: {out}\n  from {from}");
+                        let lower = sel.to_ascii_lowercase();
+                        assert!(
+                            !["body", "html", ":root", ":host"].iter().any(|b| lower.contains(b)),
+                            "{sel}: {out}"
+                        );
+                    }
+                }
                 rest = past;
                 continue;
             }
@@ -1320,7 +1674,12 @@ mod tests {
         );
         assert!(!lower.starts_with("on"), "{name} in {out}");
         if lower == "id" {
-            assert!(!value.to_ascii_lowercase().starts_with("site-"), "{out}");
+            let id = value.to_ascii_lowercase();
+            assert!(!id.starts_with("site-"), "{out}");
+            assert!(
+                !["architect", "addeventlistener", "eventsource", "matchmedia"].contains(&id.as_str()),
+                "id={value} shadows a global: {out}\n  from {from}"
+            );
         }
         if matches!(lower.as_str(), "href" | "xlink:href" | "src") {
             let url: String = value
@@ -1332,9 +1691,12 @@ mod tests {
                 .split_once(':')
                 .filter(|(s, _)| !s.contains(['/', '?', '#']))
                 .map(|(s, _)| s);
+            let image = matches!((tag, lower.as_str()), ("img", "src") | ("image", _));
             let ok = match scheme {
                 None => !url.starts_with("//") && !url.starts_with("/\\"),
-                Some("https" | "mailto") => true,
+                // A block's image is never from another site (a beacon).
+                Some("https") => !image,
+                Some("mailto") => true,
                 Some("data") => ["png", "jpeg", "gif", "webp"]
                     .iter()
                     .any(|k| url.starts_with(&format!("data:image/{k}"))),
@@ -1343,19 +1705,60 @@ mod tests {
             assert!(ok, "{name}={value} in {out}\n  from {from}");
         }
         if lower == "style" || SVG_ATTRS.contains(&lower.as_str()) {
-            let squeezed: String = value
-                .chars()
-                .filter(|c| !c.is_whitespace())
-                .collect::<String>()
-                .to_ascii_lowercase();
             assert!(
-                !squeezed.contains("@import")
-                    && !squeezed.contains("position:fixed")
-                    && !squeezed.contains('\\')
-                    && local_refs_only(&squeezed),
+                inert_by_own_reading(value, lower != "style"),
                 "{name}={value} in {out}\n  from {from}"
             );
         }
+    }
+
+    /// Whether `css` is inert, read here without the sanitiser's code: no
+    /// string, comment, escape, `var()`, custom property or at-rule;
+    /// nothing that loads; no `position` but `static` or `relative`. With
+    /// `local_urls`, `url(#id)` (and only that) is allowed.
+    fn inert_by_own_reading(css: &str, local_urls: bool) -> bool {
+        let lower = css.to_ascii_lowercase();
+        if ["\"", "'", "/*", "\\", "var(", "--", "@"]
+            .iter()
+            .any(|b| lower.contains(b))
+        {
+            return false;
+        }
+        let squeezed: String = lower.chars().filter(|c| !c.is_whitespace()).collect();
+        let urls_ok = squeezed.match_indices("url(").all(|(at, _)| {
+            let rest = &squeezed[at + 4..];
+            local_urls
+                && rest.strip_prefix('#').is_some_and(|r| {
+                    let id_end = r.find(')').unwrap_or(0);
+                    id_end > 0
+                        && r[..id_end]
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+                })
+        });
+        let loads = [
+            "image-set(",
+            "image(",
+            "src(",
+            "cross-fade(",
+            "element(",
+            "paint(",
+            "expression(",
+            "-moz-binding",
+            "behavior",
+            "javascript:",
+        ]
+        .iter()
+        .any(|b| squeezed.contains(b));
+        let positions_ok = squeezed.match_indices("position:").all(|(at, f)| {
+            let declaration_starts = at == 0 || squeezed[..at].ends_with([';', '{']);
+            let value = squeezed[at + f.len()..]
+                .split([';', '}', '!'])
+                .next()
+                .unwrap_or_default();
+            !declaration_starts || value == "static" || value == "relative"
+        });
+        urls_ok && !loads && positions_ok
     }
 
     #[test]
@@ -1405,7 +1808,7 @@ mod tests {
     /// pass per input byte and six output bytes per input byte (plus the
     /// end tags of what was left open).
     fn bounded(markup: &str) -> String {
-        let (out, passes) = sanitize_counting(markup);
+        let (out, passes) = sanitize_counting(markup, Some(SCOPE));
         assert!(
             passes <= markup.len(),
             "{passes} passes over {} bytes",
@@ -1431,8 +1834,8 @@ mod tests {
     fn a_closed_style_sheet_ends() {
         assert_eq!(bounded("<style>a{}</style>b"), "b");
         assert_eq!(
-            bounded("<svg><style>.x{}</style><rect/></svg>"),
-            "<svg><style>.x{}</style><rect></rect></svg>"
+            bounded("<svg><style>.x{fill:red}</style><rect/></svg>"),
+            "<svg><style>.site-block-t .x { fill:red }</style><rect></rect></svg>"
         );
         // An end tag that only starts like one, and one never ended.
         assert_eq!(bounded("<svg><style>a</styles>b</style"), "<svg></svg>");

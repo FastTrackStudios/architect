@@ -71,7 +71,7 @@ pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
 pub use page_blocks::PageBlocks;
-pub use sanitize::sanitize;
+pub use sanitize::{BLOCK_BOX_STYLE, sanitize, sanitize_block};
 pub use scope::Scope;
 pub use search::SearchEntry;
 pub use site::{Crumb, NavNode, Options, Page, Problem, Site, SiteError};

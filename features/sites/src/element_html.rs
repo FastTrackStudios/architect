@@ -33,11 +33,18 @@ pub const MAX_HTML_BYTES: usize = 16 << 20;
 /// The tree is more than [`MAX_ELEMENTS`] elements or [`MAX_HTML_BYTES`]
 /// bytes written out.
 pub fn elements_to_html(elements: &[Element]) -> Result<String, String> {
+    Ok(sanitize(&elements_to_markup(elements)?))
+}
+
+/// `elements` written as markup, bounded as [`elements_to_html`] is, not
+/// yet sanitised: for [`crate::Drawn::into_block_html`], which sanitises
+/// it as a block.
+pub(crate) fn elements_to_markup(elements: &[Element]) -> Result<String, String> {
     let mut w = TreeWriter::default();
     for element in elements {
         w.element(element, 0)?;
     }
-    Ok(sanitize(&w.out))
+    Ok(w.out)
 }
 
 #[derive(Default)]
@@ -180,7 +187,7 @@ mod tests {
             "div",
             &[
                 ("class", "kf-bar"),
-                ("style", "border: 1px solid var(--border)"),
+                ("style", "border: 1px solid currentColor"),
             ],
             vec![text("C <maj>")],
         );
@@ -195,7 +202,7 @@ mod tests {
         );
         assert_eq!(
             elements_to_html(&[tree]).unwrap(),
-            "<div id=\"kf-chart\"><div class=\"kf-bar\" style=\"border: 1px solid var(--border)\">C &lt;maj&gt;</div><br></div>"
+            "<div id=\"kf-chart\"><div class=\"kf-bar\" style=\"border: 1px solid currentColor\">C &lt;maj&gt;</div><br></div>"
         );
     }
 
