@@ -27,6 +27,9 @@ architect-dayplan = { workspace = true }
 architect-threads = { workspace = true }
 architect-notify = { workspace = true }
 architect-files-extension = { workspace = true }
+# Updates (#523): `release` is its network half (reqwest, a runtime),
+# turned on here in the app, not in a UI crate.
+architect-updates = { workspace = true, features = ["release"] }
 
 [dev-dependencies]
 tempfile = "3"

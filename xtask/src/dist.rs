@@ -47,9 +47,14 @@ pub struct Options {
     pub out: PathBuf,
     pub profile: String,
     pub target_dir: Option<PathBuf>,
-    /// The version written into the desktop entry and Info.plist.
+    /// The version written into the desktop entry and Info.plist, and
+    /// stamped into the binary (`ARCHITECT_RELEASE_VERSION`).
     pub version: Option<String>,
 }
+
+/// The build-time env `architect-updates` reads as the app's release
+/// version (`RELEASE_VERSION`).
+const RELEASE_VERSION_ENV: &str = "ARCHITECT_RELEASE_VERSION";
 
 /// The repo: the scripts and the flake are read from here wherever the
 /// command runs.
@@ -99,6 +104,14 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
     }
     if let Some(dir) = &opts.target_dir {
         cmd.arg("--target-dir").arg(dir);
+    }
+    // The release version, stamped into the binary for its updater
+    // (`architect-updates` `RELEASE_VERSION`); without `--version` the
+    // build is a development build, which never updates itself.
+    if let Some(v) = &opts.version {
+        cmd.env(RELEASE_VERSION_ENV, v.trim().trim_start_matches('v'));
+    } else {
+        cmd.env_remove(RELEASE_VERSION_ENV);
     }
     if node {
         // Without the window (no Blitz, wgpu or wayland), and without the
