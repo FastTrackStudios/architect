@@ -142,6 +142,57 @@ store's image wins a tie, a release beats a nightly of the same
 `nix/desktop/test-choose.sh` (the flake's
 `checks.x86_64-linux.architect-desktop-choose`) covers the choice.
 
+### The site
+
+`architect.fasttrackstudio.app` is moving off the cluster to Vercel
+(#534), so the landing page stays up whatever the cluster does. The
+site is `apps/site`, a TanStack Start app on bun with its own lockfile,
+biome and tsconfig. Cargo never builds it. Every page is prerendered,
+so none needs a server when it is requested:
+
+| Page | From |
+| --- | --- |
+| `/` | the landing page, ported from `apps/web/landing`; its words are in `apps/site/src/content/landing.ts`, its media copied from `apps/web/landing` at build time (`apps/site/scripts/assets.sh`) |
+| `/download` | the latest release's `latest-linux.json` and `latest-macos.json`, and the Nix one-liner above |
+| `/changelog` | the last releases' notes (the GitHub release bodies, which are `scripts/release-notes.sh`'s output) |
+| `/extensions` | the store's index, `extensions/index.toml`. While it lists nothing, the page is built from `examples/registry/index.toml` and says it is an example |
+| `/docs/` | `docs/content`, built by `architect site build --base /docs/` as `scripts/web-bundle.sh` builds it |
+
+`apps/site/scripts/data.ts` reads the releases and the index when the
+site is built. It writes `apps/site/src/data/*.json`, which is
+committed: if GitHub cannot be reached, it warns and keeps the
+committed copy, so a build never fails on the network.
+`apps/site/scripts/assemble.sh` joins the app's build and a docs build
+(`DOCS_DIR`) into Vercel's prebuilt output (`.vercel/output`, Build
+Output API v3). Its `config.json` (`apps/site/scripts/vercel-config.ts`)
+serves each page at a clean URL and redirects `/app` and `/s/*`, path
+and query kept, to the node's own hostname
+(`apps/site/src/content/site.ts` `NODE_ORIGIN`). The app and share
+links are never proxied through Vercel.
+
+`.github/workflows/site.yml` checks a pull request that touches the
+site, the docs or the landing page: biome, tsc, the build, the route
+tree's drift and every internal link. With the Vercel secrets set, it
+also deploys a preview carrying the latest release's docs. After
+`release.yml` succeeds on a tag, or on a manual dispatch, it builds the
+docs with the CLI on the release runners and deploys to production.
+With `VERCEL_TOKEN`, `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID` unset, the
+deploy steps skip with a notice. Locally, from `apps/site`, with bun
+(`nix shell nixpkgs#bun`):
+
+<!-- doc-check: off (bun commands, run in apps/site) -->
+```sh
+bun install --frozen-lockfile
+bun run dev                                     # http://localhost:3000
+bun run build                                   # .output/public, every page prerendered
+DOCS_DIR=../../target/site bash scripts/assemble.sh   # after `just docs`
+bun scripts/serve.ts .vercel/output 4173       # the deploy, its redirects applied
+```
+<!-- doc-check: on -->
+
+Until the Vercel site is live, `apps/web/landing` and the
+`architect-web` image keep serving the old one.
+
 ## 5. Moving a consumer to a new tag
 
 `cargo xtask fleet-bump` rewrites every architect-owned git dependency
