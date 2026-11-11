@@ -9,6 +9,7 @@ name: release
 #   ghcr.io/fasttrackstudios/architect-web:<v>|sha-|latest   job web (landing page, docs, web app)
 #     + architect-web-<X.Y.Z>.tar.gz
 #   Architect-linux-x86_64.AppImage + latest-linux.json      job linux
+#   a PR bumping nix/desktop/source.json (the flake's app)     job nix-bump
 #   Architect-macos-arm64.dmg + latest-macos.json            job macos (UNTESTED, off by default)
 #   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums
 #
@@ -278,6 +279,54 @@ jobs:
           cat latest-linux.json
           gh release upload "$GITHUB_REF_NAME" "$app" latest-linux.json --clobber --repo "$GITHUB_REPOSITORY"
           echo "### Linux: \`$app\` (glibc floor $(cat "$app-glibc-floor.txt"))" >> "$GITHUB_STEP_SUMMARY"
+
+  # The flake's architect-desktop wraps the release's AppImage
+  # (nix/desktop/package.nix, #523): after the Linux asset is up, open a PR
+  # (branch chore/nix-desktop-<tag>) that points nix/desktop/source.json at
+  # it, written by nix/desktop/update.sh from latest-linux.json. Only for
+  # the highest release, never a push to main, and never a failed release:
+  # anything that goes wrong is a warning.
+  nix-bump:
+    needs: linux
+    runs-on: [self-hosted, thebattleship-release]
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Open the bump pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -uo pipefail
+          warn() { echo "::warning::nix-bump: $*"; echo "### Nix bump: $*" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          highest="$(git -c versionsort.suffix=- tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)"
+          [ "$TAG" = "$highest" ] || { echo "$TAG is not the highest release ($highest); no bump"; exit 0; }
+          nix shell nixpkgs#jq nixpkgs#curl --command bash nix/desktop/update.sh "$TAG" \
+            || warn "update.sh failed for $TAG; run nix/desktop/update.sh $TAG by hand"
+          if git diff --quiet -- nix/desktop/source.json; then
+            echo "nix/desktop/source.json already names $TAG"; exit 0
+          fi
+          branch="chore/nix-desktop-$TAG"
+          git switch -c "$branch"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "architect-desktop (nix): $TAG" -- nix/desktop/source.json
+          git push -q --force origin "$branch" \
+            || warn "could not push $branch; run nix/desktop/update.sh $TAG and open the PR by hand"
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "a PR from $branch is open already"; exit 0
+          fi
+          gh pr create --base main --head "$branch" \
+            --title "architect-desktop (nix): $TAG" \
+            --body "Points the flake's \`architect-desktop\` (\`nix/desktop/source.json\`) at $TAG's AppImage, written by \`nix/desktop/update.sh $TAG\` from the release's \`latest-linux.json\`. Opened by release.yml (job nix-bump). A PR opened with the workflow token starts no checks of its own: close and reopen it, or push to the branch, to run them." \
+            || warn "could not open a PR from $branch (does the repo let Actions open PRs?); open it by hand"
+          echo "### Nix bump: PR from \`$branch\`" >> "$GITHUB_STEP_SUMMARY"
 
   # The desktop app for macOS: Developer-ID signed, notarized and stapled
   # (scripts/desktop/macos.sh, Studio's flow), and latest-macos.json.

@@ -87,6 +87,7 @@ release-notes`). Architect, the app, is released from the same tag
 | `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the landing page, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz` |
 | `linux` | `Architect-linux-x86_64.AppImage` (`scripts/desktop/linux.sh`) and `latest-linux.json`: the version, the AppImage's URL and its sha256, for the updater |
 | `macos` | `Architect-macos-arm64.dmg`, Developer-ID signed and notarized (`scripts/desktop/macos.sh`), and `latest-macos.json`. Built on airlock; on while the repo variable `ARCHITECT_MACOS_RELEASE` is `true` |
+| `nix-bump` | a PR (branch `chore/nix-desktop-<tag>`) pointing the flake's `architect-desktop` at the new AppImage, for the highest release only; it warns instead of failing |
 | `sums` | `SHA256SUMS` over every asset, and `SHA256SUMS.minisig` signed with the org key when the `release-signing` environment has `FTS_RELEASE_MINISIGN_KEY` |
 
 `:latest` goes only to the highest release. Packages pushed with
@@ -100,6 +101,46 @@ checksums and signs them, and the binaries update themselves through
 `SHA256SUMS` against the key the app compiles in, the asset's hash and
 a `--version` smoke test, then swaps the binary atomically
 ([signed self-update](@/architecture/release.md)).
+
+### The desktop app on Nix
+
+The flake's `architect-desktop` (also `default`, x86_64-linux) is the
+release's own AppImage run in an FHS env (`nix/desktop/package.nix`),
+so installing it compiles nothing:
+
+```sh
+nix run github:FastTrackStudios/architect            # the newest pinned release
+nix run github:FastTrackStudios/architect/v0.12.0    # a given tag
+```
+
+In a NixOS or home-manager configuration, add the flake as an input
+and install its package:
+
+```nix
+inputs.architect.url = "github:FastTrackStudios/architect";
+# then, in a module that has `inputs` and `pkgs`:
+environment.systemPackages = [ inputs.architect.packages.${pkgs.stdenv.hostPlatform.system}.architect-desktop ];
+```
+
+It installs the app's desktop entry and icon, so it shows in app
+launchers. The version and hash live in `nix/desktop/source.json`;
+`nix/desktop/update.sh [<tag>]` rewrites them from a release's
+`latest-linux.json`, and the release's `nix-bump` job opens that PR.
+
+Updates reach a Nix user two ways, and the newer one runs. The store
+is read-only, so the launcher (`nix/desktop/launch.sh`) sets
+`ARCHITECT_UPDATE_DIR` (default
+`${XDG_DATA_HOME:-$HOME/.local/share}/architect/updates`, kept when
+already set) for the app's updater to write a downloaded
+`Architect-linux-x86_64.AppImage` and its `version` file into. At each
+start it runs whichever is newer, the store's image or the downloaded
+one (`nix/desktop/choose.sh`), with `APPIMAGE` set to that file: a flake
+bump (`nix flake update architect`) is never shadowed by an older
+download, and an in-app update runs without waiting for the flake. The
+store's image wins a tie, a release beats a nightly of the same
+`X.Y.Z`, and a missing or unreadable `version` means the store's.
+`nix/desktop/test-choose.sh` (the flake's
+`checks.x86_64-linux.architect-desktop-choose`) covers the choice.
 
 ## 5. Moving a consumer to a new tag
 
