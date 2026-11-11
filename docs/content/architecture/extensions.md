@@ -565,6 +565,10 @@ and an `instantiate` function:
 node features/extensions/web/transpile.mjs my_extension.wasm out/   # jco pinned in features/extensions/web/package.json
 ```
 
+(`architect build-web`, the npm package's command, runs the same
+transpile and writes the extension's metadata and typed actions beside
+it.)
+
 **Why jco.** It is the Bytecode Alliance's component-model
 implementation for JS: it lifts and lowers every WIT type the world uses
 (variants, records, lists, results), so the browser runs the component
@@ -656,6 +660,13 @@ back-pressure, `MAX_WORKERS`). `features/extensions/tests/wasi_web.rs`
 runs it from `cargo test` (node from `devenv --profile wasi shell`; it
 says so and passes without node, `ARCHITECT_WASI_WEB_REQUIRED=1` makes
 that a failure).
+
+**In someone else's page.** The same runner is the npm package
+`@fasttrackstudio/architect` (`features/extensions/web` is the package):
+any TypeScript app loads a component with it, runs its actions with
+types generated from its manifest and mounts its views, its host the
+embedder's, deny by default. See [Extensions in your own web
+app](@/guide/extensions-in-your-web-app.md).
 
 **Next.** WASI 0.3's async (`component-model-async`, which also lets
 jco drop JSPI) and what a component adds at run time (`updates`). Its
