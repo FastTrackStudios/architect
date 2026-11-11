@@ -12,7 +12,9 @@ use crate::agent::{AgentError, Files};
 use crate::copies::{CopyReport, HolderStatus, Locations, Policy, ScrubReport, Violation};
 use crate::id::VersionId;
 use crate::rendition::Peaks;
-use crate::roots::{Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus};
+use crate::roots::{
+    Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus, VersionBytes,
+};
 
 impl From<EngineError> for AgentError {
     fn from(e: EngineError) -> Self {
@@ -22,7 +24,8 @@ impl From<EngineError> for AgentError {
             EngineError::NotSynced(paths) => Self::NotSynced(paths.join(", ")),
             EngineError::BelowPolicy(paths) => Self::BelowPolicy(first_few(&paths)),
             EngineError::Io(why) => Self::Refused(why),
-            EngineError::NoRoom(why) => Self::NoRoom(why),
+            EngineError::NoRoom(why) | EngineError::TooLarge(why) => Self::NoRoom(why),
+            e @ EngineError::Changed(_) => Self::NotSynced(e.to_string()),
         }
     }
 }
@@ -139,6 +142,18 @@ impl Files for Engine {
     async fn history(&self, root: String, path: String) -> Result<Vec<FileVersion>, AgentError> {
         let id = self.resolve_root(&root)?;
         Ok(self.tree(id).await?.history(&path).to_vec())
+    }
+
+    async fn held(&self, root: String, path: String) -> Result<Vec<VersionBytes>, AgentError> {
+        let id = self.resolve_root(&root)?;
+        let versions = self.tree(id).await?.history(&path).to_vec();
+        let mut out = Vec::new();
+        for v in versions {
+            if let Some(content) = &v.content {
+                out.push(self.version_bytes(v.id, content).await);
+            }
+        }
+        Ok(out)
     }
 
     async fn restore(

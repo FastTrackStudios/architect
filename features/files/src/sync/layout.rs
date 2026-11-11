@@ -19,8 +19,20 @@ pub const MARKER: &str = ".fts-root.json";
 pub const TASK_STORE: &str = ".fts-files";
 /// The first line of a file Task dehydrated: never indexed as content.
 pub const TASK_STUB: &[u8] = b"#fts-stub v1\n";
-/// The suffix of this engine's own temp files.
-pub const PART: &str = ".architect-part";
+/// The suffix of this engine's own temp files: one convention, the
+/// blob layer's ([`architect::blob::STAGING`]).
+pub const PART: &str = architect::blob::STAGING;
+/// The engine's own folder in a tree (`<files_dir>/.architect`: a holding
+/// node's incoming bytes and kept versions). Never a root, never synced.
+pub const AREA: &str = ".architect";
+
+/// Where a holding node keeps what it fetches and the versions it
+/// replaces, on the tree's own filesystem.
+#[must_use]
+pub fn areas(files_dir: &Path) -> (PathBuf, PathBuf) {
+    let area = files_dir.join(AREA);
+    (area.join("incoming"), area.join("versions"))
+}
 
 /// A root found on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,18 +116,30 @@ fn dirs(parent: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Whether a root-relative path is never synced: Task's store and
-/// marker, the DAW's regenerable peaks, the OS's litter, temp files.
+/// Whether a root-relative path is never synced.
+///
+/// Task's store and marker, the engine's own folder, the DAW's
+/// regenerable peaks, the OS's litter, and every temp name the engine
+/// writes (anything with [`PART`] in its name). The one place that
+/// decides it: the scan, the unpin check and the start-up clean-up all
+/// ask here.
 #[must_use]
 pub fn ignored(rel: &str) -> bool {
     let name = rel.rsplit('/').next().unwrap_or(rel);
-    rel.split('/').any(|seg| seg == TASK_STORE)
+    rel.split('/').any(|seg| seg == TASK_STORE || seg == AREA)
         || name == MARKER
         || name == ".DS_Store"
         || name == "Thumbs.db"
         || name.starts_with("._")
-        || name.ends_with(PART)
+        || is_temp(name)
         || has_ext(name, &["reapeaks", "tmp"])
+}
+
+/// Whether a file name is one of the engine's temp files (removed at
+/// start, never content).
+#[must_use]
+pub fn is_temp(name: &str) -> bool {
+    name.contains(PART)
 }
 
 /// Whether saving this file is a save point: a DAW's session file.
@@ -155,6 +179,26 @@ mod tests {
         );
         assert_eq!(found[1].meta.section, Section::Assets);
         assert_eq!(found[1].meta.name, "Tracks");
+    }
+
+    /// Every temp name the engine or the blob layer can write in a tree
+    /// is ignored (#527: a cross-filesystem copy's `.architect-part.part`
+    /// was committed as a file and pushed to peers).
+    #[test]
+    fn every_temp_name_the_engine_writes_is_ignored() {
+        let at = Path::new("Audio/take.wav");
+        let staged = architect::blob::staging_path(at);
+        let rel = |p: &Path| p.to_string_lossy().into_owned();
+        assert!(ignored(&rel(&staged)), "write_file's staging name");
+        assert!(ignored(&rel(&architect::blob::staging_path(&staged))));
+        assert!(
+            ignored("Audio/take.wav.architect-part.part"),
+            "the old double suffix"
+        );
+        assert!(ignored(".architect/versions/ab/abcd"));
+        assert!(ignored(".architect/incoming/.partial/abcd.part"));
+        assert!(!ignored("Audio/take.wav"));
+        assert!(!ignored("Audio/architect-parts.wav"));
     }
 
     #[test]

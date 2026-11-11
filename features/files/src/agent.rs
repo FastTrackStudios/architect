@@ -10,7 +10,9 @@
 
 use crate::copies::{CopyReport, HolderStatus, Locations, Policy, ScrubReport, Violation};
 use crate::rendition::Peaks;
-use crate::roots::{Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus};
+use crate::roots::{
+    Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus, VersionBytes,
+};
 
 /// Why the agent refused.
 #[architect::error]
@@ -38,7 +40,7 @@ pub enum AgentError {
 pub mod files {
     use super::{
         AgentError, Asset, Checkpoint, CopyReport, DriveStatus, FileEntry, FileVersion, Hit,
-        HolderStatus, Locations, Peaks, Policy, RootStatus, ScrubReport, Violation,
+        HolderStatus, Locations, Peaks, Policy, RootStatus, ScrubReport, VersionBytes, Violation,
     };
 
     /// The agent: roots, pins, versions.
@@ -58,6 +60,10 @@ pub mod files {
         #[action(effect = read_only)]
         async fn history(&self, root: String, path: String)
         -> Result<Vec<FileVersion>, AgentError>;
+        /// Who holds each version's bytes, in [`Self::history`]'s order
+        /// (deletes left out): a version no one holds cannot be restored.
+        #[action(effect = read_only)]
+        async fn held(&self, root: String, path: String) -> Result<Vec<VersionBytes>, AgentError>;
         /// Put a file back at a version (a new version; nothing is lost).
         async fn restore(
             &self,

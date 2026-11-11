@@ -617,7 +617,10 @@ impl Engine {
 
     /// What this device holds of `hash`, looked at now.
     fn holding_of(&self, hash: &Sha256) -> Option<Holding> {
-        let stored = self.store.local.path_for(hash);
+        let stored = self
+            .store
+            .stored_for(hash)
+            .unwrap_or_else(|| self.store.local.path_for(hash));
         if let Some(path) = self.store.in_place.find(hash) {
             let size = std::fs::metadata(path).ok()?.len();
             return Some(Holding {
@@ -659,16 +662,22 @@ impl Engine {
     /// The blobs in the store (and the downloads growing there).
     fn stored(&self) -> HashMap<String, Holding> {
         let mut out = HashMap::new();
-        let root = self.store.local.root().to_owned();
-        let Ok(dirs) = std::fs::read_dir(&root) else {
-            return out;
-        };
+        let roots: Vec<PathBuf> = self
+            .store
+            .areas()
+            .into_iter()
+            .map(|a| a.root().to_owned())
+            .collect();
         let state = if self.config().hold_all {
             CopyState::Full
         } else {
             CopyState::Cached
         };
-        for dir in dirs.flatten() {
+        for dir in roots
+            .iter()
+            .filter_map(|r| std::fs::read_dir(r).ok())
+            .flat_map(Iterator::flatten)
+        {
             if dir.file_name().len() != 2 {
                 continue;
             }
@@ -1056,7 +1065,9 @@ impl Engine {
                     report.corrupt.push(hex.clone());
                     lock(&self.books.damaged).insert(hex.clone());
                     tracing::warn!(hash = %hex, file = ?file, "files: a scrub found bad or missing bytes");
-                    if let Some(path) = file.filter(|p| p.starts_with(self.store.local.root())) {
+                    if let Some(path) =
+                        file.filter(|p| self.store.areas().iter().any(|a| p.starts_with(a.root())))
+                    {
                         let to = self.config().data.join("corrupt").join(&hex);
                         if let Some(dir) = to.parent() {
                             let _ = std::fs::create_dir_all(dir);
@@ -1711,35 +1722,59 @@ impl Engine {
         self.drop_stored(hash).await
     }
 
+    /// Who holds a version's bytes (`content`, hex): this device, and the
+    /// holders on record.
+    pub async fn version_bytes(
+        &self,
+        version: crate::id::VersionId,
+        content: &str,
+    ) -> crate::roots::VersionBytes {
+        let here = Sha256::from_hex(content).is_ok_and(|h| self.holds(&h));
+        let holders = self.locations(content).await.copies.len();
+        crate::roots::VersionBytes {
+            version,
+            here,
+            holders: u32::try_from(holders).unwrap_or(u32::MAX),
+        }
+    }
+
     /// Drop one blob from the store to make room (the store's budget,
-    /// [`super::space`]), on a holding node too: refused under policy as
-    /// [`Self::evict_blob`], and never the last copy. Bytes no working
-    /// file holds go only when at least one other holder has a verified
-    /// copy, whatever the policy says; pinned blobs never go.
+    /// [`super::space`]): only a blob whose bytes this same device holds
+    /// in a working file in place, re-hashed from that file just before
+    /// the delete. The device holds the same bytes after as before, so
+    /// nothing is lost and no other holder is relied on.
+    ///
+    /// Nothing else is evicted for space: a copy only other holders keep
+    /// would need the org's policy applied to old versions, a live
+    /// possession check just before the delete, and an `evicting` note
+    /// the other holders have seen first, or two holders can each drop
+    /// the last two copies (#530).
     ///
     /// # Errors
     ///
-    /// [`EngineError::BelowPolicy`] (also for a last copy), or the file
-    /// cannot be removed.
+    /// [`EngineError::BelowPolicy`]: pinned, or no working file holds
+    /// these bytes now; or the file cannot be read or removed.
     pub async fn evict_for_space(&self, hash: Sha256) -> Result<(), EngineError> {
         if self.store.local.is_pinned(hash).await.unwrap_or(true) {
             return Err(EngineError::BelowPolicy(vec![format!("{hash} (pinned)")]));
         }
-        if self.store.in_place.find(&hash).is_none() {
-            self.refresh_ledgers().await;
-            let me = self.holder_id();
-            let elsewhere = self
-                .seen(&hash.to_hex(), None)
-                .iter()
-                .filter(|s| s.holder.id != me && s.verdict.confidence == Confidence::Verified)
-                .count();
-            if elsewhere == 0 {
-                return Err(EngineError::BelowPolicy(vec![format!(
-                    "{hash} (the last copy)"
-                )]));
-            }
+        let Some(working) = self.store.in_place.find(&hash) else {
+            return Err(EngineError::BelowPolicy(vec![format!(
+                "{hash} (no working file holds it: never evicted for space, #530)"
+            )]));
+        };
+        let (_, actual) = architect::blob::hash_file(&working).await?;
+        if actual != hash {
+            // The index's stat lied (an edit that kept size and mtime).
+            self.store.in_place.forget(&hash);
+            return Err(EngineError::Changed(working.display().to_string()));
         }
-        self.drop_stored(hash).await
+        // Still the same file after the read.
+        if self.store.in_place.find(&hash).as_deref() != Some(working.as_path()) {
+            return Err(EngineError::Changed(working.display().to_string()));
+        }
+        self.store.local.remove(&hash)?;
+        Ok(())
     }
 
     /// [`Self::evict_blob`]'s work: the policy guard, `evicting`, gone.

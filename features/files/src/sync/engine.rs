@@ -24,13 +24,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use architect::blob::{Fetcher, Sha256};
+use architect::blob::{Fetcher, LocalFs, Sha256};
 use facet::Facet;
 use futures_util::future::BoxFuture;
 use loro::LoroDoc;
 use uuid::Uuid;
 
-use super::layout::{self, PART};
+use super::layout;
 use super::manifest::{
     Checkpoint, FileVersion, Manifest, RootMeta, Section, Settled, Tree, conflict_path,
 };
@@ -124,11 +124,22 @@ pub enum EngineError {
     /// The store's budget has no room: deferred until there is.
     #[error("{0}")]
     NoRoom(String),
+    /// More than the store's whole limit: it cannot arrive until the
+    /// limit is raised (not merely deferred).
+    #[error("{0}")]
+    TooLarge(String),
+    /// The working file changed while it was being replaced: left as the
+    /// user made it, for the next scan to commit (a fork, not a loss).
+    #[error("{0} changed while it was being replaced; left as it is")]
+    Changed(String),
 }
 
 impl From<architect::blob::BlobError> for EngineError {
     fn from(e: architect::blob::BlobError) -> Self {
         match e {
+            architect::blob::BlobError::NoRoom(no) if no.too_large() => {
+                Self::TooLarge(no.to_string())
+            }
             architect::blob::BlobError::NoRoom(no) => Self::NoRoom(no.to_string()),
             other => Self::Io(other.to_string()),
         }
@@ -149,9 +160,78 @@ struct RootState {
     scanner: Scanner,
     index: Option<Index>,
     missing: u32,
-    /// Files whose fetch waits for room in the store.
-    deferred: u32,
+    /// Files waiting for room, and files too large to ever fit.
+    waiting: Waiting,
+    /// Leftover temp files of an earlier run removed (once per start).
+    cleaned: bool,
     error: Option<String>,
+}
+
+/// Bytes kept aside for a version about to be replaced.
+struct Kept {
+    area: LocalFs,
+    hash: Sha256,
+    /// Linked to the live file: it must go if the swap does not happen,
+    /// or a later in-place write would change it too.
+    linked: bool,
+}
+
+impl Kept {
+    /// The swap did not happen: drop a link (a verified copy is a good
+    /// copy of that version and stays).
+    fn undo(self) {
+        if self.linked {
+            let _ = self.area.remove(&self.hash);
+        }
+    }
+}
+
+/// A write that did not happen: its staged file goes, a kept link too.
+async fn abort(staged: &Path, kept: Option<Kept>, e: EngineError) -> Result<Stat, EngineError> {
+    let _ = tokio::fs::remove_file(staged).await;
+    if let Some(k) = kept {
+        k.undo();
+    }
+    Err(e)
+}
+
+/// Remove the engine's temp files left in a tree by a run that died.
+fn remove_temp_files(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        match entry.file_type() {
+            Ok(t) if t.is_dir() && name != layout::AREA && name != layout::TASK_STORE => {
+                remove_temp_files(&entry.path());
+            }
+            Ok(t) if t.is_file() && layout::is_temp(&name) => {
+                let _ = std::fs::remove_file(entry.path());
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Files of a root that wait on space, by why.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Waiting {
+    /// For room in the store (or its floor): retried every pass.
+    deferred: u32,
+    /// More than the store's whole limit.
+    too_large: u32,
+}
+
+impl Waiting {
+    /// Count `e` if it is a wait on space.
+    const fn count(&mut self, e: &EngineError) {
+        match e {
+            EngineError::NoRoom(_) => self.deferred = self.deferred.saturating_add(1),
+            EngineError::TooLarge(_) => self.too_large = self.too_large.saturating_add(1),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Facet)]
@@ -479,15 +559,21 @@ impl Engine {
 
         // 1. Scan.
         let index_file = self.index_path(doc_id);
-        let (mut scanner, mut index) = self.with_root(doc_id, |state| {
+        let (mut scanner, mut index, cleaned) = self.with_root(doc_id, |state| {
             (
                 std::mem::take(&mut state.scanner),
                 state
                     .index
                     .take()
                     .unwrap_or_else(|| Index::load(&index_file)),
+                std::mem::replace(&mut state.cleaned, true),
             )
         });
+        if !cleaned {
+            // A run that died mid-write leaves temp files: never content.
+            let root = dir.clone();
+            let _ = tokio::task::spawn_blocking(move || remove_temp_files(&root)).await;
+        }
         for (path, known) in &index.files {
             if let Ok(hash) = Sha256::from_hex(&known.content) {
                 self.store.in_place.insert(hash, dir.join(path), known.stat);
@@ -515,8 +601,8 @@ impl Engine {
         };
 
         // 2 and 3. Apply, settling forks.
-        let (missing, deferred) = self.apply(&manifest, &dir, &mut index).await;
-        self.note_deferred(doc_id, deferred);
+        let (missing, waiting) = self.apply(&manifest, &dir, &mut index).await;
+        self.note_waiting(doc_id, waiting);
 
         // 4. Checkpoint.
         if first_import && !index.files.is_empty() {
@@ -533,15 +619,16 @@ impl Engine {
 
     /// Keep a root's count of fetches waiting for room; one event when
     /// a root starts waiting, not one per pass while it does.
-    fn note_deferred(&self, doc_id: Uuid, deferred: u32) {
-        let before = self.with_root(doc_id, |state| {
-            std::mem::replace(&mut state.deferred, deferred)
-        });
-        if deferred > 0 && before == 0 {
-            let usage = self.store.local.budget().map(|b| b.usage());
+    fn note_waiting(&self, doc_id: Uuid, now: Waiting) {
+        let before = self.with_root(doc_id, |state| std::mem::replace(&mut state.waiting, now));
+        let started = (now.deferred > 0 && before.deferred == 0)
+            || (now.too_large > 0 && before.too_large == 0);
+        if started {
+            let usage = self.fetcher.store().budget().map(|b| b.usage());
             tracing::warn!(
                 files.root = %doc_id,
-                files.deferred = deferred,
+                files.deferred = now.deferred,
+                files.too_large = now.too_large,
                 store.used = usage.map(|u| u.used),
                 store.max = usage.map(|u| u.max),
                 fs.free = usage.and_then(|u| u.space).map(|s| s.free),
@@ -551,12 +638,22 @@ impl Engine {
         }
     }
 
-    /// Fetches waiting for room in the store, over every root.
+    /// Files waiting for room, over every root.
     #[must_use]
     pub fn deferred(&self) -> u32 {
         self.lock()
             .values()
-            .map(|s| s.deferred)
+            .map(|s| s.waiting.deferred)
+            .fold(0, u32::saturating_add)
+    }
+
+    /// Files more than the store's whole limit, over every root: they
+    /// cannot arrive until the limit is raised.
+    #[must_use]
+    pub fn too_large(&self) -> u32 {
+        self.lock()
+            .values()
+            .map(|s| s.waiting.too_large)
             .fold(0, u32::saturating_add)
     }
 
@@ -677,11 +774,16 @@ impl Engine {
     }
 
     /// Bring the working copy to the heads; how many files are still
-    /// missing, and how many of those wait for room in the store.
-    async fn apply(&self, manifest: &Manifest<'_>, dir: &Path, index: &mut Index) -> (u32, u32) {
+    /// missing, and how many of those wait on space.
+    async fn apply(
+        &self,
+        manifest: &Manifest<'_>,
+        dir: &Path,
+        index: &mut Index,
+    ) -> (u32, Waiting) {
         let tree = manifest.tree();
         let mut missing = 0u32;
-        let mut deferred = 0u32;
+        let mut waiting = Waiting::default();
         let mut closing = Vec::new();
         let paths: Vec<String> = tree.paths().map(str::to_owned).collect();
         for path in paths {
@@ -697,12 +799,10 @@ impl Engine {
                         if !at.exists()
                             && tree.current(&copy).is_none()
                             && let Some(content) = &loser.content
-                            && let Err(e) = self.write_file(&at, content, loser.size).await
+                            && let Err(e) = self.write_file(&at, content, loser.size, None).await
                         {
                             missing = missing.saturating_add(1);
-                            if matches!(e, EngineError::NoRoom(_)) {
-                                deferred = deferred.saturating_add(1);
-                            }
+                            waiting.count(&e);
                         }
                     }
                     let heads = tree.heads(&path);
@@ -753,19 +853,12 @@ impl Engine {
                 );
                 continue;
             }
-            // The bytes this file is replacing are kept if sync replaced
-            // them; with no room for them, the file waits.
-            if let Some(k) = &known
-                && let Err(e) = self.keep_replaced(&file, k).await
+            // The bytes this file is replacing are kept (`write_file`);
+            // with no room for them the file waits, as it was.
+            match self
+                .write_file(&file, content, target.size, known.as_ref())
+                .await
             {
-                tracing::debug!(%path, %e, "files: not replaced yet");
-                missing = missing.saturating_add(1);
-                if matches!(e, EngineError::NoRoom(_)) {
-                    deferred = deferred.saturating_add(1);
-                }
-                continue;
-            }
-            match self.write_file(&file, content, target.size).await {
                 Ok(stat) => {
                     index.files.insert(
                         path,
@@ -777,72 +870,178 @@ impl Engine {
                     );
                 }
                 Err(e) => {
-                    tracing::debug!(%path, %e, "files: not fetched yet");
+                    tracing::debug!(%path, %e, "files: not written yet");
                     missing = missing.saturating_add(1);
-                    if matches!(e, EngineError::NoRoom(_)) {
-                        deferred = deferred.saturating_add(1);
-                    }
+                    waiting.count(&e);
                 }
             }
         }
         manifest.push(&closing);
-        (missing, deferred)
+        (missing, waiting)
     }
 
-    /// A working file about to be replaced is moved into the store (if
-    /// not there already), so its version stays: within the store's
-    /// budget, else the replacement waits ([`EngineError::NoRoom`]).
-    async fn keep_replaced(&self, file: &Path, known: &Indexed) -> Result<(), EngineError> {
-        let Ok(hash) = Sha256::from_hex(&known.content) else {
-            return Ok(());
-        };
-        // Only the bytes the index knows: a file changed since is a fork.
-        let unchanged = std::fs::metadata(file).is_ok_and(|m| Stat::of(&m) == known.stat);
-        if !unchanged {
-            return Ok(());
+    /// The bytes of `hash` from somewhere on this device, and the area
+    /// they should leave once they are in the tree (a transient copy:
+    /// what was fetched or put, and on a device a store copy too large to
+    /// keep as history). `None` when they must be fetched.
+    async fn source_of(&self, hash: &Sha256, size: u64) -> Option<(PathBuf, Option<LocalFs>)> {
+        let pinned = self.store.local.is_pinned(*hash).await.unwrap_or(true);
+        let inbox_is_store = self.store.inbox.root() == self.store.local.root();
+        for area in self.store.areas() {
+            let path = area.path_for(hash);
+            if !path.is_file() {
+                continue;
+            }
+            let is_inbox = area.root() == self.store.inbox.root();
+            let is_history = area.root() == self.store.history.root();
+            let transient = !pinned
+                && if inbox_is_store {
+                    // A device: its store keeps small files as history.
+                    is_inbox && size > self.config.keep_inline
+                } else {
+                    // A holding node: what landed in its inbox is passing through.
+                    is_inbox && !is_history
+                };
+            return Some((path, transient.then(|| area.clone())));
         }
-        Ok(self.store.local.adopt(file, &hash).await?)
+        self.store.in_place.find(hash).map(|p| (p, None))
     }
 
-    /// Write `content` at `at`: beside it first, then renamed into place,
-    /// so a DAW sees the old file or the whole new one.
-    async fn write_file(&self, at: &Path, content: &str, size: u64) -> Result<Stat, EngineError> {
+    /// Write `content` at `at` without ever losing a byte (#527):
+    ///
+    /// 1. the new bytes are staged beside `at` (linked from where they
+    ///    pass through, else copied, synced and verified), so `at` is
+    ///    never empty while they arrive;
+    /// 2. if `at` holds a version the index knows (`known`), it must be
+    ///    exactly that file still, and its bytes are kept
+    ///    ([`Self::keep_old`]) unless this device holds them elsewhere;
+    ///    with no room for them nothing changes ([`EngineError::NoRoom`]);
+    /// 3. right before the swap `at` is checked again: a file the user
+    ///    changed or created meanwhile is left alone
+    ///    ([`EngineError::Changed`]), and the scan makes it a fork;
+    /// 4. the staged file is renamed in (never over a file that appeared
+    ///    when there was none), and only then does a transient copy leave.
+    async fn write_file(
+        &self,
+        at: &Path,
+        content: &str,
+        size: u64,
+        known: Option<&Indexed>,
+    ) -> Result<Stat, EngineError> {
         let hash = Sha256::from_hex(content).map_err(|e| EngineError::Io(e.to_string()))?;
-        let source = if let Some(path) = self.store.file_for(&hash) {
-            path
+        let (source, transient) = if let Some(found) = self.source_of(&hash, size).await {
+            found
         } else {
             // Asked before any remote is: no room, no fetch (and no event
             // per pass for a file that keeps waiting).
-            if !self.store.local.has_room(size) {
-                return Err(EngineError::NoRoom(format!(
-                    "no room in the store for {size} bytes"
-                )));
-            }
+            self.fetcher.store().check_room(size)?;
             self.fetcher.fetch(hash).await?;
             // The fetcher checked every byte against the hash.
             self.note_verified(content);
-            self.store.local.path_for(&hash)
+            let path = self.fetcher.store().path_for(&hash);
+            let (_, transient) = self
+                .source_of(&hash, size)
+                .await
+                .ok_or_else(|| EngineError::Io(format!("{hash} vanished after its fetch")))?;
+            (path, transient)
         };
         if let Some(parent) = at.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        let part = PathBuf::from(format!("{}{PART}", at.display()));
-        let from_store = source.starts_with(self.store.local.root());
-        if from_store
-            && size > self.config.keep_inline
-            && !self.store.local.is_pinned(hash).await.unwrap_or(true)
-        {
-            // One copy on this device: it moves out of the store into the
-            // working copy (copied across filesystems, then removed), and
-            // is served from there.
-            self.store.local.move_out(&hash, &part).await?;
-        } else {
-            tokio::fs::copy(&source, &part).await?;
+        // 1. Stage.
+        let staged = architect::blob::stage(&source, at, hash, transient.is_some()).await?;
+        let staged = staged.path;
+        // 2. Keep what it replaces.
+        let unchanged = |k: &Indexed| std::fs::metadata(at).is_ok_and(|m| Stat::of(&m) == k.stat);
+        let kept = match known {
+            Some(k) => {
+                if !unchanged(k) {
+                    return abort(
+                        &staged,
+                        None,
+                        EngineError::Changed(at.display().to_string()),
+                    )
+                    .await;
+                }
+                match self.keep_old(at, k).await {
+                    Ok(kept) => kept,
+                    Err(e) => return abort(&staged, None, e).await,
+                }
+            }
+            None => None,
+        };
+        // 3. Check again, right before the swap. A link moved the old
+        // file's ctime: compare the rest.
+        let linked = kept.as_ref().is_some_and(|x| x.linked);
+        let still = known.map_or_else(
+            || !at.exists(),
+            |k| {
+                std::fs::metadata(at).is_ok_and(|m| {
+                    let now = Stat::of(&m);
+                    if linked {
+                        now.same_file(&k.stat)
+                    } else {
+                        now == k.stat
+                    }
+                })
+            },
+        );
+        if !still {
+            return abort(
+                &staged,
+                kept,
+                EngineError::Changed(at.display().to_string()),
+            )
+            .await;
         }
-        tokio::fs::rename(&part, at).await?;
+        // 4. Swap.
+        if let Err(e) = architect::blob::commit(&staged, at, known.is_none()).await {
+            let e = if e.kind() == std::io::ErrorKind::AlreadyExists {
+                EngineError::Changed(at.display().to_string())
+            } else {
+                e.into()
+            };
+            return abort(&staged, kept, e).await;
+        }
+        if let Some(area) = transient {
+            let _ = area.remove(&hash);
+        }
         let stat = Stat::of(&tokio::fs::metadata(at).await?);
         self.store.in_place.insert(hash, at.to_path_buf(), stat);
         Ok(stat)
+    }
+
+    /// Keep the bytes of `at` (the version `known` says it is) before it
+    /// is replaced: in the history area (a holding node's, on the tree's
+    /// filesystem; a device's store), linked when the filesystem allows,
+    /// else copied and verified. Nothing to do when this device holds
+    /// those bytes elsewhere.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::NoRoom`] (the history's budget or its filesystem's
+    /// floor), [`EngineError::Changed`], or the copy failed.
+    async fn keep_old(&self, at: &Path, known: &Indexed) -> Result<Option<Kept>, EngineError> {
+        let Ok(hash) = Sha256::from_hex(&known.content) else {
+            return Ok(None);
+        };
+        if self.store.stored_for(&hash).is_some()
+            || self.store.in_place.find(&hash).is_some_and(|p| p != at)
+        {
+            return Ok(None);
+        }
+        let area = self.store.history.clone();
+        let Some(linked) = area.adopt(at, &hash, true).await? else {
+            return Ok(None);
+        };
+        let kept = Kept { area, hash, linked };
+        // A link shares the file: it must still be the version it was.
+        let same = std::fs::metadata(at).is_ok_and(|m| Stat::of(&m).same_file(&known.stat));
+        if !same {
+            kept.undo();
+            return Err(EngineError::Changed(at.display().to_string()));
+        }
+        Ok(Some(kept))
     }
 
     /// Fetch a library's notes, so its assets read offline.
@@ -1031,8 +1230,8 @@ impl Engine {
             .await
             .ok_or_else(|| EngineError::NoRoot(doc_id.to_string()))?;
         let manifest = Manifest::new(&doc);
-        let hash = architect::blob::BlobStore::put(&self.store.local, None, body).await?;
-        let size = tokio::fs::metadata(self.store.local.path_for(&hash))
+        let hash = architect::blob::BlobStore::put(&self.store, None, body).await?;
+        let size = tokio::fs::metadata(self.store.inbox.path_for(&hash))
             .await?
             .len();
         let version = FileVersion {
@@ -1197,12 +1396,12 @@ impl Engine {
             (
                 s.index.as_ref().is_some_and(at_head),
                 s.missing,
-                s.deferred,
+                s.waiting,
                 s.scanner.stubs.clone(),
                 s.error.clone(),
             )
         });
-        let (at_heads, missing, deferred, stubs, error) = seen.unwrap_or_default();
+        let (at_heads, missing, waiting, stubs, error) = seen.unwrap_or_default();
         let synced = dir.is_some() && at_heads;
         Some(RootStatus {
             doc_id: doc_id.to_string(),
@@ -1215,7 +1414,8 @@ impl Engine {
             path: dir.map(|d| d.display().to_string()),
             pinned,
             missing,
-            deferred,
+            deferred: waiting.deferred,
+            too_large: waiting.too_large,
             synced,
             stubs,
             error,

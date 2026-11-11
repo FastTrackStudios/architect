@@ -341,8 +341,8 @@ async fn parallel_fetches_cannot_jointly_exceed_the_budget() {
     assert_eq!((usage.used, usage.reserved), (30_000, 0));
 }
 
-/// Over its soft threshold the store drops what is safe: bytes a working
-/// file also holds go, a blob no one else has a verified copy of stays.
+/// Over its soft threshold the store drops only what a working file also
+/// holds, down to 80%; a blob no working file holds stays.
 #[tokio::test(flavor = "multi_thread")]
 async fn eviction_drops_duplicates_and_never_a_last_copy() {
     let tmp = tempfile::tempdir().unwrap();
@@ -403,5 +403,9 @@ async fn eviction_drops_duplicates_and_never_a_last_copy() {
         laptop.engine.store.local.path_for(&last).is_file(),
         "the last copy stays"
     );
-    assert_eq!(du(&blobs), 30_000, "the working files' duplicates went");
+    let left = du(&blobs);
+    assert!(
+        (30_000..=57_600).contains(&left),
+        "duplicates of working files went until under 80% of 72 kB: {left}"
+    );
 }
