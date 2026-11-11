@@ -57,3 +57,14 @@ features = ["architect-app/keyflow-lab"]
 name = "editor-story"
 packages = ["architect-editor"]
 features = ["architect-editor/stories", "architect-editor/native"]
+
+# The whole stack started as `devenv up` starts it (#541,
+# `xtask/tests/dev_stack.rs`): the demo seed end to end (sign-in, the org's
+# vault through the node, a share link per audience) and a mirror of a
+# stand-in production with the guard's refusals. Its feature also lets the
+# guard take a loopback port as production, so only this pass turns it on.
+# It builds auth-server, mock-oauth and the headless node itself.
+[[pass]]
+name = "dev-stack"
+packages = ["xtask"]
+features = ["xtask/stack-test"]

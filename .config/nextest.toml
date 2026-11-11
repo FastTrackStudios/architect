@@ -10,3 +10,10 @@ final-status-level = "fail"
 # green main run takes 60–90 s (the WASI tests build their components
 # in-test, longer on a cold cache); flagged slow at 60 s, killed at 8 min.
 slow-timeout = { period = "60s", terminate-after = 8 }
+
+# The local stack's test (xtask/tests/dev_stack.rs, #541) builds the
+# headless node and the auth server before it starts them: on a cold cache
+# that alone can pass 8 minutes. Still bounded.
+[[profile.ci.overrides]]
+filter = "package(xtask) & binary(dev_stack)"
+slow-timeout = { period = "60s", terminate-after = 20 }

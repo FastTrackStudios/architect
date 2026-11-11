@@ -6,6 +6,7 @@
 
 mod boundaries;
 mod builtins;
+mod dev;
 mod dist;
 mod docs;
 mod ext;
@@ -72,6 +73,15 @@ enum Command {
         /// Replace every address with `user-<id>@local.invalid`.
         #[arg(long)]
         redact_emails: bool,
+    },
+    /// The whole stack on this machine (`devenv up`, #541): mock-oauth,
+    /// the auth server, a headless node and the app, filled from a
+    /// sanitised mirror of production on a credentialed machine and from
+    /// the demo seed everywhere else, guarded so nothing reaches
+    /// production (`docs/content/guide/local-stack.md`).
+    Dev {
+        #[command(subcommand)]
+        action: dev::DevAction,
     },
     /// Pack an extension's folder into an unsigned `.archext` archive:
     /// its files, `bin/<target-triple>/` builds and a content index of
@@ -364,6 +374,7 @@ fn main() -> ExitCode {
             out,
             redact_emails,
         } => mirror::run(&from, &out, redact_emails),
+        Command::Dev { action } => dev::run_cli(action),
         Command::FleetBump {
             tag,
             manifests,
