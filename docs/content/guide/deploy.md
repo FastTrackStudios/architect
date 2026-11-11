@@ -557,6 +557,9 @@ or an `lrc` fence in the note):
 - **Blocks follow the same playhead.** The page's player is
   `architect.playhead`, the contract every block on the page follows, the
   extensions' too ([views that follow playback](@/architecture/extensions.md#views-that-follow-playback)).
+  An audio engine running on the page (Studio's) attaches to it as its
+  clock (`architect.playhead.attach`): the blocks then follow the engine
+  and the page's own player steps aside.
 
 Not yet: streaming from `architect-files` and its renditions (a small proxy
 before the full file, #490; today the files are the vault's own, copied into
