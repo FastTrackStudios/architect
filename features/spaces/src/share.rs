@@ -197,6 +197,56 @@ fn split_emails(s: &str) -> Vec<String> {
     out
 }
 
+/// How far a link plays (#528): the most its viewers may fetch.
+///
+/// Each layer holds the ones below it. The sharer sets it per link and
+/// per audience; a viewer opts deeper within it; the node refuses a file
+/// above it (an extension's `[[share_layers]]` rules say which layer each
+/// file of a note type is in; a file no rule names is a page file).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Facet)]
+#[repr(u8)]
+pub enum Listen {
+    /// The page alone: notes, charts, lyrics, files no rule places
+    /// higher. No audio engine.
+    Page,
+    /// The page and the reference: what an engine needs to play the
+    /// song's mix with a live click and guide, the project read-only
+    /// (Studio's Reference Mode). The default for a new link.
+    #[default]
+    Reference,
+    /// Everything: every stem, for the full multitrack engine.
+    Full,
+}
+
+impl Listen {
+    /// Every layer, lowest first.
+    pub const ALL: [Self; 3] = [Self::Page, Self::Reference, Self::Full];
+
+    /// `page`, `reference` or `full`.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::Reference => "reference",
+            Self::Full => "full",
+        }
+    }
+
+    /// Parse `page`, `reference` or `full` (any case).
+    ///
+    /// # Errors
+    ///
+    /// Anything else.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "page" | "none" => Ok(Self::Page),
+            "reference" | "ref" => Ok(Self::Reference),
+            "full" | "multitrack" | "multitracks" => Ok(Self::Full),
+            other => Err(format!("no layer `{other}`: page, reference or full")),
+        }
+    }
+}
+
 /// The longest name a [`ShareAudience`] may have.
 pub const AUDIENCE_NAME_MAX: usize = 48;
 /// The most named audiences one share carries.
@@ -220,6 +270,10 @@ pub struct ShareAudience {
     /// Its own link's code: `<node>/s/<code>/` ([`is_code`]).
     pub code: String,
     pub created_at: i64,
+    /// How far its link plays, never past the share's ([`Share::listen`]);
+    /// None (and an audience written before layers): the share's.
+    #[facet(default)]
+    pub listen: Option<Listen>,
 }
 
 impl ShareAudience {
@@ -242,6 +296,8 @@ impl ShareAudience {
 pub struct NewAudience {
     pub name: String,
     pub filter: String,
+    /// How far its link plays; None: the share's.
+    pub listen: Option<Listen>,
 }
 
 /// Check a new audience's name against the ones `share` has (the filter
@@ -314,6 +370,11 @@ pub struct Share {
     /// written before them reads as having none.
     #[facet(default)]
     pub audiences: Vec<ShareAudience>,
+    /// How far its own link plays (#528), and the most any of its
+    /// audiences may. A share written before layers served every file
+    /// its notes attach, so it reads as [`Listen::Full`].
+    #[facet(default = Listen::Full)]
+    pub listen: Listen,
 }
 
 /// Where a share stands at one moment.
@@ -405,6 +466,15 @@ impl Share {
         self.audiences.iter().find(|a| a.code == code)
     }
 
+    /// How far the link of `audience` plays (the share's own link when
+    /// None): the audience's cap, never past the share's.
+    #[must_use]
+    pub fn listen_for(&self, audience: Option<&ShareAudience>) -> Listen {
+        audience
+            .and_then(|a| a.listen)
+            .map_or(self.listen, |a| a.min(self.listen))
+    }
+
     /// Whether the people it lets in may comment.
     #[must_use]
     pub fn comments(&self) -> bool {
@@ -435,6 +505,8 @@ pub struct NewShare {
     pub access: ShareAccess,
     pub expires_at: Option<i64>,
     pub domain: Option<String>,
+    /// How far its link plays ([`Listen::default`]: Reference).
+    pub listen: Listen,
 }
 
 /// One change to a share ([`crate::ShareLinks::update`]).
@@ -443,6 +515,8 @@ pub struct NewShare {
 pub enum ShareChange {
     Audience(Audience),
     Access(ShareAccess),
+    /// How far its own link plays, and the most its audiences may.
+    Listen(Listen),
     /// A new expiry; None: until revoked.
     Expires(Option<i64>),
     Title(Option<String>),
@@ -552,6 +626,7 @@ mod tests {
             created_by: "u1".into(),
             domain: None,
             audiences: Vec::new(),
+            listen: Listen::Full,
         }
     }
 
@@ -607,6 +682,7 @@ mod tests {
         let new = |name: &str| NewAudience {
             name: name.into(),
             filter: "instrument == \"violin\"".into(),
+            listen: None,
         };
         assert!(validate_audience(&s, &new("violin")).is_ok());
         assert!(validate_audience(&s, &new("  ")).is_err());
@@ -617,6 +693,7 @@ mod tests {
             filter: new("").filter,
             code: code_from([9; 10]),
             created_at: 1,
+            listen: None,
         });
         assert!(validate_audience(&s, &new(" violin ")).is_err());
         let found = s.audience_named("VIOLIN").unwrap();
@@ -624,6 +701,41 @@ mod tests {
         assert_eq!(found.path(), format!("/s/{}/", found.code));
         assert_ne!(found.path(), s.path());
         assert!(s.audience_at(&s.code).is_none());
+    }
+
+    #[test]
+    fn an_audiences_cap_only_narrows_the_links() {
+        assert_eq!(Listen::default(), Listen::Reference, "a new link's default");
+        assert!(Listen::Page < Listen::Reference && Listen::Reference < Listen::Full);
+        for l in Listen::ALL {
+            assert_eq!(Listen::parse(l.label()), Ok(l));
+        }
+        assert!(Listen::parse("stems").is_err());
+        let audience = |listen| ShareAudience {
+            name: "band".into(),
+            filter: String::new(),
+            code: code_from([9; 10]),
+            created_at: 1,
+            listen,
+        };
+        let mut s = share(Audience::Link);
+        s.listen = Listen::Reference;
+        assert_eq!(s.listen_for(None), Listen::Reference);
+        assert_eq!(s.listen_for(Some(&audience(None))), Listen::Reference);
+        assert_eq!(
+            s.listen_for(Some(&audience(Some(Listen::Page)))),
+            Listen::Page
+        );
+        // Asking for more than the link offers is the link's.
+        assert_eq!(
+            s.listen_for(Some(&audience(Some(Listen::Full)))),
+            Listen::Reference
+        );
+        s.listen = Listen::Full;
+        assert_eq!(
+            s.listen_for(Some(&audience(Some(Listen::Full)))),
+            Listen::Full
+        );
     }
 
     #[test]
@@ -645,6 +757,7 @@ mod tests {
             access: ShareAccess::Read,
             expires_at: None,
             domain: None,
+            listen: Listen::default(),
         };
         assert!(validate(&new, 0).is_err());
         let ok = NewShare {

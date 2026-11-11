@@ -58,7 +58,7 @@ pub fn parse_comments(text: &str) -> Vec<ShareComment> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::share::{Audience, ShareAccess, ShareAudience, ShareScope, code_from};
+    use crate::share::{Audience, Listen, ShareAccess, ShareAudience, ShareScope, code_from};
 
     #[test]
     fn a_share_round_trips_through_its_note() {
@@ -79,7 +79,9 @@ mod tests {
                 filter: "instrument == \"violin\"".into(),
                 code: code_from([4; 10]),
                 created_at: 2,
+                listen: Some(Listen::Page),
             }],
+            listen: Listen::Reference,
         };
         let note = share_note(&share);
         assert!(note.starts_with("---\npublish: false\n---\n"), "{note}");
@@ -98,6 +100,22 @@ mod tests {
         );
     }
 
+    /// A share note written with audiences but before layers (#528): the
+    /// share reads as Full (what it served), each audience as the share's.
+    #[test]
+    fn a_share_note_written_before_layers_reads_as_full() {
+        let (code, other) = (code_from([5; 10]), code_from([6; 10]));
+        let note = format!(
+            "---\npublish: false\n---\n# Share {code}\n\n```json\n{{\"code\":\"{code}\",\"vault\":\"notes\",\"scope\":\"Vault\",\"title\":null,\"audience\":\"Link\",\"access\":\"Read\",\"expires_at\":null,\"revoked_at\":null,\"created_at\":7,\"created_by\":\"u1\",\"domain\":null,\"audiences\":[{{\"name\":\"band\",\"filter\":\"\",\"code\":\"{other}\",\"created_at\":8}}]}}\n```\n"
+        );
+        let share = parse_share_note(&note).expect("an old note reads");
+        assert_eq!(share.listen, Listen::Full);
+        let band = share.audience_named("band").expect("its audience");
+        assert_eq!(band.listen, None);
+        assert_eq!(share.listen_for(Some(band)), Listen::Full);
+        assert_eq!(parse_share_note(&share_note(&share)), Some(share));
+    }
+
     /// The note of a share made before audiences (#510), byte for byte
     /// what `share_note` wrote then: it still reads, with no audiences.
     #[test]
@@ -112,6 +130,8 @@ mod tests {
         assert_eq!(share.audience, Audience::Link);
         assert_eq!(share.created_at, 7);
         assert!(share.audiences.is_empty());
+        // Before layers (#528) every attached file was served: Full.
+        assert_eq!(share.listen, Listen::Full);
         // And written again it carries the (empty) list, and reads the same.
         assert_eq!(parse_share_note(&share_note(&share)), Some(share));
     }
