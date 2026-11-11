@@ -10,6 +10,11 @@
 //! filter over the scope on a link of its own (`SHARE_AUDIENCE_ADD`,
 //! `SHARE_AUDIENCE_REMOVE`, `SHARE_AUDIENCES`). `SHARE_ARCHIVE` saves the
 //! zip a link's "Download all" gives.
+//!
+//! A link plays to a layer (#528, `listen`: page, reference or full; a
+//! new link's default is reference), set on the share (`SHARE_CREATE`,
+//! `SHARE_UPDATE`) and narrowed per audience (`SHARE_AUDIENCE_ADD`,
+//! `SHARE_AUDIENCE_UPDATE`); the host refuses a file above it.
 
 use std::sync::Arc;
 
@@ -17,7 +22,8 @@ use architect::action::{
     ActionCaller, ActionError, ActionList, ActionMeta, Effect, InvocationSource,
 };
 use architect_spaces::{
-    Audience, NewAudience, NewShare, Share, ShareAccess, ShareAudience, ShareChange, ShareScope,
+    Audience, Listen, NewAudience, NewShare, Share, ShareAccess, ShareAudience, ShareChange,
+    ShareScope,
 };
 use facet::Facet;
 
@@ -35,10 +41,11 @@ pub mod ids {
     pub const PUBLISH_DOMAIN: &str = "PUBLISH_DOMAIN";
     pub const SHARE_AUDIENCE_ADD: &str = "SHARE_AUDIENCE_ADD";
     pub const SHARE_AUDIENCE_REMOVE: &str = "SHARE_AUDIENCE_REMOVE";
+    pub const SHARE_AUDIENCE_UPDATE: &str = "SHARE_AUDIENCE_UPDATE";
     pub const SHARE_AUDIENCES: &str = "SHARE_AUDIENCES";
     pub const SHARE_ARCHIVE: &str = "SHARE_ARCHIVE";
     /// Every id, in menu order.
-    pub const ALL: [&str; 11] = [
+    pub const ALL: [&str; 12] = [
         SHARE_SHEET,
         SHARE_CREATE,
         SHARE_LIST,
@@ -48,6 +55,7 @@ pub mod ids {
         PUBLISH_DOMAIN,
         SHARE_AUDIENCE_ADD,
         SHARE_AUDIENCE_REMOVE,
+        SHARE_AUDIENCE_UPDATE,
         SHARE_AUDIENCES,
         SHARE_ARCHIVE,
     ];
@@ -72,14 +80,15 @@ macro_rules! metas {
 
 metas! { "Share";
     SHARE_SHEET = SHARE_SHEET, "Share…", "Opens the Share sheet on a scope: `folder`, `tag`, `note`/`notes`, `base`, or the whole `vault` when none is given; from a file's context menu, that file (a note) or folder. The sheet picks the audience, access and expiry, makes the link, copies it, and lists and revokes the org's shares.";
-    SHARE_CREATE = SHARE_CREATE, "Create a share link", "Makes a share link on the node that hosts the current org (`host`, or the one kept): a scope of `vault` (the host's only vault when unset) given as `folder`, `tag`, `note`, `notes` or `base` (else the whole vault); `audience` public, link (default: anyone with the link), org (the org's signed-in members) or invited:<email>,<email>; `access` read (default) or comment; `expires` never (default), 1h, 24h, 7d, 30d or a date YYYY-MM-DD; `title`. Answers the share and its `url`.";
-    SHARE_LIST = SHARE_LIST, "Share links", "The share links of the current org's host: code, url, scope, audience, access, expiry, whether it is live, expired or revoked.";
-    SHARE_UPDATE = SHARE_UPDATE, "Change a share link", "Changes share `code`: `audience`, `access`, `expires` (never, 1h, 24h, 7d, 30d, YYYY-MM-DD) or `title`. The next request to the link is answered by the change.";
+    SHARE_CREATE = SHARE_CREATE, "Create a share link", "Makes a share link on the node that hosts the current org (`host`, or the one kept): a scope of `vault` (the host's only vault when unset) given as `folder`, `tag`, `note`, `notes` or `base` (else the whole vault); `audience` public, link (default: anyone with the link), org (the org's signed-in members) or invited:<email>,<email>; `access` read (default) or comment; `expires` never (default), 1h, 24h, 7d, 30d or a date YYYY-MM-DD; `title`; `listen`, how far the link plays: page (the notes and files no extension rule places higher), reference (default: also the files a reference player needs, the song's mix and project read-only) or full (every file, the multitracks); the host refuses a file above it. Answers the share and its `url`.";
+    SHARE_LIST = SHARE_LIST, "Share links", "The share links of the current org's host: code, url, scope, audience, access, expiry, how far it plays (`listen`), whether it is live, expired or revoked, and its audiences.";
+    SHARE_UPDATE = SHARE_UPDATE, "Change a share link", "Changes share `code`: `audience`, `access`, `expires` (never, 1h, 24h, 7d, 30d, YYYY-MM-DD), `title` or `listen` (page, reference or full: how far its link plays, and the most any of its audiences may). The next request to the link is answered by the change.";
     SHARE_REVOKE = SHARE_REVOKE, "Revoke a share link", "Takes share `code` down: its link answers 404 from the next request on. Final.";
     SHARE_COMMENTS = SHARE_COMMENTS, "Share comments", "The comments left on share `code` (page, by, text, when).";
-    SHARE_AUDIENCE_ADD = SHARE_AUDIENCE_ADD, "Add a share audience", "Adds a named audience to share `code`: `name` (violin), and `filter`, a Bases filter expression over the notes of the share's scope (`instrument == \"violin\"`, `file.hasTag(\"rhythm\")`; empty: every note). The audience gets a link of its own, `<host>/s/<its code>/`, that shows and serves only the notes the filter holds for and the files they attach; the share's own link stays the whole scope. Answers the share and the audience's `url`.";
+    SHARE_AUDIENCE_ADD = SHARE_AUDIENCE_ADD, "Add a share audience", "Adds a named audience to share `code`: `name` (violin), and `filter`, a Bases filter expression over the notes of the share's scope (`instrument == \"violin\"`, `file.hasTag(\"rhythm\")`; empty: every note). The audience gets a link of its own, `<host>/s/<its code>/`, that shows and serves only the notes the filter holds for and the files they attach; the share's own link stays the whole scope. `listen` (page, reference or full; unset: the share's) narrows how far its link plays, never past the share's. Answers the share and the audience's `url`.";
+    SHARE_AUDIENCE_UPDATE = SHARE_AUDIENCE_UPDATE, "Change a share audience", "Changes audience `name` of share `code`: `listen`, how far its link plays (page, reference or full, never past the share's; `share`: the share's own). Answers the share and the audience.";
     SHARE_AUDIENCE_REMOVE = SHARE_AUDIENCE_REMOVE, "Remove a share audience", "Removes audience `name` from share `code`: its link answers 404 from the next request on. The share's own link and its other audiences stay.";
-    SHARE_AUDIENCES = SHARE_AUDIENCES, "Share audiences", "The named audiences of share `code`: name, filter, code and url of each.";
+    SHARE_AUDIENCES = SHARE_AUDIENCES, "Share audiences", "The named audiences of share `code`: name, filter, code, url and how far its link plays (`listen`, and `listen_set` when it narrows the share's) of each.";
     SHARE_ARCHIVE = SHARE_ARCHIVE, "Download a share's files", "Saves the zip a share link's Download all gives to the file `to`: the files of share `code`, or of its `audience` alone, in folders by `by` (order: numbered files; note (default): a numbered folder per note; property:<key>: a folder per value), all of them or one `group` (a note's title or a property's value). Streamed from the host; answers the file, its bytes and how many files it holds.";
     PUBLISH_DOMAIN = PUBLISH_DOMAIN, "Publish at a domain", "Serves share `code` at the root of `domain` (album.example.com) too, as its own site; no `domain` stops it. Point the domain's DNS at the host and add it to its ingress.";
 }
@@ -135,6 +144,8 @@ pub struct CreateArgs {
     pub access: Option<String>,
     pub expires: Option<String>,
     pub title: Option<String>,
+    /// page, reference (default) or full.
+    pub listen: Option<String>,
     pub host: Option<String>,
 }
 
@@ -146,6 +157,8 @@ pub struct UpdateArgs {
     pub access: Option<String>,
     pub expires: Option<String>,
     pub title: Option<String>,
+    /// page, reference or full.
+    pub listen: Option<String>,
     pub host: Option<String>,
 }
 
@@ -171,6 +184,18 @@ pub struct AudienceAddArgs {
     pub name: String,
     /// A Bases filter expression; none: every note of the scope.
     pub filter: Option<String>,
+    /// page, reference or full; none: the share's.
+    pub listen: Option<String>,
+    pub host: Option<String>,
+}
+
+/// What [`ids::SHARE_AUDIENCE_UPDATE`] takes.
+#[derive(Debug, Clone, Facet)]
+pub struct AudienceUpdateArgs {
+    pub code: String,
+    pub name: String,
+    /// page, reference or full; `share`: the share's own.
+    pub listen: String,
     pub host: Option<String>,
 }
 
@@ -216,15 +241,22 @@ pub struct AudienceRow {
     pub code: String,
     /// Its own link, on the host.
     pub url: Option<String>,
+    /// How far its link plays: page, reference or full.
+    pub listen: String,
+    /// The layer it was set to, when it narrows the share's; none: the
+    /// share's.
+    pub listen_set: Option<String>,
 }
 
 impl AudienceRow {
-    fn of(audience: &ShareAudience, accounts: &Accounts) -> Self {
+    fn of(share: &Share, audience: &ShareAudience, accounts: &Accounts) -> Self {
         Self {
             name: audience.name.clone(),
             filter: audience.filter.clone(),
             code: audience.code.clone(),
             url: accounts.org_host().map(|host| audience.url(&host)),
+            listen: share.listen_for(Some(audience)).label().to_owned(),
+            listen_set: audience.listen.map(|l| l.label().to_owned()),
         }
     }
 }
@@ -294,6 +326,8 @@ pub struct ShareRow {
     /// live, expired or revoked.
     pub state: String,
     pub domain: Option<String>,
+    /// How far its own link plays: page, reference or full.
+    pub listen: String,
     /// Its named audiences, each with its own link.
     pub audiences: Vec<AudienceRow>,
 }
@@ -316,10 +350,11 @@ impl ShareRow {
             }
             .to_owned(),
             domain: share.domain.clone(),
+            listen: share.listen.label().to_owned(),
             audiences: share
                 .audiences
                 .iter()
-                .map(|a| AudienceRow::of(a, accounts))
+                .map(|a| AudienceRow::of(share, a, accounts))
                 .collect(),
         }
     }
@@ -490,6 +525,10 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
             let audience = Audience::parse(args.audience.as_deref().unwrap_or("link"))?;
             let access = parse_access(args.access.as_deref().unwrap_or("read"))?;
             let expires_at = parse_expiry(args.expires.as_deref().unwrap_or("never"), at)?;
+            let listen = args
+                .listen
+                .as_deref()
+                .map_or_else(|| Ok(Listen::default()), Listen::parse)?;
             let scope = ScopeArgs {
                 vault: args.vault.clone(),
                 folder: args.folder,
@@ -509,6 +548,7 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
                         access,
                         expires_at,
                         domain: None,
+                        listen,
                     },
                 )
                 .await?;
@@ -545,8 +585,13 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
             if let Some(title) = &args.title {
                 changes.push(ShareChange::Title(Some(title.clone())));
             }
+            if let Some(listen) = &args.listen {
+                changes.push(ShareChange::Listen(Listen::parse(listen)?));
+            }
             if changes.is_empty() {
-                return Err("say what to change: audience, access, expires or title".to_owned());
+                return Err(
+                    "say what to change: audience, access, expires, title or listen".to_owned(),
+                );
             }
             let mut share = None;
             for change in changes {
@@ -599,13 +644,14 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
                 let new = NewAudience {
                     name: args.name.clone(),
                     filter: args.filter.unwrap_or_default(),
+                    listen: args.listen.as_deref().map(Listen::parse).transpose()?,
                 };
                 let share = a
                     .share_audience_add(args.host.as_deref(), &args.code, new)
                     .await?;
                 let audience = share
                     .audience_named(&args.name)
-                    .map(|made| AudienceRow::of(made, &a))
+                    .map(|made| AudienceRow::of(&share, made, &a))
                     .ok_or_else(|| "the audience was not added".to_owned())?;
                 Ok(AudienceOut {
                     share: ShareRow::of(&share, &a),
@@ -629,8 +675,33 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
                     audiences: share
                         .audiences
                         .iter()
-                        .map(|x| AudienceRow::of(x, &a))
+                        .map(|x| AudienceRow::of(&share, x, &a))
                         .collect(),
+                })
+            }
+        },
+    )?;
+    let a = accounts.clone();
+    list.register_async(
+        &SHARE_AUDIENCE_UPDATE,
+        Effect::Mutating,
+        move |args: AudienceUpdateArgs| {
+            let a = a.clone();
+            async move {
+                let listen = match args.listen.trim() {
+                    "share" | "" => None,
+                    other => Some(Listen::parse(other)?),
+                };
+                let share = a
+                    .share_audience_listen(args.host.as_deref(), &args.code, &args.name, listen)
+                    .await?;
+                let audience = share
+                    .audience_named(&args.name)
+                    .map(|x| AudienceRow::of(&share, x, &a))
+                    .ok_or_else(|| format!("no audience {}", args.name))?;
+                Ok(AudienceOut {
+                    share: ShareRow::of(&share, &a),
+                    audience,
                 })
             }
         },
@@ -645,7 +716,7 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
                 audiences: share
                     .audiences
                     .iter()
-                    .map(|x| AudienceRow::of(x, &a))
+                    .map(|x| AudienceRow::of(&share, x, &a))
                     .collect(),
             })
         }

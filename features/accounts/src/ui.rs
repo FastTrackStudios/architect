@@ -797,6 +797,7 @@ fn SharePage() -> Element {
     let mut emails = use_signal(String::new);
     let mut access = use_signal(|| "read".to_owned());
     let mut expires = use_signal(|| "never".to_owned());
+    let mut listen = use_signal(|| architect_spaces::Listen::default().label().to_owned());
     let mut problem = use_signal(|| None::<String>);
     let seen = accounts.shares_seen();
     let made_url = made.as_ref().and_then(|s| accounts.share_url(s));
@@ -826,6 +827,9 @@ fn SharePage() -> Element {
                 Chips { id: "share-expires", options: vec![("never", "Until revoked"), ("24h", "A day"), ("7d", "A week"), ("30d", "30 days")].into_iter().map(|(v, l): (&str, &str)| (v.to_owned(), l.to_owned())).collect(), now: expires(), onpick: move |v: String| expires.set(v) }
             }
         }
+        label { style: "display: flex; flex-direction: column; gap: 4px; font-size: 13px;", "It plays"
+            Chips { id: "share-listen", options: listen_options(), now: listen(), onpick: move |v: String| listen.set(v) }
+        }
         if let Some(why) = problem() {
             div { role: "alert", style: "font-size: 13px; color: {t.danger};", "{why}" }
         }
@@ -833,13 +837,14 @@ fn SharePage() -> Element {
             onclick: move |_| {
                 let a = make.clone();
                 let draft = draft_make.clone();
-                let (h, who, list, acc, exp) = (host.peek().clone(), audience.peek().clone(), emails.peek().clone(), access.peek().clone(), expires.peek().clone());
+                let (h, who, list, acc, exp, plays) = (host.peek().clone(), audience.peek().clone(), emails.peek().clone(), access.peek().clone(), expires.peek().clone(), listen.peek().clone());
                 spawn(async move {
                     let who = if who == "invited" { format!("invited:{list}") } else { who };
                     let made = async {
                         let audience = architect_spaces::Audience::parse(&who)?;
                         let access = crate::share_actions::parse_access(&acc)?;
                         let expires_at = crate::share_actions::parse_expiry(&exp, now_secs())?;
+                        let listen = architect_spaces::Listen::parse(&plays)?;
                         let host = Some(h.as_str()).filter(|h| !h.trim().is_empty());
                         a.share_create(host, architect_spaces::NewShare {
                             vault: draft.vault.clone(),
@@ -849,6 +854,7 @@ fn SharePage() -> Element {
                             access,
                             expires_at,
                             domain: None,
+                            listen,
                         }).await
                     }.await;
                     match made {
@@ -894,6 +900,18 @@ fn SharePage() -> Element {
     }
 }
 
+/// The layers a link plays to (#528), as [`Chips`] offers them.
+fn listen_options() -> Vec<(String, String)> {
+    [
+        ("page", "Page"),
+        ("reference", "Reference"),
+        ("full", "Full multitracks"),
+    ]
+    .into_iter()
+    .map(|(v, l)| (v.to_owned(), l.to_owned()))
+    .collect()
+}
+
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -922,7 +940,9 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
         .unwrap_or_else(|| share.scope.describe());
     let audience = share.audience.label();
     let access = crate::share_actions::access_label(share.access);
+    let plays = share.listen.label();
     let code = share.code.clone();
+    let plays_code = share.code.clone();
     rsx! {
         div { "data-share": "{share.code}", "data-share-state": "{state}",
             style: "display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; opacity: {dim};",
@@ -930,7 +950,7 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
                 Share2 { size: 16, color: t.ink_2.to_string() }
                 div { style: "flex: 1 1 0; min-width: 0; display: flex; flex-direction: column;",
                     div { style: "font-size: 13px;", "{title}" }
-                    div { style: "font-size: 12px; color: {t.ink_3};", "{audience} · {access} · {state}" }
+                    div { style: "font-size: 12px; color: {t.ink_3};", "{audience} · {access} · plays {plays} · {state}" }
                 }
                 if live {
                     button { style: button_style(&t, false), "aria-label": "Revoke {title}",
@@ -944,6 +964,46 @@ fn ShareRowView(share: architect_spaces::Share) -> Element {
             }
             if live {
                 input { readonly: true, value: "{url}", style: "{field} font-size: 12px;" }
+                Chips { id: "share-listen-{share.code}", options: listen_options(), now: share.listen.label().to_owned(),
+                    onpick: move |v: String| {
+                        let (a, c) = (ui.accounts(), plays_code.clone());
+                        spawn(async move {
+                            if let Ok(l) = architect_spaces::Listen::parse(&v) {
+                                let _ = a.share_update(None, &c, architect_spaces::ShareChange::Listen(l)).await;
+                            }
+                        });
+                    }
+                }
+                for audience in share.audiences.iter() {
+                    AudiencePlays { key: "{audience.code}", code: share.code.clone(), name: audience.name.clone(), audience_code: audience.code.clone(), now: share.listen_for(Some(audience)).label().to_owned() }
+                }
+            }
+        }
+    }
+}
+
+/// How far one audience's link of share `code` plays (#528), as a
+/// choice of the three layers.
+#[component]
+fn AudiencePlays(code: String, name: String, audience_code: String, now: String) -> Element {
+    let Some(ui) = try_use_accounts() else {
+        return rsx! {};
+    };
+    let t = theme();
+    let label = name.clone();
+    rsx! {
+        div { "data-share-audience": "{label}",
+            style: "display: flex; align-items: center; gap: 8px; font-size: 12px;",
+            div { style: "flex: 0 0 96px; overflow: hidden; text-overflow: ellipsis; color: {t.ink_2};", "{label}" }
+            Chips { id: "share-listen-{audience_code}", options: listen_options(), now,
+                onpick: move |v: String| {
+                    let (a, c, n) = (ui.accounts(), code.clone(), name.clone());
+                    spawn(async move {
+                        if let Ok(l) = architect_spaces::Listen::parse(&v) {
+                            let _ = a.share_audience_listen(None, &c, &n, Some(l)).await;
+                        }
+                    });
+                }
             }
         }
     }
