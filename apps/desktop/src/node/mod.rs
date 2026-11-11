@@ -337,6 +337,7 @@ pub async fn start_with(
     let state = NodeState {
         name: config.name.clone(),
         endpoint: endpoint_id.clone(),
+        iroh: Some(endpoint.clone()),
         backend: backend.clone(),
         sites: config.sites.keys().cloned().collect(),
         admission: admission.clone(),
@@ -714,8 +715,11 @@ async fn bind_iroh(config: &Config) -> Result<iroh::Endpoint, StartError> {
         .map_err(|e| StartError::Iroh(format!("its key: {e}")))?;
     let builder = match config.iroh {
         IrohMode::N0 => iroh_link::endpoint_builder(PeerLookup::N0),
+        // No relay, no lookup, and none of the builder's default sockets
+        // on every interface (`0.0.0.0`, `[::]`): loopback alone, below.
         IrohMode::Local => iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
             .relay_mode(iroh::RelayMode::Disabled)
+            .clear_ip_transports()
             .alpns(vec![VOX_ALPN.to_vec()]),
     }
     .secret_key(key);

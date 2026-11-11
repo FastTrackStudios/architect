@@ -17,5 +17,16 @@ guppy.workspace = true
 # ext-pack / ext-sign / ext-verify / ext-index: the `.archext` format, signing included.
 architect-extension-archive = { workspace = true, features = ["sign"] }
 
+[features]
+# `xtask/tests/dev_stack.rs`: the whole stack started from its binaries,
+# and `DEV_STACK_TEST_PRODUCTION_HOSTS` (a loopback port standing in for
+# production) honoured by the guard. Only the stack's feature-tests pass
+# turns it on.
+stack-test = []
+
+[[test]]
+name = "dev_stack"
+required-features = ["stack-test"]
+
 [lints]
 workspace = true

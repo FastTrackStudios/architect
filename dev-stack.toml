@@ -1,0 +1,29 @@
+# The whole stack on your machine (#541): `devenv up` starts mock-oauth,
+# the auth server, a headless node and the app from these settings, through
+# `cargo xtask dev run <process>` (xtask/src/dev). devenv.nix reads the
+# ports from here too, so this file is the one place to change them.
+# Docs: docs/content/guide/local-stack.md.
+
+# Every process binds 127.0.0.1 on its port. Chosen clear of what the
+# fleet runs on a dev machine: Teley 8787, the OTLP collector 4318, the
+# auth demo and `just web` 8080, the mock's usual 4040, Task's server
+# 9090, the site's dev server 3000, the sandbox's web demo 8090.
+# `DEV_STACK_PORT_<NAME>` (AUTH, NODE, …) overrides one for a run.
+[ports]
+mock_oauth = 7410
+auth = 7411
+node = 7412
+web = 7413
+site = 7414
+
+# A credentialed machine (an administrator's session token in
+# `AUTH_ADMIN_TOKEN`, or a file named by `AUTH_ADMIN_TOKEN_FILE`) fills the
+# local auth server with a sanitised mirror of this server's database: an
+# authenticated GET of `/admin/snapshot`, the only call the stack ever
+# makes off this machine. Everyone else gets the demo seed.
+[mirror]
+from = "https://auth.fasttrackstudio.app"
+# The org (slug) the local node hosts on a mirror; empty: the first org,
+# by slug, that has an owner. The node signs in as that org's owner with
+# the development password every mirrored account gets.
+node_org = ""

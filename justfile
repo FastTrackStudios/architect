@@ -191,18 +191,12 @@ fleet-bump TAG +MANIFESTS:
 # at GitHub, Google and TONE3000 — so the buttons work without anyone's
 # credentials. `just mock-oauth` has to be running; `just auth-demo`
 # starts both.
+#
+# Its environment is written once, in `cargo xtask dev auth`
+# (xtask/src/dev/mod.rs `auth_env`), which `devenv up`'s auth server
+# shares; it execs the server.
 auth-dev:
-    AUTH_DEV_SEED=1 \
-    AUTH_DATABASE_URL="sqlite::memory:" \
-    AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
-    AUTH_BASE_URL="http://localhost:8080" \
-    AUTH_SOCIAL_MOCK_URL="http://localhost:4040" \
-    AUTH_GITHUB_CLIENT_ID="mock-github" \
-    AUTH_GITHUB_CLIENT_SECRET="mock-github-secret" \
-    AUTH_GOOGLE_CLIENT_ID="mock-google" \
-    AUTH_GOOGLE_CLIENT_SECRET="mock-google-secret" \
-    AUTH_TONE3000_CLIENT_ID="mock-tone3000" \
-    cargo run -p auth-server
+    cargo xtask dev auth --port 8080 --db memory --seed --mock-port 4040
 
 # A stand-in for GitHub, Google and TONE3000 on http://localhost:4040.
 #
@@ -229,11 +223,7 @@ auth-demo:
 # The same, but on disk, so it survives a restart.
 #   just auth-dev-persistent ./auth-local.db
 auth-dev-persistent DB="./auth-local.db":
-    AUTH_DEV_SEED=1 \
-    AUTH_DATABASE_URL="sqlite://{{DB}}?mode=rwc" \
-    AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
-    AUTH_BASE_URL="http://localhost:8080" \
-    cargo run -p auth-server
+    cargo xtask dev auth --port 8080 --db {{DB}} --seed
 
 # Pull a sanitised copy of a running server's database.
 #
@@ -267,11 +257,7 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
     # one fails with "already holds N users", which is correct but
     # unhelpful as the answer to "run this again".
     rm -f "{{DB}}"
-    AUTH_IMPORT_SNAPSHOT="{{SNAPSHOT}}" \
-    AUTH_DATABASE_URL="sqlite://{{DB}}?mode=rwc" \
-    AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
-    AUTH_BASE_URL="http://localhost:8080" \
-    cargo run -p auth-server
+    exec cargo xtask dev auth --port 8080 --db "{{DB}}" --import "{{SNAPSHOT}}"
 
 # Browser tests for the auth pages, against a server this starts itself.
 #
@@ -280,6 +266,36 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
 #   nix-shell -p chromium --run 'PLAYWRIGHT_CHROMIUM_PATH=$(which chromium) just auth-e2e'
 auth-e2e:
     cd apps/auth-server/e2e && npm install && npx playwright test
+
+# ── The whole stack on your machine (`devenv up`, #541) ─────────────
+# docs/content/guide/local-stack.md. Every recipe here is `cargo xtask dev`.
+
+# What is running, which fill and why, the snapshot's age, the URLs to
+# open and the development password.
+dev-status:
+    cargo xtask dev status
+
+# Remove all of the stack's state (the mirror, the databases, the node's
+# data, the app's folder and scratch vault). Stop `devenv up` first.
+dev-reset:
+    cargo xtask dev reset
+
+# Mirror production again (needs AUTH_ADMIN_TOKEN or AUTH_ADMIN_TOKEN_FILE);
+# the next start loads it. `--real-emails` keeps real addresses;
+# `--vault <name>` is not available yet (the docs say why).
+#   just dev-refresh
+#   just dev-refresh --real-emails
+dev-refresh *ARGS:
+    cargo xtask dev refresh {{ARGS}}
+
+# The demo seed from the next `devenv up` on, even on a credentialed
+# machine (`just dev-refresh` undoes it).
+dev-seed:
+    cargo xtask dev seed
+
+# The stack's guard alone: what every process would be given, checked.
+dev-guard:
+    cargo xtask dev guard
 
 # Its own folder (~/.config/architect); its first run asks for a vault.
 # ARGS go to the app: `just app actions list` asks the running app. Runs

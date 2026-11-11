@@ -37,6 +37,12 @@ let
     vulkan-loader
     libGL
   ];
+  # The stack's ports (dev-stack.toml: the one place they are set) and the
+  # command every one of its processes starts through.
+  stack = builtins.fromTOML (builtins.readFile ./dev-stack.toml);
+  url = name: "http://127.0.0.1:${toString stack.ports.${name}}";
+  curl = "${pkgs.curl}/bin/curl";
+  xdev = "exec cargo run -q -p xtask -- dev run";
   common = with pkgs; [
     # Stylo's native build script generates Rust from Python.
     python3
@@ -61,64 +67,85 @@ in
   # libstdc++ at run time on NixOS.
   env.LD_LIBRARY_PATH = lib.makeLibraryPath (common ++ linux ++ [ pkgs.stdenv.cc.cc.lib ]);
 
-  # `devenv up`: the Architect app (apps/desktop) under the fleet's dx,
-  # plus the telemetry module's Teley (:8787) and collector (:4318), which
-  # the app's spans go to. `just app` runs the app alone, without dx, as a
-  # person runs it (its first run asks for a vault).
-  # The app's build as a task the app process waits on, so `devenv up`'s TUI
-  # shows the app waiting (as auth-dev waits on mock-oauth) while it
-  # compiles, with the build's own log. The same flags as `dx serve` below,
-  # so its build after this is a quick up-to-date check. A failed build
-  # fails the task and the app does not start.
+  # `devenv up`: the whole stack on this machine (#541,
+  # docs/content/guide/local-stack.md), each process started by
+  # `cargo xtask dev run <process>` (xtask/src/dev), which runs the guard
+  # (nothing may name production or leave loopback), decides the fill (a
+  # sanitised mirror of production on a machine with an admin token, the
+  # demo seed everywhere else) and execs the binary with its environment.
+  # The stack's test (xtask/tests/dev_stack.rs) starts the same command, so
+  # the two cannot drift. Ports are dev-stack.toml's; state is under
+  # devenv's (`$DEVENV_STATE/stack`, 0700), `just dev-reset` removes it.
+  # Plus the telemetry module's Teley (:8787) and collector (:4318).
   tasks."app:build" = {
+    # The app's build as a task the app process waits on, so `devenv up`'s
+    # TUI shows the app waiting while it compiles, with the build's own
+    # log. The same flags as the app's `dx serve`, so its build after this
+    # is a quick up-to-date check. A failed build fails the task and the
+    # app does not start.
     exec = "cd apps/desktop && dx build --platform desktop --renderer native";
     before = [ "devenv:processes:app" ];
   };
-  # Without Rust hot-patching: it builds a different ("fat") binary from
-  # `dx build`, so the task's build was thrown away (86s twice), and dx's
-  # own help calls it experimental and segfault-prone. rsx hot reload stays.
-  # The app opens a scratch copy of the demo vault (apps/ui/demo-vault),
-  # seeded under devenv's state when it is missing, so a run never edits the
-  # repo's copy or a vault of the person's; `just vault-reset` seeds it again.
+
+  # The stand-in for GitHub, Google and TONE3000 the auth server's social
+  # buttons go to. Up once it answers at all (curl exits 0 on any status).
+  processes.mock-oauth = {
+    exec = "${xdev} mock-oauth";
+    ready.exec = "${curl} -s -o /dev/null ${url "mock_oauth"}/";
+  };
+  # The auth server: on-disk SQLite and a secret of its own under devenv's
+  # state, filled once at start (it prints which fill and why).
+  processes.auth = {
+    exec = "${xdev} auth";
+    after = [ "devenv:processes:mock-oauth" ];
+    ready.exec = "${curl} -sf -o /dev/null ${url "auth"}/health";
+  };
+  # The headless node (`architect-desktop serve`, built without the window)
+  # signed in to that auth server, hosting the fill's org and its vault,
+  # `ARCHITECT_IROH=local`: no relay, no lookup, loopback only.
+  processes.node = {
+    exec = "${xdev} node";
+    after = [ "devenv:processes:auth" ];
+    ready.exec = "${curl} -sf -o /dev/null ${url "node"}/health";
+  };
+  # The Architect app (apps/desktop) under the fleet's dx, its issuer the
+  # local auth server and its orgs' node the local node, with a folder and
+  # keychain service of its own, on a scratch copy of the demo vault
+  # (`just vault-reset`). Without Rust hot-patching: it builds a different
+  # ("fat") binary from `dx build`, and dx calls it experimental. rsx hot
+  # reload stays.
   processes.app = {
-    exec = "cd apps/desktop && exec dx serve --platform desktop --renderer native --hot-patch false";
-    env = config.fleet.telemetry.processEnv // {
-      ARCHITECT_VAULT = "${config.devenv.state}/demo-vault";
-      ARCHITECT_VAULT_SEED = "${config.devenv.root}/apps/ui/demo-vault";
-    };
+    exec = "${xdev} app";
+    after = [ "devenv:processes:node" ];
+    env = config.fleet.telemetry.processEnv;
     # Ready only while the built app itself runs, not while dx is still
-    # compiling it: the TUI shows the app waiting during the build, running
-    # once its window is up, and unhealthy if the app dies under dx. dx
-    # launches it from target/dx/architect-desktop/… (the [p] keeps pgrep
-    # from matching this probe's own command line).
+    # compiling it. dx launches it from target/dx/architect-desktop/… (the
+    # [p] keeps pgrep from matching this probe's own command line).
     ready = {
       exec = "${pkgs.procps}/bin/pgrep -f 'target/dx/architect-deskto[p]/' >/dev/null";
       period = 2;
       failure_threshold = 2;
     };
   };
+  # Off by default: `devenv up web` (the web app, its issuer the local
+  # one) and `devenv up site` (apps/site's dev server).
+  processes.web = {
+    exec = "${xdev} web";
+    after = [ "devenv:processes:auth" ];
+    start.enable = false;
+  };
+  processes.site = {
+    exec = "${xdev} site";
+    start.enable = false;
+  };
   # The dev sandbox (apps/sandbox, made-up data and the example
-  # extensions) the same way, off by default: `devenv up sandbox`.
+  # extensions), off by default: `devenv up sandbox`.
   processes.sandbox = {
     exec = "cd apps/sandbox && exec dx serve --platform desktop --renderer native --hot-patch false";
     env = config.fleet.telemetry.processEnv // {
       ARCHITECT_VAULT = "${config.devenv.state}/demo-vault";
       ARCHITECT_VAULT_SEED = "${config.devenv.root}/apps/ui/demo-vault";
     };
-    start.enable = false;
-  };
-
-  # The justfile's auth demo as processes, off by default:
-  # `devenv up auth-dev mock-oauth`.
-  processes.mock-oauth = {
-    exec = "cargo run -p mock-oauth";
-    # Up once :4040 answers at all (curl exits 0 on any HTTP status).
-    ready.exec = "${pkgs.curl}/bin/curl -s -o /dev/null http://127.0.0.1:4040/";
-    start.enable = false;
-  };
-  processes.auth-dev = {
-    exec = "just auth-dev";
-    after = [ "devenv:processes:mock-oauth" ];
     start.enable = false;
   };
 

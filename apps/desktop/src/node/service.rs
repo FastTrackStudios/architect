@@ -60,6 +60,12 @@ pub struct NodeStatus {
     pub devices: u32,
     /// Its blob store against its budget, when it runs the files engine.
     pub files_store: Option<FilesStore>,
+    /// The relays its iroh endpoint is reachable through: none with
+    /// `ARCHITECT_IROH=local`.
+    pub relays: Vec<String>,
+    /// The addresses its iroh endpoint is bound to (`127.0.0.1:…` with
+    /// `ARCHITECT_IROH=local`).
+    pub iroh_addrs: Vec<String>,
 }
 
 /// The files engine's blob store against its budget (#525).
@@ -163,6 +169,8 @@ pub struct AccountView {
 pub struct NodeState {
     pub(crate) name: String,
     pub(crate) endpoint: String,
+    /// The iroh endpoint itself: where it is bound and which relays it uses.
+    pub(crate) iroh: Option<iroh::Endpoint>,
     pub(crate) backend: Backend,
     pub(crate) sites: Vec<String>,
     pub(crate) admission: Admission,
@@ -224,6 +232,12 @@ impl NodeState {
                     tree_fs_free: history.and_then(|h| h.space).map(|s| s.free),
                     incoming_used: engine.inbox_usage().map(|i| i.used),
                 })
+            }),
+            relays: self.iroh.as_ref().map_or_else(Vec::new, |e| {
+                e.addr().relay_urls().map(ToString::to_string).collect()
+            }),
+            iroh_addrs: self.iroh.as_ref().map_or_else(Vec::new, |e| {
+                e.bound_sockets().iter().map(ToString::to_string).collect()
             }),
         }
     }
