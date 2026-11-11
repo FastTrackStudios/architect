@@ -50,7 +50,8 @@ use architect_accounts::Issuer;
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use architect_desktop::node::{self, Config, IrohMode, Running};
 use architect_spaces::{
-    Audience, NewAudience, NewShare, Share, ShareAccess, ShareChange, ShareLinksClient, ShareScope,
+    Audience, Listen, NewAudience, NewShare, Share, ShareAccess, ShareChange, ShareLinksClient,
+    ShareScope,
 };
 use auth_server::{ServerConfig, server};
 use reqwest::StatusCode;
@@ -248,6 +249,7 @@ impl World {
                 access,
                 expires_at: None,
                 domain: None,
+                listen: Listen::default(),
             })
             .await
             .unwrap()
@@ -632,6 +634,7 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
             access: ShareAccess::Read,
             expires_at: Some(node::shares::now() + 2),
             domain: None,
+            listen: Listen::default(),
         })
         .await
         .unwrap();
@@ -651,6 +654,7 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
                 access: ShareAccess::Read,
                 expires_at: Some(1),
                 domain: None,
+                listen: Listen::default(),
             })
             .await
             .is_err()
@@ -753,6 +757,7 @@ async fn setlist(w: &World) -> (Share, String, String) {
             NewAudience {
                 name: name.to_owned(),
                 filter: filter.to_owned(),
+                listen: None,
             },
         )
     };
@@ -914,6 +919,7 @@ async fn two_audiences_are_each_served_only_their_own_notes_and_files() {
             NewAudience {
                 name: name.to_owned(),
                 filter: filter.to_owned(),
+                listen: None,
             },
         )
     };
@@ -1320,6 +1326,7 @@ async fn media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_orde
             NewAudience {
                 name: "band".to_owned(),
                 filter: "section == \"band\"".to_owned(),
+                listen: None,
             },
         )
         .await
@@ -1526,6 +1533,7 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
                 NewAudience {
                     name: name.to_owned(),
                     filter: filter.to_owned(),
+                    listen: None,
                 },
             )
             .await
@@ -1605,5 +1613,649 @@ async fn an_embedders_own_blocks_draw_on_a_link_after_the_installed_ones() {
     }
     assert_eq!(song.matches("data-by=\"studio.kf\"").count(), 1, "{song}");
 
+    w.host.stop().await;
+}
+
+// ── Layers (#528) ────────────────────────────────────────────────────
+
+/// An extension installed on the node that owns `type: song` notes and
+/// places their files: the session and the reference for a Reference
+/// link, every other proxy (the stems) for a Full one alone.
+fn install_song_layers(pkg: &Path) {
+    touch(
+        pkg,
+        "extension.toml",
+        "id = \"demo.songs\"\nname = \"Songs\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n\
+         [[share_layers]]\nnote_type = \"song\"\n\
+         reference = [\"*.session\", \"Media/Proxies/Reference*\"]\n\
+         full = [\"Media/Proxies/**\"]\n",
+    );
+}
+
+/// Two songs, each attaching its session, its reference, its stems and
+/// a chart; Joy is the band's, Noel the strings'.
+fn seed_songs(vault: &Path) {
+    for (song, section) in [("Joy", "band"), ("Noel", "strings")] {
+        touch(
+            vault,
+            &format!("Songs/{song}/{song}.md"),
+            &format!(
+                "---\ntitle: {song}\ntype: song\nsection: {section}\n---\n# {song}\n\n\
+                 ![[{song}.session]]\n\n![[Media/Proxies/Reference.ogg]]\n\n\
+                 ![[Media/Proxies/Bass.ogg]]\n\n![[Media/Proxies/Gänse.ogg]]\n\n![[Charts/{song}.pdf]]\n"
+            ),
+        );
+        let at = |rel: &str| format!("Songs/{song}/{rel}");
+        touch(
+            vault,
+            &at(&format!("{song}.session")),
+            &format!("session of {song}"),
+        );
+        touch(
+            vault,
+            &at("Media/Proxies/Reference.ogg"),
+            &format!("REFERENCE {song}"),
+        );
+        touch(
+            vault,
+            &at("Media/Proxies/Bass.ogg"),
+            &format!("STEM BASS {song}"),
+        );
+        touch(
+            vault,
+            &at("Media/Proxies/Gänse.ogg"),
+            &format!("STEM GANSE {song}"),
+        );
+        touch(
+            vault,
+            &at(&format!("Charts/{song}.pdf")),
+            &format!("%PDF {song}"),
+        );
+    }
+}
+
+/// GET exactly `path` (no client normalising its dots, slashes or
+/// escapes) from `addr`, with `host` as its Host; the status and the body.
+async fn raw_get(addr: std::net::SocketAddr, path: &str, host: &str) -> (u16, String) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    stream
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut out = Vec::new();
+    stream.read_to_end(&mut out).await.unwrap();
+    let text = String::from_utf8_lossy(&out).into_owned();
+    let status = text
+        .split(' ')
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    (status, text)
+}
+
+/// The names in the zip at `url`.
+async fn zip_names(url: &str) -> Vec<String> {
+    zip_at(url)
+        .await
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// The JSON at `url`, once it answers 200.
+async fn json_at(url: &str) -> serde_json::Value {
+    let (status, _, body) = get(url, None).await;
+    assert_eq!(status, StatusCode::OK, "{url}: {body}");
+    serde_json::from_str(&body).unwrap()
+}
+
+/// The `path` of each file a `_files.json` lists.
+fn listed_paths(json: &serde_json::Value) -> Vec<String> {
+    json["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_links_layer_is_held_by_the_node_on_every_route() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
+    seed_songs(&vault);
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let share = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Folder("Songs".to_owned()),
+            title: Some("Songs".to_owned()),
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: None,
+            listen: Listen::Full,
+        })
+        .await
+        .unwrap();
+    assert_eq!(share.listen, Listen::Full);
+    let add = |name: &str, filter: &str, listen: Option<Listen>| {
+        let (links, code) = (links.clone(), share.code.clone());
+        let new = NewAudience {
+            name: name.to_owned(),
+            filter: filter.to_owned(),
+            listen,
+        };
+        async move { links.add_audience(code, new).await.unwrap() }
+    };
+    add("orchestra", "", Some(Listen::Reference)).await;
+    add("strings", "section == \"strings\"", None).await;
+    let share = add("page", "", Some(Listen::Page)).await;
+    let link = |name: Option<&str>| {
+        let code = name.map_or(share.code.as_str(), |n| {
+            &share.audience_named(n).unwrap().code
+        });
+        w.url(&format!("/s/{code}/"))
+    };
+    let (full, orchestra, strings, page_only) = (
+        link(None),
+        link(Some("orchestra")),
+        link(Some("strings")),
+        link(Some("page")),
+    );
+    assert_eq!(
+        share.listen_for(share.audience_named("strings")),
+        Listen::Full
+    );
+    for at in [&full, &orchestra, &page_only] {
+        page_with(&format!("{at}Joy/Joy/"), None, "Joy").await;
+    }
+    let bass = "Joy/Joy/Media/Proxies/Bass.ogg";
+    let bass = bass.replacen("Joy/Joy", "Songs/Joy", 1);
+    let reference = "Songs/Joy/Media/Proxies/Reference.ogg";
+    let session = "Songs/Joy/Joy.session";
+    let chart = "Songs/Joy/Charts/Joy.pdf";
+
+    // A Full link serves the stem, with a range too.
+    let (status, _, bytes) = get_range(&format!("{full}{bass}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, b"STEM BASS Joy");
+    let (status, headers, bytes) = get_range(&format!("{full}{bass}"), Some("bytes=5-8")).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(bytes, b"BASS");
+    assert_eq!(headers["content-range"], "bytes 5-8/13");
+
+    // A Reference link refuses it, saying the layer it needs; ranges too.
+    for range in [None, Some("bytes=0-3")] {
+        let (status, headers, bytes) = get_range(&format!("{orchestra}{bass}"), range).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{range:?}");
+        assert_eq!(headers["x-architect-layer"], "full");
+        let body = String::from_utf8_lossy(&bytes);
+        assert!(
+            body.contains("<b>full</b>") && !body.contains("STEM"),
+            "{body}"
+        );
+    }
+    // And serves what it plays, ranges and all.
+    let (status, _, bytes) = get_range(&format!("{orchestra}{reference}"), Some("bytes=0-8")).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(bytes, b"REFERENCE");
+    for file in [session, chart] {
+        assert_eq!(
+            get(&format!("{orchestra}{file}"), None).await.0,
+            StatusCode::OK
+        );
+    }
+    // A Page link: the chart alone.
+    for file in [reference, session, bass.as_str()] {
+        let (status, headers, _) = get(&format!("{page_only}{file}"), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{file}");
+        assert!(headers.contains_key("x-architect-layer"));
+    }
+    assert_eq!(
+        get(&format!("{page_only}{chart}"), None).await.0,
+        StatusCode::OK
+    );
+
+    // Other spellings of the stem: its case, its Unicode form, doubled
+    // slashes, escapes, dot segments. Each is refused or not there; none
+    // hands out its bytes.
+    let addr = w.host.http;
+    let path = |link: &str, rest: &str| format!("{}{rest}", link.trim_start_matches(&w.url("")));
+    let tricks = [
+        "Songs/Joy/Media/Proxies/bass.ogg".to_owned(),
+        "Songs/Joy/Media/Proxies/BASS.OGG".to_owned(),
+        "Songs/joy/media/proxies/Bass.ogg".to_owned(),
+        "Songs//Joy/Media//Proxies/Bass.ogg".to_owned(),
+        "Songs/Joy/Media/Proxies/%42ass.ogg".to_owned(),
+        "Songs%2FJoy%2FMedia%2FProxies%2FBass.ogg".to_owned(),
+        "Songs/Joy/Media/./Proxies/Bass.ogg".to_owned(),
+        "Songs/Joy/Media/%2e/Proxies/Bass.ogg".to_owned(),
+        "Songs/Joy/Charts/../Media/Proxies/Bass.ogg".to_owned(),
+        "Songs/Joy/Charts/%2e%2e/Media/Proxies/Bass.ogg".to_owned(),
+        // Gänse, composed (NFC) as written, and decomposed (NFD).
+        "Songs/Joy/Media/Proxies/G%C3%A4nse.ogg".to_owned(),
+        "Songs/Joy/Media/Proxies/Ga%CC%88nse.ogg".to_owned(),
+        "Songs/Joy/Media/Proxies/GA%CC%88NSE.ogg".to_owned(),
+        "Songs/Joy/Media/Proxies/Bass.ogg?listen=full".to_owned(),
+        "Songs/Joy/Media/Proxies/Bass.ogg/".to_owned(),
+    ];
+    for trick in &tricks {
+        for link in [&orchestra, &page_only] {
+            let (status, text) = raw_get(addr, &path(link, trick), "127.0.0.1").await;
+            assert_ne!(status, 200, "{trick}: {text}");
+            assert_ne!(status, 206, "{trick}: {text}");
+            assert!(!text.contains("STEM"), "{trick} leaked: {text}");
+        }
+    }
+    // Where the file system opens the stem by another spelling (macOS:
+    // any case, either Unicode form), the node knows it for the stem by
+    // what it is on disk and says so.
+    let proxies = vault.join("Songs/Joy/Media/Proxies");
+    for (spelling, asked) in [
+        ("bass.ogg", "Songs/Joy/Media/Proxies/bass.ogg"),
+        (
+            "Ga\u{308}nse.ogg",
+            "Songs/Joy/Media/Proxies/Ga%CC%88nse.ogg",
+        ),
+    ] {
+        if proxies.join(spelling).exists() {
+            let (status, text) = raw_get(addr, &path(&orchestra, asked), "127.0.0.1").await;
+            assert_eq!(status, 403, "{asked}: {text}");
+        }
+    }
+    // The same request on the Full link does reach the stem (the tricks
+    // above are refused for its layer, not for being odd), where the file
+    // system allows the spelling.
+    let (status, _) = raw_get(
+        addr,
+        &path(&full, "Songs/Joy/Media/Proxies/%42ass.ogg"),
+        "127.0.0.1",
+    )
+    .await;
+    assert_eq!(status, 200);
+
+    // Another audience's notes: not there at all (404, nothing about a
+    // layer), even on a Full audience.
+    let (status, headers, _) = get(&format!("{strings}{bass}"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!headers.contains_key("x-architect-layer"));
+    assert_eq!(
+        get(&format!("{strings}Songs/Noel/Media/Proxies/Bass.ogg"), None)
+            .await
+            .0,
+        StatusCode::OK
+    );
+
+    // The files page, the archive and the queue leave out what is above.
+    let files = page_with(&format!("{orchestra}_files/"), None, "Files").await;
+    assert!(
+        files.contains("Reference.ogg") && files.contains("Joy.session"),
+        "{files}"
+    );
+    assert!(
+        !files.contains("Bass.ogg") && !files.contains("nse.ogg"),
+        "{files}"
+    );
+    let names = zip_names(&format!("{orchestra}_archive.zip?by=order")).await;
+    assert!(
+        names.iter().any(|n| n.ends_with("Reference.ogg")),
+        "{names:?}"
+    );
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.contains("Bass") || n.contains("nse")),
+        "{names:?}"
+    );
+    let names = zip_names(&format!("{orchestra}_archive.zip?by=note&group=Joy")).await;
+    assert!(!names.iter().any(|n| n.contains("Bass")), "{names:?}");
+    let names = zip_names(&format!("{page_only}_archive.zip?by=order")).await;
+    assert!(
+        names
+            .iter()
+            .all(|n| n.contains("Charts") || n.contains("Joy.pdf") || n.contains("Noel.pdf")),
+        "{names:?}"
+    );
+    let names = zip_names(&format!("{full}_archive.zip?by=order")).await;
+    assert!(names.iter().any(|n| n.contains("Bass")), "{names:?}");
+    let song = page_with(&format!("{orchestra}Joy/Joy/"), None, "site-queue").await;
+    let queue = song.split("id=\"site-queue\">").nth(1).unwrap();
+    assert!(
+        queue.contains("Reference.ogg") && !queue.contains("Bass.ogg"),
+        "{queue}"
+    );
+    let song = page_with(&format!("{full}Joy/Joy/"), None, "site-queue").await;
+    assert!(song.contains("Bass.ogg"));
+
+    // The JSON listing: what the link serves, its layer and the most it
+    // plays; a viewer may ask for less, never more.
+    let listing = json_at(&format!("{full}_files.json")).await;
+    assert_eq!(
+        (listing["listen"].as_str(), listing["max"].as_str()),
+        (Some("full"), Some("full"))
+    );
+    let stem = listing["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["path"] == bass.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(stem["layer"], "full");
+    assert_eq!(stem["size"], 13);
+    assert_eq!(stem["url"], format!("/s/{}/{}", share.code, bass));
+    assert_eq!(stem["note"], "Songs/Joy/Joy.md");
+    let joy = listing["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["path"] == "Songs/Joy/Joy.md")
+        .unwrap();
+    assert_eq!(joy["type"], "song");
+    let lower = json_at(&format!("{full}_files.json?listen=reference")).await;
+    assert_eq!(
+        (lower["listen"].as_str(), lower["max"].as_str()),
+        (Some("reference"), Some("full"))
+    );
+    let paths = listed_paths(&lower);
+    assert!(paths.contains(&reference.to_owned()) && paths.contains(&session.to_owned()));
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.contains("Bass") || p.contains("nse")),
+        "{paths:?}"
+    );
+    for file in lower["files"].as_array().unwrap() {
+        assert_ne!(file["layer"], "full");
+    }
+    let asked_more = json_at(&format!("{orchestra}_files.json?listen=full")).await;
+    assert_eq!(
+        (asked_more["listen"].as_str(), asked_more["max"].as_str()),
+        (Some("reference"), Some("reference"))
+    );
+    assert_eq!(listed_paths(&asked_more), paths);
+    let page_listing = json_at(&format!("{page_only}_files.json")).await;
+    assert!(
+        listed_paths(&page_listing)
+            .iter()
+            .all(|p| p.contains("/Charts/"))
+    );
+    assert_eq!(
+        get(&format!("{full}_files.json?listen=stems"), None)
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Narrowed, the share's own link is held at once; an audience never
+    // plays past it.
+    let share = links
+        .update(share.code.clone(), ShareChange::Listen(Listen::Reference))
+        .await
+        .unwrap();
+    assert_eq!(
+        get(&format!("{full}{bass}"), None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        get(&format!("{strings}Songs/Noel/Media/Proxies/Bass.ogg"), None)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let share = links
+        .audience_listen(
+            share.code.clone(),
+            "orchestra".to_owned(),
+            Some(Listen::Full),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        share.audience_named("orchestra").unwrap().listen,
+        Some(Listen::Full)
+    );
+    assert_eq!(
+        get(&format!("{orchestra}{bass}"), None).await.0,
+        StatusCode::FORBIDDEN
+    );
+
+    // Its domain is the share's own link, held the same.
+    links
+        .update(
+            share.code.clone(),
+            ShareChange::Domain(Some("songs.example.test".to_owned())),
+        )
+        .await
+        .unwrap();
+    let mut seen = 0;
+    for _ in 0..200 {
+        let (status, _) = raw_get(addr, "/Joy/Joy/", "songs.example.test").await;
+        if status == 200 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        seen += 1;
+    }
+    assert!(seen < 200, "the domain never served");
+    let (status, text) = raw_get(addr, &format!("/{bass}"), "songs.example.test").await;
+    assert_eq!(status, 403, "{text}");
+    let (status, text) = raw_get(
+        addr,
+        "/Songs/Joy/Media/Proxies/bass.ogg",
+        "songs.example.test",
+    )
+    .await;
+    assert_ne!(status, 200, "{text}");
+    let (status, _) = raw_get(addr, &format!("/{reference}"), "songs.example.test").await;
+    assert_eq!(status, 200);
+
+    // With no rule for a file (the extension gone), it is a page file
+    // again: what a link served before layers.
+    std::fs::remove_dir_all(w.tmp.path().join("host/data/extensions/demo.songs")).unwrap();
+    assert_eq!(
+        get(&format!("{page_only}{bass}"), None).await.0,
+        StatusCode::OK
+    );
+
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_share_written_before_layers_serves_what_it_served() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
+    seed_songs(&vault);
+    // A share note as a node wrote it before #528, byte for byte: no
+    // `listen` on the share or its audience.
+    let (code, band) = (
+        architect_spaces::share::code_from([21; 10]),
+        architect_spaces::share::code_from([22; 10]),
+    );
+    touch(
+        &vault,
+        &format!("_architect/shares/{code}.md"),
+        &format!(
+            "---\npublish: false\n---\n# Share {code}\n\n```json\n{{\"code\":\"{code}\",\"vault\":\"notes\",\"scope\":{{\"Folder\":\"Songs\"}},\"title\":null,\"audience\":\"Link\",\"access\":\"Read\",\"expires_at\":null,\"revoked_at\":null,\"created_at\":7,\"created_by\":\"u1\",\"domain\":null,\"audiences\":[{{\"name\":\"band\",\"filter\":\"\",\"code\":\"{band}\",\"created_at\":8}}]}}\n```\n"
+        ),
+    );
+    let stem = "Songs/Joy/Media/Proxies/Bass.ogg";
+    for at in [&code, &band] {
+        let url = w.url(&format!("/s/{at}/"));
+        page_with(&format!("{url}Joy/Joy/"), None, "Joy").await;
+        let (status, _, bytes) = get_range(&format!("{url}{stem}"), Some("bytes=0-3")).await;
+        assert_eq!(status, StatusCode::PARTIAL_CONTENT, "{at}");
+        assert_eq!(bytes, b"STEM");
+        let listing = json_at(&format!("{url}_files.json")).await;
+        assert_eq!(listing["max"], "full");
+        assert!(listed_paths(&listing).contains(&stem.to_owned()));
+    }
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let old = links
+        .shares()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.code == code)
+        .unwrap();
+    assert_eq!(old.listen, Listen::Full);
+    assert_eq!(old.audiences[0].listen, None);
+
+    w.host.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_apps_share_actions_set_and_read_how_far_a_link_plays() {
+    use std::sync::Arc;
+
+    use architect::action::ActionList;
+    use architect_accounts::{AccountStore, Accounts, MemorySecrets};
+    use serde_json::{Value, json};
+
+    let w = world().await;
+    let store = Arc::new(AccountStore::in_memory(Arc::new(MemorySecrets::new())));
+    let accounts = Accounts::new(store, Issuer::new(&w.issuer), "architect-test").without_browser();
+    let list = Arc::new(ActionList::new());
+    architect_accounts::actions::register(&list, &accounts).unwrap();
+    accounts
+        .sign_in_password("grace@local.test", auth_server::dev::DEV_PASSWORD)
+        .await
+        .unwrap();
+    accounts.refresh_orgs().await.unwrap();
+    list.run_json("ORG_SWITCH", br#"{"org":"indie"}"#).unwrap();
+    let run = |id: &'static str, args: Value| {
+        let list = Arc::clone(&list);
+        async move {
+            list.run_json_async(id, args.to_string().as_bytes())
+                .await
+                .map(|out| serde_json::from_slice::<Value>(&out).unwrap())
+                .map_err(|e| format!("{e:?}"))
+        }
+    };
+    let host = format!("http://{}", w.host.http);
+    // A new link plays to Reference unless told otherwise.
+    let made = run("SHARE_CREATE", json!({"folder": "Set", "host": host}))
+        .await
+        .unwrap();
+    assert_eq!(made["share"]["listen"], "reference");
+    let code = made["share"]["code"].as_str().unwrap().to_owned();
+    let page = run("SHARE_CREATE", json!({"folder": "Set", "listen": "page"}))
+        .await
+        .unwrap();
+    assert_eq!(page["share"]["listen"], "page");
+    assert!(
+        run("SHARE_CREATE", json!({"folder": "Set", "listen": "stems"}))
+            .await
+            .is_err()
+    );
+    let added = run(
+        "SHARE_AUDIENCE_ADD",
+        json!({"code": code, "name": "band", "listen": "full"}),
+    )
+    .await
+    .unwrap();
+    // Asked for more than the link: it plays to the link's.
+    assert_eq!(added["audience"]["listen"], "reference");
+    assert_eq!(added["audience"]["listen_set"], "full");
+    let changed = run("SHARE_UPDATE", json!({"code": code, "listen": "full"}))
+        .await
+        .unwrap();
+    assert_eq!(changed["share"]["listen"], "full");
+    assert_eq!(changed["share"]["audiences"][0]["listen"], "full");
+    let narrowed = run(
+        "SHARE_AUDIENCE_UPDATE",
+        json!({"code": code, "name": "band", "listen": "page"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(narrowed["audience"]["listen"], "page");
+    let back = run(
+        "SHARE_AUDIENCE_UPDATE",
+        json!({"code": code, "name": "BAND", "listen": "share"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(back["audience"]["listen"], "full");
+    assert_eq!(back["audience"]["listen_set"], Value::Null);
+    assert!(
+        run(
+            "SHARE_AUDIENCE_UPDATE",
+            json!({"code": code, "name": "nobody", "listen": "page"})
+        )
+        .await
+        .is_err()
+    );
+    let rows = run("SHARE_AUDIENCES", json!({"code": code})).await.unwrap();
+    assert_eq!(rows["audiences"][0]["listen"], "full");
+
+    w.host.stop().await;
+}
+
+/// A file is in the layer of every note that links it, in the share's
+/// scope or not, hidden or not: a plain note in the scope linking a stem
+/// does not bring it down to the page.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_is_placed_by_every_note_that_links_it() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
+    touch(
+        &vault,
+        "Loose/Song.md",
+        "---\ntype: [song, live]\npublish: false\n---\n![[Media/Proxies/Stem.ogg]]\n",
+    );
+    touch(
+        &vault,
+        "Loose/notes.md",
+        "# Notes\n\nThe stem: ![[Media/Proxies/Stem.ogg]]\n",
+    );
+    touch(&vault, "Loose/Media/Proxies/Stem.ogg", "STEM LOOSE");
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    for scope in [
+        ShareScope::Folder("Loose".to_owned()),
+        ShareScope::Notes(vec!["Loose/notes.md".to_owned()]),
+    ] {
+        let share = links
+            .create(NewShare {
+                vault: "notes".to_owned(),
+                scope: scope.clone(),
+                title: None,
+                audience: Audience::Link,
+                access: ShareAccess::Read,
+                expires_at: None,
+                domain: None,
+                listen: Listen::Reference,
+            })
+            .await
+            .unwrap();
+        let url = w.url(&format!("/s/{}/", share.code));
+        page_with(&url, None, "<!DOCTYPE html>").await;
+        let (status, headers, body) =
+            get(&format!("{url}Loose/Media/Proxies/Stem.ogg"), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{scope:?}: {body}");
+        assert_eq!(headers["x-architect-layer"], "full");
+        assert!(
+            !listed_paths(&json_at(&format!("{url}_files.json")).await)
+                .iter()
+                .any(|p| p.contains("Stem"))
+        );
+        let full = links
+            .update(share.code.clone(), ShareChange::Listen(Listen::Full))
+            .await
+            .unwrap();
+        assert_eq!(full.listen, Listen::Full);
+        assert_eq!(
+            get(&format!("{url}Loose/Media/Proxies/Stem.ogg"), None)
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
     w.host.stop().await;
 }

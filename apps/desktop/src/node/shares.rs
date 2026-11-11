@@ -51,6 +51,18 @@
 //! order, read per request), which the site's player
 //! (`features/sites/assets/player.js`) plays through.
 //!
+//! A link plays to a layer (#528, [`Listen`]: page, reference, full),
+//! set on the share and narrowed per audience. The `[[share_layers]]`
+//! rules of the node's extensions place each file a note of their type
+//! attaches ([`LayerRules`]); a file above the link's layer is refused
+//! (`403`, saying the layer it needs) on every route that hands out
+//! bytes: the file itself (by its name, or any other spelling of the same
+//! file on disk), the files page, the archive and the queue leave it out.
+//! `<link>_files.json` lists what the link serves, for a client that
+//! opens a song over it (Studio): each file's size, hash, layer and URL,
+//! the link's layer and the layer asked for (`?listen=`, never past the
+//! link's). A file no rule places is a page file, served as before.
+//!
 //! Nothing outside a share's scope is ever built into it, so nothing
 //! outside it can be served: the site is built from the scope's notes
 //! alone, its links to other notes are plain text, and an attachment is
@@ -83,15 +95,16 @@ use architect_spaces::share::{
     validate, validate_audience, validate_domain,
 };
 use architect_spaces::{
-    NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment, ShareFault, ShareLinks,
-    ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments, parse_share_note,
-    share_note,
+    Listen, NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment, ShareFault,
+    ShareLinks, ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments,
+    parse_share_note, share_note,
 };
 use tokio::sync::{Notify, watch};
 use vault_live::Backend;
 use vault_proto::{IfMatch, VaultSync as _};
 
 use super::org::{IssuerLane, NodeOrg};
+use super::share_layers::{LayerRules, same_file, within};
 
 /// The cookie a signed-in viewer's issuer session is kept in.
 pub const SESSION_COOKIE: &str = "architect_session";
@@ -180,6 +193,9 @@ struct VaultView {
     vault: Vault,
     /// What each link lists in this vault, once asked.
     listings: Mutex<HashMap<String, Arc<Vec<Entry>>>>,
+    /// Every note, hidden ones too, with every file it links: what
+    /// places a file in a layer (#528), once asked.
+    notes: std::sync::OnceLock<Vec<Entry>>,
 }
 
 /// A vault's view, and the lock one reader holds while it reads it.
@@ -216,6 +232,8 @@ struct Inner {
     kick: Mutex<HashMap<String, Arc<Notify>>>,
     /// What draws the fences extensions claim (#488).
     blocks: architect_sites::Blocks,
+    /// Which layer each attached file is in (#528).
+    layers: LayerRules,
     /// Per vault: how many times it has changed. A view of it older
     /// than this is read again before a request is checked against it.
     moved: Mutex<HashMap<String, Arc<AtomicU64>>>,
@@ -232,7 +250,7 @@ struct Pending {
 impl Shares {
     /// The shares of `backend`'s vaults, built under `data/shares`, their
     /// pages drawing the fences `blocks` claim as the app draws them
-    /// (#488).
+    /// (#488), their files placed in layers by `layers` (#528).
     #[must_use]
     pub fn new(
         backend: Backend,
@@ -240,6 +258,7 @@ impl Shares {
         org: Option<NodeOrg>,
         issuer: Option<&str>,
         blocks: architect_sites::Blocks,
+        layers: LayerRules,
     ) -> Self {
         Self(Arc::new(Inner {
             backend,
@@ -252,6 +271,7 @@ impl Shares {
             signins: Mutex::new(HashMap::new()),
             kick: Mutex::new(HashMap::new()),
             blocks,
+            layers,
             moved: Mutex::new(HashMap::new()),
             views: Mutex::new(HashMap::new()),
         }))
@@ -468,6 +488,7 @@ impl Shares {
             generation,
             vault: read,
             listings: Mutex::new(HashMap::new()),
+            notes: std::sync::OnceLock::new(),
         });
         *held = Some(Arc::clone(&view));
         drop(held);
@@ -499,6 +520,64 @@ impl Shares {
         let entries = Arc::new(entries);
         listings().insert(key, Arc::clone(&entries));
         entries
+    }
+
+    /// The layer of each file of `share`'s vault above the page, as the
+    /// vault is now: placed by every note that links it, in the share's
+    /// scope or not, hidden or not, so a note outside the scope never
+    /// lowers it. None when there are rules and the vault cannot be read
+    /// (nothing is known: hold everything back). Blocking ([`Self::view`]).
+    fn placed(&self, share: &Share) -> Option<HashMap<String, Listen>> {
+        if self.0.layers.is_empty() {
+            return Some(HashMap::new());
+        }
+        let view = self.view(&share.vault)?;
+        let notes = view.notes.get_or_init(|| listing::every_note(&view.vault));
+        Some(self.0.layers.place(notes))
+    }
+
+    /// The layer the file at `rest` (a path below a link of `share`
+    /// built into `dir`) needs, when it is above `cap`. Found by its
+    /// name, and by what it is on disk, so no other spelling of a held
+    /// back file (its case, its Unicode form, `//`) reaches it. Blocking.
+    fn above(&self, share: &Share, dir: &Path, rest: &str, cap: Listen) -> Option<Listen> {
+        if cap == Listen::Full {
+            return None;
+        }
+        let Some(placed) = self.placed(share) else {
+            return Some(Listen::Full);
+        };
+        let higher: Vec<(&String, Listen)> = placed
+            .iter()
+            .filter(|(_, layer)| **layer > cap)
+            .map(|(file, layer)| (file, *layer))
+            .collect();
+        if higher.is_empty() {
+            return None;
+        }
+        let decoded = decode(rest);
+        let key = decoded.trim_start_matches('/');
+        if let Some((_, layer)) = higher.iter().find(|(file, _)| file.as_str() == key) {
+            return Some(*layer);
+        }
+        let unsafe_path = decoded
+            .split('/')
+            .any(|s| s == ".." || s == "." || s.contains('\\') || s.contains('\0'));
+        if unsafe_path {
+            return None;
+        }
+        let mut path = dir.join(key);
+        if decoded.ends_with('/') || path.is_dir() {
+            path = path.join("index.html");
+        }
+        let asked = std::fs::metadata(&path)
+            .ok()
+            .filter(std::fs::Metadata::is_file)?;
+        higher
+            .iter()
+            .filter(|(file, _)| same_file(&asked, &dir.join(file.as_str())))
+            .map(|(_, layer)| *layer)
+            .max()
     }
 
     /// Whether `audience`'s link answers `rest` (a path below it), in
@@ -662,6 +741,7 @@ impl Shares {
             created_by: by.to_owned(),
             domain: new.domain.map(|d| d.trim().to_lowercase()),
             audiences: Vec::new(),
+            listen: new.listen,
         })
         .await
     }
@@ -683,6 +763,7 @@ impl Shares {
         match change {
             ShareChange::Audience(a) => share.audience = a.normalised(),
             ShareChange::Access(a) => share.access = a,
+            ShareChange::Listen(l) => share.listen = l,
             ShareChange::Expires(at) => share.expires_at = at,
             ShareChange::Title(t) => share.title = t.filter(|t| !t.trim().is_empty()),
             ShareChange::Domain(d) => {
@@ -770,7 +851,40 @@ impl Shares {
             filter,
             code: self.new_code(),
             created_at: now(),
+            listen: new.listen,
         });
+        self.save(share).await
+    }
+
+    /// How far audience `name`'s link of share `code` plays: `listen`,
+    /// never past the share's; None: the share's.
+    ///
+    /// # Errors
+    ///
+    /// No such share or audience, a revoked share, or its note could not
+    /// be written.
+    pub async fn audience_listen(
+        &self,
+        code: &str,
+        name: &str,
+        listen: Option<Listen>,
+    ) -> Result<Share, ShareFault> {
+        let mut share = self
+            .get(code)
+            .ok_or_else(|| ShareFault::NotFound(code.to_owned()))?;
+        if share.revoked_at.is_some() {
+            return Err(ShareFault::Invalid(
+                "a revoked share stays revoked".to_owned(),
+            ));
+        }
+        let Some(audience) = share
+            .audiences
+            .iter_mut()
+            .find(|a| a.name.trim().eq_ignore_ascii_case(name.trim()))
+        else {
+            return Err(ShareFault::NotFound(format!("{code}: audience {name}")));
+        };
+        audience.listen = listen;
         self.save(share).await
     }
 
@@ -981,6 +1095,16 @@ impl ShareLinks for SharesLane {
         self.0.remove_audience(&code, &name).await
     }
 
+    async fn audience_listen(
+        &self,
+        code: String,
+        name: String,
+        listen: Option<Listen>,
+    ) -> Result<Share, ShareFault> {
+        caller()?;
+        self.0.audience_listen(&code, &name, listen).await
+    }
+
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault> {
         caller()?;
         if self.0.get(&code).is_none() {
@@ -1168,12 +1292,14 @@ async fn serve(
         share: &share,
         audience: audience.as_ref(),
         mount,
+        listen: share.listen_for(audience.as_ref()),
     };
     let query = request.uri().query().unwrap_or_default().to_owned();
     let headers = request.headers().clone();
     match rest {
         "/_live" => live(shares, code),
         "/_files" | "/_files/" => private(&share, files_page(shares, &link, &query).await),
+        "/_files.json" => private(&share, files_json(shares, &link, &query).await),
         "/_archive.zip" => private(&share, archive(shares, &link, &query).await),
         "/_comment" if method == architect::http::axum::http::Method::POST => {
             comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
@@ -1185,6 +1311,11 @@ async fn serve(
                 if let Some(refusal) = refuse(shares, &share, audience, rest).await {
                     return private(&share, refusal);
                 }
+            }
+            // A file above the link's layer, by any name: refused here,
+            // whatever the page shows.
+            if let Some(needs) = needs_layer(shares, &share, &dir, rest, link.listen).await {
+                return private(&share, layer_refusal(link.listen, needs));
             }
             let mut response = file(&dir, rest, &headers).await;
             if share.comments() && is_html(&response) {
@@ -1233,6 +1364,48 @@ async fn refuse(
             "<p>Nothing is shared on this link yet.</p>",
         )),
     }
+}
+
+/// The layer the file at `rest` needs, when it is above `cap`
+/// ([`Shares::above`]).
+async fn needs_layer(
+    shares: &Shares,
+    share: &Share,
+    dir: &Path,
+    rest: &str,
+    cap: Listen,
+) -> Option<Listen> {
+    if cap == Listen::Full {
+        return None;
+    }
+    let (shares, share, dir, rest) = (
+        shares.clone(),
+        share.clone(),
+        dir.to_owned(),
+        rest.to_owned(),
+    );
+    // Not answered: held back, never served.
+    blocking(move || shares.above(&share, &dir, &rest, cap))
+        .await
+        .unwrap_or(Some(Listen::Full))
+}
+
+/// `403` for a file of layer `needs` on a link that plays to `cap`: the
+/// layer named in the body and in `x-architect-layer`.
+fn layer_refusal(cap: Listen, needs: Listen) -> Response {
+    let mut response = page(
+        StatusCode::FORBIDDEN,
+        "Not on this link",
+        &format!(
+            "<p>This file is in the <b>{needs}</b> layer. This link plays to <b>{cap}</b>.</p>",
+            needs = needs.label(),
+            cap = cap.label()
+        ),
+    );
+    response
+        .headers_mut()
+        .insert("x-architect-layer", HeaderValue::from_static(needs.label()));
+    response
 }
 
 /// What every answer of a share carries: no referrer (the code stays off
@@ -1516,6 +1689,9 @@ struct Link<'a> {
     audience: Option<&'a ShareAudience>,
     /// Where it is served: `/s/<code>/`, or `/` on a domain.
     mount: &'a str,
+    /// How far it plays: the files above it are left out
+    /// ([`Share::listen_for`]).
+    listen: Listen,
 }
 
 impl Link<'_> {
@@ -1547,9 +1723,24 @@ struct Listed {
 
 impl Shares {
     /// What `link` lists now, grouped `by`, read from the vault as it
-    /// is. Blocking ([`Self::view`]).
-    fn listed(&self, share: &Share, audience: Option<&ShareAudience>, by: &Grouping) -> Listed {
+    /// is, with no file above `cap`. Blocking ([`Self::view`]).
+    fn listed(
+        &self,
+        share: &Share,
+        audience: Option<&ShareAudience>,
+        by: &Grouping,
+        cap: Listen,
+    ) -> Listed {
         let entries = self.listing(share, audience);
+        let entries = if cap == Listen::Full {
+            entries
+        } else {
+            Arc::new(within(
+                &entries,
+                &self.placed(share).unwrap_or_default(),
+                cap,
+            ))
+        };
         let manifest = {
             let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
             table.get(&share.code).and_then(|held| {
@@ -1574,13 +1765,14 @@ impl Shares {
     }
 
     async fn listed_for(&self, link: &Link<'_>, by: &Grouping) -> Option<Listed> {
-        let (shares, share, audience, by) = (
+        let (shares, share, audience, by, cap) = (
             self.clone(),
             link.share.clone(),
             link.audience.cloned(),
             by.clone(),
+            link.listen,
         );
-        blocking(move || shares.listed(&share, audience.as_ref(), &by)).await
+        blocking(move || shares.listed(&share, audience.as_ref(), &by, cap)).await
     }
 }
 
@@ -1727,6 +1919,112 @@ async fn files_page(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    response
+}
+
+#[derive(serde::Deserialize)]
+struct ListenQuery {
+    listen: Option<String>,
+}
+
+/// `<link>_files.json` (#528): what the link serves, for a client that
+/// opens a song over it. `listen` is the layer listed (`?listen=`, never
+/// past the link's), `max` the most the link plays; each note with its
+/// type, page and files; each file once, in list order, with its size,
+/// sha256 (None when the vault has not hashed it yet), layer and URL.
+async fn files_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
+    let asked = match serde_urlencoded_form::<ListenQuery>(query.as_bytes())
+        .ok()
+        .and_then(|q| q.listen)
+        .map(|l| Listen::parse(&l))
+    {
+        None => link.listen,
+        Some(Ok(l)) => l.min(link.listen),
+        Some(Err(why)) => {
+            let mut response = (
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({ "error": why }).to_string(),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            return response;
+        }
+    };
+    let at = Link {
+        listen: asked,
+        ..*link
+    };
+    let Some(listed) = shares.listed_for(&at, &Grouping::Order).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let found = {
+        let (shares, share) = (shares.clone(), link.share.clone());
+        blocking(move || {
+            let held: HashMap<String, (u64, String)> = shares
+                .0
+                .backend
+                .manifest(&share.vault)
+                .map(|m| {
+                    m.files
+                        .into_iter()
+                        .map(|f| (f.path, (f.size, f.sha256)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (held, shares.placed(&share).unwrap_or_default())
+        })
+        .await
+    };
+    let (held, placed) = found.unwrap_or_default();
+    let base = link.mount.trim_end_matches('/');
+    let mut notes = Vec::new();
+    let mut files = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for entry in listed.entries.iter() {
+        notes.push(serde_json::json!({
+            "path": entry.path,
+            "title": entry.title,
+            "type": entry.properties.get("type").and_then(|t| t.as_str()),
+            "page": listed.pages.get(&entry.path).map(|p| format!("{base}{p}")),
+            "files": entry.files,
+        }));
+        for file in &entry.files {
+            if !seen.insert(file.as_str()) {
+                continue;
+            }
+            let (size, sha256) = held.get(file).map_or_else(
+                || {
+                    let size = std::fs::metadata(listed.root.join(file)).map_or(0, |m| m.len());
+                    (size, None)
+                },
+                |(size, hash)| (*size, Some(hash.as_str())),
+            );
+            files.push(serde_json::json!({
+                "path": file,
+                "url": format!("{base}/{}", architect_sites::encode_path(file)),
+                "size": size,
+                "sha256": sha256,
+                "layer": placed.get(file).copied().unwrap_or(Listen::Page).label(),
+                "note": entry.path,
+            }));
+        }
+    }
+    let body = serde_json::json!({
+        "link": link.mount,
+        "title": link.title(),
+        "listen": asked.label(),
+        "max": link.listen.label(),
+        "notes": notes,
+        "files": files,
+    });
+    let mut response = (StatusCode::OK, body.to_string()).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
     );
     response
 }
