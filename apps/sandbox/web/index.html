@@ -8,7 +8,8 @@
        own blob: modules only (no `import()` of another host, no eval), the
        network of this server only. A page reaches others through
        `net.fetch`, checked against its extension's capabilities.hosts. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <!-- 'sha256-2Ozk1xYt6pOOhdNqjDWTnCfSTbCchEDao3pk8Fj3xes=' is the extension sandbox frame's script (features/extensions/web/runner.js SANDBOX_HASH; features/extensions/web/test/sandbox.test.mjs keeps it current). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval' 'sha256-2Ozk1xYt6pOOhdNqjDWTnCfSTbCchEDao3pk8Fj3xes='; worker-src 'self' blob:; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
   <style>
     :root {
       --background: #18181b; --foreground: #e4e4e7; --border: #3f3f46; --input: #3f3f46; --card: #27272a;

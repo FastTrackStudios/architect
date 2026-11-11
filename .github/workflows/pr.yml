@@ -84,3 +84,44 @@ jobs:
           set -euo pipefail
           cargo hakari generate --diff
           cargo hakari manage-deps --dry-run
+
+  # @fasttrackstudio/architect and its CLI (features/extensions/web): their
+  # unit tests (the capability check, the view sanitiser, the sandbox's
+  # hash, the public surface, typed actions through tsc and the hostile
+  # manifests, what `npm pack` would publish), in parallel with `check` and only when
+  # the package or the world changed. They need no component: running real
+  # components (web.test.mjs, package.test.mjs) builds them for
+  # wasm32-wasip2, minutes on the self-hosted pool, so that stays on main
+  # (features/extensions/tests/wasi_web.rs in checks.yml).
+  npm-package:
+    name: npm package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: changed
+        id: changed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch -q --no-tags --depth=1 origin "$BASE"
+          if git diff --quiet "$BASE" HEAD -- features/extensions/web features/extensions/wit examples/web-counter .github/workflows/pr.yml; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "the package did not change"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: ${{ steps.changed.outputs.run == 'true' }}
+        with:
+          node-version: 24
+      - name: unit tests
+        if: ${{ steps.changed.outputs.run == 'true' }}
+        working-directory: features/extensions/web
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run test:unit

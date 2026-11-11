@@ -16,6 +16,15 @@
 // request (`hostcall::HostRequest` JSON), answered with `hostcall::HostAnswer`
 // JSON: the embedder checks it against the extension's capabilities
 // (features/extensions/src/web.rs `WebHost`).
+//
+// In a page, every instance's Web Worker is started inside a sandbox: a
+// hidden `<iframe sandbox="allow-scripts">` (no `allow-same-origin`, so
+// an opaque origin) whose own CSP lets nothing load or connect. The
+// extension's JS (jco's glue, which ships with the extension) runs there,
+// never with the page's origin: no cookies, no storage, no channels of
+// the page's, no network. The page fetches its files and hands them in,
+// the glue as text and the core modules as bytes; everything crosses on a
+// MessageChannel of the sandbox's own.
 
 /// Each way, a worker's queue holds this many messages (`wasi::QUEUE`).
 export const QUEUE = 64;
@@ -23,24 +32,65 @@ export const QUEUE = 64;
 export const MAX_WORKERS = 8;
 /// News reaches an owner at most this often, in ms (`wasi::NEWS_EVERY`).
 export const NEWS_EVERY = 16;
-/// An instance's limits (`wasi::Limits`): 64 MiB, 5 s a call.
-export const LIMITS = { memory: 64 << 20, call: 5000 };
+/// An instance's limits (`wasi::Limits`): 64 MiB, 5 s a call; and what
+/// keeps a misbehaving one from flooding the page: log lines a second and
+/// their length, the shortest timer, restarts a minute (each after a
+/// longer wait), its start, the core modules it may ask for (how many, how
+/// big), a host request's size, its data's (one value, all of it), an
+/// idle time after which it is stopped and its sandbox taken down (0:
+/// never; it starts again on its next call), and for each mounted view
+/// (view.js) edits a frame, nodes and its box's height in CSS px. The
+/// memory limit is its wasm's: its own JS (jco's glue) in the sandbox
+/// uses what the browser gives a worker until it is stopped.
+export const LIMITS = {
+  memory: 64 << 20,
+  call: 5000,
+  logLines: 200,
+  logLength: 4096,
+  tick: 16,
+  restarts: 5,
+  start: 15000,
+  modules: 32,
+  moduleBytes: 64 << 20,
+  messageBytes: 4 << 20,
+  dataBytes: 256 << 10,
+  dataTotal: 4 << 20,
+  idle: 0,
+  editsPerFrame: 10000,
+  nodesPerPane: 20000,
+  viewHeight: 4096,
+};
 /// A worker's: 64 MiB, 60 s for its whole run (`Limits::worker`).
 export const WORKER_LIMITS = { memory: 64 << 20, call: 60000 };
 
 const PAGE = 1 << 16;
 
-// ---- the memory limit, in the module ---------------------------------------
+/// A log line's levels, and the sources an extension's own lines may have.
+const LEVELS = ['debug', 'info', 'warn', 'error'];
+const SOURCES = ['log', 'stdout', 'stderr'];
 
-function leb(bytes, at) {
+// ---- the memory limit, in the module ---------------------------------------
+//
+// A core module is the extension's: it is read here only after every size
+// and count in it is checked against the bytes really there, in time
+// linear in its length. In a page it is not read here at all: the page
+// hands the sandbox's worker its bytes and the worker writes the limit in
+// (instance.js `limitMemory`, the same code), so nothing an extension
+// ships runs on the page's main thread.
+
+/// A LEB128 u32 at `at`, inside `end`: `[value, next]`; throws past it.
+function leb(b, at, end) {
   let value = 0;
-  let shift = 0;
-  for (;;) {
-    const b = bytes[at++];
-    value += (b & 0x7f) * 2 ** shift;
-    shift += 7;
-    if (!(b & 0x80)) return [value, at];
+  for (let shift = 0; shift < 35; shift += 7) {
+    if (at >= end) throw new Error('not a wasm module: a number runs past its section');
+    const byte = b[at++];
+    value += (byte & 0x7f) * 2 ** shift;
+    if (!(byte & 0x80)) {
+      if (value > 0xffffffff) throw new Error('not a wasm module: a number past 32 bits');
+      return [value, at];
+    }
   }
+  throw new Error('not a wasm module: a number of more than 5 bytes');
 }
 
 function toLeb(n) {
@@ -56,24 +106,30 @@ function toLeb(n) {
 
 /// `bytes` (a core module) with each memory it defines at most `pages`
 /// pages: past them `memory.grow` fails, as a native `ResourceLimiter`
-/// refuses it.
+/// refuses it. Throws when it is not a module whose sizes add up.
 export function limitMemory(bytes, pages) {
   const b = new Uint8Array(bytes);
+  if (b.length < 8 || b[0] !== 0 || b[1] !== 0x61 || b[2] !== 0x73 || b[3] !== 0x6d)
+    throw new Error('not a wasm module');
   let at = 8;
   while (at < b.length) {
     const id = b[at];
-    const [size, body] = leb(b, at + 1);
+    const [size, body] = leb(b, at + 1, b.length);
     const end = body + size;
+    if (end > b.length) throw new Error('not a wasm module: a section runs past its end');
     if (id === 5) {
-      let [count, p] = leb(b, body);
+      let [count, p] = leb(b, body, end);
+      // Each memory is at least two bytes: a count past that is a lie.
+      if (count > (end - p) / 2) throw new Error('not a wasm module: more memories than its section holds');
       const out = toLeb(count);
       while (count--) {
+        if (p >= end) throw new Error('not a wasm module: a memory runs past its section');
         const flags = b[p++];
-        if (flags & 0x04) return bytes; // memory64: left alone
+        if (flags & 0x04) return b; // memory64: left alone
         let min;
         let max = Infinity;
-        [min, p] = leb(b, p);
-        if (flags & 0x01) [max, p] = leb(b, p);
+        [min, p] = leb(b, p, end);
+        if (flags & 0x01) [max, p] = leb(b, p, end);
         out.push((flags & 0x02) | 0x01, ...toLeb(min), ...toLeb(Math.max(min, Math.min(max, pages))));
       }
       const section = [5, ...toLeb(out.length), ...out];
@@ -85,34 +141,225 @@ export function limitMemory(bytes, pages) {
     }
     at = end;
   }
-  return bytes;
+  return b;
 }
 
 /// Compiled core modules, shared by every instance of a component (the
-/// native compile cache's part): by URL and memory limit.
+/// native compile cache's part): by resolved URL and memory limit.
 const compiled = new Map();
 
-async function coreModule(url, name, memory, load) {
-  const key = `${url}#${name}#${memory}`;
+async function coreModule(href, memory, load) {
+  const key = `${href}#${memory}`;
   if (!compiled.has(key)) {
     compiled.set(
       key,
-      load(new URL(name, url).href).then((bytes) =>
-        WebAssembly.compile(limitMemory(bytes, Math.floor(memory / PAGE))),
-      ),
+      Promise.resolve(load(href)).then((bytes) => WebAssembly.compile(limitMemory(bytes, Math.floor(memory / PAGE)))),
     );
   }
   return compiled.get(key);
 }
 
+/// A file of the extension's, read by the page: never with the page's
+/// credentials.
 async function fetchBytes(url) {
   if (url.startsWith('file:')) {
-    const fs = await import('node:fs/promises');
+    // Under node only: named so a page's bundler leaves it out.
+    const fsModule = 'node:fs/promises';
+    const fs = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
     return fs.readFile(new URL(url));
   }
-  const r = await fetch(url);
+  const r = await fetch(url, { credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.arrayBuffer();
+}
+
+/// A core module `name` the extension's JS asks for, beside its module
+/// `url`: a relative path (no scheme, no leading `/`, no `.`, `..` or
+/// empty part, no `\ ? # %`), resolved inside `url`'s folder; or null.
+export function besideModule(url, name) {
+  const n = String(name ?? '');
+  // eslint-disable-next-line no-control-regex
+  if (!n || n.length > 256 || /^[a-z][a-z0-9+.-]*:/i.test(n) || n.startsWith('/') || /[\\?#%\u0000-\u001f]/.test(n)) return null;
+  if (n.split('/').some((s) => s === '' || s === '.' || s === '..')) return null;
+  const folder = new URL('.', url).href;
+  const href = new URL(n, folder).href;
+  return href.startsWith(folder) ? href : null;
+}
+
+/// The bytes of a core module the sandbox's worker asked for, unread
+/// (read in the worker): by resolved URL.
+const raw = new Map();
+
+function coreBytes(href, load) {
+  if (!raw.has(href)) raw.set(href, Promise.resolve(load(href)));
+  return raw.get(href);
+}
+
+const text = (bytes) => new TextDecoder().decode(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes);
+
+// ---- the sandbox -----------------------------------------------------------
+
+/// The sandbox frame's script, inline in its document: it starts each
+/// instance's Web Worker (from instance.js, as a blob of the frame's own
+/// opaque origin) and passes messages between it and the page's
+/// MessageChannel. Under Trusted Types it makes a policy of this name that
+/// passes only blob: URLs. A string, not a function, so a page's bundler
+/// cannot change it: an embedder's CSP names its hash (`SANDBOX_HASH`).
+export const SANDBOX_SCRIPT = `(() => {
+  let tt = null;
+  try {
+    if (self.trustedTypes && self.trustedTypes.createPolicy) {
+      tt = self.trustedTypes.createPolicy('fasttrackstudio-architect', {
+        createScriptURL: (u) => { if (!String(u).startsWith('blob:')) throw new TypeError('not a blob: URL'); return u; },
+      });
+    }
+  } catch (e) {}
+  addEventListener('message', function first(e) {
+    if (e.source !== parent || e.data !== 'architect' || !e.ports[0]) return;
+    removeEventListener('message', first);
+    const port = e.ports[0];
+    const workers = new Map();
+    let instance = null;
+    port.onmessage = ({ data: m }) => {
+      if (m.t === 'instance') {
+        instance = URL.createObjectURL(new Blob([m.source], { type: 'text/javascript' }));
+        return;
+      }
+      if (m.t === 'spawn') {
+        let w;
+        try {
+          w = new Worker(tt ? tt.createScriptURL(instance) : instance, { type: 'module' });
+        } catch (err) {
+          port.postMessage({ t: 'error', id: m.id, message: String(err && err.message || err) });
+          return;
+        }
+        w.onmessage = (x) => port.postMessage({ t: 'from', id: m.id, data: x.data });
+        w.onerror = (x) => {
+          x.preventDefault();
+          port.postMessage({ t: 'error', id: m.id, message: String(x.message || 'it failed') });
+        };
+        w.onmessageerror = () => port.postMessage({ t: 'error', id: m.id, message: 'a message it could not read' });
+        workers.set(m.id, w);
+        return;
+      }
+      const w = workers.get(m.id);
+      if (!w) return;
+      if (m.t === 'to') w.postMessage(m.data);
+      else if (m.t === 'terminate') {
+        w.terminate();
+        workers.delete(m.id);
+      }
+    };
+    port.postMessage({ t: 'booted' });
+  });
+})();`;
+
+/// `sha256-…` of `SANDBOX_SCRIPT`: what an embedder's CSP `script-src`
+/// names when it has one (test/sandbox.test.mjs keeps it current).
+export const SANDBOX_HASH = 'sha256-2Ozk1xYt6pOOhdNqjDWTnCfSTbCchEDao3pk8Fj3xes=';
+
+/// The sandbox frame's own CSP: its script, blob: workers and modules of
+/// its own origin, wasm; nothing to fetch, connect to, frame or show.
+export const SANDBOX_CSP = `default-src 'none'; script-src '${SANDBOX_HASH}' blob: 'wasm-unsafe-eval'; worker-src blob:; connect-src 'none'; img-src 'none'; media-src 'none'; style-src 'none'; font-src 'none'; frame-src 'none'; child-src blob:; base-uri 'none'; form-action 'none'`;
+
+const SANDBOX_HTML = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"><script>${SANDBOX_SCRIPT}</script>`;
+
+let pagePolicy;
+/// The frame's document, through a Trusted Types policy where the page
+/// enforces them (`trusted-types fasttrackstudio-architect`).
+function sandboxHtml() {
+  const tt = globalThis.trustedTypes;
+  if (!tt?.createPolicy) return SANDBOX_HTML;
+  if (pagePolicy === undefined) {
+    try {
+      pagePolicy = tt.createPolicy('fasttrackstudio-architect', {
+        createHTML: (h) => {
+          if (h !== SANDBOX_HTML) throw new TypeError('not the sandbox frame');
+          return h;
+        },
+      });
+    } catch {
+      pagePolicy = null;
+    }
+  }
+  return pagePolicy ? pagePolicy.createHTML(SANDBOX_HTML) : SANDBOX_HTML;
+}
+
+/// A sandbox frame: its instances' Web Workers, each a `spawn()`.
+export class Sandbox {
+  constructor(instanceSource, parent = null) {
+    const doc = globalThis.document;
+    this.workers = new Map();
+    this.next = 0;
+    this.frame = doc.createElement('iframe');
+    this.frame.setAttribute('sandbox', 'allow-scripts');
+    this.frame.setAttribute('aria-hidden', 'true');
+    this.frame.setAttribute('tabindex', '-1');
+    this.frame.setAttribute('title', 'extension sandbox');
+    this.frame.style.setProperty('display', 'none', 'important');
+    const channel = new MessageChannel();
+    this.port = channel.port1;
+    this.ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('its sandbox frame did not start (a CSP without its hash, or Trusted Types without its policy?)')), 15000);
+      this.port.onmessage = ({ data: m }) => {
+        if (m?.t === 'booted') {
+          clearTimeout(timer);
+          this.port.postMessage({ t: 'instance', source: instanceSource });
+          resolve();
+        } else this.dispatch(m);
+      };
+      this.frame.addEventListener(
+        'load',
+        // The frame's origin is opaque: no origin to name; what crosses
+        // here is only the port, and the frame takes it only from its
+        // parent.
+        () => this.frame.contentWindow?.postMessage('architect', '*', [channel.port2]),
+        { once: true },
+      );
+    });
+    this.ready.catch(() => {});
+    this.frame.srcdoc = sandboxHtml();
+    (parent ?? doc.body ?? doc.documentElement).append(this.frame);
+  }
+
+  dispatch(m) {
+    const w = this.workers.get(m?.id);
+    if (!w) return;
+    if (m.t === 'from') w.onmessage?.({ data: m.data });
+    else if (m.t === 'error') w.onerror?.({ message: m.message });
+  }
+
+  /// A Web Worker in the frame, in a Web Worker's shape.
+  spawn() {
+    const id = ++this.next;
+    const send = (m) =>
+      this.ready.then(
+        () => this.port.postMessage(m),
+        () => {},
+      );
+    const shaped = {
+      onmessage: null,
+      onerror: null,
+      postMessage: (data) => send({ t: 'to', id, data }),
+      terminate: () => {
+        this.workers.delete(id);
+        send({ t: 'terminate', id });
+      },
+    };
+    this.workers.set(id, shaped);
+    this.ready.then(
+      () => this.port.postMessage({ t: 'spawn', id }),
+      (e) => shaped.onerror?.({ message: e.message }),
+    );
+    return shaped;
+  }
+
+  close() {
+    for (const id of this.workers.keys()) this.port.postMessage({ t: 'terminate', id });
+    this.workers.clear();
+    this.port.close();
+    this.frame.remove();
+  }
 }
 
 // ---- the pool --------------------------------------------------------------
@@ -174,15 +421,40 @@ class Instance {
     this.ready = new Promise((resolve, reject) => {
       this.started = { resolve, reject };
     });
+    this.booted = false;
+    this.modules = new Set();
+    // A start that does not end is stopped, as a call past its time.
+    this.startTimer = setTimeout(() => {
+      if (!this.booted) this.kill(`it did not start in ${limits.start ?? 15000} ms`);
+    }, limits.start ?? 15000);
+    this.startTimer?.unref?.();
     this.worker.onmessage = (e) => this.message(e.data ?? e);
     this.worker.onerror = (e) => this.kill(`it failed: ${e.message ?? e}`);
-    this.worker.postMessage({
+    this.hold();
+    const start = {
       t: 'start',
       url: opts.url,
       role,
       memory: limits.memory,
       theme: opts.theme ? opts.theme() : null,
-    });
+    };
+    if (opts.inlineGlue) {
+      // The glue as text the page read (and checked): the worker makes
+      // it a module of its own origin.
+      Promise.resolve((opts.load ?? fetchBytes)(opts.url))
+        .then((bytes) => {
+          if (!this.dead) this.worker.postMessage({ ...start, glue: text(bytes) });
+        })
+        .catch((e) => this.kill(`its module could not be read: ${e?.message ?? e}`));
+    } else this.worker.postMessage(start);
+  }
+
+  /// Under node, the worker keeps the process alive only while it starts
+  /// or runs a call (`ref`/`unref` where the worker has them).
+  hold() {
+    const busy = !this.dead && (!this.booted || this.calls.size > 0);
+    if (busy) this.worker.ref?.();
+    else this.worker.unref?.();
   }
 
   /// Its own time so far, in ms.
@@ -216,6 +488,7 @@ class Instance {
     this.run();
     return new Promise((resolve, reject) => {
       this.calls.set(id, { resolve, reject });
+      this.hold();
       this.worker.postMessage({ t: 'call', id, iface, fn, args, ...extra });
     });
   }
@@ -224,12 +497,16 @@ class Instance {
     const c = this.calls.get(id);
     this.calls.delete(id);
     if (!this.calls.size) this.pause();
+    this.hold();
     return c;
   }
 
   async message(m) {
     switch (m.t) {
       case 'ready':
+        this.booted = true;
+        clearTimeout(this.startTimer);
+        this.hold();
         this.started.resolve();
         break;
       case 'failed':
@@ -237,8 +514,36 @@ class Instance {
         this.kill(m.why);
         break;
       case 'module': {
-        const module = await coreModule(this.opts.url, m.name, this.limits.memory, this.opts.load ?? fetchBytes);
-        this.worker.postMessage({ t: 'answer', id: m.id, value: { module } });
+        // Only a file beside its module, read without the page's
+        // credentials, at most `modules` of them, each at most
+        // `moduleBytes`. A sandbox's worker is of another origin: a
+        // compiled module does not cross to it; its bytes do, and the
+        // worker writes the memory limit in (nothing of the extension's
+        // is parsed on the page's thread).
+        const href = besideModule(this.opts.url, m.name);
+        const name = JSON.stringify(String(m.name).slice(0, 100));
+        if (!href) {
+          this.kill(`it asked for module ${name}: not a file beside its module`);
+          break;
+        }
+        this.modules.add(href);
+        if (this.modules.size > (this.limits.modules ?? 32)) {
+          this.kill(`it asked for more than ${this.limits.modules ?? 32} modules`);
+          break;
+        }
+        const load = this.opts.load ?? fetchBytes;
+        let value;
+        try {
+          if (this.opts.bytesOnly) {
+            const bytes = await coreBytes(href, load);
+            if (bytes.byteLength > (this.limits.moduleBytes ?? 64 << 20)) throw new Error(`past ${this.limits.moduleBytes ?? 64 << 20} bytes`);
+            value = { bytes, memory: Math.floor(this.limits.memory / PAGE) };
+          } else value = { module: await coreModule(href, this.limits.memory, load) };
+        } catch (e) {
+          this.kill(`its module ${name} could not be read: ${e?.message ?? e}`);
+          break;
+        }
+        if (!this.dead) this.worker.postMessage({ t: 'answer', id: m.id, value });
         break;
       }
       case 'reply': {
@@ -276,6 +581,7 @@ class Instance {
     if (this.dead) return;
     this.dead = why;
     this.pause();
+    this.worker.unref?.();
     this.worker.terminate();
     this.started.reject(new Error(why));
     for (const c of this.calls.values()) c.reject({ trap: why });
@@ -312,10 +618,69 @@ export class Component {
     this.stopped = false;
     this.stats = { calls: 0, traps: 0, lastTrap: null, alive: false, generation: 0 };
     this.info = { actions: [], views: [] };
+    this.logWindow = { at: 0, lines: 0, dropped: 0 };
+    this.restarts = [];
+    // In a page (no `spawn` of the embedder's), its instances run in a
+    // sandbox frame; `sandbox: false` only where the page trusts its JS.
+    this.sandbox = null;
+    this.runOpts = opts;
+    this.sandboxed = opts.sandbox !== false && !opts.spawn && !!globalThis.document && !!globalThis.MessageChannel;
+    if (this.sandboxed) {
+      this.runOpts = { ...opts, spawn: () => this.ensureSandbox().spawn(), bytesOnly: true, inlineGlue: true };
+    }
+    this.idled = false;
+    this.lastUsed = performance.now();
+    this.idleTimer = null;
   }
 
+  /// Its sandbox frame, made when an instance first needs one.
+  ensureSandbox() {
+    if (!this.sandbox)
+      this.sandbox = new Sandbox(typeof this.opts.instance === 'string' ? this.opts.instance : String(this.opts.instance), this.opts.sandboxParent);
+    return this.sandbox;
+  }
+
+  /// `limits.idle` after its last call, with no view mounted and no
+  /// worker running, it is stopped and its sandbox taken down: whatever
+  /// its own JS was doing ends. Its next call starts it again.
+  watch() {
+    const idle = this.limits.idle;
+    if (!idle || this.stopped) return;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.stopped || !this.live) return;
+      if (performance.now() - this.lastUsed < idle || this.panes.size || this.alive()) return this.watch();
+      this.log('info', 'wasi', `idle for ${idle} ms: stopped until its next call`);
+      clearTimeout(this.timer);
+      this.live.kill('it was idle');
+      this.live = null;
+      this.stats.alive = false;
+      this.sandbox?.close();
+      this.sandbox = null;
+      this.idled = true;
+    }, idle);
+    this.idleTimer?.unref?.();
+  }
+
+  /// A line of its log: at most `limits.logLines` a second, each at most
+  /// `limits.logLength` long; what is dropped is counted, then said.
   log(level, source, text) {
-    this.opts.log?.(level, source, text);
+    const now = performance.now();
+    const w = this.logWindow;
+    if (now - w.at >= 1000) {
+      if (w.dropped) this.opts.log?.('warn', 'host', `${w.dropped} log line(s) dropped: past ${this.limits.logLines} a second`);
+      w.at = now;
+      w.lines = 0;
+      w.dropped = 0;
+    }
+    if (++w.lines > this.limits.logLines) {
+      w.dropped++;
+      return;
+    }
+    let line = String(text);
+    if (line.length > this.limits.logLength) line = `${line.slice(0, this.limits.logLength)}… (${line.length} characters)`;
+    this.opts.log?.(level, source, line);
   }
 
   /// Starts it (with what the copy it replaces saved): its actions and views.
@@ -325,7 +690,7 @@ export class Component {
 
   async instantiate(state) {
     const live = new Instance(
-      this.opts,
+      this.runOpts,
       'owner',
       this.limits,
       (m) => this.ownerAsks(m),
@@ -346,6 +711,7 @@ export class Component {
 
   /// One call at a time, as the native actor's queue: `f` after the last.
   job(f) {
+    this.lastUsed = performance.now();
     const run = this.queue.then(f, f);
     this.queue = run.then(
       () => this.afterJob(),
@@ -356,6 +722,8 @@ export class Component {
 
   afterJob() {
     this.stats.calls++;
+    this.lastUsed = performance.now();
+    this.watch();
     if (this.newsDue) this.scheduleNews();
   }
 
@@ -365,6 +733,10 @@ export class Component {
 
   /// `f` on its live instance; a trap starts it again.
   async on(f) {
+    if (!this.live && this.idled && !this.stopped) {
+      this.idled = false;
+      await this.instantiate(null);
+    }
     if (!this.live) throw new Error(this.notRunning());
     try {
       return await f(this.live);
@@ -438,7 +810,8 @@ export class Component {
     try {
       const next = await this.on((i) => i.call('guest', 'tick'));
       if (next != null && !this.stopped) {
-        this.timer = setTimeout(() => this.job(() => this.timers()), Math.max(4, Number(next)));
+        this.timer = setTimeout(() => this.job(() => this.timers()), Math.max(this.limits.tick, Number(next)));
+        this.timer?.unref?.();
       }
     } catch {
       return; // trapped: started again
@@ -478,6 +851,18 @@ export class Component {
     this.panes.clear();
     for (const p of panes) this.opts.frame?.(p, { failed: why });
     if (this.stopped) return;
+    // At most `limits.restarts` a minute, each after a longer wait.
+    const now = performance.now();
+    this.restarts = this.restarts.filter((t) => now - t < 60000);
+    this.restarts.push(now);
+    if (this.restarts.length > this.limits.restarts) {
+      this.stats.lastTrap = `${why}; it is not started again: ${this.restarts.length} restarts in a minute`;
+      this.log('error', 'wasi', this.stats.lastTrap);
+      return;
+    }
+    const wait = this.restarts.length > 1 ? Math.min(10000, 250 * 2 ** (this.restarts.length - 2)) : 0;
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    if (this.stopped) return;
     try {
       await this.instantiate(null);
       this.opts.restarted?.(why);
@@ -489,12 +874,15 @@ export class Component {
   /// Unloads it: its instance and workers end.
   stop() {
     this.stopped = true;
+    clearTimeout(this.idleTimer);
     clearTimeout(this.newsTimer);
     clearTimeout(this.timer);
     this.cancelAll();
     this.live?.kill('it was unloaded');
     this.live = null;
     this.stats.alive = false;
+    this.sandbox?.close();
+    this.sandbox = null;
   }
 
   /// What it runs: its instance and each worker.
@@ -517,6 +905,8 @@ export class Component {
   async ownerAsks(m) {
     switch (m.op) {
       case 'call':
+        if (typeof m.request !== 'string' || m.request.length > this.limits.messageBytes)
+          return JSON.stringify({ error: { kind: 'failed', message: `a host request past ${this.limits.messageBytes} bytes` } });
         return this.opts.host(m.request);
       case 'spawn':
         return this.spawn(m.name, m.args);
@@ -528,7 +918,9 @@ export class Component {
   }
 
   ownerNote(live, m) {
-    if (m.t === 'log') this.log(m.level, m.source, m.text);
+    // Its level one of four, its source one the host names: never one an
+    // extension chose (it cannot pass for the host).
+    if (m.t === 'log') this.log(LEVELS.includes(m.level) ? m.level : 'info', SOURCES.includes(m.source) ? m.source : 'log', m.text);
     else if (m.t === 'cancel') this.cancel(m.worker, 'its owner cancelled it');
     else if (m.t === 'dead' && this.live === live && !this.stopped && !live.calls.size) {
       // Ended between calls (it cannot: a call is how it runs).
@@ -540,7 +932,8 @@ export class Component {
   }
 
   spawn(name, args) {
-    const decl = this.opts.workers?.[name];
+    const workers = this.opts.workers ?? {};
+    const decl = Object.hasOwn(workers, name) ? workers[name] : null;
     if (!decl) return { err: `it has no worker ${name} (its manifest's [[workers]])` };
     if (this.alive() >= MAX_WORKERS)
       return { err: `it has ${MAX_WORKERS} workers running or waiting: as many as it may` };
@@ -570,7 +963,7 @@ export class Component {
   begin(w) {
     if (w.status !== 'waiting') return this.pool.leave();
     w.status = 'running';
-    const opts = { ...this.opts, url: w.url };
+    const opts = { ...this.runOpts, url: w.url };
     w.instance = new Instance(
       opts,
       'worker',
@@ -591,6 +984,7 @@ export class Component {
   /// The owner's `post` to worker `to`: refused at once when its queue is
   /// full (a view never waits) or it ended.
   toWorker(to, message) {
+    if (String(message).length > this.limits.messageBytes) return { err: `a message past ${this.limits.messageBytes} bytes` };
     const w = this.crew.get(to);
     if (!w || w.outcome) return { err: `worker ${to} ended` };
     if (w.inbox.length >= QUEUE)
@@ -608,6 +1002,7 @@ export class Component {
       case 'post':
         // To its owner: it waits while the owner's queue is full.
         if (w.outcome || w.cancelled) return { err: 'cancelled' };
+        if (String(m.message).length > this.limits.messageBytes) return { err: `a message past ${this.limits.messageBytes} bytes` };
         if (w.news.length < QUEUE) {
           w.news.push(m.message);
           this.nudge();
@@ -633,7 +1028,7 @@ export class Component {
   }
 
   workerNote(w, m) {
-    if (m.t === 'log') this.log(m.level, `worker ${w.name}`, m.text);
+    if (m.t === 'log') this.log(LEVELS.includes(m.level) ? m.level : 'info', `worker ${w.name}`, m.text);
     else if (m.t === 'progress') {
       w.progress = { done: m.done, total: m.total, note: m.note };
       w.progressNew = true;
@@ -693,6 +1088,7 @@ export class Component {
       this.newsTimer = null;
       this.job(() => this.hear());
     }, wait);
+    this.newsTimer?.unref?.();
   }
 
   /// Its workers' news, between its calls: every message in order, the

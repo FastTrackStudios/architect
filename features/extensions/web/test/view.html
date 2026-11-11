@@ -1,0 +1,12 @@
+<!doctype html>
+<!-- view.js under hostile edits, in a real DOM (test/view.test.mjs). The
+     embedder's own form, password field, config element and SVG symbol. -->
+<meta charset="utf-8" />
+<title>view.js</title>
+<div id="page-banner">the embedder's own</div>
+<form id="login">
+  <input id="pw" name="password" type="password" value="" />
+  <div id="mount"></div>
+</form>
+<svg width="0" height="0"><symbol id="logo"><rect id="logo-rect" width="10" height="10" /></symbol></svg>
+<script type="module" src="./view-page.js"></script>

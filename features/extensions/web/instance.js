@@ -27,7 +27,7 @@ let lastAlloc = null;
 let asks = 0;
 const asked = new Map();
 
-const post = (m) => self.postMessage(m);
+const post = (m) => globalThis.self.postMessage(m);
 
 /// Asks the main thread; resolves with its answer.
 function ask(m) {
@@ -303,6 +303,20 @@ function world() {
         const r = await fields('ask_secret', JSON.stringify({ name }));
         return r.tag === 'ok' ? ok(Boolean(JSON.parse(r.val))) : r;
       },
+      // The editor being typed in, and MIDI and OSC ports: whatever the
+      // browser's host answers (`WebHost`: not in the browser yet).
+      editorState: () => fields('editor_state', ''),
+      editEditor: (command) => fields('edit_editor', command),
+      decorateEditor: (decorations) => unit({ op: 'decorate_editor', decorations: jsonArg(decorations) ?? [] }),
+      ports: (kind) => fields('ports', JSON.stringify({ kind: kind || null })),
+      openPort: (request) => fields('open_port', request),
+      portSend: (port, message) => unit({ op: 'port_send', port, message: jsonArg(message) }),
+      portReceive: (port, max) => fields('port_receive', JSON.stringify({ port, max: max || null })),
+      closePort: async (port) => {
+        if (worker) return false;
+        const r = await service({ op: 'close_port', port });
+        return r.tag === 'ok' && Boolean(JSON.parse(r.val));
+      },
     },
     'architect:extension/worker': {
       spawn: async (name, args) => {
@@ -330,6 +344,79 @@ function world() {
   };
 }
 
+// ---- the memory limit ------------------------------------------------------
+//
+// A sandbox's page hands this worker a core module's bytes unread: the
+// memory limit is written in here, off the page's thread. The same code
+// as runner.js `limitMemory` (test/limits.test.mjs keeps them equal):
+// every size and count checked against the bytes there before a loop.
+
+/// A LEB128 u32 at `at`, inside `end`: `[value, next]`; throws past it.
+function leb(b, at, end) {
+  let value = 0;
+  for (let shift = 0; shift < 35; shift += 7) {
+    if (at >= end) throw new Error('not a wasm module: a number runs past its section');
+    const byte = b[at++];
+    value += (byte & 0x7f) * 2 ** shift;
+    if (!(byte & 0x80)) {
+      if (value > 0xffffffff) throw new Error('not a wasm module: a number past 32 bits');
+      return [value, at];
+    }
+  }
+  throw new Error('not a wasm module: a number of more than 5 bytes');
+}
+
+function toLeb(n) {
+  const out = [];
+  do {
+    let b = n % 128;
+    n = Math.floor(n / 128);
+    if (n) b |= 0x80;
+    out.push(b);
+  } while (n);
+  return out;
+}
+
+/// `bytes` (a core module) with each memory it defines at most `pages`
+/// pages: past them `memory.grow` fails, as a native `ResourceLimiter`
+/// refuses it. Throws when it is not a module whose sizes add up.
+export function limitMemory(bytes, pages) {
+  const b = new Uint8Array(bytes);
+  if (b.length < 8 || b[0] !== 0 || b[1] !== 0x61 || b[2] !== 0x73 || b[3] !== 0x6d)
+    throw new Error('not a wasm module');
+  let at = 8;
+  while (at < b.length) {
+    const id = b[at];
+    const [size, body] = leb(b, at + 1, b.length);
+    const end = body + size;
+    if (end > b.length) throw new Error('not a wasm module: a section runs past its end');
+    if (id === 5) {
+      let [count, p] = leb(b, body, end);
+      // Each memory is at least two bytes: a count past that is a lie.
+      if (count > (end - p) / 2) throw new Error('not a wasm module: more memories than its section holds');
+      const out = toLeb(count);
+      while (count--) {
+        if (p >= end) throw new Error('not a wasm module: a memory runs past its section');
+        const flags = b[p++];
+        if (flags & 0x04) return b; // memory64: left alone
+        let min;
+        let max = Infinity;
+        [min, p] = leb(b, p, end);
+        if (flags & 0x01) [max, p] = leb(b, p, end);
+        out.push((flags & 0x02) | 0x01, ...toLeb(min), ...toLeb(Math.max(min, Math.min(max, pages))));
+      }
+      const section = [5, ...toLeb(out.length), ...out];
+      const patched = new Uint8Array(at + section.length + (b.length - end));
+      patched.set(b.subarray(0, at), 0);
+      patched.set(section, at);
+      patched.set(b.subarray(end), at + section.length);
+      return patched;
+    }
+    at = end;
+  }
+  return b;
+}
+
 // ---- instantiating, calling ------------------------------------------------
 
 function memoryNow() {
@@ -351,7 +438,15 @@ async function start(m) {
   role = m.role;
   memoryLimit = m.memory;
   if (m.theme) theme = { ...m.theme, revision: BigInt(m.theme.revision ?? 0) };
-  const { instantiate } = await import(m.url);
+  // The glue as text (a sandbox's page read it): a module of this
+  // worker's own origin; under node, a data: URL.
+  let url = m.url;
+  if (m.glue != null) {
+    url = globalThis.process?.versions?.node
+      ? `data:text/javascript;base64,${globalThis.Buffer.from(m.glue).toString('base64')}`
+      : URL.createObjectURL(new Blob([m.glue], { type: 'text/javascript' }));
+  }
+  const { instantiate } = await import(url);
   const imports = { ...wasi(), ...world() };
   let refused = null;
   const guarded = new Proxy(imports, {
@@ -361,7 +456,9 @@ async function start(m) {
     },
   });
   root = await instantiate(
-    (name) => ask({ t: 'module', name }).then((a) => a.module),
+    // A compiled module from the page, or (from a sandbox's page, another
+    // origin) its bytes, compiled here.
+    (name) => ask({ t: 'module', name }).then((a) => a.module ?? WebAssembly.compile(limitMemory(a.bytes, a.memory))),
     guarded,
     async (module, linked) => {
       const instance = await WebAssembly.instantiate(module, linked);
@@ -393,7 +490,8 @@ async function call(m) {
   post({ t: 'reply', id: m.id, value: json(value ?? null) });
 }
 
-self.onmessage = async ({ data: m }) => {
+// (Imported by a test, outside a worker, it only defines its functions.)
+(globalThis.self ?? globalThis).onmessage = async ({ data: m }) => {
   switch (m.t) {
     case 'start':
       try {

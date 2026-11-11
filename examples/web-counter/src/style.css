@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; --fg: #18181b; --bg: #fafafa; --line: #d4d4d8; }
+@media (prefers-color-scheme: dark) { :root { --fg: #f4f4f5; --bg: #18181b; --line: #3f3f46; } }
+body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+main { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+.view { border: 1px solid var(--line); border-radius: 8px; min-height: 120px; }

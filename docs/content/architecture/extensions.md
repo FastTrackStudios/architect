@@ -565,6 +565,11 @@ and an `instantiate` function:
 node features/extensions/web/transpile.mjs my_extension.wasm out/   # jco pinned in features/extensions/web/package.json
 ```
 
+(`architect-ext build-web`, from the npm package
+`@fasttrackstudio/architect-cli`, runs the same transpile and writes the
+extension's metadata, a lock of every file's SHA-256 and typed actions
+beside it.)
+
 **Why jco.** It is the Bytecode Alliance's component-model
 implementation for JS: it lifts and lowers every WIT type the world uses
 (variants, records, lists, results), so the browser runs the component
@@ -584,7 +589,15 @@ JSPI ships in Chromium browsers (137 on), in Firefox (checked here on
 does not start, and `WebComponent::start` says why.
 
 **Where it runs.** Each instance is a Web Worker
-(`features/extensions/web/instance.js`); the page's side
+(`features/extensions/web/instance.js`), started inside a sandbox: a
+hidden `<iframe sandbox="allow-scripts">` with no `allow-same-origin`,
+an opaque origin with its own CSP (`runner.js` `Sandbox`,
+`SANDBOX_CSP`). An extension's JS (jco's glue ships with it) never runs
+with the page's origin, so it gets none of the page's cookies, storage,
+channels or network. The page fetches the files and hands in the glue as
+text and the core modules as bytes; a page with a CSP names the frame's
+script by its hash (`SANDBOX_HASH`; `apps/sandbox/web/index.html`). Under
+node there is no frame, so a node host trusts the extension's JS. The page's side
 (`features/extensions/web/runner.js`, linked in by wasm-bindgen) is the
 native actor: one call at a time, a trap restarting it fresh, its views'
 panes told. `web::WebComponent` drives it from Rust: `start` (the
@@ -656,6 +669,14 @@ back-pressure, `MAX_WORKERS`). `features/extensions/tests/wasi_web.rs`
 runs it from `cargo test` (node from `devenv --profile wasi shell`; it
 says so and passes without node, `ARCHITECT_WASI_WEB_REQUIRED=1` makes
 that a failure).
+
+**In someone else's page.** The same runner is the npm package
+`@fasttrackstudio/architect` (`features/extensions/web` is the package;
+`features/extensions/web/cli` is `@fasttrackstudio/architect-cli`). Any
+TypeScript app loads a component with it, pinned by its lock, runs its
+actions with types generated from its manifest, and mounts its views in
+a shadow root. Its host is the embedder's, deny by default. See
+[Extensions in your own web app](@/guide/extensions-in-your-web-app.md).
 
 **Next.** WASI 0.3's async (`component-model-async`, which also lets
 jco drop JSPI) and what a component adds at run time (`updates`). Its

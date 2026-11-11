@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The CSP an embedder needs (docs/content/guide/extensions-in-your-web-app.md, "Security"):
+         nothing by default; its own scripts; the extension sandbox's script by its hash, blob: modules
+         and workers and wasm (which the sandbox frame and its workers inherit); its files from 'self';
+         no frame but the sandbox's srcdoc, no media, nothing inline. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' blob: '%SANDBOX_HASH%'; worker-src blob:; frame-src 'none'; connect-src 'self'; img-src 'self' data:; media-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'"
+    />
+    <title>Architect extension in a web page</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>WASI Counter, in someone else's page</h1>
+      <p id="status">Loading…</p>
+      <section>
+        <h2>Actions</h2>
+        <div class="row">
+          <button id="add" type="button">Add 5 (typed action)</button>
+          <button id="ask" type="button">Ask the app for its themes</button>
+        </div>
+        <p>Answer: <output id="answer">nothing yet</output></p>
+      </section>
+      <section>
+        <h2>Its view</h2>
+        <div id="counter" class="view"></div>
+      </section>
+      <section>
+        <h2>An embed view, given its input</h2>
+        <div id="bars" class="view"></div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
