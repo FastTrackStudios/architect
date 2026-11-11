@@ -8,10 +8,13 @@
 #                  route tree's drift, every internal link and asset;
 #                  then a PREVIEW deploy, with the latest release's docs
 #                  (its architect-web tarball: no Rust on a hosted runner)
-#   release done   PRODUCTION: after release.yml finishes on a v* tag
-#                  (workflow_run, so the release's latest-linux.json and
-#                  latest-macos.json, which /download reads, are already
-#                  up), the docs built with the `architect` CLI at the tag
+#   release        PRODUCTION: release.yml calls this workflow as its last
+#                  job (`site`, after the Linux and macOS jobs, so the
+#                  release's latest-linux.json and latest-macos.json, which
+#                  /download reads, are already up), the docs built with
+#                  the `architect` CLI at the tag. A call, not a
+#                  workflow_run: the self-hosted runners' gate lets a public
+#                  repo's push to a v* tag through and refuses workflow_run.
 #   dispatch       PRODUCTION from the dispatched ref, the same way
 #
 # Every Vercel step needs VERCEL_TOKEN, VERCEL_ORG_ID and VERCEL_PROJECT_ID
@@ -33,13 +36,18 @@ on:
       - "docs/**"
       - "apps/web/landing/**"
       - ".github/workflows/site.yml"
-  workflow_run:
-    workflows: [release]
-    types: [completed]
+  workflow_call:
+    secrets:
+      VERCEL_TOKEN:
+        required: false
+      VERCEL_ORG_ID:
+        required: false
+      VERCEL_PROJECT_ID:
+        required: false
   workflow_dispatch:
 
 concurrency:
-  group: site-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || github.ref }}
+  group: site-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -150,12 +158,8 @@ jobs:
 
   production:
     name: site production
-    # After a successful release (release.yml runs only on v* tags), or by hand.
-    if: >-
-      ${{ github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'workflow_run' &&
-           github.event.workflow_run.conclusion == 'success' &&
-           startsWith(github.event.workflow_run.head_branch, 'v')) }}
+    # Called by release.yml on a v* tag (the caller's event: push), or by hand.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) }}
     # Reserved capacity, as release.yml's jobs.
     runs-on: [self-hosted, thebattleship-release]
     timeout-minutes: 90
@@ -180,7 +184,7 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.vercel.outputs.deploy == 'true'
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       # The release runners carry no devenv, bun or node of their own.
       - uses: ./.github/actions/devenv

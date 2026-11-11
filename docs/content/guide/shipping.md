@@ -173,8 +173,8 @@ links are never proxied through Vercel.
 `.github/workflows/site.yml` checks a pull request that touches the
 site, the docs or the landing page: biome, tsc, the build, the route
 tree's drift and every internal link. With the Vercel secrets set, it
-also deploys a preview carrying the latest release's docs. After
-`release.yml` succeeds on a tag, or on a manual dispatch, it builds the
+also deploys a preview carrying the latest release's docs. As
+`release.yml`'s last job (`site`) on a tag, or on a manual dispatch, it builds the
 docs with the CLI on the release runners and deploys to production.
 With `VERCEL_TOKEN`, `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID` unset, the
 deploy steps skip with a notice. Locally, from `apps/site`, with bun
