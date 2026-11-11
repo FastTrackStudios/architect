@@ -53,7 +53,7 @@ mod live;
 pub mod org;
 mod s3;
 pub mod service;
-mod share_layers;
+pub mod share_layers;
 pub mod shares;
 
 use std::collections::BTreeMap;
@@ -482,7 +482,11 @@ pub async fn start_with_layers(
         node_org.clone(),
         config.issuer.as_deref(),
         blocks.clone(),
-        share_layers::LayerRules::new(Some(config.extensions_dir()), layers),
+        share_layers::LayerRules::new(
+            Some(config.extensions_dir()),
+            layers,
+            Some(data.join("share-layers.json")),
+        ),
     );
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
