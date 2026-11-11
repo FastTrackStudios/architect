@@ -597,14 +597,33 @@ link goes (`features/spaces/src/share.rs` `Listen`):
   body and in `x-architect-layer`, by its name and by any other spelling of
   the same file on disk (another case, another Unicode form, `//`): the
   node compares what the request opens with the files it holds back
-  (`apps/desktop/src/node/shares.rs` `Shares::above`). Another audience's
-  file is still `404` first, so nothing about it shows. The files page, the
-  archive and the page's queue leave such files out; ranges keep working
-  for the rest. A file no rule places is a page file, served as it was.
-  When there are rules and the node cannot read the vault, it holds every
-  file back rather than guess.
-- **A share written before layers** served every file its notes attach, so
-  it reads as Full, and its audiences as the share's.
+  (`apps/desktop/src/node/shares.rs` `Shares::above`). Only a file in the
+  link's own folder is answered so: anything outside the link, another
+  audience's file, a page it does not have, is the same `404` as a path
+  that is nowhere (status, headers and body), so a link says nothing of
+  what is outside it. Ranges keep working for the rest. A file no rule
+  places is a page file.
+- **Named nowhere.** Each link is built for its layer: a held-back file is
+  in no page of it (no player, link, embed or lyrics), its search index,
+  its files page, its archive or its queue. Its bytes are refused.
+- **Nothing an extension does opens a link.** Every rule for a note type
+  counts and the highest layer wins. While an installed extension's
+  manifest does not read (half-written, not a manifest), the node does not
+  know where files are and holds every attached file back on every link
+  below Full until it is fixed, warning once with the file's path (as when
+  it cannot read the vault). An uninstalled extension's rules are kept in
+  the node's data dir (`share-layers.json`) and still place files until
+  the owner forgets them:
+
+  ```sh
+  architect-desktop actions run SHARE_LAYERS_KEPT                       # what is kept, by extension
+  architect-desktop actions run SHARE_LAYERS_FORGET --arg extension=fts.studio
+  ```
+- **A share note without a layer** (written before layers, or one that
+  lost the field) reads as Reference, the default, and its audiences as
+  the share's: access fails closed. Anyone who can write the vault can
+  edit a share note, so a cap is as strong as the vault's write access
+  (#552).
 
 ```sh
 architect-desktop actions run SHARE_CREATE --arg folder=Songs --arg listen=reference
