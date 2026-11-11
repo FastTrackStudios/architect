@@ -5,7 +5,7 @@
 // limits; what it asks of the app reaches the embedder's `Host` only within
 // what the embedder granted; `mountView` draws one of its views into an
 // element. docs/content/guide/extensions-in-your-web-app.md.
-import { Component, LIMITS, WORKER_LIMITS, SANDBOX_HASH, SANDBOX_CSP } from './runner.js';
+import { Component, fetchBytes, LIMITS, WORKER_LIMITS, SANDBOX_HASH, SANDBOX_CSP } from './runner.js';
 import INSTANCE_SOURCE from './dist/instance-source.js';
 import { capabilities, noCapabilities, within } from './check.js';
 import { answerer, ArchitectError } from './host.js';
@@ -43,16 +43,10 @@ function insideFolder(path) {
   return parts.join('/');
 }
 
-async function readBytes(url) {
-  if (url.protocol === 'file:') {
-    // Under node only: named so a page's bundler leaves it out.
-    const fsModule = 'node:fs/promises';
-    const fs = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
-    return new Uint8Array(await fs.readFile(url));
-  }
-  const r = await fetch(url, { credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
-  if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
-  return new Uint8Array(await r.arrayBuffer());
+/// A file of the extension's: without credentials, never past `cap`
+/// bytes (runner.js `fetchBytes` stops reading there).
+async function readBytes(url, cap = 1 << 20) {
+  return new Uint8Array(await fetchBytes(url.href, cap));
 }
 
 /// `sha256-<base64>` of `bytes` (Subresource Integrity's form).
@@ -69,7 +63,7 @@ const refuse = (why) => new ArchitectError({ kind: 'refused', capability: 'integ
 /// `lock` (when there is one) before anything uses it.
 function folderReader(folder, lock) {
   const cache = new Map();
-  return (path) => {
+  return (path, cap = LIMITS.moduleBytes) => {
     const rel = insideFolder(path);
     if (!rel) return Promise.reject(refuse(`${JSON.stringify(path)} is not a file inside the extension's folder`));
     if (!cache.has(rel)) {
@@ -78,7 +72,7 @@ function folderReader(folder, lock) {
         (async () => {
           const want = lock?.files?.[rel];
           if (lock && !want) throw refuse(`${rel} is not in its lock`);
-          const bytes = await readBytes(new URL(rel, folder));
+          const bytes = await readBytes(new URL(rel, folder), cap);
           if (want) {
             const got = await digest(bytes);
             if (got !== want) throw refuse(`${rel} is not the file its lock names (${got}, not ${want})`);
@@ -245,6 +239,9 @@ export async function loadExtension(source, options = {}) {
   const manifest = metadata.manifest;
   const why = refusal(metadata.world, manifest?.api, manifest?.id);
   if (why) throw new ArchitectError({ kind: 'unsupported', what: why });
+  // Its folder is never a site's root: everything there would be a file
+  // beside its module, readable by its JS (without cookies).
+  if (folder.pathname === '/') throw refuse('its folder is the site’s root: serve an extension from a folder of its own');
   const module = insideFolder(metadata.module);
   if (!module) throw refuse(`its module ${JSON.stringify(metadata.module)} is not a file inside its folder`);
   const host = options.host ?? {};
@@ -256,12 +253,17 @@ export async function loadExtension(source, options = {}) {
   // limit (lines a second, length).
   const log = (level, src, text) => (me.component ? me.component.log(level, src, text) : sink(level, src, text));
   me.log = log;
-  if (options.integrity === false) sink('warn', 'host', `${manifest.id}: loaded with integrity: false, its files unchecked`);
+  if (options.integrity === false) {
+    // Said out loud, to the embedder's log or else the console.
+    const said = `${manifest.id}: loaded with integrity: false, its files unchecked`;
+    if (options.log ?? host.log) sink('warn', 'host', said);
+    else console.warn(`@fasttrackstudio/architect: ${said}`);
+  }
   const ask = answerer({ manifest, may, host, log, limits });
   const url = new URL(module, folder).href;
-  const load = (href) => {
+  const load = (href, cap) => {
     if (!href.startsWith(folder.href)) return Promise.reject(refuse(`${href} is outside its folder`));
-    return read(href.slice(folder.href.length));
+    return read(href.slice(folder.href.length), cap);
   };
   const workers = {};
   for (const w of manifest.workers ?? []) {

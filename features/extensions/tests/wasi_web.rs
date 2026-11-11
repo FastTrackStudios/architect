@@ -184,11 +184,13 @@ fn components_run_in_the_browsers_shape() {
             "test/sanitize.test.mjs",
             "test/sandbox.test.mjs",
             "test/limits.test.mjs",
+            "test/publish.test.mjs",
             "test/surface.test.mjs",
             "test/pack.test.mjs",
             "cli/test/typegen.test.mjs",
             "cli/test/pack.test.mjs",
             "test/package.test.mjs",
+            "test/publish-components.test.mjs",
         ])
         .env("ARCHITECT_WASI_GUESTS", &guests)
         .current_dir(&web);

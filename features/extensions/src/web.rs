@@ -1336,6 +1336,12 @@ impl Pane {
                         |ns| doc.create_element_ns(Some(&ns), &tag),
                     )
                     .map_err(js)?;
+                // A link opens apart from the page (`wire::LINK_FORCED`).
+                if tag.eq_ignore_ascii_case("a") {
+                    for (name, value) in crate::wire::LINK_FORCED {
+                        el.set_attribute(name, value).map_err(js)?;
+                    }
+                }
                 self.stack.push((el.into(), None));
             }
             Edit::CreateText { value } => {
@@ -1435,6 +1441,11 @@ impl Pane {
         };
         if name == "dangerous_inner_html" || name.starts_with("on") {
             return Err(format!("a view may not set {name}"));
+        }
+        // What the page forces on a link, a view neither changes nor
+        // removes.
+        if crate::wire::forced_attribute(&el.tag_name(), name) {
+            return Ok(());
         }
         let value = match value {
             Value::None => None,

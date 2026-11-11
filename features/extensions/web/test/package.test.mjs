@@ -13,19 +13,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadExtension, memoryHost, ArchitectError } from '../index.js';
 import { spawn } from '../node.js';
 import { build } from '../cli/cli.mjs';
+import { guests } from './harness.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const root = resolve(here, '../../../..');
-
-function guests() {
-  for (const dir of [
-    process.env.ARCHITECT_WASI_GUESTS,
-    join(root, 'target/wasi-guest/wasm32-wasip2/debug'),
-    join(root, 'target/wasm32-wasip2/debug'),
-  ])
-    if (dir && existsSync(join(dir, 'architect_sandbox_wasi_counter.wasm'))) return dir;
-  return null;
-}
 
 const dir = guests();
 const skip = dir ? false : 'the components are not built (cargo build --target wasm32-wasip2)';

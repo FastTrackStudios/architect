@@ -305,6 +305,10 @@ export declare function fetchHandler(options?: {
   allow?: string[];
   maxBytes?: number;
   timeoutMs?: number;
+  /** Open streams per extension (default 8). */
+  maxStreams?: number;
+  /** Bytes its open streams may hold, per extension (default 32 MiB). */
+  maxBuffered?: number;
   fetch?: typeof fetch;
 }): Pick<HostHandlers, 'fetch' | 'read_body' | 'close_body'>;
 

@@ -65,6 +65,10 @@ function walk(dir) {
   });
 }
 
+/// Folder names that are a site's root (what a dev server or host serves
+/// at `/`).
+const SITE_ROOTS = ['public', 'dist', 'www', 'static', 'build', 'out', 'site', '_site', 'htdocs'];
+
 /// What marks a folder build-web made (and may write and delete in).
 export const MARKER = '.architect-build';
 
@@ -128,6 +132,11 @@ export function build(component, out, { manifest, manifestPath, name, types } = 
   }
   checkManifest(manifest);
   name ??= basename(component, '.wasm');
+  // A site's root as the extension's folder: everything served there
+  // would be a file beside its module (the runtime refuses a folder at
+  // `/`). A folder of its own, inside the site.
+  if (SITE_ROOTS.includes(basename(resolve(out)).toLowerCase()))
+    throw new Error(`${out} looks like a site's root: build into a folder of its own (${join(out, manifest.id)})`);
   outFolder(out);
   const module = transpile(component, out, name);
   // jco's own declarations describe its raw interface, not this package's.

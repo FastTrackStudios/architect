@@ -441,16 +441,63 @@ jobs:
   # their version is the tag's; a pre-release (`v1.2.0-rc.1`) goes out
   # under the `next` dist-tag, never `latest`.
   #
-  # Two jobs, so the token is near nothing that runs code: npm-pack
-  # installs with --ignore-scripts, tests and packs with no token and no
-  # id-token; npm-publish only publishes those tarballs (no install, no
-  # scripts), in the `npm` environment (restricted to v* tags) that holds
-  # the token, with `id-token: write` (provenance needs a GitHub-hosted
-  # runner). Third-party actions in both are pinned by commit. Neither feeds the release's assets, so a failed
-  # publish cannot fail them, and it shows red. Without the NPM_TOKEN
-  # secret npm-publish says so and stops. After the first publish (by
-  # hand), switch to trusted publishing and drop the token.
+  # Three jobs, so the token is near nothing that runs code, and what is
+  # published is what was packed before anything else ran:
+  # - npm-pack: the version set, the repo's own build script, `npm pack
+  #   --ignore-scripts`; no install, no test, no dev dependency has run
+  #   when the tarballs are made. Their SHA-256 are its outputs.
+  # - npm-test: `npm ci --ignore-scripts` and the unit tests, apart.
+  # - npm-publish: in the `npm` environment (restricted to v* tags) that
+  #   holds the token, read in ONE step; it checks each tarball's digest
+  #   against npm-pack's before `npm publish` (no install, no scripts),
+  #   with `id-token: write` (provenance needs a GitHub-hosted runner).
+  # Third-party actions are pinned by commit. None of the three feeds the
+  # release's assets, so a failed publish cannot fail them, and it shows
+  # red. Without NPM_TOKEN on the environment, npm-publish says so and
+  # stops. After the first publish (by hand), switch to trusted publishing
+  # and drop the token.
   npm-pack:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      runtime_sha256: ${{ steps.pack.outputs.runtime_sha256 }}
+      cli_sha256: ${{ steps.pack.outputs.cli_sha256 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      # Nothing installed, nothing of a test or a dev dependency run: the
+      # version, the repo's own build script (instance.js as a string, the
+      # licences), the tarballs.
+      - name: Pack
+        id: pack
+        working-directory: features/extensions/web
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          npm version "$version" --no-git-tag-version --ignore-scripts
+          (cd cli && npm version "$version" --no-git-tag-version --ignore-scripts)
+          node scripts/build.mjs
+          mkdir -p "$RUNNER_TEMP/npm"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/npm"
+          (cd cli && npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/npm")
+          cd "$RUNNER_TEMP/npm"
+          sha256sum ./*.tgz
+          echo "runtime_sha256=$(sha256sum "fasttrackstudio-architect-$version.tgz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "cli_sha256=$(sha256sum "fasttrackstudio-architect-cli-$version.tgz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm/*.tgz
+          retention-days: 7
+
+  npm-test:
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -463,69 +510,53 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
-      - name: Test and pack
+      - name: Unit tests
         working-directory: features/extensions/web
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
           npm ci --ignore-scripts --no-audit --no-fund
           npm run test:unit
-          npm version "$version" --no-git-tag-version --ignore-scripts
-          (cd cli && npm version "$version" --no-git-tag-version --ignore-scripts)
-          node scripts/build.mjs
-          mkdir -p "$RUNNER_TEMP/npm"
-          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/npm"
-          (cd cli && npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/npm")
-          ls -l "$RUNNER_TEMP/npm"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: npm-tarballs
-          path: ${{ runner.temp }}/npm/*.tgz
-          retention-days: 7
 
   npm-publish:
-    needs: npm-pack
+    needs: [npm-pack, npm-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # NPM_TOKEN lives on this environment (restricted to v* tags), never
-    # on the repo: only this job can read it.
+    # on the repo: only this job can read it, in one step.
     environment: npm
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Token
-        id: token
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::notice::NPM_TOKEN is not set: @fasttrackstudio/architect was not published for $GITHUB_REF_NAME"
-            echo "### npm: not published (no NPM_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
-            echo "go=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "go=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: ${{ steps.token.outputs.go == 'true' }}
         with:
           name: npm-tarballs
           path: npm
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: ${{ steps.token.outputs.go == 'true' }}
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Publish
-        if: ${{ steps.token.outputs.go == 'true' }}
+      - name: Check and publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RUNTIME_SHA256: ${{ needs.npm-pack.outputs.runtime_sha256 }}
+          CLI_SHA256: ${{ needs.npm-pack.outputs.cli_sha256 }}
         run: |
           set -euo pipefail
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::notice::NPM_TOKEN is not set on the npm environment: @fasttrackstudio/architect was not published for $GITHUB_REF_NAME"
+            echo "### npm: not published (no NPM_TOKEN)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           version="${GITHUB_REF_NAME#v}"
+          runtime="npm/fasttrackstudio-architect-$version.tgz"
+          cli="npm/fasttrackstudio-architect-cli-$version.tgz"
+          # What is published is what npm-pack made.
+          echo "$RUNTIME_SHA256  $runtime" | sha256sum -c -
+          echo "$CLI_SHA256  $cli" | sha256sum -c -
           tag=latest
           case "$version" in *-*) tag=next ;; esac
           # The runtime first: the CLI's users install it beside it.
-          npm publish "npm/fasttrackstudio-architect-$version.tgz" --provenance --access public --tag "$tag" --ignore-scripts
-          npm publish "npm/fasttrackstudio-architect-cli-$version.tgz" --provenance --access public --tag "$tag" --ignore-scripts
+          npm publish "$runtime" --provenance --access public --tag "$tag" --ignore-scripts
+          npm publish "$cli" --provenance --access public --tag "$tag" --ignore-scripts
           echo "### npm: @fasttrackstudio/architect@$version, @fasttrackstudio/architect-cli@$version (\`$tag\`)" >> "$GITHUB_STEP_SUMMARY"

@@ -70,6 +70,21 @@ pub const MAX_VIEWS: usize = 256;
 /// handler on the root and ignores it, answering with an empty frame.
 pub const EMBED_EVENT: &str = "architect-embed";
 
+/// What a page that draws an extension's view (`web::Pane`, and the npm
+/// package's `view.js`) sets on each link (`<a>`) itself: it opens apart
+/// from the page, which it can neither reach nor send its address to.
+pub const LINK_FORCED: [(&str, &str); 2] = [("rel", "noopener noreferrer"), ("target", "_blank")];
+
+/// Whether attribute `name` of element `tag` is one the page forces
+/// ([`LINK_FORCED`]): a view's edit neither changes nor removes it.
+#[must_use]
+pub fn forced_attribute(tag: &str, name: &str) -> bool {
+    tag.eq_ignore_ascii_case("a")
+        && LINK_FORCED
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case(name))
+}
+
 /// What a process adds or changes at run time, as it happens (wire 4 on):
 /// its contributions, in place of the ones it sent before, or its runtime
 /// state.
@@ -308,4 +323,23 @@ pub struct Mods {
     pub ctrl: bool,
     pub meta: bool,
     pub shift: bool,
+}
+
+#[cfg(test)]
+mod forced_tests {
+    use super::{LINK_FORCED, forced_attribute};
+
+    /// The third review of #539: a link in an extension's view must not
+    /// navigate the page's own tab.
+    #[test]
+    fn a_links_rel_and_target_are_the_pages() {
+        assert!(forced_attribute("a", "rel"));
+        assert!(forced_attribute("A", "TARGET"));
+        assert!(!forced_attribute("a", "href"));
+        assert!(!forced_attribute("div", "target"));
+        assert_eq!(
+            LINK_FORCED,
+            [("rel", "noopener noreferrer"), ("target", "_blank")]
+        );
+    }
 }

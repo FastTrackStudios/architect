@@ -71,11 +71,17 @@ the lock against it and checks every file's bytes against the lock before anythi
 works whether the source is a URL or the metadata object. A file that differs, is missing from the
 lock, or lies outside the folder is refused, and so is a wrong or malformed `integrity`.
 
-`{ integrity: false }` loads the files unchecked and says so in the log. Use it only for a folder you
-build and serve yourself: whoever serves it decides what runs in the sandbox.
+`{ integrity: false }` loads the files unchecked. It says so in your `log` (or `host.log`), or on
+the console when you gave neither. Use it only for a folder you build and serve yourself: whoever
+serves it decides what runs in the sandbox.
 
 The module named in `architect.json` must be a relative path inside the folder: no scheme, no `..`,
 no leading `/`.
+
+**Serve each extension from a folder of its own, never your site's root.** Its JS may ask the page
+for any file beside its module, read without your cookies, and at your site's root that is every
+public file of your origin. `loadExtension` refuses a folder at `/`, and `build-web` refuses to write
+into a folder named like a site root (`public`, `dist`, `www`, …): build into a subfolder.
 
 An `Extension` has its `manifest`, `world`, `capabilities` (frozen), `actions` (`id`, `name`,
 `description`, `effect`, `schema`), `views`, `run(id, args)`, `report()` and `stop()`, and nothing
@@ -99,12 +105,15 @@ another browser.
 - **The page hands it everything.** The page fetches the files (and checks them, above) and hands in
   the glue as text and the core modules as bytes. Everything else crosses on a `MessageChannel` port
   the frame takes only from its parent.
-- **It asks the page only for files beside its module.** The core modules its JS requests must be
-  relative paths that resolve inside the extension's folder: no scheme, no leading `/`, no `..`.
-  They're read without credentials (`credentials: "omit"`) and at most `LIMITS.modules` of them,
-  each at most `LIMITS.moduleBytes`. This lives in `runner.js` itself, so Architect's own pages get it
-  too. Nothing it sends is parsed on the page's main thread: the page hands the bytes to the
-  sandbox's worker, which writes the memory limit in.
+- **It asks the page only for files beside its module.**
+  - The core modules its JS requests must be relative paths that resolve inside the extension's
+    folder: no scheme, no leading `/`, no `..`, and never a folder at the site's root.
+  - They're read without credentials (`credentials: "omit"`), at most `LIMITS.modules` of them.
+  - Reading stops at `LIMITS.moduleBytes`, and an extension's cached files are dropped when it
+    stops.
+  - This lives in `runner.js` itself, so Architect's own pages get it too.
+  - Nothing it sends is parsed on the page's main thread: the page hands the bytes to the sandbox's
+    worker.
 - **It reaches no cookie, storage, channel or network of yours.** It has no cookie-bearing request,
   no IndexedDB, Cache Storage or BroadcastChannel of your origin, no `fetch`, XHR, WebSocket or
   beacon, and no script import from your origin. `features/extensions/web/test/glue.test.mjs` runs a
@@ -112,7 +121,14 @@ another browser.
   them.
 - **It reaches only what you grant.** Everything it asks of the app is checked against its
   capabilities within your `grant` before your handler sees it (below).
-- **Its wasm is limited too**: memory, time and floods (see Limits).
+- **Time is enforced by the page; memory is not.** The page enforces each call's time, the start
+  deadline, `stop()` and the idle watchdog: past any of them it terminates the worker or removes the
+  frame, whatever runs there. Floods are bounded too (see Limits).
+  - The 64 MiB memory limit is **advisory** against a hostile extension. It is written into each
+    core module by code in the same worker as the extension's own JS, and that JS can compile wasm
+    of its own (the frame allows `wasm-unsafe-eval`).
+  - It holds for an honest extension, and a memory64 module (whose memory cannot be limited) is
+    refused.
 - **Its views can't escape into your page.** They draw in a shadow root with the share pages'
   sanitiser rules, made stricter (see Views).
 
@@ -177,6 +193,9 @@ them together at most `LIMITS.dataTotal`, and one host request at most `LIMITS.m
 - follows no redirect (a page can't see where one goes, so it couldn't check it);
 - uses the smaller of your timeout and the one the extension asks for;
 - stops reading a body at the size cap rather than buffering it first.
+- holds at most `maxStreams` (8) open streams and `maxBuffered` (32 MiB) per extension, each
+  readable and closable only by the extension that opened it;
+- answers a timeout with a message saying how long it waited.
 
 If you write your own `fetch` handler, keep all of those.
 
@@ -258,9 +277,14 @@ Each instance has limits (`limits`, `workerLimits`; defaults in `LIMITS`):
 
 - **Memory and time.** 64 MiB and 5 s per call by default, and 64 MiB and 60 s for a worker's whole
   run. A call past its time has its worker terminated, and the extension starts again.
-  - The memory limit is its **wasm's**, written into each core module.
-  - The extension's own JS (jco's glue) in the sandbox frame uses whatever CPU and memory the browser
-    gives a worker until it is stopped.
+  - The **time** limit is the page's: it terminates the worker.
+  - The **memory** limit is written into each core module in the sandbox's worker. It binds an honest
+    extension; a hostile one's JS can skip it or compile wasm of its own, so against those it is
+    advisory.
+  - A memory64 module is refused.
+  - The extension's own JS in the sandbox frame uses whatever CPU and memory the browser gives a
+    worker until the page stops it (`stop()`, a call past its time, the start deadline, the idle
+    watchdog).
 - **Start.** It must finish starting, core modules included, within `LIMITS.start` (15 s).
 - **Floods.** These cover the extension's own lines and its host-service `log` alike:
   - At most 200 log lines a second, each up to 4096 characters; the rest are counted and reported.
@@ -268,9 +292,13 @@ Each instance has limits (`limits`, `workerLimits`; defaults in `LIMITS`):
   - A view's timers are at least 16 ms apart.
   - At most 5 restarts a minute, each after a longer wait (up to 10 s). After that it stays stopped,
     and `report().lastTrap` says why.
-- **A watchdog** (`limits.idle`, off by default). After that many ms with no call, no mounted view and
-  no running worker, it is stopped and its sandbox frame removed, which ends whatever its JS was
-  doing. Its next call starts it again.
+- **A watchdog** (`limits.idle`, off by default).
+  - **What counts as use:** only your calls (`run`, mounting a view, events on it). The extension's
+    own timers, news and workers don't.
+  - **No view, no timers:** with no view mounted, its views' timers don't run.
+  - **When it fires:** after that many ms without your use and with no view mounted, it is stopped,
+    its workers too, and its sandbox frame is removed. That ends whatever its JS was doing.
+  - **Afterwards:** your next call starts it again.
 
 Under node, an idle extension doesn't keep the process alive, and `stop()` ends everything at once.
 The details and how they differ from the native runner are in
@@ -283,8 +311,9 @@ Even with all of the above, a page that loads an extension accepts that:
 - **It reads what you give it.** It sees whatever your host answers, and everything in its own views.
 - **It can phish inside its own box.** A view can draw a convincing form or message inside its
   shadow root. It can't reach your page's fields, but a person may type into its own.
-- **It uses CPU and memory.** Its JS in the sandbox can use a worker's worth of both until you call
-  `stop()` (or `limits.idle` stops it). The wasm memory limit doesn't cover that JS.
+- **It uses CPU and memory.** Its JS in the sandbox can use a worker's worth of both until the page
+  stops it: `stop()`, a call past its time, or `limits.idle`. The memory limit binds only an honest
+  extension's wasm (see "The security model").
 - **Node gives no protection.** A node host runs its JS with node's full access.
 - **Unpinned files are whatever the server sends.** With `integrity: false`, whoever serves the
   folder decides what runs in the sandbox.

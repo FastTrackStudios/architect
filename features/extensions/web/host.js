@@ -74,6 +74,17 @@ function settingDefaults(manifest) {
 /// text)` its log.
 const LEVELS = ['debug', 'info', 'warn', 'error'];
 
+/// The string fields of the requests the answerer itself keeps state by
+/// (and `run`'s action): as `hostcall::HostRequest` types them.
+const STRING_FIELDS = {
+  run: ['action'],
+  setting: ['key'],
+  set_setting: ['key'],
+  data: ['key'],
+  set_data: ['key'],
+  log: ['text'],
+};
+
 export function answerer({ manifest, may, host = {}, log, limits = {} }) {
   const dataBytes = limits.dataBytes ?? 256 << 10;
   const dataTotal = limits.dataTotal ?? 4 << 20;
@@ -104,8 +115,10 @@ export function answerer({ manifest, may, host = {}, log, limits = {} }) {
       return null;
     },
     data: (r) => (data.has(r.key) ? data.get(r.key) : null),
+    // (Every key is a string here: `answer` refuses any other, as Rust's
+    // `HostRequest` does, so what is measured is what is stored.)
     set_data: (r) => {
-      fits(String(r.key), r.value, data);
+      fits(r.key, r.value, data);
       if (r.value === undefined || r.value === null) data.delete(r.key);
       else data.set(r.key, r.value);
       return null;
@@ -127,6 +140,10 @@ export function answerer({ manifest, may, host = {}, log, limits = {} }) {
     if (!request || typeof request !== 'object' || !HOST_OPS.includes(request.op))
       return { error: { kind: 'failed', message: `not a host request: ${json(request?.op ?? request)}` } };
     const op = request.op;
+    // The fields `hostcall::HostRequest` types as strings, as strings: a
+    // key of another type is refused, never coerced.
+    for (const f of STRING_FIELDS[op] ?? [])
+      if (typeof request[f] !== 'string') return { error: { kind: 'failed', message: `not a host request: ${op}.${f} is not a string` } };
     let effect = 'read_only';
     if (op === 'run') {
       // Only an action the embedder offers, and never the extension's own
@@ -348,8 +365,25 @@ const b64 = (bytes) => {
 /// extension's `capabilities.hosts`, which the host checked already), no
 /// redirect followed (where it goes is hidden from a page, so it cannot be
 /// checked), a time and a size limit. Spread them into a host's `handle`.
-export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 30000, fetch: doFetch = globalThis.fetch } = {}) {
+export function fetchHandler({
+  allow = [],
+  maxBytes = 16 << 20,
+  timeoutMs = 30000,
+  maxStreams = 8,
+  maxBuffered = 32 << 20,
+  fetch: doFetch = globalThis.fetch,
+} = {}) {
+  // Each extension's streams: how many, how many bytes held; a stream is
+  // read or closed only by the extension that opened it.
   const streams = new Map();
+  const held = (ext) => {
+    let n = 0;
+    let bytes = 0;
+    for (const s of streams.values()) if (s.ext === ext) (n++, (bytes += s.bytes.length - s.at));
+    return { n, bytes };
+  };
+  const timedOut = (e, ms) =>
+    e?.name === 'TimeoutError' || e?.name === 'AbortError' ? { kind: 'failed', message: `the request took longer than ${ms} ms` } : null;
   let next = 0;
   const allowed = (url) => {
     const host = url.hostname.toLowerCase();
@@ -360,7 +394,11 @@ export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 3000
     });
   };
   return {
-    fetch: async (r) => {
+    fetch: async (r, ctx = { extension: '' }) => {
+      if (r.stream) {
+        const h = held(ctx.extension);
+        if (h.n >= maxStreams) throw { kind: 'failed', message: `${maxStreams} streams open: read or close one first` };
+      }
       let url;
       try {
         url = new URL(r.url);
@@ -373,7 +411,8 @@ export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 3000
       if (!allowed(url)) throw { kind: 'refused', capability: 'hosts', why: `${url.host} is not a host this page lets extensions reach` };
       // The extension may ask for less time than the page gives, never more.
       const asked = Number(r.timeout_ms);
-      const signal = AbortSignal.timeout(Math.min(timeoutMs, Number.isFinite(asked) && asked > 0 ? asked : timeoutMs, 300000));
+      const ms = Math.min(timeoutMs, Number.isFinite(asked) && asked > 0 ? asked : timeoutMs, 300000);
+      const signal = AbortSignal.timeout(ms);
       let res;
       try {
         res = await doFetch(url.href, {
@@ -388,26 +427,33 @@ export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 3000
           signal,
         });
       } catch (e) {
-        throw { kind: 'unsupported', what: `the browser refused to fetch ${url.href} (CORS, or the network): ${e?.message ?? e}` };
+        throw timedOut(e, ms) ?? { kind: 'unsupported', what: `the browser refused to fetch ${url.href} (CORS, or the network): ${e?.message ?? e}` };
       }
       if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400))
         throw { kind: 'unsupported', what: `${url.href} redirects: it is not followed` };
       const wants = Number(r.max_bytes);
       const cap = Math.min(maxBytes, Number.isFinite(wants) && wants > 0 ? wants : maxBytes);
-      const bytes = await readCapped(res, cap);
+      let bytes;
+      try {
+        bytes = await readCapped(res, cap);
+      } catch (e) {
+        throw timedOut(e, ms) ?? (e?.kind ? e : { kind: 'failed', message: `its body: ${e?.message ?? e}` });
+      }
       const headers = {};
       res.headers.forEach((v, k) => (headers[k.toLowerCase()] = v));
       const out = { status: res.status, url: url.href, headers };
       if (r.stream) {
+        if (held(ctx.extension).bytes + bytes.length > maxBuffered)
+          throw { kind: 'failed', message: `its open streams would hold more than ${maxBuffered} bytes: read or close one first` };
         const id = `s${++next}`;
-        streams.set(id, { bytes, at: 0, binary: !!r.binary, decoder: new TextDecoder() });
+        streams.set(id, { ext: ctx.extension, bytes, at: 0, binary: !!r.binary, decoder: new TextDecoder() });
         out.stream = id;
       } else out.body = r.binary ? b64(bytes) : new TextDecoder().decode(bytes);
       return out;
     },
-    read_body: (r) => {
+    read_body: (r, ctx = { extension: '' }) => {
       const s = streams.get(r.stream);
-      if (!s) throw { kind: 'not_found', what: `stream ${r.stream}` };
+      if (!s || s.ext !== ctx.extension) throw { kind: 'not_found', what: `stream ${r.stream}` };
       const end = Math.min(s.bytes.length, s.at + Math.max(1, Number(r.max ?? 65536)));
       const part = s.bytes.subarray(s.at, end);
       s.at = end;
@@ -415,6 +461,9 @@ export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 3000
       if (done) streams.delete(r.stream);
       return { chunk: s.binary ? b64(part) : s.decoder.decode(part, { stream: !done }), done };
     },
-    close_body: (r) => streams.delete(r.stream),
+    close_body: (r, ctx = { extension: '' }) => {
+      const s = streams.get(r.stream);
+      return !!s && s.ext === ctx.extension && streams.delete(r.stream);
+    },
   };
 }
