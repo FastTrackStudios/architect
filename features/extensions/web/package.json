@@ -1,13 +1,88 @@
 {
-  "name": "architect-extensions-web",
-  "private": true,
-  "description": "WASI component extensions in the browser: jco transpiles a component; runner.js and instance.js run it (docs/content/architecture/extensions.md, \"WASI components\").",
+  "name": "@fasttrackstudio/architect",
+  "version": "0.0.0-dev",
+  "description": "Run Architect's WASI component extensions in any web app: load one, call its actions with types, mount its views, inside a sandbox with memory and time limits and deny-by-default capabilities.",
   "type": "module",
   "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FastTrackStudios/architect.git",
+    "directory": "features/extensions/web"
+  },
+  "homepage": "https://architect.fasttrackstudio.app/docs/guide/extensions-in-your-web-app/",
+  "bugs": "https://github.com/FastTrackStudios/architect/issues",
+  "keywords": ["wasm", "wasi", "component-model", "extensions", "sandbox", "jco"],
+  "engines": {
+    "node": ">=24"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./react": {
+      "types": "./react.d.ts",
+      "default": "./react.js"
+    },
+    "./node": {
+      "types": "./node.d.ts",
+      "default": "./node.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./index.d.ts",
+  "bin": {
+    "architect": "./cli.mjs"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "react.js",
+    "react.d.ts",
+    "node.js",
+    "node.d.ts",
+    "node-worker.mjs",
+    "runner.js",
+    "instance.js",
+    "dist/instance-source.js",
+    "check.js",
+    "host.js",
+    "sanitize.js",
+    "view.js",
+    "world.js",
+    "transpile.mjs",
+    "typegen.mjs",
+    "cli.mjs",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
   "scripts": {
-    "test": "node --test test/web.test.mjs"
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs",
+    "test": "node --test test/web.test.mjs",
+    "test:package": "npm run build && node --test --test-concurrency=1 test/check.test.mjs test/sanitize.test.mjs test/typegen.test.mjs test/pack.test.mjs test/package.test.mjs",
+    "test:unit": "npm run build && node --test --test-concurrency=1 test/check.test.mjs test/sanitize.test.mjs test/typegen.test.mjs test/pack.test.mjs"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "smol-toml": "1.9.1"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "1.41.0"
+    "@types/react": "19.2.18",
+    "typescript": "6.0.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

@@ -16,6 +16,10 @@
 //! components, it says so and passes; `ARCHITECT_WASI_WEB_REQUIRED=1`
 //! (main CI) makes that a failure.
 //!
+//! Then the npm package's tests (`@fasttrackstudio/architect`, the same
+//! folder): `test/package.test.mjs` on the same components, and its unit
+//! tests.
+//!
 //! The node run is bounded ([`NODE_LIMIT`]): past it the run is killed and
 //! the test fails with what it printed, instead of holding main CI's
 //! Tests job to its timeout (#520).
@@ -115,7 +119,14 @@ fn components_run_in_the_browsers_shape() {
         return skip("no node on the PATH or in `devenv --profile wasi shell`");
     };
     let web = root().join("features/extensions/web");
-    if !web.join("node_modules/.bin/jco").exists() {
+    let installed = [
+        "node_modules/.bin/jco",
+        "node_modules/smol-toml",
+        "node_modules/typescript",
+    ]
+    .iter()
+    .all(|p| web.join(p).exists());
+    if !installed {
         let Some(mut npm) = tool("npm") else {
             return skip("no npm to install jco with");
         };
@@ -144,6 +155,50 @@ fn components_run_in_the_browsers_shape() {
     assert!(
         !tap.contains("# SKIP"),
         "the node tests skipped: the components were not where they looked\n{tap}"
+    );
+
+    // The npm package (`@fasttrackstudio/architect`) on the same
+    // components, through its public API: `architect build-web`, typed
+    // runs, deny-by-default capabilities, `confirm`, an unhandled request,
+    // the time limit, the world's version; and its unit tests (the
+    // capability check, the sanitiser, typed actions through tsc, what
+    // `npm pack` publishes). In the same test, after the first, so two
+    // `npm ci`s never race in one folder.
+    let Some(mut build) = tool("node") else {
+        return skip("no node");
+    };
+    let built = build.args(["scripts/build.mjs"]).current_dir(&web).status();
+    assert!(built.is_ok_and(|s| s.success()), "scripts/build.mjs failed");
+    let Some(mut package) = tool("node") else {
+        return skip("no node");
+    };
+    package
+        .args([
+            "--test",
+            "--test-reporter=tap",
+            "--test-concurrency=1",
+            "test/check.test.mjs",
+            "test/sanitize.test.mjs",
+            "test/typegen.test.mjs",
+            "test/pack.test.mjs",
+            "test/package.test.mjs",
+        ])
+        .env("ARCHITECT_WASI_GUESTS", &guests)
+        .current_dir(&web);
+    let out = bounded(package, NODE_LIMIT);
+    let tap = String::from_utf8_lossy(&out.stdout);
+    let failed: Vec<&str> = tap
+        .lines()
+        .filter(|l| l.trim_start().starts_with("not ok"))
+        .collect();
+    assert!(
+        out.status.success() && failed.is_empty(),
+        "{failed:#?}\n{tap}\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !tap.contains("# SKIP"),
+        "the package's tests skipped: the components were not where they looked\n{tap}"
     );
 }
 
