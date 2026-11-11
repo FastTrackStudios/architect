@@ -551,6 +551,18 @@ impl Distribution {
         blocks
     }
 
+    /// Its compiled-in extensions' `[[share_layers]]` rules (#528): which
+    /// layer of a share link each file of their note types is in, as the
+    /// node places them.
+    #[must_use]
+    pub fn share_layers(&self) -> Vec<architect_extensions::share_layers::ShareLayersDecl> {
+        self.extensions()
+            .into_iter()
+            .filter_map(|e| Manifest::parse(e.manifest()).ok())
+            .flat_map(|m| m.share_layers)
+            .collect()
+    }
+
     /// What it is, as the web bundle's `/app/distribution.json` and
     /// `<app> distribution` print it: its name, app, folder, bundle id,
     /// version, and every compiled-in extension (id, name, version,
