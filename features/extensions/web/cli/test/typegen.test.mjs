@@ -12,7 +12,8 @@ import { parse } from 'smol-toml';
 import { methodNames, schemaType, typegen } from '../typegen.mjs';
 
 const here = fileURLToPath(new URL('..', import.meta.url));
-const counter = parse(readFileSync(join(here, '../../../apps/sandbox/wasi-counter/extension.toml'), 'utf8'));
+const web = join(here, '..');
+const counter = parse(readFileSync(join(web, '../../../apps/sandbox/wasi-counter/extension.toml'), 'utf8'));
 
 test('the JSON schema subset as TypeScript', () => {
   assert.equal(schemaType({ type: 'string' }), 'string');
@@ -24,7 +25,7 @@ test('the JSON schema subset as TypeScript', () => {
   assert.equal(schemaType({ anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] }), 'string | Array<string>');
   assert.equal(
     schemaType({ type: 'object', properties: { a: { type: 'string', description: 'A.' }, 'b-c': { type: 'boolean' } }, required: ['a'] }),
-    '{\n  /** A. */\n  a: string;\n  "b-c"?: boolean;\n}',
+    '{\n  a: string;\n  "b-c"?: boolean;\n}',
   );
   assert.equal(schemaType({ type: 'object', additionalProperties: { type: 'number' } }), '{\n  [key: string]: number;\n}');
   assert.equal(schemaType({ type: 'object' }), 'Record<string, unknown>');
@@ -81,12 +82,12 @@ export async function use(): Promise<void> {
           moduleResolution: 'NodeNext',
           skipLibCheck: false,
           types: [],
-          paths: { '@fasttrackstudio/architect': [join(here, 'index.d.ts')] },
+          paths: { '@fasttrackstudio/architect': [join(web, 'index.d.ts')] },
         },
         files: ['use.ts'],
       }),
     );
-    const tsc = join(here, 'node_modules/typescript/bin/tsc');
+    const tsc = join(web, 'node_modules/typescript/bin/tsc');
     try {
       execFileSync(process.execPath, [tsc, '-p', dir], { stdio: 'pipe' });
     } catch (e) {
@@ -139,24 +140,108 @@ export function Counter({ ext }: { ext: Extension | null }) {
           target: 'ES2022',
           module: 'ESNext',
           moduleResolution: 'Bundler',
-          typeRoots: [join(here, 'node_modules/@types')],
+          typeRoots: [join(web, 'node_modules/@types')],
           types: [],
           paths: {
-            '@fasttrackstudio/architect': [join(here, 'index.d.ts')],
-            '@fasttrackstudio/architect/react': [join(here, 'react.d.ts')],
-            react: [join(here, 'node_modules/@types/react')],
-            'react/jsx-runtime': [join(here, 'node_modules/@types/react/jsx-runtime')],
+            '@fasttrackstudio/architect': [join(web, 'index.d.ts')],
+            '@fasttrackstudio/architect/react': [join(web, 'react.d.ts')],
+            react: [join(web, 'node_modules/@types/react')],
+            'react/jsx-runtime': [join(web, 'node_modules/@types/react/jsx-runtime')],
           },
         },
         files: ['view.tsx'],
       }),
     );
     try {
-      execFileSync(process.execPath, [join(here, 'node_modules/typescript/bin/tsc'), '-p', dir], { stdio: 'pipe' });
+      execFileSync(process.execPath, [join(web, 'node_modules/typescript/bin/tsc'), '-p', dir], { stdio: 'pipe' });
     } catch (e) {
       assert.fail(`it did not compile:\n${e.stdout}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---- P5: a manifest never becomes code ---------------------------------------
+
+import vm from 'node:vm';
+import ts from 'typescript';
+import { checkManifest } from '../manifest.mjs';
+
+/// Strings a hostile manifest could carry (the review of #539's payloads
+/// and the classic ways out of a comment, a string or a key).
+const HOSTILE = [
+  '1\nglobalThis.PWNED=true;//',
+  '*/ globalThis.PWNED=true; /*',
+  '"; globalThis.PWNED=true; "',
+  "'; globalThis.PWNED=true; '",
+  '`${globalThis.PWNED=true}`',
+  ' globalThis.PWNED=true;//',
+  '</script><script>globalThis.PWNED=true</script>',
+  '\\u0022; globalThis.PWNED=true; //',
+];
+
+function hostileManifests() {
+  const base = () => ({
+    id: 'lab.wasi-counter',
+    name: 'Counter',
+    version: '0.1.0',
+    actions: [{ id: 'LAB_WASI_COUNTER_ADD', name: 'Add', params: '{"type":"object","properties":{"by":{"type":"integer"}}}' }],
+  });
+  const out = [];
+  // The reviewer's two, as written.
+  out.push({ ...base(), version: '1\nglobalThis.PWNED_HEAD=true;//' });
+  out.push({ ...base(), actions: [{ id: 'EVIL_EXT_A:(globalThis.PWNED=true),B', name: 'x' }] , id: 'evil.ext' });
+  for (const s of HOSTILE) {
+    out.push({ ...base(), id: s });
+    out.push({ ...base(), version: s });
+    out.push({ ...base(), name: s });
+    out.push({ ...base(), actions: [{ ...base().actions[0], id: `LAB_WASI_COUNTER_${s}` }] });
+    out.push({ ...base(), actions: [{ ...base().actions[0], name: s, description: s }] });
+    out.push({ ...base(), actions: [{ ...base().actions[0], effect: s }] });
+    out.push({
+      ...base(),
+      actions: [{ ...base().actions[0], params: JSON.stringify({ type: 'object', description: s, properties: { [s]: { type: 'string', description: s, enum: [s] } } }) }],
+    });
+  }
+  return out;
+}
+
+/// The shape of a source file: its statements' kinds, and any syntax error.
+function shape(text) {
+  const f = ts.createSourceFile('x.d.ts', text, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  return { kinds: f.statements.map((s) => ts.SyntaxKind[s.kind]), errors: f.parseDiagnostics.length };
+}
+
+test('a hostile manifest is refused or emits only data: same AST shape, nothing runs', () => {
+  const good = typegen(counter);
+  const goodDts = shape(good.dts);
+  const goodJs = shape(good.js);
+  let refused = 0;
+  for (const m of hostileManifests()) {
+    let out;
+    try {
+      checkManifest(m);
+      out = typegen(m);
+    } catch (e) {
+      assert.match(String(e.message), /manifest/, `refused with a reason: ${e.message}`);
+      refused++;
+      continue;
+    }
+    const d = shape(out.dts);
+    assert.equal(d.errors, 0, `the .d.ts parses: ${JSON.stringify(m)}`);
+    assert.deepEqual(d.kinds, goodDts.kinds, `the .d.ts keeps its shape: ${JSON.stringify(m)}\n${out.dts}`);
+    const j = shape(out.js);
+    assert.equal(j.errors, 0);
+    assert.deepEqual(j.kinds, goodJs.kinds, `the .js keeps its shape: ${JSON.stringify(m)}\n${out.js}`);
+    // Run it, and bind() it, in a context with a tripwire.
+    const tripped = [];
+    const context = vm.createContext({ console: { log: () => tripped.push('console.log') } });
+    Object.defineProperty(context, 'PWNED', { set: () => tripped.push('PWNED'), get: () => undefined });
+    Object.defineProperty(context, 'PWNED_HEAD', { set: () => tripped.push('PWNED_HEAD'), get: () => undefined });
+    const js = out.js.replace(/^export /gm, '');
+    vm.runInContext(`${js}\nbind({ run: () => null });`, context);
+    assert.deepEqual(tripped, [], `nothing ran: ${JSON.stringify(m)}`);
+  }
+  assert.ok(refused > 0, 'bad ids and versions are refused');
 });

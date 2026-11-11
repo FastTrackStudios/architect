@@ -1,5 +1,5 @@
-// What npm would publish: exactly the package's files, nothing else of
-// the repo's (no tests, no node_modules, no Rust).
+// What npm would publish of @fasttrackstudio/architect: exactly its
+// files, nothing else of the repo's, and no runtime dependency at all.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url';
 const here = fileURLToPath(new URL('..', import.meta.url));
 
 export const PUBLISHED = [
-  'LICENSE-APACHE', 'LICENSE-MIT', 'README.md', 'check.js', 'cli.mjs', 'dist/instance-source.js', 'host.js', 'index.d.ts',
+  'LICENSE-APACHE', 'LICENSE-MIT', 'README.md', 'check.js', 'dist/instance-source.js', 'host.js', 'index.d.ts',
   'index.js', 'instance.js', 'node-worker.mjs', 'node.d.ts', 'node.js', 'package.json', 'react.d.ts', 'react.js',
-  'runner.js', 'sanitize.js', 'transpile.mjs', 'typegen.mjs', 'view.js', 'world.js',
+  'runner.js', 'sanitize.js', 'view.js', 'world.js',
 ];
 
 test('npm pack lists exactly the package’s files', () => {
@@ -21,11 +21,14 @@ test('npm pack lists exactly the package’s files', () => {
   assert.deepEqual(pack.files.map((f) => f.path).sort(), [...PUBLISHED].sort());
 });
 
-test('the manifest publishes publicly, with provenance, and every export has its types', () => {
+// P7 (review of #539): installing it pulled jco (75 packages, 353 MB).
+test('P7: the runtime package has no runtime dependency, no bin, and a bounded React peer', () => {
   const p = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(p.private, undefined);
+  assert.deepEqual(p.dependencies ?? {}, {});
+  assert.equal(p.bin, undefined, 'no generic `architect` command');
   assert.deepEqual(p.publishConfig, { access: 'public', provenance: true });
   assert.equal(p.type, 'module');
+  assert.match(p.peerDependencies.react, /<\d/, 'an upper bound');
   for (const [path, e] of Object.entries(p.exports)) if (path !== './package.json') assert.ok(e.types && e.default, path);
-  assert.equal(p.bin.architect, './cli.mjs');
 });

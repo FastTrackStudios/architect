@@ -85,9 +85,10 @@ jobs:
           cargo hakari generate --diff
           cargo hakari manage-deps --dry-run
 
-  # @fasttrackstudio/architect (features/extensions/web): its unit tests
-  # (the capability check, the view sanitiser, typed actions through tsc,
-  # what `npm pack` would publish), in parallel with `check` and only when
+  # @fasttrackstudio/architect and its CLI (features/extensions/web): their
+  # unit tests (the capability check, the view sanitiser, the sandbox's
+  # hash, the public surface, typed actions through tsc and the hostile
+  # manifests, what `npm pack` would publish), in parallel with `check` and only when
   # the package or the world changed. They need no component: running real
   # components (web.test.mjs, package.test.mjs) builds them for
   # wasm32-wasip2, minutes on the self-hosted pool, so that stays on main
@@ -122,5 +123,5 @@ jobs:
         working-directory: features/extensions/web
         run: |
           set -euo pipefail
-          npm ci --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
           npm run test:unit

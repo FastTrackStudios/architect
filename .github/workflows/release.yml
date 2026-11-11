@@ -12,8 +12,8 @@ name: release
 #   a PR bumping nix/desktop/source.json (the flake's app)     job nix-bump
 #   Architect-macos-arm64.dmg + latest-macos.json            job macos (UNTESTED, off by default)
 #   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums
-#   @fasttrackstudio/architect on npm (features/extensions/web) job publish-npm
-#     (inert until the NPM_TOKEN secret is set)
+#   @fasttrackstudio/architect(-cli) on npm (features/extensions/web)  jobs npm-pack, npm-publish
+#     (npm-publish inert until the NPM_TOKEN secret is set)
 #
 # Windows desktop builds are a follow-up (#431).
 on:
@@ -435,19 +435,57 @@ jobs:
           fi
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
 
-  # @fasttrackstudio/architect, the npm package that runs Architect's
-  # extensions in any web app (features/extensions/web;
-  # docs/content/guide/extensions-in-your-web-app.md): its version is the
-  # tag's, a pre-release (`v1.2.0-rc.1`) goes out under the `next`
-  # dist-tag, never `latest`. Provenance needs a GitHub-hosted runner and
-  # `id-token: write`. Without the NPM_TOKEN secret it says so and stops;
-  # it never fails the release. After the first publish (by hand: npm needs
-  # the package to exist), switch to trusted publishing and drop the token.
-  publish-npm:
+  # @fasttrackstudio/architect (the runtime, no dependencies) and
+  # @fasttrackstudio/architect-cli (build-web, with jco), from
+  # features/extensions/web (docs/content/guide/extensions-in-your-web-app.md):
+  # their version is the tag's; a pre-release (`v1.2.0-rc.1`) goes out
+  # under the `next` dist-tag, never `latest`.
+  #
+  # Two jobs, so the token is near nothing that runs code: npm-pack
+  # installs with --ignore-scripts, tests and packs with no token and no
+  # id-token; npm-publish only publishes those tarballs (no install, no
+  # scripts), with the token and `id-token: write` (provenance needs a
+  # GitHub-hosted runner). Neither feeds the release's assets, so a failed
+  # publish cannot fail them, and it shows red. Without the NPM_TOKEN
+  # secret npm-publish says so and stops. After the first publish (by
+  # hand), switch to trusted publishing and drop the token.
+  npm-pack:
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test and pack
+        working-directory: features/extensions/web
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run test:unit
+          npm version "$version" --no-git-tag-version --ignore-scripts
+          (cd cli && npm version "$version" --no-git-tag-version --ignore-scripts)
+          node scripts/build.mjs
+          mkdir -p "$RUNNER_TEMP/npm"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/npm"
+          (cd cli && npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/npm")
+          ls -l "$RUNNER_TEMP/npm"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarballs
+          path: ${{ runner.temp }}/npm/*.tgz
+          retention-days: 7
+
+  npm-publish:
+    needs: npm-pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
@@ -464,28 +502,26 @@ jobs:
           else
             echo "go=true" >> "$GITHUB_OUTPUT"
           fi
-
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         if: ${{ steps.token.outputs.go == 'true' }}
-
+        with:
+          name: npm-tarballs
+          path: npm
       - uses: actions/setup-node@v4
         if: ${{ steps.token.outputs.go == 'true' }}
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-
       - name: Publish
         if: ${{ steps.token.outputs.go == 'true' }}
-        working-directory: features/extensions/web
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          npm ci --no-audit --no-fund
-          npm version "$version" --no-git-tag-version --allow-same-version
-          npm run test:unit
           tag=latest
           case "$version" in *-*) tag=next ;; esac
-          npm publish --provenance --access public --tag "$tag"
-          echo "### npm: @fasttrackstudio/architect@$version (\`$tag\`)" >> "$GITHUB_STEP_SUMMARY"
+          # The runtime first: the CLI's users install it beside it.
+          npm publish "npm/fasttrackstudio-architect-$version.tgz" --provenance --access public --tag "$tag" --ignore-scripts
+          npm publish "npm/fasttrackstudio-architect-cli-$version.tgz" --provenance --access public --tag "$tag" --ignore-scripts
+          echo "### npm: @fasttrackstudio/architect@$version, @fasttrackstudio/architect-cli@$version (\`$tag\`)" >> "$GITHUB_STEP_SUMMARY"

@@ -13,4 +13,7 @@ writeFileSync(
   join(here, 'dist/instance-source.js'),
   `// Generated from instance.js by scripts/build.mjs: do not edit.\nexport default ${JSON.stringify(source)};\n`,
 );
-for (const f of ['LICENSE-MIT', 'LICENSE-APACHE']) copyFileSync(join(here, '../../..', f), join(here, f));
+for (const f of ['LICENSE-MIT', 'LICENSE-APACHE']) {
+  copyFileSync(join(here, '../../..', f), join(here, f));
+  copyFileSync(join(here, '../../..', f), join(here, 'cli', f));
+}

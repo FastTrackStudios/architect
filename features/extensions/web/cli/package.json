@@ -1,0 +1,45 @@
+{
+  "name": "@fasttrackstudio/architect-cli",
+  "version": "0.0.0-dev",
+  "description": "Make an Architect extension's WASI component ready for @fasttrackstudio/architect: transpile it (jco), write its metadata, a lock of every file's SHA-256, typed actions, and a size report. `architect-ext build-web`.",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FastTrackStudios/architect.git",
+    "directory": "features/extensions/web/cli"
+  },
+  "homepage": "https://architect.fasttrackstudio.app/docs/guide/extensions-in-your-web-app/",
+  "bugs": "https://github.com/FastTrackStudios/architect/issues",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "architect-ext": "./cli.mjs"
+  },
+  "exports": {
+    ".": "./cli.mjs",
+    "./typegen": "./typegen.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cli.mjs",
+    "typegen.mjs",
+    "transpile.mjs",
+    "manifest.mjs",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "scripts": {
+    "prepack": "node ../scripts/build.mjs --cli"
+  },
+  "dependencies": {
+    "@bytecodealliance/jco": "1.41.0",
+    "smol-toml": "1.9.1"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

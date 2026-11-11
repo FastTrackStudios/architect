@@ -157,12 +157,15 @@ fn components_run_in_the_browsers_shape() {
         "the node tests skipped: the components were not where they looked\n{tap}"
     );
 
-    // The npm package (`@fasttrackstudio/architect`) on the same
-    // components, through its public API: `architect build-web`, typed
-    // runs, deny-by-default capabilities, `confirm`, an unhandled request,
-    // the time limit, the world's version; and its unit tests (the
-    // capability check, the sanitiser, typed actions through tsc, what
-    // `npm pack` publishes). In the same test, after the first, so two
+    // The npm packages (`@fasttrackstudio/architect`, `-cli`) on the same
+    // components, through the public API: `build-web`, typed runs,
+    // deny-by-default capabilities, `confirm`, an unhandled request, the
+    // time limit and restarts, pinned files, the world's version, node
+    // exiting; and their unit tests (the capability check, the sanitiser,
+    // the sandbox's hash, the public surface, typed actions through tsc
+    // and hostile manifests, what `npm pack` publishes). The browser's
+    // (test/view.test.mjs, test/glue.test.mjs, examples/web-counter) need
+    // a Firefox: `npm run test:browser` there. In the same test, after the first, so two
     // `npm ci`s never race in one folder.
     let Some(mut build) = tool("node") else {
         return skip("no node");
@@ -179,8 +182,11 @@ fn components_run_in_the_browsers_shape() {
             "--test-concurrency=1",
             "test/check.test.mjs",
             "test/sanitize.test.mjs",
-            "test/typegen.test.mjs",
+            "test/sandbox.test.mjs",
+            "test/surface.test.mjs",
             "test/pack.test.mjs",
+            "cli/test/typegen.test.mjs",
+            "cli/test/pack.test.mjs",
             "test/package.test.mjs",
         ])
         .env("ARCHITECT_WASI_GUESTS", &guests)
