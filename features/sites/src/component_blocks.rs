@@ -916,7 +916,10 @@ mod tests {
             let mut at = tree.nodes[start].parent;
             while let Some(p) = at {
                 depth += 1;
-                assert!(depth <= MAX_DEPTH, "node {start} is deeper than {MAX_DEPTH}");
+                assert!(
+                    depth <= MAX_DEPTH,
+                    "node {start} is deeper than {MAX_DEPTH}"
+                );
                 at = tree.nodes[p].parent;
             }
         }

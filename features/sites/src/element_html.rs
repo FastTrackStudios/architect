@@ -39,7 +39,7 @@ pub fn elements_to_html(elements: &[Element]) -> Result<String, String> {
 /// `elements` written as markup, bounded as [`elements_to_html`] is, not
 /// yet sanitised: for [`crate::Drawn::into_block_html`], which sanitises
 /// it as a block.
-pub(crate) fn elements_to_markup(elements: &[Element]) -> Result<String, String> {
+pub fn elements_to_markup(elements: &[Element]) -> Result<String, String> {
     let mut w = TreeWriter::default();
     for element in elements {
         w.element(element, 0)?;

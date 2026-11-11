@@ -322,8 +322,9 @@ const POSITIONS: &[&str] = &["static", "relative"];
 /// block.
 const SELECTOR_REFUSED: &[&str] = &[":root", "html", "body", ":host"];
 
-/// The inline style of the box the site wraps each block in: whatever a
-/// block's CSS does, its paint, layout and counters stay inside it, and
+/// The inline style of the box the site wraps each block in.
+///
+/// Whatever a block's CSS does, its paint, layout and counters stay inside it, and
 /// what overflows scrolls inside it (a chart wider than the page, scrolled
 /// to its playhead by `player.js`) or is clipped.
 pub const BLOCK_BOX_STYLE: &str = "contain:layout paint style!important;overflow:auto!important;position:relative!important;isolation:isolate!important";
@@ -447,7 +448,9 @@ fn html_attr(tag: &str, lower: &str, value: &str) -> bool {
 /// would win.
 fn reserved_id(id: &str) -> bool {
     let lower = id.trim().to_ascii_lowercase();
-    lower.starts_with("site-") || lower.starts_with("share-") || RESERVED_IDS.contains(&lower.as_str())
+    lower.starts_with("site-")
+        || lower.starts_with("share-")
+        || RESERVED_IDS.contains(&lower.as_str())
 }
 
 /// What a URL is for.
@@ -676,10 +679,7 @@ fn scope_selector(selector: &str, scope: &str) -> Option<String> {
 /// Whether `scope` is a class name a sheet can be put under: `site-block`
 /// and ASCII letters, digits and `-`.
 fn scope_ok(scope: &str) -> bool {
-    scope.starts_with("site-block")
-        && scope
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    scope.starts_with("site-block") && scope.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// A tag or attribute name: letters, digits, `-`, `_`, `:` and `.`,
@@ -705,8 +705,9 @@ pub fn sanitize(markup: &str) -> String {
     sanitize_counting(markup, None).0
 }
 
-/// [`sanitize`] for a block the site wraps in a box of class `scope`
-/// (`site-block-…`): an SVG's `<style>` sheet is kept when each of its
+/// [`sanitize`] for a block the site wraps in a box of class `scope`.
+///
+/// The scope is `site-block-…`: an SVG's `<style>` sheet is kept when each of its
 /// rules can be put under `.{scope}` ([`scope_sheet`]). A `scope` that is
 /// not such a class keeps no sheet.
 #[must_use]
@@ -1174,6 +1175,10 @@ mod tests {
 <defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect class="kf-bar" data-at="0.000" data-bar="1" data-pass="1" x="0" y="0" width="100" height="120" rx="2"/><rect class="kf-bar" data-at="2.500" x="100" y="0" width="100" height="120" fill="url(#g)"/><path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"/><use href="#g"/><text x="4" y="20" font-size="12" font-family="Bravura" fill="#000000">C &amp; G</text><text x="40" y="20" font-size="12" font-family="FreeSerif" font-weight="bold" text-anchor="middle">Am</text><a href="#bar-2"><circle cx="5" cy="5" r="2"/></a></svg>"##;
 
     #[test]
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        reason = "CSS rules in the inputs, not format arguments"
+    )]
     fn an_svg_drawing_comes_through_whole() {
         let out = sanitize_block(CHART, SCOPE);
         for kept in [
@@ -1208,6 +1213,10 @@ mod tests {
     /// with `url('data:…')`: both sheets are dropped whole, the drawing
     /// kept (the site's own CSS marks the bar at the playhead).
     #[test]
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        reason = "CSS rules in the inputs, not format arguments"
+    )]
     fn keyflow_sheets_as_written_today_are_dropped_and_the_drawing_kept() {
         let follow = "<svg data-follow-playhead=\"\"><style>.kf-bar{fill:#f5a623;fill-opacity:0;pointer-events:all;cursor:pointer}.kf-bar[aria-current=\"time\"]{fill-opacity:0.18}</style><rect class=\"kf-bar\" data-at=\"0.000\"/></svg>";
         assert_eq!(
@@ -1224,11 +1233,17 @@ mod tests {
     /// The sheet rewriter by itself: flat rules only, every selector put
     /// under the scope, nothing that names the page above it.
     #[test]
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        reason = "CSS rules in the inputs, not format arguments"
+    )]
     fn a_sheet_is_put_under_its_block_or_dropped() {
         let scoped = |css: &str| scope_sheet(css, SCOPE);
         assert_eq!(
             scoped(".a{fill:red} g > .b, text:hover { opacity : 0.5 ; }").as_deref(),
-            Some(".site-block-t .a { fill:red } .site-block-t g > .b, .site-block-t text:hover { opacity : 0.5 }")
+            Some(
+                ".site-block-t .a { fill:red } .site-block-t g > .b, .site-block-t text:hover { opacity : 0.5 }"
+            )
         );
         // Already under the scope: kept as it is, so it is stable.
         assert_eq!(
@@ -1462,7 +1477,9 @@ mod tests {
             ),
             (
                 "<svg><rect fill=\"url(https://evil.example/x.svg#p)\"/><rect fill=\"url( '#p')\" mask=\"u\\72l(x)\"/><rect fill=\"url(#p)\" clip-path=\"url(#c) \"/><rect fill=\"url(#p)url(x)\"/></svg>",
-                Some("<svg><rect></rect><rect></rect><rect fill=\"url(#p)\" clip-path=\"url(#c) \"></rect><rect></rect></svg>"),
+                Some(
+                    "<svg><rect></rect><rect></rect><rect fill=\"url(#p)\" clip-path=\"url(#c) \"></rect><rect></rect></svg>",
+                ),
             ),
             // Handlers, frames, the rest.
             (
@@ -1503,7 +1520,9 @@ mod tests {
             ),
             (
                 "<div style=\"position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:99999\">x</div>",
-                Some("<div style=\"top:0; left:0; width:100vw; height:100vh; z-index:99999\">x</div>"),
+                Some(
+                    "<div style=\"top:0; left:0; width:100vw; height:100vh; z-index:99999\">x</div>",
+                ),
             ),
             (
                 "<div style=\"position:relative; background-position:0 0\">x</div>",
@@ -1529,7 +1548,9 @@ mod tests {
             // Finding 4: a block's image comes from the share, not elsewhere.
             (
                 "<img src=\"https://evil.example/b.png\" alt=\"b\"><svg><image href=\"https://evil.example/i.png\"/><image xlink:href=\"/s/x/i.png\"/></svg>",
-                Some("<img alt=\"b\"><svg><image></image><image xlink:href=\"/s/x/i.png\"></image></svg>"),
+                Some(
+                    "<img alt=\"b\"><svg><image></image><image xlink:href=\"/s/x/i.png\"></image></svg>",
+                ),
             ),
             // Finding 6: an id shadowing a global the page's scripts read.
             (
@@ -1626,7 +1647,9 @@ mod tests {
                         assert!(under, "{sel} not under the scope: {out}\n  from {from}");
                         let lower = sel.to_ascii_lowercase();
                         assert!(
-                            !["body", "html", ":root", ":host"].iter().any(|b| lower.contains(b)),
+                            !["body", "html", ":root", ":host"]
+                                .iter()
+                                .any(|b| lower.contains(b)),
                             "{sel}: {out}"
                         );
                     }
@@ -1677,7 +1700,8 @@ mod tests {
             let id = value.to_ascii_lowercase();
             assert!(!id.starts_with("site-"), "{out}");
             assert!(
-                !["architect", "addeventlistener", "eventsource", "matchmedia"].contains(&id.as_str()),
+                !["architect", "addeventlistener", "eventsource", "matchmedia"]
+                    .contains(&id.as_str()),
                 "id={value} shadows a global: {out}\n  from {from}"
             );
         }
@@ -1725,16 +1749,18 @@ mod tests {
             return false;
         }
         let squeezed: String = lower.chars().filter(|c| !c.is_whitespace()).collect();
-        let urls_ok = squeezed.match_indices("url(").all(|(at, _)| {
-            let rest = &squeezed[at + 4..];
+        // Each `url(` is followed by `#id)`, when `local_urls`.
+        let urls_ok = squeezed.split("url(").skip(1).all(|after| {
             local_urls
-                && rest.strip_prefix('#').is_some_and(|r| {
-                    let id_end = r.find(')').unwrap_or(0);
-                    id_end > 0
-                        && r[..id_end]
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
-                })
+                && after
+                    .strip_prefix('#')
+                    .and_then(|r| r.split_once(')'))
+                    .is_some_and(|(id, _)| {
+                        !id.is_empty()
+                            && id
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+                    })
         });
         let loads = [
             "image-set(",
@@ -1750,13 +1776,14 @@ mod tests {
         ]
         .iter()
         .any(|b| squeezed.contains(b));
-        let positions_ok = squeezed.match_indices("position:").all(|(at, f)| {
-            let declaration_starts = at == 0 || squeezed[..at].ends_with([';', '{']);
-            let value = squeezed[at + f.len()..]
-                .split([';', '}', '!'])
-                .next()
-                .unwrap_or_default();
-            !declaration_starts || value == "static" || value == "relative"
+        // Each `position:` that starts a declaration is static or relative.
+        let mut parts = squeezed.split("position:");
+        let mut before = parts.next().unwrap_or_default().to_owned();
+        let positions_ok = parts.all(|after| {
+            let starts = before.is_empty() || before.ends_with([';', '{']);
+            let value = after.split([';', '}', '!']).next().unwrap_or_default();
+            before = after.to_owned();
+            !starts || value == "static" || value == "relative"
         });
         urls_ok && !loads && positions_ok
     }
@@ -1831,6 +1858,10 @@ mod tests {
     /// `<style>`. The style branch handed `Writer::markup` the end tag's
     /// own `<`, which it wrote as `&lt;` and returned unread, forever.
     #[test]
+    #[allow(
+        clippy::literal_string_with_formatting_args,
+        reason = "CSS rules in the inputs, not format arguments"
+    )]
     fn a_closed_style_sheet_ends() {
         assert_eq!(bounded("<style>a{}</style>b"), "b");
         assert_eq!(

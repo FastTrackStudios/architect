@@ -623,7 +623,11 @@ mod tests {
             "\" style=\"{}\" data-claim=\"fence:kf\" data-by=\"demo\"><b>| C |</b></div>",
             crate::BLOCK_BOX_STYLE
         );
-        assert!(r.html.contains("<div class=\"site-block site-block-"), "{}", r.html);
+        assert!(
+            r.html.contains("<div class=\"site-block site-block-"),
+            "{}",
+            r.html
+        );
         assert!(r.html.contains(&drawn), "{}", r.html);
         assert!(
             r.html
@@ -647,15 +651,18 @@ mod tests {
         let scopes: Vec<&str> = r
             .html
             .match_indices("<div class=\"site-block ")
-            .map(|(at, found)| {
-                let rest = &r.html[at + found.len()..];
-                &rest[..rest.find('"').unwrap()]
+            .filter_map(|(at, found)| {
+                let rest = r.html.get(at + found.len()..)?;
+                rest.split_once('"').map(|(scope, _)| scope)
             })
             .collect();
         assert_eq!(scopes.len(), 2, "{}", r.html);
         assert_ne!(scopes[0], scopes[1], "each block has its own scope");
         for scope in &scopes {
-            assert!(scope.starts_with("site-block-") && scope.len() == 27, "{scope}");
+            assert!(
+                scope.starts_with("site-block-") && scope.len() == 27,
+                "{scope}"
+            );
             assert!(
                 r.html.contains(&format!(
                     "<div class=\"site-block {scope}\" style=\"{}\"",
@@ -673,7 +680,10 @@ mod tests {
             );
         }
         // Built again, the page is the same.
-        assert_eq!(go("```kf\n| C |\n```\n\n```x\nbody\n```\n", &blocks).html, r.html);
+        assert_eq!(
+            go("```kf\n| C |\n```\n\n```x\nbody\n```\n", &blocks).html,
+            r.html
+        );
     }
 
     #[test]
