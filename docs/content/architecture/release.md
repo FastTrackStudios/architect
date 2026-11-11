@@ -68,6 +68,24 @@ assets can replace the binary and its sums together.
 never a silent skip: `--check` still reports updates, and installing fails
 with `NoSigningKey`.
 
+## Pieces, for an updater of its own
+
+An app that installs something other than a bare binary (an `AppImage`
+into a launcher's folder: `updates.md`) uses the pieces `run` is made of:
+
+- `Updater::find(want)`: the newest release (or exactly `want`), as a
+  `Candidate` (`tag`, `version`, `sig_url` (none: unsigned), `notes_url`,
+  the release's page). Changes nothing.
+- `Updater::fetch_verified(&candidate, key, dir, &mut progress)`: the
+  signature and the sums checked, the asset streamed into a new
+  owner-only file in `dir` (`staging_in`), hashed as it lands, `progress`
+  told `(received, total)`. Removed when dropped; nothing is left in
+  `dir` on any error.
+- `persist_executable(staged, dest)`: 0755 and one rename (no smoke
+  test); `write_atomic(dir, name, text)`: a small file by temp and rename.
+- `ORG_KEY`: the org release key's public half, the one
+  `.github/workflows/release.yml` checks its signature against.
+
 ## The GitHub token
 
 `.token(Some(..))` sends a bearer token for the rate limit, only to URLs

@@ -70,6 +70,13 @@ pub const SIG_ASSET: &str = "SHA256SUMS.minisig";
 /// The public GitHub API.
 pub const GITHUB_API: &str = "https://api.github.com";
 
+/// The `FastTrackStudios` org release key's public half.
+///
+/// The base64 line of its minisign `.pub`; the release workflow signs
+/// every release's [`SUMS_ASSET`] with its secret half
+/// (`.github/workflows/release.yml`, `ORG_RELEASE_KEY`).
+pub const ORG_KEY: &str = "RWRh9Gk9qaStQMhku4THMidEYrQsmAEsm2dDprUkZxShEtqfIcroM8Od";
+
 /// How long the staged binary may take to answer `--version`.
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -251,6 +258,9 @@ pub struct GithubRelease {
     pub draft: bool,
     #[facet(default)]
     pub prerelease: bool,
+    /// The release's page (its notes and every download).
+    #[facet(default)]
+    pub html_url: String,
     #[facet(default)]
     pub assets: Vec<GithubAsset>,
 }
@@ -279,6 +289,8 @@ pub struct Candidate {
     /// [`SIG_ASSET`], when the release carries one. An unsigned release is
     /// still reported by a check, and never installed.
     pub sig_url: Option<String>,
+    /// The release's page: its notes and every download (may be empty).
+    pub notes_url: String,
 }
 
 /// From a release list: the newest `<tag_prefix>X.Y.Z` release that is
@@ -324,6 +336,7 @@ fn candidate(release: &GithubRelease, tag_prefix: &str, asset: &str) -> Option<C
         binary_url: url(asset)?,
         sums_url: url(SUMS_ASSET)?,
         sig_url: url(SIG_ASSET),
+        notes_url: release.html_url.clone(),
     })
 }
 
@@ -608,6 +621,57 @@ impl Updater {
         if target.exe.starts_with("/nix/store") {
             return Err(ReleaseError::NixStore(target.exe.to_owned()));
         }
+        let want = self.signed_sha256(http, candidate, key).await?;
+        let mut staged = staging_file(target.exe)?;
+        self.download_checked(http, candidate, want, &mut staged, &mut |_, _| {})
+            .await?;
+        let expected = format!("{} {}", self.app, candidate.version);
+        swap_in(staged, target.exe, &expected).await
+    }
+
+    /// The newest release this updater would install, or exactly `want`.
+    ///
+    /// Asks the releases API once; `None` when no release carries the
+    /// asset and its sums. Changes nothing.
+    pub async fn find(&self, want: Option<&str>) -> Result<Option<Candidate>, ReleaseError> {
+        let http = self.http_client()?;
+        let releases = self.releases(&http).await?;
+        Ok(pick(&releases, &self.tag_prefix, &self.asset, want))
+    }
+
+    /// Download `candidate`'s asset, verified, into a new file in `dir`.
+    ///
+    /// The release's [`SUMS_ASSET`] must be signed by `key` for this tag,
+    /// and the asset must hash to what it lists; `progress` hears
+    /// `(received, total)` as bytes land. The file is owner-only and
+    /// removed when dropped: persist it ([`persist_executable`]) to keep
+    /// it. On any error nothing is left in `dir`.
+    pub async fn fetch_verified(
+        &self,
+        candidate: &Candidate,
+        key: Option<&str>,
+        dir: &Path,
+        progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
+    ) -> Result<tempfile::NamedTempFile, ReleaseError> {
+        let key = key.ok_or(ReleaseError::NoSigningKey)?;
+        let http = self.http_client()?;
+        let want = self.signed_sha256(&http, candidate, key).await?;
+        let mut staged = staging_in(dir, &self.asset)?;
+        self.download_checked(&http, candidate, want, &mut staged, progress)
+            .await?;
+        Ok(staged)
+    }
+
+    /// The sha256 the release's signed sums list for this asset.
+    ///
+    /// Refused when the release is unsigned, the signature is not by
+    /// `key` for this tag, or the asset is not listed.
+    async fn signed_sha256(
+        &self,
+        http: &reqwest::Client,
+        candidate: &Candidate,
+        key: &str,
+    ) -> Result<Sha256, ReleaseError> {
         let tag = &candidate.tag;
         let sig_url = candidate
             .sig_url
@@ -619,28 +683,35 @@ impl Updater {
         let sig = self.get_bytes(http, sig_url, SIG_ASSET).await?;
         let sig = String::from_utf8_lossy(&sig);
         verify_sums(key, &sums, &sig, &trusted_comment(&self.app, tag))?;
-        let want =
-            expected_sha256(&String::from_utf8_lossy(&sums), &self.asset).ok_or_else(|| {
-                ReleaseError::NotListed {
-                    tag: tag.clone(),
-                    asset: self.asset.clone(),
-                }
-            })?;
+        expected_sha256(&String::from_utf8_lossy(&sums), &self.asset).ok_or_else(|| {
+            ReleaseError::NotListed {
+                tag: tag.clone(),
+                asset: self.asset.clone(),
+            }
+        })
+    }
 
-        let mut staged = staging_file(target.exe)?;
+    /// Stream the asset into `staged` and require it to hash to `want`.
+    async fn download_checked(
+        &self,
+        http: &reqwest::Client,
+        candidate: &Candidate,
+        want: Sha256,
+        staged: &mut tempfile::NamedTempFile,
+        progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
+    ) -> Result<(), ReleaseError> {
         let got = self
-            .download(http, &candidate.binary_url, &mut staged)
+            .download(http, &candidate.binary_url, staged, progress)
             .await?;
         if got != want {
             return Err(ReleaseError::ChecksumMismatch {
-                tag: tag.clone(),
+                tag: candidate.tag.clone(),
                 asset: self.asset.clone(),
                 got,
                 want,
             });
         }
-        let expected = format!("{} {}", self.app, candidate.version);
-        swap_in(staged, target.exe, &expected).await
+        Ok(())
     }
 
     fn http_client(&self) -> Result<reqwest::Client, ReleaseError> {
@@ -702,13 +773,18 @@ impl Updater {
         http: &reqwest::Client,
         url: &str,
         staged: &mut tempfile::NamedTempFile,
+        progress: &mut (dyn FnMut(u64, Option<u64>) + Send),
     ) -> Result<Sha256, ReleaseError> {
         let what = format!("download {}", self.asset);
         let mut response = self.get(http, url, &self.asset).await?;
+        let total = response.content_length();
+        let mut received = 0_u64;
         let mut hasher = sha2::Sha256::new();
         while let Some(chunk) = response.chunk().await.map_err(ReleaseError::http(&what))? {
             hasher.update(&chunk);
             staged.write_all(&chunk).map_err(ReleaseError::io(&what))?;
+            received = received.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+            progress(received, total);
         }
         staged
             .as_file()
@@ -736,6 +812,14 @@ pub fn staging_file(exe: &Path) -> Result<tempfile::NamedTempFile, ReleaseError>
     let name = exe
         .file_name()
         .map_or_else(|| "binary".into(), |n| n.to_string_lossy());
+    staging_in(dir, &name)
+}
+
+/// A new, owner-only, randomly named file in `dir` for `name`'s update.
+///
+/// Named `.<name>.update-<random>`, created exclusively, removed when
+/// dropped: [`staging_file`] for a file in any directory.
+pub fn staging_in(dir: &Path, name: &str) -> Result<tempfile::NamedTempFile, ReleaseError> {
     let prefix = format!(".{name}.update-");
     let mut builder = tempfile::Builder::new();
     builder.prefix(&prefix);
@@ -778,6 +862,50 @@ pub async fn swap_in(
         what: format!("replace {}", exe.display()),
         source: e.error,
     })
+}
+
+/// Make a verified staged file executable (`0755`) and rename it to `dest`.
+///
+/// No smoke test: for a file that cannot be run headless to ask its
+/// version (an `AppImage`). `dest` must be on the staged file's filesystem
+/// (stage in its directory); the rename is one atomic step.
+pub fn persist_executable(
+    staged: tempfile::NamedTempFile,
+    dest: &Path,
+) -> Result<(), ReleaseError> {
+    let staged = staged.into_temp_path();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
+            .map_err(ReleaseError::io("make the staged file executable"))?;
+    }
+    staged.persist(dest).map_err(|e| ReleaseError::Io {
+        what: format!("put the update at {}", dest.display()),
+        source: e.error,
+    })
+}
+
+/// Write `text` to `dir/name` atomically: a temp file there, then a rename.
+pub fn write_atomic(dir: &Path, name: &str, text: &str) -> Result<(), ReleaseError> {
+    let mut tmp = staging_in(dir, name)?;
+    tmp.write_all(text.as_bytes())
+        .and_then(|()| tmp.as_file().sync_all())
+        .map_err(ReleaseError::io(format!(
+            "write {name} in {}",
+            dir.display()
+        )))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o644))
+            .map_err(ReleaseError::io(format!("make {name} readable")))?;
+    }
+    tmp.persist(dir.join(name)).map_err(|e| ReleaseError::Io {
+        what: format!("put {name} in {}", dir.display()),
+        source: e.error,
+    })?;
+    Ok(())
 }
 
 /// What `<path> --version` prints (trimmed), or `None` if it exits
