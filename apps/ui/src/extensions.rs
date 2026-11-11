@@ -802,9 +802,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             // The editor's languages (#512): the ones compiled into the
             // editor as the app's own, and each extension's
             // `[[languages]]` while it is on (`EXT_LANGUAGES`).
-            .with_languages(architect_editor::Languages::with_app(
-                architect_editor::languages::builtin(),
-            ));
+            .with_languages(app_languages());
         // Extensions' themes and tokens into the lab's store; the theme,
         // as data, to its processes.
         if let Some(store) = &themes {
@@ -1390,4 +1388,14 @@ pub fn ExtensionTab(ui: ExtensionUi, id: &'static str) -> Element {
             }
         }
     }
+}
+
+/// The editor's languages (#512): the ones compiled into the editor as the
+/// app's own, made the editor's (`syntax::drive`), so each extension's
+/// `[[languages]]` is highlighted in fences and code editors while it is
+/// on, and withdrawn when it goes.
+fn app_languages() -> architect_editor::Languages {
+    let languages = architect_editor::Languages::with_app(architect_editor::languages::builtin());
+    architect_editor::syntax::drive(&languages);
+    languages
 }

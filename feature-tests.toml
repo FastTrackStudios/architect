@@ -49,11 +49,11 @@ workspace = true
 packages = ["architect-app"]
 features = ["architect-app/keyflow-lab"]
 
-# The editor's highlighting through the language registry (#512):
-# `architect-editor`'s `syntax` feature links the editor repo's
-# tree-sitter grammars, which the default (wasm-clean contract) build
-# leaves out.
+# `CodeEditor`'s story played headlessly on Blitz against its golden
+# (`features/editor/tests/story.rs`, #512): `architect-editor`'s `stories`
+# feature, which nothing in the workspace build turns on. (Its `syntax`
+# tests need no pass: the app's `native` turns `syntax` on there.)
 [[pass]]
-name = "editor-syntax"
+name = "editor-story"
 packages = ["architect-editor"]
-features = ["architect-editor/syntax"]
+features = ["architect-editor/stories", "architect-editor/native"]

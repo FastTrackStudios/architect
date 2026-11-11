@@ -152,17 +152,21 @@ repository = "https://github.com/FastTrackStudios/architect"
 # is the one pin of it: `architect-editor` (features/editor) re-exports
 # these crates, and everything else in architect, and every consumer of
 # architect, names `architect-editor` and not the editor repo (#512). The
-# revision is FastTrackStudios/editor#30's head (main after #28, with a
-# task's checkbox and a link pressed on Blitz). Move all four together,
+# revision is the editor's main at the merge of FastTrackStudios/editor#32
+# (host languages, `CodeEditor`, diagnostics; it carries #30's task
+# checkbox and link press on Blitz). Move every `editor-*` entry together,
 # with the `[patch]` table at the foot of this file.
 architect-editor = { path = "features/editor" }
 # Its extension surface as data: what extensions' editor calls carry.
-editor-ext = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
+editor-ext = { git = "https://github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
 # Its tree-sitter highlighter (`architect-editor`'s `syntax`).
-editor-syntax = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
+editor-syntax = { git = "https://github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+# Its LSP client (`architect-editor`'s `lsp`: a language's server, run by
+# the extension host; native only).
+editor-lsp = { git = "https://github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
 # Its view (native, on Blitz, in the app's note editor). Its source is
 # patched to the pinned editor below, like Keyflow's.
-editor-view = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0", default-features = false }
+editor-view = { git = "https://github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528", default-features = false }
 # SMTP for the auth server's verification and password-reset mail.
 # rustls, not native-tls, so the build carries no OpenSSL dependency.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }
@@ -192,7 +196,7 @@ tag = { path = "features/tags/tag" }
 tag-proto = { path = "features/tags/tag-proto" }
 # The editor's document model and markdown pass, at the editor pin above
 # (through `architect-editor`'s `state`).
-editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0", default-features = false }
+editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528", default-features = false }
 walkdir = "2"
 futures = "0.3"
 serde_yaml = "0.9"
@@ -528,20 +532,22 @@ dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", re
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 
 # The editor, through Keyflow (the lab's Keyflow chart and source editor,
-# `keyflow-lab`), at FastTrackStudios/editor#30's head (#28, the extension
-# surface, architect#312, and #442's native task toggle and link press),
-# which has #26's: #25 (a click past
+# `keyflow-lab`), at the editor's main after FastTrackStudios/editor#32
+# (host languages and `CodeEditor`, on #30: #28, the extension surface,
+# architect#312, and #442's native task toggle and link press), which has
+# #26's: #25 (a click past
 # the end of a line puts the caret at its end on Blitz), and the editor's
 # own Blitz/vendor pins moved to the IME revs architect pins below (its
 # native_ime tests, and its dev shell on macOS). Keyflow pins the editor at
 # 554b713; `www.` is the same repository under another source, as a patch
 # needs. Drop this once Keyflow pins a merged editor that has it.
 [patch."https://github.com/FastTrackStudios/editor"]
-editor-ext = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-state = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-syntax = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
-editor-vim = { git = "https://www.github.com/FastTrackStudios/editor", rev = "81451ea7d72069195ca28f66274411e525c11ae0" }
+editor-ext = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-lsp = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-state = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-syntax = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
+editor-vim = { git = "https://www.github.com/FastTrackStudios/editor", rev = "6817dc2c709fbb5a7858229592bbbc85eed49528" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]
