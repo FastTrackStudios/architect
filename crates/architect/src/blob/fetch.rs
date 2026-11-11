@@ -265,6 +265,18 @@ impl Fetcher {
         }
     }
 
+    /// The hashes being fetched now (their partials are not orphans).
+    #[must_use]
+    pub fn running(&self) -> std::collections::HashSet<Sha256> {
+        self.inner
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .copied()
+            .collect()
+    }
+
     /// The transfer of `hash`, started if none is running.
     fn start(&self, hash: Sha256) -> watch::Receiver<Progress> {
         let mut running = self

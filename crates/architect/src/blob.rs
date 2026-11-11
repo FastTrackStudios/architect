@@ -80,6 +80,7 @@ mod http_remote;
 #[cfg(feature = "http")]
 mod http_serve;
 mod keep;
+mod place;
 #[cfg(feature = "blob-s3")]
 mod s3;
 mod stream_reader;
@@ -88,7 +89,7 @@ mod wire;
 
 pub use budget::{
     NoRoom, Reservation, Space, SpaceProbe, StoreBudget, StoreUsage, default_keep_free,
-    default_max, dir_size, fs_space, move_file, walk_size,
+    default_max, dir_size, fs_space, walk_size,
 };
 pub use fetch::{Fetcher, HashSource, Progress, Remote};
 #[cfg(feature = "http-client")]
@@ -96,6 +97,10 @@ pub use http_remote::HttpRemote;
 #[cfg(feature = "http")]
 pub use http_serve::serve_http;
 pub use keep::Collected;
+pub use place::{
+    STAGING, Sink, Staged, commit, copy_verified_with, hash_file, is_staging, move_file, stage,
+    staging_path,
+};
 #[cfg(feature = "blob-s3")]
 pub use s3::{HolderEvents, S3Config, S3Store};
 pub use stream_reader::StreamReader;

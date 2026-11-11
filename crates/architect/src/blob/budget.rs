@@ -9,7 +9,7 @@
 //! together they cannot overshoot either.
 //!
 //! The total is kept as bytes are written and removed through the store
-//! ([`LocalFs::remove`], [`LocalFs::move_out`], [`LocalFs::adopt`]), and
+//! ([`LocalFs::remove`], [`LocalFs::adopt`]), and
 //! reconciled by a walk ([`StoreBudget::reconcile`]): at start and
 //! whenever the store's owner looks at it again, never per write.
 
@@ -76,8 +76,24 @@ pub struct NoRoom {
     pub keep_free: u64,
 }
 
+impl NoRoom {
+    /// Whether it can never fit: more than the whole limit. Waiting for
+    /// room does not help; raise the limit.
+    #[must_use]
+    pub const fn too_large(&self) -> bool {
+        self.need > self.max
+    }
+}
+
 impl fmt::Display for NoRoom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.too_large() {
+            return write!(
+                f,
+                "{} bytes are more than the store's whole limit of {}",
+                self.need, self.max
+            );
+        }
         write!(
             f,
             "no room for {} bytes: the store has {} (+{} in flight) of {}",
@@ -206,10 +222,15 @@ impl StoreBudget {
             .saturating_add(need)
             > self.max;
         // Bytes promised are not on disk yet: they come out of `free` too.
-        let under_floor = free.is_some_and(|free| {
-            free.saturating_sub(books.reserved).saturating_sub(need) < self.keep_free
-                || free < books.reserved.saturating_add(need)
-        });
+        // A floor that cannot be checked (statvfs failed) refuses: closed,
+        // not open.
+        let under_floor = match free {
+            Some(free) => {
+                free.saturating_sub(books.reserved).saturating_sub(need) < self.keep_free
+                    || free < books.reserved.saturating_add(need)
+            }
+            None => self.keep_free > 0,
+        };
         if over_max || under_floor {
             self.refused.fetch_add(1, Ordering::Relaxed);
             return Err(NoRoom {
@@ -237,6 +258,27 @@ impl StoreBudget {
             budget: self.clone(),
             left: need,
         })
+    }
+
+    /// Whether `need` bytes would fit now, or why not (a check, nothing
+    /// reserved, not counted as a refusal).
+    ///
+    /// # Errors
+    ///
+    /// [`NoRoom`].
+    pub fn check(&self, need: u64) -> Result<(), NoRoom> {
+        let result = {
+            let mut books = self.books();
+            let result = self.take(&mut books, need);
+            if result.is_ok() {
+                books.reserved = books.reserved.saturating_sub(need);
+            }
+            result
+        };
+        if result.is_err() {
+            self.refused.fetch_sub(1, Ordering::Relaxed);
+        }
+        result
     }
 
     /// Whether `need` bytes would fit now (a check, nothing reserved).
@@ -387,6 +429,18 @@ impl LocalFs {
         self.budget.as_ref().map(|b| b.reserve(need)).transpose()
     }
 
+    /// Whether `need` bytes fit now, or why not (nothing reserved).
+    ///
+    /// # Errors
+    ///
+    /// [`super::BlobError::NoRoom`].
+    pub fn check_room(&self, need: u64) -> Result<(), super::BlobError> {
+        self.budget
+            .as_ref()
+            .map_or(Ok(()), |b| b.check(need))
+            .map_err(super::BlobError::NoRoom)
+    }
+
     /// Whether `need` bytes fit now (always without a budget).
     #[must_use]
     pub fn has_room(&self, need: u64) -> bool {
@@ -420,68 +474,6 @@ impl LocalFs {
             b.removed(len);
         }
         Ok(len)
-    }
-
-    /// Move the blob `hash` out of the store to `to`: renamed, or copied
-    /// and removed when `to` is on another filesystem.
-    ///
-    /// # Errors
-    ///
-    /// The blob is not here, or cannot be moved.
-    pub async fn move_out(&self, hash: &super::Sha256, to: &Path) -> std::io::Result<()> {
-        let from = self.path_for(hash);
-        let len = tokio::fs::metadata(&from).await?.len();
-        move_file(&from, to).await?;
-        if let Some(b) = &self.budget {
-            b.removed(len);
-        }
-        Ok(())
-    }
-
-    /// Move the file at `from` into the store as the blob `hash` (the
-    /// caller knows its bytes hash to it), within the budget.
-    ///
-    /// # Errors
-    ///
-    /// [`super::BlobError::NoRoom`], or the file cannot be moved.
-    pub async fn adopt(&self, from: &Path, hash: &super::Sha256) -> Result<(), super::BlobError> {
-        let into = self.path_for(hash);
-        if into.exists() {
-            return Ok(());
-        }
-        let len = tokio::fs::metadata(from)
-            .await
-            .map_err(super::io_at(from))?
-            .len();
-        let mut reservation = self.reserve(len).map_err(super::BlobError::NoRoom)?;
-        if let Some(dir) = into.parent() {
-            tokio::fs::create_dir_all(dir)
-                .await
-                .map_err(super::io_at(dir))?;
-        }
-        move_file(from, &into).await.map_err(super::io_at(&into))?;
-        if let Some(r) = reservation.as_mut() {
-            r.wrote(len);
-        }
-        Ok(())
-    }
-}
-
-/// Rename `from` to `to`; across filesystems, copy beside `to`, rename
-/// it into place, then remove `from`.
-pub async fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
-    match tokio::fs::rename(from, to).await {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
-            let part = super::part_path(to);
-            if let Err(e) = tokio::fs::copy(from, &part).await {
-                let _ = tokio::fs::remove_file(&part).await;
-                return Err(e);
-            }
-            tokio::fs::rename(&part, to).await?;
-            tokio::fs::remove_file(from).await
-        }
-        Err(e) => Err(e),
     }
 }
 
@@ -523,6 +515,21 @@ mod tests {
         assert!(!b.has_room(200), "1500 - 400 - 200 is under 1000");
         assert!(b.has_room(100));
         assert_eq!(b.usage().refused, 0, "a check is not a refusal");
+    }
+
+    #[test]
+    fn an_unreadable_filesystem_refuses_what_needs_the_floor() {
+        let blind: SpaceProbe = Arc::new(|_| None);
+        let b = Arc::new(StoreBudget::new("/nowhere", 1_000, 10).with_probe(blind.clone()));
+        let no = b.reserve(1).unwrap_err();
+        assert_eq!(no.free, None);
+        assert!(no.to_string().contains("cannot be read"));
+        let open = Arc::new(StoreBudget::new("/nowhere", 1_000, 0).with_probe(blind));
+        assert!(
+            open.reserve(1).is_ok(),
+            "no floor asked for: the limit alone"
+        );
+        assert!(open.reserve(2_000).unwrap_err().too_large());
     }
 
     #[test]
