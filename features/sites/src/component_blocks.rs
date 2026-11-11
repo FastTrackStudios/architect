@@ -176,7 +176,7 @@ impl BlockRenderer for ComponentBlocks {
             .map_err(|_| format!("{} stopped", self.id))?;
         // Every event is answered with a frame (wire 5), empty or not.
         tree.apply(next(&mut session.frames, deadline)?, deadline)?;
-        Ok(Drawn::Elements(tree.into_elements()))
+        Ok(Drawn::Elements(tree.into_elements(deadline)?))
     }
 }
 
@@ -350,22 +350,36 @@ impl Tree {
         }
     }
 
-    /// Whether `node` is `inside` or below it.
+    /// Whether `node` is `inside` or below it. The walk up is bounded by
+    /// the node count, so even a broken tree cannot loop it.
     fn within(&self, node: usize, inside: usize) -> bool {
         let mut at = Some(node);
-        while let Some(n) = at {
+        for _ in 0..=self.nodes.len() {
+            let Some(n) = at else {
+                return false;
+            };
             if n == inside {
                 return true;
             }
             at = self.nodes.get(n).and_then(|n| n.parent);
         }
-        false
+        true
     }
 
     /// Puts `kids` under `parent` at `at` (its index among the children).
+    ///
+    /// The drawing stays a tree: every node has one parent and is among
+    /// its children once, and none is its own ancestor. A node listed
+    /// twice in `kids` (the same id pushed twice) is refused: put twice
+    /// under one parent, every level of such nodes would double what is
+    /// written, 2^levels elements from a few edits (#520's review).
     fn insert(&mut self, parent: usize, at: usize, kids: &[usize]) -> Result<(), String> {
         if kids.iter().any(|&k| self.within(parent, k) || k == ROOT) {
             return Err("an edit would put a node inside itself".to_owned());
+        }
+        let mut seen = std::collections::HashSet::with_capacity(kids.len());
+        if !kids.iter().all(|&k| seen.insert(k)) {
+            return Err("an edit would put one node in two places".to_owned());
         }
         for &kid in kids {
             self.detach(kid);
@@ -540,32 +554,51 @@ impl Tree {
         Ok(())
     }
 
-    /// The root's children, as a page's element tree.
-    fn into_elements(self) -> Vec<Element> {
-        self.nodes
-            .first()
-            .map(|root| {
-                root.children
-                    .iter()
-                    .filter_map(|&c| self.element(c, 0))
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// The root's children, as a page's element tree, by `deadline`.
+    ///
+    /// Bounded as it is written, not only as it was built: at most
+    /// [`MAX_NODES`] elements and [`MAX_BYTES`] bytes come out, and the
+    /// deadline is checked every [`DEADLINE_EVERY`] elements, whatever
+    /// shape the nodes have.
+    fn into_elements(self, deadline: Instant) -> Result<Vec<Element>, String> {
+        let mut budget = Budget {
+            nodes: 0,
+            bytes: 0,
+            deadline,
+        };
+        let Some(root) = self.nodes.first() else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for &c in &root.children {
+            if let Some(e) = self.element(c, 0, &mut budget)? {
+                out.push(e);
+            }
+        }
+        Ok(out)
     }
 
     /// Node `at`, `depth` levels below the root's children, as an element;
     /// nothing past [`MAX_DEPTH`], as a page writes no deeper.
-    fn element(&self, at: usize, depth: usize) -> Option<Element> {
+    fn element(
+        &self,
+        at: usize,
+        depth: usize,
+        budget: &mut Budget,
+    ) -> Result<Option<Element>, String> {
         if depth >= MAX_DEPTH {
-            return None;
+            return Ok(None);
         }
-        let n = self.nodes.get(at)?;
+        let Some(n) = self.nodes.get(at) else {
+            return Ok(None);
+        };
+        budget.spend(node_bytes(n))?;
         if n.tag == "#text" {
-            return Some(Element {
+            return Ok(Some(Element {
                 tag: "#text".to_owned(),
                 text: Some(n.text.clone()),
                 ..Element::default()
-            });
+            }));
         }
         let mut attrs: Vec<Attr> = n
             .attrs
@@ -594,17 +627,47 @@ impl Tree {
                 value: css.trim_end().to_owned(),
             });
         }
-        Some(Element {
+        let mut children = Vec::with_capacity(n.children.len());
+        for &c in &n.children {
+            if let Some(e) = self.element(c, depth.saturating_add(1), budget)? {
+                children.push(e);
+            }
+        }
+        Ok(Some(Element {
             tag: n.tag.clone(),
             attrs,
             text: (!n.text.is_empty()).then(|| n.text.clone()),
-            children: n
-                .children
-                .iter()
-                .filter_map(|&c| self.element(c, depth.saturating_add(1)))
-                .collect(),
+            children,
             ..Element::default()
-        })
+        }))
+    }
+}
+
+/// How often [`Tree::into_elements`] looks at the clock, in elements.
+const DEADLINE_EVERY: usize = 256;
+
+/// What [`Tree::into_elements`] may still write.
+struct Budget {
+    nodes: usize,
+    bytes: usize,
+    deadline: Instant,
+}
+
+impl Budget {
+    /// One more element of `bytes`.
+    fn spend(&mut self, bytes: usize) -> Result<(), String> {
+        self.nodes = self.nodes.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
+        if self.nodes > MAX_NODES {
+            return Err(format!("a drawing of over {MAX_NODES} nodes written"));
+        }
+        if self.bytes > MAX_BYTES {
+            return Err(format!("a drawing of over {MAX_BYTES} bytes written"));
+        }
+        if self.nodes.is_multiple_of(DEADLINE_EVERY) && Instant::now() >= self.deadline {
+            return Err(format!("it drew nothing in {} s", DRAW_TIMEOUT.as_secs()));
+        }
+        Ok(())
     }
 }
 
@@ -684,8 +747,8 @@ mod tests {
         ];
         tree.apply(Frame::Edits { edits: update }, later()).unwrap();
         assert_eq!(
-            elements_to_html(&tree.into_elements()),
-            "<svg viewBox=\"0 0 20 10\" data-follow-playhead=\"\">C<rect data-at=\"0\"></rect><rect data-at=\"2.5\" style=\"fill: red;\"></rect></svg>"
+            elements_to_html(&tree.into_elements(later()).unwrap()).unwrap(),
+            "<svg viewBox=\"0 0 20 10\" data-follow-playhead=\"\">C<rect data-at=\"0\"></rect><rect data-at=\"2.5\" style=\"fill: red\"></rect></svg>"
         );
     }
 
@@ -773,11 +836,13 @@ mod tests {
     fn a_deep_drawing_is_cut_at_the_depth_a_page_writes() {
         let mut tree = Tree::new();
         let n = 5_000;
-        let mut edits: Vec<Edit> = (0..n).map(|_| element("g")).collect();
-        edits.extend((0..n).map(|_| Edit::AppendChildren { m: 1 }));
+        let mut edits = vec![element("svg")];
+        edits.extend((0..n).map(|_| element("g")));
+        edits.extend((0..=n).map(|_| Edit::AppendChildren { m: 1 }));
         tree.apply(Frame::Edits { edits }, later()).unwrap();
-        let html = elements_to_html(&tree.into_elements());
-        assert_eq!(html.matches("<g>").count(), MAX_DEPTH);
+        let html = elements_to_html(&tree.into_elements(later()).unwrap()).unwrap();
+        // The `<svg>` is the first level.
+        assert_eq!(html.matches("<g>").count(), MAX_DEPTH - 1);
 
         let mut tree = Tree::new();
         let mut edits: Vec<Edit> = (0..n).map(|_| element("g")).collect();
@@ -798,6 +863,76 @@ mod tests {
                 Instant::now(),
             )
             .unwrap_err();
+        assert!(err.contains("drew nothing"), "{err}");
+    }
+
+    /// #520's review, finding 1: the same node pushed twice and appended
+    /// with `AppendChildren { m: 2 }`, at each of 20 levels (125 edits, 22
+    /// nodes), made a DAG that wrote 2^21 elements (14.7 MB). Now the
+    /// first such append is refused, and the drawing stays as built.
+    #[test]
+    fn a_node_appended_twice_is_refused() {
+        let levels = 20u64;
+        let mut edits = vec![element("svg"), Edit::SetId { id: 1 }, Edit::Pop];
+        for level in 1..=levels {
+            edits.extend([
+                element("g"),
+                Edit::SetId { id: level + 1 },
+                Edit::PushId { id: level },
+                Edit::PushId { id: level },
+                Edit::AppendChildren { m: 2 },
+                Edit::Pop,
+            ]);
+        }
+        edits.extend([
+            Edit::PushId { id: levels + 1 },
+            Edit::AppendChildren { m: 1 },
+        ]);
+        assert!(edits.len() <= 125, "{} edits", edits.len());
+        let mut tree = Tree::new();
+        let err = tree.apply(Frame::Edits { edits }, later()).unwrap_err();
+        assert!(err.contains("two places"), "{err}");
+        assert!(tree.nodes.len() <= 3, "{} nodes", tree.nodes.len());
+        // Every node has one place: no child is listed twice anywhere.
+        for node in &tree.nodes {
+            let mut kids = node.children.clone();
+            kids.sort_unstable();
+            kids.dedup();
+            assert_eq!(kids.len(), node.children.len());
+        }
+    }
+
+    /// The writer is bounded on its own: nodes that share a subtree (made
+    /// here by hand, as no edit can now) are refused once [`MAX_NODES`]
+    /// elements are written, not written 2^30 times.
+    #[test]
+    fn a_shared_subtree_is_refused_as_it_is_written() {
+        let mut tree = Tree::new();
+        let levels = 30;
+        for level in 1..=levels {
+            tree.nodes.push(Node {
+                tag: "g".to_owned(),
+                ..Node::default()
+            });
+            let below = level + 1;
+            tree.nodes[level].children = if level == levels {
+                Vec::new()
+            } else {
+                vec![below, below]
+            };
+        }
+        tree.nodes[ROOT].children = vec![1];
+        let err = tree.into_elements(later()).unwrap_err();
+        assert!(err.contains("nodes written"), "{err}");
+
+        // And it looks at the clock while it writes.
+        let mut tree = Tree::new();
+        tree.nodes.extend((0..DEADLINE_EVERY).map(|_| Node {
+            tag: "g".to_owned(),
+            ..Node::default()
+        }));
+        tree.nodes[ROOT].children = (1..=DEADLINE_EVERY).collect();
+        let err = tree.into_elements(Instant::now()).unwrap_err();
         assert!(err.contains("drew nothing"), "{err}");
     }
 }

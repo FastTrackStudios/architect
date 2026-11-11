@@ -1,73 +1,118 @@
 //! An element tree, as a page draws one (`architect_pages::Element`),
 //! written out as HTML.
 //!
-//! The tree is what an extension's page drew; the HTML goes into a page
-//! anyone reads. So it is written defensively: text and attribute values
-//! escaped, handlers (`on`, and any `on…` attribute) dropped, a
-//! `javascript:` URL dropped, and an element whose tag is not a plain
-//! name skipped with everything in it. What is kept and dropped is the
-//! same as for a renderer's finished markup (`crate::sanitize`): an SVG
-//! keeps its geometry, classes and `data-*`, never a `<script>` or a
+//! The tree is what an extension drew; the HTML goes into a page anyone
+//! reads. It is written as plain markup (names checked, text and values
+//! escaped) and then re-written by [`crate::sanitize()`], so a tree keeps
+//! and loses exactly what a renderer's finished markup does: an SVG keeps
+//! its geometry, classes and `data-*`, never a `<script>`, a handler or a
 //! `<foreignObject>`.
+//!
+//! Writing is bounded: at most [`MAX_DEPTH`] levels, [`MAX_ELEMENTS`]
+//! elements and [`MAX_HTML_BYTES`] bytes, whatever the tree. A tree that
+//! shares subtrees cannot be written as more than that.
 
 use architect_pages::Element;
 
-use crate::sanitize::{VOID, drops_element, is_name, keeps_attr};
-
-/// `elements`, as HTML.
-#[must_use]
-pub fn elements_to_html(elements: &[Element]) -> String {
-    let mut out = String::new();
-    for element in elements {
-        write_element(&mut out, element, 0);
-    }
-    out
-}
+use crate::sanitize::{VOID, is_name, sanitize};
 
 /// How deep an element tree is written: what is below is left out, so a
 /// tree an extension drew cannot overflow the stack writing it.
 pub const MAX_DEPTH: usize = 256;
 
-fn write_element(out: &mut String, element: &Element, depth: usize) {
-    if depth >= MAX_DEPTH {
-        return;
+/// How many elements (text included) one tree is written with, at most.
+pub const MAX_ELEMENTS: usize = 100_000;
+
+/// How many bytes of markup one tree is written as, at most.
+pub const MAX_HTML_BYTES: usize = 16 << 20;
+
+/// `elements`, as HTML.
+///
+/// # Errors
+///
+/// The tree is more than [`MAX_ELEMENTS`] elements or [`MAX_HTML_BYTES`]
+/// bytes written out.
+pub fn elements_to_html(elements: &[Element]) -> Result<String, String> {
+    let mut w = TreeWriter::default();
+    for element in elements {
+        w.element(element, 0)?;
     }
-    if element.tag == "#text" {
-        out.push_str(&escape(element.text.as_deref().unwrap_or_default()));
-        return;
-    }
-    let attrs = element
-        .attrs
-        .iter()
-        .map(|a| (a.name.as_str(), a.value.as_str()));
-    if !is_name(&element.tag) || drops_element(&element.tag, attrs) {
-        return;
-    }
-    out.push('<');
-    out.push_str(&element.tag);
-    for attr in &element.attrs {
-        if !keeps_attr(&element.tag, &attr.name, &attr.value) {
-            continue;
+    Ok(sanitize(&w.out))
+}
+
+#[derive(Default)]
+struct TreeWriter {
+    out: String,
+    written: usize,
+}
+
+impl TreeWriter {
+    /// Counts one more element, and checks what is written so far.
+    fn count(&mut self) -> Result<(), String> {
+        self.written = self.written.saturating_add(1);
+        if self.written > MAX_ELEMENTS {
+            return Err(format!("a drawing of over {MAX_ELEMENTS} elements"));
         }
-        out.push(' ');
-        out.push_str(&attr.name);
-        out.push_str("=\"");
-        out.push_str(&escape(&attr.value));
-        out.push('"');
+        self.check_bytes()
     }
-    out.push('>');
-    if VOID.contains(&element.tag.to_ascii_lowercase().as_str()) {
-        return;
+
+    fn check_bytes(&self) -> Result<(), String> {
+        if self.out.len() > MAX_HTML_BYTES {
+            return Err(format!("a drawing of over {MAX_HTML_BYTES} bytes"));
+        }
+        Ok(())
     }
-    if let Some(text) = &element.text {
-        out.push_str(&escape(text));
+
+    fn element(&mut self, element: &Element, depth: usize) -> Result<(), String> {
+        if depth >= MAX_DEPTH {
+            return Ok(());
+        }
+        self.count()?;
+        if element.tag == "#text" {
+            crate::sanitize::escape(element.text.as_deref().unwrap_or_default(), &mut self.out);
+            return self.check_bytes();
+        }
+        if !is_name(&element.tag) {
+            return Ok(());
+        }
+        self.out.push('<');
+        self.out.push_str(&element.tag);
+        for attr in element.attrs.iter().filter(|a| is_name(&a.name)) {
+            self.out.push(' ');
+            self.out.push_str(&attr.name);
+            self.out.push_str("=\"");
+            crate::sanitize::escape(&attr.value, &mut self.out);
+            self.out.push('"');
+        }
+        self.out.push('>');
+        if VOID.contains(&element.tag.to_ascii_lowercase().as_str()) {
+            return self.check_bytes();
+        }
+        // A style sheet is CSS, not text: written as it is, for the
+        // sanitiser to take or refuse whole.
+        let sheet = element.tag.eq_ignore_ascii_case("style");
+        if let Some(text) = &element.text {
+            if sheet {
+                self.out.push_str(text);
+            } else {
+                crate::sanitize::escape(text, &mut self.out);
+            }
+        }
+        self.check_bytes()?;
+        for child in &element.children {
+            if sheet && child.tag == "#text" {
+                self.count()?;
+                self.out.push_str(child.text.as_deref().unwrap_or_default());
+                self.check_bytes()?;
+            } else {
+                self.element(child, depth.saturating_add(1))?;
+            }
+        }
+        self.out.push_str("</");
+        self.out.push_str(&element.tag);
+        self.out.push('>');
+        self.check_bytes()
     }
-    for child in &element.children {
-        write_element(out, child, depth.saturating_add(1));
-    }
-    out.push_str("</");
-    out.push_str(&element.tag);
-    out.push('>');
 }
 
 /// `text` safe in HTML text and in a double-quoted attribute.
@@ -124,7 +169,7 @@ mod tests {
             vec![bar("0"), bar("2.5"), el("script", &[], vec![text("x()")])],
         );
         assert_eq!(
-            elements_to_html(&[tree]),
+            elements_to_html(&[tree]).unwrap(),
             "<div data-follow-playhead=\"\" data-media=\"/s/x/joy.mp3\"><div class=\"kf-bar\" data-at=\"0\">C</div><div class=\"kf-bar\" data-at=\"2.5\">C</div></div>"
         );
     }
@@ -149,7 +194,7 @@ mod tests {
             vec![bar, el("br", &[], vec![])],
         );
         assert_eq!(
-            elements_to_html(&[tree]),
+            elements_to_html(&[tree]).unwrap(),
             "<div id=\"kf-chart\"><div class=\"kf-bar\" style=\"border: 1px solid var(--border)\">C &lt;maj&gt;</div><br></div>"
         );
     }
@@ -198,7 +243,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            elements_to_html(&[tree]),
+            elements_to_html(&[tree]).unwrap(),
             "<svg viewBox=\"0 0 200 40\" data-follow-playhead=\"\" data-media=\"/s/x/joy.mp3\"><rect class=\"kf-bar\" data-at=\"0\" x=\"0\" width=\"100\" height=\"40\"></rect><rect class=\"kf-bar\" data-at=\"2.5\" x=\"100\" width=\"100\" height=\"40\"></rect><a>a</a></svg>"
         );
     }
@@ -210,6 +255,32 @@ mod tests {
             el("a", &[("href", " JavaScript:alert(1)")], vec![text("x")]),
             el("bad tag", &[], vec![]),
         ];
-        assert_eq!(elements_to_html(&tree), "<a>x</a>");
+        assert_eq!(elements_to_html(&tree).unwrap(), "<a>x</a>");
+    }
+
+    /// A tree that shares one subtree at every level (as a component's
+    /// drawing could before #520's review) is refused at
+    /// [`MAX_ELEMENTS`], not written 2^levels times.
+    #[test]
+    fn a_tree_too_big_to_write_is_refused() {
+        let mut tree = el("g", &[], vec![]);
+        for _ in 0..30 {
+            tree = el("g", &[], vec![tree.clone(), tree]);
+            // Each level clones; stop growing the owned tree past the
+            // limit so the test itself stays small.
+            if count(&tree) > MAX_ELEMENTS {
+                break;
+            }
+        }
+        let err = elements_to_html(&[el("svg", &[], vec![tree])]).unwrap_err();
+        assert!(err.contains("elements"), "{err}");
+
+        let big = el("p", &[], vec![text(&"x".repeat(MAX_HTML_BYTES + 1))]);
+        let err = elements_to_html(&[big]).unwrap_err();
+        assert!(err.contains("bytes"), "{err}");
+    }
+
+    fn count(e: &Element) -> usize {
+        e.children.iter().map(count).fold(1, usize::saturating_add)
     }
 }

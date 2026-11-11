@@ -44,16 +44,19 @@ pub enum Drawn {
 }
 
 impl Drawn {
-    /// As HTML, with nothing in it that runs: a tree is written by
-    /// [`elements_to_html`]'s rules, markup is re-written by
-    /// [`crate::sanitize()`]'s (an inline SVG keeps its drawing, its
-    /// classes and its `data-*`; never a script, an `on…` handler, a
-    /// `javascript:` URL or a `<foreignObject>`).
-    #[must_use]
-    pub fn into_html(self) -> String {
+    /// As HTML, with only what [`crate::sanitize()`]'s allow-lists keep
+    /// (an inline SVG keeps its drawing, its classes and its `data-*`;
+    /// never a script, an `on…` handler, a URL of another scheme than
+    /// `https:`, a form or a `<foreignObject>`). A tree is written by
+    /// [`elements_to_html`] first.
+    ///
+    /// # Errors
+    ///
+    /// A tree too big to write ([`elements_to_html`]).
+    pub fn into_html(self) -> Result<String, String> {
         match self {
             Self::Elements(elements) => elements_to_html(&elements),
-            Self::Html(html) => crate::sanitize::sanitize(&html),
+            Self::Html(html) => Ok(crate::sanitize::sanitize(&html)),
         }
     }
 }
@@ -133,7 +136,7 @@ impl Blocks {
     #[must_use]
     pub fn draw(&self, block: &Block<'_>) -> Option<(String, Result<String, String>)> {
         let renderer = self.renderers.iter().find(|r| r.claims(block.claim))?;
-        let drawn = renderer.render(block).map(Drawn::into_html);
+        let drawn = renderer.render(block).and_then(Drawn::into_html);
         Some((renderer.drawn_by(block.claim), drawn))
     }
 }

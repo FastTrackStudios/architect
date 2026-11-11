@@ -119,7 +119,11 @@ fn a_components_embed_view_draws_a_fence_as_an_svg_that_follows() {
         source,
         page: "Songs/joy.md",
     };
-    let html = blocks.render(&block("| C | G | Am |")).unwrap().into_html();
+    let html = blocks
+        .render(&block("| C | G | Am |"))
+        .unwrap()
+        .into_html()
+        .unwrap();
     assert!(html.starts_with("<svg class=\"wasi-bars\""), "{html}");
     assert!(html.ends_with("</svg>"), "{html}");
     for kept in [
@@ -133,7 +137,7 @@ fn a_components_embed_view_draws_a_fence_as_an_svg_that_follows() {
         assert!(html.contains(kept), "lost {kept}: {html}");
     }
     // Each block is its own mount: the next draws its own input.
-    let next = blocks.render(&block("| F |")).unwrap().into_html();
+    let next = blocks.render(&block("| F |")).unwrap().into_html().unwrap();
     assert!(next.contains("viewBox=\"0 0 80 40\""), "{next}");
     assert!(!next.contains("Am"), "{next}");
 
