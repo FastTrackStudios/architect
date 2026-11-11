@@ -1,0 +1,21 @@
+{
+  "name": "architect-example-web-counter",
+  "private": true,
+  "description": "A Vite + TypeScript page that runs the sandbox's WASI Counter extension through @fasttrackstudio/architect's public API (docs/content/guide/extensions-in-your-web-app.md).",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "extension": "architect build-web ${COUNTER_WASM:-../../target/wasi-guest/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm} public/counter --manifest ../../apps/sandbox/wasi-counter/extension.toml --types src/counter",
+    "dev": "npm run extension && vite",
+    "build": "npm run extension && tsc --noEmit && vite build",
+    "test": "npm run build && node --test test/example.test.mjs",
+    "test:packed": "npm pack ../../features/extensions/web --pack-destination /tmp >/dev/null && npm install --no-save --no-audit --no-fund /tmp/fasttrackstudio-architect-0.0.0-dev.tgz && npm test"
+  },
+  "dependencies": {
+    "@fasttrackstudio/architect": "file:../../features/extensions/web"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  }
+}

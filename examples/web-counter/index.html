@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The CSP an embedder needs (docs/content/guide/extensions-in-your-web-app.md, "Security"):
+         wasm compiled in the page, its instance in a blob: Web Worker, nothing inline. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src blob:; connect-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'"
+    />
+    <title>Architect extension in a web page</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>WASI Counter, in someone else's page</h1>
+      <p id="status">Loading…</p>
+      <section>
+        <h2>Actions</h2>
+        <div class="row">
+          <button id="add" type="button">Add 5 (typed action)</button>
+          <button id="ask" type="button">Ask the app for its themes</button>
+        </div>
+        <p>Answer: <output id="answer">nothing yet</output></p>
+      </section>
+      <section>
+        <h2>Its view</h2>
+        <div id="counter" class="view"></div>
+      </section>
+      <section>
+        <h2>An embed view, given its input</h2>
+        <div id="bars" class="view"></div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
