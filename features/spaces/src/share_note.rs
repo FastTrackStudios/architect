@@ -100,19 +100,21 @@ mod tests {
         );
     }
 
-    /// A share note written with audiences but before layers (#528): the
-    /// share reads as Full (what it served), each audience as the share's.
+    /// A share note written with audiences but with no layer (#528): the
+    /// share reads as Reference, the default, each audience as the
+    /// share's. Access fails closed: a note that lost the field never
+    /// opens wider than a new link.
     #[test]
-    fn a_share_note_written_before_layers_reads_as_full() {
+    fn a_share_note_without_a_layer_reads_as_reference() {
         let (code, other) = (code_from([5; 10]), code_from([6; 10]));
         let note = format!(
             "---\npublish: false\n---\n# Share {code}\n\n```json\n{{\"code\":\"{code}\",\"vault\":\"notes\",\"scope\":\"Vault\",\"title\":null,\"audience\":\"Link\",\"access\":\"Read\",\"expires_at\":null,\"revoked_at\":null,\"created_at\":7,\"created_by\":\"u1\",\"domain\":null,\"audiences\":[{{\"name\":\"band\",\"filter\":\"\",\"code\":\"{other}\",\"created_at\":8}}]}}\n```\n"
         );
         let share = parse_share_note(&note).expect("an old note reads");
-        assert_eq!(share.listen, Listen::Full);
+        assert_eq!(share.listen, Listen::Reference);
         let band = share.audience_named("band").expect("its audience");
         assert_eq!(band.listen, None);
-        assert_eq!(share.listen_for(Some(band)), Listen::Full);
+        assert_eq!(share.listen_for(Some(band)), Listen::Reference);
         assert_eq!(parse_share_note(&share_note(&share)), Some(share));
     }
 
@@ -130,8 +132,8 @@ mod tests {
         assert_eq!(share.audience, Audience::Link);
         assert_eq!(share.created_at, 7);
         assert!(share.audiences.is_empty());
-        // Before layers (#528) every attached file was served: Full.
-        assert_eq!(share.listen, Listen::Full);
+        // No layer (#528): Reference, the default; never wider.
+        assert_eq!(share.listen, Listen::Reference);
         // And written again it carries the (empty) list, and reads the same.
         assert_eq!(parse_share_note(&share_note(&share)), Some(share));
     }
