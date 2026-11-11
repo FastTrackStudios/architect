@@ -591,6 +591,11 @@ pub struct Manifest {
     /// API key), put into its requests by reference (`crate::net`).
     #[serde(default)]
     pub secrets: Vec<SecretDecl>,
+    /// `[[share_layers]]` (#528): which layer of a share link each file a
+    /// note of its types attaches is in
+    /// ([`crate::share_layers::ShareLayersDecl`]).
+    #[serde(default)]
+    pub share_layers: Vec<crate::share_layers::ShareLayersDecl>,
 }
 
 /// One of an extension's `[[secrets]]`: an API key or a token the person
@@ -665,6 +670,9 @@ pub enum ManifestError {
     /// A window, point, contribution to a point, service or reserved id
     /// breaks a rule (`crate::interop::check`): the field, and why.
     Interop { field: String, why: String },
+    /// A `[[share_layers]]` rule with no note type or a pattern that is
+    /// not a relative path.
+    BadShareLayers(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -689,6 +697,7 @@ impl std::fmt::Display for ManifestError {
             Self::Contribution(r) => r.fmt(f),
             Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::Interop { field, why } => write!(f, "{field}: {why}"),
+            Self::BadShareLayers(why) => write!(f, "share_layers: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -849,6 +858,9 @@ impl Manifest {
         for entry in &self.capabilities.ports {
             crate::capabilities::check_port_entry(entry)
                 .map_err(|why| ManifestError::BadCapability(format!("ports {entry:?}: {why}")))?;
+        }
+        for rule in &self.share_layers {
+            rule.check().map_err(ManifestError::BadShareLayers)?;
         }
         let mut secrets = std::collections::BTreeSet::new();
         for secret in &self.secrets {

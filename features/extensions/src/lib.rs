@@ -51,6 +51,7 @@ pub mod manifest;
 pub mod package;
 pub mod project;
 pub mod reapack;
+pub mod share_layers;
 pub mod toolbar;
 pub mod toolbar_edit;
 
