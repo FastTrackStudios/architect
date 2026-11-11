@@ -112,11 +112,46 @@ pub struct RootStatus {
     pub bytes: u64,
     /// Files whose bytes are not here yet (pinned roots).
     pub missing: u32,
+    /// Of those, the ones waiting for room in the store's budget.
+    pub deferred: u32,
+    /// Of those, the ones larger than the store's whole limit: they
+    /// arrive only once it is raised.
+    pub too_large: u32,
+    /// Of those, replacements waiting because the version they replace
+    /// cannot be kept, and why ("cannot keep history: …").
+    pub no_history: u32,
+    pub history_error: Option<String>,
+    /// Of those, replacements and deletes waiting because the kept
+    /// versions are at their bound (`files_history_max` or the floor).
+    pub history_full: u32,
+    /// Files named like the engine's temp files that it did not write:
+    /// never synced, never removed, listed here.
+    pub strays: Vec<String>,
     /// Every file is at its head.
     pub synced: bool,
     /// Task stubs met in the working copy: never synced.
     pub stubs: Vec<String>,
     pub error: Option<String>,
+}
+
+/// Who holds one version's bytes: shown beside the version list, so a
+/// version whose bytes no one holds reads "bytes not held" rather than
+/// offering a restore that cannot happen.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct VersionBytes {
+    pub version: crate::id::VersionId,
+    /// This device holds them (its store, its kept versions, a working file).
+    pub here: bool,
+    /// Holders with a copy on record (this device included), verified or not.
+    pub holders: u32,
+}
+
+impl VersionBytes {
+    /// No one holds them: the version is listed, its bytes are gone.
+    #[must_use]
+    pub const fn lost(&self) -> bool {
+        !self.here && self.holders == 0
+    }
 }
 
 /// One entry of a folder in a root, as the agent lists it.

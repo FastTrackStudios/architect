@@ -58,6 +58,49 @@ pub struct NodeStatus {
     pub sites: Vec<String>,
     /// The devices it lets in.
     pub devices: u32,
+    /// Its blob store against its budget, when it runs the files engine.
+    pub files_store: Option<FilesStore>,
+}
+
+/// The files engine's blob store against its budget (#525).
+#[architect::wire]
+#[derive(Eq)]
+pub struct FilesStore {
+    /// Bytes in the store, and promised to writes in flight.
+    pub used: u64,
+    pub reserved: u64,
+    /// Its limit (`files_store_max`).
+    pub max: u64,
+    /// The floor kept free on its filesystem (`files_keep_free`), and
+    /// that filesystem's free bytes and size, when it can be asked.
+    pub keep_free: u64,
+    pub fs_free: Option<u64>,
+    pub fs_total: Option<u64>,
+    /// Files waiting for room now, files larger than the whole limit
+    /// (they arrive once it is raised), and writes refused for space
+    /// since start.
+    pub deferred: u32,
+    pub too_large: u32,
+    pub refused: u64,
+    /// Replacements waiting because the versions they replace cannot be
+    /// kept, and why ("cannot keep history: …": a read-only share, a
+    /// `.architect` the node cannot write).
+    pub no_history: u32,
+    pub history_error: Option<String>,
+    /// Replacements and deletes waiting because the kept versions are at
+    /// their bound (`history_used` against `history_max`, or the tree
+    /// filesystem's floor). Nothing frees history by itself: raise the
+    /// bound or make room.
+    pub history_full: u32,
+    /// A holding node's kept versions, beside its tree: bytes, limit
+    /// (`files_history_max`; none is `u64::MAX`) and the tree
+    /// filesystem's free bytes. Not counted in `used`.
+    pub history_used: Option<u64>,
+    pub history_max: Option<u64>,
+    pub tree_fs_free: Option<u64>,
+    /// A holding node's fetches in flight or waiting to be written,
+    /// beside its tree.
+    pub incoming_used: Option<u64>,
 }
 
 /// A note in a vault.
@@ -76,7 +119,8 @@ pub mod node {
     /// What this node is.
     #[architect::service(actions)]
     pub trait Node {
-        /// This node: its name, endpoint, org, vaults, Sites and devices.
+        /// This node: its name, endpoint, org, vaults, Sites, devices, and
+        /// its blob store against its budget.
         #[action(effect = read_only)]
         async fn status(&self) -> Result<NodeStatus, NodeError>;
     }
@@ -123,6 +167,7 @@ pub struct NodeState {
     pub(crate) sites: Vec<String>,
     pub(crate) admission: Admission,
     pub(crate) account: Arc<Mutex<AccountView>>,
+    pub(crate) files: Option<architect_files::sync::Engine>,
 }
 
 impl NodeState {
@@ -157,6 +202,29 @@ impl NodeState {
             notes: count(self.catalog().notes().len()),
             sites: self.sites.clone(),
             devices: count(self.admission.list().len()),
+            files_store: self.files.as_ref().and_then(|engine| {
+                let usage = engine.store_usage()?;
+                let history = engine.history_usage();
+                let blocked = engine.history_blocked();
+                Some(FilesStore {
+                    used: usage.used,
+                    reserved: usage.reserved,
+                    max: usage.max,
+                    keep_free: usage.keep_free,
+                    fs_free: usage.space.map(|s| s.free),
+                    fs_total: usage.space.map(|s| s.total),
+                    deferred: engine.deferred(),
+                    too_large: engine.too_large(),
+                    refused: usage.refused,
+                    no_history: blocked.0,
+                    history_full: engine.history_full(),
+                    history_error: blocked.1,
+                    history_used: history.map(|h| h.used),
+                    history_max: history.map(|h| h.max),
+                    tree_fs_free: history.and_then(|h| h.space).map(|s| s.free),
+                    incoming_used: engine.inbox_usage().map(|i| i.used),
+                })
+            }),
         }
     }
 }

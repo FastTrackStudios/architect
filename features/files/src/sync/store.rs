@@ -2,9 +2,17 @@
 //!
 //! A project's current audio stays where the DAW wrote it; there is no
 //! second copy in the store. [`TreeStore`] answers a hash from the store
-//! when it holds it, else from the working file the index says holds it
+//! (and its other areas: where new bytes land, where replaced versions
+//! are kept), else from the working file the index says holds it
 //! (checked against the index's stat first, so a file changed since is
 //! never served as the old content).
+//!
+//! On a device the three areas are one [`LocalFs`]. On a node that holds
+//! its tree in place they are on the tree's own filesystem
+//! (`<files_dir>/.architect/incoming` and `.architect/versions`,
+//! [`super::layout::AREA`]): a fetch lands beside where it goes and is
+//! renamed in, and a replaced version is linked aside, so neither needs
+//! room on the node's data volume.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -30,6 +38,14 @@ impl InPlace {
             .insert(hash, (path, stat));
     }
 
+    /// Stop saying a working file holds `hash` (it was found changed).
+    pub fn forget(&self, hash: &Sha256) {
+        self.files
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(hash);
+    }
+
     /// The file holding `hash`, if it still does.
     #[must_use]
     pub fn find(&self, hash: &Sha256) -> Option<PathBuf> {
@@ -47,27 +63,61 @@ impl InPlace {
 /// [`BlobStore`] over a [`LocalFs`] and the working files.
 #[derive(Clone)]
 pub struct TreeStore {
+    /// The device's blob store (the data dir's, under its budget).
     pub local: LocalFs,
     pub in_place: InPlace,
+    /// Where new bytes land: fetches (the [`architect::blob::Fetcher`]'s
+    /// store must be this one) and puts. `local` unless set.
+    pub inbox: LocalFs,
+    /// Where a version a sync replaces is kept. `local` unless set.
+    pub history: LocalFs,
 }
 
 impl TreeStore {
     #[must_use]
     pub fn new(local: LocalFs) -> Self {
         Self {
+            inbox: local.clone(),
+            history: local.clone(),
             local,
             in_place: InPlace::default(),
         }
     }
 
+    /// New bytes land in `inbox` and replaced versions go to `history`
+    /// (a holding node's areas on its tree's filesystem).
+    #[must_use]
+    pub fn with_areas(mut self, inbox: LocalFs, history: LocalFs) -> Self {
+        self.inbox = inbox;
+        self.history = history;
+        self
+    }
+
+    /// The store and its areas, each once.
+    #[must_use]
+    pub fn areas(&self) -> Vec<&LocalFs> {
+        let mut out: Vec<&LocalFs> = vec![&self.local];
+        for a in [&self.inbox, &self.history] {
+            if out.iter().all(|o| o.root() != a.root()) {
+                out.push(a);
+            }
+        }
+        out
+    }
+
+    /// The area file holding `hash`, if any (not a working file).
+    #[must_use]
+    pub fn stored_for(&self, hash: &Sha256) -> Option<PathBuf> {
+        self.areas()
+            .into_iter()
+            .map(|a| a.path_for(hash))
+            .find(|p| p.is_file())
+    }
+
     /// The file holding `hash`: the store's, else a working file.
     #[must_use]
     pub fn file_for(&self, hash: &Sha256) -> Option<PathBuf> {
-        let stored = self.local.path_for(hash);
-        if stored.is_file() {
-            return Some(stored);
-        }
-        self.in_place.find(hash)
+        self.stored_for(hash).or_else(|| self.in_place.find(hash))
     }
 }
 
@@ -77,7 +127,7 @@ impl BlobStore for TreeStore {
         expected: Option<Sha256>,
         body: Reader,
     ) -> BoxFuture<'_, Result<Sha256, BlobError>> {
-        self.local.put(expected, body)
+        self.inbox.put(expected, body)
     }
 
     fn get(&self, hash: Sha256) -> BoxFuture<'_, Result<Blob, BlobError>> {

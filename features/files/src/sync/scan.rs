@@ -23,11 +23,49 @@ use crate::id::VersionId;
 pub const SETTLE: Duration = Duration::from_secs(2);
 
 /// What a file's stat says, enough to see it changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+///
+/// Size and mtime alone miss an edit that keeps both (`rsync -t`,
+/// `cp -p`, a restore, a coarse NFS clock), so the inode and the ctime
+/// count too: neither can be set back by a user. The device id does not:
+/// it changes when an NFS export is mounted again, which would re-hash
+/// the whole tree at every restart. An index written before these fields
+/// has them 0, which matches anything (and is filled in on the next
+/// write). On NFS the ctime is the server's and the inode its file id;
+/// where a server reuses ids or a client caches attributes, the scrub
+/// (`Engine::scrub`) is what catches bytes that changed under an equal
+/// stat.
+#[derive(Debug, Clone, Copy, Eq, Facet)]
 pub struct Stat {
     pub size: u64,
     /// Nanoseconds since the epoch.
     pub mtime_ns: i64,
+    /// Nanoseconds since the epoch; 0 when unknown.
+    #[facet(default)]
+    pub ctime_ns: i64,
+    /// The inode (NFS: the file id); 0 when unknown.
+    #[facet(default)]
+    pub ino: u64,
+}
+
+impl Stat {
+    /// The same file, unchanged, but for its ctime (which a hard link to
+    /// it moves).
+    #[must_use]
+    pub const fn same_file(&self, other: &Self) -> bool {
+        self.size == other.size
+            && self.mtime_ns == other.mtime_ns
+            && (self.ino == 0 || other.ino == 0 || self.ino == other.ino)
+    }
+}
+
+impl PartialEq for Stat {
+    fn eq(&self, other: &Self) -> bool {
+        let same = |a: i64, b: i64| a == 0 || b == 0 || a == b;
+        self.size == other.size
+            && self.mtime_ns == other.mtime_ns
+            && same(self.ctime_ns, other.ctime_ns)
+            && (self.ino == 0 || other.ino == 0 || self.ino == other.ino)
+    }
 }
 
 impl Stat {
@@ -40,9 +78,23 @@ impl Stat {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .and_then(|d| i64::try_from(d.as_nanos()).ok())
             .unwrap_or(0);
+        #[cfg(unix)]
+        let (ctime_ns, ino) = {
+            use std::os::unix::fs::MetadataExt as _;
+            (
+                meta.ctime()
+                    .saturating_mul(1_000_000_000)
+                    .saturating_add(meta.ctime_nsec()),
+                meta.ino(),
+            )
+        };
+        #[cfg(not(unix))]
+        let (ctime_ns, ino) = (0, 0);
         Self {
             size: meta.len(),
             mtime_ns,
+            ctime_ns,
+            ino,
         }
     }
 
@@ -155,7 +207,13 @@ impl Scanner {
         let mut out = Vec::new();
         self.stubs.clear();
         for (rel, stat) in &on_disk {
-            if index.files.get(rel).is_some_and(|i| i.stat == *stat) {
+            if let Some(known) = index.files.get_mut(rel)
+                && known.stat == *stat
+            {
+                // An index from before ctime and inode: fill them in.
+                if known.stat.ino == 0 || known.stat.ctime_ns == 0 {
+                    known.stat = *stat;
+                }
                 self.pending.remove(rel);
                 continue;
             }
@@ -298,6 +356,63 @@ mod tests {
         assert!(matches!(&seen[..], [Seen::Changed { path, .. }] if path == "take.wav"));
     }
 
+    /// An edit that keeps size and mtime (`cp -p`, `rsync -t`, a
+    /// restore) is still a change: the ctime and inode moved (#527).
+    #[test]
+    fn an_edit_that_keeps_size_and_mtime_is_seen() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("take.wav");
+        std::fs::write(&f, b"RIFF one").unwrap();
+        let (mut scanner, mut index) = (Scanner::default(), Index::default());
+        scanner
+            .scan(tmp.path(), &mut index, later(5), SETTLE)
+            .unwrap();
+        let seen = scanner
+            .scan(tmp.path(), &mut index, later(5), SETTLE)
+            .unwrap();
+        let Some(Seen::Changed {
+            path,
+            content,
+            stat,
+        }) = seen.into_iter().next()
+        else {
+            panic!("committed");
+        };
+        index.files.insert(
+            path,
+            Indexed {
+                stat,
+                content,
+                version: None,
+            },
+        );
+
+        let mtime = std::fs::metadata(&f).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        // Written beside and renamed over, as `cp -p` and `rsync -t` do.
+        let other = tmp.path().join("other");
+        std::fs::write(&other, b"RIFF two").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&other)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        std::fs::rename(&other, &f).unwrap();
+        assert_eq!(std::fs::metadata(&f).unwrap().modified().unwrap(), mtime);
+
+        scanner
+            .scan(tmp.path(), &mut index, later(5), SETTLE)
+            .unwrap();
+        let seen = scanner
+            .scan(tmp.path(), &mut index, later(5), SETTLE)
+            .unwrap();
+        assert!(
+            matches!(&seen[..], [Seen::Changed { path, .. }] if path == "take.wav"),
+            "{seen:?}"
+        );
+    }
+
     #[test]
     fn a_file_still_being_written_waits() {
         let tmp = tempfile::tempdir().unwrap();
@@ -345,6 +460,8 @@ mod tests {
                 stat: Stat {
                     size: 1,
                     mtime_ns: 1,
+                    ctime_ns: 1,
+                    ino: 1,
                 },
                 content: "x".into(),
                 version: None,

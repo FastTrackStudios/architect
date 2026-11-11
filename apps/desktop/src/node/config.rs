@@ -43,6 +43,9 @@
 //! | `ARCHITECT_FILES_SITE` | `files_site` | the name | where this holder is (`home`, `starcommand`): copies at one site are not off-site |
 //! | `ARCHITECT_FILES_VERIFY_SECS` | `files_verify_secs` | `2592000` (30 days) | how long a copy's evidence (a scrub, a passed challenge) counts |
 //! | `ARCHITECT_FILES_SCRUB_MIB` | `files_scrub_mib` | `32` | MiB re-hashed per pass at most (0: only on `FILES_SCRUB`) |
+//! | `ARCHITECT_FILES_STORE_MAX` | `files_store_max` | a quarter of the filesystem holding the store, at most 100 GiB | the hard limit on `<data dir>/files/blobs` ([`Size`]: `20000000000`, `16Gi`, `40%`): a write past it is refused before a byte lands, a fetch waits until there is room |
+//! | `ARCHITECT_FILES_KEEP_FREE` | `files_keep_free` | 15% of that filesystem, at most 64 GiB | the store never writes into this floor of free space (`statvfs`), whoever else filled the disk; on a holding node, also the floor kept on the tree's filesystem. If the free space cannot be read, writes that need the floor are refused |
+//! | `ARCHITECT_FILES_HISTORY_MAX` | `files_history_max` | a tenth of the tree's filesystem, at most 500 GiB | on a holding node, how much of the replaced versions kept beside the tree (`<files_dir>/.architect/versions`) may hold; at the limit, or at the tree filesystem's floor, a replacement waits and is reported, nothing is deleted |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -110,6 +113,106 @@ pub struct Config {
     pub files_site: Option<String>,
     pub files_verify_secs: u64,
     pub files_scrub_mib: u64,
+    pub files_store_max: Option<Size>,
+    pub files_keep_free: Option<Size>,
+    pub files_history_max: Option<Size>,
+}
+
+/// A size given as bytes (`20000000000`, `16Gi`, `500M`) or as a share
+/// of the filesystem it is about (`40%`). `K`/`M`/`G`/`T` are powers of
+/// 1000, `Ki`/`Mi`/`Gi`/`Ti` powers of 1024; a trailing `B` is allowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "SizeRaw")]
+pub enum Size {
+    Bytes(u64),
+    Percent(u8),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SizeRaw {
+    Number(u64),
+    Text(String),
+}
+
+impl TryFrom<SizeRaw> for Size {
+    type Error = String;
+
+    fn try_from(raw: SizeRaw) -> Result<Self, String> {
+        match raw {
+            SizeRaw::Number(n) => Ok(Self::Bytes(n)),
+            SizeRaw::Text(t) => t.parse(),
+        }
+    }
+}
+
+impl std::str::FromStr for Size {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        let s = s.trim();
+        if let Some(p) = s.strip_suffix('%') {
+            return match p.trim().parse::<u8>() {
+                Ok(p) if p <= 100 => Ok(Self::Percent(p)),
+                _ => Err(format!("`{s}` is not a percentage from 0 to 100")),
+            };
+        }
+        let end = s
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(s.len());
+        let (number, unit) = s.split_at(end);
+        let bad = || format!("`{s}` is not a size (bytes, `16Gi`, `1.5G`, `40%`)");
+        let (whole, frac) = number.split_once('.').unwrap_or((number, ""));
+        if whole.is_empty() || frac.contains('.') {
+            return Err(bad());
+        }
+        let whole: u64 = whole.parse().map_err(|_| bad())?;
+        let unit = unit.trim().to_ascii_lowercase();
+        let unit = unit.strip_suffix('b').unwrap_or(&unit);
+        let scale: u64 = match unit {
+            "" => 1,
+            "k" => 1_000,
+            "m" => 1_000_000,
+            "g" => 1_000_000_000,
+            "t" => 1_000_000_000_000,
+            "ki" => 1 << 10,
+            "mi" => 1 << 20,
+            "gi" => 1 << 30,
+            "ti" => 1 << 40,
+            _ => return Err(format!("`{s}`: unknown unit `{unit}`")),
+        };
+        // A fraction of the unit, to the byte (`1.5Gi`).
+        let frac_bytes = if frac.is_empty() {
+            0
+        } else {
+            let digits = u32::try_from(frac.len()).map_err(|_| bad())?;
+            let den = 10u64.checked_pow(digits).ok_or_else(bad)?;
+            let num: u64 = frac.parse().map_err(|_| bad())?;
+            u64::try_from(
+                u128::from(num)
+                    .saturating_mul(u128::from(scale))
+                    .checked_div(u128::from(den))
+                    .unwrap_or(0),
+            )
+            .map_err(|_| bad())?
+        };
+        whole
+            .checked_mul(scale)
+            .and_then(|n| n.checked_add(frac_bytes))
+            .map(Self::Bytes)
+            .ok_or_else(|| format!("`{s}` is too large"))
+    }
+}
+
+impl Size {
+    /// In bytes, on a filesystem of `total` bytes (needed for a share).
+    #[must_use]
+    pub fn of(self, total: Option<u64>) -> Option<u64> {
+        match self {
+            Self::Bytes(n) => Some(n),
+            Self::Percent(p) => total.map(|t| (t / 100).saturating_mul(u64::from(p))),
+        }
+    }
 }
 
 impl Default for Config {
@@ -150,6 +253,9 @@ impl Default for Config {
             files_site: None,
             files_verify_secs: 30 * 24 * 3600,
             files_scrub_mib: 32,
+            files_store_max: None,
+            files_keep_free: None,
+            files_history_max: None,
         }
     }
 }
@@ -186,7 +292,34 @@ impl Config {
             None => Self::default(),
         };
         config.apply_env(env)?;
+        config.check_store()?;
         Ok(config)
+    }
+
+    /// Refuse a store budget that would refuse every write: a limit of
+    /// nothing, or a floor of the whole filesystem.
+    fn check_store(&self) -> Result<(), ConfigError> {
+        let zero = |s: Option<Size>| matches!(s, Some(Size::Bytes(0) | Size::Percent(0)));
+        if zero(self.files_store_max) {
+            return Err(ConfigError::Env {
+                var: "ARCHITECT_FILES_STORE_MAX",
+                why: "0 refuses every write into the store; leave it unset for the default"
+                    .to_owned(),
+            });
+        }
+        if zero(self.files_history_max) {
+            return Err(ConfigError::Env {
+                var: "ARCHITECT_FILES_HISTORY_MAX",
+                why: "0 keeps no replaced version, so no replacement can happen; leave it unset to keep them all".to_owned(),
+            });
+        }
+        if matches!(self.files_keep_free, Some(Size::Percent(100))) {
+            return Err(ConfigError::Env {
+                var: "ARCHITECT_FILES_KEEP_FREE",
+                why: "100% keeps the whole filesystem free: nothing could be written".to_owned(),
+            });
+        }
+        Ok(())
     }
 
     /// The TOML file at `path`, over the defaults.
@@ -345,6 +478,15 @@ impl Config {
                 why: format!("{e}"),
             })?;
         }
+        for (var, field) in [
+            ("ARCHITECT_FILES_STORE_MAX", &mut self.files_store_max),
+            ("ARCHITECT_FILES_KEEP_FREE", &mut self.files_keep_free),
+            ("ARCHITECT_FILES_HISTORY_MAX", &mut self.files_history_max),
+        ] {
+            if let Some(v) = get(var).filter(|v| !v.trim().is_empty()) {
+                *field = Some(v.parse().map_err(|why| ConfigError::Env { var, why })?);
+            }
+        }
         if let Some(v) = get("ARCHITECT_FILES_SCRUB_MIB") {
             self.files_scrub_mib = v.trim().parse().map_err(|e| ConfigError::Env {
                 var: "ARCHITECT_FILES_SCRUB_MIB",
@@ -465,6 +607,45 @@ mod tests {
         );
         let bad = |var: &str| (var == "ARCHITECT_BLOB_PLACEMENT").then(|| "both".to_owned());
         assert!(Config::load(None, bad).is_err());
+    }
+
+    #[test]
+    fn the_store_budget_takes_bytes_units_and_shares() {
+        let env = |var: &str| match var {
+            "ARCHITECT_FILES_STORE_MAX" => Some("16Gi".to_owned()),
+            "ARCHITECT_FILES_KEEP_FREE" => Some("15%".to_owned()),
+            _ => None,
+        };
+        let config = Config::load(None, env).ok();
+        let config = config.as_ref();
+        assert_eq!(
+            config.and_then(|c| c.files_store_max),
+            Some(Size::Bytes(16 << 30))
+        );
+        assert_eq!(
+            config.and_then(|c| c.files_keep_free),
+            Some(Size::Percent(15))
+        );
+        assert_eq!(Size::Percent(15).of(Some(1_000)), Some(150));
+        assert_eq!(Size::Percent(15).of(None), None);
+        assert_eq!("500MB".parse(), Ok(Size::Bytes(500_000_000)));
+        assert_eq!("1234".parse(), Ok(Size::Bytes(1234)));
+        assert!("12 parsecs".parse::<Size>().is_err());
+        assert!("150%".parse::<Size>().is_err());
+        assert_eq!("1.5Gi".parse(), Ok(Size::Bytes(3 << 29)));
+        assert_eq!("16gib".parse(), Ok(Size::Bytes(16 << 30)));
+        assert_eq!("2.5k".parse(), Ok(Size::Bytes(2_500)));
+        assert!("1..5G".parse::<Size>().is_err());
+        for (var, value) in [
+            ("ARCHITECT_FILES_STORE_MAX", "lots"),
+            ("ARCHITECT_FILES_STORE_MAX", "0"),
+            ("ARCHITECT_FILES_STORE_MAX", "0%"),
+            ("ARCHITECT_FILES_KEEP_FREE", "100%"),
+            ("ARCHITECT_FILES_HISTORY_MAX", "0"),
+        ] {
+            let bad = |v: &str| (v == var).then(|| value.to_owned());
+            assert!(Config::load(None, bad).is_err(), "{var}={value}");
+        }
     }
 
     #[test]

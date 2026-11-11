@@ -80,8 +80,8 @@ use tokio::task::JoinHandle;
 use vault_live::Backend;
 
 pub use catalog::VaultCatalog;
-pub use config::{Config, ConfigError, IrohMode, Placement};
-pub use service::{NodeError, NodeState, NodeStatus};
+pub use config::{Config, ConfigError, IrohMode, Placement, Size};
+pub use service::{FilesStore, NodeError, NodeState, NodeStatus};
 
 /// The principal this node's own sweeps attach to its registry as.
 const SELF: &str = "doc-peer";
@@ -253,7 +253,9 @@ pub async fn start_with(
     let files = config
         .files_dir
         .as_ref()
-        .map(|dir| files::engine(&config, dir, files_registry.clone()));
+        .map(|dir| files::engine(&config, dir, files_registry.clone()))
+        .transpose()
+        .map_err(StartError::Other)?;
     let collab = vault_collab::VaultCollab::new(backend.clone(), data.join("crdt"));
     let collab = match &files {
         Some(engine) => {
@@ -339,6 +341,7 @@ pub async fn start_with(
         sites: config.sites.keys().cloned().collect(),
         admission: admission.clone(),
         account: Arc::new(Mutex::new(service::AccountView::default())),
+        files: files.clone(),
     };
 
     // ── The account ──────────────────────────────────────────────────

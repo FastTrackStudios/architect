@@ -83,6 +83,13 @@ spec:
             - { name: ARCHITECT_FILES_DIR, value: /files }
             - { name: ARCHITECT_FILES_HOLD, value: "true" }
             {{- end }}
+            - { name: ARCHITECT_FILES_STORE_MAX, value: {{ include "architect.storeMax" . | quote }} }
+            {{- with $n.store.keepFree }}
+            - { name: ARCHITECT_FILES_KEEP_FREE, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.store.historyMax }}
+            - { name: ARCHITECT_FILES_HISTORY_MAX, value: {{ include "architect.bytes" . | quote }} }
+            {{- end }}
             {{- if $n.s3.enabled }}
             - { name: ARCHITECT_BLOB_S3_BUCKET, value: {{ required "node.s3.bucket" $n.s3.bucket | quote }} }
             {{- with $n.s3.endpoint }}
@@ -135,7 +142,15 @@ spec:
             {{- if $n.files.enabled }}
             - { name: files, mountPath: /files }
             {{- end }}
-          {{- with $n.resources }}
+          {{- $resources := deepCopy ($n.resources | default dict) }}
+          {{- if $n.ephemeralStorage }}
+          {{- $limits := get $resources "limits" | default dict }}
+          {{- if not (hasKey $limits "ephemeral-storage") }}
+          {{- $_ := set $limits "ephemeral-storage" (include "architect.ephemeralLimit" . | int64) }}
+          {{- end }}
+          {{- $_ := set $resources "limits" $limits }}
+          {{- end }}
+          {{- with $resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -145,7 +160,10 @@ spec:
           persistentVolumeClaim:
             claimName: {{ $n.persistence.existingClaim | default (printf "%s-node" (include "architect.fullname" .)) }}
           {{- else }}
-          emptyDir: {}
+          emptyDir:
+            {{- with $n.persistence.emptyDirSizeLimit }}
+            sizeLimit: {{ . }}
+            {{- end }}
           {{- end }}
         {{- if $n.existingSecret }}
         - name: secrets

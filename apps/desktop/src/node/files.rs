@@ -16,6 +16,13 @@
 //! the bucket share its bytes, deduped by hash. With
 //! [`Placement::Primary`] the bucket is where the bytes live and this
 //! node's store is a cache.
+//!
+//! The store is bounded ([`budget`], #525): `files_store_max` and a
+//! keep-free floor `files_keep_free` on its filesystem, checked before a
+//! byte is written. A holding node's fetches land, and the versions it
+//! replaces are kept, beside its tree (`<files_dir>/.architect`), under
+//! the tree filesystem's floor and `files_history_max`; nothing is
+//! deleted to make room (`architect_files::sync::space`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -24,7 +31,7 @@ use std::time::Duration;
 
 use architect::blob::{
     BlobTransferClient, BlobTransferDispatcher, Fetcher, LocalFs, Remote, S3Config, S3Store,
-    Sha256, VoxRemote, blob_transfer_service_descriptor,
+    Sha256, StoreBudget, VoxRemote, blob_transfer_service_descriptor,
 };
 use architect::host::{DavRequest, EngineHost};
 use architect::iroh_link;
@@ -46,14 +53,126 @@ use super::{Config, Dial, IrohMode, read_secret, targets};
 /// How often the blob connections are looked at.
 const DIAL_EVERY: Duration = Duration::from_secs(3);
 
+/// The store's limit when the filesystem cannot be asked: 10 GiB.
+const FALLBACK_MAX: u64 = 10 << 30;
+
+/// The default bound on a holding node's kept versions, on a tree
+/// filesystem of `total` bytes: a tenth of it, at most 500 GiB. They live
+/// on the share people record to; at the bound a replacement waits and is
+/// reported, nothing is deleted.
+#[must_use]
+pub const fn default_history_max(total: u64) -> u64 {
+    let tenth = total / 10;
+    let cap = 500 << 30;
+    if tenth < cap { tenth } else { cap }
+}
+
+/// Which budget a [`budget`] is for.
+#[derive(Clone, Copy)]
+enum Area {
+    /// The store on the data volume: `files_store_max`, else a share of
+    /// its filesystem.
+    Store,
+    /// Where a holding node's fetches land, beside its tree: no limit
+    /// of its own, the tree filesystem's floor.
+    Incoming,
+    /// A holding node's kept versions, beside its tree:
+    /// `files_history_max`, else no limit; the tree filesystem's floor.
+    History,
+}
+
+/// The budget of the area at `root`, and one wide event saying what it
+/// is and where each number came from (a limit derived from a host disk
+/// that a volume reports as its own is visible at start). Its total
+/// starts from a walk of what is there.
+fn budget(config: &Config, area: Area, root: &Path) -> StoreBudget {
+    let space = architect::blob::fs_space(root);
+    let total = space.map(|s| s.total);
+    let (max, max_from) = match (area, config.files_store_max, config.files_history_max) {
+        (Area::Store, Some(set), _) => (set.of(total), "ARCHITECT_FILES_STORE_MAX"),
+        (Area::History, _, Some(set)) => (set.of(total), "ARCHITECT_FILES_HISTORY_MAX"),
+        (Area::Store, None, _) => (
+            total.map(architect::blob::default_max),
+            "default: a quarter of the filesystem, at most 100 GiB",
+        ),
+        (Area::History, _, None) => (
+            total.map(default_history_max),
+            "default: a tenth of the tree's filesystem, at most 500 GiB",
+        ),
+        (Area::Incoming, _, _) => (Some(u64::MAX), "none: the floor bounds it"),
+    };
+    let (max, max_from) = max.map_or(
+        (FALLBACK_MAX, "fallback: the filesystem cannot be read"),
+        |m| (m, max_from),
+    );
+    let (keep_free, floor_from) = match config.files_keep_free.map(|s| s.of(total)) {
+        Some(Some(k)) => (k, "ARCHITECT_FILES_KEEP_FREE"),
+        // A share of a filesystem that cannot be read: refuse what needs it.
+        Some(None) => (
+            1,
+            "ARCHITECT_FILES_KEEP_FREE, unreadable filesystem: writes refused",
+        ),
+        // Unreadable: refuse what needs the floor (closed, not open).
+        None => total.map_or((1, "unreadable filesystem: writes refused"), |t| {
+            (
+                architect::blob::default_keep_free(t),
+                "default: 15%, at most 64 GiB",
+            )
+        }),
+    };
+    let budget = StoreBudget::new(root, max, keep_free);
+    budget.reconcile(architect::blob::dir_size(root));
+    tracing::info!(
+        store.area = match area {
+            Area::Store => "store",
+            Area::Incoming => "incoming",
+            Area::History => "history",
+        },
+        store.used = budget.usage().used,
+        store.max = max,
+        store.max_from = max_from,
+        fs.keep_free = keep_free,
+        fs.keep_free_from = floor_from,
+        fs.total = total,
+        fs.free = space.map(|s| s.free),
+        fs.readable = space.is_some(),
+        "files: the store's budget"
+    );
+    budget
+}
+
 /// The engine for `config`, whose documents come from `registry` once set.
 pub(super) fn engine(
     config: &Config,
     files_dir: &Path,
     registry: Arc<OnceLock<DocRegistry>>,
-) -> Engine {
+) -> Result<Engine, String> {
     let data = config.data_dir.join("files");
-    let local = LocalFs::new(data.join("blobs"));
+    let blobs = data.join("blobs");
+    let local = LocalFs::new(&blobs).with_budget(Arc::new(budget(config, Area::Store, &blobs)));
+    let mut store = TreeStore::new(local);
+    let mut history_off = None;
+    if config.files_hold {
+        // Fetches land, and replaced versions are kept, on the tree's own
+        // filesystem: renamed in and linked aside, never copied through
+        // the data volume.
+        if let architect_files::sync::layout::Claimed::Unwritable(why) =
+            architect_files::sync::layout::claim_area(files_dir)?
+        {
+            tracing::warn!(files.history_off = %why, "files: the tree cannot be written: no history is kept");
+            history_off = Some(why);
+        }
+        let (incoming, versions) = architect_files::sync::layout::areas(files_dir);
+        let inbox = LocalFs::new(&incoming).with_budget(Arc::new(budget(
+            config,
+            Area::Incoming,
+            &incoming,
+        )));
+        let history =
+            LocalFs::new(&versions).with_budget(Arc::new(budget(config, Area::History, &versions)));
+        store = store.with_areas(inbox, history);
+    }
+    let fetcher = Fetcher::new(store.inbox.clone());
     let engine_config = EngineConfig {
         site: config.files_site.clone().unwrap_or_default(),
         verify_window: Duration::from_secs(config.files_verify_secs.max(1)),
@@ -62,8 +181,8 @@ pub(super) fn engine(
     };
     let engine = Engine::new(
         engine_config,
-        TreeStore::new(local.clone()),
-        Fetcher::new(local),
+        store,
+        fetcher,
         Arc::new(move |doc_id| {
             let registry = registry.clone();
             Box::pin(async move {
@@ -73,14 +192,17 @@ pub(super) fn engine(
         }),
     )
     .with_transcoder(architect_files::server::FfmpegTranscoder::new());
+    engine.set_history_off(history_off);
     // Its attestations are signed with its iroh key: its holder id is its endpoint id.
-    match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {
-        Ok(key) => engine.with_identity(key.to_bytes()),
-        Err(error) => {
-            tracing::warn!(%error, "files: the iroh key is not readable; attestations use a key of their own");
-            engine
-        }
-    }
+    Ok(
+        match iroh_link::load_or_create_secret_key(&config.data_dir.join("iroh.key")) {
+            Ok(key) => engine.with_identity(key.to_bytes()),
+            Err(error) => {
+                tracing::warn!(%error, "files: the iroh key is not readable; attestations use a key of their own");
+                engine
+            }
+        },
+    )
 }
 
 /// The agent on the node's HTTP side, when it listens on loopback only (a
@@ -243,15 +365,15 @@ async fn evict(local: LocalFs, budget: u64, there: &std::collections::HashSet<Sh
         total = total.saturating_add(meta.len());
         let at = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
         if there.contains(&hash) && !pinned.contains(&hash) {
-            held.push((at, meta.len(), path));
+            held.push((at, meta.len(), hash));
         }
     }
     held.sort();
-    for (_, len, path) in held {
+    for (_, len, hash) in held {
         if total <= budget {
             break;
         }
-        if tokio::fs::remove_file(&path).await.is_ok() {
+        if local.remove(&hash).is_ok() {
             total = total.saturating_sub(len);
         }
     }

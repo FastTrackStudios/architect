@@ -73,24 +73,33 @@ use futures::future::BoxFuture;
 use sha2::Digest as _;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 
+mod budget;
 mod fetch;
 #[cfg(feature = "http-client")]
 mod http_remote;
 #[cfg(feature = "http")]
 mod http_serve;
 mod keep;
+mod place;
 #[cfg(feature = "blob-s3")]
 mod s3;
 mod stream_reader;
 #[cfg(feature = "vox")]
 mod wire;
 
+pub use budget::{
+    NoRoom, Reservation, Space, SpaceProbe, StoreBudget, StoreUsage, default_keep_free,
+    default_max, dir_size, fs_space, walk_size,
+};
 pub use fetch::{Fetcher, HashSource, Progress, Remote};
 #[cfg(feature = "http-client")]
 pub use http_remote::HttpRemote;
 #[cfg(feature = "http")]
 pub use http_serve::serve_http;
 pub use keep::Collected;
+pub use place::{
+    STAGING, Sink, Staged, commit, copy_verified_with, hash_file, is_staging, stage, staging_path,
+};
 #[cfg(feature = "blob-s3")]
 pub use s3::{HolderEvents, S3Config, S3Store};
 pub use stream_reader::StreamReader;
@@ -232,6 +241,10 @@ pub enum BlobError {
     /// A host-supplied relative path that would leave its root.
     #[error("refusing the path {0:?}: not a plain relative path")]
     BadPath(String),
+    /// The store's budget has no room for it ([`StoreBudget`]); nothing
+    /// was written. Try again once space is freed.
+    #[error("{0}")]
+    NoRoom(NoRoom),
 }
 
 fn io_at(path: &Path) -> impl FnOnce(io::Error) -> BlobError + '_ {
@@ -667,12 +680,16 @@ pub trait BlobStore: Send + Sync {
 #[derive(Clone, Debug)]
 pub struct LocalFs {
     root: PathBuf,
+    budget: Option<std::sync::Arc<StoreBudget>>,
 }
 
 impl LocalFs {
     /// A store under `root` (created on the first put).
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            budget: None,
+        }
     }
 
     /// The store's root directory.
@@ -731,16 +748,25 @@ impl LocalFs {
         if let Some(dir) = tmp.parent() {
             tokio::fs::create_dir_all(dir).await.map_err(io_at(dir))?;
         }
+        // Each chunk is reserved before it is written: a body of unknown
+        // length cannot take the store past its budget.
+        let mut reservation = self.reserve(0).map_err(BlobError::NoRoom)?;
         let mut file = tokio::fs::File::create(tmp).await.map_err(io_at(tmp))?;
         let mut hasher = sha2::Sha256::new();
         let mut buf = vec![0u8; BUF];
+        let mut total = 0u64;
         loop {
             let n = body.read(&mut buf).await.map_err(BlobError::Source)?;
             let Some(chunk) = buf.get(..n).filter(|c| !c.is_empty()) else {
                 break;
             };
+            let len = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+            if let Some(r) = reservation.as_mut() {
+                r.grow(len).map_err(BlobError::NoRoom)?;
+            }
             file.write_all(chunk).await.map_err(io_at(tmp))?;
             hasher.update(chunk);
+            total = total.saturating_add(len);
         }
         file.sync_all().await.map_err(io_at(tmp))?;
         drop(file);
@@ -761,6 +787,9 @@ impl LocalFs {
             tokio::fs::create_dir_all(dir).await.map_err(io_at(dir))?;
         }
         tokio::fs::rename(tmp, &dest).await.map_err(io_at(&dest))?;
+        if let Some(r) = reservation.as_mut() {
+            r.wrote(total);
+        }
         Ok(actual)
     }
 

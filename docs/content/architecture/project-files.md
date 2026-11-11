@@ -53,12 +53,46 @@ full, so it is not an option.
   node's data dir, not on the mount. Each file is hashed once. After that a
   scan is a stat walk, which is also the only change detection that works on
   NFS (inotify does not see other clients' writes).
-- **Current bytes** are the working file. Past versions go in the blob store
-  on the same filesystem:
-  - A file up to `keep_inline` (64 MiB) is copied into the store when it is
-    indexed, so every version of a session file is kept.
-  - A larger file keeps the versions that sync replaced. It is renamed into
-    the store, so no second copy is made.
+- **Current bytes** are the working file. Past versions are kept as follows:
+  - On a device that pins roots, a file up to `keep_inline` (64 MiB) is copied
+    into the store when it is indexed, so every version of a session file is
+    kept.
+  - On the node that holds its tree in place, `keep_inline` is 0: the tree is
+    the copy. Copying the tree on its first scan is what filled starcommand's
+    disk (#525). A store copy it already has stays until space pressure: then
+    it may be dropped if a working file holds the same bytes and no root
+    lists them as an old version. Those copies are what protected small
+    files against direct edits.
+  - A version the engine replaces or deletes itself (a peer's newer version
+    or delete, a restore, a move, a WebDAV or S3 write or DELETE) is kept
+    before it goes (deletes are applied after every write in a pass), unless the versions
+    area or the store already holds its bytes. Another working file with the
+    same bytes never counts. On a holding node it is linked aside into
+    `<files_dir>/.architect/versions` (bounded by `files_history_max`, a
+    tenth of the tree's filesystem by default); on a device it goes into the
+    store. With no room, or nowhere writable to keep it, the replacement
+    waits and says why.
+  - An edit made on the tree behind the node's back cannot keep its previous
+    bytes unless a copy existed: the scan sees it after the fact. The version
+    stays listed, and `Files::held` says no one holds its bytes.
+- **Nothing is lost to make room** (`features/files/src/sync/space.rs`,
+  `crates/architect/src/blob/budget.rs` `StoreBudget`,
+  `crates/architect/src/blob/place.rs`).
+  - The store has a hard limit and a floor of free space on its filesystem,
+    both checked before a byte is written. A fetch with no room waits and is
+    tried again each pass; a file larger than the limit is reported too
+    large.
+  - Over 90% of the limit, the store drops only blobs that a working file
+    on the same device holds and that are no old version anywhere,
+    re-hashed just before the delete. It does so under the pass's lock, at
+    most 2 GiB of re-reading per pass (#530 covers cross-holder eviction).
+  - Writes are staged as `<name>.architect-part`, recorded in a journal
+    first (`features/files/src/sync/pending.rs`). A copy is synced and
+    verified; the target is re-checked before the swap, and a staged file
+    is never put over a file that appeared meanwhile.
+  - At start, only the journal's temp files are removed, and store files
+    sharing an inode with another name are re-hashed (changed ones are
+    quarantined, unchanged ones split).
 - **`.fts-files` is ignored**: not read, not migrated, not deleted. It is
   skipped by every scan, and Cody deletes it once Architect holds the roots.
   Its history (jj commits in a custom content-addressed backend) is not

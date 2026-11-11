@@ -19,8 +19,114 @@ pub const MARKER: &str = ".fts-root.json";
 pub const TASK_STORE: &str = ".fts-files";
 /// The first line of a file Task dehydrated: never indexed as content.
 pub const TASK_STUB: &[u8] = b"#fts-stub v1\n";
-/// The suffix of this engine's own temp files.
-pub const PART: &str = ".architect-part";
+/// The suffix of this engine's own temp files: one convention, the
+/// blob layer's ([`architect::blob::STAGING`]).
+pub const PART: &str = architect::blob::STAGING;
+/// The engine's own folder in a tree (`<files_dir>/.architect`: a holding
+/// node's incoming bytes and kept versions). Never a root, never synced.
+pub const AREA: &str = ".architect";
+
+/// The file that marks `.architect` as the node's own folder, and tells
+/// whoever finds it on the share what it is.
+pub const AREA_MARK: &str = "README.txt";
+const AREA_MARK_TEXT: &str = "This folder belongs to the Architect node that holds this tree.\n\
+incoming/  bytes it fetched from peers, about to be renamed into the tree\n\
+versions/  the previous versions of files it replaced (history), by sha-256\n\
+Anyone who mounts this share sees it. Do not edit or delete what is in it:\n\
+the versions are the only copy of some old versions.\n";
+
+/// What [`claim_area`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Claimed {
+    /// `.architect` is the node's own folder.
+    Ready,
+    /// The share cannot be written here (read-only, root-squashed): the
+    /// node starts and serves reads, keeps no history, and every
+    /// replacement or delete waits and says this.
+    Unwritable(String),
+}
+
+/// Make `<files_dir>/.architect` the node's own folder.
+///
+/// An absent or empty folder is claimed: its mark is written beside it
+/// and renamed in, so a crash leaves either no mark (claimed again next
+/// start) or a whole one. A share the node cannot write is
+/// [`Claimed::Unwritable`].
+///
+/// # Errors
+///
+/// Something else already has that name (a file, a link, a folder with
+/// other things in it and no mark of the node's): a holding node refuses
+/// to start, and the message names what to move.
+pub fn claim_area(files_dir: &Path) -> Result<Claimed, String> {
+    let area = files_dir.join(AREA);
+    let mark = area.join(AREA_MARK);
+    let unwritable = |e: &std::io::Error| {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::PermissionDenied
+        )
+    };
+    let write_mark = || -> std::io::Result<()> {
+        let tmp = area.join(format!("{AREA_MARK}{PART}"));
+        {
+            use std::io::Write as _;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(AREA_MARK_TEXT.as_bytes())?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, &mark)
+    };
+    let claim = |made: std::io::Result<()>| match made.and_then(|()| write_mark()) {
+        Ok(()) => Ok(Claimed::Ready),
+        Err(e) if unwritable(&e) => Ok(Claimed::Unwritable(format!(
+            "{} cannot be written ({e}): no history is kept, replacements and deletes wait",
+            area.display()
+        ))),
+        Err(e) => Err(format!(
+            "{}: cannot make the node's folder: {e}",
+            area.display()
+        )),
+    };
+    match std::fs::symlink_metadata(&area) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => claim(std::fs::create_dir_all(&area)),
+        Err(e) => Err(format!("{}: {e}", area.display())),
+        Ok(m) if m.file_type().is_symlink() || !m.is_dir() => Err(format!(
+            "{} exists and is not a folder of the node's (a file or a link): move it away, \
+             the node keeps its history there",
+            area.display()
+        )),
+        Ok(_) => {
+            if std::fs::read_to_string(&mark).is_ok_and(|text| {
+                text.starts_with(AREA_MARK_TEXT.lines().next().unwrap_or_default())
+            }) {
+                return Ok(Claimed::Ready);
+            }
+            // Empty but for a half-written mark: a claim a crash cut short.
+            let empty = std::fs::read_dir(&area).is_ok_and(|entries| {
+                entries
+                    .flatten()
+                    .all(|e| e.file_name().to_string_lossy().starts_with(AREA_MARK))
+            });
+            if empty {
+                return claim(Ok(()));
+            }
+            Err(format!(
+                "{} exists and is not the node's own folder (no {AREA_MARK} of its own): \
+                 move it away, the node keeps its history there",
+                area.display()
+            ))
+        }
+    }
+}
+
+/// Where a holding node keeps what it fetches and the versions it
+/// replaces, on the tree's own filesystem.
+#[must_use]
+pub fn areas(files_dir: &Path) -> (PathBuf, PathBuf) {
+    let area = files_dir.join(AREA);
+    (area.join("incoming"), area.join("versions"))
+}
 
 /// A root found on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,18 +210,33 @@ fn dirs(parent: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// Whether a root-relative path is never synced: Task's store and
-/// marker, the DAW's regenerable peaks, the OS's litter, temp files.
+/// Whether a root-relative path is never synced.
+///
+/// Task's store and marker, the engine's own folder, the DAW's
+/// regenerable peaks, the OS's litter, and every temp name the engine
+/// writes (a name ending in [`PART`]). The one place that
+/// decides it: the scan, the unpin check and the start-up clean-up all
+/// ask here.
 #[must_use]
 pub fn ignored(rel: &str) -> bool {
     let name = rel.rsplit('/').next().unwrap_or(rel);
-    rel.split('/').any(|seg| seg == TASK_STORE)
+    rel.split('/').any(|seg| seg == TASK_STORE || seg == AREA)
         || name == MARKER
         || name == ".DS_Store"
         || name == "Thumbs.db"
         || name.starts_with("._")
-        || name.ends_with(PART)
+        || is_temp(name)
         || has_ext(name, &["reapeaks", "tmp"])
+}
+
+/// Whether a file name has the engine's temp suffix, exactly.
+///
+/// The engine writes `<name>.architect-part` and nothing else. Never synced;
+/// removed at start only when the engine's journal says it wrote it
+/// (`super::pending`), otherwise left alone and reported.
+#[must_use]
+pub fn is_temp(name: &str) -> bool {
+    name.ends_with(PART)
 }
 
 /// Whether saving this file is a save point: a DAW's session file.
@@ -155,6 +276,64 @@ mod tests {
         );
         assert_eq!(found[1].meta.section, Section::Assets);
         assert_eq!(found[1].meta.name, "Tracks");
+    }
+
+    /// Every temp name the engine can write in a tree is ignored, and
+    /// only those (#527: a cross-filesystem copy's `.architect-part.part`
+    /// was committed as a file and pushed to peers; that name is gone).
+    #[test]
+    fn every_temp_name_the_engine_writes_is_ignored() {
+        let at = Path::new("Audio/take.wav");
+        let staged = architect::blob::staging_path(at);
+        let rel = |p: &Path| p.to_string_lossy().into_owned();
+        assert!(ignored(&rel(&staged)), "write_file's staging name");
+        assert!(ignored(&rel(&architect::blob::staging_path(&staged))));
+        assert!(
+            !ignored("Audio/take.wav.architect-part.part"),
+            "the engine never writes that name: it is a user's file"
+        );
+        assert!(!ignored("Audio/an.architect-part of mine.txt"));
+        assert!(ignored(".architect/versions/ab/abcd"));
+        assert!(ignored(".architect/incoming/.partial/abcd.part"));
+        assert!(!ignored("Audio/take.wav"));
+        assert!(!ignored("Audio/architect-parts.wav"));
+    }
+
+    #[test]
+    fn the_node_s_folder_is_its_own_or_it_does_not_start() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(claim_area(tmp.path()), Ok(Claimed::Ready));
+        assert_eq!(claim_area(tmp.path()), Ok(Claimed::Ready));
+        assert!(tmp.path().join(AREA).join(AREA_MARK).is_file());
+
+        // A claim a crash cut short: an empty folder, or a half mark.
+        let cut = tempfile::tempdir().unwrap();
+        std::fs::create_dir(cut.path().join(AREA)).unwrap();
+        assert_eq!(claim_area(cut.path()), Ok(Claimed::Ready));
+        let half = tempfile::tempdir().unwrap();
+        std::fs::create_dir(half.path().join(AREA)).unwrap();
+        std::fs::write(
+            half.path().join(AREA).join("README.txt.architect-part"),
+            b"Th",
+        )
+        .unwrap();
+        assert_eq!(claim_area(half.path()), Ok(Claimed::Ready));
+
+        let theirs = tempfile::tempdir().unwrap();
+        std::fs::create_dir(theirs.path().join(AREA)).unwrap();
+        std::fs::write(theirs.path().join(AREA).join("notes.md"), b"mine").unwrap();
+        assert!(
+            claim_area(theirs.path())
+                .unwrap_err()
+                .contains("not the node's own")
+        );
+        let file = tempfile::tempdir().unwrap();
+        std::fs::write(file.path().join(AREA), b"x").unwrap();
+        assert!(
+            claim_area(file.path())
+                .unwrap_err()
+                .contains("not a folder")
+        );
     }
 
     #[test]

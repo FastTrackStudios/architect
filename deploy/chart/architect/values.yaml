@@ -67,6 +67,36 @@ node:
     size: 10Gi
     storageClass: ""
     existingClaim: ""
+    # With persistence off, /data is an emptyDir of at most this size:
+    # the kubelet evicts the pod (not the host) past it.
+    emptyDirSizeLimit: 10Gi
+
+  # The files' blob store under /data (#525). Its hard limit
+  # (ARCHITECT_FILES_STORE_MAX): empty = 75% of the data volume
+  # (persistence.size, else persistence.emptyDirSizeLimit), so the
+  # documents and indexes keep the rest. The floor kept free on the
+  # filesystem under /data (ARCHITECT_FILES_KEEP_FREE): bytes or a share;
+  # 15% stays above the kubelet's 10% disk-pressure eviction. A size is
+  # bytes, 16Gi/500M style, or (keepFree only, sensibly) a percentage.
+  # local-path (and hostPath) volumes do not enforce their claim's size:
+  # these two are what bounds the node's writes to /data there.
+  store:
+    max: ""
+    keepFree: "15%"
+    # A holding node keeps the versions it replaces beside its tree
+    # (/files/.architect/versions, not on /data; anyone mounting the
+    # share's root sees it). Empty = a tenth of the files volume, at most
+    # 500 GiB; at the limit, or at the files volume's own 15% floor, a
+    # replacement waits and is reported. Nothing is deleted.
+    # (ARCHITECT_FILES_HISTORY_MAX)
+    historyMax: ""
+
+  # The container's own ephemeral storage (its writable layer and logs;
+  # never a PVC): past it the kubelet evicts this pod instead of the host
+  # filling up. With persistence off the emptyDir /data counts too, so
+  # the limit set is this plus persistence.emptyDirSizeLimit. Empty = no
+  # limit.
+  ephemeralStorage: 2Gi
 
   # Projects and asset libraries (ARCHITECT_FILES_DIR=/files, held in
   # place: ARCHITECT_FILES_HOLD). One of nfs, hostPath or existingClaim.

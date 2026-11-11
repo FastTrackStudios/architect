@@ -13,6 +13,7 @@
 //! - [`registry`]: every live file of every root, searched offline.
 //! - [`ledger`]: each holder's signed attestations, and policy.
 //! - [`verify`]: Merkle roots and possession proofs.
+//! - [`space`]: the store kept within its budget, nothing stored twice.
 
 mod agent;
 pub mod assets;
@@ -24,11 +25,13 @@ pub mod lane;
 pub mod layout;
 pub mod ledger;
 pub mod manifest;
+pub mod pending;
 pub mod registry;
 mod replicas;
 #[cfg(feature = "s3")]
 pub mod s3;
 pub mod scan;
+pub mod space;
 pub mod store;
 pub mod verify;
 

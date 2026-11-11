@@ -617,7 +617,10 @@ impl Engine {
 
     /// What this device holds of `hash`, looked at now.
     fn holding_of(&self, hash: &Sha256) -> Option<Holding> {
-        let stored = self.store.local.path_for(hash);
+        let stored = self
+            .store
+            .stored_for(hash)
+            .unwrap_or_else(|| self.store.local.path_for(hash));
         if let Some(path) = self.store.in_place.find(hash) {
             let size = std::fs::metadata(path).ok()?.len();
             return Some(Holding {
@@ -659,16 +662,22 @@ impl Engine {
     /// The blobs in the store (and the downloads growing there).
     fn stored(&self) -> HashMap<String, Holding> {
         let mut out = HashMap::new();
-        let root = self.store.local.root().to_owned();
-        let Ok(dirs) = std::fs::read_dir(&root) else {
-            return out;
-        };
+        let roots: Vec<PathBuf> = self
+            .store
+            .areas()
+            .into_iter()
+            .map(|a| a.root().to_owned())
+            .collect();
         let state = if self.config().hold_all {
             CopyState::Full
         } else {
             CopyState::Cached
         };
-        for dir in dirs.flatten() {
+        for dir in roots
+            .iter()
+            .filter_map(|r| std::fs::read_dir(r).ok())
+            .flat_map(Iterator::flatten)
+        {
             if dir.file_name().len() != 2 {
                 continue;
             }
@@ -1056,12 +1065,10 @@ impl Engine {
                     report.corrupt.push(hex.clone());
                     lock(&self.books.damaged).insert(hex.clone());
                     tracing::warn!(hash = %hex, file = ?file, "files: a scrub found bad or missing bytes");
-                    if let Some(path) = file.filter(|p| p.starts_with(self.store.local.root())) {
-                        let to = self.config().data.join("corrupt").join(&hex);
-                        if let Some(dir) = to.parent() {
-                            let _ = std::fs::create_dir_all(dir);
-                        }
-                        let _ = std::fs::rename(&path, &to);
+                    if let Some(path) =
+                        file.filter(|p| self.store.areas().iter().any(|a| p.starts_with(a.root())))
+                    {
+                        self.quarantine_file(&path, &hex);
                     }
                     let _ = std::fs::remove_file(self.merkle_path(&hex));
                     let gone: BTreeMap<String, Option<Holding>> =
@@ -1687,7 +1694,7 @@ impl Engine {
             .collect();
         self.write_own(&meta.org, &evicting).await;
         for h in &hashes {
-            let _ = std::fs::remove_file(self.store.local.path_for(h));
+            let _ = self.store.local.remove(h);
             let _ = std::fs::remove_file(self.merkle_path(&h.to_hex()));
         }
         self.attest(&hashes).await;
@@ -1708,6 +1715,154 @@ impl Engine {
                 "not a cached copy: the working copy or the node holds it".to_owned(),
             ));
         }
+        self.drop_stored(hash).await
+    }
+
+    /// Who holds a version's bytes (`content`, hex): this device, and the
+    /// holders on record.
+    pub async fn version_bytes(
+        &self,
+        version: crate::id::VersionId,
+        content: &str,
+    ) -> crate::roots::VersionBytes {
+        let here = Sha256::from_hex(content).is_ok_and(|h| self.holds(&h));
+        let holders = self.locations(content).await.copies.len();
+        crate::roots::VersionBytes {
+            version,
+            here,
+            holders: u32::try_from(holders).unwrap_or(u32::MAX),
+        }
+    }
+
+    /// Move bad bytes out of a store area so they are never served: to
+    /// `<data>/corrupt/`, or (an area on another filesystem, the tree's)
+    /// to `<area>/.corrupt/`. Never deleted.
+    pub(super) fn quarantine_file(&self, path: &std::path::Path, hex: &str) {
+        let to = self.config().data.join("corrupt").join(hex);
+        if let Some(dir) = to.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if std::fs::rename(path, &to).is_ok() {
+            return;
+        }
+        let beside = self
+            .store
+            .areas()
+            .into_iter()
+            .find(|a| path.starts_with(a.root()))
+            .map(|a| a.root().join(".corrupt").join(hex));
+        if let Some(beside) = beside {
+            if let Some(dir) = beside.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::rename(path, &beside);
+        }
+    }
+
+    /// Bad bytes found in a store area (`path`, claimed as `hash`):
+    /// quarantined, the claim withdrawn, counted as damaged.
+    pub(super) async fn quarantine(&self, hash: Sha256, path: &std::path::Path) {
+        let hex = hash.to_hex();
+        self.quarantine_file(path, &hex);
+        let _ = std::fs::remove_file(self.merkle_path(&hex));
+        lock(&self.books.damaged).insert(hex.clone());
+        let orgs = lock(&self.books.registry).orgs_of(&hex);
+        let gone: BTreeMap<String, Option<Holding>> = std::iter::once((hex, None)).collect();
+        for org in &orgs {
+            self.write_own(org, &gone).await;
+        }
+        self.attest(&[hash]).await;
+    }
+
+    /// Every content that is an old version somewhere (not what a path's
+    /// current version holds): never evicted for space, whatever else
+    /// holds the same bytes now.
+    /// `None` when any root's history cannot be read: then none of its
+    /// old versions is known, and nothing may be evicted (closed, not open).
+    pub(super) async fn old_contents(&self) -> Option<HashSet<String>> {
+        let mut out = HashSet::new();
+        for id in self.known() {
+            let Ok(tree) = self.tree(id).await else {
+                return None;
+            };
+            for path in tree.paths() {
+                let current = tree.current(path).map(|v| v.id);
+                for v in tree.history(path) {
+                    if Some(v.id) != current
+                        && let Some(c) = &v.content
+                    {
+                        out.insert(c.clone());
+                    }
+                }
+            }
+        }
+        Some(out)
+    }
+
+    /// Drop one blob from the store to make room (the store's budget,
+    /// [`super::space`]): only a blob whose bytes this same device holds
+    /// in a working file in place, re-hashed from that file just before
+    /// the delete, and only if the bytes are no old version anywhere (a
+    /// working file can change, so it is never where a version is kept).
+    /// Holds the pass's lock, so a write deciding the store keeps these
+    /// bytes never interleaves with it.
+    ///
+    /// Nothing else is evicted for space: a copy only other holders keep
+    /// would need the org's policy applied to old versions, a live
+    /// possession check just before the delete, and an `evicting` note
+    /// the other holders have seen first, or two holders can each drop
+    /// the last two copies (#530).
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::BelowPolicy`]: pinned, an old version, or no working
+    /// file holds these bytes now; or the file cannot be read or removed.
+    pub async fn evict_for_space(&self, hash: Sha256) -> Result<(), EngineError> {
+        let _busy = self.busy().await;
+        let Some(old) = self.old_contents().await else {
+            return Err(EngineError::BelowPolicy(vec![format!(
+                "{hash} (a root's history cannot be read: nothing is evicted)"
+            )]));
+        };
+        self.evict_for_space_locked(hash, &old).await
+    }
+
+    /// [`Self::evict_for_space`] with the lock held and the old versions
+    /// known.
+    pub(super) async fn evict_for_space_locked(
+        &self,
+        hash: Sha256,
+        old: &HashSet<String>,
+    ) -> Result<(), EngineError> {
+        if self.store.local.is_pinned(hash).await.unwrap_or(true) {
+            return Err(EngineError::BelowPolicy(vec![format!("{hash} (pinned)")]));
+        }
+        if old.contains(&hash.to_hex()) {
+            return Err(EngineError::BelowPolicy(vec![format!(
+                "{hash} (an old version: never evicted for space)"
+            )]));
+        }
+        let Some(working) = self.store.in_place.find(&hash) else {
+            return Err(EngineError::BelowPolicy(vec![format!(
+                "{hash} (no working file holds it: never evicted for space, #530)"
+            )]));
+        };
+        let (_, actual) = architect::blob::hash_file(&working).await?;
+        if actual != hash {
+            // The index's stat lied (an edit that kept size and mtime).
+            self.store.in_place.forget(&hash);
+            return Err(EngineError::Changed(working.display().to_string()));
+        }
+        // Still the same file after the read.
+        if self.store.in_place.find(&hash).as_deref() != Some(working.as_path()) {
+            return Err(EngineError::Changed(working.display().to_string()));
+        }
+        self.store.local.remove(&hash)?;
+        Ok(())
+    }
+
+    /// [`Self::evict_blob`]'s work: the policy guard, `evicting`, gone.
+    async fn drop_stored(&self, hash: Sha256) -> Result<(), EngineError> {
         let stored = self.store.local.path_for(&hash);
         let Ok(meta) = std::fs::metadata(&stored) else {
             return Ok(());
@@ -1738,10 +1893,7 @@ impl Engine {
         for org in &orgs {
             self.write_own(org, &evicting).await;
         }
-        match std::fs::remove_file(&stored) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-            _ => {}
-        }
+        self.store.local.remove(&hash)?;
         let _ = std::fs::remove_file(self.merkle_path(&hex));
         self.attest(&[hash]).await;
         Ok(())
@@ -1768,6 +1920,7 @@ impl Engine {
     pub(super) async fn keep_books(&self) {
         self.refresh_registry().await;
         self.refresh_ledgers().await;
+        self.keep_store().await;
         self.reconcile().await;
         let budget = self.config().scrub_budget;
         if budget > 0 {
