@@ -112,6 +112,8 @@ pub struct RootStatus {
     pub bytes: u64,
     /// Files whose bytes are not here yet (pinned roots).
     pub missing: u32,
+    /// Of those, the ones waiting for room in the store's budget.
+    pub deferred: u32,
     /// Every file is at its head.
     pub synced: bool,
     /// Task stubs met in the working copy: never synced.

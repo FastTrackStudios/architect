@@ -1687,7 +1687,7 @@ impl Engine {
             .collect();
         self.write_own(&meta.org, &evicting).await;
         for h in &hashes {
-            let _ = std::fs::remove_file(self.store.local.path_for(h));
+            let _ = self.store.local.remove(h);
             let _ = std::fs::remove_file(self.merkle_path(&h.to_hex()));
         }
         self.attest(&hashes).await;
@@ -1708,6 +1708,42 @@ impl Engine {
                 "not a cached copy: the working copy or the node holds it".to_owned(),
             ));
         }
+        self.drop_stored(hash).await
+    }
+
+    /// Drop one blob from the store to make room (the store's budget,
+    /// [`super::space`]), on a holding node too: refused under policy as
+    /// [`Self::evict_blob`], and never the last copy. Bytes no working
+    /// file holds go only when at least one other holder has a verified
+    /// copy, whatever the policy says; pinned blobs never go.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::BelowPolicy`] (also for a last copy), or the file
+    /// cannot be removed.
+    pub async fn evict_for_space(&self, hash: Sha256) -> Result<(), EngineError> {
+        if self.store.local.is_pinned(hash).await.unwrap_or(true) {
+            return Err(EngineError::BelowPolicy(vec![format!("{hash} (pinned)")]));
+        }
+        if self.store.in_place.find(&hash).is_none() {
+            self.refresh_ledgers().await;
+            let me = self.holder_id();
+            let elsewhere = self
+                .seen(&hash.to_hex(), None)
+                .iter()
+                .filter(|s| s.holder.id != me && s.verdict.confidence == Confidence::Verified)
+                .count();
+            if elsewhere == 0 {
+                return Err(EngineError::BelowPolicy(vec![format!(
+                    "{hash} (the last copy)"
+                )]));
+            }
+        }
+        self.drop_stored(hash).await
+    }
+
+    /// [`Self::evict_blob`]'s work: the policy guard, `evicting`, gone.
+    async fn drop_stored(&self, hash: Sha256) -> Result<(), EngineError> {
         let stored = self.store.local.path_for(&hash);
         let Ok(meta) = std::fs::metadata(&stored) else {
             return Ok(());
@@ -1738,10 +1774,7 @@ impl Engine {
         for org in &orgs {
             self.write_own(org, &evicting).await;
         }
-        match std::fs::remove_file(&stored) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-            _ => {}
-        }
+        self.store.local.remove(&hash)?;
         let _ = std::fs::remove_file(self.merkle_path(&hex));
         self.attest(&[hash]).await;
         Ok(())
@@ -1768,6 +1801,7 @@ impl Engine {
     pub(super) async fn keep_books(&self) {
         self.refresh_registry().await;
         self.refresh_ledgers().await;
+        self.keep_store().await;
         self.reconcile().await;
         let budget = self.config().scrub_budget;
         if budget > 0 {

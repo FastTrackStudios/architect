@@ -22,6 +22,7 @@ impl From<EngineError> for AgentError {
             EngineError::NotSynced(paths) => Self::NotSynced(paths.join(", ")),
             EngineError::BelowPolicy(paths) => Self::BelowPolicy(first_few(&paths)),
             EngineError::Io(why) => Self::Refused(why),
+            EngineError::NoRoom(why) => Self::NoRoom(why),
         }
     }
 }

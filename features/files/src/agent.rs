@@ -29,6 +29,10 @@ pub enum AgentError {
     #[error("{0}")]
     #[architect(http_status = 400)]
     Refused(String),
+    /// The device's store has no room for it now (its budget); try later.
+    #[error("{0}")]
+    #[architect(http_status = 507)]
+    NoRoom(String),
 }
 
 pub mod files {

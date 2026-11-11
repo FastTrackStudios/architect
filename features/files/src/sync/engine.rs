@@ -39,8 +39,12 @@ use super::store::TreeStore;
 use crate::id::VersionId;
 pub use crate::roots::RootStatus;
 
-/// Files up to this size are copied into the store when committed, so
-/// every version of them is kept; larger ones stay in place.
+/// Committed files up to this size are also kept in the store.
+///
+/// So every version of them is kept; larger ones stay in place. A
+/// device's default; a node that holds its tree in place keeps none
+/// (`0`): its tree is the copy, and a second one in the store is what
+/// filled a disk (#525).
 pub const KEEP_INLINE: u64 = 64 << 20;
 
 /// A root's document, from the app's registry.
@@ -58,6 +62,9 @@ pub struct EngineConfig {
     pub files_dir: PathBuf,
     /// Whether every root found in `files_dir` is held (the node).
     pub hold_all: bool,
+    /// Committed files up to this size are also copied into the store
+    /// ([`KEEP_INLINE`]; `0` on a holding node), and fetched ones up to
+    /// it stay there as well as in the working copy.
     pub keep_inline: u64,
     /// How old a change must be before it is committed ([`super::scan::SETTLE`]).
     pub settle: std::time::Duration,
@@ -76,7 +83,8 @@ pub struct EngineConfig {
 pub const VERIFY_WINDOW: std::time::Duration = std::time::Duration::from_hours(30 * 24);
 
 impl EngineConfig {
-    /// A device's engine with the defaults: [`KEEP_INLINE`], [`super::scan::SETTLE`].
+    /// A device's engine with the defaults: [`KEEP_INLINE`] (`0` when
+    /// `hold_all`: nothing stored twice), [`super::scan::SETTLE`].
     #[must_use]
     pub fn new(
         device: impl Into<String>,
@@ -89,7 +97,7 @@ impl EngineConfig {
             data,
             files_dir,
             hold_all,
-            keep_inline: KEEP_INLINE,
+            keep_inline: if hold_all { 0 } else { KEEP_INLINE },
             settle: super::scan::SETTLE,
             site: String::new(),
             verify_window: VERIFY_WINDOW,
@@ -113,6 +121,18 @@ pub enum EngineError {
     BelowPolicy(Vec<String>),
     #[error("{0}")]
     Io(String),
+    /// The store's budget has no room: deferred until there is.
+    #[error("{0}")]
+    NoRoom(String),
+}
+
+impl From<architect::blob::BlobError> for EngineError {
+    fn from(e: architect::blob::BlobError) -> Self {
+        match e {
+            architect::blob::BlobError::NoRoom(no) => Self::NoRoom(no.to_string()),
+            other => Self::Io(other.to_string()),
+        }
+    }
 }
 
 impl From<std::io::Error> for EngineError {
@@ -129,6 +149,8 @@ struct RootState {
     scanner: Scanner,
     index: Option<Index>,
     missing: u32,
+    /// Files whose fetch waits for room in the store.
+    deferred: u32,
     error: Option<String>,
 }
 
@@ -493,7 +515,8 @@ impl Engine {
         };
 
         // 2 and 3. Apply, settling forks.
-        let missing = self.apply(&manifest, &dir, &mut index).await;
+        let (missing, deferred) = self.apply(&manifest, &dir, &mut index).await;
+        self.note_deferred(doc_id, deferred);
 
         // 4. Checkpoint.
         if first_import && !index.files.is_empty() {
@@ -506,6 +529,35 @@ impl Engine {
         self.attest_root(doc_id, &meta.org, &index).await;
         self.put_back(doc_id, scanner, index, missing);
         Ok(())
+    }
+
+    /// Keep a root's count of fetches waiting for room; one event when
+    /// a root starts waiting, not one per pass while it does.
+    fn note_deferred(&self, doc_id: Uuid, deferred: u32) {
+        let before = self.with_root(doc_id, |state| {
+            std::mem::replace(&mut state.deferred, deferred)
+        });
+        if deferred > 0 && before == 0 {
+            let usage = self.store.local.budget().map(|b| b.usage());
+            tracing::warn!(
+                files.root = %doc_id,
+                files.deferred = deferred,
+                store.used = usage.map(|u| u.used),
+                store.max = usage.map(|u| u.max),
+                fs.free = usage.and_then(|u| u.space).map(|s| s.free),
+                fs.keep_free = usage.map(|u| u.keep_free),
+                "files: fetches deferred for space"
+            );
+        }
+    }
+
+    /// Fetches waiting for room in the store, over every root.
+    #[must_use]
+    pub fn deferred(&self) -> u32 {
+        self.lock()
+            .values()
+            .map(|s| s.deferred)
+            .fold(0, u32::saturating_add)
     }
 
     fn put_back(&self, doc_id: Uuid, scanner: Scanner, index: Index, missing: u32) {
@@ -561,16 +613,22 @@ impl Engine {
                     let hash =
                         Sha256::from_hex(&content).map_err(|e| EngineError::Io(e.to_string()))?;
                     let file = dir.join(&path);
-                    if stat.size <= self.config.keep_inline {
-                        let body = tokio::fs::File::open(&file).await?;
-                        architect::blob::BlobStore::put(
+                    // Kept in the store too, if small and there is room;
+                    // else served from where it is.
+                    let kept = stat.size <= self.config.keep_inline
+                        && self.store.local.has_room(stat.size)
+                        && match architect::blob::BlobStore::put(
                             &self.store.local,
                             Some(hash),
-                            Box::pin(body),
+                            Box::pin(tokio::fs::File::open(&file).await?),
                         )
                         .await
-                        .map_err(|e| EngineError::Io(e.to_string()))?;
-                    } else {
+                        {
+                            Ok(_) => true,
+                            Err(architect::blob::BlobError::NoRoom(_)) => false,
+                            Err(e) => return Err(EngineError::Io(e.to_string())),
+                        };
+                    if !kept {
                         self.store.in_place.insert(hash, file, stat);
                     }
                     let version = FileVersion {
@@ -618,10 +676,12 @@ impl Engine {
         Ok(saved)
     }
 
-    /// Bring the working copy to the heads; how many files are still missing.
-    async fn apply(&self, manifest: &Manifest<'_>, dir: &Path, index: &mut Index) -> u32 {
+    /// Bring the working copy to the heads; how many files are still
+    /// missing, and how many of those wait for room in the store.
+    async fn apply(&self, manifest: &Manifest<'_>, dir: &Path, index: &mut Index) -> (u32, u32) {
         let tree = manifest.tree();
         let mut missing = 0u32;
+        let mut deferred = 0u32;
         let mut closing = Vec::new();
         let paths: Vec<String> = tree.paths().map(str::to_owned).collect();
         for path in paths {
@@ -637,9 +697,12 @@ impl Engine {
                         if !at.exists()
                             && tree.current(&copy).is_none()
                             && let Some(content) = &loser.content
-                            && self.write_file(&at, content, loser.size).await.is_err()
+                            && let Err(e) = self.write_file(&at, content, loser.size).await
                         {
                             missing = missing.saturating_add(1);
+                            if matches!(e, EngineError::NoRoom(_)) {
+                                deferred = deferred.saturating_add(1);
+                            }
                         }
                     }
                     let heads = tree.heads(&path);
@@ -690,9 +753,17 @@ impl Engine {
                 );
                 continue;
             }
-            // The bytes this file is replacing are kept if sync replaced them.
-            if let Some(k) = &known {
-                self.keep_replaced(&file, k).await;
+            // The bytes this file is replacing are kept if sync replaced
+            // them; with no room for them, the file waits.
+            if let Some(k) = &known
+                && let Err(e) = self.keep_replaced(&file, k).await
+            {
+                tracing::debug!(%path, %e, "files: not replaced yet");
+                missing = missing.saturating_add(1);
+                if matches!(e, EngineError::NoRoom(_)) {
+                    deferred = deferred.saturating_add(1);
+                }
+                continue;
             }
             match self.write_file(&file, content, target.size).await {
                 Ok(stat) => {
@@ -708,27 +779,29 @@ impl Engine {
                 Err(e) => {
                     tracing::debug!(%path, %e, "files: not fetched yet");
                     missing = missing.saturating_add(1);
+                    if matches!(e, EngineError::NoRoom(_)) {
+                        deferred = deferred.saturating_add(1);
+                    }
                 }
             }
         }
         manifest.push(&closing);
-        missing
+        (missing, deferred)
     }
 
-    /// A working file about to be replaced: a large one is moved into the
-    /// store (small ones are there already), so its version stays.
-    async fn keep_replaced(&self, file: &Path, known: &Indexed) {
+    /// A working file about to be replaced is moved into the store (if
+    /// not there already), so its version stays: within the store's
+    /// budget, else the replacement waits ([`EngineError::NoRoom`]).
+    async fn keep_replaced(&self, file: &Path, known: &Indexed) -> Result<(), EngineError> {
         let Ok(hash) = Sha256::from_hex(&known.content) else {
-            return;
+            return Ok(());
         };
-        let into = self.store.local.path_for(&hash);
-        if into.exists() {
-            return;
+        // Only the bytes the index knows: a file changed since is a fork.
+        let unchanged = std::fs::metadata(file).is_ok_and(|m| Stat::of(&m) == known.stat);
+        if !unchanged {
+            return Ok(());
         }
-        if let Some(dir) = into.parent() {
-            let _ = tokio::fs::create_dir_all(dir).await;
-        }
-        let _ = tokio::fs::rename(file, &into).await;
+        Ok(self.store.local.adopt(file, &hash).await?)
     }
 
     /// Write `content` at `at`: beside it first, then renamed into place,
@@ -738,10 +811,14 @@ impl Engine {
         let source = if let Some(path) = self.store.file_for(&hash) {
             path
         } else {
-            self.fetcher
-                .fetch(hash)
-                .await
-                .map_err(|e| EngineError::Io(e.to_string()))?;
+            // Asked before any remote is: no room, no fetch (and no event
+            // per pass for a file that keeps waiting).
+            if !self.store.local.has_room(size) {
+                return Err(EngineError::NoRoom(format!(
+                    "no room in the store for {size} bytes"
+                )));
+            }
+            self.fetcher.fetch(hash).await?;
             // The fetcher checked every byte against the hash.
             self.note_verified(content);
             self.store.local.path_for(&hash)
@@ -751,10 +828,14 @@ impl Engine {
         }
         let part = PathBuf::from(format!("{}{PART}", at.display()));
         let from_store = source.starts_with(self.store.local.root());
-        if from_store && size > self.config.keep_inline {
-            // One copy of a large file on this device: it moves out of the
-            // store into the working copy, and is served from there.
-            tokio::fs::rename(&source, &part).await?;
+        if from_store
+            && size > self.config.keep_inline
+            && !self.store.local.is_pinned(hash).await.unwrap_or(true)
+        {
+            // One copy on this device: it moves out of the store into the
+            // working copy (copied across filesystems, then removed), and
+            // is served from there.
+            self.store.local.move_out(&hash, &part).await?;
         } else {
             tokio::fs::copy(&source, &part).await?;
         }
@@ -950,9 +1031,7 @@ impl Engine {
             .await
             .ok_or_else(|| EngineError::NoRoot(doc_id.to_string()))?;
         let manifest = Manifest::new(&doc);
-        let hash = architect::blob::BlobStore::put(&self.store.local, None, body)
-            .await
-            .map_err(|e| EngineError::Io(e.to_string()))?;
+        let hash = architect::blob::BlobStore::put(&self.store.local, None, body).await?;
         let size = tokio::fs::metadata(self.store.local.path_for(&hash))
             .await?
             .len();
@@ -1118,11 +1197,12 @@ impl Engine {
             (
                 s.index.as_ref().is_some_and(at_head),
                 s.missing,
+                s.deferred,
                 s.scanner.stubs.clone(),
                 s.error.clone(),
             )
         });
-        let (at_heads, missing, stubs, error) = seen.unwrap_or_default();
+        let (at_heads, missing, deferred, stubs, error) = seen.unwrap_or_default();
         let synced = dir.is_some() && at_heads;
         Some(RootStatus {
             doc_id: doc_id.to_string(),
@@ -1135,6 +1215,7 @@ impl Engine {
             path: dir.map(|d| d.display().to_string()),
             pinned,
             missing,
+            deferred,
             synced,
             stubs,
             error,
