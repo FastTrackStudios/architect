@@ -8,7 +8,7 @@
 
 use architect_permissions::{MethodPermit, ServicePermits};
 
-use crate::share::{NewAudience, NewShare, Share, ShareChange, ShareComment, ShareFault};
+use crate::share::{Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareFault};
 
 #[architect::rpc]
 pub trait ShareLinks {
@@ -19,7 +19,8 @@ pub trait ShareLinks {
     /// Every share of the node's vaults, revoked and expired ones too.
     async fn shares(&self) -> Result<Vec<Share>, ShareFault>;
 
-    /// Change one: its audience, access, expiry, title or domain. The
+    /// Change one: its audience, access, expiry, title, domain or how far
+    /// it plays ([`ShareChange::Listen`]). The
     /// next request to the link is answered by the change.
     async fn update(&self, code: String, change: ShareChange) -> Result<Share, ShareFault>;
 
@@ -38,6 +39,15 @@ pub trait ShareLinks {
     /// its other audiences stay.
     async fn remove_audience(&self, code: String, name: String) -> Result<Share, ShareFault>;
 
+    /// How far audience `name`'s link of share `code` plays (#528):
+    /// `listen`, never past the share's; None: the share's.
+    async fn audience_listen(
+        &self,
+        code: String,
+        name: String,
+        listen: Option<Listen>,
+    ) -> Result<Share, ShareFault>;
+
     /// The comments left on a share, oldest first.
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault>;
 }
@@ -52,6 +62,7 @@ pub const SHARE_PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("revoke", "write", "vaults/**").audited(),
         MethodPermit::new("add_audience", "write", "vaults/**").audited(),
         MethodPermit::new("remove_audience", "write", "vaults/**").audited(),
+        MethodPermit::new("audience_listen", "write", "vaults/**").audited(),
         MethodPermit::new("comments", "read", "vaults/**"),
     ],
 };
