@@ -87,6 +87,9 @@ spec:
             {{- with $n.store.keepFree }}
             - { name: ARCHITECT_FILES_KEEP_FREE, value: {{ . | quote }} }
             {{- end }}
+            {{- with $n.store.historyMax }}
+            - { name: ARCHITECT_FILES_HISTORY_MAX, value: {{ include "architect.bytes" . | quote }} }
+            {{- end }}
             {{- if $n.s3.enabled }}
             - { name: ARCHITECT_BLOB_S3_BUCKET, value: {{ required "node.s3.bucket" $n.s3.bucket | quote }} }
             {{- with $n.s3.endpoint }}
@@ -143,7 +146,7 @@ spec:
           {{- if $n.ephemeralStorage }}
           {{- $limits := get $resources "limits" | default dict }}
           {{- if not (hasKey $limits "ephemeral-storage") }}
-          {{- $_ := set $limits "ephemeral-storage" $n.ephemeralStorage }}
+          {{- $_ := set $limits "ephemeral-storage" (include "architect.ephemeralLimit" . | int64) }}
           {{- end }}
           {{- $_ := set $resources "limits" $limits }}
           {{- end }}

@@ -19,8 +19,10 @@
 //!
 //! The store is bounded ([`budget`], #525): `files_store_max` and a
 //! keep-free floor `files_keep_free` on its filesystem, checked before a
-//! byte is written; a holding node keeps nothing there that its tree
-//! holds (`architect_files::sync::space`).
+//! byte is written. A holding node's fetches land, and the versions it
+//! replaces are kept, beside its tree (`<files_dir>/.architect`), under
+//! the tree filesystem's floor and `files_history_max`; nothing is
+//! deleted to make room (`architect_files::sync::space`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -54,29 +56,70 @@ const DIAL_EVERY: Duration = Duration::from_secs(3);
 /// The store's limit when the filesystem cannot be asked: 10 GiB.
 const FALLBACK_MAX: u64 = 10 << 30;
 
-/// The budget of the store at `root`: `files_store_max` and
-/// `files_keep_free` of the filesystem holding it, else the defaults
-/// ([`architect::blob::default_max`], [`architect::blob::default_keep_free`]).
-/// Its total starts from a walk of what is there.
-pub(super) fn budget(config: &Config, root: &Path) -> StoreBudget {
-    let total = architect::blob::fs_space(root).map(|s| s.total);
-    let max = config
-        .files_store_max
-        .and_then(|s| s.of(total))
-        .or_else(|| total.map(architect::blob::default_max))
-        .unwrap_or(FALLBACK_MAX);
-    let keep_free = config
-        .files_keep_free
-        .and_then(|s| s.of(total))
-        .or_else(|| total.map(architect::blob::default_keep_free))
-        .unwrap_or(0);
+/// Which budget a [`budget`] is for.
+#[derive(Clone, Copy)]
+enum Area {
+    /// The store on the data volume: `files_store_max`, else a share of
+    /// its filesystem.
+    Store,
+    /// Where a holding node's fetches land, beside its tree: no limit
+    /// of its own, the tree filesystem's floor.
+    Incoming,
+    /// A holding node's kept versions, beside its tree:
+    /// `files_history_max`, else no limit; the tree filesystem's floor.
+    History,
+}
+
+/// The budget of the area at `root`, and one wide event saying what it
+/// is and where each number came from (a limit derived from a host disk
+/// that a volume reports as its own is visible at start). Its total
+/// starts from a walk of what is there.
+fn budget(config: &Config, area: Area, root: &Path) -> StoreBudget {
+    let space = architect::blob::fs_space(root);
+    let total = space.map(|s| s.total);
+    let (max, max_from) = match (area, config.files_store_max, config.files_history_max) {
+        (Area::Store, Some(set), _) => (set.of(total), "ARCHITECT_FILES_STORE_MAX"),
+        (Area::History, _, Some(set)) => (set.of(total), "ARCHITECT_FILES_HISTORY_MAX"),
+        (Area::Store, None, _) => (
+            total.map(architect::blob::default_max),
+            "default: a quarter of the filesystem, at most 100 GiB",
+        ),
+        (Area::Incoming | Area::History, _, _) => (Some(u64::MAX), "none: the floor bounds it"),
+    };
+    let (max, max_from) = max.map_or(
+        (FALLBACK_MAX, "fallback: the filesystem cannot be read"),
+        |m| (m, max_from),
+    );
+    let (keep_free, floor_from) = match config.files_keep_free.map(|s| s.of(total)) {
+        Some(Some(k)) => (k, "ARCHITECT_FILES_KEEP_FREE"),
+        // A share of a filesystem that cannot be read: refuse what needs it.
+        Some(None) => (
+            1,
+            "ARCHITECT_FILES_KEEP_FREE, unreadable filesystem: writes refused",
+        ),
+        None => total.map_or((0, "none: the filesystem cannot be read"), |t| {
+            (
+                architect::blob::default_keep_free(t),
+                "default: 15%, at most 64 GiB",
+            )
+        }),
+    };
     let budget = StoreBudget::new(root, max, keep_free);
     budget.reconcile(architect::blob::dir_size(root));
     tracing::info!(
+        store.area = match area {
+            Area::Store => "store",
+            Area::Incoming => "incoming",
+            Area::History => "history",
+        },
         store.used = budget.usage().used,
         store.max = max,
+        store.max_from = max_from,
         fs.keep_free = keep_free,
+        fs.keep_free_from = floor_from,
         fs.total = total,
+        fs.free = space.map(|s| s.free),
+        fs.readable = space.is_some(),
         "files: the store's budget"
     );
     budget
@@ -90,7 +133,23 @@ pub(super) fn engine(
 ) -> Engine {
     let data = config.data_dir.join("files");
     let blobs = data.join("blobs");
-    let local = LocalFs::new(&blobs).with_budget(Arc::new(budget(config, &blobs)));
+    let local = LocalFs::new(&blobs).with_budget(Arc::new(budget(config, Area::Store, &blobs)));
+    let mut store = TreeStore::new(local);
+    if config.files_hold {
+        // Fetches land, and replaced versions are kept, on the tree's own
+        // filesystem: renamed in and linked aside, never copied through
+        // the data volume.
+        let (incoming, versions) = architect_files::sync::layout::areas(files_dir);
+        let inbox = LocalFs::new(&incoming).with_budget(Arc::new(budget(
+            config,
+            Area::Incoming,
+            &incoming,
+        )));
+        let history =
+            LocalFs::new(&versions).with_budget(Arc::new(budget(config, Area::History, &versions)));
+        store = store.with_areas(inbox, history);
+    }
+    let fetcher = Fetcher::new(store.inbox.clone());
     let engine_config = EngineConfig {
         site: config.files_site.clone().unwrap_or_default(),
         verify_window: Duration::from_secs(config.files_verify_secs.max(1)),
@@ -99,8 +158,8 @@ pub(super) fn engine(
     };
     let engine = Engine::new(
         engine_config,
-        TreeStore::new(local.clone()),
-        Fetcher::new(local),
+        store,
+        fetcher,
         Arc::new(move |doc_id| {
             let registry = registry.clone();
             Box::pin(async move {

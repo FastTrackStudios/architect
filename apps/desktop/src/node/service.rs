@@ -76,9 +76,21 @@ pub struct FilesStore {
     pub keep_free: u64,
     pub fs_free: Option<u64>,
     pub fs_total: Option<u64>,
-    /// Fetches waiting for room now, and writes refused for space since start.
+    /// Files waiting for room now, files larger than the whole limit
+    /// (they arrive once it is raised), and writes refused for space
+    /// since start.
     pub deferred: u32,
+    pub too_large: u32,
     pub refused: u64,
+    /// A holding node's kept versions, beside its tree: bytes, limit
+    /// (`files_history_max`; none is `u64::MAX`) and the tree
+    /// filesystem's free bytes. Not counted in `used`.
+    pub history_used: Option<u64>,
+    pub history_max: Option<u64>,
+    pub tree_fs_free: Option<u64>,
+    /// A holding node's fetches in flight or waiting to be written,
+    /// beside its tree.
+    pub incoming_used: Option<u64>,
 }
 
 /// A note in a vault.
@@ -182,6 +194,7 @@ impl NodeState {
             devices: count(self.admission.list().len()),
             files_store: self.files.as_ref().and_then(|engine| {
                 let usage = engine.store_usage()?;
+                let history = engine.history_usage();
                 Some(FilesStore {
                     used: usage.used,
                     reserved: usage.reserved,
@@ -190,7 +203,12 @@ impl NodeState {
                     fs_free: usage.space.map(|s| s.free),
                     fs_total: usage.space.map(|s| s.total),
                     deferred: engine.deferred(),
+                    too_large: engine.too_large(),
                     refused: usage.refused,
+                    history_used: history.map(|h| h.used),
+                    history_max: history.map(|h| h.max),
+                    tree_fs_free: history.and_then(|h| h.space).map(|s| s.free),
+                    incoming_used: engine.inbox_usage().map(|i| i.used),
                 })
             }),
         }

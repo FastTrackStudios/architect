@@ -83,10 +83,17 @@ node:
   store:
     max: ""
     keepFree: "15%"
+    # A holding node keeps the versions it replaces beside its tree
+    # (/files/.architect/versions, not on /data). Empty = keep them all;
+    # at a limit, or at the files volume's own 15% floor, a replacement
+    # waits and is reported. Nothing is deleted. (ARCHITECT_FILES_HISTORY_MAX)
+    historyMax: ""
 
-  # The container's own ephemeral storage (its writable layer, logs and
-  # emptyDir volumes, never a PVC): past it the kubelet evicts this pod
-  # instead of the host filling up. Empty = no limit.
+  # The container's own ephemeral storage (its writable layer and logs;
+  # never a PVC): past it the kubelet evicts this pod instead of the host
+  # filling up. With persistence off the emptyDir /data counts too, so
+  # the limit set is this plus persistence.emptyDirSizeLimit. Empty = no
+  # limit.
   ephemeralStorage: 2Gi
 
   # Projects and asset libraries (ARCHITECT_FILES_DIR=/files, held in

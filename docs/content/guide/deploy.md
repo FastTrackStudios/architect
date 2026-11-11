@@ -71,7 +71,8 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_SWEEP_SECS` | `30` | how often it sweeps its peers, the fallback for what a live bridge missed |
 | `ARCHITECT_LIVE_MAX` | `256` | how many notes it keeps live with each peer; `0` sweeps only |
 | `ARCHITECT_FILES_STORE_MAX` | a quarter of the filesystem under the data dir, at most 100 GiB (75% of the data volume with the chart) | the hard limit on the files' blob store, `<data dir>/files/blobs`: bytes, `16Gi`/`500M`, or `40%` of that filesystem ([below](#the-blob-store-s-budget)) |
-| `ARCHITECT_FILES_KEEP_FREE` | 15% of that filesystem, at most 64 GiB | free space the store never writes into, whoever else filled the disk |
+| `ARCHITECT_FILES_KEEP_FREE` | 15% of that filesystem, at most 64 GiB | free space the store (and a holding node's tree-side areas) never writes into, whoever else filled the disk; `100%` is refused |
+| `ARCHITECT_FILES_HISTORY_MAX` | none: keep every replaced version | a holding node's kept versions, beside its tree: at the limit a replacement waits ([below](#the-blob-store-s-budget)) |
 
 The other `ARCHITECT_FILES_*` and `ARCHITECT_BLOB_*` settings (the files
 engine, the drive, a bucket) are in `apps/desktop/src/node/config.rs`'s
@@ -79,22 +80,63 @@ module docs.
 
 ### The blob store's budget
 
-The files engine keeps past versions, and the bytes it is still fetching, in
-`<data dir>/files/blobs`. A node that holds its tree in place
-(`ARCHITECT_FILES_HOLD`) keeps nothing there that the tree holds. Every write
-into the store is checked first against `ARCHITECT_FILES_STORE_MAX` and against
-`ARCHITECT_FILES_KEEP_FREE` on the filesystem under it (`statvfs`): one that
-would cross either is refused, and a fetch waits until there is room, then
-goes ahead on a later pass. Over 90% of the limit the store drops what is safe
-to drop (bytes a working file holds, then the oldest blobs another holder has a
-verified copy of, under the copy policy), never a last copy.
+Never losing a byte comes first; a bounded store comes second. Where the two
+conflict, the node defers or refuses and says so. It never deletes to make
+room.
 
-`POST /node/status` (`NODE_STATUS`) answers `files_store`: bytes used and in
-flight, the limit, the floor, the filesystem's free bytes and size, fetches
-deferred now and writes refused since start. When a root starts waiting for
-room the node logs one `files: fetches deferred for space` event with the same
-numbers; a fetch refused for space ends its `blob.fetch` span with
-`store.need`, `store.used`, `store.max`, `fs.free`, `fs.keep_free`.
+- **The store** is `<data dir>/files/blobs` on the data volume. Every write
+  into it is checked first against `ARCHITECT_FILES_STORE_MAX` and against
+  `ARCHITECT_FILES_KEEP_FREE` on the filesystem under it (`statvfs`). A write
+  that would cross either is refused. A file that has to be fetched waits and
+  is tried again on every pass. A file larger than the whole limit is
+  reported as *too large*: it arrives only once the limit is raised. If the
+  free space cannot be read, writes that need the floor are refused.
+- **A holding node** (`ARCHITECT_FILES_HOLD`) keeps almost nothing in that
+  store. Its fetches land beside its tree, in `<files_dir>/.architect/incoming`,
+  and are renamed into place, so a 30 GiB file needs no room on the data
+  volume. A version it replaces is linked aside into
+  `<files_dir>/.architect/versions`, on the tree's own disk. That area is
+  bounded by `ARCHITECT_FILES_HISTORY_MAX` (by default it keeps everything)
+  and by the tree filesystem's own floor (`ARCHITECT_FILES_KEEP_FREE` again).
+  At either limit the replacement waits and is reported; nothing is deleted.
+  Scans, WebDAV and S3 never see `.architect`.
+- **Eviction.** Over 90% of its limit, the store drops only blobs whose bytes
+  the same device holds in a working file, re-hashed just before the delete.
+  It never drops an old version and never relies on another holder's copy
+  (#530).
+- **Writes are staged.** Every file the node writes (a fetched version, a
+  conflict copy, a WebDAV or S3 write applied to the tree) is staged beside
+  its target under one temp suffix, `.architect-part`. Across filesystems it
+  is copied, synced, read back and checked against its sha-256. The target is
+  checked again just before the swap: a file the user changed meanwhile is
+  never overwritten, and the next scan makes it a fork. Temp files from a
+  run that died are removed at start.
+
+**Which edits keep their previous version.** The ones the node makes itself
+keep it: a newer version from a peer, a restore, or a WebDAV or S3 write.
+Edits made directly on the tree behind the node's back (a DAW on the NFS
+share, `rsync` into it) cannot keep it. The node sees such an edit only at
+its next scan, when the old bytes are already overwritten on disk. Such a
+version stays in the list, and `FILES_HELD` (`Files::held`) says whether
+anyone holds its bytes. A store copy the node already had (main kept one of
+every small file) is kept rather than dropped as a duplicate, so those files
+do keep their previous version. A device that pins roots keeps every file up
+to 64 MiB in its store as it commits it, as before.
+
+`POST /node/status` (`NODE_STATUS`) answers `files_store`:
+- bytes used and in flight, the limit and the floor, the filesystem's free
+  bytes and size;
+- files deferred now and files too large, and writes refused since start;
+- on a holding node, `history_used`, `history_max`, `tree_fs_free` and
+  `incoming_used`.
+
+When a root starts waiting for room, the node logs one
+`files: fetches deferred for space` event with the same numbers. A fetch
+refused for space ends its `blob.fetch` span with `store.need`, `store.used`,
+`store.max`, `fs.free` and `fs.keep_free`. At start, the node logs each area's
+budget and where each number came from (`store.max_from`,
+`fs.keep_free_from`). A limit derived from a volume that reports the host's
+disk is visible there.
 
 ```toml
 name = "fasttrackstudio"
@@ -534,8 +576,8 @@ helm install architect deploy/chart/architect \
 | `node.issuer`, `node.org`, `node.hostOrg`, `node.vaults`, `node.sites`, `node.env` | the node's settings ([Configure it](#configure-it)) |
 | `node.existingSecret` | a Secret mounted as files: `session` (`ARCHITECT_SESSION_FILE`) and, with `node.mcp`, `mcp-token` |
 | `node.persistence` | the data PVC at `/data` (its iroh key and documents). A node is one device, so `node.replicaCount` above 1 needs persistence off, and the chart refuses otherwise. With it off, `/data` is an `emptyDir` of at most `emptyDirSizeLimit` (10Gi) |
-| `node.store` | the blob store's budget: `max` (`ARCHITECT_FILES_STORE_MAX`; empty is 75% of the data volume) and `keepFree` (`ARCHITECT_FILES_KEEP_FREE`, `15%`) |
-| `node.ephemeralStorage` | the container's `ephemeral-storage` limit (2Gi): its writable layer, logs and `emptyDir` volumes. Past it the kubelet evicts this pod, not the host's others |
+| `node.store` | the blob store's budget: `max` (`ARCHITECT_FILES_STORE_MAX`; empty is 75% of the data volume; a size such as `8Gi` or `1.5Gi`, checked against the volume), `keepFree` (`ARCHITECT_FILES_KEEP_FREE`, `15%`) and `historyMax` (`ARCHITECT_FILES_HISTORY_MAX`, empty keeps every replaced version) |
+| `node.ephemeralStorage` | the container's own `ephemeral-storage` (2Gi): its writable layer and logs. With persistence off the `emptyDir` `/data` counts too, so the limit set is this plus `emptyDirSizeLimit`. Past it the kubelet evicts this pod, not the host's others |
 | `node.files` | the files dir at `/files` (`ARCHITECT_FILES_DIR`, held in place): `nfs: {server, path}`, `hostPath` or `existingClaim` |
 | `node.s3` | the files' bytes in a bucket too (`ARCHITECT_BLOB_S3_*`). The key id and the secret come from `credentialsSecret`, never from values |
 | `node.s3Face` | the node's own S3 face (`ARCHITECT_S3_BIND`): a Service port and, with `host`, a host of its own on the Ingress (buckets are at its root, so it can't share the path space) |
@@ -552,6 +594,8 @@ itself: `node.store.max` and `node.store.keepFree` (the keep-free floor
 default, 15%, is above the kubelet's 10% disk-pressure threshold, so the node
 stops writing before the host is tainted). The kubelet does evict this pod for
 its writable layer, its logs and an `emptyDir` `/data` past their limits. A
+holding node's tree-side areas live on the files volume (NFS), under the same
+15% floor of that volume and `node.store.historyMax`. A
 storage class that enforces quotas (a block device per claim, or a filesystem
 with project quotas) bounds the PVC as well.
 

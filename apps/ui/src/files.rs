@@ -17,7 +17,7 @@ use architect_files::copies::{
 };
 use architect_files::rendition::Peaks;
 use architect_files::roots::{
-    Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus,
+    Asset, Checkpoint, DriveStatus, FileEntry, FileVersion, Hit, RootStatus, VersionBytes,
 };
 
 /// Where the agent listens: `http://127.0.0.1:8090`.
@@ -235,6 +235,10 @@ impl Files for Agent {
     async fn history(&self, root: String, path: String) -> Result<Vec<FileVersion>, AgentError> {
         let c = self.0.clone();
         on_runtime(async move { Files::history(&c, root, path).await }).await
+    }
+    async fn held(&self, root: String, path: String) -> Result<Vec<VersionBytes>, AgentError> {
+        let c = self.0.clone();
+        on_runtime(async move { Files::held(&c, root, path).await }).await
     }
     async fn restore(
         &self,
