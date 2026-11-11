@@ -102,7 +102,8 @@ async function open() {
   const port = 19000 + Math.floor(Math.random() * 900);
   const proc = spawn(firefox(), ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)], { stdio: 'ignore' });
   let ws;
-  for (let i = 0; i < 40 && !ws; i++) {
+  // A cold profile can take over 10 s to listen.
+  for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);
     try {
       const s = new WebSocket(`ws://127.0.0.1:${port}/session`);

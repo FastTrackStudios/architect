@@ -197,7 +197,13 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
    **`features/sites/src/sanitize.rs`**, `sanitize`, re-writes a renderer's
    finished markup; by the same rules both escape text and drop scripts,
    `on…` handlers, `javascript:` URLs, frames and `<foreignObject>`, while
-   an inline SVG keeps its geometry, classes and `data-*`.
+   an inline SVG keeps its geometry, classes and `data-*`. A block's
+   markup comes from extensions and notes, so neither can be made to run
+   away: `sanitize` takes time and space linear in its input on any input
+   (one loop pass per byte at most, at most 256 elements open at once),
+   an element tree is written no deeper than 256 levels, and a
+   component's drawing holds at most 50,000 nodes and 16 MiB, is cloned
+   no deeper than 256 levels and stops at the 10 s draw deadline.
    **`features/sites/src/bases.rs`**, `BaseBlocks`, draws a ```` ```base ````
    fence's views with `vault::bases::view_table`.
 4. **`features/sites/src/ui.rs`**: the pure components (the header, the

@@ -226,9 +226,10 @@ classes and `data-*` (the player's `data-follow-playhead` / `data-at`),
 and loses every script, `on…` handler, `javascript:` URL and
 `<foreignObject>`. WASI components are drawn by a node built with
 feature `node-wasi` (the release's node and its image are); without it,
-only page embeds and compiled-in renderers draw. Test:
+only page embeds and compiled-in renderers draw. Tests:
 `apps/desktop/tests/shares.rs`
-`a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audience`.
+`a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audience`
+and `an_embedders_own_blocks_draw_on_a_link_after_the_installed_ones`.
 
 **Kept as org data.** A share is a note of the vault it shares,
 `_architect/shares/<code>.md` (`share_note_path`), with `publish: false`, so

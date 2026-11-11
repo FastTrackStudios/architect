@@ -145,6 +145,11 @@ struct World {
 
 /// Grace's node hosting `indie`, its vault seeded; Alan's and Ada's sessions.
 async fn world() -> World {
+    world_with(architect_sites::Blocks::new()).await
+}
+
+/// [`world`], its node started by an embedder that hands it `blocks`.
+async fn world_with(blocks: architect_sites::Blocks) -> World {
     let origin = issuer().await;
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("host");
@@ -192,6 +197,12 @@ async fn world() -> World {
         "---\ntitle: Noel chart\ninstrument: cello\n---\n```chart\n| F | Bb | Dm7 |\n```\n",
     );
     install_chart(&dir.join("data/extensions/demo.chart"));
+    // A fence only an embedder's own renderer claims (Studio's `kf`).
+    touch(
+        &vault,
+        "Embedded/song.md",
+        "---\ntitle: Song\n---\n```kf\n| D | A |\n```\n\n```chart\n| C |\n```\n",
+    );
     let grace = session_of(&origin, &dir, "grace@local.test").await;
     let config = Config {
         name: "indie-host".to_owned(),
@@ -205,7 +216,7 @@ async fn world() -> World {
         sweep_secs: 3600,
         ..Config::default()
     };
-    let host = node::start(config).await.unwrap();
+    let host = node::start_with(config, blocks).await.unwrap();
     let alan = session_of(&origin, &tmp.path().join("alan"), "alan@local.test").await;
     let ada = session_of(&origin, &tmp.path().join("ada"), "ada@local.test").await;
     World {
@@ -1514,6 +1525,55 @@ async fn a_claimed_fence_is_the_installed_extensions_drawing_live_and_per_audien
     for leak in [">Bb</text>", "Dm7", "Noel chart"] {
         assert!(!seen.contains(leak), "`{leak}` on the violin link: {seen}");
     }
+
+    w.host.stop().await;
+}
+
+/// An embedder that starts the node from Rust hands it its own blocks
+/// (Studio's `kf` engraver as an `FnBlock`): its fence is drawn on a link,
+/// made safe like any other; a fence an installed extension also claims
+/// is still the installed one's.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_embedders_own_blocks_draw_on_a_link_after_the_installed_ones() {
+    use std::sync::Arc;
+
+    use architect_sites::{Block, Drawn, FnBlock};
+    let mut blocks = architect_sites::Blocks::new();
+    blocks.add(Arc::new(FnBlock::new(
+        "studio.kf",
+        &["kf", "chart"],
+        |block: &Block<'_>| {
+            let bars = block.source.split('|').filter(|b| !b.trim().is_empty()).count();
+            Ok(Drawn::Html(format!(
+                "<svg class=\"kf-chart\" data-follow-playhead=\"\" data-bars=\"{bars}\" onload=\"alert(1)\"><rect class=\"kf-bar\" data-at=\"0\" width=\"10\" height=\"10\"/><script>alert(2)</script></svg>"
+            )))
+        },
+    )));
+    let w = world_with(blocks).await;
+    let share = w
+        .share(
+            ShareScope::Folder("Embedded".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let song = page_with(&w.url(&format!("{}song/", share.path())), None, "kf-chart").await;
+    for kept in [
+        "data-claim=\"fence:kf\" data-by=\"studio.kf\"",
+        "<svg class=\"kf-chart\" data-follow-playhead=\"\" data-bars=\"2\">",
+        "<rect class=\"kf-bar\" data-at=\"0\" width=\"10\" height=\"10\"></rect>",
+        // The `chart` fence: the installed extension draws it, not the embedder.
+        "data-claim=\"fence:chart\" data-by=\"demo.chart\"",
+    ] {
+        assert!(song.contains(kept), "lost {kept}: {song}");
+    }
+    assert!(!song.contains("language-kf"), "{song}");
+    let start = song.find("data-by=\"studio.kf\"").unwrap();
+    let block = &song[start..start + song[start..].find("</div>").unwrap()];
+    for never in ["alert(", "onload", "<script"] {
+        assert!(!block.contains(never), "`{never}` in the block: {block}");
+    }
+    assert_eq!(song.matches("data-by=\"studio.kf\"").count(), 1, "{song}");
 
     w.host.stop().await;
 }
