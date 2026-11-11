@@ -131,6 +131,12 @@ note = "architect's language registry made the editor's (`syntax::drive`), gramm
 
 [[row]]
 package = "architect-editor"
+features = ["lsp"]
+layer = "L1"
+note = "the editor's LSP client and `LanguageServers`: a language's server per root as a child process, supervised; native only, nothing on wasm"
+
+[[row]]
+package = "architect-editor"
 features = ["native"]
 layer = "L4"
 note = "the editor's Dioxus components (`TextEditor`, `CodeEditor`), re-exported (`ui`, with the Blitz renderer), and hooks that follow the language registry"
@@ -707,6 +713,12 @@ package = "architect-extensions"
 features = ["host", "crdt"]
 layer = "L1"
 note = "the extensions host: Luau through architect-scripting, git through the `git` program; not wasm yet"
+
+[[row]]
+package = "architect-extensions"
+features = ["lsp"]
+layer = "L1"
+note = "language servers through the host (#512): `Host::open_code` behind `capabilities.languages`, the `EDITOR_*` actions; desk only"
 
 [[row]]
 package = "architect-extensions"

@@ -118,8 +118,9 @@ static LANGUAGES: ActionMeta = meta(
     "Languages",
     "The editor's language registry: the app's own languages and the ones loaded extensions add \
      (`[[languages]]`). Each has its id, name, file extensions, fence names, grammar (`linked` or \
-     a file in its package), highlights query, comment token, its LSP server's command and args \
-     when it has one (carried, never started by this), and `from` (`app` or the extension). \
+     `linked:<name>`), highlights query, comment token, its LSP server's command and args \
+     when it has one (EDITOR_SERVERS shows the ones running), and `from` (`app` or the \
+     extension). \
      With `id`, `fence` (a code fence's name) or `path` (a file's), the one language it names \
      (`null` when none is registered).",
 );

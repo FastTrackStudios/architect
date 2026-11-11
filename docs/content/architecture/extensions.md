@@ -2235,8 +2235,10 @@ may change (`effect`: read-only, mutating, destructive), what of the
 app's state it may read (`reads`: `org`, `selection`, `documents`,
 `editor`) and change (`writes`: `documents`, `editor`, below), the
 app's interface it may use (`ui`: below), the folders past its own,
-the network hosts, and the MIDI ports and OSC endpoints (`ports`: "MIDI,
-OSC and control surfaces", below)
+the network hosts, the MIDI ports and OSC endpoints (`ports`: "MIDI,
+OSC and control surfaces", below), and what the host may do with its
+languages (`languages = ["servers"]`: run their servers, "Languages for
+the editor", below)
 (`features/extensions/src/manifest.rs` `Capabilities`;
 `features/extensions/src/capabilities.rs` turns them into the lines a
 person reads, `Capabilities::grows_from`, and into what may run,
@@ -2820,8 +2822,17 @@ cannot highlight (a `linked:` name nothing linked, a query tree-sitter
 refuses) stays in the registry but is left out of the editor's, and
 `architect_editor::syntax::problems` says why.
 
-The server's command is carried; the host does not start language
-servers yet.
+**A language's server** (`[languages.server] command, args`) runs only
+when the extension asks `[capabilities] languages = ["servers"]` and a
+person granted it (a server is a program on their computer): the host
+starts it, one per language and workspace root, while a code editor of
+the language is open, restarts it with backoff when it dies, and stops
+it when the last editor closes or the extension is turned off
+(`features/extensions/src/lsp.rs`, `Host::open_code`; the
+[Editor page](@/features/editor.md) "Language servers"). Its
+diagnostics are drawn in the code editor; hover, completions, go to
+definition, format and rename are the `EDITOR_*` actions, for keys, ⌘K
+and agents (`features/extensions/tests/language_servers.rs`).
 
 ### An editor in your view
 

@@ -47,6 +47,10 @@ host = [
 # runs extensions turns it on (the lab does). Without it a fetch answers
 # `unsupported`.
 net = ["host", "dep:reqwest", "dep:tokio"]
+# Language servers through the host (#512, `crate::lsp`): a language's
+# `[languages.server]` run per root while a code editor of it is open,
+# stopped with its extension; the `EDITOR_*` actions. Native only.
+lsp = ["host", "architect-editor/lsp"]
 # The `.archext` archive (`architect-extension-archive`): open, verify,
 # extract per platform. On with `host`.
 archive = ["dep:architect-extension-archive", "dep:sha2", "dep:hex"]
@@ -245,7 +249,7 @@ web-sys = { version = "0.3", optional = true, features = [
 [dev-dependencies]
 # tests/editor_view.rs: a linked extension's view holds the editor's
 # component, through architect's door (#512).
-architect-editor = { workspace = true, features = ["native"] }
+architect-editor = { workspace = true, features = ["native", "lsp-stub"] }
 # tests/distribution.rs: archives signed with a throwaway key.
 architect-extension-archive = { workspace = true, features = ["sign"] }
 sha2 = { workspace = true }
@@ -281,6 +285,13 @@ wasmtime = { version = "50.0.1", optional = true, default-features = false, feat
 
 [lib]
 doctest = false
+
+# Language servers through the host, against the editor's stub server:
+# the test binary is the server too (`--stub-lsp`), so its own main.
+[[test]]
+name = "language_servers"
+harness = false
+required-features = ["lsp"]
 
 [lints]
 workspace = true

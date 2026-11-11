@@ -126,6 +126,7 @@ fn union(a: &Capabilities, b: &Capabilities) -> Capabilities {
         (&mut out.ui, &b.ui),
         (&mut out.events, &b.events),
         (&mut out.ports, &b.ports),
+        (&mut out.languages, &b.languages),
     ] {
         for x in from {
             if !into.contains(x) {

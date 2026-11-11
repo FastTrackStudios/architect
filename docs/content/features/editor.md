@@ -34,7 +34,8 @@ On top of the re-exports it holds two things that are architect's own:
 | `syntax` | `syntax` | the registry made the editor's (`drive`), grammars the app links (`link_grammar`), the editor's host-language API (`HostLanguage`, `Syntax`, `LanguageFn`, `register_language`, `language_for_path`, `languages_revision`, …), a registered language highlighted, each span named by its theme token (`editor:features/syntax`, `editor:crates/editor-state/src/languages.rs`) |
 | `ui` + `web` or `native` | `ui` | the components (`editor:features/ui`): `TextEditor` (`Editor`), `CodeEditor`, `CODE_EDITOR_CLASS`, `EDITOR_CSS`, `DecorationSource`, `dispatch_with_history`, `WidgetMounts`, the palette and completion helpers; and `use_languages_revision`, `use_language`, `language_named`, which follow the registry. One renderer per binary |
 | `stories` | `stories` | `CodeEditor` in the story gallery (`code_editor_rust`) |
-| `lsp` | `lsp` | the editor's LSP client (`editor:features/lsp`). Native only: nothing on wasm |
+| `lsp` | `lsp` | the editor's LSP client (`editor:features/lsp`), `LanguageServers` (a language's server per root, supervised) and, with `ui`, `use_code_document`. Native only: nothing on wasm |
+| `lsp-stub` | `lsp::stub` | a stub language server for tests |
 
 `Diagnostic` and `Severity` (feature `state`, also as `diagnostic`) are
 what `CodeEditor`'s `diagnostics` prop takes.
@@ -204,6 +205,83 @@ brings a language either is a linked extension and hands its grammar over
 in Rust (`link_grammar` from its crate, then `grammar = "linked:<name>"`
 in its manifest), or names one the app links, or one the editor has.
 
+## Language servers
+
+A language's `server` (`[languages.server] command, args`) is run by the
+host while a code editor of the language is open
+(`features/editor/src/lsp.rs` `LanguageServers`):
+
+- **one per language and workspace root**, started when the first
+  document of it opens (`LanguageServers::open`, a `Document`), stopped
+  when the last one closes (the `Document` dropped);
+- **supervised**: one that dies is started again after a wait that
+  doubles (`Restart`: from 250 ms to 10 s, five times in a row; one that
+  ran 30 s counts again), and its open documents are opened in it again
+  with their text now; past the attempts it is `failed`. While it is
+  down a document keeps its text and a request is answered with why;
+- **stopped with its owner**: `LanguageServers::stop_owner`, which the
+  extension host calls when an extension is disabled or unloaded.
+
+Each server has one task that sends everything for it in order, so a
+request never overtakes an edit made before it. A document
+(`Document`, or a `DocRef` that does not hold it open) sends its edits
+as `didChange` (`change`), hears its diagnostics (`watch_diagnostics`),
+and asks `hover`, `completion`, `definition`, `format` and `rename`
+(`format` and `rename` hand their edits to its editor,
+`watch_edits`; a rename's edits to other files are counted, not
+applied). `EditBatch::changes` is the edits as one change set.
+
+### A `CodeEditor` with its server
+
+`ui::use_code_document(open, state, history)` opens the file once (the
+extension host's `Host::open_code`, below) and keeps it open while the
+component lives; its `diagnostics` and `on_transaction` go to
+`CodeEditor`, and a format or rename is applied to `state` as one step
+while the text is still what the server answered for:
+
+```rust
+let code = use_code_document(|| host.open_code(&path, &root, &text).ok(), state, Some(history));
+rsx! {
+    CodeEditor {
+        state,
+        language: use_language(path.display().to_string()),
+        diagnostics: code.diagnostics,
+        on_transaction: code.on_transaction,
+    }
+}
+```
+
+### Through the extension host
+
+The app gives its host the servers (`Host::with_language_servers`,
+`architect-extensions` feature `lsp`; `features/extensions/src/lsp.rs`)
+and puts `Host::install_editor_actions` on its list (the Architect app:
+`apps/ui/src/extensions.rs` `language_servers`). `Host::open_code(path,
+root, text)` finds the language by the file's extension and runs its
+server only when the language is the app's own or its extension asks
+`capabilities.languages = ["servers"]` and was granted it. The actions
+act on the focused code document (or `path`) at its caret (or `at`, a
+byte offset):
+
+| Id | What |
+|---|---|
+| `EDITOR_SERVERS` | every server: language, root, owner, command, state, restarts, documents |
+| `EDITOR_DIAGNOSTICS` | a document's diagnostics |
+| `EDITOR_HOVER` | the hover text at a point |
+| `EDITOR_COMPLETE` | the completions at a point |
+| `EDITOR_DEFINITION` | where the symbol at a point is defined |
+| `EDITOR_FORMAT` | formats the document, applied as one step |
+| `EDITOR_RENAME` | renames the symbol at a point to `name` |
+
+**What the editor lacks for the rest** (FastTrackStudios/editor): its
+`hover` prop is a bare `fn(&EditorState, usize)` pointer and its
+`completion` prop a synchronous source for its own `[[` and `#` triggers,
+so a server's hover and completions cannot be drawn in the editor's
+popups as they come (they are asked and answered through the actions
+and `DocRef`). It needs an async hover and completion source. Code
+actions and signature help are not asked yet. On the web there is no
+server: `lsp` compiles to nothing on wasm, and highlighting still works.
+
 ## Highlight colours are theme tokens
 
 `features/editor/src/theme.rs` `TOKENS` is fourteen tokens
@@ -243,16 +321,21 @@ host-drawn elements. The design for one is in #512.
 | `features/editor/tests/syntax.rs` | Rust from the registry highlighted in `syntax.*` tokens; a built-in grammar with a language's own query; what is unsupported says why |
 | `features/editor/tests/drive.rs` | the registry driving the editor's: a language on a linked grammar highlighted in a fence and found by path, withdrawn, back, the grammar unlinked |
 | `features/editor/tests/story.rs` | `CodeEditor`'s story on Blitz against its golden |
+| `features/editor/tests/lsp.rs` | servers against the stub: a document's diagnostic, hover, completion, format, rename and definition; one server per language and root; restarted when it dies; stopped with its owner; failed past its attempts |
+| `features/editor/tests/lsp_view.rs` | a `CodeEditor` on Blitz wired by `use_code_document`: the server's warning drawn, its format in the text, the server gone with the editor |
+| `features/extensions/tests/language_servers.rs` | through the host: refused without `capabilities.languages`, then the `EDITOR_*` actions, and the server stopped when the extension is turned off |
 | `features/editor/tests/theme.rs` | every token resolves in a theme store, reaches CSS, and a person restyles one |
 | `features/extensions/tests/interop.rs` | `languages_are_registered_while_the_extension_is_on`: enabling adds, disabling withdraws |
 | `features/extensions/tests/editor_view.rs` | a linked extension's view holds the editor and hears its changes |
 
 ## Status
 
-Steps (a) to (c) of #512, (c) for linked extensions only, and (d):
-`CodeEditor` with highlighting from the registry. Not yet: LSP servers
-started by the host (e), Keyflow on `architect-editor` (f), an editor in
-a remote view, a WASI view or a page, and folding, find and replace and
-multiple cursors in `CodeEditor` (the editor repository's
+Steps (a) to (c) of #512, (c) for linked extensions only, (d):
+`CodeEditor` with highlighting from the registry, and (e): language
+servers run by the host, diagnostics in `CodeEditor` and the `EDITOR_*`
+actions. Not yet: a server's hover and completions in the editor's own
+popups (above), Keyflow on `architect-editor` (f), an editor in a remote
+view, a WASI view or a page, and folding, find and replace and multiple
+cursors in `CodeEditor` (the editor repository's
 `editor:docs/languages.md` lists them). Grammars from files will not
 come while the editor's tree-sitter cannot load one.

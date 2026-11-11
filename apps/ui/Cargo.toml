@@ -127,6 +127,9 @@ blitz-traits = { workspace = true }
 # FILES_* (src/files.rs): the agent's HTTP client runs on a runtime of its
 # own; the window's executor is not tokio.
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+# Languages' servers through the extension host (#512): `EDITOR_*`.
+architect-extensions = { workspace = true, features = ["lsp"] }
+architect-editor = { workspace = true, features = ["lsp"] }
 architect-presence = { workspace = true, features = ["native"] }
 architect-capture = { workspace = true, features = ["native"] }
 # The first run's folder picker (`src/first_run.rs`).

@@ -14,7 +14,8 @@
 //! | `syntax` | [`syntax`]: the registry made the editor's ([`syntax::drive`]), grammars linked by the app ([`syntax::link_grammar`]), a registered language's highlighting |
 //! | `ui` (+ `web` or `native`) | [`ui`]: the Dioxus components (`TextEditor`, `CodeEditor`), their helpers, and hooks that follow the registry |
 //! | `stories` | [`stories`]: `CodeEditor` in the story gallery |
-//! | `lsp` | [`lsp`]: the editor's LSP client (native only; nothing on wasm) |
+//! | `lsp` | [`lsp`]: the editor's LSP client, and [`lsp::LanguageServers`], which runs a language's server per root (native only; nothing on wasm) |
+//! | `lsp-stub` | `lsp::stub`: a stub language server for tests |
 //!
 //! Nothing here is the editor's code: the modules are re-exports, the
 //! registry and the tokens are architect's own. What the editor lacks is
@@ -38,10 +39,8 @@ pub use editor_state::diagnostic;
 #[cfg(feature = "state")]
 pub use editor_state::diagnostic::{Diagnostic, Severity};
 
-/// The editor's LSP client (`editor-lsp`): framed JSON-RPC to a language
-/// server over a child process, document sync, diagnostics. Native only.
 #[cfg(all(feature = "lsp", not(target_family = "wasm")))]
-pub use editor_lsp as lsp;
+pub mod lsp;
 
 pub mod languages;
 #[cfg(feature = "stories")]

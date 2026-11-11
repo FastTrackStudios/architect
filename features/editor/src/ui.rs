@@ -61,3 +61,88 @@ pub fn language_named(name: &str) -> Option<Syntax> {
         .or_else(|| syntax::language_for_extension(name.trim_start_matches('.')))
         .or_else(|| syntax::language_for_path(name))
 }
+
+/// A `CodeEditor` wired to its language's server (features `ui` and
+/// `lsp`, native): what [`use_code_document`] gives.
+#[cfg(all(feature = "lsp", not(target_family = "wasm")))]
+#[derive(Clone)]
+pub struct CodeDocument {
+    /// The server's diagnostics: `CodeEditor`'s `diagnostics`.
+    pub diagnostics: ReadSignal<Vec<crate::Diagnostic>>,
+    /// Sends each edit as `didChange` and keeps the caret and focus:
+    /// `CodeEditor`'s `on_transaction`.
+    pub on_transaction: Callback<TransactionEvent>,
+    /// The open document, for hover, completion and the rest; `None`
+    /// when no server was opened.
+    pub document: Option<crate::lsp::DocRef>,
+}
+
+/// Opens the editor's file in its language's server, once, and keeps it
+/// open while the component lives.
+///
+/// `open` is called on mount (the
+/// extension host's `Host::open_code`, which checks the language may run
+/// its server, or `LanguageServers::open`). Diagnostics come back into
+/// `diagnostics`; a format or a rename's edits are applied to `state` as
+/// one transaction (through `history` when given), while the text is
+/// still what the server answered for.
+///
+/// ```ignore
+/// let code = use_code_document(|| host.open_code(&path, &root, &text).ok(), state, None);
+/// rsx! { CodeEditor { state, language, diagnostics: code.diagnostics, on_transaction: code.on_transaction } }
+/// ```
+#[cfg(all(feature = "lsp", not(target_family = "wasm")))]
+pub fn use_code_document(
+    open: impl FnOnce() -> Option<crate::lsp::Document>,
+    state: Signal<crate::state::EditorState>,
+    history: Option<Signal<crate::state::History>>,
+) -> CodeDocument {
+    let document = use_hook(move || std::rc::Rc::new(open()));
+    let mut diagnostics = use_signal(Vec::<crate::Diagnostic>::new);
+    let held = document.clone();
+    let on_transaction = use_callback(move |event: TransactionEvent| {
+        let Some(doc) = held.as_ref() else {
+            return;
+        };
+        if event.changes.iter().next().is_some() {
+            doc.change(event.changes.clone(), event.doc_after);
+        }
+        doc.set_caret(state.peek().selection.primary().head);
+        doc.focus();
+    });
+    let handle = document.as_ref().as_ref().map(crate::lsp::Document::handle);
+    let watched = handle.clone();
+    use_hook(move || {
+        let Some(doc) = watched else {
+            return;
+        };
+        let mut heard = doc.watch_diagnostics();
+        spawn(async move {
+            while let Some(now) = heard.next().await {
+                diagnostics.set(now);
+            }
+        });
+        let mut edits = doc.watch_edits();
+        spawn(async move {
+            while let Some(batch) = edits.next().await {
+                if state.peek().doc.to_string() != batch.against.to_string() {
+                    continue;
+                }
+                let spec = crate::state::TransactionSpec::new()
+                    .changes(batch.changes())
+                    .user_event("lsp.edit");
+                match history {
+                    Some(history) => {
+                        dispatch_with_history(state, history, spec, Some(on_transaction));
+                    }
+                    None => dispatch_spec(state, spec, Some(on_transaction)),
+                }
+            }
+        });
+    });
+    CodeDocument {
+        diagnostics: diagnostics.into(),
+        on_transaction,
+        document: handle,
+    }
+}

@@ -47,11 +47,18 @@ pub const MENUS: &str = "menus";
 /// Icons and badges on file-tree rows and tabs.
 pub const BADGES: &str = "badges";
 
+/// What the host may do with an extension's languages past highlighting
+/// them ([`Capabilities::languages`]).
+pub const LANGUAGES: [&str; 1] = [SERVERS];
+/// Run a language's server (`[languages.server]`), a program on this
+/// computer, while a file of the language is open.
+pub const SERVERS: &str = "servers";
+
 /// One thing an extension asks for, in a person's words.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
     /// `actions`, `effect`, `hosts`, `folders`, `reads`, `writes`, `ui`,
-    /// `events` or `ports`.
+    /// `events`, `ports` or `languages`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -223,6 +230,7 @@ impl Capabilities {
             && self.ui.is_empty()
             && self.events.is_empty()
             && self.ports.is_empty()
+            && self.languages.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -296,6 +304,22 @@ impl Capabilities {
                 kind: "ports",
                 what: p.clone(),
                 says: port_words(p),
+            });
+        }
+        for l in self
+            .languages
+            .iter()
+            .filter(|l| !granted.languages.contains(l))
+        {
+            out.push(Ask {
+                kind: "languages",
+                what: l.clone(),
+                says: if l == SERVERS {
+                    "Run its languages' servers (programs on this computer) while you edit their files"
+                        .to_owned()
+                } else {
+                    format!("Use its languages' {l}")
+                },
             });
         }
         for f in self
@@ -393,6 +417,12 @@ impl Capabilities {
                 .ports
                 .iter()
                 .filter(|p| granted.ports.contains(p))
+                .cloned()
+                .collect(),
+            languages: self
+                .languages
+                .iter()
+                .filter(|l| granted.languages.contains(l))
                 .cloned()
                 .collect(),
         }
