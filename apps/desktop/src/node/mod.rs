@@ -53,6 +53,7 @@ mod live;
 pub mod org;
 mod s3;
 pub mod service;
+mod share_layers;
 pub mod shares;
 
 use std::collections::BTreeMap;
@@ -223,6 +224,23 @@ pub async fn start(config: Config) -> Result<Running, StartError> {
 pub async fn start_with(
     config: Config,
     given: architect_sites::Blocks,
+) -> Result<Running, StartError> {
+    Box::pin(start_with_layers(config, given, Vec::new())).await
+}
+
+/// [`start_with`], its share links' files placed in layers (#528).
+///
+/// By the `[[share_layers]]` rules of the extensions installed in
+/// [`Config::extensions_dir`], then by `layers`: a distribution's
+/// compiled-in extensions' (`Distribution::share_layers`).
+///
+/// # Errors
+///
+/// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
+pub async fn start_with_layers(
+    config: Config,
+    given: architect_sites::Blocks,
+    layers: Vec<architect_sites::ShareLayersDecl>,
 ) -> Result<Running, StartError> {
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
@@ -464,6 +482,7 @@ pub async fn start_with(
         node_org.clone(),
         config.issuer.as_deref(),
         blocks.clone(),
+        share_layers::LayerRules::new(Some(config.extensions_dir()), layers),
     );
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
@@ -672,8 +691,9 @@ pub fn main(
         }
     };
     let blocks = dist.blocks(&config.data_dir.join("linked"));
+    let layers = dist.share_layers();
     runtime.block_on(async move {
-        match start_with(config, blocks).await {
+        match start_with_layers(config, blocks, layers).await {
             Ok(running) => {
                 let _ = writeln!(
                     std::io::stdout(),
