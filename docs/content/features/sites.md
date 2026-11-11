@@ -193,17 +193,44 @@ EngineHost::new(router, gate, "0.0.0.0:4040")
    without a window. **`features/sites/src/installed.rs`**, `InstalledBlocks`,
    is a folder of installed extensions, both kinds, read again when it
    changes (the node's, #488). **`features/sites/src/element_html.rs`**,
-   `elements_to_html`, writes a page's element tree out as HTML, and
-   **`features/sites/src/sanitize.rs`**, `sanitize`, re-writes a renderer's
-   finished markup; by the same rules both escape text and drop scripts,
-   `on…` handlers, `javascript:` URLs, frames and `<foreignObject>`, while
-   an inline SVG keeps its geometry, classes and `data-*`. A block's
-   markup comes from extensions and notes, so neither can be made to run
-   away: `sanitize` takes time and space linear in its input on any input
-   (one loop pass per byte at most, at most 256 elements open at once),
-   an element tree is written no deeper than 256 levels, and a
-   component's drawing holds at most 50,000 nodes and 16 MiB, is cloned
-   no deeper than 256 levels and stops at the 10 s draw deadline.
+   `elements_to_html`, writes a page's element tree out as markup and
+   hands it to **`features/sites/src/sanitize.rs`**, `sanitize`, which
+   re-writes whatever a renderer drew by allow-lists, deciding on decoded
+   values:
+   - **Elements:** inside an `<svg>`, its drawing elements (`svg`, `g`,
+     `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`,
+     `text`, `tspan`, `textPath`, `defs`, `use`, `symbol`, `clipPath`,
+     `mask`, `pattern`, `linearGradient`, `radialGradient`, `stop`,
+     `marker`, `title`, `desc`, `image`, `a`, `style`); outside, basic
+     HTML (text and headings, lists, tables, `a`, `img`, `audio`, `video`,
+     `source`, `figure`, `details`, `time`, and `button` for the lyrics
+     block). Scripts, form fields, SMIL animation, `<foreignObject>`,
+     frames, `<template>`, `<noscript>` and raw-text elements go with
+     their contents; any other element is left out, its contents kept.
+   - **Attributes:** `class`, `title`, `lang`, `dir`, `role`, `aria-*`,
+     `data-*` and `id` (but not the page's own: `site-*`, `share-*`,
+     `comments`, `data-site-*`, `data-act`), an SVG's geometry and
+     presentation, a few per element (`alt`, `controls`, `colspan`, …)
+     and a sanitised `style`. Never `on…`, `srcset`, `ping`, `action`.
+   - **URLs:** relative, `#…`, `https:` and `mailto:` for a link,
+     `https:` for media, and raster `data:image/…` for an image; `<use>`
+     only `#id`; a presentation attribute only `url(#id)`.
+   - **CSS:** a `<style>` sheet only inside an `<svg>`. A sheet is dropped
+     whole, and a `style` attribute loses the declaration, that holds
+     `url(`, `@import`, `expression(`, `image-set(`, `src(`,
+     `-moz-binding`, `behavior:`, a CSS escape or `position: fixed` /
+     `sticky`. A sheet is not scoped to its drawing and can restyle the
+     page's classes; the node's Content-Security-Policy keeps it from
+     loading or sending anything.
+
+   A block's markup comes from extensions and notes, so neither can be
+   made to run away: `sanitize` takes time and space linear in its input
+   on any input (one loop pass per byte at most, at most 256 elements open
+   at once), an element tree is written no deeper than 256 levels and to
+   at most 100,000 elements and 16 MiB, and a component's drawing stays a
+   tree (an edit that puts one node in two places is refused), holds at
+   most 50,000 nodes and 16 MiB as built and as written, is cloned no
+   deeper than 256 levels and stops at the 10 s draw deadline.
    **`features/sites/src/bases.rs`**, `BaseBlocks`, draws a ```` ```base ````
    fence's views with `vault::bases::view_table`.
 4. **`features/sites/src/ui.rs`**: the pure components (the header, the
