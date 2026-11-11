@@ -348,8 +348,38 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
     let (status, _, art) = get(&w.url(&format!("{link}Shared/art.png")), None).await;
     assert_eq!((status, art.as_str()), (StatusCode::OK, "shared png"));
     // The link's answers keep the code to themselves.
-    let (_, headers, _) = get(&w.url(&link), None).await;
+    let (_, headers, body) = get(&w.url(&link), None).await;
     assert_eq!(headers["referrer-policy"], "no-referrer");
+    // A Content-Security-Policy behind the sanitiser (#520's review): the
+    // page's one inline script by its hash, nothing loaded off the node
+    // but images, forms posted only to it. On every answer of the link,
+    // its sign-in and its 404s.
+    let policy = format!(
+        "default-src 'self'; script-src 'self' {}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'; img-src 'self' data: https:; media-src 'self'; style-src 'self' 'unsafe-inline'",
+        architect_sites::ui::THEME_BOOT_HASH
+    );
+    assert_eq!(headers["content-security-policy"], policy.as_str());
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    for (at, _) in body.match_indices("<script") {
+        let tag = body.get(at..).unwrap_or_default();
+        assert!(
+            tag.starts_with(&format!(
+                "<script>{}</script>",
+                architect_sites::ui::THEME_BOOT
+            )) || tag.starts_with("<script src=")
+                || tag.starts_with("<script type=\"application/json\" id=\"site-queue\">"),
+            "an inline script the policy would block: {}",
+            tag.get(..80).unwrap_or(tag)
+        );
+    }
+    for path in ["/s/abcdefghjkmnpqrs/".to_owned(), format!("{link}_files/")] {
+        let (_, headers, _) = get(&w.url(&path), None).await;
+        assert_eq!(
+            headers["content-security-policy"],
+            policy.as_str(),
+            "{path}"
+        );
+    }
     assert!(
         headers["x-robots-tag"]
             .to_str()

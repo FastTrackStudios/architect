@@ -545,10 +545,16 @@ pub async fn start_with(
     }
     // Outermost: a share's link and domain are answered before anything
     // else is matched (a Site mounted at `/` included).
+    // Its Sites' pages carry the shares' Content-Security-Policy (#520).
+    let site_mounts: Arc<Vec<String>> = Arc::new(sites.iter().map(|(m, _)| m.clone()).collect());
     let host = host.finish({
         let shares = shares.clone();
         move |app| {
             app.layer(architect::http::axum::middleware::from_fn_with_state(
+                site_mounts,
+                shares::sites_policy,
+            ))
+            .layer(architect::http::axum::middleware::from_fn_with_state(
                 shares,
                 shares::gate,
             ))

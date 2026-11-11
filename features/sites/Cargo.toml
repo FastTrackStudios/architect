@@ -67,6 +67,9 @@ futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# The theme script's CSP hash, checked (tests/build.rs).
+sha2 = { workspace = true }
+base64 = { workspace = true }
 # Its own embed renderers, so `cargo test --workspace` builds the tests
 # with them: tests/wasi.rs mounts a real component's embed view.
 architect-sites = { path = ".", features = ["pages", "wasi"] }

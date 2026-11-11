@@ -190,4 +190,12 @@
       if (heading) observer.observe(heading);
     });
   }
+
+  // ── live reload, while the site is served by `site serve` or a node:
+  // a file, not an inline script, so the page's Content-Security-Policy
+  // runs no inline code but the theme's.
+  var live = (document.querySelector('meta[name="site-live"]') || {}).content;
+  if (live && window.EventSource) {
+    new EventSource(live).onmessage = function () { location.reload(); };
+  }
 })();
