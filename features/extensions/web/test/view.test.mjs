@@ -64,6 +64,9 @@ test('a view cannot run script, set handlers, load from elsewhere or reach outsi
     // The box is capped.
     assert.equal(r.tallBox, 'applied');
     assert.ok(r.hostHeight <= 600, `${r.hostHeight} px tall`);
+    // SF1: what the pane forces stays, whatever the view removes.
+    assert.equal(r['SF1 removals'], 'applied');
+    assert.deepEqual(r.sf1, { rel: 'noopener noreferrer', target: '_blank', autocomplete: 'off', type: 'button' });
     assert.equal(r.events.length, 1);
     assert.equal(r.events[0].element, 1);
     assert.equal(r.events[0].name, 'click');

@@ -257,6 +257,10 @@ export class Pane {
     if (el === this.root) fail('an edit reached outside the view');
     const m = meta.get(el) ?? { svg: false, tag: el.localName, sealed: true };
     if (m.sealed) return;
+    // What the pane sets itself (a link's `rel` and `target`, a field's
+    // `autocomplete`, a button's `type`), a view neither changes nor
+    // removes.
+    if (forced(m.tag, name)) return;
     let text;
     switch (value?.tag) {
       case 'text':
@@ -288,13 +292,10 @@ export class Pane {
     }
     const kept = attrRule(m.tag, name, text, m.svg, true, this.view);
     if (kept === null) return;
-    // What the pane sets itself, a view does not change.
-    if (['autocomplete', 'rel', 'target'].includes(name.toLowerCase())) return;
     // A field's value and a box's tick are what it shows, not only its
     // attribute (which stops counting once it is typed in).
     if (name === 'value' && 'value' in el) el.value = kept;
     if (name === 'checked' && 'checked' in el) el.checked = kept !== 'false';
-    if (m.tag === 'button' && name === 'type') return;
     if (name.toLowerCase() === 'style') {
       // Through the CSSOM, not the attribute: a page whose CSP has no
       // 'unsafe-inline' for styles still lets these through.
@@ -325,6 +326,15 @@ export class Pane {
     this.root.addEventListener(name, f);
     this.listening.set(name, f);
   }
+}
+
+/// Whether attribute `name` of a `tag` is one the pane forces.
+function forced(tag, name) {
+  const n = String(name).toLowerCase();
+  if (n === 'rel' || n === 'target') return tag === 'a';
+  if (n === 'autocomplete') return ['input', 'textarea', 'select'].includes(tag);
+  if (n === 'type') return tag === 'button';
+  return false;
 }
 
 /// `declarations` (already checked) onto `el`'s style, one property at a

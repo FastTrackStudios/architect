@@ -68,6 +68,17 @@ tryFrame('P4 ids', [
   { tag: 'append-children', val: 4 },
   { tag: 'pop' },
 ]);
+// SF1 (third review): a later edit with no value removed what the pane
+// forces: a link then navigated the page's own tab.
+const none = (name) => ({ tag: 'set-attribute', val: { name, namespace: null, value: { tag: 'none' } } });
+tryFrame('SF1 removals', [
+  { tag: 'push-id', val: 0 },
+  el('a'), attr('href', 'https://example.com/'), attr('class', 'sf1-link'), none('rel'), none('target'), none('REL'), { tag: 'append-children', val: 0 },
+  el('input'), attr('class', 'sf1-field'), none('autocomplete'), attr('autocomplete', 'on'), { tag: 'append-children', val: 0 },
+  el('button'), attr('class', 'sf1-button'), none('type'), { tag: 'append-children', val: 0 },
+  { tag: 'append-children', val: 3 },
+  { tag: 'pop' },
+]);
 // Floods: a box taller than the page lets it be, and too many edits.
 tryFrame('a tall box', [{ tag: 'push-id', val: 0 }, el('div'), attr('style', 'height: 100373px'), { tag: 'append-children', val: 1 }, { tag: 'pop' }]);
 tryFrame('too many edits', Array.from({ length: 10001 }, () => ({ tag: 'pop' })));
@@ -113,6 +124,12 @@ Object.assign(results, {
   hostHeight: host.getBoundingClientRect().height,
   tallBox: results['a tall box'],
   idDiv: q('[data-at]')?.outerHTML,
+  sf1: {
+    rel: q('.sf1-link')?.getAttribute('rel'),
+    target: q('.sf1-link')?.getAttribute('target'),
+    autocomplete: q('.sf1-field')?.getAttribute('autocomplete'),
+    type: q('.sf1-button')?.getAttribute('type'),
+  },
   events,
 });
 window.results = results;
