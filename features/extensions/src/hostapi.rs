@@ -150,6 +150,7 @@ pub(crate) struct Services {
     ui: Mutex<Option<Arc<dyn HostUi>>>,
     /// The window's own interface, kept for whoever draws it
     /// (`host_ui_view::WindowUi::lend`).
+    #[cfg(feature = "ui")]
     window: Mutex<Option<Arc<dyn std::any::Any + Send + Sync>>>,
     /// What extensions set on rows and tabs.
     decorations: Decorations,
@@ -206,6 +207,7 @@ impl Default for Services {
             app_list: Mutex::new(None),
             data: Mutex::new(BTreeMap::new()),
             ui: Mutex::new(None),
+            #[cfg(feature = "ui")]
             window: Mutex::new(None),
             decorations: Decorations::default(),
             picked: Mutex::new(BTreeMap::new()),
@@ -367,6 +369,7 @@ impl Host {
 
     /// The window's interface, kept with the host for whoever draws it,
     /// made by `make` the first time it is asked for.
+    #[cfg(feature = "ui")]
     pub(crate) fn window_slot<T: Clone + Send + Sync + 'static>(
         &self,
         make: impl FnOnce() -> T,
