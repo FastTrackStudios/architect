@@ -1,30 +1,50 @@
 name: pr
 
-# A PR's checks: the fast ones, about a minute on a hosted runner. The full
-# suite (clippy, tests, wasm, boundaries, docs, tags) runs on main after the
-# merge (checks.yml). Branch protection requires this job's `check` status.
+# A PR's check: the lint main's Lint job runs, scoped to the crates the PR
+# can break, plus the checks that compile nothing. Main's full suite
+# (checks.yml: every test, every wasm line, builtins, tags) runs after the
+# merge on the self-hosted pool, which never runs a public repo's PR code.
+# Branch protection requires this job's `check` status.
+#
+# On a push to main the same job lints the whole workspace under another
+# name, only to save the hosted Rust cache PRs restore: a PR's own cache
+# is visible to that PR alone, so main has to be the one that saves it.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
 
-# A PR's new push supersedes its old run.
+# A PR's new push supersedes its old run; so does main's.
 concurrency:
-  group: pr-${{ github.event.pull_request.number }}
+  group: pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Main's settings (checks.yml): any warning fails, no debug info.
+  CARGO_BUILD_WARNINGS: deny
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   check:
-    name: check
+    name: ${{ github.event_name == 'push' && 'cache (main)' || 'check' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
+      # The PR's merge commit and its first parent, the base it merges into.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       # The pin in rust-toolchain.toml; rustup reads it.
       - name: toolchain
         run: rustup show active-toolchain
       - name: fmt
+        if: ${{ github.event_name == 'pull_request' }}
         run: cargo fmt --all -- --check
       # The committed lockfile is the one cargo resolves: a merge that left
       # it stale fails here, not on main.
@@ -32,13 +52,13 @@ jobs:
       # node (deploy/chart/architect/tests/routes.sh). helm and yq are on
       # the hosted runner; seconds.
       - name: chart
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
           helm lint deploy/chart/architect
           bash deploy/chart/architect/tests/routes.sh
       - name: lockfile
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
           cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.committed"
@@ -52,7 +72,7 @@ jobs:
       # commits. cargo-rail is the released binary at the version Task and
       # studio pin, checksum-verified; the check compiles nothing.
       - name: change files
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           RAIL: "0.32.0"
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -74,16 +94,86 @@ jobs:
       # or a new member without its hack line, fails here. Neither
       # compiles anything.
       - name: install cargo-hakari
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-hakari@0.9.38
       - name: hakari
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: |
           set -euo pipefail
           cargo hakari generate --diff
           cargo hakari manage-deps --dry-run
+
+      # ── What main's Lint compiles, on the crates this PR reaches ──────
+      # The native libraries the workspace's build scripts probe for
+      # (devenv.nix's `linux` list, as Ubuntu packages) and mold, which
+      # .cargo/config.toml links build scripts and proc macros with.
+      - name: system libraries
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            mold libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev libxdo-dev libssl-dev libsqlite3-dev \
+            libdbus-1-dev libfontconfig-dev libwayland-dev libxkbcommon-dev \
+            > /dev/null
+      # Third-party crates only: rust-cache drops workspace members, whose
+      # sources a checkout re-stamps anyway. Only main saves (above).
+      - name: rust cache
+        if: ${{ !cancelled() }}
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pr-lint
+          save-if: ${{ github.event_name == 'push' }}
+      # The crates this PR can break: every member owning (or
+      # `include_str!`-ing) a changed file, and every member depending on
+      # one. A toolchain, lockfile or CI change is the whole workspace, as
+      # is a push to main.
+      - name: scope
+        id: scope
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            # What the merge changes: the merge commit against its base.
+            python3 scripts/pr-scope.py HEAD^1 HEAD --cmds "$RUNNER_TEMP/builds.sh" | tee -a "$GITHUB_OUTPUT"
+          else
+            python3 scripts/pr-scope.py HEAD HEAD --all --cmds "$RUNNER_TEMP/builds.sh" | tee -a "$GITHUB_OUTPUT"
+          fi
+          echo "feature builds:"; grep -v '^set' "$RUNNER_TEMP/builds.sh" || true
+      # Main's lint (`cargo clippy --workspace --all-targets`, warnings
+      # denied) on every target of the selected crates: lib, bins, tests,
+      # benches, examples, as Linux builds them.
+      - name: clippy
+        if: ${{ !cancelled() && steps.scope.outputs.scope != 'none' && steps.scope.outputs.scope != '' }}
+        run: cargo clippy ${{ steps.scope.outputs.clippy_args }} --all-targets
+      # The feature combinations main compiles beyond the workspace build:
+      # each feature-tests.toml pass a selected crate is in, and the
+      # headless node (scripts/pr-scope.py, EXTRA_BUILDS).
+      - name: feature builds
+        if: ${{ !cancelled() && steps.scope.outputs.builds != '0' && steps.scope.outputs.builds != '' }}
+        run: bash -x "$RUNNER_TEMP/builds.sh"
+      # Main's Lint xtasks that read sources and the resolved graph and
+      # build nothing (only xtask itself): every feature-gated test has a
+      # pass, every docs path exists, the layer table holds, MCP and CLI
+      # match, the fleet feature union is current.
+      - name: feature-tests
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- feature-tests
+      - name: docs
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- docs
+      - name: boundaries
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- boundaries
+      - name: surfaces
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- surfaces
+      - name: fleet-deps
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- fleet-deps --check
 
   # @fasttrackstudio/architect and its CLI (features/extensions/web): their
   # unit tests (the capability check, the view sanitiser, the sandbox's
@@ -95,6 +185,7 @@ jobs:
   # (features/extensions/tests/wasi_web.rs in checks.yml).
   npm-package:
     name: npm package
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
