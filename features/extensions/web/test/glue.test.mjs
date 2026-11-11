@@ -57,10 +57,12 @@ new BroadcastChannel('page-channel').onmessage = (e) => heard.push(e.data);
 await new Promise((ok) => { const q = indexedDB.open('page-db'); q.onupgradeneeded = () => q.result.createObjectStore('secrets'); q.onsuccess = ok; });
 const logs = [];
 let error = null;
-try { await loadExtension('/fake/', { log: (l) => logs.push(l) }); } catch (e) { error = e.message; }
+try { await loadExtension('/fake/', { integrity: false, log: (l) => logs.push(l) }); } catch (e) { error = e.message; }
 await new Promise((r) => setTimeout(r, 1000));
-const glue = logs.find((l) => l.source === 'glue');
-window.results = { error, heard, glue: glue ? JSON.parse(glue.text) : null, frames: document.querySelectorAll('iframe[sandbox]').length };
+// Its own line: the host names its source ('log'), whatever it said.
+const glue = logs.find((l) => l.text.startsWith('{"origin"'));
+const claimed = logs.some((l) => l.source === 'glue');
+window.results = { error, heard, claimed, glueSource: glue ? glue.source : null, glue: glue ? JSON.parse(glue.text) : null, frames: document.querySelectorAll('iframe[sandbox]').length };
 `,
   );
   writeFileSync(join(dir, 'index.html'), `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><body><script type="module" src="/page.js"></script>`);
@@ -83,6 +85,8 @@ test('P1: the extension’s glue runs in an opaque origin and reaches nothing of
     assert.deepEqual(reached, [], 'no request of the glue’s reached the page’s origin');
     assert.match(r.error, /did not start/);
     assert.equal(r.frames, 0, 'its sandbox frame was taken down');
+    assert.equal(r.glueSource, 'log', 'the source of its line is the host’s to name');
+    assert.equal(r.claimed, false);
   } finally {
     close();
     server.close();

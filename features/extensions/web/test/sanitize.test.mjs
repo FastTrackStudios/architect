@@ -139,3 +139,53 @@ test('CSS: blunt; nothing that loads, binds, escapes or positions itself over th
   assert.equal(attrRule('rect', 'fill', 'url(https://evil/x)', true), null);
   assert.equal(attrRule('rect', 'fill', 'url(#g) url(x)', true), null);
 });
+
+// N1 (second review of #539): `https:cdn.example.com/…` is RELATIVE to an
+// https page in a browser: a cookie-bearing request to the embedder's own
+// site. Every form that is not an absolute URL as written is refused, and
+// what is set is the parsed URL.
+test('N1: only an absolute URL as written, of an allowed origin, under its path', () => {
+  const v = { prefix: 'av1-', urls: ['https://cdn.example.com/', 'https://media.example.org/clips'] };
+  const refused = [
+    'https:cdn.example.com/../../api/x',
+    'https:cdn.example.com/steal.png?csrf=1',
+    'https:/cdn.example.com/x',
+    'https:\\\\cdn.example.com/x',
+    'https:\\cdn.example.com/x',
+    '//cdn.example.com/x',
+    '/cdn.example.com/x',
+    'cdn.example.com/x',
+    'https://cdn.example.com@evil.net/x',
+    'https://user:pw@cdn.example.com/x',
+    'https://cdn.example.com.evil.net/x',
+    'https://CDN.example.com/x',
+    'HTTPS://cdn.example.com/x',
+    'https://cdn.example.com./x',
+    'https://cdn.exämple.com/x',
+    'https://xn--cdn-exmple-r2a.com/x',
+    'https://cdn.example.com/%2e%2e/api/x',
+    'https://cdn.example.com/a/../../api/x',
+    'https://cdn.example.com/a/./x',
+    'ht\ttps://cdn.example.com/x',
+    'https\n://cdn.example.com/x',
+    'https://cdn.exa\nmple.com/x',
+    ' https://cdn.example.com/x',
+    'https://cdn.example.com/x ',
+    'http://cdn.example.com/x',
+    'https://cdn.example.com:443/x',
+    'https://media.example.org/clips-evil/x',
+    'https://media.example.org/clip',
+    'blob:https://cdn.example.com/1234',
+  ];
+  for (const u of refused) {
+    for (const [tag, name, svg] of [['img', 'src', false], ['video', 'src', false], ['source', 'src', false], ['image', 'href', true]])
+      assert.equal(attrRule(tag, name, u, svg, true, v), null, `${tag} ${JSON.stringify(u)}`);
+  }
+  for (const u of ['https://cdn.example.com/x.png', 'https://cdn.example.com/a/b/c.mp4?v=1', 'https://media.example.org/clips/a.mp4', 'https://media.example.org/clips'])
+    assert.equal(attrRule('video', 'src', u, false, true, v), u, u);
+  assert.equal(attrRule('img', 'src', 'blob:https://page.example/u-1', false, true, { prefix: '', urls: ['blob:https://page.example/u-1'] }), 'blob:https://page.example/u-1');
+  // Links: the same parse; a relative-looking `https:` is no link.
+  for (const u of ['https:evil.example/x', 'https:/evil/x', '//evil/x', 'https://a@evil/', 'https://EVIL/']) assert.equal(attrRule('a', 'href', u, false), null, u);
+  assert.equal(attrRule('a', 'href', 'https://example.com/a', false), 'https://example.com/a');
+  assert.equal(attrRule('a', 'href', 'mailto:a@b.c', false), 'mailto:a@b.c');
+});

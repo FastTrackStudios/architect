@@ -164,7 +164,7 @@ fn components_run_in_the_browsers_shape() {
     // exiting; and their unit tests (the capability check, the sanitiser,
     // the sandbox's hash, the public surface, typed actions through tsc
     // and hostile manifests, what `npm pack` publishes). The browser's
-    // (test/view.test.mjs, test/glue.test.mjs, examples/web-counter) need
+    // (test/view.test.mjs, test/glue.test.mjs, test/rust-host.test.mjs, examples/web-counter) need
     // a Firefox: `npm run test:browser` there. In the same test, after the first, so two
     // `npm ci`s never race in one folder.
     let Some(mut build) = tool("node") else {
@@ -183,6 +183,7 @@ fn components_run_in_the_browsers_shape() {
             "test/check.test.mjs",
             "test/sanitize.test.mjs",
             "test/sandbox.test.mjs",
+            "test/limits.test.mjs",
             "test/surface.test.mjs",
             "test/pack.test.mjs",
             "cli/test/typegen.test.mjs",

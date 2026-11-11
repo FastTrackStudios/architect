@@ -121,26 +121,69 @@ const isFragment = (url) => {
   return s.startsWith('#') && s.length > 1;
 };
 
-/// Whether `url` may be loaded as an image or media: a `data:` raster
-/// image, or a URL starting with one of `allow` (absolute `https:` or
-/// `blob:` prefixes the embedder passed to `mountView`).
-export function loadOk(url, used, allow = []) {
-  const s = squeeze(url);
-  if (used === 'image' && urlOk(s, 'image')) return true;
-  let href;
+/// `value` as an absolute URL, or null: it must parse with no base, its
+/// scheme followed by `//`, no userinfo, no backslash, no whitespace or
+/// control, and the parser must not have rewritten it (no `..` or `%2e`
+/// resolved, no case or IDN changed, no trailing dot added), so what is
+/// checked is exactly what the browser will request. A browser reads
+/// `https:host/x` RELATIVE to the page: that is never absolute here.
+export function absolute(value, schemes) {
+  const v = String(value);
+  // eslint-disable-next-line no-control-regex
+  if (/[\s\\\u0000-\u001f\u007f]/.test(v)) return null;
+  const m = /^([a-z][a-z0-9+.-]*):\/\//.exec(v);
+  if (!m || !schemes.includes(m[1])) return null;
+  let u;
   try {
-    href = new URL(String(url).trim()).href;
+    u = new URL(v);
   } catch {
-    return false;
+    return null;
   }
-  return allow.some((a) => {
-    try {
-      const prefix = new URL(a).href;
-      return /^(https|blob):/.test(prefix) && href.startsWith(prefix);
-    } catch {
-      return false;
-    }
-  });
+  if (u.username || u.password || u.href !== v || !u.hostname || u.hostname.endsWith('.')) return null;
+  return u;
+}
+
+/// An allow-list entry as `{ origin, path }` (its path ending at a `/`).
+function entry(a) {
+  const u = absolute(a, ['https']);
+  if (!u) return null;
+  const path = u.pathname.endsWith('/') ? u.pathname : `${u.pathname}/`;
+  return { origin: u.origin, path, exact: u.href };
+}
+
+/// The URL an image or media element may load from `value`, or null: a
+/// `data:` raster image; or an absolute `https:` URL whose origin is an
+/// allowed entry's exactly and whose path is under the entry's (on a `/`
+/// boundary), with no query or fragment tricks needed; or a `blob:` URL
+/// the embedder listed exactly. What comes back is the parsed URL, the
+/// one to set.
+export function loadUrl(value, used, allow = []) {
+  const v = String(value);
+  if (used === 'image' && urlOk(v, 'image') && squeeze(v).startsWith('data:')) return v;
+  if (v.startsWith('blob:')) return allow.includes(v) ? v : null;
+  const u = absolute(v, ['https']);
+  if (!u) return null;
+  for (const a of allow) {
+    const e = entry(a);
+    if (e && u.origin === e.origin && (u.href === e.exact || u.pathname.startsWith(e.path))) return u.href;
+  }
+  return null;
+}
+
+/// Whether `url` may be loaded as an image or media (`loadUrl`).
+export function loadOk(url, used, allow = []) {
+  return loadUrl(url, used, allow) !== null;
+}
+
+/// A link's href: an absolute `https:` URL (parsed, as above) or
+/// `mailto:`; or null.
+export function linkUrl(value) {
+  const v = String(value);
+  const u = absolute(v, ['https']);
+  if (u) return u.href;
+  // eslint-disable-next-line no-control-regex
+  if (/^mailto:[^\s\\\u0000-\u001f\u007f]+$/.test(v)) return v;
+  return null;
 }
 
 /// Whether `url` may be used as a link, an image or media (`url_ok`).
@@ -311,14 +354,13 @@ export function attrRule(tag, name, value, inSvg, live = true, view = { prefix: 
     case 'xlink:href': {
       const t = String(tag);
       if (t === 'use') return fragment(value, prefix);
-      if (t === 'a') return value.trim().startsWith('#') ? fragment(value, prefix) : urlOk(value, 'link') ? value : null;
-      if (t === 'image') return loadOk(value, 'image', view.urls) ? value : null;
+      if (t === 'a') return value.trim().startsWith('#') ? fragment(value, prefix) : linkUrl(value);
+      if (t === 'image') return loadUrl(value, 'image', view.urls);
       return null;
     }
     case 'src': {
       const t = String(tag).toLowerCase();
-      const ok = t === 'img' ? loadOk(value, 'image', view.urls) : ['audio', 'video', 'source'].includes(t) ? loadOk(value, 'media', view.urls) : false;
-      return ok ? value : null;
+      return t === 'img' ? loadUrl(value, 'image', view.urls) : ['audio', 'video', 'source'].includes(t) ? loadUrl(value, 'media', view.urls) : null;
     }
     case 'xmlns':
       return inSvg && value === SVG_NS ? value : null;

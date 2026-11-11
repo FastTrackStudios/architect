@@ -315,7 +315,7 @@ export class Pane {
       while (at) {
         const id = at.getAttribute?.(DIOXUS_ID);
         if (id != null && /^\d+$/.test(id)) {
-          this.onEvent(viewEvent(Number(id), e));
+          this.onEvent(viewEvent(Number(id), e, this.root));
           return;
         }
         if (at === this.root) return;
@@ -349,15 +349,20 @@ function copyMeta(from, to) {
 
 const mods = (e) => ({ alt: !!e.altKey, ctrl: !!e.ctrlKey, meta: !!e.metaKey, shift: !!e.shiftKey });
 
-/// A DOM event as the world's `view-event`.
-export function viewEvent(element, e) {
+/// A DOM event as the world's `view-event`. A pointer's place is said
+/// relative to the view's own box (`client*`), and its scrolled content
+/// (`page*`), never the page's or the screen's: where the page or the
+/// screen is, is not the view's to know.
+export function viewEvent(element, e, box = null) {
   let data;
   if (typeof e.clientX === 'number') {
+    const r = box?.getBoundingClientRect?.() ?? { left: e.clientX, top: e.clientY };
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
     data = {
       tag: 'mouse',
       val: {
-        clientX: e.clientX, clientY: e.clientY, pageX: e.pageX ?? 0, pageY: e.pageY ?? 0,
-        // Where the screen is, not the view's to know.
+        clientX: x, clientY: y, pageX: x + (box?.scrollLeft ?? 0), pageY: y + (box?.scrollTop ?? 0),
         screenX: 0, screenY: 0, elementX: e.offsetX ?? 0, elementY: e.offsetY ?? 0,
         button: e.button ?? 0, buttons: e.buttons ?? 0, mods: mods(e),
       },

@@ -117,7 +117,11 @@ export interface LogLine {
   text: string;
 }
 
-/** What one instance may use, and what keeps it from flooding the page (defaults in `LIMITS`). */
+/**
+ * What one instance may use, and what keeps it from flooding the page (defaults in `LIMITS`). `memory`
+ * is its wasm's: its own JS (jco's glue) in the sandbox frame uses what the browser gives a worker until
+ * it is stopped (`stop()`, or `idle`).
+ */
 export interface Limits {
   /** Its memory, in bytes. */
   memory?: number;
@@ -131,6 +135,23 @@ export interface Limits {
   tick?: number;
   /** Restarts a minute (each after a longer wait); past it, it stays stopped. */
   restarts?: number;
+  /** Its start (and its core modules' reading), at most, in ms. */
+  start?: number;
+  /** Core modules its JS may ask for. */
+  modules?: number;
+  /** A core module's size, at most, in bytes. */
+  moduleBytes?: number;
+  /** A host request's or a worker message's size, at most, in bytes. */
+  messageBytes?: number;
+  /** One `set_data` / `set_setting` value's size, at most, in bytes (as JSON). */
+  dataBytes?: number;
+  /** All its data and settings, at most, in bytes (as JSON). */
+  dataTotal?: number;
+  /**
+   * After this many ms with no call, no view mounted and no worker running, it is stopped and its sandbox
+   * frame removed (whatever its own JS was doing ends); its next call starts it again. 0: never.
+   */
+  idle?: number;
   /** Edits in one frame of a view. */
   editsPerFrame?: number;
   /** Nodes a mounted view may make. */
@@ -299,7 +320,7 @@ export type HostHandlers = {
 
 /** An app action the embedder offers extensions (`run-action`): its effect is what it is checked by. */
 export interface AppAction {
-  /** Default `mutating`. */
+  /** Default `destructive`: an action whose effect is not said needs the grant's `effect = "destructive"` and `confirm`. */
   effect?: Effect;
   run(args: unknown, ctx: HostContext): unknown | Promise<unknown>;
 }
@@ -361,10 +382,11 @@ export interface WorkerLike {
 /** `loadExtension`'s options. */
 export interface LoadOptions {
   /**
-   * Pins its files: the `integrity` `build-web` printed (the lock's own `sha256-…`), or the lock itself.
-   * Each file's bytes are checked before use; a mismatch refuses it. Without it nothing is checked.
+   * Pins its files: the `integrity` `build-web` printed (the lock's own `sha256-…`), or the lock itself;
+   * each file's bytes are checked before use, a mismatch refuses it. Required: `false` loads its files
+   * UNCHECKED (whoever serves them decides what runs in the sandbox), and says so in its log.
    */
-  integrity?: string | Lock;
+  integrity: string | Lock | false;
   /** What answers its requests of the app. */
   host?: Host;
   /** What it may reach: its manifest's capabilities within this. Nothing by default. */
@@ -409,7 +431,7 @@ export declare class Extension<A extends ActionMap = AnyActions> {
  */
 export declare function loadExtension<A extends ActionMap = AnyActions>(
   source: string | URL | MetadataSource,
-  options?: LoadOptions,
+  options: LoadOptions,
 ): Promise<Extension<A>>;
 
 /** A mounted view. */

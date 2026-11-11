@@ -72,7 +72,20 @@ function settingDefaults(manifest) {
 /// `manifest` its manifest, `may` what it may reach (its capabilities
 /// within the grant), `host` the embedder's `Host`, `log(level, source,
 /// text)` its log.
-export function answerer({ manifest, may, host = {}, log }) {
+const LEVELS = ['debug', 'info', 'warn', 'error'];
+
+export function answerer({ manifest, may, host = {}, log, limits = {} }) {
+  const dataBytes = limits.dataBytes ?? 256 << 10;
+  const dataTotal = limits.dataTotal ?? 4 << 20;
+  let stored = 0;
+  const size = (v) => (v === undefined || v === null ? 0 : JSON.stringify(v).length);
+  const fits = (key, v, map) => {
+    const n = size(v);
+    if (n > dataBytes) throw { kind: 'failed', message: `a value of ${n} bytes: past its limit of ${dataBytes}` };
+    const next = stored - size(map.get(key)) + n;
+    if (next > dataTotal) throw { kind: 'failed', message: `its data would be ${next} bytes: past its limit of ${dataTotal}` };
+    stored = next;
+  };
   const settings = new Map();
   const data = new Map();
   const defaults = settingDefaults(manifest);
@@ -85,12 +98,14 @@ export function answerer({ manifest, may, host = {}, log }) {
   const own = (o, k) => o != null && Object.hasOwn(o, k);
 
   const builtIn = {
+    // Its own line: a level of four, the source the host's ('log').
     log: (r) => {
-      log(r.level ?? 'info', 'log', String(r.text ?? ''));
+      log(LEVELS.includes(r.level) ? r.level : 'info', 'log', String(r.text ?? ''));
       return null;
     },
     data: (r) => (data.has(r.key) ? data.get(r.key) : null),
     set_data: (r) => {
+      fits(String(r.key), r.value, data);
       if (r.value === undefined || r.value === null) data.delete(r.key);
       else data.set(r.key, r.value);
       return null;
@@ -98,6 +113,7 @@ export function answerer({ manifest, may, host = {}, log }) {
     setting: (r) => (settings.has(r.key) ? settings.get(r.key) : defaults.has(r.key) ? defaults.get(r.key) : null),
     set_setting: (r) => {
       if (!defaults.has(r.key)) throw { kind: 'not_found', what: `setting ${r.key} in its manifest` };
+      fits(r.key, r.value ?? null, settings);
       settings.set(r.key, r.value ?? null);
       return null;
     },
@@ -118,7 +134,9 @@ export function answerer({ manifest, may, host = {}, log }) {
       // VAULT_EMPTY_TRASH.
       if (!own(host.actions, request.action) && !own(handlers, 'run'))
         return { error: { kind: 'not_found', what: `action ${request.action}` } };
-      effect = own(host.actions, request.action) ? (host.actions[request.action].effect ?? 'mutating') : 'mutating';
+      // An action whose effect the embedder did not say is taken as
+      // destructive: it needs the grant's effect and a yes.
+      effect = own(host.actions, request.action) ? (host.actions[request.action].effect ?? 'destructive') : 'destructive';
     }
     const refused = check(manifest, may, request, effect, true);
     if (refused) {
@@ -286,6 +304,37 @@ export function memoryHost(options = {}) {
 
 // ---- fetchHandler ------------------------------------------------------------
 
+/// A response's body, read until `cap` bytes and no further: past it the
+/// read is cancelled and the call fails.
+async function readCapped(res, cap) {
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > cap) {
+    await res.body?.cancel().catch(() => {});
+    throw { kind: 'failed', message: `the response is past the most it takes (${cap} bytes)` };
+  }
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.length;
+    if (n > cap) {
+      await reader.cancel().catch(() => {});
+      throw { kind: 'failed', message: `the response is past the most it takes (${cap} bytes)` };
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
 const b64 = (bytes) => {
   let s = '';
   for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -322,7 +371,9 @@ export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 3000
       if (globalThis.location && url.origin === globalThis.location.origin)
         throw { kind: 'refused', capability: 'hosts', why: `${url.host} is this page's own origin: an extension never reaches it` };
       if (!allowed(url)) throw { kind: 'refused', capability: 'hosts', why: `${url.host} is not a host this page lets extensions reach` };
-      const signal = AbortSignal.timeout(Math.min(Number(r.timeout_ms ?? timeoutMs), 300000));
+      // The extension may ask for less time than the page gives, never more.
+      const asked = Number(r.timeout_ms);
+      const signal = AbortSignal.timeout(Math.min(timeoutMs, Number.isFinite(asked) && asked > 0 ? asked : timeoutMs, 300000));
       let res;
       try {
         res = await doFetch(url.href, {
@@ -341,9 +392,9 @@ export function fetchHandler({ allow = [], maxBytes = 16 << 20, timeoutMs = 3000
       }
       if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400))
         throw { kind: 'unsupported', what: `${url.href} redirects: it is not followed` };
-      const cap = Math.min(Number(r.max_bytes ?? maxBytes), maxBytes);
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      if (bytes.length > cap) throw { kind: 'failed', message: `the response is past the most it takes (${cap} bytes)` };
+      const wants = Number(r.max_bytes);
+      const cap = Math.min(maxBytes, Number.isFinite(wants) && wants > 0 ? wants : maxBytes);
+      const bytes = await readCapped(res, cap);
       const headers = {};
       res.headers.forEach((v, k) => (headers[k.toLowerCase()] = v));
       const out = { status: res.status, url: url.href, headers };

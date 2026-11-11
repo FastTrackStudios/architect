@@ -37,15 +37,14 @@ after(() => loaded.forEach((e) => e.stop()));
 
 const built = new Map();
 const integrities = new Map();
-function ready(name, opts) {
-  if (!built.has(name)) {
-    const out = join(root, 'target/wasi-web-package', name);
-    mkdirSync(out, { recursive: true });
+function ready(name, opts, as = name) {
+  if (!built.has(as)) {
+    const out = join(root, 'target/wasi-web-package', as);
     const { integrity } = build(join(dir, `${name}.wasm`), out, opts);
-    built.set(name, pathToFileURL(`${out}/`).href);
-    integrities.set(name, integrity);
+    built.set(as, pathToFileURL(`${out}/`).href);
+    integrities.set(as, integrity);
   }
-  return built.get(name);
+  return built.get(as);
 }
 
 const counterSource = () =>
@@ -69,8 +68,9 @@ const HAZARDS = {
 };
 const hazardsSource = () => ready('architect_extension_wasi_hazards', { manifest: HAZARDS });
 
+/// Loads it unpinned unless a test pins it: `integrity: false`, said.
 async function load(source, options) {
-  const ext = await loadExtension(source, { spawn, ...options });
+  const ext = await loadExtension(source, { spawn, integrity: false, ...options });
   loaded.push(ext);
   return ext;
 }
@@ -169,11 +169,11 @@ test('a component built for a newer world is refused, with why', { skip }, async
   const metadata = JSON.parse(await (await import('node:fs/promises')).readFile(at, 'utf8'));
   const newer = { ...metadata, world: '0.2.0', folder: new URL('.', at).href };
   await assert.rejects(
-    loadExtension(newer, { spawn }),
+    loadExtension(newer, { spawn, integrity: false }),
     /built for architect:extension@0\.2\.0, newer than this host's 0\.1\.0: update @fasttrackstudio\/architect/,
   );
   const noWorld = { ...newer, world: undefined };
-  await assert.rejects(loadExtension(noWorld, { spawn }), /does not say which architect:extension world/);
+  await assert.rejects(loadExtension(noWorld, { spawn, integrity: false }), /does not say which architect:extension world/);
 });
 
 // P6 (review of #539): nothing tied the files a page loads to what was
@@ -211,7 +211,7 @@ test('P1/P6: the module is a file inside the extension’s folder, nothing else'
   const metadata = JSON.parse(readFileSync(at, 'utf8'));
   for (const module of ['../evil.js', 'https://evil.example/glue.js', '/abs/glue.js', 'data:text/javascript,1', 'a/./b.js', '%2e%2e/x.js', 'x.js?y']) {
     await assert.rejects(
-      loadExtension({ ...metadata, module, folder: new URL('.', at).href }, { spawn }),
+      loadExtension({ ...metadata, module, folder: new URL('.', at).href }, { spawn, integrity: false }),
       /is not a file inside its folder/,
       module,
     );
@@ -229,7 +229,7 @@ test('node exits with an idle extension it did not stop', { skip, timeout: 60000
   const script = `
     import { loadExtension, memoryHost } from ${JSON.stringify(pathToFileURL(join(here, '../index.js')).href)};
     import { spawn } from ${JSON.stringify(pathToFileURL(join(here, '../node.js')).href)};
-    const ext = await loadExtension(${JSON.stringify(counterSource())}, { spawn, host: memoryHost() });
+    const ext = await loadExtension(${JSON.stringify(counterSource())}, { spawn, host: memoryHost(), integrity: false });
     console.log(await ext.run('LAB_WASI_COUNTER_ADD', { by: 1 }));
   `;
   const t = performance.now();
@@ -238,4 +238,68 @@ test('node exits with an idle extension it did not stop', { skip, timeout: 60000
   const out = execFileSync(process.execPath, [file], { timeout: 30000 }).toString();
   assert.equal(out.trim(), '1');
   assert.ok(performance.now() - t < 30000, 'it exited by itself');
+});
+
+// N2 (second review of #539): a wrong digest was ignored for an object
+// source, and leaving integrity out loaded unchecked.
+test('N2: every source shape honours every integrity shape, and unpinned must be said', { skip }, async () => {
+  const at = new URL('architect.json', counterSource());
+  const folder = new URL('.', at).href;
+  const metadata = JSON.parse(readFileSync(at, 'utf8'));
+  const integrity = integrities.get('architect_sandbox_wasi_counter');
+  const wrong = `sha256-${'A'.repeat(43)}=`;
+  const lock = JSON.parse(readFileSync(new URL('architect.lock.json', folder), 'utf8'));
+  // Left out: refused, whatever the source.
+  await assert.rejects(loadExtension(counterSource(), { spawn }), /no integrity: pass the digest build-web printed/);
+  await assert.rejects(loadExtension({ ...metadata, folder }, { spawn }), /no integrity/);
+  // A wrong digest: refused, whatever the source.
+  await assert.rejects(loadExtension(counterSource(), { spawn, integrity: wrong }), /its lock is not the one pinned/);
+  await assert.rejects(loadExtension({ ...metadata, folder }, { spawn, integrity: wrong }), /its lock is not the one pinned/);
+  // Not a digest, not a lock: refused.
+  for (const bad of ['sha256-short', 'md5-x', 42, true, { files: [] }])
+    await assert.rejects(loadExtension({ ...metadata, folder }, { spawn, integrity: bad }), /integrity|not a lock|digest/, JSON.stringify(bad));
+  // Metadata given as an object that is not what the lock names: refused.
+  await assert.rejects(
+    loadExtension({ ...metadata, folder, manifest: { ...metadata.manifest, capabilities: { actions: ['*'] } } }, { spawn, integrity }),
+    /the metadata given is not the architect.json its lock names/,
+  );
+  // The right ones: each source, each shape.
+  for (const [source, pin] of [
+    [counterSource(), integrity],
+    [counterSource(), lock],
+    [{ ...metadata, folder }, integrity],
+    [{ ...metadata, folder }, lock],
+  ]) {
+    const ext = await load(source, { integrity: pin, host: memoryHost() });
+    assert.equal(await ext.run('LAB_WASI_COUNTER_ADD', { by: 1 }), 1);
+  }
+});
+
+// S1: an app action whose effect the embedder did not say ran as mutating.
+test('S1: an action of handle.run’s, its effect unsaid, needs the destructive grant and a yes', { skip }, async () => {
+  const ran = [];
+  // The counter, asking for every effect on THEME_ (so only the grant and
+  // the yes decide).
+  const toml = (await import('smol-toml')).parse(readFileSync(join(root, 'apps/sandbox/wasi-counter/extension.toml'), 'utf8'));
+  const wide = ready('architect_sandbox_wasi_counter', { manifest: { ...toml, capabilities: { actions: ['THEME_'], effect: 'destructive' } } }, 'counter-wide');
+  const host = (confirm) => memoryHost({ handle: { run: (r) => (ran.push(r.action), ['light']) }, confirm });
+  // The review's case: a mutating grant, confirm says no.
+  const mutating = await load(wide, { host: host(() => false), grant: { actions: ['THEME_'], effect: 'mutating' } });
+  await assert.rejects(mutating.run('LAB_WASI_COUNTER_ASK'), /refused: THEME_LIST is destructive/);
+  const noYes = await load(wide, { host: host(() => false), grant: { actions: ['THEME_'], effect: 'destructive' } });
+  await assert.rejects(noYes.run('LAB_WASI_COUNTER_ASK'), /confirm|confirmation/);
+  assert.deepEqual(ran, [], 'it never ran');
+  const yes = await load(wide, { host: host(() => true), grant: { actions: ['THEME_'], effect: 'destructive' } });
+  assert.deepEqual(await yes.run('LAB_WASI_COUNTER_ASK'), ['light']);
+  assert.deepEqual(ran, ['THEME_LIST']);
+});
+
+// S4: what its JS does between calls is the page's to end.
+test('S4: idle past limits.idle it is stopped, and its next call starts it again', { skip, timeout: 30000 }, async () => {
+  const ext = await load(hazardsSource(), { host: memoryHost({ confirm: () => true }), limits: { idle: 300 } });
+  assert.deepEqual(await ext.run('TEST_HAZARDS_ECHO', 1), { echo: 1 });
+  await new Promise((r) => setTimeout(r, 900));
+  assert.equal(ext.report().alive, false, 'stopped while idle');
+  assert.deepEqual(await ext.run('TEST_HAZARDS_ECHO', 2), { echo: 2 });
+  assert.equal(ext.report().alive, true);
 });

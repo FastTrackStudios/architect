@@ -50,7 +50,7 @@ async function readBytes(url) {
     const fs = await import(/* @vite-ignore */ /* webpackIgnore: true */ fsModule);
     return new Uint8Array(await fs.readFile(url));
   }
-  const r = await fetch(url, { credentials: 'same-origin' });
+  const r = await fetch(url, { credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer' });
   if (!r.ok) throw new Error(`${url}: ${r.status} ${r.statusText}`);
   return new Uint8Array(await r.arrayBuffer());
 }
@@ -97,25 +97,52 @@ function base() {
   return globalThis.location?.href ?? import.meta.url;
 }
 
-/// `source` as `{ folder, metadata, read }`.
+/// The lock `integrity` pins, read from `folder`: a digest (the lock's
+/// own, checked), the lock itself, or `false` (nothing checked, said
+/// out loud). Anything else, or leaving it out, is refused.
+async function pinned(folder, integrity) {
+  if (integrity === false) return null;
+  if (integrity === undefined || integrity === null)
+    throw refuse('no integrity: pass the digest build-web printed ({ integrity }), or { integrity: false } to load its files unchecked');
+  if (typeof integrity === 'string') {
+    if (!/^sha256-[A-Za-z0-9+/]{43}=$/.test(integrity)) throw refuse(`${JSON.stringify(integrity.slice(0, 80))} is not a sha256- digest`);
+    const bytes = await readBytes(new URL(LOCK, folder));
+    const got = await digest(bytes);
+    if (got !== integrity) throw refuse(`its lock is not the one pinned (${got}, not ${integrity})`);
+    return checkLock(json(bytes));
+  }
+  if (typeof integrity === 'object') return checkLock(integrity);
+  throw refuse('integrity is a sha256- digest, a lock, or false');
+}
+
+function checkLock(lock) {
+  if (!lock || lock.lockfileVersion !== 1 || !lock.files || typeof lock.files !== 'object' || Array.isArray(lock.files))
+    throw refuse('not a lock: { lockfileVersion: 1, files: { path: "sha256-…" } }');
+  return lock;
+}
+
+/// `source` as `{ folder, metadata, read }`: every source shape with every
+/// integrity shape.
 async function resolve(source, integrity) {
   if (source && typeof source === 'object' && !(source instanceof URL)) {
     if (!source.manifest || !source.module || !source.folder)
       throw new TypeError('loadExtension: a source object needs `folder`, `manifest` and `module`');
     const folder = new URL(String(source.folder).replace(/\/?$/, '/'), base());
-    const lock = typeof integrity === 'object' && integrity ? integrity : null;
+    const lock = await pinned(folder, integrity);
+    // Given as an object, its metadata is not a file: what the lock names
+    // of it is checked against it all the same.
+    if (lock?.files?.[METADATA]) {
+      const want = lock.files[METADATA];
+      const metadata = json(await folderReader(folder, lock)(METADATA));
+      if (JSON.stringify(metadata) !== JSON.stringify({ module: source.module, world: source.world, manifest: source.manifest, ...(source.workers ? { workers: source.workers } : {}) }))
+        throw refuse(`the metadata given is not the ${METADATA} its lock names (${want})`);
+    }
     return { folder, metadata: source, read: folderReader(folder, lock) };
   }
   let at = new URL(String(source), base());
   if (at.pathname.endsWith(`/${METADATA}`)) at = new URL('.', at);
   const folder = new URL(at.pathname.replace(/\/?$/, '/'), at);
-  let lock = null;
-  if (typeof integrity === 'string') {
-    const bytes = await readBytes(new URL(LOCK, folder));
-    const got = await digest(bytes);
-    if (got !== integrity) throw refuse(`its lock is not the one pinned (${got}, not ${integrity})`);
-    lock = json(bytes);
-  } else if (integrity && typeof integrity === 'object') lock = integrity;
+  const lock = await pinned(folder, integrity);
   const read = folderReader(folder, lock);
   return { folder, metadata: json(await read(METADATA)), read };
 }
@@ -223,9 +250,14 @@ export async function loadExtension(source, options = {}) {
   const host = options.host ?? {};
   const may = deepFreeze(within(capabilities(manifest.capabilities), options.grant ?? noCapabilities()));
   const limits = { ...LIMITS, ...options.limits };
-  const log = (level, src, text) => (options.log ?? host.log)?.({ level, source: src, text });
-  const me = { host, panes: new Map(), nextPane: 0, stopped: false, log, limits, component: null };
-  const ask = answerer({ manifest, may, host, log });
+  const sink = (level, src, text) => (options.log ?? host.log)?.({ level, source: src, text });
+  const me = { host, panes: new Map(), nextPane: 0, stopped: false, limits, component: null };
+  // Every line, the extension's and the host's, through the component's
+  // limit (lines a second, length).
+  const log = (level, src, text) => (me.component ? me.component.log(level, src, text) : sink(level, src, text));
+  me.log = log;
+  if (options.integrity === false) sink('warn', 'host', `${manifest.id}: loaded with integrity: false, its files unchecked`);
+  const ask = answerer({ manifest, may, host, log, limits });
   const url = new URL(module, folder).href;
   const load = (href) => {
     if (!href.startsWith(folder.href)) return Promise.reject(refuse(`${href} is outside its folder`));
@@ -248,7 +280,7 @@ export async function loadExtension(source, options = {}) {
     workerLimits: options.workerLimits,
     workers,
     host: ask,
-    log,
+    log: sink,
     load,
     inlineGlue: true,
     theme: host.theme ? () => host.theme() : undefined,
