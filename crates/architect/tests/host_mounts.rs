@@ -192,3 +192,33 @@ async fn document_answers_get_with_the_head_and_beats_the_spa() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// A `finish` layer that answers paths no route has (a share link's
+/// `/s/<code>/`, as the headless node's share gate does).
+fn links_like(app: Router) -> Router {
+    app.layer(architect::http::axum::middleware::from_fn(
+        |req: Request<Body>, next: architect::http::axum::middleware::Next| async move {
+            if req.uri().path().starts_with("/s/") {
+                return "link".into_response();
+            }
+            next.run(req).await
+        },
+    ))
+}
+
+#[tokio::test]
+async fn a_dav_mount_keeps_the_finish_layers_on_paths_no_route_has() {
+    // #541: with a `dav` mount, a request for a path no route has went
+    // to the merged router's bare fallback, around the `finish` layers,
+    // so the node's share links answered an empty 404.
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
+        .dav("/dav", echo_dav)
+        .finish(links_like)
+        .into_app();
+    assert_eq!(
+        send(app.clone(), "GET", "/s/ksqx75iaaaaaaaab/").await,
+        (StatusCode::OK, "link".to_owned())
+    );
+    let (_, body) = send(app, "PROPFIND", "/dav/Songs").await;
+    assert_eq!(body, "PROPFIND /dav Songs - 0");
+}

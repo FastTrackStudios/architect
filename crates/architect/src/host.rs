@@ -677,9 +677,12 @@ fn assemble_app(
         app = wrap(app);
     }
     // After the layers on purpose: `dav` routes must not answer through
-    // CORS (see `EngineHost::dav`).
+    // CORS (see `EngineHost::dav`). The layered app is their fallback, not
+    // merged beside them: a merge keeps the layers on `app`'s routes but
+    // not on its fallback, so a path no route has (a share link the node's
+    // outermost layer answers, #541) skipped every `finish` layer.
     if let Some(outside) = outside {
-        app = app.merge(outside);
+        app = outside.fallback_service(app);
     }
     app
 }
