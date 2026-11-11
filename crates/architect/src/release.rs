@@ -77,6 +77,18 @@ pub const GITHUB_API: &str = "https://api.github.com";
 /// (`.github/workflows/release.yml`, `ORG_RELEASE_KEY`).
 pub const ORG_KEY: &str = "RWRh9Gk9qaStQMhku4THMidEYrQsmAEsm2dDprUkZxShEtqfIcroM8Od";
 
+/// The largest asset an update downloads (1 GiB).
+pub const MAX_ASSET_BYTES: u64 = 1 << 30;
+
+/// The largest [`SUMS_ASSET`] or [`SIG_ASSET`] read (1 MiB).
+pub const MAX_SMALL_BYTES: u64 = 1 << 20;
+
+/// The largest release list read (16 MiB).
+const MAX_LIST_BYTES: u64 = 16 << 20;
+
+/// How long a download may go without a byte before it is given up.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// How long the staged binary may take to answer `--version`.
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -124,6 +136,9 @@ pub enum ReleaseError {
     /// No release carries the asset asked for (`--to`).
     #[error("no release {tag} carries {asset} and {SUMS_ASSET}")]
     NotFound { tag: String, asset: String },
+    /// A download is larger than its cap; it was stopped.
+    #[error("{what} is larger than {limit} bytes, the most an update reads; nothing changed")]
+    TooLarge { what: String, limit: u64 },
     /// Talking to the releases server failed.
     #[error("{what}: {source}")]
     Http {
@@ -215,8 +230,12 @@ pub fn verify_sums(
     sig: &str,
     expected_comment: &str,
 ) -> Result<(), ReleaseError> {
+    // The comment ends in the sums' name; the error names the rest.
+    let what = expected_comment
+        .strip_suffix(SUMS_ASSET)
+        .map_or(expected_comment, str::trim_end);
     let bad = |reason: String| ReleaseError::BadSignature {
-        tag: expected_comment.to_owned(),
+        tag: what.to_owned(),
         reason,
     };
     let key = minisign_verify::PublicKey::from_base64(key.trim())
@@ -530,6 +549,8 @@ pub struct Updater {
     api_base: String,
     token: Option<String>,
     http: Option<reqwest::Client>,
+    max_asset: u64,
+    max_small: u64,
 }
 
 impl Updater {
@@ -547,7 +568,19 @@ impl Updater {
             api_base: GITHUB_API.into(),
             token: None,
             http: None,
+            max_asset: MAX_ASSET_BYTES,
+            max_small: MAX_SMALL_BYTES,
         }
+    }
+
+    /// The most bytes the asset and the sums or signature may have
+    /// (default [`MAX_ASSET_BYTES`], [`MAX_SMALL_BYTES`]); a test's
+    /// smaller ones.
+    #[must_use]
+    pub const fn limits(mut self, asset: u64, small: u64) -> Self {
+        self.max_asset = asset;
+        self.max_small = small;
+        self
     }
 
     /// Release tags are `<prefix>X.Y.Z` (default `v`; the Task desktop
@@ -577,8 +610,9 @@ impl Updater {
         self
     }
 
-    /// Use this client instead of the default (30 s connect, 60 s between
-    /// reads, 30 min overall).
+    /// Use this client instead of the default (30 s connect, and
+    /// [`STALL_TIMEOUT`] without a byte; no overall limit, so a slow link
+    /// still finishes).
     #[must_use]
     pub fn client(mut self, client: reqwest::Client) -> Self {
         self.http = Some(client);
@@ -656,6 +690,7 @@ impl Updater {
         let key = key.ok_or(ReleaseError::NoSigningKey)?;
         let http = self.http_client()?;
         let want = self.signed_sha256(&http, candidate, key).await?;
+        let _ = sweep_staging(dir, &self.asset);
         let mut staged = staging_in(dir, &self.asset)?;
         self.download_checked(&http, candidate, want, &mut staged, progress)
             .await?;
@@ -678,9 +713,11 @@ impl Updater {
             .as_deref()
             .ok_or_else(|| ReleaseError::Unsigned { tag: tag.clone() })?;
         let sums = self
-            .get_bytes(http, &candidate.sums_url, SUMS_ASSET)
+            .get_bytes(http, &candidate.sums_url, SUMS_ASSET, self.max_small)
             .await?;
-        let sig = self.get_bytes(http, sig_url, SIG_ASSET).await?;
+        let sig = self
+            .get_bytes(http, sig_url, SIG_ASSET, self.max_small)
+            .await?;
         let sig = String::from_utf8_lossy(&sig);
         verify_sums(key, &sums, &sig, &trusted_comment(&self.app, tag))?;
         expected_sha256(&String::from_utf8_lossy(&sums), &self.asset).ok_or_else(|| {
@@ -721,15 +758,18 @@ impl Updater {
         reqwest::Client::builder()
             .user_agent(format!("{}-self-update", self.app))
             .connect_timeout(Duration::from_secs(30))
-            .read_timeout(Duration::from_secs(60))
-            .timeout(Duration::from_mins(30))
+            .read_timeout(STALL_TIMEOUT)
             .build()
             .map_err(ReleaseError::http("build the HTTP client"))
     }
 
     async fn releases(&self, http: &reqwest::Client) -> Result<Vec<GithubRelease>, ReleaseError> {
         let url = format!("{}/repos/{}/releases?per_page=30", self.api_base, self.repo);
-        parse_releases(&self.get_bytes(http, &url, "the release list").await?)
+        parse_releases(
+            &self
+                .get_bytes(http, &url, "the release list", MAX_LIST_BYTES)
+                .await?,
+        )
     }
 
     async fn get(
@@ -757,13 +797,28 @@ impl Updater {
         http: &reqwest::Client,
         url: &str,
         what: &str,
+        limit: u64,
     ) -> Result<Vec<u8>, ReleaseError> {
-        let response = self.get(http, url, what).await?;
-        let body = response
-            .bytes()
+        let mut response = self.get(http, url, what).await?;
+        let too_large = || ReleaseError::TooLarge {
+            what: what.to_owned(),
+            limit,
+        };
+        if response.content_length().is_some_and(|n| n > limit) {
+            return Err(too_large());
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
             .await
-            .map_err(ReleaseError::http(format!("download {what}")))?;
-        Ok(body.to_vec())
+            .map_err(ReleaseError::http(format!("download {what}")))?
+        {
+            body.extend_from_slice(&chunk);
+            if u64::try_from(body.len()).unwrap_or(u64::MAX) > limit {
+                return Err(too_large());
+            }
+        }
+        Ok(body)
     }
 
     /// Stream the asset into `staged`, hashing it as it lands (the binary
@@ -778,12 +833,22 @@ impl Updater {
         let what = format!("download {}", self.asset);
         let mut response = self.get(http, url, &self.asset).await?;
         let total = response.content_length();
+        let too_large = || ReleaseError::TooLarge {
+            what: self.asset.clone(),
+            limit: self.max_asset,
+        };
+        if total.is_some_and(|n| n > self.max_asset) {
+            return Err(too_large());
+        }
         let mut received = 0_u64;
         let mut hasher = sha2::Sha256::new();
         while let Some(chunk) = response.chunk().await.map_err(ReleaseError::http(&what))? {
             hasher.update(&chunk);
             staged.write_all(&chunk).map_err(ReleaseError::io(&what))?;
             received = received.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+            if received > self.max_asset {
+                return Err(too_large());
+            }
             progress(received, total);
         }
         staged
@@ -815,18 +880,41 @@ pub fn staging_file(exe: &Path) -> Result<tempfile::NamedTempFile, ReleaseError>
     staging_in(dir, &name)
 }
 
+/// The name every staging file for `name` starts with.
+fn staging_prefix(name: &str) -> String {
+    format!(".{name}.update-")
+}
+
+/// Remove `name`'s staging files left in `dir` by a run that died.
+///
+/// A process killed mid-download never drops its staging file. Answers
+/// how many it removed; a file it cannot remove is skipped.
+#[must_use]
+pub fn sweep_staging(dir: &Path, name: &str) -> usize {
+    let prefix = staging_prefix(name);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| std::fs::remove_file(e.path()).is_ok())
+        .count()
+}
+
 /// A new, owner-only, randomly named file in `dir` for `name`'s update.
 ///
 /// Named `.<name>.update-<random>`, created exclusively, removed when
 /// dropped: [`staging_file`] for a file in any directory.
 pub fn staging_in(dir: &Path, name: &str) -> Result<tempfile::NamedTempFile, ReleaseError> {
-    let prefix = format!(".{name}.update-");
+    let prefix = staging_prefix(name);
     let mut builder = tempfile::Builder::new();
     builder.prefix(&prefix);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        builder.permissions(std::fs::Permissions::from_mode(0o700));
+        builder.permissions(std::fs::Permissions::from_mode(0o600));
     }
     builder.tempfile_in(dir).map_err(ReleaseError::io(format!(
         "create a staging file in {} (is it writable by this user?)",

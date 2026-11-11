@@ -24,6 +24,7 @@
 #[cfg(feature = "release")]
 pub mod engine;
 pub mod model;
+pub mod restart;
 mod view;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,7 +35,7 @@ use architect_extensions::hostcall::HostRequest;
 use architect_extensions::linked::{Builder, Extension, Handle};
 use serde_json::{Value, json};
 
-use crate::model::{Channel, State};
+use crate::model::{Begin, Channel, Machine, State};
 
 /// Its id: its actions are `UPDATES_*`.
 pub const ID: &str = "updates";
@@ -83,28 +84,15 @@ pub const STATUS: &str = "update";
 /// The settings section's view.
 pub const SETTINGS_VIEW: &str = "settings";
 
-/// The releases page, when a release names none.
-pub const RELEASES_PAGE: &str = "https://github.com/FastTrackStudios/architect/releases";
+pub use crate::model::RELEASES_PAGE;
 
-#[derive(Debug, Default)]
-struct Shared {
-    state: State,
-    /// RFC 3339, the last check that reached the releases API.
-    last_check: Option<String>,
-    channel: Channel,
-}
-
-static SHARED: Mutex<Shared> = Mutex::new(Shared {
-    state: State::Idle,
-    last_check: None,
-    channel: Channel::Stable,
-});
+static SHARED: Mutex<Machine> = Mutex::new(Machine::new());
 
 static REVISION: AtomicU64 = AtomicU64::new(0);
 
 static HANDLE: Mutex<Option<Handle>> = Mutex::new(None);
 
-fn shared() -> std::sync::MutexGuard<'static, Shared> {
+fn shared() -> std::sync::MutexGuard<'static, Machine> {
     SHARED.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -119,11 +107,23 @@ fn state() -> State {
     shared().state.clone()
 }
 
-/// Sets the state and redraws the status item and the settings row.
-fn set_state(state: State) {
-    let line = model::status_line(&state);
-    shared().state = state;
+/// Apply one transition under the lock; when it changed the state, redraw
+/// the status item and the settings row.
+fn transition<T>(change: impl FnOnce(&mut Machine) -> T, changed: impl Fn(&T) -> bool) -> T {
+    let mut m = shared();
+    let out = change(&mut m);
+    let now = changed(&out).then(|| m.state.clone());
+    drop(m);
+    if let Some(state) = now {
+        publish(&state);
+    }
+    out
+}
+
+/// Redraw what shows `state`: the status item and the settings row.
+fn publish(state: &State) {
     REVISION.fetch_add(1, Ordering::Relaxed);
+    let line = model::status_line(state);
     if let Some(h) = handle() {
         h.contribute(Contribution {
             status: line
@@ -176,16 +176,13 @@ async fn channel() -> Channel {
     c
 }
 
-/// `UPDATES_CHECK`: check now.
+/// `UPDATES_CHECK`: check now (not while an install is under way or done).
 async fn check(_: Value) -> Result<Value, String> {
     let channel = channel().await;
-    if matches!(
-        state(),
-        State::Checking | State::Downloading { .. } | State::Ready { .. }
-    ) {
-        return Ok(status());
+    if transition(Machine::begin_check, |began| *began) {
+        let (state, at) = run::check(channel).await;
+        transition(|m| m.finish_check(state, at), |kept| *kept);
     }
-    run::check(channel).await;
     Ok(status())
 }
 
@@ -197,44 +194,38 @@ async fn scheduled(_: Value) -> Result<Value, String> {
     check(Value::Null).await
 }
 
-/// `UPDATES_INSTALL`: start the download of the available update.
+/// `UPDATES_INSTALL`: start the download of the available update, once.
 async fn install(_: Value) -> Result<Value, String> {
     // An unsigned release goes on: the engine refuses it, and says why.
-    let (version, plan, notes_url) = match state() {
-        State::Available {
-            version,
-            plan,
-            notes_url,
-            ..
-        } => (version, plan, notes_url),
-        State::Downloading { .. } | State::Ready { .. } => return Ok(status()),
-        State::DevelopmentBuild => {
-            return Err(model::ReportOnly::DevelopmentBuild.reason());
+    match transition(Machine::begin_install, |b| {
+        matches!(b, Ok(Begin::Start { .. }))
+    })? {
+        Begin::Start { version, plan } => {
+            if let Err(why) = run::install(version, plan) {
+                transition(
+                    |m| {
+                        m.finish_install(State::Failed {
+                            reason: why.clone(),
+                        })
+                    },
+                    |kept| *kept,
+                );
+                return Err(why);
+            }
         }
-        _ => return Err("no update is available: check first (UPDATES_CHECK)".to_owned()),
-    };
-    if let model::Plan::ReportOnly(why) = &plan {
-        return Err(format!("{}: {}", why.reason(), page_of(&notes_url)));
+        Begin::Already => {}
     }
-    run::install(version, plan)?;
     Ok(status())
 }
 
-fn page_of(notes_url: &str) -> String {
-    if notes_url.is_empty() {
-        RELEASES_PAGE.to_owned()
-    } else {
-        notes_url.to_owned()
-    }
-}
-
-/// `UPDATES_PAGE`: the release's page (else every release's).
+/// `UPDATES_PAGE`: the release's page (else every release's), in the
+/// system's browser; only a page under [`RELEASES_PAGE`].
 async fn page(_: Value) -> Result<Value, String> {
     let url = match state() {
-        State::Available { notes_url, .. } => page_of(&notes_url),
+        State::Available { notes_url, .. } => model::release_page(&notes_url).to_owned(),
         _ => RELEASES_PAGE.to_owned(),
     };
-    host(HostRequest::Open { path: url.clone() }).await?;
+    restart::open_in_browser(&url)?;
     Ok(json!({ "opened": url }))
 }
 
@@ -243,19 +234,31 @@ async fn restart(_: Value) -> Result<Value, String> {
     let State::Ready { version, plan } = state() else {
         return Err("no update is installed yet: nothing to restart into".to_owned());
     };
-    let restarts = match &plan {
-        model::Plan::InPlace { appimage } => {
-            run::relaunch_after_exit(appimage)?;
-            true
-        }
-        _ => false,
+    let watcher = match &plan {
+        model::Plan::InPlace { appimage } => Some(restart::start_after_exit(
+            appimage,
+            std::process::id(),
+            restart::MAX_WAIT,
+        )?),
+        _ => None,
     };
-    host(HostRequest::Run {
+    let restarts = watcher.is_some();
+    let quit = host(HostRequest::Run {
         action: "PRESENCE_QUIT".to_owned(),
         args: Value::Null,
         ticket: None,
     })
-    .await?;
+    .await;
+    match (quit, watcher) {
+        (Err(why), Some(w)) => {
+            // The app is not quitting: never start it again later.
+            w.cancel();
+            return Err(why);
+        }
+        (Err(why), None) => return Err(why),
+        (Ok(_), Some(w)) => w.detach(),
+        (Ok(_), None) => {}
+    }
     Ok(json!({
         "version": version,
         "restarting": restarts,
@@ -271,9 +274,9 @@ mod run {
 
     use chrono::{SecondsFormat, Utc};
 
-    use super::{REVISION, State, set_state, shared};
+    use super::{State, transition};
     use crate::engine::{ARCHITECT, Engine};
-    use crate::model::{Channel, Env, Plan, Platform, percent};
+    use crate::model::{Channel, Env, Plan, Platform};
 
     fn runtime() -> Result<&'static tokio::runtime::Runtime, String> {
         static RT: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
@@ -295,7 +298,12 @@ mod run {
 
     /// The process's env, read here at the edge.
     fn env() -> Env {
-        Env::from_vars(|k| std::env::var_os(k), crate::engine::writable)
+        let exe = std::env::current_exe().and_then(std::fs::canonicalize).ok();
+        Env::from_vars(
+            |k| std::env::var_os(k),
+            exe.as_deref(),
+            crate::engine::writable,
+        )
     }
 
     const fn plan_name(plan: &Plan) -> &'static str {
@@ -306,13 +314,12 @@ mod run {
         }
     }
 
-    pub async fn check(channel: Channel) {
+    /// The check's answer and, when it reached the API, when.
+    pub async fn check(channel: Channel) -> (State, Option<String>) {
         let engine = engine();
         if engine.current().is_none() {
-            set_state(State::DevelopmentBuild);
-            return;
+            return (State::DevelopmentBuild, None);
         }
-        set_state(State::Checking);
         let started = Instant::now();
         let current = engine.current().map(str::to_owned);
         let work = async move { engine.check(channel, &env()).await };
@@ -339,41 +346,24 @@ mod run {
             error,
             duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         );
-        if !matches!(state, State::Failed { .. }) {
-            shared().last_check = Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true));
-        }
-        set_state(state);
+        let at = (!matches!(state, State::Failed { .. }))
+            .then(|| Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true));
+        (state, at)
     }
 
+    /// Start the download on the runtime; the state moves as it goes.
     pub fn install(version: String, plan: Plan) -> Result<(), String> {
         let rt = runtime()?;
-        set_state(State::Downloading {
-            version: version.clone(),
-            received: 0,
-            total: None,
-        });
         let engine = engine();
         rt.spawn(async move {
             let started = Instant::now();
-            let mut shown = None;
             let v = version.clone();
             let mut progress = move |received: u64, total: Option<u64>| {
-                let now = percent(received, total);
-                if now != shown {
-                    shown = now;
-                    set_state(State::Downloading {
-                        version: v.clone(),
-                        received,
-                        total,
-                    });
-                } else if let State::Downloading { received: r, .. } = &mut shared().state {
-                    *r = received;
-                    REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
+                transition(|m| m.progress(&v, received, total), |moved| *moved);
             };
             let done = engine.install(&version, &plan, &mut progress).await;
             let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            match done {
+            let state = match done {
                 Ok(state) => {
                     tracing::info!(
                         target: "architect_updates",
@@ -384,7 +374,7 @@ mod run {
                         plan = plan_name(&plan),
                         duration_ms,
                     );
-                    set_state(state);
+                    state
                 }
                 Err(f) => {
                     // A refused release is alertable; a dropped download is not.
@@ -411,60 +401,39 @@ mod run {
                             duration_ms,
                         );
                     }
-                    set_state(State::Failed { reason: f.reason });
+                    State::Failed { reason: f.reason }
                 }
-            }
+            };
+            transition(|m| m.finish_install(state), |kept| *kept);
         });
         Ok(())
-    }
-
-    /// Start `appimage` once this process has exited.
-    #[cfg(unix)]
-    pub fn relaunch_after_exit(appimage: &std::path::Path) -> Result<(), String> {
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg(r#"while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; exec "$0""#)
-            .arg(appimage)
-            .arg(std::process::id().to_string())
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("start {} again: {e}", appimage.display()))
-    }
-
-    #[cfg(not(unix))]
-    pub fn relaunch_after_exit(_: &std::path::Path) -> Result<(), String> {
-        Err("restarting into an update is not supported on this platform yet".to_owned())
     }
 }
 
 /// Without feature `release`: nothing reaches the network.
 #[cfg(not(feature = "release"))]
 mod run {
-    use super::{State, set_state};
+    use super::State;
     use crate::model::{Channel, Plan};
 
     const NO: &str = "this build of Architect cannot update itself (built without `release`)";
 
     // Async as the network half's is, so callers are the same.
     #[allow(clippy::unused_async)]
-    pub async fn check(_: Channel) {
+    pub async fn check(_: Channel) -> (State, Option<String>) {
         if super::release_version().is_none() {
-            set_state(State::DevelopmentBuild);
+            (State::DevelopmentBuild, None)
         } else {
-            set_state(State::Failed {
-                reason: NO.to_owned(),
-            });
+            (
+                State::Failed {
+                    reason: NO.to_owned(),
+                },
+                None,
+            )
         }
     }
 
     pub fn install(_: String, _: Plan) -> Result<(), String> {
-        Err(NO.to_owned())
-    }
-
-    pub fn relaunch_after_exit(_: &std::path::Path) -> Result<(), String> {
         Err(NO.to_owned())
     }
 }

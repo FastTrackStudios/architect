@@ -85,12 +85,20 @@ impl TestKey {
 #[derive(Clone, Default)]
 struct Fake {
     files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    /// Served chunked, with no Content-Length.
+    streamed: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     seen: Arc<Mutex<Vec<String>>>,
 }
 
 async fn serve(AxState(fake): AxState<Fake>, req: Request) -> Response {
     let path = req.uri().path().to_owned();
     fake.seen.lock().unwrap().push(path.clone());
+    let streamed = fake.streamed.lock().unwrap().get(&path).cloned();
+    if let Some(body) = streamed {
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> =
+            body.chunks(1024).map(|c| Ok(c.to_vec())).collect();
+        return axum::body::Body::from_stream(futures::stream::iter(chunks)).into_response();
+    }
     match fake.files.lock().unwrap().get(&path) {
         Some(body) => body.clone().into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
@@ -252,6 +260,7 @@ async fn the_update_dir_gets_the_image_then_its_version_and_appimage_is_untouche
     let env = Env {
         update_dir: Some(dir.clone()),
         appimage: Some(image.clone()),
+        appimage_ours: true,
         appimage_writable: true,
     };
     let engine = engine(&base, &key);
@@ -290,6 +299,7 @@ async fn without_an_update_dir_the_appimage_is_replaced() {
     let env = Env {
         update_dir: None,
         appimage: Some(image.clone()),
+        appimage_ours: true,
         appimage_writable: true,
     };
     let engine = engine(&base, &key);
@@ -316,6 +326,7 @@ async fn refused(release: Release, key: &TestKey, want: &str) {
     let env = Env {
         update_dir: Some(dir.clone()),
         appimage: Some(image.clone()),
+        appimage_ours: true,
         appimage_writable: true,
     };
     let engine = engine(&base, key);
@@ -461,4 +472,203 @@ async fn a_development_build_never_asks_or_installs() {
     );
     assert!(fake.seen.lock().unwrap().is_empty(), "never asked the API");
     assert!(!dir.exists());
+}
+
+/// The update dir's names during the download, and the staging file's
+/// mode then.
+#[tokio::test]
+async fn a_dead_runs_staging_file_is_swept_and_the_new_one_is_owner_only() {
+    let key = TestKey::new(7);
+    let (base, _) = start(Release::signed(&key)).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("updates");
+    std::fs::create_dir_all(&dir).unwrap();
+    let stale = dir.join(format!(".{LINUX_ASSET}.update-dead01"));
+    std::fs::write(&stale, b"half a download").unwrap();
+    let engine = engine(&base, &key);
+    let plan = Plan::UpdateDir { dir: dir.clone() };
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let during = seen.clone();
+    let watch = dir.clone();
+    let done = engine
+        .install("1.3.0", &plan, &mut move |_, _| {
+            for e in std::fs::read_dir(&watch).unwrap() {
+                let e = e.unwrap();
+                let name = e.file_name().to_string_lossy().into_owned();
+                during.lock().unwrap().push((name, mode(&e.path())));
+            }
+        })
+        .await;
+    assert!(matches!(done.unwrap(), State::Ready { .. }));
+    let seen = seen.lock().unwrap();
+    assert!(
+        !seen.iter().any(|(n, _)| n.ends_with("dead01")),
+        "the stale file is gone before the download: {seen:?}"
+    );
+    let staged: Vec<_> = seen
+        .iter()
+        .filter(|(n, _)| n.starts_with(&format!(".{LINUX_ASSET}.update-")))
+        .collect();
+    assert!(!staged.is_empty(), "{seen:?}");
+    assert!(staged.iter().all(|(_, m)| *m == 0o600), "{staged:?}");
+    assert_eq!(
+        names(&dir),
+        vec![LINUX_ASSET.to_owned(), VERSION_FILE.to_owned()]
+    );
+}
+
+fn failing_write(_: &Path, _: &str, _: &str) -> Result<(), architect::release::ReleaseError> {
+    Err(architect::release::ReleaseError::Usage("disk full".into()))
+}
+
+#[tokio::test]
+async fn an_old_version_file_never_names_the_new_image() {
+    let key = TestKey::new(7);
+    let (base, _) = start(Release::signed(&key)).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("updates");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(LINUX_ASSET), OLD).unwrap();
+    std::fs::write(dir.join(VERSION_FILE), "1.2.5\n").unwrap();
+    let engine = engine(&base, &key).write_version_with(failing_write);
+    let plan = Plan::UpdateDir { dir: dir.clone() };
+    let failure = install(&engine, &plan).await.0.unwrap_err();
+    assert!(failure.reason.contains("disk full"), "{}", failure.reason);
+    assert_eq!(std::fs::read(dir.join(LINUX_ASSET)).unwrap(), NEW);
+    assert!(
+        !dir.join(VERSION_FILE).exists(),
+        "no version: the launcher runs the store's image"
+    );
+}
+
+/// A release whose sums are validly signed, with another comment.
+fn signed_as(key: &TestKey, comment: &str) -> Release {
+    let sums = sums_for(NEW);
+    Release {
+        image: NEW.to_vec(),
+        sig: Some(key.sign(sums.as_bytes(), comment)),
+        sums,
+    }
+}
+
+#[tokio::test]
+async fn an_older_tags_signature_under_a_newer_tag_is_refused() {
+    let key = TestKey::new(7);
+    let release = signed_as(&key, &trusted_comment("architect", "v1.2.0"));
+    refused(release, &key, "made for `architect v1.2.0 SHA256SUMS`").await;
+}
+
+#[tokio::test]
+async fn sums_signed_for_another_app_are_refused() {
+    let key = TestKey::new(7);
+    let release = signed_as(&key, &trusted_comment("studio", "v1.3.0"));
+    refused(release, &key, "made for `studio v1.3.0 SHA256SUMS`").await;
+}
+
+#[tokio::test]
+async fn a_bad_signature_names_the_release_once() {
+    let key = TestKey::new(7);
+    let (base, _) = start(Release::signed(&TestKey::new(9))).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let plan = Plan::UpdateDir {
+        dir: tmp.path().join("u"),
+    };
+    let reason = install(&engine(&base, &key), &plan)
+        .await
+        .0
+        .unwrap_err()
+        .reason;
+    assert!(
+        reason.starts_with("architect v1.3.0's SHA256SUMS is not signed"),
+        "{reason}"
+    );
+    assert!(!reason.contains("SHA256SUMS SHA256SUMS"), "{reason}");
+}
+
+#[tokio::test]
+async fn oversized_sums_are_refused() {
+    let key = TestKey::new(7);
+    let mut release = Release::signed(&key);
+    release.sums.push_str(&"#".repeat(4096));
+    release.sig = Some(key.sign(
+        release.sums.as_bytes(),
+        &trusted_comment("architect", "v1.3.0"),
+    ));
+    let (base, _) = start(release).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let plan = Plan::UpdateDir {
+        dir: tmp.path().join("u"),
+    };
+    let failure = install(&engine(&base, &key).limits(1 << 20, 1024), &plan)
+        .await
+        .0
+        .unwrap_err();
+    assert!(
+        failure
+            .reason
+            .contains("SHA256SUMS is larger than 1024 bytes"),
+        "{}",
+        failure.reason
+    );
+}
+
+#[tokio::test]
+async fn an_image_announced_over_the_cap_is_refused_before_it_downloads() {
+    let key = TestKey::new(7);
+    let (base, _) = start(Release::signed(&key)).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("u");
+    let mut heard = 0;
+    let failure = engine(&base, &key)
+        .limits(8, 1 << 20)
+        .install(
+            "1.3.0",
+            &Plan::UpdateDir { dir: dir.clone() },
+            &mut |r, _| heard = r,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        failure.reason.contains("is larger than 8 bytes"),
+        "{}",
+        failure.reason
+    );
+    assert_eq!(heard, 0, "not one byte taken");
+    assert_eq!(names(&dir), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn an_image_streaming_past_the_cap_is_cut_off() {
+    let key = TestKey::new(7);
+    let big = vec![7_u8; 64 * 1024];
+    let sums = sums_for(&big);
+    let release = Release {
+        image: Vec::new(),
+        sig: Some(key.sign(sums.as_bytes(), &trusted_comment("architect", "v1.3.0"))),
+        sums,
+    };
+    let (base, fake) = start(release).await;
+    fake.streamed
+        .lock()
+        .unwrap()
+        .insert(format!("/dl/v1.3.0/{LINUX_ASSET}"), big);
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("u");
+    let mut heard = 0;
+    let failure = engine(&base, &key)
+        .limits(16 * 1024, 1 << 20)
+        .install(
+            "1.3.0",
+            &Plan::UpdateDir { dir: dir.clone() },
+            &mut |r, _| heard = r,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        failure.reason.contains("is larger than 16384 bytes"),
+        "{}",
+        failure.reason
+    );
+    assert!(heard <= 16 * 1024, "stopped at the cap, heard {heard}");
+    assert_eq!(names(&dir), Vec::<String>::new(), "nothing left behind");
 }

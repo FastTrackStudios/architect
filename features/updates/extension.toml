@@ -24,21 +24,20 @@ path = "features/updates"
 [capabilities]
 actions = ["PRESENCE_QUIT"]
 effect = "mutating"
-reads = ["documents"]
 
 [[actions]]
 id = "UPDATES_CHECK"
 name = "Check for updates"
 description = "Asks for the newest release on the update channel now and answers the updater's state (as UPDATES_STATE). Downloads nothing. A development build (no release version stamped in) never checks."
 group = "Updates"
-effect = "read_only"
+effect = "mutating"
 
 [[actions]]
 id = "UPDATES_INSTALL"
 name = "Install the update"
 description = "Downloads the available update, verifies it against the release's signed SHA256SUMS, and installs it for the next start (into $ARCHITECT_UPDATE_DIR under the Nix launcher, else over $APPIMAGE). Refused for an unsigned release, a development build, or where Architect cannot replace itself (macOS, Windows, a distro package): then it says where to download it. Answers at once; the download runs in the background (UPDATES_STATE)."
 group = "Updates"
-effect = "mutating"
+effect = "destructive"
 
 [[actions]]
 id = "UPDATES_STATE"
@@ -52,21 +51,21 @@ id = "UPDATES_RESTART"
 name = "Restart to finish updating"
 description = "Once an update is installed: quits Architect and, for a replaced AppImage, starts it again on the new version (under the Nix launcher, open Architect again)."
 group = "Updates"
-effect = "mutating"
+effect = "destructive"
 
 [[actions]]
 id = "UPDATES_PAGE"
 name = "Open the release page"
-description = "Opens the available release's page (its notes and downloads), else every release's."
+description = "Opens the available release's page (its notes and downloads) in the system's browser, else every release's; only a page under github.com/FastTrackStudios/architect/releases."
 group = "Updates"
-effect = "read_only"
+effect = "mutating"
 
 [[actions]]
 id = "UPDATES_SCHEDULED"
 name = "Updates: scheduled check"
 description = "Checks for updates when automatic checks are on (Settings → Updates); does nothing otherwise. Its hooks run it at start and every 24 hours."
 group = "Updates"
-effect = "read_only"
+effect = "mutating"
 
 [[views]]
 id = "settings"

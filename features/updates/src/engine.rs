@@ -9,7 +9,10 @@ use std::path::Path;
 
 use architect::release::{self, Candidate, ReleaseError, Updater};
 
-use crate::model::{Channel, Env, LINUX_ASSET, Plan, Platform, State, VERSION_FILE, plan};
+use crate::model::{Channel, Env, LINUX_ASSET, Plan, Platform, State, VERSION_FILE, newer, plan};
+
+/// Writes the `version` file: `(dir, name, text)`.
+pub type WriteVersion = fn(&Path, &str, &str) -> Result<(), ReleaseError>;
 
 /// Which app's releases, and with whose key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +63,7 @@ impl From<ReleaseError> for Failure {
                 | ReleaseError::NotListed { .. }
                 | ReleaseError::ChecksumMismatch { .. }
                 | ReleaseError::NoSigningKey
+                | ReleaseError::TooLarge { .. }
         );
         let reason = match e {
             ReleaseError::Unsigned { tag } => format!(
@@ -79,6 +83,7 @@ pub struct Engine {
     key: Option<String>,
     current: Option<String>,
     platform: Platform,
+    write_version: WriteVersion,
 }
 
 impl Engine {
@@ -91,7 +96,26 @@ impl Engine {
             key: source.key.map(str::to_owned),
             current,
             platform,
+            write_version: release::write_atomic,
         }
+    }
+
+    /// The `version` file's writer, in place of [`release::write_atomic`]:
+    /// a test's failing one.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn write_version_with(mut self, write: WriteVersion) -> Self {
+        self.write_version = write;
+        self
+    }
+
+    /// The caps on the image and the small files, in place of
+    /// `architect::release`'s: a test's smaller ones.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn limits(mut self, asset: u64, small: u64) -> Self {
+        self.updater = self.updater.limits(asset, small);
+        self
     }
 
     /// The releases API base (default GitHub's); a test's local server.
@@ -138,7 +162,7 @@ impl Engine {
                 reason: e.to_string(),
             },
             Ok(None) => State::UpToDate { newest: None },
-            Ok(Some(c)) if release::newer(&c.version, current) => State::Available {
+            Ok(Some(c)) if newer(&c.version, current) => State::Available {
                 signed: c.sig_url.is_some(),
                 version: c.version,
                 notes_url: c.notes_url,
@@ -153,9 +177,11 @@ impl Engine {
     /// Download `version`, verify it, and install it per `plan`.
     ///
     /// `progress` hears `(received, total)`. Answers [`State::Ready`];
-    /// on any failure nothing was installed (a verified image may already
-    /// be in the update dir when only writing `version` failed: the
-    /// launcher ignores an image without one).
+    /// on any failure before the image is renamed in, nothing changed. In
+    /// the update dir an old `version` is removed before the new image goes
+    /// in, so when writing the new `version` fails the folder holds an
+    /// image with no `version`, which the launcher never runs
+    /// (`nix/desktop/choose.sh`: no version means the store's image).
     ///
     /// # Errors
     ///
@@ -185,7 +211,7 @@ impl Engine {
                 (dir.to_owned(), appimage.clone())
             }
         };
-        if !release::newer(version, current) {
+        if !newer(version, current) {
             return Err(Failure::plain(format!(
                 "{version} is not newer than the running {current}; nothing changed"
             )));
@@ -195,11 +221,18 @@ impl Engine {
             .updater
             .fetch_verified(&candidate, self.key.as_deref(), &dir, progress)
             .await?;
-        // The image first, then its version: the launcher runs an image
-        // only once `version` names it.
+        let update_dir = matches!(plan, Plan::UpdateDir { .. });
+        if update_dir {
+            // No `version` while the image changes: an old one would name
+            // the new image with the old version.
+            remove_if_present(&dir.join(VERSION_FILE))?;
+            sync_dir(&dir)?;
+        }
         release::persist_executable(staged, &dest)?;
-        if matches!(plan, Plan::UpdateDir { .. }) {
-            release::write_atomic(&dir, VERSION_FILE, &format!("{}\n", candidate.version))?;
+        sync_dir(&dir)?;
+        if update_dir {
+            (self.write_version)(&dir, VERSION_FILE, &format!("{}\n", candidate.version))?;
+            sync_dir(&dir)?;
         }
         Ok(State::Ready {
             version: candidate.version,
@@ -216,6 +249,29 @@ impl Engine {
             ))
         })
     }
+}
+
+fn remove_if_present(path: &Path) -> Result<(), Failure> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(Failure::plain(format!("remove {}: {e}", path.display())))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Make the renames in `dir` durable (a no-op where a folder cannot be
+/// opened to sync).
+fn sync_dir(dir: &Path) -> Result<(), Failure> {
+    #[cfg(unix)]
+    {
+        std::fs::File::open(dir)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| Failure::plain(format!("sync {}: {e}", dir.display())))?;
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
 }
 
 /// `dir`, made owner-only when it is missing.
