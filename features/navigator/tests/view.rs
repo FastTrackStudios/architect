@@ -196,6 +196,62 @@ fn wide_is_two_panes_narrow_is_one_and_a_phone_is_one() {
     assert_eq!(count(&doc, ".nv-single"), 1);
 }
 
+/// The handle is 5px wide: a pointer moving faster than a frame is off it
+/// at once, and the drag still has to follow.
+#[test]
+#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+fn the_divider_follows_a_drag_that_leaves_the_handle() {
+    let source = Arc::new(
+        MemorySource::new("Lab")
+            .with_file(NoteFile::new("Welcome.md", NOW, NOW).preview("Hello"))
+            .with_file(NoteFile::new("Guides/Shell.md", NOW, NOW).preview("The shell")),
+    );
+    let mut doc = mount(source, 900, false);
+    let (_, _, before, _) = rect(&doc, ".nv-nav");
+    let (hx, hy, hw, hh) = rect(&doc, ".nv-resize");
+    let (x0, y0) = (hx + hw / 2.0, hy + hh / 2.0);
+    let at = |x: f64, held| pointer(x as f32, y0 as f32, held);
+    doc.handle_ui_event(UiEvent::PointerMove(at(x0, MouseEventButtons::None)));
+    doc.handle_ui_event(UiEvent::PointerDown(at(x0, MouseEventButtons::Primary)));
+    // Two jumps, each far past the handle, over the notes.
+    for dx in [60.0, 120.0] {
+        doc.handle_ui_event(UiEvent::PointerMove(at(
+            x0 + dx,
+            MouseEventButtons::Primary,
+        )));
+        doc.poll(None);
+    }
+    settle(&mut doc);
+    let (_, _, during, _) = rect(&doc, ".nv-nav");
+    assert!(
+        (during - before - 120.0).abs() < 2.0,
+        "the folders followed the pointer: {before} -> {during}"
+    );
+    doc.handle_ui_event(UiEvent::PointerUp(at(x0 + 120.0, MouseEventButtons::None)));
+    // Let go: a later move changes nothing.
+    doc.handle_ui_event(UiEvent::PointerMove(at(x0 + 40.0, MouseEventButtons::None)));
+    settle(&mut doc);
+    let (_, _, after, _) = rect(&doc, ".nv-nav");
+    assert!(
+        (after - during).abs() < 1.0,
+        "it stays put: {during} -> {after}"
+    );
+
+    // Let go outside the window (no release arrives): the next move with
+    // no button held ends the drag instead of dragging on.
+    let (hx, _, hw, _) = rect(&doc, ".nv-resize");
+    let x1 = hx + hw / 2.0;
+    doc.handle_ui_event(UiEvent::PointerDown(at(x1, MouseEventButtons::Primary)));
+    doc.handle_ui_event(UiEvent::PointerMove(at(x1 - 50.0, MouseEventButtons::None)));
+    doc.handle_ui_event(UiEvent::PointerMove(at(x1 - 90.0, MouseEventButtons::None)));
+    settle(&mut doc);
+    let (_, _, end, _) = rect(&doc, ".nv-nav");
+    assert!(
+        (end - after).abs() < 1.0,
+        "no drag without a button: {after} -> {end}"
+    );
+}
+
 #[test]
 fn a_click_on_a_folder_lists_it_and_a_click_on_a_note_opens_it() {
     let source = MemorySource::new("Lab")

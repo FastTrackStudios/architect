@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use architect_commands::{Command, use_command};
 use architect_settings::{UseSettings, use_settings};
+use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use futures_util::StreamExt as _;
 
@@ -1392,6 +1393,34 @@ pub fn NavigatorView(
             rsx! {
                 div { class: "nv-split nv-dual", "data-orientation": if horizontal { "horizontal" } else { "vertical" },
                     style: "position:absolute; inset:0; display:flex; flex-direction:{dir};",
+                    // The drag is followed here, over the whole navigator,
+                    // not on the 5px handle: the pointer leaves the handle
+                    // the moment it moves faster than the pane is redrawn,
+                    // and the moves then go to whatever is under it. They
+                    // bubble to this element either way.
+                    onpointermove: move |e: PointerEvent| {
+                        let Some((start, from)) = *drag.peek() else { return };
+                        // Released outside the navigator: its release never
+                        // came, so the drag ends at the next move.
+                        if !e.held_buttons().contains(MouseButton::Primary) {
+                            drag.set(None);
+                            return;
+                        }
+                        let p = e.data().client_coordinates();
+                        let at = if horizontal { p.x } else { p.y };
+                        let to = layout::clamp_size(orientation, from + (at - start) / nav.zoom(), room);
+                        nav.update(|s| if horizontal { s.nav_width = to } else { s.nav_height = to });
+                    },
+                    onpointerup: move |_| {
+                        if drag.peek().is_some() {
+                            drag.set(None);
+                        }
+                    },
+                    onpointercancel: move |_| {
+                        if drag.peek().is_some() {
+                            drag.set(None);
+                        }
+                    },
                     div { class: "nv-slot", style: "{nav_style}", {nav_pane} }
                     div {
                         class: "nv-resize",
@@ -1404,16 +1433,6 @@ pub fn NavigatorView(
                             let at = if horizontal { p.x } else { p.y };
                             drag.set(Some((at, size)));
                         },
-                        // Blitz sends the moves and the release to the
-                        // element pressed.
-                        onpointermove: move |e: PointerEvent| {
-                            let Some((start, from)) = *drag.peek() else { return };
-                            let p = e.data().client_coordinates();
-                            let at = if horizontal { p.x } else { p.y };
-                            let to = layout::clamp_size(orientation, from + (at - start) / nav.zoom(), room);
-                            nav.update(|s| if horizontal { s.nav_width = to } else { s.nav_height = to });
-                        },
-                        onpointerup: move |_| drag.set(None),
                         div { class: "nv-resize-line", style: if horizontal { "position:absolute; top:0; bottom:0; left:2px; width:1px;" } else { "position:absolute; left:0; right:0; top:2px; height:1px;" } }
                     }
                     div { class: "nv-slot", style: "flex:1 1 0; min-width:0; min-height:0; position:relative;", {list_pane} }
