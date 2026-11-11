@@ -8,7 +8,9 @@
 
 use architect_permissions::{MethodPermit, ServicePermits};
 
-use crate::share::{Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareFault};
+use crate::share::{
+    KeptLayers, Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareFault,
+};
 
 #[architect::rpc]
 pub trait ShareLinks {
@@ -48,6 +50,16 @@ pub trait ShareLinks {
         listen: Option<Listen>,
     ) -> Result<Share, ShareFault>;
 
+    /// The layer rules the node keeps for extensions no longer installed
+    /// (#528): they still place files, so removing an extension never
+    /// opens a link.
+    async fn kept_layers(&self) -> Result<Vec<KeptLayers>, ShareFault>;
+
+    /// Forget the kept layer rules of `extension`: its files are placed by
+    /// the rules installed now. Refused for an installed extension (its
+    /// rules are its manifest's) and for one nothing is kept of.
+    async fn forget_layers(&self, extension: String) -> Result<Vec<KeptLayers>, ShareFault>;
+
     /// The comments left on a share, oldest first.
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault>;
 }
@@ -63,6 +75,8 @@ pub const SHARE_PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("add_audience", "write", "vaults/**").audited(),
         MethodPermit::new("remove_audience", "write", "vaults/**").audited(),
         MethodPermit::new("audience_listen", "write", "vaults/**").audited(),
+        MethodPermit::new("kept_layers", "read", "vaults/**"),
+        MethodPermit::new("forget_layers", "write", "vaults/**").audited(),
         MethodPermit::new("comments", "read", "vaults/**"),
     ],
 };

@@ -371,9 +371,10 @@ pub struct Share {
     #[facet(default)]
     pub audiences: Vec<ShareAudience>,
     /// How far its own link plays (#528), and the most any of its
-    /// audiences may. A share written before layers served every file
-    /// its notes attach, so it reads as [`Listen::Full`].
-    #[facet(default = Listen::Full)]
+    /// audiences may. A share note without it (written before layers, or
+    /// one that lost the field) reads as [`Listen::Reference`], the
+    /// default: access fails closed.
+    #[facet(default)]
     pub listen: Listen,
 }
 
@@ -507,6 +508,20 @@ pub struct NewShare {
     pub domain: Option<String>,
     /// How far its link plays ([`Listen::default`]: Reference).
     pub listen: Listen,
+}
+
+/// The `[[share_layers]]` rules of an extension that is no longer
+/// installed, kept by the node so that removing it never opens a link
+/// (#528): until the owner forgets them
+/// ([`crate::ShareLinks::forget_layers`]).
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct KeptLayers {
+    /// The extension's id (`fts.studio`).
+    pub extension: String,
+    /// The note types its rules place (`song`).
+    pub note_types: Vec<String>,
+    /// When the node last read them from its manifest (unix seconds).
+    pub since: i64,
 }
 
 /// One change to a share ([`crate::ShareLinks::update`]).
