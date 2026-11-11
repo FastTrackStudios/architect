@@ -1068,11 +1068,7 @@ impl Engine {
                     if let Some(path) =
                         file.filter(|p| self.store.areas().iter().any(|a| p.starts_with(a.root())))
                     {
-                        let to = self.config().data.join("corrupt").join(&hex);
-                        if let Some(dir) = to.parent() {
-                            let _ = std::fs::create_dir_all(dir);
-                        }
-                        let _ = std::fs::rename(&path, &to);
+                        self.quarantine_file(&path, &hex);
                     }
                     let _ = std::fs::remove_file(self.merkle_path(&hex));
                     let gone: BTreeMap<String, Option<Holding>> =
@@ -1738,11 +1734,77 @@ impl Engine {
         }
     }
 
+    /// Move bad bytes out of a store area so they are never served: to
+    /// `<data>/corrupt/`, or (an area on another filesystem, the tree's)
+    /// to `<area>/.corrupt/`. Never deleted.
+    pub(super) fn quarantine_file(&self, path: &std::path::Path, hex: &str) {
+        let to = self.config().data.join("corrupt").join(hex);
+        if let Some(dir) = to.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if std::fs::rename(path, &to).is_ok() {
+            return;
+        }
+        let beside = self
+            .store
+            .areas()
+            .into_iter()
+            .find(|a| path.starts_with(a.root()))
+            .map(|a| a.root().join(".corrupt").join(hex));
+        if let Some(beside) = beside {
+            if let Some(dir) = beside.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::rename(path, &beside);
+        }
+    }
+
+    /// Bad bytes found in a store area (`path`, claimed as `hash`):
+    /// quarantined, the claim withdrawn, counted as damaged.
+    pub(super) async fn quarantine(&self, hash: Sha256, path: &std::path::Path) {
+        let hex = hash.to_hex();
+        self.quarantine_file(path, &hex);
+        let _ = std::fs::remove_file(self.merkle_path(&hex));
+        lock(&self.books.damaged).insert(hex.clone());
+        let orgs = lock(&self.books.registry).orgs_of(&hex);
+        let gone: BTreeMap<String, Option<Holding>> = std::iter::once((hex, None)).collect();
+        for org in &orgs {
+            self.write_own(org, &gone).await;
+        }
+        self.attest(&[hash]).await;
+    }
+
+    /// Every content that is an old version somewhere (not what a path's
+    /// current version holds): never evicted for space, whatever else
+    /// holds the same bytes now.
+    pub(super) async fn old_contents(&self) -> HashSet<String> {
+        let mut out = HashSet::new();
+        for id in self.known() {
+            let Ok(tree) = self.tree(id).await else {
+                // A root it cannot read: nothing of it is known to be safe.
+                continue;
+            };
+            for path in tree.paths() {
+                let current = tree.current(path).map(|v| v.id);
+                for v in tree.history(path) {
+                    if Some(v.id) != current
+                        && let Some(c) = &v.content
+                    {
+                        out.insert(c.clone());
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Drop one blob from the store to make room (the store's budget,
     /// [`super::space`]): only a blob whose bytes this same device holds
     /// in a working file in place, re-hashed from that file just before
-    /// the delete. The device holds the same bytes after as before, so
-    /// nothing is lost and no other holder is relied on.
+    /// the delete, and only if the bytes are no old version anywhere (a
+    /// working file can change, so it is never where a version is kept).
+    /// Holds the pass's lock, so a write deciding the store keeps these
+    /// bytes never interleaves with it.
     ///
     /// Nothing else is evicted for space: a copy only other holders keep
     /// would need the org's policy applied to old versions, a live
@@ -1752,11 +1814,28 @@ impl Engine {
     ///
     /// # Errors
     ///
-    /// [`EngineError::BelowPolicy`]: pinned, or no working file holds
-    /// these bytes now; or the file cannot be read or removed.
+    /// [`EngineError::BelowPolicy`]: pinned, an old version, or no working
+    /// file holds these bytes now; or the file cannot be read or removed.
     pub async fn evict_for_space(&self, hash: Sha256) -> Result<(), EngineError> {
+        let _busy = self.busy().await;
+        let old = self.old_contents().await;
+        self.evict_for_space_locked(hash, &old).await
+    }
+
+    /// [`Self::evict_for_space`] with the lock held and the old versions
+    /// known.
+    pub(super) async fn evict_for_space_locked(
+        &self,
+        hash: Sha256,
+        old: &HashSet<String>,
+    ) -> Result<(), EngineError> {
         if self.store.local.is_pinned(hash).await.unwrap_or(true) {
             return Err(EngineError::BelowPolicy(vec![format!("{hash} (pinned)")]));
+        }
+        if old.contains(&hash.to_hex()) {
+            return Err(EngineError::BelowPolicy(vec![format!(
+                "{hash} (an old version: never evicted for space)"
+            )]));
         }
         let Some(working) = self.store.in_place.find(&hash) else {
             return Err(EngineError::BelowPolicy(vec![format!(

@@ -117,6 +117,13 @@ pub struct RootStatus {
     /// Of those, the ones larger than the store's whole limit: they
     /// arrive only once it is raised.
     pub too_large: u32,
+    /// Of those, replacements waiting because the version they replace
+    /// cannot be kept, and why ("cannot keep history: …").
+    pub no_history: u32,
+    pub history_error: Option<String>,
+    /// Files named like the engine's temp files that it did not write:
+    /// never synced, never removed, listed here.
+    pub strays: Vec<String>,
     /// Every file is at its head.
     pub synced: bool,
     /// Task stubs met in the working copy: never synced.

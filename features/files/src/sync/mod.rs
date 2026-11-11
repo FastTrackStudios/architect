@@ -25,6 +25,7 @@ pub mod lane;
 pub mod layout;
 pub mod ledger;
 pub mod manifest;
+pub mod pending;
 pub mod registry;
 mod replicas;
 #[cfg(feature = "s3")]

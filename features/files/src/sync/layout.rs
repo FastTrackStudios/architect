@@ -26,6 +26,48 @@ pub const PART: &str = architect::blob::STAGING;
 /// node's incoming bytes and kept versions). Never a root, never synced.
 pub const AREA: &str = ".architect";
 
+/// The file that marks `.architect` as the node's own folder, and tells
+/// whoever finds it on the share what it is.
+pub const AREA_MARK: &str = "README.txt";
+const AREA_MARK_TEXT: &str = "This folder belongs to the Architect node that holds this tree.\n\
+incoming/  bytes it fetched from peers, about to be renamed into the tree\n\
+versions/  the previous versions of files it replaced (history), by sha-256\n\
+Anyone who mounts this share sees it. Do not edit or delete what is in it:\n\
+the versions are the only copy of some old versions.\n";
+
+/// Make `<files_dir>/.architect` the node's own folder, or say why it
+/// cannot be: something else already has that name (a file, a link, a
+/// folder without the node's mark). A holding node does not start then.
+///
+/// # Errors
+///
+/// What is in the way, or why the folder cannot be made.
+pub fn claim_area(files_dir: &Path) -> Result<(), String> {
+    let area = files_dir.join(AREA);
+    let mark = area.join(AREA_MARK);
+    match std::fs::symlink_metadata(&area) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir_all(&area)
+            .and_then(|()| std::fs::write(&mark, AREA_MARK_TEXT))
+            .map_err(|e| format!("{}: cannot make the node's folder: {e}", area.display())),
+        Err(e) => Err(format!("{}: {e}", area.display())),
+        Ok(m) if m.file_type().is_symlink() || !m.is_dir() => Err(format!(
+            "{} exists and is not a folder of the node's (a file or a link): move it away, \
+             the node keeps its history there",
+            area.display()
+        )),
+        Ok(_) => match std::fs::read_to_string(&mark) {
+            Ok(text) if text.starts_with(AREA_MARK_TEXT.lines().next().unwrap_or_default()) => {
+                Ok(())
+            }
+            _ => Err(format!(
+                "{} exists and is not the node's own folder (no {AREA_MARK} of its own): \
+                 move it away, the node keeps its history there",
+                area.display()
+            )),
+        },
+    }
+}
+
 /// Where a holding node keeps what it fetches and the versions it
 /// replaces, on the tree's own filesystem.
 #[must_use]
@@ -120,7 +162,7 @@ fn dirs(parent: &Path) -> Vec<PathBuf> {
 ///
 /// Task's store and marker, the engine's own folder, the DAW's
 /// regenerable peaks, the OS's litter, and every temp name the engine
-/// writes (anything with [`PART`] in its name). The one place that
+/// writes (a name ending in [`PART`]). The one place that
 /// decides it: the scan, the unpin check and the start-up clean-up all
 /// ask here.
 #[must_use]
@@ -135,11 +177,14 @@ pub fn ignored(rel: &str) -> bool {
         || has_ext(name, &["reapeaks", "tmp"])
 }
 
-/// Whether a file name is one of the engine's temp files (removed at
-/// start, never content).
+/// Whether a file name has the engine's temp suffix, exactly.
+///
+/// The engine writes `<name>.architect-part` and nothing else. Never synced;
+/// removed at start only when the engine's journal says it wrote it
+/// (`super::pending`), otherwise left alone and reported.
 #[must_use]
 pub fn is_temp(name: &str) -> bool {
-    name.contains(PART)
+    name.ends_with(PART)
 }
 
 /// Whether saving this file is a save point: a DAW's session file.
@@ -181,9 +226,9 @@ mod tests {
         assert_eq!(found[1].meta.name, "Tracks");
     }
 
-    /// Every temp name the engine or the blob layer can write in a tree
-    /// is ignored (#527: a cross-filesystem copy's `.architect-part.part`
-    /// was committed as a file and pushed to peers).
+    /// Every temp name the engine can write in a tree is ignored, and
+    /// only those (#527: a cross-filesystem copy's `.architect-part.part`
+    /// was committed as a file and pushed to peers; that name is gone).
     #[test]
     fn every_temp_name_the_engine_writes_is_ignored() {
         let at = Path::new("Audio/take.wav");
@@ -192,13 +237,37 @@ mod tests {
         assert!(ignored(&rel(&staged)), "write_file's staging name");
         assert!(ignored(&rel(&architect::blob::staging_path(&staged))));
         assert!(
-            ignored("Audio/take.wav.architect-part.part"),
-            "the old double suffix"
+            !ignored("Audio/take.wav.architect-part.part"),
+            "the engine never writes that name: it is a user's file"
         );
+        assert!(!ignored("Audio/an.architect-part of mine.txt"));
         assert!(ignored(".architect/versions/ab/abcd"));
         assert!(ignored(".architect/incoming/.partial/abcd.part"));
         assert!(!ignored("Audio/take.wav"));
         assert!(!ignored("Audio/architect-parts.wav"));
+    }
+
+    #[test]
+    fn the_node_s_folder_is_its_own_or_it_does_not_start() {
+        let tmp = tempfile::tempdir().unwrap();
+        claim_area(tmp.path()).unwrap();
+        claim_area(tmp.path()).unwrap();
+        assert!(tmp.path().join(AREA).join(AREA_MARK).is_file());
+
+        let theirs = tempfile::tempdir().unwrap();
+        std::fs::create_dir(theirs.path().join(AREA)).unwrap();
+        assert!(
+            claim_area(theirs.path())
+                .unwrap_err()
+                .contains("not the node's own")
+        );
+        let file = tempfile::tempdir().unwrap();
+        std::fs::write(file.path().join(AREA), b"x").unwrap();
+        assert!(
+            claim_area(file.path())
+                .unwrap_err()
+                .contains("not a folder")
+        );
     }
 
     #[test]

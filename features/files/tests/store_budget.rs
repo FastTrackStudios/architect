@@ -88,6 +88,30 @@ fn du(dir: &Path) -> u64 {
     })
 }
 
+/// The store's bytes, each blob counted once: a sample taken while a
+/// blob is renamed from `.partial/` into place must not see it twice
+/// (the walk is not atomic; the disk never holds it twice).
+fn du_blobs(dir: &Path) -> u64 {
+    fn walk(dir: &Path, sizes: &mut HashMap<String, u64>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            match e.file_type() {
+                Ok(t) if t.is_dir() => walk(&e.path(), sizes),
+                Ok(_) => {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    let key = name.split('.').next().unwrap_or_default().to_owned();
+                    let len = e.metadata().map_or(0, |m| m.len());
+                    let slot = sizes.entry(key).or_default();
+                    *slot = (*slot).max(len);
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    let mut sizes = HashMap::new();
+    walk(dir, &mut sizes);
+    sizes.values().sum()
+}
+
 /// A project of `files` files of `size` bytes each, distinct content.
 fn project(files_dir: &Path, name: &str, files: usize, size: usize) -> PathBuf {
     let p = files_dir.join(format!("acme/Projects/{name}"));
@@ -194,7 +218,7 @@ impl Sampler {
         let (s, m) = (stop.clone(), max.clone());
         let thread = std::thread::spawn(move || {
             while !s.load(Ordering::SeqCst) {
-                m.fetch_max(du(&blobs), Ordering::SeqCst);
+                m.fetch_max(du_blobs(&blobs), Ordering::SeqCst);
                 std::thread::sleep(Duration::from_micros(200));
             }
         });

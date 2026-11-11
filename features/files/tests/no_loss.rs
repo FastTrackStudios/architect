@@ -464,6 +464,22 @@ async fn a_copy_across_filesystems_never_commits_its_temp_file() {
     passes(&laptop, 2).await;
     let tree = tmp.path().join("nfs");
     std::fs::create_dir_all(&tree).unwrap();
+    let id = Uuid::parse_str(&laptop.engine.status().await[0].doc_id).unwrap();
+    let album = tree.join("acme/Projects/Album");
+    // What a write that died half-way left behind: a temp file the
+    // engine's journal names (it wrote it) ...
+    std::fs::create_dir_all(album.join("Audio")).unwrap();
+    let leftover = album.join("Audio/gtr.wav.architect-part");
+    std::fs::write(&leftover, &bytes[..4_000]).unwrap();
+    std::fs::create_dir_all(tmp.path().join("node/data")).unwrap();
+    std::fs::write(
+        tmp.path().join("node/data/pending-writes.json"),
+        format!("[{:?}]", leftover.display().to_string()),
+    )
+    .unwrap();
+    // ... and a user's file that only looks like one: never touched.
+    let theirs = album.join("Audio/keys.wav.architect-part");
+    std::fs::write(&theirs, b"mine").unwrap();
     let node = device(Setup {
         name: "node",
         tmp: tmp.path(),
@@ -474,12 +490,6 @@ async fn a_copy_across_filesystems_never_commits_its_temp_file() {
         peer: Some(&laptop.engine.store),
     });
     exchange(&laptop, &node);
-    let id = Uuid::parse_str(&laptop.engine.status().await[0].doc_id).unwrap();
-    let album = tree.join("acme/Projects/Album");
-    // What a copy that died half-way left behind (the old double suffix).
-    std::fs::create_dir_all(album.join("Audio")).unwrap();
-    let leftover = album.join("Audio/gtr.wav.architect-part.part");
-    std::fs::write(&leftover, &bytes[..4_000]).unwrap();
     node.engine.pin(id, Some(album.clone())).await.unwrap();
     passes(&node, 4).await;
 
@@ -489,9 +499,12 @@ async fn a_copy_across_filesystems_never_commits_its_temp_file() {
     names.sort();
     assert_eq!(
         names,
-        ["song.rpp", "take.wav"],
-        "no temp file left in the tree"
+        ["keys.wav.architect-part", "song.rpp", "take.wav"],
+        "the engine's leftover is gone, the user's file stays"
     );
+    assert_eq!(std::fs::read(&theirs).unwrap(), b"mine");
+    let status = node.engine.status().await;
+    assert_eq!(status[0].strays, ["Audio/keys.wav.architect-part"]);
     let paths: Vec<String> = node
         .engine
         .tree(id)
@@ -631,4 +644,288 @@ async fn orphaned_partial_fetches_are_cleaned() {
     d.engine.pass_all().await;
     assert!(!partial.exists());
     assert!(d.engine.store.has(Sha256::of(b"never")).await.is_ok());
+}
+
+/// The previous version of `Audio/take.wav`: its bytes `x`.
+async fn previous_of(d: &Device, x: Sha256) -> architect_files::roots::VersionBytes {
+    let id = Uuid::parse_str(&d.engine.status().await[0].doc_id).unwrap();
+    let tree = d.engine.tree(id).await.unwrap();
+    let v = tree
+        .history("Audio/take.wav")
+        .iter()
+        .find(|v| v.content.as_deref() == Some(&*x.to_hex()))
+        .cloned()
+        .unwrap();
+    d.engine.version_bytes(v.id, &x.to_hex()).await
+}
+
+/// A (third review): a version the node replaces is kept even when
+/// another working file holds the same bytes, because a working file can
+/// change. Both orders: the index remembers whichever duplicate sorts
+/// last (`copy.wav` before `take.wav`, `zcopy.wav` after it).
+async fn duplicate(name: &str) {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    let dup = p.join("Audio").join(name);
+    std::fs::write(&dup, &old).unwrap();
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+
+    // A save on the node (what WebDAV and S3 writes do) replaces take.wav.
+    let mut new = old.clone();
+    new[1] ^= 0xff;
+    node.engine
+        .save_bytes(id, "Audio/take.wav", &new)
+        .await
+        .unwrap();
+    passes(&node, 2).await;
+    assert_eq!(std::fs::read(p.join("Audio/take.wav")).unwrap(), new);
+
+    // Then the duplicate is edited on the tree itself.
+    edit_in_place(&dup, &old);
+    passes(&node, 2).await;
+    let x = Sha256::of(&old);
+    let kept = previous_of(&node, x).await;
+    assert!(kept.here, "{name}: the previous version is held: {kept:?}");
+    let file = node.engine.store.file_for(&x).unwrap();
+    assert_eq!(std::fs::read(file).unwrap(), old, "{name}: and it is X");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replaced_version_is_kept_even_when_another_working_file_has_its_bytes() {
+    duplicate("copy.wav").await;
+    duplicate("zcopy.wav").await;
+}
+
+/// C: an eviction for space started while a write is between deciding
+/// "the store keeps the old bytes" and its swap waits for the write (the
+/// pass's lock), and the old version survives it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_eviction_never_runs_inside_a_replacement() {
+    use std::sync::atomic::AtomicBool;
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    // A store copy of X (so the write keeps nothing itself), and a store
+    // over its soft limit (so eviction wants X).
+    let blobs = tmp.path().join("node/blobs");
+    let (incoming, versions) = layout::areas(&tree);
+    let local = LocalFs::new(&blobs).with_budget(Arc::new(StoreBudget::new(&blobs, 10_500, 0)));
+    let node = device(Setup {
+        name: "node",
+        tmp: tmp.path(),
+        files_dir: tree.clone(),
+        hold: true,
+        store: TreeStore::new(local).with_areas(LocalFs::new(incoming), LocalFs::new(versions)),
+        keep_inline: None,
+        peer: None,
+    });
+    let x = node.engine.store.local.put_bytes(&old).await.unwrap();
+    passes(&node, 2).await;
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+
+    // Inside the write, between its decision and its swap: start an
+    // eviction of X and give it 300 ms to run.
+    let raced = Arc::new(AtomicBool::new(false));
+    let finished_inside = Arc::new(AtomicBool::new(false));
+    let task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::default();
+    {
+        let (e, raced, finished_inside, task) = (
+            node.engine.clone(),
+            raced.clone(),
+            finished_inside.clone(),
+            task.clone(),
+        );
+        node.engine.set_swap_hook(Some(Arc::new(move |_at| {
+            let (e, raced, finished_inside, task) = (
+                e.clone(),
+                raced.clone(),
+                finished_inside.clone(),
+                task.clone(),
+            );
+            Box::pin(async move {
+                if raced.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                let done = Arc::new(AtomicBool::new(false));
+                let flag = done.clone();
+                let h = tokio::spawn(async move {
+                    let _ = e.evict_for_space(x).await;
+                    flag.store(true, Ordering::SeqCst);
+                });
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                finished_inside.store(done.load(Ordering::SeqCst), Ordering::SeqCst);
+                *task.lock().unwrap() = Some(h);
+            })
+        })));
+    }
+    let mut new = old.clone();
+    new[1] ^= 0xff;
+    node.engine
+        .save_bytes(id, "Audio/take.wav", &new)
+        .await
+        .unwrap();
+    node.engine.pass(id).await;
+    let h = task.lock().unwrap().take();
+    if let Some(h) = h {
+        h.await.unwrap();
+    }
+    assert!(
+        !finished_inside.load(Ordering::SeqCst),
+        "the eviction waited for the write"
+    );
+    assert!(raced.load(Ordering::SeqCst), "the race was forced");
+    assert_eq!(std::fs::read(p.join("Audio/take.wav")).unwrap(), new);
+    let file = node.engine.store.file_for(&x).expect("X is still held");
+    assert_eq!(std::fs::read(file).unwrap(), old);
+}
+
+/// B: a version linked aside by a run that died before its swap shares
+/// its inode with the live file; a DAW writing that file in place changes
+/// it too. At start every store file with another name is re-hashed:
+/// changed bytes are quarantined (never served as X), unchanged ones get
+/// an inode of their own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leftover_hard_link_is_never_served_as_a_version_it_no_longer_is() {
+    use std::io::Write as _;
+    use std::os::unix::fs::MetadataExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    let (_, versions) = layout::areas(&tree);
+    let kept = |bytes: &[u8]| LocalFs::new(&versions).path_for(&Sha256::of(bytes));
+    // take.wav linked aside, then written in place (same inode).
+    let x = kept(&old);
+    std::fs::create_dir_all(x.parent().unwrap()).unwrap();
+    std::fs::hard_link(p.join("Audio/take.wav"), &x).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(p.join("Audio/take.wav"))
+        .unwrap();
+    f.write_all(b"in place").unwrap();
+    drop(f);
+    // song.rpp linked aside and left alone.
+    let session = std::fs::read(p.join("song.rpp")).unwrap();
+    let y = kept(&session);
+    std::fs::create_dir_all(y.parent().unwrap()).unwrap();
+    std::fs::hard_link(p.join("song.rpp"), &y).unwrap();
+
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+
+    assert!(!x.exists(), "the changed link is quarantined");
+    let served = node.engine.store.file_for(&Sha256::of(&old));
+    assert!(
+        served.is_none_or(|f| std::fs::read(f).unwrap() == old),
+        "never served as X"
+    );
+    assert_eq!(std::fs::read(&y).unwrap(), session);
+    assert_eq!(
+        std::fs::metadata(&y).unwrap().nlink(),
+        1,
+        "an inode of its own"
+    );
+}
+
+/// E: where the old version cannot be kept (here `.architect/versions`
+/// is a file, as on a read-only share or a folder the node cannot
+/// write), the replacement waits, the root says why, and the file stays.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replacement_whose_history_cannot_be_kept_waits_and_says_why() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (_, old) = project(&tree);
+    let (_, versions) = layout::areas(&tree);
+    std::fs::create_dir_all(versions.parent().unwrap()).unwrap();
+    std::fs::write(&versions, b"not a folder").unwrap();
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+    let laptop = plain(
+        "laptop",
+        tmp.path(),
+        tmp.path().join("laptop-files"),
+        false,
+        Some(&node.engine.store),
+    );
+    node.engine
+        .fetcher
+        .add_remote(Arc::new(laptop.engine.store.clone()));
+    exchange(&node, &laptop);
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+    let copy = laptop.engine.pin(id, None).await.unwrap();
+    passes(&laptop, 2).await;
+    edit_in_place(&copy.join("Audio/take.wav"), &old);
+    passes(&laptop, 2).await;
+    exchange(&node, &laptop);
+    passes(&node, 2).await;
+
+    let held = tree.join("acme/Projects/Album/Audio/take.wav");
+    assert_eq!(std::fs::read(&held).unwrap(), old, "not replaced");
+    let s = &node.engine.status().await[0];
+    assert_eq!((s.no_history, s.deferred), (1, 0), "{s:?}");
+    assert!(s.history_error.is_some(), "{s:?}");
+}
+
+/// S5: a file the user changes while the node is replacing it is left
+/// as the user made it, and the next scan makes the two a fork: both
+/// survive, one as a conflict copy.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_changed_during_its_replacement_becomes_a_conflict_copy() {
+    use std::sync::atomic::AtomicBool;
+    let tmp = tempfile::tempdir().unwrap();
+    let tree = tmp.path().join("nfs");
+    let (p, old) = project(&tree);
+    let node = holding_node(tmp.path(), &tree, None);
+    passes(&node, 2).await;
+    let laptop = plain(
+        "laptop",
+        tmp.path(),
+        tmp.path().join("laptop-files"),
+        false,
+        Some(&node.engine.store),
+    );
+    node.engine
+        .fetcher
+        .add_remote(Arc::new(laptop.engine.store.clone()));
+    exchange(&node, &laptop);
+    let id = Uuid::parse_str(&node.engine.status().await[0].doc_id).unwrap();
+    let copy = laptop.engine.pin(id, None).await.unwrap();
+    passes(&laptop, 2).await;
+    let theirs = edit_in_place(&copy.join("Audio/take.wav"), &old);
+    passes(&laptop, 2).await;
+    exchange(&node, &laptop);
+
+    let mut mine = old.clone();
+    mine[5] ^= 0xff;
+    let once = Arc::new(AtomicBool::new(false));
+    {
+        let (mine, once) = (mine.clone(), once.clone());
+        node.engine.set_swap_hook(Some(Arc::new(move |at| {
+            let (mine, once) = (mine.clone(), once.clone());
+            Box::pin(async move {
+                if at.ends_with("take.wav") && !once.swap(true, Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    std::fs::write(&at, &mine).unwrap();
+                }
+            })
+        })));
+    }
+    node.engine.pass(id).await;
+    assert!(once.load(Ordering::SeqCst));
+    assert_eq!(
+        std::fs::read(p.join("Audio/take.wav")).unwrap(),
+        mine,
+        "left as the user made it"
+    );
+    node.engine.set_swap_hook(None);
+    passes(&node, 4).await;
+
+    let mut contents = Vec::new();
+    for e in std::fs::read_dir(p.join("Audio")).unwrap().flatten() {
+        contents.push(std::fs::read(e.path()).unwrap());
+    }
+    assert_eq!(contents.len(), 2, "the file and its conflict copy");
+    assert!(contents.contains(&mine) && contents.contains(&theirs));
 }

@@ -25,6 +25,7 @@ impl From<EngineError> for AgentError {
             EngineError::BelowPolicy(paths) => Self::BelowPolicy(first_few(&paths)),
             EngineError::Io(why) => Self::Refused(why),
             EngineError::NoRoom(why) | EngineError::TooLarge(why) => Self::NoRoom(why),
+            e @ EngineError::NoHistory(_) => Self::Refused(e.to_string()),
             e @ EngineError::Changed(_) => Self::NotSynced(e.to_string()),
         }
     }
