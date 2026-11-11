@@ -45,7 +45,7 @@ test('the generated .d.ts compiles against a right use and fails against a wrong
 import { bind, id, type Actions } from './actions.js';
 
 export async function use(): Promise<void> {
-  const ext = await loadExtension<Actions>('/counter/');
+  const ext = await loadExtension<Actions>('/counter/', { integrity: false });
   await ext.run('LAB_WASI_COUNTER_ADD', { by: 5 });
   await ext.run('LAB_WASI_COUNTER_ADD');
   await ext.run('LAB_WASI_COUNTER_ASK');
@@ -67,6 +67,8 @@ export async function use(): Promise<void> {
   await counter.add({ by: '1' });
   // @ts-expect-error: no such method
   await counter.subtract();
+  // @ts-expect-error: integrity is required (false says: unchecked)
+  await loadExtension('/counter/', {});
   void which;
 }
 `,
@@ -104,7 +106,7 @@ export async function use(): Promise<void> {
         throw e;
       }
     });
-    assert.equal(out.match(/error TS/g)?.length, 6, out);
+    assert.equal(out.match(/error TS/g)?.length, 7, out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -179,6 +181,11 @@ const HOSTILE = [
   ' globalThis.PWNED=true;//',
   '</script><script>globalThis.PWNED=true</script>',
   '\\u0022; globalThis.PWNED=true; //',
+  '\u2029globalThis.PWNED=true;//',
+  '__proto__',
+  'constructor',
+  'x'.repeat(200000),
+  '*/'.repeat(5000),
 ];
 
 function hostileManifests() {
@@ -244,4 +251,47 @@ test('a hostile manifest is refused or emits only data: same AST shape, nothing 
     assert.deepEqual(tripped, [], `nothing ran: ${JSON.stringify(m)}`);
   }
   assert.ok(refused > 0, 'bad ids and versions are refused');
+});
+
+// S6 (second review of #539).
+test('S6: a schema that grows as a power of its depth is refused in time', () => {
+  // `type` lists nested in themselves: 773 bytes took 9 s and crashed.
+  let schema = { type: 'string' };
+  for (let i = 0; i < 12; i++) schema = { type: ['object', 'array', 'string', 'null'], properties: { a: schema, b: schema }, items: schema };
+  const params = JSON.stringify(schema);
+  const m = { ...counter, actions: [{ id: 'LAB_WASI_COUNTER_ADD', name: 'Add', params }] };
+  const t = performance.now();
+  assert.throws(() => typegen(m), /the manifest is refused: a params schema/);
+  assert.ok(performance.now() - t < 1000, `${performance.now() - t} ms`);
+});
+
+test('S6: ids that collide once lower-cased get methods of their own', () => {
+  const m = {
+    ...counter,
+    actions: [
+      { id: 'LAB_WASI_COUNTER_FOO_BAR', name: 'a' },
+      { id: 'LAB_WASI_COUNTER_FOO__BAR', name: 'b' },
+      { id: 'LAB_WASI_COUNTER_FOOBAR', name: 'c' },
+    ],
+  };
+  const names = methodNames(m);
+  assert.equal(new Set(names).size, 3, names.join());
+});
+
+test('S6: build-web writes only into a folder it made, and never through a link', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, existsSync, symlinkSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { build } = await import('../cli.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'architect-out-'));
+  try {
+    const out = join(dir, 'mine');
+    mkdirSync(join(out, 'interfaces'), { recursive: true });
+    writeFileSync(join(out, 'interfaces', 'keep.txt'), 'the embedder’s');
+    assert.throws(() => build('/nonexistent.wasm', out, { manifest: counter }), /has files build-web did not write/);
+    assert.ok(existsSync(join(out, 'interfaces', 'keep.txt')), 'nothing deleted');
+    symlinkSync(out, join(dir, 'link'));
+    assert.throws(() => build('/nonexistent.wasm', join(dir, 'link'), { manifest: counter }), /not a folder build-web may write/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

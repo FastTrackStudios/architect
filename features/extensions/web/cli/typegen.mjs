@@ -26,16 +26,32 @@ const METHOD = /^[a-z][A-Za-z0-9]{0,63}$/;
 const key = (k) => (IDENT.test(k) ? k : JSON.stringify(k));
 const lit = (v) => JSON.stringify(v);
 
+/// How much of a schema it reads: past these, the manifest is refused
+/// (a `type` list nested in itself grows as a power of its depth).
+export const SCHEMA_LIMITS = { depth: 12, nodes: 2000, length: 64 << 10 };
+
+const tooBig = (why) => {
+  throw new Error(`the manifest is refused: a params schema ${why}`);
+};
+
 /// A JSON schema as a TypeScript type, `depth` its indent.
-export function schemaType(s, depth = 0) {
+export function schemaType(s, depth = 0, budget = { nodes: 0 }) {
+  if (depth > SCHEMA_LIMITS.depth) tooBig(`nested past ${SCHEMA_LIMITS.depth} levels`);
+  if (++budget.nodes > SCHEMA_LIMITS.nodes) tooBig(`of more than ${SCHEMA_LIMITS.nodes} types`);
+  const out = typeOf(s, depth, budget);
+  if (out.length > SCHEMA_LIMITS.length) tooBig(`whose type is past ${SCHEMA_LIMITS.length} characters`);
+  return out;
+}
+
+function typeOf(s, depth, budget) {
   if (s === true || s == null) return 'unknown';
   if (s === false) return 'never';
   if (typeof s !== 'object') return 'unknown';
   if ('const' in s) return lit(s.const);
   if (Array.isArray(s.enum)) return s.enum.map(lit).join(' | ') || 'never';
-  if (Array.isArray(s.anyOf ?? s.oneOf)) return (s.anyOf ?? s.oneOf).map((x) => wrap(schemaType(x, depth))).join(' | ');
-  if (Array.isArray(s.allOf)) return s.allOf.map((x) => wrap(schemaType(x, depth))).join(' & ');
-  if (Array.isArray(s.type)) return s.type.map((t) => wrap(schemaType({ ...s, type: t }, depth))).join(' | ');
+  if (Array.isArray(s.anyOf ?? s.oneOf)) return (s.anyOf ?? s.oneOf).map((x) => wrap(schemaType(x, depth + 1, budget))).join(' | ');
+  if (Array.isArray(s.allOf)) return s.allOf.map((x) => wrap(schemaType(x, depth + 1, budget))).join(' & ');
+  if (Array.isArray(s.type)) return s.type.map((t) => wrap(schemaType({ ...s, type: t }, depth + 1, budget))).join(' | ');
   switch (s.type) {
     case 'string':
       return 'string';
@@ -47,26 +63,26 @@ export function schemaType(s, depth = 0) {
     case 'null':
       return 'null';
     case 'array':
-      return `Array<${schemaType(s.items, depth)}>`;
+      return `Array<${schemaType(s.items, depth + 1, budget)}>`;
     case 'object':
-      return objectType(s, depth);
+      return objectType(s, depth, budget);
     default:
-      return s.properties ? objectType(s, depth) : 'unknown';
+      return s.properties ? objectType(s, depth, budget) : 'unknown';
   }
 }
 
 const wrap = (t) => (/[|&]/.test(t) && !t.startsWith('{') ? `(${t})` : t);
 
-function objectType(s, depth) {
+function objectType(s, depth, budget) {
   const props = s.properties ?? {};
   const required = new Set(s.required ?? []);
   const pad = '  '.repeat(depth + 1);
   const lines = Object.entries(props).map(
-    ([k, v]) => `${pad}${key(k)}${required.has(k) ? '' : '?'}: ${schemaType(v, depth + 1)};`,
+    ([k, v]) => `${pad}${key(k)}${required.has(k) ? '' : '?'}: ${schemaType(v, depth + 1, budget)};`,
   );
   const extra = s.additionalProperties;
   if (extra === true || (extra && typeof extra === 'object'))
-    lines.push(`${pad}[key: string]: ${extra === true ? 'unknown' : schemaType(extra, depth + 1)};`);
+    lines.push(`${pad}[key: string]: ${extra === true ? 'unknown' : schemaType(extra, depth + 1, budget)};`);
   if (!lines.length) return extra === false ? 'Record<string, never>' : 'Record<string, unknown>';
   return `{\n${lines.join('\n')}\n${'  '.repeat(depth)}}`;
 }

@@ -9,7 +9,7 @@
 // `actions.d.ts` and `actions.js` (typegen.mjs); and the size of
 // everything a page downloads is printed.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, gzipSync, constants } from 'node:zlib';
@@ -55,11 +55,31 @@ const sizes = (bytes) => ({
   brotli: brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length,
 });
 
+/// Every file under `dir`, never through a link.
 function walk(dir) {
   return readdirSync(dir).flatMap((f) => {
     const p = join(dir, f);
-    return statSync(p).isDirectory() ? walk(p) : [p];
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) return [];
+    return st.isDirectory() ? walk(p) : [p];
   });
+}
+
+/// What marks a folder build-web made (and may write and delete in).
+export const MARKER = '.architect-build';
+
+/// `out`, made or already build-web's: a folder with something else in
+/// it, or a link, is refused, so build-web never deletes what it did not
+/// write.
+function outFolder(out) {
+  if (existsSync(out)) {
+    const st = lstatSync(out);
+    if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`${out} is not a folder build-web may write (a link, or a file)`);
+    if (readdirSync(out).length && !existsSync(join(out, MARKER)))
+      throw new Error(`${out} has files build-web did not write (no ${MARKER}): give it an empty or new folder`);
+  }
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, MARKER), 'written by architect-ext build-web: it may replace what is in this folder\n');
 }
 
 /// The size of each file a page downloads from `out`, and the package's
@@ -108,6 +128,7 @@ export function build(component, out, { manifest, manifestPath, name, types } = 
   }
   checkManifest(manifest);
   name ??= basename(component, '.wasm');
+  outFolder(out);
   const module = transpile(component, out, name);
   // jco's own declarations describe its raw interface, not this package's.
   rmSync(join(out, `${name}.d.ts`), { force: true });
@@ -125,7 +146,7 @@ export function build(component, out, { manifest, manifestPath, name, types } = 
   const files = {};
   for (const p of walk(out).sort()) {
     const rel = relative(out, p).split('\\').join('/');
-    if (rel === 'architect.lock.json' || /^actions\.(js|d\.ts)$/.test(rel)) continue;
+    if (rel === 'architect.lock.json' || rel === MARKER || /^actions\.(js|d\.ts)$/.test(rel)) continue;
     files[rel] = sri(readFileSync(p));
   }
   const lockText = `${JSON.stringify({ lockfileVersion: 1, files }, null, 2)}\n`;
