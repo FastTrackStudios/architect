@@ -193,7 +193,7 @@ const block = (rows, extra = [], join = { class: 'studio-setlist' }) => el('div'
 
 /// The setlist's page: two sets under their headings, as an existing note
 /// draws them, and (for Click and Loop) the first song's view on the page.
-function setlist({ art = null, view = null, shell = null } = {}) {
+function setlist({ art = null, view = null, shell = null, width, hash } = {}) {
   const body = new Node('body');
   const article = body.appendChild(el('article'));
   article.appendChild(el('h2', { id: 'presidents-songs' }, [el('a', { class: 'site-anchor', href: '#presidents-songs' }, [], '#')], 'Presidents Songs'));
@@ -209,7 +209,7 @@ function setlist({ art = null, view = null, shell = null } = {}) {
   ], [el('p', { class: 'files' }, [], 'Files')]));
   if (view) body.appendChild(view);
   const queue = JSON.stringify({ scope: L, tracks: [], art: art || {} });
-  return run(body, queue, { shell });
+  return run(body, queue, { shell, width, hash });
 }
 
 function run(body, queue, opts = {}) {
@@ -247,7 +247,7 @@ function run(body, queue, opts = {}) {
     addEventListener: () => {},
     createComment: () => new Node('#comment'),
   };
-  const location = { href: `http://node.test${L}merry/`, origin: 'http://node.test', pathname: `${L}merry/`, search: '', hash: '' };
+  const location = { href: `http://node.test${L}merry/${opts.hash || ''}`, origin: 'http://node.test', pathname: `${L}merry/`, search: '', hash: opts.hash || '' };
   const window = {
     document,
     location,
@@ -275,7 +275,12 @@ function run(body, queue, opts = {}) {
     Promise,
     addEventListener: () => {},
     getComputedStyle: () => ({ overflowX: 'visible', overflowY: 'visible' }),
-    matchMedia: () => ({ matches: false }),
+    // A phone's width unless the test says (390 px).
+    matchMedia: (q) => {
+      const width = opts.width || 390;
+      const max = /max-width:\s*(\d+)px/.exec(q), min = /min-width:\s*(\d+)px/.exec(q);
+      return { matches: max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false, addEventListener() {} };
+    },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     AudioContext: function () { return audio; },
     fetch: opts.fetch || (() => Promise.reject(new Error('no network in this test'))),
@@ -749,4 +754,40 @@ test('a frame that is never ready, or stops answering, is given up', async () =>
   failing.say({ t: 'ready' });
   failing.say({ t: 'error', message: 'x' });
   assert.equal(failing.frame.parentElement, null);
+});
+
+// ── The shell, as the review found it ───────────────────────────────
+
+test('the shell: no tab from the address that is no tab, nor one that leaves the share', () => {
+  assert.doesNotThrow(() => setlist({ shell: SHELL_SPEC, hash: '#tab=constructor' }));
+  const spec = {
+    ...SHELL_SPEC,
+    tabs: [
+      ...SHELL_SPEC.tabs,
+      { id: 'evil', label: 'Evil', icon: '', target: { href: '/\\evil.example/' } },
+      { id: 'above', label: 'Above', icon: '', target: { href: '/s/other/' } },
+      { id: 'notes', label: 'Notes', icon: '', target: { href: `${L}merry/#notes` } },
+    ],
+  };
+  const p = setlist({ shell: spec });
+  const ids = p.body.querySelectorAll('.site-tab').map((t) => t.getAttribute('data-tab'));
+  assert.deepEqual(ids, ['setlist', 'charts', 'lyrics', 'notes'], 'another site, or out of the share: no tab');
+});
+
+test('the shell is a phone\'s: on a desk the card opens the player\'s own sheet, and the page behind a tab is inert', () => {
+  const desk = setlist({ shell: SHELL_SPEC, width: 1280 });
+  desk.body.querySelectorAll('[data-title="Sleigh Ride"]')[0].click();
+  desk.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: () => null }, preventDefault() {} });
+  const sheet = desk.body.querySelectorAll('.site-now')[0];
+  assert.equal(sheet.hidden, false);
+  assert.ok(!sheet.classList.contains('site-now-tab'), 'its own sheet, not a tab');
+  assert.equal(desk.location.hash, '', 'the address untouched');
+  // A phone: the view as a tab, the page behind it out of reach, the tabs not.
+  const phone = setlist({ shell: SHELL_SPEC });
+  phone.body.querySelectorAll('.site-tab')[1].click();
+  const inert = phone.body.children.filter((n) => n.hasAttribute('inert')).map((n) => n.getAttribute('class') || n.tagName);
+  assert.ok(inert.length > 0, 'the page behind is inert');
+  assert.ok(!phone.body.querySelectorAll('.site-tabs')[0].hasAttribute('inert'), 'the tabs stay live');
+  phone.body.querySelectorAll('.site-tab')[0].click();
+  assert.equal(phone.body.children.filter((n) => n.hasAttribute('inert')).length, 0, 'and nothing once it closes');
 });

@@ -557,8 +557,10 @@ or an `lrc` fence in the note):
 - **On a phone, the app's foot.** A share page on a phone wears
   Architect's phone shell: a pill of labelled tabs at the foot, a round
   button beside it, the player's card floating just above, the page
-  scrolling under both; the header keeps the site's mark, its title and
-  the theme. The tabs are the share's root note's type's favourites (an
+  scrolling under both; the header keeps the site's mark, the page's own
+  title (the one title on a phone: the page's heading and crumbs give way)
+  and the theme. On a desk the page's heading is its title (the site's
+  name beside the mark goes when it says the same) and its crumbs stay. The tabs are the share's root note's type's favourites (an
   extension's `[[favourites]]`, the note at the link's root, else the
   first it lists: a setlist shared with its songs is the setlist): a
   setlist's are Setlist, Charts (the now-playing view of the song playing,
@@ -566,8 +568,9 @@ or an `lrc` fence in the note):
   plays and pauses the set. A share whose root note's type declares none
   has Home, Search and Browse. The tab shown is in the address
   (`#tab=<id>`), so a reload or a shared link lands on it; a field being
-  typed in hides the bars. On a desk the page keeps its header and
-  navigator. (`architect_sites::shell`; `features/sites/assets/shell.js`.)
+  typed in hides the bars. While a tab of the player shows, the page
+  behind it is inert. On a desk the page keeps its header and navigator,
+  the card opens the player's own view and the address keeps its hash. (`architect_sites::shell`; `features/sites/assets/shell.js`.)
 - **Across pages.** A link's pages are separate documents, so moving between
   songs loads a new page. The player keeps the song, the time and whether it
   was playing in the tab's `sessionStorage` and picks up where it was on the

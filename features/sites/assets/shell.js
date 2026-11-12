@@ -20,6 +20,19 @@
   var body = doc.body;
   var home = typeof spec.home === "string" ? spec.home : "/";
   var here = location.pathname;
+  // The shell is a phone's: on a desk the page keeps its own header and
+  // navigator, the player its own sheet, the address its own hash.
+  var phone = window.matchMedia ? window.matchMedia("(max-width: 820px)") : { matches: true };
+  // `href` as a place of this share: same origin, under its root page.
+  var homeAt;
+  try { homeAt = new URL(home, location.href); } catch (e) { return; }
+  function inShare(href) {
+    var u;
+    try { u = new URL(href, location.href); } catch (e) { return null; }
+    if (u.origin !== location.origin || u.username || u.password) return null;
+    if (u.pathname.indexOf(homeAt.pathname) !== 0) return null;
+    return u.href;
+  }
   var player = function () { return arch.player || null; };
 
   // A tab: what it opens. Only what this page can: a player's view when
@@ -34,7 +47,7 @@
     if (to.view === "search") return !!search;
     if (to.view === "browse") return !!nav;
     if (to.view === "page") return true;
-    if (typeof to.href === "string") return to.href.indexOf(home) === 0;
+    if (typeof to.href === "string") return !!inShare(to.href);
     return false;
   }
   var tabs = spec.tabs.filter(usable).slice(0, 5);
@@ -47,7 +60,8 @@
   var pill = doc.createElement("div");
   pill.className = "site-tabs-pill";
   bar.appendChild(pill);
-  var buttons = {};
+  // By id, with nothing inherited (`#tab=constructor` is no tab).
+  var buttons = Object.create(null);
   tabs.forEach(function (t) {
     var b = doc.createElement("button");
     b.type = "button";
@@ -114,7 +128,8 @@
     if (!t) return;
     var to = t.target;
     if (typeof to.href === "string") {
-      location.href = to.href;
+      var at = inShare(to.href);
+      if (at) location.href = at;
       return;
     }
     if (to.view === "page") {
@@ -161,10 +176,15 @@
 
   arch.shell = {
     go: go,
-    // The card was tapped: its song's view is the tab that shows it.
+    // The card was tapped: its song's view is the tab that shows it (on a
+    // phone; on a desk the player opens its own sheet).
     now: function () {
-      var t = tabOf("player.now");
-      if (!t) return false;
+      return arch.shell.view("player.now");
+    },
+    // View `view` as its tab, when the shell has one and is showing.
+    view: function (view) {
+      var t = tabOf(view);
+      if (!t || !phone.matches) return false;
       go(t.id);
       return true;
     },
@@ -178,12 +198,44 @@
     },
   };
 
-  // Where the address says, else the page's own tab when this is its page.
-  var asked = /(?:^|[#&])tab=([a-z0-9.-]+)/.exec(location.hash || "");
-  var first = asked && buttons[asked[1]] ? asked[1] : null;
-  if (first && tabs.filter(function (x) { return x.id === first; })[0].target.view !== "page") go(first);
-  else {
-    var page = tabOf("page");
-    if (page && here === home) mark(page.id);
+  // One title, at the top: the page's own (what a visitor came for), in
+  // the header on a phone, where the page's heading and crumbs then give
+  // way (`body.site-shell` in the sheet). On a desk the page's heading is
+  // the title, and the site's name beside the mark goes when it says the
+  // same.
+  var heading = doc.querySelector(".site-title");
+  var brand = doc.querySelector(".site-brand span:last-child");
+  if (heading) {
+    var named = String(heading.textContent || "").trim();
+    var top = doc.createElement("span");
+    top.className = "site-shell-title";
+    top.textContent = named;
+    var head = doc.querySelector(".site-header");
+    if (head && brand && brand.parentNode) brand.parentNode.appendChild(top);
+    if (brand && String(brand.textContent || "").trim() === named) body.classList.add("site-shell-same-title");
   }
+
+  // Where the address says (on a phone), else the page's own tab when
+  // this is its page.
+  function landed() {
+    var asked = /(?:^|[#&])tab=([a-z0-9.-]+)/.exec(location.hash || "");
+    var first = asked && Object.prototype.hasOwnProperty.call(buttons, asked[1]) ? asked[1] : null;
+    var t = first ? tabs.filter(function (x) { return x.id === first; })[0] : null;
+    if (t && t.target.view !== "page" && phone.matches) go(first);
+    else {
+      var page = tabOf("page");
+      if (page && here === home) mark(page.id);
+    }
+  }
+  landed();
+  // From a phone's width to a desk's: a view shown as a tab goes back to
+  // being the player's own (closed); the other way, the address's tab.
+  var onWidth = function () {
+    if (!phone.matches && player() && player().open_ && current && tabOf("page") && current !== tabOf("page").id) {
+      player().close();
+    }
+    if (phone.matches) landed();
+  };
+  if (phone.addEventListener) phone.addEventListener("change", onWidth);
+  else if (phone.addListener) phone.addListener(onWidth);
 })();

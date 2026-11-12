@@ -1121,9 +1121,11 @@
     if (ev.shiftKey && doc.activeElement === first) { ev.preventDefault(); lastOne.focus(); }
     else if (!ev.shiftKey && doc.activeElement === lastOne) { ev.preventDefault(); first.focus(); }
   }
+  // The page behind the view made inert (a phone shell's tab bar stays
+  // live: it is how a visitor leaves the view's tab).
   function inertBehind(on) {
     Array.prototype.forEach.call(doc.body.children, function (n) {
-      if (n === sheet) return;
+      if (n === sheet || (n.classList && n.classList.contains("site-tabs"))) return;
       if (on) n.setAttribute("inert", "");
       else n.removeAttribute("inert");
     });
@@ -1398,7 +1400,12 @@
       if (modal() && !tab) {
         sheet.setAttribute("aria-modal", "true");
         inertBehind(true);
-      } else sheet.removeAttribute("aria-modal");
+      } else {
+        sheet.removeAttribute("aria-modal");
+        // A tab covers the page all the same: its content is out of reach
+        // of the keyboard and a screen reader while the view shows.
+        if (tab) inertBehind(true);
+      }
       if (!tab) {
         try { history.pushState({ siteNowPlaying: true }, ""); } catch (e) {}
       }
