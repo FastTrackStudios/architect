@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 
+import { MARK } from "#/components/ui/brand-mark";
+
 /**
  * The figures: one line drawing per pillar, animated in CSS
  * (styles/figures.css) to show the claim rather than a screenshot of it.
@@ -266,7 +268,12 @@ function Embed() {
 			<rect className="dash" x="216" y="100" width="186" height="194" rx="8" />
 			<g className="e-panel">
 				<rect className="k" x="216" y="100" width="186" height="194" rx="8" />
-				<path className="k" d="M236 142L246 122L256 142M240.500 135h11" />
+				<path
+					className="solid"
+					fillRule="evenodd"
+					transform="translate(236 121) scale(1.375)"
+					d={MARK.small}
+				/>
 				<text className="strong start" x="266" y="138">
 					Architect
 				</text>
