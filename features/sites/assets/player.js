@@ -182,12 +182,18 @@
     return li;
   }
   // Playlists one after another with nothing but headings between them
-  // (each in the box the site draws a block in) are one: the later lists'
-  // rows join the first's, each heading between a section label, and the
-  // heading right above the first one too. A lone playlist stays as it is.
+  // (each in the box the site draws a block in) are one, when each says it
+  // may be joined (`data-playlist-join`; a setlist's sets as Studio wrote
+  // them before, `.studio-setlist`): the later lists' rows join the
+  // first's, each heading between a section label, and the heading right
+  // above the first one too. A lone playlist stays as it is, and so does
+  // one that does not say so (a list of stems beside a list of references).
+  function joins(list) {
+    return list.hasAttribute("data-playlist-join") || (list.classList && list.classList.contains("studio-setlist"));
+  }
   function joinPlaylists() {
     var host = null, hostBox = null, hostList = null, above = null, joined = false;
-    Array.prototype.slice.call(doc.querySelectorAll("[data-playlist]")).forEach(function (list) {
+    Array.prototype.slice.call(doc.querySelectorAll("[data-playlist]")).filter(joins).forEach(function (list) {
       var box = (list.closest && list.closest(".site-block")) || list;
       var heads = [], n = box.previousElementSibling;
       while (isHeading(n)) { heads.unshift(n); n = n.previousElementSibling; }
@@ -294,10 +300,11 @@
       // A song with no recording: its row opens its page.
       if (page) songRows.push({ el: row, page: page });
     });
+    // Each row its own place in the queue: a song listed twice is played
+    // and marked where it was tapped, and goes on from there.
     Array.prototype.forEach.call(list.querySelectorAll("[data-track][data-media]"), function (row) {
       var src = path(row.getAttribute("data-media"));
-      rows.push({ el: row, src: src });
-      if (listed.some(function (t) { return t.src === src; })) return;
+      rows.push({ el: row, src: src, i: listed.length });
       var page = builtPage(row.getAttribute("data-page"));
       listed.push({
         src: src,
@@ -608,6 +615,7 @@
       yieldBar(true);
       emit(true);
       kick();
+      paintOpts();
       return {
         from: { src: from.src, time: from.time, playing: from.playing },
         changed: function () {
@@ -621,6 +629,7 @@
           var last = snapshot();
           source = null;
           yieldBar(false);
+          paintOpts();
           var i = last.src ? indexOf(last.src) : -1;
           if (i >= 0) select(i, last.time, false, true);
           else emit(true);
@@ -866,8 +875,9 @@
       if (ev.target.closest("a, [data-playlist-play]")) return;
       var line_ = ev.target.closest("[data-at]");
       if (line_ && line_.closest("[data-follow-playhead]") && r.el.contains(line_)) return;
-      var i = indexOf(r.src);
-      if (i < 0) return;
+      if (ev.target.closest("button, [data-track-more]")) return;
+      var i = r.i;
+      if (!tracks[i]) return;
       wake();
       if (i === cur && el) act("toggle");
       else select(i, 0, true, true);
@@ -876,9 +886,135 @@
   // A song with no recording: its row is a way to its page (its chart).
   songRows.forEach(function (r) {
     r.el.addEventListener("click", function (ev) {
-      if (ev.target.closest("a")) return;
+      if (ev.target.closest("a, button")) return;
       location.href = r.page;
     });
+  });
+
+  // ── A row's menu (its `[data-track-more]`, "…") ───────────────────
+  // What there is for that song, nothing that is not: its chart (the
+  // now-playing view, the song made current), its lyrics (when its page
+  // has them), its page and downloads. A sheet from the foot on a phone,
+  // beside the button on a desk; arrows move, Escape closes and gives the
+  // button back its focus.
+  var menu = null;
+  var deskMenu = window.matchMedia ? window.matchMedia("(min-width: 900px)") : { matches: true };
+  function closeMenu(back) {
+    if (!menu) return;
+    var m = menu;
+    menu = null;
+    [m.box, m.scrim].forEach(function (n) { if (n && n.parentNode) n.parentNode.removeChild(n); });
+    m.button.setAttribute("aria-expanded", "false");
+    if (back !== false && m.button.focus) m.button.focus();
+  }
+  // The song in the view (or its lyrics): made current first, playing on
+  // if the set was.
+  function viewSong(i, words) {
+    if (i !== cur) select(i, 0, snapshot().playing, true);
+    var view = words ? "player.lyrics" : "player.now";
+    if (arch.shell && typeof arch.shell.view === "function" && arch.shell.view(view)) return;
+    open_();
+    lyrics_(!!words);
+  }
+  function menuItems(row) {
+    var page = builtPage(row.getAttribute("data-page"));
+    var r = rows.filter(function (x) { return x.el === row; })[0];
+    var t = r ? tracks[r.i] : null;
+    var items = [];
+    if (t && hasView(t)) {
+      items.push({ label: "Open chart", run: function () { viewSong(r.i, false); } });
+      if (known[t.src] && known[t.src].lyrics) items.push({ label: "Lyrics", run: function () { viewSong(r.i, true); } });
+    }
+    if (page) items.push({ label: t ? "Song page and downloads" : "Chart and downloads", href: page });
+    return items;
+  }
+  function fillMenu(box, row) {
+    box.textContent = "";
+    if (box.classList.contains("site-row-menu-sheet")) {
+      var head = doc.createElement("p");
+      head.className = "site-row-menu-title";
+      head.textContent = row.getAttribute("data-title") || "";
+      box.appendChild(head);
+    }
+    menuItems(row).forEach(function (it) {
+      var item = doc.createElement(it.href ? "a" : "button");
+      item.className = "site-row-menu-item";
+      item.setAttribute("role", "menuitem");
+      item.setAttribute("tabindex", "-1");
+      if (it.href) item.setAttribute("href", it.href);
+      else item.setAttribute("type", "button");
+      item.textContent = it.label;
+      item.addEventListener("click", function () {
+        closeMenu(false);
+        if (it.run) it.run();
+      });
+      box.appendChild(item);
+    });
+  }
+  function menuMove(by) {
+    if (!menu) return;
+    var items = Array.prototype.slice.call(menu.box.querySelectorAll(".site-row-menu-item"));
+    if (!items.length) return;
+    var at = items.indexOf(doc.activeElement);
+    var next = items[(at + by + items.length) % items.length];
+    if (next && next.focus) next.focus();
+  }
+  function openMenu(button, row) {
+    closeMenu(false);
+    var sheet_ = !deskMenu.matches;
+    var box = doc.createElement("div");
+    box.className = "site-row-menu" + (sheet_ ? " site-row-menu-sheet" : "");
+    box.setAttribute("role", "menu");
+    box.setAttribute("aria-label", row.getAttribute("data-title") || "Song");
+    var scrim = null;
+    if (sheet_) {
+      scrim = doc.createElement("div");
+      scrim.className = "site-row-menu-scrim";
+      scrim.addEventListener("click", function () { closeMenu(); });
+      doc.body.appendChild(scrim);
+    }
+    fillMenu(box, row);
+    box.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowDown") { ev.preventDefault(); menuMove(1); }
+      else if (ev.key === "ArrowUp") { ev.preventDefault(); menuMove(-1); }
+      else if (ev.key === "Escape") { ev.preventDefault(); closeMenu(); }
+      else if (ev.key === "Tab") closeMenu(false);
+    });
+    doc.body.appendChild(box);
+    if (!sheet_ && button.getBoundingClientRect) {
+      var at = button.getBoundingClientRect();
+      box.style.top = Math.round(at.bottom + (window.scrollY || 0) + 4) + "px";
+      box.style.left = Math.round(Math.max(8, at.right + (window.scrollX || 0) - 224)) + "px";
+    }
+    menu = { box: box, scrim: scrim, button: button, row: row };
+    button.setAttribute("aria-expanded", "true");
+    menuMove(1);
+    // Whether it has lyrics is known once its page is read.
+    var r = rows.filter(function (x) { return x.el === row; })[0];
+    var t = r ? tracks[r.i] : null;
+    if (t && hasView(t) && !known[t.src]) {
+      songOf(t).then(function () {
+        if (menu && menu.row === row) fillMenu(box, row);
+      });
+    }
+  }
+  Array.prototype.forEach.call(doc.querySelectorAll("[data-playlist] [data-track-more]"), function (b) {
+    var row = b.closest("li");
+    if (!row) return;
+    b.setAttribute("aria-haspopup", "menu");
+    b.setAttribute("aria-expanded", "false");
+    b.addEventListener("click", function () {
+      if (menu && menu.button === b) closeMenu();
+      else openMenu(b, row);
+    });
+  });
+  doc.addEventListener("click", function (ev) {
+    if (!menu || !ev.target || !ev.target.closest) return;
+    if (ev.target.closest(".site-row-menu") || ev.target.closest("[data-track-more]") === menu.button) return;
+    closeMenu(false);
+  }, true);
+  doc.addEventListener("keydown", function (ev) {
+    if (menu && ev.key === "Escape") closeMenu();
   });
 
   // ── The now-playing view ──────────────────────────────────────────
@@ -915,7 +1051,7 @@
       '<div class="site-now-body"></div>' +
       '<div class="site-now-island site-now-island-bottom" hidden></div>' +
       '<div class="site-now-controls"><div class="site-now-buttons">' +
-      toggles().replace("</button>", "</button>" + controls()) + "</div></div>";
+      toggles().replace("</button>", "</button>" + '<div class="site-now-transport">' + controls() + "</div>") + "</div></div>";
     ui.nowTitle = sheet.querySelector(".site-now-title");
     ui.nowNote = sheet.querySelector(".site-now-note");
     ui.nowPage = sheet.querySelector(".site-now-page");
@@ -1424,6 +1560,8 @@
   // with a `data-beat` (1 is a bar's first), and its `data-sections`.
   // Numbers only: nothing of the fetched page is put on this one.
   var songs = {}, known = {};
+  // The closest two beats may be; the shortest section Loop will hold.
+  var MIN_BEAT = 0.05, MIN_LOOP = 0.25;
   function readSong(node) {
     var seen = {};
     var beats = Array.prototype.map.call(node.querySelectorAll("[data-at][data-beat]"), function (n) {
@@ -1433,17 +1571,32 @@
       seen[b.at] = true;
       return true;
     }).sort(function (a, b) { return a.at - b.at; });
-    return { beats: beats.slice(0, 20000), sections: sectionsOf(node) };
+    // A beat closer than this to the one before is not a beat: a chart
+    // (or a note) marking beats a millisecond apart would ask for a
+    // thousand clicks a second.
+    var spaced = [], last = -Infinity;
+    beats.forEach(function (b) {
+      if (b.at - last >= MIN_BEAT) {
+        spaced.push(b);
+        last = b.at;
+      }
+    });
+    return { beats: spaced.slice(0, 20000), sections: sectionsOf(node), lyrics: false };
   }
   var NONE = { beats: [], sections: [] };
   function songOf(t) {
     if (!t) return Promise.resolve(NONE);
     if (songs[t.src]) return songs[t.src];
     var mine = viewIn(doc, t.src);
-    var got = mine ? Promise.resolve(readSong(mine))
+    var withWords = function (x, root, from) {
+      x.lyrics = !!lyricsIn(root, t.src, from);
+      return x;
+    };
+    var got = mine ? Promise.resolve(withWords(readSong(mine), doc))
       : t.view && t.page && t.page !== here ? pageDoc(t.page).then(function (parsed) {
-        var found = viewIn(parsed, t.src, new URL(t.page, location.href).href);
-        return found ? readSong(found) : NONE;
+        var from = new URL(t.page, location.href).href;
+        var found = viewIn(parsed, t.src, from);
+        return found ? withWords(readSong(found), parsed, from) : NONE;
       }) : Promise.resolve(NONE);
     songs[t.src] = got.then(function (x) {
       known[t.src] = x;
@@ -1570,18 +1723,32 @@
     var t = tracks[cur];
     return prefs.loop && t && loop.src === t.src ? loop.sec : null;
   }
+  // The sections Loop can hold: long enough to play (a section of a
+  // few milliseconds would seek every frame), in order of their start.
+  function loopable(src) {
+    var list = src && known[src] ? known[src].sections : [];
+    return list.filter(function (x) { return x.end - x.start >= MIN_LOOP; })
+      .sort(function (a, b) { return a.start - b.start; });
+  }
+  var checking = false;
   function loopCheck(s) {
-    if (!prefs.loop || source || !s.src) return;
-    var list = known[s.src] ? known[s.src].sections : [];
+    // Its own seek tells it where the song is again: not from in here.
+    if (checking || !prefs.loop || source || !s.src) return;
+    var list = loopable(s.src);
     if (!list.length) return;
-    if (loop.src !== s.src || !loop.sec) loop = { src: s.src, sec: sectionAt(list, s.time) };
-    var sec = loop.sec;
-    if (!sec) return;
-    if (s.time >= sec.end - 0.02 && s.time < sec.end + 0.75) {
-      if (s.playing) playhead.seek(sec.start);
-      return;
+    checking = true;
+    try {
+      if (loop.src !== s.src || !loop.sec) loop = { src: s.src, sec: sectionAt(list, s.time) };
+      var sec = loop.sec;
+      if (!sec) return;
+      if (s.time >= sec.end - 0.02 && s.time < sec.end + 0.75) {
+        if (s.playing) playhead.seek(sec.start);
+        return;
+      }
+      if (s.time < sec.start - 0.05 || s.time >= sec.end + 0.75) loop.sec = sectionAt(list, s.time);
+    } finally {
+      checking = false;
     }
-    if (s.time < sec.start - 0.05 || s.time >= sec.end + 0.75) loop.sec = sectionAt(list, s.time);
   }
   function loopToggle() {
     prefs.loop = !prefs.loop;
@@ -1597,7 +1764,8 @@
     var song = songNow();
     var opts = [
       ["click", prefs.click, song.beats.length > 0, "Click: a beat with the song", "Click: this song's chart has no beats"],
-      ["loop", prefs.loop, song.sections.length > 0, "Loop the section playing", "Loop: this song's chart has no sections"],
+      // Loop holds the page's player: not while an outside clock does.
+      ["loop", prefs.loop, !source && loopable((tracks[cur] || {}).src).length > 0, "Loop the section playing", source ? "Loop: the song is played elsewhere" : "Loop: this song's chart has no sections"],
     ];
     opts.forEach(function (o) {
       Array.prototype.forEach.call(doc.querySelectorAll('.site-player [data-act="' + o[0] + '"], .site-now [data-act="' + o[0] + '"]'), function (b) {
@@ -1633,7 +1801,9 @@
     if (!t) return;
     var tile = t.tile;
     var h = tile && isFinite(parseInt(tile.getAttribute("data-hue"), 10)) ? parseInt(tile.getAttribute("data-hue"), 10) : hue(t.title);
-    ui.art.textContent = tile ? String(tile.textContent || "").trim().slice(0, 3) : initials(t.title);
+    // Clean art: the title's initials, never what a row's tile says (its
+    // key, on a setlist).
+    ui.art.textContent = initials(t.title);
     ui.art.style.setProperty("background", "hsl(" + h + " 42% 40%)");
     bar.style.setProperty("--site-player-tint", "hsl(" + h + " 50% 45%)");
     var src = t.art || (t.page && artBy[t.page]) || null;
@@ -1701,7 +1871,7 @@
   var shownPlaying = null;
   function paint(s) {
     rows.forEach(function (r) {
-      var on = s.src === r.src;
+      var on = s.index >= 0 ? s.index === r.i : s.src === r.src;
       if (on) {
         r.el.setAttribute("aria-current", "true");
         r.el.setAttribute("data-state", s.playing ? "playing" : "paused");

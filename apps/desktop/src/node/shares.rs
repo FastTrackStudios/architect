@@ -2506,7 +2506,11 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
         .as_ref()
         .map(|l| queue(l, link.mount))
         .unwrap_or_default();
-    if files == 0 && tracks.is_empty() {
+    let art = listed
+        .as_ref()
+        .map(|l| art_by_page(l, link.mount))
+        .unwrap_or_default();
+    if files == 0 && tracks.is_empty() && art.is_empty() {
         return response;
     }
     let (parts, body) = response.into_parts();
@@ -2531,17 +2535,11 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
             section,
             "<script type=\"application/json\" id=\"site-islands\">{islands}</script>"
         );
-        let art = listed
-            .as_ref()
-            .map(|l| art_by_page(l, link.mount))
-            .unwrap_or_default();
-        let json = serde_json::json!({ "scope": link.mount, "tracks": tracks, "art": art });
-        // JSON in a script element: `</` must not close it.
-        let json = json.to_string().replace("</", "<\\/");
-        let _ = write!(
-            section,
-            "<script type=\"application/json\" id=\"site-queue\">{json}</script>"
-        );
+    }
+    // The queue, and the art of the link's songs: art too when nothing
+    // plays (a setlist with no recordings still shows its covers).
+    if let Some(script) = queue_script(link.mount, &tracks, &art) {
+        section.push_str(&script);
     }
     before_main_end(parts, &String::from_utf8_lossy(&bytes), &section)
 }
@@ -2580,6 +2578,24 @@ fn queue(listed: &Listed, mount: &str) -> Vec<serde_json::Value> {
         }
     }
     tracks
+}
+
+/// The page's `site-queue` script: the link's tracks and its pages' art;
+/// None when there is neither.
+fn queue_script(
+    mount: &str,
+    tracks: &[serde_json::Value],
+    art: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    if tracks.is_empty() && art.is_empty() {
+        return None;
+    }
+    let json = serde_json::json!({ "scope": mount, "tracks": tracks, "art": art });
+    // JSON in a script element: `</` must not close it.
+    let json = json.to_string().replace("</", "<\\/");
+    Some(format!(
+        "<script type=\"application/json\" id=\"site-queue\">{json}</script>"
+    ))
 }
 
 /// Each listed note's art (`art:`, `architect_sites::art`) by its page,
@@ -3092,6 +3108,23 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Art reaches the page with no track to play: a setlist with no
+    /// recordings still shows its covers.
+    #[test]
+    fn art_goes_out_without_a_queue() {
+        let mut art = serde_json::Map::new();
+        art.insert(
+            "/s/abc/joy/".to_owned(),
+            serde_json::json!("/s/abc/Joy/cover.jpg"),
+        );
+        let script = queue_script("/s/abc/", &[], &art).unwrap();
+        assert!(
+            script.contains("\"tracks\":[]") && script.contains("/s/abc/Joy/cover.jpg"),
+            "{script}"
+        );
+        assert!(queue_script("/s/abc/", &[], &serde_json::Map::new()).is_none());
+    }
 
     #[test]
     fn art_is_a_listed_notes_own_file() {

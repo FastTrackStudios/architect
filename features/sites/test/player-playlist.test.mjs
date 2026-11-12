@@ -186,8 +186,8 @@ function row(n, title, page, media) {
   ]);
 }
 /// A playlist in the box the site draws a block in.
-const block = (rows, extra = []) => el('div', { class: 'site-block site-block-0123456789abcdef' }, [
-  el('div', { 'data-playlist': '' }, [el('ol', {}, rows), ...extra]),
+const block = (rows, extra = [], join = { class: 'studio-setlist' }) => el('div', { class: 'site-block site-block-0123456789abcdef' }, [
+  el('div', { 'data-playlist': '', ...join }, [el('ol', {}, rows), ...extra]),
 ]);
 
 /// The setlist's page: two sets under their headings, as an existing note
@@ -216,6 +216,7 @@ function run(body, queue) {
   const store = new Map();
   const timers = [];
   const audio = new FakeAudio();
+  const errors = [];
   const queueEl = queue ? Object.assign(new Node('script'), { ownText: queue }) : null;
   const document = {
     body,
@@ -247,7 +248,7 @@ function run(body, queue) {
     AudioContext: function () { return audio; },
     fetch: () => Promise.reject(new Error('no network in this test')),
     URL,
-    console,
+    console: { ...console, error: (...a) => errors.push(a.map(String).join(' ')) },
     Math,
     JSON,
   };
@@ -262,7 +263,10 @@ function run(body, queue) {
     a.currentTime = t;
   };
   return {
-    body, playhead, audio, window, location,
+    body, playhead, audio, window, location, errors,
+    /// A real Loop (or Click) button in the bar (the bar's own are
+    /// written as HTML, which this DOM does not parse).
+    button: (act) => body.querySelectorAll('.site-player')[0].appendChild(el('button', { 'data-act': act })),
     tick: () => timers.forEach((f) => f && f()),
     frame: () => frames.splice(0).forEach((f) => f()),
     audioEl, at,
@@ -440,4 +444,123 @@ test('Loop holds the section playing, and a seek moves it', async () => {
   p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
   assert.equal(at(7.2), 7.2);
   assert.deepEqual(plain(JSON.parse(p.window.sessionStorage.getItem(`architect.player:${L}`))).loop, false);
+});
+
+// ── What the review found ─────────────────────────────────────────
+
+test('lists that do not say they join stay apart', () => {
+  const body = new Node('body');
+  body.appendChild(el('h2', {}, [], 'Stems'));
+  body.appendChild(block([row(1, 'Bass', `${L}bass/`, `${L}Bass.mp3`)], [], {}));
+  body.appendChild(el('h2', {}, [], 'References'));
+  body.appendChild(block([row(1, 'Mix', `${L}mix/`, `${L}Mix.mp3`)], [], {}));
+  run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  assert.equal(body.querySelectorAll('[data-playlist]').length, 2);
+  assert.equal(body.querySelectorAll('h2').length, 2);
+  assert.equal(body.querySelectorAll('[data-playlist-section]').length, 0);
+});
+
+test('a song listed twice plays and is marked where it was tapped, and goes on from there', () => {
+  const body = new Node('body');
+  body.appendChild(block([
+    row(1, 'Joy', `${L}joy/`, `${L}Joy.mp3`),
+    row(2, 'Noel', `${L}noel/`, `${L}Noel.mp3`),
+    row(3, 'Joy', `${L}joy/`, `${L}Joy.mp3`),
+    row(4, 'Eve', `${L}eve/`, `${L}Eve.mp3`),
+  ]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  const rows = body.querySelectorAll('[data-track]');
+  rows[2].querySelectorAll('[data-track-title]')[0].click();
+  assert.equal(rows[2].getAttribute('aria-current'), 'true');
+  assert.equal(rows[0].getAttribute('aria-current'), null, 'not the first Joy');
+  p.playhead.next();
+  assert.equal(p.playhead.src, `${L}Eve.mp3`, 'on from the second');
+});
+
+test('Loop never seeks itself to death on a section too short to play', async () => {
+  const sections = [{ name: 'x', start: 2, end: 2 }, { name: 'y', start: 2, end: 2.01 }];
+  const view = el('div', { 'data-now-playing': '', 'data-media': `${L}Joy.mp3`, 'data-sections': JSON.stringify(sections) }, [el('svg')]);
+  const p = setlist({ view });
+  const loopButton = p.button('loop');
+  p.body.querySelectorAll('[data-title="Joy to the World"]')[0].click();
+  await new Promise((r) => setImmediate(r));
+  const button = { getAttribute: () => 'loop' };
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
+  const a = p.audioEl();
+  a.currentTime = 2;
+  a.playbackRate = 1;
+  a.dispatch('timeupdate');
+  assert.deepEqual(p.errors.filter((e) => /call stack|recursion/i.test(e)), [], 'no seek loop');
+  assert.equal(a.currentTime, 2, 'nothing to loop');
+  assert.ok(loopButton.hasAttribute('disabled'), 'and Loop says so');
+});
+
+test('beats closer than 50 ms are one beat, so Click never floods', async () => {
+  const beats = Array.from({ length: 200 }, (_, i) => i * 0.001);
+  const svg = el('svg', {}, beats.map((at) => el('rect', { 'data-at': String(at), 'data-beat': '1' })));
+  const view = el('div', { 'data-now-playing': '', 'data-media': `${L}Joy.mp3` }, [svg]);
+  const p = setlist({ view });
+  p.body.querySelectorAll('[data-title="Joy to the World"]')[0].click();
+  await new Promise((r) => setImmediate(r));
+  const button = { getAttribute: () => 'click' };
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
+  for (let t = 0; t <= 0.2; t += 0.025) { p.at(t); p.tick(); }
+  assert.equal(p.audio.played.length, 4, 'a millisecond apart: one click in 50 ms (0, 0.05, 0.1, 0.15), not 200');
+});
+
+test('Loop is off while an outside clock holds the playhead', async () => {
+  const p = await (async () => {
+    const q = setlist({ view: joyView() });
+    q.body.querySelectorAll('[data-title="Joy to the World"]')[0].click();
+    await new Promise((r) => setImmediate(r));
+    return q;
+  })();
+  const loopButton = p.button('loop');
+  p.audioEl().dispatch('timeupdate');
+  await new Promise((r) => setImmediate(r));
+  assert.ok(!loopButton.hasAttribute('disabled'), 'a song with sections: Loop on offer');
+  const h = p.playhead.attach({ time: 0, playing: false, seek() {} });
+  assert.ok(loopButton.hasAttribute('disabled'), 'disabled while the clock is elsewhere');
+  h.detach();
+  assert.ok(!loopButton.hasAttribute('disabled'));
+});
+
+test('a row\'s menu: its chart, its page; Escape closes it and gives the button back', async () => {
+  const body = new Node('body');
+  const more = el('button', { type: 'button', 'data-track-more': '', 'aria-label': 'More: Joy' });
+  const r = row(1, 'Joy', `${L}joy/`, `${L}Joy.mp3`);
+  r.appendChild(more);
+  const lone = row(2, 'Noel', `${L}noel/`, null);
+  const loneMore = el('button', { type: 'button', 'data-track-more': '' });
+  lone.appendChild(loneMore);
+  body.appendChild(block([r, lone]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  more.click();
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  const menu = body.querySelectorAll('.site-row-menu')[0];
+  assert.equal(menu.getAttribute('role'), 'menu');
+  const items = menu.querySelectorAll('.site-row-menu-item').map((i) => [i.textContent, i.getAttribute('href')]);
+  assert.deepEqual(items, [['Open chart', null], ['Song page and downloads', `${L}joy/`]]);
+  menu.dispatch('keydown', { key: 'Escape', preventDefault() {} });
+  assert.equal(body.querySelectorAll('.site-row-menu').length, 0);
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  // A song with no recording: its page only, no dead entry.
+  loneMore.click();
+  const lonely = body.querySelectorAll('.site-row-menu')[0].querySelectorAll('.site-row-menu-item').map((i) => i.textContent);
+  assert.deepEqual(lonely, ['Chart and downloads']);
+  // The menu button is not a tap on the row.
+  assert.equal(p.playhead.src, null);
+});
+
+test('the card shows the title\'s initials, never what the tile says (its key)', () => {
+  const body = new Node('body');
+  const r = row(1, 'Sleigh Ride', `${L}sleigh/`, `${L}Sleigh.mp3`);
+  const tile = r.querySelectorAll('[data-track-art]')[0];
+  tile.textContent = 'B';
+  tile.setAttribute('data-key', '');
+  body.appendChild(block([r]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  r.querySelectorAll('[data-track-title]')[0].click();
+  const art = body.querySelectorAll('.site-player-art')[0];
+  assert.equal(art ? art.textContent : p.window.document.body.querySelectorAll('.site-player')[0].querySelector('.site-player-art').textContent, 'SR');
 });
