@@ -28,4 +28,9 @@ assets | jq 'map(select(.name != "node.tar.gz"))' > "$t/a.json"
 bash "$here/release-sums.sh" plan "$t/expected" "$t/a.json" 2>/dev/null && no "a missing asset was accepted" || ok "refuses when a build job's asset is missing"
 : > "$t/empty"; assets > "$t/a.json"
 bash "$here/release-sums.sh" plan "$t/empty" "$t/a.json" 2>/dev/null && no "signed with no build outputs" || ok "refuses when no build job reported anything"
+# release-publish.sh decide: only a draft is published, Latest only for the highest tag.
+d() { bash "$here/release-publish.sh" decide "$@"; }
+[ "$(d true v0.12.5 v0.12.5)" = publish-latest ] && ok "a draft of the highest tag: published, Latest" || no "draft, highest"
+[ "$(d true v0.12.3 v0.12.5)" = publish ] && ok "a hotfix draft on an older line: published, never Latest" || no "draft, older"
+[ "$(d false v0.12.5 v0.12.5)" = leave ] && ok "a re-run on a published release: left alone" || no "published"
 exit "$fail"

@@ -17,7 +17,7 @@
 set -euo pipefail
 
 die() { echo "release-sums: $*" >&2; exit 1; }
-[ "${1:-}" = plan ] && [ "$#" -eq 3 ] || die "usage: release-sums.sh plan EXPECTED ASSETS.json"
+if [ "${1:-}" != plan ] || [ "$#" -ne 3 ]; then die "usage: release-sums.sh plan EXPECTED ASSETS.json"; fi
 expected="$2" assets="$3"
 
 declare -A want=() have=()
@@ -50,4 +50,4 @@ done
 for name in "${!want[@]}"; do
     case "$name" in *.sha256) continue ;; esac
     printf '%s  %s\n' "${want[$name]}" "$name"
-done | sort -k2
+done | LC_ALL=C sort -k2

@@ -96,6 +96,21 @@ type GhRelease = {
 	body: string | null;
 };
 
+/** A release by tag, drafts included: page through the list (a draft has no
+ * tag yet, so `releases/tags/<tag>` cannot find it). */
+async function findRelease(tag: string): Promise<GhRelease> {
+	for (let page = 1; page <= 10; page++) {
+		const all = await getJson<GhRelease[]>(
+			`https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}`,
+			true,
+		);
+		const r = all.find((x) => x.tag_name === tag);
+		if (r) return r;
+		if (all.length < 100) break;
+	}
+	throw new Error(`${tag} is not among the releases`);
+}
+
 /** /download and the landing page: the release (SITE_RELEASE_TAG's, or `latest`). */
 async function release() {
 	let found: GhRelease;
@@ -105,14 +120,7 @@ async function release() {
 		// not return drafts: find it in the list, which shows drafts to the
 		// release job's token.
 		found = releaseTag
-			? await getJson<GhRelease[]>(
-					`https://api.github.com/repos/${REPO}/releases?per_page=30`,
-					true,
-				).then((all) => {
-					const r = all.find((x) => x.tag_name === releaseTag);
-					if (!r) throw new Error(`${releaseTag} is not among the releases`);
-					return r;
-				})
+			? await findRelease(releaseTag)
 			: await getJson<GhRelease>(
 					`https://api.github.com/repos/${REPO}/releases/latest`,
 					true,
