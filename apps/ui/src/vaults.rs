@@ -17,15 +17,66 @@ static DEMO: include_dir::Dir<'static> =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/demo-vault");
 
 /// The vault the app opened last, while its folder is there.
+///
+/// A vault in the app's folder is kept relative to it, and one kept
+/// whole that is gone is looked for again under the app's folder: iOS
+/// moves an app's folder (its data container) on every install and
+/// update, so a whole path from before an update names nothing.
 #[must_use]
 pub fn remembered() -> Option<PathBuf> {
-    let text = std::fs::read_to_string(crate::app_dir()?.join(KEPT)).ok()?;
+    let app = crate::app_dir()?;
+    let text = std::fs::read_to_string(app.join(KEPT)).ok()?;
     let kept: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let dir = PathBuf::from(kept.get("current")?.as_str()?);
+    let dir = resolve(&app, kept.get("current")?.as_str()?);
     dir.is_dir().then_some(dir)
 }
 
-/// Remembers `dir` as the vault to open from now on.
+/// `kept` (a vault's folder as `vaults.json` has it) as a folder now:
+/// relative to `app`, else whole, else (gone, from an app folder that has
+/// moved) the same place under `app`, when it is there.
+#[must_use]
+pub fn resolve(app: &Path, kept: &str) -> PathBuf {
+    let path = PathBuf::from(kept);
+    if path.is_relative() {
+        return app.join(path);
+    }
+    if path.is_dir() {
+        return path;
+    }
+    // `…/<old container>/Library/Application Support/<app folder>/<rest>`:
+    // `<rest>` under this app's folder.
+    let name = app.file_name().map(std::ffi::OsStr::to_os_string);
+    let comps: Vec<_> = path.components().collect();
+    let found = name.and_then(|name| comps.iter().rposition(|c| c.as_os_str() == name));
+    if let Some(at) = found {
+        let rest: PathBuf = comps.iter().skip(at.saturating_add(1)).collect();
+        let moved = app.join(rest);
+        if moved.is_dir() {
+            return moved;
+        }
+    }
+    path
+}
+
+/// `dir` as `vaults.json` keeps it: relative to `app` when inside it.
+fn keep_path(app: &Path, dir: &Path) -> String {
+    dir.strip_prefix(app).map_or_else(
+        |_| dir.display().to_string(),
+        |rel| rel.display().to_string(),
+    )
+}
+
+/// `vaults.json` as it is, an object.
+fn read_kept(app: &Path) -> serde_json::Map<String, serde_json::Value> {
+    std::fs::read_to_string(app.join(KEPT))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// Remembers `dir` as the vault to open from now on (its other entries,
+/// the org vaults, kept).
 ///
 /// # Errors
 ///
@@ -33,8 +84,47 @@ pub fn remembered() -> Option<PathBuf> {
 pub fn remember(dir: &Path) -> std::io::Result<()> {
     let app = crate::app_dir().ok_or_else(|| std::io::Error::other("the app has no folder"))?;
     std::fs::create_dir_all(&app)?;
-    let kept = serde_json::json!({ "current": dir.display().to_string() });
-    std::fs::write(app.join(KEPT), kept.to_string())
+    let mut kept = read_kept(&app);
+    kept.insert("current".to_owned(), keep_path(&app, dir).into());
+    std::fs::write(app.join(KEPT), serde_json::Value::Object(kept).to_string())
+}
+
+/// Keeps `entries` as the account's org vaults in `vaults.json` `orgs`
+/// (`crate::org_vaults::adopt`): the account's entries replaced, those
+/// written by hand left.
+///
+/// # Errors
+///
+/// The file cannot be written.
+pub fn keep_account_orgs(app: &Path, entries: Vec<serde_json::Value>) -> std::io::Result<()> {
+    std::fs::create_dir_all(app)?;
+    let mut kept = read_kept(app);
+    let mut orgs: Vec<serde_json::Value> = kept
+        .get("orgs")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|e| e.get("account").and_then(serde_json::Value::as_bool) != Some(true))
+        .collect();
+    let by_hand: Vec<String> = orgs
+        .iter()
+        .filter_map(|e| {
+            e.get("org")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    orgs.extend(entries.into_iter().filter(|e| {
+        e.get("org")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|o| !by_hand.iter().any(|h| h == o))
+    }));
+    if kept.get("orgs").and_then(serde_json::Value::as_array) == Some(&orgs) {
+        return Ok(());
+    }
+    kept.insert("orgs".to_owned(), orgs.into());
+    std::fs::write(app.join(KEPT), serde_json::Value::Object(kept).to_string())
 }
 
 /// One org's vault on this device (org = vault, #443): what the
@@ -73,7 +163,8 @@ impl OrgVault {
 #[must_use]
 pub fn catalog() -> Vec<OrgVault> {
     let mut texts = Vec::new();
-    if let Some(app) = crate::app_dir()
+    let app = crate::app_dir();
+    if let Some(app) = app.as_ref()
         && let Ok(t) = std::fs::read_to_string(app.join(KEPT))
         && let Ok(v) = serde_json::from_str::<serde_json::Value>(&t)
         && let Some(orgs) = v.get("orgs")
@@ -89,7 +180,12 @@ pub fn catalog() -> Vec<OrgVault> {
     let mut out: Vec<OrgVault> = Vec::new();
     for list in texts {
         for e in list.as_array().into_iter().flatten() {
-            let Some(v) = parse_entry(e) else { continue };
+            let Some(mut v) = parse_entry(e) else {
+                continue;
+            };
+            if let Some(app) = app.as_ref() {
+                v.dir = resolve(app, &v.dir.display().to_string());
+            }
             if v.dir.is_dir() && !out.iter().any(|o| o.org == v.org) {
                 out.push(v);
             }
