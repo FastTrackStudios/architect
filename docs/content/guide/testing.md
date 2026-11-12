@@ -164,12 +164,30 @@ Every bug fix lands with a test that failed before it.
 
 ## 6. What CI runs
 
-A PR runs `.github/workflows/pr.yml`: one job, `check`, about a minute
-on a hosted runner.
+A PR runs `.github/workflows/pr.yml` on hosted runners, with every
+warning an error (`CARGO_BUILD_WARNINGS=deny`), as on main. Two jobs run
+in parallel and `check`, the status branch protection requires, passes
+only when both did:
 
-- `cargo fmt --all -- --check`
-- a lockfile check: `cargo metadata --format-version 1` must leave
-  `Cargo.lock` unchanged.
+- `fast checks`: `cargo fmt --all -- --check`, the chart, a stale
+  `Cargo.lock`, change files (`just ci-changes`), the workspace-hack, and
+  the xtasks that only read sources and the graph: `feature-tests`,
+  `docs`, `surfaces`, `fleet-deps --check` and `boundaries`.
+- `lint`: main's `cargo clippy --workspace --all-targets` (every target:
+  tests, benches, examples, as Linux builds them) whenever the PR changes
+  a crate, then a `cargo clippy` of each `feature-tests.toml` pass and of
+  the headless node (`-p architect-desktop --no-default-features
+  --features vox`) that the PR reaches: `scripts/pr-scope.py` maps the
+  changed files to the members owning (or `include_str!`-ing) them plus
+  every member depending on those, and reaches everything when
+  `Cargo.lock`, the toolchain, `.cargo/` or the CI changes.
+
+Its Rust cache (third-party crates only) is saved by the same workflow on
+each push to `main`, so a PR restores main's.
+
+The PR check runs no test, no wasm check, no `builtins` and no `tags`:
+those run on main after the merge. The self-hosted pool that runs them
+never runs a public repo's PR code.
 
 After a merge, every push to `main` runs `.github/workflows/checks.yml`,
 with every warning an error (`CARGO_BUILD_WARNINGS=deny`) and the
@@ -183,11 +201,10 @@ pinned toolchain:
 | `tags` | `cargo run -p xtask -- tags --verbose` on the full history |
 | `check` | passes only when `lint`, `test` and `wasm` all succeeded |
 
-Because the PR runs only the fast checks, run the full set locally
-before opening one, with `CARGO_BUILD_WARNINGS=deny`: fmt, clippy, the
-workspace tests, the wasm `cargo check` lines copied from
-`checks.yml`, `boundaries` and `docs`. Whoever merges watches `main`
-and reverts or fixes forward when it goes red.
+A PR that passes `check` has passed main's Lint for what it touches.
+Before opening one, still run the tests of what you changed: the PR check
+compiles them but runs none. Whoever merges watches `main` and reverts or
+fixes forward when it goes red.
 
 `cargo run -q -p xtask -- docs` (also `just docs-check`) fails on any
 repo path, page link, `just` recipe, xtask command or `-p` package the
