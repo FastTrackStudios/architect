@@ -200,8 +200,9 @@ test('the demo is the app on the demo vault, and sends nothing', { skip }, async
     });
     await tab.until('document.activeElement && document.activeElement.tagName === "INPUT"', 'the palette');
 
-    // Only the app's own files (and the site's icon) were asked for.
-    const off = seen.filter((u) => { const p = new URL(u); return p.origin !== origin || !(p.pathname.startsWith('/app/') || p.pathname === '/favicon.svg'); });
+    // Only the app's own files (and the site's icon) were asked for; the
+    // demo vault's images are data: URLs, decoded in the page.
+    const off = seen.filter((u) => { if (u.startsWith('data:')) return false; const p = new URL(u); return p.origin !== origin || !(p.pathname.startsWith('/app/') || p.pathname === '/favicon.svg'); });
     assert.deepEqual(off, [], 'requests outside /app/');
   } finally {
     close();
