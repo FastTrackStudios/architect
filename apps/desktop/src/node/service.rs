@@ -66,6 +66,11 @@ pub struct NodeStatus {
     /// The addresses its iroh endpoint is bound to (`127.0.0.1:…` with
     /// `ARCHITECT_IROH=local`).
     pub iroh_addrs: Vec<String>,
+    /// What its share links' layer rules need the owner to know (#528): a
+    /// kept-rules file set aside, a manifest that does not read, rules a
+    /// reinstall lowered; one line each, naming nothing of the vault.
+    /// Details: `SHARE_LAYERS_KEPT`.
+    pub share_layers: Vec<String>,
 }
 
 /// The files engine's blob store against its budget (#525).
@@ -176,6 +181,8 @@ pub struct NodeState {
     pub(crate) admission: Admission,
     pub(crate) account: Arc<Mutex<AccountView>>,
     pub(crate) files: Option<architect_files::sync::Engine>,
+    /// Its share links' layer rules, for its status.
+    pub(crate) layers: Option<super::share_layers::LayerRules>,
 }
 
 impl NodeState {
@@ -239,6 +246,11 @@ impl NodeState {
             iroh_addrs: self.iroh.as_ref().map_or_else(Vec::new, |e| {
                 e.bound_sockets().iter().map(ToString::to_string).collect()
             }),
+            share_layers: self
+                .layers
+                .as_ref()
+                .map(super::share_layers::LayerRules::status)
+                .unwrap_or_default(),
         }
     }
 }

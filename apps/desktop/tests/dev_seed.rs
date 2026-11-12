@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use architect_spaces::share::{code_from, share_note_path};
 use architect_spaces::{
-    Audience, Share, ShareAccess, ShareAudience, ShareScope, parse_share_note, share_note,
+    Audience, Listen, Share, ShareAccess, ShareAudience, ShareScope, parse_share_note, share_note,
 };
 
 /// The seeded links: public, link, org, and a link with two named audiences.
@@ -31,6 +31,8 @@ fn seeded() -> Vec<Share> {
         created_by: "dev-seed".to_owned(),
         domain: None,
         audiences: Vec::new(),
+        // A new link's default (#528).
+        listen: Listen::Reference,
     };
     let mut setlist = share(
         4,
@@ -45,6 +47,7 @@ fn seeded() -> Vec<Share> {
             filter: format!("instrument == \"{name}\""),
             code: code_from([0x54, 0x1d, 0x5e, 0xed, 0, 0, 0, 0, 0, seed]),
             created_at: 1_794_355_200,
+            listen: None,
         })
         .collect();
     vec![

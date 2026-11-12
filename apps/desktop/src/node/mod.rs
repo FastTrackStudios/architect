@@ -352,7 +352,15 @@ pub async fn start_with_layers(
         }
     }));
 
+    // The share links' layer rules (#528): the shares place files by them,
+    // the status says what the owner should know of them.
+    let share_layers = share_layers::LayerRules::new(
+        Some(config.extensions_dir()),
+        layers,
+        Some(data.join("share-layers.json")),
+    );
     let state = NodeState {
+        layers: Some(share_layers.clone()),
         name: config.name.clone(),
         endpoint: endpoint_id.clone(),
         iroh: Some(endpoint.clone()),
@@ -482,11 +490,7 @@ pub async fn start_with_layers(
         node_org.clone(),
         config.issuer.as_deref(),
         blocks.clone(),
-        share_layers::LayerRules::new(
-            Some(config.extensions_dir()),
-            layers,
-            Some(data.join("share-layers.json")),
-        ),
+        share_layers,
     );
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));

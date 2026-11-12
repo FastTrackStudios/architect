@@ -95,7 +95,7 @@ use architect_spaces::share::{
     validate, validate_audience, validate_domain,
 };
 use architect_spaces::{
-    KeptLayers, Listen, NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment,
+    LayersReport, Listen, NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment,
     ShareFault, ShareLinks, ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments,
     parse_share_note, share_note,
 };
@@ -205,6 +205,18 @@ struct VaultView {
 
 /// A vault's view, and the lock one reader holds while it reads it.
 type ViewSlot = Arc<Mutex<Option<Arc<VaultView>>>>;
+
+/// Whether a file is served on a link below Full ([`Shares::above`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hold {
+    /// Serve it (or its 404).
+    Serve,
+    /// Held back: it needs this layer.
+    Held(Listen),
+    /// The folder is being swapped in, or the file cannot be read: held
+    /// back, as "being built".
+    Building,
+}
 
 /// What a request to an audience's link is answered with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -592,76 +604,81 @@ impl Shares {
         )
     }
 
-    /// The layer the file at `rest` (a path below the link `code` of
-    /// `share`, built into `dir`) needs, when it is above `cap`.
+    /// Whether the file at `rest` (a path below the link of `share` for
+    /// `audience`, built into `dir`) is held back from a link that plays
+    /// to `cap`. Blocking.
     ///
-    /// Only a file that is in the link's own folder is answered: anything
-    /// else is None (a 404 like a path that is nowhere), so a link says
-    /// nothing of a file outside it. Then by its name, and by what it is
-    /// on disk, so no other spelling of a held-back file (its case, its
-    /// Unicode form, `//`) reaches it. While placement is unknown every
-    /// attachment of the link is held back. Blocking.
+    /// Decided first by its key, from the placement (cached), among the
+    /// files of this link alone (so a link says nothing of a file outside
+    /// it), before the disk is touched. A held-back file is never built
+    /// into a link, so only a folder from before a change of layer can
+    /// hold one: then by what the request opens on disk, so no other
+    /// spelling (its case, its Unicode form, `//`) reaches it. A folder or
+    /// a file that cannot be read is held back ([`Hold::Building`]), never
+    /// served. While placement is unknown every file of the link is held
+    /// back.
     fn above(
         &self,
         share: &Share,
-        code: &str,
+        audience: Option<&ShareAudience>,
         dir: &Path,
         rest: &str,
         cap: Listen,
-    ) -> Option<Listen> {
+    ) -> Hold {
         if cap == Listen::Full {
-            return None;
+            return Hold::Serve;
         }
         let decoded = decode(rest);
         let unsafe_path = decoded
             .split('/')
             .any(|s| s == ".." || s == "." || s.contains('\\') || s.contains('\0'));
         if unsafe_path {
-            return None;
+            return Hold::Serve;
         }
         let key = decoded.trim_start_matches('/');
+        // By key: this link's files above its layer.
+        let listing = self.listing(share, audience);
+        let mine: std::collections::HashSet<&str> = listing
+            .iter()
+            .flat_map(|e| e.files.iter().map(String::as_str))
+            .collect();
+        // Named as this link names them (the placement is dropped).
+        let held: Vec<(&str, Listen)> = self.placed(share).map_or_else(
+            || mine.iter().map(|file| (*file, Listen::Full)).collect(),
+            |placed| {
+                placed
+                    .iter()
+                    .filter(|(_, layer)| **layer > cap)
+                    .filter_map(|(file, layer)| mine.get(file.as_str()).map(|f| (*f, *layer)))
+                    .collect()
+            },
+        );
+        if let Some((_, layer)) = held.iter().find(|(file, _)| *file == key) {
+            return Hold::Held(*layer);
+        }
+        // On disk: what the folder holds now.
+        if !dir.is_dir() {
+            return Hold::Building;
+        }
         let mut path = dir.join(key);
         if decoded.ends_with('/') || path.is_dir() {
             path = path.join("index.html");
         }
-        // Not in this link's folder: not this link's to speak of.
-        let asked = std::fs::metadata(&path)
-            .ok()
-            .filter(std::fs::Metadata::is_file)?;
-        let held: Vec<(String, Listen)> = if let Some(placed) = self.placed(share) {
-            placed
+        match std::fs::metadata(&path) {
+            Ok(asked) if asked.is_file() => held
                 .iter()
-                .filter(|(_, layer)| **layer > cap)
-                .map(|(file, layer)| (file.clone(), *layer))
-                .collect()
-        } else {
-            // Unknown: every attachment of the link is held back.
-            let manifest = {
-                let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
-                let found = table
-                    .get(&share.code)
-                    .and_then(|h| h.manifests.get(code).cloned());
-                drop(table);
-                found
-            };
-            let Some(manifest) = manifest else {
-                // Not built yet as far as this node knows: hold back
-                // all but its pages.
-                return (!content_type(&path).starts_with("text/html")).then_some(Listen::Full);
-            };
-            manifest
-                .files
-                .values()
-                .map(|f| (f.clone(), Listen::Full))
-                .collect()
-        };
-        if let Some((_, layer)) = held.iter().find(|(file, _)| file.as_str() == key) {
-            return Some(*layer);
+                .filter(|(file, _)| same_file(&asked, &dir.join(file)))
+                .map(|(_, layer)| *layer)
+                .max()
+                .map_or(Hold::Serve, Hold::Held),
+            Ok(_) => Hold::Serve,
+            // Not readable in a folder that is there: `file` reads the
+            // same path and fails the same way (its 404); a held-back file
+            // is never in the folder being swapped in.
+            Err(_) if dir.is_dir() => Hold::Serve,
+            // The folder went away under the request: held back.
+            Err(_) => Hold::Building,
         }
-        held.iter()
-            .filter(|(file, _)| same_file(&asked, &dir.join(file.as_str())))
-            .map(|(_, layer)| *layer)
-            .max()
     }
 
     /// Whether `audience`'s link answers `rest` (a path below it), in
@@ -698,6 +715,15 @@ impl Shares {
             } else {
                 Guard::Refused
             };
+        }
+        // A file of its own notes that its build held back (above its
+        // layer, #528): its own, answered by the layer check after this.
+        let vault_path = key.trim_start_matches('/');
+        if listed()
+            .iter()
+            .any(|e| e.files.iter().any(|f| f == vault_path))
+        {
+            return Guard::Open;
         }
         // A note or a file of the share that is not this audience's.
         let others = whole.is_some_and(|w| note(&w).is_some() || w.files.contains_key(key));
@@ -1022,6 +1048,13 @@ impl Shares {
             .is_some_and(|m| m.pages.contains_key(key) || (key == "/" && !m.pages.is_empty()))
     }
 
+    /// Have every vault's shares built again (the layer rules changed).
+    fn kick_all(&self) {
+        for vault in self.0.backend.vault_ids() {
+            self.kick(&vault).notify_one();
+        }
+    }
+
     /// Where an audience's pages are built.
     fn audience_dir(&self, share: &str, audience: &str) -> PathBuf {
         self.0.out.join(share).join("audiences").join(audience)
@@ -1221,25 +1254,33 @@ impl ShareLinks for SharesLane {
         self.0.audience_listen(&code, &name, listen).await
     }
 
-    async fn kept_layers(&self) -> Result<Vec<KeptLayers>, ShareFault> {
+    async fn kept_layers(&self) -> Result<LayersReport, ShareFault> {
         caller()?;
         let layers = self.0.0.layers.clone();
-        blocking(move || layers.kept())
+        blocking(move || layers.report())
             .await
             .ok_or_else(|| ShareFault::Internal("the kept rules did not read".to_owned()))
     }
 
-    async fn forget_layers(&self, extension: String) -> Result<Vec<KeptLayers>, ShareFault> {
+    async fn forget_layers(&self, extension: String) -> Result<LayersReport, ShareFault> {
         caller()?;
         let layers = self.0.0.layers.clone();
         let forgotten = blocking(move || layers.forget(&extension))
             .await
             .ok_or_else(|| ShareFault::Internal("the kept rules did not read".to_owned()))?
             .map_err(ShareFault::Invalid)?;
-        for vault in self.0.0.backend.vault_ids() {
-            self.0.kick(&vault).notify_one();
-        }
+        self.0.kick_all();
         Ok(forgotten)
+    }
+
+    async fn acknowledge_layers(&self) -> Result<LayersReport, ShareFault> {
+        caller()?;
+        let layers = self.0.0.layers.clone();
+        let report = blocking(move || layers.acknowledge())
+            .await
+            .ok_or_else(|| ShareFault::Internal("the kept rules did not read".to_owned()))?;
+        self.0.kick_all();
+        Ok(report)
     }
 
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault> {
@@ -1442,6 +1483,15 @@ async fn serve(
             comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
         }
         _ => {
+            // A rebuild swaps the folder in with two renames; in between
+            // it is not there for a moment. Wait that out first, so every
+            // check below sees the folder that will answer.
+            for _ in 0..SWAP_WAITS {
+                if dir.is_dir() {
+                    break;
+                }
+                tokio::time::sleep(SWAP_WAIT).await;
+            }
             // An audience's link: checked now, against the vault as it
             // is, whatever was built.
             if let Some(audience) = &audience {
@@ -1451,10 +1501,10 @@ async fn serve(
             }
             // A file above the link's layer, by any name: refused here,
             // whatever the page shows.
-            if let Some(needs) =
-                needs_layer(shares, &share, link.code(), &dir, rest, link.listen).await
-            {
-                return private(&share, layer_refusal(link.listen, needs));
+            match needs_layer(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
+                Hold::Serve => {}
+                Hold::Held(needs) => return private(&share, layer_refusal(link.listen, needs)),
+                Hold::Building => return private(&share, being_built()),
             }
             let mut response = file(&dir, rest, &headers).await;
             // Comments go on a page that is there, never on a 404 (whose
@@ -1512,30 +1562,40 @@ async fn refuse(
     }
 }
 
-/// The layer the file at `rest` needs, when it is above `cap`
-/// ([`Shares::above`]).
+/// Whether the file at `rest` is held back from a link that plays to
+/// `cap` ([`Shares::above`]).
 async fn needs_layer(
     shares: &Shares,
     share: &Share,
-    code: &str,
+    audience: Option<&ShareAudience>,
     dir: &Path,
     rest: &str,
     cap: Listen,
-) -> Option<Listen> {
+) -> Hold {
     if cap == Listen::Full {
-        return None;
+        return Hold::Serve;
     }
-    let (shares, share, code, dir, rest) = (
+    let (shares, share, audience, dir, rest) = (
         shares.clone(),
         share.clone(),
-        code.to_owned(),
+        audience.cloned(),
         dir.to_owned(),
         rest.to_owned(),
     );
     // Not answered: held back, never served.
-    blocking(move || shares.above(&share, &code, &dir, &rest, cap))
+    blocking(move || shares.above(&share, audience.as_ref(), &dir, &rest, cap))
         .await
-        .unwrap_or(Some(Listen::Full))
+        .unwrap_or(Hold::Held(Listen::Full))
+}
+
+/// `503`: the link's pages are being built (or a file of it cannot be
+/// read now).
+fn being_built() -> Response {
+    page(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Being built",
+        "<p>This link's pages are being built. Try again in a moment.</p>",
+    )
 }
 
 /// `403` for a file of layer `needs` on a link that plays to `cap`: the
@@ -1584,33 +1644,12 @@ fn private(share: &Share, mut response: Response) -> Response {
 /// is read whole (comments and the bar go into it); any other file is
 /// streamed and answers `Range` (`206`, `Accept-Ranges`), so a page's
 /// `<audio>` and `<video>` seek without downloading the file (#511).
-async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
-    // A rebuild swaps the folder in with two renames; in between it is
-    // not there for a moment. Wait that moment out rather than answer
-    // "being built" for a link that is built.
-    for _ in 0..SWAP_WAITS {
-        if dir.exists() {
-            break;
-        }
-        tokio::time::sleep(SWAP_WAIT).await;
-    }
-    let response = file_once(dir, rest, headers).await;
-    if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-        tokio::time::sleep(SWAP_WAIT).await;
-        if dir.exists() {
-            return file_once(dir, rest, headers).await;
-        }
-    }
-    response
-}
-
 /// How long, and how many times, a request waits for a link's folder
-/// being swapped in by a rebuild.
+/// being swapped in by a rebuild (in [`serve`], before any check).
 const SWAP_WAIT: Duration = Duration::from_millis(20);
 const SWAP_WAITS: usize = 10;
 
-/// [`file`], once.
-async fn file_once(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
+async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
     let decoded = decode(rest);
     let safe = !decoded
         .split('/')
@@ -2331,12 +2370,12 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     let Some(listed) = shares.listed_for(link, &by).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let files: Vec<(String, PathBuf)> = listed
+    let files: Vec<(String, PathBuf, String)> = listed
         .groups
         .iter()
         .filter(|g| group.as_ref().is_none_or(|want| *want == g.label))
         .flat_map(|g| g.files.iter())
-        .map(|f| (f.archive.clone(), listed.root.join(&f.file)))
+        .map(|f| (f.archive.clone(), listed.root.join(&f.file), f.file.clone()))
         .collect();
     if files.is_empty() {
         return page(
@@ -2351,8 +2390,12 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     );
     let code = link.code().to_owned();
     let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Vec<u8>>>(4);
+    let still = Still {
+        shares: shares.clone(),
+        code: code.clone(),
+    };
     tokio::spawn(async move {
-        if let Err(error) = write_archive(files, &tx).await {
+        if let Err(error) = write_archive(files, &still, &tx).await {
             tracing::warn!(%code, %error, "a share archive stopped");
             // The download ends short of its directory: an archive that
             // does not open, never one that looks whole and is not.
@@ -2374,6 +2417,38 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     response
 }
 
+/// Whether a link still serves a file, asked by an archive in progress.
+struct Still {
+    shares: Shares,
+    /// The link's code (a share's own, or an audience's).
+    code: String,
+}
+
+impl Still {
+    /// Whether the link is live and `file` (a vault path) not above its
+    /// layer, now.
+    async fn serves(&self, file: &str) -> bool {
+        let Some((share, audience)) = self.shares.link(&self.code) else {
+            return false;
+        };
+        if share.state(now()) != ShareState::Live {
+            return false;
+        }
+        let cap = share.listen_for(audience.as_ref());
+        if cap == Listen::Full {
+            return true;
+        }
+        let (shares, file) = (self.shares.clone(), file.to_owned());
+        blocking(move || {
+            shares
+                .placed(&share)
+                .is_some_and(|placed| placed.get(&file).is_none_or(|layer| *layer <= cap))
+        })
+        .await
+        .unwrap_or(false)
+    }
+}
+
 /// Write `files` (each: its path in the archive, the file to read) to
 /// `to` as a zip, a piece at a time. A file that is gone is left out.
 ///
@@ -2381,13 +2456,22 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
 ///
 /// A file could not be read through, or nobody is reading any more.
 async fn write_archive(
-    files: Vec<(String, PathBuf)>,
+    files: Vec<(String, PathBuf, String)>,
+    still: &Still,
     to: &tokio::sync::mpsc::Sender<std::io::Result<Vec<u8>>>,
 ) -> std::io::Result<()> {
     use tokio::io::AsyncReadExt as _;
     let gone = |_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the reader left");
     let mut zip = ZipWriter::new();
-    for (name, path) in files {
+    for (name, path, vault_path) in files {
+        // Decided when the archive began; asked again before each file,
+        // so a revoke, an expiry or a lowered layer stops it there.
+        if !still.serves(&vault_path).await {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "the link no longer serves the rest",
+            ));
+        }
         let Ok(mut file) = tokio::fs::File::open(&path).await else {
             tracing::debug!(path = %path.display(), "a shared file is gone; left out of the archive");
             continue;
