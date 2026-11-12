@@ -11,6 +11,15 @@
 #       fts-forge (`just release`); YOUR own tagging as the bot needs it too.
 #       Studio has this ruleset already (25679805).
 #
+#   scripts/github-rulesets.sh immutable architect|keyflow|studio [--apply]
+#       GitHub's immutable releases: once a release is PUBLISHED its assets
+#       and its tag can no longer be changed or deleted (notes still can).
+#       Architect publishes its release only after `sums` has signed every
+#       asset (release.yml), so it can turn this on now. Studio cannot yet:
+#       several workflows attach to its one Release after it is published
+#       (desktop, studio-architect), which immutability would refuse; it
+#       needs one publishing job that waits for all of them first.
+#
 #   scripts/github-rulesets.sh codeowners architect|keyflow|studio [--apply]
 #       main: a PR that touches what .github/CODEOWNERS lists (the
 #       workflows, the release scripts) needs the code owner's approval.
@@ -22,11 +31,19 @@
 set -euo pipefail
 
 FTS_FORGE_APP_ID=5391924
-kind="${1:?usage: github-rulesets.sh tag|codeowners <repo> [--apply]}"
+kind="${1:?usage: github-rulesets.sh tag|codeowners|immutable <repo> [--apply]}"
 repo="${2:?repo}"
 apply="${3:-}"
 
 case "$kind" in
+    immutable)
+        case "$repo" in architect | keyflow | studio) ;; *) echo "immutable: architect, keyflow or studio" >&2; exit 1 ;; esac
+        if [ "$apply" = --apply ]; then
+            gh api -X PUT "repos/FastTrackStudios/$repo/immutable-releases" --silent && echo "immutable releases on for $repo"
+        else
+            echo "would run: gh api -X PUT repos/FastTrackStudios/$repo/immutable-releases (now: $(gh api "repos/FastTrackStudios/$repo/immutable-releases" --jq .enabled 2>/dev/null || echo unknown))"
+        fi
+        exit 0 ;;
     tag)
         case "$repo" in architect | keyflow) ;; *) echo "tag ruleset: architect or keyflow (studio has one)" >&2; exit 1 ;; esac
         json="$(cat <<JSON
@@ -65,7 +82,7 @@ JSON
 }
 JSON
 )" ;;
-    *) echo "usage: github-rulesets.sh tag|codeowners <repo> [--apply]" >&2; exit 1 ;;
+    *) echo "usage: github-rulesets.sh tag|codeowners|immutable <repo> [--apply]" >&2; exit 1 ;;
 esac
 
 if [ "$apply" = --apply ]; then
