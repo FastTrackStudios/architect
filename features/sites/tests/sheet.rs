@@ -1,8 +1,8 @@
 //! The site's sheet (`assets/site.css`) as old browsers read it:
 //! Safari 16.0 and 16.1 have no `color-mix()`, so every declaration of
-//! the player's and the playlist's that mixes a colour comes after a
-//! plain one of the same property (the older browser keeps the plain
-//! one); and the small icon buttons a finger taps are 44 px square.
+//! the sheet that mixes a colour comes after a plain one of the same
+//! property (the older browser keeps the plain one); and the small icon
+//! buttons a finger taps are 44 px square.
 
 #![allow(
     clippy::unwrap_used,
@@ -58,7 +58,9 @@ fn rules(css: &str) -> Vec<(String, String)> {
 #[test]
 fn every_mixed_colour_has_a_plain_one_before_it() {
     let mut missing = Vec::new();
-    for (selector, body) in rules(players_part()) {
+    // The whole sheet: every page's rules (the header, the navigator, the
+    // tables) as well as the player's.
+    for (selector, body) in rules(SHEET) {
         let decls: Vec<(String, String)> = body
             .split(';')
             .filter_map(|d| d.split_once(':'))
