@@ -21,8 +21,22 @@
 // A block needs no script to follow it: a `[data-follow-playhead]`
 // element's `[data-at]` children (seconds) are marked aria-current="time"
 // at the playhead, scrolled to inside the nearest box that scrolls them,
-// and seek there on a click. They may be HTML or SVG elements (a chart's
+// and seek there on a click (an item is its nearest box's: a box inside a
+// box follows its own). They may be HTML or SVG elements (a chart's
 // `<rect data-at>` per bar, keyflow#59).
+//
+// An item may glide: with `data-glide="d"` the item marked moves `d` along
+// x (in the units of its own `x`; px for HTML) as the playhead goes from
+// its `data-at` to the next item's, or to its own `data-until` when it has
+// one (the last item, or one that holds still before the next), on every
+// frame while playing and exactly where the playhead is on a seek or a
+// pause: a chart's playhead line gliding across its beats (Session's
+// cursor, studio's `follow.rs`). Where the next item is on another line,
+// the glide ends where this line does, and the next item shows where it
+// is. It moves by a transform of that one element (the SVG `transform`
+// attribute, an HTML element's style); the item left goes back to where
+// it is drawn. A box with gliding items marks them at the playhead itself
+// (a box without marks a line 50 ms early, as lyrics are read ahead).
 //
 // A playlist (`[data-playlist]`, a block's list of songs) makes the page
 // a player: its tracks (`[data-track][data-media]`, each with
@@ -55,6 +69,7 @@
 (function () {
   "use strict";
   var doc = document;
+  var SVG_NS = "http://www.w3.org/2000/svg";
   var arch = (window.architect = window.architect || {});
   if (arch.playhead) return;
 
@@ -259,7 +274,7 @@
   var last = "";
   function emit(force) {
     var s = snapshot();
-    var key = [s.time.toFixed(2), s.playing, s.rate, s.src, s.duration].join("|");
+    var key = [s.time.toFixed(3), s.playing, s.rate, s.src, s.duration].join("|");
     if (!force && key === last) return;
     last = key;
     listeners.slice().forEach(function (fn) {
@@ -329,6 +344,8 @@
     cur = indexOf(src);
     emit(true);
     save(true);
+    // Followed each frame from its first play, not each timeupdate.
+    kick();
   }
 
   // Make track `i` current, at `time`; play it when `play`. A track of
@@ -483,20 +500,38 @@
   // Blocks that follow without a script: the page's, and the now-playing
   // view's while it shows another page's.
   function line(box) {
-    var items = Array.prototype.slice.call(box.querySelectorAll("[data-at]"));
+    // Its own items: a box inside it (a chart's beats under its bars)
+    // follows its own.
+    var items = Array.prototype.slice.call(box.querySelectorAll("[data-at]")).filter(function (i) {
+      return i.parentElement && i.parentElement.closest("[data-follow-playhead]") === box;
+    });
     var media = box.getAttribute("data-media");
     box.addEventListener("click", function (ev) {
       var item = ev.target.closest("[data-at]");
-      if (!item || !box.contains(item)) return;
+      if (!item || items.indexOf(item) < 0) return;
       var at = parseFloat(item.getAttribute("data-at"));
       if (isFinite(at)) playhead.seek(at, media ? { src: media } : undefined);
     });
+    var at = items.map(function (i) { return parseFloat(i.getAttribute("data-at")) || 0; });
+    // Each item's glide: how far it moves, and when it is there.
+    var glides = items.map(function (item, i) {
+      var d = parseFloat(item.getAttribute("data-glide"));
+      if (!isFinite(d)) return null;
+      var until = parseFloat(item.getAttribute("data-until"));
+      if (!isFinite(until)) until = i + 1 < at.length ? at[i + 1] : NaN;
+      return { by: d, until: until };
+    });
+    var glides_ = glides.some(function (g) { return g; });
     return {
       box: box,
       media: media ? path(media, box) : null,
       items: items,
-      at: items.map(function (i) { return parseFloat(i.getAttribute("data-at")) || 0; }),
+      at: at,
+      glides: glides_ ? glides : null,
       current: null,
+      // The item moved, and its own transform before it was.
+      moved: null,
+      base: null,
     };
   }
   var lines = Array.prototype.map.call(followers, line);
@@ -504,23 +539,30 @@
     var boxes = Array.prototype.slice.call(root.querySelectorAll("[data-follow-playhead]"));
     // The root itself, when it is one (a lyrics list brought in whole).
     if (root.hasAttribute && root.hasAttribute("data-follow-playhead")) boxes.unshift(root);
-    lines = lines.filter(function (f) { return boxes.indexOf(f.box) < 0; });
+    lines = lines.filter(function (f) {
+      if (boxes.indexOf(f.box) < 0) return true;
+      // A box let go of: its glided item back where it is drawn.
+      if (f.moved) shift(f.moved, f.base, null);
+      return false;
+    });
     if (on) lines = lines.concat(boxes.map(line));
     emit(true);
   }
   function follow_(s) {
     lines.forEach(function (f) {
       var mine = f.media ? s.src === f.media : s.here;
-      var found = null;
+      var found = null, best = -1;
       if (mine) {
         // The last line that has started.
-        var lo = 0, hi = f.at.length - 1, best = -1;
+        var ahead = f.glides ? 0 : 0.05;
+        var lo = 0, hi = f.at.length - 1;
         while (lo <= hi) {
           var mid = (lo + hi) >> 1;
-          if (f.at[mid] <= s.time + 0.05) { best = mid; lo = mid + 1; } else hi = mid - 1;
+          if (f.at[mid] <= s.time + ahead) { best = mid; lo = mid + 1; } else hi = mid - 1;
         }
         found = best >= 0 ? f.items[best] : null;
       }
+      if (f.glides) glide(f, best >= 0 ? best : -1, s.time);
       if (found === f.current) return;
       if (f.current) f.current.removeAttribute("aria-current");
       f.current = found;
@@ -528,6 +570,37 @@
       found.setAttribute("aria-current", "time");
       intoView(found);
     });
+  }
+
+  // Box `f`'s item `i` (-1: none) where it has glided to at `time`; the
+  // item it moved before back where it is drawn.
+  function glide(f, i, time) {
+    var item = i >= 0 ? f.items[i] : null;
+    var g = item ? f.glides[i] : null;
+    if (f.moved && f.moved !== (g ? item : null)) {
+      shift(f.moved, f.base, null);
+      f.moved = null;
+    }
+    if (!g) return;
+    if (f.moved !== item) {
+      f.moved = item;
+      f.base = item.namespaceURI === SVG_NS ? item.getAttribute("transform") : item.style.transform || "";
+    }
+    var from = f.at[i];
+    var part = g.until > from ? Math.min(1, Math.max(0, (time - from) / (g.until - from))) : 0;
+    shift(item, f.base, g.by * part);
+  }
+  // `el` moved `dx` along its x from where it is drawn (its own transform,
+  // `base`, kept); null: back where it is drawn.
+  function shift(el, base, dx) {
+    if (el.namespaceURI === SVG_NS) {
+      if (dx === null) {
+        if (base === null || base === undefined) el.removeAttribute("transform");
+        else el.setAttribute("transform", base);
+      } else el.setAttribute("transform", (base ? base + " " : "") + "translate(" + dx.toFixed(3) + " 0)");
+    } else {
+      el.style.transform = dx === null ? base || "" : (base ? base + " " : "") + "translateX(" + dx.toFixed(3) + "px)";
+    }
   }
 
   // The nearest box that scrolls `el`, below the page itself: a lyrics

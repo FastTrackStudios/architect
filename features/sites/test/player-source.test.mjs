@@ -8,6 +8,10 @@
 //   `[data-at]` lines follow it each frame, the page's media is paused
 //   and its bar hidden, and seeks, plays and pauses go to the source.
 // - Detached, the page's player takes over where the source was.
+// - A box whose items glide (`data-glide`, a chart's playhead line) moves
+//   the item at the playhead along x with the time between its own and
+//   the next's, on each frame, a seek, a pause and with a source; across
+//   a line break, and back where it is drawn once left.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -20,9 +24,12 @@ const PLAYER = readFileSync(process.env.ARCHITECT_PLAYER_JS || join(here, '../as
 
 // ── A DOM just big enough for the player ────────────────────────────
 
+const SVG_TAGS = new Set(['svg', 'g', 'rect', 'line', 'path']);
+
 class Node {
   constructor(tag, attrs = {}) {
     this.tagName = tag.toUpperCase();
+    this.namespaceURI = SVG_TAGS.has(tag) ? 'http://www.w3.org/2000/svg' : 'http://www.w3.org/1999/xhtml';
     this.attrs = { ...attrs };
     this.children = [];
     this.parentElement = null;
@@ -151,7 +158,7 @@ function page({ media = ['/s/x/joy.mp3'], chartMedia = null, build = null } = {}
   vm.runInNewContext(PLAYER, window);
   const frame = () => frames.splice(0).forEach((f) => f());
   const current = () => bars.findIndex((b) => b.getAttribute('aria-current') === 'time');
-  return { window, playhead: window.architect.playhead, players, chart, bars, events, frame, current, body };
+  return { window, playhead: window.architect.playhead, players, chart, bars, events, frame, frames, current, body };
 }
 
 /// An engine's clock: a time it is told, playing or not, recording what
@@ -370,4 +377,182 @@ test('a row that is also a follow box (written for a page without playlists) pla
   assert.equal(p.playhead.src, '/s/x/silent.mp4');
   assert.equal(p.playhead.playing, true, 'playing, not paused again');
   assert.equal(rows[1].getAttribute('aria-current'), 'true');
+});
+
+// ── A gliding line: a chart's playhead between its beats ───────────
+
+/// A chart's beats, two lines of it: each beat's line (`x`, `y`) moves
+/// `data-glide` until the next beat; the last beat of the first line
+/// glides to that line's end (80), the next beat is on the second line.
+/// The beats are not evenly spaced (a tempo change at 1 s).
+const BEATS = [
+  { at: 0, x: 10, y: 0, glide: 20 },
+  { at: 1, x: 30, y: 0, glide: 20 },
+  { at: 1.5, x: 50, y: 0, glide: 30 },
+  { at: 2, x: 10, y: 100, glide: 20 },
+  { at: 3, x: 30, y: 100, glide: 20, until: 4 },
+];
+
+function beats(opts = {}) {
+  const items = [];
+  const p = page({
+    ...opts,
+    build: (body) => {
+      const svg = body.appendChild(new Node('svg'));
+      const box = svg.appendChild(new Node('g', { 'data-follow-playhead': '' }));
+      for (const b of BEATS) {
+        const attrs = { 'data-at': String(b.at), x: String(b.x), y: String(b.y), width: '1.5', height: '40' };
+        if (opts.glide !== false) attrs['data-glide'] = String(b.glide);
+        if (b.until && opts.glide !== false) attrs['data-until'] = String(b.until);
+        items.push(box.appendChild(new Node('rect', attrs)));
+      }
+    },
+  });
+  /// Where the line is: [x, y] of the marked beat, its glide added.
+  const line = () => {
+    const marked = items.filter((i) => i.getAttribute('aria-current') === 'time');
+    assert.equal(marked.length, 1, 'one beat marked');
+    const [b] = marked;
+    const moved = items.filter((i) => i.getAttribute('transform') !== null);
+    assert.ok(moved.every((i) => i === b), 'only the marked beat is moved');
+    const m = /^translate\(([-\d.]+) 0\)$/.exec(b.getAttribute('transform') || 'translate(0 0)');
+    assert.ok(m, `a translate: ${b.getAttribute('transform')}`);
+    return [Number(b.getAttribute('x')) + Number(m[1]), Number(b.getAttribute('y'))];
+  };
+  return { ...p, items, line };
+}
+
+const near = (got, want, what) => assert.ok(Math.abs(got - want) < 1e-6, `${what}: ${got}, not ${want}`);
+
+test('a gliding line moves with the time between its beats, every frame while it plays', () => {
+  const p = beats();
+  const [audio] = p.players;
+  audio.play();
+  // Mid-beat: half of the first beat's glide, then a quarter of the next.
+  audio.currentTime = 0.5;
+  p.frame();
+  let [x, y] = p.line();
+  near(x, 20, 'half way through the first beat');
+  assert.equal(y, 0);
+  audio.currentTime = 1.25;
+  p.frame();
+  [x] = p.line();
+  near(x, 40, 'half way through the second (a half-second beat)');
+  assert.equal(p.items[0].getAttribute('transform'), null, 'the beat left is back where it is drawn');
+  // No lead: the next beat is marked when it starts, not 50 ms before.
+  audio.currentTime = 1.47;
+  p.frame();
+  assert.equal(p.items[2].getAttribute('aria-current'), null);
+  // Each frame moves it (no wait for a timeupdate).
+  const xs = [];
+  for (const t of [1.6, 1.7, 1.8, 1.9]) {
+    audio.currentTime = t;
+    p.frame();
+    xs.push(p.line()[0]);
+  }
+  xs.forEach((v, i) => near(v, 50 + 30 * ((0.1 * (i + 1)) / 0.5), `frame ${i}`));
+});
+
+test('across a line break it glides to the line\'s end, then shows on the next line', () => {
+  const p = beats();
+  const [audio] = p.players;
+  audio.play();
+  audio.currentTime = 1.999;
+  p.frame();
+  let [x, y] = p.line();
+  near(x, 50 + 30 * (0.499 / 0.5), 'at the first line\'s end');
+  assert.equal(y, 0);
+  audio.currentTime = 2.0;
+  p.frame();
+  [x, y] = p.line();
+  near(x, 10, 'the next line\'s first beat');
+  assert.equal(y, 100);
+  assert.equal(p.items[2].getAttribute('transform'), null);
+  audio.currentTime = 2.75;
+  p.frame();
+  near(p.line()[0], 25, 'gliding on the next line');
+  // The last beat glides until its own `data-until`, then holds.
+  audio.currentTime = 3.5;
+  p.frame();
+  near(p.line()[0], 40, 'half way to its until');
+  audio.currentTime = 9;
+  p.frame();
+  near(p.line()[0], 50, 'held at its end');
+});
+
+test('a seek and a pause put the line exactly where the playhead is', () => {
+  const p = beats();
+  const [audio] = p.players;
+  p.playhead.seek(1.25, { play: false });
+  assert.equal(audio.paused, true);
+  near(p.line()[0], 40, 'after a seek, paused');
+  p.playhead.seek(0.25);
+  near(p.line()[0], 15, 'after a seek back');
+  audio.play();
+  audio.currentTime = 2.5;
+  audio.pause();
+  near(p.line()[0], 20, 'paused');
+  assert.equal(p.items[1].getAttribute('transform'), null);
+});
+
+test('a source\'s clock moves the line too, each frame', () => {
+  const p = beats();
+  const e = engine({ at: 0.5, on: true });
+  p.playhead.attach(e);
+  near(p.line()[0], 20, 'at the source\'s time');
+  e.at = 2.25;
+  p.frame();
+  const [x, y] = p.line();
+  near(x, 15, 'a frame later');
+  assert.equal(y, 100);
+  e.on = false;
+  e.at = 1.75;
+  p.playhead.seek(1.75);
+  near(p.line()[0], 65, 'a seek of the source');
+});
+
+test('a box without glides marks its beats as before, and a beat\'s own transform is kept', () => {
+  const p = beats({ glide: false });
+  const [audio] = p.players;
+  audio.play();
+  audio.currentTime = 1.96;
+  p.frame();
+  assert.equal(p.items[3].getAttribute('aria-current'), 'time', 'marked 50 ms early, as lyrics are');
+  assert.ok(p.items.every((i) => i.getAttribute('transform') === null), 'nothing moved');
+  // A beat drawn with a transform of its own glides from there, and goes
+  // back to it.
+  const q = beats();
+  q.items[0].setAttribute('transform', 'scale(1 1)');
+  q.players[0].play();
+  q.players[0].currentTime = 0.5;
+  q.frame();
+  assert.equal(q.items[0].getAttribute('transform'), 'scale(1 1) translate(10.000 0)');
+  q.players[0].currentTime = 1.1;
+  q.frame();
+  assert.equal(q.items[0].getAttribute('transform'), 'scale(1 1)');
+});
+
+test('a box inside a box follows its own items (a chart\'s beats under its bars)', () => {
+  let bars, beats;
+  const p = page({
+    build: (body) => {
+      const svg = body.appendChild(new Node('svg', { 'data-follow-playhead': '' }));
+      bars = [0, 2].map((at) => svg.appendChild(new Node('rect', { 'data-at': String(at) })));
+      const box = svg.appendChild(new Node('g', { 'data-follow-playhead': '' }));
+      beats = [0, 1, 2, 3].map((at) => box.appendChild(new Node('rect', { 'data-at': String(at), 'data-glide': '10' })));
+    },
+  });
+  const [audio] = p.players;
+  audio.play();
+  audio.currentTime = 2.5;
+  p.frame();
+  assert.equal(bars[1].getAttribute('aria-current'), 'time', 'the bar at 2 s');
+  assert.equal(beats[2].getAttribute('aria-current'), 'time', 'the beat at 2 s');
+  assert.equal(beats[2].getAttribute('transform'), 'translate(5.000 0)');
+  assert.ok(bars.every((b) => b.getAttribute('transform') === null), 'the bars do not glide');
+  // A click on a beat seeks once, to it.
+  p.playhead.pause();
+  audio.currentTime = 0;
+  p.body.children[0].children[2].dispatch('click', { target: beats[3] });
+  assert.equal(audio.currentTime, 3);
 });
