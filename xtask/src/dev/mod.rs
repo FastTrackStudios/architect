@@ -46,9 +46,11 @@ const DEMO_VAULT: &str = "apps/ui/demo-vault";
 /// a share link per audience kind.
 const SEED_OVERLAY: &str = "scripts/dev-stack/seed-vault";
 
-/// The keychain service the stack's app keeps its sessions under: never the
-/// app's own, so a local session and a real one never meet.
-const DEV_KEYCHAIN: &str = "app.fasttrackstudio.architect.dev-stack";
+/// Where the stack's app keeps its sessions: a file in its own folder
+/// (`ARCHITECT_SECRET_STORE`), never the platform keychain, which would ask
+/// the person at the screen on every rebuild (an unsigned binary is a new
+/// identity to macOS each time); `ARCHITECT_FORBID_KEYCHAIN` makes sure.
+const APP_SECRETS: &str = "secrets.json";
 
 /// Inherited variables no process of the stack sees: each is given exactly
 /// what the stack decides, and nothing a shell happened to export (a peer,
@@ -372,7 +374,11 @@ impl Stack {
             Process::App => vec![
                 pair("ARCHITECT_AUTH_ISSUER", auth),
                 pair("ARCHITECT_ORG_HOST", Self::url(p.node)),
-                pair("ARCHITECT_KEYCHAIN_SERVICE", DEV_KEYCHAIN.to_owned()),
+                pair(
+                    "ARCHITECT_SECRET_STORE",
+                    format!("file:{}", self.state.join("app").join(APP_SECRETS).display()),
+                ),
+                pair("ARCHITECT_FORBID_KEYCHAIN", "1".to_owned()),
                 pair(
                     "ARCHITECT_CONFIG_DIR",
                     self.state.join("app").display().to_string(),
@@ -1187,6 +1193,21 @@ mod tests {
             let refused = guard::check_settings(&stack.env_for(process, None), &stack.production);
             assert!(refused.is_empty(), "{process:?}: {refused:?}");
         }
+    }
+
+    #[test]
+    fn the_stacks_app_never_opens_the_platform_keychain() {
+        let stack = stack();
+        let env = stack.env_for(Process::App, None);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("ARCHITECT_FORBID_KEYCHAIN"), Some("1"));
+        assert!(get("ARCHITECT_KEYCHAIN_SERVICE").is_none());
+        let store = get("ARCHITECT_SECRET_STORE").unwrap();
+        let path = store.strip_prefix("file:").unwrap();
+        assert!(
+            std::path::Path::new(path).starts_with(&stack.state),
+            "the sessions live in the stack's own state: {path}"
+        );
     }
 
     #[test]

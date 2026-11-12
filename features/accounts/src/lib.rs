@@ -47,11 +47,16 @@ pub mod share_actions;
 pub mod ui;
 
 pub use model::{Account, AccountsFile, DEVICE_ORG, Device, OrgHost, device_org, with_device_org};
+#[cfg(not(target_arch = "wasm32"))]
+pub use secrets::FileSecrets;
 pub use secrets::{MemorySecrets, SecretError, SecretStore};
 pub use store::{AccountStore, ActiveSession, StoreError};
 
 #[cfg(all(feature = "keychain", not(target_arch = "wasm32")))]
-pub use keychain::{DEFAULT_SERVICE, Keychain, SERVICE_ENV};
+pub use keychain::{
+    DEFAULT_SERVICE, FORBID_ENV, Keychain, SECRETS_FILE, SERVICE_ENV, STORE_ENV, StoreChoice,
+    choose_store, development_build, keychain_forbidden, secret_store,
+};
 
 #[cfg(all(feature = "http", not(target_arch = "wasm32")))]
 pub use controller::{Accounts, BrowserWait, Sheet, Status};

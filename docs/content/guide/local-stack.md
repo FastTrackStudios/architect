@@ -21,7 +21,7 @@ in this order, each waiting for the one before it to answer:
 | `mock-oauth` | 7410 | | The stand-in for GitHub, Google and TONE3000 (`apps/mock-oauth`): the auth server's social buttons work with nobody's credentials. |
 | `auth` | 7411 | `mock-oauth` | The auth server (`apps/auth-server`): SQLite on disk under the stack's state, a secret of its own generated on its first start, filled as below. |
 | `node` | 7412 | `auth` | `architect-desktop serve`, built without the window: signed in to the local auth server, hosting the fill's org and a vault of the demo's content, `ARCHITECT_IROH=local`, files in a local folder. |
-| `app` | (a window) | `node` | The Architect app under `dx serve`: its issuer the local auth server, its orgs' node the local node (`ARCHITECT_ORG_HOST`), a folder and a keychain service of its own, a scratch copy of the demo vault. |
+| `app` | (a window) | `node` | The Architect app under `dx serve`: its issuer the local auth server, its orgs' node the local node (`ARCHITECT_ORG_HOST`), a folder of its own with its sessions in a file there (never the keychain), a scratch copy of the demo vault. |
 | `web` | 7413 | `auth` | Off by default (`devenv up web`): the web front end (`scripts/web-bundle.sh`), its `config.json` pointed at the local issuer. |
 | `site` | 7414 | | Off by default (`devenv up site`): `apps/site`'s dev server. |
 
@@ -136,7 +136,7 @@ Every guarantee is code, run before any process starts, and tested:
 | The node cannot find or be found by a production peer: no relay, no lookup, loopback only. | `ARCHITECT_IROH=local` (`apps/desktop/src/node/mod.rs` `bind_iroh`); its status reports `relays` and `iroh_addrs` | `apps/desktop/tests/node.rs` `a_local_node_has_no_relay_and_listens_on_loopback_only`; `xtask/tests/dev_stack.rs` reads them from the running node |
 | The node is never an enrolled peer of production: a local edit cannot reach it. | It signs in only to the local auth server and enrols nowhere (`ARCHITECT_ENROL_AT` and `ARCHITECT_PEERS` are never set, and stripped if inherited) | `xtask/src/dev/mod.rs` `the_node_runs_local_iroh_and_signs_in_locally` |
 | Mirrored data at rest is the developer's alone. | Folders `0700`, files `0600` (`write_private`, `private_dir`); `.devenv/` is git-ignored | `state_files_are_private`; `xtask/tests/dev_stack.rs` checks the modes of the running stack |
-| The app's local sessions never meet real ones. | Its keychain service is `app.fasttrackstudio.architect.dev-stack` and its folder is the stack's (`ARCHITECT_CONFIG_DIR`) | `xtask/src/dev/mod.rs` `the_stack_as_configured_passes_its_own_guard` |
+| The app's local sessions never meet real ones, and the stack never opens the platform keychain. | Its sessions are a file in its own folder, the stack's (`ARCHITECT_SECRET_STORE=file:…`, `ARCHITECT_CONFIG_DIR`), with `ARCHITECT_FORBID_KEYCHAIN=1` | `xtask/src/dev/mod.rs` `the_stacks_app_never_opens_the_platform_keychain` |
 
 `just dev-guard` runs the guard alone. The production hostnames are a
 constant (`guard::PRODUCTION_DOMAIN`); only the stack's own test can add
@@ -168,6 +168,23 @@ does not have today:
 What the stack must never do instead is join production's sync: an
 enrolled or paired dev node would carry local edits back. Until the
 export exists, `just dev-refresh --vault <name>` says so and stops.
+
+## Sessions, and the keychain
+
+No development run or test touches the platform keychain. A binary rebuilt
+again and again is unsigned, a new code identity to macOS each time, so
+reading a keychain entry an earlier build wrote makes the system ask the
+person at the screen ("wants to use your confidential information stored
+in …"), on every launch, and "Always Allow" cannot stick. So the stack's
+app keeps its sessions in `secrets.json` in its own folder
+(`ARCHITECT_SECRET_STORE=file:<path>`), any debug build on macOS or the
+iOS simulator does the same in its app folder unless told otherwise, and
+every `cargo test`, `cargo nextest` and `cargo run` in the repo runs with
+`ARCHITECT_FORBID_KEYCHAIN=1` (`.cargo/config.toml`), under which
+`architect_accounts::Keychain` panics rather than open it
+(`features/accounts/src/keychain.rs` `secret_store`, `FileSecrets` in
+`features/accounts/src/secrets.rs`). A release build keeps its sessions in
+the keychain, under `ARCHITECT_KEYCHAIN_SERVICE` when set.
 
 ## Running the pieces alone
 
