@@ -1,4 +1,4 @@
-/* The landing page's and the app shell's look (apps/web). */
+/* The web app shell's look (apps/web/app, served at /app/). */
 :root {
   --bg: #111113; --fg: #ececef; --muted: #9b9ba4; --rule: #2a2a30; --card: #18181b;
   --accent: #6d7cff; --accent-fg: #fff; --problem: #f87171;

@@ -1958,6 +1958,27 @@ menu = [{ label = "Transpose", action = "LAB_CONTRIB_PIN" }]
 }
 
 #[cfg(test)]
+mod webrtc_tests {
+    /// `capabilities.webrtc` names only what there is: peer connections.
+    #[test]
+    fn a_manifest_declares_webrtc_by_name() {
+        let base = "id = \"demo.call\"\nname = \"Call\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n[capabilities]\n";
+        let m = super::Manifest::parse(&format!("{base}webrtc = [\"peer-connections\"]\n"))
+            .expect("it reads");
+        assert_eq!(m.capabilities.webrtc, ["peer-connections"]);
+        assert!(super::Manifest::parse(&format!("{base}webrtc = [\"camera\"]\n")).is_err());
+        assert!(
+            super::Manifest::parse(base)
+                .expect("none")
+                .capabilities
+                .webrtc
+                .is_empty()
+        );
+    }
+}
+
+
+#[cfg(test)]
 mod favourites_tests {
     /// `[[favourites]]` reads into the manifest, and one that breaks a
     /// rule makes the manifest fail to read.
@@ -2018,25 +2039,5 @@ mod favourites_tests {
         assert!(manifest.favourites.is_empty());
         assert_eq!(manifest.favourites_dropped.len(), 1);
         assert_eq!(manifest.share_layers.len(), 1);
-    }
-}
-
-#[cfg(test)]
-mod webrtc_tests {
-    /// `capabilities.webrtc` names only what there is: peer connections.
-    #[test]
-    fn a_manifest_declares_webrtc_by_name() {
-        let base = "id = \"demo.call\"\nname = \"Call\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n[capabilities]\n";
-        let m = super::Manifest::parse(&format!("{base}webrtc = [\"peer-connections\"]\n"))
-            .expect("it reads");
-        assert_eq!(m.capabilities.webrtc, ["peer-connections"]);
-        assert!(super::Manifest::parse(&format!("{base}webrtc = [\"camera\"]\n")).is_err());
-        assert!(
-            super::Manifest::parse(base)
-                .expect("none")
-                .capabilities
-                .webrtc
-                .is_empty()
-        );
     }
 }

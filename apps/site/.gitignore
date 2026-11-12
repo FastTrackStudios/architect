@@ -2,12 +2,6 @@ node_modules
 .output
 .nitro
 .tanstack
-.vercel
 dist
 *.local
 .env
-# Copied from apps/web/landing at build time (scripts/assets.sh): the
-# media, fonts and mark live there, never twice in git.
-public/media
-public/fonts
-public/mark.svg

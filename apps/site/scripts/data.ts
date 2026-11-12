@@ -1,9 +1,12 @@
 /**
  * The site's build-time data, written to src/data/*.json (committed):
  *
- *   release.json     the latest GitHub release and its updater manifests
- *                    (latest-linux.json, latest-macos.json: release.yml's
- *                    `linux` and `macos` jobs), for /download
+ *   release.json     the release the site is built for: its tag, page and
+ *                    date, for /download and the landing page. Nothing
+ *                    about its files: their names follow from the tag and
+ *                    the browser checks them against GitHub's API
+ *                    (src/lib/release-assets.ts), so no other release job
+ *                    has to run first
  *   changelog.json   the last releases' notes (the GitHub release bodies,
  *                    which are scripts/release-notes.sh's output), for /changelog
  *   extensions.json  the extension store's index (extensions/index.toml at
@@ -12,10 +15,18 @@
  *   bun scripts/data.ts            # all three
  *   bun scripts/data.ts release    # one or more by name
  *
- * FAIL-SOFT: a source that cannot be read (GitHub unreachable, rate
- * limited) keeps the committed file and prints a warning (a GitHub Actions
- * `::warning::` in CI). This script never exits non-zero for a network
- * failure; a build never fails because GitHub was unreachable.
+ * FAIL-SOFT by default: a source that cannot be read (GitHub unreachable,
+ * rate limited) keeps the committed file and prints a warning (a GitHub
+ * Actions `::warning::` in CI); a local or PR build never fails because
+ * GitHub was unreachable.
+ *
+ * STRICT for a release: with SITE_RELEASE_TAG=vX.Y.Z (scripts/web-bundle.sh
+ * passes ARCHITECT_RELEASE_TAG through, release.yml's `web` job sets it)
+ * /download describes THAT release (not GitHub's `latest`, which a hotfix
+ * of an older line is not) and every failure exits 1: the release must
+ * exist and /changelog must list it with its notes. Both are made by
+ * release.yml's `release` job, the only one the bundle waits for; the
+ * binaries are not asked for (they may still be building).
  *
  * GITHUB_TOKEN (or GH_TOKEN), when set, is sent to the API: unauthenticated
  * calls share a 60-an-hour limit per address. Drafts are never listed.
@@ -34,7 +45,17 @@ const repoRoot = join(site, "..", "..");
 const dataDir = join(site, "src", "data");
 
 const inCi = process.env.GITHUB_ACTIONS === "true";
+/** The release this build is for (strict), or "" (fail-soft, `latest`). */
+const releaseTag = process.env.SITE_RELEASE_TAG ?? "";
 function warn(message: string) {
+	if (releaseTag) {
+		console.error(
+			inCi
+				? `::error::site data (${releaseTag}): ${message}`
+				: `error: site data (${releaseTag}): ${message}`,
+		);
+		process.exit(1);
+	}
 	console.warn(
 		inCi ? `::warning::site data: ${message}` : `warning: ${message}`,
 	);
@@ -64,7 +85,6 @@ function write(name: string, value: unknown) {
 	console.log(`site data: wrote src/data/${name}`);
 }
 
-type GhAsset = { name: string; browser_download_url: string; size: number };
 type GhRelease = {
 	tag_name: string;
 	name: string | null;
@@ -73,67 +93,29 @@ type GhRelease = {
 	draft: boolean;
 	prerelease: boolean;
 	body: string | null;
-	assets: GhAsset[];
 };
 
-type LinuxManifest = { version: string; appimage: string; sha256: string };
-type MacManifest = { version: string; dmg: string; sha256: string };
-
-/** /download: the latest release, its manifests and its other assets. */
+/** /download and the landing page: the release (SITE_RELEASE_TAG's, or `latest`). */
 async function release() {
-	const base = `https://github.com/${REPO}/releases/latest/download`;
-	let latest: GhRelease;
+	let found: GhRelease;
 	try {
-		latest = await getJson<GhRelease>(
-			`https://api.github.com/repos/${REPO}/releases/latest`,
+		found = await getJson<GhRelease>(
+			releaseTag
+				? `https://api.github.com/repos/${REPO}/releases/tags/${releaseTag}`
+				: `https://api.github.com/repos/${REPO}/releases/latest`,
 			true,
 		);
 	} catch (e) {
-		warn(
-			`the latest release could not be read (${e}); keeping src/data/release.json`,
-		);
+		warn(`the release could not be read (${e}); keeping src/data/release.json`);
 		return;
 	}
-	// Each manifest on its own: a release without a macOS build (the job is
-	// off by default) has no latest-macos.json, which is not an error.
-	const has = (name: string) => latest.assets.some((a) => a.name === name);
-	const asset = (name: string) =>
-		latest.assets.find((a) => a.name === name)?.browser_download_url ?? null;
-	let linux: LinuxManifest | null = null;
-	let macos: MacManifest | null = null;
-	try {
-		if (has("latest-linux.json"))
-			linux = await getJson<LinuxManifest>(`${base}/latest-linux.json`);
-		if (has("latest-macos.json"))
-			macos = await getJson<MacManifest>(`${base}/latest-macos.json`);
-	} catch (e) {
-		warn(
-			`a release manifest could not be read (${e}); keeping src/data/release.json`,
-		);
-		return;
-	}
-	const node = latest.assets.find((a) =>
-		/^architect-node-.*-x86_64-linux\.tar\.gz$/.test(a.name),
-	);
+	if (releaseTag && found.tag_name !== releaseTag)
+		warn(`GitHub answered ${found.tag_name} for ${releaseTag}`);
 	write("release.json", {
-		tag: latest.tag_name,
-		version: latest.tag_name.replace(/^v/, ""),
-		url: latest.html_url,
-		publishedAt: latest.published_at,
-		linux: linux && {
-			version: linux.version,
-			url: linux.appimage,
-			sha256: linux.sha256,
-			file: linux.appimage.split("/").pop(),
-		},
-		macos: macos && {
-			version: macos.version,
-			url: macos.dmg,
-			sha256: macos.sha256,
-			file: macos.dmg.split("/").pop(),
-		},
-		node: node ? { url: node.browser_download_url, file: node.name } : null,
-		sums: asset("SHA256SUMS"),
+		tag: found.tag_name,
+		version: found.tag_name.replace(/^v/, ""),
+		url: found.html_url,
+		publishedAt: found.published_at,
 	});
 }
 
@@ -162,6 +144,12 @@ async function changelog() {
 			prerelease: r.prerelease,
 			html: marked.parse(r.body ?? "", { async: false, gfm: true }),
 		}));
+	if (releaseTag) {
+		const own = listed.find((r) => r.tag === releaseTag);
+		if (!own) warn(`${releaseTag} is not among the releases listed`);
+		else if (!releases.find((r) => r.tag_name === releaseTag)?.body?.trim())
+			warn(`${releaseTag}'s release has no notes`);
+	}
 	write("changelog.json", { repo: REPO, releases: listed });
 }
 

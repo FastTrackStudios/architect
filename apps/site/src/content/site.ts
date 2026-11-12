@@ -28,22 +28,16 @@ export const SITE = {
 } as const;
 
 /**
- * OPEN DECISION (#534): the node's public hostname once this site owns
- * `architect.fasttrackstudio.app`. The web app (`/app/…`) and share links
- * (`/s/…`) are served by the node, never through Vercel; this site only
- * REDIRECTS them here, path and query kept (scripts/assemble.sh reads this
- * constant). A placeholder until the hostname and its DNS are decided.
+ * The paths the node owns on this same origin: the web app (`/app/…`) and
+ * share links (`/s/…`). The site links them as plain same-origin paths;
+ * the server in front of the web bundle routes `/s/` to the node and
+ * serves `/app/` from the bundle (scripts/web-bundle.sh, its ROUTES.md).
+ * Never prerendered or link-checked here.
  */
-export const NODE_ORIGIN = "https://app.architect.fasttrackstudio.app";
-
-/** The paths the node owns: redirected there, never rendered here. */
 export const NODE_PATHS = ["/app", "/s"] as const;
 
 /** The docs: `docs/content` built by `architect site build`, copied in at /docs/. */
 export const DOCS_PATH = "/docs/";
-
-/** The release that `latest` means on GitHub. */
-export const RELEASES_LATEST = `${SITE.repo}/releases/latest`;
 
 /** The header's nav, on every page. */
 export const NAV_LINKS = [
@@ -51,6 +45,13 @@ export const NAV_LINKS = [
 	{ label: "Extensions", to: "/extensions" },
 	{ label: "Changelog", to: "/changelog" },
 ] as const;
+
+/**
+ * The org's minisign public key: release.yml's `sums` job signs SHA256SUMS
+ * with it (its ORG_RELEASE_KEY), and the apps' updaters pin it.
+ */
+export const ORG_RELEASE_KEY =
+	"RWRh9Gk9qaStQMhku4THMidEYrQsmAEsm2dDprUkZxShEtqfIcroM8Od";
 
 /** The Nix one-liner (the flake's default package is the release's AppImage). */
 export const NIX_RUN = "nix run github:FastTrackStudios/architect";

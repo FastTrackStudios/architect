@@ -18,8 +18,8 @@
   # prebuilt one: the runner's warm target dir builds the binary in
   # minutes, and the same binary is attached to the release.
   #
-  # The web front end (#431): the landing page, the docs and the web app
-  # (apps/web) as one static site (scripts/web-bundle.sh) behind
+  # The web front end (#431): the site (apps/site), the docs and the web
+  # app (apps/web) as one static site (scripts/web-bundle.sh) behind
   # static-web-server (apps/web/sws.toml), its own image:
   #
   #   nix build .#architect-web-image        # pure: the wasm and the docs' CLI built in the sandbox
@@ -33,6 +33,10 @@
     devenv-fleet.url = "github:FastTrackStudios/devenv-fleet/c4ddec850ad97b5da74c746bff39a988f02b13a4";
     nixpkgs.follows = "devenv-fleet/nixpkgs";
     crane.url = "github:ipetkov/crane";
+    # bun and node for apps/site (architect-site): the fleet's nixpkgs has a
+    # bun too old for its lockfile. The same revision as
+    # scripts/web-bundle.sh's and release.yml's.
+    nixpkgs-site.url = "github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980";
   };
 
   outputs =
@@ -41,6 +45,7 @@
       nixpkgs,
       devenv-fleet,
       crane,
+      nixpkgs-site,
       ...
     }:
     let
@@ -166,6 +171,62 @@
             RUSTFLAGS = "--cfg no_workspace_hack";
             nativeBuildInputs = [ pkgs.pkg-config ];
           };
+          # The site (apps/site): its node_modules from the frozen lockfile
+          # (fixed-output: the one step with a network; bump the hash with
+          # bun.lock), then every page prerendered from the committed data
+          # (apps/site/src/data; a release's own bundle is built in the dev
+          # shell, with its data fetched for the tag).
+          sitePkgs = nixpkgs-site.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+          architect-site-deps = pkgs.stdenvNoCC.mkDerivation {
+            pname = "architect-site-deps";
+            inherit version;
+            src = lib.fileset.toSource {
+              root = ./apps/site;
+              fileset = lib.fileset.unions [
+                ./apps/site/package.json
+                ./apps/site/bun.lock
+              ];
+            };
+            nativeBuildInputs = [ sitePkgs.bun ];
+            dontConfigure = true;
+            buildPhase = ''
+              export HOME=$TMPDIR
+              bun install --frozen-lockfile --no-progress --ignore-scripts --backend=copyfile
+            '';
+            installPhase = "cp -r node_modules $out";
+            dontFixup = true;
+            outputHashMode = "recursive";
+            outputHashAlgo = "sha256";
+            outputHash = "sha256-VKzU8DB6wsUBocaCB1LHIf9/A2oKJPMGuFcxksnocDA=";
+          };
+          architect-site = pkgs.stdenv.mkDerivation {
+            pname = "architect-site";
+            inherit version;
+            src = lib.cleanSourceWith {
+              src = ./apps/site;
+              filter =
+                path: _type:
+                !(builtins.elem (baseNameOf (toString path)) [
+                  "node_modules"
+                  ".output"
+                  ".nitro"
+                  ".tanstack"
+                ]);
+            };
+            nativeBuildInputs = [
+              sitePkgs.bun
+              sitePkgs.nodejs_22
+            ];
+            dontConfigure = true;
+            buildPhase = ''
+              export HOME=$TMPDIR
+              cp -r ${architect-site-deps} node_modules
+              chmod -R u+w node_modules
+              patchShebangs node_modules
+              bun run build
+            '';
+            installPhase = "cp -r .output/public $out";
+          };
           # The bundle: the same script `just web` runs, given the pieces;
           # which distribution it is (`/app/distribution.json`), from the
           # Architect app's node (`architect-desktop distribution`, #491).
@@ -175,6 +236,7 @@
                 nativeBuildInputs = [ pkgs.wasm-bindgen-cli_0_2_127 ];
                 ARCHITECT_WEB_WASM = "${architect-web-wasm}/architect_web.wasm";
                 ARCHITECT_CLI = "${architect-cli}/bin/architect";
+                ARCHITECT_SITE = "${architect-site}";
                 WASM_BINDGEN = "wasm-bindgen";
               }
               ''
@@ -228,7 +290,7 @@
                   "org.opencontainers.image.source" = "https://github.com/FastTrackStudios/architect";
                   "org.opencontainers.image.revision" = buildRev;
                   "org.opencontainers.image.version" = release;
-                  "org.opencontainers.image.description" = "Architect's web front end: the landing page, the docs and the web app, static";
+                  "org.opencontainers.image.description" = "Architect's web front end: the site, the docs and the web app, static";
                 };
               };
             };
@@ -284,6 +346,7 @@
             architect-node
             architect-cli
             architect-web-wasm
+            architect-site
             architect-web-bundle
             ;
         }
