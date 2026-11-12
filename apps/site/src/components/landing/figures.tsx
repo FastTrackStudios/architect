@@ -35,7 +35,7 @@ const FIGURES: Record<
 	},
 	synced: {
 		label:
-			"A node in the middle with a desktop, a laptop and a phone around it. Changes travel along the lines between them, in both directions.",
+			"A desktop, a laptop, a phone and a node, each linked directly to every other. Changes travel along every link, peer to peer.",
 		draw: Synced,
 	},
 	shared: {
@@ -296,11 +296,15 @@ function Embed() {
 }
 
 function Synced() {
-	// Each device and the path its changes take to the node and back.
+	// A mesh: every peer is linked to every other, the node included.
+	// Changes travel each link in both directions.
 	const links = [
-		"M112 104C170 104 190 150 216 166",
-		"M368 104C310 104 290 150 264 166",
-		"M240 292V214",
+		"M118 179H364",
+		"M204 84C150 90 110 120 92 152",
+		"M276 84C330 90 370 120 396 156",
+		"M222 296C160 290 110 250 86 228",
+		"M258 296C320 290 370 250 398 212",
+		"M240 116V268",
 	];
 	return (
 		<>
@@ -308,41 +312,31 @@ function Synced() {
 				<g key={d}>
 					<path d={d} />
 					<circle
-						className="flow"
+						className={i % 2 ? "flow back" : "flow"}
 						r="3.5"
 						style={
 							{
 								offsetPath: `path("${d}")`,
-								"--d": `${i * 0.9}s`,
-							} as React.CSSProperties
-						}
-					/>
-					<circle
-						className="flow back"
-						r="3.5"
-						style={
-							{
-								offsetPath: `path("${d}")`,
-								"--d": `${i * 0.9 + 1.6}s`,
+								"--d": `${i * 0.55}s`,
 							} as React.CSSProperties
 						}
 					/>
 				</g>
 			))}
-			{/* The node: two slabs, always on. */}
-			<Slab cx={240} cy={186} w={44} t={12} className="k" />
-			<Slab cx={240} cy={168} w={44} t={12} className="k" />
-			<text className="strong start" x="296" y="200">
+			{/* The node: one more peer, the one that is always on. */}
+			<Slab cx={240} cy={84} w={40} t={11} />
+			<Slab cx={240} cy={66} w={40} t={11} />
+			<text className="start" x="292" y="70">
 				node
 			</text>
 			{/* Desktop */}
-			<rect x="34" y="62" width="78" height="54" rx="6" />
-			<path d="M73 116v12M56 128h34" />
+			<rect className="k" x="40" y="152" width="78" height="54" rx="6" />
+			<path className="k" d="M79 206v12M62 218h34" />
 			{/* Laptop */}
-			<rect x="372" y="66" width="74" height="48" rx="6" />
-			<path d="M360 122h98" />
+			<rect className="k" x="364" y="156" width="74" height="48" rx="6" />
+			<path className="k" d="M352 212h98" />
 			{/* Phone */}
-			<rect x="222" y="292" width="36" height="56" rx="7" />
+			<rect className="k" x="222" y="268" width="36" height="56" rx="7" />
 		</>
 	);
 }

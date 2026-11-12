@@ -62,7 +62,7 @@ export const PILLARS: readonly Pillar[] = [
 		id: "synced",
 		figure: "synced",
 		title: "Synced",
-		body: "Your devices keep each other up to date, directly. A node you run is one more of them, the one that never sleeps.",
+		body: "Peer to peer: your devices sync with each other directly. A node is one more peer, the one that is always on.",
 		status: { label: "In the node today, coming to the app", href: issue(383) },
 	},
 	{
