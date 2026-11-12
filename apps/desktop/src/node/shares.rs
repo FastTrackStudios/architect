@@ -2551,14 +2551,13 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
         return Response::from_parts(parts, Body::empty());
     };
     let mut section = shell;
-    section.push_str(&if files > 0 {
-        format!(
+    if files > 0 {
+        let _ = write!(
+            section,
             "{FILES_STYLE}<nav class=\"share-files-bar\" aria-label=\"Files\"><a href=\"{m}_files/\">Files ({files})</a><a class=\"share-download\" href=\"{m}_archive.zip?by=note\" download>Download all</a></nav>",
             m = escape(link.mount)
-        )
-    } else {
-        String::new()
-    });
+        );
+    }
     if !tracks.is_empty() {
         // What the page's player may draw on its now-playing view
         // (studio#445): the runtime, the sandbox, the islands.
@@ -3275,11 +3274,7 @@ mod tests {
             path: path.to_owned(),
             title: path.to_owned(),
             properties: kind
-                .map(|k| {
-                    [("type".to_owned(), serde_json::json!(k))]
-                        .into_iter()
-                        .collect()
-                })
+                .map(|k| std::iter::once(("type".to_owned(), serde_json::json!(k))).collect())
                 .unwrap_or_default(),
             files: Vec::new(),
             art: None,

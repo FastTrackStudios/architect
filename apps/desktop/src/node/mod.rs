@@ -261,9 +261,11 @@ pub async fn start_with_islands(
     Box::pin(start_with_shell(config, given, layers, islands, Vec::new())).await
 }
 
-/// [`start_with_islands`], with note types' `favourites` (a distribution's
-/// compiled-in extensions' `[[favourites]]`): a share page's phone shell
-/// shows the tabs its root note's type declares (`architect_sites::shell`).
+/// [`start_with_islands`], with note types' `favourites`.
+///
+/// A distribution's compiled-in extensions' `[[favourites]]`: a share
+/// page's phone shell shows the tabs its root note's type declares
+/// (`architect_sites::shell`).
 ///
 /// # Errors
 ///

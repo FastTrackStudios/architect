@@ -99,10 +99,10 @@ fn target_json(target: &Target, home: &str) -> Option<Value> {
             .contains(&action.as_str())
             .then(|| json!({ "action": action })),
         Target::Place(place) => {
-            // Relative to the root page, never above it or elsewhere
-            // (`TypeFavourites::check` refused those already).
-            if place.contains(':') || place.starts_with('/') || place.split('/').any(|s| s == "..")
-            {
+            // Relative to the root page, never above it or elsewhere, and
+            // nothing a URL parser reads otherwise (`\` is `/` to it):
+            // `TypeFavourites::check` refused those already, checked again.
+            if !architect_favourites::place_ok(place) {
                 return None;
             }
             Some(json!({ "href": format!("{home}{place}") }))
@@ -311,6 +311,28 @@ on = { label = "Pause", icon = "pause" }
         let mut f = setlist();
         f.primary.as_mut().unwrap().target = Target::Action("SHARE_OFFLINE".to_owned());
         assert!(shell_json(Some(&f), "/s/abc/")["primary"].is_null());
+    }
+
+    /// A place a browser would read as another site never becomes a tab.
+    #[test]
+    fn a_place_that_would_leave_the_site_is_no_tab() {
+        for evil in [
+            "\\evil.example/",
+            "/\\evil",
+            "%5cevil",
+            "//evil.example",
+            "a:b",
+        ] {
+            assert_eq!(
+                target_json(&Target::Place(evil.to_owned()), "/"),
+                None,
+                "{evil}"
+            );
+        }
+        assert_eq!(
+            target_json(&Target::Place("#notes".to_owned()), "/s/x/"),
+            Some(json!({ "href": "/s/x/#notes" }))
+        );
     }
 
     #[test]
