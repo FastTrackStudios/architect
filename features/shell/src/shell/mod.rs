@@ -982,6 +982,12 @@ const TWO_WIDTH: f64 = 480.0;
 pub mod layer {
     /// A resize edge over its side.
     pub const EDGE: u8 = 5;
+    /// A phone's foot (the action bar, the tabs, the editing bar).
+    ///
+    /// Over the page, whose positioned content Blitz hit-tests even where the
+    /// page's `overflow: hidden` keeps it from being drawn (a calendar's
+    /// events below the fold took the tabs' presses).
+    pub const FOOT: u8 = 8;
     /// Floating panes (10 and up, the last drawn on top).
     pub const FLOAT: u8 = 10;
     /// Minimised floats' chips.
@@ -1551,7 +1557,9 @@ pub fn AppShell(
 
     rsx! {
         div {
-            style: "position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; \
+            // A stacking context (`z-index: 0`): the shell's layers stay
+            // inside it, under whatever the app draws over the shell.
+            style: "position: relative; z-index: 0; width: 100%; height: 100%; overflow: hidden; display: flex; \
                     flex-direction: {root_dir}; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
             onpointerdown,
             onpointermove,
@@ -1681,7 +1689,11 @@ pub fn AppShell(
                 }
             }
             if in_bar {
-                PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
+                // Its own layer: a press on it is its own, whatever the
+                // page hides under it (`layer::FOOT`).
+                div { style: "position: relative; z-index: {layer::FOOT}; flex-shrink: 0; display: flex; flex-direction: column;",
+                    PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
+                }
             }
             }
             if desk && status_style == StatusStyle::Badge {
@@ -1704,7 +1716,7 @@ pub fn AppShell(
             // A side open over the page.
             if over {
                 div {
-                    style: "position: absolute; top: 0; left: 0; width: 100%; height: 100%; \
+                    style: "position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: {layer::SHEET}; \
                             background: {t.scrim}; opacity: {amount.clamp(0.0, 1.0)};",
                     onclick: move |_| drawer.set(None),
                 }
@@ -1823,7 +1835,7 @@ fn Drawer(side: Side, x: f64, width: f64, screen: Screen, children: Element) -> 
     };
     rsx! {
         div {
-            style: "position: absolute; top: 0; left: {x}px; width: {width}px; height: 100%; \
+            style: "position: absolute; top: 0; left: {x}px; width: {width}px; height: 100%; z-index: {layer::SHEET}; \
                     display: flex; flex-direction: column; overflow-y: scroll; box-sizing: border-box; \
                     background: {t.sheet}; box-shadow: 0 0 48px rgba(0,0,0,0.55); \
                     padding: {ins.top + 8.0}px {pad_r}px {ins.bottom + 8.0}px {pad_l}px;",
