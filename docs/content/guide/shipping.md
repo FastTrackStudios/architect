@@ -87,6 +87,7 @@ release-notes`). Architect, the app, is released from the same tag
 | `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the landing page, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz` |
 | `linux` | `Architect-linux-x86_64.AppImage` (`scripts/desktop/linux.sh`) and `latest-linux.json`: the version, the AppImage's URL and its sha256, for the updater |
 | `macos` | `Architect-macos-arm64.dmg`, Developer-ID signed and notarized (`scripts/desktop/macos.sh`), and `latest-macos.json`. Built on airlock; on while the repo variable `ARCHITECT_MACOS_RELEASE` is `true` |
+| `ios` | the Architect app for iPhone and iPad (`apps/mobile`) on TestFlight, marketing version `X.Y.Z` and a unix-time build number, noted in the release's notes (`.github/workflows/ios.yml`). Built on airlock; it never holds the release, and the repo variable `ARCHITECT_IOS_RELEASE` set to `false` turns it off |
 | `nix-bump` | a PR (branch `chore/nix-desktop-<tag>`) pointing the flake's `architect-desktop` at the new AppImage, for the highest release only; it warns instead of failing |
 | `sums` | `SHA256SUMS` over every asset, and `SHA256SUMS.minisig` signed with the org key when the `release-signing` environment has `FTS_RELEASE_MINISIGN_KEY` |
 
@@ -141,6 +142,32 @@ store's image wins a tie, a release beats a nightly of the same
 `X.Y.Z`, and a missing or unreadable `version` means the store's.
 `nix/desktop/test-choose.sh` (the flake's
 `checks.x86_64-linux.architect-desktop-choose`) covers the choice.
+
+### The iOS app on TestFlight
+
+`apps/mobile/ios/deploy-testflight.sh` builds the phone app for release
+(`apps/mobile/ios/build-app.sh --device --release`: cargo with Xcode's
+toolchain, the app icon and launch colour compiled from
+`apps/mobile/ios/Assets.xcassets`), signs it with the Apple Distribution
+identity and the `FTS Architect App Store` profile, validates it with App
+Store Connect and uploads it. It takes Studio's environment
+(`KEYCHAIN`/`KEYCHAIN_PW`, the `ASC_*` key from
+`~/.appstoreconnect/config.env`, `PROFILE_NAME`, `DX_BUNDLE_ID`,
+`MARKETING_VER`, `BUILD_NO`), so airlock serves both apps:
+
+```sh
+KEYCHAIN=fts-build.keychain KEYCHAIN_PW=fts-build MARKETING_VER=0.12.2 \
+  apps/mobile/ios/deploy-testflight.sh --dry-run    # build, sign, validate; no upload
+ruby apps/mobile/ios/testflight-status.rb           # the builds App Store Connect has, read-only
+```
+
+The release's `ios` job runs it for every tag; `gh workflow run ios.yml
+-R FastTrackStudios/architect -f tag=vX.Y.Z` ships an existing tag (add
+`-f dry_run=true` to stop before the upload). A build reaches testers
+only once someone with App Store Connect access adds them to a TestFlight
+group: the job adds no tester and submits nothing for review.
+`apps/mobile/ios/app-icon.sh` redraws the icon from
+`apps/desktop/icons/architect.svg`.
 
 ### The site
 
