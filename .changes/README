@@ -33,6 +33,16 @@ It writes .changes/<slug>.md:
 - Breaking changes (a PR title with `!`, a removed or renamed public item):
   --bump major, and add a "Migration:" paragraph to the body (what
   changed, why, the exact steps for a consumer).
+- A change to STORED DATA (a schema, a storage format, a migration that
+  rewrites a vault, an index or a database): add a line to the body,
+
+      Data-Migration: <what changes, and whether a rollback undoes it>
+
+  at any bump level. The release's notes list it first ("Data migration")
+  and its release-facts.json says `"data_migration": true`, signed with the
+  release's assets: a deployer reading it (infra's release bump) never
+  auto-merges that release, because rolling the binary back does not roll
+  the data back. `just release-notes-test` checks the parsing.
 - A revert of something not yet released: delete the original change file
   instead of adding a new one.
 
