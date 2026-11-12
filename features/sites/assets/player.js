@@ -1510,6 +1510,11 @@
     if (!names.length || names.length > 64 || names.indexOf(w.entry) < 0 || !/\.js$/.test(w.entry)) return null;
     if (names.some(function (n) { return !flat.test(n) || !pinned.test(String(w.files[n])); })) return null;
     if (names.filter(function (n) { return /\.wasm$/.test(n); }).length !== 1) return null;
+    // Its frame's document, as the node chose it (the default, or the one
+    // that allows WebRTC for an island declaring and granted it).
+    var page = typeof w.webview === "string" ? w.webview : ext.webview;
+    if (!page || !/^\/_ext\/webview(-rtc)?\.[0-9a-f]+\.html$/.test(page)) return null;
+    w.webview = page;
     return w;
   }
   function webFiles(it, w) {
@@ -1559,31 +1564,59 @@
     var dark = set ? set === "dark" : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
     return { vars: vars, scheme: dark ? "dark" : "light" };
   }
+  // How long a frame has to say it is ready, and to answer a heartbeat.
+  var WEB_READY_MS = 15000, WEB_BEAT_MS = 2000, WEB_LATE_MS = 6000;
+  // The views whose frame died on this page: never booted again here.
+  var webDead = {};
   // View `view` of the island's web bundle in `slot`; the player's own
-  // `mine` gives way once it is ready.
+  // `mine` gives way once it is ready, and comes back for good if the
+  // frame leaves its document (a second load), fails (an error), is not
+  // ready in time or stops answering the heartbeat.
   function webPane(it, w, view, slot, mine) {
     var frame = doc.createElement("iframe");
     frame.setAttribute("sandbox", "allow-scripts");
     frame.setAttribute("title", view);
     frame.className = "site-now-web";
-    var chan = null, dead = false, asks = intents(), sheetText = null;
+    var chan = null, dead = false, ready = false, loads = 0, hello = false;
+    var asks = intents();
+    var beat = { sent: 0, answered: 0, n: 0, timer: 0 };
     var pane = {
       input: function (msg) {
         if (chan && !dead) chan.port1.postMessage({ t: "props", props: msg.props });
       },
       unmount: function () {
         dead = true;
+        clearTimeout(readyBy);
+        clearInterval(beat.timer);
         if (chan) { try { chan.port1.close(); } catch (e) {} }
         if (frame.parentNode) frame.parentNode.removeChild(frame);
       },
     };
+    // Gone: the pane out, the slot hidden, the player's own back.
+    function die(why) {
+      if (dead) return;
+      island.failed = why;
+      webDead[view] = true;
+      pane.unmount();
+      island.panes = island.panes.filter(function (p) { return p !== pane; });
+      slot.hidden = true;
+      mine.classList.remove("site-now-yielded");
+    }
+    var readyBy = setTimeout(function () { if (!ready) die("not ready in time"); }, WEB_READY_MS);
     frame.addEventListener("load", function () {
+      loads += 1;
+      // Its one document, loaded once: any other load is the frame gone
+      // somewhere else.
+      if (loads > 1) { die("it left its document"); return; }
       if (dead || chan || !frame.contentWindow) return;
       chan = new MessageChannel();
       chan.port1.onmessage = function (m) {
         var d = m.data || {};
         if (dead) return;
         if (d.t === "hello") {
+          // Answered once: its files are copied and booted once.
+          if (hello) return;
+          hello = true;
           var th = themeOf();
           chan.port1.postMessage({ t: "theme", vars: th.vars, scheme: th.scheme });
           var sheet_ = it.stylesheet ? pinnedSheet(it).catch(function () { return null; }) : Promise.resolve(null);
@@ -1591,15 +1624,29 @@
             if (dead) return;
             var files = {};
             Object.keys(both[0]).forEach(function (k) { files[k] = both[0][k].slice(0); });
-            sheetText = both[1];
-            chan.port1.postMessage({ t: "boot", entry: w.entry, view: view, files: files, sheet: sheetText });
+            chan.port1.postMessage({ t: "boot", entry: w.entry, view: view, files: files, sheet: both[1] });
           }, function (e) {
-            island.failed = String((e && e.message) || e);
+            die(String((e && e.message) || e));
           });
         } else if (d.t === "ready") {
+          if (ready) return;
+          ready = true;
+          clearTimeout(readyBy);
           slot.hidden = false;
           mine.classList.add("site-now-yielded");
           feed(snapshot(), true);
+          // The heartbeat, while it shows: unanswered too long, it is gone.
+          beat.timer = setInterval(function () {
+            if (dead) return;
+            if (beat.sent > beat.answered && Date.now() - beat.at > WEB_LATE_MS) { die("it stopped answering"); return; }
+            if (beat.sent === beat.answered) {
+              beat.sent += 1;
+              beat.at = Date.now();
+              chan.port1.postMessage({ t: "ping", n: beat.sent });
+            }
+          }, WEB_BEAT_MS);
+        } else if (d.t === "pong") {
+          if (Number(d.n) === beat.sent) beat.answered = beat.sent;
         } else if (d.t === "size") {
           var h = Number(d.height);
           if (isFinite(h)) frame.style.height = Math.max(0, Math.min(Math.round(h), 4000)) + "px";
@@ -1607,12 +1654,12 @@
           var a = Object.prototype.hasOwnProperty.call(asks, d.action) ? asks[d.action] : null;
           if (a) { try { a.run(d.args); } catch (e) {} }
         } else if (d.t === "error") {
-          island.failed = String(d.message || "it failed");
+          die(String(d.message || "it failed"));
         }
       };
       frame.contentWindow.postMessage("architect-web", "*", [chan.port2]);
     });
-    frame.setAttribute("src", ext.webview);
+    frame.setAttribute("src", w.webview);
     slot.appendChild(frame);
     return pane;
   }
@@ -1624,7 +1671,7 @@
     if (w) {
       if (island.panes.length) return;
       [[it.progress, ui.islandTop, ui.progress], [it.transport, ui.islandBottom, ui.controls]].forEach(function (slot) {
-        if (slot[0]) island.panes.push(webPane(it, w, slot[0], slot[1], slot[2]));
+        if (slot[0] && !webDead[slot[0]]) island.panes.push(webPane(it, w, slot[0], slot[1], slot[2]));
       });
       return;
     }

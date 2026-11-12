@@ -1818,30 +1818,73 @@ views as a plain web bundle too: wasm-bindgen's `--target web` glue
 folder named `web-*` (its modules import each other as `./<name>.js`: one
 folder, no other path). The node finds it by its files (the one `web-*.js`
 that is no `web-snippet-*.js`; `SiteIsland::web(entry)` names another) and
-puts each file's digest in `site-islands` (`web.files`). When an island
-has one, the player draws its views from it in every browser, no JS
-Promise Integration needed: each view in a frame of the node's web view
-document (`/_ext/webview.<hash>.html`, `architect_sites::island::webview_document`,
-its boot script `features/sites/assets/webview.js`), served with
-`webview_headers`: `sandbox allow-scripts` (an opaque origin), its one
-script by hash, `blob:` modules, `'wasm-unsafe-eval'`, **inline style**
-(its components' `style` attributes and its sheet: the one thing it
-allows that the sandbox document does not), images and fonts only from
-`blob:`/`data:`, `connect-src`, `worker-src`, `frame-src`, `media-src`
-`'none'`, `frame-ancestors 'self'`. The page fetches the bundle from the
-node, checks every file against its digest, and hands the frame the bytes
-(it makes them `blob:` modules, gives the glue the wasm as bytes and
-mounts the view), its theme (the page's CSS custom properties, none with
-a URL, and light or dark), its sheet (pinned as above) and where the song
-is; the frame sends back only the view's asks (the same five intents,
-checked and rate-limited by the page), its height and that it is ready.
-Code of the bundle never runs in the page's own origin, and the page's
-CSP does not change. A bundle built for `wasm32-unknown-unknown` with the
-pinned rustc uses bulk memory, mutable globals, non-trapping float-to-int,
-reference types, sign extension and multi-value (Safari 15 has all six;
-Studio's build validates its module against exactly those with
-`wasm-opt`), so the floor is the frame's own: Safari 15.4 (module scripts
-from `blob:`, `'wasm-unsafe-eval'` from 16; Studio's target is 16.4).
+puts each file's digest in `site-islands` (`web.files`), with the document
+its frame runs in (`web.webview`). When an island has one, the player draws
+its views from it in every browser, no JS Promise Integration needed: each
+view in a frame of the node's web view document
+(`architect_sites::island::webview_document`, its boot script
+`features/sites/assets/webview.js`), served with `webview_headers`. The page
+fetches the bundle from the node, checks every file against its digest, and
+hands the frame the bytes once (it makes them `blob:` modules, gives the
+glue the wasm as bytes and mounts the view), its theme (the page's CSS
+custom properties, none with a URL, and light or dark), its sheet (pinned as
+above) and where the song is; the frame sends back only the view's asks (the
+same five intents, checked and rate-limited by the page), its height (once a
+frame at most), that it is ready, and answers a heartbeat. A frame that is
+not ready in 15 s, stops answering for 6 s, reports an error or leaves its
+document (a second load) is taken down for the page's life and the
+player's own bar and controls come back.
+
+What reaches the network from a web view, and what stops it:
+
+- **By its policy** (`sandbox allow-scripts`, an opaque origin): every
+  fetch, XHR, WebSocket, `EventSource`, WebTransport, beacon and `<a ping>`
+  (`connect-src 'none'`); any script but its own by hash and `blob:`
+  modules (no remote `import()`, no speculation rules); images and fonts
+  but `blob:`/`data:` (so a stylesheet's `url()` loads nothing); media,
+  workers, child frames (`frame-src 'none'`, `child-src 'none'`: a bundle
+  cannot get removed APIs back from a fresh child), objects, manifests,
+  `<base>`, forms; popups (`window.open`), top navigation, modals and
+  forms by the sandbox flags; WebRTC by `webrtc 'block'` (CSP3, honoured by
+  Chromium and WebKit, ignored by Firefox).
+- **By its script, before any bundle code runs:** `RTCPeerConnection` and
+  its kin are removed (non-configurable `undefined`), for the engines that
+  ignore `webrtc 'block'`; the Presentation API is removed;
+  `navigator.sendBeacon` answers `false`.
+- **By its headers:** `x-dns-prefetch-control: off` (no DNS prefetch or
+  preconnect from `<link>`).
+- **By the share page's own policy:** a frame navigating itself can go
+  only where the page's `frame-src` (its `default-src 'self'`) allows, the
+  node. That is what keeps a web view from leaving the node, and it is
+  load-bearing (`apps/desktop/src/node/shares.rs` `content_security_policy`);
+  a navigation away is also the frame's death (above). The node's own
+  routes that change a visitor's state (`/s/_signin`, `/s/_signout`) answer
+  only a same-origin or typed request (`Sec-Fetch-Site`), never a frame's.
+- **Not stopped:** the bundle runs on the page's event loop in Firefox
+  (and may elsewhere): a busy loop in it stalls the share page. The
+  component route (a Worker) did not have this.
+
+**WebRTC is a capability**, never a default. An extension declares
+`capabilities.webrtc = ["peer-connections"]` and its operator grants it
+(`SiteIsland::grant_webrtc`, the distribution's call): only then is its
+view served the other web view document (`webview-rtc.<hash>.html`,
+`WebRtc::Granted`, its own path so the two are never confused or cached
+one for the other), whose policy says `webrtc 'allow'` and whose script
+leaves the constructors. Everything else about the frame is the same
+(opaque origin, `connect-src 'none'`, pinned files, intents only). The
+node chooses it from the island's manifest and the grant; no page, note,
+query or message can. What it exposes: the visitor's IP address to the
+peers and to the STUN/TURN servers the bundle names, and a data channel
+out of the sandbox that no policy meters. The bundle's code is the node
+operator's linked-in island, pinned by digest, the same trust as the
+component.
+
+A bundle built for `wasm32-unknown-unknown` with the pinned rustc uses bulk
+memory, mutable globals, non-trapping float-to-int, reference types, sign
+extension and multi-value (Safari 15 has all six; Studio's build validates
+its module against exactly those with `wasm-opt`), so the floor is the
+frame's own: Safari 15.4 (module scripts from `blob:`, `'wasm-unsafe-eval'`
+from 16; Studio's target is 16.4).
 
 - **The share page's CSP does not change.** The sandbox frame is the
   node's own document, `/_ext/sandbox.<hash>.html`

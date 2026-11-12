@@ -1511,6 +1511,12 @@ fn islands(shares: &Shares, path: &str) -> Response {
 /// sheet, the share pages' own); with `default-src 'self'` no style can
 /// load or send anything off the node.
 pub fn content_security_policy() -> HeaderValue {
+    // Load-bearing for an island's web view frame: `default-src 'self'`
+    // stands in for `frame-src`, so a frame on a share page (the island's
+    // sandbox, a web view, `architect_sites::island`) can only ever be the
+    // node's own: a web view navigating itself elsewhere is refused here,
+    // not by its own policy (a frame's CSP cannot stop its own navigation).
+    // Widen `frame-src` and a web view's bundle can leave the node.
     static POLICY: std::sync::OnceLock<HeaderValue> = std::sync::OnceLock::new();
     POLICY
         .get_or_init(|| {
@@ -2800,15 +2806,37 @@ async fn signin(shares: &Shares, rest: &str, request: Request) -> Response {
         .map_or_else(|_| "/".to_owned(), |t| safe_to(&t.to));
     let secure = is_https(request.headers(), shares.0.issuer_origin.as_deref());
     match rest {
+        // What changes the visitor's state is answered only to a request
+        // of the node's own pages or the visitor's own typing: never to
+        // another site's, nor to a frame of a share page (an island's web
+        // view is an opaque origin: its requests are cross-site).
+        "signin" | "signout" if !same_site(request.headers()) => page(
+            StatusCode::FORBIDDEN,
+            "Not from here",
+            "<p>Sign in or out from the link's own page.</p>",
+        ),
         "signin" => start_signin(shares, to, secure).await,
         "signin/wait" => wait_signin(shares, request.headers(), secure).await,
-        "signout" => {
-            let mut response = Redirect::to(&to).into_response();
-            set_cookie(&mut response, SESSION_COOKIE, "", "/", 0, secure);
-            response
-        }
+        "signout" => signout(&to, secure),
         _ => page(StatusCode::NOT_FOUND, "Not found", "<p>No such page.</p>"),
     }
+}
+
+/// Whether a request is the node's own (`Sec-Fetch-Site: same-origin`),
+/// or the visitor's typing or bookmark (`none`); a browser that sends no
+/// fetch metadata at all is taken at its word (it sends none for any).
+fn same_site(headers: &HeaderMap) -> bool {
+    headers
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok())
+        .is_none_or(|site| site == "same-origin" || site == "none")
+}
+
+/// `/s/_signout`: the session cookie cleared, back to `to`.
+fn signout(to: &str, secure: bool) -> Response {
+    let mut response = Redirect::to(to).into_response();
+    set_cookie(&mut response, SESSION_COOKIE, "", "/", 0, secure);
+    response
 }
 
 async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
@@ -3112,6 +3140,23 @@ mod tests {
 
     /// Art reaches the page with no track to play: a setlist with no
     /// recordings still shows its covers.
+    /// Signing out (or in) is not something a share page's frame, or
+    /// another site, can make a visitor do by sending them there.
+    #[test]
+    fn sign_out_answers_only_the_nodes_own_requests() {
+        let with = |site: Option<&str>| {
+            let mut h = HeaderMap::new();
+            if let Some(site) = site {
+                h.insert("sec-fetch-site", HeaderValue::from_str(site).unwrap());
+            }
+            same_site(&h)
+        };
+        assert!(with(Some("same-origin")) && with(Some("none")) && with(None));
+        assert!(!with(Some("cross-site")) && !with(Some("same-site")));
+        let out = signout("/", false);
+        assert!(out.headers().get(header::SET_COOKIE).is_some());
+    }
+
     #[test]
     fn art_goes_out_without_a_queue() {
         let mut art = serde_json::Map::new();

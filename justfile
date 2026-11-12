@@ -389,6 +389,15 @@ share-island-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_ISLAND_FOLDER="$PWD/target/island-counter" env -u LD_LIBRARY_PATH node --test apps/web/test/share-island.test.mjs
 
+# An island's web view against a hostile bundle in a real browser
+# (architect#608): nothing reaches off the node, a frame that leaves its
+# document is taken down, WebRTC only when declared and granted.
+# DRIVER=safari (on a Mac, after `safaridriver --enable` once) runs it in
+# Safari through safaridriver; the default is Firefox over WebDriver BiDi.
+share-webview-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" env -u LD_LIBRARY_PATH node --test apps/web/test/share-webview.test.mjs
+
 share-player-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop
     devenv shell -- cargo build -q -p architect-cli --bin architect

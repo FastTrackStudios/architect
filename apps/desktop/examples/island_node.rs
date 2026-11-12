@@ -3,7 +3,8 @@
 //! starts one (its config from `ARCHITECT_*`), and with the built web
 //! folder at `ARCHITECT_ISLAND_FOLDER` as an island, its view
 //! `ARCHITECT_ISLAND_VIEW` in both slots of the now-playing view, its
-//! stylesheet `ARCHITECT_ISLAND_SHEET` when set. An island is otherwise
+//! stylesheet `ARCHITECT_ISLAND_SHEET` when set, WebRTC granted when
+//! `ARCHITECT_ISLAND_WEBRTC=1` (and declared). An island is otherwise
 //! only what a distribution links in (`Distribution::island`): this is a
 //! test's stand-in for one, never a node's configuration.
 #![allow(
@@ -45,6 +46,11 @@ fn main() {
         .transport(view);
     if let Ok(sheet) = std::env::var("ARCHITECT_ISLAND_SHEET") {
         island = island.stylesheet(sheet);
+    }
+    // The operator's grant of WebRTC (`share-webview.test.mjs`): it takes
+    // effect only when the island's manifest declares it too.
+    if std::env::var("ARCHITECT_ISLAND_WEBRTC").is_ok_and(|v| v == "1") {
+        island = island.grant_webrtc();
     }
     let config = Config::load(None, |k| std::env::var(k).ok()).expect("the config");
     let runtime = tokio::runtime::Builder::new_multi_thread()
