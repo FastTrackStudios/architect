@@ -21,6 +21,7 @@ mod decks;
 pub mod distribution;
 mod embedded;
 mod extensions;
+mod favourites;
 mod files;
 mod first_run;
 mod guide;
@@ -126,15 +127,21 @@ const ALL_TABS: [(&str, &str, &str); 4] = [
     ("LAB_GO_VAULT", "Go to Vault", "vault"),
 ];
 
-/// The tabs this app shows: the sandbox's four, the Architect app's Vault
-/// (its Inbox, Tasks and Schedule come with capture and projects, #352,
-/// #344).
+/// The tabs this app goes to: the sandbox's four, the Architect app's
+/// Inbox, Vault, Project and Schedule (`favourites::TABS`, its default
+/// favourites).
 fn tabs() -> &'static [(&'static str, &'static str, &'static str)] {
     if crate::distribution().is_sandbox() {
         &ALL_TABS
     } else {
-        ALL_TABS.get(3..).unwrap_or_default()
+        &favourites::TABS
     }
+}
+
+/// Whether `route` is a tab's list (the sandbox's made-up lists), not the
+/// Vault's workspace or an extension's tab.
+fn on_a_list(route: Route) -> bool {
+    matches!(route, Route::Tab(t) if t != "vault" && !favourites::in_vault(t))
 }
 
 /// What a Done, Delete or Move changed, for Undo.
@@ -244,6 +251,18 @@ impl Lab {
     /// To a tab's list or an item afresh: no way back, no project picked,
     /// and the last change no longer said over the list (⌘Z still undoes
     /// it).
+    /// To tab `to`, and an Architect app favourite's surface opened in
+    /// the Vault's workspace (the projects list, the calendar's day, the
+    /// inbox deck, the last note), as its press does. `open` is passed in:
+    /// the app's root provides the commands, so they are not in the
+    /// root's own context.
+    pub fn go_tab(self, to: &'static str, open: &favourites::Opener) {
+        self.jump(Route::Tab(to));
+        if favourites::in_vault(to) {
+            open.open(to);
+        }
+    }
+
     pub fn jump(mut self, to: Route) {
         self.back.write().clear();
         self.project.set(None);
@@ -259,7 +278,7 @@ impl Lab {
     /// details have something from the start.
     fn select_first(mut self) {
         let first = self.shown_ids().first().copied();
-        let on_list = matches!(*self.route.peek(), Route::Tab(t) if t != "vault");
+        let on_list = on_a_list(*self.route.peek());
         self.selected.set(first.filter(|_| on_list));
     }
 
@@ -955,7 +974,12 @@ pub fn LabApp() -> Element {
     // Every command (a view's own too) and the palette's state, on the
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
-    guide::use_lab_actions(&list, &lab);
+    // What opens a favourite's surface: a tab's press, ⌃⌘1–4, `LAB_GO`.
+    let opener = favourites::Opener {
+        commands,
+        capture: capture_ui,
+    };
+    guide::use_lab_actions(&list, &lab, &opener);
     // Guided tours, from ⌘K (Help) or the Action List (`GUIDE_TOUR_START`):
     // the Architect tour (its place kept in a window's lab), and two of the
     // lab's scenarios.
@@ -1013,7 +1037,7 @@ pub fn LabApp() -> Element {
             architect_commands::Command::new(id, label)
                 .group("Go")
                 .shortcut(format!("⌃⌘{}", n.saturating_add(1))),
-            move || lab.jump(Route::Tab(to)),
+            move || lab.go_tab(to, &opener),
         );
     }
     // Keyflow's "New Chart" is a root command, so ⌘K has it from every view.
@@ -1285,7 +1309,9 @@ pub fn LabApp() -> Element {
         .contributed(move |menu| ext_ui.menu_rows(menu));
     let route = (lab.route)();
     let inbox_count = lab.lists.read().count("inbox");
-    let all_tabs = [
+    // The sandbox's made-up tabs; the Architect app's are its favourites,
+    // below, once the capture button is made.
+    let sandbox_tabs = [
         {
             let inbox = shell::Tab::new("inbox", "Inbox", icon!(Inbox));
             // A clear Inbox shows no count.
@@ -1302,11 +1328,6 @@ pub fn LabApp() -> Element {
         // below loads it into the Vault.
         shell::Tab::new("embedded", "Embedded", icon!(LayoutGrid)),
     ];
-    let tabs: Vec<shell::Tab> = if crate::distribution().is_sandbox() {
-        all_tabs.into()
-    } else {
-        all_tabs.into_iter().filter(|t| t.id == "vault").collect()
-    };
     // Which workspace the lab shows; `None` is all of them.
     // The person's organizations (the identity server's, here made up):
     // the switcher, and what each role may do.
@@ -1390,6 +1411,20 @@ pub fn LabApp() -> Element {
         let _ = commands.run_with("TIME_OPEN", "{}");
     })
     .with_badge(to_process);
+    // The bottom slots and the round button: the sandbox's own; the
+    // Architect app's favourites for what is open (`favourites`), Inbox,
+    // Vault, Project and Schedule and Capture unless the open note's type
+    // declares its own.
+    let (tabs, separate): (Vec<shell::Tab>, Option<shell::Action>) =
+        if crate::distribution().is_sandbox() {
+            (sandbox_tabs.into(), Some(capture))
+        } else {
+            let default = favourites::default_set(to_process, capture_ui.is_some().then_some(capture));
+            let declared = favourites::declared();
+            // TODO(#607): the open note's type.
+            let set = shell::resolve_favourites(&default, &declared, None);
+            (set.slots().to_vec(), set.primary.clone())
+        };
     // The sidebar's foot, above the switcher and the account (bottom to
     // top: Account, Workspace, Settings, Theme).
     let foot = vec![
@@ -1518,10 +1553,10 @@ pub fn LabApp() -> Element {
                                     r#"{"name":"Embedded views"}"#,
                                 );
                             } else {
-                                lab.jump(Route::Tab(id));
+                                lab.go_tab(id, &opener);
                             }
                         },
-                        separate: (crate::distribution().is_sandbox() || capture_ui.is_some()).then_some(capture),
+                        separate,
                         brand: rsx! { Brand {} },
                         account,
                         workspaces,
@@ -1531,7 +1566,7 @@ pub fn LabApp() -> Element {
                         left: crate::distribution().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
-                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault" && !ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
+                        right: if (lab.right)() && on_a_list(route) && !matches!(route, Route::Tab(t) if ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
                         on_pull: move |()| lab.jump(Route::Tab("vault")),
                         window: window_chrome,
                         status,
@@ -1549,8 +1584,15 @@ pub fn LabApp() -> Element {
                         // Sidebar: Rail / One column / Two columns, on ⌘K.
                         SidebarCommands {}
                         match route {
-                            Route::Tab("vault") if needs_vault() => rsx! { first_run::FirstRun { on_open: vault_opened } },
-                            Route::Tab("vault") => rsx! { vault::VaultPage {} },
+                            // The Vault's workspace, under the Architect app's
+                            // four alike (one arm: it stays mounted between them).
+                            Route::Tab(t) if t == "vault" || favourites::in_vault(t) => rsx! {
+                                if needs_vault() {
+                                    first_run::FirstRun { on_open: vault_opened }
+                                } else {
+                                    vault::VaultPage {}
+                                }
+                            },
                             Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                             Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
@@ -1617,7 +1659,7 @@ fn ListKeys() -> Element {
     dioxus_native::use_window_event(move |event, _| match event {
         WindowEvent::ModifiersChanged(m) => held.set(m.state()),
         WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-            let on_list = matches!(*lab.route.peek(), Route::Tab(t) if t != "vault");
+            let on_list = on_a_list(*lab.route.peek());
             let over = commands.overlay.peek().is_some()
                 || lab.settings.is_some_and(|s| s.open.peek().is_some());
             if !on_list || over || !held.peek().is_empty() {

@@ -466,6 +466,18 @@ fn first_workspace() -> Workspace {
     w
 }
 
+/// Shows the vault's notes: the last note pane opened, else the files.
+fn show_notes(mut workspace: Signal<Workspace>) {
+    let mut w = workspace.write();
+    let note = w
+        .panes
+        .iter()
+        .rev()
+        .find(|p| p.view.0 == VAULT_NOTE)
+        .map(|p| p.id.clone());
+    let _ = w.activate(&note.unwrap_or_else(|| architect_workspace::PaneId::new("files")));
+}
+
 /// "Mix": every note stacked in one strip, the graph beside it.
 fn mix_workspace() -> Workspace {
     let mut w = Workspace::new();
@@ -587,6 +599,12 @@ pub fn VaultPage() -> Element {
     architect_workspace::use_tab_kinds(crate::decks::tab_kinds(), Some(actions.clone()));
     // A phone's action bar: the workspace's tabs button, counted.
     architect_workspace::use_tabs_button(workspace);
+    // The Vault tab's surface (`crate::favourites`): back to the notes from
+    // the projects list or the calendar.
+    architect_commands::use_command(
+        architect_commands::Command::new("VAULT_NOTES", "Show the vault's notes").group("Go"),
+        move || show_notes(workspace),
+    );
     // The marker lane draws over the arrangement; its tool window floats
     // as a pane, to dock or tab like any other.
     let _canvases = architect_canvas::ui::use_canvases();

@@ -5,6 +5,7 @@ mod bar;
 mod bars;
 mod busy;
 mod chrome;
+mod favourites;
 mod input_debug;
 mod keyboard;
 #[cfg(target_os = "macos")]
@@ -35,6 +36,7 @@ use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
 pub use busy::BusyBadge;
 pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
+pub use favourites::{Declared, Favourites, SLOTS, resolve_favourites};
 pub use input_debug::{foot_bottom, input_debug, set_input_debug};
 pub use keyboard::{
     Foot, Keyboard, KeyboardTaps, TAP_SLOP, TapStroke, hide_keyboard, install_keyboard, keyboard,
