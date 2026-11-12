@@ -1848,6 +1848,22 @@ browser that runs it apart, the page stays live and takes the frame down
 6 to 10 s after it falls silent. So a web view's bundle is trusted not to spin, as the island's
 component is: the node operator links it in, pinned by digest.
 
+**A lyrics view** (`SiteIsland::lyrics(view)`, a web bundle's only): the
+now-playing view's lyrics (a phone shell's Lyrics tab) drawn by the
+island, the whole height the words had (the page's position bar gives way
+too; its controls stay). Its frame is started the first time lyrics show
+and is as tall as the place the page gives it, whatever height it says
+(the page owns that size: an orientation change or the bars moving resize
+the frame, and the view measures itself). Besides the playhead it is given
+`lyrics` (`[{at, text}]`, the song's timed lyrics list as the page has it,
+at most 2,000 lines of 300 characters) and `artist` (the row's subtitle);
+nothing the share does not already serve. It shows once ready and only for
+a song with timed lines: before that, for a song without, and for good
+after its frame fails (the rules above), the page's own list (or its "No
+lyrics") is there. Studio's is Session's lyrics panel, fixed to its
+Confidence Monitor.
+
+||||||| cc3c1c7a
 What reaches the network from a web view, and what stops it:
 
 - **By its policy** (`sandbox allow-scripts`, an opaque origin): every
