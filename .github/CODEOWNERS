@@ -1,0 +1,7 @@
+# Changes to what the release chain trusts need the owner's review once the
+# `codeowners` ruleset is applied (scripts/github-rulesets.sh codeowners
+# architect --apply). Without it this file only requests the review.
+/.github/ @Codys-Wright
+/scripts/release-notes.sh @Codys-Wright
+/scripts/check-token-mints.py @Codys-Wright
+/scripts/github-rulesets.sh @Codys-Wright

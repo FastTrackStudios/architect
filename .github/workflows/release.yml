@@ -40,10 +40,23 @@ jobs:
       - name: notes
         run: bash scripts/release-notes.sh notes "${GITHUB_REF_NAME}" > "$RUNNER_TEMP/notes.md"
 
+      # release-facts.json: whether this release migrates data (change files'
+      # `Data-Migration:` lines, .changes/README). Attached before any other
+      # asset, so `sums` signs it with the rest: a consumer (infra's release
+      # bump) reads it from signed material, and a migrating release never
+      # deploys itself.
+      - name: release facts
+        run: |
+          set -euo pipefail
+          bash scripts/release-notes.sh facts "${GITHUB_REF_NAME}" > "$RUNNER_TEMP/release-facts.json"
+          python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$RUNNER_TEMP/release-facts.json"
+          cat "$RUNNER_TEMP/release-facts.json"
+
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           body_path: ${{ runner.temp }}/notes.md
+          files: ${{ runner.temp }}/release-facts.json
 
   # The Architect app, headless: `architect-desktop serve`, the always-on
   # node (apps/desktop/src/node). A tag publishes its image to GHCR and
@@ -481,15 +494,19 @@ jobs:
   # up (infra#3, the release chain): keyflow's and studio's
   # bump-architect.yml (each opens its own pin-bump PR, and merges it only
   # when its CI is green on it) and infra's release-bump.yml (the site,
-  # architect-web, after it verifies SHA256SUMS against the org key
-  # itself). The token can only start workflows (`actions: write`) in those
-  # three repos: they treat the inputs as untrusted, and each also polls
-  # hourly, so a missed dispatch costs at most an hour. A stable vX.Y.Z only:
-  # a pre-release tag wakes nothing. Never fails the release.
+  # architect-web; it verifies everything itself: the signature, the tag on
+  # main, `checks` green on it). Each repo also polls hourly, so a missed
+  # wake costs one poll. A stable vX.Y.Z only. Never fails the release.
   #
-  # INERT until the owner sets the repo variable RELEASE_DISPATCH = on and
-  # gives the environment `release-dispatch` (deployment: v* tags only) the
-  # secret FORGE_APP_PRIVATE_KEY, and the repo the variable FORGE_APP_ID.
+  # Tokens: THREE, each minted for one repository with `actions: write`
+  # only (start a workflow there), each used by one step
+  # (scripts/check-token-mints.py checks it).
+  #
+  # INERT until the owner sets the repo variable RELEASE_DISPATCH = on, and
+  # the environment `release-dispatch` (deployment: v* tags only) holds the
+  # environment variable BOT_ENVIRONMENT = release-dispatch and the secret
+  # RELEASE_DISPATCH_APP_KEY (the fts-forge App's key, under a name nothing
+  # else uses), and the repo the variable FORGE_APP_ID.
   dispatch:
     needs: sums
     if: ${{ vars.RELEASE_DISPATCH == 'on' && needs.sums.result == 'success' }}
@@ -499,30 +516,63 @@ jobs:
     environment: release-dispatch
     permissions: {}
     steps:
-      - name: fts-forge token (start workflows in keyflow, studio, infra)
-        id: forge
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.FORGE_APP_ID }}
-          private-key: ${{ secrets.FORGE_APP_PRIVATE_KEY }}
-          owner: FastTrackStudios
-          repositories: keyflow,studio,infra
-          permission-actions: write
-      - name: Start the bumps
+      - name: Runs in the release-dispatch environment, with its key; a stable tag
         env:
-          GH_TOKEN: ${{ steps.forge.outputs.token }}
+          BOT_ENVIRONMENT: ${{ vars.BOT_ENVIRONMENT }}
+          KEY_SET: ${{ secrets.RELEASE_DISPATCH_APP_KEY != '' }}
           TAG: ${{ github.ref_name }}
         run: |
-          set -uo pipefail
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "$TAG is not a stable release tag: nothing downstream is woken"; exit 0
+          if [ "${BOT_ENVIRONMENT:-}" != release-dispatch ] || [ "$KEY_SET" != true ]; then
+            echo "::error::this job must run in the 'release-dispatch' environment (variable BOT_ENVIRONMENT=release-dispatch, secret RELEASE_DISPATCH_APP_KEY); got '${BOT_ENVIRONMENT:-}', key set: $KEY_SET"
+            exit 1
           fi
-          status=0
-          gh workflow run bump-architect.yml -R FastTrackStudios/keyflow -f tag="$TAG" || status=1
-          gh workflow run bump-architect.yml -R FastTrackStudios/studio -f tag="$TAG" || status=1
-          gh workflow run release-bump.yml -R FastTrackStudios/infra -f repo=FastTrackStudios/architect -f tag="$TAG" || status=1
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a stable release tag: nothing downstream is woken"; exit 1
+          fi
+      - name: fts-forge token (keyflow only, actions write)
+        id: keyflow
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.FORGE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_DISPATCH_APP_KEY }}
+          owner: FastTrackStudios
+          repositories: keyflow
+          permission-actions: write
+      - name: Start keyflow's bump
+        env:
+          GH_TOKEN: ${{ steps.keyflow.outputs.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh workflow run bump-architect.yml -R FastTrackStudios/keyflow -f tag="$TAG"
+      - name: fts-forge token (studio only, actions write)
+        id: studio
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.FORGE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_DISPATCH_APP_KEY }}
+          owner: FastTrackStudios
+          repositories: studio
+          permission-actions: write
+      - name: Start studio's bump
+        env:
+          GH_TOKEN: ${{ steps.studio.outputs.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh workflow run bump-architect.yml -R FastTrackStudios/studio -f tag="$TAG"
+      - name: fts-forge token (infra only, actions write)
+        id: infra
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.FORGE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_DISPATCH_APP_KEY }}
+          owner: FastTrackStudios
+          repositories: infra
+          permission-actions: write
+      - name: Start infra's release bump
+        env:
+          GH_TOKEN: ${{ steps.infra.outputs.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh workflow run release-bump.yml -R FastTrackStudios/infra -f repo=FastTrackStudios/architect -f tag="$TAG"
           echo "### Downstream bumps started for $TAG (keyflow, studio, infra)" >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
 
   # @fasttrackstudio/architect (the runtime, no dependencies) and
   # @fasttrackstudio/architect-cli (build-web, with jco), from
