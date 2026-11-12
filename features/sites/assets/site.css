@@ -484,7 +484,13 @@ body.site-now-open .site-player { visibility: hidden; }
 .site-now-island .architect-view-host { contain: layout paint style !important; position: relative !important; isolation: isolate !important; overflow: hidden !important; display: block !important; inset: auto !important; transform: none !important; translate: none !important; scale: none !important; rotate: none !important; zoom: 1 !important; margin: 0 !important; box-shadow: none !important; outline: none !important; filter: none !important; z-index: auto !important; }
 .site-now-island-top { max-height: 22vh; }
 .site-now-island-bottom { max-height: 30vh; }
-.site-now-island[hidden], .site-now .site-now-yielded { display: none; }
+.site-now-island[hidden], .site-now .site-now-progress.site-now-yielded { display: none; }
+/* An island's transport in the controls' row, between Click and Loop:
+   the player's own previous, play and next give way to it. */
+.site-now-buttons .site-now-island-bottom { flex: 1; min-width: 0; align-self: center; padding: 0 6px; overflow: hidden; }
+.site-now-controls.site-now-yielded .site-now-buttons > :is(.site-player-skip, .site-player-toggle) { display: none; }
+/* An island's web view: its frame as tall as what it draws. */
+.site-now-web { display: block; width: 100%; height: 0; border: 0; background: transparent; }
 .site-now-empty { margin: auto; padding: 16px; opacity: .7; text-align: center; }
 .site-now-controls { flex: none; padding: 2px 8px calc(4px + env(safe-area-inset-bottom, 0px)); }
 .site-now-controls[hidden] { display: none; }

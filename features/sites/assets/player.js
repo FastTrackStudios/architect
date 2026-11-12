@@ -114,6 +114,9 @@
       var own = function (p) { return typeof p === "string" && /^\/_ext\/[A-Za-z0-9._\/-]+$/.test(p) && p.indexOf("..") < 0; };
       if (!x || !own(x.runtime) || !own(x.sandbox)) return;
       x.islands = (Array.isArray(x.islands) ? x.islands : []).filter(function (i) { return i && own(i.folder); });
+      // The web view frame's document, when the node has one (a view of an
+      // island's web bundle runs there: no JS Promise Integration needed).
+      x.webview = own(x.webview) && /\.html$/.test(x.webview) ? x.webview : null;
       ext = x;
     } catch (e) {
       ext = null;
@@ -913,9 +916,10 @@
       '<div class="site-now-island site-now-island-top" hidden></div>' +
       '<div class="site-now-progress"><span class="site-now-at">0:00</span><div class="site-now-seek" role="slider" tabindex="0" aria-label="Position" aria-valuemin="0"><span></span></div><span class="site-now-left">–:––</span></div>' +
       '<div class="site-now-body"></div>' +
-      '<div class="site-now-island site-now-island-bottom" hidden></div>' +
+      // An island's transport takes the middle of the controls' row: Click
+      // and Loop stay at its ends.
       '<div class="site-now-controls"><div class="site-now-buttons">' +
-      toggles().replace("</button>", "</button>" + controls()) + "</div></div>";
+      toggles().replace("</button>", "</button>" + '<div class="site-now-island site-now-island-bottom" hidden></div>' + controls()) + "</div></div>";
     ui.nowTitle = sheet.querySelector(".site-now-title");
     ui.nowNote = sheet.querySelector(".site-now-note");
     ui.nowPage = sheet.querySelector(".site-now-page");
@@ -1350,10 +1354,144 @@
       });
     return island.loading;
   }
+  // ── An island's web bundle (any browser) ─────────────────────────
+  // Its views as a plain web bundle, each in a frame of the node's web
+  // view document (`/_ext/webview.<hash>.html`: sandboxed, an opaque
+  // origin, nothing to fetch or connect to, its own CSP; this page's is
+  // unchanged). This page fetches the bundle's files from the node, checks
+  // each against its digest, and hands them in as bytes with its theme and
+  // where the song is; the frame may only ask this page's intents (the
+  // island's, checked and limited here), say its height and that it is
+  // ready. Used whenever the island has one, so its views are the same on
+  // every browser; an island without one runs as a component (above).
+  var webBytes = null;
+  function webOf(it) {
+    var w = it && it.web;
+    if (!ext || !ext.webview || !w || typeof w.entry !== "string" || !w.files || typeof w.files !== "object") return null;
+    var names = Object.keys(w.files);
+    var flat = /^web-[A-Za-z0-9._-]+\.(js|wasm)$/;
+    var pinned = /^sha256-[A-Za-z0-9+/]{43}=$/;
+    if (!names.length || names.length > 64 || names.indexOf(w.entry) < 0 || !/\.js$/.test(w.entry)) return null;
+    if (names.some(function (n) { return !flat.test(n) || !pinned.test(String(w.files[n])); })) return null;
+    if (names.filter(function (n) { return /\.wasm$/.test(n); }).length !== 1) return null;
+    return w;
+  }
+  function webFiles(it, w) {
+    if (webBytes) return webBytes;
+    if (!(window.crypto && window.crypto.subtle)) return Promise.reject(new Error("no digests here"));
+    var names = Object.keys(w.files);
+    webBytes = Promise.all(names.map(function (name) {
+      return fetch(it.folder + name, { credentials: "omit", redirect: "error" })
+        .then(function (r) {
+          if (!r.ok) throw new Error(name + " did not load");
+          return r.arrayBuffer();
+        })
+        .then(function (bytes) {
+          return window.crypto.subtle.digest("SHA-256", bytes).then(function (d) {
+            var b = "";
+            new Uint8Array(d).forEach(function (x) { b += String.fromCharCode(x); });
+            if ("sha256-" + btoa(b) !== w.files[name]) throw new Error(name + " is not the file pinned");
+            return [name, bytes];
+          });
+        });
+    })).then(function (pairs) {
+      var out = {};
+      pairs.forEach(function (p) { out[p[0]] = p[1]; });
+      return out;
+    }, function (e) {
+      webBytes = null;
+      throw e;
+    });
+    return webBytes;
+  }
+  // The page's theme as a frame takes it: its custom properties (no URL in
+  // any), and light or dark.
+  function themeOf() {
+    var vars = {}, n = 0;
+    try {
+      var cs = window.getComputedStyle(doc.documentElement);
+      for (var i = 0; i < cs.length && n < 400; i++) {
+        var k = cs[i];
+        if (String(k).indexOf("--") !== 0) continue;
+        var v = String(cs.getPropertyValue(k)).trim();
+        if (!v || v.length > 200 || /url\s*\(|expression|[<>]/i.test(v)) continue;
+        vars[k] = v;
+        n++;
+      }
+    } catch (e) {}
+    var set = doc.documentElement.getAttribute("data-theme");
+    var dark = set ? set === "dark" : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    return { vars: vars, scheme: dark ? "dark" : "light" };
+  }
+  // View `view` of the island's web bundle in `slot`; the player's own
+  // `mine` gives way once it is ready.
+  function webPane(it, w, view, slot, mine) {
+    var frame = doc.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.setAttribute("title", view);
+    frame.className = "site-now-web";
+    var chan = null, dead = false, asks = intents(), sheetText = null;
+    var pane = {
+      input: function (msg) {
+        if (chan && !dead) chan.port1.postMessage({ t: "props", props: msg.props });
+      },
+      unmount: function () {
+        dead = true;
+        if (chan) { try { chan.port1.close(); } catch (e) {} }
+        if (frame.parentNode) frame.parentNode.removeChild(frame);
+      },
+    };
+    frame.addEventListener("load", function () {
+      if (dead || chan || !frame.contentWindow) return;
+      chan = new MessageChannel();
+      chan.port1.onmessage = function (m) {
+        var d = m.data || {};
+        if (dead) return;
+        if (d.t === "hello") {
+          var th = themeOf();
+          chan.port1.postMessage({ t: "theme", vars: th.vars, scheme: th.scheme });
+          var sheet_ = it.stylesheet ? pinnedSheet(it).catch(function () { return null; }) : Promise.resolve(null);
+          Promise.all([webFiles(it, w), sheet_]).then(function (both) {
+            if (dead) return;
+            var files = {};
+            Object.keys(both[0]).forEach(function (k) { files[k] = both[0][k].slice(0); });
+            sheetText = both[1];
+            chan.port1.postMessage({ t: "boot", entry: w.entry, view: view, files: files, sheet: sheetText });
+          }, function (e) {
+            island.failed = String((e && e.message) || e);
+          });
+        } else if (d.t === "ready") {
+          slot.hidden = false;
+          mine.classList.add("site-now-yielded");
+          feed(snapshot(), true);
+        } else if (d.t === "size") {
+          var h = Number(d.height);
+          if (isFinite(h)) frame.style.height = Math.max(0, Math.min(Math.round(h), 4000)) + "px";
+        } else if (d.t === "ask") {
+          var a = Object.prototype.hasOwnProperty.call(asks, d.action) ? asks[d.action] : null;
+          if (a) { try { a.run(d.args); } catch (e) {} }
+        } else if (d.t === "error") {
+          island.failed = String(d.message || "it failed");
+        }
+      };
+      frame.contentWindow.postMessage("architect-web", "*", [chan.port2]);
+    });
+    frame.setAttribute("src", ext.webview);
+    slot.appendChild(frame);
+    return pane;
+  }
   function islandOpen() {
     var it = islandOf();
     if (!it) return;
     clearTimeout(island.idle);
+    var w = webOf(it);
+    if (w) {
+      if (island.panes.length) return;
+      [[it.progress, ui.islandTop, ui.progress], [it.transport, ui.islandBottom, ui.controls]].forEach(function (slot) {
+        if (slot[0]) island.panes.push(webPane(it, w, slot[0], slot[1], slot[2]));
+      });
+      return;
+    }
     islandLoad(it).then(function (e) {
       if (!e || sheet.hidden || island.panes.length) return;
       [[it.progress, ui.islandTop, ui.progress], [it.transport, ui.islandBottom, ui.controls]].forEach(function (slot) {

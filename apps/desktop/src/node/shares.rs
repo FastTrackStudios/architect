@@ -1461,10 +1461,11 @@ fn islands(shares: &Shares, path: &str) -> Response {
     };
     let mut response = Response::new(Body::from(body.into_owned()));
     let headers = response.headers_mut();
-    if path == architect_sites::island::sandbox_path() {
-        // Its own policy, every header of it, or no sandbox at all: served
-        // without its policy it would run with this origin's.
-        for (name, value) in architect_sites::island::sandbox_headers() {
+    if let Some(own) = architect_sites::island::document_headers(path) {
+        // A frame's document (the sandbox, a web view): its own policy,
+        // every header of it, or no document at all: served without its
+        // policy it would run with this origin's.
+        for (name, value) in own {
             let (Ok(header_name), Ok(header_value)) = (
                 header::HeaderName::from_bytes(name.as_bytes()),
                 HeaderValue::from_str(&value),

@@ -1806,7 +1806,40 @@ runs it in the sandbox frame, and draws its views into the view's top and
 bottom slots in shadow roots (`view.js`, the share pages' rules). The
 player's own position bar and controls stay until its first frame, and
 whenever it cannot load: a browser without JS Promise Integration (Safari
-today), a node without islands.
+before 27, every browser on iOS before it) when the island has no web
+bundle, a node without islands. The island's transport sits in the
+controls' row between the player's Click and Loop, which stay.
+
+**A web view: the same views on every browser.** An island may carry its
+views as a plain web bundle too: wasm-bindgen's `--target web` glue
+(exporting `mount(view)`), its modules and its one `.wasm`, files of its
+folder named `web-*` (its modules import each other as `./<name>.js`: one
+folder, no other path). The node finds it by its files (the one `web-*.js`
+that is no `web-snippet-*.js`; `SiteIsland::web(entry)` names another) and
+puts each file's digest in `site-islands` (`web.files`). When an island
+has one, the player draws its views from it in every browser, no JS
+Promise Integration needed: each view in a frame of the node's web view
+document (`/_ext/webview.<hash>.html`, `architect_sites::island::webview_document`,
+its boot script `features/sites/assets/webview.js`), served with
+`webview_headers`: `sandbox allow-scripts` (an opaque origin), its one
+script by hash, `blob:` modules, `'wasm-unsafe-eval'`, **inline style**
+(its components' `style` attributes and its sheet: the one thing it
+allows that the sandbox document does not), images and fonts only from
+`blob:`/`data:`, `connect-src`, `worker-src`, `frame-src`, `media-src`
+`'none'`, `frame-ancestors 'self'`. The page fetches the bundle from the
+node, checks every file against its digest, and hands the frame the bytes
+(it makes them `blob:` modules, gives the glue the wasm as bytes and
+mounts the view), its theme (the page's CSS custom properties, none with
+a URL, and light or dark), its sheet (pinned as above) and where the song
+is; the frame sends back only the view's asks (the same five intents,
+checked and rate-limited by the page), its height and that it is ready.
+Code of the bundle never runs in the page's own origin, and the page's
+CSP does not change. A bundle built for `wasm32-unknown-unknown` with the
+pinned rustc uses bulk memory, mutable globals, non-trapping float-to-int,
+reference types, sign extension and multi-value (Safari 15 has all six;
+Studio's build validates its module against exactly those with
+`wasm-opt`), so the floor is the frame's own: Safari 15.4 (module scripts
+from `blob:`, `'wasm-unsafe-eval'` from 16; Studio's target is 16.4).
 
 - **The share page's CSP does not change.** The sandbox frame is the
   node's own document, `/_ext/sandbox.<hash>.html`
