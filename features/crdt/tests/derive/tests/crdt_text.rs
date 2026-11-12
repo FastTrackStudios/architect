@@ -1,3 +1,4 @@
+// Scratch: a clean one-line change.
 //! `#[architect(crdt(text))]`: concurrent edits to the same field on two
 //! replicas both survive the merge — the derive writes the field as a
 //! `LoroText` diff, not a last-writer-wins string.
