@@ -47,4 +47,5 @@ jobs:
       - name: scripts/release-dry-run.sh
         env:
           GH_TOKEN: ${{ github.token }}
+          DRY_RUN_TARGET: ${{ github.event.pull_request.base.sha || github.sha }}
         run: bash scripts/release-dry-run.sh

@@ -31,10 +31,15 @@ export MINISIGN_KEY ORG_RELEASE_KEY
 MINISIGN_KEY="$(cat "$t/key.sec")"
 ORG_RELEASE_KEY="$(sed -n 2p "$t/key.pub")"
 
-gh release create "$name" --repo "$repo" --draft --title "$name (dry run, deleted at the end)" \
-    --notes "Dry run of the release mechanics (scripts/release-dry-run.sh). Not a release." \
-    --target "${GITHUB_SHA:-$(git rev-parse HEAD)}" >/dev/null
-id="$(gh api --paginate "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$name\") | .id" | head -1)"
+# The id from the create itself (a list right after it can miss a draft).
+# The tag goes on main (DRY_RUN_TARGET: the PR's base), not on the PR's
+# merge commit: the mechanics do not care where it points.
+id="$(gh api -X POST "repos/$repo/releases" -f tag_name="$name" \
+    -f target_commitish="${DRY_RUN_TARGET:-$(git rev-parse HEAD)}" -F draft=true \
+    -f name="$name (dry run, deleted at the end)" \
+    -f body="Dry run of the release mechanics (scripts/release-dry-run.sh). Not a release." --jq .id)"
+[ -n "$id" ] || { echo "could not create the draft $name" >&2; exit 1; }
+echo "draft $name (release $id)"
 names() { gh api "repos/$repo/releases/$id/assets?per_page=100" --jq '.[].name' | sort | tr '\n' ' '; }
 draft() { gh api "repos/$repo/releases/$id" --jq .draft; }
 latest() { gh api "repos/$repo/releases/latest" --jq .tag_name 2>/dev/null || echo none; }
