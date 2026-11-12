@@ -9,8 +9,8 @@
 
 use architect::connect::{Endpoint, Pool};
 use architect_spaces::{
-    KeptLayers, Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareLinksClient,
-    ShareScope,
+    LayersReport, Listen, NewAudience, NewShare, Share, ShareChange, ShareComment,
+    ShareLinksClient, ShareScope,
 };
 
 use crate::controller::{Accounts, Sheet};
@@ -214,7 +214,7 @@ impl Accounts {
     /// # Errors
     ///
     /// As [`Self::shares`].
-    pub async fn share_layers_kept(&self, host: Option<&str>) -> Result<Vec<KeptLayers>, String> {
+    pub async fn share_layers_kept(&self, host: Option<&str>) -> Result<LayersReport, String> {
         let (_, client) = self.share_links(host).await?;
         client.kept_layers().await.map_err(|e| e.to_string())
     }
@@ -229,12 +229,26 @@ impl Accounts {
         &self,
         host: Option<&str>,
         extension: &str,
-    ) -> Result<Vec<KeptLayers>, String> {
+    ) -> Result<LayersReport, String> {
         let (_, client) = self.share_links(host).await?;
         client
             .forget_layers(extension.to_owned())
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// Acknowledge the host's notices about its layer rules (a kept-rules
+    /// file set aside, rules a reinstall lowered); what is left.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`].
+    pub async fn share_layers_acknowledge(
+        &self,
+        host: Option<&str>,
+    ) -> Result<LayersReport, String> {
+        let (_, client) = self.share_links(host).await?;
+        client.acknowledge_layers().await.map_err(|e| e.to_string())
     }
 
     /// Share `code` as the host has it now.

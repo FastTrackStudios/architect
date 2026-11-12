@@ -44,10 +44,11 @@ pub mod ids {
     pub const SHARE_AUDIENCE_UPDATE: &str = "SHARE_AUDIENCE_UPDATE";
     pub const SHARE_LAYERS_KEPT: &str = "SHARE_LAYERS_KEPT";
     pub const SHARE_LAYERS_FORGET: &str = "SHARE_LAYERS_FORGET";
+    pub const SHARE_LAYERS_ACKNOWLEDGE: &str = "SHARE_LAYERS_ACKNOWLEDGE";
     pub const SHARE_AUDIENCES: &str = "SHARE_AUDIENCES";
     pub const SHARE_ARCHIVE: &str = "SHARE_ARCHIVE";
     /// Every id, in menu order.
-    pub const ALL: [&str; 14] = [
+    pub const ALL: [&str; 15] = [
         SHARE_SHEET,
         SHARE_CREATE,
         SHARE_LIST,
@@ -62,6 +63,7 @@ pub mod ids {
         SHARE_ARCHIVE,
         SHARE_LAYERS_KEPT,
         SHARE_LAYERS_FORGET,
+        SHARE_LAYERS_ACKNOWLEDGE,
     ];
 }
 
@@ -90,7 +92,8 @@ metas! { "Share";
     SHARE_REVOKE = SHARE_REVOKE, "Revoke a share link", "Takes share `code` down: its link answers 404 from the next request on. Final.";
     SHARE_COMMENTS = SHARE_COMMENTS, "Share comments", "The comments left on share `code` (page, by, text, when).";
     SHARE_AUDIENCE_ADD = SHARE_AUDIENCE_ADD, "Add a share audience", "Adds a named audience to share `code`: `name` (violin), and `filter`, a Bases filter expression over the notes of the share's scope (`instrument == \"violin\"`, `file.hasTag(\"rhythm\")`; empty: every note). The audience gets a link of its own, `<host>/s/<its code>/`, that shows and serves only the notes the filter holds for and the files they attach; the share's own link stays the whole scope. `listen` (page, reference or full; unset: the share's) narrows how far its link plays, never past the share's. Answers the share and the audience's `url`.";
-    SHARE_LAYERS_KEPT = SHARE_LAYERS_KEPT, "Kept share layer rules", "The `[[share_layers]]` rules the host keeps for extensions no longer installed (#528): each extension's id, the note types it placed and since when. They still hold files back on share links, so removing an extension never opens one, until SHARE_LAYERS_FORGET.";
+    SHARE_LAYERS_KEPT = SHARE_LAYERS_KEPT, "Kept share layer rules", "The `[[share_layers]]` rules the host keeps for extensions no longer installed (#528): each extension's id, its folder, the note types it placed and since when; they still hold files back on share links, so removing an extension never opens one, until SHARE_LAYERS_FORGET. And the host's notices: a manifest that does not read or two folders claiming one id (every attached file held back below Full until fixed), a kept-rules file that did not read (set aside; held back until SHARE_LAYERS_ACKNOWLEDGE), rules a reinstall lowered.";
+    SHARE_LAYERS_ACKNOWLEDGE = SHARE_LAYERS_ACKNOWLEDGE, "Acknowledge share layer notices", "Acknowledges the host's notices about its share layer rules: a kept-rules file that did not read (it stays set aside; files are placed again by the rules there are now) and rules a reinstall lowered. A manifest that does not read is not acknowledged: fix it. Answers what is left.";
     SHARE_LAYERS_FORGET = SHARE_LAYERS_FORGET, "Forget kept share layer rules", "Forgets the kept `[[share_layers]]` rules of `extension` (no longer installed) on the host: its note types' files are placed by the rules installed now, and may open on links that play lower. Refused for an installed extension. Answers what is kept after.";
     SHARE_AUDIENCE_UPDATE = SHARE_AUDIENCE_UPDATE, "Change a share audience", "Changes audience `name` of share `code`: `listen`, how far its link plays (page, reference or full, never past the share's; `share`: the share's own). Answers the share and the audience.";
     SHARE_AUDIENCE_REMOVE = SHARE_AUDIENCE_REMOVE, "Remove a share audience", "Removes audience `name` from share `code`: its link answers 404 from the next request on. The share's own link and its other audiences stay.";
@@ -207,6 +210,8 @@ pub struct LayersForgetArgs {
 #[derive(Debug, Clone, Facet)]
 pub struct KeptRow {
     pub extension: String,
+    /// Its folder under the host's extensions folder.
+    pub folder: String,
     pub note_types: Vec<String>,
     /// Unix seconds: when the host last read them from its manifest.
     pub since: i64,
@@ -217,18 +222,23 @@ pub struct KeptRow {
 #[derive(Debug, Clone, Facet)]
 pub struct KeptOut {
     pub kept: Vec<KeptRow>,
+    /// What the host says of its layer rules, until fixed or acknowledged.
+    pub notices: Vec<String>,
 }
 
-fn kept_out(kept: Vec<architect_spaces::KeptLayers>) -> KeptOut {
+fn kept_out(report: architect_spaces::LayersReport) -> KeptOut {
     KeptOut {
-        kept: kept
+        kept: report
+            .kept
             .into_iter()
             .map(|k| KeptRow {
                 extension: k.extension,
+                folder: k.folder,
                 note_types: k.note_types,
                 since: k.since,
             })
             .collect(),
+        notices: report.notices,
     }
 }
 
@@ -768,6 +778,19 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
                 Ok(kept_out(
                     a.share_layers_forget(args.host.as_deref(), &args.extension)
                         .await?,
+                ))
+            }
+        },
+    )?;
+    let a = accounts.clone();
+    list.register_async(
+        &SHARE_LAYERS_ACKNOWLEDGE,
+        Effect::Mutating,
+        move |args: HostArgs| {
+            let a = a.clone();
+            async move {
+                Ok(kept_out(
+                    a.share_layers_acknowledge(args.host.as_deref()).await?,
                 ))
             }
         },
