@@ -1835,6 +1835,16 @@ not ready in 15 s, stops answering for 6 s, reports an error or leaves its
 document (a second load) is taken down for the page's life and the
 player's own bar and controls come back.
 
+What the heartbeat cannot stop: a frame whose bundle never yields (a
+busy loop). A sandboxed frame is an opaque origin, but a browser may run
+it on the page's own thread (Chromium unless it isolates sandboxed
+frames, WebKit, Firefox for a frame of the page's own site): then the
+page's timers stop with it, the heartbeat never fires, and the page is
+frozen until the browser's own slow-script warning stops the script. In a
+browser that runs it apart, the page stays live and takes the frame down
+after 6 s. So a web view's bundle is trusted not to spin, as the island's
+component is: the node operator links it in, pinned by digest.
+
 **A lyrics view** (`SiteIsland::lyrics(view)`, a web bundle's only): the
 now-playing view's lyrics (a phone shell's Lyrics tab) drawn by the
 island, the whole height the words had (the page's position bar gives way
@@ -1850,6 +1860,7 @@ after its frame fails (the rules above), the page's own list (or its "No
 lyrics") is there. Studio's is Session's lyrics panel, fixed to its
 Confidence Monitor.
 
+||||||| cc3c1c7a
 What reaches the network from a web view, and what stops it:
 
 - **By its policy** (`sandbox allow-scripts`, an opaque origin): every
