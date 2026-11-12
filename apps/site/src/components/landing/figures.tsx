@@ -12,7 +12,9 @@ import { MARK } from "#/components/ui/brand-mark";
 export type FigureId =
 	| "modular"
 	| "local-first"
+	| "synced"
 	| "collaborative"
+	| "shared"
 	| "extensions"
 	| "platforms"
 	| "embeddable";
@@ -30,6 +32,16 @@ const FIGURES: Record<
 		label:
 			"A note being written. The network drops, and the writing carries on.",
 		draw: Local,
+	},
+	synced: {
+		label:
+			"A node in the middle with a desktop, a laptop and a phone around it. Changes travel along the lines between them, in both directions.",
+		draw: Synced,
+	},
+	shared: {
+		label:
+			"Six notes in a vault. Three are selected, and only those three appear on a published page beside it.",
+		draw: Shared,
 	},
 	collaborative: {
 		label:
@@ -279,6 +291,103 @@ function Embed() {
 				</text>
 				<path d="M236 172h146M236 196h110M236 220h130M236 244h84" />
 			</g>
+		</>
+	);
+}
+
+function Synced() {
+	// Each device and the path its changes take to the node and back.
+	const links = [
+		"M112 104C170 104 190 150 216 166",
+		"M368 104C310 104 290 150 264 166",
+		"M240 292V214",
+	];
+	return (
+		<>
+			{links.map((d, i) => (
+				<g key={d}>
+					<path d={d} />
+					<circle
+						className="flow"
+						r="3.5"
+						style={
+							{
+								offsetPath: `path("${d}")`,
+								"--d": `${i * 0.9}s`,
+							} as React.CSSProperties
+						}
+					/>
+					<circle
+						className="flow back"
+						r="3.5"
+						style={
+							{
+								offsetPath: `path("${d}")`,
+								"--d": `${i * 0.9 + 1.6}s`,
+							} as React.CSSProperties
+						}
+					/>
+				</g>
+			))}
+			{/* The node: two slabs, always on. */}
+			<Slab cx={240} cy={186} w={44} t={12} className="k" />
+			<Slab cx={240} cy={168} w={44} t={12} className="k" />
+			<text className="strong start" x="296" y="200">
+				node
+			</text>
+			{/* Desktop */}
+			<rect x="34" y="62" width="78" height="54" rx="6" />
+			<path d="M73 116v12M56 128h34" />
+			{/* Laptop */}
+			<rect x="372" y="66" width="74" height="48" rx="6" />
+			<path d="M360 122h98" />
+			{/* Phone */}
+			<rect x="222" y="292" width="36" height="56" rx="7" />
+		</>
+	);
+}
+
+function Shared() {
+	// A vault of six notes; the three in scope are the ones that are shared.
+	const notes = [0, 1, 2, 3, 4, 5].map((i) => ({
+		x: 44 + (i % 3) * 52,
+		y: 96 + Math.floor(i / 3) * 78,
+		shared: i === 1 || i === 2 || i === 5,
+	}));
+	return (
+		<>
+			{notes.map((n) => (
+				<g key={`${n.x}-${n.y}`} className={n.shared ? "k" : undefined}>
+					<rect x={n.x} y={n.y} width="40" height="54" rx="5" />
+					<path d={`M${n.x + 8} ${n.y + 16}h24M${n.x + 8} ${n.y + 27}h18`} />
+				</g>
+			))}
+			<path
+				className="k dash scope"
+				d="M88 88h104v70h-52v78h52v-70"
+				pathLength={1}
+			/>
+			<path d="M204 180h54" />
+			<circle
+				className="flow out"
+				r="3.5"
+				style={{ offsetPath: 'path("M204 180h54")' } as React.CSSProperties}
+			/>
+			{/* The published page. */}
+			<rect x="266" y="74" width="180" height="212" rx="10" />
+			<path d="M266 98h180" />
+			<circle className="dot" cx="280" cy="86" r="2.5" />
+			<circle className="dot" cx="290" cy="86" r="2.5" />
+			{[0, 1, 2].map((i) => (
+				<path
+					key={i}
+					className="k draw"
+					pathLength={1}
+					style={{ "--d": `${0.6 + i * 0.5}s` } as React.CSSProperties}
+					d={`M288 ${130 + i * 44}h${[120, 96, 132][i]}`}
+				/>
+			))}
+			<path d="M288 144h80M288 188h104M288 232h64" />
 		</>
 	);
 }

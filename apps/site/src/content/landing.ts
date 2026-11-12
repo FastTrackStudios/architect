@@ -1,6 +1,6 @@
 /**
  * The landing page's words (#559). The page is not screenshot-driven: it
- * says what Architect is in six short entries, then how to get it.
+ * says what Architect is in a few short entries, then how to get it.
  *
  * Where something named here is not shipped yet, its chip or its entry
  * carries a `note` ("coming", "views today") and the issue that tracks it,
@@ -30,7 +30,9 @@ export type Pillar = {
 	figure:
 		| "modular"
 		| "local-first"
+		| "synced"
 		| "collaborative"
+		| "shared"
 		| "extensions"
 		| "platforms"
 		| "embeddable";
@@ -57,11 +59,33 @@ export const PILLARS: readonly Pillar[] = [
 		body: "Your work is a folder of markdown on your own disk. No account, no network needed.",
 	},
 	{
+		id: "synced",
+		figure: "synced",
+		title: "Synced",
+		body: "Your devices keep each other up to date, directly. A node you run is one more of them, the one that never sleeps.",
+		status: { label: "In the node today, coming to the app", href: issue(383) },
+	},
+	{
 		id: "collaborative",
 		figure: "collaborative",
 		title: "Collaborative",
 		body: "Live editing and shared cursors, device to device.",
 		status: { label: "Coming to the app", href: issue(383) },
+	},
+	{
+		id: "shared",
+		figure: "shared",
+		title: "Shared, in scope",
+		body: "Share exactly the part you mean: a folder, a tag, a few notes. As a link, or as a published site.",
+		chips: {
+			label: "Share as",
+			items: [
+				{ name: "A link" },
+				{ name: "A docs site" },
+				{ name: "Read-only or with comments" },
+			],
+		},
+		link: { label: "These docs are one", href: DOCS_PATH },
 	},
 	{
 		id: "extensions",

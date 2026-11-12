@@ -49,8 +49,8 @@ src/
               release.json, changelog.json, extensions.json (scripts/data.ts)
   lib/        pageHead() (seo.ts), the light/dark theme (theme.ts), typed data
   components/
-    landing/  the hero, the pillars (what Architect is, as a short
-              list), the downloads
+    landing/  the hero, the pillars (what Architect is, one claim at a
+              time), their animated line figures, the downloads
     layout/   the header, the theme switch, the footer, a page, 404
     ui/       Rich (the content's inline markup), a command line, icons
   styles/     tokens.css (the design tokens: colour, type, space, in one

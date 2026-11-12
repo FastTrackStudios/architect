@@ -4,7 +4,10 @@
 	width: 100%;
 	border: 1px solid var(--line);
 	border-radius: var(--radius);
-	background: var(--raised);
+	/* A drafting grid: a dot every 24px, so every figure sits on one plan. */
+	background:
+		radial-gradient(circle, var(--line) 1px, transparent 1.5px) 0 0 / 24px 24px,
+		var(--raised);
 	overflow: hidden;
 }
 .fig svg {
@@ -55,6 +58,9 @@
 .fig .draw,
 .fig .net-off {
 	stroke-dasharray: 1;
+	fill: none;
+}
+.fig .scope {
 	fill: none;
 }
 
@@ -151,6 +157,9 @@
 	}
 	.fig .flow.out {
 		animation: fig-flow 1.6s linear infinite;
+	}
+	.fig .flow.back {
+		animation-direction: reverse;
 	}
 	@keyframes fig-flow {
 		0% { offset-distance: 0%; opacity: 0; }
