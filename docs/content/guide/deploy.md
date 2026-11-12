@@ -353,6 +353,18 @@ page.
   App Store build claims FasTrack's own domain; any other node's links
   open in the app through `architect://open?url=<the link>`
   (`features/spaces/src/guest.rs` `app_link`).
+- **In the app.** A link opens in the **Shared** tab
+  (`apps/ui/src/guest.rs` `GuestPage`): the sharer's node by name, who
+  it is shared with, "Read only"; never one of your vaults. It comes from
+  `SHARE_OPEN {url}` (⌘K "Open a share link…", a pasted link, an
+  agent) or from the OS (`incoming`: a universal link, the
+  `architect://` scheme, a second launch's hand-off, the launch's own
+  arguments). A note is drawn by the extension that claims its type
+  (`Embeds::resolve`) once a note's text is given to guests; until then
+  as its page's words, with "Open in browser". The account's session is
+  sent only to a node the account already uses for an org of its own
+  (`trusts`). A revoke or an expiry empties the tab on the link's next
+  news (`_live`) or within five minutes.
 - **What the app opens.** `ShareUrl::parse`: `https:` only, or `http:`
   to this machine; no credentials; a share link's path. A link the OS
   hands the app that points at this machine or a private network is

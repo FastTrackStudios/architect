@@ -48,6 +48,10 @@ architect-extensions = { workspace = true, features = ["ui", "remote", "page", "
 architect-input = { workspace = true, features = ["udp"] }
 # The lab's example extension, linked in (apps/sandbox/board).
 architect-sandbox-board = { path = "../sandbox/board" }
+# A share link opened as a guest (src/guest.rs, #629): the link's guest
+# service and its rules; a client that follows no redirect.
+architect-spaces = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 # Which distribution runs, and what it compiles in (#491).
 architect-distribution = { workspace = true }
 # First-party extensions the app ships, on by default (#368, #375).

@@ -23,6 +23,7 @@ mod embedded;
 mod extensions;
 mod files;
 mod first_run;
+pub mod guest;
 mod guide;
 mod items;
 #[cfg(feature = "keyflow-lab")]
@@ -875,6 +876,29 @@ pub fn LabApp() -> Element {
             settings: Some(settings),
         }
     });
+    // A share link opened as a guest (#629): the Shared tab, SHARE_OPEN,
+    // and the links the OS hands the window. The account's session goes
+    // only to a node it already uses for an org of its own.
+    let guest = guest::use_guest(&list, lab, move |origin: &str| {
+        let Some(accounts) = accounts.map(|a| a.accounts()) else {
+            return String::new();
+        };
+        let mut hosts: Vec<String> = accounts
+            .active()
+            .map(|a| a.org_hosts.iter().map(|h| h.host.clone()).collect())
+            .unwrap_or_default();
+        hosts.extend(architect_accounts::org_host_from_env());
+        if !guest::trusts(&hosts, origin) {
+            return String::new();
+        }
+        accounts
+            .store()
+            .active_session()
+            .ok()
+            .flatten()
+            .map(|s| s.token)
+            .unwrap_or_default()
+    });
     // The lab's signals follow the settings.
     {
         let text = |key: &str| {
@@ -1286,11 +1310,15 @@ pub fn LabApp() -> Element {
         // below loads it into the Vault.
         shell::Tab::new("embedded", "Embedded", icon!(LayoutGrid)),
     ];
-    let tabs: Vec<shell::Tab> = if crate::distribution().is_sandbox() {
+    let mut tabs: Vec<shell::Tab> = if crate::distribution().is_sandbox() {
         all_tabs.into()
     } else {
         all_tabs.into_iter().filter(|t| t.id == "vault").collect()
     };
+    // An open share link, beside the vaults and never one of them.
+    if guest.is_open() {
+        tabs.push(guest::tab());
+    }
     // Which workspace the lab shows; `None` is all of them.
     // The person's organizations (the identity server's, here made up):
     // the switcher, and what each role may do.
@@ -1511,7 +1539,7 @@ pub fn LabApp() -> Element {
                         left: crate::distribution().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
-                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault" && !ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
+                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault" && t != guest::TAB && !ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
                         on_pull: move |()| lab.jump(Route::Tab("vault")),
                         window: window_chrome,
                         status,
@@ -1531,6 +1559,7 @@ pub fn LabApp() -> Element {
                         match route {
                             Route::Tab("vault") if needs_vault() => rsx! { first_run::FirstRun { on_open: vault_opened } },
                             Route::Tab("vault") => rsx! { vault::VaultPage {} },
+                            Route::Tab(guest::TAB) => rsx! { guest::GuestPage { guest } },
                             Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                             Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },

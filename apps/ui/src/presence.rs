@@ -80,6 +80,12 @@ pub fn LabPresence(presence: Presence, inbox: usize) -> Element {
                 // (`architect://vault`; the lab's `lab://` too).
                 on_handoff: move |h: architect_presence::Handoff| {
                     for url in &h.urls {
+                        // A share link (or `architect://open?url=…`):
+                        // opened as a guest, as the OS's (#629).
+                        if architect_spaces::ShareUrl::parse(url).is_ok() {
+                            crate::guest::incoming(url.clone(), crate::guest::Source::Os);
+                            continue;
+                        }
                         let tab = url
                             .strip_prefix("architect://")
                             .or_else(|| url.strip_prefix("lab://"))
