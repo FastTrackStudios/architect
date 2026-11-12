@@ -133,7 +133,10 @@ impl FileSecrets {
             Ok(text) => serde_json::from_str(&text)
                 .map_err(|e| SecretError::Unavailable(format!("{}: {e}", self.path.display()))),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
-            Err(e) => Err(SecretError::Unavailable(format!("{}: {e}", self.path.display()))),
+            Err(e) => Err(SecretError::Unavailable(format!(
+                "{}: {e}",
+                self.path.display()
+            ))),
         }
     }
 

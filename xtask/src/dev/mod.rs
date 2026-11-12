@@ -376,7 +376,10 @@ impl Stack {
                 pair("ARCHITECT_ORG_HOST", Self::url(p.node)),
                 pair(
                     "ARCHITECT_SECRET_STORE",
-                    format!("file:{}", self.state.join("app").join(APP_SECRETS).display()),
+                    format!(
+                        "file:{}",
+                        self.state.join("app").join(APP_SECRETS).display()
+                    ),
                 ),
                 pair("ARCHITECT_FORBID_KEYCHAIN", "1".to_owned()),
                 pair(

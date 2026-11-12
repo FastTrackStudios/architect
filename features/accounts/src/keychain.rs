@@ -166,7 +166,10 @@ impl Keychain {
 
 /// Panics when [`FORBID_ENV`] forbids the keychain: a test or the dev
 /// stack reaching it is a bug to stop at once, not an error to carry.
-#[allow(clippy::panic, reason = "a process forbidden the keychain must not reach it")]
+#[allow(
+    clippy::panic,
+    reason = "a process forbidden the keychain must not reach it"
+)]
 fn forbid_if_forbidden(service: &str) {
     assert!(
         !keychain_forbidden(),
@@ -206,7 +209,12 @@ mod tests {
     use super::*;
 
     fn env(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
-        move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_owned())
+        move |k| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| (*v).to_owned())
+        }
     }
 
     #[test]
@@ -228,21 +236,38 @@ mod tests {
         );
         // Forbidden: never the keychain, asked for or not.
         assert_eq!(choose_store(env(&[]), "svc", dir, true, false), file);
-        assert_eq!(choose_store(env(&[(STORE_ENV, "keychain")]), "svc", dir, true, false), file);
+        assert_eq!(
+            choose_store(env(&[(STORE_ENV, "keychain")]), "svc", dir, true, false),
+            file
+        );
         // Named stores.
         assert_eq!(
-            choose_store(env(&[(STORE_ENV, "file:/tmp/s.json")]), "svc", dir, false, false),
+            choose_store(
+                env(&[(STORE_ENV, "file:/tmp/s.json")]),
+                "svc",
+                dir,
+                false,
+                false
+            ),
             StoreChoice::File(PathBuf::from("/tmp/s.json"))
         );
-        assert_eq!(choose_store(env(&[(STORE_ENV, "file")]), "svc", dir, false, false), file);
-        assert_eq!(choose_store(env(&[(STORE_ENV, "memory")]), "svc", dir, false, false), StoreChoice::Memory);
+        assert_eq!(
+            choose_store(env(&[(STORE_ENV, "file")]), "svc", dir, false, false),
+            file
+        );
+        assert_eq!(
+            choose_store(env(&[(STORE_ENV, "memory")]), "svc", dir, false, false),
+            StoreChoice::Memory
+        );
     }
 
     #[test]
     fn a_test_process_cannot_open_the_keychain() {
         // Every test runs with ARCHITECT_FORBID_KEYCHAIN=1 (.cargo/config.toml).
         assert!(keychain_forbidden(), "tests run with {FORBID_ENV}=1");
-        let reached = std::panic::catch_unwind(|| Keychain::new("app.fasttrackstudio.architect.test").get("k"));
+        let reached = std::panic::catch_unwind(|| {
+            Keychain::new("app.fasttrackstudio.architect.test").get("k")
+        });
         assert!(reached.is_err(), "the keychain is never opened from a test");
     }
 }
