@@ -39,11 +39,27 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      # The CI runs query step lists checks.yml's runs.
+      actions: read
     steps:
       - uses: actions/checkout@v4
       # The pin in rust-toolchain.toml; rustup reads it.
       - name: toolchain
         run: rustup show active-toolchain
+      # How main's test plan picks its base (scripts/ci_plan_base.py);
+      # stdlib only, milliseconds.
+      - name: CI script tests
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      # The same query main's plan makes, with a workflow token at
+      # `actions: read`: fails here if the token can't list checks.yml's
+      # runs (main's plan would silently run every test instead).
+      - name: CI runs query
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        working-directory: scripts
+        run: python3 -c 'import ci_plan_base as b; print(len(b.green_runs()), "green checks.yml push runs on main")'
       - name: fmt
         if: ${{ github.event_name == 'pull_request' }}
         run: cargo fmt --all -- --check
