@@ -9,9 +9,53 @@ use std::fmt::Write as _;
 use architect_theme::builtin::fallback;
 use architect_theme::{Registry, Scheme, resolve};
 
-/// The layout's stylesheet. It reads only the theme's tokens
+/// The layout's stylesheet as written: the phone's layout under
+/// `@media (--site-phone)` (a phone on its side `(--site-phone-flat)`), the
+/// desk's under `(--site-not-phone)` and `(--site-desk)`, which
+/// [`site_css`] fills in. It reads only the theme's tokens
 /// (`var(--background)`), so it follows any theme.
 pub const SITE_CSS: &str = include_str!("../assets/site.css");
+
+/// When a page takes the phone's layout (and a share link its phone
+/// shell): narrow (every phone upright, a small tablet upright), or a touch
+/// screen too short to be anything but a phone on its side. The one place
+/// it is said: [`site_css`] and [`site_js`] put it where the sheet and the
+/// scripts write `(--site-phone)`, and the scripts' test harness reads it
+/// from here (`features/sites/test/player-playlist.test.mjs`).
+///
+/// - `(max-width: 820px)`: the width the layout always switched at (every
+///   phone upright; an iPad Air upright is 820).
+/// - `(pointer: coarse) and (max-height: 500px)`: a phone turned (its
+///   height 320 to 440 CSS px). A tablet turned is 744 or more, and a
+///   desk's short window has a fine pointer, so neither is one.
+pub const PHONE: &str = "(max-width: 820px), (pointer: coarse) and (max-height: 500px)";
+
+/// A phone on its side ([`PHONE`]'s second clause): a chart read on a
+/// stand, so the bars give it the height.
+pub const PHONE_FLAT: &str = "(pointer: coarse) and (max-height: 500px)";
+
+/// Not a phone ([`PHONE`] negated): wider than 820, and not a touch screen
+/// 500 high or less.
+pub const NOT_PHONE: &str = "(min-width: 821px) and (pointer: fine), (min-width: 821px) and (pointer: none), (min-width: 821px) and (min-height: 501px)";
+
+/// A desk (the player's side panel, a row menu beside its button): 900
+/// wide or more, and not a phone on its side.
+pub const DESK: &str = "(min-width: 900px) and (pointer: fine), (min-width: 900px) and (pointer: none), (min-width: 900px) and (min-height: 501px)";
+
+/// `text` with the layout's media queries filled in.
+fn layout_queries(text: &str) -> String {
+    text.replace("(--site-phone-flat)", PHONE_FLAT)
+        .replace("(--site-not-phone)", NOT_PHONE)
+        .replace("(--site-desk)", DESK)
+        .replace("(--site-phone)", PHONE)
+}
+
+/// The layout's stylesheet as served ([`SITE_CSS`], its queries filled in).
+#[must_use]
+pub fn site_css() -> &'static str {
+    static CSS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CSS.get_or_init(|| layout_queries(SITE_CSS))
+}
 
 /// What a reader does on the page: search, the theme toggle, the phone
 /// menu, the contents' current heading; and the player (#511): media,
@@ -28,13 +72,13 @@ pub const SITE_CSS: &str = include_str!("../assets/site.css");
 pub fn site_js() -> &'static str {
     static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     JS.get_or_init(|| {
-        format!(
+        layout_queries(&format!(
             "{}\n{}\n{}\n{}",
             include_str!("../assets/site.js"),
             classic_rules(),
             include_str!("../assets/player.js"),
             include_str!("../assets/shell.js")
-        )
+        ))
     })
 }
 
@@ -95,6 +139,25 @@ pub fn fingerprint(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One definition of a phone: the sheet and the scripts as served carry
+    /// [`PHONE`] (and the desk's queries) where they write `(--site-…)`,
+    /// and nothing of the placeholder is left.
+    #[test]
+    fn the_sheet_and_the_scripts_share_one_phone() {
+        for served in [site_css(), site_js()] {
+            for token in ["(--site-phone)", "(--site-phone-flat)", "(--site-not-phone)", "(--site-desk)"] {
+                assert!(!served.contains(token), "{token} left");
+            }
+        }
+        assert!(site_css().contains(&format!("@media {PHONE} {{")));
+        assert!(site_css().contains(&format!("@media {DESK} {{")));
+        assert!(site_css().contains(&format!("@media {NOT_PHONE} {{")));
+        assert!(site_js().contains(&format!("matchMedia(\"{PHONE}\")")));
+        assert!(site_js().contains(&format!("matchMedia(\"{DESK}\")")));
+        assert!(!SITE_CSS.contains("max-width: 820px)"), "the width is said once, in PHONE");
+    }
+
 
     #[test]
     fn both_schemes_carry_the_tokens() {

@@ -71,6 +71,7 @@ pub use component_blocks::{ComponentBlocks, DRAW_TIMEOUT};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
 pub use installed::{Installed, InstalledBlocks, InstalledLayers, Package};
+pub use assets::{DESK, NOT_PHONE, PHONE, PHONE_FLAT};
 pub use island::SiteIsland;
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;

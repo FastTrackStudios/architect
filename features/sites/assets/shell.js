@@ -22,7 +22,9 @@
   var here = location.pathname;
   // The shell is a phone's: on a desk the page keeps its own header and
   // navigator, the player its own sheet, the address its own hash.
-  var phone = window.matchMedia ? window.matchMedia("(max-width: 820px)") : { matches: true };
+  // The phone's query: `architect_sites::assets::PHONE` (filled in where
+  // `(--site-phone)` is written), the sheet's too.
+  var phone = window.matchMedia ? window.matchMedia("(--site-phone)") : { matches: true };
   // `href` as a place of this share: same origin, under its root page.
   var homeAt;
   try { homeAt = new URL(home, location.href); } catch (e) { return; }
