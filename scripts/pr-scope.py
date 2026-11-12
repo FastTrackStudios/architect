@@ -3,7 +3,7 @@
 
 Usage: pr-scope.py BASE [HEAD] [--all] [--cmds FILE]
   prints KEY=VALUE lines for $GITHUB_OUTPUT; with --cmds, writes the
-  feature builds (one `cargo check` per line) to FILE; --all selects the
+  feature builds (one `cargo clippy` per line) to FILE; --all selects the
   whole workspace whatever the diff (a push to main, warming the cache).
 
 The PR check (.github/workflows/pr.yml) runs main's lint on the crates a
@@ -170,7 +170,14 @@ def reverse_closure(seeds, meta, members):
 
 
 def feature_builds(selected, cmds):
-    """The feature-tests.toml passes and EXTRA_BUILDS a selected member is in."""
+    """The feature-tests.toml passes and EXTRA_BUILDS a selected member is in.
+
+    Main only compiles these (nextest, `cargo build` in a test), so a lint
+    is stricter than it; but clippy shares the workspace lint's
+    fingerprints, so a pass re-lints only the members its features change,
+    where `cargo check` would re-check every member (96s against 2s for
+    the keyflow-lab pass, measured), and every pass is clippy-clean.
+    """
     lines = []
     passes = tomllib.loads((ROOT / "feature-tests.toml").read_text()).get("pass", [])
     for p in passes:
@@ -180,10 +187,10 @@ def feature_builds(selected, cmds):
         feats = ",".join(p.get("features", []))
         args = f"{sel} --features {feats}" if feats else sel
         # nextest builds every test target of the pass: lib, bins, tests.
-        lines.append(f"# pass {p['name']}\ncargo check {args} --tests")
+        lines.append(f"# pass {p['name']}\ncargo clippy {args} --tests")
     for b in EXTRA_BUILDS:
         if selected & set(b["packages"]):
-            lines.append(f"# {b['name']}\ncargo check {b['args']}")
+            lines.append(f"# {b['name']}\ncargo clippy {b['args']}")
     if cmds:
         Path(cmds).write_text("set -euo pipefail\n" + "\n".join(lines) + "\n")
     return len(lines)
