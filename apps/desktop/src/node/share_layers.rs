@@ -321,7 +321,7 @@ impl LayerRules {
                 changed = true;
             }
             if changed {
-                self.save(&state);
+                self.save(&mut state);
             }
             broken.extend(state.fault.clone());
             Self::refresh(&mut state, &self.0.given, installed, broken);
@@ -362,20 +362,48 @@ impl LayerRules {
     }
 
     /// Write the kept file, never while one is set aside unacknowledged.
-    fn save(&self, state: &State) {
+    ///
+    /// A write that fails is a fault like a file that does not read:
+    /// every attached file is held back below Full, the status says so,
+    /// and a marker with what could not be written is left beside it when
+    /// the folder takes one, so the fault holds across a restart until
+    /// acknowledged.
+    fn save(&self, state: &mut State) {
         let Some(path) = &self.0.kept_at else { return };
         if state.fault.is_some() {
             return;
         }
-        let written = serde_json::to_vec_pretty(&state.file)
-            .map_err(std::io::Error::other)
+        let bytes = serde_json::to_vec_pretty(&state.file).map_err(std::io::Error::other);
+        let written = bytes
+            .as_ref()
+            .map_err(|e| std::io::Error::other(e.to_string()))
             .and_then(|bytes| {
                 let tmp = path.with_extension("json.tmp");
                 std::fs::write(&tmp, bytes)?;
                 std::fs::rename(&tmp, path)
             });
         if let Err(error) = written {
-            tracing::warn!(path = %path.display(), %error, "the share layer rules could not be kept");
+            let marker = path.with_file_name(format!(
+                "{}{CORRUPT}{}-unsaved",
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                unix_now()
+            ));
+            let left_beside = bytes
+                .map_err(|e| std::io::Error::other(e.to_string()))
+                .and_then(|bytes| std::fs::write(&marker, bytes));
+            tracing::warn!(
+                path = %path.display(),
+                marker = %marker.display(),
+                marked = left_beside.is_ok(),
+                %error,
+                "the share layer rules could not be kept: share links below Full hold back every attached file until the owner acknowledges it (SHARE_LAYERS_ACKNOWLEDGE)"
+            );
+            state.fault = Some(format!(
+                "the kept share layer rules could not be written ({}): {error}",
+                path.display()
+            ));
         }
     }
 
@@ -421,7 +449,7 @@ impl LayerRules {
         };
         let mut out = Vec::new();
         if fault {
-            out.push("share layers: the kept rules did not read and were set aside; links below Full hold every attached file back until acknowledged (SHARE_LAYERS_ACKNOWLEDGE)".to_owned());
+            out.push("share layers: the kept rules could not be read or written; links below Full hold every attached file back until acknowledged (SHARE_LAYERS_ACKNOWLEDGE)".to_owned());
         }
         let manifests = current.broken.len().saturating_sub(usize::from(fault));
         if manifests > 0 {
@@ -457,9 +485,9 @@ impl LayerRules {
             if state.file.kept.len() == before {
                 return Err(format!("no layer rules are kept for {extension}"));
             }
-            self.save(&state);
-            let broken = current.broken.clone();
-            Self::refresh(&mut state, &self.0.given, current.installed.clone(), broken);
+            self.save(&mut state);
+            // Read the folder again on the next look (with any fault).
+            state.read = Read::Not;
             drop(state);
         }
         Ok(self.report())
@@ -486,7 +514,7 @@ impl LayerRules {
                 state.fault = None;
             }
             state.file.lowered.clear();
-            self.save(&state);
+            self.save(&mut state);
             // Read the folder again on the next look.
             state.read = Read::Not;
         }
@@ -916,5 +944,29 @@ mod tests {
         let rules = LayerRules::new(Some(tmp.path().to_owned()), Vec::new(), None);
         let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
         assert!(LayerRules::place(&rules.current(), &entries).is_none());
+    }
+
+    /// A kept file that cannot be written is a fault like one that does
+    /// not read: everything held back, and the status says so.
+    #[cfg(unix)]
+    #[test]
+    fn a_kept_file_that_cannot_be_written_holds_everything_back() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let (dir, data) = (tmp.path().join("extensions"), tmp.path().join("data"));
+        std::fs::create_dir_all(&data).unwrap();
+        let rules = LayerRules::new(
+            Some(dir.clone()),
+            Vec::new(),
+            Some(data.join("share-layers.json")),
+        );
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        assert!(LayerRules::place(&rules.current(), &entries).is_some());
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o555)).unwrap();
+        install(&dir, "demo.songs", OWNER);
+        let current = rules.current();
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(LayerRules::place(&current, &entries).is_none());
+        assert!(!rules.status().is_empty());
     }
 }

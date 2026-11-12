@@ -2429,10 +2429,15 @@ async fn an_unreadable_owner_holds_everything_back(broken: &str) {
     let w = world().await;
     let (_, url) = reference_link(&w).await;
     std::fs::write(owner(&w), broken).unwrap();
-    assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
-    let (status, headers, _) = get(&format!("{url}Songs/Joy/Joy.session"), None).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "unknown: held back too");
-    assert_eq!(headers["x-architect-layer"], "full");
+    // Unknown: a link below Full answers nothing (#540's third review),
+    // its pages included, until it is known again.
+    assert_eq!(stem_status(&url).await, StatusCode::SERVICE_UNAVAILABLE);
+    let (status, _, _) = get(&format!("{url}Songs/Joy/Joy.session"), None).await;
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "unknown: held back too"
+    );
     assert_eq!(
         get(&format!("{url}_files.json"), None).await.0,
         StatusCode::SERVICE_UNAVAILABLE
@@ -2452,13 +2457,15 @@ async fn an_unreadable_owner_holds_everything_back(broken: &str) {
         !page.contains("site-queue") || !page.contains("Bass.ogg"),
         "{page}"
     );
-    // Fixed: as before.
+    // Fixed: as before, once the link is built again.
     std::fs::write(owner(&w), SONG_LAYERS).unwrap();
     assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
-    assert_eq!(
-        get(&format!("{url}Songs/Joy/Joy.session"), None).await.0,
-        StatusCode::OK
-    );
+    page_with(
+        &format!("{url}Songs/Joy/Joy.session"),
+        None,
+        "session of Joy",
+    )
+    .await;
     w.host.stop().await;
 }
 
@@ -3038,15 +3045,181 @@ async fn a_linked_extensions_rules_place_its_files() {
 async fn a_linked_slot_whose_package_does_not_read_holds_everything_back() {
     let w = world().await;
     install_linked(&w, &w.tmp.path().join("dev/gone"));
-    let (_, url) = songs_link(&w).await;
-    assert_eq!(stem_status(&url).await, StatusCode::FORBIDDEN);
-    assert_eq!(
-        get(&format!("{url}Songs/Joy/Joy.session"), None).await.0,
-        StatusCode::FORBIDDEN
-    );
+    seed_songs(&w.tmp.path().join("host/data/vaults/notes"));
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let share = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Folder("Songs".to_owned()),
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: None,
+            listen: Listen::Reference,
+        })
+        .await
+        .unwrap();
+    let url = w.url(&format!("/s/{}/", share.code));
+    // Unknown from the start: nothing below Full is answered, built or not.
+    for file in ["Songs/Joy/Media/Proxies/Bass.ogg", "Songs/Joy/Joy.session"] {
+        assert_eq!(
+            served_over(&url, file, 20, Duration::from_millis(50)).await,
+            0,
+            "{file}"
+        );
+        assert_eq!(
+            get(&format!("{url}{file}"), None).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
     assert_eq!(
         get(&format!("{url}_files.json"), None).await.0,
         StatusCode::SERVICE_UNAVAILABLE
     );
+    w.host.stop().await;
+}
+
+// ── Layers: what the vault cannot read (#540's third review) ─────────
+
+/// Ask for `path` on `url` `rounds` times, `every` apart; how many times
+/// it was served (2xx, or the stem's bytes).
+async fn served_over(url: &str, path: &str, rounds: usize, every: Duration) -> usize {
+    let client = reqwest::Client::new();
+    let mut served = 0_usize;
+    for _ in 0..rounds {
+        if let Ok(res) = client.get(format!("{url}{path}")).send().await {
+            let ok = res.status().is_success();
+            let bytes = res.bytes().await.unwrap_or_default();
+            if ok || String::from_utf8_lossy(&bytes).contains("STEM") {
+                served = served.saturating_add(1);
+            }
+        }
+        tokio::time::sleep(every).await;
+    }
+    served
+}
+
+/// A typed note the vault cannot read (a stray Latin-1 byte) is not
+/// dropped from placement: where its files are is unknown, and the stem
+/// it places stays held back even though a readable note links it too.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_typed_note_holds_its_files_back() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    touch(
+        &vault,
+        "Songs/Joy/notes.md",
+        "# Notes\n\nThe bass: ![[Media/Proxies/Bass.ogg]]\n",
+    );
+    let (_, url) = reference_link(&w).await;
+    let stem = "Songs/Joy/Media/Proxies/Bass.ogg";
+    assert_eq!(
+        get(&format!("{url}{stem}"), None).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let joy = vault.join("Songs/Joy/Joy.md");
+    let mut bytes = std::fs::read(&joy).unwrap();
+    bytes.extend_from_slice(b"\nCaf\xe9\n");
+    std::fs::write(&joy, bytes).unwrap();
+    // Long enough for the node to hear of it and build the link again.
+    assert_eq!(
+        served_over(&url, stem, 60, Duration::from_millis(50)).await,
+        0
+    );
+    w.host.stop().await;
+}
+
+/// While the vault cannot be read, a link below Full answers nothing
+/// from a folder built before its layer was lowered (#540's third review:
+/// it served the old folder's stems).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lowered_link_serves_nothing_while_the_vault_cannot_be_read() {
+    let w = world().await;
+    install_song_layers(&w.tmp.path().join("host/data/extensions/demo.songs"));
+    seed_songs(&w.tmp.path().join("host/data/vaults/notes"));
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let share = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: ShareScope::Folder("Songs".to_owned()),
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: None,
+            domain: None,
+            listen: Listen::Full,
+        })
+        .await
+        .unwrap();
+    let url = w.url(&format!("/s/{}/", share.code));
+    let stem = "Songs/Joy/Media/Proxies/Bass.ogg";
+    page_with(&format!("{url}{stem}"), None, "STEM BASS").await;
+    architect_desktop::node::shares::fail_vault_views_for_tests(true);
+    links
+        .update(share.code.clone(), ShareChange::Listen(Listen::Reference))
+        .await
+        .unwrap();
+    let served = served_over(&url, stem, 40, Duration::from_millis(50)).await;
+    architect_desktop::node::shares::fail_vault_views_for_tests(false);
+    assert_eq!(served, 0, "the old folder's stem was served");
+    // Readable again: held back by its layer.
+    let mut held = StatusCode::OK;
+    for _ in 0..100 {
+        held = get(&format!("{url}{stem}"), None).await.0;
+        if held == StatusCode::FORBIDDEN {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(held, StatusCode::FORBIDDEN);
+    w.host.stop().await;
+}
+
+/// A file an in-scope note stopped linking, now placed above the link's
+/// layer by a note the link does not list, is not served from the folder
+/// built before: it answers as a path that is nowhere.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_that_left_the_list_and_is_now_held_is_not_served() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    let file = "Songs/Joy/Media/Proxies/Loose.ogg";
+    touch(&vault, file, "STEM LOOSE");
+    touch(
+        &vault,
+        "Songs/Joy/notes.md",
+        "# Notes\n\n![[Media/Proxies/Loose.ogg]]\n",
+    );
+    let (_, url) = reference_link(&w).await;
+    // A page file now: built into the link.
+    page_with(&format!("{url}{file}"), None, "STEM LOOSE").await;
+    // A hidden song note takes it (Full: 403 while the link lists it),
+    // then the plain note lets go of it (Full, and not the link's: 404).
+    touch(
+        &vault,
+        "Songs/Joy/Hidden.md",
+        "---\ntype: song\npublish: false\n---\n![[Media/Proxies/Loose.ogg]]\n",
+    );
+    let mut held = StatusCode::OK;
+    for _ in 0..100 {
+        held = get(&format!("{url}{file}"), None).await.0;
+        if held == StatusCode::FORBIDDEN {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(held, StatusCode::FORBIDDEN);
+    touch(
+        &vault,
+        "Songs/Joy/notes.md",
+        "# Notes\n\nNothing attached now.\n",
+    );
+    assert_eq!(
+        served_over(&url, file, 60, Duration::from_millis(20)).await,
+        0
+    );
+    let (status, headers, _) = get(&format!("{url}{file}"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!headers.contains_key("x-architect-layer"));
     w.host.stop().await;
 }

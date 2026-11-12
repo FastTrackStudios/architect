@@ -124,6 +124,16 @@ const VIEWER_TTL: Duration = Duration::from_secs(60);
 const MAX_COMMENTS: usize = 2000;
 const MAX_COMMENT: usize = 4000;
 
+/// Set by [`fail_vault_views_for_tests`]: every vault view is unreadable.
+static VIEWS_FAIL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Make every vault view unreadable (`true`) or readable again: a test's
+/// way to hold the moment a vault cannot be read (#540's third review).
+#[doc(hidden)]
+pub fn fail_vault_views_for_tests(fail: bool) {
+    VIEWS_FAIL.store(fail, Ordering::SeqCst);
+}
+
 /// Unix seconds now.
 #[must_use]
 pub fn now() -> i64 {
@@ -201,6 +211,13 @@ struct VaultView {
     /// Where each file is placed, by the rules' generation it was placed
     /// with (None inside: not known).
     placed: Mutex<Option<(u64, Option<Arc<HashMap<String, Listen>>>)>>,
+    /// Each placed file by its folded path (`share_layers::fold`, `//`
+    /// collapsed): how another spelling of it is found. By the rules'
+    /// generation, as `placed`.
+    folded: Mutex<Option<(u64, Arc<HashMap<String, Vec<String>>>)>>,
+    /// What of the vault did not read (a note, a folder): while there is
+    /// any, where files are is not known (#540's third review).
+    unread: Vec<String>,
 }
 
 /// A vault's view, and the lock one reader holds while it reads it.
@@ -213,6 +230,9 @@ enum Hold {
     Serve,
     /// Held back: it needs this layer.
     Held(Listen),
+    /// Above the layer and not one of the link's files: answered as a
+    /// path that is nowhere.
+    Hidden,
     /// The folder is being swapped in, or the file cannot be read: held
     /// back, as "being built".
     Building,
@@ -408,19 +428,30 @@ impl Shares {
         };
         let at = self.0.out.join(&share.code);
         let mut manifests: HashMap<String, Arc<Manifest>> = HashMap::new();
-        // Each link names no file above how far it plays (#528).
+        // Each link names no file above how far it plays (#528). While the
+        // vault cannot be read, nothing is built: the folders stay as they
+        // were, and a link below Full answers nothing from them.
+        let caps: BTreeSet<Listen> = std::iter::once(share.listen)
+            .chain(share.audiences.iter().map(|a| share.listen_for(Some(a))))
+            .collect();
         let mut held: HashMap<Listen, BTreeSet<String>> = HashMap::new();
-        let mut options = |base: String, filter: Option<String>, cap: Listen| {
+        for cap in caps {
+            let Some(set) = self.held_back(share, cap) else {
+                tracing::warn!(code = %share.code, vault = %share.vault, "a shared vault does not read: its links are not built again until it does");
+                return;
+            };
+            held.insert(cap, set);
+        }
+        let options = |base: String, filter: Option<String>, cap: Listen| {
             let mut opts =
                 architect_sites::Options::new(&root, share.title.clone().unwrap_or_default());
             opts.live_reload = Some(format!("{base}_live"));
             opts.base = base;
             opts.scope = scope(&share.scope);
             opts.filter = filter;
-            opts.hold_back.clone_from(
-                held.entry(cap)
-                    .or_insert_with(|| self.held_back(share, cap)),
-            );
+            if let Some(set) = held.get(&cap) {
+                opts.hold_back.clone_from(set);
+            }
             opts
         };
         // Its own link: the whole scope. And its domain's root.
@@ -497,6 +528,9 @@ impl Shares {
     /// `vault` as it is now: read again if it has changed since it was
     /// last read. Blocking (it reads the vault's notes).
     fn view(&self, vault: &str) -> Option<Arc<VaultView>> {
+        if VIEWS_FAIL.load(Ordering::SeqCst) {
+            return None;
+        }
         let slot: ViewSlot = {
             let mut views = self.0.views.lock().unwrap_or_else(PoisonError::into_inner);
             Arc::clone(views.entry(vault.to_owned()).or_default())
@@ -508,7 +542,7 @@ impl Shares {
             return Some(Arc::clone(view));
         }
         let root = self.0.backend.root(vault).ok()?;
-        let read = listing::open(&root)
+        let (read, unread) = listing::open_reporting(&root)
             .map_err(|error| tracing::warn!(%vault, %error, "a shared vault could not be read"))
             .ok()?;
         let view = Arc::new(VaultView {
@@ -517,6 +551,8 @@ impl Shares {
             listings: Mutex::new(HashMap::new()),
             notes: std::sync::OnceLock::new(),
             placed: Mutex::new(None),
+            folded: Mutex::new(None),
+            unread,
         });
         *held = Some(Arc::clone(&view));
         drop(held);
@@ -569,30 +605,63 @@ impl Shares {
                 return placed.clone();
             }
         }
-        let notes = view.notes.get_or_init(|| listing::every_note(&view.vault));
-        let placed = LayerRules::place(&current, notes).map(Arc::new);
+        // A note the vault could not read may place files: unknown.
+        let placed = if view.unread.is_empty() {
+            let notes = view.notes.get_or_init(|| listing::every_note(&view.vault));
+            LayerRules::place(&current, notes).map(Arc::new)
+        } else {
+            tracing::warn!(vault = %share.vault, unread = ?view.unread, "part of a shared vault does not read: share links below Full hold back every attached file");
+            None
+        };
         *slot = Some((current.generation, placed.clone()));
         placed
     }
 
+    /// The placed files of `share`'s vault by their folded path, for
+    /// [`Self::above`]. Built once per placement. Blocking.
+    fn folded(
+        &self,
+        share: &Share,
+        placed: &HashMap<String, Listen>,
+    ) -> Arc<HashMap<String, Vec<String>>> {
+        let generation = self.0.layers.current().generation;
+        let Some(view) = self.view(&share.vault) else {
+            return Arc::default();
+        };
+        let mut slot = view.folded.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((at, folded)) = slot.as_ref() {
+            if *at == generation {
+                return Arc::clone(folded);
+            }
+        }
+        let mut folded: HashMap<String, Vec<String>> = HashMap::new();
+        for file in placed.keys() {
+            folded
+                .entry(fold_path(file))
+                .or_default()
+                .push(file.clone());
+        }
+        let folded = Arc::new(folded);
+        *slot = Some((generation, Arc::clone(&folded)));
+        folded
+    }
+
     /// The attachments a link of `share` that plays to `cap` holds back:
     /// built but never named (`architect_sites::Options::hold_back`).
-    /// Every attached file while placement is unknown. Blocking.
-    fn held_back(&self, share: &Share, cap: Listen) -> BTreeSet<String> {
+    /// Every attached file while placement is unknown; None while the
+    /// vault cannot be read at all (build nothing then). Blocking.
+    fn held_back(&self, share: &Share, cap: Listen) -> Option<BTreeSet<String>> {
         if cap == Listen::Full {
-            return BTreeSet::new();
+            return Some(BTreeSet::new());
         }
-        self.placed(share).map_or_else(
+        let view = self.view(&share.vault)?;
+        Some(self.placed(share).map_or_else(
             || {
-                self.view(&share.vault)
-                    .map(|view| {
-                        view.notes
-                            .get_or_init(|| listing::every_note(&view.vault))
-                            .iter()
-                            .flat_map(|e| e.files.iter().cloned())
-                            .collect()
-                    })
-                    .unwrap_or_default()
+                view.notes
+                    .get_or_init(|| listing::every_note(&view.vault))
+                    .iter()
+                    .flat_map(|e| e.files.iter().cloned())
+                    .collect()
             },
             |placed| {
                 placed
@@ -601,7 +670,7 @@ impl Shares {
                     .map(|(file, _)| file.clone())
                     .collect()
             },
-        )
+        ))
     }
 
     /// Whether the file at `rest` (a path below the link of `share` for
@@ -628,6 +697,15 @@ impl Shares {
         if cap == Listen::Full {
             return Hold::Serve;
         }
+        // Where files are must be known, from a vault read whole: else a
+        // link below Full answers nothing (a folder built before a change
+        // may hold anything).
+        if self.view(&share.vault).is_none() {
+            return Hold::Building;
+        }
+        let Some(placed) = self.placed(share) else {
+            return Hold::Building;
+        };
         let decoded = decode(rest);
         let unsafe_path = decoded
             .split('/')
@@ -636,27 +714,28 @@ impl Shares {
             return Hold::Serve;
         }
         let key = decoded.trim_start_matches('/');
-        // By key: this link's files above its layer.
         let listing = self.listing(share, audience);
         let mine: std::collections::HashSet<&str> = listing
             .iter()
             .flat_map(|e| e.files.iter().map(String::as_str))
             .collect();
-        // Named as this link names them (the placement is dropped).
-        let held: Vec<(&str, Listen)> = self.placed(share).map_or_else(
-            || mine.iter().map(|file| (*file, Listen::Full)).collect(),
-            |placed| {
-                placed
-                    .iter()
-                    .filter(|(_, layer)| **layer > cap)
-                    .filter_map(|(file, layer)| mine.get(file.as_str()).map(|f| (*f, *layer)))
-                    .collect()
-            },
-        );
-        if let Some((_, layer)) = held.iter().find(|(file, _)| *file == key) {
-            return Hold::Held(*layer);
+        // Above the link's layer: 403 if the link lists it, else the same
+        // 404 as a path that is nowhere (it says nothing of a file it does
+        // not list, even one an older build left in its folder).
+        let answer = |file: &str, layer: Listen| {
+            if mine.contains(file) {
+                Hold::Held(layer)
+            } else {
+                Hold::Hidden
+            }
+        };
+        // By key, before the disk.
+        if let Some(layer) = placed.get(key).filter(|layer| **layer > cap) {
+            return answer(key, *layer);
         }
-        // On disk: what the folder holds now.
+        // On disk: what the folder holds now. Another spelling of a placed
+        // file (its case, its Unicode form, `//`) is found by its folded
+        // path and confirmed by what the request opens.
         if !dir.is_dir() {
             return Hold::Building;
         }
@@ -665,16 +744,19 @@ impl Shares {
             path = path.join("index.html");
         }
         match std::fs::metadata(&path) {
-            Ok(asked) if asked.is_file() => held
-                .iter()
-                .filter(|(file, _)| same_file(&asked, &dir.join(file)))
-                .map(|(_, layer)| *layer)
-                .max()
-                .map_or(Hold::Serve, Hold::Held),
+            Ok(asked) if asked.is_file() => {
+                let folded = self.folded(share, &placed);
+                folded
+                    .get(&fold_path(key))
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|file| placed.get(file).filter(|l| **l > cap).map(|l| (file, *l)))
+                    .find(|(file, _)| same_file(&asked, &dir.join(file.as_str())))
+                    .map_or(Hold::Serve, |(file, layer)| answer(file, layer))
+            }
             Ok(_) => Hold::Serve,
             // Not readable in a folder that is there: `file` reads the
-            // same path and fails the same way (its 404); a held-back file
-            // is never in the folder being swapped in.
+            // same path and fails the same way (its 404).
             Err(_) if dir.is_dir() => Hold::Serve,
             // The folder went away under the request: held back.
             Err(_) => Hold::Building,
@@ -1504,6 +1586,7 @@ async fn serve(
             match needs_layer(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
                 Hold::Serve => {}
                 Hold::Held(needs) => return private(&share, layer_refusal(link.listen, needs)),
+                Hold::Hidden => return private(&share, not_found(&dir).await),
                 Hold::Building => return private(&share, being_built()),
             }
             let mut response = file(&dir, rest, &headers).await;
@@ -2415,6 +2498,13 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
         headers.insert(header::CONTENT_DISPOSITION, value);
     }
     response
+}
+
+/// `path` as [`Shares::above`] compares spellings: folded
+/// (`share_layers::fold`: one Unicode form, lower cased), `//` collapsed.
+fn fold_path(path: &str) -> String {
+    let joined: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    architect_sites::share_layers::fold(&joined.join("/"))
 }
 
 /// Whether a link still serves a file, asked by an archive in progress.
