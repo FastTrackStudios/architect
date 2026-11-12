@@ -927,13 +927,17 @@
     var t = r ? tracks[r.i] : null;
     var items = [];
     if (t && hasView(t)) {
-      items.push({ label: "Open chart", run: function () { viewSong(r.i, false); } });
-      if (known[t.src] && known[t.src].lyrics) items.push({ label: "Lyrics", run: function () { viewSong(r.i, true); } });
+      items.push({ id: "chart", label: "Open chart", run: function () { viewSong(r.i, false); } });
+      if (known[t.src] && known[t.src].lyrics) items.push({ id: "lyrics", label: "Lyrics", run: function () { viewSong(r.i, true); } });
     }
-    if (page) items.push({ label: t ? "Song page and downloads" : "Chart and downloads", href: page });
+    if (page) items.push({ id: "page", label: t ? "Song page and downloads" : "Chart and downloads", href: page });
     return items;
   }
+  // Filled again when the song's page arrives (it may add Lyrics): the
+  // item that had the keyboard has it again, so the arrows and a screen
+  // reader keep their place.
   function fillMenu(box, row) {
+    var had = doc.activeElement && box.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-action") : null;
     box.textContent = "";
     if (box.classList.contains("site-row-menu-sheet")) {
       var head = doc.createElement("p");
@@ -946,6 +950,7 @@
       item.className = "site-row-menu-item";
       item.setAttribute("role", "menuitem");
       item.setAttribute("tabindex", "-1");
+      item.setAttribute("data-action", it.id);
       if (it.href) item.setAttribute("href", it.href);
       else item.setAttribute("type", "button");
       item.textContent = it.label;
@@ -954,6 +959,7 @@
         if (it.run) it.run();
       });
       box.appendChild(item);
+      if (had && had === it.id && item.focus) item.focus();
     });
   }
   function menuMove(by) {
