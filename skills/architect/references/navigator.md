@@ -298,7 +298,7 @@ default; a page or an extension fills it while its view is on show.
   folder, which iOS moves on every install). The signed-in account's orgs
   are adopted there and synced with each org's node (`apps/ui/src/org_vaults.rs`
   `use_org_vaults`: `<app dir>/Org vaults/<slug>`, pulled and pushed over the
-  org's lane with `vault_proto::notes::NotesClient`, `plan`, a phone's drawer
+  org's lane with `vault_proto::notes::service::NotesClient`, `plan`, a phone's drawer
   showing them in `OrgVaultsPanel`) and mounted at once (`apps/ui/src/vault.rs`
   `mount_org_vaults`); the app's own vault is its
   org's (`app_vault_org`). A note of another org's vault opens as the pane

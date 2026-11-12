@@ -114,9 +114,9 @@ pub mod node {
     pub use prelude::*;
 }
 
-/// [`Notes`]'s declaration: `vault_proto::notes::notes`.
+/// [`Notes`]'s declaration: `vault_proto::notes::service`.
 pub mod notes {
-    pub use vault_proto::notes::notes::*;
+    pub use vault_proto::notes::service::*;
 }
 
 pub use node::Node;

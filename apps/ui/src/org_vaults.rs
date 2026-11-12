@@ -11,7 +11,7 @@
 //! - **Synced**: when a node is known for the org (the one given on the
 //!   org's Devices page, `Accounts::host_of`, or `ARCHITECT_ORG_HOST`), the
 //!   app reads the org's notes on the node's lane (`/org/{slug}/vox`, as
-//!   the account: `vault_proto::notes::NotesClient`) and writes them into
+//!   the account: `vault_proto::notes::service::NotesClient`) and writes them into
 //!   the folder, and writes back a note changed here ([`plan`]): on sign-in,
 //!   when the account's orgs change, every [`EVERY`], and on "Sync now".
 //!   A note changed on both sides keeps this device's text and the node's
@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use architect_accounts::Accounts;
@@ -337,7 +337,7 @@ fn net() -> Result<&'static tokio::runtime::Runtime, String> {
 
 /// One org's vault synced with its node's lane at `host`.
 async fn sync_one(host: &str, slug: &str, bearer: &str, dir: &Path) -> Result<SyncState, String> {
-    use vault_proto::notes::notes::NotesClient;
+    use vault_proto::notes::service::NotesClient;
     let endpoint = architect::connect::Endpoint::url(architect_accounts::lane(host, slug))
         .with_bearer(Some(bearer.to_owned()));
     let client: NotesClient = architect::connect::Pool::new()

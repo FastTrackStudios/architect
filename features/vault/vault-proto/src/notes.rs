@@ -3,8 +3,8 @@
 //! to the org's members), and what an app pulls an org's vault with.
 //!
 //! Declared here, not in the node, so the app can call it too: the node
-//! implements [`notes::Notes`] (`apps/desktop/src/node/service.rs`), the
-//! app reads it as a client (`notes::NotesClient`).
+//! implements [`service::Notes`] (`apps/desktop/src/node/service.rs`), the
+//! app reads it as a client (`service::NotesClient`).
 
 use crate::VaultSyncError;
 
@@ -37,9 +37,9 @@ pub struct NoteRef {
     pub path: String,
 }
 
-/// [`notes::Notes`]'s declaration: one service per module, as the
+/// [`service::Notes`]'s declaration: one service per module, as the
 /// generated names (`http`, `prelude`) are per module.
-pub mod notes {
+pub mod service {
     use super::{NodeError, NoteRef};
 
     /// The notes of the vaults this node holds.
