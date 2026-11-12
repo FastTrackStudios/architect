@@ -408,6 +408,11 @@ export interface LoadOptions {
    * sandbox: node trusts the extension's JS). In a page, leave it out: the sandbox frame makes them.
    */
   spawn?(instance: string): WorkerLike;
+  /** The sandbox document served by your own origin with its own CSP
+   * (`sandbox allow-scripts; ` + `SANDBOX_CSP` + `; frame-ancestors 'self'`): the frame is
+   * loaded from it instead of `srcdoc`, so your page's CSP needs no `SANDBOX_HASH`, `blob:` or
+   * `'wasm-unsafe-eval'`. */
+  sandbox?: string | URL;
 }
 
 /** A loaded extension. */
@@ -455,6 +460,12 @@ export interface MountOptions {
    * then only `data:` raster images; never a relative URL.
    */
   urls?: string[];
+  /** A stylesheet for the view's shadow root, kept as `cleanSheet` keeps it (refused whole on
+   * `@import`, fonts, escapes; `url()` only under `sheetUrls[0]`; `:host` keeps only custom
+   * properties). */
+  sheet?: string;
+  /** The URL prefix its stylesheet's `url()`s may name (its first only). */
+  sheetUrls?: string[];
 }
 
 /** Draws `extension`'s view `viewId` into `element` (emptied first), in a shadow root of its own. */

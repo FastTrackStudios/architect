@@ -48,6 +48,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 # The checksum of each file of a streamed archive (`archive`, #510).
 crc32fast = "1"
+# An island's lock digest, as the web runtime pins it (`island`,
+# studio#445); and the theme script's CSP hash, checked (tests/build.rs).
+sha2 = { workspace = true }
+base64 = { workspace = true }
 tracing = { workspace = true }
 # The site's light and dark themes: architect's tokens as CSS variables.
 architect-theme = { workspace = true }
@@ -67,9 +71,6 @@ futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
-# The theme script's CSP hash, checked (tests/build.rs).
-sha2 = { workspace = true }
-base64 = { workspace = true }
 # Its own embed renderers, so `cargo test --workspace` builds the tests
 # with them: tests/wasi.rs mounts a real component's embed view.
 architect-sites = { path = ".", features = ["pages", "wasi"] }

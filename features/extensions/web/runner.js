@@ -322,8 +322,15 @@ function sandboxHtml() {
 }
 
 /// A sandbox frame: its instances' Web Workers, each a `spawn()`.
+/// `url`: the sandbox document served by the embedder's own origin with
+/// its own headers (a node's `/_ext/sandbox.<hash>.html`, studio#445):
+/// a frame loaded from it keeps its own policy, where a `srcdoc` one
+/// inherits the page's (which must then name `SANDBOX_HASH`, `blob:` and
+/// `'wasm-unsafe-eval'`). Either way the frame is `sandbox="allow-scripts"`
+/// alone: an opaque origin, no `allow-same-origin`, no navigation, popups,
+/// forms or modals.
 export class Sandbox {
-  constructor(instanceSource, parent = null) {
+  constructor(instanceSource, parent = null, url = null) {
     const doc = globalThis.document;
     this.workers = new Map();
     this.next = 0;
@@ -354,7 +361,8 @@ export class Sandbox {
       );
     });
     this.ready.catch(() => {});
-    this.frame.srcdoc = sandboxHtml();
+    if (url) this.frame.src = String(url);
+    else this.frame.srcdoc = sandboxHtml();
     (parent ?? doc.body ?? doc.documentElement).append(this.frame);
   }
 
@@ -675,7 +683,11 @@ export class Component {
   /// Its sandbox frame, made when an instance first needs one.
   ensureSandbox() {
     if (!this.sandbox)
-      this.sandbox = new Sandbox(typeof this.opts.instance === 'string' ? this.opts.instance : String(this.opts.instance), this.opts.sandboxParent);
+      this.sandbox = new Sandbox(
+        typeof this.opts.instance === 'string' ? this.opts.instance : String(this.opts.instance),
+        this.opts.sandboxParent,
+        this.opts.sandboxUrl,
+      );
     return this.sandbox;
   }
 

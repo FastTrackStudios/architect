@@ -242,6 +242,22 @@ pub async fn start_with_layers(
     given: architect_sites::Blocks,
     layers: Vec<architect_sites::ShareLayersDecl>,
 ) -> Result<Running, StartError> {
+    Box::pin(start_with_islands(config, given, layers, Vec::new())).await
+}
+
+/// [`start_with_layers`], with `islands` drawn on its share links'
+/// now-playing views (studio#445): a distribution's linked-in WASI
+/// components (`Distribution::island`), served at `/_ext/`.
+///
+/// # Errors
+///
+/// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
+pub async fn start_with_islands(
+    config: Config,
+    given: architect_sites::Blocks,
+    layers: Vec<architect_sites::ShareLayersDecl>,
+    islands: Vec<architect_sites::SiteIsland>,
+) -> Result<Running, StartError> {
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
     // same fence, as its development copy does in the app.
@@ -491,7 +507,8 @@ pub async fn start_with_layers(
         config.issuer.as_deref(),
         blocks.clone(),
         share_layers,
-    );
+    )
+    .with_islands(islands);
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
     }
@@ -700,8 +717,9 @@ pub fn main(
     };
     let blocks = dist.blocks(&config.data_dir.join("linked"));
     let layers = dist.share_layers();
+    let islands = dist.islands();
     runtime.block_on(async move {
-        match start_with_layers(config, blocks, layers).await {
+        match start_with_islands(config, blocks, layers, islands).await {
             Ok(running) => {
                 let _ = writeln!(
                     std::io::stdout(),

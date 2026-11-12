@@ -159,6 +159,7 @@ pub struct Distribution {
     linked: Vec<Linked>,
     bundles: Vec<Bundle>,
     blocks: Vec<Arc<dyn BlockRenderer>>,
+    islands: Vec<architect_sites::SiteIsland>,
     adopts: Option<Adopted>,
     registries: Vec<Registry>,
     dev_installs: bool,
@@ -233,6 +234,7 @@ impl Distribution {
             linked: Vec::new(),
             bundles: Vec::new(),
             blocks: Vec::new(),
+            islands: Vec::new(),
             adopts: None,
             registries: vec![store()],
             dev_installs: true,
@@ -337,6 +339,22 @@ impl Distribution {
     pub fn block(mut self, renderer: impl BlockRenderer + 'static) -> Self {
         self.blocks.push(Arc::new(renderer));
         self
+    }
+
+    /// With `island` drawing its views on the node's share links'
+    /// now-playing views (studio#445): a WASI component this distribution
+    /// links in, its built web folder served by the node from a node-owned
+    /// path (`architect_sites::island`), never from a vault.
+    #[must_use]
+    pub fn island(mut self, island: architect_sites::SiteIsland) -> Self {
+        self.islands.push(island);
+        self
+    }
+
+    /// Its islands ([`island`](Self::island)).
+    #[must_use]
+    pub fn islands(&self) -> Vec<architect_sites::SiteIsland> {
+        self.islands.clone()
     }
 
     /// Also installs from `registry` (#493): listed after the ones before

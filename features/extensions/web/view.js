@@ -43,6 +43,9 @@ export class Pane {
     this.onEvent = onEvent;
     this.listening = new Map();
     this.view = { prefix: options.prefix ?? `av${++panes}-`, urls: [...(options.urls ?? [])] };
+    // Its stylesheet, already `cleanSheet`'s: in its shadow root, before
+    // its box (whose contract is inline and `!important`).
+    this.sheet = typeof options.sheet === 'string' && options.sheet ? options.sheet : null;
     this.limits = { ...DEFAULTS, ...options.limits };
     this.reset();
   }
@@ -66,6 +69,11 @@ export class Pane {
       this.root,
       `${VIEW_BOX_STYLE};max-height:${Number(this.limits.viewHeight)}px!important;max-width:100%!important`,
     );
+    if (this.sheet) {
+      const style = this.doc.createElement('style');
+      style.textContent = this.sheet;
+      shadow.append(style);
+    }
     shadow.append(this.root);
     this.element.append(host);
     meta.set(this.root, { svg: false, tag: 'div', sealed: false });

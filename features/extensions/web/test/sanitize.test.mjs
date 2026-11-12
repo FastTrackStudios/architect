@@ -189,3 +189,47 @@ test('N1: only an absolute URL as written, of an allowed origin, under its path'
   assert.equal(attrRule('a', 'href', 'https://example.com/a', false), 'https://example.com/a');
   assert.equal(attrRule('a', 'href', 'mailto:a@b.c', false), 'mailto:a@b.c');
 });
+
+// ── A view's stylesheet (an island's, studio#445) ─────────────────────
+import { cleanSheet } from '../sanitize.js';
+
+test('a view’s stylesheet keeps its rules and none that load, import or move its box', () => {
+  const prefix = '/_ext/island/demo.ab12/';
+  assert.equal(cleanSheet('.a{color:red}.b:hover{transform:scale(2)}'), '.a{color:red}.b:hover{transform:scale(2)}');
+  // Tailwind's shape: layers, theme variables on :root and :host, @property, @media.
+  assert.equal(
+    cleanSheet('@layer theme{:root,:host{--c:#fff;width:9999px}}@property --x{syntax:"*";inherits:false}'),
+    '@layer theme{:root,:host{--c:#fff}}@property --x{syntax:"*";inherits:false}',
+  );
+  // A brace in a string does not smuggle a :host rule in.
+  assert.equal(cleanSheet('.a{content:"}:host{width:1px}"}'), null);
+  assert.equal(
+    cleanSheet('@layer theme, base;@layer theme{:root,:host{--c:#fff;width:9999px;position:fixed}}@media (min-width:9px){.a{top:0}}'),
+    '@layer theme, base;@layer theme{:root,:host{--c:#fff}}@media (min-width:9px){.a{top:0}}',
+  );
+  // Comments out first: they do not hide anything.
+  assert.equal(cleanSheet('.a{color:red}/* @import url(x) */'), '.a{color:red}');
+  for (const bad of [
+    '@import url(https://e.vil/x.css);',
+    '@import "x.css";',
+    '@font-face{font-family:x;src:url(https://e.vil/f)}',
+    '@namespace svg url(http://www.w3.org/2000/svg);',
+    '.a{background:image-set("x" 1x)}',
+    '.a{color:\\72 ed}',
+    '.a{width:expression(alert(1))}',
+    '.a{-moz-binding:url(x)}',
+    '</style><script>x</script>',
+    '.a{color:red',
+    '@unknown{.a{b:c}}',
+    '@media x{@import url(y);}',
+  ]) assert.equal(cleanSheet(bad, prefix), null, bad);
+  // url(): only the island's own path.
+  assert.equal(cleanSheet('.a{background:url(https://e.vil/beacon)}', prefix), '.a{background:none}');
+  assert.equal(cleanSheet('.a{background:url(/s/abc/x.png)}', prefix), '.a{background:none}');
+  assert.equal(cleanSheet(`.a{background:url(${prefix}../../x)}`, prefix), '.a{background:none}');
+  assert.equal(cleanSheet(`.a{background:url('${prefix}i.png')}`, prefix), `.a{background:url("${prefix}i.png")}`);
+  assert.equal(cleanSheet(`.a{background:url(${prefix}i.png)}`), '.a{background:none}', 'no prefix: no url');
+  // :host keeps only custom properties.
+  assert.equal(cleanSheet(':host{display:none;width:100vw;--a:1}'), ':host{--a:1}');
+  assert.equal(cleanSheet(':host(.x){margin:-9999px}'), '');
+});

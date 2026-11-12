@@ -1758,14 +1758,58 @@ phone the view covers the page (modal: the page behind is inert); from
 the queue and says so in the bar; the lock screen shows the song and its
 buttons work (Media Session).
 
+**An island: an extension's views live on the now-playing view**
+(studio#445). A distribution links in a WASI component as an island
+(`Distribution::island(SiteIsland::new(id, files).progress(view).transport(view).stylesheet(file))`,
+its `architect-ext build-web` folder): the node serves its files, the web
+runtime and a sandbox document from its own `/_ext/` (each path named by
+its content, `nosniff`, immutable; never from a vault or a link), and puts
+`<script type="application/json" id="site-islands">` on a share's pages.
+When the view first opens, the page's player loads the runtime, which
+fetches the component's files itself (pinned by their lock's digest),
+runs it in the sandbox frame, and draws its views into the view's top and
+bottom slots in shadow roots (`view.js`, the share pages' rules). The
+player's own position bar and controls stay until its first frame, and
+whenever it cannot load: a browser without JS Promise Integration (Safari
+today), a node without islands.
+
+- **The share page's CSP does not change.** The sandbox frame is the
+  node's own document, `/_ext/sandbox.<hash>.html`
+  (`architect_sites::island::sandbox_document`), served with only its own
+  policy: `sandbox allow-scripts` (an opaque origin even opened at the top
+  level: no cookies, no storage), the runtime's `SANDBOX_CSP` (its one
+  script by hash, `blob:` workers, `'wasm-unsafe-eval'`,
+  `connect-src 'none'`), `frame-ancestors 'self'`. A `srcdoc` frame would
+  inherit the page's policy, which allows no wasm; the runtime takes the
+  document's URL (`loadExtension(…, { sandbox })`, `Sandbox`'s `url`). The
+  frame is `sandbox="allow-scripts"` alone: never `allow-same-origin`,
+  navigation, popups, forms or modals.
+- **What it is given and may ask.** Data only, at most a frame a 16 ms, as
+  its views' embed input (`{claim: "playhead", props}`): `time`, `playing`,
+  `duration`, `index`, `tracks`, the song's `title` and `sections` (the
+  view's `data-sections`: `[{name, start, end, color}]`). It may ask only
+  `PLAYHEAD_SEEK` (`{t}`, a finite time within the song), `PLAYHEAD_PLAY`,
+  `PLAYHEAD_PAUSE`, `PLAYHEAD_NEXT`, `PLAYHEAD_PREVIOUS`, each checked by
+  the player; everything else is refused.
+- **Its stylesheet** (`cleanSheet`, `sanitize.js`) goes in its views'
+  shadow roots: no `@import`, font, namespace or escape (refused whole),
+  `url()` only under its own `/_ext/` folder, at-rules only `@media`,
+  `@supports`, `@layer`, `@container`, `@keyframes`, `@property`; a `:host`
+  rule keeps only custom properties. The view's box contract
+  (`contain: layout paint style`, `position: relative`, `isolation`, inline
+  and `!important`) keeps even `position: fixed` inside it.
+
 **What a view brings in is checked twice.** A view from another page is
 fetched only from a page the link built: the node answers its pages with
 `X-Architect-Page: built` (`architect::host::BUILT_PAGE`; a static
 Site's router too), which no vault file is served with, since the
 builder publishes no vault file named `index.html` or `404.html`. Then
-what is imported goes through the builder's allow-list again, in the
-page (no script, `<style>` outside an SVG, meta, base, link, form, frame
-or handler). A page that does not load says why in the view and is asked
+what is imported goes through the share pages' allow-lists again, in the
+page: the node's web runtime's `sanitize.js` (the port of `sanitize.rs`
+every live view is held to), an SVG `<style>` kept only when every rule is
+under its block's box class, `<use>` only to its own `#id`, images only
+relative or a raster `data:`. A page without the node's runtime (a static
+Site) brings in no view. A page that does not load says why in the view and is asked
 for again next time.
 
 ```html

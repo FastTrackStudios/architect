@@ -45,6 +45,7 @@ mod component_blocks;
 mod element_html;
 mod frontmatter;
 mod installed;
+pub mod island;
 pub mod listing;
 pub mod lyrics;
 mod markdown;
@@ -68,6 +69,7 @@ pub use component_blocks::{ComponentBlocks, DRAW_TIMEOUT};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
 pub use installed::{Installed, InstalledBlocks, InstalledLayers, Package};
+pub use island::SiteIsland;
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
