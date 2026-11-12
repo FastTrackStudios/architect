@@ -111,6 +111,18 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
         report.files = report.files.saturating_add(copy_dir(folder, dir)?);
     }
     for rel in &site.attachments {
+        // A folder's `index.html` (and the site's 404 page) is the
+        // builder's own, served as a page this site wrote
+        // (`architect::host::BUILT_PAGE`): a vault file is never copied
+        // under that name.
+        let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
+        if name == "index.html" || name == "404.html" {
+            report.problems.push(crate::site::Problem {
+                page: rel.clone(),
+                message: "not published: a file named index.html or 404.html would be served as one of the site's own pages".to_owned(),
+            });
+            continue;
+        }
         let from = site.root.join(rel);
         if let Some(to) = inside(dir, rel) {
             if let Some(parent) = to.parent() {

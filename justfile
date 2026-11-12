@@ -383,7 +383,7 @@ web-test PORT="18080":
 # and the queue goes on to the next song's page.
 share-player-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop
-    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" node --test apps/web/test/share-player.test.mjs
+    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" env -u LD_LIBRARY_PATH node --test apps/web/test/share-player.test.mjs apps/web/test/share-playlist.test.mjs
 
 # The sandbox's browser demo (apps/sandbox/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page

@@ -1729,6 +1729,56 @@ tempo map, as HTML or as its engraved SVG (keyflow#59):
 The synced-lyrics block is built this way
 (`features/sites/src/lyrics.rs` `lyrics_html`).
 
+**A playlist and a now-playing view.** A block can make its page a
+player, the way a streaming app's playlist is: a list whose rows play in
+place, a bar at the foot while anything plays, and a view of what plays
+that opens from the bar (studio#445). Attributes again, no script:
+
+| Attribute | On | Means |
+| --- | --- | --- |
+| `data-playlist` | a list | its tracks are the page's queue, in document order (every playlist of the page, one after the other); a tap on one plays it and the page stays; the next one starts without a page load |
+| `data-track` + `data-media="<url>"` | a row of it | a track: its recording; `aria-current="true"` and `data-state` (`playing` or `paused`) while it is the one playing; a link in it still goes where it says |
+| `data-title`, `data-subtitle` | the row | what the bar and the view say of it |
+| `data-page="<url>"` | the row | the page whose `[data-now-playing]` shows it: a page this link (or site) built, under its mount, ending in `/`, no `_` segment, no query; anything else is ignored (no view, no link) |
+| `data-playlist-play` | a button in the list | plays it from its first track |
+| `data-now-playing` + `data-media="<url>"` | a block's element | what the now-playing view shows while that recording plays: moved in from this page, or fetched from the track's `data-page` (once), with its block's box so its sheet comes too; its `[data-follow-playhead]` boxes follow there |
+| `data-transport` | inside the view | the view brings its own controls: the player's are not drawn under it |
+| `data-progress` | inside the view | the view brings its own position bar: the player's is not drawn above it |
+
+Every playlist of a page is one queue, in document order (a setlist's
+sets play through); the page's own `<audio>`/`<video>` are not queued
+there, and one played by hand ends without starting the list. The bar's
+song (a link to its page, as on any site) opens the view instead when
+there is one: from the top, where it is (a bar to seek on), the view, the
+controls, then the song's lyrics (its page's synced lyrics, a tap away)
+and its page and downloads. Back, a swipe down on its head or Escape
+closes it, focus goes back to the bar, and what plays goes on. On a
+phone the view covers the page (modal: the page behind is inert); from
+900 px it is a panel beside the list. A recording the node refuses stops
+the queue and says so in the bar; the lock screen shows the song and its
+buttons work (Media Session).
+
+**What a view brings in is checked twice.** A view from another page is
+fetched only from a page the link built: the node answers its pages with
+`X-Architect-Page: built` (`architect::host::BUILT_PAGE`; a static
+Site's router too), which no vault file is served with, since the
+builder publishes no vault file named `index.html` or `404.html`. Then
+what is imported goes through the builder's allow-list again, in the
+page (no script, `<style>` outside an SVG, meta, base, link, form, frame
+or handler). A page that does not load says why in the view and is asked
+for again next time.
+
+```html
+<div data-playlist>
+  <button data-playlist-play>Play</button>
+  <ol>
+    <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="D · 128 bpm">…<a href="../joy/">Chart</a></li>
+  </ol>
+</div>
+<!-- on Joy's page -->
+<div data-now-playing data-media="Media/Joy.mp4"><svg>… <g data-follow-playhead data-media="Media/Joy.mp4">…</g></svg></div>
+```
+
 **Or subscribe in script.** A view with a script of its own on the page
 (a view mounted live there later, #488) reads the same player,
 `architect.playhead` (`features/sites/assets/player.js`):

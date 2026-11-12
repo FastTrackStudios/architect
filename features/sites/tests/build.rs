@@ -577,3 +577,38 @@ fn a_page_runs_no_inline_script_but_the_hashed_theme() {
         "{page}"
     );
 }
+
+/// A vault file named `index.html` (or `404.html`) is not published: at a
+/// folder's URL it would be served as one of the site's own pages
+/// (`architect::host::BUILT_PAGE`), and the page's player trusts those.
+#[test]
+fn a_vault_index_html_is_not_published() {
+    let dir = tempfile::tempdir().unwrap();
+    touch(
+        dir.path(),
+        "gig.md",
+        "---\ntitle: Gig\n---\n[[raw/index.html]] [[raw/404.html]] [[raw/page.html]]\n",
+    );
+    touch(dir.path(), "raw/index.html", "<p>not a page</p>");
+    touch(dir.path(), "raw/404.html", "<p>not a page</p>");
+    touch(dir.path(), "raw/page.html", "<p>an attachment</p>");
+    let out = tempfile::tempdir().unwrap();
+    let report = build(
+        &Options::new(dir.path(), "Gig"),
+        &Blocks::new(),
+        &out.path().join("site"),
+    )
+    .unwrap();
+    let site = out.path().join("site");
+    assert!(!site.join("raw/index.html").exists());
+    assert!(!site.join("raw/404.html").exists());
+    assert!(
+        site.join("raw/page.html").is_file(),
+        "other files are copied"
+    );
+    let said: Vec<&str> = report.problems.iter().map(|p| p.page.as_str()).collect();
+    assert!(
+        said.contains(&"raw/index.html") && said.contains(&"raw/404.html"),
+        "{said:?}"
+    );
+}

@@ -64,6 +64,14 @@ pub fn cache_policy(path: &str, content_type: Option<&str>) -> &'static str {
     }
 }
 
+/// The header a page the site builder wrote is served with.
+///
+/// `x-architect-page: built`, and on no other file: a vault file the build
+/// copied (an attachment, even one named `.html`) never answers with it.
+/// The page's player imports a now-playing view only from a response that
+/// carries it (`architect-sites`' `assets/player.js`).
+pub const BUILT_PAGE: (&str, &str) = ("x-architect-page", "built");
+
 /// The router that serves the site in `dir` from its root.
 ///
 /// Each folder answers with its `index.html`, a path that is not there
@@ -91,6 +99,15 @@ async fn cache_headers(request: Request, next: Next) -> Response {
             .get(header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok());
         let policy = cache_policy(&path, content_type);
+        // A folder's `index.html` is a page the builder wrote: the builder
+        // copies no attachment under that name.
+        let page = path.ends_with('/') && content_type.is_some_and(|t| t.starts_with("text/html"));
+        if page && status.is_success() {
+            response.headers_mut().insert(
+                header::HeaderName::from_static(BUILT_PAGE.0),
+                HeaderValue::from_static(BUILT_PAGE.1),
+            );
+        }
         response
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));

@@ -1762,7 +1762,11 @@ async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
         return page(StatusCode::NOT_FOUND, "Not found", "<p>No such page.</p>");
     }
     let mut path = dir.join(decoded.trim_start_matches('/'));
-    if decoded.ends_with('/') || path.is_dir() {
+    // A folder answers with the page the builder wrote there (it copies
+    // no vault file as `index.html`), marked so the page's player can tell
+    // it from an attachment (`architect::host::BUILT_PAGE`).
+    let built = decoded.ends_with('/') || path.is_dir();
+    if built {
         path = path.join("index.html");
     }
     let kind = content_type(&path);
@@ -1778,6 +1782,12 @@ async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
                 header::CONTENT_TYPE,
                 HeaderValue::from_static(content_type(&path)),
             );
+            if built {
+                response.headers_mut().insert(
+                    header::HeaderName::from_static(architect::host::BUILT_PAGE.0),
+                    HeaderValue::from_static(architect::host::BUILT_PAGE.1),
+                );
+            }
             response
         }
         Err(_) if !dir.exists() => page(
