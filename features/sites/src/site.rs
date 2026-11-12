@@ -53,11 +53,11 @@ pub struct Options {
     /// are published, the rest are outside the site as notes outside
     /// the scope are. None: every note of the scope.
     pub filter: Option<String>,
-    /// Attachments (vault paths) the site holds but never names (#528: a
-    /// share link's files above its layer): each is copied, so the node
-    /// can refuse it by name, but no link, embed, player, lyrics, search
-    /// entry or listing of the site mentions it; a link to one is
-    /// dropped with its text.
+    /// Attachments (vault paths) the site holds back (#528: a share link's
+    /// files above its layer): never copied into it, and no link, embed,
+    /// player, lyrics, search entry or listing of the site mentions one; a
+    /// link to one is dropped with its text. Nothing held back is ever on
+    /// disk under the site, so no request can reach its bytes there.
     pub hold_back: BTreeSet<String>,
 }
 
@@ -452,10 +452,11 @@ impl Site {
                 });
             }
             for link in &outgoing {
-                if let Some(target) = link
-                    .resolved
-                    .filter(|t| attachments.contains(t) && opts.scope.holds_file(t))
-                {
+                if let Some(target) = link.resolved.filter(|t| {
+                    attachments.contains(t)
+                        && opts.scope.holds_file(t)
+                        && !opts.hold_back.contains(*t)
+                }) {
                     used_attachments.insert(target.to_owned());
                 }
             }

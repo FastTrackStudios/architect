@@ -43,6 +43,22 @@ pub enum WriteError {
     Io(PathBuf, std::io::Error),
 }
 
+/// Called between the two renames that swap a written site into place,
+/// with the folder being replaced: a test's way to hold the moment the
+/// folder is not there (#540's review). None in use.
+#[doc(hidden)]
+pub type SwapHook = std::sync::Arc<dyn Fn(&Path) + Send + Sync>;
+
+static SWAP_HOOK: std::sync::Mutex<Option<SwapHook>> = std::sync::Mutex::new(None);
+
+/// Set (or clear) the [`SwapHook`]. For tests only.
+#[doc(hidden)]
+pub fn set_swap_hook(hook: Option<SwapHook>) {
+    *SWAP_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = hook;
+}
+
 /// Write `site` to `out`.
 ///
 /// # Errors
@@ -73,6 +89,13 @@ pub fn write(site: &Site, out: &Path) -> Result<Report, WriteError> {
             remove(&previous)?;
         }
         rename(out, &previous)?;
+        let hook = SWAP_HOOK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = hook {
+            hook(out);
+        }
         rename(&staging, out)?;
         remove(&previous)?;
     } else {

@@ -518,10 +518,26 @@ pub struct NewShare {
 pub struct KeptLayers {
     /// The extension's id (`fts.studio`).
     pub extension: String,
+    /// The folder it was installed in, under the node's extensions folder
+    /// (rules are kept by folder: two folders never share them).
+    pub folder: String,
     /// The note types its rules place (`song`).
     pub note_types: Vec<String>,
     /// When the node last read them from its manifest (unix seconds).
     pub since: i64,
+}
+
+/// What the node holds of its layer rules (#528).
+///
+/// The rules kept for extensions no longer installed, and what the owner
+/// should know (a manifest or the kept rules' file that does not read,
+/// rules a reinstall lowered), until acknowledged
+/// ([`crate::ShareLinks::acknowledge_layers`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Facet)]
+pub struct LayersReport {
+    pub kept: Vec<KeptLayers>,
+    /// One line each, newest last.
+    pub notices: Vec<String>,
 }
 
 /// One change to a share ([`crate::ShareLinks::update`]).

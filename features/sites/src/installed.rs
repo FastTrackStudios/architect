@@ -111,9 +111,26 @@ impl BlockRenderer for InstalledBlocks {
 /// The `[[share_layers]]` rules (#528) of the extensions installed in a
 /// folder: which layer of a share link each file of their note types is
 /// in. Read again when what is in the folder changes.
+///
+/// A slot is read as the installer reads it
+/// (`architect_extensions::install`): its own `extension.toml`, else the
+/// package its `installed.toml` links to (a development copy installed
+/// from a path). A slot whose manifest does not read where it resolves is
+/// broken.
 pub struct InstalledLayers {
     dir: PathBuf,
-    held: Mutex<(Option<Vec<(String, Option<SystemTime>)>>, Arc<Installed>)>,
+    held: Mutex<(Option<Vec<SlotStamp>>, Arc<Installed>)>,
+}
+
+/// One installed extension's layer rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    /// Its slot's folder name under the extensions folder.
+    pub folder: String,
+    /// The id its manifest claims.
+    pub id: String,
+    /// Its rules (none: it declares none).
+    pub rules: Vec<ShareLayersDecl>,
 }
 
 /// The installed extensions' layer rules, as the folder was when read.
@@ -121,13 +138,16 @@ pub struct InstalledLayers {
 pub struct Installed {
     /// Counts up each time the folder is read again (it changed).
     pub generation: u64,
-    /// Each extension read, by its id, with its rules (none: it declares
-    /// none).
-    pub packages: Vec<(String, Vec<ShareLayersDecl>)>,
+    /// Each extension read.
+    pub packages: Vec<Package>,
     /// Each manifest that could not be read or is not a manifest, and
     /// why. While there is one, which layer a file is in is not known.
     pub broken: Vec<(PathBuf, String)>,
 }
+
+/// A slot as stamped: its name, and when its `extension.toml`, its
+/// `installed.toml` and the manifest it links to were written.
+type SlotStamp = (String, [Option<SystemTime>; 3]);
 
 impl std::fmt::Debug for InstalledLayers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -135,6 +155,66 @@ impl std::fmt::Debug for InstalledLayers {
             .field("dir", &self.dir)
             .finish_non_exhaustive()
     }
+}
+
+/// Where a slot's manifest is: its own, or its linked package's. None:
+/// nothing is installed there.
+fn manifest_of(slot: &Path) -> Option<Result<PathBuf, String>> {
+    let own = slot.join("extension.toml");
+    if own.is_file() {
+        return Some(Ok(own));
+    }
+    let record = slot.join("installed.toml");
+    if !record.is_file() {
+        return None;
+    }
+    Some(
+        std::fs::read_to_string(&record)
+            .map_err(|e| e.to_string())
+            .and_then(|text| text.parse::<toml::Table>().map_err(|e| e.to_string()))
+            .and_then(|table| {
+                table
+                    .get("link")
+                    .and_then(toml::Value::as_str)
+                    .map(|link| slot.join(link).join("extension.toml"))
+                    .ok_or_else(|| {
+                        format!(
+                            "{} names no package (`link`) and the slot has no extension.toml",
+                            record.display()
+                        )
+                    })
+            }),
+    )
+}
+
+/// What `dir` holds, for [`InstalledLayers`]: each slot and when its
+/// manifests were written, in order.
+fn slot_stamps(dir: &Path) -> Vec<SlotStamp> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let written = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let mut out: Vec<SlotStamp> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| {
+            let slot = e.path();
+            let linked = match manifest_of(&slot) {
+                Some(Ok(path)) => written(&path),
+                _ => None,
+            };
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                [
+                    written(&slot.join("extension.toml")),
+                    written(&slot.join("installed.toml")),
+                    linked,
+                ],
+            )
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 impl InstalledLayers {
@@ -151,28 +231,32 @@ impl InstalledLayers {
     /// that does not read is warned of once, naming the file.
     #[must_use]
     pub fn read(&self) -> Arc<Installed> {
-        let stamp = stamp(&self.dir);
+        let stamp = slot_stamps(&self.dir);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
         if held.0.as_ref() != Some(&stamp) {
             let mut read = Installed {
                 generation: held.1.generation.wrapping_add(1),
                 ..Installed::default()
             };
-            for (name, written) in &stamp {
-                if name.starts_with('.') {
+            for (folder, _) in &stamp {
+                if folder.starts_with('.') {
                     continue;
                 }
-                let path = self.dir.join(name).join("extension.toml");
-                if written.is_none() {
-                    // A folder with no manifest (yet): nothing installed.
-                    continue;
-                }
-                match std::fs::read_to_string(&path)
-                    .map_err(|e| e.to_string())
-                    .and_then(|text| Manifest::parse(&text).map_err(|e| e.to_string()))
-                {
-                    Ok(manifest) => read.packages.push((manifest.id, manifest.share_layers)),
-                    Err(error) => {
+                let read_one = match manifest_of(&self.dir.join(folder)) {
+                    None => continue,
+                    Some(Err(why)) => Err((self.dir.join(folder).join("installed.toml"), why)),
+                    Some(Ok(path)) => std::fs::read_to_string(&path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|text| Manifest::parse(&text).map_err(|e| e.to_string()))
+                        .map_err(|why| (path, why)),
+                };
+                match read_one {
+                    Ok(manifest) => read.packages.push(Package {
+                        folder: folder.clone(),
+                        id: manifest.id,
+                        rules: manifest.share_layers,
+                    }),
+                    Err((path, error)) => {
                         tracing::warn!(
                             path = %path.display(),
                             %error,
