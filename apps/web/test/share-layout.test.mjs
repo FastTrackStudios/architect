@@ -30,6 +30,9 @@ function which(cmd) {
 }
 const browser = process.env.FIREFOX || which('firefox');
 const skip = NODE && browser ? false : 'needs ARCHITECT_ISLAND_NODE (just share-layout-test) and a Firefox (FIREFOX=…)';
+// CI (.github/workflows/browser.yml) has a browser: missing one there is a
+// failure, never a skip.
+if (process.env.ARCHITECT_BROWSER_REQUIRED && skip) throw new Error(`ARCHITECT_BROWSER_REQUIRED: ${skip}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const put = (root, rel, body) => { const p = join(root, rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, body); };
 const freePort = () => new Promise((ok) => { const srv = createServer(); srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => ok(port)); }); });
