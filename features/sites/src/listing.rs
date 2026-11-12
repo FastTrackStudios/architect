@@ -46,6 +46,16 @@ pub fn open(root: &std::path::Path) -> Result<Vault, String> {
     Vault::open(root).map_err(|e| e.to_string())
 }
 
+/// [`open`], and what of the vault could not be read (notes that did not
+/// load, entries the walk skipped), one line each.
+///
+/// # Errors
+///
+/// The folder could not be read.
+pub fn open_reporting(root: &std::path::Path) -> Result<(Vault, Vec<String>), String> {
+    Vault::open_reporting(root).map_err(|e| e.to_string())
+}
+
 /// One listed note.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {

@@ -15,8 +15,8 @@
 //!
 //! Each pattern is matched against an attached file's path relative to
 //! the folder of the note that attaches it (a file outside that folder:
-//! its vault path), whole, in any case (Unicode lowercase, character by
-//! character; `note_type` the same, its spaces trimmed): `*` and
+//! its vault path), whole, in any case and either Unicode form ([`fold`]:
+//! NFC, lower cased; `note_type` the same, its spaces trimmed): `*` and
 //! `?` stay within one segment, `**` is any number of segments. Matching
 //! takes time linear in the pattern times the path, never exponential,
 //! and [`ShareLayersDecl::check`] bounds what a manifest may ask
@@ -78,12 +78,7 @@ impl ShareLayersDecl {
     /// Whether it is about notes of `note_type` (any case).
     #[must_use]
     pub fn is_for(&self, note_type: &str) -> bool {
-        let (mine, theirs) = (self.note_type.trim(), note_type.trim());
-        mine.chars().count() == theirs.chars().count()
-            && mine
-                .chars()
-                .zip(theirs.chars())
-                .all(|(a, b)| same_char(a, b))
+        fold(self.note_type.trim()) == fold(note_type.trim())
     }
 
     /// Its note type named, and each pattern a relative path within the
@@ -136,12 +131,12 @@ impl ShareLayersDecl {
 
 /// Whether `path` matches `pattern`, whole, segment by segment.
 ///
-/// In any case (Unicode lowercase, character by character: `Gänse*` is
-/// `GÄNSE.ogg`; the Unicode form is not folded: spell it as the vault
-/// does). Linear in the pattern times the path: one wildcard is retried
+/// In any case and either Unicode form ([`fold`]: `Gänse*` is
+/// `GÄNSE.ogg`, decomposed or not). Linear in the pattern times the path: one wildcard is retried
 /// at a time, never a tree of them.
 #[must_use]
 pub fn glob(pattern: &str, path: &str) -> bool {
+    let (pattern, path) = (fold(pattern), fold(path));
     let pattern: Vec<&str> = pattern.split('/').collect();
     let path: Vec<&str> = path.split('/').collect();
     wildcard(&pattern, &path, |p| *p == "**", |p, n| one(p, n))
@@ -152,17 +147,18 @@ pub fn glob(pattern: &str, path: &str) -> bool {
 fn one(pattern: &str, name: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let name: Vec<char> = name.chars().collect();
-    wildcard(
-        &pattern,
-        &name,
-        |c| *c == '*',
-        |p, n| *p == '?' || same_char(*p, *n),
-    )
+    wildcard(&pattern, &name, |c| *c == '*', |p, n| *p == '?' || p == n)
 }
 
-/// `a` and `b` alike in any case: equal, or equal lower cased (Unicode).
-fn same_char(a: char, b: char) -> bool {
-    a == b || a.to_lowercase().eq(b.to_lowercase())
+/// `s` as patterns, paths and note types are compared.
+///
+/// In one Unicode form (NFC: `ä` written as one character or as `a` and a
+/// combining mark is the same) and lower cased (Unicode), so `Gänse*`
+/// matches `GÄNSE.ogg` as macOS hands either back.
+#[must_use]
+pub fn fold(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+    s.nfc().flat_map(char::to_lowercase).collect()
 }
 
 /// `items` matched whole by `pattern`, where `star(p)` matches any run
@@ -374,5 +370,18 @@ mod tests {
             ..song()
         };
         assert!(umlaut.is_for("STÜCK"));
+    }
+
+    /// One spelling, either Unicode form: an NFC pattern matches an NFD
+    /// path (what macOS hands back), and a note type the same.
+    #[test]
+    fn unicode_forms_are_one() {
+        assert!(glob("Stems/G\u{e4}nse*", "Stems/Ga\u{308}nse.ogg"));
+        assert!(glob("Stems/Ga\u{308}nse*", "Stems/G\u{e4}nse.ogg"));
+        let rule = ShareLayersDecl {
+            note_type: "St\u{fc}ck".into(),
+            ..song()
+        };
+        assert!(rule.is_for("Stu\u{308}ck"));
     }
 }

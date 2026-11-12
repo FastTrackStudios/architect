@@ -145,9 +145,23 @@ pub struct Installed {
     pub broken: Vec<(PathBuf, String)>,
 }
 
-/// A slot as stamped: its name, and when its `extension.toml`, its
-/// `installed.toml` and the manifest it links to were written.
-type SlotStamp = (String, [Option<SystemTime>; 3]);
+/// One file as stamped: when it was written, its size and its inode
+/// (0 where there is none), so two writes in one tick of a coarse clock
+/// are still told apart.
+type FileStamp = Option<(SystemTime, u64, u64)>;
+
+/// A slot as stamped: its name, and its `extension.toml`, its
+/// `installed.toml` and the manifest it links to.
+type SlotStamp = (String, [FileStamp; 3]);
+
+fn file_stamp(path: &Path) -> FileStamp {
+    let meta = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    Some((meta.modified().ok()?, meta.len(), inode))
+}
 
 impl std::fmt::Debug for InstalledLayers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -193,21 +207,20 @@ fn slot_stamps(dir: &Path) -> Vec<SlotStamp> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let written = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     let mut out: Vec<SlotStamp> = entries
         .flatten()
         .filter(|e| e.path().is_dir())
         .map(|e| {
             let slot = e.path();
             let linked = match manifest_of(&slot) {
-                Some(Ok(path)) => written(&path),
+                Some(Ok(path)) => file_stamp(&path),
                 _ => None,
             };
             (
                 e.file_name().to_string_lossy().into_owned(),
                 [
-                    written(&slot.join("extension.toml")),
-                    written(&slot.join("installed.toml")),
+                    file_stamp(&slot.join("extension.toml")),
+                    file_stamp(&slot.join("installed.toml")),
                     linked,
                 ],
             )
@@ -394,5 +407,35 @@ mod tests {
 
         std::fs::remove_dir_all(&pkg).unwrap();
         assert!(!installed.claims(&kf));
+    }
+
+    /// Two writes of a manifest in one tick of a coarse clock: the second
+    /// (another size) is read, not the first kept (#540's third review).
+    #[test]
+    fn a_manifest_rewritten_within_one_tick_is_read_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let slot = tmp.path().join("demo.songs");
+        std::fs::create_dir_all(&slot).unwrap();
+        let manifest = slot.join("extension.toml");
+        let head = "id = \"demo.songs\"\nname = \"X\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n";
+        std::fs::write(
+            &manifest,
+            format!("{head}[[share_layers]]\nnote_type = \"song\"\nfull = [\"Media/**\"]\n"),
+        )
+        .unwrap();
+        let when = std::fs::metadata(&manifest).unwrap().modified().unwrap();
+        let layers = InstalledLayers::new(tmp.path());
+        assert_eq!(layers.read().packages[0].rules[0].full, ["Media/**"]);
+        std::fs::write(&manifest, format!("{head}[[share_layers]]\nnote_type = \"song\"\nfull = [\"Media/**\", \"Stems/**\"]\n")).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&manifest)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+        assert_eq!(
+            layers.read().packages[0].rules[0].full,
+            ["Media/**", "Stems/**"]
+        );
     }
 }
