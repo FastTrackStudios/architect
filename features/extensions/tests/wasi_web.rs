@@ -170,11 +170,8 @@ fn components_run_in_the_browsers_shape() {
     let Some(mut build) = tool("node") else {
         return skip("no node");
     };
-    let status = build.args(["scripts/build.mjs"]).current_dir(&web).status();
-    assert!(
-        status.is_ok_and(|s| s.success()),
-        "scripts/build.mjs failed"
-    );
+    let built = build.args(["scripts/build.mjs"]).current_dir(&web).status();
+    assert!(built.is_ok_and(|s| s.success()), "scripts/build.mjs failed");
     let Some(mut package) = tool("node") else {
         return skip("no node");
     };
