@@ -81,6 +81,8 @@ pub struct SiteIsland {
     transport: Option<String>,
     stylesheet: Option<String>,
     web: Option<String>,
+    /// The operator's grant of WebRTC ([`Self::grant_webrtc`]).
+    webrtc_granted: bool,
     derived: OnceLock<Derived>,
 }
 
@@ -147,6 +149,7 @@ impl SiteIsland {
             transport: None,
             stylesheet: None,
             web,
+            webrtc_granted: false,
             derived: OnceLock::new(),
         }
     }
@@ -163,6 +166,42 @@ impl SiteIsland {
         self.web = (web_name(&entry) && ext_is(&entry, "js") && self.file(&entry).is_some())
             .then_some(entry);
         self
+    }
+
+    /// Grant it WebRTC in its web view (the operator's grant): it gets the
+    /// web view document that allows peer connections, if its extension
+    /// also declares `capabilities.webrtc = ["peer-connections"]`. What it
+    /// exposes: the visitor's IP to its peers and to the STUN/TURN servers
+    /// it names, and a data channel out of the sandbox no policy meters.
+    #[must_use]
+    pub const fn grant_webrtc(mut self) -> Self {
+        self.webrtc_granted = true;
+        self
+    }
+
+    /// Whether its extension declares WebRTC (`capabilities.webrtc`
+    /// holding `peer-connections`, in its folder's `architect.json`).
+    #[must_use]
+    pub fn declares_webrtc(&self) -> bool {
+        self.file("architect.json")
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+            .and_then(|json| {
+                json.pointer("/manifest/capabilities/webrtc")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|list| list.iter().any(|v| v == "peer-connections"))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Which web view its views run in: WebRTC only when declared and
+    /// granted, never anything a page, a note or a message says.
+    #[must_use]
+    pub fn webrtc(&self) -> WebRtc {
+        if self.webrtc_granted && self.declares_webrtc() {
+            WebRtc::Granted
+        } else {
+            WebRtc::Blocked
+        }
     }
 
     /// Its web bundle's files: its `web-*.js` and `web-*.wasm`, by name.
@@ -338,58 +377,138 @@ pub fn sandbox_headers() -> [(&'static str, String); 4] {
     ]
 }
 
+/// Which of the two web view documents an island's views run in.
+///
+/// By default WebRTC is blocked (by policy and by its script, before any
+/// bundle code runs); an island whose
+/// extension declares `capabilities.webrtc = ["peer-connections"]` and
+/// whose operator grants it ([`SiteIsland::grant_webrtc`]) gets the one
+/// that allows it. Each has its own path, named by its content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebRtc {
+    /// `webrtc 'block'`, the constructors removed: the default.
+    Blocked,
+    /// `webrtc 'allow'`, the constructors left: declared and granted.
+    Granted,
+}
+
+impl WebRtc {
+    const fn index(self) -> usize {
+        match self {
+            Self::Blocked => 0,
+            Self::Granted => 1,
+        }
+    }
+}
+
+/// The web view's script for `rtc` (`assets/webview.js`; the granted one
+/// with its `RTC` switch on).
+fn webview_script(rtc: WebRtc) -> &'static str {
+    static SCRIPTS: OnceLock<[String; 2]> = OnceLock::new();
+    let all = SCRIPTS.get_or_init(|| {
+        [
+            WEBVIEW_SCRIPT.to_owned(),
+            WEBVIEW_SCRIPT.replacen("var RTC = false;", "var RTC = true;", 1),
+        ]
+    });
+    all.get(rtc.index()).map_or(WEBVIEW_SCRIPT, String::as_str)
+}
+
 /// A web view frame's policy (with `sandbox allow-scripts` and
-/// `frame-ancestors 'self'` in [`webview_headers`]): its script by hash,
-/// `blob:` modules (the bundle, made by it from the bytes it is handed),
-/// wasm, inline style; images and fonts only from `blob:`/`data:`;
-/// nothing to fetch, connect to, frame or start a worker from.
-fn webview_csp() -> &'static str {
-    static CSP: OnceLock<String> = OnceLock::new();
-    CSP.get_or_init(|| {
-        format!(
-            "default-src 'none'; script-src '{}' blob: 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; font-src blob: data:; connect-src 'none'; media-src 'none'; worker-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'",
-            sha256(WEBVIEW_SCRIPT.as_bytes())
-        )
-    })
+/// `frame-ancestors 'self'` in [`webview_headers`]).
+///
+/// Blocked by the policy: every fetch, XHR, WebSocket, `EventSource`,
+/// WebTransport, beacon and `<a ping>` (`connect-src 'none'`); scripts but
+/// its own by hash and `blob:` modules (`script-src`: no speculation rules,
+/// no remote import); images and fonts but `blob:`/`data:` (so no CSS
+/// `url()` leaves it); media, workers, child frames, objects, manifests,
+/// `<base>`, forms; WebRTC (`webrtc 'block'`, CSP3: honoured by Chromium
+/// and `WebKit`, ignored by Firefox, so its script removes the constructors
+/// too). By the sandbox flags (only `allow-scripts`): popups
+/// (`window.open`), top navigation, forms, modals, same-origin. Its own
+/// navigation away is held by the share page's policy (`frame-src`
+/// through `default-src 'self'`): it may go only to the node. DNS
+/// prefetch and preconnect are refused by `x-dns-prefetch-control: off`.
+fn webview_csp(rtc: WebRtc) -> String {
+    format!(
+        "default-src 'none'; script-src '{}' blob: 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; font-src blob: data:; connect-src 'none'; media-src 'none'; worker-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'; webrtc '{}'",
+        sha256(webview_script(rtc).as_bytes()),
+        match rtc {
+            WebRtc::Blocked => "block",
+            WebRtc::Granted => "allow",
+        }
+    )
 }
 
 /// A web view's frame: a root for the view (`#main`, where a Dioxus web
 /// bundle mounts), a reset, and its one script. The same for everyone.
 #[must_use]
 pub fn webview_document() -> &'static str {
-    static DOC: OnceLock<String> = OnceLock::new();
-    DOC.get_or_init(|| {
+    webview_document_for(WebRtc::Blocked)
+}
+
+/// The web view document for `rtc`.
+#[must_use]
+pub fn webview_document_for(rtc: WebRtc) -> &'static str {
+    static DOCS: OnceLock<[String; 2]> = OnceLock::new();
+    let doc = |rtc: WebRtc| {
         format!(
-            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}body{{font:14px/1.3 system-ui,-apple-system,sans-serif;color:var(--foreground,CanvasText)}}</style></head><body><div id=\"main\"></div><script>{WEBVIEW_SCRIPT}</script></body></html>"
+            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}body{{font:14px/1.3 system-ui,-apple-system,sans-serif;color:var(--foreground,CanvasText)}}</style></head><body><div id=\"main\"></div><script>{}</script></body></html>",
+            webview_script(rtc)
         )
-    })
+    };
+    let all = DOCS.get_or_init(|| [doc(WebRtc::Blocked), doc(WebRtc::Granted)]);
+    all.get(rtc.index()).map_or("", String::as_str)
 }
 
 /// Where the web view document is served, named by its content.
 #[must_use]
 pub fn webview_path() -> &'static str {
-    static PATH: OnceLock<String> = OnceLock::new();
-    PATH.get_or_init(|| {
-        format!(
-            "{ISLANDS_PATH}webview.{}.html",
-            fingerprint(webview_document().as_bytes())
-        )
-    })
+    webview_path_for(WebRtc::Blocked)
+}
+
+/// Where the web view document for `rtc` is served: its own path
+/// (`webview.<hash>.html`, `webview-rtc.<hash>.html`), so the two are
+/// never confused, nor cached one for the other.
+#[must_use]
+pub fn webview_path_for(rtc: WebRtc) -> &'static str {
+    static PATHS: OnceLock<[String; 2]> = OnceLock::new();
+    let all = PATHS.get_or_init(|| {
+        [WebRtc::Blocked, WebRtc::Granted].map(|rtc| {
+            let name = match rtc {
+                WebRtc::Blocked => "webview",
+                WebRtc::Granted => "webview-rtc",
+            };
+            format!(
+                "{ISLANDS_PATH}{name}.{}.html",
+                fingerprint(webview_document_for(rtc).as_bytes())
+            )
+        })
+    });
+    all.get(rtc.index()).map_or("", String::as_str)
 }
 
 /// The web view document's own headers: [`webview_csp`] in a sandbox,
-/// framed only by the node's own pages, `nosniff`, immutable.
+/// framed only by the node's own pages, no DNS prefetch, `nosniff`,
+/// immutable.
 #[must_use]
-pub fn webview_headers() -> [(&'static str, String); 4] {
-    [
+pub fn webview_headers() -> Vec<(&'static str, String)> {
+    webview_headers_for(WebRtc::Blocked)
+}
+
+/// [`webview_headers`] for `rtc`.
+#[must_use]
+pub fn webview_headers_for(rtc: WebRtc) -> Vec<(&'static str, String)> {
+    vec![
         (
             "content-security-policy",
             format!(
                 "sandbox allow-scripts; {}; frame-ancestors 'self'",
-                webview_csp()
+                webview_csp(rtc)
             ),
         ),
         ("x-content-type-options", "nosniff".to_owned()),
+        ("x-dns-prefetch-control", "off".to_owned()),
         (
             "cache-control",
             "public, max-age=31536000, immutable".to_owned(),
@@ -404,11 +523,13 @@ pub fn webview_headers() -> [(&'static str, String); 4] {
 /// origin's): the sandbox's or a web view's. None for anything else (a
 /// module, a component, a sheet).
 #[must_use]
-pub fn document_headers(path: &str) -> Option<[(&'static str, String); 4]> {
+pub fn document_headers(path: &str) -> Option<Vec<(&'static str, String)>> {
     if path == sandbox_path() {
-        Some(sandbox_headers())
-    } else if path == webview_path() {
-        Some(webview_headers())
+        Some(sandbox_headers().into())
+    } else if path == webview_path_for(WebRtc::Blocked) {
+        Some(webview_headers_for(WebRtc::Blocked))
+    } else if path == webview_path_for(WebRtc::Granted) {
+        Some(webview_headers_for(WebRtc::Granted))
     } else {
         None
     }
@@ -466,11 +587,13 @@ pub fn serve<'a>(islands: &'a [SiteIsland], path: &str) -> Option<(Cow<'a, [u8]>
             "text/html; charset=utf-8",
         ));
     }
-    if path == webview_path() {
-        return Some((
-            Cow::Borrowed(webview_document().as_bytes()),
-            "text/html; charset=utf-8",
-        ));
+    for rtc in [WebRtc::Blocked, WebRtc::Granted] {
+        if path == webview_path_for(rtc) {
+            return Some((
+                Cow::Borrowed(webview_document_for(rtc).as_bytes()),
+                "text/html; charset=utf-8",
+            ));
+        }
     }
     if let Some(rest) = path.strip_prefix(runtime_path()) {
         return runtime_file(rest).map(|body| {
@@ -527,6 +650,9 @@ pub fn page_json(islands: &[SiteIsland]) -> serde_json::Value {
                 // node holds it.
                 "web": i.web.as_deref().map(|entry| serde_json::json!({
                     "entry": entry,
+                    // Its frame's document: chosen here, by its declaration
+                    // and its grant.
+                    "webview": webview_path_for(i.webrtc()),
                     "files": i
                         .web_files()
                         .into_iter()
@@ -636,12 +762,108 @@ mod tests {
             .unwrap();
         assert!(csp.contains(&format!("script-src '{}' blob:", sha256(script.as_bytes()))));
         assert!(webview_path().starts_with("/_ext/webview.") && ext_is(webview_path(), "html"));
+        // WebRTC blocked by the policy and removed by the script; no DNS
+        // prefetch; no child frame (a bundle cannot get the constructors
+        // back from one).
+        assert!(
+            csp.contains("webrtc 'block'")
+                && csp.contains("frame-src 'none'")
+                && csp.contains("child-src 'none'")
+        );
+        assert!(script.contains("var RTC = false;") && script.contains("RTCPeerConnection"));
+        assert!(headers.contains(&("x-dns-prefetch-control", "off".to_owned())));
         assert!(document_headers(webview_path()).is_some());
         assert!(document_headers(sandbox_path()).is_some());
         assert!(document_headers("/_ext/webview.html").is_none());
         assert_eq!(
             serve(&[], webview_path()).map(|(b, t)| (b.into_owned(), t)),
             Some((doc.as_bytes().to_vec(), "text/html; charset=utf-8"))
+        );
+    }
+
+    /// WebRTC is a declared and granted capability: the default frame
+    /// blocks it; an island declaring `capabilities.webrtc` and granted by
+    /// its operator gets its own document that allows it; one that is not
+    /// declared gets nothing from a grant, and nothing else chooses.
+    #[test]
+    fn webrtc_is_declared_and_granted_never_asked_for() {
+        let manifest = |caps: &str| {
+            format!(
+                "{{\"module\":\"x.js\",\"manifest\":{{\"id\":\"demo.call\",\"capabilities\":{caps}}}}}"
+            )
+        };
+        let island = |caps: &str| {
+            SiteIsland::new(
+                "demo.call",
+                vec![
+                    (
+                        "architect.json".to_owned(),
+                        Cow::Owned(manifest(caps).into_bytes()),
+                    ),
+                    (
+                        "web-call.js".to_owned(),
+                        Cow::Borrowed(b"export default 1".as_slice()),
+                    ),
+                    (
+                        "web-call_bg.wasm".to_owned(),
+                        Cow::Borrowed(b"\0asm".as_slice()),
+                    ),
+                ],
+            )
+            .progress("call")
+        };
+        let declared = r#"{"webrtc":["peer-connections"]}"#;
+        assert_eq!(
+            island(declared).webrtc(),
+            WebRtc::Blocked,
+            "declared, not granted"
+        );
+        assert_eq!(
+            island("{}").grant_webrtc().webrtc(),
+            WebRtc::Blocked,
+            "granted, not declared"
+        );
+        assert_eq!(
+            island(r#"{"webrtc":["camera"]}"#).grant_webrtc().webrtc(),
+            WebRtc::Blocked
+        );
+        let granted = island(declared).grant_webrtc();
+        assert_eq!(granted.webrtc(), WebRtc::Granted);
+        let json = page_json(&[granted, island(declared)]);
+        assert_eq!(
+            json["islands"][0]["web"]["webview"],
+            webview_path_for(WebRtc::Granted)
+        );
+        assert_eq!(
+            json["islands"][1]["web"]["webview"],
+            webview_path_for(WebRtc::Blocked)
+        );
+        // Two documents, two paths, each served with its own policy.
+        assert_ne!(
+            webview_path_for(WebRtc::Granted),
+            webview_path_for(WebRtc::Blocked)
+        );
+        assert!(webview_path_for(WebRtc::Granted).starts_with("/_ext/webview-rtc."));
+        let csp = |rtc| {
+            document_headers(webview_path_for(rtc)).unwrap()[0]
+                .1
+                .clone()
+        };
+        assert!(
+            csp(WebRtc::Granted).contains("webrtc 'allow'")
+                && csp(WebRtc::Granted).contains("connect-src 'none'")
+        );
+        assert!(webview_document_for(WebRtc::Granted).contains("var RTC = true;"));
+        assert!(csp(WebRtc::Blocked).contains("webrtc 'block'"));
+        assert!(webview_document_for(WebRtc::Blocked).contains("var RTC = false;"));
+        // A note cannot hand the page an islands list of its own: what it
+        // draws loses every script element.
+        let drawn = crate::sanitize::sanitize(
+            "<script type=\"application/json\" id=\"site-islands\">{}</script><p>x</p>",
+        );
+        assert!(
+            !drawn.contains("site-islands") && !drawn.contains("<script"),
+            "{drawn}"
         );
     }
 

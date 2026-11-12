@@ -1760,12 +1760,14 @@ that opens from the bar (studio#445). Attributes again, no script:
 
 | Attribute | On | Means |
 | --- | --- | --- |
-| `data-playlist` | a list | its tracks are the page's queue, in document order (every playlist of the page, one after the other); a tap on one plays it and the page stays; the next one starts without a page load. Playlists one after another with nothing but headings between them (each in its block's box) are joined into one: each heading becomes a section label of it, keeping its `id` |
+| `data-playlist` | a list | its tracks are the page's queue, in document order (every playlist of the page, one after the other); a tap on one plays it and the page stays; the next one starts without a page load. Playlists one after another with nothing but headings between them (each in its block's box), each with `data-playlist-join` (or the class `studio-setlist`, as Studio wrote a setlist's sets before), are joined into one: each heading becomes a section label of it, keeping its `id`; lists that do not say so stay apart |
 | `data-playlist-section` | a row of it | a section's label (a set's name): never a track; numbering, the queue and next/previous run on through it |
 | `data-track` + `data-media="<url>"` | a row of it | a track: its recording; `aria-current="true"` and `data-state` (`playing` or `paused`) while it is the one playing; a link in it still goes where it says |
 | `data-title`, `data-subtitle` | the row | what the bar and the view say of it |
 | `data-page="<url>"` | the row | the page whose `[data-now-playing]` shows it: a page this link (or site) built, under its mount, ending in `/`, no `_` segment, no query; anything else is ignored (no view, no link). A row with `data-page` and no `data-track` is a song with no recording: in the list, quieter, and a tap opens that page |
 | `data-track-mark`, `data-track-art`, `data-track-title`, `data-track-meta`, `data-track-length`, `data-track-open` | inside a row | its parts as the page's sheet lays them out (number, a square tile, title over one muted line, length, a small link to its page); the player lays the song's art over its `data-track-art` tile when the link has art for its `data-page` (the queue's `art`, from the note's `art:`), and draws the bar's art from the same tile (`data-hue` its colour) |
+| `data-track-more` | a `<button type="button">` in a row | its menu ("…", 44 px): Open chart (the now-playing view, the song made current) and Lyrics when it has them, Song page and downloads; a sheet from the foot on a phone, beside the button on a desk; arrows move, Escape closes |
+| `data-key`, `data-key-size`, `data-track-key`, `data-track-transposed` | the row's `data-track-art` tile | the song's key on its art: the art dimmed under it, the key (`data-track-key`; `data-key-size` `s` or `xs` for a long one) in place of the tile's initials, a corner mark (`data-track-transposed`) when the list plays it in another key; the tile's accessible label says it in words. The player's card shows the art clean |
 | `data-playlist-play` | a button in the list | no longer drawn: a row plays from where it is, the bar plays the list |
 | `data-now-playing` + `data-media="<url>"` | a block's element | what the now-playing view shows while that recording plays: moved in from this page, or fetched from the track's `data-page` (once), with its block's box so its sheet comes too; its `[data-follow-playhead]` boxes follow there |
 | `data-transport` | inside the view | the view brings its own controls: the player's are not drawn under it |
@@ -1816,30 +1818,73 @@ views as a plain web bundle too: wasm-bindgen's `--target web` glue
 folder named `web-*` (its modules import each other as `./<name>.js`: one
 folder, no other path). The node finds it by its files (the one `web-*.js`
 that is no `web-snippet-*.js`; `SiteIsland::web(entry)` names another) and
-puts each file's digest in `site-islands` (`web.files`). When an island
-has one, the player draws its views from it in every browser, no JS
-Promise Integration needed: each view in a frame of the node's web view
-document (`/_ext/webview.<hash>.html`, `architect_sites::island::webview_document`,
-its boot script `features/sites/assets/webview.js`), served with
-`webview_headers`: `sandbox allow-scripts` (an opaque origin), its one
-script by hash, `blob:` modules, `'wasm-unsafe-eval'`, **inline style**
-(its components' `style` attributes and its sheet: the one thing it
-allows that the sandbox document does not), images and fonts only from
-`blob:`/`data:`, `connect-src`, `worker-src`, `frame-src`, `media-src`
-`'none'`, `frame-ancestors 'self'`. The page fetches the bundle from the
-node, checks every file against its digest, and hands the frame the bytes
-(it makes them `blob:` modules, gives the glue the wasm as bytes and
-mounts the view), its theme (the page's CSS custom properties, none with
-a URL, and light or dark), its sheet (pinned as above) and where the song
-is; the frame sends back only the view's asks (the same five intents,
-checked and rate-limited by the page), its height and that it is ready.
-Code of the bundle never runs in the page's own origin, and the page's
-CSP does not change. A bundle built for `wasm32-unknown-unknown` with the
-pinned rustc uses bulk memory, mutable globals, non-trapping float-to-int,
-reference types, sign extension and multi-value (Safari 15 has all six;
-Studio's build validates its module against exactly those with
-`wasm-opt`), so the floor is the frame's own: Safari 15.4 (module scripts
-from `blob:`, `'wasm-unsafe-eval'` from 16; Studio's target is 16.4).
+puts each file's digest in `site-islands` (`web.files`), with the document
+its frame runs in (`web.webview`). When an island has one, the player draws
+its views from it in every browser, no JS Promise Integration needed: each
+view in a frame of the node's web view document
+(`architect_sites::island::webview_document`, its boot script
+`features/sites/assets/webview.js`), served with `webview_headers`. The page
+fetches the bundle from the node, checks every file against its digest, and
+hands the frame the bytes once (it makes them `blob:` modules, gives the
+glue the wasm as bytes and mounts the view), its theme (the page's CSS
+custom properties, none with a URL, and light or dark), its sheet (pinned as
+above) and where the song is; the frame sends back only the view's asks (the
+same five intents, checked and rate-limited by the page), its height (once a
+frame at most), that it is ready, and answers a heartbeat. A frame that is
+not ready in 15 s, stops answering for 6 s, reports an error or leaves its
+document (a second load) is taken down for the page's life and the
+player's own bar and controls come back.
+
+What reaches the network from a web view, and what stops it:
+
+- **By its policy** (`sandbox allow-scripts`, an opaque origin): every
+  fetch, XHR, WebSocket, `EventSource`, WebTransport, beacon and `<a ping>`
+  (`connect-src 'none'`); any script but its own by hash and `blob:`
+  modules (no remote `import()`, no speculation rules); images and fonts
+  but `blob:`/`data:` (so a stylesheet's `url()` loads nothing); media,
+  workers, child frames (`frame-src 'none'`, `child-src 'none'`: a bundle
+  cannot get removed APIs back from a fresh child), objects, manifests,
+  `<base>`, forms; popups (`window.open`), top navigation, modals and
+  forms by the sandbox flags; WebRTC by `webrtc 'block'` (CSP3, honoured by
+  Chromium and WebKit, ignored by Firefox).
+- **By its script, before any bundle code runs:** `RTCPeerConnection` and
+  its kin are removed (non-configurable `undefined`), for the engines that
+  ignore `webrtc 'block'`; the Presentation API is removed;
+  `navigator.sendBeacon` answers `false`.
+- **By its headers:** `x-dns-prefetch-control: off` (no DNS prefetch or
+  preconnect from `<link>`).
+- **By the share page's own policy:** a frame navigating itself can go
+  only where the page's `frame-src` (its `default-src 'self'`) allows, the
+  node. That is what keeps a web view from leaving the node, and it is
+  load-bearing (`apps/desktop/src/node/shares.rs` `content_security_policy`);
+  a navigation away is also the frame's death (above). The node's own
+  routes that change a visitor's state (`/s/_signin`, `/s/_signout`) answer
+  only a same-origin or typed request (`Sec-Fetch-Site`), never a frame's.
+- **Not stopped:** the bundle runs on the page's event loop in Firefox
+  (and may elsewhere): a busy loop in it stalls the share page. The
+  component route (a Worker) did not have this.
+
+**WebRTC is a capability**, never a default. An extension declares
+`capabilities.webrtc = ["peer-connections"]` and its operator grants it
+(`SiteIsland::grant_webrtc`, the distribution's call): only then is its
+view served the other web view document (`webview-rtc.<hash>.html`,
+`WebRtc::Granted`, its own path so the two are never confused or cached
+one for the other), whose policy says `webrtc 'allow'` and whose script
+leaves the constructors. Everything else about the frame is the same
+(opaque origin, `connect-src 'none'`, pinned files, intents only). The
+node chooses it from the island's manifest and the grant; no page, note,
+query or message can. What it exposes: the visitor's IP address to the
+peers and to the STUN/TURN servers the bundle names, and a data channel
+out of the sandbox that no policy meters. The bundle's code is the node
+operator's linked-in island, pinned by digest, the same trust as the
+component.
+
+A bundle built for `wasm32-unknown-unknown` with the pinned rustc uses bulk
+memory, mutable globals, non-trapping float-to-int, reference types, sign
+extension and multi-value (Safari 15 has all six; Studio's build validates
+its module against exactly those with `wasm-opt`), so the floor is the
+frame's own: Safari 15.4 (module scripts from `blob:`, `'wasm-unsafe-eval'`
+from 16; Studio's target is 16.4).
 
 - **The share page's CSP does not change.** The sandbox frame is the
   node's own document, `/_ext/sandbox.<hash>.html`

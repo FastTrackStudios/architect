@@ -125,8 +125,12 @@ become pages. A link to a note outside the scope is drawn as plain text
 (`site-outside`, with no URL and no title), an embed of one is left out
 entirely (its alt text too), and it is never reported as a problem. No
 backlink, base row, search entry, tag page or feed lists a note outside it.
-An attachment is copied only when a note in the scope links to it or embeds
-it, and under a folder scope only when it is in the folder. A one-note scope
+An attachment is copied only when a note in the scope links to it, embeds
+it or names it as its art (`art:`), and under a folder scope only when it is
+in the folder. Under a tag, note-list or base scope `holds_file` is true for
+any file, so a listed note's `art:` (like an embed in its body) can publish
+any image in the vault. A note's art is one of its files: it is on the
+link's Files page and in "Download all" as its other attachments are. A one-note scope
 makes that note the home page. A share link is a scoped site
 ([deploy](@/guide/deploy.md)).
 

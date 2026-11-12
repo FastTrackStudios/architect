@@ -163,6 +163,12 @@ pub struct Capabilities {
     /// (run a language's server, a program on this computer, while a
     /// file of the language is open).
     pub languages: Vec<String>,
+    /// Network it may reach past its sandbox, granted by an operator:
+    /// `peer-connections` (WebRTC in a share page's web view frame,
+    /// `architect_sites::SiteIsland::grant_webrtc`). It exposes the
+    /// visitor's IP to its peers and its STUN/TURN servers, and a data
+    /// channel out of the sandbox no policy meters.
+    pub webrtc: Vec<String>,
 }
 
 /// One action it adds.
@@ -862,6 +868,16 @@ impl Manifest {
         }) {
             return Err(ManifestError::BadCapability(format!(
                 "events {bad:?}: an app event's name, <prefix>.* or *"
+            )));
+        }
+        if let Some(bad) = self
+            .capabilities
+            .webrtc
+            .iter()
+            .find(|w| w.as_str() != "peer-connections")
+        {
+            return Err(ManifestError::BadCapability(format!(
+                "webrtc {bad:?}: only \"peer-connections\""
             )));
         }
         for entry in &self.capabilities.ports {
@@ -1920,5 +1936,25 @@ mod favourites_tests {
             "{ place = \"https://evil.example/\" }",
         );
         assert!(super::Manifest::parse(&bad).is_err());
+    }
+}
+
+#[cfg(test)]
+mod webrtc_tests {
+    /// `capabilities.webrtc` names only what there is: peer connections.
+    #[test]
+    fn a_manifest_declares_webrtc_by_name() {
+        let base = "id = \"demo.call\"\nname = \"Call\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n[capabilities]\n";
+        let m = super::Manifest::parse(&format!("{base}webrtc = [\"peer-connections\"]\n"))
+            .expect("it reads");
+        assert_eq!(m.capabilities.webrtc, ["peer-connections"]);
+        assert!(super::Manifest::parse(&format!("{base}webrtc = [\"camera\"]\n")).is_err());
+        assert!(
+            super::Manifest::parse(base)
+                .expect("none")
+                .capabilities
+                .webrtc
+                .is_empty()
+        );
     }
 }

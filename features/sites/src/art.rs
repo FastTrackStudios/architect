@@ -74,11 +74,21 @@ where
     }
     let files = files.into_iter();
     let joined = (!folder.is_empty()).then(|| format!("{folder}/{want}"));
-    if let Some(f) = files.clone().find(|f| *f == want) {
-        return Some(f);
-    }
-    if let Some(f) = joined.and_then(|j| files.clone().find(|f| *f == j)) {
-        return Some(f);
+    let exact = || files.clone().find(|f| *f == want);
+    let beside = || {
+        joined
+            .as_deref()
+            .and_then(|j| files.clone().find(|f| *f == j))
+    };
+    // A bare name is the note's own file first (`cover.jpg` beside the
+    // song, not one at the vault's root); a path is the vault's first.
+    let found = if want.contains('/') {
+        exact().or_else(beside)
+    } else {
+        beside().or_else(exact)
+    };
+    if found.is_some() {
+        return found;
     }
     if want.contains('/') {
         return None;
@@ -136,6 +146,20 @@ mod tests {
         assert_eq!(art("[[cover.jpg]]", "Setlists/Eve.md"), None);
         assert_eq!(art("https://example.com/a.png", "Songs/Joy/Joy.md"), None);
         assert_eq!(art("[[../Art/sleigh.png]]", "Songs/Joy/Joy.md"), None);
+    }
+
+    /// A bare name is the song's own cover before one at the vault's root.
+    #[test]
+    fn a_bare_name_is_the_notes_own_file_first() {
+        let files = ["cover.jpg", "Songs/Joy/cover.jpg"];
+        assert_eq!(
+            resolve("[[cover.jpg]]", "Songs/Joy", files.iter().copied()),
+            Some("Songs/Joy/cover.jpg")
+        );
+        assert_eq!(
+            resolve("[[cover.jpg]]", "Songs/Noel", files.iter().copied()),
+            Some("cover.jpg")
+        );
     }
 
     #[test]

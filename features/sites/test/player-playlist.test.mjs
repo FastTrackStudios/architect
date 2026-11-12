@@ -187,8 +187,8 @@ function row(n, title, page, media) {
   ]);
 }
 /// A playlist in the box the site draws a block in.
-const block = (rows, extra = []) => el('div', { class: 'site-block site-block-0123456789abcdef' }, [
-  el('div', { 'data-playlist': '' }, [el('ol', {}, rows), ...extra]),
+const block = (rows, extra = [], join = { class: 'studio-setlist' }) => el('div', { class: 'site-block site-block-0123456789abcdef' }, [
+  el('div', { 'data-playlist': '', ...join }, [el('ol', {}, rows), ...extra]),
 ]);
 
 /// The setlist's page: two sets under their headings, as an existing note
@@ -209,25 +209,40 @@ function setlist({ art = null, view = null, shell = null } = {}) {
   ], [el('p', { class: 'files' }, [], 'Files')]));
   if (view) body.appendChild(view);
   const queue = JSON.stringify({ scope: L, tracks: [], art: art || {} });
-  return run(body, queue, shell);
+  return run(body, queue, { shell });
 }
 
-function run(body, queue, shell = null) {
+function run(body, queue, opts = {}) {
   const frames = [];
+  const timeouts = [];
+  const made = [];
+  made.channels = [];
+  const clock = { now: 1000 };
+  const islandsEl = opts.islands ? Object.assign(new Node('script'), { ownText: JSON.stringify(opts.islands) }) : null;
   const store = new Map();
   const timers = [];
   const audio = new FakeAudio();
+  const errors = [];
   const queueEl = queue ? Object.assign(new Node('script'), { ownText: queue }) : null;
-  const shellEl = shell ? Object.assign(new Node('script'), { ownText: JSON.stringify(shell) }) : null;
+  const shellEl = opts.shell ? Object.assign(new Node('script'), { ownText: JSON.stringify(opts.shell) }) : null;
   const replaced = [];
   const document = {
     body,
     documentElement: new Node('html'),
     currentScript: null,
-    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-shell') ? shellEl : null),
+    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-shell') ? shellEl : sel.startsWith('script#site-islands') ? islandsEl : null),
     getElementById: () => null,
     querySelectorAll: (sel) => body.querySelectorAll(sel),
-    createElement: (tag) => (tag === 'audio' ? new Media('') : new Node(tag)),
+    createElement: (tag) => {
+      if (tag === 'audio') return new Media('');
+      const n = new Node(tag);
+      // A frame: what its parent posts it, kept.
+      if (tag === 'iframe') {
+        n.contentWindow = { posted: [], postMessage(data, _, ports) { this.posted.push({ data, ports }); } };
+        made.push(n);
+      }
+      return n;
+    },
     dispatchEvent: () => {},
     addEventListener: () => {},
     createComment: () => new Node('#comment'),
@@ -243,16 +258,29 @@ function run(body, queue, shell = null) {
     cancelAnimationFrame: () => {},
     setInterval: (fn) => { timers.push(fn); return timers.length; },
     clearInterval: (i) => { timers[i - 1] = null; },
-    setTimeout: () => 0,
-    clearTimeout: () => {},
+    setTimeout: (fn, ms) => { timeouts.push({ fn, at: clock.now + (ms || 0) }); return timeouts.length; },
+    clearTimeout: (i) => { if (timeouts[i - 1]) timeouts[i - 1].fn = null; },
+    Date: { now: () => clock.now },
+    MessageChannel: class {
+      constructor() {
+        const a = { sent: [], onmessage: null, postMessage(d) { this.sent.push(d); }, close() { this.closed = true; } };
+        this.port1 = a;
+        this.port2 = {};
+        made.channels.push(this);
+      }
+    },
+    crypto: globalThis.crypto,
+    btoa: globalThis.btoa,
+    TextDecoder,
+    Promise,
     addEventListener: () => {},
     getComputedStyle: () => ({ overflowX: 'visible', overflowY: 'visible' }),
     matchMedia: () => ({ matches: false }),
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     AudioContext: function () { return audio; },
-    fetch: () => Promise.reject(new Error('no network in this test')),
+    fetch: opts.fetch || (() => Promise.reject(new Error('no network in this test'))),
     URL,
-    console,
+    console: { ...console, error: (...a) => errors.push(a.map(String).join(' ')) },
     Math,
     JSON,
   };
@@ -267,7 +295,12 @@ function run(body, queue, shell = null) {
     a.currentTime = t;
   };
   return {
-    body, playhead, audio, window, location, replaced,
+    body, playhead, audio, window, location, replaced, errors, clock, made,
+    /// Run every timeout due by now.
+    later: () => timeouts.splice(0).forEach((t) => (t.fn && t.at <= clock.now ? t.fn() : timeouts.push(t))),
+    /// A real Loop (or Click) button in the bar (the bar's own are
+    /// written as HTML, which this DOM does not parse).
+    button: (act) => body.querySelectorAll('.site-player')[0].appendChild(el('button', { 'data-act': act })),
     tick: () => timers.forEach((f) => f && f()),
     frame: () => frames.splice(0).forEach((f) => f()),
     audioEl, at,
@@ -504,4 +537,216 @@ test('no shell without the node\'s site-shell', () => {
   const p = setlist();
   assert.equal(p.body.querySelectorAll('.site-tabs').length, 0);
   assert.equal(p.window.architect.shell, undefined);
+});
+
+// ── What the review found ─────────────────────────────────────────
+
+test('lists that do not say they join stay apart', () => {
+  const body = new Node('body');
+  body.appendChild(el('h2', {}, [], 'Stems'));
+  body.appendChild(block([row(1, 'Bass', `${L}bass/`, `${L}Bass.mp3`)], [], {}));
+  body.appendChild(el('h2', {}, [], 'References'));
+  body.appendChild(block([row(1, 'Mix', `${L}mix/`, `${L}Mix.mp3`)], [], {}));
+  run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  assert.equal(body.querySelectorAll('[data-playlist]').length, 2);
+  assert.equal(body.querySelectorAll('h2').length, 2);
+  assert.equal(body.querySelectorAll('[data-playlist-section]').length, 0);
+});
+
+test('a song listed twice plays and is marked where it was tapped, and goes on from there', () => {
+  const body = new Node('body');
+  body.appendChild(block([
+    row(1, 'Joy', `${L}joy/`, `${L}Joy.mp3`),
+    row(2, 'Noel', `${L}noel/`, `${L}Noel.mp3`),
+    row(3, 'Joy', `${L}joy/`, `${L}Joy.mp3`),
+    row(4, 'Eve', `${L}eve/`, `${L}Eve.mp3`),
+  ]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  const rows = body.querySelectorAll('[data-track]');
+  rows[2].querySelectorAll('[data-track-title]')[0].click();
+  assert.equal(rows[2].getAttribute('aria-current'), 'true');
+  assert.equal(rows[0].getAttribute('aria-current'), null, 'not the first Joy');
+  p.playhead.next();
+  assert.equal(p.playhead.src, `${L}Eve.mp3`, 'on from the second');
+});
+
+test('Loop never seeks itself to death on a section too short to play', async () => {
+  const sections = [{ name: 'x', start: 2, end: 2 }, { name: 'y', start: 2, end: 2.01 }];
+  const view = el('div', { 'data-now-playing': '', 'data-media': `${L}Joy.mp3`, 'data-sections': JSON.stringify(sections) }, [el('svg')]);
+  const p = setlist({ view });
+  const loopButton = p.button('loop');
+  p.body.querySelectorAll('[data-title="Joy to the World"]')[0].click();
+  await new Promise((r) => setImmediate(r));
+  const button = { getAttribute: () => 'loop' };
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
+  const a = p.audioEl();
+  a.currentTime = 2;
+  a.playbackRate = 1;
+  a.dispatch('timeupdate');
+  assert.deepEqual(p.errors.filter((e) => /call stack|recursion/i.test(e)), [], 'no seek loop');
+  assert.equal(a.currentTime, 2, 'nothing to loop');
+  assert.ok(loopButton.hasAttribute('disabled'), 'and Loop says so');
+});
+
+test('beats closer than 50 ms are one beat, so Click never floods', async () => {
+  const beats = Array.from({ length: 200 }, (_, i) => i * 0.001);
+  const svg = el('svg', {}, beats.map((at) => el('rect', { 'data-at': String(at), 'data-beat': '1' })));
+  const view = el('div', { 'data-now-playing': '', 'data-media': `${L}Joy.mp3` }, [svg]);
+  const p = setlist({ view });
+  p.body.querySelectorAll('[data-title="Joy to the World"]')[0].click();
+  await new Promise((r) => setImmediate(r));
+  const button = { getAttribute: () => 'click' };
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
+  for (let t = 0; t <= 0.2; t += 0.025) { p.at(t); p.tick(); }
+  assert.equal(p.audio.played.length, 4, 'a millisecond apart: one click in 50 ms (0, 0.05, 0.1, 0.15), not 200');
+});
+
+test('Loop is off while an outside clock holds the playhead', async () => {
+  const p = await (async () => {
+    const q = setlist({ view: joyView() });
+    q.body.querySelectorAll('[data-title="Joy to the World"]')[0].click();
+    await new Promise((r) => setImmediate(r));
+    return q;
+  })();
+  const loopButton = p.button('loop');
+  p.audioEl().dispatch('timeupdate');
+  await new Promise((r) => setImmediate(r));
+  assert.ok(!loopButton.hasAttribute('disabled'), 'a song with sections: Loop on offer');
+  const h = p.playhead.attach({ time: 0, playing: false, seek() {} });
+  assert.ok(loopButton.hasAttribute('disabled'), 'disabled while the clock is elsewhere');
+  h.detach();
+  assert.ok(!loopButton.hasAttribute('disabled'));
+});
+
+test('a row\'s menu: its chart, its page; Escape closes it and gives the button back', async () => {
+  const body = new Node('body');
+  const more = el('button', { type: 'button', 'data-track-more': '', 'aria-label': 'More: Joy' });
+  const r = row(1, 'Joy', `${L}joy/`, `${L}Joy.mp3`);
+  r.appendChild(more);
+  const lone = row(2, 'Noel', `${L}noel/`, null);
+  const loneMore = el('button', { type: 'button', 'data-track-more': '' });
+  lone.appendChild(loneMore);
+  body.appendChild(block([r, lone]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  more.click();
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  const menu = body.querySelectorAll('.site-row-menu')[0];
+  assert.equal(menu.getAttribute('role'), 'menu');
+  const items = menu.querySelectorAll('.site-row-menu-item').map((i) => [i.textContent, i.getAttribute('href')]);
+  assert.deepEqual(items, [['Open chart', null], ['Song page and downloads', `${L}joy/`]]);
+  menu.dispatch('keydown', { key: 'Escape', preventDefault() {} });
+  assert.equal(body.querySelectorAll('.site-row-menu').length, 0);
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  // A song with no recording: its page only, no dead entry.
+  loneMore.click();
+  const lonely = body.querySelectorAll('.site-row-menu')[0].querySelectorAll('.site-row-menu-item').map((i) => i.textContent);
+  assert.deepEqual(lonely, ['Chart and downloads']);
+  // The menu button is not a tap on the row.
+  assert.equal(p.playhead.src, null);
+});
+
+test('the card shows the title\'s initials, never what the tile says (its key)', () => {
+  const body = new Node('body');
+  const r = row(1, 'Sleigh Ride', `${L}sleigh/`, `${L}Sleigh.mp3`);
+  const tile = r.querySelectorAll('[data-track-art]')[0];
+  tile.textContent = 'B';
+  tile.setAttribute('data-key', '');
+  body.appendChild(block([r]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  r.querySelectorAll('[data-track-title]')[0].click();
+  const art = body.querySelectorAll('.site-player-art')[0];
+  assert.equal(art ? art.textContent : p.window.document.body.querySelectorAll('.site-player')[0].querySelector('.site-player-art').textContent, 'SR');
+});
+
+// ── An island's web view (the review of #608) ───────────────────────
+
+async function sha(bytes) {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return 'sha256-' + Buffer.from(d).toString('base64');
+}
+
+/// The setlist with an island whose web bundle the node serves, its
+/// now-playing view open: the frame made, its port and what it was sent.
+async function webview() {
+  const files = { 'web-x.js': Buffer.from('export default 1'), 'web-x_bg.wasm': Buffer.from('\0asm') };
+  const pinned = {};
+  for (const [n, b] of Object.entries(files)) pinned[n] = await sha(b);
+  const fetched = [];
+  const fetch = (url) => {
+    fetched.push(url);
+    const name = String(url).split('/').pop();
+    if (!files[name]) return Promise.resolve({ ok: false, status: 404, headers: { get: () => null } });
+    return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new Uint8Array(files[name]).buffer) });
+  };
+  const islands = {
+    runtime: '/_ext/runtime.0123/', sandbox: '/_ext/sandbox.0123.html', webview: '/_ext/webview.0123abcd.html',
+    islands: [{ id: 'demo', folder: '/_ext/island/demo.0123/', progress: 'bar', web: { entry: 'web-x.js', files: pinned, webview: '/_ext/webview.0123abcd.html' } }],
+  };
+  const body = new Node('body');
+  body.appendChild(block([row(1, 'Joy', `${L}joy/`, `${L}Joy.mp3`)]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }), { islands, fetch });
+  body.querySelectorAll('[data-track-title]')[0].click();
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: () => null }, preventDefault() {} });
+  const frame = p.made[0];
+  assert.ok(frame, 'a frame for the view');
+  assert.equal(frame.getAttribute('src'), '/_ext/webview.0123abcd.html', 'the document the node chose');
+  frame.dispatch('load');
+  const handed = frame.contentWindow.posted[0];
+  assert.equal(handed.data, 'architect-web');
+  const port = p.made.channels[0].port1;
+  const say = (d) => port.onmessage({ data: d });
+  const boots = () => port.sent.filter((m) => m.t === 'boot').length;
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+  const slot = frame.parentElement;
+  return { p, frame, port, say, boots, settle, slot, fetched };
+}
+
+test('a frame is answered and booted once, however often it says hello', async () => {
+  const w = await webview();
+  for (let i = 0; i < 300; i++) w.say({ t: 'hello' });
+  await w.settle();
+  assert.equal(w.boots(), 1, 'one boot');
+  assert.equal(w.fetched.filter((u) => String(u).startsWith('/_ext/')).length, 2, 'its two files fetched once');
+});
+
+test('a frame that leaves its document after it is ready is gone, and the player\'s own are back', async () => {
+  const w = await webview();
+  w.say({ t: 'hello' });
+  await w.settle();
+  w.say({ t: 'ready' });
+  assert.equal(w.slot.hidden, false);
+  w.frame.dispatch('load');
+  assert.equal(w.frame.parentElement, null, 'the frame is out');
+  assert.equal(w.slot.hidden, true);
+  // A ready that comes later changes nothing.
+  w.say({ t: 'ready' });
+  assert.equal(w.slot.hidden, true);
+});
+
+test('a frame that is never ready, or stops answering, is given up', async () => {
+  const late = await webview();
+  late.p.clock.now += 16000;
+  late.p.later();
+  assert.equal(late.frame.parentElement, null, 'not ready in 15 s');
+  const quiet = await webview();
+  quiet.say({ t: 'hello' });
+  await quiet.settle();
+  quiet.say({ t: 'ready' });
+  quiet.p.tick();
+  const ping = quiet.port.sent.find((m) => m.t === 'ping');
+  assert.ok(ping, 'a heartbeat');
+  quiet.say({ t: 'pong', n: ping.n });
+  quiet.p.clock.now += 2000;
+  quiet.p.tick();
+  assert.ok(quiet.frame.parentElement, 'answered: still up');
+  quiet.p.clock.now += 7000;
+  quiet.p.tick();
+  assert.equal(quiet.frame.parentElement, null, 'unanswered 6 s: gone');
+  // An error after ready: gone too.
+  const failing = await webview();
+  failing.say({ t: 'hello' });
+  await failing.settle();
+  failing.say({ t: 'ready' });
+  failing.say({ t: 'error', message: 'x' });
+  assert.equal(failing.frame.parentElement, null);
 });

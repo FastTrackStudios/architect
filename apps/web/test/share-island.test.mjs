@@ -300,7 +300,7 @@ test('the island takes the view’s top and bottom; its sheet moves nothing; it 
     assert.equal(await tab.eval('getComputedStyle(document.querySelector(".site-now-progress")).display'), 'none');
     // The controls' row stays for Click and Loop; its previous, play and
     // next give way to the island's transport, which sits between them.
-    assert.equal(await tab.eval('[...document.querySelectorAll(".site-now-controls .site-now-buttons > .site-player-skip, .site-now-controls .site-now-buttons > .site-player-toggle")].every((b) => getComputedStyle(b).display === "none")'), true);
+    assert.equal(await tab.eval('getComputedStyle(document.querySelector(".site-now-controls .site-now-transport")).display'), 'none');
     assert.equal(await tab.eval('!!document.querySelector(".site-now-buttons > .site-now-island-bottom")'), true);
     // Its view, in a shadow root, styled by its sheet, which moved nothing.
     const host = 'document.querySelector(".site-now-island-top .architect-view-host")';

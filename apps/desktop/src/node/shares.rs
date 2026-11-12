@@ -1527,6 +1527,12 @@ fn islands(shares: &Shares, path: &str) -> Response {
 /// sheet, the share pages' own); with `default-src 'self'` no style can
 /// load or send anything off the node.
 pub fn content_security_policy() -> HeaderValue {
+    // Load-bearing for an island's web view frame: `default-src 'self'`
+    // stands in for `frame-src`, so a frame on a share page (the island's
+    // sandbox, a web view, `architect_sites::island`) can only ever be the
+    // node's own: a web view navigating itself elsewhere is refused here,
+    // not by its own policy (a frame's CSP cannot stop its own navigation).
+    // Widen `frame-src` and a web view's bundle can leave the node.
     static POLICY: std::sync::OnceLock<HeaderValue> = std::sync::OnceLock::new();
     POLICY
         .get_or_init(|| {
@@ -2536,6 +2542,10 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
     .to_string()
     .replace("</", "<\\/");
     let shell = format!("<script type=\"application/json\" id=\"site-shell\">{shell}</script>");
+    let art = listed
+        .as_ref()
+        .map(|l| art_by_page(l, link.mount))
+        .unwrap_or_default();
     let (parts, body) = response.into_parts();
     let Ok(bytes) = architect::http::axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
         return Response::from_parts(parts, Body::empty());
@@ -2559,17 +2569,11 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
             section,
             "<script type=\"application/json\" id=\"site-islands\">{islands}</script>"
         );
-        let art = listed
-            .as_ref()
-            .map(|l| art_by_page(l, link.mount))
-            .unwrap_or_default();
-        let json = serde_json::json!({ "scope": link.mount, "tracks": tracks, "art": art });
-        // JSON in a script element: `</` must not close it.
-        let json = json.to_string().replace("</", "<\\/");
-        let _ = write!(
-            section,
-            "<script type=\"application/json\" id=\"site-queue\">{json}</script>"
-        );
+    }
+    // The queue, and the art of the link's songs: art too when nothing
+    // plays (a setlist with no recordings still shows its covers).
+    if let Some(script) = queue_script(link.mount, &tracks, &art) {
+        section.push_str(&script);
     }
     before_main_end(parts, &String::from_utf8_lossy(&bytes), &section)
 }
@@ -2638,6 +2642,24 @@ fn queue(listed: &Listed, mount: &str) -> Vec<serde_json::Value> {
         }
     }
     tracks
+}
+
+/// The page's `site-queue` script: the link's tracks and its pages' art;
+/// None when there is neither.
+fn queue_script(
+    mount: &str,
+    tracks: &[serde_json::Value],
+    art: &serde_json::Map<String, serde_json::Value>,
+) -> Option<String> {
+    if tracks.is_empty() && art.is_empty() {
+        return None;
+    }
+    let json = serde_json::json!({ "scope": mount, "tracks": tracks, "art": art });
+    // JSON in a script element: `</` must not close it.
+    let json = json.to_string().replace("</", "<\\/");
+    Some(format!(
+        "<script type=\"application/json\" id=\"site-queue\">{json}</script>"
+    ))
 }
 
 /// Each listed note's art (`art:`, `architect_sites::art`) by its page,
@@ -2841,15 +2863,37 @@ async fn signin(shares: &Shares, rest: &str, request: Request) -> Response {
         .map_or_else(|_| "/".to_owned(), |t| safe_to(&t.to));
     let secure = is_https(request.headers(), shares.0.issuer_origin.as_deref());
     match rest {
+        // What changes the visitor's state is answered only to a request
+        // of the node's own pages or the visitor's own typing: never to
+        // another site's, nor to a frame of a share page (an island's web
+        // view is an opaque origin: its requests are cross-site).
+        "signin" | "signout" if !same_site(request.headers()) => page(
+            StatusCode::FORBIDDEN,
+            "Not from here",
+            "<p>Sign in or out from the link's own page.</p>",
+        ),
         "signin" => start_signin(shares, to, secure).await,
         "signin/wait" => wait_signin(shares, request.headers(), secure).await,
-        "signout" => {
-            let mut response = Redirect::to(&to).into_response();
-            set_cookie(&mut response, SESSION_COOKIE, "", "/", 0, secure);
-            response
-        }
+        "signout" => signout(&to, secure),
         _ => page(StatusCode::NOT_FOUND, "Not found", "<p>No such page.</p>"),
     }
+}
+
+/// Whether a request is the node's own (`Sec-Fetch-Site: same-origin`),
+/// or the visitor's typing or bookmark (`none`); a browser that sends no
+/// fetch metadata at all is taken at its word (it sends none for any).
+fn same_site(headers: &HeaderMap) -> bool {
+    headers
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok())
+        .is_none_or(|site| site == "same-origin" || site == "none")
+}
+
+/// `/s/_signout`: the session cookie cleared, back to `to`.
+fn signout(to: &str, secure: bool) -> Response {
+    let mut response = Redirect::to(to).into_response();
+    set_cookie(&mut response, SESSION_COOKIE, "", "/", 0, secure);
+    response
 }
 
 async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
@@ -3150,6 +3194,40 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Art reaches the page with no track to play: a setlist with no
+    /// recordings still shows its covers.
+    /// Signing out (or in) is not something a share page's frame, or
+    /// another site, can make a visitor do by sending them there.
+    #[test]
+    fn sign_out_answers_only_the_nodes_own_requests() {
+        let with = |site: Option<&str>| {
+            let mut h = HeaderMap::new();
+            if let Some(site) = site {
+                h.insert("sec-fetch-site", HeaderValue::from_str(site).unwrap());
+            }
+            same_site(&h)
+        };
+        assert!(with(Some("same-origin")) && with(Some("none")) && with(None));
+        assert!(!with(Some("cross-site")) && !with(Some("same-site")));
+        let out = signout("/", false);
+        assert!(out.headers().get(header::SET_COOKIE).is_some());
+    }
+
+    #[test]
+    fn art_goes_out_without_a_queue() {
+        let mut art = serde_json::Map::new();
+        art.insert(
+            "/s/abc/joy/".to_owned(),
+            serde_json::json!("/s/abc/Joy/cover.jpg"),
+        );
+        let script = queue_script("/s/abc/", &[], &art).unwrap();
+        assert!(
+            script.contains("\"tracks\":[]") && script.contains("/s/abc/Joy/cover.jpg"),
+            "{script}"
+        );
+        assert!(queue_script("/s/abc/", &[], &serde_json::Map::new()).is_none());
+    }
 
     #[test]
     fn art_is_a_listed_notes_own_file() {
