@@ -544,8 +544,10 @@ or an `lrc` fence in the note):
   setlist's songs: `[data-playlist]`, [views that follow playback](@/architecture/extensions.md#views-that-follow-playback))
   is the player: its rows are the queue, a tap on one plays it there, and
   the songs follow each other with no page load. The bar at the foot opens
-  the now-playing view: the playing song's chart (its `[data-now-playing]`,
-  fetched from its page) with the controls under it.
+  the now-playing view: where the song is at the top, its chart (its
+  `[data-now-playing]`, fetched only from a page the link built) and the
+  controls under it, its lyrics and page a tap away. Without a playlist
+  the bar's song is a link to its page, as before.
 - **Across pages.** A link's pages are separate documents, so moving between
   songs loads a new page. The player keeps the song, the time and whether it
   was playing in the tab's `sessionStorage` and picks up where it was on the

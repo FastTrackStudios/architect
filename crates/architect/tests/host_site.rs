@@ -91,3 +91,38 @@ async fn a_nested_site_answers_under_its_mount_only() {
     let outside = get(app, "/guide/ui/").await;
     assert_eq!(outside.0, StatusCode::NOT_FOUND);
 }
+
+/// `BUILT_PAGE` marks a folder's page the builder wrote, and nothing else:
+/// not a file of the site, not an `.html` one, not the 404 page.
+#[tokio::test]
+async fn a_built_page_is_marked_and_nothing_else_is() {
+    use architect::host::BUILT_PAGE;
+    let dir = site();
+    std::fs::write(dir.path().join("raw.html"), "<p>raw</p>").unwrap();
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
+        .site("/", dir.path())
+        .into_app();
+    let marked = |path: &'static str| {
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(Request::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            (
+                res.status(),
+                res.headers()
+                    .get(BUILT_PAGE.0)
+                    .map(|v| v.to_str().unwrap().to_owned()),
+            )
+        }
+    };
+    assert_eq!(
+        marked("/guide/ui/").await,
+        (StatusCode::OK, Some(BUILT_PAGE.1.to_owned()))
+    );
+    assert_eq!(marked("/").await.1.as_deref(), Some(BUILT_PAGE.1));
+    assert_eq!(marked("/raw.html").await, (StatusCode::OK, None));
+    assert_eq!(marked("/logo.svg").await, (StatusCode::OK, None));
+    assert_eq!(marked("/nope/").await, (StatusCode::NOT_FOUND, None));
+}

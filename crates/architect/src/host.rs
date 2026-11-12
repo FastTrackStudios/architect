@@ -41,7 +41,9 @@ use crate::permissions_gate::PermissionsGate;
 mod mount;
 pub use mount::{BEARER_SUBPROTOCOL_PREFIX, DavRequest, IntoLane, Lane, RequestHead};
 mod site;
-pub use site::{CACHE_FILE, CACHE_IMMUTABLE, CACHE_PAGE, SITE_ASSETS, cache_policy, site_router};
+pub use site::{
+    BUILT_PAGE, CACHE_FILE, CACHE_IMMUTABLE, CACHE_PAGE, SITE_ASSETS, cache_policy, site_router,
+};
 #[cfg(feature = "otlp-forward")]
 mod otlp;
 #[cfg(feature = "otlp-forward")]
