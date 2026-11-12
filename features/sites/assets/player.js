@@ -1053,6 +1053,8 @@
       '<div class="site-now-island site-now-island-top" hidden></div>' +
       '<div class="site-now-progress"><span class="site-now-at">0:00</span><div class="site-now-seek" role="slider" tabindex="0" aria-label="Position" aria-valuemin="0"><span></span></div><span class="site-now-left">–:––</span></div>' +
       '<div class="site-now-body"></div>' +
+      // An island's lyrics view: the body's place, while it shows lyrics.
+      '<div class="site-now-island site-now-island-lyrics" hidden></div>' +
       // An island's transport takes the middle of the controls' row: Click
       // and Loop stay at its ends.
       '<div class="site-now-controls"><div class="site-now-buttons">' +
@@ -1064,6 +1066,7 @@
     ui.progress = sheet.querySelector(".site-now-progress");
     ui.islandTop = sheet.querySelector(".site-now-island-top");
     ui.islandBottom = sheet.querySelector(".site-now-island-bottom");
+    ui.islandLyrics = sheet.querySelector(".site-now-island-lyrics");
     ui.seek = sheet.querySelector(".site-now-seek");
     ui.seekFill = sheet.querySelector(".site-now-seek span");
     ui.controls = sheet.querySelector(".site-now-controls");
@@ -1238,6 +1241,7 @@
       if (view.lyrics.parentNode) view.lyrics.parentNode.removeChild(view.lyrics);
     }
     view = { src: null, node: null, home: null, lyrics: null };
+    island.lines = [];
     ui.lyrics.hidden = true;
     ui.lyrics.setAttribute("aria-pressed", "false");
     // A tab of lyrics (a phone shell's) stays one from song to song.
@@ -1246,6 +1250,7 @@
   function mount(node, home, src, lyrics) {
     unmount();
     view = { src: src, node: node, home: home, lyrics: lyrics };
+    island.lines = linesOf(lyrics);
     if (home) node.parentNode.insertBefore(home, node);
     ui.body.textContent = "";
     ui.body.appendChild(node);
@@ -1370,6 +1375,42 @@
       none.textContent = "No lyrics for this song";
       ui.body.appendChild(none);
     } else if (!want && none && none.parentNode) none.parentNode.removeChild(none);
+    wordsIsland();
+  }
+  // A song's timed lines (its lyrics list's `[data-at]` items), as data
+  // only: what an island's lyrics view is given.
+  function linesOf(list) {
+    if (!list) return [];
+    var out = [];
+    var items = list.querySelectorAll("li[data-at]");
+    for (var i = 0; i < items.length && out.length < 2000; i++) {
+      var at = parseFloat(items[i].getAttribute("data-at"));
+      if (!isFinite(at) || at < 0) continue;
+      out.push({ at: at, text: String(items[i].textContent || "").replace(/\s+/g, " ").trim().slice(0, 300) });
+    }
+    return out;
+  }
+  // The island's lyrics view: started the first time lyrics show (one
+  // frame, kept till the view closes), shown in the body's place while
+  // lyrics show, it is ready and the song has timed lines; else the
+  // page's own list (or its "No lyrics").
+  function wordsIsland() {
+    if (!sheet || !ui.islandLyrics) return;
+    var it = islandOf();
+    var showing = !sheet.hidden && sheet.classList.contains("site-now-showing-lyrics");
+    var w = it && it.lyrics ? webOf(it) : null;
+    if (showing && w && !island.words && !webDead[it.lyrics]) {
+      island.words = webPane(it, w, it.lyrics, ui.islandLyrics, null, {
+        fill: true,
+        shown: function () { wordsIsland(); },
+        gone: function () { island.words = null; wordsIsland(); },
+      });
+      island.words.words = true;
+      island.panes.push(island.words);
+    }
+    var on = showing && !!island.words && island.words.ready() && island.lines.length > 0;
+    ui.islandLyrics.hidden = !on;
+    sheet.classList.toggle("site-now-lyrics-island", on);
   }
   // A phone shell's tab (`architect.player.open({ tab: true })`): the
   // view in place of the page above the shell's bar, not a sheet over
@@ -1449,7 +1490,7 @@
   // ask only these, each checked here. The player's own position bar and
   // controls show until its first frame, and stay when it cannot load (a
   // browser without JS Promise Integration, a node without islands).
-  var island = { loading: null, ext: null, panes: [], sections: [], fed: 0, sheet: null };
+  var island = { loading: null, ext: null, panes: [], sections: [], lines: [], words: null, fed: 0, sheet: null };
   // At most this many intents a second (a burst of twice that): an island
   // flooding play and pause is refused, not obeyed.
   var INTENTS_PER_SECOND = 8;
@@ -1618,16 +1659,21 @@
   // View `view` of the island's web bundle in `slot`; the player's own
   // `mine` gives way once it is ready, and comes back for good if the
   // frame leaves its document (a second load), fails (an error), is not
-  // ready in time or stops answering the heartbeat.
-  function webPane(it, w, view, slot, mine) {
+  // ready in time or stops answering the heartbeat. With `opts`, its
+  // caller says what shows (`shown` when it is ready, `gone` when it
+  // dies), and a `fill` frame is as tall as the slot the page gives it,
+  // whatever height it says.
+  function webPane(it, w, view, slot, mine, opts) {
+    opts = opts || {};
     var frame = doc.createElement("iframe");
     frame.setAttribute("sandbox", "allow-scripts");
     frame.setAttribute("title", view);
-    frame.className = "site-now-web";
+    frame.className = "site-now-web" + (opts.fill ? " site-now-web-fill" : "");
     var chan = null, dead = false, ready = false, loads = 0, hello = false;
     var asks = intents();
     var beat = { sent: 0, answered: 0, n: 0, timer: 0 };
     var pane = {
+      ready: function () { return ready && !dead; },
       input: function (msg) {
         if (chan && !dead) chan.port1.postMessage({ t: "props", props: msg.props });
       },
@@ -1646,6 +1692,7 @@
       webDead[view] = true;
       pane.unmount();
       island.panes = island.panes.filter(function (p) { return p !== pane; });
+      if (opts.gone) { opts.gone(); return; }
       slot.hidden = true;
       mine.classList.remove("site-now-yielded");
     }
@@ -1679,8 +1726,11 @@
           if (ready) return;
           ready = true;
           clearTimeout(readyBy);
-          slot.hidden = false;
-          mine.classList.add("site-now-yielded");
+          if (opts.shown) opts.shown();
+          else {
+            slot.hidden = false;
+            mine.classList.add("site-now-yielded");
+          }
           feed(snapshot(), true);
           // The heartbeat, while it shows: unanswered too long, it is gone.
           beat.timer = setInterval(function () {
@@ -1695,6 +1745,8 @@
         } else if (d.t === "pong") {
           if (Number(d.n) === beat.sent) beat.answered = beat.sent;
         } else if (d.t === "size") {
+          // A frame the page sizes: what it says it draws is not asked.
+          if (opts.fill) return;
           var h = Number(d.height);
           if (isFinite(h)) frame.style.height = Math.max(0, Math.min(Math.round(h), 4000)) + "px";
         } else if (d.t === "ask") {
@@ -1716,10 +1768,11 @@
     clearTimeout(island.idle);
     var w = webOf(it);
     if (w) {
-      if (island.panes.length) return;
+      if (island.panes.some(function (p) { return !p.words; })) return;
       [[it.progress, ui.islandTop, ui.progress], [it.transport, ui.islandBottom, ui.controls]].forEach(function (slot) {
         if (slot[0] && !webDead[slot[0]]) island.panes.push(webPane(it, w, slot[0], slot[1], slot[2]));
       });
+      wordsIsland();
       return;
     }
     islandLoad(it).then(function (e) {
@@ -1751,6 +1804,7 @@
       try { m.unmount(); } catch (e) {}
     });
     island.panes = [];
+    island.words = null;
     clearTimeout(island.idle);
     island.idle = setTimeout(function () {
       if (island.panes.length || !island.ext) return;
@@ -1761,6 +1815,8 @@
     if (!ui.islandTop) return;
     ui.islandTop.hidden = true;
     ui.islandBottom.hidden = true;
+    ui.islandLyrics.hidden = true;
+    sheet.classList.remove("site-now-lyrics-island");
     ui.progress.classList.remove("site-now-yielded");
     ui.controls.classList.remove("site-now-yielded");
   }
@@ -1780,8 +1836,16 @@
       title: t ? String(t.title || "") : "",
       sections: island.sections,
     };
+    var words = null;
     island.panes.forEach(function (m) {
-      try { m.input({ claim: "playhead", source: "", props: props }); } catch (e) {}
+      // The lyrics view, besides: the song's timed lines and who it is by.
+      if (m.words && !words) {
+        words = {};
+        Object.keys(props).forEach(function (k) { words[k] = props[k]; });
+        words.lyrics = island.lines;
+        words.artist = t ? String(t.subtitle || "") : "";
+      }
+      try { m.input({ claim: "playhead", source: "", props: m.words ? words : props }); } catch (e) {}
     });
   }
 

@@ -67,6 +67,7 @@ class Node {
   }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
+  get attributes() { return Object.entries(this.attrs).map(([name, value]) => ({ name, value })); }
   removeAttribute(k) { delete this.attrs[k]; }
   hasAttribute(k) { return k in this.attrs; }
   appendChild(c) { if (c.parentElement) c.parentElement.removeChild(c); c.parentElement = this; this.children.push(c); return c; }
@@ -246,6 +247,7 @@ function run(body, queue, opts = {}) {
     dispatchEvent: () => {},
     addEventListener: () => {},
     createComment: () => new Node('#comment'),
+    importNode: (n) => n,
   };
   const location = { href: `http://node.test${L}merry/${opts.hash || ''}`, origin: 'http://node.test', pathname: `${L}merry/`, search: '', hash: opts.hash || '' };
   const window = {
@@ -288,7 +290,10 @@ function run(body, queue, opts = {}) {
     console: { ...console, error: (...a) => errors.push(a.map(String).join(' ')) },
     Math,
     JSON,
+    // Pages this link built, by path (a song's page, fetched for its view).
+    DOMParser: class { parseFromString(key) { return (opts.pages || {})[key]; } },
   };
+  if (opts.rules) window.architect = { rules: opts.rules };
   Object.assign(window, { window });
   vm.runInNewContext(PLAYER + '\n' + SHELL, window);
   const playhead = window.architect.playhead;
@@ -790,4 +795,116 @@ test('the shell is a phone\'s: on a desk the card opens the player\'s own sheet,
   assert.ok(!phone.body.querySelectorAll('.site-tabs')[0].hasAttribute('inert'), 'the tabs stay live');
   phone.body.querySelectorAll('.site-tab')[0].click();
   assert.equal(phone.body.children.filter((n) => n.hasAttribute('inert')).length, 0, 'and nothing once it closes');
+});
+
+// ── The Lyrics tab: an island's lyrics view (studio's Confidence Monitor)
+
+/// Joy's page as the link built it: its view, and its timed lyrics (a
+/// `♪` line a timed gap) unless `words` is false.
+function joyPage(words = true) {
+  const root = new Node('body');
+  root.appendChild(el('div', { class: 'site-block site-block-0123456789abcdef' }, [
+    el('div', { 'data-now-playing': '', 'data-media': `${L}Joy.mp3`, 'data-sections': JSON.stringify([{ name: 'VS 1', start: 1, end: 9, color: '#3b82f6' }]) }, [el('svg')]),
+  ]));
+  if (words) {
+    root.appendChild(el('ol', { class: 'site-lyrics', 'data-follow-playhead': '', 'data-media': `${L}Joy.mp3` }, [
+      el('li', { 'data-at': '1.500' }, [el('button', { class: 'site-lyric' }, [], 'Joy to   the world')]),
+      el('li', { 'data-at': '3.000' }, [el('button', { class: 'site-lyric' }, [], 'the Lord is come')]),
+      el('li', { 'data-at': '4.500' }, [el('button', { class: 'site-lyric' }, [], '♪')]),
+    ]));
+  }
+  return root;
+}
+
+/// The setlist with an island whose web bundle has a lyrics view (and a
+/// progress bar), Joy's page served, the Lyrics tab open.
+async function lyricsTab({ words = true } = {}) {
+  const files = { 'web-x.js': Buffer.from('export default 1'), 'web-x_bg.wasm': Buffer.from('\0asm') };
+  const pinned = {};
+  for (const [n, b] of Object.entries(files)) pinned[n] = await sha(b);
+  const page = `${L}joy/`;
+  const fetch = (url) => {
+    const name = String(url).split('/').pop();
+    if (String(url) === page) {
+      return Promise.resolve({ ok: true, status: 200, headers: { get: (k) => (k === 'content-type' ? 'text/html' : k === 'x-architect-page' ? 'built' : null) }, text: () => Promise.resolve(page) });
+    }
+    if (!files[name]) return Promise.resolve({ ok: false, status: 404, headers: { get: () => null } });
+    return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new Uint8Array(files[name]).buffer) });
+  };
+  const islands = {
+    runtime: '/_ext/runtime.0123/', sandbox: '/_ext/sandbox.0123.html', webview: '/_ext/webview.0123abcd.html',
+    islands: [{ id: 'demo', folder: '/_ext/island/demo.0123/', progress: 'bar', lyrics: 'words', web: { entry: 'web-x.js', files: pinned, webview: '/_ext/webview.0123abcd.html' } }],
+  };
+  const rules = { elementRule: () => ['keep'], attrRule: (_t, _n, v) => v, cssInert: () => true };
+  const body = new Node('body');
+  body.appendChild(block([row(1, 'Joy', page, `${L}Joy.mp3`)]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }), { islands, fetch, rules, pages: { [page]: joyPage(words) } });
+  body.querySelectorAll('[data-track-title]')[0].click();
+  p.window.architect.player.open({ tab: true, lyrics: true });
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+  await settle();
+  const frames = p.made.filter((f) => f.tagName === 'IFRAME');
+  const bar = frames.find((f) => f.getAttribute('title') === 'bar');
+  const lyrics = frames.find((f) => f.getAttribute('title') === 'words');
+  assert.ok(bar && lyrics, 'a frame for each view');
+  const port = (f) => {
+    f.dispatch('load');
+    return p.made.channels[p.made.channels.length - 1].port1;
+  };
+  const ports = { bar: port(bar), lyrics: port(lyrics) };
+  const ready = async (which) => {
+    ports[which].onmessage({ data: { t: 'hello' } });
+    await settle();
+    ports[which].onmessage({ data: { t: 'ready' } });
+  };
+  const sheet = body.querySelectorAll('.site-now')[0];
+  return { p, sheet, bar, lyrics, ports, ready, settle };
+}
+
+test('the Lyrics tab: the island\'s lyrics view in the words\' place, given the song\'s timed lines, sized by the page', async () => {
+  const t = await lyricsTab();
+  const slot = t.lyrics.parentElement;
+  assert.equal(t.lyrics.className, 'site-now-web site-now-web-fill');
+  assert.equal(slot.hidden, true, 'not before it is ready');
+  await t.ready('lyrics');
+  await t.ready('bar');
+  assert.equal(slot.hidden, false, 'ready: it shows');
+  assert.ok(t.sheet.classList.contains('site-now-lyrics-island'), 'the page\'s words and bar give way');
+  // Its props: the lines (a gap as the page has it) and who it is by;
+  // the bar is given neither.
+  const last = (port) => port.sent.filter((m) => m.t === 'props').pop().props;
+  const words = last(t.ports.lyrics);
+  assert.deepEqual(plain(words.lyrics), [
+    { at: 1.5, text: 'Joy to the world' },
+    { at: 3, text: 'the Lord is come' },
+    { at: 4.5, text: '♪' },
+  ]);
+  assert.equal(words.artist, 'Artist');
+  assert.equal(words.title, 'Joy');
+  assert.equal(plain(words.sections)[0].name, 'VS 1');
+  const bar = last(t.ports.bar);
+  assert.equal(bar.lyrics, undefined);
+  assert.equal(bar.artist, undefined);
+  // The page sizes it: what it says it draws is not asked.
+  t.ports.lyrics.onmessage({ data: { t: 'size', height: 37 } });
+  assert.equal(t.lyrics.style.height, undefined);
+  t.ports.bar.onmessage({ data: { t: 'size', height: 37 } });
+  assert.equal(t.bar.style.height, '37px', 'the bar\'s frame is as tall as it says');
+  // Gone (an error): the page's own list is back, for good on this page.
+  t.ports.lyrics.onmessage({ data: { t: 'error', message: 'x' } });
+  assert.equal(slot.hidden, true);
+  assert.ok(!t.sheet.classList.contains('site-now-lyrics-island'));
+  assert.equal(t.lyrics.parentElement, null);
+  assert.equal(t.sheet.querySelector('.site-now-body').querySelectorAll('.site-now-words').length, 1, 'the list');
+  assert.equal(t.p.errors.length, 0, t.p.errors.join('\n'));
+});
+
+// (Its "No lyrics" is the page's own, `words_()`: this DOM's querySelector
+// never comes back empty, so it is not looked for here.)
+test('a song with no timed lines keeps the page\'s own words in the Lyrics tab', async () => {
+  const t = await lyricsTab({ words: false });
+  await t.ready('lyrics');
+  assert.equal(t.lyrics.parentElement.hidden, true, 'nothing to follow: not shown');
+  assert.ok(!t.sheet.classList.contains('site-now-lyrics-island'));
+  assert.deepEqual(plain(t.ports.lyrics.sent.filter((m) => m.t === 'props').pop().props.lyrics), []);
 });

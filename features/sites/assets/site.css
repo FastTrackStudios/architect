@@ -494,6 +494,14 @@ body.site-now-open .site-player { visibility: hidden; }
 .site-now-controls.site-now-yielded .site-now-transport { display: none; }
 /* An island's web view: its frame as tall as what it draws. */
 .site-now-web { display: block; width: 100%; height: 0; border: 0; background: transparent; }
+/* An island's lyrics view (a Confidence Monitor): the body's place, the
+   whole height the words had, a screen of its own (dark by design, in
+   either theme). The page's bar gives way to the strip it draws. */
+.site-now .site-now-island.site-now-island-lyrics { flex: 1; min-height: 0; padding: 0; margin: 2px 8px 6px; border-radius: 12px; background: #000; }
+.site-now-island-lyrics .site-now-web-fill { height: 100%; }
+.site-now.site-now-lyrics-island .site-now-body,
+.site-now.site-now-lyrics-island .site-now-progress,
+.site-now.site-now-lyrics-island .site-now-island-top { display: none; }
 .site-now-empty { margin: auto; padding: 16px; opacity: .7; text-align: center; }
 .site-now-controls { flex: none; padding: 0 8px calc(2px + env(safe-area-inset-bottom, 0px)); }
 .site-now-controls[hidden] { display: none; }

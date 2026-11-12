@@ -79,6 +79,7 @@ pub struct SiteIsland {
     files: Vec<(String, Cow<'static, [u8]>)>,
     progress: Option<String>,
     transport: Option<String>,
+    lyrics: Option<String>,
     stylesheet: Option<String>,
     web: Option<String>,
     /// The operator's grant of WebRTC ([`Self::grant_webrtc`]).
@@ -147,6 +148,7 @@ impl SiteIsland {
             files,
             progress: None,
             transport: None,
+            lyrics: None,
             stylesheet: None,
             web,
             webrtc_granted: false,
@@ -227,6 +229,19 @@ impl SiteIsland {
     #[must_use]
     pub fn transport(mut self, view: impl Into<String>) -> Self {
         self.transport = Some(view.into());
+        self
+    }
+
+    /// Its view `view` in the now-playing view's lyrics (a phone shell's
+    /// Lyrics tab), the whole height the words had. Drawn only from its web
+    /// bundle ([`Self::web`], in a web view frame the page sizes): given
+    /// `lyrics` (`[{at, text}]`, the song's timed lyrics list as the page
+    /// has it) and `artist` besides what the other views are. The page's
+    /// own list shows until its first frame, for a song with no timed
+    /// lines, and for good if the frame fails.
+    #[must_use]
+    pub fn lyrics(mut self, view: impl Into<String>) -> Self {
+        self.lyrics = Some(view.into());
         self
     }
 
@@ -642,6 +657,8 @@ pub fn page_json(islands: &[SiteIsland]) -> serde_json::Value {
                 "integrity": i.integrity(),
                 "progress": i.progress,
                 "transport": i.transport,
+                // Its lyrics view: a web bundle's only.
+                "lyrics": i.web.as_ref().and(i.lyrics.as_ref()),
                 // Only with its digest: the player pins it as it pins the
                 // component's files.
                 "stylesheet": i.stylesheet_integrity().and(i.stylesheet.as_deref()),
@@ -968,6 +985,16 @@ mod tests {
         assert!(serve(std::slice::from_ref(&bad), &format!("{}a", bad.folder())).is_none());
         let json = page_json(&islands);
         assert_eq!(json["islands"][0]["progress"], "bar");
+        // A lyrics view is a web bundle's: without one, none.
+        let words = island.lyrics("words");
+        assert!(page_json(std::slice::from_ref(&words))["islands"][0]["lyrics"].is_null());
+        let web = SiteIsland::new(
+            "demo.words",
+            vec![("web-x.js".to_owned(), Cow::Borrowed(b"export function mount(){}".as_slice()))],
+        )
+        .lyrics("words")
+        .web("web-x.js");
+        assert_eq!(page_json(std::slice::from_ref(&web))["islands"][0]["lyrics"], "words");
         // No stylesheet without a valid name and its digest.
         let files = vec![("a.css".to_owned(), Cow::Borrowed(b".a{}".as_slice()))];
         let sheet = SiteIsland::new("x", files.clone()).stylesheet("a.css");
