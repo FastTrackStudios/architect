@@ -11,6 +11,7 @@ name: release
 #   Architect-linux-x86_64.AppImage + latest-linux.json      job linux
 #   a PR bumping nix/desktop/source.json (the flake's app)     job nix-bump
 #   Architect-macos-arm64.dmg + latest-macos.json            job macos (UNTESTED, off by default)
+#   the iOS app on TestFlight, noted in the release's notes   job ios (ios.yml; never blocks)
 #   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums
 #   @fasttrackstudio/architect(-cli) on npm (features/extensions/web)  jobs npm-pack, npm-publish
 #     (npm-publish inert until the NPM_TOKEN secret is set)
@@ -381,6 +382,17 @@ jobs:
           printf '{\n  "version": "%s",\n  "dmg": "https://github.com/%s/releases/download/%s/%s",\n  "sha256": "%s"\n}\n' \
             "${GITHUB_REF_NAME#v}" "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$app" "$sha" > latest-macos.json
           gh release upload "$GITHUB_REF_NAME" "$app" latest-macos.json --clobber --repo "$GITHUB_REPOSITORY"
+
+  # The Architect app (apps/mobile) to TestFlight on airlock: ios.yml,
+  # also dispatchable for an existing tag (`gh workflow run ios.yml -f
+  # tag=vX.Y.Z`). The runner holds the App Store Connect key, the
+  # distribution identity and the profile: no secrets. Nothing needs it and
+  # its job is continue-on-error, so a failed upload never holds the
+  # release. Off while the repo variable ARCHITECT_IOS_RELEASE is `false`.
+  ios:
+    needs: release
+    if: ${{ vars.ARCHITECT_IOS_RELEASE != 'false' }}
+    uses: ./.github/workflows/ios.yml
 
   # SHA256SUMS over every asset the release carries, signed with the org's
   # minisign key (the one Task's and Studio's updaters pin) when the
