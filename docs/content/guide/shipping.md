@@ -84,7 +84,7 @@ release-notes`). Architect, the app, is released from the same tag
 | --- | --- |
 | `release` | the GitHub release and its notes |
 | `node` | `ghcr.io/fasttrackstudios/architect:<X.Y.Z>`, `:sha-<short>`, `:latest` (the headless node, [deploy](@/guide/deploy.md)), and `architect-node-<tag>-x86_64-linux.tar.gz` |
-| `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the landing page, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz` |
+| `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the site, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz`, what the server serves. Built after `node`, `linux` and `macos`, for the site's `/download` |
 | `linux` | `Architect-linux-x86_64.AppImage` (`scripts/desktop/linux.sh`) and `latest-linux.json`: the version, the AppImage's URL and its sha256, for the updater |
 | `macos` | `Architect-macos-arm64.dmg`, Developer-ID signed and notarized (`scripts/desktop/macos.sh`), and `latest-macos.json`. Built on airlock; on while the repo variable `ARCHITECT_MACOS_RELEASE` is `true` |
 | `ios` | the Architect app for iPhone and iPad (`apps/mobile`) on TestFlight, marketing version `X.Y.Z` and a unix-time build number, noted in the release's notes (`.github/workflows/ios.yml`). Built on airlock; it never holds the release, and the repo variable `ARCHITECT_IOS_RELEASE` set to `false` turns it off |
@@ -171,54 +171,63 @@ group: the job adds no tester and submits nothing for review.
 
 ### The site
 
-`architect.fasttrackstudio.app` is moving off the cluster to Vercel
-(#534), so the landing page stays up whatever the cluster does. The
-site is `apps/site`, a TanStack Start app on bun with its own lockfile,
-biome and tsconfig. Cargo never builds it. Every page is prerendered,
-so none needs a server when it is requested:
+`architect.fasttrackstudio.app` is served by one VPS: its static file
+server serves the release's `architect-web-<X.Y.Z>.tar.gz` and sends the
+node's paths to the node (#534). The site is `apps/site`, a TanStack
+Start app on bun with its own lockfile, biome and tsconfig, and it is the
+root of that bundle (`scripts/web-bundle.sh`). Cargo never builds it.
+Every page is prerendered, so none needs a server when it is requested:
 
 | Page | From |
 | --- | --- |
-| `/` | the landing page; its words are in `apps/site/src/content/landing.ts`, its design tokens in `apps/site/src/styles/tokens.css`, its font copied at build time (`apps/site/scripts/assets.sh`) from `apps/web/landing` |
-| `/download` | the latest release's `latest-linux.json` and `latest-macos.json`, and the Nix one-liner above |
+| `/` | the landing page; its words are in `apps/site/src/content/landing.ts`, its design tokens in `apps/site/src/styles/tokens.css`, its font in `apps/site/public/fonts` |
+| `/download` | the release's `latest-linux.json` and `latest-macos.json`, its node archive, and the Nix one-liner above |
 | `/changelog` | the last releases' notes (the GitHub release bodies, which are `scripts/release-notes.sh`'s output) |
 | `/extensions` | the store's index, `extensions/index.toml`. While it lists nothing, the page is built from `examples/registry/index.toml` and says it is an example |
-| `/docs/` | `docs/content`, built by `architect site build --base /docs/` as `scripts/web-bundle.sh` builds it |
+| `/docs/` | `docs/content`, built by `architect site build --base /docs/` |
+| `/app/` | the web app ([the web front end](@/guide/web.md)) |
 
 `apps/site/scripts/data.ts` reads the releases and the index when the
-site is built. It writes `apps/site/src/data/*.json`, which is
-committed: if GitHub cannot be reached, it warns and keeps the
-committed copy, so a build never fails on the network.
-`apps/site/scripts/assemble.sh` joins the app's build and a docs build
-(`DOCS_DIR`) into Vercel's prebuilt output (`.vercel/output`, Build
-Output API v3). Its `config.json` (`apps/site/scripts/vercel-config.ts`)
-serves each page at a clean URL and redirects `/app` and `/s/*`, path
-and query kept, to the node's own hostname
-(`apps/site/src/content/site.ts` `NODE_ORIGIN`). The app and share
-links are never proxied through Vercel.
+site is built and writes `apps/site/src/data/*.json`, which is
+committed. A local or pull-request build keeps the committed copy when
+GitHub cannot be reached. A release's build is strict:
+`release.yml`'s `web` job sets `ARCHITECT_RELEASE_TAG`, runs after the
+`linux`, `node` and `macos` jobs, and fails unless `/download` describes
+that tag with its Linux manifest and `/changelog` lists it. `SHA256SUMS`
+comes after the bundle (it sums the bundle too), so `/download` links
+the tag's own.
+
+The site's links to the web app (`/app/`) and to share links (`/s/…`)
+are same-origin paths: the site and the node share the domain.
+`scripts/web-routes.md`, copied into every bundle as `ROUTES.md`, says
+exactly how a server must serve it: try the path, then `<path>.html`,
+then `<path>/index.html`, else `404.html` with a 404; the node's paths
+and `/auth/callback` ahead of the files; long caching only for the
+content-hashed `assets/`. `apps/site/scripts/serve.ts` serves a folder
+by exactly those rules, and `scripts/check-web-bundle.sh` checks a
+bundle behind it: the files the server asserts, `/`, `/download`,
+`/changelog`, `/extensions`, `/docs/`, `/app/`, the 404, and that `/` is
+this site.
 
 `.github/workflows/site.yml` checks a pull request that touches the
-site, the docs or the landing page: biome, tsc, the build, the route
-tree's drift and every internal link. With the Vercel secrets set, it
-also deploys a preview carrying the latest release's docs. As
-`release.yml`'s last job (`site`) on a tag, or on a manual dispatch, it builds the
-docs with the CLI on the release runners and deploys to production.
-With `VERCEL_TOKEN`, `VERCEL_ORG_ID` or `VERCEL_PROJECT_ID` unset, the
-deploy steps skip with a notice. Locally, from `apps/site`, with bun
-(`nix shell nixpkgs#bun`):
+site, the web app's files, the docs or the bundle's scripts: biome,
+tsc, the build, the route tree's drift, every internal link, then the
+bundle assembled around this build with the latest release's docs and
+wasm, through `scripts/check-web-bundle.sh`. It deploys nothing; the
+release's `web` job runs the same check on the bundle it ships.
+Locally, from `apps/site`, with bun (`nix shell nixpkgs#bun`):
 
 <!-- doc-check: off (bun commands, run in apps/site) -->
 ```sh
 bun install --frozen-lockfile
 bun run dev                                     # http://localhost:3000
 bun run build                                   # .output/public, every page prerendered
-DOCS_DIR=../../target/site bash scripts/assemble.sh   # after `just docs`
-bun scripts/serve.ts .vercel/output 4173       # the deploy, its redirects applied
+bun scripts/serve.ts .output/public 4173        # by the bundle's rules
 ```
 <!-- doc-check: on -->
 
-Until the Vercel site is live, `apps/web/landing` and the
-`architect-web` image keep serving the old one.
+From the repository root, `just web` builds the whole bundle (the site
+too) and serves it.
 
 ## 5. Moving a consumer to a new tag
 

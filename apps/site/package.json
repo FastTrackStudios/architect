@@ -7,13 +7,11 @@
 	},
 	"scripts": {
 		"data": "bun scripts/data.ts",
-		"assets": "bash scripts/assets.sh",
-		"dev": "bash scripts/assets.sh && vite dev --port 3000",
-		"build": "bash scripts/assets.sh && vite build",
+		"dev": "vite dev --port 3000",
+		"build": "vite build",
 		"preview": "vite preview",
 		"links": "bun scripts/check-links.ts .output/public",
-		"assemble": "bash scripts/assemble.sh",
-		"serve": "bun scripts/serve.ts .vercel/output",
+		"serve": "bun scripts/serve.ts",
 		"format": "biome format",
 		"lint": "biome lint",
 		"check": "biome check"

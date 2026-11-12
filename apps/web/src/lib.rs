@@ -1,17 +1,17 @@
 //! Architect in a browser (#431): the web app's shell, served with the
-//! landing page and the docs as one static site.
+//! site and the docs as one static bundle.
 //!
 //! The site (`scripts/web-bundle.sh`, `just web`, the `architect-web`
 //! image in `flake.nix`) has three parts on one host:
 //!
 //! | path | what |
 //! | --- | --- |
-//! | `/` | the landing page (`apps/web/landing`, a slot for the designed page) |
+//! | `/` | the site (`apps/site`, prerendered: the landing page, `/download`, `/changelog`, `/extensions`) |
 //! | `/docs/` | the docs, `docs/content` built by `architect site build` |
 //! | `/app/` | this app ([`APP`]); the sign-in comes back to `/auth/callback` ([`CALLBACK`]) |
 //!
 //! The app always lives at `/app/`, signed in or not; `/` stays the
-//! landing page, which links to it. Everything else on the host (`/vox`,
+//! site's landing page, which links to it. Everything else on the host (`/vox`,
 //! `/org`, `/s`, …) belongs to the headless node, routed by the reverse
 //! proxy in front of both (`deploy/chart/architect`).
 //!
