@@ -65,9 +65,16 @@ pub fn mount(mode: Mode) {
 
 /// Leaves the demo for the sign-in (the app's own URL, signed out).
 fn sign_in() {
-    if let Some(w) = web_sys::window() {
-        let _ = w.location().assign(crate::APP);
+    let Some(w) = web_sys::window() else { return };
+    // The demo keeps nothing: an edited one asks before it goes.
+    if vault::demo_edited()
+        && !w
+            .confirm_with_message("Leave the demo? Your changes here are not saved.")
+            .unwrap_or(false)
+    {
+        return;
     }
+    let _ = w.location().assign(crate::APP);
 }
 
 /// The app's root: what `LabApp` (apps/ui) is on a desk or a phone, with
@@ -91,6 +98,7 @@ fn WebApp() -> Element {
         let _ = architect::action::app_status::register(&list);
     });
     let theme = theme::use_web_theme(&list);
+    let assets = use_hook(theme::assets);
     let settings = settings::use_web_settings();
     architect_settings::use_appearance_section();
     // Commands: the palette (⌘K), quick open (⌘O), every command's key.
@@ -173,14 +181,14 @@ fn WebApp() -> Element {
     rsx! {
         div {
             style: "position: absolute; inset: 0; overflow: hidden;",
-            document::Style { {theme::page_css(&theme.resolved().read())} }
+            document::Style { {theme::page_css(&theme.resolved().read(), assets.as_deref())} }
             theme::SystemScheme {}
             keys::WebKeys {}
             architect_ui::theme::ThemeStoreProvider {
                 div { style: "position: absolute; inset: 0;",
                     AppShell {
                         screen: shown,
-                        title: "Architect",
+                        title: crate::browser::app_name(),
                         tabs,
                         current: Some("vault"),
                         on_tab: move |_: &'static str| {},
@@ -295,7 +303,7 @@ fn Brand() -> Element {
     let t = shell::use_shell().theme;
     rsx! {
         div { style: "display: flex; align-items: center; gap: 8px; font-weight: 600; color: {t.ink};",
-            span { "Architect" }
+            span { {crate::browser::app_name()} }
 
         }
     }

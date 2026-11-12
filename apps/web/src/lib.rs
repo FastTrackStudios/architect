@@ -48,6 +48,7 @@ mod app;
 #[cfg(target_arch = "wasm32")]
 mod browser;
 pub mod demo;
+pub mod keys;
 
 use std::fmt::Write as _;
 

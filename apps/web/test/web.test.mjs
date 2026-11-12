@@ -200,10 +200,39 @@ test('the demo is the app on the demo vault, and sends nothing', { skip }, async
     });
     await tab.until('document.activeElement && document.activeElement.tagName === "INPUT"', 'the palette');
 
-    // Only the app's own files (and the site's icon) were asked for; the
+    // Only the app's own files (its page under /app/, its code and face
+    // under /assets/app-<sha12>/) and the site's icon were asked for; the
     // demo vault's images are data: URLs, decoded in the page.
-    const off = seen.filter((u) => { if (u.startsWith('data:')) return false; const p = new URL(u); return p.origin !== origin || !(p.pathname.startsWith('/app/') || p.pathname === '/favicon.svg'); });
+    const off = seen.filter((u) => { if (u.startsWith('data:')) return false; const p = new URL(u); return p.origin !== origin || !(p.pathname.startsWith('/app/') || p.pathname.startsWith('/assets/app-') || p.pathname === '/favicon.svg'); });
     assert.deepEqual(off, [], 'requests outside /app/');
+  } finally {
+    close();
+  }
+});
+
+// Off Apple platforms Ctrl is the command key: Ctrl+K opens what ⌘K does
+// (apps/web/src/keys.rs `chords`). The page is told it runs on Linux
+// before any of its script does.
+test('off a Mac, Ctrl+K opens the palette', { skip }, async () => {
+  const { tab, close } = await open();
+  try {
+    await tab.send('script.addPreloadScript', {
+      functionDeclaration: `() => {
+        Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'Linux x86_64', configurable: true });
+        Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => undefined, configurable: true });
+      }`,
+    });
+    await tab.go(`${origin}/app/?demo`);
+    await tab.until('!!document.querySelector(\'[data-note="Welcome.md"] [data-testid=note-text]\')', 'the Welcome note', 30000);
+    assert.equal(await tab.eval('navigator.platform'), 'Linux x86_64');
+    await tab.send('input.performActions', {
+      context: (await tab.send('browsingContext.getTree', {})).contexts[0].context,
+      actions: [{ type: 'key', id: 'keys', actions: [
+        { type: 'keyDown', value: '\uE009' }, { type: 'keyDown', value: 'k' },
+        { type: 'keyUp', value: 'k' }, { type: 'keyUp', value: '\uE009' },
+      ] }],
+    });
+    await tab.until('document.activeElement && document.activeElement.tagName === "INPUT"', 'the palette from Ctrl+K');
   } finally {
     close();
   }

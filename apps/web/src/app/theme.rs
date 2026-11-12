@@ -51,15 +51,38 @@ pub fn SystemScheme() -> Element {
     rsx! {}
 }
 
+/// Where the app's code and face are (`<html data-assets>`, which
+/// `start.js` sets: `/assets/app-<sha12>/`, cached for good;
+/// `scripts/web-bundle.sh`). `None` where the page names none.
+#[must_use]
+pub fn assets() -> Option<String> {
+    let dir = web_sys::window()?
+        .document()?
+        .document_element()?
+        .get_attribute("data-assets")?;
+    // Only the bundle's own folder on this origin.
+    (dir.starts_with("/assets/app-")
+        && dir.ends_with('/')
+        && dir
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-')))
+    .then_some(dir)
+}
+
 /// The page under the app: its background the theme's desk, the press
 /// look of the app's rows (`apps/ui/src/theme.rs` `page_css`), and the
-/// app's face (Inter, served beside it: `scripts/web-bundle.sh`).
+/// app's face (Inter, from `assets`, its folder; without one the system's
+/// face).
 #[must_use]
-pub fn page_css(resolved: &architect_theme::Resolved) -> String {
+pub fn page_css(resolved: &architect_theme::Resolved, assets: Option<&str>) -> String {
+    let face = assets.map_or_else(String::new, |dir| {
+        format!(
+            "@font-face {{ font-family: 'Inter'; src: url('{dir}Inter-Variable.woff2') format('woff2'); \
+             font-weight: 100 900; font-display: swap; }}"
+        )
+    });
     format!(
-        "@font-face {{ font-family: 'Inter'; src: url('/app/Inter-Variable.ttf') format('truetype'); \
-         font-weight: 100 900; font-display: swap; }}\
-         html, body {{ margin: 0; padding: 0; background: {desk}; }}\
+        "{face}html, body {{ margin: 0; padding: 0; background: {desk}; }}\
          button {{ cursor: pointer; }}\
          .lp:hover {{ box-shadow: inset 0 0 0 999px {hover}; }}\
          .lp:active {{ background-color: {active}; }}",

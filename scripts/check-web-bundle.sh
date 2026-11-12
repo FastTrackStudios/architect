@@ -5,6 +5,7 @@
 #
 #   bash scripts/check-web-bundle.sh BUNDLE [PORT]     # needs bun and curl
 #
+# - the web app's code under the assets/app-<sha12>/ start.js names
 # - the files the server's package asserts exist (index.html, 404.html,
 #   app/index.html, app/config.json, docs/index.html), and ROUTES.md
 # - /, /download, /changelog, /extensions, /docs/, /app/ answer 200 with
@@ -57,6 +58,14 @@ get /docs/ 200
 get /app/ 200
 has /app/ '/app/start.js'
 get /app/config.json 200
+# The app's code is under the release's assets/app-<sha12>/ (cached for
+# good), named by start.js (never cached).
+get /app/start.js 200
+app_assets="$(grep -ao "/assets/app-[0-9a-f]\{12\}/" "$tmp/body" | head -1)"
+[ -n "$app_assets" ] || fail "/app/start.js names no /assets/app-<sha12>/"
+get "${app_assets}architect_web_bg.wasm" 200
+get "${app_assets}architect_web.js" 200
+get "${app_assets}Inter-Variable.woff2" 200
 get /no/such/page 404
 has /no/such/page "$mark"
 # A page's URL with a trailing slash is not the page (only folders take one).

@@ -31,6 +31,19 @@ pub const FILES: &str = "VAULT_FILES";
 /// The view a note of the vault is; its pane's state is the note's path.
 const NOTE: &str = "vault.note";
 
+/// Whether a note of the demo was edited or made since the page loaded:
+/// leaving the demo then asks first (`super::sign_in`).
+static EDITED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the demo vault was changed here.
+pub fn demo_edited() -> bool {
+    EDITED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn edited() {
+    EDITED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The vault the app shows, in context above the Vault tab.
 #[derive(Clone)]
 pub struct WebVault {
@@ -179,6 +192,7 @@ fn new_note(workspace: Signal<Workspace>, vault: &MemorySource, folder: &str) {
         }])
         .is_ok()
     {
+        edited();
         show_note(workspace, &path, Target::Tab);
     }
 }
@@ -407,23 +421,6 @@ fn NoteView() -> Element {
     }
 }
 
-/// The frontmatter block (with its fences and the line after) and the
-/// body under it.
-fn split(text: &str) -> (&str, &str) {
-    if let Some(rest) = text.strip_prefix("---\n")
-        && let Some(end) = rest
-            .find("\n---\n")
-            .or_else(|| rest.strip_suffix("\n---").map(str::len))
-    {
-        let at = end.saturating_add(4).saturating_add(5).min(text.len());
-        return (
-            text.get(..at).unwrap_or_default(),
-            text.get(at..).unwrap_or_default(),
-        );
-    }
-    (text.get(..0).unwrap_or_default(), text)
-}
-
 /// The note's frame: the text area fills the pane's column, as the
 /// desktop's editor does (`apps/ui/src/note_editor.rs` `LAYOUT`).
 const LAYOUT: &str = "
@@ -468,8 +465,8 @@ fn WebNote(path: String) -> Element {
             }
         };
     };
-    let (front, body) = split(&text);
-    let front = front.to_owned();
+    let (front, body) = architect_navigator::markdown::split_block(&text);
+    let front = front.into_owned();
     let properties = note_from_markdown(&path, &text, 0, 0).properties;
     let body = body.to_owned();
     let created = use_hook(|| {
@@ -485,6 +482,7 @@ fn WebNote(path: String) -> Element {
             let full = format!("{front}{}", e.value());
             let file = note_from_markdown(&path, &full, created, now());
             source.set_text(file, full);
+            edited();
         }
     };
     let editing = architect_shell::use_editing_actions("editor:note", &[]);

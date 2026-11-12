@@ -146,6 +146,12 @@ fn draw(screen: &Screen) {
     }
 }
 
+/// The distribution's name (`/app/distribution.json`, read at start):
+/// what the app calls itself.
+pub fn app_name() -> String {
+    DIST.with(|d| d.borrow().name.clone())
+}
+
 /// Reads `/app/distribution.json` into [`DIST`], and names the page and
 /// its header after it. Missing, the bundle is the Architect app's.
 async fn read_distribution() {
@@ -181,11 +187,12 @@ async fn run() -> Result<(), String> {
     let route = route(&path, search.trim_start_matches('?'));
     // The demo: the app at once, on the demo vault in memory, nothing
     // asked of the issuer or the node.
+    // Which distribution this is, first: the demo is named for it too.
+    read_distribution().await;
     if route == Route::Demo {
         crate::app::mount(crate::app::Mode::Demo);
         return Ok(());
     }
-    read_distribution().await;
     draw(&Screen::Loading);
     let (status, text) = fetch("GET", &format!("{APP}config.json"), None, &[]).await?;
     if status != 200 {
