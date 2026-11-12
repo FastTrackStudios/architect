@@ -990,11 +990,17 @@ mod tests {
         assert!(page_json(std::slice::from_ref(&words))["islands"][0]["lyrics"].is_null());
         let web = SiteIsland::new(
             "demo.words",
-            vec![("web-x.js".to_owned(), Cow::Borrowed(b"export function mount(){}".as_slice()))],
+            vec![(
+                "web-x.js".to_owned(),
+                Cow::Borrowed(b"export function mount(){}".as_slice()),
+            )],
         )
         .lyrics("words")
         .web("web-x.js");
-        assert_eq!(page_json(std::slice::from_ref(&web))["islands"][0]["lyrics"], "words");
+        assert_eq!(
+            page_json(std::slice::from_ref(&web))["islands"][0]["lyrics"],
+            "words"
+        );
         // No stylesheet without a valid name and its digest.
         let files = vec![("a.css".to_owned(), Cow::Borrowed(b".a{}".as_slice()))];
         let sheet = SiteIsland::new("x", files.clone()).stylesheet("a.css");
