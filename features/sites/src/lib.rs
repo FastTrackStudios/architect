@@ -56,6 +56,7 @@ mod page_blocks;
 pub mod sanitize;
 mod scope;
 mod search;
+pub mod shell;
 mod site;
 pub mod ui;
 mod url;

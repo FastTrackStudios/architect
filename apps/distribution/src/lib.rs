@@ -581,6 +581,18 @@ impl Distribution {
             .collect()
     }
 
+    /// Its compiled-in extensions' `[[favourites]]`: the tabs a share
+    /// page's phone shell (and the app's shell) shows while a note of
+    /// their types is open.
+    #[must_use]
+    pub fn favourites(&self) -> Vec<architect_extensions::favourites::TypeFavourites> {
+        self.extensions()
+            .into_iter()
+            .filter_map(|e| Manifest::parse(e.manifest()).ok())
+            .flat_map(|m| m.favourites)
+            .collect()
+    }
+
     /// What it is, as the web bundle's `/app/distribution.json` and
     /// `<app> distribution` print it: its name, app, folder, bundle id,
     /// version, and every compiled-in extension (id, name, version,

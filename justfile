@@ -407,6 +407,12 @@ share-webview-test:
 share-webview-test-classic:
     DRIVER=gecko GECKODRIVER="$(nix build --no-link --print-out-paths nixpkgs#geckodriver)/bin/geckodriver" just share-webview-test
 
+# A share page on a phone, measured in Firefox (one title at the top, the
+# list's gutters, the card above the tab bar): apps/web/test/share-layout.test.mjs.
+share-layout-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" env -u LD_LIBRARY_PATH node --test apps/web/test/share-layout.test.mjs
+
 # The site's /download (apps/site): its link logic (bun test), then the
 # built page in a headless Firefox with GitHub's API stubbed: every file
 # there, the Mac build missing, the API down, rate limited

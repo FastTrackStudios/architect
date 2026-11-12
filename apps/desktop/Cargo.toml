@@ -87,6 +87,8 @@ vault-proto = { workspace = true, features = ["vox"] }
 vault-collab = { workspace = true }
 # Sites (#364): a vault published, rebuilt when it changes.
 architect-sites = { workspace = true }
+# A share page's phone shell: note types' favourites (`architect_sites::shell`).
+architect-favourites = { workspace = true }
 # Which distribution it is, and its compiled-in extensions' block renderers
 # for the node's share links and Sites (#491, #488).
 architect-distribution = { workspace = true, features = ["pages"] }

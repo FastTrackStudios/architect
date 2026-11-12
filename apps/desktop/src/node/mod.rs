@@ -258,6 +258,25 @@ pub async fn start_with_islands(
     layers: Vec<architect_sites::ShareLayersDecl>,
     islands: Vec<architect_sites::SiteIsland>,
 ) -> Result<Running, StartError> {
+    Box::pin(start_with_shell(config, given, layers, islands, Vec::new())).await
+}
+
+/// [`start_with_islands`], with note types' `favourites`.
+///
+/// A distribution's compiled-in extensions' `[[favourites]]`: a share
+/// page's phone shell shows the tabs its root note's type declares
+/// (`architect_sites::shell`).
+///
+/// # Errors
+///
+/// [`StartError`]: the data dir, the iroh endpoint or the HTTP listener.
+pub async fn start_with_shell(
+    config: Config,
+    given: architect_sites::Blocks,
+    layers: Vec<architect_sites::ShareLayersDecl>,
+    islands: Vec<architect_sites::SiteIsland>,
+    favourites: Vec<architect_favourites::TypeFavourites>,
+) -> Result<Running, StartError> {
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
     // same fence, as its development copy does in the app.
@@ -508,7 +527,8 @@ pub async fn start_with_islands(
         blocks.clone(),
         share_layers,
     )
-    .with_islands(islands);
+    .with_islands(islands)
+    .with_favourites(favourites);
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
     }
@@ -718,8 +738,9 @@ pub fn main(
     let blocks = dist.blocks(&config.data_dir.join("linked"));
     let layers = dist.share_layers();
     let islands = dist.islands();
+    let favourites = dist.favourites();
     runtime.block_on(async move {
-        match start_with_islands(config, blocks, layers, islands).await {
+        match start_with_shell(config, blocks, layers, islands, favourites).await {
             Ok(running) => {
                 let _ = writeln!(
                     std::io::stdout(),

@@ -864,10 +864,11 @@
         return;
       }
       if (ev.target.closest("label, input")) return;
-      // The card's song (anywhere but its buttons): its view, not its page.
+      // The card's song (anywhere but its buttons): its view, not its page;
+      // in a phone shell with a tab for it, that tab.
       if (hasView(tracks[cur])) {
         ev.preventDefault();
-        open_();
+        if (!(arch.shell && typeof arch.shell.now === "function" && arch.shell.now())) open_();
       }
     });
     doc.body.appendChild(bar);
@@ -1131,9 +1132,11 @@
     if (ev.shiftKey && doc.activeElement === first) { ev.preventDefault(); lastOne.focus(); }
     else if (!ev.shiftKey && doc.activeElement === lastOne) { ev.preventDefault(); first.focus(); }
   }
+  // The page behind the view made inert (a phone shell's tab bar stays
+  // live: it is how a visitor leaves the view's tab).
   function inertBehind(on) {
     Array.prototype.forEach.call(doc.body.children, function (n) {
-      if (n === sheet) return;
+      if (n === sheet || (n.classList && n.classList.contains("site-tabs"))) return;
       if (on) n.setAttribute("inert", "");
       else n.removeAttribute("inert");
     });
@@ -1248,7 +1251,8 @@
     view = { src: null, node: null, home: null, lyrics: null };
     ui.lyrics.hidden = true;
     ui.lyrics.setAttribute("aria-pressed", "false");
-    sheet.classList.remove("site-now-showing-lyrics");
+    // A tab of lyrics (a phone shell's) stays one from song to song.
+    if (!tabbed.lyrics) sheet.classList.remove("site-now-showing-lyrics");
   }
   function mount(node, home, src, lyrics) {
     unmount();
@@ -1262,6 +1266,8 @@
       follows(lyrics, true);
       ui.lyrics.hidden = false;
     }
+    if (tabbed.lyrics) lyrics_(true);
+    else words_();
     ui.controls.hidden = !!node.querySelector("[data-transport]");
     ui.progress.hidden = !!node.querySelector("[data-progress]");
     island.sections = sectionsOf(node);
@@ -1359,25 +1365,61 @@
       })
       .then(function (html) { return new DOMParser().parseFromString(html, "text/html"); }));
   }
-  function lyrics_() {
-    var on = !sheet.classList.contains("site-now-showing-lyrics");
+  function lyrics_(force) {
+    var on = typeof force === "boolean" ? force : !sheet.classList.contains("site-now-showing-lyrics");
     sheet.classList.toggle("site-now-showing-lyrics", on);
     ui.lyrics.setAttribute("aria-pressed", on ? "true" : "false");
+    words_();
   }
-  function open_() {
+  // In lyrics, a song with none says so.
+  function words_() {
+    var none = sheet.querySelector(".site-now-nowords");
+    var want = sheet.classList.contains("site-now-showing-lyrics") && !view.lyrics && !!view.node;
+    if (want && !none) {
+      none = doc.createElement("p");
+      none.className = "site-now-words site-now-empty site-now-nowords";
+      none.textContent = "No lyrics for this song";
+      ui.body.appendChild(none);
+    } else if (!want && none && none.parentNode) none.parentNode.removeChild(none);
+  }
+  // A phone shell's tab (`architect.player.open({ tab: true })`): the
+  // view in place of the page above the shell's bar, not a sheet over
+  // everything (no history entry, the page behind not made inert).
+  var tabbed = { on: false, lyrics: false };
+  function open_(opts) {
     if (!sheet) return;
+    var tab = !!(opts && opts.tab);
+    // A tab with nothing playing: the first song, ready where it starts.
+    if (cur < 0 && tab && tracks.length) select(0, 0, false, true);
     var t = tracks[cur];
     if (!t) return;
+    tabbed.lyrics = tab && !!opts.lyrics;
+    if (tab) lyrics_(tabbed.lyrics);
     show(t);
+    if (!sheet.hidden && tabbed.on !== tab) {
+      // From a sheet to a tab or back: the same view, its frame redrawn.
+      sheet.classList.toggle("site-now-tab", tab);
+      tabbed.on = tab;
+    }
     if (sheet.hidden) {
       opener = doc.activeElement && doc.activeElement !== doc.body ? doc.activeElement : ui.title;
       sheet.hidden = false;
+      tabbed.on = tab;
+      sheet.classList.toggle("site-now-tab", tab);
       doc.body.classList.add("site-now-open");
-      if (modal()) {
+      doc.body.classList.toggle("site-now-tabbed", tab);
+      if (modal() && !tab) {
         sheet.setAttribute("aria-modal", "true");
         inertBehind(true);
-      } else sheet.removeAttribute("aria-modal");
-      try { history.pushState({ siteNowPlaying: true }, ""); } catch (e) {}
+      } else {
+        sheet.removeAttribute("aria-modal");
+        // A tab covers the page all the same: its content is out of reach
+        // of the keyboard and a screen reader while the view shows.
+        if (tab) inertBehind(true);
+      }
+      if (!tab) {
+        try { history.pushState({ siteNowPlaying: true }, ""); } catch (e) {}
+      }
       ui.close.focus();
       islandOpen();
     }
@@ -1387,8 +1429,12 @@
   }
   function close_(popped) {
     if (!sheet || sheet.hidden) return;
+    var wasTab = tabbed.on;
+    tabbed = { on: false, lyrics: false };
     sheet.hidden = true;
+    sheet.classList.remove("site-now-tab");
     doc.body.classList.remove("site-now-open");
+    doc.body.classList.remove("site-now-tabbed");
     inertBehind(false);
     wanted = null;
     islandClose();
@@ -1399,6 +1445,7 @@
     var back = opener && opener.isConnected ? opener : ui.title;
     opener = null;
     if (back && back.focus) back.focus();
+    if (wasTab && arch.shell && typeof arch.shell.closed === "function") arch.shell.closed();
   }
 
   // ── The island (studio#445) ───────────────────────────────────────
@@ -2034,6 +2081,16 @@
       for (var i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
       bar.style.setProperty("--site-player-tint", "rgb(" + Math.round(r / n) + " " + Math.round(g / n) + " " + Math.round(b / n) + ")");
     } catch (e) {}
+  }
+
+  // What a page's shell (its phone tabs, `shell.js`) asks of the player.
+  if (sheet) {
+    arch.player = {
+      open: function (opts) { open_(opts); },
+      close: function () { close_(); },
+      get open_() { return !sheet.hidden; },
+      get tracks() { return tracks.length; },
+    };
   }
 
   // The lock screen and the headset: the song, and its buttons.

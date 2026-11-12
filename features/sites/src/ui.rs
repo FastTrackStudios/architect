@@ -109,7 +109,7 @@ pub fn Head(site: Rc<Site>, view: View, assets: Rc<Assets>) -> Element {
     };
     rsx! {
         meta { charset: "utf-8" }
-        meta { name: "viewport", content: "width=device-width, initial-scale=1" }
+        meta { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" }
         meta { name: "color-scheme", content: "light dark" }
         title { "{title}" }
         if let Some(description) = description {
@@ -173,7 +173,7 @@ fn Header(site: Rc<Site>) -> Element {
             }
             a { class: "site-brand", href: "{site.base}",
                 span { class: "site-mark", dangerous_inner_html: ICON_MARK }
-                span { "{site.title}" }
+                span { class: "site-brand-name", "{site.title}" }
             }
             div { class: "site-search", role: "search",
                 span { class: "site-search-icon", dangerous_inner_html: ICON_SEARCH }

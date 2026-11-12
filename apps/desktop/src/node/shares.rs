@@ -283,6 +283,9 @@ struct Inner {
     /// The islands its pages' players may draw (studio#445), served at
     /// `/_ext/` (`architect_sites::island`).
     islands: std::sync::OnceLock<Arc<[architect_sites::SiteIsland]>>,
+    /// Note types' favourites (`[[favourites]]`): a share's phone shell's
+    /// tabs, by its root note's type (`architect_sites::shell`).
+    favourites: std::sync::OnceLock<Arc<[architect_favourites::TypeFavourites]>>,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -320,6 +323,7 @@ impl Shares {
             moved: Mutex::new(HashMap::new()),
             views: Mutex::new(HashMap::new()),
             islands: std::sync::OnceLock::new(),
+            favourites: std::sync::OnceLock::new(),
         }))
     }
 
@@ -333,6 +337,18 @@ impl Shares {
 
     fn islands(&self) -> &[architect_sites::SiteIsland] {
         self.0.islands.get().map_or(&[], |i| i)
+    }
+
+    /// With note types' `favourites`: a share's phone shell shows its root
+    /// note's type's tabs; the first call holds.
+    #[must_use]
+    pub fn with_favourites(self, favourites: Vec<architect_favourites::TypeFavourites>) -> Self {
+        let _ = self.0.favourites.set(favourites.into());
+        self
+    }
+
+    fn favourites(&self) -> &[architect_favourites::TypeFavourites] {
+        self.0.favourites.get().map_or(&[], |f| f)
     }
 
     /// Every share, as the table holds it now.
@@ -2516,25 +2532,35 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
         .as_ref()
         .map(|l| queue(l, link.mount))
         .unwrap_or_default();
+    // The phone shell: its root note's type's tabs, or the share's own.
+    let base = link.mount.trim_end_matches('/');
+    let (root_type, root_page) = listed.as_ref().and_then(root_note).map_or_else(
+        || (String::new(), link.mount.to_owned()),
+        |(t, page)| (t, format!("{base}{page}")),
+    );
+    let shell = architect_sites::shell::shell_json(
+        architect_sites::shell::favourites_for(shares.favourites(), &root_type),
+        &root_page,
+    )
+    .to_string()
+    .replace("</", "<\\/");
+    let shell = format!("<script type=\"application/json\" id=\"site-shell\">{shell}</script>");
     let art = listed
         .as_ref()
         .map(|l| art_by_page(l, link.mount))
         .unwrap_or_default();
-    if files == 0 && tracks.is_empty() && art.is_empty() {
-        return response;
-    }
     let (parts, body) = response.into_parts();
     let Ok(bytes) = architect::http::axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
         return Response::from_parts(parts, Body::empty());
     };
-    let mut section = if files > 0 {
-        format!(
+    let mut section = shell;
+    if files > 0 {
+        let _ = write!(
+            section,
             "{FILES_STYLE}<nav class=\"share-files-bar\" aria-label=\"Files\"><a href=\"{m}_files/\">Files ({files})</a><a class=\"share-download\" href=\"{m}_archive.zip?by=note\" download>Download all</a></nav>",
             m = escape(link.mount)
-        )
-    } else {
-        String::new()
-    };
+        );
+    }
     if !tracks.is_empty() {
         // What the page's player may draw on its now-playing view
         // (studio#445): the runtime, the sandbox, the islands.
@@ -2552,6 +2578,36 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
         section.push_str(&script);
     }
     before_main_end(parts, &String::from_utf8_lossy(&bytes), &section)
+}
+
+/// The link's root note: the note at its page `/`, else the first it
+/// lists (a setlist shared with its songs: the setlist). Its type (the
+/// frontmatter's `type:`, or its list's first; empty without one) and its
+/// page below the link.
+fn root_note(listed: &Listed) -> Option<(String, String)> {
+    let at_root = listed
+        .pages
+        .iter()
+        .find(|(_, page)| page.as_str() == "/")
+        .map(|(note, _)| note.as_str());
+    let entry = match at_root {
+        Some(root) => listed.entries.iter().find(|e| e.path == root)?,
+        None => listed
+            .entries
+            .iter()
+            .find(|e| listed.pages.contains_key(&e.path))?,
+    };
+    let page = listed.pages.get(&entry.path)?.clone();
+    let kind = match entry.properties.get("type") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(list)) => list
+            .first()
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+        _ => String::new(),
+    };
+    Some((kind, page))
 }
 
 /// A link's queue (#511): every audio or video file of the notes it
@@ -3360,6 +3416,48 @@ mod tests {
             serde_json::Value::Object(art),
             serde_json::json!({ "/s/abc/joy/": "/s/abc/Set/Joy%20cover.jpg" })
         );
+    }
+
+    #[test]
+    fn the_shells_root_is_the_note_at_the_root_else_the_first_listed() {
+        let entry = |path: &str, kind: Option<&str>| Entry {
+            path: path.to_owned(),
+            title: path.to_owned(),
+            properties: kind
+                .map(|k| std::iter::once(("type".to_owned(), serde_json::json!(k))).collect())
+                .unwrap_or_default(),
+            files: Vec::new(),
+            art: None,
+        };
+        let listed = |pages: &[(&str, &str)]| Listed {
+            groups: Vec::new(),
+            entries: Arc::new(vec![
+                entry("Setlists/Eve.md", Some("setlist")),
+                entry("Songs/Joy.md", Some("song")),
+            ]),
+            pages: pages
+                .iter()
+                .map(|(n, p)| ((*n).to_owned(), (*p).to_owned()))
+                .collect(),
+            root: PathBuf::new(),
+        };
+        // A setlist shared with its songs: the first listed, at its page.
+        assert_eq!(
+            root_note(&listed(&[
+                ("Setlists/Eve.md", "/setlists/eve/"),
+                ("Songs/Joy.md", "/songs/joy/")
+            ])),
+            Some(("setlist".to_owned(), "/setlists/eve/".to_owned()))
+        );
+        // A note at the link's root wins.
+        assert_eq!(
+            root_note(&listed(&[
+                ("Setlists/Eve.md", "/setlists/eve/"),
+                ("Songs/Joy.md", "/")
+            ])),
+            Some(("song".to_owned(), "/".to_owned()))
+        );
+        assert_eq!(root_note(&listed(&[])), None);
     }
 
     #[test]

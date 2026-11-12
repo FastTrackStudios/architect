@@ -22,6 +22,7 @@ import vm from 'node:vm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PLAYER = readFileSync(process.env.ARCHITECT_PLAYER_JS || join(here, '../assets/player.js'), 'utf8');
+const SHELL = readFileSync(join(here, '../assets/shell.js'), 'utf8');
 
 // ── A DOM just big enough ────────────────────────────────────────────
 
@@ -196,7 +197,7 @@ const block = (rows, extra = [], join = { class: 'studio-setlist' }) => el('div'
 
 /// The setlist's page: two sets under their headings, as an existing note
 /// draws them, and (for Click and Loop) the first song's view on the page.
-function setlist({ art = null, view = null } = {}) {
+function setlist({ art = null, view = null, shell = null, width, hash } = {}) {
   const body = new Node('body');
   const article = body.appendChild(el('article'));
   article.appendChild(el('h2', { id: 'presidents-songs' }, [el('a', { class: 'site-anchor', href: '#presidents-songs' }, [], '#')], 'Presidents Songs'));
@@ -212,7 +213,7 @@ function setlist({ art = null, view = null } = {}) {
   ], [el('p', { class: 'files' }, [], 'Files')]));
   if (view) body.appendChild(view);
   const queue = JSON.stringify({ scope: L, tracks: [], art: art || {} });
-  return run(body, queue);
+  return run(body, queue, { shell, width, hash });
 }
 
 function run(body, queue, opts = {}) {
@@ -227,11 +228,14 @@ function run(body, queue, opts = {}) {
   const audio = new FakeAudio();
   const errors = [];
   const queueEl = queue ? Object.assign(new Node('script'), { ownText: queue }) : null;
+  const shellEl = opts.shell ? Object.assign(new Node('script'), { ownText: JSON.stringify(opts.shell) }) : null;
+  const replaced = [];
   const document = {
     body,
     documentElement: new Node('html'),
     currentScript: null,
-    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-islands') ? islandsEl : null),
+    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-shell') ? shellEl : sel.startsWith('script#site-islands') ? islandsEl : null),
+    getElementById: () => null,
     querySelectorAll: (sel) => body.querySelectorAll(sel),
     createElement: (tag) => {
       if (tag === 'audio') return new Media('');
@@ -253,11 +257,12 @@ function run(body, queue, opts = {}) {
     importNode: (n) => n,
     get activeElement() { return focused; },
   };
-  const location = { href: `http://node.test${L}merry/`, origin: 'http://node.test' };
+  const location = { href: `http://node.test${L}merry/${opts.hash || ''}`, origin: 'http://node.test', pathname: `${L}merry/`, search: '', hash: opts.hash || '' };
   const window = {
     document,
     location,
-    history: { state: null, pushState() {}, back() {} },
+    history: { state: null, pushState() {}, back() {}, replaceState(_, __, url) { replaced.push(url); location.hash = url.slice(url.indexOf('#')); } },
+    scrollTo() {},
     sessionStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) },
     requestAnimationFrame: (fn) => frames.push(fn),
     cancelAnimationFrame: () => {},
@@ -280,7 +285,12 @@ function run(body, queue, opts = {}) {
     Promise,
     addEventListener: () => {},
     getComputedStyle: () => ({ overflowX: 'visible', overflowY: 'visible' }),
-    matchMedia: () => ({ matches: false }),
+    // A phone's width unless the test says (390 px).
+    matchMedia: (q) => {
+      const width = opts.width || 390;
+      const max = /max-width:\s*(\d+)px/.exec(q), min = /min-width:\s*(\d+)px/.exec(q);
+      return { matches: max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false, addEventListener() {} };
+    },
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     AudioContext: function () { return audio; },
     fetch: opts.fetch || (() => Promise.reject(new Error('no network in this test'))),
@@ -294,7 +304,7 @@ function run(body, queue, opts = {}) {
   if (opts.rules) window.architect = { rules: opts.rules };
   focused = null;
   Object.assign(window, { window });
-  vm.runInNewContext(PLAYER, window);
+  vm.runInNewContext(PLAYER + '\n' + SHELL, window);
   const playhead = window.architect.playhead;
   const audioEl = () => body.all().find((n) => n instanceof Media);
   /// The media at `t`, its clock moved on with the audio clock's.
@@ -304,7 +314,7 @@ function run(body, queue, opts = {}) {
     a.currentTime = t;
   };
   return {
-    body, playhead, audio, window, location, errors, clock, made,
+    body, playhead, audio, window, location, replaced, errors, clock, made,
     /// Run every timeout due by now.
     later: () => timeouts.splice(0).forEach((t) => (t.fn && t.at <= clock.now ? t.fn() : timeouts.push(t))),
     /// A real Loop (or Click) button in the bar (the bar's own are
@@ -489,6 +499,65 @@ test('Loop holds the section playing, and a seek moves it', async () => {
   p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
   assert.equal(at(7.2), 7.2);
   assert.deepEqual(plain(JSON.parse(p.window.sessionStorage.getItem(`architect.player:${L}`))).loop, false);
+});
+
+// ── The phone shell ─────────────────────────────────────────────────
+
+const SHELL_SPEC = {
+  home: `${L}merry/`,
+  type: 'setlist',
+  tabs: [
+    { id: 'setlist', label: 'Setlist', icon: '<svg></svg>', target: { view: 'page' } },
+    { id: 'charts', label: 'Charts', icon: '<svg></svg>', target: { view: 'player.now' } },
+    { id: 'lyrics', label: 'Lyrics', icon: '<svg></svg>', target: { view: 'player.lyrics' } },
+    // A view this page does not have: left out.
+    { id: 'browse', label: 'Browse', icon: '<svg></svg>', target: { view: 'browse' } },
+  ],
+  primary: { id: 'play', label: 'Play', icon: '<svg></svg>', target: { action: 'PLAYER_TOGGLE' }, state: 'playing', on: { label: 'Pause', icon: '<svg></svg>', target: { action: 'PLAYER_TOGGLE' } } },
+};
+
+test('the shell: a type\'s tabs, Charts as a tab of the player, the card going there, the round button playing', () => {
+  const p = setlist({ shell: SHELL_SPEC });
+  const tabs = p.body.querySelectorAll('.site-tab');
+  assert.deepEqual(tabs.map((t) => t.getAttribute('data-tab')), ['setlist', 'charts', 'lyrics'], 'no navigator here: no Browse');
+  assert.equal(tabs[0].getAttribute('aria-current'), 'page', 'its page is the setlist tab');
+  assert.ok(p.body.classList.contains('site-shell'));
+  // Charts with nothing playing: the first song, ready, its view a tab.
+  tabs[1].click();
+  assert.equal(p.playhead.src, `${L}Sleigh.mp3`);
+  assert.equal(p.playhead.playing, false);
+  assert.equal(p.location.hash, '#tab=charts');
+  const sheet = p.body.querySelectorAll('.site-now')[0];
+  assert.equal(sheet.hidden, false);
+  assert.ok(sheet.classList.contains('site-now-tab'), 'a tab, not a sheet over the page');
+  assert.equal(sheet.getAttribute('aria-modal'), null);
+  assert.equal(tabs[1].getAttribute('aria-current'), 'page');
+  // Lyrics: the same view, its words.
+  tabs[2].click();
+  assert.ok(sheet.classList.contains('site-now-showing-lyrics'));
+  assert.equal(p.location.hash, '#tab=lyrics');
+  // Back to the list: the view closes.
+  tabs[0].click();
+  assert.equal(sheet.hidden, true);
+  assert.equal(p.location.hash, '#tab=setlist');
+  // The round button plays and pauses the set.
+  const round = p.body.querySelectorAll('.site-tabs-round')[0];
+  round.click();
+  assert.equal(p.playhead.playing, true);
+  assert.equal(round.getAttribute('aria-label'), 'Pause');
+  round.click();
+  assert.equal(p.playhead.playing, false);
+  assert.ok(p.body.classList.contains('site-shell-plays'), 'the card leaves play to it');
+  // The card goes to the Charts tab.
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: () => null }, preventDefault() {} });
+  assert.equal(p.location.hash, '#tab=charts');
+  assert.ok(sheet.classList.contains('site-now-tab'));
+});
+
+test('no shell without the node\'s site-shell', () => {
+  const p = setlist();
+  assert.equal(p.body.querySelectorAll('.site-tabs').length, 0);
+  assert.equal(p.window.architect.shell, undefined);
 });
 
 // ── What the review found ─────────────────────────────────────────
@@ -731,6 +800,48 @@ test('a frame that is never ready, or stops answering, is given up', async () =>
   failing.say({ t: 'ready' });
   failing.say({ t: 'error', message: 'x' });
   assert.equal(failing.frame.parentElement, null);
+});
+
+// ── The shell, as the review found it ───────────────────────────────
+
+test('the shell: no tab from the address that is no tab, nor one that leaves the share', () => {
+  // A name every object inherits is no tab: the page's own tab is current,
+  // nothing thrown, nothing opened.
+  let asked;
+  assert.doesNotThrow(() => { asked = setlist({ shell: SHELL_SPEC, hash: '#tab=constructor' }); });
+  const current = asked.body.querySelectorAll('.site-tab').filter((t) => t.getAttribute('aria-current') === 'page').map((t) => t.getAttribute('data-tab'));
+  assert.deepEqual(current, ['setlist'], 'the page\'s own tab');
+  assert.deepEqual(asked.errors, []);
+  const spec = {
+    ...SHELL_SPEC,
+    tabs: [
+      ...SHELL_SPEC.tabs,
+      { id: 'evil', label: 'Evil', icon: '', target: { href: '/\\evil.example/' } },
+      { id: 'above', label: 'Above', icon: '', target: { href: '/s/other/' } },
+      { id: 'notes', label: 'Notes', icon: '', target: { href: `${L}merry/#notes` } },
+    ],
+  };
+  const p = setlist({ shell: spec });
+  const ids = p.body.querySelectorAll('.site-tab').map((t) => t.getAttribute('data-tab'));
+  assert.deepEqual(ids, ['setlist', 'charts', 'lyrics', 'notes'], 'another site, or out of the share: no tab');
+});
+
+test('the shell is a phone\'s: on a desk the card opens the player\'s own sheet, and the page behind a tab is inert', () => {
+  const desk = setlist({ shell: SHELL_SPEC, width: 1280 });
+  desk.body.querySelectorAll('[data-title="Sleigh Ride"]')[0].click();
+  desk.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: () => null }, preventDefault() {} });
+  const sheet = desk.body.querySelectorAll('.site-now')[0];
+  assert.equal(sheet.hidden, false);
+  assert.ok(!sheet.classList.contains('site-now-tab'), 'its own sheet, not a tab');
+  assert.equal(desk.location.hash, '', 'the address untouched');
+  // A phone: the view as a tab, the page behind it out of reach, the tabs not.
+  const phone = setlist({ shell: SHELL_SPEC });
+  phone.body.querySelectorAll('.site-tab')[1].click();
+  const inert = phone.body.children.filter((n) => n.hasAttribute('inert')).map((n) => n.getAttribute('class') || n.tagName);
+  assert.ok(inert.length > 0, 'the page behind is inert');
+  assert.ok(!phone.body.querySelectorAll('.site-tabs')[0].hasAttribute('inert'), 'the tabs stay live');
+  phone.body.querySelectorAll('.site-tab')[0].click();
+  assert.equal(phone.body.children.filter((n) => n.hasAttribute('inert')).length, 0, 'and nothing once it closes');
 });
 
 test('a frame is never given up for the time the page was hidden (an app switch), and is when it stays silent after', async () => {
