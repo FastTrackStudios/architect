@@ -83,12 +83,19 @@ async function open() {
 
 const problem = 'document.querySelector("#app .problem")?.textContent';
 
-test('the landing page, the docs and the app share one host', { skip }, async () => {
+test('the site, the docs and the app share one host', { skip }, async () => {
   const { tab, close } = await open();
   try {
+    // The site (apps/site, prerendered): the landing page with the mark in
+    // its header, and its pages at their clean URLs (scripts/web-routes.md).
     await tab.go(`${origin}/`);
-    // The landing page is a slot (apps/web/landing): only that it is there.
     assert.ok(await tab.eval('!!document.querySelector("h1")'));
+    assert.ok(await tab.eval('!!document.querySelector("header .brand-mark path")'));
+    assert.equal(await tab.eval('!!document.querySelector(".hero-plan")'), false);
+    for (const [path, title] of [['/download', /^Download/], ['/changelog', /^Changelog/], ['/extensions', /^Extensions/]]) {
+      await tab.go(`${origin}${path}`);
+      assert.match(await tab.eval('document.title'), title, path);
+    }
     await tab.go(`${origin}/docs/`);
     assert.match(await tab.eval('document.title'), /architect/);
 

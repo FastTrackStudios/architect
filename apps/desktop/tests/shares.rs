@@ -369,7 +369,10 @@ async fn a_folder_share_serves_the_folder_live_and_a_revoke_takes_it_down() {
                 "<script>{}</script>",
                 architect_sites::ui::THEME_BOOT
             )) || tag.starts_with("<script src=")
-                || tag.starts_with("<script type=\"application/json\" id=\"site-queue\">"),
+                || tag.starts_with("<script type=\"application/json\" id=\"site-queue\">")
+                // The phone shell's tabs (data, never run: not a script the
+                // policy governs).
+                || tag.starts_with("<script type=\"application/json\" id=\"site-shell\">"),
             "an inline script the policy would block: {}",
             tag.get(..80).unwrap_or(tag)
         );

@@ -6,7 +6,7 @@ name: release
 #   the GitHub release, notes from .changes/                 job release
 #   ghcr.io/fasttrackstudios/architect:<v>|sha-|latest       job node (the headless node)
 #     + architect-node-<tag>-x86_64-linux.tar.gz
-#   ghcr.io/fasttrackstudios/architect-web:<v>|sha-|latest   job web (landing page, docs, web app)
+#   ghcr.io/fasttrackstudios/architect-web:<v>|sha-|latest   job web (the site, docs, web app)
 #     + architect-web-<X.Y.Z>.tar.gz
 #   Architect-linux-x86_64.AppImage + latest-linux.json      job linux
 #   a PR bumping nix/desktop/source.json (the flake's app)     job nix-bump
@@ -79,6 +79,15 @@ jobs:
       # with `devenv: command not found`).
       - uses: ./.github/actions/devenv
 
+      # Nor bun or node (apps/site's build): the pinned nixpkgs'.
+      - name: bun and node
+        run: |
+          set -euo pipefail
+          rev=github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980
+          for pkg in bun nodejs_22; do
+            echo "$(nix build --no-link --print-out-paths "$rev#$pkg")/bin" >> "$GITHUB_PATH"
+          done
+
       - name: Plan the tags
         id: plan
         run: |
@@ -146,12 +155,22 @@ jobs:
           (cd "$RUNNER_TEMP" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$name.tar.gz" "$RUNNER_TEMP/$name.tar.gz.sha256" --clobber
 
-  # The web front end: the landing page at /, the docs at /docs/ and the
-  # web app at /app/ as one static site (scripts/web-bundle.sh), its own
-  # image behind static-web-server (flake.nix `architect-web-image-prebuilt`,
-  # the same contents as the pure `architect-web-image`), and the same
-  # bundle attached as architect-web-<X.Y.Z>.tar.gz. Starts PRIVATE on
-  # GHCR like `architect`: make it public once in the org's package settings.
+  # The web front end: the site (apps/site, prerendered: the landing page,
+  # /download, /changelog, /extensions) at /, the docs at /docs/ and the web
+  # app at /app/ as one static site (scripts/web-bundle.sh, its ROUTES.md),
+  # attached as architect-web-<X.Y.Z>.tar.gz: what the VPS serves, the one
+  # deployment. Also its own image behind static-web-server (flake.nix
+  # `architect-web-image-prebuilt`, the same contents as the pure
+  # `architect-web-image`). Starts PRIVATE on GHCR like `architect`: make it
+  # public once in the org's package settings.
+  #
+  # After `release` only, so the server's bundle is not held behind the
+  # desktop builds: /download is built for this tag (ARCHITECT_RELEASE_TAG,
+  # apps/site/scripts/data.ts: the build FAILS unless the release exists
+  # and /changelog lists it with its notes) and links each file by the
+  # name release.yml gives it. The browser asks GitHub's API which of them
+  # are up yet (apps/site/src/lib/release-assets.ts): one still building,
+  # or a Mac build that is off or failed, shows as not available yet.
   #
   #   ghcr.io/fasttrackstudios/architect-web:<X.Y.Z> | sha-<short> | latest
   web:
@@ -173,6 +192,15 @@ jobs:
       # with `devenv: command not found`).
       - uses: ./.github/actions/devenv
 
+      # Nor bun or node (apps/site's build): the pinned nixpkgs'.
+      - name: bun and node
+        run: |
+          set -euo pipefail
+          rev=github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980
+          for pkg in bun nodejs_22; do
+            echo "$(nix build --no-link --print-out-paths "$rev#$pkg")/bin" >> "$GITHUB_PATH"
+          done
+
       - name: Plan the tags
         id: plan
         run: |
@@ -189,6 +217,11 @@ jobs:
 
       - name: Build the bundle
         id: build
+        env:
+          # The site's /download and /changelog: this tag's, or the build
+          # fails. Only the release and its notes are asked for.
+          ARCHITECT_RELEASE_TAG: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           export CARGO_TARGET_DIR="${CI_CACHE_DIR:-$RUNNER_TEMP}/architect-web/$RUNNER_NAME/target"
@@ -200,6 +233,9 @@ jobs:
           devenv shell -- cargo xtask dist web --out "$RUNNER_TEMP/dist-web" \
             | tee "$RUNNER_TEMP/dist-web.txt"
           mv "$(sed -n 's/^web=//p' "$RUNNER_TEMP/dist-web.txt")" "$out"
+          # Served by the bundle's own rules (scripts/web-routes.md): the
+          # site's pages, the docs, the app and the 404, or no release.
+          bash scripts/check-web-bundle.sh "$out"
           echo "bundle=$out" >> "$GITHUB_OUTPUT"
 
       - name: Push the image
@@ -397,17 +433,10 @@ jobs:
   # SHA256SUMS over every asset the release carries, signed with the org's
   # minisign key (the one Task's and Studio's updaters pin) when the
   # tag-only `release-signing` environment has FTS_RELEASE_MINISIGN_KEY;
-  # without it the sums go out unsigned, with a warning. Runs after the
-  # Mac job too when that one is on (and whether it passed or not).
-  # The site (#534): landing, download, changelog, the store and the docs,
-  # deployed to Vercel by site.yml once the desktop manifests it reads are
-  # up. Without the Vercel secrets its deploy skips with a notice.
-  site:
-    needs: [web, linux, macos]
-    if: ${{ !cancelled() && needs.linux.result == 'success' }}
-    uses: ./.github/workflows/site.yml
-    secrets: inherit
-
+  # without it the sums go out unsigned, with a warning. Runs last: after
+  # `web` (the sums cover the web bundle, and /download links SHA256SUMS
+  # by name, shown once it is up) and after the Mac job too when that one
+  # is on (and whether it passed or not).
   sums:
     needs: [node, web, linux, macos]
     if: ${{ !cancelled() && needs.node.result == 'success' && needs.web.result == 'success' && needs.linux.result == 'success' }}

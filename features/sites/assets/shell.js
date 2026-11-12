@@ -60,8 +60,10 @@
   var pill = doc.createElement("div");
   pill.className = "site-tabs-pill";
   bar.appendChild(pill);
-  // By id, with nothing inherited (`#tab=constructor` is no tab).
+  // By id, with nothing inherited: every lookup of a tab by an id from the
+  // address or a click goes through these (`#tab=constructor` is no tab).
   var buttons = Object.create(null);
+  var byId = Object.create(null);
   tabs.forEach(function (t) {
     var b = doc.createElement("button");
     b.type = "button";
@@ -75,6 +77,7 @@
     b.addEventListener("click", function () { go(t.id); });
     pill.appendChild(b);
     buttons[t.id] = b;
+    byId[t.id] = t;
   });
 
   // The round button: its first face, and its second while its state is
@@ -124,7 +127,7 @@
   }
   // Show tab `id`.
   function go(id) {
-    var t = tabs.filter(function (x) { return x.id === id; })[0];
+    var t = byId[id];
     if (!t) return;
     var to = t.target;
     if (typeof to.href === "string") {
@@ -204,7 +207,7 @@
   // the title, and the site's name beside the mark goes when it says the
   // same.
   var heading = doc.querySelector(".site-title");
-  var brand = doc.querySelector(".site-brand span:last-child");
+  var brand = doc.querySelector(".site-brand-name");
   if (heading) {
     var named = String(heading.textContent || "").trim();
     var top = doc.createElement("span");
@@ -219,8 +222,8 @@
   // this is its page.
   function landed() {
     var asked = /(?:^|[#&])tab=([a-z0-9.-]+)/.exec(location.hash || "");
-    var first = asked && Object.prototype.hasOwnProperty.call(buttons, asked[1]) ? asked[1] : null;
-    var t = first ? tabs.filter(function (x) { return x.id === first; })[0] : null;
+    var first = asked ? asked[1] : null;
+    var t = first ? byId[first] : null;
     if (t && t.target.view !== "page" && phone.matches) go(first);
     else {
       var page = tabOf("page");

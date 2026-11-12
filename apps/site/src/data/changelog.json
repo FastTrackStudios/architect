@@ -2,6 +2,38 @@
 	"repo": "FastTrackStudios/architect",
 	"releases": [
 		{
+			"tag": "v0.12.5",
+			"name": "v0.12.5",
+			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.12.5",
+			"publishedAt": "2026-11-12T18:09:33Z",
+			"prerelease": false,
+			"html": "<h3>Added</h3>\n<ul>\n<li>Changed the web bundle (scripts/web-bundle.sh, architect-web-&lt;X.Y.Z&gt;.tar.gz): its root is now the site (apps/site, prerendered): the landing page, /download, /changelog and /extensions, with the docs at /docs/ and the web app at /app/ as before. The bundle carries ROUTES.md (scripts/web-routes.md), the rules a server must apply: the path, then <path>.html, then <path>/index.html, else 404.html with a 404; the content-hashed assets/ may be cached for good. A release builds it after its Linux and node assets and fails unless /download describes that release. Removed the old landing page (apps/web/landing) and the Vercel deploy.</li>\n</ul>\n<h3>Fixed and improved</h3>\n<ul>\n<li>Improved a share page&#39;s chart cursor: a follow item with <code>data-glide</code> (and optional <code>data-until</code>) now moves smoothly across the beat at the playhead, once per frame, by a single transform (Studio&#39;s chart playhead line, as Session draws it). A follow box nested in another one now follows only its own items. A media element first played by hand is now followed every frame.</li>\n</ul>\n<p>Since v0.12.4.</p>\n<p><strong>iOS:</strong> TestFlight build 0.12.5 (1794507156) of Architect (app.fasttrackstudio.architect).</p>\n"
+		},
+		{
+			"tag": "v0.12.4",
+			"name": "v0.12.4",
+			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.12.4",
+			"publishedAt": "2026-11-12T13:38:10Z",
+			"prerelease": false,
+			"html": "<h3>Added</h3>\n<ul>\n<li>Islands (studio#445): a distribution links in a WASI component whose views draw live on a share link’s now-playing view (Distribution::island, architect_sites::SiteIsland); the node serves its files, the web runtime and a sandbox document from /_ext/, the sandbox its own document with its own CSP (sandbox allow-scripts, no network), so the share page’s CSP is unchanged; the player brings a view in through the runtime’s share-page allow-lists, keeps /S/… apart from /s/…, and follows a chart a third of the way down. A view&#39;s stylesheet (mountView&#39;s new <code>sheet</code>/<code>sheetUrls</code>, for every embedder of @fasttrackstudio/architect; loadExtension&#39;s new <code>sandbox</code>) is tokenised and parsed as CSS and held to an allow-list, refused whole on anything else, and the view&#39;s host keeps its box contract from outside its shadow root. Every Site&#39;s own script carries the share pages&#39; allow-lists (<code>architect.rules</code>), so the now-playing view brings a page&#39;s chart and lyrics in on Sites without the node&#39;s runtime too. <code>/_ext/</code> answers GET and HEAD only. A sheet&#39;s <code>url()</code> is resolved as the browser will request it and kept only as the normalised path of one of the extension&#39;s own files on the page&#39;s origin (no <code>%</code>, backslash, query or fragment), <code>&amp;</code> is refused outside a rule, a custom property holding a block refuses the sheet, a sheet is bounded in size, rules, nesting and selector length, its animations end, a reader who asked for less motion gets none, and the view&#39;s host also pins <code>transform</code>, <code>translate</code>, <code>scale</code>, <code>rotate</code>, <code>zoom</code>, <code>margin</code>, <code>box-shadow</code>, <code>outline</code> and <code>filter</code>.</li>\n</ul>\n<p>Since v0.12.3.</p>\n<p><strong>iOS:</strong> TestFlight build 0.12.4 (1794491317) of Architect (app.fasttrackstudio.architect).</p>\n"
+		},
+		{
+			"tag": "v0.12.3",
+			"name": "v0.12.3",
+			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.12.3",
+			"publishedAt": "2026-11-12T11:14:45Z",
+			"prerelease": false,
+			"html": "<h3>Added</h3>\n<ul>\n<li>A share link&#39;s setlist plays like a streaming app&#39;s playlist: a block&#39;s [data-playlist] rows are the queue and play in place with no page load between songs, the bar at the foot (icons, the song, a line for where it is) opens a now-playing view of the playing track&#39;s [data-now-playing] (moved in or fetched from its page), with the player&#39;s controls under it unless it brings its own ([data-transport])</li>\n</ul>\n<h3>Fixed and improved</h3>\n<ul>\n<li>A share&#39;s now-playing view is fetched only from a page the link built (marked X-Architect-Page: built by the node and a static Site&#39;s router; the builder no longer publishes a vault file named index.html or 404.html) and imported through the builder&#39;s allow-list; without a playlist the bar&#39;s song stays a link to its page. The view puts where the song is at the top, the controls under it, lyrics a tap away; focus moves in and back, failed loads are said and retried, a refused recording stops the queue, and the lock screen shows the song (Media Session).</li>\n<li>Added the Architect app on TestFlight: apps/mobile builds for an iPhone or iPad (architect-app no longer fails to compile for iOS: tokio for FILES_* there too), with its app icon, launch screen and App Store keys (ITSAppUsesNonExemptEncryption false, NSLocalNetworkUsageDescription); apps/mobile/ios/deploy-testflight.sh signs and uploads it (--dry-run validates only), and the release&#39;s ios job ships every tag</li>\n</ul>\n<p>Since v0.12.2.</p>\n<p><strong>iOS:</strong> TestFlight build 0.12.3 (1794482365) of Architect (app.fasttrackstudio.architect).</p>\n"
+		},
+		{
+			"tag": "v0.12.2",
+			"name": "v0.12.2",
+			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.12.2",
+			"publishedAt": "2026-11-12T06:10:16Z",
+			"prerelease": false,
+			"html": "<h3>Added</h3>\n<ul>\n<li>Added the npm packages @fasttrackstudio/architect (features/extensions/web; no dependencies) and @fasttrackstudio/architect-cli (<code>architect-ext build-web</code>), published on a v* tag once NPM_TOKEN is set. loadExtension runs an extension&#39;s WASI component in any web app. Its JS runs in an opaque-origin sandbox frame, its files are pinned by the lock build-web writes (<code>integrity</code>), and its capabilities are deny by default: the manifest&#39;s [capabilities] within the embedder&#39;s grant, checked as hostcall::check checks them, and an embedder&#39;s action is never the extension&#39;s own. A destructive action needs <code>confirm</code>. Each HostRequest op has a typed handler with the capabilities in its context. Also: memoryHost, fetchHandler, mountView (a shadow root, ids prefixed per pane, only allow-listed URLs, no field a form or autofill reads), ArchitectView for React, flood limits, and isSupported. <code>integrity</code> is required (<code>false</code> loads unchecked). A core module the extension&#39;s JS asks for is read only from beside its glue, without credentials, and its memory limit is written in by the sandbox&#39;s worker, never on the page&#39;s thread. Logs, host requests, data and starts are bounded, and <code>limits.idle</code> stops an idle extension. Changed the browser runner (runner.js): every instance now runs in that sandbox frame, Architect&#39;s own web pages included; a page with a CSP must name SANDBOX_HASH in script-src (apps/sandbox/web/index.html does). Fixed WASI components in a browser: every host import that waits for the page (notify, pick, documents, fetch, …) is now JSPI-async, so it answers instead of trapping or dropping its error, and the editor and port imports are linked.</li>\n<li>Fixed what the third security review of #539 found before the npm package&#39;s first publish. A set_data key of another type than string is refused (as HostRequest types it), so the data cap cannot be bypassed. A memory64 module is refused. A view&#39;s edit cannot remove a link&#39;s rel/target, a field&#39;s autocomplete or a button&#39;s type, and web::Pane now forces rel/target on links too (wire::forced_attribute, wire::LINK_FORCED). The idle watchdog counts only the embedder&#39;s calls, and a view&#39;s timers do not run with no view mounted. fetchHandler caps open streams and their bytes per extension. Core-module reads stop at moduleBytes and each component&#39;s cache is emptied on stop. A site&#39;s root is refused as an extension&#39;s folder. integrity: false warns on the console when no log is given. The npm-pack job packs before anything else runs and npm-publish checks the tarballs&#39; digests.</li>\n<li>Added layers on share links (#528): a share and each audience carry <code>listen</code> (<code>Listen</code>: page, reference, full; a new link, and a share note without one, plays to reference; an audience never past its share), set with <code>ShareChange::Listen</code> and <code>ShareLinks::audience_listen</code>. Extensions place a note type&#39;s files with <code>[[share_layers]]</code> (<code>ShareLayersDecl</code>: linear-time globs, bounded by <code>MAX_PATTERNS</code>, <code>MAX_PATTERN_LEN</code>, <code>MAX_STARS</code>); the node takes the highest layer over every extension&#39;s rules (a development copy read through its <code>installed.toml</code> link), holds every attached file back below Full while a manifest does not read, has an unknown <code>[[share_layers]]</code> key or shares its id with another folder (<code>architect_sites::InstalledLayers</code>, <code>Installed</code>, <code>Package</code>), keeps an uninstalled extension&#39;s rules by folder in its data dir until forgotten, sets a kept file that does not read aside and holds everything back until acknowledged, and warns of rules a reinstall lowered (<code>ShareLinks::kept_layers</code>, <code>forget_layers</code>, <code>acknowledge_layers</code>, <code>KeptLayers</code>, <code>LayersReport</code>, <code>NodeStatus::share_layers</code>; actions <code>SHARE_LAYERS_KEPT</code>, <code>SHARE_LAYERS_FORGET</code>, <code>SHARE_LAYERS_ACKNOWLEDGE</code>). Patterns and note types match in any case and either Unicode form (<code>share_layers::fold</code>). A part of the vault that does not read (<code>vault_obsidian::Vault::open_reporting</code>, <code>walk_vault_reporting</code>, <code>architect_sites::listing::open_reporting</code>) makes placement unknown: a link below Full answers 503 and is not built until it reads. A kept file that cannot be written is a fault like one that does not read. Compiled-in rules come from <code>Distribution::share_layers</code> through <code>node::start_with_layers</code>. A file above a link&#39;s layer is 403 with <code>x-architect-layer</code>, by any spelling of it on disk; anything outside a link is the same 404 as a path that is nowhere. Each link is built for its layer (<code>architect_sites::Options::hold_back</code>): a held-back file is never copied into it and no page, search index, files page, archive or queue names it; the node refuses it by path from its placement before touching the disk, and an archive under way stops at a file its link no longer serves. A hand-edited <code>listen</code> reads in any case. <code>&lt;link&gt;_files.json</code> lists what a link serves (size, sha256, layer, URL; <code>listen</code>, <code>max</code>; 503 while placement is unknown). <code>SHARE_AUDIENCE_UPDATE</code> and <code>listen</code> on <code>SHARE_CREATE</code>, <code>SHARE_UPDATE</code> and <code>SHARE_AUDIENCE_ADD</code>; the Share sheet shows how far each link and audience plays, and why a change failed.</li>\n</ul>\n<h3>Fixed and improved</h3>\n<ul>\n<li>A build from outside the workspace (a distribution) can dial wss:// again: architect&#39;s native connect names tokio-tungstenite&#39;s TLS feature itself (bundled roots) instead of getting it by feature unification; a distribution&#39;s node failed every dial to its issuer with Url(TlsFeatureNotEnabled)</li>\n</ul>\n<p>Since v0.12.1.</p>\n"
+		},
+		{
 			"tag": "v0.12.1",
 			"name": "v0.12.1",
 			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.12.1",
@@ -128,38 +160,6 @@
 			"publishedAt": "2026-10-22T21:00:38Z",
 			"prerelease": false,
 			"html": "<p>Changes since v0.9.22:</p>\n<ul>\n<li>docs(changelog): 0.9.23 (#57)</li>\n<li>feat(input): architect-input keymap engine, moved from studio (#50) (#54)</li>\n</ul>\n"
-		},
-		{
-			"tag": "v0.9.22",
-			"name": "v0.9.22",
-			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.9.22",
-			"publishedAt": "2026-10-22T19:27:22Z",
-			"prerelease": false,
-			"html": "<p>Changes since v0.9.21:</p>\n<ul>\n<li>docs(changelog): 0.9.22 (#55)</li>\n<li>feat(release): architect::release signed self-update core (STA-387) (#53)</li>\n<li>docs(layout): backends and extensibility in the one-crate shape (STA-322) (#51)</li>\n</ul>\n"
-		},
-		{
-			"tag": "v0.9.21",
-			"name": "v0.9.21",
-			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.9.21",
-			"publishedAt": "2026-10-22T16:13:59Z",
-			"prerelease": false,
-			"html": "<p>Changes since v0.9.20:</p>\n<ul>\n<li>feat(actions): async actions, service-to-action projection, named MCP tools (STA-261) (#46)</li>\n</ul>\n"
-		},
-		{
-			"tag": "v0.9.20",
-			"name": "v0.9.20",
-			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.9.20",
-			"publishedAt": "2026-10-22T15:16:46Z",
-			"prerelease": false,
-			"html": "<p>Changes since v0.9.19:</p>\n<ul>\n<li>feat(crdt): crdt(text) LoroText fields + crdt::schema migration helper (STA-271) (#45)</li>\n</ul>\n"
-		},
-		{
-			"tag": "v0.9.19",
-			"name": "v0.9.19",
-			"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.9.19",
-			"publishedAt": "2026-10-22T09:59:58Z",
-			"prerelease": false,
-			"html": "<p>Changes since v0.9.18:</p>\n<ul>\n<li>feat(architect): snapshot — WriteGate, GatedLayer and bounded WAL-checkpoint quiesce (STA-399) (#43)</li>\n</ul>\n"
 		}
 	]
 }

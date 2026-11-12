@@ -800,6 +800,8 @@
     loop: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 1.5 21.5 6 17 10.5V7.2H7.5A2.5 2.5 0 0 0 5 9.7V12H3V9.7a4.5 4.5 0 0 1 4.5-4.5H17zM7 22.5 2.5 18 7 13.5v3.3h9.5a2.5 2.5 0 0 0 2.5-2.5V12h2v2.3a4.5 4.5 0 0 1-4.5 4.5H7z"/><path d="M11 9.5h2v5h-2z"/></svg>',
     page: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M5 2h9.4L20 7.6V22H5zm2 2v16h11V9h-5V4zm8 .4V7h2.6z"/></svg>',
     words: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v2H3zm0 6h18v2H3zm0 6h11v2H3z"/></svg>',
+    // A song with no art: Lucide's music note (the page's icon set), never letters.
+    note: '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
   };
   // Click and Loop: a toggle each, on when pressed.
   function toggles() {
@@ -839,6 +841,9 @@
       '<div class="site-player-line" aria-hidden="true"><span></span></div>';
     if (shell) bar.classList.add("site-player-card");
     ui.art = bar.querySelector(".site-player-art");
+    // Its tile from the start: the note, not an empty square, before any
+    // song is loaded ("5 tracks").
+    if (shell) paintArt(null);
     ui.line = bar.querySelector(".site-player-line span");
     ui.title = bar.querySelector(".site-player-title");
     ui.note = bar.querySelector(".site-player-note");
@@ -926,13 +931,17 @@
     var t = r ? tracks[r.i] : null;
     var items = [];
     if (t && hasView(t)) {
-      items.push({ label: "Open chart", run: function () { viewSong(r.i, false); } });
-      if (known[t.src] && known[t.src].lyrics) items.push({ label: "Lyrics", run: function () { viewSong(r.i, true); } });
+      items.push({ id: "chart", label: "Open chart", run: function () { viewSong(r.i, false); } });
+      if (known[t.src] && known[t.src].lyrics) items.push({ id: "lyrics", label: "Lyrics", run: function () { viewSong(r.i, true); } });
     }
-    if (page) items.push({ label: t ? "Song page and downloads" : "Chart and downloads", href: page });
+    if (page) items.push({ id: "page", label: t ? "Song page and downloads" : "Chart and downloads", href: page });
     return items;
   }
+  // Filled again when the song's page arrives (it may add Lyrics): the
+  // item that had the keyboard has it again, so the arrows and a screen
+  // reader keep their place.
   function fillMenu(box, row) {
+    var had = doc.activeElement && box.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-action") : null;
     box.textContent = "";
     if (box.classList.contains("site-row-menu-sheet")) {
       var head = doc.createElement("p");
@@ -945,6 +954,7 @@
       item.className = "site-row-menu-item";
       item.setAttribute("role", "menuitem");
       item.setAttribute("tabindex", "-1");
+      item.setAttribute("data-action", it.id);
       if (it.href) item.setAttribute("href", it.href);
       else item.setAttribute("type", "button");
       item.textContent = it.label;
@@ -953,6 +963,7 @@
         if (it.run) it.run();
       });
       box.appendChild(item);
+      if (had && had === it.id && item.focus) item.focus();
     });
   }
   function menuMove(by) {
@@ -1681,6 +1692,7 @@
         dead = true;
         clearTimeout(readyBy);
         clearInterval(beat.timer);
+        doc.removeEventListener("visibilitychange", seen);
         if (chan) { try { chan.port1.close(); } catch (e) {} }
         if (frame.parentNode) frame.parentNode.removeChild(frame);
       },
@@ -1696,7 +1708,22 @@
       slot.hidden = true;
       mine.classList.remove("site-now-yielded");
     }
-    var readyBy = setTimeout(function () { if (!ready) die("not ready in time"); }, WEB_READY_MS);
+    // While the page is hidden (another app, a locked phone) its timers
+    // and the frame's may stop: nothing heard then is a sign of death. The
+    // checks wait for it to be shown, and the beat starts again from there.
+    function late() {
+      if (ready || dead) return;
+      if (doc.hidden) { readyBy = setTimeout(late, WEB_READY_MS); return; }
+      die("not ready in time");
+    }
+    var readyBy = setTimeout(late, WEB_READY_MS);
+    function seen() {
+      if (doc.hidden || dead) return;
+      beat.answered = beat.sent;
+      beat.at = Date.now();
+      if (!ready) { clearTimeout(readyBy); readyBy = setTimeout(late, WEB_READY_MS); }
+    }
+    doc.addEventListener("visibilitychange", seen);
     frame.addEventListener("load", function () {
       loads += 1;
       // Its one document, loaded once: any other load is the frame gone
@@ -1734,7 +1761,7 @@
           feed(snapshot(), true);
           // The heartbeat, while it shows: unanswered too long, it is gone.
           beat.timer = setInterval(function () {
-            if (dead) return;
+            if (dead || doc.hidden) return;
             if (beat.sent > beat.answered && Date.now() - beat.at > WEB_LATE_MS) { die("it stopped answering"); return; }
             if (beat.sent === beat.answered) {
               beat.sent += 1;
@@ -2074,7 +2101,8 @@
 
   // The card's art: the song's, else its row's tile, else one drawn from
   // its title; the card tinted from it.
-  var artFor = null;
+  // The track whose art the card shows (`undefined`: none painted yet).
+  var artFor;
   function hue(text) {
     var h = 0x811c9dc5;
     var t = String(text || "").toLowerCase();
@@ -2084,22 +2112,20 @@
     }
     return h % 360;
   }
-  function initials(text) {
-    var words = String(text || "").split(/[^0-9A-Za-zÀ-ɏ]+/).filter(Boolean);
-    return words.slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase(); }).join("") || "♪";
-  }
   function paintArt(t) {
     if (!ui.art || artFor === t) return;
     artFor = t;
     ui.art.textContent = "";
     ui.art.removeAttribute("style");
     bar.style.removeProperty("--site-player-tint");
+    // A music note under any art, on the theme's muted tile with nothing
+    // loaded, on the song's colour with one: never letters, never what a
+    // row's tile says (its key, on a setlist), never an empty square.
+    ui.art.innerHTML = ICON.note;
+    ui.art.setAttribute("data-glyph", "");
     if (!t) return;
     var tile = t.tile;
     var h = tile && isFinite(parseInt(tile.getAttribute("data-hue"), 10)) ? parseInt(tile.getAttribute("data-hue"), 10) : hue(t.title);
-    // Clean art: the title's initials, never what a row's tile says (its
-    // key, on a setlist).
-    ui.art.textContent = initials(t.title);
     ui.art.style.setProperty("background", "hsl(" + h + " 42% 40%)");
     bar.style.setProperty("--site-player-tint", "hsl(" + h + " 50% 45%)");
     var src = t.art || (t.page && artBy[t.page]) || null;

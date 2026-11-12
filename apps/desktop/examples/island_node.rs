@@ -4,9 +4,12 @@
 //! folder at `ARCHITECT_ISLAND_FOLDER` as an island, its view
 //! `ARCHITECT_ISLAND_VIEW` in both slots of the now-playing view, its
 //! stylesheet `ARCHITECT_ISLAND_SHEET` when set, WebRTC granted when
-//! `ARCHITECT_ISLAND_WEBRTC=1` (and declared). An island is otherwise
-//! only what a distribution links in (`Distribution::island`): this is a
-//! test's stand-in for one, never a node's configuration.
+//! `ARCHITECT_ISLAND_WEBRTC=1` (and declared); with no
+//! `ARCHITECT_ISLAND_FOLDER`, no island. `ARCHITECT_FAVOURITES` names a
+//! TOML file of `[[favourites]]` (a distribution's compiled-in extensions'
+//! declarations: a share page's phone shell, `apps/web/test/share-layout.test.mjs`).
+//! An island or favourites are otherwise only what a distribution links
+//! in: this is a test's stand-in, never a node's configuration.
 #![allow(
     clippy::print_stdout,
     clippy::print_stderr,
@@ -17,7 +20,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use architect_desktop::node::{Config, start_with_islands};
+use architect_desktop::node::{Config, start_with_shell};
 use architect_sites::SiteIsland;
 
 fn files(root: &Path, dir: &Path, out: &mut Vec<(String, Cow<'static, [u8]>)>) {
@@ -36,11 +39,10 @@ fn files(root: &Path, dir: &Path, out: &mut Vec<(String, Cow<'static, [u8]>)>) {
     }
 }
 
-fn main() {
-    let folder = std::env::var("ARCHITECT_ISLAND_FOLDER").expect("ARCHITECT_ISLAND_FOLDER");
+fn island(folder: &str) -> SiteIsland {
     let view = std::env::var("ARCHITECT_ISLAND_VIEW").unwrap_or_else(|_| "counter".to_owned());
     let mut list = Vec::new();
-    files(Path::new(&folder), Path::new(&folder), &mut list);
+    files(Path::new(folder), Path::new(folder), &mut list);
     let mut island = SiteIsland::new("lab.wasi-counter", list)
         .progress(view.clone())
         .transport(view);
@@ -52,17 +54,42 @@ fn main() {
     if std::env::var("ARCHITECT_ISLAND_WEBRTC").is_ok_and(|v| v == "1") {
         island = island.grant_webrtc();
     }
+    island
+}
+
+/// `[[favourites]]` from the TOML file at `path`.
+fn favourites(path: &str) -> Vec<architect_favourites::TypeFavourites> {
+    let text = std::fs::read_to_string(path).expect("the favourites file");
+    let table: toml::Table = toml::from_str(&text).expect("TOML");
+    table
+        .get("favourites")
+        .cloned()
+        .map(|v| v.try_into().expect("[[favourites]]"))
+        .unwrap_or_default()
+}
+
+fn main() {
+    let islands: Vec<SiteIsland> = std::env::var("ARCHITECT_ISLAND_FOLDER")
+        .ok()
+        .map(|f| island(&f))
+        .into_iter()
+        .collect();
+    let favourites = std::env::var("ARCHITECT_FAVOURITES")
+        .ok()
+        .map(|f| favourites(&f))
+        .unwrap_or_default();
     let config = Config::load(None, |k| std::env::var(k).ok()).expect("the config");
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
     runtime.block_on(async move {
-        let running = start_with_islands(
+        let running = start_with_shell(
             config,
             architect_sites::Blocks::new(),
             Vec::new(),
-            vec![island],
+            islands,
+            favourites,
         )
         .await
         .expect("the node started");

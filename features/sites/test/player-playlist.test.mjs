@@ -32,6 +32,9 @@ class Style {
   removeProperty(k) { delete this.props[k]; }
 }
 
+// What has the keyboard's focus (`document.activeElement`).
+let focused = null;
+
 class Node {
   constructor(tag, attrs = {}, text = '') {
     this.tagName = tag.toUpperCase();
@@ -126,7 +129,7 @@ class Node {
   set innerHTML(_) {}
   getBoundingClientRect() { return { top: 0, left: 0, width: 10, height: 10 }; }
   scrollTo() {}
-  focus() {}
+  focus() { focused = this; }
 }
 
 class Media extends Node {
@@ -245,9 +248,14 @@ function run(body, queue, opts = {}) {
       return n;
     },
     dispatchEvent: () => {},
-    addEventListener: () => {},
+    // Shown or hidden (another app, a locked phone), and who listens.
+    hidden: false,
+    on: {},
+    addEventListener(type, fn) { (this.on[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { this.on[type] = (this.on[type] || []).filter((f) => f !== fn); },
     createComment: () => new Node('#comment'),
     importNode: (n) => n,
+    get activeElement() { return focused; },
   };
   const location = { href: `http://node.test${L}merry/${opts.hash || ''}`, origin: 'http://node.test', pathname: `${L}merry/`, search: '', hash: opts.hash || '' };
   const window = {
@@ -294,6 +302,7 @@ function run(body, queue, opts = {}) {
     DOMParser: class { parseFromString(key) { return (opts.pages || {})[key]; } },
   };
   if (opts.rules) window.architect = { rules: opts.rules };
+  focused = null;
   Object.assign(window, { window });
   vm.runInNewContext(PLAYER + '\n' + SHELL, window);
   const playhead = window.architect.playhead;
@@ -312,6 +321,8 @@ function run(body, queue, opts = {}) {
     /// written as HTML, which this DOM does not parse).
     button: (act) => body.querySelectorAll('.site-player')[0].appendChild(el('button', { 'data-act': act })),
     tick: () => timers.forEach((f) => f && f()),
+    /// The page hidden or shown again, as `visibilitychange` says.
+    visibility: (hidden) => { document.hidden = hidden; (document.on.visibilitychange || []).slice().forEach((f) => f({ type: 'visibilitychange' })); },
     frame: () => frames.splice(0).forEach((f) => f()),
     audioEl, at,
     list: () => body.querySelectorAll('[data-playlist]'),
@@ -598,6 +609,28 @@ test('Loop never seeks itself to death on a section too short to play', async ()
   assert.ok(loopButton.hasAttribute('disabled'), 'and Loop says so');
 });
 
+test('Loop\'s own seek never re-enters it, even when the media has not moved yet', async () => {
+  const sections = [{ name: 'Verse', start: 0, end: 4 }];
+  const view = el('div', { 'data-now-playing': '', 'data-media': `${L}Joy.mp3`, 'data-sections': JSON.stringify(sections) }, [el('svg')]);
+  const p = setlist({ view });
+  p.body.querySelectorAll('[data-title="Joy to the World"]')[0].click();
+  await new Promise((r) => setImmediate(r));
+  const button = { getAttribute: () => 'loop' };
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
+  const a = p.audioEl();
+  a.paused = false;
+  a.currentTime = 1;
+  a.dispatch('timeupdate');
+  // At the section's end, and a seek that does not land at once (the
+  // media still says where it was): Loop's seek tells it where the song
+  // is, synchronously, while it is still deciding.
+  const seeks = [];
+  Object.defineProperty(a, 'currentTime', { get: () => 3.99, set: (v) => { seeks.push(v); }, configurable: true });
+  a.dispatch('timeupdate');
+  assert.deepEqual(p.errors.filter((e) => /call stack|recursion/i.test(e)), [], 'no seek loop');
+  assert.deepEqual(seeks, [0], 'one seek back to the section\'s start');
+});
+
 test('beats closer than 50 ms are one beat, so Click never floods', async () => {
   const beats = Array.from({ length: 200 }, (_, i) => i * 0.001);
   const svg = el('svg', {}, beats.map((at) => el('rect', { 'data-at': String(at), 'data-beat': '1' })));
@@ -655,7 +688,7 @@ test('a row\'s menu: its chart, its page; Escape closes it and gives the button 
   assert.equal(p.playhead.src, null);
 });
 
-test('the card shows the title\'s initials, never what the tile says (its key)', () => {
+test('the card shows a music note, never letters nor what the tile says (its key), and never an empty square', () => {
   const body = new Node('body');
   const r = row(1, 'Sleigh Ride', `${L}sleigh/`, `${L}Sleigh.mp3`);
   const tile = r.querySelectorAll('[data-track-art]')[0];
@@ -663,9 +696,17 @@ test('the card shows the title\'s initials, never what the tile says (its key)',
   tile.setAttribute('data-key', '');
   body.appendChild(block([r]));
   const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  const art = () => p.window.document.body.querySelectorAll('.site-player')[0].querySelector('.site-player-art');
+  // Nothing loaded ("1 track"): the glyph, not an empty tile.
+  p.frame();
+  assert.ok(art().hasAttribute('data-glyph'), 'a glyph before anything plays');
+  assert.equal(art().textContent, '');
   r.querySelectorAll('[data-track-title]')[0].click();
-  const art = body.querySelectorAll('.site-player-art')[0];
-  assert.equal(art ? art.textContent : p.window.document.body.querySelectorAll('.site-player')[0].querySelector('.site-player-art').textContent, 'SR');
+  p.frame();
+  assert.ok(art().hasAttribute('data-glyph'), 'a glyph for the song');
+  assert.equal(art().textContent, '', 'no initials, no key');
+  assert.match(art().style.props.background || '', /^hsl\(200 /, 'on its tile\'s colour');
+  assert.ok(!/function initials/.test(PLAYER), 'no initials code path');
 });
 
 // ── An island's web view (the review of #608) ───────────────────────
@@ -764,7 +805,13 @@ test('a frame that is never ready, or stops answering, is given up', async () =>
 // ── The shell, as the review found it ───────────────────────────────
 
 test('the shell: no tab from the address that is no tab, nor one that leaves the share', () => {
-  assert.doesNotThrow(() => setlist({ shell: SHELL_SPEC, hash: '#tab=constructor' }));
+  // A name every object inherits is no tab: the page's own tab is current,
+  // nothing thrown, nothing opened.
+  let asked;
+  assert.doesNotThrow(() => { asked = setlist({ shell: SHELL_SPEC, hash: '#tab=constructor' }); });
+  const current = asked.body.querySelectorAll('.site-tab').filter((t) => t.getAttribute('aria-current') === 'page').map((t) => t.getAttribute('data-tab'));
+  assert.deepEqual(current, ['setlist'], 'the page\'s own tab');
+  assert.deepEqual(asked.errors, []);
   const spec = {
     ...SHELL_SPEC,
     tabs: [
@@ -907,4 +954,74 @@ test('a song with no timed lines keeps the page\'s own words in the Lyrics tab',
   assert.equal(t.lyrics.parentElement.hidden, true, 'nothing to follow: not shown');
   assert.ok(!t.sheet.classList.contains('site-now-lyrics-island'));
   assert.deepEqual(plain(t.ports.lyrics.sent.filter((m) => m.t === 'props').pop().props.lyrics), []);
+});
+
+test('a frame is never given up for the time the page was hidden (an app switch), and is when it stays silent after', async () => {
+  // Ready, a ping sent, then the phone switches app: its pong never comes
+  // while the page is hidden.
+  const w = await webview();
+  w.say({ t: 'hello' });
+  await w.settle();
+  w.say({ t: 'ready' });
+  w.p.tick();
+  assert.ok(w.port.sent.some((m) => m.t === 'ping'));
+  w.p.visibility(true);
+  w.p.clock.now += 60000;
+  w.p.tick();
+  assert.ok(w.frame.parentElement, 'hidden a minute: still up');
+  // Shown again: the beat starts over, a new ping, answered: up.
+  w.p.visibility(false);
+  w.p.tick();
+  const pings = w.port.sent.filter((m) => m.t === 'ping');
+  assert.equal(pings.length, 2, 'a new beat from being shown');
+  w.say({ t: 'pong', n: pings[1].n });
+  w.p.clock.now += 2000;
+  w.p.tick();
+  assert.ok(w.frame.parentElement, 'answered after being shown');
+  // Silent while shown: gone, as before.
+  w.p.clock.now += 7000;
+  w.p.tick();
+  assert.equal(w.frame.parentElement, null, 'silent 6 s while shown: gone');
+
+  // Not ready yet when the page is hidden: the deadline waits for it.
+  const slow = await webview();
+  slow.p.visibility(true);
+  slow.p.clock.now += 16000;
+  slow.p.later();
+  assert.ok(slow.frame.parentElement, 'hidden past 15 s: not given up');
+  slow.p.visibility(false);
+  slow.p.clock.now += 16000;
+  slow.p.later();
+  assert.equal(slow.frame.parentElement, null, '15 s shown and not ready: gone');
+});
+
+test('the row menu keeps the keyboard where it was when the song\'s page arrives and refills it', async () => {
+  const page = `${L}joy/`;
+  const joy = new Node('body');
+  joy.appendChild(el('div', { 'data-now-playing': '', 'data-media': `${L}Joy.mp3` }, [el('svg')]));
+  joy.appendChild(el('ol', { class: 'site-lyrics', 'data-follow-playhead': '', 'data-media': `${L}Joy.mp3` }, [el('li', { 'data-at': '1.000' }, [], 'Joy')]));
+  const fetch = (url) => (String(url) === page
+    ? Promise.resolve({ ok: true, status: 200, headers: { get: (k) => (k === 'content-type' ? 'text/html' : k === 'x-architect-page' ? 'built' : null) }, text: () => Promise.resolve(page) })
+    : Promise.reject(new Error('no network')));
+  const rules = { elementRule: () => ['keep'], attrRule: (_t, _n, v) => v, cssInert: () => true };
+  const body = new Node('body');
+  const more = el('button', { type: 'button', 'data-track-more': '', 'aria-label': 'More: Joy' });
+  const r = row(1, 'Joy', page, `${L}Joy.mp3`);
+  r.appendChild(more);
+  body.appendChild(block([r]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }), { fetch, rules, pages: { [page]: joy } });
+  more.click();
+  const menu = body.querySelectorAll('.site-row-menu')[0];
+  const now = () => p.window.document.activeElement;
+  assert.equal(now().textContent, 'Open chart', 'its first item focused');
+  menu.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.equal(now().textContent, 'Song page and downloads');
+  // The song's page arrives: it has lyrics, so the menu is filled again.
+  await new Promise((res) => setTimeout(res, 20));
+  const items = menu.querySelectorAll('.site-row-menu-item');
+  assert.deepEqual(items.map((i) => i.textContent), ['Open chart', 'Lyrics', 'Song page and downloads'], 'refilled');
+  assert.ok(menu.contains(now()), 'the focus is in the menu still, not on the page');
+  assert.equal(now().textContent, 'Song page and downloads', 'on the item it was on');
+  menu.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
+  assert.equal(now().textContent, 'Lyrics', 'and the arrows go on from there');
 });

@@ -1670,7 +1670,10 @@ async fn serve(
             return page(
                 StatusCode::FORBIDDEN,
                 "Not shared with you",
-                "<p>This link was not shared with the account you are signed in as.</p><p><a href=\"/s/_signout?to=/\">Sign out</a></p>",
+                &format!(
+                    "<p>This link was not shared with the account you are signed in as.</p>{}",
+                    signout_form("/")
+                ),
             );
         }
     }
@@ -2862,18 +2865,21 @@ async fn signin(shares: &Shares, rest: &str, request: Request) -> Response {
         .map_or_else(|_| "/".to_owned(), |t| safe_to(&t.to));
     let secure = is_https(request.headers(), shares.0.issuer_origin.as_deref());
     match rest {
-        // What changes the visitor's state is answered only to a request
-        // of the node's own pages or the visitor's own typing: never to
-        // another site's, nor to a frame of a share page (an island's web
-        // view is an opaque origin: its requests are cross-site).
-        "signin" | "signout" if !same_site(request.headers()) => page(
+        // Sign-out is a form posted from the node's own page, its Origin
+        // checked: on every browser, whether it sends fetch metadata or not
+        // (Safari 15.4 to 16.3 sends none). A share page's frames cannot
+        // post (no `allow-forms`, `connect-src 'none'`), and their Origin
+        // is `null`.
+        "signout" => signout(request.method(), request.headers(), &to, secure),
+        // Sign-in (it starts a device sign-in; it signs no one out) is
+        // answered only to the node's own pages or the visitor's typing.
+        "signin" if !same_site(request.headers()) => page(
             StatusCode::FORBIDDEN,
             "Not from here",
-            "<p>Sign in or out from the link's own page.</p>",
+            "<p>Sign in from the link's own page.</p>",
         ),
         "signin" => start_signin(shares, to, secure).await,
         "signin/wait" => wait_signin(shares, request.headers(), secure).await,
-        "signout" => signout(&to, secure),
         _ => page(StatusCode::NOT_FOUND, "Not found", "<p>No such page.</p>"),
     }
 }
@@ -2888,11 +2894,75 @@ fn same_site(headers: &HeaderMap) -> bool {
         .is_none_or(|site| site == "same-origin" || site == "none")
 }
 
-/// `/s/_signout`: the session cookie cleared, back to `to`.
-fn signout(to: &str, secure: bool) -> Response {
+/// A form that signs the visitor out and goes back to `to` (the only way
+/// out: [`signout`] clears nothing on a GET).
+fn signout_form(to: &str) -> String {
+    format!(
+        "<form method=\"post\" action=\"/s/_signout?to={}\"><button class=\"button\" type=\"submit\">Sign out</button></form>",
+        escape(&urlencoding_path(to))
+    )
+}
+
+/// `to` as a query value: what a path may hold, the rest percent-encoded.
+fn urlencoding_path(to: &str) -> String {
+    to.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                char::from(b).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// `/s/_signout`. A GET is a page asking, with the form ([`signout_form`]);
+/// a POST from this node's own page (its `Origin` this node's: absent,
+/// `null` or another site's is refused) clears the session cookie and goes
+/// back to `to`. Nothing else.
+fn signout(method: &Method, headers: &HeaderMap, to: &str, secure: bool) -> Response {
+    if method == Method::GET || method == Method::HEAD {
+        return page(
+            StatusCode::OK,
+            "Sign out",
+            &format!(
+                "<p>Sign out of this node's links on this browser?</p>{}<p><a href=\"{}\">Stay signed in</a></p>",
+                signout_form(to),
+                escape(to)
+            ),
+        );
+    }
+    if method != Method::POST {
+        let mut response = page(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "Not allowed",
+            "<p>Only GET and POST.</p>",
+        );
+        response
+            .headers_mut()
+            .insert(header::ALLOW, HeaderValue::from_static("GET, HEAD, POST"));
+        return response;
+    }
+    if !own_origin(headers, secure) {
+        return page(
+            StatusCode::FORBIDDEN,
+            "Not from here",
+            "<p>Sign out from the link's own page.</p>",
+        );
+    }
     let mut response = Redirect::to(to).into_response();
     set_cookie(&mut response, SESSION_COOKIE, "", "/", 0, secure);
     response
+}
+
+/// Whether a request's `Origin` is this node (its `Host`, over https when
+/// `secure`): never when it has none, or `null` (a sandboxed frame).
+fn own_origin(headers: &HeaderMap, secure: bool) -> bool {
+    let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
+    let (Some(origin), Some(host)) = (header(header::ORIGIN), header(header::HOST)) else {
+        return false;
+    };
+    let scheme = if secure { "https" } else { "http" };
+    origin.eq_ignore_ascii_case(&format!("{scheme}://{host}"))
 }
 
 async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
@@ -3183,9 +3253,13 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    // `same-origin`, not `no-referrer`: a form posted from a `no-referrer`
+    // page carries `Origin: null` even to its own origin, and sign-out's
+    // own form (`signout_form`) must say it is this node's. The referrer
+    // still never leaves the node.
     response.headers_mut().insert(
         header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
+        HeaderValue::from_static("same-origin"),
     );
     response
 }
@@ -3194,12 +3268,10 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
 mod tests {
     use super::*;
 
-    /// Art reaches the page with no track to play: a setlist with no
-    /// recordings still shows its covers.
-    /// Signing out (or in) is not something a share page's frame, or
-    /// another site, can make a visitor do by sending them there.
+    /// Signing in is not something a share page's frame, or another site,
+    /// can make a visitor start by sending them there.
     #[test]
-    fn sign_out_answers_only_the_nodes_own_requests() {
+    fn sign_in_answers_only_the_nodes_own_requests() {
         let with = |site: Option<&str>| {
             let mut h = HeaderMap::new();
             if let Some(site) = site {
@@ -3209,10 +3281,88 @@ mod tests {
         };
         assert!(with(Some("same-origin")) && with(Some("none")) && with(None));
         assert!(!with(Some("cross-site")) && !with(Some("same-site")));
-        let out = signout("/", false);
-        assert!(out.headers().get(header::SET_COOKIE).is_some());
     }
 
+    /// The node's own pages (sign-out's among them) send a referrer only to
+    /// the node: their forms' posts then say their Origin (`no-referrer`
+    /// would make it `null`, refused).
+    #[test]
+    fn the_nodes_own_pages_keep_their_origin_for_their_forms() {
+        let r = page(StatusCode::OK, "Sign out", &signout_form("/"));
+        assert_eq!(
+            r.headers().get(header::REFERRER_POLICY).unwrap(),
+            "same-origin"
+        );
+    }
+
+    /// Signing out is a form posted from the node's own page: a GET (a
+    /// link, a frame navigating, a browser that sends no fetch metadata)
+    /// never clears the session; a POST does only with this node's Origin.
+    #[test]
+    fn sign_out_is_a_post_from_the_nodes_own_page() {
+        let headers = |origin: Option<&str>| {
+            let mut h = HeaderMap::new();
+            h.insert(header::HOST, HeaderValue::from_static("node.test:8080"));
+            if let Some(o) = origin {
+                h.insert(header::ORIGIN, HeaderValue::from_str(o).unwrap());
+            }
+            h
+        };
+        let clears = |r: &Response| {
+            r.headers()
+                .get_all(header::SET_COOKIE)
+                .iter()
+                .any(|c| c.to_str().unwrap_or_default().starts_with(SESSION_COOKIE))
+        };
+        // GET (and HEAD): a page with the form, nothing cleared, whatever
+        // the request says of itself.
+        for method in [Method::GET, Method::HEAD] {
+            for origin in [None, Some("http://node.test:8080")] {
+                let r = signout(&method, &headers(origin), "/s/abc/", false);
+                assert_eq!(r.status(), StatusCode::OK);
+                assert!(!clears(&r), "{method} never signs out");
+            }
+        }
+        // POST from anywhere but this node: refused.
+        for origin in [
+            None,
+            Some("null"),
+            Some("https://evil.example"),
+            Some("https://node.test:8080"),
+        ] {
+            let r = signout(&Method::POST, &headers(origin), "/", false);
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{origin:?}");
+            assert!(!clears(&r), "{origin:?}");
+        }
+        // The page's own form: signed out, back where it was.
+        let r = signout(
+            &Method::POST,
+            &headers(Some("http://node.test:8080")),
+            "/s/abc/",
+            false,
+        );
+        assert!(clears(&r));
+        assert_eq!(r.headers().get(header::LOCATION).unwrap(), "/s/abc/");
+        assert_eq!(
+            signout(
+                &Method::PUT,
+                &headers(Some("http://node.test:8080")),
+                "/",
+                false
+            )
+            .status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        // The form posts there, its way back kept.
+        let form = signout_form("/s/a b/");
+        assert!(
+            form.contains("method=\"post\" action=\"/s/_signout?to=/s/a%20b/\""),
+            "{form}"
+        );
+    }
+
+    /// Art reaches the page with no track to play: a setlist with no
+    /// recordings still shows its covers.
     #[test]
     fn art_goes_out_without_a_queue() {
         let mut art = serde_json::Map::new();

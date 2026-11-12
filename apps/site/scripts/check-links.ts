@@ -5,10 +5,10 @@
  *
  * Reads each page this app built (every .html outside docs/) and each CSS
  * file, and checks every href, src, poster and url() that stays on the
- * site: the file exists (with the deploy's clean URLs: /download is
- * download.html, a folder is its index.html), and a #fragment names an id
- * on the page it points at. Not checked: other hosts; the node's paths
- * (/app, /s/: redirects, scripts/vercel-config.ts); /docs/… when the
+ * site: the file exists (with the bundle's clean URLs, scripts/serve.ts:
+ * /download is download.html, a folder is its index.html), and a #fragment
+ * names an id on the page it points at. Not checked: other hosts; the
+ * node's paths (/app, /s/: NODE_PATHS, not this app's); /docs/… when the
  * folder has no docs/ (a PR build has no `architect` CLI to build them);
  * and the docs' own pages (their builder checks those). KNOWN_DEAD lists
  * links the ported landing page already had that resolve nowhere today;
@@ -19,7 +19,7 @@ import { join, relative } from "node:path";
 
 import { NODE_PATHS } from "../src/content/site.ts";
 
-/** /guides/ is linked by apps/web/landing too, and 404s on the live site. */
+/** /guides/ was linked by the old landing page too, and 404s on the live site. */
 const KNOWN_DEAD = ["/guides/"];
 
 const root = process.argv[2];

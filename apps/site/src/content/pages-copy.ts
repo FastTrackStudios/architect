@@ -1,9 +1,10 @@
 /**
  * The words of the pages beside the landing page: /download, /changelog,
  * /extensions and the 404. What they list comes from src/data (written at
- * build time by scripts/data.ts); what they say is here.
+ * build time by scripts/data.ts) and, for /download's files, GitHub's API
+ * in the browser (src/lib/release-assets.ts); what they say is here.
  */
-import { DOCS_PATH, NIX_RUN, RELEASES_LATEST, SITE } from "./site";
+import { DOCS_PATH, NIX_RUN, ORG_RELEASE_KEY, SITE } from "./site";
 
 export const DOWNLOAD = {
 	title: "Download",
@@ -40,7 +41,8 @@ export const DOWNLOAD = {
 			note: "The app's own binary with no window, for a home server (`architect-desktop serve`).",
 		},
 	},
-	missing: "No build for this platform in the latest release.",
+	/** An asset GitHub does not list (yet: a release's jobs upload them one by one; the Mac job is optional). */
+	missing: "Not available for this release yet.",
 	nix: {
 		title: "On Nix",
 		lede: "The flake's `architect-desktop` is the release's own AppImage in an FHS env, so installing it compiles nothing.",
@@ -54,11 +56,24 @@ export const DOWNLOAD = {
 		},
 	},
 	sha: "sha256",
-	sums: "SHA256SUMS",
-	all: {
-		label: "Every file in this release, on GitHub",
-		href: RELEASES_LATEST,
+	verify: {
+		title: "Check a download",
+		lede: "`SHA256SUMS` lists every file in the release with its sha256, and `SHA256SUMS.minisig` is its signature with the org's minisign key. In the folder you downloaded to:",
+		code: [
+			{
+				comment: "the files you have, against the sums",
+				line: "sha256sum --ignore-missing -c SHA256SUMS",
+			},
+			{
+				comment: "the sums, against the org key",
+				line: `minisign -Vm SHA256SUMS -P ${ORG_RELEASE_KEY}`,
+			},
+		],
 	},
+	sums: "SHA256SUMS",
+	sig: "SHA256SUMS.minisig",
+	bundle: "The web bundle ({file}), to serve this site yourself",
+	all: "Every file in this release, on GitHub",
 };
 
 export const CHANGELOG = {
