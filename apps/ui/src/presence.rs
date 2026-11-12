@@ -10,7 +10,7 @@ use architect_presence::{
 };
 use dioxus::prelude::*;
 
-use crate::{Lab, Route, tabs};
+use crate::{Lab, tabs};
 
 /// The running app's bundle identifier (its distribution's): its one
 /// instance, its login item.
@@ -85,7 +85,7 @@ pub fn LabPresence(presence: Presence, inbox: usize) -> Element {
                             .or_else(|| url.strip_prefix("lab://"))
                             .unwrap_or(url);
                         if let Some((_, _, to)) = tabs().iter().find(|(_, _, t)| *t == tab) {
-                            lab.jump(Route::Tab(to));
+                            lab.jump(crate::Route::Tab(to));
                         }
                     }
                 },

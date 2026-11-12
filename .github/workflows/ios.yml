@@ -1,0 +1,132 @@
+# The Architect app (apps/mobile) to TestFlight (#593): a release build for
+# the phone, signed for the App Store and uploaded by
+# apps/mobile/ios/deploy-testflight.sh, as Studio's studio-ios.yml ships
+# Studio.
+#
+#   release    release.yml calls this as its `ios` job on every v* tag (a
+#              call, not a workflow_run: the self-hosted runners' gate
+#              refuses workflow_run)
+#   dispatch   an existing tag, by hand:
+#                gh workflow run ios.yml -R FastTrackStudios/architect -f tag=v0.12.2
+#              (`-f dry_run=true` builds, signs and validates, no upload)
+#
+# Runs on airlock's org runner (`airlock`), which already holds what the
+# upload needs, so this workflow takes no secrets: the App Store Connect
+# API key (~/.appstoreconnect/config.env and its .p8), the Apple
+# Distribution identity in the fts-build keychain (Studio's
+# setup-keychain.sh), and the "FTS Architect App Store" profile among the
+# installed ones. The marketing version is the tag's (v0.12.2 -> 0.12.2),
+# the build number the upload's unix time (it must climb on every upload).
+# A failure never blocks the release: nothing else needs this job, and the
+# job itself is continue-on-error; the release's notes say which build
+# went to TestFlight.
+name: ios
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to ship to TestFlight (vX.Y.Z)"
+        required: true
+        type: string
+      dry_run:
+        description: "Build, sign and validate; do not upload"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-testflight-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    if: ${{ github.repository == 'FastTrackStudios/architect' }}
+    runs-on: [self-hosted, macOS, airlock]
+    timeout-minutes: 120
+    continue-on-error: true
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+    steps:
+      - name: The tag is vX.Y.Z
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z): TestFlight takes the tag's version"
+            exit 1
+          fi
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "build_no=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          clean: false
+          persist-credentials: false
+
+      - name: Build, sign and upload
+        env:
+          KEYCHAIN: fts-build.keychain
+          KEYCHAIN_PW: fts-build
+          MARKETING_VER: ${{ steps.version.outputs.version }}
+          BUILD_NO: ${{ steps.version.outputs.build_no }}
+          DX_BUNDLE_ID: app.fasttrackstudio.architect
+          PROFILE_NAME: FTS Architect App Store
+        run: |
+          set -euo pipefail
+          export PATH="/nix/var/nix/profiles/default/bin:/opt/homebrew/bin:$PATH"
+          export TMPDIR="$RUNNER_TEMP"
+          flags=()
+          [ "$DRY_RUN" = true ] && flags=(--dry-run)
+          bash apps/mobile/ios/deploy-testflight.sh ${flags[@]+"${flags[@]}"}
+
+      # App Store Connect lists an upload once it starts processing it
+      # (a few minutes); its state is in the summary, the job does not
+      # wait for it to be VALID.
+      - name: App Store Connect has the build
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          BUILD_NO: ${{ steps.version.outputs.build_no }}
+        run: |
+          set -uo pipefail
+          for _ in $(seq 1 30); do
+            if out="$(ruby apps/mobile/ios/testflight-status.rb app.fasttrackstudio.architect "$BUILD_NO")"; then
+              echo "$out"
+              { echo '```'; echo "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::warning::build $BUILD_NO is not in App Store Connect after 15 minutes (apps/mobile/ios/testflight-status.rb shows it later)"
+
+      - name: Record on the GitHub Release
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NO: ${{ steps.version.outputs.build_no }}
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:$PATH"
+          notes="$RUNNER_TEMP/notes.md"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json body --jq .body > "$notes"
+          line="**iOS:** TestFlight build $VERSION ($BUILD_NO) of Architect (app.fasttrackstudio.architect)."
+          if grep -qF "TestFlight build $VERSION ($BUILD_NO)" "$notes"; then exit 0; fi
+          printf '\n%s\n' "$line" >> "$notes"
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes-file "$notes"
+
+      - name: Summary
+        if: always()
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NO: ${{ steps.version.outputs.build_no }}
+          RESULT: ${{ job.status }}
+        run: |
+          echo "### Architect iOS TestFlight" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$TAG\`: marketing version \`$VERSION\`, build \`$BUILD_NO\`$([ "$DRY_RUN" = true ] && echo ' (dry run: not uploaded)'): $RESULT." >> "$GITHUB_STEP_SUMMARY"

@@ -135,6 +135,11 @@ architect-capture = { workspace = true, features = ["native"] }
 # The first run's folder picker (`src/first_run.rs`).
 rfd = { workspace = true }
 
+[target.'cfg(target_os = "ios")'.dependencies]
+# FILES_* (src/files.rs) on a phone: the agent ARCHITECT_FILES_AGENT names,
+# through the same client on its own runtime.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 # The device's agent (src/files.rs): its config's defaults, and starting it
 # (systemd / launchd) when the window opens and it is not running.
