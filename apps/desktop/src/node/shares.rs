@@ -82,7 +82,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use architect::http::axum::body::Body;
 use architect::http::axum::extract::{Request, State};
-use architect::http::axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use architect::http::axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use architect::http::axum::middleware::Next;
 use architect::http::axum::response::sse::{Event, KeepAlive, Sse};
 use architect::http::axum::response::{IntoResponse, Redirect, Response};
@@ -280,6 +280,9 @@ struct Inner {
     /// than this is read again before a request is checked against it.
     moved: Mutex<HashMap<String, Arc<AtomicU64>>>,
     views: Mutex<HashMap<String, ViewSlot>>,
+    /// The islands its pages' players may draw (studio#445), served at
+    /// `/_ext/` (`architect_sites::island`).
+    islands: std::sync::OnceLock<Arc<[architect_sites::SiteIsland]>>,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -316,7 +319,20 @@ impl Shares {
             layers,
             moved: Mutex::new(HashMap::new()),
             views: Mutex::new(HashMap::new()),
+            islands: std::sync::OnceLock::new(),
         }))
+    }
+
+    /// With `islands` (studio#445): its pages' players may draw them; the
+    /// first call holds.
+    #[must_use]
+    pub fn with_islands(self, islands: Vec<architect_sites::SiteIsland>) -> Self {
+        let _ = self.0.islands.set(islands.into());
+        self
+    }
+
+    fn islands(&self) -> &[architect_sites::SiteIsland] {
+        self.0.islands.get().map_or(&[], |i| i)
     }
 
     /// Every share, as the table holds it now.
@@ -1394,10 +1410,92 @@ impl ShareLinks for SharesLane {
 /// `/s/…` is `404` here, never the node's other routes). Every answer
 /// given here carries [`content_security_policy`].
 pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) -> Response {
+    // The node's own `/_ext/` (studio#445), on any host a share has too:
+    // the islands' files, their runtime and their sandbox document, each
+    // with its own headers and never the share's policy (two CSPs would
+    // both hold, and the share's would stop the sandbox's script).
+    if request
+        .uri()
+        .path()
+        .starts_with(architect_sites::island::ISLANDS_PATH)
+    {
+        // Files: read, never written to.
+        if request.method() != Method::GET && request.method() != Method::HEAD {
+            let mut response = page(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "Not allowed",
+                "<p>Only GET and HEAD.</p>",
+            );
+            let headers = response.headers_mut();
+            headers.insert(header::ALLOW, HeaderValue::from_static("GET, HEAD"));
+            headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+            headers.insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            );
+            return response;
+        }
+        return islands(&shares, request.uri().path());
+    }
     match answer(shares, request).await {
         Ok(response) => with_policy(response),
         Err(request) => next.run(*request).await,
     }
+}
+
+/// What the node answers under `/_ext/`: an island's file, the runtime or
+/// the sandbox document (`architect_sites::island::serve`), `404` for
+/// anything else. Every answer is `nosniff` and cached for good (each
+/// path is named by its content); the sandbox document carries its own
+/// policy (`sandbox_headers`), and a `.js` or `.wasm` the share's.
+fn islands(shares: &Shares, path: &str) -> Response {
+    let Some((body, kind)) = architect_sites::island::serve(shares.islands(), path) else {
+        let mut response = page(StatusCode::NOT_FOUND, "Not found", "<p>No such file.</p>");
+        let headers = response.headers_mut();
+        headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+        headers.insert(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        );
+        return response;
+    };
+    let mut response = Response::new(Body::from(body.into_owned()));
+    let headers = response.headers_mut();
+    if path == architect_sites::island::sandbox_path() {
+        // Its own policy, every header of it, or no sandbox at all: served
+        // without its policy it would run with this origin's.
+        for (name, value) in architect_sites::island::sandbox_headers() {
+            let (Ok(header_name), Ok(header_value)) = (
+                header::HeaderName::from_bytes(name.as_bytes()),
+                HeaderValue::from_str(&value),
+            ) else {
+                tracing::error!(
+                    header = name,
+                    "the island sandbox's header does not read: no sandbox served"
+                );
+                return page(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Not available",
+                    "<p>No such file.</p>",
+                );
+            };
+            headers.insert(header_name, header_value);
+        }
+        return response;
+    }
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(kind));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    // A module or a component is fetched, never a page: the share's
+    // policy, should one be opened.
+    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+    response
 }
 
 /// The Content-Security-Policy of every page of a share or a Site the node
@@ -2424,6 +2522,15 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
         String::new()
     };
     if !tracks.is_empty() {
+        // What the page's player may draw on its now-playing view
+        // (studio#445): the runtime, the sandbox, the islands.
+        let islands = architect_sites::island::page_json(shares.islands())
+            .to_string()
+            .replace("</", "<\\/");
+        let _ = write!(
+            section,
+            "<script type=\"application/json\" id=\"site-islands\">{islands}</script>"
+        );
         let json = serde_json::json!({ "scope": link.mount, "tracks": tracks });
         // JSON in a script element: `</` must not close it.
         let json = json.to_string().replace("</", "<\\/");

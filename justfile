@@ -381,9 +381,18 @@ web-test PORT="18080":
 # own with a link share of a two-song gig, in a headless Firefox
 # (FIREFOX=… names one): the lyric line follows playback, a click seeks,
 # and the queue goes on to the next song's page.
+# An island on a share's now-playing view in a real browser (studio#445): the
+# sandbox's WASI counter built for wasm32-wasip2 and by build-web, a node with it
+# linked in (apps/desktop/examples/island_node.rs), Firefox headless.
+share-island-test:
+    devenv --profile wasi shell -- bash -c 'cargo build -q -p architect-sandbox-wasi-counter --target wasm32-wasip2 && (cd features/extensions/web && npm ci --no-audit --no-fund >/dev/null) && node features/extensions/web/cli/cli.mjs build-web target/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm target/island-counter --manifest apps/sandbox/wasi-counter/extension.toml >/dev/null'
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_ISLAND_FOLDER="$PWD/target/island-counter" env -u LD_LIBRARY_PATH node --test apps/web/test/share-island.test.mjs
+
 share-player-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop
-    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" env -u LD_LIBRARY_PATH node --test apps/web/test/share-player.test.mjs apps/web/test/share-playlist.test.mjs
+    devenv shell -- cargo build -q -p architect-cli --bin architect
+    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" ARCHITECT_CLI="$PWD/target/debug/architect" env -u LD_LIBRARY_PATH node --test apps/web/test/share-player.test.mjs apps/web/test/share-playlist.test.mjs apps/web/test/site-now-playing.test.mjs
 
 # The sandbox's browser demo (apps/sandbox/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page

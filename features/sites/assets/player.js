@@ -75,6 +75,24 @@
   }
   var here = path(location.href);
 
+  // What the node offers a share page (`architect_sites::island`,
+  // studio#445): its web runtime, its sandbox document, its islands. Only
+  // the node's own `/_ext/` paths.
+  var ext = null;
+  (function () {
+    var n = doc.querySelector('script#site-islands[type="application/json"]');
+    if (!n) return;
+    try {
+      var x = JSON.parse(n.textContent || "null");
+      var own = function (p) { return typeof p === "string" && /^\/_ext\/[A-Za-z0-9._\/-]+$/.test(p) && p.indexOf("..") < 0; };
+      if (!x || !own(x.runtime) || !own(x.sandbox)) return;
+      x.islands = (Array.isArray(x.islands) ? x.islands : []).filter(function (i) { return i && own(i.folder); });
+      ext = x;
+    } catch (e) {
+      ext = null;
+    }
+  })();
+
   // Where the site is mounted: the folder above its `_site/` assets (this
   // script is one), else the link's scope.
   function normal(p) {
@@ -82,7 +100,8 @@
       try { return decodeURIComponent(x); } catch (e) { return null; }
     });
     if (segs.some(function (x) { return x === null || x === "." || x === ".." || /[\\\/]/.test(x); })) return null;
-    return ("/" + segs.join("/") + (segs.length ? "/" : "")).toLowerCase();
+    // Case kept: the node's paths are (`/S/…` is not `/s/…`).
+    return "/" + segs.join("/") + (segs.length ? "/" : "");
   }
   var siteRoot = null;
   (function () {
@@ -528,7 +547,9 @@
     var box = scroller(el);
     if (!box) return;
     var r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
-    var top = box.scrollTop + (r.top - b.top) - (box.clientHeight - r.height) / 2;
+    // A third of the way down, as Session's chart follows: what comes
+    // next under it, and a chart's first lines (its title) at the top.
+    var top = box.scrollTop + (r.top - b.top) - box.clientHeight / 3;
     var left = box.scrollLeft + (r.left - b.left) - (box.clientWidth - r.width) / 2;
     box.scrollTo({
       top: Math.max(0, top),
@@ -652,8 +673,10 @@
     sheet.innerHTML =
       '<div class="site-now-head"><button type="button" class="site-now-close" data-act="close" aria-label="Close">' + ICON.down + "</button>" +
       '<div class="site-now-what"><span class="site-now-title"></span><span class="site-now-note"></span></div><span class="site-now-spacer"></span></div>' +
+      '<div class="site-now-island site-now-island-top" hidden></div>' +
       '<div class="site-now-progress"><span class="site-now-at">0:00</span><div class="site-now-seek" role="slider" tabindex="0" aria-label="Position" aria-valuemin="0"><span></span></div><span class="site-now-left">–:––</span></div>' +
       '<div class="site-now-body"></div>' +
+      '<div class="site-now-island site-now-island-bottom" hidden></div>' +
       '<div class="site-now-controls"><div class="site-now-buttons">' + controls() + "</div></div>" +
       '<div class="site-now-more"><button type="button" class="site-now-lyrics" data-act="lyrics" aria-pressed="false" hidden>Lyrics</button><a class="site-now-page">Song page and downloads</a></div>';
     ui.nowTitle = sheet.querySelector(".site-now-title");
@@ -661,6 +684,8 @@
     ui.nowPage = sheet.querySelector(".site-now-page");
     ui.body = sheet.querySelector(".site-now-body");
     ui.progress = sheet.querySelector(".site-now-progress");
+    ui.islandTop = sheet.querySelector(".site-now-island-top");
+    ui.islandBottom = sheet.querySelector(".site-now-island-bottom");
     ui.seek = sheet.querySelector(".site-now-seek");
     ui.seekFill = sheet.querySelector(".site-now-seek span");
     ui.controls = sheet.querySelector(".site-now-controls");
@@ -726,35 +751,67 @@
     });
   }
 
-  // What a view brings in from another page: the builder's allow-list
-  // (`sanitize.rs`), again, on this side.
-  var KEEP_HTML = "div span p br hr h1 h2 h3 h4 h5 h6 ul ol li dl dt dd table caption colgroup col thead tbody tfoot tr td th a strong em b i u s code pre blockquote figure figcaption img details summary small sub sup time button svg".split(" ");
-  var KEEP_SVG = "svg g path rect circle ellipse line polyline polygon text tspan textpath defs use symbol clippath mask pattern lineargradient radialgradient stop marker title desc a style".split(" ");
-  function safeUrl(v) {
-    var t = String(v).replace(/[\u0000- ]/g, "").toLowerCase();
-    return t.charAt(0) === "#" || !/^[a-z][a-z0-9+.-]*:/.test(t) || t.indexOf("https:") === 0;
+  // What a view brings in from another page goes through the share
+  // pages' own allow-lists again, in this page: `sanitize.js` (the port of
+  // `sanitize.rs` every live view is held to, one source), which the
+  // site's own script carries as `architect.rules` on every Site and
+  // share link. Without it no view is brought in.
+  function rules() {
+    return Promise.resolve(arch.rules || null);
   }
-  function clean(node, inSvg) {
+  // A block's sheet, kept only when every rule is under its box's class
+  // (as the builder scoped it) and is inert.
+  function scopedSheet(r, text, scope) {
+    var css = String(text).replace(/\/\*[\s\S]*?\*\//g, "");
+    if (!scope || !r.cssInert(css)) return false;
+    return css.split("}").every(function (rule) {
+      rule = rule.trim();
+      if (!rule) return true;
+      var at = rule.indexOf("{");
+      if (at < 0) return false;
+      return rule.slice(0, at).split(",").every(function (sel) {
+        sel = sel.trim();
+        return sel.indexOf("." + scope + " ") === 0 || sel === "." + scope;
+      });
+    });
+  }
+  function clean(r, node, inSvg, scope) {
     Array.prototype.slice.call(node.children).forEach(function (child) {
-      var tag = child.localName.toLowerCase();
-      var svg = inSvg || tag === "svg";
-      var keep = svg ? KEEP_SVG.indexOf(tag) >= 0 : KEEP_HTML.indexOf(tag) >= 0;
-      // A sheet only inside an SVG (where the builder put it, scoped).
-      if (!keep || (tag === "style" && !inSvg)) {
+      var tag = child.localName;
+      var svg = inSvg || tag.toLowerCase() === "svg";
+      // An SVG's sheet, as share pages keep it (a live view keeps none):
+      // only under its block's box class, inert, and nothing but its text.
+      if (tag.toLowerCase() === "style") {
+        if (inSvg && scopedSheet(r, child.textContent, scope)) {
+          Array.prototype.slice.call(child.attributes).forEach(function (at) { child.removeAttribute(at.name); });
+          child.textContent = child.textContent;
+        } else child.parentNode.removeChild(child);
+        return;
+      }
+      var rule = r.elementRule(tag, inSvg, false);
+      if (rule[0] === "drop") {
         child.parentNode.removeChild(child);
         return;
       }
+      if (rule[0] === "unwrap") {
+        var plain = doc.createElementNS(inSvg ? "http://www.w3.org/2000/svg" : "http://www.w3.org/1999/xhtml", inSvg ? "g" : "span");
+        while (child.firstChild) plain.appendChild(child.firstChild);
+        child.parentNode.replaceChild(plain, child);
+        clean(r, plain, inSvg, scope);
+        return;
+      }
       Array.prototype.slice.call(child.attributes).forEach(function (at) {
-        var n = at.name.toLowerCase();
-        if (/^on/.test(n) || n === "srcdoc" || n === "srcset" || n === "formaction" || n === "action" || n === "ping" ||
-            ((n === "href" || n === "src" || n === "xlink:href") && !safeUrl(at.value)) ||
-            (n === "style" && /url\(|expression|javascript:|@|\\/i.test(at.value))) {
-          child.removeAttribute(at.name);
-        }
+        var kept = r.attrRule(tag, at.name, at.value, svg && tag.toLowerCase() !== "svg" ? true : svg, false, { prefix: "", urls: [] });
+        if (kept === null) child.removeAttribute(at.name);
+        else if (kept !== at.value) child.setAttribute(at.name, kept);
       });
-      clean(child, svg);
+      clean(r, child, svg, scope);
     });
     return node;
+  }
+  function scopeOf(box) {
+    var m = /(?:^|\s)(site-block-[0-9a-f]{16})(?:\s|$)/.exec(box.getAttribute("class") || "");
+    return m ? m[1] : null;
   }
 
   // The view on `root` whose media is `src`, else its only one.
@@ -819,7 +876,32 @@
     }
     ui.controls.hidden = !!node.querySelector("[data-transport]");
     ui.progress.hidden = !!node.querySelector("[data-progress]");
+    island.sections = sectionsOf(node);
     emit(true);
+  }
+  // A view's sections (`data-sections` on its `[data-now-playing]`: JSON,
+  // `[{name, start, end, color}]`, seconds on its recording), as data
+  // only: what an island is given.
+  function sectionsOf(node) {
+    var at = node.matches && node.matches("[data-sections]") ? node : node.querySelector("[data-sections]");
+    var raw = at ? at.getAttribute("data-sections") || "" : "";
+    if (!raw || raw.length > 65536) return [];
+    try {
+      var list = JSON.parse(raw);
+      if (!Array.isArray(list)) return [];
+      return list.slice(0, 200).filter(function (x) {
+        return x && isFinite(x.start) && isFinite(x.end) && x.end >= x.start;
+      }).map(function (x) {
+        return {
+          name: String(x.name || "").slice(0, 80),
+          start: Number(x.start),
+          end: Number(x.end),
+          color: /^#[0-9a-fA-F]{3,8}$/.test(String(x.color || "")) ? String(x.color) : null,
+        };
+      });
+    } catch (e) {
+      return [];
+    }
   }
   function say(text) {
     var note = doc.createElement("p");
@@ -853,15 +935,17 @@
         return r.text();
       })
       .then(function (html) { return new DOMParser().parseFromString(html, "text/html"); }));
-    got.then(function (parsed) {
+    Promise.all([got, rules()]).then(function (both) {
+      var parsed = both[0], r = both[1];
       if (wanted !== t.src) return;
       var from = new URL(page, location.href).href;
       var found = viewIn(parsed, t.src, from);
-      if (!found) {
+      if (!found || !r) {
         say("");
         return;
       }
-      var node = clean(doc.importNode(boxOf(found), true), false);
+      var box = boxOf(found);
+      var node = clean(r, doc.importNode(box, true), false, scopeOf(box));
       node.setAttribute("data-site-from", from);
       // Its boxes that follow "what plays on their page" follow its track
       // here.
@@ -871,7 +955,7 @@
       var words = lyricsIn(parsed, t.src, from);
       var lyrics = null;
       if (words) {
-        lyrics = clean(doc.importNode(words, true), false);
+        lyrics = clean(r, doc.importNode(words, true), false, null);
         lyrics.setAttribute("data-site-from", from);
         lyrics.setAttribute("data-media", t.src);
         lyrics.classList.add("site-now-words");
@@ -902,6 +986,7 @@
       } else sheet.removeAttribute("aria-modal");
       try { history.pushState({ siteNowPlaying: true }, ""); } catch (e) {}
       ui.close.focus();
+      islandOpen();
     }
     emit(true);
     var cur_ = sheet.querySelector('[aria-current="time"]');
@@ -913,6 +998,7 @@
     doc.body.classList.remove("site-now-open");
     inertBehind(false);
     wanted = null;
+    islandClose();
     unmount();
     if (!popped && history.state && history.state.siteNowPlaying) {
       try { history.back(); } catch (e) {}
@@ -920,6 +1006,173 @@
     var back = opener && opener.isConnected ? opener : ui.title;
     opener = null;
     if (back && back.focus) back.focus();
+  }
+
+  // ── The island (studio#445) ───────────────────────────────────────
+  // A linked-in extension's views at the top of the view (where it is)
+  // and under it (the controls), drawn by the node's web runtime: the
+  // component runs in the sandbox document the node serves
+  // (`/_ext/sandbox.<hash>.html`, an opaque origin with no network, its
+  // own CSP; this page's is unchanged), its files fetched by this page
+  // from the node's `/_ext/` and pinned by their lock, its views drawn
+  // into shadow roots by `view.js` under the share pages' rules. It is
+  // given data only (where the song is, its sections, its title) and may
+  // ask only these, each checked here. The player's own position bar and
+  // controls show until its first frame, and stay when it cannot load (a
+  // browser without JS Promise Integration, a node without islands).
+  var island = { loading: null, ext: null, panes: [], sections: [], fed: 0, sheet: null };
+  // At most this many intents a second (a burst of twice that): an island
+  // flooding play and pause is refused, not obeyed.
+  var INTENTS_PER_SECOND = 8;
+  var bucket = { tokens: INTENTS_PER_SECOND * 2, at: Date.now() };
+  function intents() {
+    var ok = function (fn) {
+      return {
+        effect: "read_only",
+        run: function (args) {
+          var now = Date.now();
+          bucket.tokens = Math.min(INTENTS_PER_SECOND * 2, bucket.tokens + ((now - bucket.at) / 1000) * INTENTS_PER_SECOND);
+          bucket.at = now;
+          if (bucket.tokens < 1) throw { kind: "failed", message: "too many requests" };
+          bucket.tokens -= 1;
+          fn(args);
+          return null;
+        },
+      };
+    };
+    return {
+      PLAYHEAD_SEEK: ok(function (args) {
+        var t = args && typeof args === "object" ? Number(args.t) : NaN;
+        var d = snapshot().duration;
+        if (!isFinite(t) || t < 0 || !d || t > d) throw { kind: "failed", message: "a time within the song" };
+        playhead.seek(t);
+      }),
+      PLAYHEAD_PLAY: ok(function () { playhead.play(); }),
+      PLAYHEAD_PAUSE: ok(function () { playhead.pause(); }),
+      PLAYHEAD_NEXT: ok(function () { next(false); }),
+      PLAYHEAD_PREVIOUS: ok(function () { previous(); }),
+    };
+  }
+  function pinnedSheet(it) {
+    var name = String(it.stylesheet);
+    var digest = String(it.stylesheetIntegrity || "");
+    if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(name) || name.split("/").some(function (x) { return x === "." || x === ".."; }) ||
+        !/^sha256-[A-Za-z0-9+/]{43}=$/.test(digest) || !(window.crypto && window.crypto.subtle)) {
+      return Promise.reject(new Error("its stylesheet is not pinned"));
+    }
+    return fetch(it.folder + name, { credentials: "omit", redirect: "error" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("its stylesheet did not load");
+        return r.arrayBuffer();
+      })
+      .then(function (bytes) {
+        return window.crypto.subtle.digest("SHA-256", bytes).then(function (d) {
+          var b = "";
+          new Uint8Array(d).forEach(function (x) { b += String.fromCharCode(x); });
+          if ("sha256-" + btoa(b) !== digest) throw new Error("its stylesheet is not the one pinned");
+          return new TextDecoder().decode(bytes);
+        });
+      });
+  }
+  function islandOf() {
+    return ext && ext.islands.length ? ext.islands[0] : null;
+  }
+  function islandLoad(it) {
+    if (island.loading) return island.loading;
+    var asks = intents();
+    island.loading = import(ext.runtime + "index.js")
+      .then(function (rt) {
+        if (!rt.isSupported()) return null;
+        // Its stylesheet, a file of its folder, pinned by its digest as the
+        // component's files are by their lock; anything else and the
+        // island does not load.
+        var sheet_ = it.stylesheet ? pinnedSheet(it) : Promise.resolve(null);
+        return Promise.all([
+          rt.loadExtension(it.folder, {
+            integrity: it.integrity || undefined,
+            sandbox: ext.sandbox,
+            host: { actions: asks },
+            grant: { actions: Object.keys(asks), effect: "read_only" },
+          }),
+          sheet_,
+        ]).then(function (both) {
+          island.rt = rt;
+          island.ext = both[0];
+          island.sheet = both[1];
+          return both[0];
+        });
+      })
+      .catch(function (e) {
+        island.failed = String((e && e.message) || e);
+        return null;
+      });
+    return island.loading;
+  }
+  function islandOpen() {
+    var it = islandOf();
+    if (!it) return;
+    clearTimeout(island.idle);
+    islandLoad(it).then(function (e) {
+      if (!e || sheet.hidden || island.panes.length) return;
+      [[it.progress, ui.islandTop, ui.progress], [it.transport, ui.islandBottom, ui.controls]].forEach(function (slot) {
+        if (!slot[0]) return;
+        var m;
+        try {
+          m = island.rt.mountView(e, slot[0], slot[1], { sheet: island.sheet, sheetUrls: [it.folder] });
+        } catch (err) {
+          return;
+        }
+        island.panes.push(m);
+        Promise.resolve(m.rendered).then(function () {
+          if (island.panes.indexOf(m) < 0) return;
+          // Its first frame: it takes the slot, the player's gives way.
+          slot[1].hidden = false;
+          slot[2].classList.add("site-now-yielded");
+          feed(snapshot(), true);
+        }, function () {});
+      });
+    });
+  }
+  // Closed for this long, the extension is unloaded (its instance, its
+  // workers, its sandbox); the next open loads it again.
+  var ISLAND_IDLE_MS = 30000;
+  function islandClose() {
+    island.panes.forEach(function (m) {
+      try { m.unmount(); } catch (e) {}
+    });
+    island.panes = [];
+    clearTimeout(island.idle);
+    island.idle = setTimeout(function () {
+      if (island.panes.length || !island.ext) return;
+      try { island.ext.stop(); } catch (e) {}
+      island.ext = null;
+      island.loading = null;
+    }, ISLAND_IDLE_MS);
+    if (!ui.islandTop) return;
+    ui.islandTop.hidden = true;
+    ui.islandBottom.hidden = true;
+    ui.progress.classList.remove("site-now-yielded");
+    ui.controls.classList.remove("site-now-yielded");
+  }
+  // What the island is given, at most a frame a 16 ms: data only.
+  function feed(s, force) {
+    if (!island.panes.length) return;
+    var now = Date.now();
+    if (!force && now - island.fed < 16) return;
+    island.fed = now;
+    var t = tracks[s.index];
+    var props = {
+      time: s.time,
+      playing: !!s.playing,
+      duration: s.duration,
+      index: s.index,
+      tracks: s.tracks,
+      title: t ? String(t.title || "") : "",
+      sections: island.sections,
+    };
+    island.panes.forEach(function (m) {
+      try { m.input({ claim: "playhead", source: "", props: props }); } catch (e) {}
+    });
   }
 
   // The lock screen and the headset: the song, and its buttons.
@@ -997,6 +1250,7 @@
     ui.time.textContent = clock(s.time) + " / " + clock(s.duration);
     ui.line.style.width = (part * 100).toFixed(2) + "%";
     media_(s, t);
+    if (sheet && !sheet.hidden) feed(s, false);
     if (sheet) {
       ui.nowTitle.textContent = t ? t.title : "";
       ui.nowNote.textContent = noteText || (t ? t.subtitle || "" : "");

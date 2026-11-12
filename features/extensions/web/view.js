@@ -12,7 +12,7 @@
 // (the frame fails, as `Pane` fails it); no URL but a safe one; no CSS
 // that loads, binds or positions itself over the page. Events on its
 // elements go back to it as the world's `view-event`s.
-import { attrRule, elementRule, styleProperty, SVG_NS, VIEW_BOX_STYLE } from './sanitize.js';
+import { attrRule, elementRule, styleProperty, SVG_NS, VIEW_BOX_STYLE, VIEW_HOST_STYLE, VIEW_MOTION_GUARD } from './sanitize.js';
 
 /// Each pane's id prefix: its own, page-wide.
 let panes = 0;
@@ -43,6 +43,9 @@ export class Pane {
     this.onEvent = onEvent;
     this.listening = new Map();
     this.view = { prefix: options.prefix ?? `av${++panes}-`, urls: [...(options.urls ?? [])] };
+    // Its stylesheet, already `cleanSheet`'s: in its shadow root, before
+    // its box (whose contract is inline and `!important`).
+    this.sheet = typeof options.sheet === 'string' && options.sheet ? options.sheet : null;
     this.limits = { ...DEFAULTS, ...options.limits };
     this.reset();
   }
@@ -56,7 +59,14 @@ export class Pane {
     this.count = 0;
     const host = this.doc.createElement('div');
     host.setAttribute('class', 'architect-view-host');
-    setStyle(host, `display:block!important;max-height:${Number(this.limits.viewHeight)}px!important;overflow:hidden!important`);
+    // The box contract, from outside the view (its sheet cannot select its
+    // host: `cleanSheet` refuses `:host`, a top-level `&` and the host's
+    // class): whatever its content does, its paint, layout and fixed
+    // descendants stay in this box, which clips them. And the box itself
+    // stays where the page put it, at its size, drawing nothing beyond it,
+    // even if a sheet ever reached it: every property that moves, scales
+    // or paints outside a box is pinned too.
+    setStyle(host, `${VIEW_HOST_STYLE};max-height:${Number(this.limits.viewHeight)}px!important`);
     // Open: the page may look in (the sandbox protects the page from the
     // view, not the view from the page).
     const shadow = host.attachShadow({ mode: 'open' });
@@ -66,6 +76,16 @@ export class Pane {
       this.root,
       `${VIEW_BOX_STYLE};max-height:${Number(this.limits.viewHeight)}px!important;max-width:100%!important`,
     );
+    if (this.sheet) {
+      // Before its sheet: motion off for whoever asked for less of it. A
+      // layer's `!important` wins over the sheet's (which `cleanSheet`
+      // leaves unlayered), and over its own `!important`.
+      const guard = this.doc.createElement('style');
+      guard.textContent = VIEW_MOTION_GUARD;
+      const style = this.doc.createElement('style');
+      style.textContent = this.sheet;
+      shadow.append(guard, style);
+    }
     shadow.append(this.root);
     this.element.append(host);
     meta.set(this.root, { svg: false, tag: 'div', sealed: false });

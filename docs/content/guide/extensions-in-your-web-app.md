@@ -343,6 +343,19 @@ base-uri 'none'; form-action 'none'; object-src 'none'
 - **`blob:` and `'wasm-unsafe-eval'`** in `script-src`, and **`worker-src blob:`**, must be added by
   every embedder. They are for the sandbox frame's workers, its blob modules and its wasm, which run
   in the frame's opaque origin and inherit your policy as well as the frame's own.
+- **Or serve the sandbox document yourself** and leave your policy as it is: pass
+  `loadExtension(source, { sandbox: url })`, `url` your own origin's copy of the frame's document
+  (`<!doctype html><script>` + `SANDBOX_SCRIPT` + `</script>`) served with its own
+  `Content-Security-Policy: sandbox allow-scripts; ` + `SANDBOX_CSP` + `; frame-ancestors 'self'`
+  and `nosniff`. A frame loaded from a URL keeps its own policy instead of inheriting yours, so your
+  page needs none of the three above. Architect's node does this for its share pages
+  (`architect_sites::island`, studio#445).
+- **A view's stylesheet** (`mountView(…, { sheet, sheetUrls })`) is held to the same sanitiser for
+  every embedder (`cleanSheet`: CSS tokenised and checked, refused whole on anything outside its
+  allow-list or past its size bounds; a `url()` resolved as the browser will and kept only as the
+  path of one file directly under `sheetUrls[0]` on your page's origin), and the view's host keeps
+  its box contract from outside its shadow root: a sheet cannot reach the page, nor make it
+  request anything but the view's own files.
   - **What this loosens:** script already running in *your* page (an XSS) could start workers and
     import modules from `blob:` URLs it makes, and compile wasm. It still needs a way to run in the
     first place: `blob:` lets no outside script in.

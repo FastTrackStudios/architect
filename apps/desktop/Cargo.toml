@@ -130,6 +130,11 @@ workspace = true
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 # The window's tests need the window's crates.
+[[example]]
+# A node with an island, for apps/web/test/share-island.test.mjs (studio#445).
+name = "island_node"
+required-features = ["vox"]
+
 [[test]]
 name = "actions"
 required-features = ["gui"]

@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
-use crate::assets::{SITE_CSS, SITE_JS, fingerprint, theme_css};
+use crate::assets::{SITE_CSS, fingerprint, site_js, theme_css};
 use crate::search;
 use crate::site::{Problem, Site};
 use crate::ui::{self, Assets, View};
@@ -144,7 +144,7 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
     };
     let assets = Rc::new(Assets {
         css: asset("site", "css", &css)?,
-        js: asset("site", "js", SITE_JS)?,
+        js: asset("site", "js", site_js())?,
         search: asset("search", "json", &index)?,
     });
 

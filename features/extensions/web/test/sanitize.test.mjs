@@ -189,3 +189,146 @@ test('N1: only an absolute URL as written, of an allowed origin, under its path'
   assert.equal(attrRule('a', 'href', 'https://example.com/a', false), 'https://example.com/a');
   assert.equal(attrRule('a', 'href', 'mailto:a@b.c', false), 'mailto:a@b.c');
 });
+
+// ── A view's stylesheet (an island's, studio#445) ─────────────────────
+import { cleanSheet, SHEET_LIMITS } from '../sanitize.js';
+
+const PREFIX = '/_ext/island/demo.ab12/';
+
+test('a view’s stylesheet keeps rules, nesting, groups and Tailwind’s theme, written out again from its tokens', () => {
+  assert.equal(cleanSheet('.a{color:red}.b:hover{transform:scale(2)}'), '.a{color:red;}.b:hover{transform:scale(2);}');
+  assert.equal(cleanSheet('.a{color:red;&:hover{color:blue;@media (hover:hover){color:green}}}'), '.a{color:red;&:hover{color:blue;@media (hover:hover){color:green;}}}');
+  // Tailwind's theme on :root and :host: its custom properties, on the view's box.
+  assert.equal(cleanSheet('@layer theme,base;@layer theme{:root,:host{--c:#fff}}.b{color:var(--c)}'), '.architect-view{--c:#fff;}.b{color:var(--c);}');
+  assert.equal(cleanSheet('@property --a{syntax:"<length>";inherits:false;initial-value:0}'), '@property --a{syntax:"<length>";inherits:false;initial-value:0;}');
+  assert.equal(cleanSheet('.text-\\[10px\\]{font-size:10px}.w-1\\/2{width:50%}'), '.text-\\[10px\\]{font-size:10px;}.w-1\\/2{width:50%;}');
+  assert.equal(cleanSheet('@keyframes spin{to{transform:rotate(360deg)}}'), '@keyframes spin{to{transform:rotate(360deg);}}');
+  assert.equal(cleanSheet('.a{position:absolute;inset:0}'), '.a{position:absolute;inset:0;}');
+  assert.equal(cleanSheet(`.a{background:url('${PREFIX}i.png')}`, PREFIX), `.a{background:url("${PREFIX}i.png");}`);
+  // A comment is not a gap a name can be split across: `:ho/**/st` is two tokens.
+  assert.notEqual(cleanSheet('.a:ho/**/st{color:red}'), null);
+});
+
+test('a view’s stylesheet is refused whole on anything that reaches its host, the page, the network or markup', () => {
+  const bad = [
+    // The review's payloads (architect#601).
+    String.raw`:\68 ost{position:fixed!important;inset:0!important;z-index:2147483647!important}`,
+    String.raw`.wasi-count::before{content:\75 rl(https://e.vil/x) "{";}}`,
+    // :host, every spelling.
+    ':host{width:100vw}', ':HOST{width:1px}', String.raw`:\68ost{width:1px}`, String.raw`:\000068 ost{width:1px}`,
+    String.raw`:\48 OST{width:1px}`, String.raw`:h\6f st{width:1px}`, String.raw`:\68 \6f \73 \74 {width:1px}`,
+    ':host(.x){margin:-9999px}', ':host-context(body){color:red}', ':is(:host){color:red}', ':where(:host) .a{color:red}',
+    '::part(x){color:red}', '::slotted(*){color:red}', ':root{color:red}', ':scope{color:red}',
+    'html{color:red}', 'body .a{color:red}', 'HTML{color:red}', String.raw`\68 tml{color:red}`,
+    '.architect-view{width:1px}', '.architect-view-host{width:1px}', String.raw`.architect\-view{width:1px}`,
+    // :root/:host with more than custom properties.
+    ':root,:host{--c:#fff;width:1px}',
+    // url(), every spelling, outside the island's own path.
+    '.a{background:url(https://e.vil/b)}', '.a{background:url("https://e.vil/b")}', String.raw`.a{background:u\rl(https://e.vil/b)}`,
+    String.raw`.a{background:\75 rl(https://e.vil/b)}`, String.raw`.a{background:\55 RL(https://e.vil/b)}`, String.raw`.a{background:ur\l(x)}`,
+    '.a{background:URL(https://e.vil/b)}', `.a{background:url(${PREFIX}../../x)}`, '.a{background:url(/s/abc/x.png)}',
+    // What loads, reads or draws another element.
+    '.a{content:attr(data-media)}', '.a::before{content:attr(data-title url)}', '.a{background:image-set("x" 1x)}',
+    '.a{background:-webkit-image-set(url(x) 1x)}', '.a{background:image(x)}', '.a{background:element(#x)}',
+    '.a{background:paint(x)}', '.a{background:src("x")}', '.a{width:expression(alert(1))}', '.a{-moz-binding:url(x)}', '.a{behavior:url(x)}',
+    // At-rules.
+    '@import url(https://e.vil/x.css);', '@import "x.css";', '@charset "utf-8";', '@namespace svg url(http://www.w3.org/2000/svg);',
+    '@font-face{font-family:x;src:url(https://e.vil/f);unicode-range:U+0-7F}', '@page{margin:0}', '@media x{@import url(y);}',
+    '@document url-prefix(){.a{color:red}}', '@unknown{.a{b:c}}', '.a{&:hover{@font-feature-values x{}}}',
+    // The box contract.
+    '.a{position:fixed}', '.a{position:sticky}', String.raw`.a{position:\66ixed}`, '.a{position:FIXED}',
+    '.a{width:100vw!important}', '.a{z-index:9!important}', '.a{transform:none ! important}',
+    // What the tokeniser does not take.
+    '.a{content:"unclosed}', ".a{content:'x\ny'}", '.a{color:red', '.a{color:red}}', '.a{color:(red}', '.a{color:red}/* unclosed',
+    '</style><script>alert(1)</script>', '.a<b{color:red}', '<!-- .a{color:red} -->', '.a{color:red\\', String.raw`.a{color:r\
+ed}`,
+    '.a{color:red;}{}', '{color:red}', '.a{color:red}@', '.a{color:red}\u0000',
+  ];
+  for (const css of bad) assert.equal(cleanSheet(css, PREFIX), null, css);
+});
+
+test('what cleanSheet writes, cleaned again, is itself', () => {
+  for (const css of [
+    '.a{color:red;&:hover{color:blue;@media (hover:hover){color:green}}}',
+    '@layer theme{:root,:host{--c:#fff}}.b{color:var(--c)}',
+    String.raw`.text-\[10px\]{font-size:10px}`,
+    `.a::before{content:"\\"}\\a x"}`,
+  ]) {
+    const once = cleanSheet(css, PREFIX);
+    assert.notEqual(once, null, css);
+    assert.equal(cleanSheet(once, PREFIX), once, css);
+  }
+});
+
+// The second security review of architect#601: a url() is judged as the
+// browser will request it, never as text.
+test('a sheet’s url() names only a file of the extension’s own, resolved as the browser will, written back normalised', () => {
+  const P = PREFIX;
+  const kept = (u) => cleanSheet(`.a{background-image:${u}}`, P);
+  // Its own files, however spelled, come out as their one path.
+  for (const u of [`url(${P}a.png)`, `url("${P}a.png")`, `url('${P}a.png')`, `url( ${P}a.png )`, `url(${P}./a.png)`, `url("${P}./a.png")`,
+    `url(${P}x/../a.png)`, `url(https://view.invalid${P}a.png)`, `url(//view.invalid${P}a.png)`, `url(/_ext/island/./demo.ab12/a.png)`])
+    assert.equal(kept(u), `.a{background-image:url("${P}a.png");}`, u);
+  // Everything else is refused whole: the reviewer's escapes and the family.
+  const out = [
+    `url(${P}%2e%2e/%2e%2e/%2e%2e/s/secret-dd)`, `url("${P}.%2E/.%2e/.%2e/s/secret-dd2")`, `url(${P}%2E./x)`, `url(${P}%2E%2E/x)`,
+    `url(${P}%252e%252e/x)`, `url(${P}%2f..%2fx)`, `url(${P}a%2epng)`, `url("${P}..\\\\..\\\\x")`, String.raw`url(${P}\2e\2e/\2e\2e/x)`,
+    `url(${P}../../x)`, `url(${P}../x.png)`, `url(${P}.)`, `url(${P}..)`, `url(${P})`, `url(${P}a/b.png)`, `url(${P}a.png?x)`, `url(${P}a.png?)`,
+    `url("${P}a.png#x")`, `url("${P}a.png#")`, `url("${P}a\tb.png")`, `url("${P}a\\a b.png")`, `url(//e.vil${P}a.png)`, `url(//e.vil/x)`,
+    `url(https://e.vil${P}a.png)`, `url(https://user:pw@view.invalid${P}a.png)`, `url(http://view.invalid${P}a.png)`,
+    `url("data:image/png;base64,AAAA")`, `url("blob:https://view.invalid/${P}a.png")`, `url(javascript:alert(1))`, `url(/_ext/x)`, `url(/x)`,
+    `url("${P}a.png" crossorigin(anonymous))`, `url("${P}a.png" "x")`, `url(${'a'.repeat(3000)})`,
+  ];
+  for (const u of out) {
+    for (const prop of ['background-image', 'list-style', 'mask', 'mask-image', 'shape-outside', 'border-image', 'content', 'cursor'])
+      assert.equal(cleanSheet(`.a,.a::before{${prop}:${u}}`, P), null, `${prop}: ${u}`);
+  }
+  // No prefix, no url at all.
+  assert.equal(cleanSheet(`.a{background:url(${P}a.png)}`), null);
+  // Written back normalised, and cleaned again it is itself.
+  const once = cleanSheet(`.a{background:url(${P}./a.png)}`, P);
+  assert.equal(cleanSheet(once, P), once);
+});
+
+test('a sheet’s `&` is kept only inside a rule; at the top it is the host', () => {
+  for (const css of ['&{position:absolute;inset:-100px}', ':is(&){color:red}', '& .a{color:red}', '.a,&{color:red}', ':where(&){color:red}',
+    '@media all{&{color:red}}', '@layer x{&{color:red}}', '@supports (color:red){:is(&) .a{color:red}}'])
+    assert.equal(cleanSheet(css, PREFIX), null, css);
+  assert.equal(cleanSheet('.a{&:hover{color:red}}'), '.a{&:hover{color:red;}}');
+  assert.equal(cleanSheet('.a{@media all{&{color:red}}}'), '.a{@media all{&{color:red;}}}');
+});
+
+test('a custom property’s value is a value: a block in it refuses the sheet, never reads as a rule', () => {
+  for (const css of ['.a{--x:{a:b};color:red}', '.a{--x:{a:b}}', '.a{--x: a {b} c;}', '--x:{a:b}', '--x:{color:red}.a{color:red}', ':root,:host{--x:{a:b}}'])
+    assert.equal(cleanSheet(css, PREFIX), null, css);
+  assert.equal(cleanSheet('.a{--x:1px;width:var(--x)}'), '.a{--x:1px;width:var(--x);}');
+});
+
+test('a sheet past its bounds is refused whole', () => {
+  assert.equal(cleanSheet(`${'.a{'.repeat(2000)}color:red${'}'.repeat(2000)}`), null);
+  assert.equal(cleanSheet(`${':is('.repeat(3000)}.a${')'.repeat(3000)}{color:red}`), null);
+  assert.equal(cleanSheet(`.a${',.a'.repeat(50000)}{color:red}\n`.repeat(10)), null);
+  assert.equal(cleanSheet(`.a${',.a'.repeat(300)}{color:red}`), null, 'a selector list too long');
+  assert.equal(cleanSheet('.a{color:red}'.repeat(SHEET_LIMITS.rules + 1)), null, 'too many rules');
+  assert.notEqual(cleanSheet('.a{color:red}'.repeat(1000)), null);
+  assert.equal(cleanSheet(`.a{width:${'calc('.repeat(20)}1px${')'.repeat(20)}}`), null);
+  assert.equal(cleanSheet(`${'.a{'.repeat(SHEET_LIMITS.depth)}color:red${'}'.repeat(SHEET_LIMITS.depth)}`), `${'.a{'.repeat(SHEET_LIMITS.depth)}color:red;${'}'.repeat(SHEET_LIMITS.depth)}`);
+  assert.equal(cleanSheet(`${'.a{'.repeat(SHEET_LIMITS.depth + 1)}color:red${'}'.repeat(SHEET_LIMITS.depth + 1)}`), null);
+  assert.equal(cleanSheet(`.a{content:"${'x'.repeat(SHEET_LIMITS.bytes)}"}`), null);
+});
+
+test('a sheet’s animations end, and soon', () => {
+  for (const css of ['@keyframes k{to{filter:blur(50px)}}.a{animation:k 1ms infinite}', '.a{animation-iteration-count:infinite}', '.a{animation:k 1s 11}',
+    '.a{animation-iteration-count:1000}', '.a{animation-duration:31s}', '.a{animation:k 100000ms}', '.a{animation-delay:-60s}',
+    '.a{transition-duration:99s}', '.a{animation:var(--a)}', '.a{animation:k 1s INFINITE}'])
+    assert.equal(cleanSheet(css, PREFIX), null, css);
+  assert.equal(cleanSheet('.a{animation:k 1s ease 3;transition:color .2s}'), '.a{animation:k 1s ease 3;transition:color .2s;}');
+});
+
+test('two tokens a dropped comment brought together are not written as one', () => {
+  assert.equal(cleanSheet('.a{background:url/**/("https://e.vil/x")}', PREFIX), null);
+  assert.equal(cleanSheet(`.a{background:url/**/("${PREFIX}a.png")}`, PREFIX), null);
+  assert.equal(cleanSheet('.a{color:red/**/blue}'), '.a{color:red/**/blue;}');
+  assert.equal(cleanSheet('.a{width:1px/**/2px}'), '.a{width:1px/**/2px;}');
+  assert.equal(cleanSheet('.a{width:calc((1px + 2px) * 2)}'), '.a{width:calc((1px + 2px) * 2);}');
+});

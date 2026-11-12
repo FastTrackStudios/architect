@@ -418,6 +418,16 @@ body.site-now-open .site-player { visibility: hidden; }
 .site-now-body > .site-now-words { display: none; flex: 1; min-height: 0; max-height: none; margin: 0; padding: 12px 16px; }
 .site-now-showing-lyrics .site-now-body > .site-now-words { display: block; }
 .site-now-showing-lyrics .site-now-body > :not(.site-now-words) { display: none; }
+/* An island's views (studio#445): its slot shows from its first frame,
+   and the player's own bar or controls give way. */
+.site-now-island { flex: none; padding: 4px 12px; overflow: hidden; contain: layout paint style; position: relative; isolation: isolate; }
+/* The view's host keeps its box from the page's own sheet too. */
+.site-now-island .architect-view-host { contain: layout paint style !important; position: relative !important; isolation: isolate !important; overflow: hidden !important; display: block !important; inset: auto !important; transform: none !important; translate: none !important; scale: none !important; rotate: none !important; zoom: 1 !important; margin: 0 !important; box-shadow: none !important; outline: none !important; filter: none !important; z-index: auto !important; }
+.site-now-island-top { max-height: 22vh; }
+.site-now-island-bottom { max-height: 30vh; }
+.site-now-island[hidden], .site-now .site-now-yielded { display: none; }
+.site-now-island-top { border-bottom: 1px solid var(--border, #8884); }
+.site-now-island-bottom { border-top: 1px solid var(--border, #8884); }
 .site-now-empty { margin: auto; padding: 16px; opacity: .7; text-align: center; }
 .site-now-controls { flex: none; padding: 8px 16px 4px; border-top: 1px solid var(--border, #8884); }
 .site-now-controls[hidden] { display: none; }

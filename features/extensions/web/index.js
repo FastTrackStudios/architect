@@ -10,6 +10,7 @@ import INSTANCE_SOURCE from './dist/instance-source.js';
 import { capabilities, noCapabilities, within } from './check.js';
 import { answerer, ArchitectError } from './host.js';
 import { Pane, ViewError } from './view.js';
+import { cleanSheet } from './sanitize.js';
 import { refusal } from './world.js';
 
 export { ArchitectError, memoryHost, fetchHandler } from './host.js';
@@ -288,6 +289,8 @@ export async function loadExtension(source, options = {}) {
     theme: host.theme ? () => host.theme() : undefined,
     frame: (pane, f) => frame(me, pane, f),
     restarted: () => remount(me),
+    // A sandbox document of the embedder's own (`Sandbox`'s `url`).
+    ...(options.sandbox ? { sandboxUrl: new URL(String(options.sandbox), base()).href } : {}),
     ...(options.spawn ? { spawn: options.spawn } : {}),
   });
   me.component = component;
@@ -331,16 +334,21 @@ export async function loadExtension(source, options = {}) {
 /// Draws `extension`'s view `viewId` into `element` (emptied first), in a
 /// shadow root of its own: its edits applied as they come, events on it
 /// sent back. `options.urls`: URL prefixes its images and media may load
-/// from (none by default). `unmount()` ends it.
+/// from (none by default). `options.sheet`: a stylesheet for its shadow
+/// root, kept as `cleanSheet` keeps it (its `url()`s only under
+/// `options.sheetUrls`' first prefix). `unmount()` ends it.
 export function mountView(extension, viewId, element, options = {}) {
   const me = inner.get(extension);
   if (!me) throw new TypeError('mountView: not an extension loadExtension made');
   if (!extension.views.some((v) => v.id === viewId))
     throw new ArchitectError({ kind: 'not_found', what: `view ${viewId} of ${extension.manifest.id}` });
   const id = ++me.nextPane;
+  const sheet = options.sheet == null ? null : cleanSheet(String(options.sheet), (options.sheetUrls ?? [])[0] ?? null);
+  if (options.sheet != null && sheet === null) me.log('warn', 'view', 'its stylesheet was refused: it holds what a view’s sheet may not');
   const pane = new Pane(element, (event) => me.component.event(id, event), {
     urls: options.urls ?? [],
     limits: me.limits,
+    sheet,
   });
   me.panes.set(id, { pane, view: viewId });
   const rendered = me.component.render(id, viewId);

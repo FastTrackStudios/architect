@@ -74,9 +74,10 @@ export default function Chart() {
   return (
     <div data-now-playing="">
       <svg class="demo-chart" viewBox={\`0 0 \${bars.length * w} 60\`} width="100%" data-follow-playhead="">
+        <style>{".demo-bar{fill:#3b82f6;fill-opacity:0}.demo-bar[aria-current=time]{fill-opacity:0.25}"}</style>
         {bars.map((b, i) => (
           <g key={\`\${i}\`}>
-            <rect class="demo-bar" data-at={\`\${i * 0.5}\`} x={\`\${i * w}\`} y="0" width={\`\${w}\`} height="60" fill="transparent" />
+            <rect class="demo-bar" data-at={\`\${i * 0.5}\`} x={\`\${i * w}\`} y="0" width={\`\${w}\`} height="60" />
             <text x={\`\${i * w + 8}\`} y="36">{b}</text>
           </g>
         ))}
@@ -91,17 +92,18 @@ export default function Chart() {
     row('Joy', 'joy.wav', `${L}/01-joy/`) +
     row('Evil', 'evil.wav', `${L}/Gig/evil.html`) +
     row('Signout', 'signout.wav', '/s/_signout?to=/') +
+    row('Upper', 'upper.wav', `/S/${CODE}/01-joy/`) +
     '</ul></div>\n\n' +
     '<div data-playlist data-title="Second set"><ul>' +
     row('Raw', 'raw.wav', `${L}/Gig/raw/`) +
     row('Nope', 'nope.wav', `${L}/nope/`) +
     row('Missing', 'missing.wav', `${L}/02-noel/`) +
-    '</ul></div>\n\n![[media/noel.wav]]\n\n[[evil.html]] [[raw/index.html]] [[media/evil.wav]] [[media/signout.wav]] [[media/raw.wav]] [[media/nope.wav]]\n');
+    '</ul></div>\n\n![[media/noel.wav]]\n\n[[evil.html]] [[raw/index.html]] [[media/evil.wav]] [[media/signout.wav]] [[media/raw.wav]] [[media/nope.wav]] [[media/upper.wav]]\n');
   put(vault, 'Gig/evil.html', `<!doctype html><html><body><div class="site-block"><div data-now-playing data-media="${L}/Gig/media/joy.wav"><p id="pwn">RAW ATTACHMENT</p><style>html body{outline:9px solid red !important}</style><img src="data:," onerror="window.__xss=1"><meta http-equiv="refresh" content="1;url=${L}/02-noel/"></div></div></body></html>`);
   put(vault, 'Gig/raw/index.html', `<!doctype html><html><body><div data-now-playing><p id="pwn">RAW INDEX</p><meta http-equiv="refresh" content="1;url=${L}/02-noel/"></div></body></html>`);
   put(vault, 'Gig/media/joy.lrc', '[00:00.00]Joy to the world\n[00:00.60]The Lord is come\n[00:01.20]Let earth\n');
   put(vault, 'Gig/media/joy.wav', wav(3.5));
-  for (const name of ['noel', 'evil', 'signout', 'raw', 'nope']) put(vault, `Gig/media/${name}.wav`, wav(3));
+  for (const name of ['noel', 'evil', 'signout', 'raw', 'nope', 'upper']) put(vault, `Gig/media/${name}.wav`, wav(3));
   const share = {
     code: CODE, vault: 'notes', scope: { Folder: 'Gig' }, title: 'The gig', audience: 'Link', access: 'Read',
     expires_at: null, revoked_at: null, created_at: 1, created_by: 'test', domain: null,
@@ -243,7 +245,8 @@ test('the view is fetched only from a page the link built', { skip, timeout: 900
   const { tab, close } = await open();
   try {
     await tab.go(`${origin}${L}/03-list/`);
-    for (const title of ['Evil', 'Signout']) {
+    // `/S/…` is not the link (its paths are case-sensitive): no view, no link.
+    for (const title of ['Evil', 'Signout', 'Upper']) {
       await tab.eval(tap(title));
       await tab.until(`architect.playhead.src && document.querySelector(".site-player-title").textContent === ${JSON.stringify(title)}`, title);
       // Not a page the link built: no view to open, no page to link.
@@ -279,11 +282,15 @@ test('the view: position at the top, the chart, the controls; focus, inert, Esca
     assert.equal(await tab.eval('document.querySelector(".site-player-title").getAttribute("aria-haspopup")'), 'dialog');
     await tab.eval(OPEN);
     await tab.until('document.querySelector(".site-now-body .demo-chart")', 'the chart in the view');
+    // At its start the chart's top (its title) is in view, not scrolled under the view's head.
+    assert.equal(await tab.eval('document.querySelector(".site-now-body .site-block").scrollTop'), 0);
     // Top to bottom: where it is, the chart, the controls.
     const tops = JSON.parse(await tab.eval('JSON.stringify([".site-now-progress", ".site-now-body", ".site-now-controls"].map((s) => document.querySelector(s).getBoundingClientRect().top))'));
     assert.ok(tops[0] < tops[1] && tops[1] < tops[2], JSON.stringify(tops));
     // It follows there.
     await tab.until('document.querySelector(".site-now .demo-bar[aria-current=time]")', 'a bar marked in the view');
+    // Its block's scoped sheet came with it: a bar is not drawn black.
+    assert.equal(await tab.eval('getComputedStyle(document.querySelector(".site-now .demo-bar:not([aria-current])")).fillOpacity'), '0');
     // Focus in, the page behind inert, modal at a phone's width.
     assert.equal(await tab.eval('document.activeElement.className'), 'site-now-close');
     assert.equal(await tab.eval('document.querySelector(".site-now").getAttribute("aria-modal")'), 'true');
@@ -333,8 +340,8 @@ test('the queue: every playlist of the page in order, its own media not; a refus
     await tab.go(`${origin}${L}/03-list/`);
     // Six rows over two playlists: the page's own `![[media/noel.wav]]`
     // is not queued.
-    assert.equal(await tab.eval('architect.playhead.snapshot().tracks'), 6);
-    await tab.eval(tap('Signout'));
+    assert.equal(await tab.eval('architect.playhead.snapshot().tracks'), 7);
+    await tab.eval(tap('Upper'));
     await tab.until('architect.playhead.playing', 'the first set\'s last playing');
     await tab.eval('architect.playhead.next(), true');
     await tab.until(`architect.playhead.src === "${L}/Gig/media/raw.wav"`, 'the second set\'s first next');
