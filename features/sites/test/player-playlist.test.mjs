@@ -581,7 +581,7 @@ test('a row\'s menu: its chart, its page; Escape closes it and gives the button 
   assert.equal(p.playhead.src, null);
 });
 
-test('the card shows the title\'s initials, never what the tile says (its key)', () => {
+test('the card shows a music note, never letters nor what the tile says (its key), and never an empty square', () => {
   const body = new Node('body');
   const r = row(1, 'Sleigh Ride', `${L}sleigh/`, `${L}Sleigh.mp3`);
   const tile = r.querySelectorAll('[data-track-art]')[0];
@@ -589,9 +589,17 @@ test('the card shows the title\'s initials, never what the tile says (its key)',
   tile.setAttribute('data-key', '');
   body.appendChild(block([r]));
   const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  const art = () => p.window.document.body.querySelectorAll('.site-player')[0].querySelector('.site-player-art');
+  // Nothing loaded ("1 track"): the glyph, not an empty tile.
+  p.frame();
+  assert.ok(art().hasAttribute('data-glyph'), 'a glyph before anything plays');
+  assert.equal(art().textContent, '');
   r.querySelectorAll('[data-track-title]')[0].click();
-  const art = body.querySelectorAll('.site-player-art')[0];
-  assert.equal(art ? art.textContent : p.window.document.body.querySelectorAll('.site-player')[0].querySelector('.site-player-art').textContent, 'SR');
+  p.frame();
+  assert.ok(art().hasAttribute('data-glyph'), 'a glyph for the song');
+  assert.equal(art().textContent, '', 'no initials, no key');
+  assert.match(art().style.props.background || '', /^hsl\(200 /, 'on its tile\'s colour');
+  assert.ok(!/function initials/.test(PLAYER), 'no initials code path');
 });
 
 // ── An island's web view (the review of #608) ───────────────────────
