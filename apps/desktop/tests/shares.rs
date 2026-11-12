@@ -3459,6 +3459,21 @@ async fn a_guest_reads_a_link_as_its_notes_and_a_note_as_its_pages_words() {
     // Every medium a guest is pointed at is served by the link.
     assert_eq!(get(&w.url(images[0]), None).await.0, StatusCode::OK);
 
+    // The page hands itself to the app: a plain link, nothing that runs.
+    let page = page_with(
+        &w.url(&format!("/s/{}/track/", share.code)),
+        None,
+        "Mix notes.",
+    )
+    .await;
+    let app = architect_spaces::guest::app_link(&w.url(&format!("/s/{}/track/", share.code)));
+    let href = format!("href=\"{}\"", app.replace('&', "&amp;"));
+    assert!(page.contains(&href), "no Open in Architect: {page}");
+    assert!(page.contains(">Open in Architect<"));
+    let opened = architect_spaces::ShareUrl::parse(&app).unwrap();
+    assert_eq!(opened.code(), share.code);
+    assert_eq!(opened.rest(), "/track/");
+
     // A note outside the link: the same answer as one that is nowhere.
     let outside = client
         .read(

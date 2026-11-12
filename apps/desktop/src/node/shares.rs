@@ -1823,7 +1823,12 @@ async fn serve(
                 response = with_comments(shares, &share, rest, mount, response).await;
             }
             if response.status() == StatusCode::OK && is_html(&response) {
-                response = with_files_bar(shares, &link, response).await;
+                // The link as the app opens it (#629): this page on this
+                // node, never on a share's own domain (no `/s/<code>/`).
+                let here = (mount != "/")
+                    .then(|| page_address(&headers, shares.0.issuer_origin.as_deref(), mount, rest))
+                    .flatten();
+                response = with_files_bar(shares, &link, response, here.as_deref()).await;
             }
             private(&share, response)
         }
@@ -2894,7 +2899,51 @@ impl ShareGuest for GuestLane {
 /// A page of the link, with a bar to its files page and its archive
 /// when it lists any file, and its queue ([`queue`]) when any of them
 /// plays.
-async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) -> Response {
+/// This page's address as its visitor asked for it (`Host`, and https
+/// behind a proxy that says so): what "Open in Architect" hands the app.
+/// None for a host that does not read as one.
+fn page_address(
+    headers: &HeaderMap,
+    issuer: Option<&str>,
+    mount: &str,
+    rest: &str,
+) -> Option<String> {
+    let host = headers.get(header::HOST)?.to_str().ok()?;
+    let ok = !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-.:[]".contains(c));
+    if !ok {
+        return None;
+    }
+    let scheme = if is_https(headers, issuer) {
+        "https"
+    } else {
+        "http"
+    };
+    Some(format!(
+        "{scheme}://{host}{}{rest}",
+        mount.trim_end_matches('/')
+    ))
+}
+
+/// "Open in Architect" (#629): a plain link to this page in the app
+/// (`architect://open?url=…`), with where to get the app. Nothing runs and
+/// nothing is in the way: a visitor without the app reads on.
+fn open_in_app(here: &str) -> String {
+    format!(
+        "<style>.share-open-app{{max-width:42rem;margin:1.5rem auto;padding:.6rem 1rem;display:flex;flex-wrap:wrap;gap:.4rem 1rem;align-items:center;font:14px/1.4 system-ui,sans-serif;border-top:1px solid var(--site-rule,#8884)}}.share-open-app a{{color:inherit}}.share-open-app .share-open{{font-weight:600}}</style>\
+         <nav class=\"share-open-app\" aria-label=\"Architect\"><a class=\"share-open\" href=\"{app}\">Open in Architect</a><span>Don't have it? <a href=\"https://architect.fasttrackstudio.app/download\" rel=\"noopener noreferrer\">Get Architect</a></span></nav>",
+        app = escape(&architect_spaces::guest::app_link(here))
+    )
+}
+
+async fn with_files_bar(
+    shares: &Shares,
+    link: &Link<'_>,
+    response: Response,
+    here: Option<&str>,
+) -> Response {
     let listed = shares.listed_for(link, &Grouping::Order).await;
     let files: usize = listed
         .iter()
@@ -2927,6 +2976,9 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
         return Response::from_parts(parts, Body::empty());
     };
     let mut section = shell;
+    if let Some(here) = here {
+        section.push_str(&open_in_app(here));
+    }
     if files > 0 {
         let _ = write!(
             section,

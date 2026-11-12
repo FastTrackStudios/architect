@@ -378,6 +378,11 @@ page.
   from a folder registers itself with `architect-desktop links register`
   (`apps/desktop/src/links.rs` `register`). A second launch hands its
   link to the running app (`architect_presence::single_instance`).
+- **Open in Architect.** Every page of a link ends with a plain link
+  to itself in the app (`architect://open?url=<the page>`) and where to
+  get the app (`apps/desktop/src/node/shares.rs` `open_in_app`): nothing
+  runs, nothing is in the way of a visitor without the app. Not on a
+  share's own domain, which has no `/s/<code>/` path.
 - **What the app opens.** `ShareUrl::parse`: `https:` only, or `http:`
   to this machine; no credentials; a share link's path. A link the OS
   hands the app that points at this machine or a private network is
