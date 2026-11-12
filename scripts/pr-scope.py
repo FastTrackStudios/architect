@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Which crates a PR can break, and the lint commands that cover them.
+"""Whether a PR touches Rust, and which feature builds it reaches.
 
 Usage: pr-scope.py BASE [HEAD] [--all] [--cmds FILE]
   prints KEY=VALUE lines for $GITHUB_OUTPUT; with --cmds, writes the
-  feature builds (one `cargo clippy` per line) to FILE; --all selects the
-  whole workspace whatever the diff (a push to main, warming the cache).
+  feature builds (one `cargo clippy` per line) to FILE; --all reaches
+  everything whatever the diff (a push to main, warming the cache).
 
-The PR check (.github/workflows/pr.yml) runs main's lint on the crates a
-PR touches instead of the whole workspace: every member owning a changed
-file (or `include_str!`/`include_bytes!`-ing one), plus every member that
-depends on one of those, normal, build or dev, transitively. Selecting all
-reverse dependencies also means each changed crate is resolved with the
-same features the workspace build gives it: only its dependents turn its
-features on, and they are all in the selection.
+The PR check (.github/workflows/pr.yml) lints the whole workspace, exactly
+as main does, whenever a PR changes a crate: a hosted runner with main's
+cache does that in about three minutes, and a `-p` subset resolves
+features differently from the workspace, so it can fail on code main
+lints clean or pass code main fails. What this script narrows is the rest:
+
+- no clippy at all when no crate is touched (docs, skills, nix, the site);
+- each feature-tests.toml pass, and each EXTRA_BUILDS build, only when a
+  crate it builds is reached: every member owning a changed file (or
+  `include_str!`/`include_bytes!`-ing one), plus every member depending on
+  one, normal, build or dev, transitively.
 
 Not `cargo rail plan`: without recorded build evidence (`cargo rail plan
 evidence`) rail widens every plan whose diff holds a file it cannot prove
@@ -20,13 +24,12 @@ no build script reads, which includes every `.changes/*.md`, so on this
 repo it plans the whole workspace for every PR.
 
 Outputs:
-  scope=none|packages|workspace
-  clippy_args=  `-p a -p b …` or `--workspace` ("" when scope=none)
-  packages=     the selected members, space-separated (for the log)
-  builds=N      how many feature builds --cmds wrote
+  rust=true|false   lint the workspace
+  reached=          the members reached, space-separated, or (workspace)
+  builds=N          how many feature builds --cmds wrote
 
-Anything this script cannot read exactly widens to the whole workspace,
-never narrows on a guess.
+Anything this script cannot read exactly reaches everything, never
+narrows on a guess.
 """
 import json
 import os
@@ -40,7 +43,7 @@ from typing import NoReturn
 ROOT = Path(__file__).resolve().parent.parent
 
 # Inputs that change how every crate builds or lints, or what this check
-# itself does: any change here lints the whole workspace.
+# itself does: any change here reaches every member.
 WORKSPACE_INPUTS = (
     "Cargo.toml",
     "Cargo.lock",
@@ -59,7 +62,7 @@ WORKSPACE_INPUTS = (
 
 # Builds main runs that are neither the workspace lint nor a
 # feature-tests.toml pass, so a feature combination they compile is only
-# checked here. Each runs when one of `packages` is selected.
+# checked here. Each runs when one of `packages` is reached.
 EXTRA_BUILDS = [
     # The headless node: `xtask/tests/dev_stack.rs` builds it inside the
     # dev-stack pass under main's `CARGO_BUILD_WARNINGS=deny` (#549 went red
@@ -76,10 +79,6 @@ EXTRA_BUILDS = [
     },
 ]
 
-# Above this share of the workspace, lint `--workspace`: the same
-# resolution main uses, for about the same cost.
-WORKSPACE_SHARE = 0.6
-
 INCLUDE = re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)')
 
 
@@ -89,9 +88,9 @@ def emit(**kv):
 
 
 def everything(reason, members, cmds) -> NoReturn:
-    print(f"scope: {reason} -> the whole workspace", file=sys.stderr)
+    print(f"scope: {reason} -> every member and feature build", file=sys.stderr)
     builds = feature_builds(set(members), cmds)
-    emit(scope="workspace", clippy_args="--workspace", packages="(workspace)", builds=builds)
+    emit(rust="true", reached="(workspace)", builds=builds)
     sys.exit(0)
 
 
@@ -169,8 +168,8 @@ def reverse_closure(seeds, meta, members):
     return out
 
 
-def feature_builds(selected, cmds):
-    """The feature-tests.toml passes and EXTRA_BUILDS a selected member is in.
+def feature_builds(reached, cmds):
+    """The feature-tests.toml passes and EXTRA_BUILDS a reached member is in.
 
     Main only compiles these (nextest, `cargo build` in a test), so a lint
     is stricter than it; but clippy shares the workspace lint's
@@ -181,15 +180,16 @@ def feature_builds(selected, cmds):
     lines = []
     passes = tomllib.loads((ROOT / "feature-tests.toml").read_text()).get("pass", [])
     for p in passes:
-        if not selected & set(p["packages"]):
+        if not reached & set(p["packages"]):
             continue
+        # As main builds it (xtask/src/feature_tests.rs).
         sel = "--workspace" if p.get("workspace") else " ".join(f"-p {x}" for x in p["packages"])
         feats = ",".join(p.get("features", []))
         args = f"{sel} --features {feats}" if feats else sel
         # nextest builds every test target of the pass: lib, bins, tests.
         lines.append(f"# pass {p['name']}\ncargo clippy {args} --tests")
     for b in EXTRA_BUILDS:
-        if selected & set(b["packages"]):
+        if reached & set(b["packages"]):
             lines.append(f"# {b['name']}\ncargo clippy {b['args']}")
     if cmds:
         Path(cmds).write_text("set -euo pipefail\n" + "\n".join(lines) + "\n")
@@ -237,24 +237,17 @@ def main():
         everything("the workspace-hack changed", members, cmds)
     if not seeds:
         print(f"scope: {len(files)} changed file(s), none in a crate", file=sys.stderr)
-        emit(scope="none", clippy_args="", packages="", builds=feature_builds(set(), cmds))
+        emit(rust="false", reached="", builds=feature_builds(set(), cmds))
         return
 
-    selected = reverse_closure(seeds, meta, members)
+    reached = reverse_closure(seeds, meta, members)
     print(
         f"scope: changed {', '.join(sorted(seeds))}; with dependents "
-        f"{len(selected)} of {len(members)} members",
+        f"{len(reached)} of {len(members)} members",
         file=sys.stderr,
     )
-    if len(selected) >= WORKSPACE_SHARE * len(members):
-        everything(f"{len(selected)} of {len(members)} members reached", members, cmds)
-    builds = feature_builds(selected, cmds)
-    emit(
-        scope="packages",
-        clippy_args=" ".join(f"-p {p}" for p in sorted(selected)),
-        packages=" ".join(sorted(selected)),
-        builds=builds,
-    )
+    builds = feature_builds(reached, cmds)
+    emit(rust="true", reached=" ".join(sorted(reached)), builds=builds)
 
 
 if __name__ == "__main__":

@@ -173,14 +173,14 @@ only when both did:
   `Cargo.lock`, change files (`just ci-changes`), the workspace-hack, and
   the xtasks that only read sources and the graph: `feature-tests`,
   `docs`, `surfaces`, `fleet-deps --check` and `boundaries`.
-- `lint`: main's `cargo clippy --all-targets`, on the crates the PR can
-  break (`scripts/pr-scope.py`: every member owning, or `include_str!`-ing,
-  a changed file, plus every member depending on one; the whole workspace
-  when `Cargo.lock`, the toolchain, `.cargo/` or the CI changes), then a
-  `cargo clippy` of each `feature-tests.toml` pass and of the headless node
-  (`-p architect-desktop --no-default-features --features vox`) that a
-  selected crate is in. Every target is linted: tests, benches, examples,
-  as Linux builds them.
+- `lint`: main's `cargo clippy --workspace --all-targets` (every target:
+  tests, benches, examples, as Linux builds them) whenever the PR changes
+  a crate, then a `cargo clippy` of each `feature-tests.toml` pass and of
+  the headless node (`-p architect-desktop --no-default-features
+  --features vox`) that the PR reaches: `scripts/pr-scope.py` maps the
+  changed files to the members owning (or `include_str!`-ing) them plus
+  every member depending on those, and reaches everything when
+  `Cargo.lock`, the toolchain, `.cargo/` or the CI changes.
 
 Its Rust cache (third-party crates only) is saved by the same workflow on
 each push to `main`, so a PR restores main's.

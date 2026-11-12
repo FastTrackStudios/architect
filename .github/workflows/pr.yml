@@ -1,8 +1,8 @@
 name: pr
 
-# A PR's check, on hosted runners: main's Lint (checks.yml) on the crates
-# the PR can break, every check that compiles nothing, and the xtasks that
-# only read sources and the graph. What it leaves to main's full suite
+# A PR's check, on hosted runners: main's Lint (checks.yml), the feature
+# builds the PR reaches, every check that compiles nothing, and the xtasks
+# that only read sources and the graph. What it leaves to main's full suite
 # (tests, wasm, builtins, tags) runs after the merge on the self-hosted
 # pool, which never runs a public repo's PR code.
 #
@@ -144,7 +144,7 @@ jobs:
         if: ${{ !cancelled() && steps.xtask.outcome == 'success' }}
         run: target/xtask/debug/xtask boundaries
 
-  # What main's Lint compiles, on the crates this PR reaches.
+  # Main's clippy, and the feature combinations the PR reaches.
   lint:
     name: ${{ github.event_name == 'push' && 'lint (warms the PR cache)' || 'lint' }}
     runs-on: ubuntu-latest
@@ -177,10 +177,10 @@ jobs:
         with:
           shared-key: pr-lint
           save-if: ${{ github.event_name == 'push' || github.head_ref == 'ci/pr-lint' }}  # TEMP
-      # The crates this PR can break (scripts/pr-scope.py): every member
-      # owning (or `include_str!`-ing) a changed file, and every member
-      # depending on one. A toolchain, lockfile or CI change is the whole
-      # workspace, as is a push to main.
+      # Whether the PR touches a crate, and which crates it reaches
+      # (scripts/pr-scope.py): every member owning (or `include_str!`-ing)
+      # a changed file, and every member depending on one. A toolchain,
+      # lockfile or CI change reaches everything, as does a push to main.
       - name: scope
         id: scope
         run: |
@@ -192,16 +192,17 @@ jobs:
             python3 scripts/pr-scope.py HEAD HEAD --all --cmds "$RUNNER_TEMP/builds.sh" | tee -a "$GITHUB_OUTPUT"
           fi
           echo "feature builds:"; grep -v '^set' "$RUNNER_TEMP/builds.sh" || true
-      # Main's lint (`cargo clippy --workspace --all-targets`, warnings
-      # denied) on every target of the selected crates: lib, bins, tests,
-      # benches, examples, as Linux builds them.
+      # Main's lint, exactly: every target of every member (lib, bins,
+      # tests, benches, examples, as Linux builds them), warnings denied.
+      # The whole workspace, not the reached crates: about three minutes
+      # warm, and a `-p` subset resolves features differently from main.
       - name: clippy
-        if: ${{ steps.scope.outputs.scope != 'none' }}
-        run: cargo clippy ${{ steps.scope.outputs.clippy_args }} --all-targets
+        if: ${{ steps.scope.outputs.rust == 'true' }}
+        run: cargo clippy --workspace --all-targets
       # The feature combinations main compiles beyond the workspace build:
-      # each feature-tests.toml pass a selected crate is in, and the
-      # headless node (scripts/pr-scope.py, EXTRA_BUILDS). Linted, which
-      # reuses the step above's work.
+      # each feature-tests.toml pass a reached crate is in, and the headless
+      # node (scripts/pr-scope.py, EXTRA_BUILDS). Linted, which reuses the
+      # step above's work.
       - name: feature builds
         if: ${{ !cancelled() && steps.scope.outputs.builds != '0' }}
         run: bash -x "$RUNNER_TEMP/builds.sh"
