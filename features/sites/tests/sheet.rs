@@ -102,3 +102,27 @@ fn the_icon_buttons_a_finger_taps_are_44_px() {
     // No narrower override on a phone.
     assert!(!part.contains("[data-track-open] { width: 36px; }"));
 }
+
+/// A playlist's block keeps `overflow: auto` (the box a block is drawn in,
+/// inline and `!important`), so nothing of a row may reach past it: a
+/// negative margin on the row's menu button scrolled every phone's list
+/// sideways (a bar under the list, white in a dark theme).
+#[test]
+fn nothing_of_a_row_reaches_past_its_block() {
+    for (selector, body) in rules(players_part()) {
+        if !selector.contains("[data-playlist]") {
+            continue;
+        }
+        for decl in body.split(';') {
+            let Some((prop, value)) = decl.split_once(':') else {
+                continue;
+            };
+            let prop = prop.trim();
+            let horizontal = matches!(prop, "margin-right" | "margin-left" | "margin" | "margin-inline" | "margin-inline-end");
+            assert!(
+                !(horizontal && value.contains('-')),
+                "{selector} {{ {prop}:{value} }}"
+            );
+        }
+    }
+}
