@@ -255,6 +255,13 @@ impl Checker {
             self.load_and_render(&package, &mut report);
             self.check_pages(folder, manifest, &mut report);
         }
+        // A `[[favourites]]` declaration the manifest left out: its author
+        // hears of it here (the manifest itself still reads).
+        for why in &manifest.favourites_dropped {
+            report
+                .problem("manifest", format!("favourites: {why}"))
+                .field = Some("favourites".to_owned());
+        }
         report.ok = report.problems.is_empty();
         span.record("ext.ok", report.ok);
         report

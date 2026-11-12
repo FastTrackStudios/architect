@@ -207,6 +207,11 @@ layer = "L0"
 note = "the palette, resolver, cascade and store: pure data"
 
 [[row]]
+package = "architect-favourites"
+layer = "L0"
+note = "a note type's favourites and primary action: pure data"
+
+[[row]]
 package = "architect-theme"
 features = ["actions"]
 layer = "L0"
