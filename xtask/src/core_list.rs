@@ -1389,7 +1389,8 @@ fn verify(root: &Path) -> Result<(), String> {
                             e.id, p.sha256
                         )),
                         None => {
-                            problems.push(format!("`{}`: the signed sums do not list {name}", e.id))
+                            problems
+                                .push(format!("`{}`: the signed sums do not list {name}", e.id));
                         }
                     }
                 }
