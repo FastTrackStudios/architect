@@ -3161,8 +3161,13 @@ async fn a_lowered_link_serves_nothing_while_the_vault_cannot_be_read() {
         .await
         .unwrap();
     let served = served_over(&url, stem, 40, Duration::from_millis(50)).await;
+    // Unavailable for now: stored by no cache, and when to ask again.
+    let (status, headers, _) = get(&format!("{url}{stem}"), None).await;
     architect_desktop::node::shares::fail_vault_views_for_tests(false);
     assert_eq!(served, 0, "the old folder's stem was served");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(headers["cache-control"], "no-store");
+    assert_eq!(headers["retry-after"], "5");
     // Readable again: held back by its layer.
     let mut held = StatusCode::OK;
     for _ in 0..100 {

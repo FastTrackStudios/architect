@@ -214,7 +214,12 @@ struct VaultView {
     /// Each placed file by its folded path (`share_layers::fold`, `//`
     /// collapsed): how another spelling of it is found. By the rules'
     /// generation, as `placed`.
-    folded: Mutex<Option<(u64, Arc<HashMap<String, Vec<String>>>)>>,
+    folded: Mutex<
+        Option<(
+            Arc<HashMap<String, Listen>>,
+            Arc<HashMap<String, Vec<String>>>,
+        )>,
+    >,
     /// What of the vault did not read (a note, a folder): while there is
     /// any, where files are is not known (#540's third review).
     unread: Vec<String>,
@@ -617,32 +622,38 @@ impl Shares {
         placed
     }
 
-    /// The placed files of `share`'s vault by their folded path, for
-    /// [`Self::above`]. Built once per placement. Blocking.
+    /// The files of `placed` by their folded path, for [`Self::above`].
+    /// Built once per placement: the slot remembers which placement it
+    /// folded (the same allocation), so a vault or rules change between
+    /// [`Self::placed`] and here never answers from another placement's
+    /// map. Blocking.
     fn folded(
         &self,
         share: &Share,
-        placed: &HashMap<String, Listen>,
+        placed: &Arc<HashMap<String, Listen>>,
     ) -> Arc<HashMap<String, Vec<String>>> {
-        let generation = self.0.layers.current().generation;
+        let fold = || {
+            let mut folded: HashMap<String, Vec<String>> = HashMap::new();
+            for file in placed.keys() {
+                folded
+                    .entry(fold_path(file))
+                    .or_default()
+                    .push(file.clone());
+            }
+            Arc::new(folded)
+        };
+        // No view to remember it on: folded for this request alone.
         let Some(view) = self.view(&share.vault) else {
-            return Arc::default();
+            return fold();
         };
         let mut slot = view.folded.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some((at, folded)) = slot.as_ref() {
-            if *at == generation {
+        if let Some((of, folded)) = slot.as_ref() {
+            if Arc::ptr_eq(of, placed) {
                 return Arc::clone(folded);
             }
         }
-        let mut folded: HashMap<String, Vec<String>> = HashMap::new();
-        for file in placed.keys() {
-            folded
-                .entry(fold_path(file))
-                .or_default()
-                .push(file.clone());
-        }
-        let folded = Arc::new(folded);
-        *slot = Some((generation, Arc::clone(&folded)));
+        let folded = fold();
+        *slot = Some((Arc::clone(placed), Arc::clone(&folded)));
         folded
     }
 
@@ -1674,11 +1685,16 @@ async fn needs_layer(
 /// `503`: the link's pages are being built (or a file of it cannot be
 /// read now).
 fn being_built() -> Response {
-    page(
+    let mut response = page(
         StatusCode::SERVICE_UNAVAILABLE,
         "Being built",
         "<p>This link's pages are being built. Try again in a moment.</p>",
-    )
+    );
+    // When to ask again ([`private`] keeps it out of every cache).
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+    response
 }
 
 /// `403` for a file of layer `needs` on a link that plays to `cap`: the
@@ -1703,6 +1719,9 @@ fn layer_refusal(cap: Listen, needs: Listen) -> Response {
 /// other sites), not listed unless public, not cached by anybody else
 /// when it is for signed-in people.
 fn private(share: &Share, mut response: Response) -> Response {
+    // A link that is being built is stored nowhere: what it answers next
+    // is not what it answers now.
+    let unavailable = response.status() == StatusCode::SERVICE_UNAVAILABLE;
     let headers = response.headers_mut();
     headers.insert(
         header::REFERRER_POLICY,
@@ -1716,6 +1735,8 @@ fn private(share: &Share, mut response: Response) -> Response {
     }
     let cache = if share.audience.signed_in() {
         "private, no-store"
+    } else if unavailable {
+        "no-store"
     } else {
         "no-cache"
     };
