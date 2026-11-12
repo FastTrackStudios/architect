@@ -20,6 +20,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use architect_extensions::contrib::Claim;
+use architect_extensions::manifest::Manifest;
+use architect_extensions::share_layers::ShareLayersDecl;
 
 use crate::blocks::{Block, BlockRenderer, Blocks, Drawn};
 
@@ -103,6 +105,183 @@ impl BlockRenderer for InstalledBlocks {
             Some((_, drawn)) => drawn.map(Drawn::Html),
             None => Err(format!("no extension claims {}", block.claim)),
         }
+    }
+}
+
+/// The `[[share_layers]]` rules (#528) of the extensions installed in a
+/// folder: which layer of a share link each file of their note types is
+/// in. Read again when what is in the folder changes.
+///
+/// A slot is read as the installer reads it
+/// (`architect_extensions::install`): its own `extension.toml`, else the
+/// package its `installed.toml` links to (a development copy installed
+/// from a path). A slot whose manifest does not read where it resolves is
+/// broken.
+pub struct InstalledLayers {
+    dir: PathBuf,
+    held: Mutex<(Option<Vec<SlotStamp>>, Arc<Installed>)>,
+}
+
+/// One installed extension's layer rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    /// Its slot's folder name under the extensions folder.
+    pub folder: String,
+    /// The id its manifest claims.
+    pub id: String,
+    /// Its rules (none: it declares none).
+    pub rules: Vec<ShareLayersDecl>,
+}
+
+/// The installed extensions' layer rules, as the folder was when read.
+#[derive(Debug, Default)]
+pub struct Installed {
+    /// Counts up each time the folder is read again (it changed).
+    pub generation: u64,
+    /// Each extension read.
+    pub packages: Vec<Package>,
+    /// Each manifest that could not be read or is not a manifest, and
+    /// why. While there is one, which layer a file is in is not known.
+    pub broken: Vec<(PathBuf, String)>,
+}
+
+/// One file as stamped: when it was written, its size and its inode
+/// (0 where there is none), so two writes in one tick of a coarse clock
+/// are still told apart.
+type FileStamp = Option<(SystemTime, u64, u64)>;
+
+/// A slot as stamped: its name, and its `extension.toml`, its
+/// `installed.toml` and the manifest it links to.
+type SlotStamp = (String, [FileStamp; 3]);
+
+fn file_stamp(path: &Path) -> FileStamp {
+    let meta = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    Some((meta.modified().ok()?, meta.len(), inode))
+}
+
+impl std::fmt::Debug for InstalledLayers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstalledLayers")
+            .field("dir", &self.dir)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Where a slot's manifest is: its own, or its linked package's. None:
+/// nothing is installed there.
+fn manifest_of(slot: &Path) -> Option<Result<PathBuf, String>> {
+    let own = slot.join("extension.toml");
+    if own.is_file() {
+        return Some(Ok(own));
+    }
+    let record = slot.join("installed.toml");
+    if !record.is_file() {
+        return None;
+    }
+    Some(
+        std::fs::read_to_string(&record)
+            .map_err(|e| e.to_string())
+            .and_then(|text| text.parse::<toml::Table>().map_err(|e| e.to_string()))
+            .and_then(|table| {
+                table
+                    .get("link")
+                    .and_then(toml::Value::as_str)
+                    .map(|link| slot.join(link).join("extension.toml"))
+                    .ok_or_else(|| {
+                        format!(
+                            "{} names no package (`link`) and the slot has no extension.toml",
+                            record.display()
+                        )
+                    })
+            }),
+    )
+}
+
+/// What `dir` holds, for [`InstalledLayers`]: each slot and when its
+/// manifests were written, in order.
+fn slot_stamps(dir: &Path) -> Vec<SlotStamp> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<SlotStamp> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| {
+            let slot = e.path();
+            let linked = match manifest_of(&slot) {
+                Some(Ok(path)) => file_stamp(&path),
+                _ => None,
+            };
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                [
+                    file_stamp(&slot.join("extension.toml")),
+                    file_stamp(&slot.join("installed.toml")),
+                    linked,
+                ],
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+impl InstalledLayers {
+    /// The extensions installed in `dir` (missing: none yet).
+    #[must_use]
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            dir: dir.into(),
+            held: Mutex::default(),
+        }
+    }
+
+    /// What the folder holds now: read again if it changed. A manifest
+    /// that does not read is warned of once, naming the file.
+    #[must_use]
+    pub fn read(&self) -> Arc<Installed> {
+        let stamp = slot_stamps(&self.dir);
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.0.as_ref() != Some(&stamp) {
+            let mut read = Installed {
+                generation: held.1.generation.wrapping_add(1),
+                ..Installed::default()
+            };
+            for (folder, _) in &stamp {
+                if folder.starts_with('.') {
+                    continue;
+                }
+                let read_one = match manifest_of(&self.dir.join(folder)) {
+                    None => continue,
+                    Some(Err(why)) => Err((self.dir.join(folder).join("installed.toml"), why)),
+                    Some(Ok(path)) => std::fs::read_to_string(&path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|text| Manifest::parse(&text).map_err(|e| e.to_string()))
+                        .map_err(|why| (path, why)),
+                };
+                match read_one {
+                    Ok(manifest) => read.packages.push(Package {
+                        folder: folder.clone(),
+                        id: manifest.id,
+                        rules: manifest.share_layers,
+                    }),
+                    Err((path, error)) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            %error,
+                            "an installed extension's manifest does not read: until it is fixed, share links below Full hold back every attached file"
+                        );
+                        read.broken.push((path, error));
+                    }
+                }
+            }
+            *held = (Some(stamp), Arc::new(read));
+        }
+        Arc::clone(&held.1)
     }
 }
 
@@ -228,5 +407,35 @@ mod tests {
 
         std::fs::remove_dir_all(&pkg).unwrap();
         assert!(!installed.claims(&kf));
+    }
+
+    /// Two writes of a manifest in one tick of a coarse clock: the second
+    /// (another size) is read, not the first kept (#540's third review).
+    #[test]
+    fn a_manifest_rewritten_within_one_tick_is_read_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let slot = tmp.path().join("demo.songs");
+        std::fs::create_dir_all(&slot).unwrap();
+        let manifest = slot.join("extension.toml");
+        let head = "id = \"demo.songs\"\nname = \"X\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n";
+        std::fs::write(
+            &manifest,
+            format!("{head}[[share_layers]]\nnote_type = \"song\"\nfull = [\"Media/**\"]\n"),
+        )
+        .unwrap();
+        let when = std::fs::metadata(&manifest).unwrap().modified().unwrap();
+        let layers = InstalledLayers::new(tmp.path());
+        assert_eq!(layers.read().packages[0].rules[0].full, ["Media/**"]);
+        std::fs::write(&manifest, format!("{head}[[share_layers]]\nnote_type = \"song\"\nfull = [\"Media/**\", \"Stems/**\"]\n")).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&manifest)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+        assert_eq!(
+            layers.read().packages[0].rules[0].full,
+            ["Media/**", "Stems/**"]
+        );
     }
 }

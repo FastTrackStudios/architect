@@ -51,6 +51,18 @@
 //! order, read per request), which the site's player
 //! (`features/sites/assets/player.js`) plays through.
 //!
+//! A link plays to a layer (#528, [`Listen`]: page, reference, full),
+//! set on the share and narrowed per audience. The `[[share_layers]]`
+//! rules of the node's extensions place each file a note of their type
+//! attaches ([`LayerRules`]); a file above the link's layer is refused
+//! (`403`, saying the layer it needs) on every route that hands out
+//! bytes: the file itself (by its name, or any other spelling of the same
+//! file on disk), the files page, the archive and the queue leave it out.
+//! `<link>_files.json` lists what the link serves, for a client that
+//! opens a song over it (Studio): each file's size, hash, layer and URL,
+//! the link's layer and the layer asked for (`?listen=`, never past the
+//! link's). A file no rule places is a page file, served as before.
+//!
 //! Nothing outside a share's scope is ever built into it, so nothing
 //! outside it can be served: the site is built from the scope's notes
 //! alone, its links to other notes are plain text, and an attachment is
@@ -61,7 +73,7 @@
 //! and the node sets its session as an `HttpOnly` cookie. The node never
 //! sees a password.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -83,15 +95,16 @@ use architect_spaces::share::{
     validate, validate_audience, validate_domain,
 };
 use architect_spaces::{
-    NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment, ShareFault, ShareLinks,
-    ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments, parse_share_note,
-    share_note,
+    LayersReport, Listen, NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment,
+    ShareFault, ShareLinks, ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments,
+    parse_share_note, share_note,
 };
 use tokio::sync::{Notify, watch};
 use vault_live::Backend;
 use vault_proto::{IfMatch, VaultSync as _};
 
 use super::org::{IssuerLane, NodeOrg};
+use super::share_layers::{LayerRules, same_file, within};
 
 /// The cookie a signed-in viewer's issuer session is kept in.
 pub const SESSION_COOKIE: &str = "architect_session";
@@ -103,11 +116,23 @@ const SIGNIN_COOKIE: &str = "architect_signin";
 const SIGNIN_PATH: &str = "/s/_signin";
 /// How long the vault is left to settle before the shares are rebuilt.
 const SETTLE: Duration = Duration::from_millis(400);
+/// How often the layer rules are looked at for a change to build for.
+const RULES_EVERY: Duration = Duration::from_secs(2);
 /// How long a resolved viewer is trusted before the issuer is asked again.
 const VIEWER_TTL: Duration = Duration::from_secs(60);
 /// The most comments a share keeps; the longest one.
 const MAX_COMMENTS: usize = 2000;
 const MAX_COMMENT: usize = 4000;
+
+/// Set by [`fail_vault_views_for_tests`]: every vault view is unreadable.
+static VIEWS_FAIL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Make every vault view unreadable (`true`) or readable again: a test's
+/// way to hold the moment a vault cannot be read (#540's third review).
+#[doc(hidden)]
+pub fn fail_vault_views_for_tests(fail: bool) {
+    VIEWS_FAIL.store(fail, Ordering::SeqCst);
+}
 
 /// Unix seconds now.
 #[must_use]
@@ -180,10 +205,43 @@ struct VaultView {
     vault: Vault,
     /// What each link lists in this vault, once asked.
     listings: Mutex<HashMap<String, Arc<Vec<Entry>>>>,
+    /// Every note, hidden ones too, with every file it links: what
+    /// places a file in a layer (#528), once asked.
+    notes: std::sync::OnceLock<Vec<Entry>>,
+    /// Where each file is placed, by the rules' generation it was placed
+    /// with (None inside: not known).
+    placed: Mutex<Option<(u64, Option<Arc<HashMap<String, Listen>>>)>>,
+    /// Each placed file by its folded path (`share_layers::fold`, `//`
+    /// collapsed): how another spelling of it is found. By the rules'
+    /// generation, as `placed`.
+    folded: Mutex<
+        Option<(
+            Arc<HashMap<String, Listen>>,
+            Arc<HashMap<String, Vec<String>>>,
+        )>,
+    >,
+    /// What of the vault did not read (a note, a folder): while there is
+    /// any, where files are is not known (#540's third review).
+    unread: Vec<String>,
 }
 
 /// A vault's view, and the lock one reader holds while it reads it.
 type ViewSlot = Arc<Mutex<Option<Arc<VaultView>>>>;
+
+/// Whether a file is served on a link below Full ([`Shares::above`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hold {
+    /// Serve it (or its 404).
+    Serve,
+    /// Held back: it needs this layer.
+    Held(Listen),
+    /// Above the layer and not one of the link's files: answered as a
+    /// path that is nowhere.
+    Hidden,
+    /// The folder is being swapped in, or the file cannot be read: held
+    /// back, as "being built".
+    Building,
+}
 
 /// What a request to an audience's link is answered with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +274,8 @@ struct Inner {
     kick: Mutex<HashMap<String, Arc<Notify>>>,
     /// What draws the fences extensions claim (#488).
     blocks: architect_sites::Blocks,
+    /// Which layer each attached file is in (#528).
+    layers: LayerRules,
     /// Per vault: how many times it has changed. A view of it older
     /// than this is read again before a request is checked against it.
     moved: Mutex<HashMap<String, Arc<AtomicU64>>>,
@@ -232,7 +292,7 @@ struct Pending {
 impl Shares {
     /// The shares of `backend`'s vaults, built under `data/shares`, their
     /// pages drawing the fences `blocks` claim as the app draws them
-    /// (#488).
+    /// (#488), their files placed in layers by `layers` (#528).
     #[must_use]
     pub fn new(
         backend: Backend,
@@ -240,6 +300,7 @@ impl Shares {
         org: Option<NodeOrg>,
         issuer: Option<&str>,
         blocks: architect_sites::Blocks,
+        layers: LayerRules,
     ) -> Self {
         Self(Arc::new(Inner {
             backend,
@@ -252,6 +313,7 @@ impl Shares {
             signins: Mutex::new(HashMap::new()),
             kick: Mutex::new(HashMap::new()),
             blocks,
+            layers,
             moved: Mutex::new(HashMap::new()),
             views: Mutex::new(HashMap::new()),
         }))
@@ -371,30 +433,51 @@ impl Shares {
         };
         let at = self.0.out.join(&share.code);
         let mut manifests: HashMap<String, Arc<Manifest>> = HashMap::new();
-        let options = |base: String, filter: Option<String>| {
+        // Each link names no file above how far it plays (#528). While the
+        // vault cannot be read, nothing is built: the folders stay as they
+        // were, and a link below Full answers nothing from them.
+        let caps: BTreeSet<Listen> = std::iter::once(share.listen)
+            .chain(share.audiences.iter().map(|a| share.listen_for(Some(a))))
+            .collect();
+        let mut held: HashMap<Listen, BTreeSet<String>> = HashMap::new();
+        for cap in caps {
+            let Some(set) = self.held_back(share, cap) else {
+                tracing::warn!(code = %share.code, vault = %share.vault, "a shared vault does not read: its links are not built again until it does");
+                return;
+            };
+            held.insert(cap, set);
+        }
+        let options = |base: String, filter: Option<String>, cap: Listen| {
             let mut opts =
                 architect_sites::Options::new(&root, share.title.clone().unwrap_or_default());
             opts.live_reload = Some(format!("{base}_live"));
             opts.base = base;
             opts.scope = scope(&share.scope);
             opts.filter = filter;
+            if let Some(set) = held.get(&cap) {
+                opts.hold_back.clone_from(set);
+            }
             opts
         };
         // Its own link: the whole scope. And its domain's root.
-        if let Some(manifest) =
-            self.build_one(share, &options(share.path(), None), &at.join("site"))
-        {
+        let own = options(share.path(), None, share.listen);
+        if let Some(manifest) = self.build_one(share, &own, &at.join("site")) {
             manifests.insert(share.code.clone(), Arc::new(manifest));
         }
         if share.domain.is_some() {
-            self.build_one(share, &options("/".to_owned(), None), &at.join("domain"));
+            let domain = options("/".to_owned(), None, share.listen);
+            self.build_one(share, &domain, &at.join("domain"));
         } else {
             let _ = std::fs::remove_dir_all(at.join("domain"));
         }
         // Each audience: the notes its filter holds for, and no others.
         for audience in &share.audiences {
             let out = self.audience_dir(&share.code, &audience.code).join("site");
-            let opts = options(audience.path(), Some(audience.filter.clone()));
+            let opts = options(
+                audience.path(),
+                Some(audience.filter.clone()),
+                share.listen_for(Some(audience)),
+            );
             // An audience nothing is in has no pages, and says so.
             let manifest = self.build_one(share, &opts, &out).unwrap_or_default();
             manifests.insert(audience.code.clone(), Arc::new(manifest));
@@ -450,6 +533,9 @@ impl Shares {
     /// `vault` as it is now: read again if it has changed since it was
     /// last read. Blocking (it reads the vault's notes).
     fn view(&self, vault: &str) -> Option<Arc<VaultView>> {
+        if VIEWS_FAIL.load(Ordering::SeqCst) {
+            return None;
+        }
         let slot: ViewSlot = {
             let mut views = self.0.views.lock().unwrap_or_else(PoisonError::into_inner);
             Arc::clone(views.entry(vault.to_owned()).or_default())
@@ -461,13 +547,17 @@ impl Shares {
             return Some(Arc::clone(view));
         }
         let root = self.0.backend.root(vault).ok()?;
-        let read = listing::open(&root)
+        let (read, unread) = listing::open_reporting(&root)
             .map_err(|error| tracing::warn!(%vault, %error, "a shared vault could not be read"))
             .ok()?;
         let view = Arc::new(VaultView {
             generation,
             vault: read,
             listings: Mutex::new(HashMap::new()),
+            notes: std::sync::OnceLock::new(),
+            placed: Mutex::new(None),
+            folded: Mutex::new(None),
+            unread,
         });
         *held = Some(Arc::clone(&view));
         drop(held);
@@ -499,6 +589,189 @@ impl Shares {
         let entries = Arc::new(entries);
         listings().insert(key, Arc::clone(&entries));
         entries
+    }
+
+    /// The layer of each file of `share`'s vault above the page, as the
+    /// vault and the rules are now: placed by every note that links it,
+    /// in the share's scope or not, hidden or not, so a note outside the
+    /// scope never lowers it. Placed once per vault change or rules
+    /// change, never per request. None when it is not known (a manifest
+    /// or the vault does not read): hold everything back. Blocking
+    /// ([`Self::view`]).
+    fn placed(&self, share: &Share) -> Option<Arc<HashMap<String, Listen>>> {
+        let current = self.0.layers.current();
+        if current.is_empty() {
+            return Some(Arc::default());
+        }
+        let view = self.view(&share.vault)?;
+        let mut slot = view.placed.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((generation, placed)) = slot.as_ref() {
+            if *generation == current.generation {
+                return placed.clone();
+            }
+        }
+        // A note the vault could not read may place files: unknown.
+        let placed = if view.unread.is_empty() {
+            let notes = view.notes.get_or_init(|| listing::every_note(&view.vault));
+            LayerRules::place(&current, notes).map(Arc::new)
+        } else {
+            tracing::warn!(vault = %share.vault, unread = ?view.unread, "part of a shared vault does not read: share links below Full hold back every attached file");
+            None
+        };
+        *slot = Some((current.generation, placed.clone()));
+        placed
+    }
+
+    /// The files of `placed` by their folded path, for [`Self::above`].
+    /// Built once per placement: the slot remembers which placement it
+    /// folded (the same allocation), so a vault or rules change between
+    /// [`Self::placed`] and here never answers from another placement's
+    /// map. Blocking.
+    fn folded(
+        &self,
+        share: &Share,
+        placed: &Arc<HashMap<String, Listen>>,
+    ) -> Arc<HashMap<String, Vec<String>>> {
+        let fold = || {
+            let mut folded: HashMap<String, Vec<String>> = HashMap::new();
+            for file in placed.keys() {
+                folded
+                    .entry(fold_path(file))
+                    .or_default()
+                    .push(file.clone());
+            }
+            Arc::new(folded)
+        };
+        // No view to remember it on: folded for this request alone.
+        let Some(view) = self.view(&share.vault) else {
+            return fold();
+        };
+        let mut slot = view.folded.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((of, folded)) = slot.as_ref() {
+            if Arc::ptr_eq(of, placed) {
+                return Arc::clone(folded);
+            }
+        }
+        let folded = fold();
+        *slot = Some((Arc::clone(placed), Arc::clone(&folded)));
+        folded
+    }
+
+    /// The attachments a link of `share` that plays to `cap` holds back:
+    /// built but never named (`architect_sites::Options::hold_back`).
+    /// Every attached file while placement is unknown; None while the
+    /// vault cannot be read at all (build nothing then). Blocking.
+    fn held_back(&self, share: &Share, cap: Listen) -> Option<BTreeSet<String>> {
+        if cap == Listen::Full {
+            return Some(BTreeSet::new());
+        }
+        let view = self.view(&share.vault)?;
+        Some(self.placed(share).map_or_else(
+            || {
+                view.notes
+                    .get_or_init(|| listing::every_note(&view.vault))
+                    .iter()
+                    .flat_map(|e| e.files.iter().cloned())
+                    .collect()
+            },
+            |placed| {
+                placed
+                    .iter()
+                    .filter(|(_, layer)| **layer > cap)
+                    .map(|(file, _)| file.clone())
+                    .collect()
+            },
+        ))
+    }
+
+    /// Whether the file at `rest` (a path below the link of `share` for
+    /// `audience`, built into `dir`) is held back from a link that plays
+    /// to `cap`. Blocking.
+    ///
+    /// Decided first by its key, from the placement (cached), among the
+    /// files of this link alone (so a link says nothing of a file outside
+    /// it), before the disk is touched. A held-back file is never built
+    /// into a link, so only a folder from before a change of layer can
+    /// hold one: then by what the request opens on disk, so no other
+    /// spelling (its case, its Unicode form, `//`) reaches it. A folder or
+    /// a file that cannot be read is held back ([`Hold::Building`]), never
+    /// served. While placement is unknown every file of the link is held
+    /// back.
+    fn above(
+        &self,
+        share: &Share,
+        audience: Option<&ShareAudience>,
+        dir: &Path,
+        rest: &str,
+        cap: Listen,
+    ) -> Hold {
+        if cap == Listen::Full {
+            return Hold::Serve;
+        }
+        // Where files are must be known, from a vault read whole: else a
+        // link below Full answers nothing (a folder built before a change
+        // may hold anything).
+        if self.view(&share.vault).is_none() {
+            return Hold::Building;
+        }
+        let Some(placed) = self.placed(share) else {
+            return Hold::Building;
+        };
+        let decoded = decode(rest);
+        let unsafe_path = decoded
+            .split('/')
+            .any(|s| s == ".." || s == "." || s.contains('\\') || s.contains('\0'));
+        if unsafe_path {
+            return Hold::Serve;
+        }
+        let key = decoded.trim_start_matches('/');
+        let listing = self.listing(share, audience);
+        let mine: std::collections::HashSet<&str> = listing
+            .iter()
+            .flat_map(|e| e.files.iter().map(String::as_str))
+            .collect();
+        // Above the link's layer: 403 if the link lists it, else the same
+        // 404 as a path that is nowhere (it says nothing of a file it does
+        // not list, even one an older build left in its folder).
+        let answer = |file: &str, layer: Listen| {
+            if mine.contains(file) {
+                Hold::Held(layer)
+            } else {
+                Hold::Hidden
+            }
+        };
+        // By key, before the disk.
+        if let Some(layer) = placed.get(key).filter(|layer| **layer > cap) {
+            return answer(key, *layer);
+        }
+        // On disk: what the folder holds now. Another spelling of a placed
+        // file (its case, its Unicode form, `//`) is found by its folded
+        // path and confirmed by what the request opens.
+        if !dir.is_dir() {
+            return Hold::Building;
+        }
+        let mut path = dir.join(key);
+        if decoded.ends_with('/') || path.is_dir() {
+            path = path.join("index.html");
+        }
+        match std::fs::metadata(&path) {
+            Ok(asked) if asked.is_file() => {
+                let folded = self.folded(share, &placed);
+                folded
+                    .get(&fold_path(key))
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|file| placed.get(file).filter(|l| **l > cap).map(|l| (file, *l)))
+                    .find(|(file, _)| same_file(&asked, &dir.join(file.as_str())))
+                    .map_or(Hold::Serve, |(file, layer)| answer(file, layer))
+            }
+            Ok(_) => Hold::Serve,
+            // Not readable in a folder that is there: `file` reads the
+            // same path and fails the same way (its 404).
+            Err(_) if dir.is_dir() => Hold::Serve,
+            // The folder went away under the request: held back.
+            Err(_) => Hold::Building,
+        }
     }
 
     /// Whether `audience`'s link answers `rest` (a path below it), in
@@ -535,6 +808,15 @@ impl Shares {
             } else {
                 Guard::Refused
             };
+        }
+        // A file of its own notes that its build held back (above its
+        // layer, #528): its own, answered by the layer check after this.
+        let vault_path = key.trim_start_matches('/');
+        if listed()
+            .iter()
+            .any(|e| e.files.iter().any(|f| f == vault_path))
+        {
+            return Guard::Open;
         }
         // A note or a file of the share that is not this audience's.
         let others = whole.is_some_and(|w| note(&w).is_some() || w.files.contains_key(key));
@@ -580,7 +862,24 @@ impl Shares {
                 me.build_all(&vault);
             }
         };
+        // The layer rules' generation the pages were built with: a rules
+        // change (an extension installed, fixed, removed, forgotten)
+        // builds them again, so no page names a file its link holds back.
+        let rules = {
+            let layers = self.0.layers.clone();
+            move || {
+                let layers = layers.clone();
+                async move {
+                    tokio::task::spawn_blocking(move || layers.current().generation)
+                        .await
+                        .unwrap_or_default()
+                }
+            }
+        };
+        let mut built_with = rules().await;
         let _ = tokio::task::spawn_blocking(pass.clone()).await;
+        let mut every = tokio::time::interval(RULES_EVERY);
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 heard = changes.recv() => {
@@ -591,7 +890,13 @@ impl Shares {
                     while changes.try_recv().is_ok() {}
                 }
                 () = kick.notified() => {}
+                _ = every.tick() => {
+                    if rules().await == built_with {
+                        continue;
+                    }
+                }
             }
+            built_with = rules().await;
             let _ = tokio::task::spawn_blocking(pass.clone()).await;
         }
     }
@@ -662,6 +967,7 @@ impl Shares {
             created_by: by.to_owned(),
             domain: new.domain.map(|d| d.trim().to_lowercase()),
             audiences: Vec::new(),
+            listen: new.listen,
         })
         .await
     }
@@ -683,6 +989,7 @@ impl Shares {
         match change {
             ShareChange::Audience(a) => share.audience = a.normalised(),
             ShareChange::Access(a) => share.access = a,
+            ShareChange::Listen(l) => share.listen = l,
             ShareChange::Expires(at) => share.expires_at = at,
             ShareChange::Title(t) => share.title = t.filter(|t| !t.trim().is_empty()),
             ShareChange::Domain(d) => {
@@ -770,7 +1077,40 @@ impl Shares {
             filter,
             code: self.new_code(),
             created_at: now(),
+            listen: new.listen,
         });
+        self.save(share).await
+    }
+
+    /// How far audience `name`'s link of share `code` plays: `listen`,
+    /// never past the share's; None: the share's.
+    ///
+    /// # Errors
+    ///
+    /// No such share or audience, a revoked share, or its note could not
+    /// be written.
+    pub async fn audience_listen(
+        &self,
+        code: &str,
+        name: &str,
+        listen: Option<Listen>,
+    ) -> Result<Share, ShareFault> {
+        let mut share = self
+            .get(code)
+            .ok_or_else(|| ShareFault::NotFound(code.to_owned()))?;
+        if share.revoked_at.is_some() {
+            return Err(ShareFault::Invalid(
+                "a revoked share stays revoked".to_owned(),
+            ));
+        }
+        let Some(audience) = share
+            .audiences
+            .iter_mut()
+            .find(|a| a.name.trim().eq_ignore_ascii_case(name.trim()))
+        else {
+            return Err(ShareFault::NotFound(format!("{code}: audience {name}")));
+        };
+        audience.listen = listen;
         self.save(share).await
     }
 
@@ -790,6 +1130,22 @@ impl Shares {
         share.audiences.retain(|a| a.code != gone.code);
         let _ = std::fs::remove_dir_all(self.audience_dir(&share.code, &gone.code));
         self.save(share).await
+    }
+
+    /// Whether the link `code` of `share` has a page at `key` (`/joy/`).
+    fn has_page(&self, share: &Share, code: &str, key: &str) -> bool {
+        let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
+        table
+            .get(&share.code)
+            .and_then(|h| h.manifests.get(code))
+            .is_some_and(|m| m.pages.contains_key(key) || (key == "/" && !m.pages.is_empty()))
+    }
+
+    /// Have every vault's shares built again (the layer rules changed).
+    fn kick_all(&self) {
+        for vault in self.0.backend.vault_ids() {
+            self.kick(&vault).notify_one();
+        }
     }
 
     /// Where an audience's pages are built.
@@ -981,6 +1337,45 @@ impl ShareLinks for SharesLane {
         self.0.remove_audience(&code, &name).await
     }
 
+    async fn audience_listen(
+        &self,
+        code: String,
+        name: String,
+        listen: Option<Listen>,
+    ) -> Result<Share, ShareFault> {
+        caller()?;
+        self.0.audience_listen(&code, &name, listen).await
+    }
+
+    async fn kept_layers(&self) -> Result<LayersReport, ShareFault> {
+        caller()?;
+        let layers = self.0.0.layers.clone();
+        blocking(move || layers.report())
+            .await
+            .ok_or_else(|| ShareFault::Internal("the kept rules did not read".to_owned()))
+    }
+
+    async fn forget_layers(&self, extension: String) -> Result<LayersReport, ShareFault> {
+        caller()?;
+        let layers = self.0.0.layers.clone();
+        let forgotten = blocking(move || layers.forget(&extension))
+            .await
+            .ok_or_else(|| ShareFault::Internal("the kept rules did not read".to_owned()))?
+            .map_err(ShareFault::Invalid)?;
+        self.0.kick_all();
+        Ok(forgotten)
+    }
+
+    async fn acknowledge_layers(&self) -> Result<LayersReport, ShareFault> {
+        caller()?;
+        let layers = self.0.0.layers.clone();
+        let report = blocking(move || layers.acknowledge())
+            .await
+            .ok_or_else(|| ShareFault::Internal("the kept rules did not read".to_owned()))?;
+        self.0.kick_all();
+        Ok(report)
+    }
+
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault> {
         caller()?;
         if self.0.get(&code).is_none() {
@@ -1168,17 +1563,28 @@ async fn serve(
         share: &share,
         audience: audience.as_ref(),
         mount,
+        listen: share.listen_for(audience.as_ref()),
     };
     let query = request.uri().query().unwrap_or_default().to_owned();
     let headers = request.headers().clone();
     match rest {
         "/_live" => live(shares, code),
         "/_files" | "/_files/" => private(&share, files_page(shares, &link, &query).await),
+        "/_files.json" => private(&share, files_json(shares, &link, &query).await),
         "/_archive.zip" => private(&share, archive(shares, &link, &query).await),
         "/_comment" if method == architect::http::axum::http::Method::POST => {
             comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
         }
         _ => {
+            // A rebuild swaps the folder in with two renames; in between
+            // it is not there for a moment. Wait that out first, so every
+            // check below sees the folder that will answer.
+            for _ in 0..SWAP_WAITS {
+                if dir.is_dir() {
+                    break;
+                }
+                tokio::time::sleep(SWAP_WAIT).await;
+            }
             // An audience's link: checked now, against the vault as it
             // is, whatever was built.
             if let Some(audience) = &audience {
@@ -1186,8 +1592,18 @@ async fn serve(
                     return private(&share, refusal);
                 }
             }
+            // A file above the link's layer, by any name: refused here,
+            // whatever the page shows.
+            match needs_layer(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
+                Hold::Serve => {}
+                Hold::Held(needs) => return private(&share, layer_refusal(link.listen, needs)),
+                Hold::Hidden => return private(&share, not_found(&dir).await),
+                Hold::Building => return private(&share, being_built()),
+            }
             let mut response = file(&dir, rest, &headers).await;
-            if share.comments() && is_html(&response) {
+            // Comments go on a page that is there, never on a 404 (whose
+            // body would then tell a refused path from one that is nowhere).
+            if share.comments() && response.status() == StatusCode::OK && is_html(&response) {
                 response = with_comments(shares, &share, rest, mount, response).await;
             }
             if response.status() == StatusCode::OK && is_html(&response) {
@@ -1217,11 +1633,16 @@ async fn refuse(
     };
     match asked.unwrap_or(Guard::Refused) {
         Guard::Open => None,
-        Guard::Refused => Some(page(
-            StatusCode::NOT_FOUND,
-            "Not found",
-            "<p>No such page.</p>",
-        )),
+        // Answered as a path that is nowhere is (the site's own 404), so
+        // the link says nothing of another audience's note or file.
+        Guard::Refused => Some(
+            not_found(
+                &shares
+                    .audience_dir(&share.code, &audience.code)
+                    .join("site"),
+            )
+            .await,
+        ),
         Guard::Building => Some(page(
             StatusCode::SERVICE_UNAVAILABLE,
             "Being built",
@@ -1235,10 +1656,72 @@ async fn refuse(
     }
 }
 
+/// Whether the file at `rest` is held back from a link that plays to
+/// `cap` ([`Shares::above`]).
+async fn needs_layer(
+    shares: &Shares,
+    share: &Share,
+    audience: Option<&ShareAudience>,
+    dir: &Path,
+    rest: &str,
+    cap: Listen,
+) -> Hold {
+    if cap == Listen::Full {
+        return Hold::Serve;
+    }
+    let (shares, share, audience, dir, rest) = (
+        shares.clone(),
+        share.clone(),
+        audience.cloned(),
+        dir.to_owned(),
+        rest.to_owned(),
+    );
+    // Not answered: held back, never served.
+    blocking(move || shares.above(&share, audience.as_ref(), &dir, &rest, cap))
+        .await
+        .unwrap_or(Hold::Held(Listen::Full))
+}
+
+/// `503`: the link's pages are being built (or a file of it cannot be
+/// read now).
+fn being_built() -> Response {
+    let mut response = page(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Being built",
+        "<p>This link's pages are being built. Try again in a moment.</p>",
+    );
+    // When to ask again ([`private`] keeps it out of every cache).
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+    response
+}
+
+/// `403` for a file of layer `needs` on a link that plays to `cap`: the
+/// layer named in the body and in `x-architect-layer`.
+fn layer_refusal(cap: Listen, needs: Listen) -> Response {
+    let mut response = page(
+        StatusCode::FORBIDDEN,
+        "Not on this link",
+        &format!(
+            "<p>This file is in the <b>{needs}</b> layer. This link plays to <b>{cap}</b>.</p>",
+            needs = needs.label(),
+            cap = cap.label()
+        ),
+    );
+    response
+        .headers_mut()
+        .insert("x-architect-layer", HeaderValue::from_static(needs.label()));
+    response
+}
+
 /// What every answer of a share carries: no referrer (the code stays off
 /// other sites), not listed unless public, not cached by anybody else
 /// when it is for signed-in people.
 fn private(share: &Share, mut response: Response) -> Response {
+    // A link that is being built is stored nowhere: what it answers next
+    // is not what it answers now.
+    let unavailable = response.status() == StatusCode::SERVICE_UNAVAILABLE;
     let headers = response.headers_mut();
     headers.insert(
         header::REFERRER_POLICY,
@@ -1252,6 +1735,8 @@ fn private(share: &Share, mut response: Response) -> Response {
     }
     let cache = if share.audience.signed_in() {
         "private, no-store"
+    } else if unavailable {
+        "no-store"
     } else {
         "no-cache"
     };
@@ -1263,6 +1748,11 @@ fn private(share: &Share, mut response: Response) -> Response {
 /// is read whole (comments and the bar go into it); any other file is
 /// streamed and answers `Range` (`206`, `Accept-Ranges`), so a page's
 /// `<audio>` and `<video>` seek without downloading the file (#511).
+/// How long, and how many times, a request waits for a link's folder
+/// being swapped in by a rebuild (in [`serve`], before any check).
+const SWAP_WAIT: Duration = Duration::from_millis(20);
+const SWAP_WAITS: usize = 10;
+
 async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
     let decoded = decode(rest);
     let safe = !decoded
@@ -1295,19 +1785,26 @@ async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
             "Being built",
             "<p>This link's pages are being built. Try again in a moment.</p>",
         ),
-        Err(_) => tokio::fs::read(dir.join("404.html")).await.map_or_else(
-            |_| page(StatusCode::NOT_FOUND, "Not found", "<p>No such page.</p>"),
-            |bytes| {
-                let mut response = Response::new(Body::from(bytes));
-                *response.status_mut() = StatusCode::NOT_FOUND;
-                response.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    HeaderValue::from_static("text/html; charset=utf-8"),
-                );
-                response
-            },
-        ),
+        Err(_) => not_found(dir).await,
     }
+}
+
+/// The answer for a path that is not in the link built into `dir`: its
+/// site's 404 page, else a plain one. The same for anything not there,
+/// whatever it is elsewhere.
+async fn not_found(dir: &Path) -> Response {
+    tokio::fs::read(dir.join("404.html")).await.map_or_else(
+        |_| page(StatusCode::NOT_FOUND, "Not found", "<p>No such page.</p>"),
+        |bytes| {
+            let mut response = Response::new(Body::from(bytes));
+            *response.status_mut() = StatusCode::NOT_FOUND;
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            );
+            response
+        },
+    )
 }
 
 fn content_type(path: &Path) -> &'static str {
@@ -1389,10 +1886,20 @@ async fn comment(
     if text.is_empty() || text.chars().count() > MAX_COMMENT || !form.page.starts_with('/') {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    // An audience comments on its own pages only.
+    // An audience comments on its own pages only, and a page it does
+    // not have is answered as one that is nowhere: the same either way.
     if let Some(audience) = audience {
-        if let Some(refusal) = refuse(shares, share, audience, &page_key(&form.page)).await {
+        let key = page_key(&form.page);
+        if let Some(refusal) = refuse(shares, share, audience, &key).await {
             return refusal;
+        }
+        if !shares.has_page(share, &audience.code, &key) {
+            return not_found(
+                &shares
+                    .audience_dir(&share.code, &audience.code)
+                    .join("site"),
+            )
+            .await;
         }
     }
     let by = match viewer {
@@ -1516,6 +2023,9 @@ struct Link<'a> {
     audience: Option<&'a ShareAudience>,
     /// Where it is served: `/s/<code>/`, or `/` on a domain.
     mount: &'a str,
+    /// How far it plays: the files above it are left out
+    /// ([`Share::listen_for`]).
+    listen: Listen,
 }
 
 impl Link<'_> {
@@ -1547,9 +2057,31 @@ struct Listed {
 
 impl Shares {
     /// What `link` lists now, grouped `by`, read from the vault as it
-    /// is. Blocking ([`Self::view`]).
-    fn listed(&self, share: &Share, audience: Option<&ShareAudience>, by: &Grouping) -> Listed {
+    /// is, with no file above `cap`. Blocking ([`Self::view`]).
+    fn listed(
+        &self,
+        share: &Share,
+        audience: Option<&ShareAudience>,
+        by: &Grouping,
+        cap: Listen,
+    ) -> Listed {
         let entries = self.listing(share, audience);
+        let entries = if cap == Listen::Full {
+            entries
+        } else if let Some(placed) = self.placed(share) {
+            Arc::new(within(&entries, &placed, cap))
+        } else {
+            // Where the files are is not known: none of them.
+            Arc::new(
+                entries
+                    .iter()
+                    .map(|e| Entry {
+                        files: Vec::new(),
+                        ..e.clone()
+                    })
+                    .collect(),
+            )
+        };
         let manifest = {
             let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
             table.get(&share.code).and_then(|held| {
@@ -1574,13 +2106,14 @@ impl Shares {
     }
 
     async fn listed_for(&self, link: &Link<'_>, by: &Grouping) -> Option<Listed> {
-        let (shares, share, audience, by) = (
+        let (shares, share, audience, by, cap) = (
             self.clone(),
             link.share.clone(),
             link.audience.cloned(),
             by.clone(),
+            link.listen,
         );
-        blocking(move || shares.listed(&share, audience.as_ref(), &by)).await
+        blocking(move || shares.listed(&share, audience.as_ref(), &by, cap)).await
     }
 }
 
@@ -1731,6 +2264,126 @@ async fn files_page(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     response
 }
 
+#[derive(serde::Deserialize)]
+struct ListenQuery {
+    listen: Option<String>,
+}
+
+/// `<link>_files.json` (#528): what the link serves, for a client that
+/// opens a song over it. `listen` is the layer listed (`?listen=`, never
+/// past the link's), `max` the most the link plays; each note with its
+/// type, page and files; each file once, in list order, with its size,
+/// sha256 (None when the vault has not hashed it yet), layer and URL.
+async fn files_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
+    let asked = match serde_urlencoded_form::<ListenQuery>(query.as_bytes())
+        .ok()
+        .and_then(|q| q.listen)
+        .map(|l| Listen::parse(&l))
+    {
+        None => link.listen,
+        Some(Ok(l)) => l.min(link.listen),
+        Some(Err(why)) => {
+            let mut response = (
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({ "error": why }).to_string(),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            return response;
+        }
+    };
+    let at = Link {
+        listen: asked,
+        ..*link
+    };
+    let Some(listed) = shares.listed_for(&at, &Grouping::Order).await else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let found = {
+        let (shares, share) = (shares.clone(), link.share.clone());
+        blocking(move || {
+            let held: HashMap<String, (u64, String)> = shares
+                .0
+                .backend
+                .manifest(&share.vault)
+                .map(|m| {
+                    m.files
+                        .into_iter()
+                        .map(|f| (f.path, (f.size, f.sha256)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (held, shares.placed(&share))
+        })
+        .await
+    };
+    let Some((held, placed)) = found else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if placed.is_none() && asked < Listen::Full {
+        let mut response = (
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({ "error": "which layer each file is in is not known now (an extension's manifest or the vault does not read); try again later" }).to_string(),
+        )
+            .into_response();
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        return response;
+    }
+    let base = link.mount.trim_end_matches('/');
+    let mut notes = Vec::new();
+    let mut files = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for entry in listed.entries.iter() {
+        notes.push(serde_json::json!({
+            "path": entry.path,
+            "title": entry.title,
+            "type": entry.properties.get("type").and_then(|t| t.as_str()),
+            "page": listed.pages.get(&entry.path).map(|p| format!("{base}{p}")),
+            "files": entry.files,
+        }));
+        for file in &entry.files {
+            if !seen.insert(file.as_str()) {
+                continue;
+            }
+            let (size, sha256) = held.get(file).map_or_else(
+                || {
+                    let size = std::fs::metadata(listed.root.join(file)).map_or(0, |m| m.len());
+                    (size, None)
+                },
+                |(size, hash)| (*size, Some(hash.as_str())),
+            );
+            files.push(serde_json::json!({
+                "path": file,
+                "url": format!("{base}/{}", architect_sites::encode_path(file)),
+                "size": size,
+                "sha256": sha256,
+                "layer": placed.as_ref().map(|p| p.get(file).copied().unwrap_or(Listen::Page).label()),
+                "note": entry.path,
+            }));
+        }
+    }
+    let body = serde_json::json!({
+        "link": link.mount,
+        "title": link.title(),
+        "listen": asked.label(),
+        "max": link.listen.label(),
+        "notes": notes,
+        "files": files,
+    });
+    let mut response = (StatusCode::OK, body.to_string()).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
+}
+
 /// A page of the link, with a bar to its files page and its archive
 /// when it lists any file, and its queue ([`queue`]) when any of them
 /// plays.
@@ -1821,12 +2474,12 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     let Some(listed) = shares.listed_for(link, &by).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let files: Vec<(String, PathBuf)> = listed
+    let files: Vec<(String, PathBuf, String)> = listed
         .groups
         .iter()
         .filter(|g| group.as_ref().is_none_or(|want| *want == g.label))
         .flat_map(|g| g.files.iter())
-        .map(|f| (f.archive.clone(), listed.root.join(&f.file)))
+        .map(|f| (f.archive.clone(), listed.root.join(&f.file), f.file.clone()))
         .collect();
     if files.is_empty() {
         return page(
@@ -1841,8 +2494,12 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     );
     let code = link.code().to_owned();
     let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Vec<u8>>>(4);
+    let still = Still {
+        shares: shares.clone(),
+        code: code.clone(),
+    };
     tokio::spawn(async move {
-        if let Err(error) = write_archive(files, &tx).await {
+        if let Err(error) = write_archive(files, &still, &tx).await {
             tracing::warn!(%code, %error, "a share archive stopped");
             // The download ends short of its directory: an archive that
             // does not open, never one that looks whole and is not.
@@ -1864,6 +2521,45 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
     response
 }
 
+/// `path` as [`Shares::above`] compares spellings: folded
+/// (`share_layers::fold`: one Unicode form, lower cased), `//` collapsed.
+fn fold_path(path: &str) -> String {
+    let joined: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    architect_sites::share_layers::fold(&joined.join("/"))
+}
+
+/// Whether a link still serves a file, asked by an archive in progress.
+struct Still {
+    shares: Shares,
+    /// The link's code (a share's own, or an audience's).
+    code: String,
+}
+
+impl Still {
+    /// Whether the link is live and `file` (a vault path) not above its
+    /// layer, now.
+    async fn serves(&self, file: &str) -> bool {
+        let Some((share, audience)) = self.shares.link(&self.code) else {
+            return false;
+        };
+        if share.state(now()) != ShareState::Live {
+            return false;
+        }
+        let cap = share.listen_for(audience.as_ref());
+        if cap == Listen::Full {
+            return true;
+        }
+        let (shares, file) = (self.shares.clone(), file.to_owned());
+        blocking(move || {
+            shares
+                .placed(&share)
+                .is_some_and(|placed| placed.get(&file).is_none_or(|layer| *layer <= cap))
+        })
+        .await
+        .unwrap_or(false)
+    }
+}
+
 /// Write `files` (each: its path in the archive, the file to read) to
 /// `to` as a zip, a piece at a time. A file that is gone is left out.
 ///
@@ -1871,13 +2567,22 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
 ///
 /// A file could not be read through, or nobody is reading any more.
 async fn write_archive(
-    files: Vec<(String, PathBuf)>,
+    files: Vec<(String, PathBuf, String)>,
+    still: &Still,
     to: &tokio::sync::mpsc::Sender<std::io::Result<Vec<u8>>>,
 ) -> std::io::Result<()> {
     use tokio::io::AsyncReadExt as _;
     let gone = |_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the reader left");
     let mut zip = ZipWriter::new();
-    for (name, path) in files {
+    for (name, path, vault_path) in files {
+        // Decided when the archive began; asked again before each file,
+        // so a revoke, an expiry or a lowered layer stops it there.
+        if !still.serves(&vault_path).await {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "the link no longer serves the rest",
+            ));
+        }
         let Ok(mut file) = tokio::fs::File::open(&path).await else {
             tracing::debug!(path = %path.display(), "a shared file is gone; left out of the archive");
             continue;

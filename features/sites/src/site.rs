@@ -53,6 +53,12 @@ pub struct Options {
     /// are published, the rest are outside the site as notes outside
     /// the scope are. None: every note of the scope.
     pub filter: Option<String>,
+    /// Attachments (vault paths) the site holds back (#528: a share link's
+    /// files above its layer): never copied into it, and no link, embed,
+    /// player, lyrics, search entry or listing of the site mentions one; a
+    /// link to one is dropped with its text. Nothing held back is ever on
+    /// disk under the site, so no request can reach its bytes there.
+    pub hold_back: BTreeSet<String>,
 }
 
 impl Options {
@@ -73,6 +79,7 @@ impl Options {
             bases: true,
             scope: Scope::Vault,
             filter: None,
+            hold_back: BTreeSet::new(),
         }
     }
 }
@@ -397,6 +404,7 @@ impl Site {
                 &attachments,
                 &base,
                 &opts.scope,
+                &opts.hold_back,
             ) {
                 Target::Broken if wiki => {
                     let name = dest.split('#').next().unwrap_or_default();
@@ -419,6 +427,7 @@ impl Site {
                         crate::media::is_lyrics(t)
                             && attachments.contains(t)
                             && opts.scope.holds_file(t)
+                            && !opts.hold_back.contains(*t)
                     })?;
                 std::fs::read_to_string(opts.vault.join(target)).ok()
             };
@@ -443,10 +452,11 @@ impl Site {
                 });
             }
             for link in &outgoing {
-                if let Some(target) = link
-                    .resolved
-                    .filter(|t| attachments.contains(t) && opts.scope.holds_file(t))
-                {
+                if let Some(target) = link.resolved.filter(|t| {
+                    attachments.contains(t)
+                        && opts.scope.holds_file(t)
+                        && !opts.hold_back.contains(*t)
+                }) {
                     used_attachments.insert(target.to_owned());
                 }
             }
@@ -672,6 +682,7 @@ fn resolve_link(
     attachments: &BTreeSet<&str>,
     base: &str,
     scope: &Scope,
+    hold_back: &BTreeSet<String>,
 ) -> Target {
     let scoped = !scope.is_vault();
     let decoded = decode_percent(dest);
@@ -688,6 +699,9 @@ fn resolve_link(
         if attachments.contains(target) {
             if !scope.holds_file(target) {
                 return Target::Outside;
+            }
+            if hold_back.contains(target) {
+                return Target::Held;
             }
             return Target::File(format!("{base}{}", encode_path(target)));
         }

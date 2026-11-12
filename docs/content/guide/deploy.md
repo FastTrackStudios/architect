@@ -571,6 +571,125 @@ and in a headless Firefox (`apps/web/test/share-player.test.mjs`, `just
 share-player-test`): the lyric line advances while a song plays, a click
 seeks, and the queue goes on to the next song's page and plays it.
 
+### How far a link plays
+
+A song can go out at three depths (#528), and the sharer says how deep each
+link goes (`features/spaces/src/share.rs` `Listen`):
+
+| Layer | `listen` | What the link serves |
+| --- | --- | --- |
+| **Page** | `page` | the pages, and every file no extension places higher (charts, lyrics, downloads) |
+| **Reference** | `reference` | also what a player needs for the song's mix with a live click and guide, the project shown read-only (Studio's Reference Mode) |
+| **Full** | `full` | every file: the stems, for the full multitrack engine |
+
+- **The sharer sets the most.** `listen` is on the share (its own link and
+  its domain) and on each audience, which only narrows it: an audience set
+  higher than its share plays to the share's
+  (`features/spaces/src/share.rs` `Share::listen_for`). A new link plays to **Reference** unless told
+  otherwise. The orchestra's audience gets Reference, the band's Full.
+- **The viewer opts in within it.** A page plays what is on it; a player
+  that loads deeper (Studio's "Load multitracks") offers it only when the
+  link allows.
+- **The node holds it, per file.** Architect does not know a song's folder
+  layout: the extension that owns the note type places its files with
+  `[[share_layers]]` rules ([share layers](@/architecture/extensions.md#share-layers)).
+  A file above the link's layer is `403` with the layer it needs in the
+  body and in `x-architect-layer`, by its name and by any other spelling of
+  the same file on disk (another case, another Unicode form, `//`): the
+  node compares what the request opens with the files it holds back
+  (`apps/desktop/src/node/shares.rs` `Shares::above`). Only a file in the
+  link's own folder is answered so: anything outside the link, another
+  audience's file, a page it does not have, is the same `404` as a path
+  that is nowhere (status, headers and body), so a link says nothing of
+  what is outside it. Ranges keep working for the rest. A file no rule
+  places is a page file.
+- **Named nowhere, never on disk.** Each link is built for its layer: a
+  held-back file is not copied into its folder at all, and is in no page of
+  it (no player, link, embed or lyrics), its search index, its files page,
+  its archive or its queue. The node answers `403` for it from where files
+  are placed, by its path, before it looks at the disk; a folder being
+  swapped in by a rebuild is waited for first, and one it cannot read is
+  `503`, never served. A folder built before a change of layer is checked
+  by what the request opens on disk; a file there that the link no longer
+  lists but that is now above its layer answers the same `404` as a path
+  that is nowhere.
+- **Unknown is closed.** Where files are must be known from a vault read
+  whole. While any part of the vault does not read (a note that is not
+  UTF-8, a file without permission, one half-written by a sync, a folder
+  the walk cannot enter) or where files are is otherwise unknown (below), a
+  link below Full answers `503` to everything, its pages included, and is
+  not built again until it reads; its pages come back with the vault.
+- **Closing is at once; opening a moment later.** A layer lowered through
+  `SHARE_UPDATE` or the Share sheet holds files back from the next request.
+  A file that opens (a layer raised, a rule lowered or forgotten) is served
+  once the link is built again, a moment later. A change in the vault (a
+  note's `type` becoming `song`) reaches the node about half a second after
+  the write: until then the file is placed as it was. A download of the
+  archive already under way is asked again before each file and stops at
+  the first one its link no longer serves (revoked, expired, its layer
+  lowered): the zip then does not open.
+- **Nothing an extension does opens a link.** Every rule for a note type
+  counts and the highest layer wins. A development copy (installed from a
+  path, its slot holding only `installed.toml`) is read where it links to.
+  While an installed extension's manifest does not read (half-written, not
+  a manifest, an unknown key in `[[share_layers]]`, a link to nothing) or
+  two folders claim one id, the node does not know where files are and
+  holds every attached file back on every link below Full until it is
+  fixed, warning once with the file's path. An uninstalled extension's
+  rules are kept, by its folder, in the node's data dir
+  (`share-layers.json`) and still place files until the owner forgets
+  them. If that file does not read, it is set aside
+  (`share-layers.json.corrupt-<time>`), never written over, and every
+  attached file is held back below Full, across restarts, until the owner
+  acknowledges it; if it cannot be written, the same (with what could not
+  be written left beside it when the folder takes it). A reinstall that declares fewer rules lowers files as
+  it says, and the node warns, listing what was lowered, until
+  acknowledged. The node's status (`NodeStatus::share_layers`) says when
+  any of these needs the owner:
+
+  ```sh
+  architect-desktop actions run SHARE_LAYERS_KEPT                       # kept rules and notices
+  architect-desktop actions run SHARE_LAYERS_FORGET --arg extension=fts.studio
+  architect-desktop actions run SHARE_LAYERS_ACKNOWLEDGE                # a set-aside file, lowered rules
+  ```
+- **A share note without a layer** (written before layers, or one that
+  lost the field) reads as Reference, the default, and its audiences as
+  the share's: access fails closed. A hand-edited `"listen"` reads in any
+  case (`full`); a value that is no layer leaves the note unread (`404`). Anyone who can write the vault can
+  edit a share note, so a cap is as strong as the vault's write access
+  (#552).
+
+```sh
+architect-desktop actions run SHARE_CREATE --arg folder=Songs --arg listen=reference
+architect-desktop actions run SHARE_UPDATE --arg code=<code> --arg listen=full
+architect-desktop actions run SHARE_AUDIENCE_ADD --arg code=<code> --arg name=orchestra --arg listen=reference
+architect-desktop actions run SHARE_AUDIENCE_UPDATE --arg code=<code> --arg name=orchestra --arg listen=share   # back to the share's
+```
+
+The Share sheet shows the same as one choice per link and per audience.
+
+**The listing, for a client.** `<link>_files.json` is what a link serves,
+for a program that opens a song over it (Studio's `SongSource` over an
+Architect link):
+
+```json
+{
+  "link": "/s/<code>/", "title": "Songs",
+  "listen": "reference", "max": "full",
+  "notes": [{ "path": "Songs/Joy/Joy.md", "title": "Joy", "type": "song", "page": "/s/<code>/joy/joy/", "files": ["…"] }],
+  "files": [{ "path": "Songs/Joy/Joy.session", "url": "/s/<code>/Songs/Joy/Joy.session",
+              "size": 18211, "sha256": "…", "layer": "reference", "note": "Songs/Joy/Joy.md" }]
+}
+```
+
+`max` is the most the link plays; `listen` is the layer listed, the link's
+unless `?listen=` asks for less (never more). Each file is listed once, in
+list order, with its vault's size and sha256 (`null` until the vault has
+hashed it). Tested on a headless node (`apps/desktop/tests/shares.rs`
+`a_links_layer_is_held_by_the_node_on_every_route`,
+`a_share_written_before_layers_serves_what_it_served`,
+`the_apps_share_actions_set_and_read_how_far_a_link_plays`).
+
 ## Its own deployment
 
 A share, or a whole vault, can also live at a URL of its own. There are two

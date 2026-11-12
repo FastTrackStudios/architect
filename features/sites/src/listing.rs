@@ -46,6 +46,16 @@ pub fn open(root: &std::path::Path) -> Result<Vault, String> {
     Vault::open(root).map_err(|e| e.to_string())
 }
 
+/// [`open`], and what of the vault could not be read (notes that did not
+/// load, entries the walk skipped), one line each.
+///
+/// # Errors
+///
+/// The folder could not be read.
+pub fn open_reporting(root: &std::path::Path) -> Result<(Vault, Vec<String>), String> {
+    Vault::open_reporting(root).map_err(|e| e.to_string())
+}
+
 /// One listed note.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
@@ -110,6 +120,47 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
             })
         })
         .collect()
+}
+
+/// Every note of `vault`, hidden ones too, in path order, each with
+/// every attachment it links or embeds: what places a shared file in a
+/// layer (#528), whatever a share's scope, filter or `publish:` shows.
+#[must_use]
+pub fn every_note(vault: &Vault) -> Vec<Entry> {
+    let rows = vault_to_rows(vault);
+    let index = LinkIndex::build(vault);
+    let attachments: HashSet<&str> = vault
+        .attachments
+        .iter()
+        .map(|a| a.rel_path.as_str())
+        .collect();
+    let mut out: Vec<Entry> = vault
+        .pages
+        .iter()
+        .zip(&rows)
+        .map(|(page, row)| {
+            let mut files: Vec<String> = Vec::new();
+            for link in index.outgoing(&page.rel_path) {
+                if let Some(file) = link.resolved.filter(|t| attachments.contains(t)) {
+                    if !files.iter().any(|f| f == file) {
+                        files.push(file.to_owned());
+                    }
+                }
+            }
+            Entry {
+                path: page.rel_path.clone(),
+                title: title_of(page, &Meta::of(page)),
+                properties: row
+                    .frontmatter
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+                files,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
 }
 
 /// How a listing is grouped: the views a share page switches between.

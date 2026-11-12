@@ -60,13 +60,14 @@ mod url;
 mod write;
 
 pub use architect_extensions::contrib::Claim;
+pub use architect_extensions::share_layers::{self, ShareLayersDecl};
 pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
 #[cfg(feature = "wasi")]
 pub use component_blocks::{ComponentBlocks, DRAW_TIMEOUT};
 pub use element_html::elements_to_html;
 pub use frontmatter::Meta;
-pub use installed::InstalledBlocks;
+pub use installed::{Installed, InstalledBlocks, InstalledLayers, Package};
 pub use lyrics::LyricsBlocks;
 pub use markdown::Heading;
 #[cfg(feature = "pages")]
@@ -76,7 +77,7 @@ pub use scope::Scope;
 pub use search::SearchEntry;
 pub use site::{Crumb, NavNode, Options, Page, Problem, Site, SiteError};
 pub use url::{encode_path, fragment_id, slug_segment};
-pub use write::{Report, WriteError, write};
+pub use write::{Report, SwapHook, WriteError, set_swap_hook, write};
 
 /// Read the vault in `opts.vault`, draw it with `blocks`, and write the
 /// site to `out`.

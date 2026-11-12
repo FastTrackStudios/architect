@@ -1808,6 +1808,58 @@ crate both sides use, a pane-side clock in place of the page's media
 element, and the embed context (`features/extensions/src/linked.rs`
 `EmbedContext`) carrying the playhead to a linked view.
 
+### Share layers
+
+A share link plays to a layer its sharer sets (page, reference, full;
+[how far a link plays](@/guide/deploy.md#how-far-a-link-plays)), and the
+node refuses a file above it. Which files of a song are its reference
+and which its stems is the song's extension's to say, as data, so the
+node needs no code of it:
+
+```toml
+[[share_layers]]
+note_type = "song"                                   # notes with `type: song`
+reference = ["*.session", "Media/Proxies/Reference*", "Media/Peaks/**"]
+full = ["Media/Proxies/**"]                          # the stems
+# page = ["Charts/**"]                               # on every link (as a file no rule names)
+```
+
+(`features/extensions/src/share_layers.rs` `ShareLayersDecl`, checked by
+`Manifest::check`.) A pattern matches an attached file's path relative to
+the folder of the note that attaches it (a file outside it: its vault
+path), whole, in any case and either Unicode form
+(`features/extensions/src/share_layers.rs` `fold`: NFC, lower cased, so
+`Gänse*` is `GÄNSE.ogg` written composed or decomposed, as macOS hands
+either back), as `note_type` is (its spaces trimmed): `*`
+and `?` within one segment, `**` any number of them. A key
+`[[share_layers]]` does not know (`fulll`) is an error: the manifest does
+not load, and on a node every attached file is held back until it is
+fixed. Matching is linear in the
+pattern times the path, and a rule has at most 64 patterns, each at most
+256 bytes with at most 8 `*` (`MAX_PATTERNS`, `MAX_PATTERN_LEN`,
+`MAX_STARS`); a manifest past them does not load. Within one rule the
+lists are tried `page`, `reference`, `full`, and the first that matches
+places the file, so a narrow `reference` pattern carves the reference out
+of a broad `full` one. Across rules (two extensions for one note type,
+or a note with a list of types, `type: [song, live]`) the highest layer
+wins: no rule lowers another's. A file is in the highest layer any note of
+the vault that links it places it in, inside the share's scope or not,
+hidden or not, so a plain note linking a stem never brings it down to the
+page. A held-back file is named in nothing built for the link (the page
+draws no player, link or lyrics of it). While a manifest in the
+extensions folder does not read, placement is unknown and every attached
+file is held back below Full; an uninstalled extension's rules are kept
+until the owner forgets them (`SHARE_LAYERS_FORGET`). A newer version or a
+reinstall that declares fewer `reference`/`full` patterns lowers those
+files at once (a development copy edited the same): the node logs a
+warning listing them and its status shows it until the owner acknowledges
+it (`SHARE_LAYERS_ACKNOWLEDGE`). Declare less only on purpose. The node reads the rules of the extensions installed on it
+(`features/sites/src/installed.rs` `InstalledLayers`, again when the
+folder changes), then a distribution's compiled-in ones
+(`apps/distribution/src/lib.rs` `Distribution::share_layers`, passed to
+`apps/desktop/src/node/mod.rs` `start_with_layers`) and places each file
+(`apps/desktop/src/node/share_layers.rs` `LayerRules`).
+
 ## Base view types
 
 Bases (`features/bases`, [Bases](@/features/bases.md)) draws a base's

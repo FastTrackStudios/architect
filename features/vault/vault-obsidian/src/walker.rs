@@ -38,8 +38,18 @@ pub struct VaultEntry {
 /// (folders before children, lexicographic within a folder). v1
 /// loads the whole list into memory — vaults under ~50k files are
 /// fine; we'll stream if/when that becomes a constraint.
+#[must_use]
 pub fn walk_vault(root: &Path, cfg: &ObsidianConfig) -> Vec<VaultEntry> {
+    walk_vault_reporting(root, cfg).0
+}
+
+/// [`walk_vault`], and what it could not read on the way (a folder or an
+/// entry it skipped), one line each: for a caller that must not take a
+/// partial walk for the whole vault.
+#[must_use]
+pub fn walk_vault_reporting(root: &Path, cfg: &ObsidianConfig) -> (Vec<VaultEntry>, Vec<String>) {
     let mut out = Vec::new();
+    let mut skipped = Vec::new();
     let ignore = build_ignore(cfg);
     for entry in WalkDir::new(root)
         .follow_links(false)
@@ -54,6 +64,7 @@ pub fn walk_vault(root: &Path, cfg: &ObsidianConfig) -> Vec<VaultEntry> {
             Ok(e) => e,
             Err(e) => {
                 tracing::warn!(?e, "walk error — skipping");
+                skipped.push(e.to_string());
                 continue;
             }
         };
@@ -75,7 +86,7 @@ pub fn walk_vault(root: &Path, cfg: &ObsidianConfig) -> Vec<VaultEntry> {
             kind,
         });
     }
-    out
+    (out, skipped)
 }
 
 fn classify(p: &Path) -> VaultEntryKind {

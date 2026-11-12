@@ -153,6 +153,8 @@ pickers = ["ui", "dep:rfd"]
 remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
+# `[[share_layers]]` patterns and paths compared in one Unicode form (NFC).
+unicode-normalization = "0.1"
 # The editor, through architect's door (#512): its extension surface as
 # data (`editor`: snapshots, edit commands, keymaps, decorations, slash
 # rows) and the language registry `[[languages]]` fills. The contract

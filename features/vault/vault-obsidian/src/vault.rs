@@ -13,7 +13,7 @@ use vault_live::bases::{self, ParsedBase};
 
 use crate::config::{ObsidianConfig, read_obsidian_config};
 use crate::guard::SelfWriteGuard;
-use crate::walker::{VaultEntry, VaultEntryKind, walk_vault};
+use crate::walker::{VaultEntry, VaultEntryKind, walk_vault_reporting};
 
 /// One `.md` file from the vault. Owned, parsed, with the original
 /// raw bytes preserved so callers can diff against future writes.
@@ -84,8 +84,18 @@ impl Vault {
     /// `.obsidian`, `.trash`, `.git`, dotfiles, and entries matched
     /// by `userIgnoreFilters` in `.obsidian/app.json`.
     pub fn open(root: &Path) -> Result<Self, LoadError> {
+        Self::open_reporting(root).map(|(vault, _)| vault)
+    }
+
+    /// [`Self::open`], and what it could not read: each note or base that
+    /// did not load (invalid UTF-8, a permission error, a half-written
+    /// file) and each entry the walk skipped, one line each (`path:
+    /// why`). For a caller that must not take a partial read for the
+    /// whole vault (a share link's layers, #528); [`Self::open`] skips
+    /// them, as before.
+    pub fn open_reporting(root: &Path) -> Result<(Self, Vec<String>), LoadError> {
         let config = read_obsidian_config(root);
-        let entries = walk_vault(root, &config);
+        let (entries, mut unread) = walk_vault_reporting(root, &config);
         let mut pages = Vec::new();
         let mut bases = Vec::new();
         let mut attachments = Vec::new();
@@ -94,11 +104,17 @@ impl Vault {
             match entry.kind {
                 VaultEntryKind::Markdown => match load_page(&entry) {
                     Ok(p) => pages.push(p),
-                    Err(e) => tracing::warn!(path = %entry.rel_path, ?e, "page load failed"),
+                    Err(e) => {
+                        tracing::warn!(path = %entry.rel_path, ?e, "page load failed");
+                        unread.push(format!("{}: {e}", entry.rel_path));
+                    }
                 },
                 VaultEntryKind::Base => match load_base(&entry) {
                     Ok(b) => bases.push(b),
-                    Err(e) => tracing::warn!(path = %entry.rel_path, ?e, "base load failed"),
+                    Err(e) => {
+                        tracing::warn!(path = %entry.rel_path, ?e, "base load failed");
+                        unread.push(format!("{}: {e}", entry.rel_path));
+                    }
                 },
                 VaultEntryKind::Canvas | VaultEntryKind::Attachment => {
                     attachments.push(VaultEntryRef {
@@ -109,13 +125,16 @@ impl Vault {
             }
         }
 
-        Ok(Self {
-            root: root.to_path_buf(),
-            config,
-            pages,
-            bases,
-            attachments,
-        })
+        Ok((
+            Self {
+                root: root.to_path_buf(),
+                config,
+                pages,
+                bases,
+                attachments,
+            },
+            unread,
+        ))
     }
 
     /// Look up a page by vault-relative path.

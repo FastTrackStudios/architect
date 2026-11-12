@@ -9,7 +9,8 @@
 
 use architect::connect::{Endpoint, Pool};
 use architect_spaces::{
-    NewAudience, NewShare, Share, ShareChange, ShareComment, ShareLinksClient, ShareScope,
+    LayersReport, Listen, NewAudience, NewShare, Share, ShareChange, ShareComment,
+    ShareLinksClient, ShareScope,
 };
 
 use crate::controller::{Accounts, Sheet};
@@ -183,6 +184,71 @@ impl Accounts {
             .map_err(|e| e.to_string())?;
         let _ = self.shares(None).await;
         Ok(share)
+    }
+
+    /// How far audience `name`'s link of share `code` plays (#528):
+    /// `listen`, never past the share's; None: the share's.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`], or no such share or audience.
+    pub async fn share_audience_listen(
+        &self,
+        host: Option<&str>,
+        code: &str,
+        name: &str,
+        listen: Option<Listen>,
+    ) -> Result<Share, String> {
+        let (_, client) = self.share_links(host).await?;
+        let share = client
+            .audience_listen(code.to_owned(), name.to_owned(), listen)
+            .await
+            .map_err(|e| e.to_string())?;
+        let _ = self.shares(None).await;
+        Ok(share)
+    }
+
+    /// The layer rules the host keeps for extensions no longer installed
+    /// (#528): they still place files until forgotten.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`].
+    pub async fn share_layers_kept(&self, host: Option<&str>) -> Result<LayersReport, String> {
+        let (_, client) = self.share_links(host).await?;
+        client.kept_layers().await.map_err(|e| e.to_string())
+    }
+
+    /// Forget the kept layer rules of `extension` on the host: its files
+    /// are placed by the rules installed now. What is kept after.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`], an installed extension, or nothing kept of it.
+    pub async fn share_layers_forget(
+        &self,
+        host: Option<&str>,
+        extension: &str,
+    ) -> Result<LayersReport, String> {
+        let (_, client) = self.share_links(host).await?;
+        client
+            .forget_layers(extension.to_owned())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Acknowledge the host's notices about its layer rules (a kept-rules
+    /// file set aside, rules a reinstall lowered); what is left.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::shares`].
+    pub async fn share_layers_acknowledge(
+        &self,
+        host: Option<&str>,
+    ) -> Result<LayersReport, String> {
+        let (_, client) = self.share_links(host).await?;
+        client.acknowledge_layers().await.map_err(|e| e.to_string())
     }
 
     /// Share `code` as the host has it now.
