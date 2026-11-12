@@ -802,6 +802,31 @@ mod tests {
         );
     }
 
+    /// A `[[favourites]]` declaration of the wrong shape (a misspelt key)
+    /// is dropped like a bad one: the manifest reads, its share layers
+    /// still place the files, nothing is held back.
+    #[test]
+    fn a_misshapen_favourites_declaration_never_makes_placement_unknown() {
+        let tmp = tempfile::tempdir().unwrap();
+        install(
+            tmp.path(),
+            "demo.songs",
+            &format!(
+                "{OWNER}\n[[favourites]]\nnote_type = \"song\"\n[[favourites.tabs]]\nid = \"song\"\nlable = \"Song\"\nicon = \"music\"\ntarget = {{ view = \"page\" }}\n"
+            ),
+        );
+        let rules = LayerRules::new(Some(tmp.path().to_owned()), Vec::new(), None);
+        let current = rules.current();
+        assert!(current.broken.is_empty(), "{:?}", current.broken);
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        assert_eq!(
+            LayerRules::place(&current, &entries)
+                .unwrap()
+                .get("Joy/Media/Bass.ogg"),
+            Some(&Listen::Full)
+        );
+    }
+
     #[test]
     fn rules_are_kept_after_an_uninstall_until_forgotten() {
         let tmp = tempfile::tempdir().unwrap();

@@ -499,6 +499,38 @@ pub struct SourceDecl {
     pub bin: String,
 }
 
+/// `[[favourites]]` as written, read one declaration at a time: those that
+/// read and keep their rules, and why each other one was left out (`#<n>`
+/// when it has no readable `note_type`).
+fn favourites_of(
+    raw: Option<toml::Value>,
+) -> (Vec<architect_favourites::TypeFavourites>, Vec<String>) {
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+    let list = match raw {
+        None => return (kept, dropped),
+        Some(toml::Value::Array(list)) => list,
+        Some(_) => {
+            dropped.push("favourites: not a list of tables ([[favourites]])".to_owned());
+            return (kept, dropped);
+        }
+    };
+    for (n, value) in list.into_iter().enumerate() {
+        let name = value
+            .get("note_type")
+            .and_then(toml::Value::as_str)
+            .map_or_else(|| format!("#{}", n.saturating_add(1)), str::to_owned);
+        match value.try_into::<architect_favourites::TypeFavourites>() {
+            Ok(decl) => match decl.check() {
+                Ok(()) => kept.push(decl),
+                Err(why) => dropped.push(format!("{name}: {why}")),
+            },
+            Err(why) => dropped.push(format!("{name}: {why}")),
+        }
+    }
+    (kept, dropped)
+}
+
 /// `extension.toml`, read.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Manifest {
@@ -599,8 +631,15 @@ pub struct Manifest {
     /// `[[favourites]]`: the tabs and the primary action a shell shows
     /// while a note of its types is open (a share link's phone shell,
     /// the app's bottom bar): [`architect_favourites::TypeFavourites`].
-    #[serde(default)]
+    /// Read from [`Self::favourites_raw`] one declaration at a time by
+    /// [`Self::parse`].
+    #[serde(skip)]
     pub favourites: Vec<architect_favourites::TypeFavourites>,
+    /// `[[favourites]]` as written: any TOML, so a declaration of the wrong
+    /// shape (a misspelt key, an unknown kind of target) cannot fail the
+    /// whole manifest; [`Self::parse`] reads each and drops the rest.
+    #[serde(default, rename = "favourites")]
+    favourites_raw: Option<toml::Value>,
     /// The `[[favourites]]` declarations [`Self::parse`] left out, each
     /// with why: data a shell draws must never make the manifest unreadable
     /// (an installed extension's unreadable manifest holds back a node's
@@ -780,15 +819,10 @@ impl Manifest {
     pub fn parse(text: &str) -> Result<Self, ManifestError> {
         let mut manifest: Self =
             toml::from_str(text).map_err(|e| ManifestError::Parse(e.to_string()))?;
-        // A declaration that breaks a rule is dropped, not fatal.
-        let mut dropped = Vec::new();
-        manifest.favourites.retain(|decl| match decl.check() {
-            Ok(()) => true,
-            Err(why) => {
-                dropped.push(format!("{}: {why}", decl.note_type));
-                false
-            }
-        });
+        // A declaration of the wrong shape, or that breaks a rule, is
+        // dropped and said, never fatal.
+        let (favourites, dropped) = favourites_of(manifest.favourites_raw.take());
+        manifest.favourites = favourites;
         manifest.favourites_dropped = dropped;
         manifest.check()?;
         Ok(manifest)
@@ -1937,6 +1971,36 @@ mod favourites_tests {
             manifest.favourites_dropped
         );
         assert!(manifest.favourites_dropped[0].starts_with("setlist: tab"));
+        assert_eq!(manifest.share_layers.len(), 1);
+    }
+
+    /// A declaration of the wrong shape (a misspelt key, an unknown kind of
+    /// target, not a table at all) is dropped and said like one that breaks
+    /// a rule; the good ones beside it and the rest of the manifest read.
+    #[test]
+    fn a_misshapen_favourites_declaration_is_dropped_never_the_manifest() {
+        let head = "id = \"fts.studio\"\nname = \"Studio\"\nversion = \"0.1.0\"\nkind = \"data\"\n";
+        let good = "[[favourites]]\nnote_type = \"setlist\"\n[[favourites.tabs]]\nid = \"setlist\"\nlabel = \"Setlist\"\nicon = \"list-music\"\ntarget = { view = \"page\" }\n";
+        let layers = "\n[[share_layers]]\nnote_type = \"song\"\nfull = [\"Media/**\"]\n";
+        for bad in [
+            // A misspelt key.
+            "[[favourites]]\nnote_type = \"song\"\n[[favourites.tabs]]\nid = \"song\"\nlable = \"Song\"\nicon = \"music\"\ntarget = { view = \"page\" }\n",
+            // An unknown kind of target.
+            "[[favourites]]\nnote_type = \"song\"\n[[favourites.tabs]]\nid = \"song\"\nlabel = \"Song\"\nicon = \"music\"\ntarget = { teleport = \"x\" }\n",
+            // A field of the wrong type.
+            "[[favourites]]\nnote_type = 3\n",
+        ] {
+            let text = format!("{head}{good}{bad}{layers}");
+            let manifest = super::Manifest::parse(&text).unwrap_or_else(|e| panic!("{bad}: {e}"));
+            assert_eq!(manifest.favourites.len(), 1, "{bad}");
+            assert!(manifest.favourites[0].is_for("setlist"));
+            assert_eq!(manifest.favourites_dropped.len(), 1, "{bad}");
+            assert_eq!(manifest.share_layers.len(), 1);
+        }
+        // Not a list of tables at all.
+        let manifest = super::Manifest::parse(&format!("{head}favourites = 3\n{layers}")).unwrap();
+        assert!(manifest.favourites.is_empty());
+        assert_eq!(manifest.favourites_dropped.len(), 1);
         assert_eq!(manifest.share_layers.len(), 1);
     }
 }
