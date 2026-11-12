@@ -1,0 +1,26 @@
+[package]
+name = "architect-favourites"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A note type's favourites: the tabs a shell keeps one tap away while a note of that type is open, and its primary action, declared as data by the extension that owns the type"
+
+# The contract only: serde, wasm-clean. `architect-extensions` reads it
+# from a manifest's `[[favourites]]`; a share page's phone shell (the
+# node) and the app's shell (`architect-shell`) draw it.
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

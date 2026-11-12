@@ -160,6 +160,9 @@ unicode-normalization = "0.1"
 # rows) and the language registry `[[languages]]` fills. The contract
 # only: serde, no tree-sitter, no Dioxus.
 architect-editor = { workspace = true }
+# `[[favourites]]`: a note type's tabs and primary action, the contract a
+# shell draws (`architect-favourites`, serde only).
+architect-favourites = { workspace = true }
 # Its theme tokens checked (the model); its themes into the app's store
 # (`host`), the theme to a process (`process`, `guest`), the host's
 # theme into a process view's document (`remote`).

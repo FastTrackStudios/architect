@@ -1940,6 +1940,43 @@ crate both sides use, a pane-side clock in place of the page's media
 element, and the embed context (`features/extensions/src/linked.rs`
 `EmbedContext`) carrying the playhead to a linked view.
 
+### Favourites
+
+A note type's **favourites** are the few places a shell keeps one tap
+away while a note of that type is open, and its one primary action: a
+setlist's Setlist, Charts and Lyrics, and a round Play. The extension
+that owns the type declares them, as data:
+
+```toml
+[[favourites]]
+note_type = "setlist"
+
+[[favourites.tabs]]
+id = "setlist"
+label = "Setlist"
+icon = "list-music"            # a Lucide icon's name
+target = { view = "page" }     # or { action = "ID" }, or { place = "#heading" }
+
+[favourites.primary]
+id = "play"
+label = "Play"
+icon = "play"
+target = { action = "PLAYER_TOGGLE" }
+state = "playing"              # while on, the button shows `on`
+on = { label = "Pause", icon = "pause" }
+```
+
+(`features/favourites/src/lib.rs` `TypeFavourites`, checked by
+`TypeFavourites::check` when the manifest is read: a note type, at most
+five tabs with unique ids, labels of at most 24 characters, Lucide icon
+names, a `place` relative to the note and never another site.) Nothing in
+it belongs to one shell: a target is a view id, an action id or a place
+relative to the open note, and whoever draws the shell resolves it (a
+share link's phone shell its own views; the app's shell its views and its
+Action List). A tab whose target the shell does not know is left out; a
+`state` it does not know shows the first face only. A type that declares
+none keeps the shell's own tabs.
+
 ### Share layers
 
 A share link plays to a layer its sharer sets (page, reference, full;

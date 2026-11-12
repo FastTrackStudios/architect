@@ -596,6 +596,11 @@ pub struct Manifest {
     /// ([`crate::share_layers::ShareLayersDecl`]).
     #[serde(default)]
     pub share_layers: Vec<crate::share_layers::ShareLayersDecl>,
+    /// `[[favourites]]`: the tabs and the primary action a shell shows
+    /// while a note of its types is open (a share link's phone shell,
+    /// the app's bottom bar): [`architect_favourites::TypeFavourites`].
+    #[serde(default)]
+    pub favourites: Vec<architect_favourites::TypeFavourites>,
 }
 
 /// One of an extension's `[[secrets]]`: an API key or a token the person
@@ -673,6 +678,9 @@ pub enum ManifestError {
     /// A `[[share_layers]]` rule with no note type or a pattern that is
     /// not a relative path.
     BadShareLayers(String),
+    /// A `[[favourites]]` declaration that is not one
+    /// ([`architect_favourites::TypeFavourites::check`]).
+    BadFavourites(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -698,6 +706,7 @@ impl std::fmt::Display for ManifestError {
             Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::Interop { field, why } => write!(f, "{field}: {why}"),
             Self::BadShareLayers(why) => write!(f, "share_layers: {why}"),
+            Self::BadFavourites(why) => write!(f, "favourites: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -861,6 +870,11 @@ impl Manifest {
         }
         for rule in &self.share_layers {
             rule.check().map_err(ManifestError::BadShareLayers)?;
+        }
+        for decl in &self.favourites {
+            decl.check().map_err(|why| {
+                ManifestError::BadFavourites(format!("{}: {why}", decl.note_type))
+            })?;
         }
         let mut secrets = std::collections::BTreeSet::new();
         for secret in &self.secrets {
@@ -1883,5 +1897,28 @@ menu = [{ label = "Transpose", action = "LAB_CONTRIB_PIN" }]
     fn an_id_makes_an_action_namespace() {
         assert_eq!(action_prefix("fts.metronome"), "FTS_METRONOME_");
         assert_eq!(action_prefix("a--b"), "A_B_");
+    }
+}
+
+#[cfg(test)]
+mod favourites_tests {
+    /// `[[favourites]]` reads into the manifest, and one that breaks a
+    /// rule makes the manifest fail to read.
+    #[test]
+    fn a_manifest_reads_its_favourites_and_refuses_a_bad_one() {
+        let text = "id = \"fts.studio\"\nname = \"Studio\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n\
+                    [[favourites]]\nnote_type = \"setlist\"\n\
+                    [[favourites.tabs]]\nid = \"setlist\"\nlabel = \"Setlist\"\nicon = \"list-music\"\ntarget = { view = \"page\" }\n\
+                    [favourites.primary]\nid = \"play\"\nlabel = \"Play\"\nicon = \"play\"\ntarget = { action = \"PLAYER_TOGGLE\" }\n\
+                    state = \"playing\"\non = { label = \"Pause\", icon = \"pause\" }\n";
+        let manifest = super::Manifest::parse(text).expect("it reads");
+        assert_eq!(manifest.favourites.len(), 1);
+        assert!(manifest.favourites[0].is_for("setlist"));
+        assert_eq!(manifest.favourites[0].tabs[0].label, "Setlist");
+        let bad = text.replace(
+            "{ view = \"page\" }",
+            "{ place = \"https://evil.example/\" }",
+        );
+        assert!(super::Manifest::parse(&bad).is_err());
     }
 }

@@ -486,6 +486,7 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         ManifestError::BadCapability(_) => (Some("capabilities".to_owned()), None),
         ManifestError::Interop { field, .. } => (Some(field.clone()), None),
         ManifestError::BadShareLayers(_) => (Some("share_layers".to_owned()), None),
+        ManifestError::BadFavourites(_) => (Some("favourites".to_owned()), None),
     };
     let message = match error {
         // TOML's own text carries a drawing of the line; the message is
