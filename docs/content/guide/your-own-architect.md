@@ -114,6 +114,12 @@ The release workflow (`.github/workflows/release.yml`) builds the
 Architect app through the same command: `cargo xtask dist node`, `web` and
 `desktop`.
 
+`--features a,b` turns on features of the distribution crate (with
+`--manifest-path`), such as `node-wasi` for a node that draws installed WASI
+components' blocks as the release's node does. The standard release's own
+distribution crate, `dist/standard`, is built this way from the
+[core extensions](@/guide/core-extensions.md) list.
+
 ## The web
 
 The web app (`apps/web`) is one wasm for every distribution: it reads

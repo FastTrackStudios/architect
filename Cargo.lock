@@ -22314,9 +22314,14 @@ version = "0.1.0"
 dependencies = [
  "architect-extension-archive",
  "clap",
+ "flate2",
  "guppy",
+ "hex",
+ "minisign-verify",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tar",
  "toml 0.8.2",
 ]
 

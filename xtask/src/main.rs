@@ -6,6 +6,7 @@
 
 mod boundaries;
 mod builtins;
+mod core_list;
 mod dev;
 mod dist;
 mod docs;
@@ -205,6 +206,19 @@ enum Command {
         /// (default: the workspace's).
         #[arg(long)]
         version: Option<String>,
+        /// Cargo features of the distribution crate to turn on (with
+        /// `--manifest-path`), e.g. `node-wasi` for its node.
+        #[arg(long, value_delimiter = ',')]
+        features: Vec<String>,
+    },
+    /// Architect's core extensions (`extensions/core-extensions.toml`,
+    /// #631) and the standard distribution built from them
+    /// (`dist/standard`): `check` (offline, CI), `sync` (regenerate
+    /// `dist/standard`), `verify` (every pin against its source), `fetch`
+    /// (packaged folders beside a build), `graph` (one Architect).
+    Core {
+        #[command(subcommand)]
+        action: core_list::Action,
     },
     /// Check that every built-in extension crate builds both ways: linked
     /// in (`--lib`) and as a process (`--bin`), WASI once its runner
@@ -330,6 +344,7 @@ fn main() -> ExitCode {
             profile,
             target_dir,
             version,
+            features,
         } => dist::run_cli(&dist::Options {
             targets,
             manifest_path,
@@ -338,7 +353,9 @@ fn main() -> ExitCode {
             profile,
             target_dir,
             version,
+            features,
         }),
+        Command::Core { action } => core_list::run_cli(&action),
         Command::Builtins => {
             let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             builtins::run_cli(&root)
