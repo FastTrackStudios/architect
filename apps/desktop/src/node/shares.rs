@@ -1461,6 +1461,26 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         return islands(&shares, request.uri().path());
     }
     let guest = is_guest_path(request.uri().path());
+    // A web app on another origin calls a link's guest service too: the
+    // code is the credential and a session travels in the body, never a
+    // cookie, so any origin may, without credentials.
+    if guest && request.method() == Method::OPTIONS {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        let headers = response.headers_mut();
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("POST"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("content-type, authorization"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_MAX_AGE,
+            HeaderValue::from_static("600"),
+        );
+        return guest_headers(response);
+    }
     match answer(shares, request).await {
         Ok(response) => with_policy(response),
         // A link's guest service (`ShareGuest`, mounted on the node's
@@ -1500,6 +1520,10 @@ fn guest_headers(mut response: Response) -> Response {
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
     );
     response
 }

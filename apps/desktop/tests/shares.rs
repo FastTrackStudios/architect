@@ -3479,6 +3479,25 @@ async fn a_guest_reads_a_link_as_its_notes_and_a_note_as_its_pages_words() {
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()["cache-control"], "private, no-store");
     assert_eq!(res.headers()["referrer-policy"], "no-referrer");
+    // Any origin (a web app elsewhere) may call it, without credentials.
+    assert_eq!(res.headers()["access-control-allow-origin"], "*");
+    assert!(
+        !res.headers()
+            .contains_key("access-control-allow-credentials")
+    );
+    let pre = reqwest::Client::new()
+        .request(
+            reqwest::Method::OPTIONS,
+            w.url(&format!("/s/{}/_guest/read", share.code)),
+        )
+        .header("origin", "https://app.example")
+        .header("access-control-request-method", "POST")
+        .header("access-control-request-headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pre.status(), StatusCode::NO_CONTENT);
+    assert_eq!(pre.headers()["access-control-allow-methods"], "POST");
 
     // Revoked: gone, from the next call on.
     let links: ShareLinksClient = w.lane(&w.grace).await;

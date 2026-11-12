@@ -340,7 +340,12 @@ page.
   gets a note's markdown (`GuestNote::source` is empty): only what the
   page says, built from the page's own sanitised prose
   (`features/sites/src/plain.rs` `blocks`, written beside each page as
-  `_note.json`). Its answers are `private, no-store`, `no-referrer`.
+  `_note.json`). Its answers are `private, no-store`, `no-referrer`, and
+  any origin may call it without credentials (`Access-Control-Allow-Origin: *`):
+  the code is the credential, and a session travels in the body, never a
+  cookie. It is the one way an app, the web app or an extension's view
+  reads a link; the node-rendered page is there until the web app shows
+  links.
 - **Universal links.** With `ARCHITECT_APPLE_APP_IDS` set, the node
   serves `/.well-known/apple-app-site-association` naming those apps for
   `/s/*` (never `/s/_*`, its sign-in, or a link's guest service)
