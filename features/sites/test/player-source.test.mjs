@@ -43,7 +43,16 @@ class Node {
   setAttribute(k, v) { this.attrs[k] = String(v); }
   removeAttribute(k) { delete this.attrs[k]; }
   hasAttribute(k) { return k in this.attrs; }
-  appendChild(c) { c.parentElement = this; this.children.push(c); return c; }
+  appendChild(c) { if (c.parentElement) c.parentElement.removeChild(c); c.parentElement = this; this.children.push(c); return c; }
+  get parentNode() { return this.parentElement; }
+  insertBefore(c, ref) {
+    if (c.parentElement) c.parentElement.removeChild(c);
+    c.parentElement = this;
+    const at = this.children.indexOf(ref);
+    this.children.splice(at < 0 ? this.children.length : at, 0, c);
+    return c;
+  }
+  removeChild(c) { this.children = this.children.filter((x) => x !== c); c.parentElement = null; return c; }
   addEventListener(name, fn, opts) {
     (this.listeners[name] ||= []).push({ fn, once: !!(opts && opts.once) });
   }
@@ -53,15 +62,29 @@ class Node {
     ls.forEach((l) => l.fn({ target: this, ...ev }));
   }
   contains(n) { for (; n; n = n.parentElement) if (n === this) return true; return false; }
+  // Selectors: `[a]`, `[a][b]`, and those joined by a space (inside).
+  matches(compound) {
+    const attrs = compound.match(/^(\[[\w-]+\])+$/) ? [...compound.matchAll(/\[([\w-]+)\]/g)].map((m) => m[1]) : null;
+    return !!attrs && attrs.every((a) => this.hasAttribute(a));
+  }
   closest(sel) {
-    const attr = sel.match(/^\[([\w-]+)\]$/)?.[1];
-    for (let n = this; n; n = n.parentElement) if (attr && n.hasAttribute(attr)) return n;
+    for (let n = this; n; n = n.parentElement) if (n.matches(sel)) return n;
     return null;
   }
   all() { return this.children.flatMap((c) => [c, ...c.all()]); }
   querySelectorAll(sel) {
-    const attr = sel.match(/^\[([\w-]+)\]$/)?.[1];
-    return this.all().filter((n) => attr && n.hasAttribute(attr));
+    const parts = sel.trim().split(/\s+/);
+    const last = parts.pop();
+    return this.all().filter((n) => {
+      if (!n.matches(last)) return false;
+      let from = n.parentElement;
+      for (let i = parts.length - 1; i >= 0; i--) {
+        while (from && from !== this && !from.matches(parts[i])) from = from.parentElement;
+        if (!from || from === this) return false;
+        from = from.parentElement;
+      }
+      return true;
+    });
   }
   querySelector(sel) {
     // The bar's parts: stand-ins, one per selector.
@@ -90,8 +113,9 @@ class Media extends Node {
 
 /// A page at `/s/x/joy/` with `media` and a chart following the
 /// playhead (a bar every 2 s), run through the player.
-function page({ media = ['/s/x/joy.mp3'], chartMedia = null } = {}) {
+function page({ media = ['/s/x/joy.mp3'], chartMedia = null, build = null } = {}) {
   const body = new Node('body');
+  if (build) build(body);
   const players = media.map((src) => body.appendChild(new Media(src)));
   const chart = body.appendChild(new Node('div', { 'data-follow-playhead': '' }));
   if (chartMedia) chart.setAttribute('data-media', chartMedia);
@@ -106,10 +130,13 @@ function page({ media = ['/s/x/joy.mp3'], chartMedia = null } = {}) {
     querySelectorAll: (sel) => body.querySelectorAll(sel),
     createElement: (tag) => (tag === 'audio' ? new Media('') : new Node(tag)),
     dispatchEvent: (ev) => events.push(ev.detail),
+    addEventListener: () => {},
+    createComment: () => new Node('#comment'),
   };
   const window = {
     document,
     location: { href: 'http://node.test/s/x/joy/' },
+    history: { state: null, pushState() {}, back() {} },
     sessionStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) },
     requestAnimationFrame: (fn) => frames.push(fn),
     cancelAnimationFrame: () => {},
@@ -274,4 +301,73 @@ test('a source needs a clock and a seek', () => {
   // (A TypeError of the page's realm.)
   assert.throws(() => p.playhead.attach({ time: 0 }), /a time and a seek/);
   assert.throws(() => p.playhead.attach({ seek() {} }), /a time and a seek/);
+});
+
+// ── A playlist: the page is the player ──────────────────────────────
+
+/// A setlist's page: a playlist of three songs, each row naming its
+/// recording and the page that shows it.
+function setlist() {
+  const rows = [];
+  const p = page({
+    media: [],
+    build: (body) => {
+      const list = body.appendChild(new Node('div', { 'data-playlist': '' }));
+      for (const name of ['sleigh', 'silent', 'joy']) {
+        rows.push(list.appendChild(new Node('li', {
+          'data-track': '', 'data-media': `/s/x/${name}.mp4`, 'data-page': `/s/x/${name}/`, 'data-title': name,
+        })));
+      }
+    },
+  });
+  p.window.location.href = 'http://node.test/s/x/setlist/';
+  return { ...p, rows };
+}
+
+test('a playlist is the queue: a row plays where the page is, the next follows without leaving it', () => {
+  const { playhead, rows, window, events } = setlist();
+  const at = window.location.href;
+  rows[1].dispatch('click', { target: rows[1] });
+  let s = events.at(-1);
+  assert.equal(s.src, '/s/x/silent.mp4', 'the row tapped plays');
+  assert.equal(s.tracks, 3, 'its rows are the queue');
+  assert.equal(rows[1].getAttribute('aria-current'), 'true', 'and is marked');
+  assert.equal(rows[0].getAttribute('aria-current'), null);
+  // A seek naming no track is in the one playing, not the page's first.
+  playhead.seek(30);
+  assert.equal(playhead.src, '/s/x/silent.mp4');
+  playhead.next();
+  assert.equal(playhead.src, '/s/x/joy.mp4', 'the next row');
+  assert.equal(window.location.href, at, 'no page load');
+  assert.equal(rows[2].getAttribute('aria-current'), 'true');
+  playhead.previous();
+  s = events.at(-1);
+  assert.ok(['/s/x/joy.mp4', '/s/x/silent.mp4'].includes(s.src));
+  assert.equal(window.location.href, at);
+});
+
+
+test('a row that is also a follow box (written for a page without playlists) plays once, in place', () => {
+  const rows = [];
+  const lines = [];
+  const p = page({
+    media: [],
+    build: (body) => {
+      const list = body.appendChild(new Node('div', { 'data-playlist': '' }));
+      for (const name of ['sleigh', 'silent']) {
+        const row = list.appendChild(new Node('li', {
+          'data-track': '', 'data-follow-playhead': '', 'data-media': `/s/x/${name}.mp4`, 'data-page': `/s/x/${name}/`, 'data-title': name,
+        }));
+        rows.push(row);
+        lines.push(row.appendChild(new Node('span', { 'data-at': '0' })));
+      }
+    },
+  });
+  p.window.location.href = 'http://node.test/s/x/setlist/';
+  // The click reaches the line's follow box (the row) and the row: one
+  // of them plays it, and it is not toggled back off.
+  rows[1].dispatch('click', { target: lines[1] });
+  assert.equal(p.playhead.src, '/s/x/silent.mp4');
+  assert.equal(p.playhead.playing, true, 'playing, not paused again');
+  assert.equal(rows[1].getAttribute('aria-current'), 'true');
 });

@@ -1729,6 +1729,37 @@ tempo map, as HTML or as its engraved SVG (keyflow#59):
 The synced-lyrics block is built this way
 (`features/sites/src/lyrics.rs` `lyrics_html`).
 
+**A playlist and a now-playing view.** A block can make its page a
+player, the way a streaming app's playlist is: a list whose rows play in
+place, a bar at the foot while anything plays, and a view of what plays
+that opens from the bar (studio#445). Attributes again, no script:
+
+| Attribute | On | Means |
+| --- | --- | --- |
+| `data-playlist` | a list | its tracks are the page's queue, in document order (every playlist of the page, one after the other); a tap on one plays it and the page stays; the next one starts without a page load |
+| `data-track` + `data-media="<url>"` | a row of it | a track: its recording; `aria-current="true"` and `data-state` (`playing` or `paused`) while it is the one playing; a link in it still goes where it says |
+| `data-title`, `data-subtitle` | the row | what the bar and the view say of it |
+| `data-page="<url>"` | the row | the page whose `[data-now-playing]` shows it |
+| `data-playlist-play` | a button in the list | plays it from its first track |
+| `data-now-playing` + `data-media="<url>"` | a block's element | what the now-playing view shows while that recording plays: moved in from this page, or fetched from the track's `data-page` (once), with its block's box so its sheet comes too; its `[data-follow-playhead]` boxes follow there |
+| `data-transport` | inside the view | the view brings its own controls: the bar's are not drawn under it |
+
+The bar (the song, play / pause, previous / next, a line for where it
+is) opens the view; Back, a swipe down on its head or Escape closes it,
+and what plays goes on. On a phone the view covers the page; on a wide
+screen it is a panel beside the list.
+
+```html
+<div data-playlist>
+  <button data-playlist-play>Play</button>
+  <ol>
+    <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="D · 128 bpm">…<a href="../joy/">Chart</a></li>
+  </ol>
+</div>
+<!-- on Joy's page -->
+<div data-now-playing data-media="Media/Joy.mp4"><svg>… <g data-follow-playhead data-media="Media/Joy.mp4">…</g></svg></div>
+```
+
 **Or subscribe in script.** A view with a script of its own on the page
 (a view mounted live there later, #488) reads the same player,
 `architect.playhead` (`features/sites/assets/player.js`):

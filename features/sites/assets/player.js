@@ -24,6 +24,19 @@
 // and seek there on a click. They may be HTML or SVG elements (a chart's
 // `<rect data-at>` per bar, keyflow#59).
 //
+// A playlist (`[data-playlist]`, a block's list of songs) makes the page
+// a player: its tracks (`[data-track][data-media]`, each with
+// `data-title`, `data-subtitle` and `data-page`, the page that shows it
+// playing) in document order are the queue; a tap on one plays it and
+// the page stays where it is; a `[data-playlist-play]` in it plays it from
+// the top; the track playing is marked aria-current="true". Songs follow
+// each other without a page load. The bar at the bottom (the song, its
+// position, play / pause) opens the now-playing view: the playing track's
+// `[data-now-playing]` element (from its page, fetched when it is
+// another), with the player's controls under it unless it brings its own
+// (`[data-transport]` in it). Back, a swipe down or Escape closes it;
+// what plays goes on.
+//
 // Pages are separate documents: the player keeps where it is (track,
 // time, playing) in sessionStorage and resumes on the next page; a
 // browser that refuses to start sound without a click leaves it paused
@@ -34,13 +47,20 @@
   var arch = (window.architect = window.architect || {});
   if (arch.playhead) return;
 
-  function path(url) {
+  function path(url, from) {
     try {
-      var p = new URL(url, location.href).pathname;
+      var base = (from && from.getAttribute && closestBase(from)) || location.href;
+      var p = new URL(url, base).pathname;
       return p.replace(/index\.html$/, "");
     } catch (e) {
       return String(url);
     }
+  }
+  // A fetched page's elements keep the page they came from: their
+  // relative URLs are read from there.
+  function closestBase(node) {
+    var n = node.closest ? node.closest("[data-site-from]") : null;
+    return n ? n.getAttribute("data-site-from") : null;
   }
   var here = path(location.href);
 
@@ -66,6 +86,34 @@
       tracks.push({ src: src, page: here, title: el.textContent.trim() || src.split("/").pop(), kind: el.tagName.toLowerCase() });
     }
   });
+  // The page's playlists: their tracks are the queue, the page stays.
+  var rows = [];
+  var listed = [];
+  Array.prototype.forEach.call(doc.querySelectorAll("[data-playlist]"), function (list) {
+    Array.prototype.forEach.call(list.querySelectorAll("[data-track][data-media]"), function (row) {
+      var src = path(row.getAttribute("data-media"));
+      rows.push({ el: row, src: src });
+      if (listed.some(function (t) { return t.src === src; })) return;
+      var page = row.getAttribute("data-page");
+      listed.push({
+        src: src,
+        page: page ? path(page) : here,
+        title: row.getAttribute("data-title") || row.textContent.trim(),
+        subtitle: row.getAttribute("data-subtitle") || "",
+        kind: "audio",
+      });
+    });
+  });
+  var shell = listed.length > 0;
+  if (shell) {
+    inline.forEach(function (m) {
+      var src = path(m.getAttribute("src") || "");
+      if (!listed.some(function (t) { return t.src === src; })) {
+        listed.push({ src: src, page: here, title: m.textContent.trim() || src.split("/").pop(), subtitle: "", kind: m.tagName.toLowerCase() });
+      }
+    });
+    tracks = listed;
+  }
   var followers = doc.querySelectorAll("[data-follow-playhead]");
   if (!tracks.length && !followers.length) return;
 
@@ -226,7 +274,7 @@
     var t = tracks[i];
     if (!t) return;
     var media = inlineFor(t.src);
-    if (!media && follow && !stay && t.page !== here) {
+    if (!media && follow && !stay && !shell && t.page !== here) {
       store({ src: t.src, time: time || 0, playing: play, follow: follow });
       location.href = t.page;
       return;
@@ -254,7 +302,7 @@
   }
 
   function next(auto) {
-    if (cur + 1 < tracks.length) select(cur + 1, 0, true);
+    if (cur + 1 < tracks.length) select(cur + 1, 0, true, shell);
     else if (auto) emit(true);
   }
   function previous() {
@@ -262,7 +310,7 @@
       el.currentTime = 0;
       return;
     }
-    if (cur > 0) select(cur - 1, 0, el ? !el.paused : true);
+    if (cur > 0) select(cur - 1, 0, el ? !el.paused : true, shell);
     else if (el) el.currentTime = 0;
   }
   function firstHere() {
@@ -294,7 +342,9 @@
     seek: function (t, opts) {
       if (source) return ask("seek", Math.max(0, Number(t) || 0));
       var src = opts && opts.src ? path(opts.src) : null;
-      var want = src ? indexOf(src) : cur >= 0 && tracks[cur].page === here ? cur : firstHere();
+      // A playlist's page plays its tracks where it is: a seek with no
+      // track named is in the one playing.
+      var want = src ? indexOf(src) : cur >= 0 && (shell || tracks[cur].page === here) ? cur : firstHere();
       if (want < 0) return;
       if (want !== cur || !el) select(want, t, opts && opts.play !== undefined ? opts.play : true, true);
       else {
@@ -361,8 +411,9 @@
   };
   arch.playhead = playhead;
 
-  // Blocks that follow without a script.
-  var lines = Array.prototype.map.call(followers, function (box) {
+  // Blocks that follow without a script: the page's, and the now-playing
+  // view's while it shows another page's.
+  function line(box) {
     var items = Array.prototype.slice.call(box.querySelectorAll("[data-at]"));
     var media = box.getAttribute("data-media");
     box.addEventListener("click", function (ev) {
@@ -373,12 +424,19 @@
     });
     return {
       box: box,
-      media: media ? path(media) : null,
+      media: media ? path(media, box) : null,
       items: items,
       at: items.map(function (i) { return parseFloat(i.getAttribute("data-at")) || 0; }),
       current: null,
     };
-  });
+  }
+  var lines = Array.prototype.map.call(followers, line);
+  function follows(root, on) {
+    var boxes = Array.prototype.slice.call(root.querySelectorAll("[data-follow-playhead]"));
+    lines = lines.filter(function (f) { return boxes.indexOf(f.box) < 0; });
+    if (on) lines = lines.concat(boxes.map(line));
+    emit(true);
+  }
   function follow_(s) {
     lines.forEach(function (f) {
       var mine = f.media ? s.src === f.media : s.here;
@@ -430,42 +488,243 @@
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 
-  // The bar: shown for a link's queue, or two players or more on a page.
+  // The bar: shown for a link's queue, a playlist, or two players or more
+  // on a page. Its song opens the now-playing view.
+  var ICON = {
+    previous: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg>',
+    next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg>',
+    play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15L20 12z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h4v15H6zM14 4.5h4v15h-4z"/></svg>',
+    down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.3 8.3 12 15l6.7-6.7 1.4 1.4L12 17.8 3.9 9.7z"/></svg>',
+  };
+  function controls() {
+    return '<button type="button" class="site-player-skip" data-act="previous" aria-label="Previous">' + ICON.previous + "</button>" +
+      '<button type="button" class="site-player-toggle" data-act="toggle" aria-label="Play">' + ICON.play + "</button>" +
+      '<button type="button" class="site-player-skip" data-act="next" aria-label="Next">' + ICON.next + "</button>";
+  }
+  function act(a) {
+    if (a === "previous") previous();
+    else if (a === "next") next(false);
+    else if (a === "open") open_();
+    else if (a === "close") close_();
+    else if (snapshot().playing) playhead.pause();
+    else playhead.play();
+  }
   var bar = null, ui = {};
-  if (queueEl ? tracks.length > 0 : inline.length > 1) {
+  if (shell || (queueEl ? tracks.length > 0 : inline.length > 1)) {
     bar = doc.createElement("div");
     bar.className = "site-player";
     bar.setAttribute("role", "region");
     bar.setAttribute("aria-label", "Player");
     bar.innerHTML =
-      '<button type="button" data-act="previous" aria-label="Previous">⏮</button>' +
-      '<button type="button" data-act="toggle" aria-label="Play">▶</button>' +
-      '<button type="button" data-act="next" aria-label="Next">⏭</button>' +
-      '<span class="site-player-what"><a class="site-player-title"></a><span class="site-player-note"></span></span>' +
+      '<div class="site-player-line" aria-hidden="true"><span></span></div>' +
+      '<button type="button" class="site-player-what" data-act="open" aria-label="Now playing"><span class="site-player-title"></span><span class="site-player-note"></span></button>' +
       '<span class="site-player-time">0:00</span>' +
-      '<label class="site-player-follow" title="Go to each song\'s page as it plays"><input type="checkbox"> Follow</label>';
-    ui.toggle = bar.querySelector('[data-act="toggle"]');
+      controls() +
+      (shell ? "" : '<label class="site-player-follow" title="Go to each song\'s page as it plays"><input type="checkbox"> Follow</label>');
+    ui.line = bar.querySelector(".site-player-line span");
     ui.title = bar.querySelector(".site-player-title");
     ui.note = bar.querySelector(".site-player-note");
     ui.time = bar.querySelector(".site-player-time");
     ui.follow = bar.querySelector(".site-player-follow input");
-    ui.follow.checked = follow;
-    ui.follow.addEventListener("change", function () {
-      follow = ui.follow.checked;
-      save(true);
-    });
+    if (ui.follow) {
+      ui.follow.checked = follow;
+      ui.follow.addEventListener("change", function () {
+        follow = ui.follow.checked;
+        save(true);
+      });
+    }
     bar.addEventListener("click", function (ev) {
-      var act = ev.target.closest("[data-act]");
-      if (!act) return;
-      var a = act.getAttribute("data-act");
-      if (a === "previous") previous();
-      else if (a === "next") next(false);
-      else if (el && !el.paused) el.pause();
-      else playhead.play();
+      var a = ev.target.closest("[data-act]");
+      if (a) act(a.getAttribute("data-act"));
     });
     doc.body.appendChild(bar);
     doc.body.classList.add("site-has-player");
   }
+
+  // A playlist's rows: a tap plays the row's track where the page is (its
+  // links still go where they say); the playing row is marked.
+  rows.forEach(function (r) {
+    r.el.addEventListener("click", function (ev) {
+      // Its links go where they say; a line of a follow box in it seeks
+      // there itself (a row written for a page without playlists).
+      if (ev.target.closest("a, [data-playlist-play]")) return;
+      var line_ = ev.target.closest("[data-at]");
+      if (line_ && line_.closest("[data-follow-playhead]") && r.el.contains(line_)) return;
+      var i = indexOf(r.src);
+      if (i < 0) return;
+      if (i === cur && el) act("toggle");
+      else select(i, 0, true, true);
+    });
+  });
+  Array.prototype.forEach.call(doc.querySelectorAll("[data-playlist] [data-playlist-play]"), function (b) {
+    b.addEventListener("click", function () {
+      var first = b.closest("[data-playlist]").querySelector("[data-track][data-media]");
+      var i = first ? indexOf(path(first.getAttribute("data-media"))) : -1;
+      if (i >= 0) select(i, 0, true, true);
+    });
+  });
+
+  // The now-playing view: the playing track's `[data-now-playing]`, in a
+  // sheet over the page. One from this page is moved in (with its block's
+  // box, which scopes its sheet) and back out on close; one from another
+  // page is fetched once and kept.
+  var sheet = null, view = { src: null, node: null, home: null };
+  // The track whose view is shown or on its way.
+  var wanted = null;
+  var fetched = {};
+  if (bar) {
+    sheet = doc.createElement("div");
+    sheet.className = "site-now";
+    sheet.hidden = true;
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    sheet.setAttribute("aria-label", "Now playing");
+    sheet.innerHTML =
+      '<div class="site-now-head"><button type="button" class="site-now-close" data-act="close" aria-label="Close">' + ICON.down + "</button>" +
+      '<div class="site-now-what"><span class="site-now-title"></span><span class="site-now-note"></span></div>' +
+      '<a class="site-now-page">Song page</a></div>' +
+      '<div class="site-now-body"></div>' +
+      '<div class="site-now-controls"><div class="site-player-line" aria-hidden="true"><span></span></div><div class="site-now-buttons"><span class="site-now-at">0:00</span>' + controls() + '<span class="site-now-left">–:––</span></div></div>';
+    ui.nowTitle = sheet.querySelector(".site-now-title");
+    ui.nowNote = sheet.querySelector(".site-now-note");
+    ui.nowPage = sheet.querySelector(".site-now-page");
+    ui.body = sheet.querySelector(".site-now-body");
+    ui.controls = sheet.querySelector(".site-now-controls");
+    ui.nowLine = sheet.querySelector(".site-now-controls .site-player-line span");
+    ui.nowAt = sheet.querySelector(".site-now-at");
+    ui.nowLeft = sheet.querySelector(".site-now-left");
+    sheet.addEventListener("click", function (ev) {
+      var a = ev.target.closest("[data-act]");
+      if (a && !ev.target.closest(".site-now-body")) act(a.getAttribute("data-act"));
+    });
+    // A swipe down on its head closes it.
+    var startY = null;
+    var head = sheet.querySelector(".site-now-head");
+    head.addEventListener("touchstart", function (ev) { startY = ev.touches[0].clientY; }, { passive: true });
+    head.addEventListener("touchend", function (ev) {
+      if (startY !== null && ev.changedTouches[0].clientY - startY > 60) close_();
+      startY = null;
+    });
+    doc.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && !sheet.hidden) close_();
+    });
+    window.addEventListener("popstate", function () {
+      if (!sheet.hidden && !(history.state && history.state.siteNowPlaying)) close_(true);
+    });
+    doc.body.appendChild(sheet);
+  }
+  // The view on this page whose media is `src`, else its first.
+  function viewIn(root, src) {
+    var all = Array.prototype.slice.call(root.querySelectorAll("[data-now-playing]"));
+    for (var i = 0; i < all.length; i++) {
+      var m = all[i].getAttribute("data-media");
+      if (m && path(m, all[i]) === src) return all[i];
+    }
+    return all.length === 1 && !all[0].getAttribute("data-media") ? all[0] : null;
+  }
+  // What to show: the view element's block box (it scopes the block's
+  // sheet), else the element.
+  function boxOf(node) {
+    return node.closest(".site-block") || node;
+  }
+  function unmount() {
+    if (!view.node) return;
+    if (view.home) {
+      view.home.parentNode.insertBefore(view.node, view.home);
+      view.home.parentNode.removeChild(view.home);
+    } else {
+      follows(view.node, false);
+      if (view.node.parentNode) view.node.parentNode.removeChild(view.node);
+    }
+    view = { src: null, node: null, home: null };
+  }
+  function mount(node, home, src) {
+    unmount();
+    view = { src: src, node: node, home: home };
+    if (home) node.parentNode.insertBefore(home, node);
+    ui.body.textContent = "";
+    ui.body.appendChild(node);
+    if (!home) follows(node, true);
+    ui.controls.hidden = !!node.querySelector("[data-transport]");
+    sheet.classList.toggle("site-now-own", ui.controls.hidden);
+    emit(true);
+  }
+  function show(t) {
+    if (!t || wanted === t.src) return;
+    wanted = t.src;
+    var mine = viewIn(doc, t.src);
+    if (mine && !sheet.contains(mine)) {
+      var box = boxOf(mine);
+      mount(box, doc.createComment("now-playing"), t.src);
+      return;
+    }
+    unmount();
+    ui.controls.hidden = false;
+    var note = doc.createElement("p");
+    note.className = "site-now-empty";
+    note.textContent = "Loading…";
+    ui.body.textContent = "";
+    ui.body.appendChild(note);
+    if (t.page === here) {
+      note.textContent = "";
+      return;
+    }
+    var page = t.page;
+    var got = fetched[page] || (fetched[page] = fetch(page, { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.text() : ""; })
+      .then(function (html) {
+        var parsed = new DOMParser().parseFromString(html, "text/html");
+        return parsed;
+      }));
+    got.then(function (parsed) {
+      if (wanted !== t.src) return;
+      var found = parsed ? viewIn(withBase(parsed, page), t.src) : null;
+      if (!found) {
+        note.textContent = "";
+        return;
+      }
+      var node = doc.importNode(boxOf(found), true);
+      node.setAttribute("data-site-from", new URL(page, location.href).href);
+      mount(node, null, t.src);
+    }).catch(function () { note.textContent = ""; });
+  }
+  // `parsed` read as from `page`: its views' relative URLs resolve there.
+  function withBase(parsed, page) {
+    Array.prototype.forEach.call(parsed.querySelectorAll("[data-now-playing]"), function (n) {
+      boxOf(n).setAttribute("data-site-from", new URL(page, location.href).href);
+    });
+    return parsed;
+  }
+  function open_() {
+    if (!sheet) return;
+    var t = tracks[cur];
+    if (!t) {
+      if (tracks.length) select(0, 0, false, true);
+      t = tracks[cur];
+    }
+    if (!t) return;
+    show(t);
+    if (sheet.hidden) {
+      sheet.hidden = false;
+      doc.body.classList.add("site-now-open");
+      try { history.pushState({ siteNowPlaying: true }, ""); } catch (e) {}
+    }
+    emit(true);
+    var cur_ = sheet.querySelector('[aria-current="time"]');
+    if (cur_) intoView(cur_);
+  }
+  function close_(popped) {
+    if (!sheet || sheet.hidden) return;
+    sheet.hidden = true;
+    doc.body.classList.remove("site-now-open");
+    wanted = null;
+    unmount();
+    if (!popped && history.state && history.state.siteNowPlaying) {
+      try { history.back(); } catch (e) {}
+    }
+  }
+
   // The bar steps aside while a source holds the clock: the engine
   // brings its own transport.
   function yieldBar(away) {
@@ -480,15 +739,39 @@
     return Math.floor(t / 60) + ":" + (s < 10 ? "0" : "") + s;
   }
   function paint(s, note) {
+    rows.forEach(function (r) {
+      var on = s.src === r.src;
+      if (on) {
+        r.el.setAttribute("aria-current", "true");
+        r.el.setAttribute("data-state", s.playing ? "playing" : "paused");
+      } else if (r.el.hasAttribute("aria-current")) {
+        r.el.removeAttribute("aria-current");
+        r.el.removeAttribute("data-state");
+      }
+    });
     if (!bar) return;
     var t = tracks[s.index];
-    ui.toggle.textContent = s.playing ? "⏸" : "▶";
-    ui.toggle.setAttribute("aria-label", s.playing ? "Pause" : "Play");
-    ui.title.textContent = t ? t.title : tracks.length + " tracks";
-    if (t) ui.title.href = t.page; else ui.title.removeAttribute("href");
-    ui.time.textContent = clock(s.time) + " / " + clock(s.duration);
+    var part = s.duration ? Math.min(1, s.time / s.duration) : 0;
+    Array.prototype.forEach.call(doc.querySelectorAll('.site-player [data-act="toggle"], .site-now [data-act="toggle"]'), function (b) {
+      b.innerHTML = s.playing ? ICON.pause : ICON.play;
+      b.setAttribute("aria-label", s.playing ? "Pause" : "Play");
+    });
+    bar.classList.toggle("site-player-on", !!t);
+    ui.title.textContent = t ? t.title : tracks.length === 1 ? "1 track" : tracks.length + " tracks";
     if (note !== undefined) ui.note.textContent = note;
-    else if (s.playing) ui.note.textContent = "";
+    else ui.note.textContent = t ? t.subtitle || "" : "";
+    ui.time.textContent = clock(s.time) + " / " + clock(s.duration);
+    ui.line.style.width = (part * 100).toFixed(2) + "%";
+    if (sheet) {
+      ui.nowTitle.textContent = t ? t.title : "";
+      ui.nowNote.textContent = t ? t.subtitle || "" : "";
+      if (t && t.page && t.page !== here) ui.nowPage.href = t.page; else ui.nowPage.removeAttribute("href");
+      ui.nowPage.hidden = !(t && t.page && t.page !== here);
+      ui.nowLine.style.width = (part * 100).toFixed(2) + "%";
+      ui.nowAt.textContent = clock(s.time);
+      ui.nowLeft.textContent = s.duration ? "-" + clock(s.duration - s.time) : "–:––";
+      if (!sheet.hidden && t && wanted !== t.src) show(t);
+    }
   }
 
   // Resume where the last page left off.

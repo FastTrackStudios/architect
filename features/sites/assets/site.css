@@ -372,13 +372,61 @@ video.site-media { max-height: 70vh; background: #000; border-radius: 6px; }
 [data-follow-playhead] svg [data-at], svg[data-follow-playhead] [data-at] { cursor: pointer; }
 [data-follow-playhead] svg [data-at]:hover, svg[data-follow-playhead] [data-at]:hover { fill: var(--primary, var(--accent)); fill-opacity: .12; }
 [data-follow-playhead] svg [data-at][aria-current="time"], svg[data-follow-playhead] [data-at][aria-current="time"] { fill: var(--primary, var(--accent)); fill-opacity: .28; }
-body.site-has-player { padding-bottom: 64px; }
-.site-player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--background); color: var(--foreground); border-top: 1px solid var(--border, #8884); font: 14px/1.3 system-ui, sans-serif; }
-.site-player button { font: inherit; min-width: 36px; height: 36px; border-radius: 18px; border: 1px solid var(--border, #8886); background: transparent; color: inherit; cursor: pointer; }
-.site-player-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.site-player-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: inherit; font-weight: 600; }
-.site-player-note { font-size: 12px; opacity: .75; }
-.site-player-time { font-variant-numeric: tabular-nums; opacity: .8; }
+/* The player (#511): a bar at the bottom while anything plays, whose song
+   opens the now-playing view over the page. */
+body.site-has-player { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+.site-player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; align-items: center; gap: 4px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--background); color: var(--foreground); border-top: 1px solid var(--border, #8884); font: 14px/1.3 system-ui, sans-serif; }
+.site-player[hidden] { display: none; }
+.site-player-line { position: absolute; left: 0; right: 0; top: -1px; height: 2px; pointer-events: none; }
+.site-player-line span { display: block; height: 100%; width: 0; background: var(--primary, currentColor); }
+.site-player button, .site-now button { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; border-radius: 999px; -webkit-tap-highlight-color: transparent; }
+.site-player button:focus-visible, .site-now button:focus-visible { outline: 2px solid var(--ring, currentColor); outline-offset: 2px; }
+.site-player button svg, .site-now button svg { width: 22px; height: 22px; fill: currentColor; }
+.site-player .site-player-skip, .site-player .site-player-toggle { flex: none; width: 40px; height: 40px; }
+.site-player .site-player-toggle, .site-now .site-player-toggle { background: var(--foreground); color: var(--background); }
+.site-player .site-player-toggle svg { width: 20px; height: 20px; }
+.site-player .site-player-what { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; padding: 4px 8px; border-radius: 8px; }
+.site-player .site-player-what:hover { background: var(--site-code-bg); }
+.site-player-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.site-player-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .7; }
+.site-player-note:empty { display: none; }
+.site-player-time { font-variant-numeric: tabular-nums; font-size: 12px; opacity: .7; padding: 0 6px; }
 .site-player-follow { display: flex; gap: 4px; align-items: center; font-size: 12px; }
 .site-player-audio { display: none; }
-@media (max-width: 520px) { .site-player-follow { display: none; } }
+@media (max-width: 520px) { .site-player-follow, .site-player-time { display: none; } }
+
+.site-now { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--background); color: var(--foreground); font: 14px/1.3 system-ui, sans-serif; }
+.site-now[hidden] { display: none; }
+body.site-now-open { overflow: hidden; }
+body.site-now-open .site-player { visibility: hidden; }
+.site-now-head { display: flex; align-items: center; gap: 8px; padding: calc(6px + env(safe-area-inset-top, 0px)) 10px 6px; border-bottom: 1px solid var(--border, #8884); }
+.site-now-close { flex: none; width: 44px; height: 44px; }
+.site-now-close svg { width: 28px; height: 28px; }
+.site-now-what { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.site-now-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; font-size: 15px; }
+.site-now-note { font-size: 12px; opacity: .7; }
+.site-now-page { flex: none; width: 88px; text-align: right; font-size: 13px; color: var(--primary, inherit); text-decoration: none; }
+.site-now-page[hidden] { display: block; visibility: hidden; }
+.site-now-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.site-now-body > .site-block, .site-now-body > [data-now-playing] { flex: 1; min-height: 0; margin: 0; }
+.site-now-empty { margin: auto; opacity: .6; }
+.site-now-controls { flex: none; padding: 4px 16px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border, #8884); }
+.site-now-controls[hidden] { display: none; }
+.site-now-controls .site-player-line { position: relative; top: 0; height: 4px; margin: 8px 0 6px; border-radius: 2px; overflow: hidden; background: var(--border, #8884); }
+.site-now-buttons { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.site-now-buttons .site-player-skip { width: 48px; height: 48px; }
+.site-now-buttons .site-player-skip svg { width: 28px; height: 28px; }
+.site-now-buttons .site-player-toggle { width: 64px; height: 64px; }
+.site-now-buttons .site-player-toggle svg { width: 28px; height: 28px; }
+.site-now-at, .site-now-left { flex: 1; font-variant-numeric: tabular-nums; font-size: 12px; opacity: .7; }
+.site-now-left { text-align: right; }
+@media (min-width: 900px) {
+  .site-now { left: auto; width: min(760px, 62vw); border-left: 1px solid var(--border, #8884); box-shadow: -12px 0 32px #0003; }
+  body.site-now-open { overflow: auto; }
+}
+
+/* A playlist's rows (a block's `[data-playlist]`): the playing one marked. */
+[data-playlist] [data-track] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+[data-playlist] [data-track]:hover { background: var(--site-code-bg); }
+[data-playlist] [data-track][aria-current="true"] { color: var(--primary, inherit); }
+[data-playlist] [data-track][aria-current="true"] [data-track-mark] { color: var(--primary, inherit); }

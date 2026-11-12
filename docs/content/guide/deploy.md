@@ -540,6 +540,12 @@ or an `lrc` fence in the note):
   its filter's (`apps/desktop/src/node/shares.rs` `queue`). A bar at the
   foot of the page plays it: previous, play, next, the song (a link to its
   page) and the time. When a song ends the next one starts.
+- **A playlist plays in place.** A page whose blocks are a playlist (a
+  setlist's songs: `[data-playlist]`, [views that follow playback](@/architecture/extensions.md#views-that-follow-playback))
+  is the player: its rows are the queue, a tap on one plays it there, and
+  the songs follow each other with no page load. The bar at the foot opens
+  the now-playing view: the playing song's chart (its `[data-now-playing]`,
+  fetched from its page) with the controls under it.
 - **Across pages.** A link's pages are separate documents, so moving between
   songs loads a new page. The player keeps the song, the time and whether it
   was playing in the tab's `sessionStorage` and picks up where it was on the
