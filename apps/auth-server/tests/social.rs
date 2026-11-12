@@ -60,6 +60,7 @@ fn test_config() -> ServerConfig {
             // Task treats a refused refresh as a sign-out: no rotation.
             rotate_refresh_tokens: false,
             disabled: false,
+            issue_sessions: false,
         }],
         ..ServerConfig::local()
     }

@@ -26,12 +26,37 @@ const PASSWORD: &str = auth_server::dev::DEV_PASSWORD;
 /// The issuer, served on loopback: its origin, and its router (to act as
 /// a person's browser).
 async fn issuer() -> (String, axum::Router) {
+    issuer_with(true).await
+}
+
+/// The test app's client as the Architect app's is registered: public, a
+/// loopback redirect on any port and the app's scheme, and allowed to
+/// trade its token for a session when `issue_sessions`.
+fn native_client(issue_sessions: bool) -> architect_auth::OidcClientConfig {
+    architect_auth::OidcClientConfig {
+        client_id: "architect-test".into(),
+        client_secret: None,
+        name: "Architect (test)".into(),
+        redirect_uris: vec![
+            "http://127.0.0.1/oauth/callback".into(),
+            "app.fasttrackstudio.architect:/oauth/callback".into(),
+        ],
+        scopes: vec!["openid".into(), "profile".into(), "email".into(), "offline_access".into()],
+        public_client: true,
+        skip_consent: true,
+        disabled: false,
+        issue_sessions,
+    }
+}
+
+async fn issuer_with(issue_sessions: bool) -> (String, axum::Router) {
     let db = Database::connect("sqlite::memory:").await.unwrap();
     Migrator::up(&db, None).await.unwrap();
     let config = ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
         database_url: "sqlite::memory:".into(),
         session_ttl_seconds: 3600,
+        oidc_clients: vec![native_client(issue_sessions)],
         ..ServerConfig::local()
     };
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db.clone())).unwrap();
@@ -142,7 +167,7 @@ async fn a_browser_sign_in_lands_once_its_person_approves_the_code() {
     let secrets = Arc::new(MemorySecrets::new());
     let a = accounts(&origin, secrets.clone());
     a.open_sheet(architect_accounts::Sheet::SignIn);
-    a.sign_in_browser();
+    a.sign_in_with_code();
     until("the code", || a.browser().is_some()).await;
     let wait = a.browser().unwrap();
     assert!(wait.url.starts_with(&origin), "{}", wait.url);
@@ -305,4 +330,114 @@ async fn each_account_has_its_orgs_and_keeps_the_one_it_is_in() {
     // All, kept too.
     list.run_json("ORG_SWITCH", br#"{"org":"all"}"#).unwrap();
     assert!(a.orgs().current().is_none() && a.active_session().scope().is_all());
+}
+
+
+/// The person's browser on the issuer: signed in as `email`, it opens the
+/// sign-in page the app opened and follows the issuer's redirect, which
+/// must lead to the app's loopback port; answers that redirect.
+async fn browser_signs_in(origin: &str, page: &str, email: &str) -> String {
+    let session = Issuer::new(origin)
+        .sign_in_password(email, PASSWORD)
+        .await
+        .unwrap()
+        .session
+        .token;
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let reply = http
+        .get(page)
+        .header("cookie", format!("architect-auth.session={session}"))
+        .send()
+        .await
+        .unwrap();
+    assert!(reply.status().is_redirection(), "{}", reply.status());
+    let back = reply.headers()["location"].to_str().unwrap().to_owned();
+    assert!(
+        back.starts_with("http://127.0.0.1:") && back.contains("/oauth/callback?code="),
+        "the issuer sends the browser to the app's loopback port"
+    );
+    back
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_browser_sign_in_comes_back_on_the_apps_loopback_port_signed_in() {
+    let (origin, _) = issuer().await;
+    let secrets = Arc::new(MemorySecrets::new());
+    let a = accounts(&origin, secrets.clone());
+    a.sign_in();
+    until("the sign-in page", || a.browser().is_some()).await;
+    let wait = a.browser().unwrap();
+    assert!(wait.url.starts_with(&format!("{origin}/oauth2/authorize?")), "the issuer's own page");
+    assert!(wait.url.contains("code_challenge_method=S256"));
+    assert!(wait.user_code.is_empty(), "no code to type: the browser comes back");
+
+    let back = browser_signs_in(&origin, &wait.url, "ada@local.test").await;
+    // The browser lands on the app's port: a page saying to go back.
+    let landed = reqwest::get(&back).await.unwrap();
+    assert_eq!(landed.status(), 200);
+    assert!(landed.text().await.unwrap().contains("signed in"));
+
+    until("the account", || a.active().is_some()).await;
+    assert_eq!(a.active().and_then(|x| x.email).as_deref(), Some("ada@local.test"));
+    assert_eq!(a.sheet(), None);
+    assert_eq!(secrets.len(), 1, "the session, in the keychain");
+    // A session the issuer's services take (what orgs and devices need).
+    let orgs = a.refresh_orgs().await.unwrap();
+    assert!(orgs.orgs.iter().any(|o| o.slug == "acme"), "Ada's org");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_callback_with_another_state_signs_no_one_in() {
+    let (origin, _) = issuer().await;
+    let a = accounts(&origin, Arc::new(MemorySecrets::new()));
+    a.sign_in();
+    until("the sign-in page", || a.browser().is_some()).await;
+    let page = a.browser().unwrap().url;
+    let back = browser_signs_in(&origin, &page, "ada@local.test").await;
+    // A forged or stale callback: the code, another state.
+    let (head, _) = back.split_once("&state=").unwrap();
+    let _ = reqwest::get(format!("{head}&state=forged")).await.unwrap();
+    until("the refusal", || matches!(a.status(), Status::Failed(_))).await;
+    assert!(a.active().is_none());
+    assert!(a.browser().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_the_issuer_does_not_let_mint_sessions_signs_no_one_in() {
+    let (origin, _) = issuer_with(false).await;
+    let a = accounts(&origin, Arc::new(MemorySecrets::new()));
+    a.sign_in();
+    until("the sign-in page", || a.browser().is_some()).await;
+    let page = a.browser().unwrap().url;
+    let back = browser_signs_in(&origin, &page, "ada@local.test").await;
+    let _ = reqwest::get(&back).await.unwrap();
+    until("the refusal", || matches!(a.status(), Status::Failed(_))).await;
+    assert!(a.active().is_none(), "the code alone is no session");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_cancelled_leaves_the_app_as_it_was() {
+    let (origin, _) = issuer().await;
+    let a = accounts(&origin, Arc::new(MemorySecrets::new()));
+    a.sign_in();
+    until("the sign-in page", || a.browser().is_some()).await;
+    let page = a.browser().unwrap().url;
+    a.cancel_browser();
+    assert!(a.browser().is_none());
+    assert_eq!(a.status(), Status::Idle);
+    // Its person finishes in the browser anyway: nothing lands.
+    let back = browser_signs_in(&origin, &page, "ada@local.test").await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let _ = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap()
+        .get(&back)
+        .send()
+        .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(a.active().is_none());
 }

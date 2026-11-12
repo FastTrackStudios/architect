@@ -23,6 +23,10 @@
 //! - [`ui`] (feature `ui`): the shell's Account item with the switcher, and
 //!   the sign-in sheet with the devices.
 
+#[cfg(feature = "http")]
+pub mod browser;
+#[cfg(feature = "http")]
+pub mod redirect;
 mod model;
 mod secrets;
 mod store;

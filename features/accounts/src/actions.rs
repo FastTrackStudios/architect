@@ -65,7 +65,7 @@ macro_rules! metas {
 
 metas! {
     LIST = LIST, "Accounts", "The accounts signed in on this device (key, name, email, whether it must sign in again) and the active one, at which issuer. No session or token.";
-    SIGN_IN = SIGN_IN, "Sign in…", "Opens the sign-in sheet. `method` browser starts a sign-in in the browser at once (the person approves a code on the issuer's page); otherwise the sheet offers the browser and an email and password, which only the person types.";
+    SIGN_IN = SIGN_IN, "Sign in…", "Signs in in the browser: the issuer's own page opens in the system's browser (on iOS its sign-in sheet), the person signs in and approves the code there, and the app comes back signed in. The sign-in sheet shows the code and a Cancel. No password is typed into the app.";
     SWITCH = SWITCH, "Switch account…", "Makes `account` (its key, id or email, from ACCOUNT_LIST) the active one. With no `account`, opens the accounts sheet to choose.";
     SIGN_OUT = SIGN_OUT, "Sign out", "Signs `account` (the active one when unset) out of this device: its session ends at the issuer and leaves the keychain.";
     DEVICES = DEVICES, "Devices", "The active account's devices at the issuer (id, name, platform, last seen, which one is this device).";
@@ -115,7 +115,7 @@ pub struct ListOut {
 /// What [`ids::SIGN_IN`] takes.
 #[derive(Debug, Clone, Default, Facet)]
 pub struct SignInArgs {
-    /// `browser` to start the browser sign-in at once.
+    /// `browser`, the only way (kept for callers that name it).
     #[facet(default)]
     pub method: Option<String>,
 }
@@ -188,10 +188,10 @@ pub fn register(list: &Arc<ActionList>, accounts: &Accounts) -> Result<(), Actio
     })?;
     let a = accounts.clone();
     list.register(&SIGN_IN, Effect::Mutating, move |args: SignInArgs| {
-        a.open_sheet(Sheet::SignIn);
-        if args.method.as_deref() == Some("browser") {
-            a.sign_in_browser();
+        if args.method.as_deref().is_some_and(|m| m != "browser") {
+            return Err("sign-in is in the browser: `method` is `browser` or left out".to_owned());
         }
+        a.sign_in();
         Ok(SheetOut {
             sheet: sheet_name(a.sheet()),
         })
