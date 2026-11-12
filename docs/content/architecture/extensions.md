@@ -1699,6 +1699,8 @@ elements or SVG ones:
 | `data-follow-playhead` | the block's element | its `[data-at]` children follow the playhead |
 | `data-at="12.5"` | a child (a bar, a line) | it starts at this second of the track |
 | `data-media="<url>"` | the block's element, optional | follow this media file only; without it, whatever plays from the block's own page |
+| `data-glide="24.5"` | a child, optional | while it is current it moves this far along x (in its own units, px for HTML), from its `data-at` to the next child's: a playhead line gliding between beats |
+| `data-until="13.1"` | a gliding child, optional | its glide ends here instead of at the next child's `data-at` (the last child, or one that holds before the next) |
 
 The page marks the last child whose `data-at` has passed with
 `aria-current="time"` (style it: `[aria-current="time"]`), centres it in
@@ -1724,6 +1726,28 @@ tempo map, as HTML or as its engraved SVG (keyflow#59):
   <rect class="kf-bar" data-at="2.5" x="310" y="20" width="270" height="80" fill="transparent"/>
   …
 </svg>
+```
+
+A box inside a box follows its own children: a chart's bars and its
+beats are two boxes in one SVG, the bar at the playhead washed, one beat's
+line marked. With `data-glide` that line moves continuously, as Session's
+cursor does: on every frame while it plays, and exactly where the playhead
+is after a seek or a pause, by a transform of that one element (the item
+left goes back where it is drawn). Its times are the children's own, so a
+tempo change needs nothing more; where the next beat is on another line,
+the glide ends at this line's end (`data-glide` says how far) and the next
+beat shows where it is drawn. A box with gliding children marks them when
+they start (other boxes mark a line 50 ms early, as lyrics are read
+ahead). Studio's charts draw their beats this way
+(`studio:features/setlists/src/follow.rs`).
+
+```svg
+<!-- a beat's line: 0.7 s long, 22 units to the next beat -->
+<g data-follow-playhead>
+  <rect class="kf-beat" data-at="6.252" data-glide="22.2" x="133" y="160" width="1.5" height="40"/>
+  <rect class="kf-beat" data-at="6.958" data-glide="37.5" x="155.2" y="160" width="1.5" height="40"/>
+  …
+</g>
 ```
 
 The synced-lyrics block is built this way

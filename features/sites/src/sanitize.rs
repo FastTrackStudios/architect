@@ -1168,11 +1168,11 @@ mod tests {
     /// with its sheet's attribute selector unquoted (`[aria-current=time]`,
     /// what keyflow has to write for the sheet to come through): an SVG
     /// whose root follows the playhead, a transparent rect per played bar,
-    /// fonts named by presentation attributes. All of it comes through:
+    /// a beat's line that glides (`data-glide`, `data-until`), fonts named by presentation attributes. All of it comes through:
     /// geometry, classes, `data-*`, the sheet (under the block's scope),
     /// gradients referenced by `#id`, text.
     const CHART: &str = r##"<svg data-follow-playhead="" data-media="/s/abc/joy.mp3" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" viewBox="0 0 400 120" width="400" height="120" overflow="hidden" class="kf-chart">  <style>.kf-bar{fill:#f5a623;fill-opacity:0;pointer-events:all;cursor:pointer}.kf-bar[aria-current=time]{fill-opacity:0.18}</style>
-<defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect class="kf-bar" data-at="0.000" data-bar="1" data-pass="1" x="0" y="0" width="100" height="120" rx="2"/><rect class="kf-bar" data-at="2.500" x="100" y="0" width="100" height="120" fill="url(#g)"/><path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"/><use href="#g"/><text x="4" y="20" font-size="12" font-family="Bravura" fill="#000000">C &amp; G</text><text x="40" y="20" font-size="12" font-family="FreeSerif" font-weight="bold" text-anchor="middle">Am</text><a href="#bar-2"><circle cx="5" cy="5" r="2"/></a></svg>"##;
+<defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient></defs><rect class="kf-bar" data-at="0.000" data-bar="1" data-pass="1" x="0" y="0" width="100" height="120" rx="2"/><rect class="kf-bar" data-at="2.500" x="100" y="0" width="100" height="120" fill="url(#g)"/><rect class="kf-beat" data-at="2.500" data-glide="23.75" data-until="3.125" x="99.25" y="-4" width="1.5" height="128"/><path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"/><use href="#g"/><text x="4" y="20" font-size="12" font-family="Bravura" fill="#000000">C &amp; G</text><text x="40" y="20" font-size="12" font-family="FreeSerif" font-weight="bold" text-anchor="middle">Am</text><a href="#bar-2"><circle cx="5" cy="5" r="2"/></a></svg>"##;
 
     #[test]
     #[allow(
@@ -1188,6 +1188,8 @@ mod tests {
             r#"data-media="/s/abc/joy.mp3""#,
             r#"<rect class="kf-bar" data-at="0.000" data-bar="1" data-pass="1" x="0" y="0" width="100" height="120" rx="2"></rect>"#,
             r#"data-at="2.500" x="100" y="0" width="100" height="120" fill="url(#g)""#,
+            // A beat's line gliding to the next (the page player's `data-glide`).
+            r#"<rect class="kf-beat" data-at="2.500" data-glide="23.75" data-until="3.125" x="99.25" y="-4" width="1.5" height="128"></rect>"#,
             r#"<path d="M0 60 L400 60" stroke="currentColor" stroke-width="1.5" transform="translate(0,1)"></path>"#,
             r##"<linearGradient id="g"><stop offset="0" stop-color="#fff"></stop></linearGradient>"##,
             r##"<use href="#g"></use>"##,

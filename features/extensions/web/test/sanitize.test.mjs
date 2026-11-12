@@ -30,6 +30,10 @@ test('attributes: never a handler, a frame or a form action; ids and data-* not 
   assert.equal(attrRule('div', 'id', 'mine', false), 'mine', 'no prefix outside a pane');
   for (const id of ['site-header', 'share-x', 'comments', 'architect', 'addEventListener']) assert.equal(attrRule('div', 'id', id, false), null, id);
   assert.equal(attrRule('div', 'data-at', '1.5', false), '1.5');
+  // A chart's beat line that glides (the share player's `data-glide`), as a
+  // share page's view brings it in.
+  for (const [n, v] of [['data-at', '2.5'], ['data-glide', '23.75'], ['data-until', '3.125'], ['transform', 'translate(1 0)']])
+    assert.equal(attrRule('rect', n, v, true, false), v, n);
   for (const n of ['data-site-x', 'data-act', 'data-dioxus-id', 'data-']) assert.equal(attrRule('div', n, '1', false), null, n);
   assert.equal(attrRule('div', 'aria-label', 'Add', false), 'Add');
   assert.equal(attrRule('div', 'x"y', '1', false), null, 'not a name');
