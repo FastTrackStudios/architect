@@ -13,6 +13,7 @@ name: release
 #   Architect-macos-arm64.dmg + latest-macos.json            job macos (UNTESTED, off by default)
 #   the iOS app on TestFlight, noted in the release's notes   job ios (ios.yml; never blocks)
 #   SHA256SUMS (+ SHA256SUMS.minisig, the org key)           job sums
+#   the downstream bumps started: keyflow, studio, infra     job dispatch (inert until RELEASE_DISPATCH)
 #   @fasttrackstudio/architect(-cli) on npm (features/extensions/web)  jobs npm-pack, npm-publish
 #     (npm-publish inert until the NPM_TOKEN secret is set)
 #
@@ -475,6 +476,53 @@ jobs:
             echo "::warning::release-signing has no FTS_RELEASE_MINISIGN_KEY: SHA256SUMS goes out unsigned"
           fi
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Wake the repos that pin this release, once its signed SHA256SUMS is
+  # up (infra#3, the release chain): keyflow's and studio's
+  # bump-architect.yml (each opens its own pin-bump PR, and merges it only
+  # when its CI is green on it) and infra's release-bump.yml (the site,
+  # architect-web, after it verifies SHA256SUMS against the org key
+  # itself). The token can only start workflows (`actions: write`) in those
+  # three repos: they treat the inputs as untrusted, and each also polls
+  # hourly, so a missed dispatch costs at most an hour. A stable vX.Y.Z only:
+  # a pre-release tag wakes nothing. Never fails the release.
+  #
+  # INERT until the owner sets the repo variable RELEASE_DISPATCH = on and
+  # gives the environment `release-dispatch` (deployment: v* tags only) the
+  # secret FORGE_APP_PRIVATE_KEY, and the repo the variable FORGE_APP_ID.
+  dispatch:
+    needs: sums
+    if: ${{ vars.RELEASE_DISPATCH == 'on' && needs.sums.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    environment: release-dispatch
+    permissions: {}
+    steps:
+      - name: fts-forge token (start workflows in keyflow, studio, infra)
+        id: forge
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.FORGE_APP_ID }}
+          private-key: ${{ secrets.FORGE_APP_PRIVATE_KEY }}
+          owner: FastTrackStudios
+          repositories: keyflow,studio,infra
+          permission-actions: write
+      - name: Start the bumps
+        env:
+          GH_TOKEN: ${{ steps.forge.outputs.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -uo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$TAG is not a stable release tag: nothing downstream is woken"; exit 0
+          fi
+          status=0
+          gh workflow run bump-architect.yml -R FastTrackStudios/keyflow -f tag="$TAG" || status=1
+          gh workflow run bump-architect.yml -R FastTrackStudios/studio -f tag="$TAG" || status=1
+          gh workflow run release-bump.yml -R FastTrackStudios/infra -f repo=FastTrackStudios/architect -f tag="$TAG" || status=1
+          echo "### Downstream bumps started for $TAG (keyflow, studio, infra)" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   # @fasttrackstudio/architect (the runtime, no dependencies) and
   # @fasttrackstudio/architect-cli (build-web, with jco), from
