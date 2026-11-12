@@ -48,6 +48,8 @@ futures-util = { version = "0.3", default-features = false, optional = true }
 tracing = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `FileSecrets`' private temporary file for each write.
+tempfile = "3"
 # The platform keychain. Linux: the Secret Service over D-Bus (libdbus, as
 # the rest of the desk app already links), never the kernel keyring (it
 # forgets on reboot) and never a plain file.

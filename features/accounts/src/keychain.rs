@@ -35,10 +35,12 @@ pub const STORE_ENV: &str = "ARCHITECT_SECRET_STORE";
 /// stack); [`Keychain`] panics if it is used.
 pub const FORBID_ENV: &str = "ARCHITECT_FORBID_KEYCHAIN";
 
-/// Whether [`FORBID_ENV`] forbids the keychain here.
+/// Whether [`FORBID_ENV`] forbids the keychain here: a debug build only.
+/// A release build ignores it, so whoever can set the app's environment
+/// (`launchctl setenv`) cannot move its sessions out of the keychain.
 #[must_use]
 pub fn keychain_forbidden() -> bool {
-    std::env::var(FORBID_ENV).is_ok_and(|v| v.trim() == "1")
+    cfg!(debug_assertions) && std::env::var(FORBID_ENV).is_ok_and(|v| v.trim() == "1")
 }
 
 /// The secrets file a store keeps in `dir` (the app's folder).
@@ -64,8 +66,13 @@ pub const fn development_build() -> bool {
 }
 
 /// The store for a process, from its environment (`env`), whether the
-/// keychain is forbidden and whether it is a development build: see the
-/// module's docs. `dir` is the app's folder.
+/// keychain is forbidden, whether it is a development build and whether
+/// it is a debug one: see the module's docs. `dir` is the app's folder.
+///
+/// A release build (`debug` false) takes from its environment only
+/// `memory` (a session kept for the process alone, never on disk) and the
+/// keychain's service name: never a file, never "forbidden", so its
+/// sessions cannot be moved into a file someone chose.
 #[must_use]
 pub fn choose_store(
     env: impl Fn(&str) -> Option<String>,
@@ -73,6 +80,7 @@ pub fn choose_store(
     dir: &Path,
     forbidden: bool,
     development: bool,
+    debug: bool,
 ) -> StoreChoice {
     let file = || StoreChoice::File(dir.join(SECRETS_FILE));
     let service = || {
@@ -80,6 +88,12 @@ pub fn choose_store(
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| default_service.to_owned())
     };
+    if !debug {
+        return match env(STORE_ENV).as_deref().map(str::trim) {
+            Some("memory") => StoreChoice::Memory,
+            _ => StoreChoice::Keychain(service()),
+        };
+    }
     match env(STORE_ENV).as_deref().map(str::trim) {
         Some("memory") => StoreChoice::Memory,
         Some("file") => file(),
@@ -104,6 +118,7 @@ pub fn secret_store(default_service: &str, dir: &Path) -> Arc<dyn SecretStore> {
         dir,
         keychain_forbidden(),
         development_build(),
+        cfg!(debug_assertions),
     ) {
         StoreChoice::Keychain(service) => Arc::new(Keychain::new(service)),
         StoreChoice::File(path) => {
@@ -223,21 +238,45 @@ mod tests {
         let file = StoreChoice::File(dir.join(SECRETS_FILE));
         let kc = |s: &str| StoreChoice::Keychain(s.to_owned());
         // A release build: the keychain, its service as named.
-        assert_eq!(choose_store(env(&[]), "svc", dir, false, false), kc("svc"));
         assert_eq!(
-            choose_store(env(&[(SERVICE_ENV, "other")]), "svc", dir, false, false),
+            choose_store(env(&[]), "svc", dir, false, false, true),
+            kc("svc")
+        );
+        assert_eq!(
+            choose_store(
+                env(&[(SERVICE_ENV, "other")]),
+                "svc",
+                dir,
+                false,
+                false,
+                true
+            ),
             kc("other")
         );
         // A development build: the file, unless it asks for the keychain.
-        assert_eq!(choose_store(env(&[]), "svc", dir, false, true), file);
+        assert_eq!(choose_store(env(&[]), "svc", dir, false, true, true), file);
         assert_eq!(
-            choose_store(env(&[(STORE_ENV, "keychain")]), "svc", dir, false, true),
+            choose_store(
+                env(&[(STORE_ENV, "keychain")]),
+                "svc",
+                dir,
+                false,
+                true,
+                true
+            ),
             kc("svc")
         );
         // Forbidden: never the keychain, asked for or not.
-        assert_eq!(choose_store(env(&[]), "svc", dir, true, false), file);
+        assert_eq!(choose_store(env(&[]), "svc", dir, true, false, true), file);
         assert_eq!(
-            choose_store(env(&[(STORE_ENV, "keychain")]), "svc", dir, true, false),
+            choose_store(
+                env(&[(STORE_ENV, "keychain")]),
+                "svc",
+                dir,
+                true,
+                false,
+                true
+            ),
             file
         );
         // Named stores.
@@ -247,16 +286,57 @@ mod tests {
                 "svc",
                 dir,
                 false,
-                false
+                false,
+                true
             ),
             StoreChoice::File(PathBuf::from("/tmp/s.json"))
         );
         assert_eq!(
-            choose_store(env(&[(STORE_ENV, "file")]), "svc", dir, false, false),
+            choose_store(env(&[(STORE_ENV, "file")]), "svc", dir, false, false, true),
             file
         );
         assert_eq!(
-            choose_store(env(&[(STORE_ENV, "memory")]), "svc", dir, false, false),
+            choose_store(
+                env(&[(STORE_ENV, "memory")]),
+                "svc",
+                dir,
+                false,
+                false,
+                true
+            ),
+            StoreChoice::Memory
+        );
+    }
+
+    #[test]
+    fn a_release_build_keeps_its_sessions_in_the_keychain_whatever_its_environment_says() {
+        let dir = Path::new("/app");
+        let kc = StoreChoice::Keychain("svc".to_owned());
+        for (store, forbidden) in [
+            ("file:/tmp/planted.json", false),
+            ("file", false),
+            ("keychain", false),
+            ("anything", true),
+        ] {
+            let env = move |k: &str| (k == STORE_ENV).then(|| store.to_owned());
+            assert_eq!(
+                choose_store(env, "svc", dir, forbidden, false, false),
+                kc,
+                "{store}"
+            );
+        }
+        // No store named, forbidden or a development-looking build: the keychain.
+        assert_eq!(choose_store(env(&[]), "svc", dir, true, true, false), kc);
+        // Memory alone is taken: nothing reaches a disk.
+        assert_eq!(
+            choose_store(
+                env(&[(STORE_ENV, "memory")]),
+                "svc",
+                dir,
+                false,
+                false,
+                false
+            ),
             StoreChoice::Memory
         );
     }
