@@ -1,34 +1,18 @@
 /**
- * The landing page's words (#559). There are few of them on purpose: a
- * headline, the downloads, and a short heading over each real capture.
- * Every claim is true of the code at the commit it was written against;
- * what is not built yet is simply not said.
+ * The landing page's words (#559). The page is not screenshot-driven: it
+ * says what Architect is in six short entries, then how to get it.
+ *
+ * Where something named here is not shipped yet, its chip or its entry
+ * carries a `note` ("coming", "views today") and the issue that tracks it,
+ * so the page never claims more than the code does.
  */
 import { DOCS_PATH, SITE } from "./site";
 
-export type Media =
-	| {
-			kind: "video";
-			src: string;
-			poster: string;
-			width: number;
-			height: number;
-			/** What the clip shows, for a reader who cannot see it. */
-			alt: string;
-	  }
-	| {
-			kind: "image";
-			src: string;
-			/** A narrower copy for phones, with its width. */
-			small?: { src: string; width: number };
-			width: number;
-			height: number;
-			alt: string;
-	  };
+const issue = (n: number) => `${SITE.repo}/issues/${n}`;
 
 export const HERO = {
-	title: "The foundation you build on.",
-	sub: "One local-first app for notes, tasks, files and projects. Every feature in it is an extension.",
+	title: "Build the systems that work for you.",
+	sub: "Architect is a modular, local-first, collaborative foundation.",
 	/** One button: the visitor's own platform, shown by its icon. */
 	download: "Download",
 	for: "for {platform}",
@@ -36,83 +20,60 @@ export const HERO = {
 	macos: "macOS",
 	more: { label: "More platforms", to: "/download" },
 	demo: { label: "Demo", href: "/app/?demo" },
-	/** The tabs over the screenshot. */
-	pick: "Show",
-	shots: [
-		{
-			id: "notes",
-			label: "Notes",
-			media: {
-				kind: "image",
-				src: "/media/hero-notes.webp",
-				small: { src: "/media/hero-notes-840.webp", width: 840 },
-				width: 1400,
-				height: 875,
-				alt: "A note called Garden open in Architect: a picture, a checklist with three of five items done, two callouts and a block of Rust code, beside the folder tree of the vault.",
-			},
-		},
-		{
-			id: "tasks",
-			label: "Tasks",
-			media: {
-				kind: "image",
-				src: "/media/hero-tasks.webp",
-				small: { src: "/media/hero-tasks-840.webp", width: 840 },
-				width: 1400,
-				height: 875,
-				alt: "The capture box with one typed line, and under it what was read from the line: a task, high priority, the project Website Redesign, the tag mixing, due November 8, repeating every week.",
-			},
-		},
-		{
-			id: "files",
-			label: "Files",
-			media: {
-				kind: "image",
-				src: "/media/hero-files.webp",
-				width: 681,
-				height: 757,
-				alt: "A project's files in Architect: the REAPER project Crescendum with 27 files, and for the selected file, two verified copies at two sites, on the laptop and on the node.",
-			},
-		},
-		{
-			id: "projects",
-			label: "Projects",
-			media: {
-				kind: "image",
-				src: "/media/hero-projects.webp",
-				small: { src: "/media/hero-projects-840.webp", width: 840 },
-				width: 1400,
-				height: 875,
-				alt: "A project called Album: its songs with key and tempo, its notes, a sub-project and its tasks listed beside the project's own page.",
-			},
-		},
-	] as ReadonlyArray<{ id: string; label: string; media: Media }>,
 };
 
-export type Feature = {
+export type Chip = { name: string; note?: string; href?: string };
+
+export type Pillar = {
 	id: string;
+	/** Which drawing acts it out (src/components/landing/figures.tsx). */
+	figure:
+		| "modular"
+		| "local-first"
+		| "collaborative"
+		| "extensions"
+		| "platforms"
+		| "embeddable";
 	title: string;
-	media: readonly Media[];
-	/** A short list under the heading: what it is built with, by name. */
-	list?: {
-		label: string;
-		items: ReadonlyArray<{ name: string; note?: string }>;
-	};
-	/** A link under the heading, where there is somewhere to go. */
+	body: string;
+	/** A status on the whole entry, with where it is tracked. */
+	status?: { label: string; href: string };
+	chips?: { label: string; items: readonly Chip[] };
+	code?: { lines: readonly string[] };
 	link?: { label: string; href?: string; to?: string };
 };
 
-/** One heading and one capture (or two) each. */
-export const FEATURES: readonly Feature[] = [
+export const PILLARS: readonly Pillar[] = [
+	{
+		id: "modular",
+		figure: "modular",
+		title: "Modular",
+		body: "Every feature is an extension. Keep the ones you use, replace the ones you don't.",
+	},
+	{
+		id: "local-first",
+		figure: "local-first",
+		title: "Local-first",
+		body: "Your work is a folder of markdown on your own disk. No account, no network needed.",
+	},
+	{
+		id: "collaborative",
+		figure: "collaborative",
+		title: "Collaborative",
+		body: "Live editing and shared cursors, device to device.",
+		status: { label: "Coming to the app", href: issue(383) },
+	},
 	{
 		id: "extensions",
-		title: "Build anything on it.",
-		list: {
+		figure: "extensions",
+		title: "Extensions",
+		body: "A sandboxed, permissioned extension system, in the language you already write.",
+		chips: {
 			label: "Write an extension in",
 			items: [
 				{ name: "Rust" },
 				// Views are TSX today; actions in TypeScript are #536.
-				{ name: "TypeScript", note: "views today" },
+				{ name: "TypeScript", note: "views today", href: issue(536) },
 				{ name: "Lua" },
 				{ name: "Anything that compiles to WASM" },
 			],
@@ -121,65 +82,41 @@ export const FEATURES: readonly Feature[] = [
 			label: "How extensions work",
 			href: `${DOCS_PATH}architecture/extensions/`,
 		},
-		media: [
-			{
-				kind: "video",
-				src: "/media/extensions-manager.mp4",
-				poster: "/media/extensions-manager.webp",
-				width: 960,
-				height: 573,
-				alt: "The extensions manager: extensions, scripts, workers, themes, pages, layouts and keys in one list, with the Board extension turned off and on.",
-			},
-		],
 	},
 	{
-		id: "vault",
-		title: "A folder of markdown.",
-		media: [
-			{
-				kind: "video",
-				src: "/media/workspace-vault-tour.mp4",
-				poster: "/media/vault-workspace.webp",
-				width: 960,
-				height: 573,
-				alt: "The workspace: notes open as tabs, split side by side beside the graph and backlinks.",
-			},
-		],
+		id: "platforms",
+		figure: "platforms",
+		title: "Every platform",
+		body: "One app, the same workspace everywhere.",
+		chips: {
+			label: "Runs on",
+			items: [
+				{ name: "Linux" },
+				{ name: "macOS" },
+				{ name: "Web", note: "preview", href: issue(383) },
+				{ name: "Mobile", note: "coming", href: issue(383) },
+				{ name: "Windows", note: "coming", href: issue(431) },
+			],
+		},
 	},
 	{
-		id: "calendar",
-		title: "Plan the week.",
-		media: [
-			{
-				kind: "image",
-				src: "/media/calendar.webp",
-				small: { src: "/media/calendar-840.webp", width: 840 },
-				width: 1400,
-				height: 875,
-				alt: "A week in the calendar: each day planned in blocks from a day template, with a mix review, a team sync, a mastering call and a show on Saturday night.",
-			},
-		],
-	},
-	{
-		id: "studio",
-		title: "Studio, for music.",
-		media: [
-			{
-				kind: "image",
-				src: "/media/setlist.webp",
-				small: { src: "/media/setlist-840.webp", width: 840 },
-				width: 1400,
-				height: 875,
-				alt: "Architect with setlists in the navigator: Sunday Service holds three songs, and the song Slow River is open with its Keyflow chart as text and its key, tempo and status as properties.",
-			},
-			{
-				kind: "image",
-				src: "/media/studio-follow.webp",
-				width: 730,
-				height: 890,
-				alt: "A shared song's page from Studio, Silent Night in A at 72 bpm: the recording is playing at 0:40 and bar 16 of the chart under it is marked.",
-			},
-		],
+		id: "embeddable",
+		figure: "embeddable",
+		title: "Embeddable",
+		body: "Run an Architect extension inside your own web app, or ship your own Architect.",
+		status: { label: "npm package coming", href: issue(535) },
+		code: {
+			lines: [
+				"import { loadExtension, mountView } from '@fasttrackstudio/architect';",
+				"",
+				"const ext = await loadExtension('/counter/', { integrity, host });",
+				"await mountView(ext, 'counter', element).rendered;",
+			],
+		},
+		link: {
+			label: "Extensions in your web app",
+			href: `${DOCS_PATH}guide/extensions-in-your-web-app/`,
+		},
 	},
 ];
 

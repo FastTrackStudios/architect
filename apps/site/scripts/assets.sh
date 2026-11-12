@@ -17,8 +17,6 @@ done
 mkdir -p "$pub"
 rm -rf "$pub/media" "$pub/fonts"
 cp -r "$src/media" "$pub/media"
-# This site's own captures (media/, made by scripts/media.sh), beside them.
-cp "$site"/media/*.webp "$pub/media/"
 mkdir -p "$pub/fonts"
 cp "$src"/assets/fonts/*.woff2 "$src"/assets/fonts/*.txt "$src"/assets/fonts/*.md "$pub/fonts/"
 cp "$src/assets/mark.svg" "$pub/mark.svg"

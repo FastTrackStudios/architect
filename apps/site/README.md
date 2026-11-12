@@ -49,10 +49,10 @@ src/
               release.json, changelog.json, extensions.json (scripts/data.ts)
   lib/        pageHead() (seo.ts), the light/dark theme (theme.ts), typed data
   components/
-    landing/  the hero and its screenshot tabs, a feature (one heading,
-              one capture), the downloads
+    landing/  the hero, the pillars (what Architect is, as a short
+              list), the downloads
     layout/   the header, the theme switch, the footer, a page, 404
-    ui/       Rich (the content's inline markup), a capture, a command line
+    ui/       Rich (the content's inline markup), a command line, icons
   styles/     tokens.css (the design tokens: colour, type, space, in one
               file the hub can adopt), base.css, site.css (the shell),
               landing.css, pages.css
@@ -63,10 +63,10 @@ scripts/      data.ts, assets.sh, check-links.ts, vercel-config.ts,
 ```
 
 The look is a clean slate (#559): two neutrals and ink, light and dark,
-no brand colour; the only colour on a page is the app in its screenshots.
-`--accent` and `--on-accent` default to ink, so a product built on these
-tokens adds its colour by setting those two. The page reads fully with
-scripts off: the screenshot tabs are radios and labels (`:has(:checked)`).
+no brand colour. `--accent` and `--on-accent` default to ink, so a product
+built on these tokens adds its colour by setting those two. What is not
+shipped yet is a dashed chip that links to its issue. The page reads fully
+with scripts off.
 
 ## Data, at build time
 
@@ -85,15 +85,10 @@ build never fails on the network. `GITHUB_TOKEN` is sent when set.
 
 ## Media
 
-Real captures only, from the scenarios (#133). Two sources, both copied
-into `public/` by `scripts/assets.sh` at `dev` and `build`:
-
-- `apps/web/landing` (the old page's clips, posters, and the font), until
-  it is retired;
-- `media/`: this site's own WebPs, derived from the orphan `media` branch
-  (and Studio's share-page capture) by `scripts/media.sh`, which names
-  every source and crop. They are committed as the last good copy, the
-  way `src/data` is, so a build needs no network and no encoder.
+The landing page shows no screenshots (#559): it is type, chips and one
+code sample. `scripts/assets.sh` copies the font and the old page's media
+from `apps/web/landing` into `public/` at `dev` and `build`; when that
+folder is retired, the font moves here.
 
 ## Deploy
 

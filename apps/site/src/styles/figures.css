@@ -1,0 +1,176 @@
+/* ── The figures: line drawings that act out each claim ─────────────────── */
+
+.fig {
+	width: 100%;
+	border: 1px solid var(--line);
+	border-radius: var(--radius);
+	background: var(--raised);
+	overflow: hidden;
+}
+.fig svg {
+	width: 100%;
+	height: auto;
+	aspect-ratio: 4 / 3;
+	fill: var(--raised);
+	stroke: var(--ink-soft);
+	stroke-width: 1.25;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+.fig .k {
+	stroke: var(--ink);
+}
+.fig text {
+	fill: var(--ink-soft);
+	stroke: none;
+	font-size: 13px;
+	text-anchor: middle;
+}
+.fig text.strong {
+	fill: var(--ink);
+}
+.fig text.start {
+	text-anchor: start;
+}
+.fig text.on {
+	fill: var(--raised);
+	font-size: 11px;
+	font-weight: 600;
+}
+.fig .dot,
+.fig .flow,
+.fig .solid {
+	fill: var(--ink);
+	stroke: none;
+}
+.fig .dot {
+	fill: var(--ink-soft);
+}
+.fig .hollow {
+	fill: var(--raised);
+}
+.fig .dash {
+	stroke-dasharray: 4 6;
+}
+.fig .draw,
+.fig .net-off {
+	stroke-dasharray: 1;
+	fill: none;
+}
+
+/* Everything below is motion. With none, each figure is its finished drawing. */
+.fig .m-in,
+.fig .net-off,
+.fig .net-label,
+.fig .flow {
+	opacity: 0;
+}
+.fig .sel {
+	fill: var(--line);
+	stroke: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.fig[data-off] * {
+		animation-play-state: paused !important;
+	}
+
+	/* A line that writes itself, then clears, on an 8s loop. */
+	.fig .draw {
+		animation: fig-draw 8s var(--d, 0s) cubic-bezier(0.3, 0, 0.2, 1) infinite backwards;
+	}
+	@keyframes fig-draw {
+		0% { stroke-dashoffset: 1; }
+		12%, 88% { stroke-dashoffset: 0; }
+		96%, 100% { stroke-dashoffset: 1; }
+	}
+
+	/* Modular: one block lifts out, another drops in. */
+	.fig .m-out { animation: fig-out 7s cubic-bezier(0.3, 0, 0.2, 1) infinite; }
+	.fig .m-in { animation: fig-in 7s cubic-bezier(0.3, 0, 0.2, 1) infinite; }
+	@keyframes fig-out {
+		0%, 14% { transform: translateY(0); opacity: 1; }
+		30%, 94% { transform: translateY(-74px); opacity: 0; }
+		95% { transform: translateY(0); opacity: 0; }
+		100% { transform: translateY(0); opacity: 1; }
+	}
+	@keyframes fig-in {
+		0%, 36% { transform: translateY(-74px); opacity: 0; }
+		52%, 92% { transform: translateY(0); opacity: 1; }
+		100% { transform: translateY(0); opacity: 0; }
+	}
+
+	/* Local-first: the network drops while the note keeps writing. */
+	.fig .net { animation: fig-net 8s infinite; }
+	.fig .net-off { animation: fig-net-off 8s infinite; }
+	.fig .net-label { animation: fig-net-label 8s infinite; }
+	@keyframes fig-net {
+		0%, 22% { opacity: 1; }
+		30%, 78% { opacity: 0.35; }
+		86%, 100% { opacity: 1; }
+	}
+	@keyframes fig-net-off {
+		0%, 22% { opacity: 1; stroke-dashoffset: 1; }
+		30%, 78% { opacity: 1; stroke-dashoffset: 0; }
+		86%, 100% { opacity: 0; stroke-dashoffset: 0; }
+	}
+	@keyframes fig-net-label {
+		0%, 24% { opacity: 0; }
+		32%, 78% { opacity: 1; }
+		86%, 100% { opacity: 0; }
+	}
+
+	/* Collaborative: one selects a line, the other writes one. */
+	.fig .cur-a { animation: fig-cur-a 8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+	.fig .cur-b { animation: fig-cur-b 8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+	.fig .sel {
+		transform-box: fill-box;
+		transform-origin: left center;
+		animation: fig-sel 8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+	}
+	@keyframes fig-cur-a {
+		0% { transform: translate(250px, 90px); }
+		10% { transform: translate(140px, 158px); }
+		34%, 80% { transform: translate(310px, 160px); }
+		100% { transform: translate(250px, 90px); }
+	}
+	@keyframes fig-sel {
+		0%, 10% { transform: scaleX(0); }
+		34%, 84% { transform: scaleX(1); }
+		92%, 100% { transform: scaleX(0); }
+	}
+	@keyframes fig-cur-b {
+		0% { transform: translate(140px, 214px); }
+		12%, 88% { transform: translate(290px, 214px); }
+		96%, 100% { transform: translate(140px, 214px); }
+	}
+
+	/* Extensions: each language flows into the sandbox, one extension comes out. */
+	.fig .flow {
+		animation: fig-flow 3.2s var(--d, 0s) linear infinite;
+	}
+	.fig .flow.out {
+		animation: fig-flow 1.6s linear infinite;
+	}
+	@keyframes fig-flow {
+		0% { offset-distance: 0%; opacity: 0; }
+		12%, 88% { opacity: 1; }
+		100% { offset-distance: 100%; opacity: 0; }
+	}
+	.fig .pulse { animation: fig-pulse 3.2s ease-in-out infinite; }
+	@keyframes fig-pulse {
+		0%, 100% { transform: translateY(0); }
+		50% { transform: translateY(-6px); }
+	}
+
+	/* Embeddable: the view slides into the host's slot. */
+	.fig .e-panel { animation: fig-embed 7s cubic-bezier(0.2, 0.8, 0.2, 1) infinite; }
+	@keyframes fig-embed {
+		0%, 8% { transform: translateX(150px); opacity: 0; }
+		30%, 88% { transform: translateX(0); opacity: 1; }
+		100% { transform: translateX(0); opacity: 0; }
+	}
+}
+/* With no motion: the cursors rest where they would be mid-loop. */
+.fig .cur-a { transform: translate(310px, 160px); }
+.fig .cur-b { transform: translate(290px, 214px); }

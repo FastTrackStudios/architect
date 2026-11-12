@@ -1,14 +1,11 @@
 import { Link } from "@tanstack/react-router";
 
 import { AppleIcon, LinuxIcon } from "#/components/ui/icons";
-import { Shot } from "#/components/ui/shot";
 import { HERO } from "#/content/landing";
 import { RELEASE } from "#/lib/data";
 
 /**
- * The first viewport: what it is, the download, and the app itself. The
- * tabs over the screenshot are radios and their labels, so they switch it
- * with no script at all (styles/landing.css, `:has(:checked)`).
+ * The first viewport: what it is, and the three things to do about it.
  */
 export function Hero() {
 	return (
@@ -49,29 +46,6 @@ export function Hero() {
 					{HERO.more.label}
 				</Link>
 			</p>
-			<div className="viewer">
-				<div className="tabs" role="radiogroup" aria-label={HERO.pick}>
-					{HERO.shots.map((s, i) => (
-						<label key={s.id} className="tab">
-							<input
-								className="vh"
-								type="radio"
-								name="hero-shot"
-								id={`pick-${s.id}`}
-								defaultChecked={i === 0}
-							/>
-							{s.label}
-						</label>
-					))}
-				</div>
-				<div className="frame viewer-shots">
-					{HERO.shots.map((s, i) => (
-						<div key={s.id} className={`viewer-shot viewer-${s.id}`}>
-							<Shot media={s.media} eager={i === 0} />
-						</div>
-					))}
-				</div>
-			</div>
 		</section>
 	);
 }

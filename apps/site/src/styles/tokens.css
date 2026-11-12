@@ -1,8 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════
    Architect: the design tokens, in one place (#559).
 
-   A clean slate. Two neutrals and ink, no brand colour: the only colour on
-   a page is the app itself, in its screenshots. A product built on this
+   A clean slate. Two neutrals and ink, no brand colour. A product built on this
    (the hub, Studio) adds its own accent by setting --accent and
    --on-accent; unset, they are ink, and nothing else needs to change.
 

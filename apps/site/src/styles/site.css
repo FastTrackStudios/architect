@@ -178,41 +178,6 @@
 	color: var(--ink);
 }
 
-/* ── A capture in its frame ─────────────────────────────────────────────── */
-.frame {
-	border: 1px solid var(--line);
-	border-radius: var(--radius);
-	background: var(--raised);
-	box-shadow: var(--shadow);
-	overflow: hidden;
-}
-.frame img,
-.frame video {
-	width: 100%;
-}
-.clip {
-	position: relative;
-}
-.clip-btn {
-	position: absolute;
-	right: 0.6rem;
-	bottom: 0.6rem;
-	display: none;
-	min-width: 2.75rem;
-	min-height: 2.75rem;
-	padding: 0 0.8rem;
-	border: 0;
-	border-radius: var(--radius-control);
-	background: #0e0e10cc;
-	color: #ededee;
-	font: inherit;
-	font-size: var(--step--1);
-	cursor: pointer;
-}
-.js .clip-btn {
-	display: block;
-}
-
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .site-footer {
 	display: flex;

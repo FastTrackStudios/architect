@@ -4,7 +4,7 @@
 	padding-top: clamp(3rem, 9vw, 7rem);
 }
 .hero h1 {
-	max-width: 14em;
+	max-width: 12em;
 }
 .hero .sub {
 	margin-top: 1.25rem;
@@ -38,68 +38,84 @@
 	color: var(--ink-soft);
 }
 
-/* The viewer: four tabs, one screenshot. */
-.viewer {
-	margin-top: clamp(3rem, 7vw, 5rem);
+/* ── The pillars: a name, one line, its facts, on a rule ────────────────── */
+.pillars {
+	margin-top: var(--section);
 }
-.tabs {
-	display: flex;
-	gap: 0.25rem;
-	margin-bottom: 0.75rem;
-}
-.tab {
-	padding: 0.55rem 0.85rem;
-	border-radius: var(--radius-control);
-	color: var(--ink-soft);
-	font-size: 0.95rem;
-	cursor: pointer;
-}
-.tab:hover {
-	color: var(--ink);
-}
-.tab:has(:checked) {
-	background: var(--raised);
-	color: var(--ink);
-}
-.tab:has(:focus-visible) {
-	outline: 2px solid var(--ink);
-	outline-offset: 2px;
-}
-.viewer-shots {
+.pillar {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 2rem 4rem;
+	align-items: center;
+	padding-block: clamp(2.5rem, 6vw, 5rem);
+	border-top: 1px solid var(--line);
 }
-.viewer-shot {
-	grid-area: 1 / 1;
-	opacity: 0;
-	visibility: hidden;
-	transition:
-		opacity 0.25s,
-		visibility 0.25s;
+.pillar-body {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 1.1rem;
+	justify-items: start;
 }
-.viewer-shot img {
-	aspect-ratio: 1400 / 875;
-	object-fit: cover;
-	object-position: left top;
+.pillar-body .sub {
+	margin-top: -0.2rem;
 }
-.viewer-files img {
-	object-fit: contain;
-	object-position: center;
+.pillar-body > p > a {
+	color: var(--ink-soft);
 }
-/* Notes shows until a tab says otherwise; a browser without :has keeps it. */
-.viewer-notes,
-.viewer:has(#pick-tasks:checked) .viewer-tasks,
-.viewer:has(#pick-files:checked) .viewer-files,
-.viewer:has(#pick-projects:checked) .viewer-projects {
-	opacity: 1;
-	visibility: visible;
+@media (min-width: 56rem) {
+	.pillar {
+		grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+	}
+	/* Alternate sides, so the page does not read as one long column. */
+	.pillar:nth-child(even) .fig {
+		order: -1;
+	}
 }
-.viewer:has(#pick-notes:not(:checked)) .viewer-notes {
-	opacity: 0;
-	visibility: hidden;
+.chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+.chip,
+.tag {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.45rem;
+	padding: 0.4rem 0.8rem;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-control);
+	font-size: 0.95rem;
+}
+/* Not shipped yet: an outline of a chip, with where it is tracked. */
+.chip.soon,
+.tag {
+	border-style: dashed;
+	border-color: var(--ink-soft);
+	color: var(--ink-soft);
+}
+.chip small,
+.chip a {
+	font-size: var(--step--1);
+	color: var(--ink-soft);
+}
+.tag {
+	font-size: var(--step--1);
+	text-decoration: none;
+}
+.tag:hover {
+	color: var(--ink);
+	border-color: var(--ink);
+}
+.code {
+	width: 100%;
+	padding: 1rem 1.15rem;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-control);
+	background: var(--raised);
+	line-height: 1.6;
+	overflow-x: auto;
 }
 
-/* ── A feature: one heading, one capture ────────────────────────────────── */
-.feature,
 .get {
 	margin-top: var(--section);
 }
@@ -113,39 +129,6 @@
 }
 .feature-head a {
 	color: var(--ink-soft);
-}
-.feature-head:has(+ .feature-list) {
-	margin-bottom: 1rem;
-}
-.feature-list {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
-	margin-bottom: clamp(1.5rem, 3vw, 2.5rem);
-}
-.feature-list li {
-	padding: 0.4rem 0.8rem;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-control);
-	font-size: 0.95rem;
-	color: var(--ink-soft);
-}
-.feature-list li {
-	color: var(--ink);
-}
-.feature-list small {
-	font-size: inherit;
-	color: var(--ink-soft);
-}
-.feature-media.pair {
-	display: grid;
-	gap: 1.25rem;
-	align-items: start;
-}
-@media (min-width: 60rem) {
-	.feature-media.pair {
-		grid-template-columns: minmax(0, 1.95fr) minmax(0, 1fr);
-	}
 }
 
 /* ── Get ────────────────────────────────────────────────────────────────── */

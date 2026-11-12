@@ -11,12 +11,12 @@ export const SITE = {
 	domain: "architect.fasttrackstudio.app",
 	url: "https://architect.fasttrackstudio.app",
 	/** The home page's own title (the landing page's, verbatim). */
-	homeTitle: "Architect: the foundation you build on",
+	homeTitle: "Architect: build the systems that work for you",
 	description:
-		"Architect is one local-first, open-source app for notes, tasks, files and projects. Your work is a folder of markdown on your own disk, and every feature is an extension. For Linux and macOS.",
+		"Architect is a modular, local-first, collaborative foundation: one open-source app where every feature is an extension, written in Rust, Lua or anything that compiles to WASM. For Linux and macOS.",
 	/** og:description on the home page. */
 	ogDescription:
-		"One local-first app for notes, tasks, files and projects, and the foundation for everything built on it.",
+		"A modular, local-first, collaborative foundation to build the systems that work for you.",
 	/** Painted as <meta name="theme-color">: the grounds in src/styles/tokens.css. */
 	themeColor: { light: "#ffffff", dark: "#0e0e10" },
 	/** Where the light/dark choice is kept (the old page's key; it kept "plot"/"model"). */
