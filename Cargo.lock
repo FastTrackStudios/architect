@@ -720,6 +720,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rtrb",
  "rustix 1.1.5",
+ "rustls",
  "s3s",
  "s3s-fs",
  "sea-orm",
@@ -743,6 +744,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "webpki-roots 1.0.9",
  "zeroize",
 ]
 

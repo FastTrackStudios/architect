@@ -117,13 +117,40 @@ mod native {
                 request.headers_mut().insert("authorization", value);
             }
         }
-        let (stream, _response) = tokio_tungstenite::connect_async(request)
-            .await
-            .map_err(|e| ConnectError::Dial {
-                endpoint: endpoint.to_string(),
-                reason: format!("{e:?}"),
-            })?;
+        let (stream, _response) = tokio_tungstenite::connect_async_tls_with_config(
+            request,
+            None,
+            false,
+            Some(tokio_tungstenite::Connector::Rustls(tls())),
+        )
+        .await
+        .map_err(|e| ConnectError::Dial {
+            endpoint: endpoint.to_string(),
+            reason: format!("{e:?}"),
+        })?;
         Ok(vox_websocket::WsLink::new(stream))
+    }
+
+    /// The TLS client config of every `wss://` dial: ring, TLS 1.2 and 1.3,
+    /// the bundled Mozilla roots. Its own provider, never the process
+    /// default: a build that links both ring and aws-lc-rs has none, and
+    /// rustls panics asking for it. Built once (`ws://` never reads it).
+    fn tls() -> std::sync::Arc<rustls::ClientConfig> {
+        static TLS: std::sync::OnceLock<std::sync::Arc<rustls::ClientConfig>> =
+            std::sync::OnceLock::new();
+        std::sync::Arc::clone(TLS.get_or_init(|| {
+            let roots = rustls::RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+            };
+            let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+                rustls::crypto::ring::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("ring supports the default protocol versions")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+            std::sync::Arc::new(config)
+        }))
     }
 }
 
