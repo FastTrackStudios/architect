@@ -610,7 +610,15 @@ link goes (`features/spaces/src/share.rs` `Listen`):
   are placed, by its path, before it looks at the disk; a folder being
   swapped in by a rebuild is waited for first, and one it cannot read is
   `503`, never served. A folder built before a change of layer is checked
-  by what the request opens on disk.
+  by what the request opens on disk; a file there that the link no longer
+  lists but that is now above its layer answers the same `404` as a path
+  that is nowhere.
+- **Unknown is closed.** Where files are must be known from a vault read
+  whole. While any part of the vault does not read (a note that is not
+  UTF-8, a file without permission, one half-written by a sync, a folder
+  the walk cannot enter) or where files are is otherwise unknown (below), a
+  link below Full answers `503` to everything, its pages included, and is
+  not built again until it reads; its pages come back with the vault.
 - **Closing is at once; opening a moment later.** A layer lowered through
   `SHARE_UPDATE` or the Share sheet holds files back from the next request.
   A file that opens (a layer raised, a rule lowered or forgotten) is served
@@ -633,7 +641,8 @@ link goes (`features/spaces/src/share.rs` `Listen`):
   them. If that file does not read, it is set aside
   (`share-layers.json.corrupt-<time>`), never written over, and every
   attached file is held back below Full, across restarts, until the owner
-  acknowledges it. A reinstall that declares fewer rules lowers files as
+  acknowledges it; if it cannot be written, the same (with what could not
+  be written left beside it when the folder takes it). A reinstall that declares fewer rules lowers files as
   it says, and the node warns, listing what was lowered, until
   acknowledged. The node's status (`NodeStatus::share_layers`) says when
   any of these needs the owner:

@@ -1827,9 +1827,10 @@ full = ["Media/Proxies/**"]                          # the stems
 (`features/extensions/src/share_layers.rs` `ShareLayersDecl`, checked by
 `Manifest::check`.) A pattern matches an attached file's path relative to
 the folder of the note that attaches it (a file outside it: its vault
-path), whole and in any case (Unicode lowercase, character by
-character: `Gänse*` is `GÄNSE.ogg`; the Unicode form is not folded, so
-spell it as the vault does), as `note_type` is (its spaces trimmed): `*`
+path), whole, in any case and either Unicode form
+(`features/extensions/src/share_layers.rs` `fold`: NFC, lower cased, so
+`Gänse*` is `GÄNSE.ogg` written composed or decomposed, as macOS hands
+either back), as `note_type` is (its spaces trimmed): `*`
 and `?` within one segment, `**` any number of them. A key
 `[[share_layers]]` does not know (`fulll`) is an error: the manifest does
 not load, and on a node every attached file is held back until it is
