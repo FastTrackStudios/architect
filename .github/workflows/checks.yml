@@ -5,12 +5,17 @@ name: checks
 # main and reverts or fixes forward when it goes red.
 #
 # Tests are selected the way Task's main CI does it: on a push to main,
-# `cargo rail plan` between the previous main and this commit names the
-# packages the diff reaches, and nextest runs only those (scripts/
-# ci-rail-plan.py). The whole workspace still builds, so the artifacts are
-# the ones a full run uses. Every test runs on the nightly schedule, on a
-# `v*` tag and on a manual dispatch, and whenever the plan can't be read
-# exactly (CI inputs changed, workspace-wide change, rail failing).
+# `cargo rail plan` between the base and this commit names the packages
+# the diff reaches, and nextest runs only those (scripts/ci-rail-plan.py).
+# The base is the newest ancestor whose own push-to-main run finished
+# green (scripts/ci_plan_base.py), not the previous push: a newer push
+# cancels an older run, so the commits since the last green run, cancelled
+# and red ones included, are all in this run's diff. The whole workspace
+# still builds, so the artifacts are the ones a full run uses. Every test
+# runs on the nightly schedule, on a `v*` tag and on a manual dispatch,
+# and whenever the plan can't be read exactly (no green ancestor among the
+# newest 100 green runs, Actions API failing, CI inputs changed,
+# workspace-wide change, rail failing).
 on:
   push:
     branches: [main]
@@ -19,12 +24,14 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
-# A push to main never cancels a running check: it waits as the one pending
-# run, so every run that starts on main finishes and says whether that
-# commit is green.
+# Pushes to main share one group and a newer push cancels the older run:
+# only the newest main commit is checked, and its plan (above) covers the
+# commits whose runs were cancelled. A `v*` tag, the nightly schedule and
+# a manual dispatch each get a group of their own (the run id), so nothing
+# cancels them, nor queues behind them, and they always finish.
 concurrency:
-  group: checks-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'checks-main' || format('checks-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -111,26 +118,31 @@ jobs:
     name: Tests
     runs-on: [self-hosted, thebattleship]
     timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
     defaults:
       run:
         shell: devenv shell -- bash -e {0}
     steps:
       - uses: actions/checkout@v4
         with:
-          # The plan diffs against the previous main commit.
+          # The plan diffs against the newest green main ancestor, and
+          # ci_plan_base.py asks git whether a run's commit is one.
           fetch-depth: 0
       - uses: ./.github/actions/shared-rust
         with:
           kind: test
 
-      # Fail open: anything but a push to main with a readable plan runs
-      # every test.
+      # Fail open: anything but a push to main with a green ancestor and a
+      # readable plan runs every test.
       - name: plan
         id: plan
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
-          BEFORE: ${{ github.event.before }}
+          # Reads this workflow's runs (the job's `actions: read`).
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           full() {
             echo "plan: $1 -> every test"
@@ -138,9 +150,11 @@ jobs:
             exit 0
           }
           [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ] || full "$EVENT on $REF"
-          git cat-file -e "$BEFORE^{commit}" 2>/dev/null || full "no previous main commit ($BEFORE)"
+          base="$(python3 scripts/ci_plan_base.py "$(git rev-parse HEAD)")" || full "base lookup failed"
+          [ -n "$base" ] || full "no green main ancestor"
+          echo "plan: base $base ($(git rev-list --count "$base..HEAD") commit(s) since)"
           plan="$RUNNER_TEMP/rail-plan.json"
-          cargo rail plan --from "$BEFORE" --to HEAD --json > "$plan" || full "cargo rail plan failed"
+          cargo rail plan --from "$base" --to HEAD --json > "$plan" || full "cargo rail plan failed"
           gates="$(python3 scripts/ci-rail-plan.py "$plan")" || full "plan parse failed"
           [ -n "$gates" ] || full "plan parse produced no gates"
           echo "$gates" | tee -a "$GITHUB_OUTPUT"

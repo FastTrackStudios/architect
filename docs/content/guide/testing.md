@@ -206,6 +206,14 @@ Before opening one, still run the tests of what you changed: the PR check
 compiles them but runs none. Whoever merges watches `main` and reverts or
 fixes forward when it goes red.
 
+A newer push to `main` cancels the older push's `checks` run, so only the
+newest commit of a batch of merges is checked. Its tests are the ones
+`cargo rail plan` reaches from the newest ancestor whose run finished
+green (`scripts/ci_plan_base.py`), so the commits whose runs were
+cancelled or went red are covered by that run; with no such ancestor, or
+the Actions API failing, it runs every test. A `v*` tag, the nightly run
+and a manual dispatch run every test and are never cancelled.
+
 `cargo run -q -p xtask -- docs` (also `just docs-check`) fails on any
 repo path, page link, `just` recipe, xtask command or `-p` package the
 docs and skills name that does not exist (`xtask/src/docs.rs`). Cite

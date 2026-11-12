@@ -46,8 +46,12 @@ body, and updates `skills/architect/` in the same PR.
 The PR checks are only fmt and the lockfile; the full suite (clippy,
 tests, wasm, boundaries, docs) runs on `main` after the merge
 (`.github/workflows/checks.yml`). A commit is releasable when its
-`checks` run on `main` finished with the `check` job green. Tag that
-commit, never a branch head or a commit whose run is pending or red:
+`checks` run on `main` finished with the `check` job green. A newer
+push to `main` cancels the older one's run, so a commit merged in a batch
+may have no finished run at all; release from a later commit whose run
+is green instead. Tag a green commit, never a branch head or a commit
+whose run is pending, cancelled or red (the tag's own run still runs
+every test):
 
 ```sh
 gh run list -R FastTrackStudios/architect --workflow checks.yml --branch main -L 5
