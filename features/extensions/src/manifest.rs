@@ -607,6 +607,12 @@ pub struct Manifest {
     /// the app's bottom bar): [`architect_favourites::TypeFavourites`].
     #[serde(default)]
     pub favourites: Vec<architect_favourites::TypeFavourites>,
+    /// The `[[favourites]]` declarations [`Self::parse`] left out, each
+    /// with why: data a shell draws must never make the manifest unreadable
+    /// (an installed extension's unreadable manifest holds back a node's
+    /// shared files), so a bad one is dropped and reported (`EXT_CHECK`).
+    #[serde(skip)]
+    pub favourites_dropped: Vec<String>,
 }
 
 /// One of an extension's `[[secrets]]`: an API key or a token the person
@@ -684,9 +690,6 @@ pub enum ManifestError {
     /// A `[[share_layers]]` rule with no note type or a pattern that is
     /// not a relative path.
     BadShareLayers(String),
-    /// A `[[favourites]]` declaration that is not one
-    /// ([`architect_favourites::TypeFavourites::check`]).
-    BadFavourites(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -712,7 +715,6 @@ impl std::fmt::Display for ManifestError {
             Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::Interop { field, why } => write!(f, "{field}: {why}"),
             Self::BadShareLayers(why) => write!(f, "share_layers: {why}"),
-            Self::BadFavourites(why) => write!(f, "favourites: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -782,8 +784,18 @@ impl Manifest {
     ///
     /// It is not a manifest, or breaks a rule [`Self::check`] keeps.
     pub fn parse(text: &str) -> Result<Self, ManifestError> {
-        let manifest: Self =
+        let mut manifest: Self =
             toml::from_str(text).map_err(|e| ManifestError::Parse(e.to_string()))?;
+        // A declaration that breaks a rule is dropped, not fatal.
+        let mut dropped = Vec::new();
+        manifest.favourites.retain(|decl| match decl.check() {
+            Ok(()) => true,
+            Err(why) => {
+                dropped.push(format!("{}: {why}", decl.note_type));
+                false
+            }
+        });
+        manifest.favourites_dropped = dropped;
         manifest.check()?;
         Ok(manifest)
     }
@@ -886,11 +898,6 @@ impl Manifest {
         }
         for rule in &self.share_layers {
             rule.check().map_err(ManifestError::BadShareLayers)?;
-        }
-        for decl in &self.favourites {
-            decl.check().map_err(|why| {
-                ManifestError::BadFavourites(format!("{}: {why}", decl.note_type))
-            })?;
         }
         let mut secrets = std::collections::BTreeSet::new();
         for secret in &self.secrets {
@@ -1931,11 +1938,22 @@ mod favourites_tests {
         assert_eq!(manifest.favourites.len(), 1);
         assert!(manifest.favourites[0].is_for("setlist"));
         assert_eq!(manifest.favourites[0].tabs[0].label, "Setlist");
+        // One that breaks a rule is dropped and said, not fatal: the rest
+        // of the manifest (its share layers) still reads.
         let bad = text.replace(
             "{ view = \"page\" }",
             "{ place = \"https://evil.example/\" }",
+        ) + "\n[[share_layers]]\nnote_type = \"song\"\nfull = [\"Media/**\"]\n";
+        let manifest = super::Manifest::parse(&bad).expect("it still reads");
+        assert!(manifest.favourites.is_empty());
+        assert_eq!(
+            manifest.favourites_dropped.len(),
+            1,
+            "{:?}",
+            manifest.favourites_dropped
         );
-        assert!(super::Manifest::parse(&bad).is_err());
+        assert!(manifest.favourites_dropped[0].starts_with("setlist: tab"));
+        assert_eq!(manifest.share_layers.len(), 1);
     }
 }
 
