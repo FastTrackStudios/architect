@@ -173,10 +173,12 @@ impl TypeFavourites {
     }
 }
 
-/// Whether `place` is a place relative to the note: letters, digits,
-/// `-`, `_`, `.`, `~`, `/` and one `#` anchor; not starting with `/` or
-/// `.`, no `..` or empty segment. Whatever a WHATWG URL parser would
-/// normalise into another origin (`\`, `%`, `:`, `//`) is refused here.
+/// Whether `place` is a place relative to the note.
+///
+/// Letters, digits, `-`, `_`, `.`, `~`, `/` and one `#` anchor; not
+/// starting with `/` or `.`, no `..`, `.` or empty segment but a trailing
+/// `/`. Whatever a WHATWG URL parser would normalise into another origin
+/// (`\`, `%`, `:`, `//`) is refused here.
 #[must_use]
 pub fn place_ok(place: &str) -> bool {
     let (path, anchor) = place.split_once('#').unwrap_or((place, ""));
@@ -184,6 +186,8 @@ pub fn place_ok(place: &str) -> bool {
         s.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | '/'))
     };
+    let segments: Vec<&str> = path.split('/').collect();
+    let last = segments.len().saturating_sub(1);
     !place.is_empty()
         && place.len() <= MAX_NAME
         && plain(path)
@@ -193,9 +197,10 @@ pub fn place_ok(place: &str) -> bool {
         && !path.starts_with('/')
         && !path.starts_with('.')
         && (path.is_empty()
-            || path.split('/').enumerate().all(|(i, seg)| {
-                seg != ".." && seg != "." && (!seg.is_empty() || i == path.split('/').count() - 1)
-            }))
+            || segments
+                .iter()
+                .enumerate()
+                .all(|(i, seg)| *seg != ".." && *seg != "." && (!seg.is_empty() || i == last)))
 }
 
 /// `a-z`, `0-9`, `-` (and `.` for a state such as `player.playing`).
