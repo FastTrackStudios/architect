@@ -877,6 +877,31 @@ fn use_lab_vault() -> LabVault {
     })
 }
 
+/// Mounts every org vault in `vaults` that the navigator does not hold
+/// yet (an account signed in, an org joined), beside the app's own: a
+/// no-op before the Vault has been shown, which reads the catalog then.
+pub fn mount_org_vaults(vaults: &[crate::vaults::OrgVault]) {
+    let Some(lab) = try_consume_context::<LabVault>() else {
+        return;
+    };
+    let own = lab.own.peek().clone();
+    for v in vaults {
+        let m = Mount::vault(v.badge());
+        if m.id == own || lab.others.peek().contains_key(&m.id) {
+            continue;
+        }
+        match vault::actions::OpenVault::open(&v.dir) {
+            Ok(open) => {
+                let source = watched(open, v.name.clone());
+                let mut others = lab.others;
+                others.write().insert(m.id.clone(), source.clone());
+                lab.mounts.peek().mount(m, Arc::new(source));
+            }
+            Err(e) => tracing::warn!(org = %v.org, error = %e, "lab.vault.org_vault_unopened"),
+        }
+    }
+}
+
 /// Where the navigator keeps what it had open between runs: the app's
 /// folder's `navigator-view` (the Architect app's, or the sandbox's
 /// throwaway one); none for an in-memory vault.

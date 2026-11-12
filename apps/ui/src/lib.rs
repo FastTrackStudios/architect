@@ -31,6 +31,7 @@ mod keyflow;
 mod note;
 mod note_editor;
 mod notes;
+pub mod org_vaults;
 mod pages;
 mod paint;
 pub mod presence;
@@ -783,6 +784,9 @@ pub fn LabApp() -> Element {
     use_hook(|| confirm::require(&list));
     // Sign-in (#188): the person's accounts, ACCOUNT_* on the list.
     let accounts = accounts::use_app_accounts(&list, files);
+    // The account's org vaults: kept, mounted in the navigator and synced
+    // with the node that hosts each org (`org_vaults`).
+    let _org_vaults = org_vaults::use_org_vaults(accounts);
     // The lab's vault: a folder of markdown, its VAULT_* actions (only
     // with files: a film's run keeps nothing).
     use_hook(|| {
@@ -1564,7 +1568,15 @@ pub fn LabApp() -> Element {
                         foot,
                         // The sandbox's made-up projects; the Architect app's
                         // sidebar is the Vault's navigator.
-                        left: crate::distribution().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
+                        // A phone's left drawer: the account's orgs and their
+                        // vaults (on a desk the Vault's navigator claims it).
+                        left: if crate::distribution().is_sandbox() {
+                            Some(rsx! { pages::LeftSide {} })
+                        } else if screen().form() == architect_shell::FormFactor::Phone {
+                            Some(rsx! { org_vaults::OrgVaultsPanel {} })
+                        } else {
+                            None
+                        },
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
                         right: if (lab.right)() && on_a_list(route) && !matches!(route, Route::Tab(t) if ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },

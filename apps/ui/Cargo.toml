@@ -96,7 +96,10 @@ tag = { workspace = true, features = ["actions"] }
 # Bases: a .base as a workspace view, a note's ```base fence, the
 # BASES_* actions (src/notes.rs, src/vault.rs).
 architect-bases = { workspace = true, features = ["ui"] }
-architect = { workspace = true, features = ["action-list", "settings", "http-client"] }
+architect = { workspace = true, features = ["action-list", "settings", "http-client", "connect"] }
+# An org vault synced with the node that hosts its org, over the org's
+# lane (src/org_vaults.rs): the node's `Notes`, as a client.
+vault-proto = { workspace = true, features = ["vox", "notes"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
 dioxus-native = { workspace = true }
