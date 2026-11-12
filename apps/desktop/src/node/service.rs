@@ -49,6 +49,9 @@ pub struct NodeStatus {
     pub endpoint: String,
     /// The org the account's devices share, once the pass found one.
     pub org: Option<String>,
+    /// The org whose vaults it serves on its org lane, `/org/{slug}/vox`
+    /// (`Config::host_org`): what a signed-in web app opens.
+    pub hosts: Option<String>,
     /// Whether its last account pass went through.
     pub signed_in: bool,
     /// How many vaults it holds, and their notes.
@@ -114,13 +117,9 @@ pub struct FilesStore {
     pub incoming_used: Option<u64>,
 }
 
-/// A note in a vault.
-#[architect::wire]
-#[derive(Eq)]
-pub struct NoteRef {
-    pub vault: String,
-    pub path: String,
-}
+/// A note in a vault: `vault_proto::notes`' (the `Notes` contract lives
+/// there, so a browser has its client).
+pub use vault_proto::notes::NoteRef;
 
 /// [`Node`]'s declaration: one service per module, as the generated
 /// names (`http`, `prelude`) are per module.
@@ -139,28 +138,14 @@ pub mod node {
     pub use prelude::*;
 }
 
-/// [`Notes`]'s declaration.
+/// [`Notes`]'s declaration: `vault_proto::notes`, its generated client,
+/// server and actions with it.
 pub mod notes {
-    use super::{NodeError, NoteRef};
-
-    /// The notes of the vaults this node holds.
-    #[architect::service(actions)]
-    pub trait Notes {
-        /// Every note this node holds.
-        #[action(effect = read_only)]
-        async fn list(&self) -> Result<Vec<NoteRef>, NodeError>;
-        /// A note's markdown.
-        #[action(effect = read_only)]
-        async fn read(&self, vault: String, path: String) -> Result<String, NodeError>;
-        /// Write a note's markdown; it reaches every peer on the next sweep.
-        async fn write(&self, vault: String, path: String, text: String) -> Result<(), NodeError>;
-    }
-
-    pub use prelude::*;
+    pub use vault_proto::notes::*;
 }
 
 pub use node::Node;
-pub use notes::Notes;
+pub use notes::{Notes, NotesError};
 
 /// What the account pass last said.
 #[derive(Debug, Clone, Default)]
@@ -183,6 +168,8 @@ pub struct NodeState {
     pub(crate) files: Option<architect_files::sync::Engine>,
     /// Its share links' layer rules, for its status.
     pub(crate) layers: Option<super::share_layers::LayerRules>,
+    /// The org it hosts on its org lane, if any.
+    pub(crate) hosts: Option<String>,
 }
 
 impl NodeState {
@@ -212,6 +199,7 @@ impl NodeState {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             endpoint: self.endpoint.clone(),
             org: account.org,
+            hosts: self.hosts.clone(),
             signed_in: account.signed_in,
             vaults: count(self.backend.vault_ids().len()),
             notes: count(self.catalog().notes().len()),
@@ -262,7 +250,7 @@ impl Node for NodeState {
 }
 
 impl Notes for NodeState {
-    async fn list(&self) -> Result<Vec<NoteRef>, NodeError> {
+    async fn list(&self) -> Result<Vec<NoteRef>, NotesError> {
         Ok(self
             .catalog()
             .notes()
@@ -276,12 +264,12 @@ impl Notes for NodeState {
             .collect())
     }
 
-    async fn read(&self, vault: String, path: String) -> Result<String, NodeError> {
+    async fn read(&self, vault: String, path: String) -> Result<String, NotesError> {
         let bytes = self.backend.get_file(&vault, &path)?;
         Ok(String::from_utf8_lossy(&bytes.0).into_owned())
     }
 
-    async fn write(&self, vault: String, path: String, text: String) -> Result<(), NodeError> {
+    async fn write(&self, vault: String, path: String, text: String) -> Result<(), NotesError> {
         // Registered first, so an open document merges the write as a
         // change rather than the next open finding it.
         self.backend.register_collab(&vault, &path)?;
@@ -292,7 +280,7 @@ impl Notes for NodeState {
             backend.put_file(&vault, &path, text.into_bytes(), IfMatch::Force)
         })
         .await
-        .map_err(|e| NodeError::Refused(e.to_string()))??;
+        .map_err(|e| NotesError::Refused(e.to_string()))??;
         Ok(())
     }
 }

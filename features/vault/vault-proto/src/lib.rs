@@ -43,6 +43,8 @@ mod file;
 mod graph;
 pub mod grouping;
 mod manifest;
+/// The `Notes` service: a node's notes, listed, read and written.
+pub mod notes;
 mod page;
 mod page_meta;
 mod service;

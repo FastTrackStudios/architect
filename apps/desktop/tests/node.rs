@@ -625,6 +625,8 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     );
     host.host_org = Some("indie".to_owned());
     let host = node::start(host).await.unwrap();
+    // Its status names the org it hosts: what a web app opens.
+    assert_eq!(status(&host).await.hosts.as_deref(), Some("indie"));
 
     // Alan, a member, signed in at the issuer: the notes, then one live.
     let alan_dir = tmp.path().join("alan-web");

@@ -404,6 +404,7 @@ pub async fn start_with_shell(
         admission: admission.clone(),
         account: Arc::new(Mutex::new(service::AccountView::default())),
         files: files.clone(),
+        hosts: config.host_org.clone(),
     };
 
     // ── The account ──────────────────────────────────────────────────
