@@ -761,6 +761,8 @@ pub fn VaultPage() -> Element {
                 title_row,
                 // One left side: the shell's ribbon and sidebar are the dock's.
                 in_shell: shell.desk(),
+                // On a phone the navigator is the shell's left drawer.
+                drawer_dock: true,
                 phone_header: !phone,
                 switcher,
                 screensets: sets,
@@ -1890,9 +1892,20 @@ fn VaultFiles(providers: Vec<LoadedProvider>) -> Element {
     }
     let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
     let app_list = try_use_context::<Arc<architect::action::ActionList>>();
+    // A phone's drawer goes away once a note is opened from it: the note
+    // is what was asked for (a browse that only previews keeps it).
+    // The drawer's signal (a handle, `Copy`), so the handler can close it.
+    let drawer = architect_shell::try_use_shell()
+        .filter(|s| s.form() == FormFactor::Phone)
+        .map(|s| s.drawer);
     let on_open = EventHandler::new({
         let own = own.clone();
         move |o: Open| {
+            if !o.browsing
+                && let Some(mut drawer) = drawer
+            {
+                drawer.set(None);
+            }
             let target = match (o.how, o.browsing) {
                 (OpenIn::Split, _) => Target::Split(Side::Right),
                 (_, true) => Target::Here,

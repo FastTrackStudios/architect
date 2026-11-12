@@ -51,8 +51,8 @@ use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowLeft, CalendarDays, CheckCheck, CircleQuestionMark, Command as CommandIcon, Feather,
-    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Palette, Plus, Search, Settings2, Timer,
-    Undo2, Users,
+    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Palette, PanelLeft, Plus, Search,
+    Settings2, Timer, Undo2, Users,
 };
 
 pub use distribution::{app_dir, app_dir_or_temp, distribution, sandbox};
@@ -1587,6 +1587,9 @@ pub fn LabApp() -> Element {
                         // A phone's action bar (a page adds its own: the
                         // Vault, its tabs).
                         actions: vec![
+                            // The left drawer (the orgs, their vaults, the
+                            // navigator), as an edge swipe opens it.
+                            shell::BarAction::new(architect_commands::TOGGLE_SIDEBAR, "Sidebar", icon!(PanelLeft)),
                             shell::BarAction::new("LAB_GO_BACK", "Go back", icon!(ArrowLeft)),
                             shell::BarAction::new("COMMAND_PALETTE_OPEN_ANYTHING", "Open…", icon!(Search)),
                             shell::BarAction::new("LAB_UNDO", "Undo", icon!(Undo2)),

@@ -456,6 +456,15 @@ impl ShellTheme {
 
 // ── The shell's state ───────────────────────────────────────────────────────
 
+static DRAWER_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a side is open over the page (a phone's drawer), as the shell
+/// last drew it: readable from any thread.
+#[must_use]
+pub fn drawer_open() -> bool {
+    DRAWER_OPEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A side of the shell.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Side {
@@ -1153,6 +1162,9 @@ pub fn AppShell(
         .chain(chrome.bar.iter().cloned())
         .collect();
     let mut drawer = use_signal(|| None::<Side>);
+    // Told to the process (`drawer_open`), for what reads it off the
+    // window's thread (an app's state action).
+    DRAWER_OPEN.store(drawer().is_some(), std::sync::atomic::Ordering::Relaxed);
     let fold = use_signal(|| None::<bool>);
     let right_away = use_signal(|| false);
     let left_w = use_signal(|| LEFT_WIDTH);
@@ -1172,6 +1184,11 @@ pub fn AppShell(
     // title row). On a desk the switcher sits at the sidebar's foot either
     // way, so it stays put when such a page comes and goes.
     let page_side = page_left.read().is_some();
+    // A phone's drawer has room for both, one over the other: the app's
+    // (its orgs and vaults) above the page's (a workspace's navigator).
+    // Elsewhere the page's replaces the app's.
+    let drawer_page = page_left();
+    let drawer_app = left.clone();
     let left = page_left().or(left);
     // A slot's filler replaces its content; a hidden one has none.
     let left = slot_content(&chrome, Slot::Left, left);
@@ -1705,15 +1722,25 @@ pub fn AppShell(
                 }
                 match shown_side {
                     Some(Side::Left) => rsx! {
-                        if let Some(left) = left {
+                        if left.is_some() {
                             Drawer { side: Side::Left, x: left_x, width: drawer_w, screen,
                                 if let Some(workspaces) = workspaces {
                                     div { style: "display: flex; padding: 0 10px 8px;",
                                         Switcher { workspaces, place: Place::Head }
                                     }
                                 }
-                                {left}
-                                span { style: "flex: 1;" }
+                                if phone && drawer_page.is_some() {
+                                    {drawer_app}
+                                    // The page's side (the navigator) in the room left.
+                                    div { "data-drawer-page": "true",
+                                        style: "flex: 1 1 0; min-height: 360px; display: flex; flex-direction: column; \
+                                                overflow: hidden; border-top: 1px solid {t.rule};",
+                                        {drawer_page}
+                                    }
+                                } else {
+                                    {left}
+                                    span { style: "flex: 1;" }
+                                }
                                 if !foot.is_empty() {
                                     div { style: "display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-top: 1px solid {t.rule};",
                                         for action in foot.iter().cloned() {

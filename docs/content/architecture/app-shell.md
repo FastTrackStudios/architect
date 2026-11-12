@@ -229,6 +229,19 @@ insets, whether winit's view has the keyboard, and the last presses with
 what in the foot heard them. On a phone the two lines meet while the
 keyboard is up; where they do not, the reported height is wrong.
 
+### A phone's left drawer
+
+On a phone the left side is a drawer over the page, opened by a swipe
+from the left edge, the action bar's Sidebar button or
+`SHELL_SIDEBAR_TOGGLE` (`features/commands/src/sidebar.rs`
+`TOGGLE_SIDEBAR`), and closed by a tap on the scrim or a swipe back. It
+holds the org switcher, then the app's own side (the Architect app's org
+vaults with their sync state), then the page's side (a workspace's left
+dock: the navigator over every org vault, `WorkspaceView`'s
+`drawer_dock`), then the foot's buttons and the account. A note opened
+from the navigator puts the drawer away. `architect_shell::drawer_open`
+says whether it is open, from any thread (`LAB_STATE`'s `drawer`).
+
 ### Favourites: the slots follow what is open
 
 On a phone the four tabs and the round button are **favourites**, not a

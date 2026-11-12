@@ -1350,6 +1350,10 @@ pub fn WorkspaceView(
     /// mount.
     #[props(default)]
     in_shell: bool,
+    /// On a phone, the app's shell's left drawer is the left dock (the
+    /// navigator): its groups in the drawer, no ribbon. Read on mount.
+    #[props(default)]
+    drawer_dock: bool,
     /// On a phone, the bar over the pane (its title, the switcher). An app
     /// that shows them in its own bar turns it off and opens the switcher
     /// through `switcher`.
@@ -1477,14 +1481,12 @@ pub fn WorkspaceView(
     // The top tab bars are the window's title row: the shell's own row
     // gives way to them (one row, not two).
     architect_shell::use_title_row(title_row.is_some());
-    // One left side: the shell draws the dock and its ribbon, from here.
-    let slots = (in_shell && !phone).then(|| {
-        (
-            rsx! { HostScope { host, dock::ShellLeftDock {} } },
-            rsx! { HostScope { host, dock::ShellRibbon {} } },
-        )
-    });
-    let (slot_left, slot_rail) = slots.unzip();
+    // One left side: the shell draws the dock and its ribbon, from here;
+    // on a phone the dock (the navigator) is its left drawer, with no
+    // ribbon.
+    let slot_left = (in_shell || (phone && drawer_dock))
+        .then(|| rsx! { HostScope { host, dock::ShellLeftDock {} } });
+    let slot_rail = (in_shell && !phone).then(|| rsx! { HostScope { host, dock::ShellRibbon {} } });
     architect_shell::use_shell_slots(slot_left, slot_rail);
     if *host.in_shell.peek() != in_shell {
         host.in_shell.set(in_shell);
