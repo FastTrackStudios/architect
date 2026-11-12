@@ -265,6 +265,8 @@ jobs:
             -p architect-capture --features architect-capture/ui \
             -p architect-editor --features architect-editor/web
           cargo check --target wasm32-unknown-unknown -p vault --no-default-features
+          # ⌘K's views without the extension host: what the web app draws.
+          cargo check --target wasm32-unknown-unknown -p architect-command-palette --no-default-features
 
   # The one status main's branch protection requires (context `check`).
   # It passes only when every job above succeeded; a skipped or cancelled
