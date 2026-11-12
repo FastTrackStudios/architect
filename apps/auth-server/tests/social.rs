@@ -55,6 +55,7 @@ fn test_config() -> ServerConfig {
             public_client: true,
             skip_consent: true,
             disabled: false,
+            issue_sessions: false,
         }],
         ..ServerConfig::local()
     }

@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use architect_auth::{
     ArchitectAuth, AuthStorage, AuthorizeOidc, BeginOAuthAuthorization, CurrentSession,
-    ExchangeOidcToken, GetOidcUserInfo, LinkOAuthAccount, SignInOAuthAccount, UnlinkOAuthAccount,
+    ExchangeForSession, ExchangeOidcToken, GetOidcUserInfo, LinkOAuthAccount, SignInOAuthAccount, UnlinkOAuthAccount,
     VerifyJwt, VerifyOAuthState,
     crypto::{decrypt_secret, encrypt_secret},
     transport::{AuthCookieConfig, axum::session_token_from_headers, map_auth_error},
@@ -524,11 +524,41 @@ pub struct AuthorizeParams {
 /// RFC 6749 requires.
 async fn token<S>(
     State(state): State<HttpState<S>>,
+    headers: HeaderMap,
     axum::extract::Form(form): axum::extract::Form<TokenForm>,
 ) -> Result<Json<Value>, ApiError>
 where
     S: AuthStorage,
 {
+    // RFC 8693: a first-party native app's fresh access token traded for
+    // an issuer session (what the issuer's vox services take).
+    if form.grant_type == architect_auth::TOKEN_EXCHANGE {
+        let session = state
+            .auth
+            .exchange_for_session(ExchangeForSession {
+                client_id: form.client_id,
+                client_secret: form.client_secret,
+                subject_token: form.subject_token.unwrap_or_default(),
+                subject_token_type: form.subject_token_type.unwrap_or_default(),
+                requested_token_type: form.requested_token_type.unwrap_or_default(),
+                user_agent: user_agent(&headers),
+            })
+            .await?;
+        let expires_in = session
+            .session
+            .expires_at
+            .signed_duration_since(chrono::Utc::now())
+            .num_seconds()
+            .max(0);
+        return Ok(Json(json!({
+            "access_token": session.token,
+            "issued_token_type": architect_auth::SESSION_TOKEN_TYPE,
+            "token_type": "Bearer",
+            "expires_in": expires_in,
+            "user_id": session.user.id.to_string(),
+            "email": session.user.email,
+        })));
+    }
     let response = state
         .auth
         .exchange_oidc_token(ExchangeOidcToken {
@@ -566,6 +596,14 @@ pub struct TokenForm {
     pub code_verifier: Option<String>,
     #[serde(default)]
     pub refresh_token: Option<String>,
+    /// Token exchange (RFC 8693): the token traded, what it is, what is
+    /// asked for.
+    #[serde(default)]
+    pub subject_token: Option<String>,
+    #[serde(default)]
+    pub subject_token_type: Option<String>,
+    #[serde(default)]
+    pub requested_token_type: Option<String>,
 }
 
 async fn userinfo<S>(

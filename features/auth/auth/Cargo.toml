@@ -39,6 +39,8 @@ k256.workspace = true
 sha3.workspace = true
 totp-rs.workspace = true
 webauthn-rs.workspace = true
+# A native app's loopback redirect, matched on any port (RFC 8252 §7.3).
+url = "2"
 uuid.workspace = true
 vox = { workspace = true, optional = true }
 
@@ -50,7 +52,6 @@ axum = ["dep:architect", "dep:axum", "architect/server-axum"]
 full = ["backend-db", "vox", "axum", "auth-proto/full"]
 
 [dev-dependencies]
-url = "2"
 proptest.workspace = true
 tokio.workspace = true
 webauthn-authenticator-rs = { version = "0.5.5", features = ["softpasskey"] }

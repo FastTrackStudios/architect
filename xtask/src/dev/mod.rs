@@ -55,6 +55,11 @@ const APP_SECRETS: &str = "secrets.json";
 /// Inherited variables no process of the stack sees: each is given exactly
 /// what the stack decides, and nothing a shell happened to export (a peer,
 /// an issuer, a bucket's keys, the admin token).
+/// The native app's redirects at the issuer (`architect_accounts::browser`):
+/// a loopback port of its choosing on a desk, its own scheme on iOS.
+pub const NATIVE_LOOPBACK_REDIRECT: &str = "http://127.0.0.1/oauth/callback";
+pub const NATIVE_SCHEME_REDIRECT: &str = "app.fasttrackstudio.architect:/oauth/callback";
+
 const STRIPPED_PREFIXES: [&str; 4] = ["ARCHITECT_", "AUTH_", "AWS_", "MOCK_OAUTH_"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -894,18 +899,28 @@ pub fn auth_env(run: &AuthRun) -> Vec<(String, String)> {
             vars.push((k.to_owned(), v));
         }
     }
+    // The Architect apps sign in as the public client `architect`, as they
+    // do at production's issuer: the native app in the system browser,
+    // back on a loopback port (any, RFC 8252 §7.3) or its own scheme, its
+    // fresh token traded for a session (`issue_sessions`); the web app on
+    // its callback, when it runs.
+    let mut redirects = vec![
+        NATIVE_LOOPBACK_REDIRECT.to_owned(),
+        NATIVE_SCHEME_REDIRECT.to_owned(),
+    ];
     if let Some(web) = run.web_port {
-        // The web app signs in as the public client `architect`, as it does
-        // at production's issuer.
-        let clients = serde_json::json!([{
-            "client_id": "architect",
-            "name": "Architect (local)",
-            "redirect_uris": [format!("http://127.0.0.1:{web}/auth/callback")],
-            "public_client": true,
-            "skip_consent": true,
-        }]);
-        vars.push(("AUTH_OIDC_CLIENTS".to_owned(), clients.to_string()));
+        redirects.push(format!("http://127.0.0.1:{web}/auth/callback"));
     }
+    let clients = serde_json::json!([{
+        "client_id": "architect",
+        "name": "Architect (local)",
+        "redirect_uris": redirects,
+        "scopes": ["openid", "profile", "email", "offline_access"],
+        "public_client": true,
+        "skip_consent": true,
+        "issue_sessions": true,
+    }]);
+    vars.push(("AUTH_OIDC_CLIENTS".to_owned(), clients.to_string()));
     if run.seed {
         vars.push(("AUTH_DEV_SEED".to_owned(), "1".to_owned()));
     }

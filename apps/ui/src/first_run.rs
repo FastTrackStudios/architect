@@ -95,7 +95,7 @@ pub fn FirstRun(on_open: Callback<()>) -> Element {
                 // Optional: the sheet, over the welcome (#188).
                 if let Some(accounts) = signed_in_ui {
                     button { "data-testid": "first-run-sign-in", style: "{row}",
-                        onclick: move |_| accounts.open(architect_accounts::Sheet::SignIn),
+                        onclick: move |_| accounts.accounts().sign_in(),
                         span { style: label, "Sign in" }
                         span { style: "{about}", "Optional: your account, its devices and, soon, sync." }
                     }

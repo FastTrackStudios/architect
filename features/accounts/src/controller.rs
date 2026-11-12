@@ -17,6 +17,34 @@ use crate::store::{AccountStore, ActiveSession};
 /// A session that ends within this long is renewed at start.
 const RENEW_WITHIN_SECS: i64 = 24 * 60 * 60;
 
+/// How long a browser sign-in waits for its person.
+const SIGN_IN_WAIT: Duration = Duration::from_mins(10);
+
+/// The desk's loopback redirect, once: the first request for its path
+/// gets a page saying to go back to the app; anything else a 404.
+#[cfg(not(target_os = "ios"))]
+async fn loopback_once(listener: tokio::net::TcpListener) -> std::io::Result<String> {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    loop {
+        let (mut sock, _) = listener.accept().await?;
+        let mut buf = vec![0_u8; 8192];
+        let n = sock.read(&mut buf).await?;
+        let request = String::from_utf8_lossy(buf.get(..n).unwrap_or_default()).into_owned();
+        if let Some(target) = crate::redirect::loopback_target(&request) {
+            let page = crate::redirect::LOOPBACK_PAGE;
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/html; charset=utf-8\r\ncontent-length: {}\r\ncache-control: no-store\r\nconnection: close\r\n\r\n{page}",
+                page.len()
+            );
+            let _ = sock.write_all(reply.as_bytes()).await;
+            return Ok(target.to_owned());
+        }
+        let _ = sock
+            .write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+            .await;
+    }
+}
+
 /// What the sheet shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sheet {
@@ -282,8 +310,20 @@ impl Accounts {
         self.changed();
     }
 
-    /// Stops a browser sign-in waiting, the sheet staying open.
+    /// Signs in: the sign-in sheet opens and the browser sign-in starts at
+    /// once (the issuer's page in the system's browser, `crate::browser`),
+    /// unless one is already waiting. What "Sign in" does everywhere.
+    pub fn sign_in(&self) {
+        self.open_sheet(Sheet::SignIn);
+        if self.browser().is_none() && !matches!(self.status(), Status::Busy(_)) {
+            self.sign_in_browser();
+        }
+    }
+
+    /// Stops a browser sign-in waiting, the sheet staying open; its page
+    /// is closed where the app can (iOS's sheet).
     pub fn cancel_browser(&self) {
+        crate::browser::close();
         {
             let mut state = self.state();
             state.browser = None;
@@ -339,10 +379,148 @@ impl Accounts {
         }
     }
 
-    /// Starts a browser sign-in and waits for it in the background: the
-    /// approval page opens (or its link shows), and the account becomes
-    /// active once its person approves.
+    /// Signs in in the system's browser and waits for it in the
+    /// background: the issuer's sign-in page opens (iOS's sign-in sheet, a
+    /// desk's default browser), its person signs in there, and the issuer
+    /// sends the browser back to the app with a code, which the app
+    /// redeems (authorization code + PKCE, `crate::redirect`) and trades
+    /// for an issuer session. The account becomes active then.
     pub fn sign_in_browser(&self) {
+        let attempt = {
+            let mut state = self.state();
+            state.attempt = state.attempt.wrapping_add(1);
+            state.status = Status::Busy("Opening the sign-in page…".to_owned());
+            state.attempt
+        };
+        self.changed();
+        let me = self.clone();
+        issuer::spawn(async move { me.code_flow(attempt).await });
+    }
+
+    /// The browser sign-in failed: said, and its page closed.
+    fn sign_in_failed(&self, attempt: u64, why: String) {
+        crate::browser::close();
+        let mut state = self.state();
+        if state.attempt != attempt {
+            return;
+        }
+        state.browser = None;
+        drop(state);
+        self.set_status(Status::Failed(why));
+    }
+
+    async fn code_flow(&self, attempt: u64) {
+        use crate::redirect;
+        let pkce = redirect::new_pkce();
+        let client_id = self.0.client_id.clone();
+        // Where the browser comes back: the app's scheme on iOS (its sheet
+        // hands it over), a loopback port of the app's own elsewhere.
+        #[cfg(target_os = "ios")]
+        let redirect_uri = redirect::SCHEME_REDIRECT.to_owned();
+        #[cfg(not(target_os = "ios"))]
+        let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
+            Ok(l) => l,
+            Err(e) => return self.sign_in_failed(attempt, format!("Could not listen for the sign-in: {e}")),
+        };
+        #[cfg(not(target_os = "ios"))]
+        let redirect_uri = match listener.local_addr() {
+            Ok(at) => redirect::loopback_redirect(at.port()),
+            Err(e) => return self.sign_in_failed(attempt, format!("Could not listen for the sign-in: {e}")),
+        };
+        let url = auth_client::oidc::authorize_url(
+            self.0.issuer.origin(),
+            &client_id,
+            &redirect_uri,
+            &pkce,
+            redirect::SCOPE,
+        );
+        if !crate::browser::on_issuer(&url, self.0.issuer.origin()) {
+            return self.sign_in_failed(attempt, "The sign-in page is not on the issuer: not opened.".to_owned());
+        }
+        // iOS's sheet hands back where it landed (or nothing: cancelled).
+        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+        let tx = std::sync::Mutex::new(Some(tx));
+        let opened = self.0.open_browser
+            && crate::browser::open(&url, move |back| {
+                if let Some(tx) = tx.lock().ok().and_then(|mut t| t.take()) {
+                    let _ = tx.send(back);
+                }
+            });
+        {
+            let mut state = self.state();
+            if state.attempt != attempt {
+                return;
+            }
+            state.browser = Some(BrowserWait {
+                user_code: String::new(),
+                url,
+                opened,
+                attempt,
+            });
+            state.status = Status::Busy("Finish signing in in your browser…".to_owned());
+        }
+        self.changed();
+        #[cfg(target_os = "ios")]
+        let back = async move { rx.await.ok().flatten() };
+        #[cfg(not(target_os = "ios"))]
+        let back = {
+            drop(rx);
+            async move { loopback_once(listener).await.ok() }
+        };
+        let deadline = Instant::now()
+            .checked_add(SIGN_IN_WAIT)
+            .unwrap_or_else(Instant::now);
+        tokio::pin!(back);
+        let back = loop {
+            tokio::select! {
+                got = &mut back => break got,
+                () = tokio::time::sleep(Duration::from_secs(1)) => {
+                    if !self.still(attempt) {
+                        return;
+                    }
+                    if Instant::now() > deadline {
+                        return self.sign_in_failed(attempt, sentence(&IssuerError::Expired));
+                    }
+                }
+            }
+        };
+        let Some(back) = back else {
+            // Closed by its person: as it was.
+            if self.still(attempt) {
+                self.cancel_browser();
+            }
+            return;
+        };
+        let code = match redirect::callback(&back, &pkce) {
+            Ok(code) => code,
+            Err(e) => return self.sign_in_failed(attempt, format!("{e}.")),
+        };
+        self.set_status(Status::Busy("Signing in…".to_owned()));
+        let signed = match self
+            .0
+            .issuer
+            .redeem_code(&client_id, &redirect_uri, &code, &pkce)
+            .await
+        {
+            Ok(access) => self.0.issuer.trade_for_session(&client_id, &access).await,
+            Err(e) => Err(e),
+        };
+        match signed {
+            Ok(signed) => {
+                crate::browser::close();
+                if self.still(attempt) {
+                    let _ = self.adopt(signed);
+                }
+            }
+            Err(e) => self.sign_in_failed(attempt, sentence(&e)),
+        }
+    }
+
+    /// Signs in by a code approved on the issuer's page (the device
+    /// authorization grant): for a device with no browser of its own to
+    /// come back to (a headless node, the CLI). Waits in the background;
+    /// the account becomes active once its person approves.
+    pub fn sign_in_with_code(&self) {
         let attempt = {
             let mut state = self.state();
             state.attempt = state.attempt.wrapping_add(1);
@@ -351,7 +529,7 @@ impl Accounts {
         };
         self.changed();
         let me = self.clone();
-        issuer::spawn(async move { me.browser_flow(attempt).await });
+        issuer::spawn(async move { me.device_flow(attempt).await });
     }
 
     fn still(&self, attempt: u64) -> bool {
@@ -359,12 +537,26 @@ impl Accounts {
         state.attempt == attempt && state.browser.as_ref().is_some_and(|b| b.attempt == attempt)
     }
 
-    async fn browser_flow(&self, attempt: u64) {
+    async fn device_flow(&self, attempt: u64) {
         let code = match self.0.issuer.start_browser(&self.0.client_id).await {
             Ok(code) => code,
             Err(e) => return self.set_status(Status::Failed(sentence(&e))),
         };
-        let opened = self.0.open_browser && webbrowser::open(&code.url).is_ok();
+        // Only the issuer's own page, in the system's browser (iOS's
+        // sign-in sheet): never another host (`crate::browser`).
+        if !crate::browser::on_issuer(&code.url, self.0.issuer.origin()) {
+            return self.set_status(Status::Failed(
+                "The sign-in page is not on the issuer: not opened.".to_owned(),
+            ));
+        }
+        let opened = self.0.open_browser && {
+            let me = self.clone();
+            crate::browser::open(&code.url, move |back| {
+                if back.is_none() && me.still(attempt) {
+                    me.cancel_browser();
+                }
+            })
+        };
         {
             let mut state = self.state();
             if state.attempt != attempt {
@@ -390,6 +582,7 @@ impl Accounts {
             }
             if Instant::now() > deadline {
                 self.state().browser = None;
+                crate::browser::close();
                 return self.set_status(Status::Failed(sentence(&IssuerError::Expired)));
             }
             match self.0.issuer.poll_browser(&code.device_code).await {
@@ -397,6 +590,8 @@ impl Accounts {
                     wait = wait.saturating_add(auth_client::device::SLOW_DOWN_STEP);
                 }
                 Ok(Polled::Approved(signed)) => {
+                    // Signed in: the sheet's work is done.
+                    crate::browser::close();
                     if self.still(attempt) {
                         let _ = self.adopt(*signed);
                     }
@@ -406,6 +601,7 @@ impl Accounts {
                 Ok(Polled::Waiting) | Err(IssuerError::Unreachable { .. }) => {}
                 Err(e) => {
                     self.state().browser = None;
+                    crate::browser::close();
                     return self.set_status(Status::Failed(sentence(&e)));
                 }
             }
