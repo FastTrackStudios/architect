@@ -574,7 +574,7 @@ body.site-now-open .site-player { visibility: hidden; }
 }
 /* A row's menu button: "…", a finger's size. */
 [data-playlist] [data-track-more] {
-  all: unset; box-sizing: border-box; display: grid; place-items: center; width: 44px; height: 44px; margin-right: -6px;
+  all: unset; box-sizing: border-box; display: grid; place-items: center; width: 44px; height: 44px;
   border-radius: 999px; color: var(--site-faint); cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
 [data-playlist] [data-track-more]:hover, [data-playlist] [data-track-more][aria-expanded="true"] { color: var(--foreground); background: var(--site-code-bg); }
