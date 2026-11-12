@@ -101,7 +101,7 @@ impl AccountsUi {
         let me = *self;
         let Some(active) = file.active().cloned() else {
             let mut menu = shell::Menu::new().item("Sign in…", icon!(LogIn), move |()| {
-                me.accounts().sign_in()
+                me.accounts().sign_in();
             });
             if !file.accounts.is_empty() {
                 menu = menu.item("Accounts…", icon!(Users), move |()| {
