@@ -389,6 +389,14 @@ share-island-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_ISLAND_FOLDER="$PWD/target/island-counter" env -u LD_LIBRARY_PATH node --test apps/web/test/share-island.test.mjs
 
+# The site's /download (apps/site): its link logic (bun test), then the
+# built page in a headless Firefox with GitHub's API stubbed: every file
+# there, the Mac build missing, the API down, rate limited
+# (apps/site/test/download.browser.mjs; SCREENSHOTS=<dir> keeps the shots).
+site-download-test:
+    cd apps/site && bun install --frozen-lockfile && bun run test && bun run build
+    cd apps/site && env -u LD_LIBRARY_PATH node --test test/download.browser.mjs
+
 share-player-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop
     devenv shell -- cargo build -q -p architect-cli --bin architect

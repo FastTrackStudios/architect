@@ -146,13 +146,14 @@
 	border-radius: var(--radius-control);
 	background: var(--raised);
 }
+/* The whole line is always in view: it wraps where it must (a key or a
+   URL anywhere), rather than scroll behind a hidden scrollbar. */
 .cmd code {
 	flex: 1;
 	min-width: 0;
 	padding: 0.7rem 0.9rem;
-	overflow-x: auto;
-	white-space: nowrap;
-	scrollbar-width: none;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 .cmd .copy {
 	display: none;

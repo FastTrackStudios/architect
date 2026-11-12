@@ -59,6 +59,12 @@ What the server adds around them, as before this bundle carried the site:
   sign-in's way back;
 - `app/config.json` is the server's own.
 
+The bundle sets no Content-Security-Policy. A server that adds one must
+let the site's pages call GitHub's API (`connect-src 'self'
+https://api.github.com`): `/download` and the landing page ask it which
+of the release's files are up (`apps/site/src/lib/release-check.ts`);
+blocked, they keep their links and lose only the check.
+
 `/app/…` and `/s/…` are same-origin links in the site's pages: the site
 and the node share one domain, nothing redirects them elsewhere.
 

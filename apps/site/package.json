@@ -10,6 +10,7 @@
 		"dev": "vite dev --port 3000",
 		"build": "vite build",
 		"preview": "vite preview",
+		"test": "bun test test/",
 		"links": "bun scripts/check-links.ts .output/public",
 		"serve": "bun scripts/serve.ts",
 		"format": "biome format",

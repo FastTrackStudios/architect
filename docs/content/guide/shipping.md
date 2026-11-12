@@ -84,7 +84,7 @@ release-notes`). Architect, the app, is released from the same tag
 | --- | --- |
 | `release` | the GitHub release and its notes |
 | `node` | `ghcr.io/fasttrackstudios/architect:<X.Y.Z>`, `:sha-<short>`, `:latest` (the headless node, [deploy](@/guide/deploy.md)), and `architect-node-<tag>-x86_64-linux.tar.gz` |
-| `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the site, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz`, what the server serves. Built after `node`, `linux` and `macos`, for the site's `/download` |
+| `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the site, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz`, what the server serves. Waits for `release` only: the site's `/download` names the release's files by convention and checks them in the browser |
 | `linux` | `Architect-linux-x86_64.AppImage` (`scripts/desktop/linux.sh`) and `latest-linux.json`: the version, the AppImage's URL and its sha256, for the updater |
 | `macos` | `Architect-macos-arm64.dmg`, Developer-ID signed and notarized (`scripts/desktop/macos.sh`), and `latest-macos.json`. Built on airlock; on while the repo variable `ARCHITECT_MACOS_RELEASE` is `true` |
 | `ios` | the Architect app for iPhone and iPad (`apps/mobile`) on TestFlight, marketing version `X.Y.Z` and a unix-time build number, noted in the release's notes (`.github/workflows/ios.yml`). Built on airlock; it never holds the release, and the repo variable `ARCHITECT_IOS_RELEASE` set to `false` turns it off |
@@ -181,7 +181,7 @@ Every page is prerendered, so none needs a server when it is requested:
 | Page | From |
 | --- | --- |
 | `/` | the landing page; its words are in `apps/site/src/content/landing.ts`, its design tokens in `apps/site/src/styles/tokens.css`, its font in `apps/site/public/fonts` |
-| `/download` | the release's `latest-linux.json` and `latest-macos.json`, its node archive, and the Nix one-liner above |
+| `/download` | the release's tag: each file's link follows from it (`apps/site/src/lib/release-assets.ts`), and the page asks GitHub's API which files are up, with their sizes and sha256; also the Nix one-liner above and how to check a download against the signed `SHA256SUMS` |
 | `/changelog` | the last releases' notes (the GitHub release bodies, which are `scripts/release-notes.sh`'s output) |
 | `/extensions` | the store's index, `extensions/index.toml`. While it lists nothing, the page is built from `examples/registry/index.toml` and says it is an example |
 | `/docs/` | `docs/content`, built by `architect site build --base /docs/` |
@@ -191,11 +191,28 @@ Every page is prerendered, so none needs a server when it is requested:
 site is built and writes `apps/site/src/data/*.json`, which is
 committed. A local or pull-request build keeps the committed copy when
 GitHub cannot be reached. A release's build is strict:
-`release.yml`'s `web` job sets `ARCHITECT_RELEASE_TAG`, runs after the
-`linux`, `node` and `macos` jobs, and fails unless `/download` describes
-that tag with its Linux manifest and `/changelog` lists it. `SHA256SUMS`
-comes after the bundle (it sums the bundle too), so `/download` links
-the tag's own.
+`release.yml`'s `web` job sets `ARCHITECT_RELEASE_TAG` and fails unless
+that release exists and `/changelog` lists it with its notes. Both come
+from the `release` job, the only one `web` waits for, so the bundle the
+server deploys does not wait on the desktop builds.
+
+`/download` carries no file data from the build. Every asset's name
+follows from the tag (`Architect-linux-x86_64.AppImage`,
+`Architect-macos-arm64.dmg`, `architect-node-<tag>-x86_64-linux.tar.gz`,
+`architect-web-<X.Y.Z>.tar.gz`, `SHA256SUMS`, `SHA256SUMS.minisig`), so
+the prerendered page links each one under
+`https://github.com/FastTrackStudios/architect/releases/download/<tag>/`
+and works with scripts off. On load it makes one call to
+`https://api.github.com/repos/FastTrackStudios/architect/releases/tags/<tag>`
+(unauthenticated, 60 an hour per address; kept in `sessionStorage` for
+ten minutes) and reconciles: a file the release does not list yet (a
+job still running, or the optional Mac build off or failed) is shown as
+not available, and the listed ones get their size and sha256 (the API's
+asset `digest`). If the call fails or is rate limited, the links stay as
+they are. The page never fetches an asset itself. The landing page's
+Download buttons do the same. The sha256 of each file is always in
+`SHA256SUMS`, signed with the org key; the page shows how to check both.
+`sums` still runs last, after `web`, so the sums cover the bundle.
 
 The site's links to the web app (`/app/`) and to share links (`/s/…`)
 are same-origin paths: the site and the node share the domain.

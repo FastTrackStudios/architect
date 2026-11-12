@@ -164,16 +164,17 @@ jobs:
   # `architect-web-image`). Starts PRIVATE on GHCR like `architect`: make it
   # public once in the org's package settings.
   #
-  # After `linux`, `node` and `macos`: /download describes this release
-  # (its latest-linux.json, latest-macos.json and node archive), fetched
-  # for this tag at build time, and the build FAILS without them
-  # (ARCHITECT_RELEASE_TAG, apps/site/scripts/data.ts). macOS is optional
-  # (off, or failed: /download offers no dmg); Linux and the node are not.
+  # After `release` only, so the server's bundle is not held behind the
+  # desktop builds: /download is built for this tag (ARCHITECT_RELEASE_TAG,
+  # apps/site/scripts/data.ts: the build FAILS unless the release exists
+  # and /changelog lists it with its notes) and links each file by the
+  # name release.yml gives it. The browser asks GitHub's API which of them
+  # are up yet (apps/site/src/lib/release-assets.ts): one still building,
+  # or a Mac build that is off or failed, shows as not available yet.
   #
   #   ghcr.io/fasttrackstudios/architect-web:<X.Y.Z> | sha-<short> | latest
   web:
-    needs: [release, node, linux, macos]
-    if: ${{ !cancelled() && needs.release.result == 'success' && needs.node.result == 'success' && needs.linux.result == 'success' }}
+    needs: release
     runs-on: [self-hosted, thebattleship-release]
     timeout-minutes: 90
     permissions:
@@ -217,7 +218,8 @@ jobs:
       - name: Build the bundle
         id: build
         env:
-          # The site's /download and /changelog: this tag's, or the build fails.
+          # The site's /download and /changelog: this tag's, or the build
+          # fails. Only the release and its notes are asked for.
           ARCHITECT_RELEASE_TAG: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -431,8 +433,10 @@ jobs:
   # SHA256SUMS over every asset the release carries, signed with the org's
   # minisign key (the one Task's and Studio's updaters pin) when the
   # tag-only `release-signing` environment has FTS_RELEASE_MINISIGN_KEY;
-  # without it the sums go out unsigned, with a warning. Runs after the
-  # Mac job too when that one is on (and whether it passed or not).
+  # without it the sums go out unsigned, with a warning. Runs last: after
+  # `web` (the sums cover the web bundle, and /download links SHA256SUMS
+  # by name, shown once it is up) and after the Mac job too when that one
+  # is on (and whether it passed or not).
   sums:
     needs: [node, web, linux, macos]
     if: ${{ !cancelled() && needs.node.result == 'success' && needs.web.result == 'success' && needs.linux.result == 'success' }}

@@ -4,8 +4,10 @@
 # with the docs at /docs/ and the web app at /app/, which the VPS serves as
 # static files (scripts/web-routes.md). This workflow deploys nothing.
 #
-#   pull request   bun install (frozen), biome, tsc, build, the route
-#                  tree's drift, every internal link and asset; then the
+#   pull request   bun install (frozen), biome, tsc, the unit tests, build,
+#                  the route tree's drift, every internal link and asset,
+#                  /download in a headless Firefox with GitHub's API
+#                  stubbed (apps/site/test/download.browser.mjs); then the
 #                  web bundle assembled by scripts/web-bundle.sh around this
 #                  build, with the latest release's docs and bound wasm (no
 #                  Rust on a hosted runner), served by the bundle's rules
@@ -54,6 +56,8 @@ jobs:
         run: bunx biome ci .
       - name: Typecheck
         run: bunx tsc --noEmit
+      - name: Unit tests
+        run: bun run test
       # Built from the committed src/data: a PR's check never depends on
       # GitHub's API (a release's build fetches its own, strictly).
       - name: Build
@@ -64,6 +68,21 @@ jobs:
         run: git diff --exit-code -- src/routeTree.gen.ts
       - name: Links and assets resolve
         run: bun scripts/check-links.ts .output/public
+      # The runner image's Firefox; Node 24 for its WebSocket.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: /download in a browser
+        run: |
+          set -euo pipefail
+          firefox --version
+          SCREENSHOTS="$RUNNER_TEMP/shots" node --test test/download.browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: download-screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
       # The bundle as the release builds it, but for the two Rust pieces:
       # the latest release's docs and bound wasm stand in for them.
       - name: Web bundle

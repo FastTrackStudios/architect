@@ -11,7 +11,8 @@
 #   their own page; an unknown path answers 404 with the site's 404 page
 # - the landing page is the site's (its header carries the mark's path),
 #   not the old apps/web/landing page (`hero-plan`)
-# - /download names a Linux build and /changelog lists a release
+# - /download links a release's Linux build (by convention: the browser
+#   checks it against GitHub's API) and /changelog lists a release
 # Run by site.yml on a pull request and by release.yml's `web` job.
 set -euo pipefail
 bundle="$(cd "${1:?usage: check-web-bundle.sh BUNDLE [PORT]}" && pwd)"
@@ -46,7 +47,7 @@ has / "$mark"
 ! grep -aq hero-plan "$tmp/body" || fail "/ is the old landing page (hero-plan)"
 get /download 200
 has /download '<title>Download'
-has /download 'Architect-linux-x86_64.AppImage'
+has /download '/releases/download/v[^/"]*/Architect-linux-x86_64.AppImage'
 get /changelog 200
 has /changelog '<title>Changelog'
 has /changelog 'releases/tag/v'

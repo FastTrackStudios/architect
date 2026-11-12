@@ -46,6 +46,9 @@
 	background: none;
 	padding: 0;
 }
+.row-sha code {
+	overflow-wrap: anywhere;
+}
 .row .btn {
 	justify-self: start;
 }
@@ -68,12 +71,16 @@
 
 .page-block {
 	display: grid;
+	/* minmax(0, …): a command line wider than a phone scrolls in its box
+	   (.cmd code) instead of widening the page. */
+	grid-template-columns: minmax(0, 1fr);
 	gap: 1rem;
 	max-width: 46rem;
 	margin-top: clamp(2.5rem, 6vw, 4rem);
 }
 .cmds {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr);
 	gap: 1rem;
 }
 .cmds .label {

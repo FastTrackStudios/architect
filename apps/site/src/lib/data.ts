@@ -6,21 +6,17 @@
  */
 import releaseJson from "#/data/release.json";
 
-export type Asset = {
-	version: string;
-	url: string;
-	sha256: string;
-	file: string;
-};
+/**
+ * The release a build is for: its tag and page, nothing about its files.
+ * Its downloads are named by convention from the tag and checked against
+ * GitHub's API in the browser (src/lib/release-assets.ts), so the bundle
+ * is built without waiting for the release's other jobs.
+ */
 export type Release = {
 	tag: string;
 	version: string;
 	url: string;
 	publishedAt: string | null;
-	linux: Asset | null;
-	macos: Asset | null;
-	node: { url: string; file: string } | null;
-	sums: string | null;
 };
 
 export type ReleaseNotes = {
