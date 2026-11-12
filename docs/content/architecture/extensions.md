@@ -1801,15 +1801,39 @@ today), a node without islands.
   `@supports`, `@container`, `@keyframes`, `@property` (`@layer`
   flattened). Refused: any other at-rule; selectors naming `:host`,
   `:root`, `::part`, `::slotted`, `:scope`, `html`, `body` or the view's
-  own host and box (Tailwind's `:root, :host { --x }` theme is kept, its
-  custom properties alone, on the box); `url()` outside its own `/_ext/`
-  folder, `attr()`, `image()`, `image-set()`, `element()`, `paint()`;
-  `position: fixed`/`sticky`; `!important` on what the box contract sets.
+  own host and box, and `&` outside a rule (at the top it is the host;
+  Tailwind's `:root, :host { --x }` theme is kept, its custom properties
+  alone, on the box); `attr()`, `image()`, `image-set()`, `element()`,
+  `paint()`; a custom property holding a block (`--x: {…}`, a value the
+  browser keeps, never a rule); `position: fixed`/`sticky`; `!important`
+  on what the box contract sets; animations or transitions that do not
+  end (`infinite`, more than 10 runs, a time past 30 s); a sheet past its
+  bounds (`SHEET_LIMITS`: 256 KB, 4,000 rules, 8 blocks deep, 16
+  brackets or functions deep, 512 tokens a selector list).
+  **A `url()` is never judged as text**: it is resolved as the browser
+  will request it (against the document's base URL), then kept only on
+  the page's origin with a path of exactly its own `/_ext/` folder and
+  one file name (`[A-Za-z0-9._-]`, the island's own file-name rule), no
+  `%`, backslash, whitespace, query, fragment or credentials anywhere in
+  it, and written back as that normalised path. (`%2e%2e`, `.%2E`, `/./`
+  and `//host` mean to the URL parser what a prefix match does not see:
+  the second security review of architect#601.) Tokens a dropped comment
+  brought together are written apart again (CSS Syntax §9), so
+  `url/**/(` never comes back as `url(`.
   The box contract holds even so: the view's host carries
-  `contain: layout paint style`, `position: relative`, `isolation` and
-  `overflow: hidden` inline and `!important` from outside the shadow root
-  (and the share page's own sheet repeats it), and the sheet can select
-  neither the host nor the box.
+  `contain: layout paint style`, `position: relative`, `isolation`,
+  `overflow: hidden`, and no `transform`, `translate`, `scale`, `rotate`,
+  `zoom`, `margin`, `box-shadow`, `outline` or `filter`, inline and
+  `!important` from outside the shadow root (and the share page's own
+  sheet repeats it), and the sheet can select neither the host nor the
+  box. A reader who asked for less motion gets none: a layer before the
+  sheet turns its animations and transitions off, and a layer's
+  `!important` wins over the sheet's.
+  `features/extensions/web/test/sheet-oracle.test.mjs` is this
+  boundary's judge in a real browser: every payload of both security
+  reviews, refused or kept, may not make Firefox request anything but the
+  view's own files (its network log and the server's), hold a `url()`
+  resolving elsewhere, or paint or be hit outside its slot.
 - **Its intents** are capped (8 a second, a burst of 16), and the extension
   is unloaded 30 s after the view closes.
 

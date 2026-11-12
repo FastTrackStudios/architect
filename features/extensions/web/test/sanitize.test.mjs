@@ -191,7 +191,7 @@ test('N1: only an absolute URL as written, of an allowed origin, under its path'
 });
 
 // ── A view's stylesheet (an island's, studio#445) ─────────────────────
-import { cleanSheet } from '../sanitize.js';
+import { cleanSheet, SHEET_LIMITS } from '../sanitize.js';
 
 const PREFIX = '/_ext/island/demo.ab12/';
 
@@ -258,4 +258,77 @@ test('what cleanSheet writes, cleaned again, is itself', () => {
     assert.notEqual(once, null, css);
     assert.equal(cleanSheet(once, PREFIX), once, css);
   }
+});
+
+// The second security review of architect#601: a url() is judged as the
+// browser will request it, never as text.
+test('a sheet’s url() names only a file of the extension’s own, resolved as the browser will, written back normalised', () => {
+  const P = PREFIX;
+  const kept = (u) => cleanSheet(`.a{background-image:${u}}`, P);
+  // Its own files, however spelled, come out as their one path.
+  for (const u of [`url(${P}a.png)`, `url("${P}a.png")`, `url('${P}a.png')`, `url( ${P}a.png )`, `url(${P}./a.png)`, `url("${P}./a.png")`,
+    `url(${P}x/../a.png)`, `url(https://view.invalid${P}a.png)`, `url(//view.invalid${P}a.png)`, `url(/_ext/island/./demo.ab12/a.png)`])
+    assert.equal(kept(u), `.a{background-image:url("${P}a.png");}`, u);
+  // Everything else is refused whole: the reviewer's escapes and the family.
+  const out = [
+    `url(${P}%2e%2e/%2e%2e/%2e%2e/s/secret-dd)`, `url("${P}.%2E/.%2e/.%2e/s/secret-dd2")`, `url(${P}%2E./x)`, `url(${P}%2E%2E/x)`,
+    `url(${P}%252e%252e/x)`, `url(${P}%2f..%2fx)`, `url(${P}a%2epng)`, `url("${P}..\\\\..\\\\x")`, String.raw`url(${P}\2e\2e/\2e\2e/x)`,
+    `url(${P}../../x)`, `url(${P}../x.png)`, `url(${P}.)`, `url(${P}..)`, `url(${P})`, `url(${P}a/b.png)`, `url(${P}a.png?x)`, `url(${P}a.png?)`,
+    `url("${P}a.png#x")`, `url("${P}a.png#")`, `url("${P}a\tb.png")`, `url("${P}a\\a b.png")`, `url(//e.vil${P}a.png)`, `url(//e.vil/x)`,
+    `url(https://e.vil${P}a.png)`, `url(https://user:pw@view.invalid${P}a.png)`, `url(http://view.invalid${P}a.png)`,
+    `url("data:image/png;base64,AAAA")`, `url("blob:https://view.invalid/${P}a.png")`, `url(javascript:alert(1))`, `url(/_ext/x)`, `url(/x)`,
+    `url("${P}a.png" crossorigin(anonymous))`, `url("${P}a.png" "x")`, `url(${'a'.repeat(3000)})`,
+  ];
+  for (const u of out) {
+    for (const prop of ['background-image', 'list-style', 'mask', 'mask-image', 'shape-outside', 'border-image', 'content', 'cursor'])
+      assert.equal(cleanSheet(`.a,.a::before{${prop}:${u}}`, P), null, `${prop}: ${u}`);
+  }
+  // No prefix, no url at all.
+  assert.equal(cleanSheet(`.a{background:url(${P}a.png)}`), null);
+  // Written back normalised, and cleaned again it is itself.
+  const once = cleanSheet(`.a{background:url(${P}./a.png)}`, P);
+  assert.equal(cleanSheet(once, P), once);
+});
+
+test('a sheet’s `&` is kept only inside a rule; at the top it is the host', () => {
+  for (const css of ['&{position:absolute;inset:-100px}', ':is(&){color:red}', '& .a{color:red}', '.a,&{color:red}', ':where(&){color:red}',
+    '@media all{&{color:red}}', '@layer x{&{color:red}}', '@supports (color:red){:is(&) .a{color:red}}'])
+    assert.equal(cleanSheet(css, PREFIX), null, css);
+  assert.equal(cleanSheet('.a{&:hover{color:red}}'), '.a{&:hover{color:red;}}');
+  assert.equal(cleanSheet('.a{@media all{&{color:red}}}'), '.a{@media all{&{color:red;}}}');
+});
+
+test('a custom property’s value is a value: a block in it refuses the sheet, never reads as a rule', () => {
+  for (const css of ['.a{--x:{a:b};color:red}', '.a{--x:{a:b}}', '.a{--x: a {b} c;}', '--x:{a:b}', '--x:{color:red}.a{color:red}', ':root,:host{--x:{a:b}}'])
+    assert.equal(cleanSheet(css, PREFIX), null, css);
+  assert.equal(cleanSheet('.a{--x:1px;width:var(--x)}'), '.a{--x:1px;width:var(--x);}');
+});
+
+test('a sheet past its bounds is refused whole', () => {
+  assert.equal(cleanSheet(`${'.a{'.repeat(2000)}color:red${'}'.repeat(2000)}`), null);
+  assert.equal(cleanSheet(`${':is('.repeat(3000)}.a${')'.repeat(3000)}{color:red}`), null);
+  assert.equal(cleanSheet(`.a${',.a'.repeat(50000)}{color:red}\n`.repeat(10)), null);
+  assert.equal(cleanSheet(`.a${',.a'.repeat(300)}{color:red}`), null, 'a selector list too long');
+  assert.equal(cleanSheet('.a{color:red}'.repeat(SHEET_LIMITS.rules + 1)), null, 'too many rules');
+  assert.notEqual(cleanSheet('.a{color:red}'.repeat(1000)), null);
+  assert.equal(cleanSheet(`.a{width:${'calc('.repeat(20)}1px${')'.repeat(20)}}`), null);
+  assert.equal(cleanSheet(`${'.a{'.repeat(SHEET_LIMITS.depth)}color:red${'}'.repeat(SHEET_LIMITS.depth)}`), `${'.a{'.repeat(SHEET_LIMITS.depth)}color:red;${'}'.repeat(SHEET_LIMITS.depth)}`);
+  assert.equal(cleanSheet(`${'.a{'.repeat(SHEET_LIMITS.depth + 1)}color:red${'}'.repeat(SHEET_LIMITS.depth + 1)}`), null);
+  assert.equal(cleanSheet(`.a{content:"${'x'.repeat(SHEET_LIMITS.bytes)}"}`), null);
+});
+
+test('a sheet’s animations end, and soon', () => {
+  for (const css of ['@keyframes k{to{filter:blur(50px)}}.a{animation:k 1ms infinite}', '.a{animation-iteration-count:infinite}', '.a{animation:k 1s 11}',
+    '.a{animation-iteration-count:1000}', '.a{animation-duration:31s}', '.a{animation:k 100000ms}', '.a{animation-delay:-60s}',
+    '.a{transition-duration:99s}', '.a{animation:var(--a)}', '.a{animation:k 1s INFINITE}'])
+    assert.equal(cleanSheet(css, PREFIX), null, css);
+  assert.equal(cleanSheet('.a{animation:k 1s ease 3;transition:color .2s}'), '.a{animation:k 1s ease 3;transition:color .2s;}');
+});
+
+test('two tokens a dropped comment brought together are not written as one', () => {
+  assert.equal(cleanSheet('.a{background:url/**/("https://e.vil/x")}', PREFIX), null);
+  assert.equal(cleanSheet(`.a{background:url/**/("${PREFIX}a.png")}`, PREFIX), null);
+  assert.equal(cleanSheet('.a{color:red/**/blue}'), '.a{color:red/**/blue;}');
+  assert.equal(cleanSheet('.a{width:1px/**/2px}'), '.a{width:1px/**/2px;}');
+  assert.equal(cleanSheet('.a{width:calc((1px + 2px) * 2)}'), '.a{width:calc((1px + 2px) * 2);}');
 });

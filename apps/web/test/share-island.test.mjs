@@ -134,13 +134,14 @@ async function open() {
   if (!ws) throw new Error('firefox did not start');
   let id = 0;
   const waiting = new Map();
+  const listeners = [];
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) {
       const w = waiting.get(m.id);
       waiting.delete(m.id);
       m.type === 'error' ? w.no(new Error(`${m.error}: ${m.message}`)) : w.ok(m.result);
-    }
+    } else if (m.method) listeners.forEach((f) => f(m));
   };
   const send = (method, params = {}) => new Promise((ok, no) => {
     const i = ++id;
@@ -151,6 +152,9 @@ async function open() {
   const context = (await send('browsingContext.getTree', {})).contexts[0].context;
   let sized = false;
   const tab = {
+    send,
+    /// Hears the browser's events (`session.subscribe` first).
+    on: (f) => listeners.push(f),
     go: async (url) => {
       if (!sized) {
         await send('browsingContext.navigate', { context, url: 'about:blank', wait: 'complete' }).catch(() => {});
@@ -299,7 +303,8 @@ test('the island takes the view’s top and bottom; its sheet moves nothing; it 
     const host = 'document.querySelector(".site-now-island-top .architect-view-host")';
     await tab.until(`${host}.shadowRoot.querySelector(".wasi-count")`, 'its view');
     assert.equal(await tab.eval(`getComputedStyle(${host}.shadowRoot.querySelector(".wasi-count")).color`), 'rgb(1, 2, 3)');
-    const sheet = await tab.eval(`${host}.shadowRoot.querySelector("style").textContent`);
+    // Its sheet, after the motion guard the view puts first.
+    const sheet = await tab.eval(`${host}.shadowRoot.querySelector("style:last-of-type").textContent`);
     assert.ok(sheet.includes('.architect-view{--island-mark:1;}'), sheet);
     // However it throws its content about, nothing of it shows outside its slots.
     assert.deepEqual(JSON.parse(await tab.eval(ESCAPES)), []);
@@ -334,12 +339,15 @@ test('the review’s payload sheet is refused whole: the island stays in its slo
   } finally { close(); }
 });
 
-test('whatever cleanSheet keeps, the browser reads no rule or value outside the allow-list', { skip, timeout: 120000 }, async () => {
+test('whatever cleanSheet keeps, the browser reads no rule or value outside the allow-list, and requests nothing but the view’s own files', { skip, timeout: 120000 }, async () => {
   const { origin } = await setup();
   const ext = await islands(origin);
   const { tab, close } = await open();
   try {
     await tab.go(`${origin}${L}/03-list/`);
+    const net = [];
+    await tab.send('session.subscribe', { events: ['network.beforeRequestSent'] });
+    tab.on((m) => { if (m.method === 'network.beforeRequestSent') net.push(m.params.request.url); });
     const report = await tab.eval(`(async () => {
       const { cleanSheet } = await import(${JSON.stringify(ext.runtime + 'sanitize.js')});
       const prefix = '/_ext/island/x.1/';
@@ -360,7 +368,11 @@ test('whatever cleanSheet keeps, the browser reads no rule or value outside the 
       );
       const val = () => pick(
         [esc('red'), 'calc(1px + 2px)', 'var(--x)', 'rgb(1 2 3)', '"{" "}" "url(x)"', 'url(' + prefix + 'a.png)', esc('absolute'), 'linear-gradient(' + esc('red') + ', blue)'],
-        [esc('url') + '(https://e.vil/x)', esc('url') + '("https://e.vil/x")', esc('attr') + '(data-x)', esc('image-set') + '("x" 1x)', esc('fixed'), esc('element') + '(#x)'],
+        [esc('url') + '(https://e.vil/x)', esc('url') + '("https://e.vil/x")', esc('attr') + '(data-x)', esc('image-set') + '("x" 1x)', esc('fixed'), esc('element') + '(#x)',
+          // What the URL parser reads as a parent folder or elsewhere (the second review).
+          'url(' + prefix + '%2e%2e/%2e%2e/s/secret)', 'url("' + prefix + '.%2E/.%2e/s/secret")', 'url(' + prefix + '%2E./x)', 'url(' + prefix + '%252e%252e/x)',
+          'url("' + prefix + '..\\\\x")', 'url(' + prefix + 'a.png?x)', 'url("' + prefix + 'a.png#x")', 'url(//e.vil' + prefix + 'a.png)', 'url("data:,x")', 'url(' + prefix + '../x)',
+          'url("' + prefix + 'a\\9 b.png")', 'url/**/("https://e.vil/x")'],
       );
       const prop = () => pick([esc('color'), 'content', 'background', '--x', esc('position'), 'width'], [esc('position'), esc('z-index'), esc('behavior')]);
       const decl = () => prop() + ':' + val() + (rand(12) === 0 ? '!' + esc('important') : '');
@@ -375,6 +387,14 @@ test('whatever cleanSheet keeps, the browser reads no rule or value outside the 
       const BAD_SELECTOR = /:host|::part|::slotted|:root|:scope|(^|[\\s,>+~(])(html|body)(?![\\w-])|\\.architect-view(?![\\w-]|-host)/i;
       let kept = 0, refused = 0;
       const wrong = [];
+      // Each kept sheet styles a real view, so the browser requests what it
+      // names (judged from the network log outside).
+      const stage = document.createElement('div');
+      stage.style.cssText = 'position:absolute;left:0;top:0;width:300px;height:300px;overflow:hidden';
+      document.body.append(stage);
+      const shadow = stage.attachShadow({ mode: 'open' });
+      shadow.innerHTML = '<div class="architect-view"><div class="a b c d e f"><div class="b"></div><div class="e" data-x="{"></div></div></div>';
+      const own = new RegExp('^' + prefix.replace(/[.]/g, '\\\\.') + '[A-Za-z0-9._-]{1,128}$');
       for (let n = 0; n < 2000; n++) {
         const css = Array.from({ length: 1 + rand(2) }, rule).join('');
         const out = cleanSheet(css, prefix);
@@ -382,6 +402,8 @@ test('whatever cleanSheet keeps, the browser reads no rule or value outside the 
         kept++;
         const sheet = new CSSStyleSheet();
         sheet.replaceSync(out);
+        shadow.adoptedStyleSheets = [sheet];
+        for (const e of shadow.querySelectorAll('*')) getComputedStyle(e).backgroundImage;
         const walk = (list) => {
           for (const r of list) {
             const type = r.constructor.name;
@@ -393,7 +415,12 @@ test('whatever cleanSheet keeps, the browser reads no rule or value outside the 
             }
             if (r.style) for (const p of r.style) {
               const v = r.style.getPropertyValue(p);
-              if (/url\\(/i.test(v) && !v.includes(prefix)) wrong.push(['url ' + p + ': ' + v, css]);
+              // Every url() as the browser resolves it: the view's own file.
+              for (const m of v.matchAll(/url\\(\\s*"((?:[^"\\\\]|\\\\.)*)"\\s*\\)|url\\(\\s*([^"')\\s]*)\\s*\\)/gi)) {
+                const u = new URL((m[1] ?? m[2]).replace(/\\\\(.)/g, '$1'), document.baseURI);
+                if (u.origin !== location.origin || !own.test(u.pathname) || u.search || u.hash) wrong.push(['url ' + p + ': ' + v, css]);
+              }
+              if (/url\\(/i.test(v) && !/url\\(\\s*["']?\\//i.test(v)) wrong.push(['url not a path ' + p + ': ' + v, css]);
               if (/attr\\(|image-set\\(|element\\(|image\\(/i.test(v)) wrong.push(['value ' + p + ': ' + v, css]);
               if (p === 'position' && /fixed|sticky/i.test(v)) wrong.push(['position ' + v, css]);
             }
@@ -402,11 +429,18 @@ test('whatever cleanSheet keeps, the browser reads no rule or value outside the 
         };
         walk(sheet.cssRules);
       }
+      await new Promise((r) => setTimeout(r, 500));
+      stage.remove();
       return JSON.stringify({ kept, refused, wrong: wrong.slice(0, 5) });
     })()`);
     const r = JSON.parse(report);
     assert.deepEqual(r.wrong, [], JSON.stringify(r));
     assert.ok(r.kept > 100 && r.refused > 100, JSON.stringify(r));
+    // Nothing the kept sheets named was requested but the view's own files.
+    const own = /^\/_ext\/island\/x\.1\/[A-Za-z0-9._-]{1,128}$/;
+    const strays = net.filter((u) => u.startsWith(origin) ? /^\/_ext\/island\//.test(new URL(u).pathname) && !own.test(new URL(u).pathname) : !u.startsWith('data:'));
+    assert.deepEqual(strays, [], 'requests outside the view’s own files');
+    assert.ok(net.some((u) => own.test(new URL(u).pathname)), 'a kept url() was requested at all');
   } finally { close(); }
 });
 

@@ -352,8 +352,10 @@ base-uri 'none'; form-action 'none'; object-src 'none'
   (`architect_sites::island`, studio#445).
 - **A view's stylesheet** (`mountView(…, { sheet, sheetUrls })`) is held to the same sanitiser for
   every embedder (`cleanSheet`: CSS tokenised and checked, refused whole on anything outside its
-  allow-list), and the view's host keeps its box contract from outside its shadow root: a sheet
-  cannot reach the page.
+  allow-list or past its size bounds; a `url()` resolved as the browser will and kept only as the
+  path of one file directly under `sheetUrls[0]` on your page's origin), and the view's host keeps
+  its box contract from outside its shadow root: a sheet cannot reach the page, nor make it
+  request anything but the view's own files.
   - **What this loosens:** script already running in *your* page (an XSS) could start workers and
     import modules from `blob:` URLs it makes, and compile wasm. It still needs a way to run in the
     first place: `blob:` lets no outside script in.
