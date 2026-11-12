@@ -82,7 +82,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use architect::http::axum::body::Body;
 use architect::http::axum::extract::{Request, State};
-use architect::http::axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use architect::http::axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use architect::http::axum::middleware::Next;
 use architect::http::axum::response::sse::{Event, KeepAlive, Sse};
 use architect::http::axum::response::{IntoResponse, Redirect, Response};
@@ -1419,6 +1419,22 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         .path()
         .starts_with(architect_sites::island::ISLANDS_PATH)
     {
+        // Files: read, never written to.
+        if request.method() != Method::GET && request.method() != Method::HEAD {
+            let mut response = page(
+                StatusCode::METHOD_NOT_ALLOWED,
+                "Not allowed",
+                "<p>Only GET and HEAD.</p>",
+            );
+            let headers = response.headers_mut();
+            headers.insert(header::ALLOW, HeaderValue::from_static("GET, HEAD"));
+            headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+            headers.insert(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            );
+            return response;
+        }
         return islands(&shares, request.uri().path());
     }
     match answer(shares, request).await {
@@ -1446,13 +1462,24 @@ fn islands(shares: &Shares, path: &str) -> Response {
     let mut response = Response::new(Body::from(body.into_owned()));
     let headers = response.headers_mut();
     if path == architect_sites::island::sandbox_path() {
+        // Its own policy, every header of it, or no sandbox at all: served
+        // without its policy it would run with this origin's.
         for (name, value) in architect_sites::island::sandbox_headers() {
-            if let (Ok(name), Ok(value)) = (
+            let (Ok(header_name), Ok(header_value)) = (
                 header::HeaderName::from_bytes(name.as_bytes()),
                 HeaderValue::from_str(&value),
-            ) {
-                headers.insert(name, value);
-            }
+            ) else {
+                tracing::error!(
+                    header = name,
+                    "the island sandbox's header does not read: no sandbox served"
+                );
+                return page(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Not available",
+                    "<p>No such file.</p>",
+                );
+            };
+            headers.insert(header_name, header_value);
         }
         return response;
     }

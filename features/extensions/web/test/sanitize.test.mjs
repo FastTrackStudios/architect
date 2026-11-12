@@ -193,55 +193,69 @@ test('N1: only an absolute URL as written, of an allowed origin, under its path'
 // ── A view's stylesheet (an island's, studio#445) ─────────────────────
 import { cleanSheet } from '../sanitize.js';
 
-test('a view’s stylesheet keeps its rules and none that load, import or move its box', () => {
-  const prefix = '/_ext/island/demo.ab12/';
-  assert.equal(cleanSheet('.a{color:red}.b:hover{transform:scale(2)}'), '.a{color:red}.b:hover{transform:scale(2)}');
-  // Tailwind's shape: layers, theme variables on :root and :host, @property, @media.
-  assert.equal(
-    cleanSheet('@layer theme{:root,:host{--c:#fff;width:9999px}}@property --x{syntax:"*";inherits:false}'),
-    '@layer theme{:root,:host{--c:#fff}}@property --x{syntax:"*";inherits:false}',
-  );
-  // A brace in a string does not smuggle a :host rule in.
-  assert.equal(cleanSheet('.a{content:"}:host{width:1px}"}'), null);
-  assert.equal(
-    cleanSheet('@layer theme, base;@layer theme{:root,:host{--c:#fff;width:9999px;position:fixed}}@media (min-width:9px){.a{top:0}}'),
-    '@layer theme, base;@layer theme{:root,:host{--c:#fff}}@media (min-width:9px){.a{top:0}}',
-  );
-  // Comments out first: they do not hide anything.
-  assert.equal(cleanSheet('.a{color:red}/* @import url(x) */'), '.a{color:red}');
-  for (const bad of [
-    '@import url(https://e.vil/x.css);',
-    '@import "x.css";',
-    '@font-face{font-family:x;src:url(https://e.vil/f)}',
-    '@namespace svg url(http://www.w3.org/2000/svg);',
-    '.a{background:image-set("x" 1x)}',
-    '.a{color:\\72 ed}',
-    '.a{background:u\\72l(https://e.vil/x)}',
-    '@media \\28 x\\29{.a{b:c}}',
-    '.a{width:expression(alert(1))}',
-    '.a{-moz-binding:url(x)}',
-    '</style><script>x</script>',
-    '.a{color:red',
-    '@unknown{.a{b:c}}',
-    '@media x{@import url(y);}',
-  ]) assert.equal(cleanSheet(bad, prefix), null, bad);
-  // An escape in a selector (Tailwind's) is kept; nowhere else.
-  assert.equal(cleanSheet('.text-\\[10px\\]{font-size:10px}.w-1\\/2{width:50%}'), '.text-\\[10px\\]{font-size:10px}.w-1\\/2{width:50%}');
-  // Tailwind v4's nesting and @property syntax, kept; held to the same rules inside.
-  assert.equal(
-    cleanSheet('.h\\:x{&:hover{@media (hover:hover){color:blue}}}@property --a{syntax:"<length>";inherits:false;initial-value:0}'),
-    '.h\\:x{&:hover{@media (hover:hover){color:blue}}}@property --a{syntax:"<length>";inherits:false;initial-value:0}',
-  );
-  assert.equal(cleanSheet('.a{color:red;&:hover{color:\\72 ed}}'), null, 'an escape in a nested declaration');
-  assert.equal(cleanSheet('.a{&:hover{@font-feature-values x{}}}'), null, 'an unknown at-rule nested');
-  assert.equal(cleanSheet('.a{color:red;&:hover{background:url(https://e.vil/b)}}', prefix), '.a{color:red;&:hover{background:none}}');
-  // url(): only the island's own path.
-  assert.equal(cleanSheet('.a{background:url(https://e.vil/beacon)}', prefix), '.a{background:none}');
-  assert.equal(cleanSheet('.a{background:url(/s/abc/x.png)}', prefix), '.a{background:none}');
-  assert.equal(cleanSheet(`.a{background:url(${prefix}../../x)}`, prefix), '.a{background:none}');
-  assert.equal(cleanSheet(`.a{background:url('${prefix}i.png')}`, prefix), `.a{background:url("${prefix}i.png")}`);
-  assert.equal(cleanSheet(`.a{background:url(${prefix}i.png)}`), '.a{background:none}', 'no prefix: no url');
-  // :host keeps only custom properties.
-  assert.equal(cleanSheet(':host{display:none;width:100vw;--a:1}'), ':host{--a:1}');
-  assert.equal(cleanSheet(':host(.x){margin:-9999px}'), '');
+const PREFIX = '/_ext/island/demo.ab12/';
+
+test('a view’s stylesheet keeps rules, nesting, groups and Tailwind’s theme, written out again from its tokens', () => {
+  assert.equal(cleanSheet('.a{color:red}.b:hover{transform:scale(2)}'), '.a{color:red;}.b:hover{transform:scale(2);}');
+  assert.equal(cleanSheet('.a{color:red;&:hover{color:blue;@media (hover:hover){color:green}}}'), '.a{color:red;&:hover{color:blue;@media (hover:hover){color:green;}}}');
+  // Tailwind's theme on :root and :host: its custom properties, on the view's box.
+  assert.equal(cleanSheet('@layer theme,base;@layer theme{:root,:host{--c:#fff}}.b{color:var(--c)}'), '.architect-view{--c:#fff;}.b{color:var(--c);}');
+  assert.equal(cleanSheet('@property --a{syntax:"<length>";inherits:false;initial-value:0}'), '@property --a{syntax:"<length>";inherits:false;initial-value:0;}');
+  assert.equal(cleanSheet('.text-\\[10px\\]{font-size:10px}.w-1\\/2{width:50%}'), '.text-\\[10px\\]{font-size:10px;}.w-1\\/2{width:50%;}');
+  assert.equal(cleanSheet('@keyframes spin{to{transform:rotate(360deg)}}'), '@keyframes spin{to{transform:rotate(360deg);}}');
+  assert.equal(cleanSheet('.a{position:absolute;inset:0}'), '.a{position:absolute;inset:0;}');
+  assert.equal(cleanSheet(`.a{background:url('${PREFIX}i.png')}`, PREFIX), `.a{background:url("${PREFIX}i.png");}`);
+  // A comment is not a gap a name can be split across: `:ho/**/st` is two tokens.
+  assert.notEqual(cleanSheet('.a:ho/**/st{color:red}'), null);
+});
+
+test('a view’s stylesheet is refused whole on anything that reaches its host, the page, the network or markup', () => {
+  const bad = [
+    // The review's payloads (architect#601).
+    String.raw`:\68 ost{position:fixed!important;inset:0!important;z-index:2147483647!important}`,
+    String.raw`.wasi-count::before{content:\75 rl(https://e.vil/x) "{";}}`,
+    // :host, every spelling.
+    ':host{width:100vw}', ':HOST{width:1px}', String.raw`:\68ost{width:1px}`, String.raw`:\000068 ost{width:1px}`,
+    String.raw`:\48 OST{width:1px}`, String.raw`:h\6f st{width:1px}`, String.raw`:\68 \6f \73 \74 {width:1px}`,
+    ':host(.x){margin:-9999px}', ':host-context(body){color:red}', ':is(:host){color:red}', ':where(:host) .a{color:red}',
+    '::part(x){color:red}', '::slotted(*){color:red}', ':root{color:red}', ':scope{color:red}',
+    'html{color:red}', 'body .a{color:red}', 'HTML{color:red}', String.raw`\68 tml{color:red}`,
+    '.architect-view{width:1px}', '.architect-view-host{width:1px}', String.raw`.architect\-view{width:1px}`,
+    // :root/:host with more than custom properties.
+    ':root,:host{--c:#fff;width:1px}',
+    // url(), every spelling, outside the island's own path.
+    '.a{background:url(https://e.vil/b)}', '.a{background:url("https://e.vil/b")}', String.raw`.a{background:u\rl(https://e.vil/b)}`,
+    String.raw`.a{background:\75 rl(https://e.vil/b)}`, String.raw`.a{background:\55 RL(https://e.vil/b)}`, String.raw`.a{background:ur\l(x)}`,
+    '.a{background:URL(https://e.vil/b)}', `.a{background:url(${PREFIX}../../x)}`, '.a{background:url(/s/abc/x.png)}',
+    // What loads, reads or draws another element.
+    '.a{content:attr(data-media)}', '.a::before{content:attr(data-title url)}', '.a{background:image-set("x" 1x)}',
+    '.a{background:-webkit-image-set(url(x) 1x)}', '.a{background:image(x)}', '.a{background:element(#x)}',
+    '.a{background:paint(x)}', '.a{background:src("x")}', '.a{width:expression(alert(1))}', '.a{-moz-binding:url(x)}', '.a{behavior:url(x)}',
+    // At-rules.
+    '@import url(https://e.vil/x.css);', '@import "x.css";', '@charset "utf-8";', '@namespace svg url(http://www.w3.org/2000/svg);',
+    '@font-face{font-family:x;src:url(https://e.vil/f);unicode-range:U+0-7F}', '@page{margin:0}', '@media x{@import url(y);}',
+    '@document url-prefix(){.a{color:red}}', '@unknown{.a{b:c}}', '.a{&:hover{@font-feature-values x{}}}',
+    // The box contract.
+    '.a{position:fixed}', '.a{position:sticky}', String.raw`.a{position:\66ixed}`, '.a{position:FIXED}',
+    '.a{width:100vw!important}', '.a{z-index:9!important}', '.a{transform:none ! important}',
+    // What the tokeniser does not take.
+    '.a{content:"unclosed}', ".a{content:'x\ny'}", '.a{color:red', '.a{color:red}}', '.a{color:(red}', '.a{color:red}/* unclosed',
+    '</style><script>alert(1)</script>', '.a<b{color:red}', '<!-- .a{color:red} -->', '.a{color:red\\', String.raw`.a{color:r\
+ed}`,
+    '.a{color:red;}{}', '{color:red}', '.a{color:red}@', '.a{color:red}\u0000',
+  ];
+  for (const css of bad) assert.equal(cleanSheet(css, PREFIX), null, css);
+});
+
+test('what cleanSheet writes, cleaned again, is itself', () => {
+  for (const css of [
+    '.a{color:red;&:hover{color:blue;@media (hover:hover){color:green}}}',
+    '@layer theme{:root,:host{--c:#fff}}.b{color:var(--c)}',
+    String.raw`.text-\[10px\]{font-size:10px}`,
+    `.a::before{content:"\\"}\\a x"}`,
+  ]) {
+    const once = cleanSheet(css, PREFIX);
+    assert.notEqual(once, null, css);
+    assert.equal(cleanSheet(once, PREFIX), once, css);
+  }
 });

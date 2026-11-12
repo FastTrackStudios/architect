@@ -391,7 +391,8 @@ share-island-test:
 
 share-player-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop
-    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" env -u LD_LIBRARY_PATH node --test apps/web/test/share-player.test.mjs apps/web/test/share-playlist.test.mjs
+    devenv shell -- cargo build -q -p architect-cli --bin architect
+    ARCHITECT_DESKTOP="$PWD/target/debug/architect-desktop" ARCHITECT_CLI="$PWD/target/debug/architect" env -u LD_LIBRARY_PATH node --test apps/web/test/share-player.test.mjs apps/web/test/share-playlist.test.mjs apps/web/test/site-now-playing.test.mjs
 
 # The sandbox's browser demo (apps/sandbox/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page

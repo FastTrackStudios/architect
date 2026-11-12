@@ -460,9 +460,16 @@ export interface MountOptions {
    * then only `data:` raster images; never a relative URL.
    */
   urls?: string[];
-  /** A stylesheet for the view's shadow root, kept as `cleanSheet` keeps it (refused whole on
-   * `@import`, fonts, escapes; `url()` only under `sheetUrls[0]`; `:host` keeps only custom
-   * properties). */
+  /** A stylesheet for the view's shadow root. Every embedder's goes through the same sanitiser
+   * (`cleanSheet`): tokenised and parsed as CSS, checked on its unescaped tokens, written out again
+   * from them, or refused whole (the view then draws unstyled). Kept: style rules (nesting too),
+   * `@media`, `@supports`, `@container`, `@keyframes`, `@property` (`@layer` flattened). Refused:
+   * any other at-rule (`@import`, `@font-face`, `@namespace`, …); a selector naming `:host`,
+   * `:root`, `::part`, `::slotted`, `:scope`, `html`, `body` or the view's own box (Tailwind's
+   * `:root, :host { --x }` theme is kept, its custom properties alone, on the box); `url()` but
+   * under `sheetUrls[0]`, `attr()`, `image()`, `image-set()`, `element()`, `paint()`, any function
+   * not drawing or arithmetic; `position: fixed`/`sticky`; `!important` on what the box contract
+   * sets. The view's host and box keep their contract from outside the sheet regardless. */
   sheet?: string;
   /** The URL prefix its stylesheet's `url()`s may name (its first only). */
   sheetUrls?: string[];

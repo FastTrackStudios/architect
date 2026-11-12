@@ -51,20 +51,49 @@ const INSTANCE: &str = include_str!("../../extensions/web/instance.js");
 
 /// One extension's island: its id, its built web folder's files, and its
 /// views for the now-playing view's slots.
+///
+/// Built once ([`new`](Self::new) and its setters); what it serves under
+/// (its folder path, its lock's and its stylesheet's digests) is worked
+/// out once, on first use.
 #[derive(Debug, Clone)]
 pub struct SiteIsland {
-    /// Its extension id (letters, digits, `.`, `-`).
-    pub id: String,
-    /// `architect-ext build-web`'s folder: each file by its path in it.
-    pub files: Vec<(String, Cow<'static, [u8]>)>,
-    /// The view drawn at the top of the now-playing view (in place of
-    /// the player's position bar).
-    pub progress: Option<String>,
-    /// The view drawn under it (in place of the player's controls).
-    pub transport: Option<String>,
-    /// A stylesheet of its folder put in its views' shadow roots
-    /// (sanitised by the runtime: `view.js` `cleanSheet`).
-    pub stylesheet: Option<String>,
+    id: String,
+    files: Vec<(String, Cow<'static, [u8]>)>,
+    progress: Option<String>,
+    transport: Option<String>,
+    stylesheet: Option<String>,
+    derived: OnceLock<Derived>,
+}
+
+#[derive(Debug, Clone)]
+struct Derived {
+    folder: String,
+    integrity: Option<String>,
+    stylesheet_integrity: Option<String>,
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    format!(
+        "sha256-{}",
+        base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(bytes))
+    )
+}
+
+/// Whether `name` is a file path of a folder: segments of letters,
+/// digits, `.`, `_`, `-`, none `.`, `..` or empty, no leading `/`.
+fn file_name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name.split('/').all(|seg| {
+            !seg.is_empty()
+                && seg != "."
+                && seg != ".."
+                && seg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        })
 }
 
 impl SiteIsland {
@@ -77,6 +106,7 @@ impl SiteIsland {
             progress: None,
             transport: None,
             stylesheet: None,
+            derived: OnceLock::new(),
         }
     }
 
@@ -94,11 +124,20 @@ impl SiteIsland {
         self
     }
 
-    /// `file` of its folder as its views' stylesheet.
+    /// `file` of its folder as its views' stylesheet (a path inside its
+    /// folder: no `..`, no leading `/`; anything else is not used).
     #[must_use]
     pub fn stylesheet(mut self, file: impl Into<String>) -> Self {
-        self.stylesheet = Some(file.into());
+        let file = file.into();
+        self.stylesheet = file_name_ok(&file).then_some(file);
+        self.derived = OnceLock::new();
         self
+    }
+
+    /// Its id.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     /// Whether its id is one a path may carry.
@@ -113,30 +152,44 @@ impl SiteIsland {
             && !self.id.starts_with('.')
     }
 
+    fn derived(&self) -> &Derived {
+        self.derived.get_or_init(|| {
+            let mut all = Vec::new();
+            for (path, bytes) in &self.files {
+                all.extend_from_slice(path.as_bytes());
+                all.push(0);
+                all.extend_from_slice(bytes);
+            }
+            Derived {
+                folder: format!("{ISLANDS_PATH}island/{}.{}/", self.id, fingerprint(&all)),
+                integrity: self.file("architect.lock.json").map(sha256),
+                stylesheet_integrity: self
+                    .stylesheet
+                    .as_deref()
+                    .and_then(|s| self.file(s))
+                    .map(sha256),
+            }
+        })
+    }
+
     /// Its folder's path: `/_ext/island/<id>.<content hash>/`.
     #[must_use]
-    pub fn folder(&self) -> String {
-        let mut all = Vec::new();
-        for (path, bytes) in &self.files {
-            all.extend_from_slice(path.as_bytes());
-            all.push(0);
-            all.extend_from_slice(bytes);
-        }
-        format!("{ISLANDS_PATH}island/{}.{}/", self.id, fingerprint(&all))
+    pub fn folder(&self) -> &str {
+        &self.derived().folder
     }
 
     /// `sha256-…` of its folder's lock (`architect.lock.json`, which names
     /// every file's digest): what the runtime's `loadExtension` pins it
     /// by. None without a lock (the runtime then refuses to load it).
     #[must_use]
-    pub fn integrity(&self) -> Option<String> {
-        use base64::Engine as _;
-        use sha2::Digest as _;
-        let lock = self.file("architect.lock.json")?;
-        Some(format!(
-            "sha256-{}",
-            base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(lock))
-        ))
+    pub fn integrity(&self) -> Option<&str> {
+        self.derived().integrity.as_deref()
+    }
+
+    /// `sha256-…` of its stylesheet: what the page's player pins it by.
+    #[must_use]
+    pub fn stylesheet_integrity(&self) -> Option<&str> {
+        self.derived().stylesheet_integrity.as_deref()
     }
 
     /// File `rest` of its folder.
@@ -279,7 +332,7 @@ pub fn serve<'a>(islands: &'a [SiteIsland], path: &str) -> Option<(Cow<'a, [u8]>
         });
     }
     for island in islands.iter().filter(|i| i.id_ok()) {
-        if let Some(rest) = path.strip_prefix(&island.folder()) {
+        if let Some(rest) = path.strip_prefix(island.folder()) {
             let body = island.file(rest)?;
             return Some((Cow::Borrowed(body), content_type(rest)));
         }
@@ -317,7 +370,10 @@ pub fn page_json(islands: &[SiteIsland]) -> serde_json::Value {
                 "integrity": i.integrity(),
                 "progress": i.progress,
                 "transport": i.transport,
-                "stylesheet": i.stylesheet,
+                // Only with its digest: the player pins it as it pins the
+                // component's files.
+                "stylesheet": i.stylesheet_integrity().and(i.stylesheet.as_deref()),
+                "stylesheetIntegrity": i.stylesheet_integrity(),
             })
         })
         .collect();
@@ -413,6 +469,31 @@ mod tests {
         assert!(serve(std::slice::from_ref(&bad), &format!("{}a", bad.folder())).is_none());
         let json = page_json(&islands);
         assert_eq!(json["islands"][0]["progress"], "bar");
+        // No stylesheet without a valid name and its digest.
+        let files = vec![("a.css".to_owned(), Cow::Borrowed(b".a{}".as_slice()))];
+        let sheet = SiteIsland::new("x", files.clone()).stylesheet("a.css");
+        assert!(sheet.stylesheet_integrity().unwrap().starts_with("sha256-"));
+        assert_eq!(
+            page_json(std::slice::from_ref(&sheet))["islands"][0]["stylesheet"],
+            "a.css"
+        );
+        for bad in [
+            "../a.css",
+            "/a.css",
+            "a/../b.css",
+            "",
+            "a\\b.css",
+            "./a.css",
+        ] {
+            let island = SiteIsland::new("x", files.clone()).stylesheet(bad);
+            assert!(island.stylesheet_integrity().is_none(), "{bad}");
+            assert!(
+                page_json(&[island])["islands"][0]["stylesheet"].is_null(),
+                "{bad}"
+            );
+        }
+        // Worked out once.
+        assert!(std::ptr::eq(sheet.folder(), sheet.folder()));
         assert_eq!(json["sandbox"], sandbox_path());
     }
 }

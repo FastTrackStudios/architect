@@ -752,17 +752,12 @@
   }
 
   // What a view brings in from another page goes through the share
-  // pages' own allow-lists again, in this page: the runtime's
-  // `sanitize.js` (the port of `sanitize.rs` every live view is held to),
-  // as a static share page keeps them. Without the node's runtime, no view
-  // is brought in.
-  var rulesLoading = null;
+  // pages' own allow-lists again, in this page: `sanitize.js` (the port of
+  // `sanitize.rs` every live view is held to, one source), which the
+  // site's own script carries as `architect.rules` on every Site and
+  // share link. Without it no view is brought in.
   function rules() {
-    if (!ext) return Promise.resolve(null);
-    return rulesLoading || (rulesLoading = import(ext.runtime + "sanitize.js").catch(function () {
-      rulesLoading = null;
-      return null;
-    }));
+    return Promise.resolve(arch.rules || null);
   }
   // A block's sheet, kept only when every rule is under its box's class
   // (as the builder scoped it) and is inert.
@@ -1026,9 +1021,24 @@
   // controls show until its first frame, and stay when it cannot load (a
   // browser without JS Promise Integration, a node without islands).
   var island = { loading: null, ext: null, panes: [], sections: [], fed: 0, sheet: null };
+  // At most this many intents a second (a burst of twice that): an island
+  // flooding play and pause is refused, not obeyed.
+  var INTENTS_PER_SECOND = 8;
+  var bucket = { tokens: INTENTS_PER_SECOND * 2, at: Date.now() };
   function intents() {
     var ok = function (fn) {
-      return { effect: "read_only", run: function (args) { fn(args); return null; } };
+      return {
+        effect: "read_only",
+        run: function (args) {
+          var now = Date.now();
+          bucket.tokens = Math.min(INTENTS_PER_SECOND * 2, bucket.tokens + ((now - bucket.at) / 1000) * INTENTS_PER_SECOND);
+          bucket.at = now;
+          if (bucket.tokens < 1) throw { kind: "failed", message: "too many requests" };
+          bucket.tokens -= 1;
+          fn(args);
+          return null;
+        },
+      };
     };
     return {
       PLAYHEAD_SEEK: ok(function (args) {
@@ -1043,6 +1053,27 @@
       PLAYHEAD_PREVIOUS: ok(function () { previous(); }),
     };
   }
+  function pinnedSheet(it) {
+    var name = String(it.stylesheet);
+    var digest = String(it.stylesheetIntegrity || "");
+    if (!/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(name) || name.split("/").some(function (x) { return x === "." || x === ".."; }) ||
+        !/^sha256-[A-Za-z0-9+/]{43}=$/.test(digest) || !(window.crypto && window.crypto.subtle)) {
+      return Promise.reject(new Error("its stylesheet is not pinned"));
+    }
+    return fetch(it.folder + name, { credentials: "omit", redirect: "error" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("its stylesheet did not load");
+        return r.arrayBuffer();
+      })
+      .then(function (bytes) {
+        return window.crypto.subtle.digest("SHA-256", bytes).then(function (d) {
+          var b = "";
+          new Uint8Array(d).forEach(function (x) { b += String.fromCharCode(x); });
+          if ("sha256-" + btoa(b) !== digest) throw new Error("its stylesheet is not the one pinned");
+          return new TextDecoder().decode(bytes);
+        });
+      });
+  }
   function islandOf() {
     return ext && ext.islands.length ? ext.islands[0] : null;
   }
@@ -1052,9 +1083,10 @@
     island.loading = import(ext.runtime + "index.js")
       .then(function (rt) {
         if (!rt.isSupported()) return null;
-        var sheet_ = it.stylesheet
-          ? fetch(it.folder + it.stylesheet, { credentials: "omit", redirect: "error" }).then(function (r) { return r.ok ? r.text() : null; }, function () { return null; })
-          : Promise.resolve(null);
+        // Its stylesheet, a file of its folder, pinned by its digest as the
+        // component's files are by their lock; anything else and the
+        // island does not load.
+        var sheet_ = it.stylesheet ? pinnedSheet(it) : Promise.resolve(null);
         return Promise.all([
           rt.loadExtension(it.folder, {
             integrity: it.integrity || undefined,
@@ -1079,6 +1111,7 @@
   function islandOpen() {
     var it = islandOf();
     if (!it) return;
+    clearTimeout(island.idle);
     islandLoad(it).then(function (e) {
       if (!e || sheet.hidden || island.panes.length) return;
       [[it.progress, ui.islandTop, ui.progress], [it.transport, ui.islandBottom, ui.controls]].forEach(function (slot) {
@@ -1100,11 +1133,21 @@
       });
     });
   }
+  // Closed for this long, the extension is unloaded (its instance, its
+  // workers, its sandbox); the next open loads it again.
+  var ISLAND_IDLE_MS = 30000;
   function islandClose() {
     island.panes.forEach(function (m) {
       try { m.unmount(); } catch (e) {}
     });
     island.panes = [];
+    clearTimeout(island.idle);
+    island.idle = setTimeout(function () {
+      if (island.panes.length || !island.ext) return;
+      try { island.ext.stop(); } catch (e) {}
+      island.ext = null;
+      island.loading = null;
+    }, ISLAND_IDLE_MS);
     if (!ui.islandTop) return;
     ui.islandTop.hidden = true;
     ui.islandBottom.hidden = true;

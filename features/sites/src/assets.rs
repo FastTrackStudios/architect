@@ -17,11 +17,39 @@ pub const SITE_CSS: &str = include_str!("../assets/site.css");
 /// menu, the contents' current heading; and the player (#511): media,
 /// a share link's queue, and the playhead blocks follow
 /// (`assets/player.js`, inert on a page with neither).
-pub const SITE_JS: &str = concat!(
-    include_str!("../assets/site.js"),
-    "\n",
-    include_str!("../assets/player.js")
-);
+///
+/// Between them, the share pages' allow-lists as the player and every
+/// embedder of the web runtime hold to them (`features/extensions/web/
+/// sanitize.js`, one source): what the now-playing view brings in from
+/// another page is cleaned with them on every Site and share link, with
+/// or without the node's runtime (studio#445).
+#[must_use]
+pub fn site_js() -> &'static str {
+    static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    JS.get_or_init(|| {
+        format!(
+            "{}\n{}\n{}",
+            include_str!("../assets/site.js"),
+            classic_rules(),
+            include_str!("../assets/player.js")
+        )
+    })
+}
+
+/// `sanitize.js` (an ES module, no imports) as a classic script: its
+/// `export`s taken off, its body in a function of its own, what the
+/// player uses put on `architect.rules`.
+fn classic_rules() -> String {
+    let module = include_str!("../../extensions/web/sanitize.js");
+    let body: String = module
+        .lines()
+        .map(|line| line.strip_prefix("export ").unwrap_or(line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "(function () {{\n\"use strict\";\n{body}\nvar a = (window.architect = window.architect || {{}});\nif (!a.rules) a.rules = Object.freeze({{ elementRule: elementRule, attrRule: attrRule, cssInert: cssInert, cleanSheet: cleanSheet }});\n}})();"
+    )
+}
 
 /// The theme family `theme`'s light and dark tokens as CSS variables: the
 /// system picks one, and a reader's choice (`data-theme` on `<html>`, set
@@ -73,6 +101,19 @@ mod tests {
         assert_eq!(css.matches("  color-scheme: dark;").count(), 2);
         // An unknown family falls back rather than writing nothing.
         assert!(theme_css("nope").contains("--foreground:"));
+    }
+
+    #[test]
+    fn the_site_script_carries_the_share_pages_rules_for_its_player() {
+        let js = site_js();
+        let rules = js.find("a.rules = Object.freeze").unwrap();
+        let player = js.find("architect-sites: the player").unwrap();
+        assert!(rules < player, "the rules before the player");
+        assert!(
+            !js.lines().any(|l| l.starts_with("export ")),
+            "a classic script"
+        );
+        assert!(js.contains("function cleanSheet(css"));
     }
 
     #[test]

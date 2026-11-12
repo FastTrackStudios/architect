@@ -386,102 +386,607 @@ export function attrRule(tag, name, value, inSvg, live = true, view = { prefix: 
   return null;
 }
 
-/// What CSS a view's stylesheet may never hold, looked for in lower case:
-/// what loads, imports, binds or runs. An escape (`\`) is refused
-/// everywhere but in a rule's selector, where Tailwind writes them
-/// (`.text-\[10px\]`) and nothing can load: in a declaration or an
-/// at-rule it could spell any of these. The sheet is set as text, never
-/// parsed as markup; `</style` is refused all the same.
-const SHEET_REFUSED = /@import|@font-face|@namespace|@document|expression\(|javascript:|-moz-binding|behaviou?r\s*:|image-set\(|image\(|cross-fade\(|element\(|paint\(|src\(|<\/style/i;
-const SHEET_BLOCKS = ['media', 'supports', 'layer', 'container'];
-const SHEET_VERBATIM = ['keyframes', '-webkit-keyframes', 'property'];
+// ---- a view's stylesheet ---------------------------------------------------
+//
+// An island's sheet (studio#445) goes into its views' shadow roots, for any
+// embedder of this package. It is never pattern-matched: it is tokenised
+// as a browser tokenises CSS (CSS Syntax 3: comments, strings, escapes,
+// url tokens, numbers, blocks), parsed into rules, held to an allow-list
+// on the DECODED tokens, and written out again from those tokens, so what
+// a browser parses is exactly what was checked. Anything the tokeniser or
+// the parser does not understand, and anything outside the allow-list,
+// refuses the whole sheet (`null`): the island then draws unstyled, or
+// the embedder falls back.
 
-/// A view's stylesheet (an island's, studio#445) as its shadow root holds
-/// it, or null when it is refused whole: no comment (taken out), no
-/// `@import`, font, namespace or anything that loads, no escape but in a
-/// selector; a `url()` only under `urlPrefix` (the extension's own node
-/// path), quoted again; at-rules only `@media`, `@supports`, `@layer`,
-/// `@container`, `@keyframes`, `@property`; nested rules (`&:hover{…}`)
-/// held to the same; a top-level `:host` rule keeps only its custom
-/// properties (`--x`), so nothing can change the box's size or place.
-/// The box's own contract (`VIEW_BOX_STYLE`, inline and `!important`)
-/// holds over any sheet: `contain: layout paint style` keeps even a
-/// `position: fixed` inside it.
-export function cleanSheet(css, urlPrefix = null) {
-  let text = String(css).replace(/\/\*[\s\S]*?\*\//g, '');
-  if (text.includes('/*') || SHEET_REFUSED.test(text)) return null;
-  const urls = (text.match(/url\(/gi) ?? []).length;
-  let seen = 0;
-  text = text.replace(/url\(\s*(["']?)([^"')\s]*)\1\s*\)/gi, (_, _q, u) => {
-    seen += 1;
-    const ok = !!urlPrefix && u.startsWith(urlPrefix) && !u.includes('..') && /^[A-Za-z0-9._~\/%-]+$/.test(u);
-    return ok ? `url("${u}")` : 'none';
-  });
-  if (seen !== urls) return null;
-  return sheetBlock(text, false);
+/// What a sheet may not select (after unescaping), each a pseudo-class or
+/// pseudo-element name: the shadow host and the page above it.
+const SHEET_PSEUDO_REFUSED = ['host', 'host-context', 'root', 'part', 'slotted', 'scope', 'deep', 'shadow'];
+/// The pseudo-classes taking arguments a selector may use.
+const SHEET_PSEUDO_FUNCTIONS = ['not', 'is', 'where', 'has', 'nth-child', 'nth-last-child', 'nth-of-type', 'nth-last-of-type', 'lang', 'dir'];
+/// What a selector may not name as an element, or as a class: the page's
+/// root and body, the view's own host and box.
+const SHEET_TYPES_REFUSED = ['html', 'body', ':root'];
+const SHEET_CLASSES_REFUSED = ['architect-view', 'architect-view-host'];
+/// The functions a value may call: none that loads, reads an attribute or
+/// draws another element.
+const SHEET_FUNCTIONS = new Set([
+  'calc', 'min', 'max', 'clamp', 'var', 'env', 'round', 'mod', 'rem', 'abs', 'sign',
+  'rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch', 'color', 'color-mix', 'light-dark',
+  'linear-gradient', 'radial-gradient', 'conic-gradient', 'repeating-linear-gradient', 'repeating-radial-gradient', 'repeating-conic-gradient',
+  'translate', 'translatex', 'translatey', 'translatez', 'translate3d', 'rotate', 'rotatex', 'rotatey', 'rotatez', 'rotate3d',
+  'scale', 'scalex', 'scaley', 'scalez', 'scale3d', 'skew', 'skewx', 'skewy', 'matrix', 'matrix3d', 'perspective',
+  'cubic-bezier', 'steps', 'linear',
+  'blur', 'brightness', 'contrast', 'drop-shadow', 'grayscale', 'hue-rotate', 'invert', 'opacity', 'saturate', 'sepia',
+  'repeat', 'minmax', 'fit-content', 'counter', 'counters', 'selector',
+]);
+/// The at-rules a sheet may hold. `@layer` blocks are flattened (their
+/// rules kept in order, unlayered) and `@layer a, b;` dropped.
+const SHEET_GROUPS = ['media', 'supports', 'container'];
+/// What the view's box contract sets: never `!important` on them.
+const SHEET_CONTRACT = /^(position|inset|top|right|bottom|left|width|height|min-width|min-height|max-width|max-height|contain|overflow|overflow-x|overflow-y|isolation|display|z-index|transform|translate|scale|rotate|margin|margin-top|margin-right|margin-bottom|margin-left|inset-inline|inset-block|inset-inline-start|inset-inline-end|inset-block-start|inset-block-end)$/;
+
+class SheetRefused extends Error {}
+const refuse_ = (why) => {
+  throw new SheetRefused(why);
+};
+
+const cssHex = (c) => /^[0-9a-fA-F]$/.test(c);
+const cssNameStart = (c) => c !== undefined && (/^[A-Za-z_]$/.test(c) || c.codePointAt(0) >= 0x80);
+const cssName = (c) => c !== undefined && (cssNameStart(c) || /^[0-9-]$/.test(c));
+const cssDigit = (c) => c !== undefined && /^[0-9]$/.test(c);
+const cssWs = (c) => c === ' ' || c === '\t' || c === '\n';
+
+/// The tokens of `css` (CSS Syntax 3), or a throw on anything it does not
+/// take: an unclosed comment, string or url, a newline in a string, an
+/// escape at the end, `<!--`/`-->`, a NUL.
+function tokenize(css) {
+  const s = [...String(css).replace(/\r\n?|\f/g, '\n')];
+  if (s.includes('\0')) refuse_('a NUL');
+  const out = [];
+  let i = 0;
+  const at = (k) => s[i + k];
+  const validEscape = (k = 0) => at(k) === '\\' && at(k + 1) !== undefined && at(k + 1) !== '\n';
+  const startsIdent = (k = 0) => {
+    const c = at(k);
+    if (c === '-') return cssNameStart(at(k + 1)) || at(k + 1) === '-' || validEscape(k + 1);
+    return cssNameStart(c) || validEscape(k);
+  };
+  const escape = () => {
+    // At the backslash.
+    i += 1;
+    const c = s[i];
+    if (c === undefined) refuse_('an escape at the end');
+    if (cssHex(c)) {
+      let hex = '';
+      while (hex.length < 6 && cssHex(s[i])) hex += s[i++];
+      if (cssWs(s[i])) i += 1;
+      const n = parseInt(hex, 16);
+      return n === 0 || (n >= 0xd800 && n <= 0xdfff) || n > 0x10ffff ? '�' : String.fromCodePoint(n);
+    }
+    i += 1;
+    return c;
+  };
+  const name = () => {
+    let v = '';
+    for (;;) {
+      if (cssName(s[i])) v += s[i++];
+      else if (validEscape()) v += escape();
+      else return v;
+    }
+  };
+  const numberAhead = () => {
+    let k = 0;
+    if (at(k) === '+' || at(k) === '-') k += 1;
+    if (cssDigit(at(k))) return true;
+    return at(k) === '.' && cssDigit(at(k + 1));
+  };
+  const number = () => {
+    let raw = '';
+    if (s[i] === '+' || s[i] === '-') raw += s[i++];
+    while (cssDigit(s[i])) raw += s[i++];
+    if (s[i] === '.' && cssDigit(s[i + 1])) {
+      raw += s[i++];
+      while (cssDigit(s[i])) raw += s[i++];
+    }
+    if ((s[i] === 'e' || s[i] === 'E') && (cssDigit(s[i + 1]) || ((s[i + 1] === '+' || s[i + 1] === '-') && cssDigit(s[i + 2])))) {
+      raw += s[i++];
+      if (s[i] === '+' || s[i] === '-') raw += s[i++];
+      while (cssDigit(s[i])) raw += s[i++];
+    }
+    return raw;
+  };
+  while (i < s.length) {
+    const c = s[i];
+    if (c === '/' && at(1) === '*') {
+      const end = s.indexOf('*', i + 2);
+      let j = i + 2;
+      for (;;) {
+        if (j >= s.length - 1) refuse_('an unclosed comment');
+        if (s[j] === '*' && s[j + 1] === '/') break;
+        j += 1;
+      }
+      void end;
+      i = j + 2;
+      continue;
+    }
+    if (cssWs(c)) {
+      while (cssWs(s[i])) i += 1;
+      out.push({ t: 'ws' });
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      i += 1;
+      let v = '';
+      for (;;) {
+        const d = s[i];
+        if (d === undefined) refuse_('an unclosed string');
+        if (d === c) {
+          i += 1;
+          break;
+        }
+        if (d === '\n') refuse_('a newline in a string');
+        if (d === '\\') {
+          if (s[i + 1] === undefined) refuse_('an escape at the end');
+          if (s[i + 1] === '\n') {
+            i += 2;
+            continue;
+          }
+          v += escape();
+          continue;
+        }
+        v += d;
+        i += 1;
+      }
+      out.push({ t: 'string', v });
+      continue;
+    }
+    if (c === '#') {
+      if (cssName(at(1)) || validEscape(1)) {
+        i += 1;
+        out.push({ t: 'hash', v: name() });
+        continue;
+      }
+      out.push({ t: 'delim', v: '#' });
+      i += 1;
+      continue;
+    }
+    if (numberAhead()) {
+      const raw = number();
+      if (startsIdent()) out.push({ t: 'dimension', raw, unit: name() });
+      else if (s[i] === '%') {
+        i += 1;
+        out.push({ t: 'percentage', raw });
+      } else out.push({ t: 'number', raw });
+      continue;
+    }
+    if (c === '<' && at(1) === '!' && at(2) === '-' && at(3) === '-') refuse_('<!--');
+    if (c === '-' && at(1) === '-' && at(2) === '>') refuse_('-->');
+    if (startsIdent()) {
+      const v = name();
+      if (s[i] === '(') {
+        i += 1;
+        if (v.toLowerCase() === 'url') {
+          let k = i;
+          while (cssWs(s[k])) k += 1;
+          if (s[k] === '"' || s[k] === "'") {
+            out.push({ t: 'function', v: 'url' });
+            continue;
+          }
+          // An unquoted url token.
+          i = k;
+          let u = '';
+          for (;;) {
+            const d = s[i];
+            if (d === undefined) refuse_('an unclosed url');
+            if (d === ')') {
+              i += 1;
+              break;
+            }
+            if (cssWs(d)) {
+              while (cssWs(s[i])) i += 1;
+              if (s[i] !== ')') refuse_('a bad url');
+              continue;
+            }
+            if (d === '"' || d === "'" || d === '(' || d.codePointAt(0) < 0x20 || d.codePointAt(0) === 0x7f) refuse_('a bad url');
+            if (d === '\\') {
+              if (!validEscape()) refuse_('a bad url');
+              u += escape();
+              continue;
+            }
+            u += d;
+            i += 1;
+          }
+          out.push({ t: 'url', v: u });
+          continue;
+        }
+        out.push({ t: 'function', v });
+        continue;
+      }
+      out.push({ t: 'ident', v });
+      continue;
+    }
+    if (c === '@') {
+      if (startsIdent(1)) {
+        i += 1;
+        out.push({ t: 'at', v: name() });
+        continue;
+      }
+      out.push({ t: 'delim', v: '@' });
+      i += 1;
+      continue;
+    }
+    if (c === '\\') {
+      if (!validEscape()) refuse_('a bad escape');
+      // An ident starting with an escape is handled by startsIdent.
+      refuse_('a bad escape');
+    }
+    const single = { ':': 'colon', ';': 'semicolon', ',': 'comma', '[': '[', ']': ']', '(': '(', ')': ')', '{': '{', '}': '}' };
+    if (single[c]) out.push({ t: single[c] });
+    else out.push({ t: 'delim', v: c });
+    i += 1;
+  }
+  return out;
 }
 
-/// Declarations (in a rule's body): no escape, no at-rule.
-const declsOk = (d) => !d.includes('\\') && !d.includes('@');
+/// `tokens` from `i` to its matching closer, for an opener at `i`; the
+/// index past it.
+function matching(tokens, i) {
+  const pairs = { '{': '}', '[': ']', '(': ')', function: ')' };
+  const stack = [pairs[tokens[i].t]];
+  let j = i + 1;
+  for (; j < tokens.length && stack.length; j++) {
+    const t = tokens[j].t;
+    if (pairs[t]) stack.push(pairs[t]);
+    else if (t === '}' || t === ']' || t === ')') {
+      if (stack.pop() !== t) refuse_('blocks that do not pair');
+    }
+  }
+  if (stack.length) refuse_('an unclosed block');
+  return j;
+}
 
-/// `text` as rules (`inRule` false: a sheet or an at-rule's body) or as a
-/// rule's body (declarations and nested rules); null when anything in it
-/// is refused.
-function sheetBlock(text, inRule) {
-  let out = '';
+/// Rules of a list (`tokens`): `{at, prelude, block}` or `{prelude, block}`
+/// (a block's tokens, without its braces; null for an at-rule ending in `;`).
+function rules(tokens) {
+  const out = [];
   let i = 0;
-  for (;;) {
-    const open = text.indexOf('{', i);
-    const seg = text.slice(i, open < 0 ? text.length : open);
-    if (seg.includes('}')) return null;
-    const semi = seg.lastIndexOf(';');
-    const lead = semi >= 0 ? seg.slice(0, semi) : '';
-    const head = (semi >= 0 ? seg.slice(semi + 1) : seg).trim();
-    if (lead.trim()) {
-      if (inRule) {
-        if (!declsOk(lead)) return null;
-        out += `${lead.trim()};`;
-      } else {
-        // Between rules, only `@layer a, b;`.
-        for (const stmt of lead.split(';').map((x) => x.trim()).filter(Boolean)) {
-          if (!/^@layer\s+[\w\s,.-]+$/i.test(stmt)) return null;
-          out += `${stmt};`;
-        }
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t.t === 'ws' || t.t === 'semicolon') {
+      i += 1;
+      continue;
+    }
+    if (t.t === '}' || t.t === ']' || t.t === ')') refuse_('a stray closer');
+    const at = t.t === 'at' ? t.v.toLowerCase() : null;
+    const start = at ? i + 1 : i;
+    let j = start;
+    while (j < tokens.length && tokens[j].t !== '{' && !(at && tokens[j].t === 'semicolon')) {
+      if (tokens[j].t === '}' || tokens[j].t === ']' || tokens[j].t === ')') refuse_('a stray closer');
+      j = ['(', '[', 'function'].includes(tokens[j].t) ? matching(tokens, j) : j + 1;
+    }
+    const prelude = tokens.slice(start, j);
+    if (j >= tokens.length) {
+      if (at) {
+        out.push({ at, prelude, block: null });
+        break;
       }
+      refuse_('a rule with no block');
     }
-    if (open < 0) {
-      if (!head) return out;
-      // A rule's last declaration, without its `;`.
-      if (inRule && declsOk(head)) return out + head;
-      return null;
+    if (tokens[j].t === 'semicolon') {
+      out.push({ at, prelude, block: null });
+      i = j + 1;
+      continue;
     }
-    let depth = 1;
-    let j = open + 1;
-    for (; j < text.length && depth; j++) {
-      if (text[j] === '{') depth += 1;
-      else if (text[j] === '}') depth -= 1;
+    const end = matching(tokens, j);
+    out.push({ at, prelude, block: tokens.slice(j + 1, end - 1) });
+    i = end;
+  }
+  return out;
+}
+
+/// A style rule's body: declarations `{name, value, important}` and nested
+/// rules, in order.
+function body(tokens) {
+  const out = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t.t === 'ws' || t.t === 'semicolon') {
+      i += 1;
+      continue;
     }
-    if (depth || !head) return null;
-    const body = text.slice(open + 1, j - 1);
-    if (head.startsWith('@')) {
-      if (head.includes('\\')) return null;
-      const name = (/^@([\w-]+)/.exec(head)?.[1] ?? '').toLowerCase();
-      if (SHEET_BLOCKS.includes(name)) {
-        const inner = sheetBlock(body, inRule);
-        if (inner === null) return null;
-        out += `${head}{${inner}}`;
-      } else if (SHEET_VERBATIM.includes(name) && !inRule) {
-        if (body.includes('@') || body.includes('\\')) return null;
-        out += `${head}{${body}}`;
-      } else return null;
-    } else if (!inRule && /:host/i.test(head)) {
-      const keep = body.split(';').map((d) => d.trim()).filter((d) => d.startsWith('--') && !d.includes('{') && !d.includes('\\'));
-      if (keep.length) out += `${head}{${keep.join(';')}}`;
-    } else {
-      const inner = sheetBlock(body, true);
-      if (inner === null) return null;
-      out += `${head}{${inner}}`;
+    if (t.t === 'at') {
+      const [r] = rules(tokens.slice(i, endOfItem(tokens, i, true)));
+      out.push(r);
+      i = endOfItem(tokens, i, true);
+      continue;
     }
-    i = j;
+    const end = endOfItem(tokens, i, false);
+    const item = tokens.slice(i, end);
+    const block = item.findIndex((x) => x.t === '{');
+    if (block >= 0) {
+      // A nested rule: its prelude, then its block.
+      const close = matching(item, block);
+      if (item.slice(close).some((x) => x.t !== 'ws')) refuse_('something after a nested rule');
+      out.push({ at: null, prelude: item.slice(0, block), block: item.slice(block + 1, close - 1) });
+    } else out.push(declaration(item));
+    i = end;
+  }
+  return out;
+}
+
+/// Where the item at `i` ends: past its `;`, or past its block.
+function endOfItem(tokens, i, at) {
+  let j = i;
+  while (j < tokens.length && tokens[j].t !== 'semicolon') {
+    if (tokens[j].t === '{') {
+      const close = matching(tokens, j);
+      return close;
+    }
+    j = ['(', '[', 'function'].includes(tokens[j].t) ? matching(tokens, j) : j + 1;
+  }
+  void at;
+  return j;
+}
+
+function declaration(item) {
+  const toks = item.filter((x, k) => !(x.t === 'ws' && (k === 0 || k === item.length - 1)));
+  if (toks[0]?.t !== 'ident') refuse_('a declaration with no name');
+  let k = 1;
+  while (toks[k]?.t === 'ws') k += 1;
+  if (toks[k]?.t !== 'colon') refuse_('a declaration with no colon');
+  let value = toks.slice(k + 1);
+  let important = false;
+  const trimmed = value.filter((x) => x.t !== 'ws');
+  const n = trimmed.length;
+  if (n >= 2 && trimmed[n - 2].t === 'delim' && trimmed[n - 2].v === '!' && trimmed[n - 1].t === 'ident' && trimmed[n - 1].v.toLowerCase() === 'important') {
+    important = true;
+    const cut = value.lastIndexOf(trimmed[n - 2]);
+    value = value.slice(0, cut);
+  }
+  if (value.some((x) => x.t === 'delim' && x.v === '!')) refuse_('a stray !');
+  return { name: toks[0].v, value, important };
+}
+
+/// Value tokens: what loads, reads or draws another element refused.
+function valueOk(value, urlPrefix) {
+  for (let i = 0; i < value.length; i++) {
+    const t = value[i];
+    if (t.t === '{' || t.t === '}' || t.t === 'semicolon' || t.t === 'at') refuse_('a block in a value');
+    if (t.t === 'url') {
+      if (!urlOkFor(t.v, urlPrefix)) refuse_('a url');
+    } else if (t.t === 'function') {
+      const f = t.v.toLowerCase();
+      if (f === 'url') {
+        const arg = value.slice(i + 1).find((x) => x.t !== 'ws');
+        if (arg?.t !== 'string' || !urlOkFor(arg.v, urlPrefix)) refuse_('a url');
+      } else if (!SHEET_FUNCTIONS.has(f)) refuse_(`${f}()`);
+    } else if (t.t === 'delim' && t.v === '\\') refuse_('a backslash');
+  }
+}
+
+function urlOkFor(u, prefix) {
+  return !!prefix && u.startsWith(prefix) && !u.includes('..') && /^[A-Za-z0-9._~\/%-]+$/.test(u);
+}
+
+/// A selector's tokens: nothing of the host, the page's root or body,
+/// the view's own box; pseudo-functions only from the list.
+function selectorOk(prelude) {
+  if (!prelude.some((x) => x.t !== 'ws')) refuse_('an empty selector');
+  let depth = 0;
+  for (let i = 0; i < prelude.length; i++) {
+    const t = prelude[i];
+    const prev = prelude[i - 1];
+    if (t.t === '[') depth += 1;
+    else if (t.t === ']') depth -= 1;
+    if (depth > 0) {
+      if (t.t === 'function' || t.t === 'url') refuse_('a function in an attribute selector');
+      continue;
+    }
+    if (t.t === 'url' || t.t === '{' || t.t === 'at' || t.t === 'semicolon') refuse_('a selector');
+    if (t.t === 'colon') continue;
+    if ((t.t === 'ident' || t.t === 'function') && prev?.t === 'colon') {
+      const n = t.v.toLowerCase();
+      if (SHEET_PSEUDO_REFUSED.includes(n)) refuse_(`:${n}`);
+      if (t.t === 'function' && !SHEET_PSEUDO_FUNCTIONS.includes(n)) refuse_(`:${n}()`);
+      continue;
+    }
+    if (t.t === 'function') refuse_(`${t.v}() in a selector`);
+    if (t.t === 'ident') {
+      const n = t.v.toLowerCase();
+      const cls = prev?.t === 'delim' && prev.v === '.';
+      if (cls && SHEET_CLASSES_REFUSED.includes(n)) refuse_(`.${n}`);
+      if (!cls && SHEET_TYPES_REFUSED.includes(n)) refuse_(n);
+    }
+  }
+}
+
+/// Whether a selector list is only `:root` and `:host` (no argument), or
+/// `.architect-view` (where a theme is written).
+function themeOnly(prelude) {
+  const parts = [];
+  let cur = [];
+  for (const t of prelude) {
+    if (t.t === 'comma') {
+      parts.push(cur);
+      cur = [];
+    } else if (t.t !== 'ws') cur.push(t);
+  }
+  parts.push(cur);
+  return parts.every(
+    (p) =>
+      p.length === 2 &&
+      p[1].t === 'ident' &&
+      ((p[0].t === 'colon' && ['root', 'host'].includes(p[1].v.toLowerCase())) ||
+        // What this writes them as, cleaned again.
+        (p[0].t === 'delim' && p[0].v === '.' && p[1].v === 'architect-view')),
+  );
+}
+
+/// Group preludes (`@media`, `@supports`, `@container`): conditions only.
+function conditionOk(prelude) {
+  for (const t of prelude) {
+    if (t.t === 'url' || t.t === '{' || t.t === 'at' || t.t === 'semicolon' || t.t === 'string') refuse_('a condition');
+    if (t.t === 'function' && !SHEET_FUNCTIONS.has(t.v.toLowerCase())) refuse_(`${t.v}() in a condition`);
+  }
+}
+
+// ---- writing it out again --------------------------------------------------
+
+function ident(v) {
+  let out = '';
+  const chars = [...v];
+  chars.forEach((c, k) => {
+    const code = c.codePointAt(0);
+    const first = k === 0 || (k === 1 && chars[0] === '-');
+    if (code < 0x20 || code === 0x7f) out += `\\${code.toString(16)} `;
+    else if (cssName(c) && !(first && cssDigit(c))) out += c;
+    else if (c === '-' && k === 0 && chars.length > 1) out += c;
+    else if (c === '-' && k > 0) out += c;
+    else out += `\\${c}`;
+  });
+  return out;
+}
+
+function string(v) {
+  return `"${[...v].map((c) => (c === '"' || c === '\\' ? `\\${c}` : c === '\n' ? '\\a ' : c.codePointAt(0) < 0x20 ? `\\${c.codePointAt(0).toString(16)} ` : c)).join('')}"`;
+}
+
+function write(tokens) {
+  return tokens
+    .map((t) => {
+      switch (t.t) {
+        case 'ws': return ' ';
+        case 'ident': return ident(t.v);
+        case 'function': return `${ident(t.v)}(`;
+        case 'at': return `@${ident(t.v)}`;
+        case 'hash': return `#${[...t.v].map((c) => (cssName(c) ? c : `\\${c}`)).join('')}`;
+        case 'string': return string(t.v);
+        case 'url': return `url(${string(t.v)})`;
+        case 'number': return t.raw;
+        case 'percentage': return `${t.raw}%`;
+        case 'dimension': return `${t.raw}${ident(t.unit)}`;
+        case 'colon': return ':';
+        case 'semicolon': return ';';
+        case 'comma': return ',';
+        // `<` only ever stands in markup (`</style>`) outside a string.
+        case 'delim': return t.v === '\\' || t.v === '<' ? refuse_(t.v) : t.v;
+        default: return t.t;
+      }
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sheetRules(list, urlPrefix, nested) {
+  let out = '';
+  for (const r of list) {
+    if (r.at) {
+      if (r.at === 'layer') {
+        // Flattened: its rules in place, unlayered; `@layer a, b;` dropped.
+        if (r.block) out += nested ? ruleBody(body(r.block), urlPrefix) : sheetRules(rules(r.block), urlPrefix, false);
+        continue;
+      }
+      if (SHEET_GROUPS.includes(r.at)) {
+        if (!r.block) refuse_(`@${r.at} with no block`);
+        conditionOk(r.prelude);
+        out += `@${r.at} ${write(r.prelude)}{${nested ? ruleBody(body(r.block), urlPrefix) : sheetRules(rules(r.block), urlPrefix, false)}}`;
+        continue;
+      }
+      if (r.at === 'keyframes' && !nested && r.block) {
+        const n = r.prelude.filter((x) => x.t !== 'ws');
+        if (n.length !== 1 || n[0].t !== 'ident') refuse_('@keyframes with no name');
+        let frames = '';
+        for (const f of rules(r.block)) {
+          if (f.at || !f.block) refuse_('a keyframe');
+          for (const t of f.prelude) if (!['ws', 'percentage', 'comma'].includes(t.t) && !(t.t === 'ident' && ['from', 'to'].includes(t.v.toLowerCase()))) refuse_('a keyframe selector');
+          frames += `${write(f.prelude)}{${declarations(body(f.block), urlPrefix)}}`;
+        }
+        out += `@keyframes ${ident(n[0].v)}{${frames}}`;
+        continue;
+      }
+      if (r.at === 'property' && !nested && r.block) {
+        const n = r.prelude.filter((x) => x.t !== 'ws');
+        if (n.length !== 1 || n[0].t !== 'ident' || !n[0].v.startsWith('--')) refuse_('@property with no custom name');
+        const items = body(r.block);
+        for (const d of items) if (d.at !== undefined || !['syntax', 'inherits', 'initial-value'].includes(d.name.toLowerCase())) refuse_('@property');
+        out += `@property ${ident(n[0].v)}{${declarations(items, urlPrefix)}}`;
+        continue;
+      }
+      refuse_(`@${r.at}`);
+    }
+    if (!nested && themeOnly(r.prelude)) {
+      // Tailwind's theme (`:root, :host { --x: … }`): its custom
+      // properties alone, on the view's own box, where they reach every
+      // element of the view and nothing else. Anything but a custom
+      // property there refuses the sheet.
+      const items = body(r.block);
+      if (items.some((d) => d.name === undefined || !d.name.startsWith('--'))) refuse_('more than custom properties for :root or :host');
+      out += `.architect-view{${declarations(items, urlPrefix)}}`;
+      continue;
+    }
+    selectorOk(r.prelude);
+    out += `${write(r.prelude)}{${ruleBody(body(r.block), urlPrefix)}}`;
+  }
+  return out;
+}
+
+function ruleBody(items, urlPrefix) {
+  let out = '';
+  const decls = [];
+  const flush = () => {
+    if (decls.length) out += declarations(decls.splice(0), urlPrefix);
+  };
+  for (const item of items) {
+    if (item.name !== undefined) decls.push(item);
+    else {
+      flush();
+      out += sheetRules([item], urlPrefix, true);
+    }
+  }
+  flush();
+  return out;
+}
+
+function declarations(items, urlPrefix) {
+  return items
+    .map((d) => {
+      if (d.name === undefined) refuse_('a rule where a declaration goes');
+      const n = d.name.toLowerCase();
+      if (n === 'behavior' || n === 'behaviour' || n === '-moz-binding') refuse_(n);
+      valueOk(d.value, urlPrefix);
+      const v = write(d.value);
+      if (n === 'position' && /^(fixed|sticky|-webkit-sticky)$/i.test(v)) refuse_(`position: ${v}`);
+      if (d.important && SHEET_CONTRACT.test(n)) refuse_(`${n} !important`);
+      return `${ident(d.name)}:${v}${d.important ? '!important' : ''};`;
+    })
+    .join('');
+}
+
+/// A view's stylesheet (an island's, studio#445; `mountView`'s `sheet`)
+/// as its shadow root may hold it, or `null`, refused whole.
+///
+/// Tokenised and parsed as CSS (never pattern-matched), every name
+/// unescaped before it is checked, written out again from the tokens:
+/// - rules only, and `@media`, `@supports`, `@container`, `@keyframes`,
+///   `@property` (`@layer` flattened); no `@import`, `@namespace`,
+///   `@charset`, `@font-face` or any other at-rule;
+/// - selectors with no `:host`, `:host()`, `:host-context()`, `::part`,
+///   `::slotted`, `:root`, `:scope`, `html`, `body`, nor the view's own
+///   host or box (`.architect-view`, `.architect-view-host`);
+/// - values with no function but drawing and arithmetic (no `attr()`,
+///   `image()`, `image-set()`, `element()`, `paint()`, `src()`), a `url()`
+///   only under `urlPrefix` (the extension's own immutable path);
+/// - no `position: fixed` or `sticky`, no `!important` on what the box
+///   contract sets.
+/// The box contract holds over any sheet regardless: `mountView`'s host
+/// carries it from outside (`VIEW_HOST_STYLE`), its box from inside, both
+/// inline and `!important`, neither selectable by the sheet.
+export function cleanSheet(css, urlPrefix = null) {
+  try {
+    return sheetRules(rules(tokenize(css)), urlPrefix, false);
+  } catch {
+    return null;
   }
 }

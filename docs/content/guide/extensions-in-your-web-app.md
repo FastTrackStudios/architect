@@ -350,6 +350,10 @@ base-uri 'none'; form-action 'none'; object-src 'none'
   and `nosniff`. A frame loaded from a URL keeps its own policy instead of inheriting yours, so your
   page needs none of the three above. Architect's node does this for its share pages
   (`architect_sites::island`, studio#445).
+- **A view's stylesheet** (`mountView(…, { sheet, sheetUrls })`) is held to the same sanitiser for
+  every embedder (`cleanSheet`: CSS tokenised and checked, refused whole on anything outside its
+  allow-list), and the view's host keeps its box contract from outside its shadow root: a sheet
+  cannot reach the page.
   - **What this loosens:** script already running in *your* page (an XSS) could start workers and
     import modules from `blob:` URLs it makes, and compile wasm. It still needs a way to run in the
     first place: `blob:` lets no outside script in.

@@ -1791,13 +1791,27 @@ today), a node without islands.
   `PLAYHEAD_SEEK` (`{t}`, a finite time within the song), `PLAYHEAD_PLAY`,
   `PLAYHEAD_PAUSE`, `PLAYHEAD_NEXT`, `PLAYHEAD_PREVIOUS`, each checked by
   the player; everything else is refused.
-- **Its stylesheet** (`cleanSheet`, `sanitize.js`) goes in its views'
-  shadow roots: no `@import`, font, namespace or escape (refused whole),
-  `url()` only under its own `/_ext/` folder, at-rules only `@media`,
-  `@supports`, `@layer`, `@container`, `@keyframes`, `@property`; a `:host`
-  rule keeps only custom properties. The view's box contract
-  (`contain: layout paint style`, `position: relative`, `isolation`, inline
-  and `!important`) keeps even `position: fixed` inside it.
+- **Its stylesheet** (`cleanSheet`, `sanitize.js`, the same for every
+  embedder of the web runtime) goes in its views' shadow roots, pinned by
+  its digest (`stylesheetIntegrity`) like the component's files. It is
+  tokenised and parsed as CSS, never pattern-matched; every name is
+  checked unescaped, and what is kept is written out again from its tokens,
+  so a browser reads exactly what was checked. Anything not understood or
+  not allowed refuses it whole. Kept: style rules (nested too), `@media`,
+  `@supports`, `@container`, `@keyframes`, `@property` (`@layer`
+  flattened). Refused: any other at-rule; selectors naming `:host`,
+  `:root`, `::part`, `::slotted`, `:scope`, `html`, `body` or the view's
+  own host and box (Tailwind's `:root, :host { --x }` theme is kept, its
+  custom properties alone, on the box); `url()` outside its own `/_ext/`
+  folder, `attr()`, `image()`, `image-set()`, `element()`, `paint()`;
+  `position: fixed`/`sticky`; `!important` on what the box contract sets.
+  The box contract holds even so: the view's host carries
+  `contain: layout paint style`, `position: relative`, `isolation` and
+  `overflow: hidden` inline and `!important` from outside the shadow root
+  (and the share page's own sheet repeats it), and the sheet can select
+  neither the host nor the box.
+- **Its intents** are capped (8 a second, a burst of 16), and the extension
+  is unloaded 30 s after the view closes.
 
 **What a view brings in is checked twice.** A view from another page is
 fetched only from a page the link built: the node answers its pages with
@@ -1805,8 +1819,8 @@ fetched only from a page the link built: the node answers its pages with
 Site's router too), which no vault file is served with, since the
 builder publishes no vault file named `index.html` or `404.html`. Then
 what is imported goes through the share pages' allow-lists again, in the
-page: the node's web runtime's `sanitize.js` (the port of `sanitize.rs`
-every live view is held to), an SVG `<style>` kept only when every rule is
+page: `sanitize.js` (the port of `sanitize.rs` every live view is held
+to), which every Site's own script carries as `architect.rules`, an SVG `<style>` kept only when every rule is
 under its block's box class, `<use>` only to its own `#id`, images only
 relative or a raster `data:`. A page without the node's runtime (a static
 Site) brings in no view. A page that does not load says why in the view and is asked

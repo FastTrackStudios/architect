@@ -58,7 +58,7 @@ const L = `/s/${CODE}`;
 /// link share of `Gig/`: a setlist page whose rows play two songs, Joy's
 /// page drawing its chart as its now-playing view; the WASI counter as
 /// the island, with a stylesheet that tries everything a sheet may not.
-async function node(dir) {
+async function node(dir, sheet) {
   const vault = join(dir, 'vault');
   put(vault, 'Gig/01-joy.md', '---\ntitle: Joy\n---\n![[media/joy.wav]]\n\n```chart\n| C | G | Am | F | C | G | C |\n```\n');
   const ext = join(dir, 'data', 'extensions', 'demo.chart');
@@ -91,7 +91,7 @@ export default function Chart() {
   // overlay, a beacon and a resize of its box.
   const folder = join(dir, 'island');
   cpSync(islandFolder, folder, { recursive: true });
-  writeFileSync(join(folder, 'island.css'), ':host{position:fixed;inset:0;width:100vw;height:100vh;--island-mark:1}.architect-view{position:fixed;top:0;left:0;width:100vw;height:100vh;background:url(https://e.vil/beacon)}.wasi-count{color:rgb(1, 2, 3)}');
+  writeFileSync(join(folder, 'island.css'), sheet);
   const port = 19800 + Math.floor(Math.random() * 90);
   const env = {
     ...process.env,
@@ -185,20 +185,40 @@ async function open() {
 }
 
 
-let shared;
-async function setup() {
-  if (!shared) {
+/// A sheet the sanitiser keeps that still tries to leave its slot: its
+/// own theme, an element thrown far off and blown up, everything moved.
+const AGGRESSIVE = ':root,:host{--island-mark:1}.wasi-count{color:rgb(1, 2, 3);position:absolute;top:-3000px;left:-3000px;width:9000px;height:9000px;background:rgb(255, 0, 0);transform:scale(20)}*{margin:-400px}';
+/// The review's payloads (architect#601): refused whole.
+const PAYLOAD = String.raw`:\68 ost{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;max-height:none!important;z-index:2147483647!important;background:rgb(255,0,0)!important}.wasi-count::before{content:\75 rl(https://e.vil/x) "{";}}`;
+
+const nodes = {};
+async function setup(sheet = AGGRESSIVE) {
+  if (!nodes[sheet]) {
     const dir = mkdtempSync(join(tmpdir(), 'architect-island-'));
-    shared = { dir, ...(await node(dir)) };
+    nodes[sheet] = { dir, ...(await node(dir, sheet)) };
   }
-  return shared;
+  return nodes[sheet];
 }
 test.after(() => {
-  if (shared) {
-    shared.proc.kill();
-    rmSync(shared.dir, { recursive: true, force: true });
+  for (const n of Object.values(nodes)) {
+    n.proc.kill();
+    rmSync(n.dir, { recursive: true, force: true });
   }
 });
+
+/// The page's points (a 20 px grid over the viewport) where the island
+/// shows: none may be outside its slots.
+const ESCAPES = `(() => {
+  const slots = [...document.querySelectorAll(".site-now-island")].filter((s) => !s.hidden).map((s) => s.getBoundingClientRect());
+  const hosts = [...document.querySelectorAll(".site-now-island .architect-view-host")];
+  const out = [];
+  for (let y = 0; y < innerHeight; y += 20) for (let x = 0; x < innerWidth; x += 20) {
+    const at = document.elementFromPoint(x, y);
+    if (!at || !hosts.some((h) => h === at || h.contains(at))) continue;
+    if (!slots.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)) out.push([x, y]);
+  }
+  return JSON.stringify(out);
+})()`;
 
 /// What the node put on the setlist page for its player.
 async function islands(origin) {
@@ -232,6 +252,13 @@ test('the sandbox is the node’s own document, with its own policy and only tha
   assert.equal(index.headers.get('x-content-type-options'), 'nosniff');
   assert.match(index.headers.get('content-type'), /javascript/);
   assert.equal((await fetch(`${origin}/_ext/sandbox.html`)).status, 404, 'only by its content’s name');
+  for (const method of ['POST', 'PUT', 'DELETE']) {
+    const w = await fetch(`${origin}${ext.sandbox}`, { method });
+    assert.equal(w.status, 405, method);
+  }
+  assert.equal((await fetch(`${origin}${ext.sandbox}`, { method: 'HEAD' })).status, 200);
+  // The stylesheet is pinned by its digest beside the lock's.
+  assert.match(ext.islands[0].stylesheetIntegrity, /^sha256-/);
   assert.equal((await fetch(`${origin}${L}/_ext/x`)).status, 404);
 });
 
@@ -273,11 +300,9 @@ test('the island takes the view’s top and bottom; its sheet moves nothing; it 
     await tab.until(`${host}.shadowRoot.querySelector(".wasi-count")`, 'its view');
     assert.equal(await tab.eval(`getComputedStyle(${host}.shadowRoot.querySelector(".wasi-count")).color`), 'rgb(1, 2, 3)');
     const sheet = await tab.eval(`${host}.shadowRoot.querySelector("style").textContent`);
-    assert.ok(!sheet.includes('e.vil'), sheet);
-    assert.ok(sheet.includes(':host{--island-mark:1}'), sheet);
-    const box = JSON.parse(await tab.eval(`JSON.stringify((() => { const r = ${host}.getBoundingClientRect(); const v = ${host}.shadowRoot.querySelector(".architect-view").getBoundingClientRect(); const s = document.querySelector(".site-now-island-top").getBoundingClientRect(); return { host: [r.top, r.height], view: [v.top, v.width], slot: [s.top, s.width] }; })())`));
-    assert.ok(box.host[0] >= box.slot[0] - 1 && box.view[0] >= box.slot[0] - 1, JSON.stringify(box));
-    assert.ok(box.view[1] <= box.slot[1] + 1, `no overlay of the page: ${JSON.stringify(box)}`);
+    assert.ok(sheet.includes('.architect-view{--island-mark:1;}'), sheet);
+    // However it throws its content about, nothing of it shows outside its slots.
+    assert.deepEqual(JSON.parse(await tab.eval(ESCAPES)), []);
     // It may ask nothing but the playhead intents: its own ask is refused.
     await tab.eval(`${host}.shadowRoot.querySelector(".wasi-ask").click(), true`);
     await tab.until(`/refused|not/i.test(${host}.shadowRoot.querySelector(".wasi-asked")?.textContent ?? "")`, 'its ask refused', 15000);
@@ -288,3 +313,100 @@ test('the island takes the view’s top and bottom; its sheet moves nothing; it 
     assert.equal(await tab.eval('document.querySelector(".site-now-progress").classList.contains("site-now-yielded")'), false);
   } finally { close(); }
 });
+
+test('the review’s payload sheet is refused whole: the island stays in its slots, unstyled', { skip, timeout: 120000 }, async () => {
+  const { origin } = await setup(PAYLOAD);
+  const { tab, close } = await open();
+  try {
+    await tab.go(`${origin}${L}/03-list/`);
+    await tab.eval('[...document.querySelectorAll("[data-track]")][0].click(), true');
+    await tab.until('architect.playhead.playing', 'Joy playing');
+    await tab.eval('document.querySelector(".site-player-title").click(), true');
+    await tab.until('!document.querySelector(".site-now-island-top").hidden', 'the island drawn', 30000);
+    const host = 'document.querySelector(".site-now-island-top .architect-view-host")';
+    await tab.until(`${host}.shadowRoot.querySelector(".wasi-count")`, 'its view');
+    assert.equal(await tab.eval(`!!${host}.shadowRoot.querySelector("style")`), false, 'no sheet');
+    assert.deepEqual(JSON.parse(await tab.eval(ESCAPES)), []);
+    for (const [x, y] of [[10, 10], [200, 800]]) {
+      const at = await tab.eval(`(() => { const e = document.elementFromPoint(${x}, ${y}); return !!e.closest(".site-now-island") && !e.closest(".site-now-island-top, .site-now-island-bottom")?.getBoundingClientRect; })()`);
+      assert.equal(at, false, `${x},${y}`);
+    }
+  } finally { close(); }
+});
+
+test('whatever cleanSheet keeps, the browser reads no rule or value outside the allow-list', { skip, timeout: 120000 }, async () => {
+  const { origin } = await setup();
+  const ext = await islands(origin);
+  const { tab, close } = await open();
+  try {
+    await tab.go(`${origin}${L}/03-list/`);
+    const report = await tab.eval(`(async () => {
+      const { cleanSheet } = await import(${JSON.stringify(ext.runtime + 'sanitize.js')});
+      const prefix = '/_ext/island/x.1/';
+      // A seeded generator of sheets: hostile pieces, escaped every way, among good ones.
+      let seed = 445;
+      const rand = (n) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n);
+      const esc = (w) => [...w].map((c) => {
+        const k = rand(6);
+        const hex = c.codePointAt(0).toString(16);
+        return k === 0 ? '\\\\' + hex + ' ' : k === 1 ? '\\\\' + hex.toUpperCase() + ' ' : k === 2 ? '\\\\' + hex.padStart(6, '0') : k === 3 && /[a-z]/.test(c) ? c.toUpperCase() : c;
+      }).join('');
+      // Mostly allowed but tricky (escaped good names, braces and url( in
+      // strings, nesting), sometimes hostile, every way spelled.
+      const pick = (good, bad) => (rand(5) === 0 ? bad[rand(bad.length)] : good[rand(good.length)]);
+      const sel = () => pick(
+        ['.' + esc('a'), 'div > .' + esc('b'), '.c:' + esc('hover'), '.d::' + esc('before'), ':is(.a, .' + esc('b') + ')', '.e[data-x="{"]', '.' + esc('html'), '.f:not(.' + esc('host') + ')'],
+        [':' + esc('host'), ':' + esc('host') + '(.a)', '::' + esc('part') + '(x)', ':' + esc('root'), esc('html'), esc('body'), '.' + esc('architect-view'), ':is(.a, :' + esc('host') + ')'],
+      );
+      const val = () => pick(
+        [esc('red'), 'calc(1px + 2px)', 'var(--x)', 'rgb(1 2 3)', '"{" "}" "url(x)"', 'url(' + prefix + 'a.png)', esc('absolute'), 'linear-gradient(' + esc('red') + ', blue)'],
+        [esc('url') + '(https://e.vil/x)', esc('url') + '("https://e.vil/x")', esc('attr') + '(data-x)', esc('image-set') + '("x" 1x)', esc('fixed'), esc('element') + '(#x)'],
+      );
+      const prop = () => pick([esc('color'), 'content', 'background', '--x', esc('position'), 'width'], [esc('position'), esc('z-index'), esc('behavior')]);
+      const decl = () => prop() + ':' + val() + (rand(12) === 0 ? '!' + esc('important') : '');
+      const rule = () => {
+        const k = rand(10);
+        if (k === 0 && rand(3) === 0) return '@' + esc('import') + ' url(https://e.vil/x.css);';
+        if (k === 1) return '@media (min-width:1px){' + sel() + '{' + decl() + '}}';
+        if (k === 2) return sel() + '{' + decl() + ';' + sel().replace(/^[^&]/, '&$&') + '{' + decl() + '}}';
+        if (k === 3) return '@' + esc('layer') + ' t{' + sel() + '{' + decl() + '}}';
+        return sel() + '{' + decl() + ';' + decl() + '}';
+      };
+      const BAD_SELECTOR = /:host|::part|::slotted|:root|:scope|(^|[\\s,>+~(])(html|body)(?![\\w-])|\\.architect-view(?![\\w-]|-host)/i;
+      let kept = 0, refused = 0;
+      const wrong = [];
+      for (let n = 0; n < 2000; n++) {
+        const css = Array.from({ length: 1 + rand(2) }, rule).join('');
+        const out = cleanSheet(css, prefix);
+        if (out === null) { refused++; continue; }
+        kept++;
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(out);
+        const walk = (list) => {
+          for (const r of list) {
+            const type = r.constructor.name;
+            if (!['CSSStyleRule', 'CSSMediaRule', 'CSSSupportsRule', 'CSSContainerRule', 'CSSKeyframesRule', 'CSSKeyframeRule', 'CSSPropertyRule', 'CSSNestedDeclarations'].includes(type)) wrong.push([type, css]);
+            if (r.selectorText !== undefined) {
+              const s = r.selectorText;
+              const themeBox = s === '.architect-view' && [...r.style].every((p) => p.startsWith('--'));
+              if (!themeBox && BAD_SELECTOR.test(s)) wrong.push(['selector ' + s, css]);
+            }
+            if (r.style) for (const p of r.style) {
+              const v = r.style.getPropertyValue(p);
+              if (/url\\(/i.test(v) && !v.includes(prefix)) wrong.push(['url ' + p + ': ' + v, css]);
+              if (/attr\\(|image-set\\(|element\\(|image\\(/i.test(v)) wrong.push(['value ' + p + ': ' + v, css]);
+              if (p === 'position' && /fixed|sticky/i.test(v)) wrong.push(['position ' + v, css]);
+            }
+            if (r.cssRules) walk(r.cssRules);
+          }
+        };
+        walk(sheet.cssRules);
+      }
+      return JSON.stringify({ kept, refused, wrong: wrong.slice(0, 5) });
+    })()`);
+    const r = JSON.parse(report);
+    assert.deepEqual(r.wrong, [], JSON.stringify(r));
+    assert.ok(r.kept > 100 && r.refused > 100, JSON.stringify(r));
+  } finally { close(); }
+});
+

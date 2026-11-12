@@ -59,7 +59,14 @@ export class Pane {
     this.count = 0;
     const host = this.doc.createElement('div');
     host.setAttribute('class', 'architect-view-host');
-    setStyle(host, `display:block!important;max-height:${Number(this.limits.viewHeight)}px!important;overflow:hidden!important`);
+    // The box contract, from outside the view (its sheet cannot select its
+    // host: `cleanSheet` refuses `:host` and the host's class): whatever
+    // its content does, its paint, layout and fixed descendants stay in
+    // this box, which clips them.
+    setStyle(
+      host,
+      `display:block!important;max-height:${Number(this.limits.viewHeight)}px!important;overflow:hidden!important;contain:layout paint style!important;position:relative!important;isolation:isolate!important`,
+    );
     // Open: the page may look in (the sandbox protects the page from the
     // view, not the view from the page).
     const shadow = host.attachShadow({ mode: 'open' });
