@@ -389,6 +389,24 @@ share-island-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_ISLAND_FOLDER="$PWD/target/island-counter" env -u LD_LIBRARY_PATH node --test apps/web/test/share-island.test.mjs
 
+# An island's web view against a hostile bundle in a real browser
+# (architect#608): nothing reaches off the node, a frame that leaves its
+# document is taken down, WebRTC only when declared and granted.
+# DRIVER=safari (on a Mac: `safaridriver --enable` once, Safari quit) runs
+# it in Safari through safaridriver, started and stopped by the suite on a
+# free port; DRIVER=gecko runs that same classic-WebDriver path (no script
+# evaluated in the page) in Firefox through geckodriver
+# (`just share-webview-test-classic`); the default is Firefox over BiDi.
+# Each test prints PASS or FAIL with the page state it last read.
+share-webview-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" env -u LD_LIBRARY_PATH node --test apps/web/test/share-webview.test.mjs
+
+# The suite on the classic-WebDriver path Safari takes, in Firefox
+# (geckodriver from nixpkgs): what keeps that path from rotting without a Mac.
+share-webview-test-classic:
+    DRIVER=gecko GECKODRIVER="$(nix build --no-link --print-out-paths nixpkgs#geckodriver)/bin/geckodriver" just share-webview-test
+
 # The site's /download (apps/site): its link logic (bun test), then the
 # built page in a headless Firefox with GitHub's API stubbed: every file
 # there, the Mac build missing, the API down, rate limited

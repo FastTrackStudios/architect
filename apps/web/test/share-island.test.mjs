@@ -298,7 +298,10 @@ test('the island takes the view’s top and bottom; its sheet moves nothing; it 
     const tops = JSON.parse(await tab.eval('JSON.stringify([".site-now-island-top", ".site-now-body", ".site-now-island-bottom"].map((s) => document.querySelector(s).getBoundingClientRect().top))'));
     assert.ok(tops[0] < tops[1] && tops[1] < tops[2], JSON.stringify(tops));
     assert.equal(await tab.eval('getComputedStyle(document.querySelector(".site-now-progress")).display'), 'none');
-    assert.equal(await tab.eval('getComputedStyle(document.querySelector(".site-now-controls")).display'), 'none');
+    // The controls' row stays for Click and Loop; its previous, play and
+    // next give way to the island's transport, which sits between them.
+    assert.equal(await tab.eval('getComputedStyle(document.querySelector(".site-now-controls .site-now-transport")).display'), 'none');
+    assert.equal(await tab.eval('!!document.querySelector(".site-now-buttons > .site-now-island-bottom")'), true);
     // Its view, in a shadow root, styled by its sheet, which moved nothing.
     const host = 'document.querySelector(".site-now-island-top .architect-view-host")';
     await tab.until(`${host}.shadowRoot.querySelector(".wasi-count")`, 'its view');

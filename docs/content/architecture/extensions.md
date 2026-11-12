@@ -1808,7 +1808,108 @@ runs it in the sandbox frame, and draws its views into the view's top and
 bottom slots in shadow roots (`view.js`, the share pages' rules). The
 player's own position bar and controls stay until its first frame, and
 whenever it cannot load: a browser without JS Promise Integration (Safari
-today), a node without islands.
+before 27, every browser on iOS before it) when the island has no web
+bundle, a node without islands. The island's transport sits in the
+controls' row between the player's Click and Loop, which stay.
+
+**A web view: the same views on every browser.** An island may carry its
+views as a plain web bundle too: wasm-bindgen's `--target web` glue
+(exporting `mount(view)`), its modules and its one `.wasm`, files of its
+folder named `web-*` (its modules import each other as `./<name>.js`: one
+folder, no other path). The node finds it by its files (the one `web-*.js`
+that is no `web-snippet-*.js`; `SiteIsland::web(entry)` names another) and
+puts each file's digest in `site-islands` (`web.files`), with the document
+its frame runs in (`web.webview`). When an island has one, the player draws
+its views from it in every browser, no JS Promise Integration needed: each
+view in a frame of the node's web view document
+(`architect_sites::island::webview_document`, its boot script
+`features/sites/assets/webview.js`), served with `webview_headers`. The page
+fetches the bundle from the node, checks every file against its digest, and
+hands the frame the bytes once (it makes them `blob:` modules, gives the
+glue the wasm as bytes and mounts the view), its theme (the page's CSS
+custom properties, none with a URL, and light or dark), its sheet (pinned as
+above) and where the song is; the frame sends back only the view's asks (the
+same five intents, checked and rate-limited by the page), its height (once a
+frame at most), that it is ready, and answers a heartbeat. A frame that is
+not ready in 15 s, stops answering (taken down 6 to 10 s after it falls
+silent: a ping every 2 s, late after 6 s), reports an error or leaves its
+document (a second load) is taken down for the page's life and the
+player's own bar and controls come back. While the page is hidden (another
+app, a locked phone) neither clock runs against it: the beat starts over
+when the page is shown.
+
+What the heartbeat cannot stop: a frame whose bundle never yields (a
+busy loop). A sandboxed frame is an opaque origin, but a browser may run
+it on the page's own thread (Chromium unless it isolates sandboxed
+frames, WebKit, Firefox for a frame of the page's own site): then the
+page's timers stop with it, the heartbeat never fires, and the page is
+frozen until the browser's own slow-script warning stops the script. In a
+browser that runs it apart, the page stays live and takes the frame down
+6 to 10 s after it falls silent. So a web view's bundle is trusted not to spin, as the island's
+component is: the node operator links it in, pinned by digest.
+
+What reaches the network from a web view, and what stops it:
+
+- **By its policy** (`sandbox allow-scripts`, an opaque origin): every
+  fetch, XHR, WebSocket, `EventSource`, WebTransport, beacon and `<a ping>`
+  (`connect-src 'none'`); any script but its own by hash and `blob:`
+  modules (no remote `import()`, no speculation rules); images and fonts
+  but `blob:`/`data:` (so a stylesheet's `url()` loads nothing); media,
+  workers, objects, manifests, `<base>`, forms; popups (`window.open`), top
+  navigation, modals and forms by the sandbox flags.
+- **Child frames:** `frame-src 'none'` stops `blob:`, `data:` and the web
+  view documents as children. An `about:blank` or `srcdoc` child is still
+  made; what keeps a bundle from getting removed APIs back from its fresh
+  global is the sandbox (the child is a new opaque origin: the bundle
+  cannot reach into it) and the policy it inherits (`script-src`: nothing
+  runs in it the frame's own policy would not run).
+- **By its script, before any bundle code runs:** this is the WebRTC
+  control on every engine. `RTCPeerConnection` and its kin are removed
+  (non-configurable `undefined`), by name and by pattern (every own global
+  matching `/^(webkit|moz)?RTC/`, so one an engine adds goes too); the
+  Presentation API is removed; `navigator.sendBeacon` answers `false`. The
+  policy's `webrtc 'block'` is kept as forward-looking only: no engine
+  enforces a `webrtc` directive today (WebKit and Chromium define none).
+- **By its headers:** `x-dns-prefetch-control: off` (no DNS prefetch or
+  preconnect from `<link>`).
+- **By the share page's own policy:** a frame navigating itself can go
+  only where the page's `frame-src` (its `default-src 'self'`) allows, the
+  node. That is what keeps a web view from leaving the node, and it is
+  load-bearing (`apps/desktop/src/node/shares.rs` `content_security_policy`);
+  a navigation away is also the frame's death (above). The node's own
+  routes that change a visitor's state never answer a frame: sign-out
+  (`/s/_signout`) is a form posted from the node's own page, its `Origin`
+  checked (a GET is a page asking; the frame has no `allow-forms`, no
+  `connect-src`, and its Origin would be `null`), on every browser, with or
+  without fetch metadata (Safari 15.4 to 16.3 sends none); sign-in
+  (`/s/_signin`) answers only a same-origin or typed request
+  (`Sec-Fetch-Site`).
+- **Not stopped:** the bundle runs on the page's event loop in Firefox
+  (and may elsewhere): a busy loop in it stalls the share page. The
+  component route (a Worker) did not have this.
+
+**WebRTC is a capability**, never a default. An extension declares
+`capabilities.webrtc = ["peer-connections"]` and its operator grants it
+(`SiteIsland::grant_webrtc`, the distribution's call): only then is its
+view served the other web view document (`webview-rtc.<hash>.html`,
+`WebRtc::Granted`, its own path so the two are never confused or cached
+one for the other), whose script leaves the constructors (its policy says
+`webrtc 'allow'`). A node where no island is granted WebRTC does not serve
+that document at all (a direct GET is a 404). Everything else about the frame is the same
+(opaque origin, `connect-src 'none'`, pinned files, intents only). The
+node chooses it from the island's manifest and the grant; no page, note,
+query or message can. What it exposes: the visitor's IP address to the
+peers and to the STUN/TURN servers the bundle names, and a data channel
+out of the sandbox that no policy meters. The bundle's code is the node
+operator's linked-in island, pinned by digest, the same trust as the
+component.
+
+A bundle built for `wasm32-unknown-unknown` with the pinned rustc uses bulk
+memory, mutable globals, non-trapping float-to-int, reference types, sign
+extension and multi-value (Safari 15 has all six; Studio's build validates
+its module against exactly those with `wasm-opt`), so the floor is the
+frame's own: Safari 15.4 (module scripts from `blob:`, `'wasm-unsafe-eval'`
+from 16; Studio's target is 16.4).
 
 - **The share page's CSP does not change.** The sandbox frame is the
   node's own document, `/_ext/sandbox.<hash>.html`

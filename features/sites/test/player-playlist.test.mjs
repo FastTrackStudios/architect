@@ -217,6 +217,11 @@ function setlist({ art = null, view = null } = {}) {
 
 function run(body, queue, opts = {}) {
   const frames = [];
+  const timeouts = [];
+  const made = [];
+  made.channels = [];
+  const clock = { now: 1000 };
+  const islandsEl = opts.islands ? Object.assign(new Node('script'), { ownText: JSON.stringify(opts.islands) }) : null;
   const store = new Map();
   const timers = [];
   const audio = new FakeAudio();
@@ -226,11 +231,24 @@ function run(body, queue, opts = {}) {
     body,
     documentElement: new Node('html'),
     currentScript: null,
-    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : null),
+    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-islands') ? islandsEl : null),
     querySelectorAll: (sel) => body.querySelectorAll(sel),
-    createElement: (tag) => (tag === 'audio' ? new Media('') : new Node(tag)),
+    createElement: (tag) => {
+      if (tag === 'audio') return new Media('');
+      const n = new Node(tag);
+      // A frame: what its parent posts it, kept.
+      if (tag === 'iframe') {
+        n.contentWindow = { posted: [], postMessage(data, _, ports) { this.posted.push({ data, ports }); } };
+        made.push(n);
+      }
+      return n;
+    },
     dispatchEvent: () => {},
-    addEventListener: () => {},
+    // Shown or hidden (another app, a locked phone), and who listens.
+    hidden: false,
+    on: {},
+    addEventListener(type, fn) { (this.on[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { this.on[type] = (this.on[type] || []).filter((f) => f !== fn); },
     createComment: () => new Node('#comment'),
     importNode: (n) => n,
     get activeElement() { return focused; },
@@ -245,8 +263,21 @@ function run(body, queue, opts = {}) {
     cancelAnimationFrame: () => {},
     setInterval: (fn) => { timers.push(fn); return timers.length; },
     clearInterval: (i) => { timers[i - 1] = null; },
-    setTimeout: () => 0,
-    clearTimeout: () => {},
+    setTimeout: (fn, ms) => { timeouts.push({ fn, at: clock.now + (ms || 0) }); return timeouts.length; },
+    clearTimeout: (i) => { if (timeouts[i - 1]) timeouts[i - 1].fn = null; },
+    Date: { now: () => clock.now },
+    MessageChannel: class {
+      constructor() {
+        const a = { sent: [], onmessage: null, postMessage(d) { this.sent.push(d); }, close() { this.closed = true; } };
+        this.port1 = a;
+        this.port2 = {};
+        made.channels.push(this);
+      }
+    },
+    crypto: globalThis.crypto,
+    btoa: globalThis.btoa,
+    TextDecoder,
+    Promise,
     addEventListener: () => {},
     getComputedStyle: () => ({ overflowX: 'visible', overflowY: 'visible' }),
     matchMedia: () => ({ matches: false }),
@@ -273,11 +304,15 @@ function run(body, queue, opts = {}) {
     a.currentTime = t;
   };
   return {
-    body, playhead, audio, window, location, errors,
+    body, playhead, audio, window, location, errors, clock, made,
+    /// Run every timeout due by now.
+    later: () => timeouts.splice(0).forEach((t) => (t.fn && t.at <= clock.now ? t.fn() : timeouts.push(t))),
     /// A real Loop (or Click) button in the bar (the bar's own are
     /// written as HTML, which this DOM does not parse).
     button: (act) => body.querySelectorAll('.site-player')[0].appendChild(el('button', { 'data-act': act })),
     tick: () => timers.forEach((f) => f && f()),
+    /// The page hidden or shown again, as `visibilitychange` says.
+    visibility: (hidden) => { document.hidden = hidden; (document.on.visibilitychange || []).slice().forEach((f) => f({ type: 'visibilitychange' })); },
     frame: () => frames.splice(0).forEach((f) => f()),
     audioEl, at,
     list: () => body.querySelectorAll('[data-playlist]'),
@@ -603,6 +638,138 @@ test('the card shows a music note, never letters nor what the tile says (its key
   assert.equal(art().textContent, '', 'no initials, no key');
   assert.match(art().style.props.background || '', /^hsl\(200 /, 'on its tile\'s colour');
   assert.ok(!/function initials/.test(PLAYER), 'no initials code path');
+});
+
+// ── An island's web view (the review of #608) ───────────────────────
+
+async function sha(bytes) {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return 'sha256-' + Buffer.from(d).toString('base64');
+}
+
+/// The setlist with an island whose web bundle the node serves, its
+/// now-playing view open: the frame made, its port and what it was sent.
+async function webview() {
+  const files = { 'web-x.js': Buffer.from('export default 1'), 'web-x_bg.wasm': Buffer.from('\0asm') };
+  const pinned = {};
+  for (const [n, b] of Object.entries(files)) pinned[n] = await sha(b);
+  const fetched = [];
+  const fetch = (url) => {
+    fetched.push(url);
+    const name = String(url).split('/').pop();
+    if (!files[name]) return Promise.resolve({ ok: false, status: 404, headers: { get: () => null } });
+    return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new Uint8Array(files[name]).buffer) });
+  };
+  const islands = {
+    runtime: '/_ext/runtime.0123/', sandbox: '/_ext/sandbox.0123.html', webview: '/_ext/webview.0123abcd.html',
+    islands: [{ id: 'demo', folder: '/_ext/island/demo.0123/', progress: 'bar', web: { entry: 'web-x.js', files: pinned, webview: '/_ext/webview.0123abcd.html' } }],
+  };
+  const body = new Node('body');
+  body.appendChild(block([row(1, 'Joy', `${L}joy/`, `${L}Joy.mp3`)]));
+  const p = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }), { islands, fetch });
+  body.querySelectorAll('[data-track-title]')[0].click();
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: () => null }, preventDefault() {} });
+  const frame = p.made[0];
+  assert.ok(frame, 'a frame for the view');
+  assert.equal(frame.getAttribute('src'), '/_ext/webview.0123abcd.html', 'the document the node chose');
+  frame.dispatch('load');
+  const handed = frame.contentWindow.posted[0];
+  assert.equal(handed.data, 'architect-web');
+  const port = p.made.channels[0].port1;
+  const say = (d) => port.onmessage({ data: d });
+  const boots = () => port.sent.filter((m) => m.t === 'boot').length;
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+  const slot = frame.parentElement;
+  return { p, frame, port, say, boots, settle, slot, fetched };
+}
+
+test('a frame is answered and booted once, however often it says hello', async () => {
+  const w = await webview();
+  for (let i = 0; i < 300; i++) w.say({ t: 'hello' });
+  await w.settle();
+  assert.equal(w.boots(), 1, 'one boot');
+  assert.equal(w.fetched.filter((u) => String(u).startsWith('/_ext/')).length, 2, 'its two files fetched once');
+});
+
+test('a frame that leaves its document after it is ready is gone, and the player\'s own are back', async () => {
+  const w = await webview();
+  w.say({ t: 'hello' });
+  await w.settle();
+  w.say({ t: 'ready' });
+  assert.equal(w.slot.hidden, false);
+  w.frame.dispatch('load');
+  assert.equal(w.frame.parentElement, null, 'the frame is out');
+  assert.equal(w.slot.hidden, true);
+  // A ready that comes later changes nothing.
+  w.say({ t: 'ready' });
+  assert.equal(w.slot.hidden, true);
+});
+
+test('a frame that is never ready, or stops answering, is given up', async () => {
+  const late = await webview();
+  late.p.clock.now += 16000;
+  late.p.later();
+  assert.equal(late.frame.parentElement, null, 'not ready in 15 s');
+  const quiet = await webview();
+  quiet.say({ t: 'hello' });
+  await quiet.settle();
+  quiet.say({ t: 'ready' });
+  quiet.p.tick();
+  const ping = quiet.port.sent.find((m) => m.t === 'ping');
+  assert.ok(ping, 'a heartbeat');
+  quiet.say({ t: 'pong', n: ping.n });
+  quiet.p.clock.now += 2000;
+  quiet.p.tick();
+  assert.ok(quiet.frame.parentElement, 'answered: still up');
+  quiet.p.clock.now += 7000;
+  quiet.p.tick();
+  assert.equal(quiet.frame.parentElement, null, 'unanswered 6 s: gone');
+  // An error after ready: gone too.
+  const failing = await webview();
+  failing.say({ t: 'hello' });
+  await failing.settle();
+  failing.say({ t: 'ready' });
+  failing.say({ t: 'error', message: 'x' });
+  assert.equal(failing.frame.parentElement, null);
+});
+
+test('a frame is never given up for the time the page was hidden (an app switch), and is when it stays silent after', async () => {
+  // Ready, a ping sent, then the phone switches app: its pong never comes
+  // while the page is hidden.
+  const w = await webview();
+  w.say({ t: 'hello' });
+  await w.settle();
+  w.say({ t: 'ready' });
+  w.p.tick();
+  assert.ok(w.port.sent.some((m) => m.t === 'ping'));
+  w.p.visibility(true);
+  w.p.clock.now += 60000;
+  w.p.tick();
+  assert.ok(w.frame.parentElement, 'hidden a minute: still up');
+  // Shown again: the beat starts over, a new ping, answered: up.
+  w.p.visibility(false);
+  w.p.tick();
+  const pings = w.port.sent.filter((m) => m.t === 'ping');
+  assert.equal(pings.length, 2, 'a new beat from being shown');
+  w.say({ t: 'pong', n: pings[1].n });
+  w.p.clock.now += 2000;
+  w.p.tick();
+  assert.ok(w.frame.parentElement, 'answered after being shown');
+  // Silent while shown: gone, as before.
+  w.p.clock.now += 7000;
+  w.p.tick();
+  assert.equal(w.frame.parentElement, null, 'silent 6 s while shown: gone');
+
+  // Not ready yet when the page is hidden: the deadline waits for it.
+  const slow = await webview();
+  slow.p.visibility(true);
+  slow.p.clock.now += 16000;
+  slow.p.later();
+  assert.ok(slow.frame.parentElement, 'hidden past 15 s: not given up');
+  slow.p.visibility(false);
+  slow.p.clock.now += 16000;
+  slow.p.later();
+  assert.equal(slow.frame.parentElement, null, '15 s shown and not ready: gone');
 });
 
 test('the row menu keeps the keyboard where it was when the song\'s page arrives and refills it', async () => {

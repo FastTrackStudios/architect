@@ -389,6 +389,13 @@ impl Capabilities {
             effect: self.effect.min(granted.effect),
             hosts,
             folders,
+            // WebRTC only as declared and granted.
+            webrtc: self
+                .webrtc
+                .iter()
+                .filter(|w| granted.webrtc.contains(w))
+                .cloned()
+                .collect(),
             reads: self
                 .reads
                 .iter()

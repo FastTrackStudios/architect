@@ -21,6 +21,21 @@
 //! inherit the share page's CSP, which allows no wasm; a document of its
 //! own leaves the share's policy exactly as it is. It is static and the
 //! same for everyone.
+//!
+//! **A web view** ([`SiteIsland::web`]): the same views built as a plain
+//! web bundle (wasm-bindgen's `--target web` glue, its modules and its
+//! wasm, files of the island's folder named `web-*`), for a browser
+//! without JS Promise Integration (Safari before 27, every browser on iOS
+//! before it). Each view runs in a frame of its own, the
+//! [`webview_document`], served with [`webview_headers`]: `sandbox
+//! allow-scripts` (an opaque origin), its one boot script by hash, `blob:`
+//! modules and wasm, inline style (its components' `style` attributes),
+//! images and fonts only from `blob:`/`data:`, and nothing to fetch or
+//! connect to. The page fetches the bundle's files from the node, checks
+//! each against its digest ([`page_json`]'s `web.files`), and hands them
+//! in as bytes with its theme and where the song is; the frame sends back
+//! only the view's asks (the island's intents, checked by the page), its
+//! height and that it is ready.
 
 use std::borrow::Cow;
 use std::sync::OnceLock;
@@ -45,6 +60,9 @@ const RUNTIME: &[(&str, &str)] = &[
     ),
     ("world.js", include_str!("../../extensions/web/world.js")),
 ];
+/// A web view frame's one script (`assets/webview.js`).
+const WEBVIEW_SCRIPT: &str = include_str!("../assets/webview.js");
+
 /// `instance.js`, which the runtime starts each instance's worker from
 /// (as `scripts/build.mjs` writes `dist/instance-source.js`).
 const INSTANCE: &str = include_str!("../../extensions/web/instance.js");
@@ -62,6 +80,9 @@ pub struct SiteIsland {
     progress: Option<String>,
     transport: Option<String>,
     stylesheet: Option<String>,
+    web: Option<String>,
+    /// The operator's grant of WebRTC ([`Self::grant_webrtc`]).
+    webrtc_granted: bool,
     derived: OnceLock<Derived>,
 }
 
@@ -81,6 +102,18 @@ fn sha256(bytes: &[u8]) -> String {
     )
 }
 
+/// Whether `name`'s extension is exactly `ext` (the page's player checks
+/// the same, case and all).
+fn ext_is(name: &str, ext: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, e)| e == ext)
+}
+
+/// Whether `name` is a web bundle's file: `web-` and a plain name (no
+/// folder: its modules import each other as `./<name>`).
+fn web_name(name: &str) -> bool {
+    name.starts_with("web-") && !name.contains('/') && file_name_ok(name)
+}
+
 /// Whether `name` is a file path of a folder: segments of letters,
 /// digits, `.`, `_`, `-`, none `.`, `..` or empty, no leading `/`.
 fn file_name_ok(name: &str) -> bool {
@@ -97,17 +130,90 @@ fn file_name_ok(name: &str) -> bool {
 }
 
 impl SiteIsland {
-    /// Island `id` of `files`, no views yet.
+    /// Island `id` of `files`, no views yet. Its web bundle is found by its
+    /// files: the one `web-*.js` that is not a `web-snippet-*.js` is its
+    /// entry ([`Self::web`] names another).
     #[must_use]
     pub fn new(id: impl Into<String>, files: Vec<(String, Cow<'static, [u8]>)>) -> Self {
+        let mut entries = files.iter().map(|(name, _)| name.as_str()).filter(|name| {
+            web_name(name) && ext_is(name, "js") && !name.starts_with("web-snippet-")
+        });
+        let web = match (entries.next(), entries.next()) {
+            (Some(one), None) => Some(one.to_owned()),
+            _ => None,
+        };
         Self {
             id: id.into(),
             files,
             progress: None,
             transport: None,
             stylesheet: None,
+            web,
+            webrtc_granted: false,
             derived: OnceLock::new(),
         }
+    }
+
+    /// Its views as a web bundle too: `entry`, the wasm-bindgen glue of
+    /// its folder (`web-<name>.js`, which exports `mount(view)`), with the
+    /// rest of its `web-*` files (its modules and its one `.wasm`). A page
+    /// in a browser without JS Promise Integration draws its views from it
+    /// in [`webview_document`] frames. Anything but a `web-*.js` file of
+    /// its folder is not used.
+    #[must_use]
+    pub fn web(mut self, entry: impl Into<String>) -> Self {
+        let entry = entry.into();
+        self.web = (web_name(&entry) && ext_is(&entry, "js") && self.file(&entry).is_some())
+            .then_some(entry);
+        self
+    }
+
+    /// Grant it WebRTC in its web view (the operator's grant): it gets the
+    /// web view document that allows peer connections, if its extension
+    /// also declares `capabilities.webrtc = ["peer-connections"]`. What it
+    /// exposes: the visitor's IP to its peers and to the STUN/TURN servers
+    /// it names, and a data channel out of the sandbox no policy meters.
+    #[must_use]
+    pub const fn grant_webrtc(mut self) -> Self {
+        self.webrtc_granted = true;
+        self
+    }
+
+    /// Whether its extension declares WebRTC (`capabilities.webrtc`
+    /// holding `peer-connections`, in its folder's `architect.json`).
+    #[must_use]
+    pub fn declares_webrtc(&self) -> bool {
+        self.file("architect.json")
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+            .and_then(|json| {
+                json.pointer("/manifest/capabilities/webrtc")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|list| list.iter().any(|v| v == "peer-connections"))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Which web view its views run in: WebRTC only when declared and
+    /// granted, never anything a page, a note or a message says.
+    #[must_use]
+    pub fn webrtc(&self) -> WebRtc {
+        if self.webrtc_granted && self.declares_webrtc() {
+            WebRtc::Granted
+        } else {
+            WebRtc::Blocked
+        }
+    }
+
+    /// Its web bundle's files: its `web-*.js` and `web-*.wasm`, by name.
+    fn web_files(&self) -> Vec<(&str, &[u8])> {
+        if self.web.is_none() {
+            return Vec::new();
+        }
+        self.files
+            .iter()
+            .filter(|(name, _)| web_name(name) && (ext_is(name, "js") || ext_is(name, "wasm")))
+            .map(|(name, bytes)| (name.as_str(), bytes.as_ref()))
+            .collect()
     }
 
     /// Its view `view` at the top of the now-playing view.
@@ -271,6 +377,170 @@ pub fn sandbox_headers() -> [(&'static str, String); 4] {
     ]
 }
 
+/// Which of the two web view documents an island's views run in.
+///
+/// By default WebRTC is blocked (by policy and by its script, before any
+/// bundle code runs); an island whose
+/// extension declares `capabilities.webrtc = ["peer-connections"]` and
+/// whose operator grants it ([`SiteIsland::grant_webrtc`]) gets the one
+/// that allows it. Each has its own path, named by its content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebRtc {
+    /// The constructors removed by its script (the control, on every
+    /// engine; its policy's `webrtc 'block'` is forward-looking only, no
+    /// engine enforces it): the default.
+    Blocked,
+    /// The constructors left (`webrtc 'allow'`): declared and granted,
+    /// and served only on a node where some island is.
+    Granted,
+}
+
+impl WebRtc {
+    const fn index(self) -> usize {
+        match self {
+            Self::Blocked => 0,
+            Self::Granted => 1,
+        }
+    }
+}
+
+/// The web view's script for `rtc` (`assets/webview.js`; the granted one
+/// with its `RTC` switch on).
+fn webview_script(rtc: WebRtc) -> &'static str {
+    static SCRIPTS: OnceLock<[String; 2]> = OnceLock::new();
+    let all = SCRIPTS.get_or_init(|| {
+        [
+            WEBVIEW_SCRIPT.to_owned(),
+            WEBVIEW_SCRIPT.replacen("var RTC = false;", "var RTC = true;", 1),
+        ]
+    });
+    all.get(rtc.index()).map_or(WEBVIEW_SCRIPT, String::as_str)
+}
+
+/// A web view frame's policy (with `sandbox allow-scripts` and
+/// `frame-ancestors 'self'` in [`webview_headers`]).
+///
+/// Blocked by the policy: every fetch, XHR, WebSocket, `EventSource`,
+/// WebTransport, beacon and `<a ping>` (`connect-src 'none'`); scripts but
+/// its own by hash and `blob:` modules (`script-src`: no speculation rules,
+/// no remote import); images and fonts but `blob:`/`data:` (so no CSS
+/// `url()` leaves it); media, workers, objects, manifests, `<base>`,
+/// forms; `blob:`, `data:` and the web view documents as child frames
+/// (`frame-src 'none'`; an `about:blank` or `srcdoc` child is held by the
+/// sandbox's new opaque origin and the `script-src` it inherits). WebRTC is
+/// stopped by its script, which removes the constructors on every engine;
+/// `webrtc 'block'` is kept as forward-looking only (no engine enforces a
+/// `webrtc` directive). By the sandbox flags (only `allow-scripts`): popups
+/// (`window.open`), top navigation, forms, modals, same-origin. Its own
+/// navigation away is held by the share page's policy (`frame-src`
+/// through `default-src 'self'`): it may go only to the node. DNS
+/// prefetch and preconnect are refused by `x-dns-prefetch-control: off`.
+fn webview_csp(rtc: WebRtc) -> String {
+    format!(
+        "default-src 'none'; script-src '{}' blob: 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src blob: data:; font-src blob: data:; connect-src 'none'; media-src 'none'; worker-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'; webrtc '{}'",
+        sha256(webview_script(rtc).as_bytes()),
+        match rtc {
+            WebRtc::Blocked => "block",
+            WebRtc::Granted => "allow",
+        }
+    )
+}
+
+/// A web view's frame: a root for the view (`#main`, where a Dioxus web
+/// bundle mounts), a reset, and its one script. The same for everyone.
+#[must_use]
+pub fn webview_document() -> &'static str {
+    webview_document_for(WebRtc::Blocked)
+}
+
+/// The web view document for `rtc`.
+#[must_use]
+pub fn webview_document_for(rtc: WebRtc) -> &'static str {
+    static DOCS: OnceLock<[String; 2]> = OnceLock::new();
+    let doc = |rtc: WebRtc| {
+        format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}body{{font:14px/1.3 system-ui,-apple-system,sans-serif;color:var(--foreground,CanvasText)}}</style></head><body><div id=\"main\"></div><script>{}</script></body></html>",
+            webview_script(rtc)
+        )
+    };
+    let all = DOCS.get_or_init(|| [doc(WebRtc::Blocked), doc(WebRtc::Granted)]);
+    all.get(rtc.index()).map_or("", String::as_str)
+}
+
+/// Where the web view document is served, named by its content.
+#[must_use]
+pub fn webview_path() -> &'static str {
+    webview_path_for(WebRtc::Blocked)
+}
+
+/// Where the web view document for `rtc` is served: its own path
+/// (`webview.<hash>.html`, `webview-rtc.<hash>.html`), so the two are
+/// never confused, nor cached one for the other.
+#[must_use]
+pub fn webview_path_for(rtc: WebRtc) -> &'static str {
+    static PATHS: OnceLock<[String; 2]> = OnceLock::new();
+    let all = PATHS.get_or_init(|| {
+        [WebRtc::Blocked, WebRtc::Granted].map(|rtc| {
+            let name = match rtc {
+                WebRtc::Blocked => "webview",
+                WebRtc::Granted => "webview-rtc",
+            };
+            format!(
+                "{ISLANDS_PATH}{name}.{}.html",
+                fingerprint(webview_document_for(rtc).as_bytes())
+            )
+        })
+    });
+    all.get(rtc.index()).map_or("", String::as_str)
+}
+
+/// The web view document's own headers: [`webview_csp`] in a sandbox,
+/// framed only by the node's own pages, no DNS prefetch, `nosniff`,
+/// immutable.
+#[must_use]
+pub fn webview_headers() -> Vec<(&'static str, String)> {
+    webview_headers_for(WebRtc::Blocked)
+}
+
+/// [`webview_headers`] for `rtc`.
+#[must_use]
+pub fn webview_headers_for(rtc: WebRtc) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "content-security-policy",
+            format!(
+                "sandbox allow-scripts; {}; frame-ancestors 'self'",
+                webview_csp(rtc)
+            ),
+        ),
+        ("x-content-type-options", "nosniff".to_owned()),
+        ("x-dns-prefetch-control", "off".to_owned()),
+        (
+            "cache-control",
+            "public, max-age=31536000, immutable".to_owned(),
+        ),
+        ("content-type", "text/html; charset=utf-8".to_owned()),
+    ]
+}
+
+/// The headers a document under [`ISLANDS_PATH`] is served with.
+///
+/// Every one of them (without its policy it would run with the page's
+/// origin's): the sandbox's or a web view's. None for anything else (a
+/// module, a component, a sheet).
+#[must_use]
+pub fn document_headers(path: &str) -> Option<Vec<(&'static str, String)>> {
+    if path == sandbox_path() {
+        Some(sandbox_headers().into())
+    } else if path == webview_path_for(WebRtc::Blocked) {
+        Some(webview_headers_for(WebRtc::Blocked))
+    } else if path == webview_path_for(WebRtc::Granted) {
+        Some(webview_headers_for(WebRtc::Granted))
+    } else {
+        None
+    }
+}
+
 /// The runtime's files, with `dist/instance-source.js` made as its build
 /// makes it.
 fn runtime_files() -> &'static [(String, String)] {
@@ -323,6 +593,22 @@ pub fn serve<'a>(islands: &'a [SiteIsland], path: &str) -> Option<(Cow<'a, [u8]>
             "text/html; charset=utf-8",
         ));
     }
+    // The document that allows WebRTC only on a node where some island is
+    // granted it (and declares it): elsewhere it is not there at all.
+    let granted = islands
+        .iter()
+        .any(|i| i.id_ok() && i.webrtc() == WebRtc::Granted);
+    for rtc in [WebRtc::Blocked, WebRtc::Granted] {
+        if rtc == WebRtc::Granted && !granted {
+            continue;
+        }
+        if path == webview_path_for(rtc) {
+            return Some((
+                Cow::Borrowed(webview_document_for(rtc).as_bytes()),
+                "text/html; charset=utf-8",
+            ));
+        }
+    }
     if let Some(rest) = path.strip_prefix(runtime_path()) {
         return runtime_file(rest).map(|body| {
             (
@@ -374,12 +660,26 @@ pub fn page_json(islands: &[SiteIsland]) -> serde_json::Value {
                 // component's files.
                 "stylesheet": i.stylesheet_integrity().and(i.stylesheet.as_deref()),
                 "stylesheetIntegrity": i.stylesheet_integrity(),
+                // Its web bundle: each file pinned by its digest, as the
+                // node holds it.
+                "web": i.web.as_deref().map(|entry| serde_json::json!({
+                    "entry": entry,
+                    // Its frame's document: chosen here, by its declaration
+                    // and its grant.
+                    "webview": webview_path_for(i.webrtc()),
+                    "files": i
+                        .web_files()
+                        .into_iter()
+                        .map(|(name, bytes)| (name.to_owned(), serde_json::Value::String(sha256(bytes))))
+                        .collect::<serde_json::Map<_, _>>(),
+                })),
             })
         })
         .collect();
     serde_json::json!({
         "runtime": runtime_path(),
         "sandbox": sandbox_path(),
+        "webview": webview_path(),
         "islands": list,
     })
 }
@@ -426,6 +726,229 @@ mod tests {
             path.starts_with("/_ext/sandbox.")
                 && Path::new(path).extension().is_some_and(|e| e == "html")
         );
+    }
+
+    /// A web view's frame (no JS Promise Integration needed): its own
+    /// document, sandboxed, its one script by hash, nothing to fetch or
+    /// connect to; the only widening over the sandbox's is inline style.
+    #[test]
+    fn a_web_view_frame_runs_its_bundle_under_its_own_policy() {
+        let doc = webview_document();
+        assert!(doc.contains("<div id=\"main\"></div>"));
+        assert!(
+            doc.contains("e.source !== parent"),
+            "its port only from its parent"
+        );
+        let headers = webview_headers();
+        let csp = &headers[0].1;
+        assert!(csp.starts_with("sandbox allow-scripts;"), "{csp}");
+        for no in [
+            "allow-same-origin",
+            "allow-top-navigation",
+            "allow-popups",
+            "allow-forms",
+            "allow-modals",
+            "'unsafe-eval'",
+            "'self' blob",
+            "https:",
+            "http:",
+            "*",
+        ] {
+            assert!(!csp.contains(no), "{no} in {csp}");
+        }
+        for yes in [
+            "default-src 'none'",
+            "connect-src 'none'",
+            "worker-src 'none'",
+            "frame-src 'none'",
+            "img-src blob: data:",
+            "style-src 'unsafe-inline'",
+            "'wasm-unsafe-eval'",
+            "frame-ancestors 'self'",
+        ] {
+            assert!(csp.contains(yes), "{yes} not in {csp}");
+        }
+        // The hash is the script the document carries, byte for byte.
+        let script = doc
+            .split("<script>")
+            .nth(1)
+            .and_then(|s| s.split("</script>").next())
+            .unwrap();
+        assert!(csp.contains(&format!("script-src '{}' blob:", sha256(script.as_bytes()))));
+        assert!(webview_path().starts_with("/_ext/webview.") && ext_is(webview_path(), "html"));
+        // WebRTC blocked by the policy and removed by the script; no DNS
+        // prefetch; no child frame (a bundle cannot get the constructors
+        // back from one).
+        assert!(
+            csp.contains("webrtc 'block'")
+                && csp.contains("frame-src 'none'")
+                && csp.contains("child-src 'none'")
+        );
+        assert!(script.contains("var RTC = false;") && script.contains("RTCPeerConnection"));
+        assert!(headers.contains(&("x-dns-prefetch-control", "off".to_owned())));
+        assert!(document_headers(webview_path()).is_some());
+        assert!(document_headers(sandbox_path()).is_some());
+        assert!(document_headers("/_ext/webview.html").is_none());
+        assert_eq!(
+            serve(&[], webview_path()).map(|(b, t)| (b.into_owned(), t)),
+            Some((doc.as_bytes().to_vec(), "text/html; charset=utf-8"))
+        );
+    }
+
+    /// WebRTC is a declared and granted capability: the default frame
+    /// blocks it; an island declaring `capabilities.webrtc` and granted by
+    /// its operator gets its own document that allows it; one that is not
+    /// declared gets nothing from a grant, and nothing else chooses.
+    #[test]
+    fn webrtc_is_declared_and_granted_never_asked_for() {
+        let manifest = |caps: &str| {
+            format!(
+                "{{\"module\":\"x.js\",\"manifest\":{{\"id\":\"demo.call\",\"capabilities\":{caps}}}}}"
+            )
+        };
+        let island = |caps: &str| {
+            SiteIsland::new(
+                "demo.call",
+                vec![
+                    (
+                        "architect.json".to_owned(),
+                        Cow::Owned(manifest(caps).into_bytes()),
+                    ),
+                    (
+                        "web-call.js".to_owned(),
+                        Cow::Borrowed(b"export default 1".as_slice()),
+                    ),
+                    (
+                        "web-call_bg.wasm".to_owned(),
+                        Cow::Borrowed(b"\0asm".as_slice()),
+                    ),
+                ],
+            )
+            .progress("call")
+        };
+        let declared = r#"{"webrtc":["peer-connections"]}"#;
+        assert_eq!(
+            island(declared).webrtc(),
+            WebRtc::Blocked,
+            "declared, not granted"
+        );
+        assert_eq!(
+            island("{}").grant_webrtc().webrtc(),
+            WebRtc::Blocked,
+            "granted, not declared"
+        );
+        assert_eq!(
+            island(r#"{"webrtc":["camera"]}"#).grant_webrtc().webrtc(),
+            WebRtc::Blocked
+        );
+        let granted = island(declared).grant_webrtc();
+        assert_eq!(granted.webrtc(), WebRtc::Granted);
+        let json = page_json(&[granted, island(declared)]);
+        assert_eq!(
+            json["islands"][0]["web"]["webview"],
+            webview_path_for(WebRtc::Granted)
+        );
+        assert_eq!(
+            json["islands"][1]["web"]["webview"],
+            webview_path_for(WebRtc::Blocked)
+        );
+        // Two documents, two paths, each served with its own policy.
+        assert_ne!(
+            webview_path_for(WebRtc::Granted),
+            webview_path_for(WebRtc::Blocked)
+        );
+        assert!(webview_path_for(WebRtc::Granted).starts_with("/_ext/webview-rtc."));
+        // The document that allows WebRTC is served only where some island
+        // is granted it: elsewhere a direct GET finds nothing.
+        let rtc = webview_path_for(WebRtc::Granted);
+        assert!(serve(&[], rtc).is_none());
+        assert!(serve(&[island(declared), island("{}").grant_webrtc()], rtc).is_none());
+        assert!(serve(&[island(declared).grant_webrtc()], rtc).is_some());
+        assert!(
+            serve(&[], webview_path_for(WebRtc::Blocked)).is_some(),
+            "the default always"
+        );
+        let csp = |rtc| {
+            document_headers(webview_path_for(rtc)).unwrap()[0]
+                .1
+                .clone()
+        };
+        assert!(
+            csp(WebRtc::Granted).contains("webrtc 'allow'")
+                && csp(WebRtc::Granted).contains("connect-src 'none'")
+        );
+        assert!(webview_document_for(WebRtc::Granted).contains("var RTC = true;"));
+        assert!(csp(WebRtc::Blocked).contains("webrtc 'block'"));
+        assert!(webview_document_for(WebRtc::Blocked).contains("var RTC = false;"));
+        // A note cannot hand the page an islands list of its own: what it
+        // draws loses every script element.
+        let drawn = crate::sanitize::sanitize(
+            "<script type=\"application/json\" id=\"site-islands\">{}</script><p>x</p>",
+        );
+        assert!(
+            !drawn.contains("site-islands") && !drawn.contains("<script"),
+            "{drawn}"
+        );
+    }
+
+    /// An island's web bundle: its `web-*` modules and wasm, each with its
+    /// digest; an entry that is not one of its `web-*.js` is not used.
+    #[test]
+    fn an_islands_web_bundle_is_its_web_files_pinned_by_digest() {
+        let files = vec![
+            (
+                "web-x.js".to_owned(),
+                Cow::Borrowed(b"export default 1".as_slice()),
+            ),
+            (
+                "web-x_bg.wasm".to_owned(),
+                Cow::Borrowed(b"\0asm".as_slice()),
+            ),
+            (
+                "web-snippet-0.js".to_owned(),
+                Cow::Borrowed(b"export const a = 1".as_slice()),
+            ),
+            ("x.wasm".to_owned(), Cow::Borrowed(b"\0asm2".as_slice())),
+            ("island.css".to_owned(), Cow::Borrowed(b".a{}".as_slice())),
+        ];
+        let island = SiteIsland::new("studio.transport", files.clone())
+            .progress("progress")
+            .web("web-x.js");
+        let json = page_json(std::slice::from_ref(&island));
+        assert_eq!(json["webview"], webview_path());
+        let web = &json["islands"][0]["web"];
+        assert_eq!(web["entry"], "web-x.js");
+        let mut names: Vec<&str> = web["files"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, ["web-snippet-0.js", "web-x.js", "web-x_bg.wasm"]);
+        assert_eq!(web["files"]["web-x.js"], sha256(b"export default 1"));
+        // Found by its files: the one entry that is no snippet.
+        let found = SiteIsland::new("x", files.clone());
+        assert_eq!(
+            page_json(std::slice::from_ref(&found))["islands"][0]["web"]["entry"],
+            "web-x.js"
+        );
+        let mut two = files.clone();
+        two.push(("web-y.js".to_owned(), Cow::Borrowed(b"".as_slice())));
+        assert!(
+            page_json(&[SiteIsland::new("x", two)])["islands"][0]["web"].is_null(),
+            "two entries: none"
+        );
+        for bad in [
+            "x.wasm",
+            "island.css",
+            "web-nope.js",
+            "../web-x.js",
+            "web-x_bg.wasm",
+        ] {
+            let island = SiteIsland::new("x", files.clone()).web(bad);
+            assert!(page_json(&[island])["islands"][0]["web"].is_null(), "{bad}");
+        }
     }
 
     #[test]
