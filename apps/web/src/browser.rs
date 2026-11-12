@@ -174,6 +174,17 @@ pub fn start() {
 }
 
 async fn run() -> Result<(), String> {
+    let window = window()?;
+    let location = window.location();
+    let path = location.pathname().map_err(js)?;
+    let search = location.search().map_err(js)?;
+    let route = route(&path, search.trim_start_matches('?'));
+    // The demo: the app at once, on the demo vault in memory, nothing
+    // asked of the issuer or the node.
+    if route == Route::Demo {
+        crate::app::mount(crate::app::Mode::Demo);
+        return Ok(());
+    }
     read_distribution().await;
     draw(&Screen::Loading);
     let (status, text) = fetch("GET", &format!("{APP}config.json"), None, &[]).await?;
@@ -182,12 +193,8 @@ async fn run() -> Result<(), String> {
     }
     let config = Rc::new(Config::parse(&text)?);
     wire(Rc::clone(&config))?;
-    let window = window()?;
-    let location = window.location();
-    let path = location.pathname().map_err(js)?;
-    let search = location.search().map_err(js)?;
-    let problem = match route(&path, search.trim_start_matches('?')) {
-        Route::App => None,
+    let problem = match route {
+        Route::App | Route::Demo => None,
         Route::Callback { code, state } => redeem(&config, &code, &state).await.err(),
         Route::Refused(why) => Some(why),
     };

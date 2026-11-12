@@ -16,7 +16,8 @@ assets/           the site's scripts and styles, content-hashed names
 fonts/            the site's font (Archivo) and its licence
 favicon.svg, logo.svg
 docs/             the docs, every page a folder with index.html (/docs/…/)
-app/              the web app: index.html, start.js, style.css, the wasm,
+app/              the web app: index.html, start.js, style.css, the wasm
+                  and its JS (architect_web.js, snippets/), its font,
                   config.json (the server's own copy replaces it)
 ROUTES.md         this file
 ```

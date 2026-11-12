@@ -6,7 +6,10 @@
 #                   changelog.html, extensions.html (+ extensions/<id>.html),
 #                   404.html, their hashed assets/ and fonts/
 #   OUT/docs/       docs/content, built by `architect site build --base /docs/`
-#   OUT/app/        the web app (apps/web): its page, its wasm, config.json
+#   OUT/app/        the web app (apps/web): its page, its wasm and the JS
+#                   wasm-bindgen writes beside it (architect_web.js, and
+#                   snippets/: dioxus-web's interpreter), config.json, its
+#                   face (Inter-Variable.ttf, OFL: Inter-OFL.txt)
 #   OUT/ROUTES.md   how a server must serve OUT (scripts/web-routes.md)
 #
 # What `just web` serves, the release attaches as architect-web-<v>.tar.gz
@@ -17,13 +20,14 @@
 #   scripts/web-bundle.sh OUT            # builds what it needs (dev shell)
 #
 # Prebuilt pieces skip their build (flake.nix passes all of them):
-#   ARCHITECT_WEB_WASM   architect_web.wasm (wasm32-unknown-unknown, release)
+#   ARCHITECT_WEB_WASM   architect_web.wasm (wasm32-unknown-unknown, profile `web`)
 #   ARCHITECT_CLI        the `architect` CLI binary (apps/cli)
 #   WASM_BINDGEN         a wasm-bindgen at Cargo.lock's version
 #   ARCHITECT_SITE       apps/site's prerendered output (its .output/public)
 # and two more for a check without Rust (site.yml: a release's bundle's):
 #   ARCHITECT_WEB_BOUND  a folder with wasm-bindgen's output (architect_web.js,
-#                        architect_web_bg.wasm), instead of the wasm and bindgen
+#                        architect_web_bg.wasm, snippets/ when it has one),
+#                        instead of the wasm and bindgen
 #   ARCHITECT_DOCS       a built docs folder, instead of the CLI
 # Otherwise the site is built here with bun (`bun install --frozen-lockfile`,
 # `bun run build`), from a bun and node on the PATH or nixpkgs' (nix shell).
@@ -89,9 +93,10 @@ fi
 bound="${ARCHITECT_WEB_BOUND:-}"
 wasm="${ARCHITECT_WEB_WASM:-}"
 if [ -z "$bound" ] && [ -z "$wasm" ]; then
-    (cd "$root" && cargo build -q --release -p architect-web --target wasm32-unknown-unknown)
+    # The `web` profile (Cargo.toml): size first, what the browser fetches.
+    (cd "$root" && cargo build -q --profile web -p architect-web --lib --target wasm32-unknown-unknown)
     target="$(cd "$root" && cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
-    wasm="$target/wasm32-unknown-unknown/release/architect_web.wasm"
+    wasm="$target/wasm32-unknown-unknown/web/architect_web.wasm"
 fi
 
 bindgen="${WASM_BINDGEN:-}"
@@ -113,11 +118,17 @@ rm -rf "$out/docs" "$out/app"
 cp "$root/scripts/web-routes.md" "$out/ROUTES.md"
 mkdir -p "$out/app"
 cp "$root"/apps/web/app/* "$out/app/"
+# The app's face, as the desktop app's (apps/ui/assets/fonts).
+cp "$root/apps/ui/assets/fonts/Inter-Variable.ttf" "$out/app/"
+cp "$root/apps/ui/assets/fonts/OFL.txt" "$out/app/Inter-OFL.txt"
 if [ -n "${ARCHITECT_DISTRIBUTION:-}" ]; then
     cp "$ARCHITECT_DISTRIBUTION" "$out/app/distribution.json"
 fi
 if [ -n "$bound" ]; then
     cp "$bound/architect_web.js" "$bound/architect_web_bg.wasm" "$out/app/"
+    if [ -d "$bound/snippets" ]; then
+        cp -r "$bound/snippets" "$out/app/"
+    fi
 else
     "$bindgen" --target web --no-typescript --out-dir "$out/app" "$wasm"
 fi

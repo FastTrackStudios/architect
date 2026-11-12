@@ -153,12 +153,56 @@ test('the app is the distribution its bundle was built for', { skip }, async () 
     await tab.go(`${origin}/app/`);
     await tab.until('!!document.querySelector("[data-action=sign-in]")', 'the sign-in button');
     assert.match(await tab.eval('document.querySelector("#app h2").textContent'), new RegExp(`Sign in to ${dist.name}`));
+    // Signed out, the demo is a press away.
+    assert.equal(await tab.eval('document.querySelector(\'#app a[href="/app/?demo"]\')?.textContent'), 'Try the demo');
     if (res.ok) {
       assert.equal(await tab.eval('document.title'), dist.name);
       assert.equal(await tab.eval('document.querySelector("header .brand").textContent'), dist.name);
     }
     const listed = await tab.eval('JSON.stringify([...document.querySelectorAll("#app [data-extension]")].map((e) => e.dataset.extension))');
     assert.deepEqual(JSON.parse(listed), dist.extensions.map((e) => e.id));
+  } finally {
+    close();
+  }
+});
+
+// The landing page's Demo button (`/app/?demo`): the app itself (the
+// shell, the workspace, the navigator, ⌘K) on the demo vault, in the
+// tab's memory: no sign-in, and no request leaves the app's own files.
+test('the demo is the app on the demo vault, and sends nothing', { skip }, async () => {
+  const { tab, close } = await open();
+  try {
+    const seen = [];
+    tab.on((m) => { if (m.method === 'network.beforeRequestSent') seen.push(m.params.request.url); });
+    await tab.send('session.subscribe', { events: ['network.beforeRequestSent'] });
+    await tab.go(`${origin}/app/?demo`);
+    await tab.until('!!document.querySelector(\'[data-note="Welcome.md"] [data-testid=note-text]\')', 'the Welcome note', 30000);
+    assert.ok(await tab.eval('!!document.querySelector("[data-testid=demo-badge]")'), 'the demo says so, and signs in');
+    const leaf = (text) => `[...document.querySelectorAll("#app *")].some((e) => e.childElementCount === 0 && e.textContent.trim().startsWith(${JSON.stringify(text)}))`;
+    assert.ok(await tab.eval(leaf('Projects')), 'the navigator lists the vault');
+
+    // An edit is the vault's at once: the navigator's preview follows it.
+    await tab.eval(`(() => {
+      const t = document.querySelector('[data-note="Welcome.md"] [data-testid=note-text]');
+      t.focus();
+      t.value = 'Edited in the test. ' + t.value;
+      t.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await tab.until(leaf('Edited in the test.'), 'the edit in the navigator');
+
+    // ⌘K: the Command Palette, its field focused.
+    await tab.send('input.performActions', {
+      context: (await tab.send('browsingContext.getTree', {})).contexts[0].context,
+      actions: [{ type: 'key', id: 'keys', actions: [
+        { type: 'keyDown', value: '' }, { type: 'keyDown', value: 'k' },
+        { type: 'keyUp', value: 'k' }, { type: 'keyUp', value: '' },
+      ] }],
+    });
+    await tab.until('document.activeElement && document.activeElement.tagName === "INPUT"', 'the palette');
+
+    // Only the app's own files (and the site's icon) were asked for.
+    const off = seen.filter((u) => { const p = new URL(u); return p.origin !== origin || !(p.pathname.startsWith('/app/') || p.pathname === '/favicon.svg'); });
+    assert.deepEqual(off, [], 'requests outside /app/');
   } finally {
     close();
   }
