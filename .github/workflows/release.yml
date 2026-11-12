@@ -247,6 +247,17 @@ jobs:
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "### architect-web image: \`$tags\`" >> "$GITHUB_STEP_SUMMARY"
 
+      # The site build finds this release while it is still a DRAFT, and
+      # only with a token (data.ts lists the releases with it): prove the
+      # token reaches the build inside the dev shell, or fail here, clearly.
+      - name: The token reaches the site build (devenv shell)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # shellcheck disable=SC2016 # expanded by the dev shell's bash, on purpose
+          devenv shell -- bash -c '[ -n "${GITHUB_TOKEN:-}" ]' \
+            || { echo "::error::GITHUB_TOKEN is not visible inside devenv shell: the site build could not find the draft release"; exit 1; }
+          echo "GITHUB_TOKEN is visible inside devenv shell"
       - name: Build the bundle
         id: build
         env:
@@ -497,6 +508,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          # The tags: Latest only for the highest stable one.
+          fetch-depth: 0
           persist-credentials: false
       - name: Sum the reported assets, sign, publish
         env:
@@ -510,36 +523,13 @@ jobs:
             ${{ needs.macos.result == 'success' && needs.macos.outputs.digests || '' }}
         run: |
           set -euo pipefail
-          tools=(nix shell --quiet --inputs-from . nixpkgs#gh nixpkgs#jq nixpkgs#minisign --command)
-          dir="$RUNNER_TEMP/sums"
-          rm -rf "$dir" && mkdir -p "$dir"
-          printf '%s\n' "$EXPECTED" | sed 's/^[[:space:]]*//; /^$/d' > "$dir/expected"
-          assets() {
-            local id
-            id="$("${tools[@]}" gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id" | head -1)"
-            [ -n "$id" ] || { echo "::error::no release for $GITHUB_REF_NAME"; exit 1; }
-            "${tools[@]}" gh api "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" --jq '[.[] | {name, digest}]'
-          }
-          assets > "$dir/assets.json"
-          "${tools[@]}" bash scripts/release-sums.sh plan "$dir/expected" "$dir/assets.json" > "$dir/SHA256SUMS"
-          cat "$dir/SHA256SUMS"
-          upload=("$dir/SHA256SUMS")
-          if [ -n "$MINISIGN_KEY" ]; then
-            key="$RUNNER_TEMP/release.key"
-            ( umask 077; printf '%s\n' "$MINISIGN_KEY" > "$key" )
-            "${tools[@]}" minisign -S -s "$key" -m "$dir/SHA256SUMS" -x "$dir/SHA256SUMS.minisig" -t "architect $GITHUB_REF_NAME SHA256SUMS"
-            rm -f "$key"
-            "${tools[@]}" minisign -V -P "$ORG_RELEASE_KEY" -m "$dir/SHA256SUMS" -x "$dir/SHA256SUMS.minisig"
-            upload+=("$dir/SHA256SUMS.minisig")
-          else
-            echo "::warning::release-signing has no FTS_RELEASE_MINISIGN_KEY: SHA256SUMS goes out unsigned"
-          fi
-          "${tools[@]}" gh release upload "$GITHUB_REF_NAME" "${upload[@]}" --clobber --repo "$GITHUB_REPOSITORY"
-          # Nothing moved while signing, then publish.
-          assets > "$dir/assets.json"
-          "${tools[@]}" bash scripts/release-sums.sh plan "$dir/expected" "$dir/assets.json" > /dev/null
-          "${tools[@]}" gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"
-          echo "### $GITHUB_REF_NAME published, $(wc -l < "$dir/SHA256SUMS") assets signed" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$EXPECTED" | sed 's/^[[:space:]]*//; /^$/d' > "$RUNNER_TEMP/expected"
+          # The Mac job is continue-on-error: what it uploaded without
+          # reporting is deleted, not signed (scripts/release-publish.sh).
+          nix shell --quiet --inputs-from . nixpkgs#gh nixpkgs#jq nixpkgs#minisign --command \
+            bash scripts/release-publish.sh run "$GITHUB_REF_NAME" "$RUNNER_TEMP/expected" \
+              --optional Architect-macos-arm64.dmg --optional latest-macos.json
+          echo "### $GITHUB_REF_NAME: signed and published (scripts/release-publish.sh)" >> "$GITHUB_STEP_SUMMARY"
 
   # @fasttrackstudio/architect (the runtime, no dependencies) and
   # @fasttrackstudio/architect-cli (build-web, with jco), from

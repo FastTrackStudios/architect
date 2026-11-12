@@ -145,6 +145,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         for keypath, s in strings(doc):
             if re.search(r"toJSON\(\s*secrets\s*\)", s):
                 bad.append(f"{name} ({'.'.join(keypath)}): toJSON(secrets)")
+            # Allowed besides a mint's private-key: exactly `${{ secrets.K != '' }}`
+            # (the environment guard: a boolean, never the value).
+            if re.fullmatch(r"\$\{\{\s*secrets\.[A-Za-z0-9_]+\s*!=\s*''\s*\}\}", s.strip()):
+                continue
             for m in re.finditer(r"secrets\.([A-Za-z0-9_]+)", s):
                 if m.group(1) in BOT_KEYS and keypath not in mint_keys:
                     bad.append(f"{name} ({'.'.join(keypath)}): secrets.{m.group(1)} outside a mint's private-key")
@@ -197,6 +201,14 @@ jobs:
       K: ${{ secrets.RELEASE_QUEUE_APP_KEY }}
     steps:
       - run: gh api app/installations
+""",
+    "the key inside a longer expression": """
+jobs:
+  other:
+    env:
+      K: ${{ secrets.PIN_BUMP_APP_KEY != '' && secrets.PIN_BUMP_APP_KEY }}
+    steps:
+      - run: "true"
 """,
     "toJSON(secrets)": """
 jobs:

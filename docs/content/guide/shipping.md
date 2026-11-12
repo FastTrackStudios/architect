@@ -91,6 +91,28 @@ release-notes`). Architect, the app, is released from the same tag
 | `nix-bump` | a PR (branch `chore/nix-desktop-<tag>`) pointing the flake's `architect-desktop` at the new AppImage, for the highest release only; it warns instead of failing |
 | `sums` | `SHA256SUMS` over exactly the assets the jobs above report (each reports its files' sha256 as a job output), refusing an asset no job made, a missing one or one changed after upload (`scripts/release-sums.sh`); `SHA256SUMS.minisig` signed with the org key when the `release-signing` environment has `FTS_RELEASE_MINISIGN_KEY`; then it publishes the draft. Nothing reads a release whose assets are not signed |
 
+**When `sums` refuses** (the release stays a draft, nothing is published),
+it names the asset:
+
+- **"… is on the Release but no build job made it"**: something uploaded
+  an asset no job reported. Look at it in the draft. If it is a leftover of
+  an earlier attempt of a job that has since re-run, delete it (`gh release
+  delete-asset vX.Y.Z <name> --yes`), then re-run `sums`. The Mac job's
+  `Architect-macos-arm64.dmg` and `latest-macos.json` are deleted by `sums`
+  itself when `macos` did not report them (it is continue-on-error, so a
+  failed or skipped Mac build never blocks the release; the run log says
+  so).
+- **"… its build job made …"** (a digest that changed after upload):
+  re-run the job that made the asset (it uploads with `--clobber` and
+  reports the new digest), then re-run `sums`.
+- **"… is not on the Release"**: re-run the job that should have uploaded
+  it, then `sums`.
+
+`sums` publishes only a draft, and marks it Latest only when its tag is the
+highest stable tag. A hotfix on an older line, or a re-run, never moves
+Latest. `scripts/release-dry-run.sh` (`release-dry-run.yml`, on PRs that
+touch these mechanics) exercises all of this on a throwaway draft.
+
 `:latest` goes only to the highest release. Packages pushed with
 `GITHUB_TOKEN` start private on GHCR, so each image is made public once
 in the org's package settings. A Windows build is a follow-up.
