@@ -288,6 +288,81 @@ impl Issuer {
         .await
     }
 
+    /// Redeems a sign-in's `code` at the token endpoint with its PKCE
+    /// verifier: the access token (OIDC, short-lived).
+    ///
+    /// # Errors
+    ///
+    /// The issuer's refusal (a wrong verifier, a used code, another
+    /// redirect), or [`IssuerError::Unreachable`].
+    pub async fn redeem_code(
+        &self,
+        client_id: &str,
+        redirect_uri: &str,
+        code: &str,
+        pkce: &auth_client::oidc::Pkce,
+    ) -> Result<String, IssuerError> {
+        let body = auth_client::oidc::token_request_body(client_id, redirect_uri, code, pkce);
+        let answer = self.post_token(body).await?;
+        auth_client::oidc::access_token_from(&answer).map_err(|e| IssuerError::Other(e.to_string()))
+    }
+
+    /// Trades a fresh `access_token` for an issuer session (RFC 8693 at the
+    /// token endpoint): what the issuer's services take. The issuer allows
+    /// it to a first-party client (`issue_sessions`), once per token.
+    ///
+    /// # Errors
+    ///
+    /// The issuer's refusal, or [`IssuerError::Unreachable`].
+    pub async fn trade_for_session(
+        &self,
+        client_id: &str,
+        access_token: &str,
+    ) -> Result<SignedIn, IssuerError> {
+        let answer = self
+            .post_token(crate::redirect::exchange_body(client_id, access_token))
+            .await?;
+        let session = auth_client::oidc::access_token_from(&answer)
+            .map_err(|e| IssuerError::Other(e.to_string()))?;
+        self.session(&session).await
+    }
+
+    /// POSTs `body` (a form) to `/oauth2/token`: the answer's JSON, or the
+    /// issuer's `error_description` as a refusal.
+    async fn post_token(&self, body: String) -> Result<String, IssuerError> {
+        let me = self.clone();
+        let url = format!("{}/oauth2/token", self.origin.trim_end_matches('/'));
+        self.run(async move {
+            let unreachable = |detail: String| IssuerError::Unreachable {
+                issuer: me.origin.clone(),
+                detail,
+            };
+            let reply = reqwest::Client::new()
+                .post(&url)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("user-agent", user_agent())
+                .body(body)
+                .send()
+                .await
+                .map_err(|e| unreachable(e.to_string()))?;
+            let ok = reply.status().is_success();
+            let text = reply.text().await.map_err(|e| unreachable(e.to_string()))?;
+            if ok {
+                return Ok(text);
+            }
+            let why = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| {
+                    ["error_description", "message", "error"]
+                        .iter()
+                        .find_map(|k| v.get(*k).and_then(|m| m.as_str()).map(str::to_owned))
+                })
+                .unwrap_or_else(|| "the issuer refused the sign-in".to_owned());
+            Err(IssuerError::Other(why))
+        })
+        .await
+    }
+
     /// Who `token` is, and its session now (its expiry).
     ///
     /// # Errors

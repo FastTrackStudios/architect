@@ -249,6 +249,11 @@ struct OidcClientJson {
     skip_consent: bool,
     #[serde(default)]
     disabled: bool,
+    /// A first-party native app (the Architect app) trades its fresh
+    /// access token for an issuer session at `/oauth2/token` (token
+    /// exchange): off unless set.
+    #[serde(default)]
+    issue_sessions: bool,
 }
 
 fn default_scopes() -> Vec<String> {
@@ -267,6 +272,7 @@ impl From<OidcClientJson> for OidcClientConfig {
             public_client: value.public_client,
             skip_consent: value.skip_consent,
             disabled: value.disabled,
+            issue_sessions: value.issue_sessions,
         }
     }
 }

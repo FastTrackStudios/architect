@@ -100,8 +100,9 @@ impl AccountsUi {
         let file = self.snapshot();
         let me = *self;
         let Some(active) = file.active().cloned() else {
-            let mut menu = shell::Menu::new()
-                .item("Sign in…", icon!(LogIn), move |()| me.open(Sheet::SignIn));
+            let mut menu = shell::Menu::new().item("Sign in…", icon!(LogIn), move |()| {
+                me.accounts().sign_in();
+            });
             if !file.accounts.is_empty() {
                 menu = menu.item("Accounts…", icon!(Users), move |()| {
                     me.open(Sheet::Accounts);
@@ -135,7 +136,7 @@ impl AccountsUi {
         }
         menu = menu
             .item("Add an account…", icon!(UserPlus), move |()| {
-                me.open(Sheet::SignIn);
+                me.accounts().sign_in();
             })
             .item(
                 "Accounts and devices…",
@@ -340,70 +341,10 @@ fn StatusLine(status: Status) -> Element {
     }
 }
 
-/// What the password field shows for each character.
-const DOT: char = '•';
-
-/// A password field: focusable, typed into by keys, its text drawn as dots
-/// (Blitz has no masked input). Return calls `on_enter`. While it has the
-/// focus the shell is told a field is typed in, so no single-key command
-/// fires.
-#[component]
-fn PasswordField(value: Signal<String>, on_enter: Callback<()>) -> Element {
-    let t = theme();
-    let mut focused = use_signal(|| false);
-    let mut value = value;
-    let dots = DOT.to_string().repeat(value.read().chars().count());
-    let ring = if focused() {
-        t.accent.to_string()
-    } else {
-        t.rule.to_string()
-    };
-    let field = field_style(&t);
-    rsx! {
-        div {
-            id: "account-password",
-            role: "textbox",
-            "aria-label": "Password",
-            tabindex: "0",
-            style: "{field} display: flex; align-items: center; outline: none; border-color: {ring}; letter-spacing: 2px; overflow: hidden;",
-            onfocus: move |_| {
-                focused.set(true);
-                shell::set_typing(true);
-            },
-            onblur: move |_| {
-                focused.set(false);
-                shell::set_typing(false);
-            },
-            onkeydown: move |e: KeyboardEvent| {
-                let held = e.modifiers();
-                match e.key() {
-                    Key::Named(NamedKey::Enter) => {
-                        e.prevent_default();
-                        on_enter.call(());
-                    }
-                    Key::Named(NamedKey::Backspace) => {
-                        e.prevent_default();
-                        e.stop_propagation();
-                        value.with_mut(|v| {
-                            v.pop();
-                        });
-                    }
-                    Key::Character(c) if !held.ctrl() && !held.meta() => {
-                        e.prevent_default();
-                        e.stop_propagation();
-                        value.with_mut(|v| v.push_str(&c));
-                    }
-                    _ => {}
-                }
-            },
-            span { "{dots}" }
-            if focused() {
-                span { style: "flex-shrink: 0; width: 1px; height: 18px; margin-left: 1px; background: {t.ink};" }
-            }
-        }
-    }
-}
-
+/// The sign-in sheet: the browser sign-in under way (its code, the page
+/// again, Cancel), or the button that starts it. No field here takes a
+/// password: the person signs in on the issuer's own page
+/// (`crate::browser`), which a password manager or a passkey fills.
 #[component]
 fn SignInPage() -> Element {
     let Some(ui) = try_use_accounts() else {
@@ -412,68 +353,76 @@ fn SignInPage() -> Element {
     let _ = (ui.rev)();
     let accounts = ui.accounts();
     let t = theme();
-    let mut email = use_signal(String::new);
-    let mut password = use_signal(String::new);
     let status = accounts.status();
     let busy = matches!(status, Status::Busy(_));
     let wait = accounts.browser();
     let issuer = host(accounts.issuer().origin());
     let has_accounts = !accounts.snapshot().accounts.is_empty();
-    let mut submit = {
-        let a = accounts.clone();
-        move || {
-            let (e, p) = (email.peek().clone(), password.peek().clone());
-            password.set(String::new());
-            let a = a.clone();
-            spawn(async move {
-                let _ = a.sign_in_password(&e, &p).await;
-            });
-        }
-    };
-    let on_enter = {
-        let mut submit = submit.clone();
-        move |e: KeyboardEvent| {
-            if e.key() == Key::Named(NamedKey::Enter) {
-                e.prevent_default();
-                submit();
-            }
-        }
-    };
-    let mut enter = submit.clone();
-    let (browser, cancel, reopen, back, later) = (
+    let (browser, cancel, again, back, later) = (
         accounts.clone(),
         accounts.clone(),
-        wait.as_ref().map(|w| w.url.clone()),
         accounts.clone(),
-        accounts,
+        accounts.clone(),
+        accounts.clone(),
     );
-    let field = field_style(&t);
+    let (again2, cancel2) = (accounts.clone(), accounts);
+    let reopen = wait.as_ref().map(|w| w.url.clone());
     rsx! {
         div { style: "display: flex; flex-direction: column; gap: 4px;",
             div { style: "font-size: 18px; font-weight: 650;", "Sign in" }
             div { style: "font-size: 13px; color: {t.ink_2}; line-height: 1.4;",
-                "Optional: the app works signed out. Sign in at {issuer} to use your account and see its devices here."
+                "Optional: the app works signed out. You sign in on {issuer}'s own page, in your browser, and come back signed in."
             }
         }
         if let Some(w) = wait {
-            div { "data-browser-code": "{w.user_code}",
-                style: "display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 10px; background: {t.active};",
-                div { style: "font-size: 13px; color: {t.ink_2};",
-                    if w.opened { "Approve this code on the page that opened in your browser:" } else { "Open the link below and approve this code:" }
-                }
-                div { style: "font-size: 26px; font-weight: 700; letter-spacing: 3px; font-family: ui-monospace, Menlo, monospace;", "{w.user_code}" }
-                div { style: "font-size: 12px; color: {t.ink_3}; word-break: break-all;", "{w.url}" }
-                div { style: "display: flex; gap: 8px;",
-                    button { style: button_style(&t, false),
-                        onclick: move |_| {
-                            if let Some(url) = reopen.clone() {
-                                let _ = webbrowser::open(&url);
-                            }
-                        },
-                        Globe { size: 14 }
-                        "Open the page"
+            if w.user_code.is_empty() {
+                // The browser sign-in: finished in the browser.
+                div { "data-browser-wait": "true",
+                    style: "display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 10px; background: {t.active};",
+                    div { style: "font-size: 14px; color: {t.ink};",
+                        if w.opened { "Finish signing in on the page that opened. You come back here signed in." } else { "Your browser did not open. Start again, or open this page:" }
                     }
-                    button { style: button_style(&t, false), onclick: move |_| cancel.cancel_browser(), "Cancel" }
+                    if !w.opened {
+                        div { style: "font-size: 12px; color: {t.ink_3}; word-break: break-all;", "{w.url}" }
+                    }
+                    div { style: "display: flex; gap: 8px;",
+                        button { style: button_style(&t, false),
+                            onclick: move |_| {
+                                again.cancel_browser();
+                                again.sign_in_browser();
+                            },
+                            Globe { size: 14 }
+                            "Start again"
+                        }
+                        button { style: button_style(&t, false), onclick: move |_| cancel.cancel_browser(), "Cancel" }
+                    }
+                }
+            } else {
+                // A code to approve (the device grant).
+                div { "data-browser-code": "{w.user_code}",
+                    style: "display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 10px; background: {t.active};",
+                    div { style: "font-size: 13px; color: {t.ink_2};",
+                        if w.opened { "Sign in and approve this code on the page that opened:" } else { "Open the page below and approve this code:" }
+                    }
+                    div { style: "font-size: 26px; font-weight: 700; letter-spacing: 3px; font-family: ui-monospace, Menlo, monospace;", "{w.user_code}" }
+                    div { style: "font-size: 12px; color: {t.ink_3}; word-break: break-all;", "{w.url}" }
+                    div { style: "display: flex; gap: 8px;",
+                        button { style: button_style(&t, false),
+                            onclick: move |_| {
+                                if let Some(url) = reopen.clone() {
+                                    let a = again2.clone();
+                                    let _ = crate::browser::open(&url, move |back| {
+                                        if back.is_none() {
+                                            a.cancel_browser();
+                                        }
+                                    });
+                                }
+                            },
+                            Globe { size: 14 }
+                            "Open the page"
+                        }
+                        button { style: button_style(&t, false), onclick: move |_| cancel2.cancel_browser(), "Cancel" }
+                    }
                 }
             }
         } else {
@@ -483,30 +432,7 @@ fn SignInPage() -> Element {
                 disabled: busy,
                 onclick: move |_| browser.sign_in_browser(),
                 Globe { size: 16 }
-                "Continue in the browser"
-            }
-            div { style: "font-size: 12px; color: {t.ink_3}; text-align: center;", "or with your email and password" }
-            label { r#for: "account-email", style: "font-size: 13px; color: {t.ink_2};", "Email" }
-            input {
-                id: "account-email",
-                r#type: "email",
-                value: "{email}",
-                autocomplete: "username",
-                style: "{field}",
-                oninput: move |e: FormEvent| email.set(e.value()),
-                onkeydown: on_enter,
-            }
-            label { r#for: "account-password", style: "font-size: 13px; color: {t.ink_2};", "Password" }
-            // Blitz draws an `input type=password` as typed: the field is
-            // the sheet's own, its dots drawn here.
-            PasswordField { value: password, on_enter: move |()| enter() }
-            button {
-                "data-sign-in": "password",
-                style: button_style(&t, false),
-                disabled: busy,
-                onclick: move |_| submit(),
-                LogIn { size: 14 }
-                "Sign in"
+                "Sign in with your browser"
             }
         }
         StatusLine { status }
@@ -541,7 +467,7 @@ fn AccountsPage() -> Element {
         for account in file.accounts {
             AccountRowView { key: "{account.key()}", active: active.as_deref() == Some(account.key().as_str()), account }
         }
-        button { style: button_style(&t, false), onclick: move |_| add.open_sheet(Sheet::SignIn),
+        button { style: button_style(&t, false), onclick: move |_| add.sign_in(),
             UserPlus { size: 14 }
             "Add an account"
         }
@@ -604,7 +530,7 @@ fn AccountRowView(account: Account, active: bool) -> Element {
                 }
             }
             if needs {
-                button { style: button_style(&t, false), onclick: move |_| ui.open(Sheet::SignIn), "Sign in" }
+                button { style: button_style(&t, false), onclick: move |_| ui.accounts().sign_in(), "Sign in" }
             } else if !active {
                 button { style: button_style(&t, false), onclick: move |_| { let _ = ui.accounts().switch(&switch_key); }, "Switch" }
             }

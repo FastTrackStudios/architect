@@ -19,7 +19,7 @@ description = "Accounts on an issuer: who is signed in, their sessions in the pl
 [features]
 default = []
 keychain = ["dep:keyring", "dep:tracing"]
-http = ["architect-orgs/auth", "dep:auth-proto", "dep:architect-spaces", "architect-spaces/vox", "dep:architect", "architect/http-client", "architect/connect", "dep:architect-devices", "architect-devices/vox", "dep:tokio", "dep:uuid", "dep:webbrowser"]
+http = ["architect-orgs/auth", "dep:auth-proto", "dep:architect-spaces", "architect-spaces/vox", "dep:architect", "architect/http-client", "architect/connect", "dep:architect-devices", "architect-devices/vox", "dep:tokio", "dep:uuid", "dep:webbrowser", "dep:reqwest"]
 actions = ["http", "architect/action-list"]
 ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:lucide-dioxus", "dep:futures-channel", "dep:futures-util"]
 
@@ -54,11 +54,14 @@ tracing = { workspace = true, optional = true }
 keyring = { version = "3.6", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
 # The issuer's requests run on a small runtime of their own, whoever asks
 # (the window's executor is not tokio).
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "sync"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "sync", "net", "io-util", "macros"], optional = true }
 # This device's id at the issuer (auth_client::this_device).
 uuid = { version = "1", default-features = false, optional = true }
 # "Continue in browser": the issuer's approval page.
 webbrowser = { version = "1", optional = true }
+# The sign-in's two requests to the issuer's token endpoint (src/issuer.rs
+# `redeem_code`, `trade_for_session`).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -68,6 +71,8 @@ auth-server = { workspace = true }
 architect-auth = { workspace = true, features = ["db"] }
 axum = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
+# The person's browser in the redirect sign-in's tests.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 
@@ -77,6 +82,32 @@ required-features = ["actions"]
 
 [lib]
 doctest = false
+
+# iOS: the browser sign-in in the system's sheet (ASWebAuthenticationSession,
+# src/browser.rs), over the app's window.
+[target.'cfg(target_os = "ios")'.dependencies]
+block2 = { version = "0.6" }
+objc2 = { workspace = true }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "NSError",
+    "NSOperation",
+    "NSSet",
+    "NSString",
+    "NSURL",
+] }
+objc2-ui-kit = { workspace = true, default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "UIApplication",
+    "UIResponder",
+    "UIScene",
+    "UIView",
+    "UIWindow",
+    "UIWindowScene",
+] }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

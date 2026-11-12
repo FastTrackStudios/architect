@@ -453,6 +453,33 @@ pub struct ExchangeOidcToken {
     pub refresh_token: Option<String>,
 }
 
+/// RFC 8693's grant type: an access token traded for another token.
+pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
+/// RFC 8693's name for an OAuth access token, the subject traded.
+pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
+/// What is asked for in its place: an issuer session token, what the
+/// issuer's vox services authenticate.
+pub const SESSION_TOKEN_TYPE: &str = "urn:fasttrackstudio:params:oauth:token-type:session";
+/// How long after its issue an access token may still be traded, seconds:
+/// a client trades the one it was just given, at once.
+pub const EXCHANGE_WINDOW_SECONDS: i64 = 300;
+
+/// A first-party app's fresh access token traded for an issuer session.
+///
+/// At `/oauth2/token` with [`TOKEN_EXCHANGE`]: allowed only for a client
+/// with `issue_sessions`, for a token issued to that client within
+/// [`EXCHANGE_WINDOW_SECONDS`], once per token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExchangeForSession {
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub subject_token: String,
+    pub subject_token_type: String,
+    pub requested_token_type: String,
+    /// The app, as the session's user agent says it.
+    pub user_agent: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OidcTokenResponse {
     pub access_token: String,

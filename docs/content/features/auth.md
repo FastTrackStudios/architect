@@ -94,6 +94,42 @@ that into an `AuthVoxContext`, or `SessionIdentityResolver` into a
 `Principal` for the gate. A device without a browser posts the device-code
 request, shows the code, and polls until the person approves it elsewhere.
 
+### A native app's sign-in
+
+The Architect app signs in in the system's browser, on the issuer's own
+page, never in fields it draws (`features/accounts/src/redirect.rs`,
+`features/accounts/src/browser.rs`): authorization code with PKCE (S256)
+and a checked `state`. On iOS the page opens in `ASWebAuthenticationSession`
+and comes back on the app's scheme, `app.fasttrackstudio.architect:/oauth/callback`;
+on a desk it opens in the default browser and comes back on a loopback
+port the app listens on, `http://127.0.0.1:<port>/oauth/callback`. The
+issuer matches a registered loopback redirect on any port (RFC 8252 §7.3,
+`features/auth/auth/src/flows.rs` `redirect_matches`), never `localhost`.
+
+The code buys an OIDC access token, which the issuer's vox services do not
+take: they take sessions. So the app trades it at once for an issuer
+session (RFC 8693 at `/oauth2/token`, grant type `TOKEN_EXCHANGE`,
+`requested_token_type` `SESSION_TOKEN_TYPE`, `ExchangeForSession`), allowed
+only to a client registered with `issue_sessions`, for a token issued to
+that client in the last `EXCHANGE_WINDOW_SECONDS`, once per token; the
+session is new (signing the app out leaves the browser signed in). From
+there it is the session it always was: kept in the keychain, renewed,
+revoked on sign-out.
+
+The `architect` client the native app uses, in `AUTH_OIDC_CLIENTS`:
+
+```json
+{ "client_id": "architect", "public_client": true, "skip_consent": true,
+  "issue_sessions": true,
+  "scopes": ["openid", "profile", "email", "offline_access"],
+  "redirect_uris": ["http://127.0.0.1/oauth/callback",
+                    "app.fasttrackstudio.architect:/oauth/callback",
+                    "https://architect.fasttrackstudio.app/auth/callback"] }
+```
+
+The device-code flow stays for what has no browser to come back to (a
+headless node, the CLI: `Accounts::sign_in_with_code`).
+
 ## Tests to read
 
 - `apps/auth-server/tests/surfaces.rs`: one scenario over HTTP, in-process
