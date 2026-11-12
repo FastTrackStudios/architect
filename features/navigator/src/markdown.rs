@@ -184,6 +184,29 @@ fn has_markdown_ext(path: &str) -> bool {
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
 }
 
+/// A note's frontmatter block as it is written, and the body after it.
+///
+/// The block has its fences and the line end after the closing one: an
+/// editor keeps the block and edits the body. A note with no frontmatter (or one
+/// that never closes) is all body. The block always ends with a line end,
+/// so `block + body` stays a note with frontmatter whatever the body
+/// becomes (a block closed at the end of the file gains one).
+#[must_use]
+pub fn split_block(text: &str) -> (std::borrow::Cow<'_, str>, &str) {
+    match split_frontmatter(text) {
+        (Some(_), body) => {
+            let at = text.len().saturating_sub(body.len());
+            let block = text.get(..at).unwrap_or_default();
+            if block.ends_with('\n') {
+                (std::borrow::Cow::Borrowed(block), body)
+            } else {
+                (std::borrow::Cow::Owned(format!("{block}\n")), body)
+            }
+        }
+        (None, _) => (std::borrow::Cow::Borrowed(""), text),
+    }
+}
+
 /// The frontmatter (between the first two `---` lines) and the rest.
 fn split_frontmatter(text: &str) -> (Option<&str>, &str) {
     let Some(rest) = text
@@ -341,6 +364,22 @@ mod tests {
                 .starts_with("Welcome Some words here")
         );
         assert!(f.words.unwrap_or_default() > 5);
+    }
+
+    #[test]
+    fn a_block_is_kept_whole_and_ends_with_a_line_end() {
+        let (block, body) = split_block("---\ntitle: A\n---\nBody\n");
+        assert_eq!((&*block, body), ("---\ntitle: A\n---\n", "Body\n"));
+        // Closed at the end of the file, no line end: one is added, so a
+        // body typed after it never joins the fence.
+        let (block, body) = split_block("---\ntitle: A\n---");
+        assert_eq!((&*block, body), ("---\ntitle: A\n---\n", ""));
+        assert_eq!(format!("{block}typed"), "---\ntitle: A\n---\ntyped");
+        let (block, body) = split_block("---\r\ntitle: A\r\n---\r\nB");
+        assert_eq!((&*block, body), ("---\r\ntitle: A\r\n---\r\n", "B"));
+        // None, or never closed: all body.
+        assert_eq!(split_block("just text").0, "");
+        assert_eq!(split_block("---\nnot closed").1, "---\nnot closed");
     }
 
     #[test]
