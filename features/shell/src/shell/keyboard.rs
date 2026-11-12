@@ -136,6 +136,69 @@ impl TapStroke {
     }
 }
 
+/// A root's ear for the keyboard rule: its pointer events make each
+/// finger's [`TapStroke`], and its click brings the keyboard up when the
+/// stroke was a tap that left a field typed in ([`tap_raises`]).
+///
+/// [`AppShell`](super::AppShell)'s root has one. An app whose sheets,
+/// palettes and overlays are drawn beside the shell (the Architect app's
+/// sign-in sheet, settings, ⌘K) gives its own root one too
+/// ([`use_keyboard_taps`]): a tap on their fields never reaches the
+/// shell's.
+#[derive(Clone)]
+pub struct KeyboardTaps {
+    stroke: std::rc::Rc<std::cell::Cell<TapStroke>>,
+    tap: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+/// A [`KeyboardTaps`] for the calling root: wire its `down`, `moved`,
+/// `up` and `click` to the root element's `onpointerdown`,
+/// `onpointermove`, `onpointerup` and `onclick`.
+#[must_use]
+pub fn use_keyboard_taps() -> KeyboardTaps {
+    use_hook(|| KeyboardTaps {
+        stroke: std::rc::Rc::default(),
+        tap: std::rc::Rc::new(std::cell::Cell::new(true)),
+    })
+}
+
+impl KeyboardTaps {
+    pub fn down(&self, e: &PointerEvent) {
+        let c = e.client_coordinates();
+        let mut s = self.stroke.get();
+        s.press(c.x, c.y);
+        self.stroke.set(s);
+    }
+
+    pub fn moved(&self, e: &PointerEvent) {
+        let c = e.client_coordinates();
+        let mut s = self.stroke.get();
+        s.at(c.x, c.y);
+        self.stroke.set(s);
+    }
+
+    pub fn up(&self, e: &PointerEvent) {
+        let c = e.client_coordinates();
+        let mut s = self.stroke.get();
+        let was_tap = s.release(c.x, c.y);
+        self.stroke.set(s);
+        self.tap.set(was_tap);
+        if !was_tap {
+            super::input_debug::note(format!("scroll ended at {:.0},{:.0}: no keyboard", c.x, c.y));
+        }
+    }
+
+    /// The click that follows a release: the keyboard up if it was a tap
+    /// and a field has the focus.
+    pub fn click(&self) {
+        let was_tap = self.tap.replace(true);
+        if tap_raises(soft_keyboard(), was_tap, keyboard()) {
+            super::input_debug::note("tap on a field: keyboard up");
+            show_keyboard();
+        }
+    }
+}
+
 /// Whether a click the shell's root hears brings the keyboard up: where
 /// the keyboard is the screen's own, a tap (not a scroll) that ends with
 /// a field typed in and the keyboard down.

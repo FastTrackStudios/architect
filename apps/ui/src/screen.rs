@@ -322,3 +322,62 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
     }
     (!full && device == Device::Native).then_some(chrome)
 }
+
+/// Hears every finger at the window, whatever the page does with its
+/// events, and brings the keyboard up after a tap that left a field
+/// typed in (`architect_shell::tap_raises`): a sheet, ⌘K or the settings
+/// keep their clicks from bubbling, so no element of the page hears them
+/// all. A scroll that starts on a field leaves the keyboard down.
+#[component]
+pub fn WindowTaps() -> Element {
+    use dioxus_native::winit::event::ElementState;
+    let stroke = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(architect_shell::TapStroke::default())));
+    let window = dioxus_native::use_window();
+    dioxus_native::use_window_event(move |event, _| {
+        let scale = window.scale_factor();
+        let at = |p: &dioxus_native::winit::dpi::PhysicalPosition<f64>| (p.x / scale, p.y / scale);
+        match event {
+            WindowEvent::PointerButton {
+                state: ElementState::Pressed,
+                primary: true,
+                position,
+                ..
+            } => {
+                let (x, y) = at(position);
+                let mut s = stroke.get();
+                s.press(x, y);
+                stroke.set(s);
+            }
+            WindowEvent::PointerMoved {
+                primary: true,
+                position,
+                ..
+            } => {
+                let (x, y) = at(position);
+                let mut s = stroke.get();
+                s.at(x, y);
+                stroke.set(s);
+            }
+            WindowEvent::PointerButton {
+                state: ElementState::Released,
+                primary: true,
+                position,
+                ..
+            } => {
+                let (x, y) = at(position);
+                let mut s = stroke.get();
+                let tap = s.release(x, y);
+                stroke.set(s);
+                if architect_shell::tap_raises(
+                    architect_shell::soft_keyboard(),
+                    tap,
+                    architect_shell::keyboard(),
+                ) {
+                    architect_shell::show_keyboard();
+                }
+            }
+            _ => {}
+        }
+    });
+    rsx! {}
+}

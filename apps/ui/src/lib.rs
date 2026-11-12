@@ -1485,6 +1485,10 @@ pub fn LabApp() -> Element {
                 theme::SystemScheme {}
                 architect_commands::WindowKeys {}
                 ListKeys {}
+                // A tap on a field anywhere in the app brings the keyboard
+                // up, heard from the window: the sheets, ⌘K and settings
+                // keep their clicks to themselves.
+                screen::WindowTaps {}
                 // The Dock icon, its badge and menu, the menu-bar item,
                 // background mode and opening at login.
                 presence::LabPresence { presence: presence::declare(lab, inbox_count, capture_ui.is_some()), inbox: inbox_count }

@@ -197,10 +197,14 @@ from `task:apps/mobile/src/keyboard_bar.rs`).
 Where the keyboard is the screen's own (iOS: `soft_keyboard`), it comes
 up only when the person asks for it, as in any iOS app:
 
-- **A tap that ends on a field.** The shell's root follows each finger
+- **A tap that ends on a field.** Each finger's stroke is followed
   (`features/shell/src/shell/keyboard.rs` `TapStroke`: past `TAP_SLOP` it
-  is a scroll), and its click brings the keyboard up when a field has the
-  focus (`tap_raises`). A press that becomes a scroll, and an `autofocus`
+  is a scroll), and its release brings the keyboard up when a field has
+  the focus (`tap_raises`). The shell's root hears its own
+  (`KeyboardTaps`, `use_keyboard_taps`); the Architect app hears every
+  finger at the window (`apps/ui/src/screen.rs` `WindowTaps`), since its
+  sheets, ⌘K and settings are beside the shell and keep their clicks from
+  bubbling. A press that becomes a scroll, and an `autofocus`
   (a note opening), give the field the focus and no keyboard: Blitz asks
   winit's view to become the first responder whenever a field is focused,
   and `features/shell/src/shell/keyboard/ios.rs` refuses it unless a tap
