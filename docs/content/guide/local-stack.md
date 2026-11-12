@@ -11,6 +11,32 @@ production, and on a machine that holds an administrator's token the
 accounts and orgs are a sanitised copy of production's, so you can test
 with production's shape without touching it.
 
+## Run it: `just dev`, `just demo`, `just website`
+
+The same three recipes, with the same meaning, in Architect, Studio and
+Keyflow (`scripts/run-it.sh` here):
+
+| Recipe | What it runs |
+| --- | --- |
+| `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below (`devenv up mock-oauth auth node app web site`). |
+| `just demo` | The quickest look, nothing watched: the issuer and a node with a share link (Studio's when it is beside this one, else the demo seed's, `/s/ksqx75iaaaaaaaae/`). Sign in as `ada@local.test`, password `development-password`. |
+| `just website` | The public site alone (`apps/site`: landing, download, changelog, extensions, docs) with hot reload, on 7414. `just docs-serve` still serves `docs/content` alone. |
+| `just phone` | Studio's running stack's node on this tailnet over HTTPS (`tailscale serve`, never funnel), for a phone. |
+
+`devenv up` with no arguments is unchanged: this repo's own stack.
+
+### A share page's assets without relinking
+
+A debug build of the node reads `site.css`, `site.js` and `player.js`
+from the folder `ARCHITECT_SITES_ASSETS_DIR` names, at every build of a
+site's pages, instead of the copies compiled in
+(`features/sites/src/assets.rs` `DEV_ASSETS_VAR`); a release build
+ignores it. Studio's stack sets it to a local Architect's
+`features/sites/assets` and rebuilds the share pages on a save, so an
+edit to the player shows on reload in about three seconds, with no
+build. A linked extension's renderer has no such copy on a node yet:
+#626.
+
 ## What starts
 
 Each process is `cargo xtask dev run <process>` (`xtask/src/dev/mod.rs`),

@@ -120,6 +120,19 @@ devenv up    # the sandbox under dx serve, plus Teley and its collector
 just sandbox     # or the sandbox alone, without dx
 ```
 
+## Run it locally
+
+```sh
+just dev       # everything, rebuilt on save: with ../studio beside this checkout, Studio's
+               # node + extensions on a real setlist and its share link, with THIS Architect;
+               # `just dev plain` is Architect's own stack (devenv up)
+just demo      # the quickest look: the issuer and a node with a share link, nothing watched
+just website   # the public site (apps/site) with hot reload
+```
+
+The same three recipes mean the same in Studio and Keyflow
+([the whole stack on your machine](docs/content/guide/local-stack.md)).
+
 ![The Architect tour over the sandbox: a popover per chapter, ringing the title-row tabs, the sidebar toggle and the Lab menu](https://raw.githubusercontent.com/FastTrackStudios/architect/media/architect-tour-intro.gif)
 
 The tour is a guide scenario, `apps/ui/tours/architect-tour.styx`,

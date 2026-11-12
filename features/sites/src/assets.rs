@@ -4,6 +4,7 @@
 //! lets the server keep them for a year
 //! (`architect::host::cache_policy`).
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use architect_theme::builtin::fallback;
@@ -12,6 +13,34 @@ use architect_theme::{Registry, Scheme, resolve};
 /// The layout's stylesheet. It reads only the theme's tokens
 /// (`var(--background)`), so it follows any theme.
 pub const SITE_CSS: &str = include_str!("../assets/site.css");
+
+/// Names a folder a debug build reads `site.css`, `site.js` and
+/// `player.js` from, in place of the copies compiled in: each build of a
+/// site reads them again, so an edit to `features/sites/assets` shows on
+/// a node's next build of its pages without relinking the node (Studio's
+/// local stack sets it to a local Architect checkout's assets). A release
+/// build ignores it.
+pub const DEV_ASSETS_VAR: &str = "ARCHITECT_SITES_ASSETS_DIR";
+
+/// `name` from [`DEV_ASSETS_VAR`]'s folder, in a debug build that names
+/// one; `None` otherwise (and for a file that is not there).
+fn dev_asset(name: &str) -> Option<String> {
+    dev_asset_in(std::env::var_os(DEV_ASSETS_VAR).as_deref(), name)
+}
+
+fn dev_asset_in(dir: Option<&std::ffi::OsStr>, name: &str) -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::fs::read_to_string(std::path::Path::new(dir?).join(name)).ok()
+}
+
+/// The layout's stylesheet: [`SITE_CSS`], or a debug build's
+/// [`DEV_ASSETS_VAR`] copy.
+#[must_use]
+pub fn site_css() -> Cow<'static, str> {
+    dev_asset("site.css").map_or(Cow::Borrowed(SITE_CSS), Cow::Owned)
+}
 
 /// What a reader does on the page: search, the theme toggle, the phone
 /// menu, the contents' current heading; and the player (#511): media,
@@ -23,17 +52,31 @@ pub const SITE_CSS: &str = include_str!("../assets/site.css");
 /// sanitize.js`, one source): what the now-playing view brings in from
 /// another page is cleaned with them on every Site and share link, with
 /// or without the node's runtime (studio#445).
+///
+/// A debug build reads `site.js` and `player.js` from [`DEV_ASSETS_VAR`]'s
+/// folder when it names one, at every call.
 #[must_use]
-pub fn site_js() -> &'static str {
+pub fn site_js() -> Cow<'static, str> {
+    let (site, player) = (dev_asset("site.js"), dev_asset("player.js"));
+    if site.is_some() || player.is_some() {
+        return Cow::Owned(format!(
+            "{}\n{}\n{}",
+            site.as_deref().unwrap_or(include_str!("../assets/site.js")),
+            classic_rules(),
+            player
+                .as_deref()
+                .unwrap_or(include_str!("../assets/player.js"))
+        ));
+    }
     static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    JS.get_or_init(|| {
+    Cow::Borrowed(JS.get_or_init(|| {
         format!(
             "{}\n{}\n{}",
             include_str!("../assets/site.js"),
             classic_rules(),
             include_str!("../assets/player.js")
         )
-    })
+    }))
 }
 
 /// `sanitize.js` (an ES module, no imports) as a classic script: its
@@ -114,6 +157,20 @@ mod tests {
             "a classic script"
         );
         assert!(js.contains("function cleanSheet(css"));
+    }
+
+    #[test]
+    fn a_debug_build_reads_the_dev_assets_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("player.js"), "// edited").unwrap();
+        let dir = Some(tmp.path().as_os_str());
+        assert_eq!(
+            dev_asset_in(dir, "player.js").as_deref(),
+            cfg!(debug_assertions).then_some("// edited")
+        );
+        // Not there, or no folder named: the compiled-in copy.
+        assert_eq!(dev_asset_in(dir, "site.css"), None);
+        assert_eq!(dev_asset_in(None, "player.js"), None);
     }
 
     #[test]

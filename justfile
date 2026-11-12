@@ -2,7 +2,32 @@
 # Run commands: just <recipe-name>
 
 default:
-    @just --list
+    @just --list --unsorted
+
+# ── Run it (docs/content/guide/local-stack.md) ───────────────────────────
+# The same three recipes, with the same meaning, in Architect, Studio and
+# Keyflow. With a Studio checkout beside this one (../studio, or
+# LOCAL_STACK_STUDIO_PATH) they run Studio's stack, Studio's extensions
+# on its node, with THIS checkout as its Architect (`architect=local`);
+# `plain` runs Architect's own stack instead (`devenv up`: the demo
+# seed, no Studio). Arguments go to Studio's `just dev` (keyflow=local,
+# desktop=on, watch=off).
+
+# Everything locally, rebuilt on save: Studio's node with this Architect, issuer, web app, site (`plain`: Architect's own stack)
+dev *ARGS:
+    @bash scripts/run-it.sh dev {{ARGS}}
+
+# See it working, quickly: issuer + a node with a share link, no watchers (`plain`: Architect's demo seed)
+demo *ARGS:
+    @bash scripts/run-it.sh demo {{ARGS}}
+
+# The public website (apps/site: landing, download, changelog, extensions, docs), hot reload
+website:
+    devenv up site
+
+# The running Studio stack's node on this tailnet over HTTPS for a phone (tailscale serve, never funnel); `just phone off`
+phone *ARGS:
+    @bash scripts/run-it.sh phone {{ARGS}}
 
 # Recompile architect-ui's utility sheet.
 #

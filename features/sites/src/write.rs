@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
-use crate::assets::{SITE_CSS, fingerprint, site_js, theme_css};
+use crate::assets::{fingerprint, site_css, site_js, theme_css};
 use crate::search;
 use crate::site::{Problem, Site};
 use crate::ui::{self, Assets, View};
@@ -133,7 +133,7 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
         }
     }
 
-    let css = format!("{}\n{SITE_CSS}", theme_css(&site.theme));
+    let css = format!("{}\n{}", theme_css(&site.theme), site_css());
     let index = serde_json::to_string(&search::entries(site)).unwrap_or_else(|_| "[]".to_owned());
     let assets_dir = dir.join(ASSETS);
     create(&assets_dir)?;
@@ -144,7 +144,7 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
     };
     let assets = Rc::new(Assets {
         css: asset("site", "css", &css)?,
-        js: asset("site", "js", site_js())?,
+        js: asset("site", "js", &site_js())?,
         search: asset("search", "json", &index)?,
     });
 
