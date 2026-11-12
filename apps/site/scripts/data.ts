@@ -90,21 +90,41 @@ type GhRelease = {
 	name: string | null;
 	html_url: string;
 	published_at: string | null;
+	created_at: string;
 	draft: boolean;
 	prerelease: boolean;
 	body: string | null;
 };
 
+/** A release by tag, drafts included: page through the list (a draft has no
+ * tag yet, so `releases/tags/<tag>` cannot find it). */
+async function findRelease(tag: string): Promise<GhRelease> {
+	for (let page = 1; page <= 10; page++) {
+		const all = await getJson<GhRelease[]>(
+			`https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}`,
+			true,
+		);
+		const r = all.find((x) => x.tag_name === tag);
+		if (r) return r;
+		if (all.length < 100) break;
+	}
+	throw new Error(`${tag} is not among the releases`);
+}
+
 /** /download and the landing page: the release (SITE_RELEASE_TAG's, or `latest`). */
 async function release() {
 	let found: GhRelease;
 	try {
-		found = await getJson<GhRelease>(
-			releaseTag
-				? `https://api.github.com/repos/${REPO}/releases/tags/${releaseTag}`
-				: `https://api.github.com/repos/${REPO}/releases/latest`,
-			true,
-		);
+		// The release being built is still a DRAFT (release.yml publishes it
+		// once `sums` has signed every asset), and `releases/tags/<tag>` does
+		// not return drafts: find it in the list, which shows drafts to the
+		// release job's token.
+		found = releaseTag
+			? await findRelease(releaseTag)
+			: await getJson<GhRelease>(
+					`https://api.github.com/repos/${REPO}/releases/latest`,
+					true,
+				);
 	} catch (e) {
 		warn(`the release could not be read (${e}); keeping src/data/release.json`);
 		return;
@@ -114,8 +134,12 @@ async function release() {
 	write("release.json", {
 		tag: found.tag_name,
 		version: found.tag_name.replace(/^v/, ""),
-		url: found.html_url,
-		publishedAt: found.published_at,
+		// A draft's html_url is an `untagged-…` page: link the tag's page,
+		// which is the release once it is published.
+		url: found.draft
+			? `https://github.com/${REPO}/releases/tag/${found.tag_name}`
+			: found.html_url,
+		publishedAt: found.published_at ?? found.created_at,
 	});
 }
 
@@ -134,13 +158,20 @@ async function changelog() {
 		return;
 	}
 	const listed = releases
-		.filter((r) => !r.draft && r.published_at)
+		// Published ones, and this build's own release while it is a draft.
+		.filter(
+			(r) =>
+				(!r.draft && r.published_at) ||
+				(releaseTag && r.tag_name === releaseTag),
+		)
 		.slice(0, CHANGELOG_RELEASES)
 		.map((r) => ({
 			tag: r.tag_name,
 			name: r.name || r.tag_name,
-			url: r.html_url,
-			publishedAt: r.published_at,
+			url: r.draft
+				? `https://github.com/${REPO}/releases/tag/${r.tag_name}`
+				: r.html_url,
+			publishedAt: r.published_at ?? r.created_at,
 			prerelease: r.prerelease,
 			html: marked.parse(r.body ?? "", { async: false, gfm: true }),
 		}));

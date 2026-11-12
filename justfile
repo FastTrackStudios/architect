@@ -488,3 +488,16 @@ sandbox-web-test:
 
 alias lab-web := sandbox-web
 alias lab-web-test := sandbox-web-test
+
+# release-notes.sh's data-migration facts, in a throwaway repo (PR checks run it)
+release-notes-test:
+    bash scripts/release-notes-test.sh
+
+# Every workflow's App token: one repository, its hop's permissions, its key
+check-token-mints:
+    python3 scripts/check-token-mints.py --self-test
+    python3 scripts/check-token-mints.py
+
+# release-sums.sh and release-publish.sh's decisions (PR checks run it)
+release-sums-test:
+    bash scripts/release-sums-test.sh
