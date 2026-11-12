@@ -14,25 +14,12 @@ use serde_json::Value;
 use vault::actions::{Changes, OpenVault, Renamed, TagEdit, Watch, page_tags};
 use vault::obsidian::{Vault, VaultPage, page_tasks, page_wordcount};
 
+use crate::markdown::embeds;
+pub use crate::markdown::{FEATURE_IMAGE_PROPERTIES, preview_of};
 use crate::source::{
     FileOp, Listener, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent, Subscription,
     TaskCounts,
 };
-
-/// The frontmatter properties a note's feature image is read from, in
-/// order (Notebook Navigator's `featureImageProperties`, and the common
-/// others).
-pub const FEATURE_IMAGE_PROPERTIES: &[&str] = &[
-    "thumbnail",
-    "featureResized",
-    "feature",
-    "image",
-    "cover",
-    "banner",
-];
-
-/// How long a preview is, at most (characters).
-const PREVIEW_CHARS: usize = 300;
 
 /// Image files a feature image may be.
 const IMAGES: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp"];
@@ -580,95 +567,6 @@ fn property(v: &Value) -> PropertyValue {
     }
 }
 
-/// A note's text as its preview: its words, without its frontmatter, its
-/// fences, headings' and tasks' marks, or links' brackets (a link's alias
-/// when it has one); embeds left out.
-#[must_use]
-pub fn preview_of(text: &str) -> String {
-    let body = text
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---").map(|(_, b)| b))
-        .map_or(text, |b| {
-            b.trim_start_matches(|c| c != '\n').trim_start_matches('\n')
-        });
-    let mut out = String::new();
-    let mut in_fence = false;
-    for line in body.lines() {
-        let t = line.trim();
-        if t.starts_with("```") || t.starts_with("~~~") {
-            in_fence = !in_fence;
-            continue;
-        }
-        if in_fence || t.is_empty() || t.starts_with('|') {
-            continue;
-        }
-        let t = t
-            .trim_start_matches('#')
-            .trim_start_matches('>')
-            .trim_start();
-        let t = ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "]
-            .iter()
-            .find_map(|m| t.strip_prefix(m))
-            .unwrap_or(t);
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        // Emphasis and code marks are not words.
-        let plain: String = unlink(t)
-            .chars()
-            .filter(|c| !matches!(c, '*' | '`' | '=' | '~'))
-            .collect();
-        out.push_str(&plain);
-        if out.chars().count() >= PREVIEW_CHARS {
-            break;
-        }
-    }
-    let words: Vec<&str> = out.split_whitespace().collect();
-    let joined = words.join(" ");
-    joined.chars().take(PREVIEW_CHARS).collect()
-}
-
-/// `[[a|b]]` as `b`, `[[a]]` as `a`, `![[x]]` and `![](x)` dropped,
-/// `[t](u)` as `t`.
-fn unlink(line: &str) -> String {
-    let mut out = String::with_capacity(line.len());
-    let mut rest = line;
-    while let Some(i) = rest.find(['[', '!']) {
-        let (before, at) = rest.split_at_checked(i).unwrap_or((rest, ""));
-        out.push_str(before);
-        if let Some(inner) = at.strip_prefix("![[").and_then(|r| r.split_once("]]")) {
-            rest = inner.1;
-        } else if let Some((target, after)) = at.strip_prefix("[[").and_then(|r| r.split_once("]]"))
-        {
-            let shown = target.rsplit_once('|').map_or(target, |(_, a)| a);
-            let shown = shown.split('#').next().unwrap_or(shown);
-            out.push_str(shown.rsplit('/').next().unwrap_or(shown));
-            rest = after;
-        } else if let Some((_, after)) = at
-            .strip_prefix("![")
-            .and_then(|r| r.split_once("]("))
-            .and_then(|(_, r)| r.split_once(')'))
-        {
-            rest = after;
-        } else if let Some((text, after)) = at
-            .strip_prefix('[')
-            .and_then(|r| r.split_once("]("))
-            .and_then(|(t, r)| r.split_once(')').map(|(_, a)| (t, a)))
-        {
-            out.push_str(text);
-            rest = after;
-        } else {
-            let mut chars = at.chars();
-            if let Some(c) = chars.next() {
-                out.push(c);
-            }
-            rest = chars.as_str();
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
 /// The note's feature image on disk: the first of
 /// [`FEATURE_IMAGE_PROPERTIES`] that names an image in the vault, else the
 /// first image its text embeds.
@@ -689,20 +587,6 @@ fn feature_image(v: &Vault, page: &VaultPage) -> Option<std::path::PathBuf> {
         }
     }
     embeds(&page.raw).find_map(|target| resolve_image(v, page, &target))
-}
-
-/// The targets of a text's image embeds: `![[x.png]]`, `![](x.png)`.
-fn embeds(text: &str) -> impl Iterator<Item = String> + '_ {
-    let wiki = text.match_indices("![[").filter_map(move |(i, _)| {
-        let rest = text.get(i.saturating_add(3)..)?;
-        rest.split_once("]]").map(|(t, _)| t.to_owned())
-    });
-    let md = text.match_indices("![").filter_map(move |(i, _)| {
-        let rest = text.get(i.saturating_add(2)..)?;
-        let (_, after) = rest.split_once("](")?;
-        after.split_once(')').map(|(t, _)| t.to_owned())
-    });
-    wiki.chain(md)
 }
 
 /// An image a property or embed names (`[[Attachments/x.png|alt]]`,
@@ -794,7 +678,7 @@ fn file_url(abs: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview_of, unlink};
+    use crate::markdown::{preview_of, unlink};
 
     #[test]
     fn a_preview_is_the_notes_words() {
