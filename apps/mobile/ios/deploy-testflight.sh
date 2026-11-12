@@ -163,6 +163,16 @@ echo "=== signing (distribution) ==="
 cp "$PROFILE" "$APP/embedded.mobileprovision"
 security cms -D -i "$PROFILE" > "$WORK/profile.plist"
 /usr/libexec/PlistBuddy -x -c "Print :Entitlements" "$WORK/profile.plist" > "$WORK/entitlements.plist"
+# Universal links (#629): the domains in Architect.entitlements, only when
+# the profile allows Associated Domains (the App ID's capability); without
+# it the app is signed as before and claims no domain.
+if /usr/libexec/PlistBuddy -c "Print :com.apple.developer.associated-domains" "$WORK/entitlements.plist" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.associated-domains" "$WORK/entitlements.plist"
+    /usr/libexec/PlistBuddy -c "Merge $SCRIPT_DIR/Architect.entitlements" "$WORK/entitlements.plist"
+    echo "=== associated domains: $(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.associated-domains' "$WORK/entitlements.plist" | tr -d '\n') ==="
+else
+    echo "note: the profile has no Associated Domains: this build claims no universal links" >&2
+fi
 # Inside out: anything nested first, then the app.
 find "$APP" -mindepth 1 \( -name "*.dylib" -o -name "*.framework" \) -print0 \
     | while IFS= read -r -d '' f; do codesign --force --keychain "$KEYCHAIN" --sign "$SIGN_ID" --timestamp "$f"; done

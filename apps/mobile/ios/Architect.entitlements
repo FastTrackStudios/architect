@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal links (#629): share links on FasTrack's own node open in
+	     the app. Merged into the profile's entitlements by
+	     deploy-testflight.sh, only when the profile allows Associated
+	     Domains. The node's /.well-known/apple-app-site-association
+	     (ARCHITECT_APPLE_APP_IDS) names this app back. A node on another
+	     domain is reached through architect://open?url=… instead. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:architect.fasttrackstudio.app</string>
+	</array>
+</dict>
+</plist>

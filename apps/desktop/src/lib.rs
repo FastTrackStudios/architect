@@ -29,6 +29,7 @@ mod mcp_port;
 #[cfg(feature = "gui")]
 pub use app::*;
 
+pub mod links;
 pub mod node;
 
 pub use architect_distribution::{self as distribution, Bundle, Distribution, Icon};

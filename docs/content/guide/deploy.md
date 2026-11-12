@@ -365,6 +365,19 @@ page.
   sent only to a node the account already uses for an org of its own
   (`trusts`). A revoke or an expiry empties the tab on the link's next
   news (`_live`) or within five minutes.
+- **How a link reaches the app.** iOS: the scene delegate
+  (`apps/mobile/src/scene.rs`) hands over a universal link's activity
+  and the scheme's URL contexts, at a cold start and later; the
+  scheme is in `apps/mobile/ios/Info.plist`, the domains in
+  `apps/mobile/ios/Architect.entitlements` (signed in by
+  `apps/mobile/ios/deploy-testflight.sh` only when the profile allows
+  Associated Domains). macOS: `CFBundleURLTypes` in the bundle
+  (`scripts/desktop/macos.sh`), the open URLs reaching the presence's
+  hand-off. Linux: the AppImage's desktop entry handles
+  `x-scheme-handler/architect` (`scripts/desktop/linux.sh`); a build run
+  from a folder registers itself with `architect-desktop links register`
+  (`apps/desktop/src/links.rs` `register`). A second launch hands its
+  link to the running app (`architect_presence::single_instance`).
 - **What the app opens.** `ShareUrl::parse`: `https:` only, or `http:`
   to this machine; no credentials; a share link's path. A link the OS
   hands the app that points at this machine or a private network is

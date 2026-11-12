@@ -149,8 +149,9 @@ cat > "$AD/$slug.desktop" <<DESKTOP
 Type=Application
 Name=$title
 Comment=$comment
-Exec=$bin
+Exec=$bin %u
 Icon=$slug
+MimeType=x-scheme-handler/architect;
 Categories=$categories
 Terminal=false
 StartupWMClass=$bin

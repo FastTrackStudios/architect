@@ -26,6 +26,17 @@
 	<array>
 		<string>iPhoneOS</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.fasttrackstudio.architect.links</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>architect</string>
+			</array>
+		</dict>
+	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
