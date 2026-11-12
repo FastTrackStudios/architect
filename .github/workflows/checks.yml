@@ -192,8 +192,10 @@ jobs:
         if: ${{ steps.plan.outputs.full == 'true' }}
         run: cargo test --workspace --doc
 
-  # The framework half must stay wasm-clean; the ui/story crates pull
-  # native rendering (blitz/vello) and are checked natively only.
+  # The framework half must stay wasm-clean, and so must the UI the web
+  # app (apps/web, dioxus-web) mounts (#172). The Blitz hosts (`native`
+  # features), the vault's filesystem backend and the extension host
+  # (Luau, #495) are native only.
   wasm:
     name: wasm check
     runs-on: [self-hosted, thebattleship]
@@ -245,6 +247,24 @@ jobs:
           # Workers), and the web app's page that runs the WASI Counter.
           cargo check --target wasm32-unknown-unknown -p architect-extensions --features web
           cargo check --target wasm32-unknown-unknown -p architect-web
+          # The app's UI on dioxus-web (#172): the shell, the workspace,
+          # the commands and palette slot, settings, the navigator over a
+          # MemorySource, orgs and accounts, the theme, the editor's web
+          # view, and the vault's model without its filesystem backend.
+          cargo check --target wasm32-unknown-unknown \
+            -p architect-ui -p architect-theme --features architect-theme/dioxus \
+            -p architect-shell --features architect-shell/ui \
+            -p architect-workspace --features architect-workspace/ui,architect-workspace/home \
+            -p architect-commands --features architect-commands/ui \
+            -p architect-settings --features architect-settings/ui,architect-settings/store,architect-settings/appearance \
+            -p architect-navigator --features architect-navigator/ui \
+            -p architect-navigator-api \
+            -p architect-orgs --features architect-orgs/ui \
+            -p architect-accounts --features architect-accounts/ui \
+            -p architect-guide --features architect-guide/ui \
+            -p architect-capture --features architect-capture/ui \
+            -p architect-editor --features architect-editor/web
+          cargo check --target wasm32-unknown-unknown -p vault --no-default-features
 
   # The one status main's branch protection requires (context `check`).
   # It passes only when every job above succeeded; a skipped or cancelled
