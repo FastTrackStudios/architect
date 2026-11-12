@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use architect_sites::listing::Entry;
 use architect_sites::{InstalledLayers, ShareLayersDecl};
-use architect_spaces::{KeptLayers, Listen};
+use architect_spaces::{KeptLayers, LayersReport, Listen};
 
 /// How many times this process has placed a vault's files.
 static PLACEMENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -70,16 +70,31 @@ enum Read {
 struct State {
     /// The installed folder as last read.
     read: Read,
-    /// Each extension's last declared rules, by id.
-    kept: BTreeMap<String, Kept>,
-    /// The kept file could not be read: unknown until it is.
-    kept_broken: Option<String>,
+    /// What is kept, as in the kept file.
+    file: KeptFile,
+    /// The kept file did not read: it was set aside, and nothing is
+    /// written over it or placed until the owner acknowledges it.
+    fault: Option<String>,
     current: Arc<Current>,
+}
+
+/// The kept file (`share-layers.json`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KeptFile {
+    /// Each extension's last declared rules, by its folder.
+    kept: BTreeMap<String, Kept>,
+    /// What a reinstall lowered, until acknowledged.
+    #[serde(default)]
+    lowered: Vec<String>,
 }
 
 /// One extension's last declared rules, as kept.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Kept {
+    /// The id its manifest claimed.
+    id: String,
     rules: Vec<ShareLayersDecl>,
     /// When they were read from its manifest (unix seconds).
     since: i64,
@@ -91,10 +106,14 @@ pub struct Current {
     /// Counts up each time the rules change.
     pub generation: u64,
     rules: Vec<ShareLayersDecl>,
-    /// What does not read: manifests, or the kept rules' file. While
-    /// there is one, placement is unknown.
+    /// Why where files are is not known now: a manifest that does not
+    /// read, two folders claiming one id, the kept file set aside. While
+    /// there is one, every attached file is held back below Full.
     pub broken: Vec<String>,
+    /// The installed extensions' folders and ids.
     installed: BTreeSet<String>,
+    /// What the owner should know, until acknowledged.
+    notices: Vec<String>,
 }
 
 impl Current {
@@ -111,9 +130,67 @@ fn unix_now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
+/// The marker a kept file that did not read is set aside as.
+const CORRUPT: &str = ".corrupt-";
+/// What an acknowledged marker ends with.
+const ACKNOWLEDGED: &str = ".acknowledged";
+
+/// The kept file's markers set aside and not acknowledged.
+fn faults(kept_at: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Some(name)) = (kept_at.parent(), kept_at.file_name()) else {
+        return Vec::new();
+    };
+    let prefix = format!("{}{CORRUPT}", name.to_string_lossy());
+    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with(&prefix) && !n.ends_with(ACKNOWLEDGED)
+        })
+        .map(|e| e.path())
+        .collect();
+    out.sort();
+    out
+}
+
+/// What `old` declared that `new` does not, in the layers above the page:
+/// each a line (`song: Media/Proxies/** no longer full`).
+fn lowered(old: &[ShareLayersDecl], new: &[ShareLayersDecl]) -> Vec<String> {
+    let items = |rules: &[ShareLayersDecl]| -> BTreeSet<(String, &'static str, String)> {
+        rules
+            .iter()
+            .flat_map(|r| {
+                let kind = r.note_type.trim().to_lowercase();
+                [("reference", &r.reference), ("full", &r.full)]
+                    .into_iter()
+                    .flat_map(move |(layer, patterns)| {
+                        let kind = kind.clone();
+                        patterns
+                            .iter()
+                            .map(move |p| (kind.clone(), layer, p.clone()))
+                    })
+            })
+            .collect()
+    };
+    let now = items(new);
+    items(old)
+        .into_iter()
+        .filter(|item| !now.contains(item))
+        .map(|(kind, layer, pattern)| format!("{kind}: `{pattern}` no longer {layer}"))
+        .collect()
+}
+
 impl LayerRules {
     /// The rules of the extensions installed in `dir`, kept at `kept_at`
     /// once read, and `given` (a distribution's compiled-in ones).
+    ///
+    /// A kept file that does not read is set aside
+    /// (`share-layers.json.corrupt-<time>`), warned of once, and every
+    /// attached file is held back below Full until the owner acknowledges
+    /// it ([`Self::acknowledge`]), across restarts: nothing is written over
+    /// it meanwhile.
     #[must_use]
     pub fn new(
         dir: Option<PathBuf>,
@@ -123,15 +200,37 @@ impl LayerRules {
         let mut state = State::default();
         if let Some(path) = &kept_at {
             match std::fs::read_to_string(path) {
-                Ok(text) => match serde_json::from_str(&text) {
-                    Ok(kept) => state.kept = kept,
+                Ok(text) => match serde_json::from_str::<KeptFile>(&text) {
+                    Ok(file) => state.file = file,
                     Err(error) => {
-                        tracing::warn!(path = %path.display(), %error, "the kept share layer rules do not read: share links below Full hold back every attached file until the file is fixed or removed");
-                        state.kept_broken = Some(format!("{}: {error}", path.display()));
+                        let aside = path.with_file_name(format!(
+                            "{}{CORRUPT}{}",
+                            path.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default(),
+                            unix_now()
+                        ));
+                        let moved = std::fs::rename(path, &aside);
+                        tracing::warn!(
+                            path = %path.display(),
+                            aside = %aside.display(),
+                            moved = moved.is_ok(),
+                            %error,
+                            "the kept share layer rules do not read: set aside; share links below Full hold back every attached file until the owner acknowledges it (SHARE_LAYERS_ACKNOWLEDGE)"
+                        );
+                        if moved.is_err() {
+                            state.fault = Some(format!("{}: {error}", path.display()));
+                        }
                     }
                 },
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => state.kept_broken = Some(format!("{}: {error}", path.display())),
+                Err(error) => state.fault = Some(format!("{}: {error}", path.display())),
+            }
+            if let Some(marker) = faults(path).into_iter().next() {
+                state.fault = Some(format!(
+                    "the kept share layer rules did not read and were set aside as {}",
+                    marker.display()
+                ));
             }
         }
         Self(Arc::new(Inner {
@@ -143,7 +242,7 @@ impl LayerRules {
     }
 
     /// The rules in force now: the installed folder read again if it
-    /// changed, each extension's declared rules kept.
+    /// changed, each extension's declared rules kept by its folder.
     #[must_use]
     pub fn current(&self) -> Arc<Current> {
         let read = self.0.installed.as_ref().map(InstalledLayers::read);
@@ -153,34 +252,78 @@ impl LayerRules {
             .map_or(Read::NoFolder, |r| Read::At(r.generation));
         if state.read != now {
             state.read = now;
-            let mut changed = false;
-            let mut installed = BTreeSet::new();
-            for (id, rules) in read.iter().flat_map(|r| r.packages.iter()) {
-                installed.insert(id.clone());
-                // Exactly what it declares now, and kept for when it is
-                // gone.
-                if rules.is_empty() {
-                    changed |= state.kept.remove(id).is_some();
-                } else if state.kept.get(id).is_none_or(|k| &k.rules != rules) {
-                    state.kept.insert(
-                        id.clone(),
-                        Kept {
-                            rules: rules.clone(),
-                            since: unix_now(),
-                        },
-                    );
-                    changed = true;
-                }
+            let packages = read.iter().flat_map(|r| r.packages.iter());
+            // One id, one folder: two folders claiming one id is a typo
+            // or a shadow, and neither is believed.
+            let mut by_id: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+            for p in packages.clone() {
+                by_id
+                    .entry(p.id.as_str())
+                    .or_default()
+                    .push(p.folder.as_str());
             }
-            if changed {
-                self.save(&state.kept);
-            }
-            let broken = read
+            let mut broken: Vec<String> = read
                 .iter()
                 .flat_map(|r| r.broken.iter())
                 .map(|(path, why)| format!("{}: {why}", path.display()))
-                .chain(state.kept_broken.clone())
                 .collect();
+            for (id, folders) in by_id.iter().filter(|(_, f)| f.len() > 1) {
+                broken.push(format!(
+                    "{} extensions claim the id {id}: {}",
+                    folders.len(),
+                    folders.join(", ")
+                ));
+            }
+            let mut changed = false;
+            let mut installed = BTreeSet::new();
+            for p in packages {
+                installed.insert(p.folder.clone());
+                installed.insert(p.id.clone());
+                if by_id.get(p.id.as_str()).is_some_and(|f| f.len() > 1) {
+                    continue;
+                }
+                let before = state.file.kept.get(&p.folder).cloned();
+                if before
+                    .as_ref()
+                    .is_some_and(|k| k.id == p.id && k.rules == p.rules)
+                {
+                    continue;
+                }
+                if let Some(before) = before.filter(|k| k.id == p.id) {
+                    let less = lowered(&before.rules, &p.rules);
+                    if !less.is_empty() {
+                        tracing::warn!(
+                            folder = %p.folder,
+                            id = %p.id,
+                            lowered = ?less,
+                            "an extension now declares fewer share layer rules: these files may open on links that play lower"
+                        );
+                        state.file.lowered.extend(
+                            less.into_iter()
+                                .map(|l| format!("{} ({}): {l}", p.id, p.folder)),
+                        );
+                    }
+                }
+                // Exactly what it declares now, and kept for when it is
+                // gone.
+                if p.rules.is_empty() {
+                    state.file.kept.remove(&p.folder);
+                } else {
+                    state.file.kept.insert(
+                        p.folder.clone(),
+                        Kept {
+                            id: p.id.clone(),
+                            rules: p.rules.clone(),
+                            since: unix_now(),
+                        },
+                    );
+                }
+                changed = true;
+            }
+            if changed {
+                self.save(&state);
+            }
+            broken.extend(state.fault.clone());
             Self::refresh(&mut state, &self.0.given, installed, broken);
         }
         Arc::clone(&state.current)
@@ -196,19 +339,35 @@ impl LayerRules {
         let rules = given
             .iter()
             .cloned()
-            .chain(state.kept.values().flat_map(|k| k.rules.iter().cloned()))
+            .chain(
+                state
+                    .file
+                    .kept
+                    .values()
+                    .flat_map(|k| k.rules.iter().cloned()),
+            )
+            .collect();
+        let notices = broken
+            .iter()
+            .cloned()
+            .chain(state.file.lowered.iter().map(|l| format!("lowered: {l}")))
             .collect();
         state.current = Arc::new(Current {
             generation: state.current.generation.wrapping_add(1),
             rules,
             broken,
             installed,
+            notices,
         });
     }
 
-    fn save(&self, kept: &BTreeMap<String, Kept>) {
+    /// Write the kept file, never while one is set aside unacknowledged.
+    fn save(&self, state: &State) {
         let Some(path) = &self.0.kept_at else { return };
-        let written = serde_json::to_vec_pretty(kept)
+        if state.fault.is_some() {
+            return;
+        }
+        let written = serde_json::to_vec_pretty(&state.file)
             .map_err(std::io::Error::other)
             .and_then(|bytes| {
                 let tmp = path.with_extension("json.tmp");
@@ -220,38 +379,68 @@ impl LayerRules {
         }
     }
 
-    /// The rules kept for extensions no longer installed.
+    /// The rules kept for extensions no longer installed, and the notices.
     #[must_use]
-    pub fn kept(&self) -> Vec<KeptLayers> {
-        let installed = self.current().installed.clone();
+    pub fn report(&self) -> LayersReport {
+        let current = self.current();
         let state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state
+        let kept = state
+            .file
             .kept
             .iter()
-            .filter(|(id, _)| !installed.contains(*id))
-            .map(|(id, kept)| {
+            .filter(|(folder, _)| !current.installed.contains(*folder))
+            .map(|(folder, kept)| {
                 let types: BTreeSet<String> = kept
                     .rules
                     .iter()
                     .map(|r| r.note_type.trim().to_lowercase())
                     .collect();
                 KeptLayers {
-                    extension: id.clone(),
+                    extension: kept.id.clone(),
+                    folder: folder.clone(),
                     note_types: types.into_iter().collect(),
                     since: kept.since,
                 }
             })
-            .collect()
+            .collect();
+        drop(state);
+        LayersReport {
+            kept,
+            notices: current.notices.clone(),
+        }
     }
 
-    /// Forget the kept rules of `extension`, no longer installed; what is
-    /// kept after.
+    /// What the node's status says of its layer rules: one line per
+    /// kind of notice, with nothing of the vault or the extensions.
+    #[must_use]
+    pub fn status(&self) -> Vec<String> {
+        let current = self.current();
+        let (fault, lowered) = {
+            let state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+            (state.fault.is_some(), state.file.lowered.len())
+        };
+        let mut out = Vec::new();
+        if fault {
+            out.push("share layers: the kept rules did not read and were set aside; links below Full hold every attached file back until acknowledged (SHARE_LAYERS_ACKNOWLEDGE)".to_owned());
+        }
+        let manifests = current.broken.len().saturating_sub(usize::from(fault));
+        if manifests > 0 {
+            out.push(format!("share layers: {manifests} extension manifest problem(s); links below Full hold every attached file back until fixed (SHARE_LAYERS_KEPT)"));
+        }
+        if lowered > 0 {
+            out.push(format!("share layers: a reinstall lowered {lowered} rule(s) (SHARE_LAYERS_KEPT, SHARE_LAYERS_ACKNOWLEDGE)"));
+        }
+        out
+    }
+
+    /// Forget the kept rules of `extension` (its id or its folder), no
+    /// longer installed; what is kept after.
     ///
     /// # Errors
     ///
     /// It is installed (its rules are its manifest's), or nothing is kept
     /// of it.
-    pub fn forget(&self, extension: &str) -> Result<Vec<KeptLayers>, String> {
+    pub fn forget(&self, extension: &str) -> Result<LayersReport, String> {
         let current = self.current();
         if current.installed.contains(extension) {
             return Err(format!(
@@ -260,15 +449,48 @@ impl LayerRules {
         }
         {
             let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
-            if state.kept.remove(extension).is_none() {
+            let before = state.file.kept.len();
+            state
+                .file
+                .kept
+                .retain(|folder, k| folder != extension && k.id != extension);
+            if state.file.kept.len() == before {
                 return Err(format!("no layer rules are kept for {extension}"));
             }
-            self.save(&state.kept);
+            self.save(&state);
             let broken = current.broken.clone();
             Self::refresh(&mut state, &self.0.given, current.installed.clone(), broken);
             drop(state);
         }
-        Ok(self.kept())
+        Ok(self.report())
+    }
+
+    /// Acknowledge the notices: a kept file set aside (marked
+    /// acknowledged; what it held is not read again) and what a reinstall
+    /// lowered. Files are placed again by the rules there are now.
+    pub fn acknowledge(&self) -> LayersReport {
+        {
+            let mut state = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(path) = &self.0.kept_at {
+                for marker in faults(path) {
+                    let mut done = marker.clone().into_os_string();
+                    done.push(ACKNOWLEDGED);
+                    if let Err(error) = std::fs::rename(&marker, &done) {
+                        tracing::warn!(path = %marker.display(), %error, "a set-aside kept rules file could not be marked acknowledged");
+                    }
+                }
+                if faults(path).is_empty() {
+                    state.fault = None;
+                }
+            } else {
+                state.fault = None;
+            }
+            state.file.lowered.clear();
+            self.save(&state);
+            // Read the folder again on the next look.
+            state.read = Read::Not;
+        }
+        self.report()
     }
 
     /// The layer of each file `entries` attach that is above the page,
@@ -531,7 +753,7 @@ mod tests {
         let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
         let rules = LayerRules::new(Some(dir.clone()), Vec::new(), Some(kept_at.clone()));
         let first = rules.current().generation;
-        assert!(rules.kept().is_empty(), "installed: its own");
+        assert!(rules.report().kept.is_empty(), "installed: its own");
         assert!(rules.forget("demo.songs").is_err());
         std::fs::remove_dir_all(dir.join("demo.songs")).unwrap();
         let after = rules.current();
@@ -542,12 +764,13 @@ mod tests {
                 .get("Joy/Media/Bass.ogg"),
             Some(&Listen::Full)
         );
-        assert_eq!(rules.kept()[0].extension, "demo.songs");
+        assert_eq!(rules.report().kept[0].extension, "demo.songs");
+        assert_eq!(rules.report().kept[0].folder, "demo.songs");
         // A restarted node keeps them too.
         let again = LayerRules::new(Some(dir.clone()), Vec::new(), Some(kept_at.clone()));
-        assert_eq!(again.kept().len(), 1);
+        assert_eq!(again.report().kept.len(), 1);
         assert!(again.forget("demo.unknown").is_err());
-        assert!(again.forget("demo.songs").unwrap().is_empty());
+        assert!(again.forget("demo.songs").unwrap().kept.is_empty());
         assert!(
             LayerRules::place(&again.current(), &entries)
                 .unwrap()
@@ -557,5 +780,141 @@ mod tests {
         std::fs::write(&kept_at, "{ not json").unwrap();
         let corrupt = LayerRules::new(Some(dir), Vec::new(), Some(kept_at));
         assert!(LayerRules::place(&corrupt.current(), &entries).is_none());
+    }
+
+    /// A kept file that does not read holds everything back, and goes on
+    /// doing so after a restart: it is never written over (#540's second
+    /// review: the first `current()` used to save the installed rules
+    /// alone over it, and after a restart an uninstalled extension's
+    /// stems opened).
+    #[test]
+    fn a_corrupt_kept_file_holds_back_across_restarts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (dir, kept_at) = (
+            tmp.path().join("extensions"),
+            tmp.path().join("share-layers.json"),
+        );
+        install(
+            &dir,
+            "demo.songs",
+            "[[share_layers]]\nnote_type = \"song\"\nfull = [\"**\"]\n",
+        );
+        install(
+            &dir,
+            "demo.other",
+            "[[share_layers]]\nnote_type = \"live\"\nfull = [\"**\"]\n",
+        );
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        let first = LayerRules::new(Some(dir.clone()), Vec::new(), Some(kept_at.clone()));
+        let _ = first.current();
+        std::fs::remove_dir_all(dir.join("demo.songs")).unwrap();
+        assert_eq!(
+            LayerRules::place(&first.current(), &entries)
+                .unwrap()
+                .get("Joy/Media/Bass.ogg"),
+            Some(&Listen::Full),
+            "kept after the uninstall"
+        );
+        std::fs::write(&kept_at, "{ half").unwrap();
+        for restart in 0..3 {
+            let rules = LayerRules::new(Some(dir.clone()), Vec::new(), Some(kept_at.clone()));
+            assert!(
+                LayerRules::place(&rules.current(), &entries).is_none(),
+                "restart {restart}: the stem must stay held back"
+            );
+            assert!(!rules.status().is_empty(), "the node's status says so");
+            assert!(
+                rules
+                    .report()
+                    .notices
+                    .iter()
+                    .any(|n| n.contains("set aside"))
+            );
+        }
+        // Set aside, never written over.
+        let aside: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("share-layers.json.corrupt-"))
+            .collect();
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join(&aside[0])).unwrap(),
+            "{ half"
+        );
+        // The owner acknowledges: placed by the rules there are now (the
+        // uninstalled one's were in the file that did not read).
+        let rules = LayerRules::new(Some(dir.clone()), Vec::new(), Some(kept_at.clone()));
+        let report = rules.acknowledge();
+        assert!(report.notices.is_empty(), "{:?}", report.notices);
+        assert!(rules.status().is_empty());
+        assert!(LayerRules::place(&rules.current(), &entries).is_some());
+        let restarted = LayerRules::new(Some(dir), Vec::new(), Some(kept_at));
+        assert!(LayerRules::place(&restarted.current(), &entries).is_some());
+    }
+
+    #[test]
+    fn a_reinstall_that_declares_less_says_what_it_lowered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (dir, kept_at) = (
+            tmp.path().join("extensions"),
+            tmp.path().join("share-layers.json"),
+        );
+        install(
+            &dir,
+            "demo.songs",
+            "[[share_layers]]\nnote_type = \"song\"\nreference = [\"*.session\"]\nfull = [\"Media/**\"]\n",
+        );
+        let rules = LayerRules::new(Some(dir.clone()), Vec::new(), Some(kept_at.clone()));
+        assert!(rules.status().is_empty());
+        install(
+            &dir,
+            "demo.songs",
+            "[[share_layers]]\nnote_type = \"song\"\nreference = [\"*.session\"]\n",
+        );
+        let report = rules.report();
+        assert_eq!(report.notices.len(), 1, "{:?}", report.notices);
+        assert!(
+            report.notices[0].contains("`Media/**` no longer full"),
+            "{:?}",
+            report.notices
+        );
+        assert_eq!(rules.status().len(), 1);
+        // Kept until acknowledged, across a restart.
+        let restarted = LayerRules::new(Some(dir), Vec::new(), Some(kept_at));
+        assert_eq!(restarted.report().notices.len(), 1);
+        assert!(restarted.acknowledge().notices.is_empty());
+    }
+
+    #[test]
+    fn two_folders_claiming_one_id_hold_everything_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        install(&tmp.path(), "demo.songs", OWNER);
+        let rules = LayerRules::new(Some(tmp.path().to_owned()), Vec::new(), None);
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        assert!(LayerRules::place(&rules.current(), &entries).is_some());
+        // Another folder, claiming the owner's id, with no rules.
+        let shadow = tmp.path().join("zzz.shadow");
+        std::fs::create_dir_all(&shadow).unwrap();
+        std::fs::write(
+            shadow.join("extension.toml"),
+            "id = \"demo.songs\"\nname = \"X\"\nversion = \"0.1.0\"\nkind = \"data\"\n",
+        )
+        .unwrap();
+        assert!(LayerRules::place(&rules.current(), &entries).is_none());
+    }
+
+    #[test]
+    fn a_misspelled_layer_holds_everything_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        install(
+            &tmp.path(),
+            "demo.songs",
+            "[[share_layers]]\nnote_type = \"song\"\nfulll = [\"Media/**\"]\n",
+        );
+        let rules = LayerRules::new(Some(tmp.path().to_owned()), Vec::new(), None);
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        assert!(LayerRules::place(&rules.current(), &entries).is_none());
     }
 }
