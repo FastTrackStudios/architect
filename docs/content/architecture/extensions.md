@@ -1827,8 +1827,13 @@ full = ["Media/Proxies/**"]                          # the stems
 (`features/extensions/src/share_layers.rs` `ShareLayersDecl`, checked by
 `Manifest::check`.) A pattern matches an attached file's path relative to
 the folder of the note that attaches it (a file outside it: its vault
-path), whole and in any ASCII case (as `note_type` is): `*` and `?`
-within one segment, `**` any number of them. Matching is linear in the
+path), whole and in any case (Unicode lowercase, character by
+character: `Gänse*` is `GÄNSE.ogg`; the Unicode form is not folded, so
+spell it as the vault does), as `note_type` is (its spaces trimmed): `*`
+and `?` within one segment, `**` any number of them. A key
+`[[share_layers]]` does not know (`fulll`) is an error: the manifest does
+not load, and on a node every attached file is held back until it is
+fixed. Matching is linear in the
 pattern times the path, and a rule has at most 64 patterns, each at most
 256 bytes with at most 8 `*` (`MAX_PATTERNS`, `MAX_PATTERN_LEN`,
 `MAX_STARS`); a manifest past them does not load. Within one rule the
@@ -1843,7 +1848,11 @@ page. A held-back file is named in nothing built for the link (the page
 draws no player, link or lyrics of it). While a manifest in the
 extensions folder does not read, placement is unknown and every attached
 file is held back below Full; an uninstalled extension's rules are kept
-until the owner forgets them (`SHARE_LAYERS_FORGET`). The node reads the rules of the extensions installed on it
+until the owner forgets them (`SHARE_LAYERS_FORGET`). A newer version or a
+reinstall that declares fewer `reference`/`full` patterns lowers those
+files at once (a development copy edited the same): the node logs a
+warning listing them and its status shows it until the owner acknowledges
+it (`SHARE_LAYERS_ACKNOWLEDGE`). Declare less only on purpose. The node reads the rules of the extensions installed on it
 (`features/sites/src/installed.rs` `InstalledLayers`, again when the
 folder changes), then a distribution's compiled-in ones
 (`apps/distribution/src/lib.rs` `Distribution::share_layers`, passed to

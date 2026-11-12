@@ -603,25 +603,50 @@ link goes (`features/spaces/src/share.rs` `Listen`):
   that is nowhere (status, headers and body), so a link says nothing of
   what is outside it. Ranges keep working for the rest. A file no rule
   places is a page file.
-- **Named nowhere.** Each link is built for its layer: a held-back file is
-  in no page of it (no player, link, embed or lyrics), its search index,
-  its files page, its archive or its queue. Its bytes are refused.
+- **Named nowhere, never on disk.** Each link is built for its layer: a
+  held-back file is not copied into its folder at all, and is in no page of
+  it (no player, link, embed or lyrics), its search index, its files page,
+  its archive or its queue. The node answers `403` for it from where files
+  are placed, by its path, before it looks at the disk; a folder being
+  swapped in by a rebuild is waited for first, and one it cannot read is
+  `503`, never served. A folder built before a change of layer is checked
+  by what the request opens on disk.
+- **Closing is at once; opening a moment later.** A layer lowered through
+  `SHARE_UPDATE` or the Share sheet holds files back from the next request.
+  A file that opens (a layer raised, a rule lowered or forgotten) is served
+  once the link is built again, a moment later. A change in the vault (a
+  note's `type` becoming `song`) reaches the node about half a second after
+  the write: until then the file is placed as it was. A download of the
+  archive already under way is asked again before each file and stops at
+  the first one its link no longer serves (revoked, expired, its layer
+  lowered): the zip then does not open.
 - **Nothing an extension does opens a link.** Every rule for a note type
-  counts and the highest layer wins. While an installed extension's
-  manifest does not read (half-written, not a manifest), the node does not
-  know where files are and holds every attached file back on every link
-  below Full until it is fixed, warning once with the file's path (as when
-  it cannot read the vault). An uninstalled extension's rules are kept in
-  the node's data dir (`share-layers.json`) and still place files until
-  the owner forgets them:
+  counts and the highest layer wins. A development copy (installed from a
+  path, its slot holding only `installed.toml`) is read where it links to.
+  While an installed extension's manifest does not read (half-written, not
+  a manifest, an unknown key in `[[share_layers]]`, a link to nothing) or
+  two folders claim one id, the node does not know where files are and
+  holds every attached file back on every link below Full until it is
+  fixed, warning once with the file's path. An uninstalled extension's
+  rules are kept, by its folder, in the node's data dir
+  (`share-layers.json`) and still place files until the owner forgets
+  them. If that file does not read, it is set aside
+  (`share-layers.json.corrupt-<time>`), never written over, and every
+  attached file is held back below Full, across restarts, until the owner
+  acknowledges it. A reinstall that declares fewer rules lowers files as
+  it says, and the node warns, listing what was lowered, until
+  acknowledged. The node's status (`NodeStatus::share_layers`) says when
+  any of these needs the owner:
 
   ```sh
-  architect-desktop actions run SHARE_LAYERS_KEPT                       # what is kept, by extension
+  architect-desktop actions run SHARE_LAYERS_KEPT                       # kept rules and notices
   architect-desktop actions run SHARE_LAYERS_FORGET --arg extension=fts.studio
+  architect-desktop actions run SHARE_LAYERS_ACKNOWLEDGE                # a set-aside file, lowered rules
   ```
 - **A share note without a layer** (written before layers, or one that
   lost the field) reads as Reference, the default, and its audiences as
-  the share's: access fails closed. Anyone who can write the vault can
+  the share's: access fails closed. A hand-edited `"listen"` reads in any
+  case (`full`); a value that is no layer leaves the note unread (`404`). Anyone who can write the vault can
   edit a share note, so a cap is as strong as the vault's write access
   (#552).
 
