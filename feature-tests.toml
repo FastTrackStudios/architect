@@ -58,6 +58,14 @@ name = "editor-story"
 packages = ["architect-editor"]
 features = ["architect-editor/stories", "architect-editor/native"]
 
+# Process views (#579, #641): the demo program and the frames test, its
+# guest and host in one process tree. Without a Vulkan adapter that shares
+# dma-bufs the test says so and returns.
+[[pass]]
+name = "process-view"
+packages = ["architect-process-view"]
+features = ["architect-process-view/demo", "architect-process-view/guest", "architect-process-view/host"]
+
 # The whole stack started as `devenv up` starts it (#541,
 # `xtask/tests/dev_stack.rs`): the demo seed end to end (sign-in, the org's
 # vault through the node, a share link per audience) and a mirror of a
