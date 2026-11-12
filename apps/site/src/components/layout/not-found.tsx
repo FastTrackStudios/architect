@@ -1,29 +1,17 @@
-import { Sheet, SheetHead } from "#/components/landing/sheet";
 import { NOT_FOUND } from "#/content/pages-copy";
+import { Page } from "./page";
 
-/** No page at this address (apps/web/site/404.html's words). */
+/** No page at this address. */
 export function NotFound() {
 	return (
-		<Sheet
-			id="not-found"
-			sheet="404"
-			labelledBy="nf-title"
-			className="sheet sheet-page"
-		>
-			<div className="sheet-body">
-				<SheetHead
-					id="nf-title"
-					title={NOT_FOUND.title}
-					lede={NOT_FOUND.lede}
-				/>
-				<p className="page-links">
-					{NOT_FOUND.links.map((l) => (
-						<a key={l.href} className="text-link" href={l.href}>
-							{l.label}
-						</a>
-					))}
-				</p>
-			</div>
-		</Sheet>
+		<Page title={NOT_FOUND.title} lede={NOT_FOUND.lede}>
+			<ul className="page-links">
+				{NOT_FOUND.links.map((l) => (
+					<li key={l.href}>
+						<a href={l.href}>{l.label}</a>
+					</li>
+				))}
+			</ul>
+		</Page>
 	);
 }

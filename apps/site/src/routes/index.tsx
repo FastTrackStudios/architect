@@ -1,20 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-	ExtensionsSheet,
-	FilesSheet,
-	FrameworkSheet,
-	IssueSheet,
-	SelfHostSheet,
-	StudioSheet,
-	SyncSheet,
-	VaultSheet,
-} from "#/components/landing/sheets";
-import { SitePlan } from "#/components/landing/site-plan";
+
+import { Feature } from "#/components/landing/feature";
+import { Get } from "#/components/landing/get";
+import { Hero } from "#/components/landing/hero";
+import { FEATURES } from "#/content/landing";
 import { pageHead } from "#/lib/seo";
 
 /**
- * The front door: the drawing set, ported from apps/web/landing. A-000 the
- * site plan, then one sheet per subject, then the issue sheet.
+ * The front door (#559): what it is and the download, then the app itself,
+ * one heading and one capture at a time, then every way to get it.
  */
 export const Route = createFileRoute("/")({
 	head: () => pageHead(),
@@ -24,15 +18,11 @@ export const Route = createFileRoute("/")({
 function Home() {
 	return (
 		<>
-			<SitePlan />
-			<VaultSheet />
-			<FilesSheet />
-			<SyncSheet />
-			<ExtensionsSheet />
-			<StudioSheet />
-			<SelfHostSheet />
-			<FrameworkSheet />
-			<IssueSheet />
+			<Hero />
+			{FEATURES.map((f) => (
+				<Feature key={f.id} feature={f} />
+			))}
+			<Get />
 		</>
 	);
 }

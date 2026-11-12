@@ -11,15 +11,15 @@ export const SITE = {
 	domain: "architect.fasttrackstudio.app",
 	url: "https://architect.fasttrackstudio.app",
 	/** The home page's own title (the landing page's, verbatim). */
-	homeTitle: "Architect: your notes, projects and files on every device",
+	homeTitle: "Architect: the foundation you build on",
 	description:
-		"Architect is a local-first app for desktop, phone and the web, and the Rust framework it is built on. Vaults of markdown, projects and files held at home and pinned where you work, synced peer to peer.",
-	/** og:description on the home page, as the landing page had it. */
+		"Architect is one local-first, open-source app for notes, tasks, files and projects. Your work is a folder of markdown on your own disk, and every feature is an extension. For Linux and macOS.",
+	/** og:description on the home page. */
 	ogDescription:
-		"Your notes, projects and files on every device, local-first and in sync.",
-	/** Painted as <meta name="theme-color">: the plot (light) and the model (dark). */
-	themeColor: { plot: "#f3f5f2", model: "#0c0e10" },
-	/** Where the Plot/Model choice is kept (the landing page's key, unchanged). */
+		"One local-first app for notes, tasks, files and projects, and the foundation for everything built on it.",
+	/** Painted as <meta name="theme-color">: the grounds in src/styles/tokens.css. */
+	themeColor: { light: "#ffffff", dark: "#0e0e10" },
+	/** Where the light/dark choice is kept (the old page's key; it kept "plot"/"model"). */
 	themeKey: "architect-plot",
 	locale: "en_US",
 	license: "MIT or Apache-2.0",
@@ -45,9 +45,37 @@ export const DOCS_PATH = "/docs/";
 /** The release that `latest` means on GitHub. */
 export const RELEASES_LATEST = `${SITE.repo}/releases/latest`;
 
-/** The pages' own nav, beside the landing page's sheet index. */
+/** The header's nav, on every page. */
 export const NAV_LINKS = [
 	{ label: "Download", to: "/download" },
 	{ label: "Extensions", to: "/extensions" },
 	{ label: "Changelog", to: "/changelog" },
 ] as const;
+
+/** The Nix one-liner (the flake's default package is the release's AppImage). */
+export const NIX_RUN = "nix run github:FastTrackStudios/architect";
+
+/** The words of the shell: header, footer, theme switch. */
+export const SHELL = {
+	skip: "Skip to the content",
+	home: "Architect, home",
+	nav: "Site",
+	docs: { label: "Docs", href: DOCS_PATH },
+	theme: {
+		toLight: "Switch to the light theme",
+		toDark: "Switch to the dark theme",
+	},
+	footer: {
+		by: {
+			pre: "By",
+			org: "FastTrackStudio",
+			href: "https://fasttrackstudio.app",
+		},
+		tail: `${SITE.license}. Pre-1.0.`,
+		links: [
+			{ label: "Source", href: SITE.repo },
+			{ label: "Releases", href: `${SITE.repo}/releases` },
+			{ label: "Docs", href: DOCS_PATH },
+		],
+	},
+} as const;

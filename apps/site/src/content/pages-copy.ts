@@ -3,7 +3,7 @@
  * /extensions and the 404. What they list comes from src/data (written at
  * build time by scripts/data.ts); what they say is here.
  */
-import { DOCS_PATH, RELEASES_LATEST, SITE } from "./site";
+import { DOCS_PATH, NIX_RUN, RELEASES_LATEST, SITE } from "./site";
 
 export const DOWNLOAD = {
 	title: "Download",
@@ -11,11 +11,23 @@ export const DOWNLOAD = {
 		"Architect for Linux and macOS, on Nix, and the node for a home server: the latest release's downloads.",
 	lede: "The latest release of the Architect app. Each download is checked by the app's updater against its sha256, and signed in SHA256SUMS with the org key.",
 	release: "Release",
+	get: "Download",
+	web: {
+		k: "Web app",
+		v: "In your browser",
+		href: "/app/",
+		open: "Open",
+		note: "Sign-in and your node's status today. Notes, projects and files come to the browser as they are ported.",
+	},
+	updates:
+		"On Linux the app updates itself from here, after checking the signed SHA256SUMS. On macOS it tells you when a release is out and points you back to this page.",
+	copy: "Copy",
+	copied: "Copied",
 	platforms: {
 		linux: {
 			k: "Linux",
 			v: "AppImage · x86_64",
-			note: "Make it executable (`chmod +x`) and run it. The app updates itself from here.",
+			note: "Make it executable (`chmod +x`) and run it.",
 		},
 		macos: {
 			k: "macOS",
@@ -33,8 +45,8 @@ export const DOWNLOAD = {
 		title: "On Nix",
 		lede: "The flake's `architect-desktop` is the release's own AppImage in an FHS env, so installing it compiles nothing.",
 		code: [
-			"nix run github:FastTrackStudios/architect            # the newest pinned release",
-			"nix run github:FastTrackStudios/architect/v{version}    # this release",
+			{ comment: "the newest pinned release", line: NIX_RUN },
+			{ comment: "this release", line: `${NIX_RUN}/v{version}` },
 		],
 		more: {
 			label: "The desktop app on Nix, in the docs",
@@ -47,7 +59,6 @@ export const DOWNLOAD = {
 		label: "Every file in this release, on GitHub",
 		href: RELEASES_LATEST,
 	},
-	strip: { sn: "I-001", t: "Download", s: "Issued for use" },
 };
 
 export const CHANGELOG = {
@@ -58,7 +69,6 @@ export const CHANGELOG = {
 	onGitHub: "On GitHub",
 	prerelease: "Pre-release",
 	older: { label: "Older releases, on GitHub", href: `${SITE.repo}/releases` },
-	strip: { sn: "R-001", t: "Revisions", s: "Newest first" },
 };
 
 export const STORE = {
@@ -89,7 +99,6 @@ export const STORE = {
 		label: "List an extension",
 		href: `${DOCS_PATH}architecture/extensions/`,
 	},
-	strip: { sn: "A-402", t: "Extension store", s: "Schedule" },
 };
 
 export const NOT_FOUND = {
@@ -97,6 +106,7 @@ export const NOT_FOUND = {
 	lede: "There is no page at this address.",
 	links: [
 		{ label: "Home", href: "/" },
+		{ label: "Download", href: "/download" },
 		{ label: "Docs", href: DOCS_PATH },
 	],
 };

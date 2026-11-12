@@ -42,27 +42,31 @@ emits a different file (the hub's rule).
 ```
 src/
   content/    the words and addresses: site.ts (identity, NODE_ORIGIN, nav),
-              landing.ts (the landing page's copy, verbatim), pages-copy.ts
+              landing.ts (the landing page's few words and its captures), pages-copy.ts
               (/download, /changelog, /extensions, 404), pages.ts (what is
               prerendered)
   data/       build-time data, committed as the last good copy:
               release.json, changelog.json, extensions.json (scripts/data.ts)
-  lib/        pageHead() (seo.ts), the Plot/Model theme (theme.ts), typed data
+  lib/        pageHead() (seo.ts), the light/dark theme (theme.ts), typed data
   components/
-    landing/  the drawing set: the site plan, section A, the sheets
-    layout/   the bar, the Plot/Model toggle, the colophon, 404
-    ui/       Rich (the content's inline markup), actions, arrows, the mark
-  styles/     landing.css (apps/web/landing's, unchanged but for font URLs),
-              pages.css (what the other pages add)
+    landing/  the hero and its screenshot tabs, a feature (one heading,
+              one capture), the downloads
+    layout/   the header, the theme switch, the footer, a page, 404
+    ui/       Rich (the content's inline markup), a capture, a command line
+  styles/     tokens.css (the design tokens: colour, type, space, in one
+              file the hub can adopt), base.css, site.css (the shell),
+              landing.css, pages.css
   routes/     /, /download, /changelog, /extensions, /extensions/$id, /404
 scripts/      data.ts, assets.sh, check-links.ts, vercel-config.ts,
               assemble.sh, serve.ts (Bun scripts, not typechecked by tsc,
               as the hub's tools/)
 ```
 
-A redesign replaces `components/` and `styles/`; the words stay in
-`src/content`. The two drawings (site plan, section A) keep their labels in
-their components, beside the geometry.
+The look is a clean slate (#559): two neutrals and ink, light and dark,
+no brand colour; the only colour on a page is the app in its screenshots.
+`--accent` and `--on-accent` default to ink, so a product built on these
+tokens adds its colour by setting those two. The page reads fully with
+scripts off: the screenshot tabs are radios and labels (`:has(:checked)`).
 
 ## Data, at build time
 
@@ -81,10 +85,15 @@ build never fails on the network. `GITHUB_TOKEN` is sent when set.
 
 ## Media
 
-The landing page's screenshots, clips, fonts and mark are copied from
-`apps/web/landing` into `public/` by `scripts/assets.sh` at `dev` and
-`build` (ignored by git, so the binaries are in the repo once). When
-`apps/web/landing` is retired, point it at the orphan `media` branch.
+Real captures only, from the scenarios (#133). Two sources, both copied
+into `public/` by `scripts/assets.sh` at `dev` and `build`:
+
+- `apps/web/landing` (the old page's clips, posters, and the font), until
+  it is retired;
+- `media/`: this site's own WebPs, derived from the orphan `media` branch
+  (and Studio's share-page capture) by `scripts/media.sh`, which names
+  every source and crop. They are committed as the last good copy, the
+  way `src/data` is, so a build needs no network and no encoder.
 
 ## Deploy
 

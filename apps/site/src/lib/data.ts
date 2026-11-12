@@ -1,10 +1,9 @@
 /**
  * The build-time data (src/data/*.json, written by scripts/data.ts and
  * committed as the last good copy), typed. Imported, never fetched: a page
- * reads what the build wrote.
+ * reads what the build wrote. One module per file (this one, changelog.ts,
+ * store.ts), so a page's script carries only the data that page shows.
  */
-import changelogJson from "#/data/changelog.json";
-import extensionsJson from "#/data/extensions.json";
 import releaseJson from "#/data/release.json";
 
 export type Asset = {
@@ -59,12 +58,6 @@ export type Store = {
 };
 
 export const RELEASE = releaseJson as Release;
-export const CHANGELOG_RELEASES = changelogJson.releases as ReleaseNotes[];
-export const STORE_INDEX = extensionsJson as Store;
-
-export function findExtension(id: string) {
-	return STORE_INDEX.entries.find((e) => e.id === id);
-}
 
 /** "11 November 2026", fixed to UTC so the build and the browser agree. */
 export function day(iso: string | null) {

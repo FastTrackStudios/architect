@@ -152,7 +152,7 @@ so none needs a server when it is requested:
 
 | Page | From |
 | --- | --- |
-| `/` | the landing page, ported from `apps/web/landing`; its words are in `apps/site/src/content/landing.ts`, its media copied from `apps/web/landing` at build time (`apps/site/scripts/assets.sh`) |
+| `/` | the landing page; its words are in `apps/site/src/content/landing.ts`, its design tokens in `apps/site/src/styles/tokens.css`, its media copied at build time (`apps/site/scripts/assets.sh`) from `apps/web/landing` and `apps/site/media` |
 | `/download` | the latest release's `latest-linux.json` and `latest-macos.json`, and the Nix one-liner above |
 | `/changelog` | the last releases' notes (the GitHub release bodies, which are `scripts/release-notes.sh`'s output) |
 | `/extensions` | the store's index, `extensions/index.toml`. While it lists nothing, the page is built from `examples/registry/index.toml` and says it is an example |

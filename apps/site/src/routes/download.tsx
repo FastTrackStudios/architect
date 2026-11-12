@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { Sheet, SheetHead } from "#/components/landing/sheet";
-import { Arrow } from "#/components/ui/arrow";
+import { Page } from "#/components/layout/page";
+import { Cmd } from "#/components/ui/cmd";
 import { Rich } from "#/components/ui/rich";
 import { DOWNLOAD } from "#/content/pages-copy";
 import { type Asset, day, RELEASE } from "#/lib/data";
@@ -24,82 +24,83 @@ export const Route = createFileRoute("/download")({
 function Download() {
 	const p = DOWNLOAD.platforms;
 	return (
-		<Sheet
-			id="download"
-			sheet="I-001 Download"
-			labelledBy="dl-title"
-			className="sheet sheet-page"
-			strip={DOWNLOAD.strip}
-		>
-			<div className="sheet-body">
-				<SheetHead id="dl-title" title={DOWNLOAD.title} lede={DOWNLOAD.lede} />
-				<dl className="tb-data release-data">
-					<div>
-						<dt>{DOWNLOAD.release}</dt>
-						<dd>
-							<a href={RELEASE.url}>{RELEASE.tag}</a> ·{" "}
-							{day(RELEASE.publishedAt)}
-						</dd>
-					</div>
-				</dl>
-				<div className="downloads">
-					<Platform
-						k={p.linux.k}
-						v={p.linux.v}
-						note={p.linux.note}
-						asset={RELEASE.linux}
-						primary
-					/>
-					<Platform
-						k={p.macos.k}
-						v={p.macos.v}
-						note={p.macos.note}
-						asset={RELEASE.macos}
-					/>
-					<Platform
-						k={p.node.k}
-						v={p.node.v}
-						note={p.node.note}
-						asset={
-							RELEASE.node && {
-								...RELEASE.node,
-								version: RELEASE.version,
-								sha256: "",
-							}
+		<Page title={DOWNLOAD.title} lede={DOWNLOAD.lede}>
+			<p className="label page-meta">
+				{DOWNLOAD.release} <a href={RELEASE.url}>{RELEASE.tag}</a>,{" "}
+				{day(RELEASE.publishedAt)}
+			</p>
+			<ul className="rows">
+				<Platform
+					k={p.linux.k}
+					v={p.linux.v}
+					note={p.linux.note}
+					asset={RELEASE.linux}
+					primary
+				/>
+				<Platform
+					k={p.macos.k}
+					v={p.macos.v}
+					note={p.macos.note}
+					asset={RELEASE.macos}
+				/>
+				<Platform
+					k={p.node.k}
+					v={p.node.v}
+					note={p.node.note}
+					asset={
+						RELEASE.node && {
+							...RELEASE.node,
+							version: RELEASE.version,
+							sha256: "",
 						}
-					/>
-				</div>
-				<div className="notes-block">
-					<h3>{DOWNLOAD.nix.title}</h3>
-					<p>
-						<Rich text={DOWNLOAD.nix.lede} />
-					</p>
-					{/* biome-ignore lint/a11y/noNoninteractiveTabindex: a code block that scrolls sideways */}
-					<pre className="code" tabIndex={0}>
-						<code>
-							{DOWNLOAD.nix.code
-								.map((l) => l.replace("{version}", RELEASE.version))
-								.join("\n")}
-						</code>
-					</pre>
-					<p className="notes-link">
-						<a className="text-link" href={DOWNLOAD.nix.more.href}>
-							{DOWNLOAD.nix.more.label}
-						</a>
-					</p>
-				</div>
-				<p className="page-links">
-					{RELEASE.sums ? (
-						<a className="text-link" href={RELEASE.sums}>
-							{DOWNLOAD.sums}
-						</a>
-					) : null}
-					<a className="text-link" href={DOWNLOAD.all.href}>
-						{DOWNLOAD.all.label}
+					}
+				/>
+				<li className="row">
+					<div className="row-what">
+						<h2>{DOWNLOAD.web.k}</h2>
+						<p className="label">{DOWNLOAD.web.v}</p>
+					</div>
+					<div className="row-body">
+						<p>{DOWNLOAD.web.note}</p>
+					</div>
+					<a className="btn btn-quiet" href={DOWNLOAD.web.href}>
+						{DOWNLOAD.web.open}
 					</a>
+				</li>
+			</ul>
+			<section className="page-block" aria-labelledby="nix-title">
+				<h2 id="nix-title">{DOWNLOAD.nix.title}</h2>
+				<p>
+					<Rich text={DOWNLOAD.nix.lede} />
 				</p>
-			</div>
-		</Sheet>
+				<ul className="cmds">
+					{DOWNLOAD.nix.code.map((c) => (
+						<li key={c.comment}>
+							<p className="label">{c.comment}</p>
+							<Cmd
+								text={c.line.replace("{version}", RELEASE.version)}
+								copy={DOWNLOAD.copy}
+								copied={DOWNLOAD.copied}
+							/>
+						</li>
+					))}
+				</ul>
+				<p>
+					<a href={DOWNLOAD.nix.more.href}>{DOWNLOAD.nix.more.label}</a>
+				</p>
+			</section>
+			<p className="page-note">{DOWNLOAD.updates}</p>
+			<ul className="page-links">
+				{RELEASE.sums ? (
+					<li>
+						<a href={RELEASE.sums}>{DOWNLOAD.sums}</a>
+					</li>
+				) : null}
+				<li>
+					<a href={DOWNLOAD.all.href}>{DOWNLOAD.all.label}</a>
+				</li>
+			</ul>
+		</Page>
 	);
 }
 
@@ -117,30 +118,31 @@ function Platform({
 	primary?: boolean;
 }) {
 	return (
-		<div className="platform">
-			{asset ? (
-				<a className={primary ? "act act-primary" : "act"} href={asset.url}>
-					<span className="act-k">{k}</span>
-					<span className="act-v">
-						{v} · {asset.file}
-					</span>
-					<Arrow dir="down" />
-				</a>
-			) : (
-				<div className="act act-none">
-					<span className="act-k">{k}</span>
-					<span className="act-v">{DOWNLOAD.missing}</span>
-				</div>
-			)}
-			<p className="platform-note">
-				<Rich text={note} />
-			</p>
-			{asset?.sha256 ? (
-				<p className="platform-sha">
-					<span className="t-k">{DOWNLOAD.sha}</span>{" "}
-					<code>{asset.sha256}</code>
+		<li className="row">
+			<div className="row-what">
+				<h2>{k}</h2>
+				<p className="label">{v}</p>
+			</div>
+			<div className="row-body">
+				<p>
+					<Rich text={asset ? note : DOWNLOAD.missing} />
 				</p>
+				{asset ? (
+					<p className="label row-file">
+						<code>{asset.file}</code>
+					</p>
+				) : null}
+				{asset?.sha256 ? (
+					<p className="label row-sha">
+						{DOWNLOAD.sha} <code>{asset.sha256}</code>
+					</p>
+				) : null}
+			</div>
+			{asset ? (
+				<a className={primary ? "btn" : "btn btn-quiet"} href={asset.url}>
+					{DOWNLOAD.get}
+				</a>
 			) : null}
-		</div>
+		</li>
 	);
 }

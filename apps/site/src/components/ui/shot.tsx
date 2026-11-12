@@ -1,46 +1,38 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { Detail as DetailT } from "#/content/landing";
+import type { Media } from "#/content/landing";
 
 /**
- * A detail: a screenshot or a looping clip in a frame, numbered with its
- * sheet's bubble.
+ * A real capture, an image or a looping clip. Images are sized (no layout
+ * shift) and lazy unless `eager`; `sizes` says how wide the slot is so a
+ * phone takes the narrower copy.
  */
-export function Detail({
-	detail,
-	sheet,
-	className = "detail",
+export function Shot({
+	media: m,
+	eager,
+	sizes = "(max-width: 72rem) 100vw, 68rem",
 }: {
-	detail: DetailT;
-	sheet: string;
-	className?: string;
+	media: Media;
+	eager?: boolean;
+	sizes?: string;
 }) {
-	const m = detail.media;
+	if (m.kind === "video") return <LoopVideo {...m} />;
 	return (
-		<figure className={className}>
-			<div className="detail-frame">
-				{m.kind === "video" ? (
-					<LoopVideo {...m} />
-				) : (
-					<img
-						className="shot"
-						src={m.src}
-						width={m.width}
-						height={m.height}
-						loading="lazy"
-						decoding="async"
-						alt={m.alt}
-					/>
-				)}
-			</div>
-			<figcaption>
-				<span className="bubble">
-					{detail.n}
-					<i>{sheet}</i>
-				</span>{" "}
-				{detail.caption}
-			</figcaption>
-		</figure>
+		<img
+			src={m.src}
+			srcSet={
+				m.small
+					? `${m.small.src} ${m.small.width}w, ${m.src} ${m.width}w`
+					: undefined
+			}
+			sizes={m.small ? sizes : undefined}
+			width={m.width}
+			height={m.height}
+			loading={eager ? "eager" : "lazy"}
+			fetchPriority={eager ? "high" : undefined}
+			decoding="async"
+			alt={m.alt}
+		/>
 	);
 }
 
@@ -48,20 +40,20 @@ export function Detail({
  * A looping clip: plays while a third of it is on screen, pauses off
  * screen, and never starts by itself under reduced motion. Play/Pause is
  * the reader's: a clip they paused stays paused, one they played plays
- * even under reduced motion.
+ * even under reduced motion. With scripts off it is its poster.
  */
 function LoopVideo({
 	src,
 	poster,
 	width,
 	height,
-	label,
+	alt,
 }: {
 	src: string;
 	poster: string;
 	width: number;
 	height: number;
-	label: string;
+	alt: string;
 }) {
 	const video = useRef<HTMLVideoElement>(null);
 	const user = useRef<"" | "play" | "pause">("");
@@ -71,7 +63,7 @@ function LoopVideo({
 		const v = video.current;
 		if (!v || !("IntersectionObserver" in window)) return;
 		const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
-		const vo = new IntersectionObserver(
+		const seen = new IntersectionObserver(
 			(entries) => {
 				for (const en of entries) {
 					if (en.isIntersecting) {
@@ -89,16 +81,14 @@ function LoopVideo({
 			},
 			{ threshold: 0.35 },
 		);
-		vo.observe(v);
-		return () => vo.disconnect();
+		seen.observe(v);
+		return () => seen.disconnect();
 	}, []);
 
 	return (
-		<>
+		<div className="clip">
 			<video
 				ref={video}
-				className="shot"
-				data-loop
 				muted
 				loop
 				playsInline
@@ -106,16 +96,15 @@ function LoopVideo({
 				poster={poster}
 				width={width}
 				height={height}
-				aria-label={label}
+				aria-label={alt}
 				onPlay={() => setPaused(false)}
 				onPause={() => setPaused(true)}
 			>
 				<source src={src} type="video/mp4" />
 			</video>
 			<button
-				className="loop-btn"
+				className="clip-btn"
 				type="button"
-				data-loop-btn
 				aria-pressed={!paused}
 				onClick={() => {
 					const v = video.current;
@@ -131,6 +120,6 @@ function LoopVideo({
 			>
 				{paused ? "Play" : "Pause"}
 			</button>
-		</>
+		</div>
 	);
 }
