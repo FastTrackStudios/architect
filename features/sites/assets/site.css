@@ -345,9 +345,10 @@ details[open] > summary > .site-tree-chevron { transform: scale(0.45) rotate(45d
     background: rgb(0 0 0 / 0.35);
   }
   body.site-nav-open { overflow: hidden; }
-  .site-main { padding: 22px 18px 0; }
+  /* A phone's gutter: 16 px both sides (a streaming app's list). */
+  .site-main { padding: 22px 16px 0; }
   .site-prose h2 { font-size: 1.35rem; }
-  .site-code { margin-left: -18px; margin-right: -18px; border-radius: 0; border-left: 0; border-right: 0; }
+  .site-code { margin-left: -16px; margin-right: -16px; border-radius: 0; border-left: 0; border-right: 0; }
   .site-prevnext { grid-template-columns: 1fr; }
   .site-next { grid-column: 1; }
   .site-results { position: fixed; top: calc(var(--site-header) + 4px); left: 8px; right: 8px; }
@@ -373,48 +374,113 @@ video.site-media { max-height: 70vh; background: #000; border-radius: 6px; }
 [data-follow-playhead] svg [data-at]:hover, svg[data-follow-playhead] [data-at]:hover { fill: var(--primary, var(--accent)); fill-opacity: .12; }
 [data-follow-playhead] svg [data-at][aria-current="time"], svg[data-follow-playhead] [data-at][aria-current="time"] { fill: var(--primary, var(--accent)); fill-opacity: .28; }
 /* The player (#511): a bar at the bottom while anything plays, whose song
-   opens the now-playing view over the page. */
-body.site-has-player { padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
-.site-player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; align-items: center; gap: 4px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--background); color: var(--foreground); border-top: 1px solid var(--border, #8884); font: 14px/1.3 system-ui, sans-serif; }
+   opens the now-playing view over the page. On a playlist's page it is a
+   card floating over the page (its art, its song, Click, Loop, play), the
+   page scrolling under it. */
+body.site-has-player { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+.site-player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; align-items: center; gap: 4px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--background); color: var(--foreground); border-top: 1px solid var(--border, #8884); font: 14px/1.3 var(--font-sans, system-ui, sans-serif); }
 .site-player[hidden] { display: none; }
 .site-player-line { position: absolute; left: 0; right: 0; top: -1px; height: 2px; pointer-events: none; }
 .site-player-line span { display: block; height: 100%; width: 0; background: var(--primary, currentColor); }
-.site-player button, .site-now button { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; border-radius: 999px; -webkit-tap-highlight-color: transparent; }
-.site-player button:focus-visible, .site-now button:focus-visible { outline: 2px solid var(--ring, currentColor); outline-offset: 2px; }
-.site-player button svg, .site-now button svg { width: 22px; height: 22px; fill: currentColor; }
-.site-player .site-player-skip, .site-player .site-player-toggle { flex: none; width: 40px; height: 40px; }
-.site-player .site-player-toggle, .site-now .site-player-toggle { background: var(--foreground); color: var(--background); }
+.site-player button, .site-now button, .site-now-page { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: inherit; border-radius: 999px; -webkit-tap-highlight-color: transparent; }
+.site-player button:focus-visible, .site-now button:focus-visible, .site-now-page:focus-visible { outline: 2px solid var(--ring, currentColor); outline-offset: 2px; }
+.site-player button svg, .site-now button svg, .site-now-page svg { width: 22px; height: 22px; fill: currentColor; stroke: none; }
+.site-player .site-player-skip, .site-player .site-player-toggle { flex: none; width: 44px; height: 44px; }
+.site-player .site-player-toggle { background: var(--foreground); color: var(--background); }
 .site-player .site-player-toggle svg { width: 20px; height: 20px; }
 .site-player .site-player-what { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; padding: 4px 8px; }
 .site-player a.site-player-title { color: inherit; text-decoration: none; border-radius: 6px; }
 .site-player a.site-player-title[href]:hover { text-decoration: underline; }
 .site-player-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
-.site-player-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; opacity: .7; }
+.site-player-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; opacity: .72; }
 .site-player-note:empty { display: none; }
 .site-player-time { font-variant-numeric: tabular-nums; font-size: 12px; opacity: .7; padding: 0 6px; }
 .site-player-follow { display: flex; gap: 4px; align-items: center; font-size: 12px; }
 .site-player-audio { display: none; }
+.site-player-art { display: none; }
 @media (max-width: 520px) { .site-player-follow, .site-player-time { display: none; } }
 
-.site-now { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--background); color: var(--foreground); font: 14px/1.3 system-ui, sans-serif; overscroll-behavior: contain; }
+/* The card. Tinted from the song's art (`--site-player-tint`, set by the
+   player), over the theme's own raised surface so its ink stays the
+   theme's. */
+.site-player.site-player-card {
+  left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  min-height: 60px; padding: 8px 4px 8px 8px; gap: 0;
+  border: 0; border-radius: 10px; overflow: hidden; cursor: pointer;
+  background: var(--card, var(--background));
+  background: color-mix(in oklab, var(--site-player-tint, var(--muted)) 30%, var(--card, var(--background)));
+  color: var(--card-foreground, var(--foreground));
+  box-shadow: 0 8px 28px rgb(0 0 0 / .2), 0 1px 3px rgb(0 0 0 / .14);
+  -webkit-tap-highlight-color: transparent;
+}
+.site-player-card .site-player-art { display: grid; }
+.site-player-card .site-player-what { padding: 0 10px; }
+.site-player-card .site-player-title { font-size: 14px; font-weight: 600; }
+.site-player-card .site-player-toggle { background: none; color: inherit; width: 44px; height: 44px; }
+.site-player-card .site-player-toggle svg { width: 26px; height: 26px; }
+.site-player-card .site-player-time { display: none; }
+/* Its progress: a thin line along its bottom edge, inside its corners. */
+.site-player-card .site-player-line { top: auto; bottom: 0; left: 8px; right: 8px; height: 2px; border-radius: 1px; background: var(--border, #8884); background: color-mix(in oklab, currentColor 18%, transparent); }
+.site-player-card .site-player-line span { background: currentColor; border-radius: 1px; }
+@media (min-width: 821px) {
+  .site-player.site-player-card { left: 50%; right: auto; width: min(760px, calc(100% - 32px)); transform: translateX(-50%); bottom: 16px; }
+  .site-player-card .site-player-time { display: block; }
+}
+
+/* A song's art, or the tile drawn in its place (a music note on a colour
+   from its title, never letters): square, small corners, the art laid
+   over the tile. */
+.site-player-art, [data-playlist] [data-track-art] {
+  position: relative; flex: none; place-items: center; overflow: hidden;
+  border-radius: 4px; background: var(--muted); color: #fff;
+  font-weight: 650; letter-spacing: .01em; line-height: 1; user-select: none;
+}
+.site-player-art { width: 40px; height: 40px; font-size: 13px; }
+.site-player-art > svg, [data-playlist] [data-track-art] > svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; opacity: .9; }
+.site-player-art > svg { width: 20px; height: 20px; }
+.site-player-art img, [data-playlist] [data-track-art] img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; margin: 0; }
+
+/* Click and Loop: off, an icon; on, the icon on a disc of the accent. */
+.site-player .site-player-opt, .site-now .site-player-opt { flex: none; width: 44px; height: 44px; opacity: .8; }
+.site-player .site-player-opt svg, .site-now .site-player-opt svg { width: 20px; height: 20px; }
+.site-player .site-player-opt[aria-pressed="true"], .site-now .site-player-opt[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--primary-foreground, #fff);
+  background: radial-gradient(circle, var(--primary) 0 15px, transparent 15.5px);
+}
+.site-player .site-player-opt[disabled], .site-now .site-player-opt[disabled] { opacity: .32; cursor: default; }
+.site-now .site-now-lyrics[aria-pressed="true"] { opacity: 1; }
+
+/* The now-playing view: where the song is, the view (a chart) filling the
+   width and every pixel between the bars, the controls in one row. */
+.site-now { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--background); color: var(--foreground); font: 14px/1.3 var(--font-sans, system-ui, sans-serif); overscroll-behavior: contain; }
 .site-now[hidden] { display: none; }
 body.site-now-open { overflow: hidden; overscroll-behavior: none; }
 body.site-now-open .site-player { visibility: hidden; }
-.site-now-head { display: flex; align-items: center; gap: 8px; padding: calc(6px + env(safe-area-inset-top, 0px)) 10px 6px; touch-action: pan-x; }
-.site-now-close, .site-now-spacer { flex: none; width: 44px; height: 44px; }
-.site-now-close svg { width: 28px; height: 28px; }
-.site-now-what { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.site-now-head { flex: none; display: flex; align-items: center; gap: 2px; padding: calc(4px + env(safe-area-inset-top, 0px)) 4px 2px; touch-action: pan-x; }
+.site-now-close { flex: none; width: 44px; height: 44px; }
+.site-now-close svg { width: 26px; height: 26px; }
+.site-now-what { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 0 4px; }
 .site-now-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; font-size: 15px; }
-.site-now-note { font-size: 12px; opacity: .7; }
-.site-now-progress { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 16px 10px; border-bottom: 1px solid var(--border, #8884); }
+.site-now-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; opacity: .7; }
+.site-now-lyrics, .site-now-page { flex: none; width: 44px; height: 44px; opacity: .8; }
+.site-now-lyrics svg, .site-now-page svg { width: 20px; height: 20px; }
+.site-now .site-now-lyrics[aria-pressed="true"] { color: var(--primary); }
+.site-now-page[hidden], .site-now-lyrics[hidden] { display: none; }
+.site-now-progress { flex: none; display: flex; align-items: center; padding: 6px 14px 10px; }
 .site-now-progress[hidden] { display: none; }
-.site-now-seek { flex: 1; height: 6px; border-radius: 3px; background: var(--border, #8884); overflow: hidden; cursor: pointer; padding: 0; }
+.site-now-seek { flex: 1; height: 4px; border-radius: 2px; background: var(--border, #8884); background: color-mix(in oklab, currentColor 16%, transparent); overflow: hidden; cursor: pointer; padding: 0; }
 .site-now-seek:focus-visible { outline: 2px solid var(--ring, currentColor); outline-offset: 4px; }
-.site-now-seek span { display: block; height: 100%; width: 0; background: var(--primary, currentColor); pointer-events: none; }
-.site-now-at, .site-now-left { flex: none; min-width: 40px; font-variant-numeric: tabular-nums; font-size: 12px; opacity: .7; }
-.site-now-left { text-align: right; }
-.site-now-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+.site-now-seek span { display: block; height: 100%; width: 0; background: currentColor; pointer-events: none; }
+/* The bar alone: no time beside it (one look with an island's bar). */
+.site-now-at, .site-now-left { display: none; }
+.site-now-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 0 4px; }
 .site-now-body > .site-block, .site-now-body > [data-now-playing] { flex: 1; min-height: 0; margin: 0; }
+/* A view's own boxes take the whole body (no box of its own height), and
+   a drawing the whole width. */
+.site-now-body [data-now-playing] { height: 100%; }
+.site-now-body [data-now-playing] > * { max-height: none !important; border-radius: 4px !important; }
+.site-now-body [data-now-playing] svg[viewBox] { width: 100% !important; height: auto !important; }
 .site-now-body > .site-now-words { display: none; flex: 1; min-height: 0; max-height: none; margin: 0; padding: 12px 16px; }
 .site-now-showing-lyrics .site-now-body > .site-now-words { display: block; }
 .site-now-showing-lyrics .site-now-body > :not(.site-now-words) { display: none; }
@@ -426,29 +492,129 @@ body.site-now-open .site-player { visibility: hidden; }
 .site-now-island-top { max-height: 22vh; }
 .site-now-island-bottom { max-height: 30vh; }
 .site-now-island[hidden], .site-now .site-now-yielded { display: none; }
-.site-now-island-top { border-bottom: 1px solid var(--border, #8884); }
-.site-now-island-bottom { border-top: 1px solid var(--border, #8884); }
 .site-now-empty { margin: auto; padding: 16px; opacity: .7; text-align: center; }
-.site-now-controls { flex: none; padding: 8px 16px 4px; border-top: 1px solid var(--border, #8884); }
+.site-now-controls { flex: none; padding: 0 8px calc(2px + env(safe-area-inset-bottom, 0px)); }
 .site-now-controls[hidden] { display: none; }
-.site-now-buttons { display: flex; align-items: center; justify-content: center; gap: 28px; }
-.site-now-buttons .site-player-skip { width: 48px; height: 48px; }
-.site-now-buttons .site-player-skip svg { width: 28px; height: 28px; }
-.site-now-buttons .site-player-toggle { width: 64px; height: 64px; }
-.site-now-buttons .site-player-toggle svg { width: 28px; height: 28px; }
-.site-now-more { flex: none; display: flex; align-items: center; justify-content: center; gap: 20px; padding: 4px 16px calc(10px + env(safe-area-inset-bottom, 0px)); font-size: 13px; }
-.site-now-more a { color: var(--primary, inherit); text-decoration: none; padding: 8px 4px; }
-.site-now-more a[hidden], .site-now-lyrics[hidden] { display: none; }
-.site-now .site-now-lyrics { padding: 6px 14px; border: 1px solid var(--border, #8886); }
-.site-now .site-now-lyrics[aria-pressed="true"] { background: var(--foreground); color: var(--background); }
+.site-now-buttons { display: flex; align-items: center; justify-content: space-between; gap: 6px; max-width: 440px; height: 56px; margin: 0 auto; }
+/* Previous, play, next: one control, no gaps, hairlines between, one
+   outline round them all; play the accented middle. */
+.site-now-transport { flex: 1; min-width: 0; max-width: 300px; height: 48px; display: flex; gap: 1px; border-radius: 12px; overflow: hidden; background: var(--border, #8884); border: 1px solid var(--border, #8884); }
+.site-now-transport .site-player-skip, .site-now-transport .site-player-toggle { flex: 1; height: 100%; border-radius: 0; background: var(--card, var(--background)); color: var(--foreground); }
+.site-now-transport .site-player-toggle { flex: 1.4; background: var(--primary); color: var(--primary-foreground, #fff); }
+.site-now-transport .site-player-skip svg { width: 24px; height: 24px; }
+.site-now-transport .site-player-toggle svg { width: 28px; height: 28px; }
 .site-player-warn { color: var(--destructive, #c0392b); opacity: 1; }
 @media (min-width: 900px) {
   .site-now { left: auto; width: min(760px, 62vw); border-left: 1px solid var(--border, #8884); box-shadow: -12px 0 32px #0003; }
   body.site-now-open { overflow: auto; }
 }
 
-/* A playlist's rows (a block's `[data-playlist]`): the playing one marked. */
-[data-playlist] [data-track] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
-[data-playlist] [data-track]:hover { background: var(--site-code-bg); }
-[data-playlist] [data-track][aria-current="true"] { color: var(--primary, inherit); }
-[data-playlist] [data-track][aria-current="true"] [data-track-mark] { color: var(--primary, inherit); }
+/* A playlist (a block's `[data-playlist]`): one list, sections labelled
+   in it, each song a row: its number, its art, its title over who it is
+   by, its length, a way to its page. The playing one marked. */
+[data-playlist] ol, [data-playlist] ul { list-style: none; margin: 0; padding: 0; }
+[data-playlist] [data-playlist-play] { display: none !important; }
+.site-block:has(> [data-playlist]) { overflow: visible; }
+[data-playlist] li[data-page], [data-playlist] li[data-track] {
+  display: grid; grid-template-columns: 1.75rem 48px minmax(0, 1fr) auto; grid-auto-flow: column; grid-auto-columns: auto; align-items: center; column-gap: 12px;
+  min-height: 60px; margin: 0; padding: 6px 0; border-radius: 6px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.site-prose [data-playlist] li + li { margin-top: 0; }
+[data-playlist] li[data-page]:hover { background: var(--site-code-bg); background: color-mix(in oklab, currentColor 5%, transparent); }
+[data-playlist] [data-track-mark] { justify-self: end; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--site-faint); }
+[data-playlist] [data-track-art] { display: grid; width: 48px; height: 48px; font-size: 15px; }
+[data-playlist] [data-track-text] { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+[data-playlist] [data-track-title] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 500; line-height: 1.3; }
+[data-playlist] [data-track-meta] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; line-height: 1.3; color: var(--site-faint); }
+[data-playlist] [data-track-length] { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--site-faint); }
+[data-playlist] a[data-track-open] { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 999px; color: var(--site-faint); text-decoration: none; }
+[data-playlist] a[data-track-open]:hover { color: var(--foreground); background: var(--site-code-bg); background: color-mix(in oklab, currentColor 8%, transparent); }
+[data-playlist] a[data-track-open] svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+/* A song with no recording: in its place, quieter; it opens its page. */
+[data-playlist] li[data-page]:not([data-track]) :is([data-track-art], [data-track-text], [data-track-mark]) { opacity: .5; }
+/* What follows a playlist's rows (a link's files): quiet. */
+[data-playlist] > p { margin: 14px 0 0; font-size: 13px; color: var(--site-faint); }
+[data-playlist] > p a { display: inline-block; color: inherit; text-decoration: none; padding: 6px 0; }
+[data-playlist] > p a:hover { color: var(--foreground); text-decoration: underline; }
+/* A set's name: a quiet label in the list, not a heading of the page. */
+[data-playlist] li[data-playlist-section] { display: block; margin: 0; padding: 20px 0 6px; font-size: 13px; font-weight: 650; letter-spacing: .01em; color: var(--site-faint); cursor: default; }
+[data-playlist] li[data-playlist-section]:first-child { padding-top: 4px; }
+/* The song playing: its title in the accent, an equalizer for its
+   number (still while paused). */
+[data-playlist] [data-track][aria-current="true"] [data-track-title] { color: var(--primary); }
+[data-playlist] [data-track][aria-current="true"] { color: inherit; }
+[data-playlist] [data-track][aria-current="true"] [data-track-mark] { color: transparent; position: relative; }
+[data-playlist] [data-track][aria-current="true"] [data-track-mark]::after {
+  content: ""; position: absolute; right: 0; top: 50%; width: 13px; height: 13px; transform: translateY(-50%);
+  background:
+    linear-gradient(var(--primary), var(--primary)) 0 100% / 3px 60% no-repeat,
+    linear-gradient(var(--primary), var(--primary)) 5px 100% / 3px 100% no-repeat,
+    linear-gradient(var(--primary), var(--primary)) 10px 100% / 3px 40% no-repeat;
+}
+[data-playlist] [data-track][data-state="playing"] [data-track-mark]::after { animation: site-eq 0.9s ease-in-out infinite alternate; }
+@keyframes site-eq {
+  0% { background-size: 3px 60%, 3px 100%, 3px 40%; }
+  50% { background-size: 3px 100%, 3px 45%, 3px 80%; }
+  100% { background-size: 3px 35%, 3px 75%, 3px 100%; }
+}
+@media (prefers-reduced-motion: reduce) { [data-playlist] [data-track][data-state="playing"] [data-track-mark]::after { animation: none; } }
+/* On a phone, room for the title: the number as narrow as two digits
+   (three still fit), the tile 46 px in, the "…" against the gutter. */
+@media (max-width: 520px) {
+  [data-playlist] li[data-page], [data-playlist] li[data-track] { grid-template-columns: 22px 48px minmax(0, 1fr) 44px; column-gap: 8px; }
+  [data-playlist] [data-track-mark] { font-size: 13px; letter-spacing: -.02em; }
+  [data-playlist] [data-track-text] { padding-left: 4px; }
+  [data-playlist] li > [data-track-more] { place-items: center end; }
+}
+/* A row's menu button: "…", a finger's size. */
+[data-playlist] [data-track-more] {
+  all: unset; box-sizing: border-box; display: grid; place-items: center; width: 44px; height: 44px;
+  border-radius: 999px; color: var(--site-faint); cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+[data-playlist] [data-track-more]:hover, [data-playlist] [data-track-more][aria-expanded="true"] { color: var(--foreground); background: var(--site-code-bg); }
+[data-playlist] [data-track-more]:focus-visible { outline: 2px solid var(--ring, currentColor); outline-offset: -2px; }
+[data-playlist] [data-track-more] svg { width: 20px; height: 20px; fill: currentColor; stroke: none; }
+/* The key, on the song's art: the art dimmed under it (enough for white
+   bold type on any cover), the key in the middle, and in the corner by how
+   far the setlist moves it (`+4`, `−3`). A tile with no art is its colour
+   and the key, the only text on it; a song with no key, its art alone, or
+   with no art a music note. */
+[data-playlist] [data-track-art][data-key] { text-shadow: 0 1px 2px rgb(0 0 0 / .35); }
+[data-playlist] [data-track-art][data-key][data-has-art]::after { content: ""; position: absolute; inset: 0; background: rgb(0 0 0 / .55); z-index: 1; }
+[data-playlist] [data-track-key] { position: relative; z-index: 2; color: #fff; font-size: 15px; font-weight: 750; letter-spacing: -.01em; line-height: 1; white-space: nowrap; }
+[data-playlist] [data-track-art][data-key-size="s"] [data-track-key] { font-size: 12px; }
+[data-playlist] [data-track-art][data-key-size="xs"] [data-track-key] { font-size: 10px; letter-spacing: -.02em; }
+/* The offset: a dark pill ringed in white, white numerals, legible on any
+   cover and any tile colour. */
+[data-playlist] [data-track-transposed] {
+  position: absolute; z-index: 2; top: 2px; right: 2px; height: 15px; padding: 0 4px;
+  border-radius: 8px; background: rgb(0 0 0 / .75); box-shadow: 0 0 0 1px rgb(255 255 255 / .45);
+  color: #fff; font-size: 10px; font-weight: 750; line-height: 15px; letter-spacing: 0; text-shadow: none;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* A row's menu: a sheet from the foot on a phone, beside its button on a desk. */
+.site-row-menu {
+  position: absolute; z-index: 70; min-width: 224px; padding: 6px; display: flex; flex-direction: column;
+  border-radius: 12px; border: 1px solid var(--border, #8884); background: var(--popover, var(--card, var(--background)));
+  color: var(--popover-foreground, var(--foreground)); box-shadow: 0 12px 36px rgb(0 0 0 / .22);
+}
+.site-row-menu-sheet {
+  position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); top: auto; min-width: 0; padding: 8px;
+  border-radius: 16px;
+}
+.site-row-menu-scrim { position: fixed; inset: 0; z-index: 69; background: rgb(0 0 0 / .35); }
+.site-row-menu-title { margin: 4px 12px 8px; font-size: 13px; font-weight: 650; color: var(--site-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site-row-menu-item {
+  all: unset; box-sizing: border-box; display: flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 8px;
+  font-size: 15px; color: inherit; cursor: pointer; text-decoration: none;
+}
+.site-row-menu-item:hover, .site-row-menu-item:focus-visible { background: var(--site-code-bg); outline: none; }
+
+/* A page's title block on a phone: the page, not the heading, first. */
+@media (max-width: 820px) {
+  .site-title { font-size: 1.65rem; line-height: 1.2; letter-spacing: -0.02em; margin-bottom: 6px; }
+  .site-crumbs { margin-bottom: 6px; }
+  .site-meta { margin-bottom: 16px; }
+  .site-lede { font-size: 1.02rem; margin-bottom: 10px; }
+}

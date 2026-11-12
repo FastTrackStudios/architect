@@ -460,6 +460,22 @@ impl Site {
                     used_attachments.insert(target.to_owned());
                 }
             }
+            // Its art is one of its files, as a link in its body is.
+            if let Some(art) = note
+                .meta
+                .art
+                .as_deref()
+                .and_then(|link| {
+                    crate::art::resolve(
+                        link,
+                        crate::art::folder_of(rel),
+                        attachments.iter().copied(),
+                    )
+                })
+                .filter(|t| opts.scope.holds_file(t) && !opts.hold_back.contains(*t))
+            {
+                used_attachments.insert(art.to_owned());
+            }
             let mut tags: BTreeSet<String> = page_tags(note.page)
                 .into_iter()
                 .map(|t| t.to_lowercase())

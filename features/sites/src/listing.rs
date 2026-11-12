@@ -65,8 +65,21 @@ pub struct Entry {
     /// Its frontmatter.
     pub properties: serde_json::Map<String, serde_json::Value>,
     /// The attachments it links or embeds, by vault path, in the order
-    /// it names them, once each.
+    /// it names them, once each; its art ([`crate::art`]) last.
     pub files: Vec<String>,
+    /// Its art, by vault path: one of `files` ([`crate::art`]).
+    pub art: Option<String>,
+}
+
+impl Entry {
+    /// Its art while it is still one of its files (a layer above the
+    /// link's takes it out of `files`, and its art with it).
+    #[must_use]
+    pub fn art(&self) -> Option<&str> {
+        self.art
+            .as_deref()
+            .filter(|a| self.files.iter().any(|f| f == a))
+    }
 }
 
 /// The notes of `scope` that `filter` holds for, in list order. Hidden
@@ -108,7 +121,14 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
                     }
                 }
             }
+            let art = art_file(&meta, &path, &attachments).filter(|a| scope.holds_file(a));
+            if let Some(art) = art {
+                if !files.iter().any(|f| f == art) {
+                    files.push(art.to_owned());
+                }
+            }
             Some(Entry {
+                art: art.map(str::to_owned),
                 title: title_of(page, &meta),
                 properties: row
                     .frontmatter
@@ -120,6 +140,16 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
             })
         })
         .collect()
+}
+
+/// The attachment note `path`'s art names, of `attachments`.
+fn art_file<'a>(meta: &Meta, path: &str, attachments: &HashSet<&'a str>) -> Option<&'a str> {
+    let link = meta.art.as_deref()?;
+    crate::art::resolve(
+        link,
+        crate::art::folder_of(path),
+        attachments.iter().copied(),
+    )
 }
 
 /// Every note of `vault`, hidden ones too, in path order, each with
@@ -147,9 +177,17 @@ pub fn every_note(vault: &Vault) -> Vec<Entry> {
                     }
                 }
             }
+            let meta = Meta::of(page);
+            let art = art_file(&meta, &page.rel_path, &attachments);
+            if let Some(art) = art {
+                if !files.iter().any(|f| f == art) {
+                    files.push(art.to_owned());
+                }
+            }
             Entry {
                 path: page.rel_path.clone(),
-                title: title_of(page, &Meta::of(page)),
+                title: title_of(page, &meta),
+                art: art.map(str::to_owned),
                 properties: row
                     .frontmatter
                     .iter()
@@ -428,6 +466,7 @@ mod tests {
             title: title.to_owned(),
             properties,
             files: files.iter().map(|f| (*f).to_owned()).collect(),
+            art: None,
         }
     }
 
