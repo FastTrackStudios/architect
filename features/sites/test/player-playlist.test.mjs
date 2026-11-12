@@ -240,7 +240,11 @@ function run(body, queue, opts = {}) {
       return n;
     },
     dispatchEvent: () => {},
-    addEventListener: () => {},
+    // Shown or hidden (another app, a locked phone), and who listens.
+    hidden: false,
+    on: {},
+    addEventListener(type, fn) { (this.on[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { this.on[type] = (this.on[type] || []).filter((f) => f !== fn); },
     createComment: () => new Node('#comment'),
   };
   const location = { href: `http://node.test${L}merry/`, origin: 'http://node.test' };
@@ -297,6 +301,8 @@ function run(body, queue, opts = {}) {
     /// written as HTML, which this DOM does not parse).
     button: (act) => body.querySelectorAll('.site-player')[0].appendChild(el('button', { 'data-act': act })),
     tick: () => timers.forEach((f) => f && f()),
+    /// The page hidden or shown again, as `visibilitychange` says.
+    visibility: (hidden) => { document.hidden = hidden; (document.on.visibilitychange || []).slice().forEach((f) => f({ type: 'visibilitychange' })); },
     frame: () => frames.splice(0).forEach((f) => f()),
     audioEl, at,
     list: () => body.querySelectorAll('[data-playlist]'),
@@ -693,4 +699,43 @@ test('a frame that is never ready, or stops answering, is given up', async () =>
   failing.say({ t: 'ready' });
   failing.say({ t: 'error', message: 'x' });
   assert.equal(failing.frame.parentElement, null);
+});
+
+test('a frame is never given up for the time the page was hidden (an app switch), and is when it stays silent after', async () => {
+  // Ready, a ping sent, then the phone switches app: its pong never comes
+  // while the page is hidden.
+  const w = await webview();
+  w.say({ t: 'hello' });
+  await w.settle();
+  w.say({ t: 'ready' });
+  w.p.tick();
+  assert.ok(w.port.sent.some((m) => m.t === 'ping'));
+  w.p.visibility(true);
+  w.p.clock.now += 60000;
+  w.p.tick();
+  assert.ok(w.frame.parentElement, 'hidden a minute: still up');
+  // Shown again: the beat starts over, a new ping, answered: up.
+  w.p.visibility(false);
+  w.p.tick();
+  const pings = w.port.sent.filter((m) => m.t === 'ping');
+  assert.equal(pings.length, 2, 'a new beat from being shown');
+  w.say({ t: 'pong', n: pings[1].n });
+  w.p.clock.now += 2000;
+  w.p.tick();
+  assert.ok(w.frame.parentElement, 'answered after being shown');
+  // Silent while shown: gone, as before.
+  w.p.clock.now += 7000;
+  w.p.tick();
+  assert.equal(w.frame.parentElement, null, 'silent 6 s while shown: gone');
+
+  // Not ready yet when the page is hidden: the deadline waits for it.
+  const slow = await webview();
+  slow.p.visibility(true);
+  slow.p.clock.now += 16000;
+  slow.p.later();
+  assert.ok(slow.frame.parentElement, 'hidden past 15 s: not given up');
+  slow.p.visibility(false);
+  slow.p.clock.now += 16000;
+  slow.p.later();
+  assert.equal(slow.frame.parentElement, null, '15 s shown and not ready: gone');
 });

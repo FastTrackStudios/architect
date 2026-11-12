@@ -1593,6 +1593,7 @@
         dead = true;
         clearTimeout(readyBy);
         clearInterval(beat.timer);
+        doc.removeEventListener("visibilitychange", seen);
         if (chan) { try { chan.port1.close(); } catch (e) {} }
         if (frame.parentNode) frame.parentNode.removeChild(frame);
       },
@@ -1607,7 +1608,22 @@
       slot.hidden = true;
       mine.classList.remove("site-now-yielded");
     }
-    var readyBy = setTimeout(function () { if (!ready) die("not ready in time"); }, WEB_READY_MS);
+    // While the page is hidden (another app, a locked phone) its timers
+    // and the frame's may stop: nothing heard then is a sign of death. The
+    // checks wait for it to be shown, and the beat starts again from there.
+    function late() {
+      if (ready || dead) return;
+      if (doc.hidden) { readyBy = setTimeout(late, WEB_READY_MS); return; }
+      die("not ready in time");
+    }
+    var readyBy = setTimeout(late, WEB_READY_MS);
+    function seen() {
+      if (doc.hidden || dead) return;
+      beat.answered = beat.sent;
+      beat.at = Date.now();
+      if (!ready) { clearTimeout(readyBy); readyBy = setTimeout(late, WEB_READY_MS); }
+    }
+    doc.addEventListener("visibilitychange", seen);
     frame.addEventListener("load", function () {
       loads += 1;
       // Its one document, loaded once: any other load is the frame gone
@@ -1642,7 +1658,7 @@
           feed(snapshot(), true);
           // The heartbeat, while it shows: unanswered too long, it is gone.
           beat.timer = setInterval(function () {
-            if (dead) return;
+            if (dead || doc.hidden) return;
             if (beat.sent > beat.answered && Date.now() - beat.at > WEB_LATE_MS) { die("it stopped answering"); return; }
             if (beat.sent === beat.answered) {
               beat.sent += 1;

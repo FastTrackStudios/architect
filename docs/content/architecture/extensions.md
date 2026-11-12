@@ -1831,9 +1831,12 @@ custom properties, none with a URL, and light or dark), its sheet (pinned as
 above) and where the song is; the frame sends back only the view's asks (the
 same five intents, checked and rate-limited by the page), its height (once a
 frame at most), that it is ready, and answers a heartbeat. A frame that is
-not ready in 15 s, stops answering for 6 s, reports an error or leaves its
+not ready in 15 s, stops answering (taken down 6 to 10 s after it falls
+silent: a ping every 2 s, late after 6 s), reports an error or leaves its
 document (a second load) is taken down for the page's life and the
-player's own bar and controls come back.
+player's own bar and controls come back. While the page is hidden (another
+app, a locked phone) neither clock runs against it: the beat starts over
+when the page is shown.
 
 What the heartbeat cannot stop: a frame whose bundle never yields (a
 busy loop). A sandboxed frame is an opaque origin, but a browser may run
@@ -1842,7 +1845,7 @@ frames, WebKit, Firefox for a frame of the page's own site): then the
 page's timers stop with it, the heartbeat never fires, and the page is
 frozen until the browser's own slow-script warning stops the script. In a
 browser that runs it apart, the page stays live and takes the frame down
-after 6 s. So a web view's bundle is trusted not to spin, as the island's
+6 to 10 s after it falls silent. So a web view's bundle is trusted not to spin, as the island's
 component is: the node operator links it in, pinned by digest.
 
 What reaches the network from a web view, and what stops it:
@@ -1852,15 +1855,21 @@ What reaches the network from a web view, and what stops it:
   (`connect-src 'none'`); any script but its own by hash and `blob:`
   modules (no remote `import()`, no speculation rules); images and fonts
   but `blob:`/`data:` (so a stylesheet's `url()` loads nothing); media,
-  workers, child frames (`frame-src 'none'`, `child-src 'none'`: a bundle
-  cannot get removed APIs back from a fresh child), objects, manifests,
-  `<base>`, forms; popups (`window.open`), top navigation, modals and
-  forms by the sandbox flags; WebRTC by `webrtc 'block'` (CSP3, honoured by
-  Chromium and WebKit, ignored by Firefox).
-- **By its script, before any bundle code runs:** `RTCPeerConnection` and
-  its kin are removed (non-configurable `undefined`), for the engines that
-  ignore `webrtc 'block'`; the Presentation API is removed;
-  `navigator.sendBeacon` answers `false`.
+  workers, objects, manifests, `<base>`, forms; popups (`window.open`), top
+  navigation, modals and forms by the sandbox flags.
+- **Child frames:** `frame-src 'none'` stops `blob:`, `data:` and the web
+  view documents as children. An `about:blank` or `srcdoc` child is still
+  made; what keeps a bundle from getting removed APIs back from its fresh
+  global is the sandbox (the child is a new opaque origin: the bundle
+  cannot reach into it) and the policy it inherits (`script-src`: nothing
+  runs in it the frame's own policy would not run).
+- **By its script, before any bundle code runs:** this is the WebRTC
+  control on every engine. `RTCPeerConnection` and its kin are removed
+  (non-configurable `undefined`), by name and by pattern (every own global
+  matching `/^(webkit|moz)?RTC/`, so one an engine adds goes too); the
+  Presentation API is removed; `navigator.sendBeacon` answers `false`. The
+  policy's `webrtc 'block'` is kept as forward-looking only: no engine
+  enforces a `webrtc` directive today (WebKit and Chromium define none).
 - **By its headers:** `x-dns-prefetch-control: off` (no DNS prefetch or
   preconnect from `<link>`).
 - **By the share page's own policy:** a frame navigating itself can go
@@ -1868,8 +1877,13 @@ What reaches the network from a web view, and what stops it:
   node. That is what keeps a web view from leaving the node, and it is
   load-bearing (`apps/desktop/src/node/shares.rs` `content_security_policy`);
   a navigation away is also the frame's death (above). The node's own
-  routes that change a visitor's state (`/s/_signin`, `/s/_signout`) answer
-  only a same-origin or typed request (`Sec-Fetch-Site`), never a frame's.
+  routes that change a visitor's state never answer a frame: sign-out
+  (`/s/_signout`) is a form posted from the node's own page, its `Origin`
+  checked (a GET is a page asking; the frame has no `allow-forms`, no
+  `connect-src`, and its Origin would be `null`), on every browser, with or
+  without fetch metadata (Safari 15.4 to 16.3 sends none); sign-in
+  (`/s/_signin`) answers only a same-origin or typed request
+  (`Sec-Fetch-Site`).
 - **Not stopped:** the bundle runs on the page's event loop in Firefox
   (and may elsewhere): a busy loop in it stalls the share page. The
   component route (a Worker) did not have this.
@@ -1879,8 +1893,9 @@ What reaches the network from a web view, and what stops it:
 (`SiteIsland::grant_webrtc`, the distribution's call): only then is its
 view served the other web view document (`webview-rtc.<hash>.html`,
 `WebRtc::Granted`, its own path so the two are never confused or cached
-one for the other), whose policy says `webrtc 'allow'` and whose script
-leaves the constructors. Everything else about the frame is the same
+one for the other), whose script leaves the constructors (its policy says
+`webrtc 'allow'`). A node where no island is granted WebRTC does not serve
+that document at all (a direct GET is a 404). Everything else about the frame is the same
 (opaque origin, `connect-src 'none'`, pinned files, intents only). The
 node chooses it from the island's manifest and the grant; no page, note,
 query or message can. What it exposes: the visitor's IP address to the

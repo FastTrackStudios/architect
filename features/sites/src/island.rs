@@ -386,9 +386,12 @@ pub fn sandbox_headers() -> [(&'static str, String); 4] {
 /// that allows it. Each has its own path, named by its content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebRtc {
-    /// `webrtc 'block'`, the constructors removed: the default.
+    /// The constructors removed by its script (the control, on every
+    /// engine; its policy's `webrtc 'block'` is forward-looking only, no
+    /// engine enforces it): the default.
     Blocked,
-    /// `webrtc 'allow'`, the constructors left: declared and granted.
+    /// The constructors left (`webrtc 'allow'`): declared and granted,
+    /// and served only on a node where some island is.
     Granted,
 }
 
@@ -421,10 +424,13 @@ fn webview_script(rtc: WebRtc) -> &'static str {
 /// WebTransport, beacon and `<a ping>` (`connect-src 'none'`); scripts but
 /// its own by hash and `blob:` modules (`script-src`: no speculation rules,
 /// no remote import); images and fonts but `blob:`/`data:` (so no CSS
-/// `url()` leaves it); media, workers, child frames, objects, manifests,
-/// `<base>`, forms; WebRTC (`webrtc 'block'`, CSP3: honoured by Chromium
-/// and `WebKit`, ignored by Firefox, so its script removes the constructors
-/// too). By the sandbox flags (only `allow-scripts`): popups
+/// `url()` leaves it); media, workers, objects, manifests, `<base>`,
+/// forms; `blob:`, `data:` and the web view documents as child frames
+/// (`frame-src 'none'`; an `about:blank` or `srcdoc` child is held by the
+/// sandbox's new opaque origin and the `script-src` it inherits). WebRTC is
+/// stopped by its script, which removes the constructors on every engine;
+/// `webrtc 'block'` is kept as forward-looking only (no engine enforces a
+/// `webrtc` directive). By the sandbox flags (only `allow-scripts`): popups
 /// (`window.open`), top navigation, forms, modals, same-origin. Its own
 /// navigation away is held by the share page's policy (`frame-src`
 /// through `default-src 'self'`): it may go only to the node. DNS
@@ -587,7 +593,15 @@ pub fn serve<'a>(islands: &'a [SiteIsland], path: &str) -> Option<(Cow<'a, [u8]>
             "text/html; charset=utf-8",
         ));
     }
+    // The document that allows WebRTC only on a node where some island is
+    // granted it (and declares it): elsewhere it is not there at all.
+    let granted = islands
+        .iter()
+        .any(|i| i.id_ok() && i.webrtc() == WebRtc::Granted);
     for rtc in [WebRtc::Blocked, WebRtc::Granted] {
+        if rtc == WebRtc::Granted && !granted {
+            continue;
+        }
         if path == webview_path_for(rtc) {
             return Some((
                 Cow::Borrowed(webview_document_for(rtc).as_bytes()),
@@ -844,6 +858,16 @@ mod tests {
             webview_path_for(WebRtc::Blocked)
         );
         assert!(webview_path_for(WebRtc::Granted).starts_with("/_ext/webview-rtc."));
+        // The document that allows WebRTC is served only where some island
+        // is granted it: elsewhere a direct GET finds nothing.
+        let rtc = webview_path_for(WebRtc::Granted);
+        assert!(serve(&[], rtc).is_none());
+        assert!(serve(&[island(declared), island("{}").grant_webrtc()], rtc).is_none());
+        assert!(serve(&[island(declared).grant_webrtc()], rtc).is_some());
+        assert!(
+            serve(&[], webview_path_for(WebRtc::Blocked)).is_some(),
+            "the default always"
+        );
         let csp = |rtc| {
             document_headers(webview_path_for(rtc)).unwrap()[0]
                 .1

@@ -426,7 +426,8 @@ layer, ahead of a Site mounted at `/`):
   starts one and links to its approval page, the person approves it there
   (signed in at the issuer), and the node sets the session as an `HttpOnly`,
   `SameSite=Lax` cookie (`Secure` behind `https`). The node never sees a
-  password. `/s/_signout` clears the cookie.
+  password. Signing out is a form on `/s/_signout` (a GET shows it): its
+  POST, from the node's own page (its `Origin` checked), clears the cookie.
 - **Answers keep the code private:** `Referrer-Policy: no-referrer` on every
   response; `X-Robots-Tag: noindex` unless the share is public; `private,
   no-store` for a signed-in audience.
