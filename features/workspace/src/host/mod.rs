@@ -1489,6 +1489,11 @@ pub fn WorkspaceView(
     if *host.in_shell.peek() != in_shell {
         host.in_shell.set(in_shell);
     }
+    // A window resized across a phone's width (a desk browser narrowed to
+    // one) follows the prop, as `in_shell` does: one bar over the pane.
+    if *host.phone_header.peek() != phone_header {
+        host.phone_header.set(phone_header);
+    }
     // A phone's class turns with it: its area, as measured.
     let area = if phone { *host.float_area.read() } else { None };
     let class = form.unwrap_or_else(|| match (phone, area) {
