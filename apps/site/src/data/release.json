@@ -1,23 +1,6 @@
 {
-	"tag": "v0.12.1",
-	"version": "0.12.1",
-	"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.12.1",
-	"publishedAt": "2026-11-11T22:45:37Z",
-	"linux": {
-		"version": "0.12.1",
-		"url": "https://github.com/FastTrackStudios/architect/releases/download/v0.12.1/Architect-linux-x86_64.AppImage",
-		"sha256": "57828b69821e6fbb019861205ac9d7ec4e5518adda7f9b55294339113a5a6a1b",
-		"file": "Architect-linux-x86_64.AppImage"
-	},
-	"macos": {
-		"version": "0.12.1",
-		"url": "https://github.com/FastTrackStudios/architect/releases/download/v0.12.1/Architect-macos-arm64.dmg",
-		"sha256": "6a0c9cba4ff6be8a5a13aee783f75cfaa100fc4beebbaf925bd2af7e01793460",
-		"file": "Architect-macos-arm64.dmg"
-	},
-	"node": {
-		"url": "https://github.com/FastTrackStudios/architect/releases/download/v0.12.1/architect-node-v0.12.1-x86_64-linux.tar.gz",
-		"file": "architect-node-v0.12.1-x86_64-linux.tar.gz"
-	},
-	"sums": "https://github.com/FastTrackStudios/architect/releases/download/v0.12.1/SHA256SUMS"
+	"tag": "v0.12.5",
+	"version": "0.12.5",
+	"url": "https://github.com/FastTrackStudios/architect/releases/tag/v0.12.5",
+	"publishedAt": "2026-11-12T18:09:33Z"
 }

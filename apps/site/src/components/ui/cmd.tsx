@@ -21,8 +21,7 @@ export function Cmd({
 	}, [done]);
 	return (
 		<div className="cmd">
-			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: a command that scrolls sideways on a phone */}
-			<code tabIndex={0}>{text}</code>
+			<code>{text}</code>
 			<button
 				className="copy"
 				type="button"

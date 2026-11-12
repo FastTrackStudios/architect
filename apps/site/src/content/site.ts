@@ -39,15 +39,19 @@ export const NODE_PATHS = ["/app", "/s"] as const;
 /** The docs: `docs/content` built by `architect site build`, copied in at /docs/. */
 export const DOCS_PATH = "/docs/";
 
-/** The release that `latest` means on GitHub. */
-export const RELEASES_LATEST = `${SITE.repo}/releases/latest`;
-
 /** The header's nav, on every page. */
 export const NAV_LINKS = [
 	{ label: "Download", to: "/download" },
 	{ label: "Extensions", to: "/extensions" },
 	{ label: "Changelog", to: "/changelog" },
 ] as const;
+
+/**
+ * The org's minisign public key: release.yml's `sums` job signs SHA256SUMS
+ * with it (its ORG_RELEASE_KEY), and the apps' updaters pin it.
+ */
+export const ORG_RELEASE_KEY =
+	"RWRh9Gk9qaStQMhku4THMidEYrQsmAEsm2dDprUkZxShEtqfIcroM8Od";
 
 /** The Nix one-liner (the flake's default package is the release's AppImage). */
 export const NIX_RUN = "nix run github:FastTrackStudios/architect";

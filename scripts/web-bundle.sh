@@ -31,7 +31,10 @@
 # ARCHITECT_RELEASE_TAG  the release this bundle is for (vX.Y.Z; release.yml
 #                        sets it): the site's release data (/download,
 #                        /changelog) is fetched for THAT tag and any failure
-#                        fails the build (apps/site/scripts/data.ts, strict).
+#                        fails the build (apps/site/scripts/data.ts, strict):
+#                        the release and its notes, never its binaries
+#                        (/download names them by convention and the browser
+#                        checks them), so nothing waits for the other jobs.
 #                        Unset, the site uses its committed data
 #                        (apps/site/src/data), which must not be empty.
 # ARCHITECT_WEB_URL      the site's public URL (default https://architect.fasttrackstudio.app)
@@ -72,10 +75,10 @@ elif [ -n "${ARCHITECT_RELEASE_TAG:-}" ]; then
     exit 1
 fi
 # The data the site was built from (fetched for the tag, or committed):
-# a bundle that offers nothing to download is a bug.
+# a bundle that names no release offers nothing to download.
 data="$root/apps/site/src/data"
-grep -q '"linux": {' "$data/release.json" \
-    || { echo "web-bundle: apps/site/src/data/release.json names no Linux build" >&2; exit 1; }
+grep -q '"tag": "v' "$data/release.json" \
+    || { echo "web-bundle: apps/site/src/data/release.json names no release" >&2; exit 1; }
 grep -q '"tag": "v' "$data/changelog.json" \
     || { echo "web-bundle: apps/site/src/data/changelog.json lists no release" >&2; exit 1; }
 if [ -n "${ARCHITECT_RELEASE_TAG:-}" ]; then

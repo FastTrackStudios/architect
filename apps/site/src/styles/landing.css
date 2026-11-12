@@ -16,11 +16,13 @@
 	gap: 0.6rem;
 	margin-top: 2rem;
 }
-/* One Download button: the visitor's platform, named by the head script. */
+/* One Download button: the visitor's platform, named by the head script.
+   With no build listed for it (src/lib/release-check.ts dropped its
+   button), the one to /download stays. */
 .btn.os-linux,
 .btn.os-macos,
-[data-os="linux"] .btn.os-any,
-[data-os="macos"] .btn.os-any {
+[data-os="linux"] .hero-get:has(.os-linux) .btn.os-any,
+[data-os="macos"] .hero-get:has(.os-macos) .btn.os-any {
 	display: none;
 }
 [data-os="linux"] .btn.os-linux,

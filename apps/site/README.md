@@ -31,6 +31,7 @@ bun run dev          # http://localhost:3000
 | `bun run data` | refreshes `src/data/*.json` from GitHub and the store's index (fail-soft; strict for `SITE_RELEASE_TAG`) |
 | `bunx biome check --write .` | lint + format |
 | `bunx tsc --noEmit` | typecheck |
+| `bun run test` | unit tests (`test/*.test.ts`, Bun's runner) |
 | `bun scripts/check-links.ts .output/public` | every internal link and asset resolves |
 | `bun scripts/serve.ts .output/public 4173` | serve a build (or a whole bundle) by the bundle's rules: P, P.html, P/index.html, else 404.html |
 
@@ -48,7 +49,9 @@ src/
               prerendered)
   data/       build-time data, committed as the last good copy:
               release.json, changelog.json, extensions.json (scripts/data.ts)
-  lib/        pageHead() (seo.ts), the light/dark theme (theme.ts), typed data
+  lib/        pageHead() (seo.ts), the light/dark theme (theme.ts), typed data,
+              a release's download links (release-assets.ts) and their
+              check against GitHub's API in the browser (release-check.ts)
   components/
     landing/  the hero, the pillars (what Architect is, one claim at a
               time), their animated line figures, the downloads
@@ -58,6 +61,8 @@ src/
               file the hub can adopt), base.css, site.css (the shell),
               landing.css, pages.css
   routes/     /, /download, /changelog, /extensions, /extensions/$id, /404
+test/         release-assets.test.ts (bun test), download.browser.mjs
+              (headless Firefox); left out of tsc like scripts/
 scripts/      data.ts, check-links.ts, serve.ts (Bun scripts, not
               typechecked by tsc, as the hub's tools/)
 ```
@@ -72,8 +77,11 @@ with scripts off.
 
 `scripts/data.ts` writes `src/data/*.json`:
 
-- `release.json`: the latest release and its updater manifests
-  (`latest-linux.json`, `latest-macos.json`), for `/download`
+- `release.json`: the release the site is built for (its tag, page and
+  date), for `/download` and the landing page. Its files are not in it:
+  their names follow from the tag (`src/lib/release-assets.ts`), and the
+  browser asks GitHub's API once which of them are up, with their sizes
+  and sha256 (`src/lib/release-check.ts`)
 - `changelog.json`: the last 20 releases' notes (the GitHub release
   bodies, `scripts/release-notes.sh`'s output), rendered to HTML
 - `extensions.json`: the store's index (`extensions/index.toml` at this
@@ -84,8 +92,19 @@ A source that cannot be read keeps the committed file and warns; a local
 or PR build never fails on the network. A release's build sets
 `SITE_RELEASE_TAG` (through `scripts/web-bundle.sh`'s
 `ARCHITECT_RELEASE_TAG`): `/download` then describes that tag, and any
-failure, a missing Linux manifest or a changelog without the tag fails
-the build. `GITHUB_TOKEN` is sent when set.
+failure, a release that is not there or a changelog without the tag's
+notes fails the build. The release's binaries are never asked for, so
+the build needs nothing but the release job. `GITHUB_TOKEN` is sent when
+set.
+
+## Tests
+
+- `bun run test`: the download links' logic (`test/release-assets.test.ts`:
+  the convention, the API's answer reconciled with it, the tab's cache)
+- `env -u LD_LIBRARY_PATH node --test test/download.browser.mjs`, after
+  `bun run build`: `/download` and the landing page's buttons in headless
+  Firefox (WebDriver BiDi) with the API stubbed, in each state;
+  `SCREENSHOTS=<dir>` saves the page at 1280 and 390 px
 
 ## Media
 
