@@ -5,6 +5,7 @@ mod bar;
 mod bars;
 mod busy;
 mod chrome;
+mod input_debug;
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod mac;
@@ -34,7 +35,11 @@ use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
 pub use busy::BusyBadge;
 pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
-pub use keyboard::{Keyboard, install_keyboard, keyboard, set_keyboard_height, set_typing};
+pub use input_debug::{foot_bottom, input_debug, set_input_debug};
+pub use keyboard::{
+    Foot, Keyboard, TAP_SLOP, TapStroke, hide_keyboard, install_keyboard, keyboard,
+    set_keyboard_height, set_soft_keyboard, set_typing, show_keyboard, soft_keyboard, tap_raises,
+};
 #[cfg(target_os = "macos")]
 pub use mac::fit_traffic_lights;
 pub use page::{
@@ -1285,12 +1290,30 @@ pub fn AppShell(
         340.0
     };
 
+    // The finger's stroke for the keyboard's sake: a tap that ends on a
+    // field brings it up (the root's click, below), a scroll does not.
+    let tap = use_hook(|| Rc::new(Cell::new(TapStroke::default())));
+    let tapped = use_hook(|| Rc::new(Cell::new(true)));
+    let (tap_down, tap_move, tap_up, tapped_up, tapped_click) =
+        (tap.clone(), tap.clone(), tap, tapped.clone(), tapped);
+    let onclick = move |_: MouseEvent| {
+        let now = keyboard();
+        let was_tap = tapped_click.replace(true);
+        if tap_raises(soft_keyboard(), was_tap, now) {
+            input_debug::note("tap on a field: keyboard up");
+            show_keyboard();
+        }
+    };
     let (touch_at, resize_at) = (touch.clone(), resize.clone());
     let onpointerdown = move |e: PointerEvent| {
+        let c = e.client_coordinates();
+        let mut t = tap_down.get();
+        t.press(c.x, c.y);
+        tap_down.set(t);
+        input_debug::hit("the page", &e);
         if !phone || resize_at.get().is_some() {
             return;
         }
-        let c = e.client_coordinates();
         touch_at.set(Some(Touch {
             x0: c.x,
             y0: c.y,
@@ -1303,6 +1326,9 @@ pub fn AppShell(
     let (touch_mv, resize_mv) = (touch.clone(), resize.clone());
     let onpointermove = move |e: PointerEvent| {
         let c = e.client_coordinates();
+        let mut t = tap_move.get();
+        t.at(c.x, c.y);
+        tap_move.set(t);
         if let Some(r) = resize_mv.get() {
             let dx = c.x - r.x0;
             let (mut w, grow, other) = match r.side {
@@ -1349,7 +1375,15 @@ pub fn AppShell(
         }
     };
     let (touch_end, resize_end) = (touch.clone(), resize.clone());
-    let onpointerup = move |_: PointerEvent| {
+    let onpointerup = move |e: PointerEvent| {
+        let c = e.client_coordinates();
+        let mut t = tap_up.get();
+        let was_tap = t.release(c.x, c.y);
+        tap_up.set(t);
+        tapped_up.set(was_tap);
+        if !was_tap {
+            input_debug::note(format!("scroll ended at {:.0},{:.0}: no keyboard", c.x, c.y));
+        }
         if resize_end.take().is_some() {
             return;
         }
@@ -1523,6 +1557,7 @@ pub fn AppShell(
             onpointermove,
             onpointerup,
             onpointercancel,
+            onclick,
             document::Style { {shell_css(&t)} }
             crate::motion::MotionFrames {}
             // A desk's title bar runs across the whole window, over the ribbon,
@@ -1707,6 +1742,10 @@ pub fn AppShell(
             }
             // The page's layer over everything (`use_shell_cover`).
             {cover()}
+            // What the shell hears of touches and the keyboard, when asked.
+            if input_debug() {
+                input_debug::InputDebugOverlay { screen }
+            }
         }
     }
 }

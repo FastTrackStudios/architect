@@ -192,9 +192,38 @@ focus, which the host forwards
 (`dioxus_native::on_text_focus_change(architect_shell::set_typing)`).
 The bar eases after the keyboard on the shell's `Motion`. On iOS the
 same call takes a web view's own ⌃ ⌄ ✓ accessory bar away (moved here
-from `task:apps/mobile/src/keyboard_bar.rs`) and makes a field focused
-from code raise the keyboard, in a web view and in Blitz (whose
-`autofocus` never asks for it).
+from `task:apps/mobile/src/keyboard_bar.rs`).
+
+Where the keyboard is the screen's own (iOS: `soft_keyboard`), it comes
+up only when the person asks for it, as in any iOS app:
+
+- **A tap that ends on a field.** The shell's root follows each finger
+  (`features/shell/src/shell/keyboard.rs` `TapStroke`: past `TAP_SLOP` it
+  is a scroll), and its click brings the keyboard up when a field has the
+  focus (`tap_raises`). A press that becomes a scroll, and an `autofocus`
+  (a note opening), give the field the focus and no keyboard: Blitz asks
+  winit's view to become the first responder whenever a field is focused,
+  and `features/shell/src/shell/keyboard/ios.rs` refuses it unless a tap
+  or a button opened the gate a moment before.
+- **The keyboard button.** A field with the focus and the keyboard down
+  (after Hide, an `autofocus`) shows a keyboard button first on the
+  action bar (`Keyboard::foot`, `Foot::TabsWithKeyboardButton`).
+- **An app that opens a field on purpose** calls `show_keyboard` (the
+  capture composer does, from its button).
+
+On such a screen the editing bar rides the keyboard only while it is up;
+`hide_keyboard` (the bar's round button) resigns the keyboard whatever
+holds the focus. Elsewhere (a desk window standing in for a phone) a
+typed field has the editing bar, as before.
+
+`ARCHITECT_INPUT_DEBUG=1`, or the Architect app's ⌘K command "Debug:
+touches and keyboard" (`SHELL_INPUT_DEBUG`), draws what the shell hears
+over the app (`features/shell/src/shell/input_debug.rs`): a cyan line at
+the keyboard's top as UIKit reported it and a magenta one at the foot's
+bottom edge as laid out (`foot_bottom`), the keyboard and the screen's
+insets, whether winit's view has the keyboard, and the last presses with
+what in the foot heard them. On a phone the two lines meet while the
+keyboard is up; where they do not, the reported height is wrong.
 
 The person orders the tabs (Task's Customize: drag to move, hide, bring
 back), per device. The first four are the bar; the rest are in the left

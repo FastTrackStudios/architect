@@ -57,6 +57,71 @@ use futures_util::StreamExt as _;
 /// "editor:note"` names.
 pub const CONTEXT: &str = "note";
 
+/// The note editor's own items on a phone's Typing Toolbar, each a
+/// command ([`use_format_commands`]) run on the note last typed in: undo,
+/// bold, italic, a link and a checklist item. Five, so an extension's
+/// `editor:note` toolbar after them is in view too; the rest of the
+/// format commands (redo, a list, indent, outdent) are on ⌘K.
+fn format_bar() -> Vec<architect_shell::BarAction> {
+    use architect_shell::{BarAction, icon};
+    use lucide_dioxus::{Bold, Italic, Link, ListTodo, Undo2};
+    vec![
+        BarAction::new("NOTE_UNDO", "Undo", icon!(Undo2)),
+        BarAction::new("NOTE_BOLD", "Bold", icon!(Bold)),
+        BarAction::new("NOTE_ITALIC", "Italic", icon!(Italic)),
+        BarAction::new("NOTE_LINK", "Link", icon!(Link)),
+        BarAction::new("NOTE_TASK", "Checklist", icon!(ListTodo)),
+    ]
+}
+
+/// The note last typed in: its state, its history and its sink, which
+/// the format commands edit.
+#[derive(Clone, Copy)]
+struct Typed {
+    state: Signal<EditorState>,
+    history: Signal<History>,
+    sink: Callback<TransactionEvent>,
+}
+
+thread_local! {
+    static TYPED: std::cell::Cell<Option<Typed>> = const { std::cell::Cell::new(None) };
+}
+
+/// Each format command's id, name and what it does to the note.
+type Format = (&'static str, &'static str, fn(&EditorState) -> Option<TransactionSpec>);
+
+const FORMATS: [Format; 9] = [
+    ("NOTE_UNDO", "Undo in the note", undo),
+    ("NOTE_REDO", "Redo in the note", redo),
+    ("NOTE_BOLD", "Bold", architect_editor::state::commands::toggle_bold),
+    ("NOTE_ITALIC", "Italic", architect_editor::state::commands::toggle_italic),
+    ("NOTE_LINK", "Link", architect_editor::state::commands::toggle_link),
+    ("NOTE_TASK", "Checklist item", architect_editor::state::commands::toggle_task),
+    ("NOTE_LIST", "List", architect_editor::state::commands::cycle_list),
+    ("NOTE_INDENT", "Indent", architect_editor::state::commands::indent_more),
+    ("NOTE_OUTDENT", "Outdent", architect_editor::state::commands::indent_less),
+];
+
+/// The format commands (`NOTE_BOLD`, …, group Format), on the note last
+/// typed in: what the note's Typing Toolbar runs. Once, at the app's root.
+pub fn use_format_commands() {
+    for (id, label, edit) in FORMATS {
+        architect_commands::use_command(
+            architect_commands::Command::new(id, label).group("Format"),
+            move || {
+                let Some(t) = TYPED.with(std::cell::Cell::get) else {
+                    return;
+                };
+                // The read ends before the edit writes.
+                let spec = edit(&t.state.peek());
+                if let Some(spec) = spec {
+                    architect_editor::ui::dispatch_with_history(t.state, t.history, spec, Some(t.sink));
+                }
+            },
+        );
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     /// The note being edited, and what its editor holds.
@@ -510,7 +575,7 @@ pub fn NoteEditor(
     let palette = use_signal(|| None::<PaletteState>);
     let mut decos = use_signal(Vec::<(String, DecorationSpec)>::new);
     let ui = try_use_context::<ExtensionUi>();
-    let editing = architect_shell::use_editing_actions(CONTEXT, &[]);
+    let editing = architect_shell::use_editing_actions(CONTEXT, &format_bar());
     // What extensions made, applied through the editor's history.
     let wake = use_coroutine(move |mut rx: UnboundedReceiver<()>| async move {
         while rx.next().await.is_some() {
@@ -577,13 +642,20 @@ pub fn NoteEditor(
         run(hit.item.action.clone());
         true
     };
-    let on_transaction = move |event: TransactionEvent| {
+    let on_transaction = use_callback(move |event: TransactionEvent| {
         LIVE.sync(state.peek().clone(), &event);
         if event.is_edit() {
             decos.set(LIVE.take_flat());
             on_change.call(event.doc_after.to_string());
         }
+    });
+    // This note is the one typed in: the format commands edit it.
+    let typed = Typed {
+        state,
+        history,
+        sink: on_transaction,
     };
+    let mark_typed = move || TYPED.with(|t| t.set(Some(typed)));
     // The fence languages extensions claim now: the editor's fence
     // registry, as they load and unload.
     let claimed = move || ui.map(|ui| ui.host().embeds().fences()).unwrap_or_default();
@@ -650,7 +722,14 @@ pub fn NoteEditor(
         )
     });
     // Gone (Done, another note): typing is what the host says again.
-    use_drop(|| architect_shell::set_typing(dioxus_native::text_input_focused()));
+    use_drop(move || {
+        architect_shell::set_typing(dioxus_native::text_input_focused());
+        TYPED.with(|t| {
+            if t.get().is_some_and(|now| now.state == typed.state) {
+                t.set(None);
+            }
+        });
+    });
     rsx! {
         document::Style { {css} }
         div {
@@ -666,10 +745,12 @@ pub fn NoteEditor(
             // and global keys stand aside while it has the keys.
             onclick: move |_| {
                 editing.focus();
+                mark_typed();
                 architect_shell::set_typing(true);
             },
             onfocusin: move |_| {
                 editing.focus();
+                mark_typed();
                 architect_shell::set_typing(true);
             },
             onfocusout: move |_| {

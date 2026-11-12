@@ -24,6 +24,7 @@ listen pointerdown
 listen pointermove
 listen pointerup
 listen pointercancel
+listen click
 pop
 push 3
 element div None
@@ -500,6 +501,7 @@ listen pointerdown
 listen pointermove
 listen pointerup
 listen pointercancel
+listen click
 pop
 push 70
 push 6
@@ -532,6 +534,7 @@ clone
 id 74
 push 74
 attr style None "flex-shrink: 0; height: 48px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-around; padding: 0 12px 0px 12px; background: #09090b; border-top: 1px solid #2b2b31;"
+listen pointerdown
 pop
 push 74
 element button None
@@ -591,6 +594,7 @@ id 82
 pop
 push 80
 attr style None "flex-shrink: 0; display: flex; align-items: flex-end; gap: 8px; padding: 8px 20px 30px 20px;"
+listen pointerdown
 pop
 push 82
 attr style None "flex: 1; min-width: 0; height: 54px; box-sizing: border-box; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 27px; background: #1a1a1f; border: 1px solid #2b2b31; box-shadow: 0 6px 20px rgba(0,0,0,0.35);"
