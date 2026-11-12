@@ -345,9 +345,10 @@ details[open] > summary > .site-tree-chevron { transform: scale(0.45) rotate(45d
     background: rgb(0 0 0 / 0.35);
   }
   body.site-nav-open { overflow: hidden; }
-  .site-main { padding: 22px 18px 0; }
+  /* A phone's gutter: 16 px both sides (a streaming app's list). */
+  .site-main { padding: 22px 16px 0; }
   .site-prose h2 { font-size: 1.35rem; }
-  .site-code { margin-left: -18px; margin-right: -18px; border-radius: 0; border-left: 0; border-right: 0; }
+  .site-code { margin-left: -16px; margin-right: -16px; border-radius: 0; border-left: 0; border-right: 0; }
   .site-prevnext { grid-template-columns: 1fr; }
   .site-next { grid-column: 1; }
   .site-results { position: fixed; top: calc(var(--site-header) + 4px); left: 8px; right: 8px; }
@@ -426,14 +427,17 @@ body.site-has-player { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0
   .site-player-card .site-player-time { display: block; }
 }
 
-/* A song's art, or the tile drawn in its place (its initials on a colour
-   from its title): square, small corners, the art laid over the tile. */
+/* A song's art, or the tile drawn in its place (a music note on a colour
+   from its title, never letters): square, small corners, the art laid
+   over the tile. */
 .site-player-art, [data-playlist] [data-track-art] {
   position: relative; flex: none; place-items: center; overflow: hidden;
   border-radius: 4px; background: var(--muted); color: #fff;
   font-weight: 650; letter-spacing: .01em; line-height: 1; user-select: none;
 }
 .site-player-art { width: 40px; height: 40px; font-size: 13px; }
+.site-player-art > svg, [data-playlist] [data-track-art] > svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; opacity: .9; }
+.site-player-art > svg { width: 20px; height: 20px; }
 .site-player-art img, [data-playlist] [data-track-art] img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; margin: 0; }
 
 /* Click and Loop: off, an icon; on, the icon on a disc of the accent. */
@@ -512,7 +516,7 @@ body.site-now-open .site-player { visibility: hidden; }
 [data-playlist] [data-playlist-play] { display: none !important; }
 .site-block:has(> [data-playlist]) { overflow: visible; }
 [data-playlist] li[data-page], [data-playlist] li[data-track] {
-  display: grid; grid-template-columns: 1.75rem 48px minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: auto; align-items: center; column-gap: 12px;
+  display: grid; grid-template-columns: 1.75rem 48px minmax(0, 1fr) auto; grid-auto-flow: column; grid-auto-columns: auto; align-items: center; column-gap: 12px;
   min-height: 60px; margin: 0; padding: 6px 0; border-radius: 6px;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
@@ -555,8 +559,13 @@ body.site-now-open .site-player { visibility: hidden; }
   100% { background-size: 3px 35%, 3px 75%, 3px 100%; }
 }
 @media (prefers-reduced-motion: reduce) { [data-playlist] [data-track][data-state="playing"] [data-track-mark]::after { animation: none; } }
+/* On a phone, room for the title: the number as narrow as two digits
+   (three still fit), the tile 46 px in, the "…" against the gutter. */
 @media (max-width: 520px) {
-  [data-playlist] li[data-page], [data-playlist] li[data-track] { grid-template-columns: 1.4rem 48px minmax(0, 1fr); column-gap: 10px; }
+  [data-playlist] li[data-page], [data-playlist] li[data-track] { grid-template-columns: 22px 48px minmax(0, 1fr) 44px; column-gap: 8px; }
+  [data-playlist] [data-track-mark] { font-size: 13px; letter-spacing: -.02em; }
+  [data-playlist] [data-track-text] { padding-left: 4px; }
+  [data-playlist] li > [data-track-more] { place-items: center end; }
 }
 /* A row's menu button: "…", a finger's size. */
 [data-playlist] [data-track-more] {
@@ -567,16 +576,23 @@ body.site-now-open .site-player { visibility: hidden; }
 [data-playlist] [data-track-more]:focus-visible { outline: 2px solid var(--ring, currentColor); outline-offset: -2px; }
 [data-playlist] [data-track-more] svg { width: 20px; height: 20px; fill: currentColor; stroke: none; }
 /* The key, on the song's art: the art dimmed under it (enough for white
-   bold type on any cover), the key in the middle, a corner mark when the
-   setlist plays it in another key. A tile with no art is its colour and
-   the key in place of its initials; a song with no key, its art alone. */
+   bold type on any cover), the key in the middle, and in the corner by how
+   far the setlist moves it (`+4`, `−3`). A tile with no art is its colour
+   and the key, the only text on it; a song with no key, its art alone, or
+   with no art a music note. */
 [data-playlist] [data-track-art][data-key] { text-shadow: 0 1px 2px rgb(0 0 0 / .35); }
 [data-playlist] [data-track-art][data-key][data-has-art]::after { content: ""; position: absolute; inset: 0; background: rgb(0 0 0 / .55); z-index: 1; }
 [data-playlist] [data-track-key] { position: relative; z-index: 2; color: #fff; font-size: 15px; font-weight: 750; letter-spacing: -.01em; line-height: 1; white-space: nowrap; }
 [data-playlist] [data-track-art][data-key-size="s"] [data-track-key] { font-size: 12px; }
 [data-playlist] [data-track-art][data-key-size="xs"] [data-track-key] { font-size: 10px; letter-spacing: -.02em; }
-[data-playlist] [data-track-transposed] { position: absolute; z-index: 2; top: 2px; right: 2px; width: 14px; height: 14px; display: grid; place-items: center; border-radius: 50%; background: #fff; color: #111; }
-[data-playlist] [data-track-transposed] svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.5; }
+/* The offset: a dark pill ringed in white, white numerals, legible on any
+   cover and any tile colour. */
+[data-playlist] [data-track-transposed] {
+  position: absolute; z-index: 2; top: 2px; right: 2px; height: 15px; padding: 0 4px;
+  border-radius: 8px; background: rgb(0 0 0 / .75); box-shadow: 0 0 0 1px rgb(255 255 255 / .45);
+  color: #fff; font-size: 10px; font-weight: 750; line-height: 15px; letter-spacing: 0; text-shadow: none;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 /* A row's menu: a sheet from the foot on a phone, beside its button on a desk. */
 .site-row-menu {
   position: absolute; z-index: 70; min-width: 224px; padding: 6px; display: flex; flex-direction: column;
