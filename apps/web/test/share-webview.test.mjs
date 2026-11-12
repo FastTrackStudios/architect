@@ -22,17 +22,29 @@
 //   it. Granted but not declared: the default document, no WebRTC.
 //
 // Driver: DRIVER=firefox (default; FIREFOX=… or `firefox` on the PATH,
-// WebDriver BiDi) or DRIVER=safari (`safaridriver`, classic WebDriver; run
-// `safaridriver --enable` once on the Mac). The bundle reports what it saw
-// by asking the page to seek (a number the page's playhead then holds), so
-// both drivers read it the same way; an escape is a hit on the listener
-// (Safari's classic WebDriver has no console to read).
+// WebDriver BiDi) or DRIVER=safari (`safaridriver`, classic WebDriver).
+// The suite drives the page WITHOUT evaluating script in it (Safari runs a
+// WebDriver script in the page's world, under the page's CSP, which
+// refuses eval): one set of operations, open a URL, count elements, read
+// an attribute, click, set and read a cookie, each backed by plain
+// WebDriver commands on Safari and by BiDi on Firefox. What it asserts is
+// in the DOM (the frame there or gone, `hidden`, classes, the position
+// bar's `aria-valuenow` after the bundle asks the page to seek) or outside
+// the browser (the listener's hits, HTTP and UDP; the node's answers).
+//
+// On a Mac: `safaridriver --enable` once (Safari's Develop menu: Allow
+// Remote Automation), quit Safari, then `DRIVER=safari just
+// share-webview-test`. The suite starts and stops `safaridriver` itself on
+// a free port. `DRIVER=gecko` runs that same classic path against Firefox
+// (geckodriver), so it is exercised without a Mac. Each test prints PASS or FAIL, and on a failure the element
+// state it last polled (Safari gives no console logs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createSocket } from 'node:dgram';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -41,8 +53,11 @@ const DRIVER = process.env.DRIVER || 'firefox';
 function which(cmd) {
   try { return execFileSync('sh', ['-c', `command -v ${cmd}`]).toString().trim() || null; } catch { return null; }
 }
-const browser = DRIVER === 'safari' ? which('safaridriver') : process.env.FIREFOX || which('firefox');
-const skip = NODE && browser ? false : `needs ARCHITECT_ISLAND_NODE (just share-webview-test) and ${DRIVER === 'safari' ? 'safaridriver' : 'a Firefox (FIREFOX=…)'}`;
+// DRIVER=gecko: the same classic WebDriver backend as Safari's (no script
+// in the page at all), against Firefox through geckodriver (GECKODRIVER=…
+// or on the PATH): the Safari path, run where there is no Mac.
+const browser = DRIVER === 'safari' ? which('safaridriver') : DRIVER === 'gecko' ? process.env.GECKODRIVER || which('geckodriver') : process.env.FIREFOX || which('firefox');
+const skip = NODE && browser ? false : `needs ARCHITECT_ISLAND_NODE (just share-webview-test) and ${DRIVER === 'safari' ? 'safaridriver' : DRIVER === 'gecko' ? 'geckodriver (GECKODRIVER=…)' : 'a Firefox (FIREFOX=…)'}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const put = (root, rel, body) => { const p = join(root, rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, body); };
 function wav(seconds) {
@@ -175,6 +190,25 @@ export function mount() {
   setTimeout(() => globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 20 + boots }), 4000);
 }`;
 
+/// A bundle that builds the node's sign-out form in its frame and submits
+/// it, by a click and by `submit()`: the POST the confirm page's button
+/// makes, from a sandboxed frame (no `allow-forms`; its Origin would be
+/// `null`).
+const SIGN_OUT = `
+export default async function init() {}
+export function mount() {
+  setTimeout(() => {
+    try {
+      const f = document.createElement("form");
+      f.method = "post"; f.action = "/s/_signout?to=/";
+      const b = document.createElement("button"); b.type = "submit"; f.appendChild(b);
+      document.body.appendChild(f);
+      b.click();
+      f.submit();
+    } catch (e) {}
+  }, 1000);
+}`;
+
 const CODE = 'gigabcdefhjkmnpq', L = `/s/${CODE}`;
 
 /// A node serving a link share with a playlist and the island `bundle`
@@ -219,12 +253,14 @@ function attacker() {
   return { port, url: `http://127.0.0.1:${port}`, hits, close: () => { http.close(); udp.close(); } };
 }
 
-// ── The two drivers: navigate, evaluate (an expression, awaited) ─────
+// ── The two drivers: the same operations, no script in the page ─────
+
+const freePort = () => new Promise((ok) => { const srv = createNetServer(); srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => ok(port)); }); });
 
 async function firefox() {
   const profile = mkdtempSync(join(tmpdir(), 'webview-ff-'));
   writeFileSync(join(profile, 'user.js'), 'user_pref("media.autoplay.default", 0);\nuser_pref("media.autoplay.blocking_policy", 0);\n');
-  const port = 19000 + Math.floor(Math.random() * 600);
+  const port = await freePort();
   const proc = spawn(browser, ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)], { stdio: 'ignore' });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
@@ -238,62 +274,138 @@ async function firefox() {
   const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; waiting.set(i, { ok, no }); ws.send(JSON.stringify({ id: i, method, params })); });
   await send('session.new', { capabilities: {} });
   const context = (await send('browsingContext.getTree', {})).contexts[0].context;
+  // BiDi evaluates outside the page's CSP; each operation is one fixed,
+  // read-only query (or a click), the same as the Safari backend's command.
+  const ev = async (expression) => {
+    const r = await send('script.evaluate', { expression, target: { context }, awaitPromise: false, userActivation: true });
+    if (r.type === 'exception') throw new Error(r.exceptionDetails.text);
+    return r.result.value;
+  };
+  const q = (css) => JSON.stringify(css);
   return {
     go: (url) => send('browsingContext.navigate', { context, url, wait: 'complete' }),
-    eval: async (expression) => {
-      const r = await send('script.evaluate', { expression, target: { context }, awaitPromise: true, userActivation: true });
-      if (r.type === 'exception') throw new Error(r.exceptionDetails.text);
-      return r.result.value;
-    },
+    count: (css) => ev(`document.querySelectorAll(${q(css)}).length`),
+    attr: (css, name) => ev(`(function (e) { return e ? e.getAttribute(${q(name)}) : null; })(document.querySelector(${q(css)}))`),
+    click: (css) => ev(`(function (e) { if (!e) throw new Error("no " + ${q(css)}); e.click(); return true; })(document.querySelector(${q(css)}))`),
+    setCookie: (name, value) => ev(`document.cookie = ${q(`${name}=${value}; path=/; SameSite=Lax`)}, true`),
+    cookie: (name) => ev(`(function (m) { return m ? m[1] : null; })(document.cookie.match(${q(`(?:^|; )${name}=([^;]*)`)}))`),
     close: () => { ws.close(); proc.kill(); try { rmSync(profile, { recursive: true, force: true }); } catch {} },
   };
 }
 
-async function safari() {
-  const port = 19600 + Math.floor(Math.random() * 90);
-  const proc = spawn(browser, ['-p', String(port)], { stdio: 'ignore' });
+const ELEMENT = 'element-6066-11e4-a52e-4f735466cecf';
+/// Classic WebDriver (Safari's `safaridriver`, or Firefox's geckodriver):
+/// navigate, find elements, read attributes, click, cookies. Nothing else.
+async function classic() {
+  const port = await freePort();
+  const gecko = DRIVER === 'gecko';
+  const args = gecko ? ['--port', String(port)] : ['-p', String(port)];
+  const proc = spawn(browser, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  let said = '';
+  proc.stderr.on('data', (d) => { said += d; });
   const base = `http://127.0.0.1:${port}`;
   const call = async (method, path, body) => {
-    const r = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const r = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     const j = await r.json();
-    if (j.value && j.value.error) throw new Error(`${j.value.error}: ${j.value.message}`);
+    if (j.value && j.value.error) { const e = new Error(`${j.value.error}: ${j.value.message}`); e.webdriver = j.value.error; throw e; }
     return j.value;
   };
-  let session;
-  for (let i = 0; i < 40 && !session; i++) {
+  for (let i = 0; i < 40; i++) {
     await sleep(250);
-    try { session = (await call('POST', '/session', { capabilities: { alwaysMatch: { browserName: 'safari' } } })).sessionId; } catch {}
+    if (await fetch(base + '/status').then((r) => r.ok, () => false)) break;
   }
-  if (!session) throw new Error('safaridriver did not start (run `safaridriver --enable` once)');
+  let session;
+  try {
+    const firefoxOptions = { args: ['-headless'], prefs: { 'media.autoplay.default': 0, 'media.autoplay.blocking_policy': 0 } };
+    if (process.env.FIREFOX || which('firefox')) firefoxOptions.binary = process.env.FIREFOX || which('firefox');
+    const caps = gecko ? { browserName: 'firefox', 'moz:firefoxOptions': firefoxOptions } : { browserName: 'safari' };
+    session = (await call('POST', '/session', { capabilities: { alwaysMatch: caps } })).sessionId;
+  } catch (e) {
+    proc.kill();
+    const why = String(e.message) + ' ' + said;
+    if (/remote automation/i.test(why)) throw new Error('Safari refused the session: turn on "Allow Remote Automation" (Safari > Settings > Advanced > Show features for web developers, then Develop > Allow Remote Automation; or `safaridriver --enable`). ' + why);
+    if (/already|paired|session/i.test(why)) throw new Error('Safari refused the session: quit Safari (and any other WebDriver session) first. ' + why);
+    throw new Error('safaridriver did not start a session: ' + why);
+  }
+  const S = `/session/${session}`;
+  const all = async (css) => (await call('POST', `${S}/elements`, { using: 'css selector', value: css })).map((e) => e[ELEMENT]);
+  const one = async (css) => (await all(css))[0] || null;
   return {
-    go: (url) => call('POST', `/session/${session}/url`, { url }),
-    eval: (expression) => call('POST', `/session/${session}/execute/async`, {
-      script: 'const done = arguments[arguments.length - 1]; Promise.resolve().then(() => eval(arguments[0])).then((v) => done(v), (e) => done({ error: String(e) }));',
-      args: [expression],
-    }),
-    close: async () => { try { await call('DELETE', `/session/${session}`); } catch {} proc.kill(); },
+    go: (url) => call('POST', `${S}/url`, { url }),
+    count: async (css) => (await all(css)).length,
+    attr: async (css, name) => {
+      const e = await one(css);
+      return e ? call('GET', `${S}/element/${e}/attribute/${encodeURIComponent(name)}`) : null;
+    },
+    click: async (css) => {
+      const e = await one(css);
+      if (!e) throw new Error(`no ${css}`);
+      return call('POST', `${S}/element/${e}/click`, {});
+    },
+    setCookie: (name, value) => call('POST', `${S}/cookie`, { cookie: { name, value, path: '/', sameSite: 'Lax' } }),
+    cookie: async (name) => { try { return (await call('GET', `${S}/cookie/${encodeURIComponent(name)}`)).value; } catch (e) { if (e.webdriver === 'no such cookie') return null; throw e; } },
+    close: async () => { try { await call('DELETE', S); } catch {} proc.kill(); },
   };
 }
 
-const open = () => (DRIVER === 'safari' ? safari() : firefox());
-async function until(tab, expr, what, ms = 20000) {
+const open = () => (DRIVER === 'safari' || DRIVER === 'gecko' ? classic() : firefox());
+
+/// Polls `look` (an async read of the page, through the driver's
+/// operations) until `ok(state)`; on timeout, fails with what it last saw.
+async function until(look, ok, what, ms = 20000) {
   const start = Date.now();
+  let state;
   for (;;) {
-    const v = await tab.eval(expr).catch(() => null);
-    if (v && !v.error) return v;
-    if (Date.now() - start > ms) throw new Error(`waited ${ms} ms for ${what}`);
-    await sleep(100);
+    try { state = await look(); } catch (e) { state = { error: String(e.message || e) }; }
+    if (!(state && state.error) && ok(state)) return state;
+    if (Date.now() - start > ms) throw new Error(`waited ${ms} ms for ${what}; last saw ${JSON.stringify(state)}`);
+    await sleep(150);
   }
 }
-/// Its list, Joy playing, its now-playing view open with the island.
+
+/// What the tests read of the page: the view's frames, its controls and
+/// bar (yielded or not), the bar's position (its `aria-valuenow`, whole
+/// seconds), the song row's state.
+const FRAME = 'iframe.site-now-web';
+async function state(tab) {
+  const has = (css, cls) => tab.attr(css, 'class').then((c) => (c == null ? null : String(c).split(/\s+/).includes(cls)));
+  return {
+    frames: await tab.count(FRAME),
+    frameSrc: await tab.attr(FRAME, 'src'),
+    controlsYielded: await has('.site-now-controls', 'site-now-yielded'),
+    barYielded: await has('.site-now-progress', 'site-now-yielded'),
+    at: Number(await tab.attr('.site-now-seek', 'aria-valuenow')),
+    row: await tab.attr('[data-track]', 'data-state'),
+  };
+}
+const path = (src) => (src ? new URL(src, 'http://x').pathname : null);
+
+/// A test that prints PASS or FAIL with the page's state on a failure.
+function check(name, opts, fn) {
+  test(name, opts, async () => {
+    try {
+      await fn();
+      console.log(`PASS ${name}`);
+    } catch (e) {
+      console.log(`FAIL ${name}: ${e.message}`);
+      throw e;
+    }
+  });
+}
+
+/// Its list, Joy current (paused, so the position holds still), its
+/// now-playing view open with the island.
 async function openView(tab, origin) {
   await tab.go(`${origin}${L}/03-list/`);
-  await tab.eval('document.cookie = "probe=kept; path=/; SameSite=Lax", true');
-  await tab.eval('[...document.querySelectorAll("[data-track]")][0].click(), true');
-  await until(tab, 'architect.playhead.playing', 'playing');
-  await tab.eval('architect.playhead.pause(), architect.playhead.seek(0, { play: false }), true');
-  await tab.eval('document.querySelector(".site-player-what").click(), true');
-  await until(tab, 'document.querySelector("iframe.site-now-web")', 'the frame');
+  await tab.setCookie('probe', 'kept');
+  await tab.click('[data-track]');
+  const row = await until(() => tab.attr('[data-track]', 'data-state'), (v) => v === 'playing' || v === 'paused', 'Joy current');
+  if (row === 'playing') {
+    await tab.click('.site-player [data-act="toggle"]');
+    await until(() => tab.attr('[data-track]', 'data-state'), (v) => v === 'paused', 'Joy paused');
+  }
+  await tab.click('.site-player-what');
+  return until(() => state(tab), (s) => s.frames > 0, 'the frame');
 }
 
 /// The webview-rtc document's path (the same on every node of a build),
@@ -314,24 +426,24 @@ async function rtcPath() {
   return rtcDoc;
 }
 
-test('a default web view reaches nothing off the node, and leaving its document gives the controls back', { skip, timeout: 180000 }, async () => {
+check('a default web view reaches nothing off the node, and leaving its document gives the controls back', { skip, timeout: 180000 }, async () => {
   const rtc = await rtcPath();
   const atk = attacker();
   const { origin, close } = await node(EVIL(atk.url, atk.port, rtc));
   const tab = await open();
   try {
-    await openView(tab, origin);
-    assert.match(await tab.eval('new URL(document.querySelector("iframe.site-now-web").src).pathname'), /^\/_ext\/webview\.[0-9a-f]+\.html$/);
+    const opened = await openView(tab, origin);
+    assert.match(path(opened.frameSrc), /^\/_ext\/webview\.[0-9a-f]+\.html$/, JSON.stringify(opened));
     // Every way out tried, the self-navigation off the node (3 s), then
     // on it (5 s), then its death.
     await sleep(9000);
     assert.deepEqual(atk.hits, [], 'the attacker heard nothing');
-    assert.equal(await tab.eval('document.querySelectorAll("iframe.site-now-web").length'), 0, 'the frames are gone');
-    assert.equal(await tab.eval('document.querySelector(".site-now-controls").classList.contains("site-now-yielded")'), false, 'the controls are back');
-    assert.equal(await tab.eval('document.querySelector(".site-now-progress").classList.contains("site-now-yielded")'), false);
+    const after = await until(() => state(tab), (s) => s.frames === 0, 'the frames gone');
+    assert.equal(after.controlsYielded, false, `the controls are back: ${JSON.stringify(after)}`);
+    assert.equal(after.barYielded, false, `the bar is back: ${JSON.stringify(after)}`);
     // Its navigation to the node's sign-out was a GET: a page asking, the
     // visitor's cookie kept.
-    assert.equal(await tab.eval('document.cookie.includes("probe=kept")'), true);
+    assert.equal(await tab.cookie('probe'), 'kept');
   } finally {
     await tab.close();
     close();
@@ -339,7 +451,7 @@ test('a default web view reaches nothing off the node, and leaving its document 
   }
 });
 
-test('navigating itself to the webview-rtc document: not served here, the frame taken down', { skip, timeout: 180000 }, async () => {
+check('navigating itself to the webview-rtc document: not served here, the frame taken down', { skip, timeout: 180000 }, async () => {
   const rtc = await rtcPath();
   const atk = attacker();
   const { origin, close } = await node(SELF_TO_RTC(rtc));
@@ -347,8 +459,8 @@ test('navigating itself to the webview-rtc document: not served here, the frame 
   try {
     assert.equal((await fetch(origin + rtc)).status, 404, 'a node granting no island WebRTC has no such document');
     await openView(tab, origin);
-    await until(tab, 'document.querySelectorAll("iframe.site-now-web").length === 0', 'the frame taken down');
-    assert.equal(await tab.eval('document.querySelector(".site-now-progress").classList.contains("site-now-yielded")'), false, 'the page\'s own bar back');
+    const after = await until(() => state(tab), (s) => s.frames === 0, 'the frame taken down');
+    assert.equal(after.barYielded, false, `the page's own bar back: ${JSON.stringify(after)}`);
     assert.deepEqual(atk.hits, []);
   } finally {
     await tab.close();
@@ -357,15 +469,15 @@ test('navigating itself to the webview-rtc document: not served here, the frame 
   }
 });
 
-test('a frame that captures its port and floods the page is booted once and stays up', { skip, timeout: 120000 }, async () => {
+check('a frame that captures its port and floods the page is booted once and stays up', { skip, timeout: 120000 }, async () => {
   const atk = attacker();
   const { origin, close } = await node(FLOOD);
   const tab = await open();
   try {
     await openView(tab, origin);
-    await until(tab, 'Math.round(architect.playhead.time) >= 20', 'the bundle\'s report', 30000);
-    assert.equal(Math.round(await tab.eval('architect.playhead.time')), 20, 'never booted again, after 500 hellos');
-    assert.equal(await tab.eval('document.querySelectorAll("iframe.site-now-web").length > 0'), true, 'still up: a flood is not an error');
+    const after = await until(() => state(tab), (s) => s.at >= 20, 'the bundle\'s report', 30000);
+    assert.equal(after.at, 20, `never booted again, after 500 hellos: ${JSON.stringify(after)}`);
+    assert.ok(after.frames > 0, `still up: a flood is not an error: ${JSON.stringify(after)}`);
     assert.deepEqual(atk.hits, []);
   } finally {
     await tab.close();
@@ -374,7 +486,7 @@ test('a frame that captures its port and floods the page is booted once and stay
   }
 });
 
-test('WebRTC only when declared and granted: its own document, a loopback that works', { skip, timeout: 120000 }, async () => {
+check('WebRTC only when declared and granted: its own document, a loopback that works', { skip, timeout: 180000 }, async () => {
   for (const [caps, grant, want, doc] of [
     [{ webrtc: ['peer-connections'] }, true, 7, /^\/_ext\/webview-rtc\.[0-9a-f]+\.html$/],
     [{}, true, 3, /^\/_ext\/webview\.[0-9a-f]+\.html$/],
@@ -383,13 +495,36 @@ test('WebRTC only when declared and granted: its own document, a loopback that w
     const { origin, close } = await node(RTC, { caps, grant });
     const tab = await open();
     try {
-      await openView(tab, origin);
-      assert.match(await tab.eval('new URL(document.querySelector("iframe.site-now-web").src).pathname'), doc, JSON.stringify({ caps, grant }));
-      await until(tab, 'Math.round(architect.playhead.time) > 0', 'the bundle\'s report');
-      assert.equal(Math.round(await tab.eval('architect.playhead.time')), want, JSON.stringify({ caps, grant }));
+      const opened = await openView(tab, origin);
+      assert.match(path(opened.frameSrc), doc, JSON.stringify({ caps, grant, opened }));
+      // The bundle's report: the page seeks to 7 (a loopback worked) or 3.
+      const after = await until(() => state(tab), (s) => s.at === 3 || s.at === 7, 'the bundle\'s report');
+      assert.equal(after.at, want, JSON.stringify({ caps, grant, after }));
     } finally {
       await tab.close();
       close();
     }
+  }
+});
+
+check('the node\'s own sign-out form signs the visitor out; a web view frame\'s cannot', { skip, timeout: 120000 }, async () => {
+  const { origin, close } = await node(SIGN_OUT);
+  const tab = await open();
+  try {
+    // The confirm page's own form (a real form post from the node's page).
+    await tab.go(`${origin}/s/_signout?to=${L}/03-list/`);
+    await tab.setCookie('architect_session', 'signed-in');
+    assert.equal(await tab.cookie('architect_session'), 'signed-in');
+    await tab.click('form[action^="/s/_signout"] button[type="submit"]');
+    await until(() => tab.cookie('architect_session'), (v) => v == null, 'the session cleared by the page\'s own form');
+    await until(() => tab.count('[data-track]'), (n) => n > 0, 'back on the list it came from');
+    // A web view frame building and submitting the same form: not sent.
+    await tab.setCookie('architect_session', 'signed-in');
+    await openView(tab, origin);
+    await sleep(3000);
+    assert.equal(await tab.cookie('architect_session'), 'signed-in', 'the frame could not sign the visitor out');
+  } finally {
+    await tab.close();
+    close();
   }
 });

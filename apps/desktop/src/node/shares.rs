@@ -3253,9 +3253,13 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    // `same-origin`, not `no-referrer`: a form posted from a `no-referrer`
+    // page carries `Origin: null` even to its own origin, and sign-out's
+    // own form (`signout_form`) must say it is this node's. The referrer
+    // still never leaves the node.
     response.headers_mut().insert(
         header::REFERRER_POLICY,
-        HeaderValue::from_static("no-referrer"),
+        HeaderValue::from_static("same-origin"),
     );
     response
 }
@@ -3277,6 +3281,18 @@ mod tests {
         };
         assert!(with(Some("same-origin")) && with(Some("none")) && with(None));
         assert!(!with(Some("cross-site")) && !with(Some("same-site")));
+    }
+
+    /// The node's own pages (sign-out's among them) send a referrer only to
+    /// the node: their forms' posts then say their Origin (`no-referrer`
+    /// would make it `null`, refused).
+    #[test]
+    fn the_nodes_own_pages_keep_their_origin_for_their_forms() {
+        let r = page(StatusCode::OK, "Sign out", &signout_form("/"));
+        assert_eq!(
+            r.headers().get(header::REFERRER_POLICY).unwrap(),
+            "same-origin"
+        );
     }
 
     /// Signing out is a form posted from the node's own page: a GET (a
