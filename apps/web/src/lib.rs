@@ -284,6 +284,10 @@ pub struct NodeStatus {
     pub version: String,
     #[serde(default)]
     pub org: Option<String>,
+    /// The org whose vaults it serves on `/org/{slug}/vox`: what the app
+    /// opens, signed in.
+    #[serde(default)]
+    pub hosts: Option<String>,
     #[serde(default)]
     pub vaults: u32,
     #[serde(default)]
@@ -303,6 +307,9 @@ pub enum Screen {
     SignedIn {
         person: Person,
         node: Option<Result<NodeStatus, String>>,
+        /// Why the org's vaults did not open (the lane refused or was not
+        /// there); `None` when the node names no org.
+        lane: Option<String>,
     },
     /// The app cannot start (no usable config).
     Broken(String),
@@ -333,7 +340,7 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
                  <a class=\"button\" href=\"{DEMO}\">Try the demo</a></p>{built_in}</section>"
             )
         }
-        Screen::SignedIn { person, node } => {
+        Screen::SignedIn { person, node, lane } => {
             let who = person
                 .name
                 .as_deref()
@@ -362,9 +369,18 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
                     s.devices
                 ),
             };
+            let lane = lane
+                .as_deref()
+                .map(|why| {
+                    format!(
+                        "<p class=\"problem\">Your org's vaults did not open: {}</p>",
+                        escape(why)
+                    )
+                })
+                .unwrap_or_default();
             format!(
-                "<section class=\"card\"><h2>Signed in as {}{email}</h2>{node}\
-                 <p>The full app is the desktop app for now; its views come to the browser here.</p>\
+                "<section class=\"card\"><h2>Signed in as {}{email}</h2>{node}{lane}\
+                 <p>Your org's vaults open here when this node hosts your org.</p>\
                  <p class=\"row\"><a class=\"button primary\" href=\"{DOWNLOADS}\">Download the desktop app</a>\
                  <a class=\"button\" href=\"{DEMO}\">Open the demo</a>\
                  <a class=\"button\" href=\"/docs/\">Docs</a>\
@@ -434,10 +450,12 @@ mod tests {
                     name: "home".into(),
                     version: "0.30.0".into(),
                     org: None,
+                    hosts: None,
                     vaults: 2,
                     notes: 9,
                     devices: 3,
                 })),
+                lane: Some("<i>no</i>".into()),
             },
             &Distribution::default(),
         );
@@ -445,6 +463,7 @@ mod tests {
         assert!(html.contains("ada@x.test"));
         assert!(html.contains("2 (9 notes)"));
         assert!(html.contains("data-action=\"sign-out\""));
+        assert!(html.contains("did not open: &lt;i&gt;no&lt;/i&gt;"), "{html}");
         assert!(
             view(
                 &Screen::SignedOut { problem: None },

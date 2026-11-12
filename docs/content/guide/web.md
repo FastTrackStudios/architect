@@ -110,10 +110,22 @@ inline styles, the components' own; `script-src` is `'self'
 `localStorage`. Pop-out windows, folders on the device, the files agent
 and extensions (#495) are not in the browser.
 
-Signed in, the app shows who is signed in, the node's status over
-same-origin HTTP (`POST /node/status`,
-`apps/desktop/src/node/service.rs` `Node`), and links to the demo, the
-docs and the desktop download.
+**Signed in**, when this host's node hosts the account's org (its status
+names the org), the app is the same app on the org's vaults: it dials the
+node's org lane, `/org/{slug}/vox` on this origin, with the session as
+the WebSocket's `vox.bearer.<token>` subprotocol (never in a URL), lists
+the vaults' notes (`vault_proto::notes` `Notes`, each vault a folder),
+reads them in the background so the navigator fills its previews, and
+keeps an open note live with the node (`crdt::sync::SyncedDoc` on
+`vault_proto::collab_doc_id`): typing reaches the node's document and
+file, and another's typing shows as it comes. A new note is written with
+`Notes::write`. Nothing is kept in the browser between visits: a reload
+lists and reads again (no IndexedDB or OPFS copy yet), and with the node
+out of reach the app says why. A node that names no org, or a lane that
+refuses the session (not a member), leaves the status page: who is
+signed in, the node's status over same-origin HTTP (`POST /node/status`,
+`apps/desktop/src/node/service.rs` `Node`), why the vaults did not open,
+and links to the demo, the docs and the desktop download.
 
 The sandbox's browser demo, which used to be `apps/web`, is
 `apps/sandbox/web` (`just sandbox-web`).

@@ -255,6 +255,15 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
     Ok(())
 }
 
+/// Forgets the session and shows the app signed out (the account menu's
+/// Sign out, in the app).
+pub(crate) fn sign_out() {
+    let _ = LocalStore.clear();
+    if let Ok(w) = window() {
+        let _ = w.location().assign(APP);
+    }
+}
+
 /// Send the browser to the issuer, its verifier parked in this tab.
 fn sign_in(config: &Config) -> Result<(), String> {
     let window = window()?;
@@ -381,12 +390,43 @@ async fn show(config: &Config) {
     draw(&Screen::SignedIn {
         person: person.clone(),
         node: None,
+        lane: None,
     });
     let node = node_status().await;
+    // The node hosts the account's org: the app on its vaults.
+    let lane = match node.as_ref().ok().and_then(|s| s.hosts.clone()) {
+        Some(org) => match open_org(&org, &session.token).await {
+            Ok(vault) => {
+                let who = person
+                    .name
+                    .clone()
+                    .or_else(|| person.email.clone())
+                    .unwrap_or_default();
+                crate::app::mount(crate::app::Mode::Org { vault, person: who, org });
+                return;
+            }
+            Err(why) => Some(why),
+        },
+        None => None,
+    };
     draw(&Screen::SignedIn {
         person,
         node: Some(node),
+        lane,
     });
+}
+
+/// The org's vaults over its lane, listed, their texts read after.
+async fn open_org(org: &str, token: &str) -> Result<crate::app::vault::WebVault, String> {
+    let lane = crate::app::org::OrgVaults::open(org, token.to_owned()).await?;
+    #[allow(clippy::as_conversions, clippy::cast_possible_truncation)] // a time in ms, well inside i64
+    let now = js_sys::Date::now() as i64;
+    let (source, notes) = lane.list(org, now).await?;
+    lane.fill(source.clone(), notes, now);
+    Ok(crate::app::vault::WebVault {
+        source,
+        org: Some(lane),
+    })
 }
 
 /// The node behind this host, over its HTTP face.

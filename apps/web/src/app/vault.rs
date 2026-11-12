@@ -44,10 +44,13 @@ fn edited() {
     EDITED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// The vault the app shows, in context above the Vault tab.
+/// The vault the app shows, in context above the Vault tab: the demo's,
+/// or the signed-in account's org vaults (`org`, which reads notes not yet
+/// read and writes edits back to the node).
 #[derive(Clone)]
 pub struct WebVault {
     pub source: MemorySource,
+    pub org: Option<super::org::OrgVaults>,
 }
 
 /// Unix milliseconds now.
@@ -167,8 +170,9 @@ fn show_note(mut workspace: Signal<Workspace>, path: &str, target: Target) {
     open_in_main(workspace, note_pane(path), target);
 }
 
-/// A new note in `folder`, written to the vault and opened.
-fn new_note(workspace: Signal<Workspace>, vault: &MemorySource, folder: &str) {
+/// A new note in `folder`, written to the vault (and the node) and opened.
+fn new_note(workspace: Signal<Workspace>, web: &WebVault, folder: &str) {
+    let vault = &web.source;
     let names = vault.files();
     let path = (1..=999)
         .map(|n: u32| {
@@ -193,6 +197,9 @@ fn new_note(workspace: Signal<Workspace>, vault: &MemorySource, folder: &str) {
         .is_ok()
     {
         edited();
+        if let Some(org) = &web.org {
+            org.write_later(&path, String::new());
+        }
         show_note(workspace, &path, Target::Tab);
     }
 }
@@ -258,20 +265,20 @@ pub fn VaultPage() -> Element {
     architect_workspace::use_tabs_button(workspace);
     let commands = vec![Command::new("new-note", "New note", icon!(SquarePen))];
     let on_command = {
-        let source = vault.source.clone();
+        let web = vault.clone();
         move |id: String| {
             if id == "new-note" {
-                new_note(workspace, &source, "");
+                new_note(workspace, &web, "");
             }
         }
     };
     {
-        let source = vault.source.clone();
+        let web = vault.clone();
         architect_commands::use_command(
             architect_commands::Command::new(NEW_NOTE, "New note")
                 .group("Vault")
                 .shortcut("⌃⌘N"),
-            move || new_note(workspace, &source, ""),
+            move || new_note(workspace, &web, ""),
         );
     }
     // The navigator in a phone's drawer, from its bar.
@@ -384,7 +391,7 @@ pub fn FilesView() -> Element {
         source
     });
     let phone = use_context::<Signal<Screen>>()().form() == FormFactor::Phone;
-    let source = use_context::<WebVault>().source;
+    let web = use_context::<WebVault>();
     rsx! {
         NavigatorView {
             navigator: nav,
@@ -403,7 +410,7 @@ pub fn FilesView() -> Element {
                     shell.open(None);
                 }
             },
-            on_new_note: move |folder: String| new_note(workspace, &source, &folder),
+            on_new_note: move |folder: String| new_note(workspace, &web, &folder),
         }
     }
 }
@@ -439,15 +446,31 @@ fn shown(v: &PropertyValue) -> String {
     }
 }
 
-/// One note: an image or a PDF drawn from its URL, a markdown note in the
-/// editor (its properties above it, as they are; editing them is the
-/// desktop's for now), anything else said so.
+/// One note: an image drawn from its URL, a markdown note as its text
+/// (read from the node first when it has not been yet), anything else
+/// said so.
 #[component]
 fn WebNote(path: String) -> Element {
     let vault = use_context::<WebVault>();
     let t = use_shell().theme;
-    let source = vault.source;
-    let text = use_hook(|| source.read_text(&path));
+    let source = vault.source.clone();
+    let mut text = use_signal(|| source.read_text(&path));
+    {
+        let (path, org, source) = (path.clone(), vault.org.clone(), source.clone());
+        use_hook(move || {
+            if text.peek().is_none()
+                && is_note(&path)
+                && let Some(org) = org
+            {
+                spawn(async move {
+                    if let Some(read) = org.read(&path).await {
+                        source.set_text(note_from_markdown(&path, &read, now(), now()), read.clone());
+                        text.set(Some(read));
+                    }
+                });
+            }
+        });
+    }
     if let Some(url) = source
         .resource_url(&path)
         .filter(|u| u.starts_with("data:image/"))
@@ -458,17 +481,34 @@ fn WebNote(path: String) -> Element {
             }
         };
     }
-    let Some(text) = text.filter(|_| is_note(&path)) else {
+    if !is_note(&path) {
         return rsx! {
             div { style: "flex: 1; padding: 32px; color: {t.ink_3};",
                 p { "{title_of(&path)} opens in the desktop app; the browser shows notes and images." }
             }
         };
-    };
-    let (front, body) = architect_navigator::markdown::split_block(&text);
+    }
+    match text() {
+        Some(text) => rsx! { NoteText { path, text } },
+        None => rsx! {
+            div { style: "flex: 1; padding: 32px; color: {t.ink_3};", p { "Opening {title_of(&path)}…" } }
+        },
+    }
+}
+
+/// A markdown note's text, editable: its properties above it, as they are.
+/// On the org's vaults it is live with the node while it is open
+/// (`super::org::LiveNote`): typing goes to the node's document, and
+/// another's typing comes into this one.
+#[component]
+fn NoteText(path: String, text: String) -> Element {
+    let vault = use_context::<WebVault>();
+    let t = use_shell().theme;
+    let source = vault.source.clone();
+    let (front, body0) = architect_navigator::markdown::split_block(&text);
     let front = front.into_owned();
     let properties = note_from_markdown(&path, &text, 0, 0).properties;
-    let body = body.to_owned();
+    let mut body = use_signal(|| body0.to_owned());
     let created = use_hook(|| {
         source
             .files()
@@ -476,13 +516,51 @@ fn WebNote(path: String) -> Element {
             .find(|f| f.path == path)
             .map_or_else(now, |f| f.created)
     });
+    // The note's text in the vault: the navigator's preview follows.
+    let keep = {
+        let (source, path, front) = (source.clone(), path.clone(), front.clone());
+        move |b: &str| {
+            let full = format!("{front}{b}");
+            source.set_text(note_from_markdown(&path, &full, created, now()), full);
+        }
+    };
+    let live = use_hook(|| {
+        let (org, path, keep) = (vault.org.clone(), path.clone(), keep.clone());
+        let (live, mut changes) = org?.live(&path)?;
+        let live = std::rc::Rc::new(live);
+        let heard = std::rc::Rc::clone(&live);
+        spawn(async move {
+            use futures_util::StreamExt as _;
+            let mut first = true;
+            while changes.next().await.is_some() {
+                let now_body = heard.body();
+                // A first, empty answer is a document not filled yet: the
+                // text read stays.
+                if first && now_body.is_empty() && !body.peek().is_empty() {
+                    first = false;
+                    continue;
+                }
+                first = false;
+                if *body.peek() != now_body {
+                    keep(&now_body);
+                    body.set(now_body);
+                }
+            }
+        });
+        Some(live)
+    });
     let on_input = {
-        let (path, front) = (path.clone(), front);
+        let (path, keep) = (path.clone(), keep);
         move |e: FormEvent| {
-            let full = format!("{front}{}", e.value());
-            let file = note_from_markdown(&path, &full, created, now());
-            source.set_text(file, full);
+            let typed = e.value();
+            keep(&typed);
             edited();
+            match (&live, &vault.org) {
+                (Some(live), _) => live.set_body(&typed),
+                (None, Some(org)) => org.write_later(&path, format!("{front}{typed}")),
+                (None, None) => {}
+            }
+            body.set(typed);
         }
     };
     let editing = architect_shell::use_editing_actions("editor:note", &[]);
@@ -503,7 +581,7 @@ fn WebNote(path: String) -> Element {
                     "data-testid": "note-text",
                     "aria-label": "{title_of(&path)}",
                     spellcheck: "true",
-                    initial_value: "{body}",
+                    value: "{body}",
                     oninput: on_input,
                     onfocusin: move |_| editing.focus(),
                     onfocusout: move |_| editing.blur(),

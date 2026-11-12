@@ -26,7 +26,14 @@ web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Docum
 # The app (src/app): the same components as the desktop and phone apps
 # (apps/ui), on dioxus-web.
 dioxus = { workspace = true, features = ["web"] }
-architect = { workspace = true, features = ["action-list"] }
+architect = { workspace = true, features = ["action-list", "connect"] }
+# The org lane's `Notes` (src/app/org.rs).
+vault-proto = { workspace = true, features = ["vox"] }
+gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }
+# An open note kept live with the node: its body on DocSync (src/app/org.rs).
+crdt = { workspace = true, features = ["vox"] }
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false }
 architect-shell = { workspace = true, features = ["ui"] }
 architect-workspace = { workspace = true, features = ["ui"] }
 architect-commands = { workspace = true, features = ["ui"] }

@@ -23,6 +23,7 @@
 #![allow(clippy::future_not_send)]
 
 mod keys;
+pub mod org;
 mod page;
 mod screen;
 mod settings;
@@ -37,14 +38,23 @@ use architect_commands::{Command, Overlay, PaletteView};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    Command as CommandIcon, Files, LogIn, NotebookText, Search, Settings2, SquarePen,
+    Command as CommandIcon, Files, LogIn, LogOut, NotebookText, Search, Settings2, SquarePen,
 };
 
 /// Which app the page is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum Mode {
     /// The demo vault in the tab's memory: nothing signed in, nothing sent.
     Demo,
+    /// The signed-in account's org vaults, over the node (`org`).
+    Org {
+        /// The vaults, listed, and the lane they came over.
+        vault: vault::WebVault,
+        /// Who is signed in (their name, else their email).
+        person: String,
+        /// The org's slug.
+        org: String,
+    },
 }
 
 /// Mounts the app in `#app`, over what the page showed while it loaded.
@@ -85,10 +95,12 @@ fn WebApp() -> Element {
     // Before anything that evaluates: the page allows no `eval`.
     page::use_safe_document();
     page::use_keyboard_feed();
-    let web_vault = use_context_provider(|| match mode {
+    let web_vault = use_context_provider(|| match &mode {
         Mode::Demo => vault::WebVault {
             source: vault::demo_vault(),
+            org: None,
         },
+        Mode::Org { vault, .. } => vault.clone(),
     });
     vault::use_vault_workspace(&web_vault.source);
     let screen = screen::use_browser_screen();
@@ -138,8 +150,11 @@ fn WebApp() -> Element {
             .shortcut("⌘,"),
         move || settings.show(None),
     );
-    let demo = mode == Mode::Demo;
-    architect_commands::use_command(Command::new("WEB_SIGN_IN", "Sign in").group("App"), sign_in);
+    let demo = matches!(mode, Mode::Demo);
+    // The demo's way out; signed in, the account's menu signs out.
+    if demo {
+        architect_commands::use_command(Command::new("WEB_SIGN_IN", "Sign in").group("App"), sign_in);
+    }
     let tabs = vec![shell::Tab::new("vault", "Vault", icon!(NotebookText))];
     let foot = vec![shell::Action::new(
         "Settings",
@@ -148,13 +163,23 @@ fn WebApp() -> Element {
             settings.show(None);
         },
     )];
-    let menu = shell::Menu::new()
-        .item("Sign in", icon!(LogIn), move |()| sign_in())
-        .item("Settings", icon!(Settings2), move |()| settings.show(None));
-    let account = shell::Account::new("Demo")
-        .detail("Nothing leaves this tab")
-        .color("#b45309")
-        .menu(menu);
+    let account = match &mode {
+        Mode::Demo => shell::Account::new("Demo")
+            .detail("Nothing leaves this tab")
+            .color("#b45309")
+            .menu(
+                shell::Menu::new()
+                    .item("Sign in", icon!(LogIn), move |()| sign_in())
+                    .item("Settings", icon!(Settings2), move |()| settings.show(None)),
+            ),
+        Mode::Org { person, org, .. } => shell::Account::new(person.clone())
+            .detail(org.clone())
+            .menu(
+                shell::Menu::new()
+                    .item("Settings", icon!(Settings2), move |()| settings.show(None))
+                    .item("Sign out", icon!(LogOut), move |()| crate::browser::sign_out()),
+            ),
+    };
     let mut status = vec![
         shell::StatusItem::new("demo", "Demo: nothing is saved")
             .hint("Sign in to keep your notes")
@@ -163,8 +188,16 @@ fn WebApp() -> Element {
             .hint("Every command")
             .on_press(move |()| commands.show(Overlay::Palette)),
     ];
-    if !demo {
-        status.retain(|s| s.id != "demo");
+    match &mode {
+        Mode::Demo => {}
+        Mode::Org { org, .. } => {
+            status.retain(|s| s.id != "demo");
+            status.insert(
+                0,
+                shell::StatusItem::new("org", format!("{org} · on the node"))
+                    .hint("Your org's vaults: every edit is written to the node"),
+            );
+        }
     }
     // A phone's demo: a strip over the top says so, the shell laid out
     // under it (as under a notch).
@@ -205,8 +238,10 @@ fn WebApp() -> Element {
                             shell::BarAction::new(vault::NEW_NOTE, "New note", icon!(SquarePen)),
                             shell::BarAction::new(architect_command_palette::OPEN_ACTION, "Commands", icon!(CommandIcon)),
                             shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
-                            shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn)),
-                        ],
+                        ]
+                        .into_iter()
+                        .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
+                        .collect::<Vec<_>>(),
                         vault::VaultPage {}
                     }
                 }
