@@ -610,6 +610,8 @@ pub fn same_file(a: &std::fs::Metadata, b: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     fn entry(path: &str, kind: Option<&str>, files: &[&str]) -> Entry {
@@ -776,9 +778,13 @@ mod tests {
     #[test]
     fn a_bad_favourites_declaration_never_makes_placement_unknown() {
         let tmp = tempfile::tempdir().unwrap();
-        let tabs: String = (0..6)
-            .map(|i| format!("[[favourites.tabs]]\nid = \"t{i}\"\nlabel = \"Tab {i}\"\nicon = \"music\"\ntarget = {{ view = \"page\" }}\n"))
-            .collect();
+        let mut tabs = String::new();
+        for i in 0..6 {
+            let _ = write!(
+                tabs,
+                "[[favourites.tabs]]\nid = \"t{i}\"\nlabel = \"Tab {i}\"\nicon = \"music\"\ntarget = {{ view = \"page\" }}\n"
+            );
+        }
         install(
             tmp.path(),
             "demo.songs",
