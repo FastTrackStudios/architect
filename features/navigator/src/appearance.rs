@@ -1,3 +1,4 @@
+// Scratch: a clean one-line change.
 //! What a person sets for one folder or one tag, over the settings.
 //!
 //! Its sort, its grouping, its rows (title and preview lines, compact),
