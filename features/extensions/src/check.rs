@@ -309,6 +309,10 @@ impl Checker {
         let host = Host::new(ActionList::new(), Discard).with_view_kinds(self.kinds.clone());
         #[cfg(all(feature = "process", unix))]
         let processes = self.process_runner(&host, manifest.kind, report);
+        // Kept alive for the whole check; read only when remote views are
+        // rendered (a node with `process` and without `remote`).
+        #[cfg(all(feature = "process", unix, not(feature = "remote")))]
+        let _ = &processes;
         if let Err(error) = host.load(package, Origin::Dev) {
             load_problem(&error, report);
             return;

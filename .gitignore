@@ -2,6 +2,10 @@
 **/target
 /dist
 **/dist
+# dist/standard is a crate (the standard distribution, #631), not output.
+!/dist/
+/dist/*
+!/dist/standard/
 .direnv/
 # devenv: state, eval cache and per-user overrides.
 .devenv/

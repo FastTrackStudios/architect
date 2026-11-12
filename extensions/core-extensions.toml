@@ -1,0 +1,103 @@
+#:schema core-extensions.schema.json
+# Architect's core extensions: what the standard release of Architect
+# includes (#631, docs/content/guide/core-extensions.md).
+#
+# Each entry names an extension that lives in its OWN repo, by reference:
+# its id, publisher, source, exact version (a tag and the commit it names),
+# the publisher's signature over that release, and its form on each
+# platform. No extension's code is copied into this repo.
+#
+# - `linked`: compiled into the standard build (`dist/standard`) from its
+#   crate at `rev`, with every architect crate in its graph patched back to
+#   this checkout, so the build holds one Architect.
+# - `packaged`: a file the publisher's release carries, fetched by the
+#   build, checked against `sha256` and the signed sums, and shipped beside
+#   the binary (`core/<id>/`).
+#
+# Entries are added, bumped or removed at the owner's request, by anyone
+# (a person or an agent). After an edit run `cargo xtask core sync`
+# (regenerates `dist/standard`) and `cargo xtask core verify` (checks every
+# pin against its source); `cargo xtask core check` (CI) fails while
+# `dist/standard` does not match this file.
+
+# Studio's song libraries and setlists (studio `features/setlists`): its
+# navigator, setlist and song views and actions in the app, and its share
+# blocks (a song's chart as Keyflow's follow SVG, a set's playable list) on
+# the node's share links and Sites.
+[[core]]
+id        = "studio-setlists"
+publisher = "FastTrackStudios"
+source    = "https://github.com/FastTrackStudios/studio"
+version   = "26.11.4"
+tag       = "v26.11.4"
+rev       = "93a2d28a19852cff177ce268c38f5e5d4808bfa9"
+
+[core.signature]
+key     = "org"
+sums    = "https://github.com/FastTrackStudios/studio/releases/download/v26.11.4/SHA256SUMS"
+minisig = "https://github.com/FastTrackStudios/studio/releases/download/v26.11.4/SHA256SUMS.minisig"
+comment = "studio v26.11.4 SHA256SUMS"
+
+[core.linked]
+crate     = "setlists"
+features  = ["extension", "share"]
+platforms = ["desktop", "node"]
+extension = "setlists::ext::Setlists"
+blocks    = "setlists::share::blocks"
+# Studio's own root `[patch]`: Keyflow still takes these from daw's old
+# repo; Studio gives it its copies, so there is one of each.
+patch."https://github.com/FastTrackStudios/daw" = ["daw", "dawfile-reaper", "fts-sample"]
+
+# Studio's island (studio `apps/architect/island`): Session's progress bar
+# and transport, and its lyrics, on a share link's now-playing view. Studio's
+# release ships it beside its node (`studio-island/` in the node tarball,
+# built by `just island` at the tag), so the standard build takes that folder
+# from the same signed release instead of building it.
+[[core]]
+id        = "studio.transport"
+publisher = "FastTrackStudios"
+source    = "https://github.com/FastTrackStudios/studio"
+version   = "26.11.4"
+tag       = "v26.11.4"
+rev       = "93a2d28a19852cff177ce268c38f5e5d4808bfa9"
+
+[core.signature]
+key     = "org"
+sums    = "https://github.com/FastTrackStudios/studio/releases/download/v26.11.4/SHA256SUMS"
+minisig = "https://github.com/FastTrackStudios/studio/releases/download/v26.11.4/SHA256SUMS.minisig"
+comment = "studio v26.11.4 SHA256SUMS"
+
+[core.packaged]
+platforms = ["node"]
+archive   = "https://github.com/FastTrackStudios/studio/releases/download/v26.11.4/studio-architect-node-v26.11.4-x86_64-linux.tar.gz"
+sha256    = "501fbbc039e2f2c1c4049320a2ca6888cbb302bbf781ba0d8045c0d98639b82e"
+folder    = "studio-architect-node-v26.11.4-x86_64-linux/studio-island"
+
+[core.packaged.island]
+progress   = "progress"
+transport  = "transport"
+lyrics     = "lyrics"
+stylesheet = "island.css"
+
+# A community extension, packaged everywhere: its publisher's own key, its
+# own repo, an `.archext` from its own release. (An example of the shape;
+# `.archext` core packages are not bundled yet: #631's next steps.)
+#
+# [[core]]
+# id        = "metronome-plus"
+# publisher = "jane-doe"
+# source    = "https://codeberg.org/jane/metronome-plus"
+# version   = "1.4.2"
+# tag       = "v1.4.2"
+# rev       = "<the 40-hex commit v1.4.2 names>"
+#
+# [core.signature]
+# key     = "RW…"      # her minisign public key, as the registry lists it
+# sums    = "https://codeberg.org/jane/metronome-plus/releases/download/v1.4.2/SHA256SUMS"
+# minisig = "https://codeberg.org/jane/metronome-plus/releases/download/v1.4.2/SHA256SUMS.minisig"
+# comment = "metronome-plus v1.4.2 SHA256SUMS"
+#
+# [core.packaged]
+# platforms = ["desktop", "node", "ios", "web"]
+# archive   = "https://codeberg.org/jane/metronome-plus/releases/download/v1.4.2/metronome-plus-1.4.2.archext"
+# sha256    = "<its sha256>"

@@ -16,6 +16,13 @@ toml.workspace = true
 guppy.workspace = true
 # ext-pack / ext-sign / ext-verify / ext-index: the `.archext` format, signing included.
 architect-extension-archive = { workspace = true, features = ["sign"] }
+# core: the core extensions list's packaged pins (sha256, the publisher's
+# minisign signature over the release's sums, the folder out of its tar.gz).
+sha2.workspace = true
+hex.workspace = true
+minisign-verify = "0.2"
+flate2 = "1.1.10"
+tar = { version = "0.4", default-features = false }
 
 [features]
 # `xtask/tests/dev_stack.rs`: the whole stack started from its binaries,

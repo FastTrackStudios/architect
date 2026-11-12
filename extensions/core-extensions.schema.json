@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FastTrackStudios/architect/blob/main/extensions/core-extensions.schema.json",
+  "title": "Architect's core extensions list (core-extensions.toml)",
+  "description": "What the standard release of Architect includes, by reference: one [[core]] entry per extension, which lives in its own repo. Read and checked by `cargo xtask core` (xtask/src/core.rs), which applies these rules and more (one form per platform, unique ids, the tag naming the version) and keeps dist/standard generated from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "core": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "url": { "type": "string", "pattern": "^https://[^\\s]+$" },
+    "platform": {
+      "enum": ["desktop", "node", "ios", "web"],
+      "description": "desktop: the app's window (Linux, macOS, Windows); node: `serve`, the headless node (share links, Sites); ios: the iPhone and iPad app; web: the hosted web app. dist/standard builds desktop and node today."
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/platform" }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "publisher", "source", "version", "tag", "rev", "signature"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+(\\.[a-z0-9_-]+)*$",
+          "description": "The extension's id, as its extension.toml says."
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who publishes it; their key signs its releases (`signature.key`)."
+        },
+        "source": {
+          "$ref": "#/$defs/url",
+          "description": "The extension's own repository (a git URL)."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?$",
+          "description": "Its release, exactly."
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The git tag of that release in `source`; it names `version`."
+        },
+        "rev": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "The commit the tag names: the linked form's digest (`cargo xtask core verify` checks the tag still names it; dist/standard's lock pins it)."
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key", "sums", "minisig", "comment"],
+          "description": "The publisher's signature over the release: its SHA256SUMS, signed with minisign.",
+          "properties": {
+            "key": {
+              "type": "string",
+              "pattern": "^(org|RW[A-Za-z0-9+/]{54})$",
+              "description": "`org` (the FastTrackStudios org release key) or the publisher's minisign public key (the base64 line of its .pub)."
+            },
+            "sums": { "$ref": "#/$defs/url" },
+            "minisig": { "$ref": "#/$defs/url" },
+            "comment": {
+              "type": "string",
+              "description": "The signature's trusted comment, exactly; it names the tag, so a signature lifted from another release is refused."
+            }
+          }
+        },
+        "linked": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["crate", "platforms", "extension"],
+          "description": "Compiled into the standard build from its crate at `rev`.",
+          "properties": {
+            "crate": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+            "features": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" }
+            },
+            "platforms": { "$ref": "#/$defs/platforms" },
+            "extension": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)+$",
+              "description": "The Rust path of its `linked::Extension` value (`Distribution::linked`)."
+            },
+            "blocks": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)+$",
+              "description": "A function returning its block renderer for the node's share links and Sites (`Distribution::block`)."
+            },
+            "patch": {
+              "type": "object",
+              "description": "Its repo's own [patch] tables the build must copy: a git URL to the crates of `source` (at `tag`) that replace it.",
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" }
+              }
+            }
+          }
+        },
+        "packaged": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["platforms", "archive", "sha256"],
+          "description": "A file its release carries, fetched, checked and shipped beside the binary (`core/<id>/`).",
+          "properties": {
+            "platforms": { "$ref": "#/$defs/platforms" },
+            "archive": { "$ref": "#/$defs/url" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "folder": {
+              "type": "string",
+              "description": "The folder taken from a .tar.gz archive (none: the archive is an .archext, not bundled yet)."
+            },
+            "island": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The folder is a share-page island (`Distribution::island`): its views and stylesheet.",
+              "properties": {
+                "progress": { "type": "string" },
+                "transport": { "type": "string" },
+                "lyrics": { "type": "string" },
+                "stylesheet": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

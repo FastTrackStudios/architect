@@ -50,6 +50,9 @@ pub struct Options {
     /// The version written into the desktop entry and Info.plist, and
     /// stamped into the binary (`ARCHITECT_RELEASE_VERSION`).
     pub version: Option<String>,
+    /// Features of the distribution crate to turn on (`--manifest-path`
+    /// only): the standard distribution's node takes `node-wasi`.
+    pub features: Vec<String>,
 }
 
 /// The build-time env `architect-updates` reads as the app's release
@@ -137,6 +140,9 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
         cmd.env(RELEASE_VERSION_ENV, stamp(v)?);
     } else {
         cmd.env_remove(RELEASE_VERSION_ENV);
+    }
+    if opts.manifest_path.is_some() && !opts.features.is_empty() {
+        cmd.args(["--features", &opts.features.join(",")]);
     }
     if node {
         // Without the window (no Blitz, wgpu or wayland), and without the

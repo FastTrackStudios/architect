@@ -114,6 +114,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo run -q -p xtask -- fleet-deps --check
 
+      # The core extensions list and dist/standard generated from it, its
+      # lock holding one Architect (offline; standard.yml builds it).
+      - name: core extensions
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- core check
+
   test:
     name: Tests
     runs-on: [self-hosted, thebattleship]

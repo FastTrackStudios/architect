@@ -1,0 +1,88 @@
+name: standard
+
+# The standard distribution (#631, docs/content/guide/core-extensions.md)
+# built against main: `dist/standard` links each core extension from its
+# own repo at the tag extensions/core-extensions.toml pins, with every
+# architect crate patched to this commit. A framework change that breaks a
+# core extension shows up here, before a release.
+#
+# NOT a required check, and not part of checks.yml or pr.yml: a pre-1.0
+# break never blocks framework work, and no PR of architect waits on
+# another repo's code compiling. The list's own check (`cargo xtask core
+# check`, offline) is in pr.yml's fast checks and checks.yml's lint.
+#
+# Follow-up, not here: release.yml does not build the standard app yet
+# (the release-chain PRs, #618 and studio#471, restructure it first). The
+# standard release needs `dist/standard` built green from the tag; the
+# server's node package (infra `packages/architect-node`) would then come
+# from architect's release instead of Studio's.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+# A newer push to main supersedes an older run.
+concurrency:
+  group: standard-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Main's settings (checks.yml): any warning fails, no debug info. Not
+  # RUSTFLAGS, which would replace .cargo/config.toml's and every kache key.
+  CARGO_BUILD_WARNINGS: deny
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  standard:
+    name: standard (core extensions against main)
+    # The pool main's heavy jobs run on: its kache store already holds
+    # architect's crates, so only the extensions' own crates and what links
+    # them compile.
+    runs-on: [self-hosted, thebattleship]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: devenv shell -- bash -e {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/shared-rust
+        with:
+          kind: standard
+
+      # The list's rules and dist/standard as the list makes it.
+      - name: list
+        run: cargo xtask core check
+
+      # Resolved as cargo builds it: one Architect (this commit's), no Task
+      # crate, each linked crate at its pin. Main may have moved a
+      # dependency since the lock was written; the build takes the move.
+      - name: one Architect
+        run: cargo xtask core graph
+
+      # The window and the node, as the release builds them (dev profile:
+      # whether it compiles is the question; the release's own build is the
+      # follow-up above).
+      - name: desktop
+        run: cargo build --manifest-path dist/standard/Cargo.toml --bins
+
+      # The node, as the release builds it, then proved to be the standard
+      # one: Architect, with every linked core extension compiled in, and its
+      # packaged folders fetched from their signed releases beside it.
+      - name: node
+        run: |
+          set -euo pipefail
+          node="$(cargo xtask dist node --manifest-path dist/standard/Cargo.toml \
+            --features node-wasi --profile dev --out "$RUNNER_TEMP/standard" | sed -n 's/^node=//p')"
+          test -x "$node"
+          cargo xtask core fetch --platform node --into "$(dirname "$node")"
+          "$node" distribution > "$RUNNER_TEMP/distribution.json"
+          grep -q '"bundle_id": "app.fasttrackstudio.architect"' "$RUNNER_TEMP/distribution.json"
+          grep -q '"id": "studio-setlists"' "$RUNNER_TEMP/distribution.json"
+
+      - name: tests
+        run: cargo test --manifest-path dist/standard/Cargo.toml

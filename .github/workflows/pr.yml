@@ -167,6 +167,13 @@ jobs:
       - name: fleet-deps
         if: ${{ !cancelled() && steps.xtask.outcome == 'success' }}
         run: target/xtask/debug/xtask fleet-deps --check
+      # The core extensions list (extensions/core-extensions.toml): its rules,
+      # dist/standard generated from it, and dist/standard's lock holding one
+      # Architect. Reads files only; never builds or fetches Studio
+      # (.github/workflows/standard.yml builds it, not required).
+      - name: core extensions
+        if: ${{ !cancelled() && steps.xtask.outcome == 'success' }}
+        run: target/xtask/debug/xtask core check
       # About 250 `cargo tree` resolutions, one at a time (cargo's package
       # cache lock serialises them): about two minutes.
       - name: boundaries
