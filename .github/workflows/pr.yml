@@ -16,7 +16,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches: [main]
+    branches: [main, ci/pr-lint]  # TEMP(ci/pr-lint): the scratch PRs' base cache
 
 # A PR's new push supersedes its old run; so does main's.
 concurrency:
@@ -115,7 +115,7 @@ jobs:
         with:
           shared-key: pr-xtask
           workspaces: ". -> target/xtask"
-          save-if: ${{ github.event_name == 'push' || github.head_ref == 'ci/pr-lint' }}
+          save-if: ${{ github.event_name == 'push' || github.head_ref == 'ci/pr-lint' # TEMP }}
       - name: xtask
         id: xtask
         if: ${{ !cancelled() }}
@@ -176,7 +176,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: pr-lint
-          save-if: ${{ github.event_name == 'push' || github.head_ref == 'ci/pr-lint' }}
+          save-if: ${{ github.event_name == 'push' || github.head_ref == 'ci/pr-lint' # TEMP }}
       # The crates this PR can break (scripts/pr-scope.py): every member
       # owning (or `include_str!`-ing) a changed file, and every member
       # depending on one. A toolchain, lockfile or CI change is the whole
