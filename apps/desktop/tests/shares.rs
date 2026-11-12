@@ -2866,7 +2866,10 @@ async fn stem_hits(client: &reqwest::Client, url: &str, requests: usize) -> (usi
     for i in 0..requests {
         let Ok(res) = client
             .get(format!("{url}Songs/Joy/Media/Proxies/Bass.ogg"))
-            .header("range", format!("bytes={}-{}", i % 3, (i % 3).saturating_add(3)))
+            .header(
+                "range",
+                format!("bytes={}-{}", i % 3, (i % 3).saturating_add(3)),
+            )
             .send()
             .await
         else {
