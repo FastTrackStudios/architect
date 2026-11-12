@@ -1,7 +1,7 @@
 //! The app's links on Linux (#629, #186): `architect://open?url=<a share
 //! link>` opens in the app.
 //!
-//! The AppImage's desktop entry declares the scheme
+//! The `AppImage`'s desktop entry declares the scheme
 //! (`scripts/desktop/linux.sh`); a build run from a folder (a dev build,
 //! Nix) registers itself with `architect-desktop links register`: a
 //! desktop entry for this binary under `$XDG_DATA_HOME/applications`

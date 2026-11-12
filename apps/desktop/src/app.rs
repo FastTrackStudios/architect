@@ -350,7 +350,7 @@ pub fn run(distribution: Distribution) -> ExitCode {
 
 /// `<app> links register`: this binary opens the app's links
 /// (`architect://open?url=…`, #629). An installed bundle declares them
-/// itself (the AppImage's desktop entry, the Mac's `Info.plist`).
+/// itself (the `AppImage`'s desktop entry, the Mac's `Info.plist`).
 fn links(name: &str, verb: Option<&str>) -> ExitCode {
     if verb != Some("register") {
         eprintln!("usage: <app> links register");
