@@ -1,51 +1,205 @@
-/* The pages beside the landing page (/download, /changelog, /extensions,
-   the 404), drawn with the landing page's tokens and parts (.sheet,
-   .sheet-head, .act, .spec, .notes-block). Only what they add is here. */
+/* ── /download, /changelog, /extensions, 404: reading pages in the same world ── */
 
-/* The bar's site nav, where the landing page has its sheet index: a row,
-   always shown (landing.css draws .sheet-list as a dropdown). */
-.bar-nav .site-list {
-  position: static; flex-direction: row; min-width: 0; gap: 2px;
-  visibility: visible; opacity: 1; transform: none; transition: none;
-  background: none; border: 0; box-shadow: none; padding: 0;
-  overflow-x: auto; scrollbar-width: none;
+.page {
+	padding-top: clamp(3rem, 8vw, 6rem);
 }
-.bar-nav .site-list a { padding: 6px 8px; }
-.site-list a[aria-current="page"] { border-color: var(--ink); }
+.page-head {
+	display: grid;
+	gap: 1.25rem;
+	margin-bottom: clamp(2rem, 5vw, 3.5rem);
+}
+.page-back {
+	margin-bottom: 1.5rem;
+}
+.page-meta {
+	margin-bottom: 1.5rem;
+	color: var(--ink-soft);
+}
+.page h2 {
+	font-size: var(--step-1);
+	letter-spacing: -0.01em;
+	line-height: 1.2;
+}
 
-.sheet-page .notes-block { grid-column: 1 / -1; max-width: 980px; }
-.sheet-page .notes-block p { margin: 0; color: var(--ink-2); max-width: var(--measure); }
-.page-links, .page-back { margin: 0; display: flex; flex-wrap: wrap; gap: 10px 28px; }
-.release-data { padding: 0; }
+/* Rows on rules: what it is, what to know, the action. */
+.rows {
+	border-top: 1px solid var(--line);
+}
+.row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 1rem;
+	align-items: start;
+	padding-block: 1.6rem;
+	border-bottom: 1px solid var(--line);
+}
+.row-body > p:first-child {
+	color: var(--ink-soft);
+}
+.row-body {
+	display: grid;
+	gap: 0.5rem;
+	min-width: 0;
+}
+.row-sha code,
+.row-file code {
+	background: none;
+	padding: 0;
+}
+.row .btn {
+	justify-self: start;
+}
+.row-spec {
+	display: flex;
+	gap: 1.5rem;
+}
+.row-spec dt {
+	color: var(--ink-soft);
+}
+@media (min-width: 52rem) {
+	.row {
+		grid-template-columns: 13rem minmax(0, 1fr) auto;
+		gap: 2rem;
+	}
+	.row .btn {
+		justify-self: end;
+	}
+}
 
-/* /download */
-.downloads { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
-.platform { display: grid; gap: 10px; align-content: start; }
-.platform .act { border: var(--pen-2) solid var(--ink); }
-.act-none { color: var(--ink-3); }
-.platform-note, .platform-sha { margin: 0; color: var(--ink-2); font-size: 0.95rem; }
-.platform-sha code { word-break: break-all; font-size: 0.8rem; }
-.t-k { font-family: var(--font-tech); color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.8rem; }
+.page-block {
+	display: grid;
+	gap: 1rem;
+	max-width: 46rem;
+	margin-top: clamp(2.5rem, 6vw, 4rem);
+}
+.cmds {
+	display: grid;
+	gap: 1rem;
+}
+.cmds .label {
+	margin-bottom: 0.35rem;
+	color: var(--ink-soft);
+}
+.page-note {
+	max-width: 46rem;
+	margin-top: 2rem;
+	color: var(--ink-soft);
+}
+/* Not lit: an example, not something that is on. */
+.page-note.unlit {
+	margin: 0 0 2rem;
+	padding: 1rem 1.2rem;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-control);
+	background: var(--raised);
+	color: var(--ink-soft);
+}
+.page-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 2rem;
+	margin-top: 2.5rem;
+}
+.page-links a {
+	display: inline-block;
+	padding-block: 0.6rem;
+	color: var(--ink-soft);
+}
 
-/* /changelog */
-.releases { list-style: none; margin: 0; padding: 0; display: grid; gap: 34px; max-width: 980px; }
-.release { border-top: var(--pen-2) solid var(--ink); padding-top: 14px; display: grid; gap: 12px; }
-.release-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
-.release-head h3 { margin: 0; font-family: var(--font-tech); font-size: 1.4rem; }
-.release-head h3 a { text-decoration: none; color: var(--line); }
-.release-day, .release-pre { font-family: var(--font-tech); color: var(--ink-3); }
-.prose { color: var(--ink-2); max-width: var(--measure); overflow-wrap: anywhere; }
-.prose h3 { font-family: var(--font-tech); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.9rem; color: var(--ink); margin: 18px 0 6px; }
-.prose ul { padding-left: 1.2em; margin: 0; display: grid; gap: 8px; }
-.prose p { margin: 8px 0; }
+.spec {
+	border-top: 1px solid var(--line);
+}
+.spec > div {
+	display: grid;
+	gap: 0.2rem 2rem;
+	padding-block: 0.9rem;
+	border-bottom: 1px solid var(--line);
+}
+.spec dt {
+	color: var(--ink-soft);
+}
+.spec dd {
+	overflow-wrap: anywhere;
+}
+@media (min-width: 40rem) {
+	.spec > div {
+		grid-template-columns: 10rem minmax(0, 1fr);
+	}
+}
+.versions li {
+	padding-block: 0.6rem;
+	border-bottom: 1px solid var(--line);
+}
 
-/* /extensions */
-.fixture-note { margin: 0; padding: 12px 16px; border: var(--pen-1) dashed var(--red); color: var(--ink-2); max-width: 980px; }
-.store-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
-.store-item { border: var(--pen-2) solid var(--ink); padding: 18px; display: grid; gap: 10px; align-content: start; }
-.store-item h3 { margin: 0; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 0.03em; }
-.store-desc { margin: 0; color: var(--ink-2); }
-.store-spec { max-width: 980px; }
-.store-spec code { word-break: break-all; }
-.versions { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.versions .sn { font-family: var(--font-tech); color: var(--line); margin-right: 8px; }
+/* The changelog: each release a rule, its notes as prose. */
+.releases {
+	border-top: 1px solid var(--line);
+}
+.release {
+	display: grid;
+	gap: 1rem 2rem;
+	padding-block: 2rem;
+	border-bottom: 1px solid var(--line);
+}
+.release-head {
+	display: grid;
+	gap: 0.3rem;
+	align-content: start;
+}
+.release-head h2 a {
+	text-decoration: none;
+}
+.release-head h2 a:hover {
+	text-decoration: underline;
+}
+.release-head .label {
+	color: var(--ink-soft);
+}
+@media (min-width: 52rem) {
+	.release {
+		grid-template-columns: 13rem minmax(0, 1fr);
+	}
+	.release-head {
+		position: sticky;
+		top: 1.5rem;
+	}
+}
+.prose {
+	max-width: 68ch;
+	min-width: 0;
+	overflow-wrap: break-word;
+}
+.prose > * + * {
+	margin-top: 0.9rem;
+}
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+	margin-top: 1.8rem;
+	font-size: var(--step-0);
+	font-weight: 600;
+	letter-spacing: 0;
+	line-height: 1.3;
+}
+.prose > :first-child {
+	margin-top: 0;
+}
+.prose ul,
+.prose ol {
+	padding-left: 1.2rem;
+	list-style: disc;
+}
+.prose ol {
+	list-style: decimal;
+}
+.prose li + li {
+	margin-top: 0.5rem;
+}
+.prose pre {
+	padding: 1rem 1.15rem;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-control);
+	background: var(--raised);
+	overflow-x: auto;
+}

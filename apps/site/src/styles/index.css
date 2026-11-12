@@ -1,4 +1,8 @@
-/* In cascade order: the landing page's drawing set (ported unchanged but
-   for the font URLs), then what the other pages add on top of it. */
+/* One file per concern, in cascade order. tokens.css is the design system:
+   the hub can take that file alone. */
+@import "./tokens.css";
+@import "./base.css";
+@import "./site.css";
 @import "./landing.css";
+@import "./figures.css";
 @import "./pages.css";

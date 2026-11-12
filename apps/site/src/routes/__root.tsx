@@ -1,17 +1,11 @@
 /// <reference types="vite/client" />
 
-import {
-	createRootRoute,
-	HeadContent,
-	Scripts,
-	useRouterState,
-} from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 
-import { Bar } from "#/components/layout/bar";
-import { Colophon } from "#/components/layout/colophon";
 import { NotFound } from "#/components/layout/not-found";
-import { BAR } from "#/content/landing";
-import { SITE } from "#/content/site";
+import { SiteFooter } from "#/components/layout/site-footer";
+import { SiteHeader } from "#/components/layout/site-header";
+import { SHELL, SITE } from "#/content/site";
 import { pageHead } from "#/lib/seo";
 import { THEME_SCRIPT } from "#/lib/theme";
 import appCss from "#/styles/index.css?url";
@@ -31,7 +25,7 @@ export const Route = createRootRoute({
 				{ name: "color-scheme", content: "light dark" },
 				{
 					name: "theme-color",
-					content: SITE.themeColor.plot,
+					content: SITE.themeColor.light,
 					media: "(prefers-color-scheme: light)",
 				},
 				// Its dark twin is in RootDocument: HeadContent keeps one meta per name.
@@ -42,7 +36,7 @@ export const Route = createRootRoute({
 				...home.meta,
 			],
 			links: [
-				{ rel: "icon", href: "/mark.svg", type: "image/svg+xml" },
+				{ rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
 				{
 					rel: "preload",
 					href: "/fonts/archivo.woff2",
@@ -50,16 +44,9 @@ export const Route = createRootRoute({
 					type: "font/woff2",
 					crossOrigin: "anonymous",
 				},
-				{
-					rel: "preload",
-					href: "/fonts/osifont.woff2",
-					as: "font",
-					type: "font/woff2",
-					crossOrigin: "anonymous",
-				},
 				{ rel: "stylesheet", href: appCss },
 			],
-			// Before first paint: the `js` class and the kept Plot/Model choice.
+			// Before first paint: the `js` class and the kept theme.
 			scripts: [{ children: THEME_SCRIPT }],
 		};
 	},
@@ -68,7 +55,6 @@ export const Route = createRootRoute({
 });
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-	const home = useRouterState({ select: (s) => s.location.pathname === "/" });
 	return (
 		// The head script sets `class` and `data-theme` before React hydrates.
 		<html lang="en" suppressHydrationWarning>
@@ -76,28 +62,17 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<HeadContent />
 				<meta
 					name="theme-color"
-					content={SITE.themeColor.model}
+					content={SITE.themeColor.dark}
 					media="(prefers-color-scheme: dark)"
 				/>
 			</head>
 			<body>
 				<a className="skip" href="#main">
-					{BAR.skip}
+					{SHELL.skip}
 				</a>
-				<Bar sheets={home} />
+				<SiteHeader />
 				<main id="main">{children}</main>
-				<Colophon />
-				<svg
-					width="0"
-					height="0"
-					className="defs"
-					aria-hidden="true"
-					focusable="false"
-				>
-					<symbol id="hex" viewBox="-12 -11 24 22">
-						<path d="M-6 -10 H6 L11.5 0 L6 10 H-6 L-11.5 0 Z" />
-					</symbol>
-				</svg>
+				<SiteFooter />
 				<Scripts />
 			</body>
 		</html>

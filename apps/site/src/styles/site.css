@@ -1,0 +1,200 @@
+/* ── The shell and the parts every page shares ─────────────────────────── */
+
+.skip {
+	position: absolute;
+	left: var(--gutter);
+	top: -4rem;
+	z-index: 20;
+	padding: 0.6rem 1rem;
+	border-radius: var(--radius-control);
+	background: var(--ink);
+	color: var(--ground);
+}
+.skip:focus {
+	top: 0.5rem;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.site-header {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem 2rem;
+	padding-block: 1rem;
+}
+.brand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-weight: 700;
+	font-size: 1.1rem;
+	letter-spacing: -0.02em;
+	text-decoration: none;
+}
+.brand-mark {
+	width: 1.375rem;
+	height: 1.375rem;
+	fill: currentColor;
+}
+.site-nav {
+	flex: 1;
+	min-width: 0;
+}
+.site-nav ul {
+	display: flex;
+	gap: 0 0.25rem;
+}
+.site-nav a {
+	display: block;
+	padding: 0.7rem 0.6rem;
+	font-size: 0.95rem;
+	color: var(--ink-soft);
+	text-decoration: none;
+	border-radius: var(--radius-control);
+}
+.site-nav a:hover,
+.site-nav a[aria-current="page"] {
+	color: var(--ink);
+}
+.theme-toggle {
+	display: none;
+	width: 2.75rem;
+	height: 2.75rem;
+	place-items: center;
+	border: 0;
+	border-radius: var(--radius-control);
+	background: none;
+	color: var(--ink-soft);
+	cursor: pointer;
+}
+.js .theme-toggle {
+	display: grid;
+}
+.theme-toggle:hover {
+	color: var(--ink);
+	background: var(--raised);
+}
+.theme-toggle svg {
+	width: 1.15rem;
+	height: 1.15rem;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linecap: round;
+}
+.theme-toggle[aria-pressed="true"] .lamp {
+	fill: currentColor;
+}
+@media (max-width: 40rem) {
+	.site-header {
+		flex-wrap: wrap;
+		padding-block: 0.6rem 0;
+	}
+	.brand {
+		flex: 1;
+	}
+	.site-nav {
+		order: 3;
+		flex: none;
+		width: 100%;
+	}
+	.site-nav ul {
+		justify-content: space-between;
+	}
+	.site-nav a {
+		padding-inline: 0;
+	}
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 2.75rem;
+	padding: 0.6rem 1.1rem;
+	border: 1px solid var(--accent);
+	border-radius: var(--radius-control);
+	background: var(--accent);
+	color: var(--on-accent);
+	font: inherit;
+	font-weight: 600;
+	line-height: 1.2;
+	text-decoration: none;
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.btn:hover {
+	opacity: 0.85;
+}
+.btn-quiet {
+	border-color: var(--line);
+	background: none;
+	color: var(--ink);
+}
+.btn-quiet:hover {
+	opacity: 1;
+	border-color: var(--ink-soft);
+}
+
+/* ── A command line with a copy button ──────────────────────────────────── */
+.cmd {
+	display: flex;
+	align-items: stretch;
+	min-width: 0;
+	max-width: 100%;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-control);
+	background: var(--raised);
+}
+.cmd code {
+	flex: 1;
+	min-width: 0;
+	padding: 0.7rem 0.9rem;
+	overflow-x: auto;
+	white-space: nowrap;
+	scrollbar-width: none;
+}
+.cmd .copy {
+	display: none;
+	flex: none;
+	padding: 0 0.9rem;
+	border: 0;
+	border-left: 1px solid var(--line);
+	border-radius: 0 var(--radius-control) var(--radius-control) 0;
+	background: none;
+	color: var(--ink-soft);
+	font: inherit;
+	font-size: var(--step--1);
+	cursor: pointer;
+}
+.js .cmd .copy {
+	display: block;
+}
+.cmd .copy:hover {
+	color: var(--ink);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+.site-footer {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 0.5rem 2rem;
+	margin-top: var(--section);
+	padding-block: 2rem 3rem;
+	border-top: 1px solid var(--line);
+	color: var(--ink-soft);
+	font-size: var(--step--1);
+}
+.site-footer ul {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 1.4rem;
+}
+.site-footer a {
+	display: inline-block;
+	padding-block: 0.6rem;
+}
+.site-footer p {
+	padding-block: 0.6rem;
+}

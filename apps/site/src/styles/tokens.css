@@ -1,0 +1,68 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Architect: the design tokens, in one place (#559).
+
+   A clean slate. Two neutrals and ink, no brand colour. A product built on this
+   (the hub, Studio) adds its own accent by setting --accent and
+   --on-accent; unset, they are ink, and nothing else needs to change.
+
+   Light and dark are the same system with the values swapped.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@font-face {
+	font-family: "Archivo";
+	src: url("/fonts/archivo.woff2") format("woff2");
+	font-weight: 100 900;
+	font-stretch: 62% 125%;
+	font-display: swap;
+}
+
+:root {
+	/* ── Colour (light) ───────────────────────────────────────────────── */
+	--ground: #ffffff;
+	--raised: #f5f5f6;
+	--ink: #111113;
+	--ink-soft: #5d5d66;
+	--line: #1111131f;
+	--accent: var(--ink);
+	--on-accent: var(--ground);
+	--shadow: 0 1px 2px #1111130f, 0 24px 48px -24px #11111340;
+
+	/* ── Type: one family ─────────────────────────────────────────────── */
+	--font: "Archivo", ui-sans-serif, system-ui, sans-serif;
+	--font-code: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+	--step--1: 0.875rem;
+	--step-0: 1rem;
+	--step-1: clamp(1.15rem, 1rem + 0.7vw, 1.5rem);
+	--step-2: clamp(1.6rem, 1.2rem + 1.8vw, 2.5rem);
+	--step-3: clamp(2.25rem, 1.4rem + 3.8vw, 4rem);
+
+	/* ── Space and shape ──────────────────────────────────────────────── */
+	--gutter: clamp(1rem, 4vw, 2.5rem);
+	--wrap: 72rem;
+	--section: clamp(5rem, 11vw, 9rem);
+	--radius: 12px;
+	--radius-control: 8px;
+
+	color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--ground: #0e0e10;
+		--raised: #18181b;
+		--ink: #ededee;
+		--ink-soft: #a1a1aa;
+		--line: #ededee1f;
+		--shadow: 0 1px 2px #00000066, 0 24px 48px -24px #000000cc;
+		color-scheme: dark;
+	}
+}
+:root[data-theme="dark"] {
+	--ground: #0e0e10;
+	--raised: #18181b;
+	--ink: #ededee;
+	--ink-soft: #a1a1aa;
+	--line: #ededee1f;
+	--shadow: 0 1px 2px #00000066, 0 24px 48px -24px #000000cc;
+	color-scheme: dark;
+}
