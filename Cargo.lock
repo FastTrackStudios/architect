@@ -841,6 +841,7 @@ dependencies = [
  "architect-orgs",
  "architect-pages",
  "architect-presence",
+ "architect-process-view",
  "architect-projects",
  "architect-sandbox-board",
  "architect-scripting",
@@ -1759,6 +1760,30 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus 5.19.0",
+]
+
+[[package]]
+name = "architect-process-view"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "anyrender_vello",
+ "architect",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "ash",
+ "blitz-dom",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures-timer",
+ "peniko 0.6.1",
+ "pollster",
+ "rustix 1.1.5",
+ "thiserror 2.0.20",
+ "vello",
+ "wgpu 30.0.1",
+ "wgpu_context",
 ]
 
 [[package]]

@@ -33,6 +33,8 @@ mod notes;
 mod pages;
 mod paint;
 pub mod presence;
+#[cfg(all(feature = "process-views", target_os = "linux"))]
+mod process_views;
 mod properties;
 mod publish;
 mod screen;
