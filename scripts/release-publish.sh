@@ -45,7 +45,13 @@ while [ $# -gt 0 ]; do
     case "$1" in --optional) optional+=("$2"); shift 2 ;; *) die "unknown argument $1" ;; esac
 done
 
-id="$(gh api --paginate "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id" | sort -n | head -1)"
+# A draft is found by listing (releases/tags/<tag> skips drafts); a list
+# can lag a create made moments before, so a few tries.
+for try in 1 2 3 4 5; do
+    id="$(gh api --paginate "repos/$repo/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | .id" | sort -n | head -1)"
+    [ -n "$id" ] || [ "$try" = 5 ] || { sleep 3; continue; }
+    break
+done
 [ -n "$id" ] || die "no release for $tag"
 dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT
