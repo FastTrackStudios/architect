@@ -464,7 +464,8 @@ fn WebNote(path: String) -> Element {
             {
                 spawn(async move {
                     if let Some(read) = org.read(&path).await {
-                        source.set_text(note_from_markdown(&path, &read, now(), now()), read.clone());
+                        source
+                            .set_text(note_from_markdown(&path, &read, now(), now()), read.clone());
                         text.set(Some(read));
                     }
                 });

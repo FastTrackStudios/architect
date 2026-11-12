@@ -402,7 +402,11 @@ async fn show(config: &Config) {
                     .clone()
                     .or_else(|| person.email.clone())
                     .unwrap_or_default();
-                crate::app::mount(crate::app::Mode::Org { vault, person: who, org });
+                crate::app::mount(crate::app::Mode::Org {
+                    vault,
+                    person: who,
+                    org,
+                });
                 return;
             }
             Err(why) => Some(why),
@@ -419,7 +423,8 @@ async fn show(config: &Config) {
 /// The org's vaults over its lane, listed, their texts read after.
 async fn open_org(org: &str, token: &str) -> Result<crate::app::vault::WebVault, String> {
     let lane = crate::app::org::OrgVaults::open(org, token.to_owned()).await?;
-    #[allow(clippy::as_conversions, clippy::cast_possible_truncation)] // a time in ms, well inside i64
+    #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
+    // a time in ms, well inside i64
     let now = js_sys::Date::now() as i64;
     let (source, notes) = lane.list(org, now).await?;
     lane.fill(source.clone(), notes, now);

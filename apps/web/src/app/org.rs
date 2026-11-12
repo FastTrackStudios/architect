@@ -21,11 +21,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use architect::connect::{Endpoint, Pool};
+use architect_navigator::markdown::note_from_markdown;
+use architect_navigator::{MemorySource, Millis, NavigatorSource as _, NoteFile};
 use crdt::CrdtDoc;
 use crdt::sync::{DocSyncClient, SyncedDoc};
 use futures_channel::mpsc::UnboundedReceiver;
-use architect_navigator::markdown::note_from_markdown;
-use architect_navigator::{MemorySource, Millis, NavigatorSource as _, NoteFile};
 use vault_proto::notes::{NoteRef, NotesClient};
 use wasm_bindgen_futures::spawn_local;
 
@@ -41,7 +41,10 @@ pub fn lane_url(slug: &str) -> Option<String> {
     } else {
         "ws"
     };
-    Some(format!("{scheme}://{}/org/{slug}/vox", location.host().ok()?))
+    Some(format!(
+        "{scheme}://{}/org/{slug}/vox",
+        location.host().ok()?
+    ))
 }
 
 /// The org's vaults over its lane.
@@ -85,7 +88,11 @@ impl OrgVaults {
     /// # Errors
     ///
     /// The node refused the listing (not a member).
-    pub async fn list(&self, name: &str, now: Millis) -> Result<(MemorySource, Vec<NoteRef>), String> {
+    pub async fn list(
+        &self,
+        name: &str,
+        now: Millis,
+    ) -> Result<(MemorySource, Vec<NoteRef>), String> {
         let notes = self.notes.list().await.map_err(|e| e.to_string())?;
         let mut source = MemorySource::new(name);
         let mut files = Vec::new();
@@ -138,7 +145,11 @@ impl OrgVaults {
             pending.insert(path.to_owned(), turn);
             turn
         };
-        let (client, pending, key) = (self.notes.clone(), Rc::clone(&self.pending), path.to_owned());
+        let (client, pending, key) = (
+            self.notes.clone(),
+            Rc::clone(&self.pending),
+            path.to_owned(),
+        );
         spawn_local(async move {
             gloo_timers::future::TimeoutFuture::new(WRITE_AFTER_MS).await;
             if pending.borrow().get(&key).copied() != Some(turn) {
@@ -202,7 +213,10 @@ impl LiveNote {
     /// Makes the body read `new`: the span that changed replaced, one
     /// commit, sent to the node.
     pub fn set_body(&self, new: &str) {
-        let text = self.replica.loro().get_text(vault_proto::COLLAB_BODY_CONTAINER);
+        let text = self
+            .replica
+            .loro()
+            .get_text(vault_proto::COLLAB_BODY_CONTAINER);
         let old: Vec<char> = text.to_string().chars().collect();
         let new: Vec<char> = new.chars().collect();
         let start = old.iter().zip(&new).take_while(|(a, b)| a == b).count();

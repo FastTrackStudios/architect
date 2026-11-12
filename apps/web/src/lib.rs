@@ -463,7 +463,10 @@ mod tests {
         assert!(html.contains("ada@x.test"));
         assert!(html.contains("2 (9 notes)"));
         assert!(html.contains("data-action=\"sign-out\""));
-        assert!(html.contains("did not open: &lt;i&gt;no&lt;/i&gt;"), "{html}");
+        assert!(
+            html.contains("did not open: &lt;i&gt;no&lt;/i&gt;"),
+            "{html}"
+        );
         assert!(
             view(
                 &Screen::SignedOut { problem: None },

@@ -39,6 +39,8 @@ impl From<VaultSyncError> for NotesError {
 /// node's Action List) natively; a browser has the client alone.
 #[cfg_attr(not(target_arch = "wasm32"), architect::service(actions))]
 #[cfg_attr(target_arch = "wasm32", architect::service)]
+// On wasm the trait is the client's alone: nothing implements it there.
+#[cfg_attr(target_arch = "wasm32", allow(async_fn_in_trait))]
 pub trait Notes {
     /// Every note this node holds.
     #[cfg_attr(not(target_arch = "wasm32"), action(effect = read_only))]

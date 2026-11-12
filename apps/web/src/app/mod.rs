@@ -153,7 +153,10 @@ fn WebApp() -> Element {
     let demo = matches!(mode, Mode::Demo);
     // The demo's way out; signed in, the account's menu signs out.
     if demo {
-        architect_commands::use_command(Command::new("WEB_SIGN_IN", "Sign in").group("App"), sign_in);
+        architect_commands::use_command(
+            Command::new("WEB_SIGN_IN", "Sign in").group("App"),
+            sign_in,
+        );
     }
     let tabs = vec![shell::Tab::new("vault", "Vault", icon!(NotebookText))];
     let foot = vec![shell::Action::new(
@@ -177,7 +180,9 @@ fn WebApp() -> Element {
             .menu(
                 shell::Menu::new()
                     .item("Settings", icon!(Settings2), move |()| settings.show(None))
-                    .item("Sign out", icon!(LogOut), move |()| crate::browser::sign_out()),
+                    .item("Sign out", icon!(LogOut), move |()| {
+                        crate::browser::sign_out()
+                    }),
             ),
     };
     let mut status = vec![
