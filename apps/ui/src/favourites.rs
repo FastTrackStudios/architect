@@ -126,8 +126,16 @@ mod tests {
     fn the_default_four_in_the_owners_order() {
         let set = default_set(5, None);
         assert_eq!(set.ids(), ["inbox", "vault", "project", "schedule"]);
-        assert_eq!(set.slots().first().and_then(|t| t.badge.clone()).as_deref(), Some("5"));
-        assert!(default_set(0, None).slots().iter().all(|t| t.badge.is_none()));
+        assert_eq!(
+            set.slots().first().and_then(|t| t.badge.clone()).as_deref(),
+            Some("5")
+        );
+        assert!(
+            default_set(0, None)
+                .slots()
+                .iter()
+                .all(|t| t.badge.is_none())
+        );
         // Each opens a surface of its own.
         for (_, _, id) in TABS {
             assert!(surface(id).is_some(), "{id}");
@@ -144,7 +152,10 @@ mod tests {
         let default = default_set(0, None);
         let declared = vec![Declared::new(
             "setlist",
-            Favourites::new(vec![Tab::new("setlist", "Setlist", icon!(NotebookText))], None),
+            Favourites::new(
+                vec![Tab::new("setlist", "Setlist", icon!(NotebookText))],
+                None,
+            ),
         )];
         let open = resolve_favourites(&default, &declared, Some("setlist"));
         assert_eq!(open.ids(), ["setlist"]);

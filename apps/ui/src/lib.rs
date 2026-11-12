@@ -1415,16 +1415,17 @@ pub fn LabApp() -> Element {
     // Architect app's favourites for what is open (`favourites`), Inbox,
     // Vault, Project and Schedule and Capture unless the open note's type
     // declares its own.
-    let (tabs, separate): (Vec<shell::Tab>, Option<shell::Action>) =
-        if crate::distribution().is_sandbox() {
-            (sandbox_tabs.into(), Some(capture))
-        } else {
-            let default = favourites::default_set(to_process, capture_ui.is_some().then_some(capture));
-            let declared = favourites::declared();
-            // TODO(#607): the open note's type.
-            let set = shell::resolve_favourites(&default, &declared, None);
-            (set.slots().to_vec(), set.primary.clone())
-        };
+    let (tabs, separate): (Vec<shell::Tab>, Option<shell::Action>) = if crate::distribution()
+        .is_sandbox()
+    {
+        (sandbox_tabs.into(), Some(capture))
+    } else {
+        let default = favourites::default_set(to_process, capture_ui.is_some().then_some(capture));
+        let declared = favourites::declared();
+        // TODO(#607): the open note's type.
+        let set = shell::resolve_favourites(&default, &declared, None);
+        (set.slots().to_vec(), set.primary.clone())
+    };
     // The sidebar's foot, above the switcher and the account (bottom to
     // top: Account, Workspace, Settings, Theme).
     let foot = vec![

@@ -99,7 +99,11 @@ pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab, opener: &crate::favour
                         format!(
                             "no tab {:?}: {}",
                             a.tab,
-                            crate::tabs().iter().map(|(_, _, t)| *t).collect::<Vec<_>>().join(", ")
+                            crate::tabs()
+                                .iter()
+                                .map(|(_, _, t)| *t)
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         )
                     })?;
                 tx.unbounded_send(tab)

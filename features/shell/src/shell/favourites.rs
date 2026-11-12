@@ -40,7 +40,9 @@ impl Favourites {
     /// The tabs the bar shows: the first [`SLOTS`].
     #[must_use]
     pub fn slots(&self) -> &[Tab] {
-        self.tabs.get(..SLOTS.min(self.tabs.len())).unwrap_or_default()
+        self.tabs
+            .get(..SLOTS.min(self.tabs.len()))
+            .unwrap_or_default()
     }
 
     /// The tabs' ids, in order.
@@ -140,8 +142,14 @@ mod tests {
         // A plain note, or nothing open: the default four and Capture.
         let plain = resolve_favourites(&default, &declared, Some("note"));
         assert_eq!(plain.ids(), ["inbox", "vault", "project", "schedule"]);
-        assert_eq!(plain.primary.as_ref().map(|a| a.label.as_str()), Some("Capture"));
-        assert_eq!(resolve_favourites(&default, &declared, None).ids(), plain.ids());
+        assert_eq!(
+            plain.primary.as_ref().map(|a| a.label.as_str()),
+            Some("Capture")
+        );
+        assert_eq!(
+            resolve_favourites(&default, &declared, None).ids(),
+            plain.ids()
+        );
         // A setlist: its own four (the fifth past the bar) and its action.
         let set = resolve_favourites(&default, &declared, Some("setlist"));
         assert_eq!(set.ids(), ["setlist", "charts", "lyrics", "arrangement"]);
