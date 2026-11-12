@@ -3233,7 +3233,10 @@ mod tests {
     #[test]
     fn the_nodes_own_pages_keep_their_origin_for_their_forms() {
         let r = page(StatusCode::OK, "Sign out", &signout_form("/"));
-        assert_eq!(r.headers().get(header::REFERRER_POLICY).unwrap(), "same-origin");
+        assert_eq!(
+            r.headers().get(header::REFERRER_POLICY).unwrap(),
+            "same-origin"
+        );
     }
 
     /// Signing out is a form posted from the node's own page: a GET (a
