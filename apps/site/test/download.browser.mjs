@@ -33,8 +33,7 @@ function firefox() {
 	if (process.env.FIREFOX) return process.env.FIREFOX;
 	try {
 		return (
-			execFileSync("sh", ["-c", "command -v firefox"]).toString().trim() ||
-			null
+			execFileSync("sh", ["-c", "command -v firefox"]).toString().trim() || null
 		);
 	} catch {
 		return null;
@@ -295,143 +294,140 @@ async function fresh(tab, base, url = "/download") {
 	await tab.go(`${base}${url}`);
 }
 
-test(
-	"/download: convention links, reconciled with the API",
-	{ skip, timeout: 120_000 },
-	async () => {
-		const server = await serve();
-		const { tab, close } = await open();
-		try {
-			// No script: the HTML alone links every file by convention.
-			const html = await (await fetch(`${server.base}/download`)).text();
-			for (const file of Object.values(FILES))
-				assert.ok(
-					html.includes(`href="${download(file)}"`),
-					`the HTML links ${file}`,
-				);
-			const landing = await (await fetch(`${server.base}/`)).text();
-			assert.ok(landing.includes(`href="${download(FILES.linux)}"`));
-			assert.ok(landing.includes(`href="${download(FILES.macos)}"`));
+test("/download: convention links, reconciled with the API", {
+	skip,
+	timeout: 120_000,
+}, async () => {
+	const server = await serve();
+	const { tab, close } = await open();
+	try {
+		// No script: the HTML alone links every file by convention.
+		const html = await (await fetch(`${server.base}/download`)).text();
+		for (const file of Object.values(FILES))
+			assert.ok(
+				html.includes(`href="${download(file)}"`),
+				`the HTML links ${file}`,
+			);
+		const landing = await (await fetch(`${server.base}/`)).text();
+		assert.ok(landing.includes(`href="${download(FILES.linux)}"`));
+		assert.ok(landing.includes(`href="${download(FILES.macos)}"`));
 
-			const states = [
-				["all", { status: 200, body: fullRelease() }],
-				[
-					"mac-missing",
-					{
-						status: 200,
-						body: {
-							...fullRelease(),
-							assets: fullRelease().assets.filter(
-								(a) => !/macos/.test(a.name),
-							),
-						},
+		const states = [
+			["all", { status: 200, body: fullRelease() }],
+			[
+				"mac-missing",
+				{
+					status: 200,
+					body: {
+						...fullRelease(),
+						assets: fullRelease().assets.filter((a) => !/macos/.test(a.name)),
 					},
-				],
-				["api-down", null],
-			];
-			for (const [name, answer] of states) {
-				await tab.stub(answer);
-				for (const [w, h] of [
-					[1280, 900],
-					[390, 844],
-				]) {
-					await tab.size(w, h);
-					await fresh(tab, server.base);
-					await settle(tab);
-					const page = await read(tab);
-					assert.equal(page.api, 1, `${name}: one API call per view`);
-					assert.equal(page.wide, false, `${name} at ${w}px: no sideways scroll`);
-					await tab.shot(`download-${name}-${w}`);
+				},
+			],
+			["api-down", null],
+		];
+		for (const [name, answer] of states) {
+			await tab.stub(answer);
+			for (const [w, h] of [
+				[1280, 900],
+				[390, 844],
+			]) {
+				await tab.size(w, h);
+				await fresh(tab, server.base);
+				await settle(tab);
+				const page = await read(tab);
+				assert.equal(page.api, 1, `${name}: one API call per view`);
+				assert.equal(page.wide, false, `${name} at ${w}px: no sideways scroll`);
+				await tab.shot(`download-${name}-${w}`);
 
-					if (name === "all") {
-						assert.equal(page.check, "release");
-						for (const key of ["linux", "macos", "node"]) {
-							assert.equal(page.rows[key].state, "listed", key);
-							assert.equal(page.rows[key].href, download(FILES[key]));
-						}
-						assert.match(page.rows.linux.text, /74\.0 MB/);
-						assert.ok(page.rows.linux.text.includes(hex("a")), "its sha256");
-						assert.deepEqual(page.links, {
-							sums: download(FILES.sums),
-							sig: download(FILES.sig),
-							web: download(FILES.web),
-						});
-					} else if (name === "mac-missing") {
-						assert.equal(page.rows.macos.state, "missing");
-						assert.equal(page.rows.macos.href, null, "no dead link");
-						assert.match(page.rows.macos.text, /Not available/);
-						assert.equal(page.rows.linux.state, "listed");
-					} else {
-						assert.equal(page.check, "error");
-						for (const key of ["linux", "macos", "node"]) {
-							assert.equal(page.rows[key].state, "unchecked", key);
-							assert.equal(page.rows[key].href, download(FILES[key]));
-						}
-						assert.equal(Object.keys(page.links).length, 3);
+				if (name === "all") {
+					assert.equal(page.check, "release");
+					for (const key of ["linux", "macos", "node"]) {
+						assert.equal(page.rows[key].state, "listed", key);
+						assert.equal(page.rows[key].href, download(FILES[key]));
 					}
+					assert.match(page.rows.linux.text, /74\.0 MB/);
+					assert.ok(page.rows.linux.text.includes(hex("a")), "its sha256");
+					assert.deepEqual(page.links, {
+						sums: download(FILES.sums),
+						sig: download(FILES.sig),
+						web: download(FILES.web),
+					});
+				} else if (name === "mac-missing") {
+					assert.equal(page.rows.macos.state, "missing");
+					assert.equal(page.rows.macos.href, null, "no dead link");
+					assert.match(page.rows.macos.text, /Not available/);
+					assert.equal(page.rows.linux.state, "listed");
+				} else {
+					assert.equal(page.check, "error");
+					for (const key of ["linux", "macos", "node"]) {
+						assert.equal(page.rows[key].state, "unchecked", key);
+						assert.equal(page.rows[key].href, download(FILES[key]));
+					}
+					assert.equal(Object.keys(page.links).length, 3);
 				}
 			}
-
-			// The answer is kept for the tab: a second view asks nothing.
-			await tab.stub({ status: 200, body: fullRelease() });
-			await fresh(tab, server.base);
-			await settle(tab);
-			await tab.go(`${server.base}/download`);
-			await settle(tab);
-			assert.equal((await read(tab)).api, 0, "the second view is cached");
-
-			// Rate limited: the links stay; the limit is kept, not asked again.
-			await tab.stub({
-				status: 403,
-				body: { message: "API rate limit exceeded" },
-				headers: { "x-ratelimit-remaining": "0" },
-			});
-			await fresh(tab, server.base);
-			await settle(tab);
-			let page = await read(tab);
-			assert.equal(page.check, "rate-limited");
-			assert.equal(page.rows.macos.state, "unchecked");
-			assert.equal(page.rows.macos.href, download(FILES.macos));
-			await tab.go(`${server.base}/download`);
-			await settle(tab);
-			page = await read(tab);
-			assert.equal(page.api, 0, "a rate limit is not asked again");
-
-			// The landing page: no Mac build, no Mac button; on a Mac the
-			// one to /download stays.
-			await tab.stub({
-				status: 200,
-				body: {
-					...fullRelease(),
-					assets: fullRelease().assets.filter((a) => !/macos/.test(a.name)),
-				},
-			});
-			await tab.size(1280, 900);
-			await fresh(tab, server.base, "/");
-			await tab.until(
-				`!document.querySelector(".hero-get .os-macos")`,
-				"the Mac button to go",
-			);
-			assert.ok(
-				await tab.eval(
-					`document.documentElement.dataset.os = "macos", getComputedStyle(document.querySelector(".hero-get .os-any")).display !== "none"`,
-				),
-				"a Mac visitor still gets a Download button",
-			);
-			assert.ok(
-				await tab.eval(
-					`!!document.querySelector('.hero-get a.os-linux[href="${download(FILES.linux)}"]')`,
-				),
-			);
-
-			// Never a release asset itself from script (its host sends no CORS).
-			assert.deepEqual(
-				tab.requests.filter((u) => u.includes("/releases/download/")),
-				[],
-			);
-		} finally {
-			close();
-			server.stop();
 		}
-	},
-);
+
+		// The answer is kept for the tab: a second view asks nothing.
+		await tab.stub({ status: 200, body: fullRelease() });
+		await fresh(tab, server.base);
+		await settle(tab);
+		await tab.go(`${server.base}/download`);
+		await settle(tab);
+		assert.equal((await read(tab)).api, 0, "the second view is cached");
+
+		// Rate limited: the links stay; the limit is kept, not asked again.
+		await tab.stub({
+			status: 403,
+			body: { message: "API rate limit exceeded" },
+			headers: { "x-ratelimit-remaining": "0" },
+		});
+		await fresh(tab, server.base);
+		await settle(tab);
+		let page = await read(tab);
+		assert.equal(page.check, "rate-limited");
+		assert.equal(page.rows.macos.state, "unchecked");
+		assert.equal(page.rows.macos.href, download(FILES.macos));
+		await tab.go(`${server.base}/download`);
+		await settle(tab);
+		page = await read(tab);
+		assert.equal(page.api, 0, "a rate limit is not asked again");
+
+		// The landing page: no Mac build, no Mac button; on a Mac the
+		// one to /download stays.
+		await tab.stub({
+			status: 200,
+			body: {
+				...fullRelease(),
+				assets: fullRelease().assets.filter((a) => !/macos/.test(a.name)),
+			},
+		});
+		await tab.size(1280, 900);
+		await fresh(tab, server.base, "/");
+		await tab.until(
+			`!document.querySelector(".hero-get .os-macos")`,
+			"the Mac button to go",
+		);
+		assert.ok(
+			await tab.eval(
+				`document.documentElement.dataset.os = "macos", getComputedStyle(document.querySelector(".hero-get .os-any")).display !== "none"`,
+			),
+			"a Mac visitor still gets a Download button",
+		);
+		assert.ok(
+			await tab.eval(
+				`!!document.querySelector('.hero-get a.os-linux[href="${download(FILES.linux)}"]')`,
+			),
+		);
+
+		// Never a release asset itself from script (its host sends no CORS).
+		assert.deepEqual(
+			tab.requests.filter((u) => u.includes("/releases/download/")),
+			[],
+		);
+	} finally {
+		close();
+		server.stop();
+	}
+});
