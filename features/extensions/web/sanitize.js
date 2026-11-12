@@ -387,18 +387,22 @@ export function attrRule(tag, name, value, inSvg, live = true, view = { prefix: 
 }
 
 /// What CSS a view's stylesheet may never hold, looked for in lower case:
-/// what loads, imports, binds or runs, an escape (it would spell any of
-/// these), or markup.
-const SHEET_REFUSED = /@import|@font-face|@namespace|@document|expression\(|javascript:|-moz-binding|behaviou?r\s*:|image-set\(|image\(|cross-fade\(|element\(|paint\(|src\(|[\\<]/i;
+/// what loads, imports, binds or runs. An escape (`\`) is refused
+/// everywhere but in a rule's selector, where Tailwind writes them
+/// (`.text-\[10px\]`) and nothing can load: in a declaration or an
+/// at-rule it could spell any of these. The sheet is set as text, never
+/// parsed as markup; `</style` is refused all the same.
+const SHEET_REFUSED = /@import|@font-face|@namespace|@document|expression\(|javascript:|-moz-binding|behaviou?r\s*:|image-set\(|image\(|cross-fade\(|element\(|paint\(|src\(|<\/style/i;
 const SHEET_BLOCKS = ['media', 'supports', 'layer', 'container'];
 const SHEET_VERBATIM = ['keyframes', '-webkit-keyframes', 'property'];
 
 /// A view's stylesheet (an island's, studio#445) as its shadow root holds
 /// it, or null when it is refused whole: no comment (taken out), no
-/// `@import`, font, namespace, escape or anything that loads; a `url()`
-/// only under `urlPrefix` (the extension's own node path), quoted again;
-/// at-rules only `@media`, `@supports`, `@layer`, `@container`,
-/// `@keyframes`, `@property`; a `:host` rule keeps only its custom
+/// `@import`, font, namespace or anything that loads, no escape but in a
+/// selector; a `url()` only under `urlPrefix` (the extension's own node
+/// path), quoted again; at-rules only `@media`, `@supports`, `@layer`,
+/// `@container`, `@keyframes`, `@property`; nested rules (`&:hover{…}`)
+/// held to the same; a top-level `:host` rule keeps only its custom
 /// properties (`--x`), so nothing can change the box's size or place.
 /// The box's own contract (`VIEW_BOX_STYLE`, inline and `!important`)
 /// holds over any sheet: `contain: layout paint style` keeps even a
@@ -414,28 +418,43 @@ export function cleanSheet(css, urlPrefix = null) {
     return ok ? `url("${u}")` : 'none';
   });
   if (seen !== urls) return null;
-  return sheetBlock(text);
+  return sheetBlock(text, false);
 }
 
-function sheetBlock(text) {
+/// Declarations (in a rule's body): no escape, no at-rule.
+const declsOk = (d) => !d.includes('\\') && !d.includes('@');
+
+/// `text` as rules (`inRule` false: a sheet or an at-rule's body) or as a
+/// rule's body (declarations and nested rules); null when anything in it
+/// is refused.
+function sheetBlock(text, inRule) {
   let out = '';
   let i = 0;
   for (;;) {
     const open = text.indexOf('{', i);
-    const tail = text.slice(i, open < 0 ? text.length : open);
-    // Statements before a block: only `@layer a, b;`.
-    const semi = tail.lastIndexOf(';');
-    if (semi >= 0) {
-      for (const stmt of tail.slice(0, semi).split(';').map((x) => x.trim()).filter(Boolean)) {
-        if (!/^@layer\s+[\w\s,.-]+$/i.test(stmt)) return null;
-        out += `${stmt};`;
+    const seg = text.slice(i, open < 0 ? text.length : open);
+    if (seg.includes('}')) return null;
+    const semi = seg.lastIndexOf(';');
+    const lead = semi >= 0 ? seg.slice(0, semi) : '';
+    const head = (semi >= 0 ? seg.slice(semi + 1) : seg).trim();
+    if (lead.trim()) {
+      if (inRule) {
+        if (!declsOk(lead)) return null;
+        out += `${lead.trim()};`;
+      } else {
+        // Between rules, only `@layer a, b;`.
+        for (const stmt of lead.split(';').map((x) => x.trim()).filter(Boolean)) {
+          if (!/^@layer\s+[\w\s,.-]+$/i.test(stmt)) return null;
+          out += `${stmt};`;
+        }
       }
     }
     if (open < 0) {
-      if ((semi >= 0 ? tail.slice(semi + 1) : tail).trim()) return null;
-      return out;
+      if (!head) return out;
+      // A rule's last declaration, without its `;`.
+      if (inRule && declsOk(head)) return out + head;
+      return null;
     }
-    const head = (semi >= 0 ? tail.slice(semi + 1) : tail).trim();
     let depth = 1;
     let j = open + 1;
     for (; j < text.length && depth; j++) {
@@ -445,23 +464,24 @@ function sheetBlock(text) {
     if (depth || !head) return null;
     const body = text.slice(open + 1, j - 1);
     if (head.startsWith('@')) {
+      if (head.includes('\\')) return null;
       const name = (/^@([\w-]+)/.exec(head)?.[1] ?? '').toLowerCase();
       if (SHEET_BLOCKS.includes(name)) {
-        const inner = sheetBlock(body);
+        const inner = sheetBlock(body, inRule);
         if (inner === null) return null;
         out += `${head}{${inner}}`;
-      } else if (SHEET_VERBATIM.includes(name)) {
-        if (body.includes('@')) return null;
+      } else if (SHEET_VERBATIM.includes(name) && !inRule) {
+        if (body.includes('@') || body.includes('\\')) return null;
         out += `${head}{${body}}`;
       } else return null;
-    } else if (/:host/i.test(head)) {
-      const keep = body.split(';').map((d) => d.trim()).filter((d) => d.startsWith('--') && !d.includes('{'));
+    } else if (!inRule && /:host/i.test(head)) {
+      const keep = body.split(';').map((d) => d.trim()).filter((d) => d.startsWith('--') && !d.includes('{') && !d.includes('\\'));
       if (keep.length) out += `${head}{${keep.join(';')}}`;
     } else {
-      if (body.includes('@')) return null;
-      out += `${head}{${body}}`;
+      const inner = sheetBlock(body, true);
+      if (inner === null) return null;
+      out += `${head}{${inner}}`;
     }
     i = j;
   }
 }
-

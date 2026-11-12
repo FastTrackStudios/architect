@@ -74,9 +74,10 @@ export default function Chart() {
   return (
     <div data-now-playing="">
       <svg class="demo-chart" viewBox={\`0 0 \${bars.length * w} 60\`} width="100%" data-follow-playhead="">
+        <style>{".demo-bar{fill:#3b82f6;fill-opacity:0}.demo-bar[aria-current=time]{fill-opacity:0.25}"}</style>
         {bars.map((b, i) => (
           <g key={\`\${i}\`}>
-            <rect class="demo-bar" data-at={\`\${i * 0.5}\`} x={\`\${i * w}\`} y="0" width={\`\${w}\`} height="60" fill="transparent" />
+            <rect class="demo-bar" data-at={\`\${i * 0.5}\`} x={\`\${i * w}\`} y="0" width={\`\${w}\`} height="60" />
             <text x={\`\${i * w + 8}\`} y="36">{b}</text>
           </g>
         ))}
@@ -288,6 +289,8 @@ test('the view: position at the top, the chart, the controls; focus, inert, Esca
     assert.ok(tops[0] < tops[1] && tops[1] < tops[2], JSON.stringify(tops));
     // It follows there.
     await tab.until('document.querySelector(".site-now .demo-bar[aria-current=time]")', 'a bar marked in the view');
+    // Its block's scoped sheet came with it: a bar is not drawn black.
+    assert.equal(await tab.eval('getComputedStyle(document.querySelector(".site-now .demo-bar:not([aria-current])")).fillOpacity'), '0');
     // Focus in, the page behind inert, modal at a phone's width.
     assert.equal(await tab.eval('document.activeElement.className'), 'site-now-close');
     assert.equal(await tab.eval('document.querySelector(".site-now").getAttribute("aria-modal")'), 'true');

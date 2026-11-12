@@ -784,8 +784,17 @@
     Array.prototype.slice.call(node.children).forEach(function (child) {
       var tag = child.localName;
       var svg = inSvg || tag.toLowerCase() === "svg";
+      // An SVG's sheet, as share pages keep it (a live view keeps none):
+      // only under its block's box class, inert, and nothing but its text.
+      if (tag.toLowerCase() === "style") {
+        if (inSvg && scopedSheet(r, child.textContent, scope)) {
+          Array.prototype.slice.call(child.attributes).forEach(function (at) { child.removeAttribute(at.name); });
+          child.textContent = child.textContent;
+        } else child.parentNode.removeChild(child);
+        return;
+      }
       var rule = r.elementRule(tag, inSvg, false);
-      if (rule[0] === "drop" || (tag.toLowerCase() === "style" && !(inSvg && scopedSheet(r, child.textContent, scope)))) {
+      if (rule[0] === "drop") {
         child.parentNode.removeChild(child);
         return;
       }

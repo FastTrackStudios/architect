@@ -216,6 +216,8 @@ test('a view’s stylesheet keeps its rules and none that load, import or move i
     '@namespace svg url(http://www.w3.org/2000/svg);',
     '.a{background:image-set("x" 1x)}',
     '.a{color:\\72 ed}',
+    '.a{background:u\\72l(https://e.vil/x)}',
+    '@media \\28 x\\29{.a{b:c}}',
     '.a{width:expression(alert(1))}',
     '.a{-moz-binding:url(x)}',
     '</style><script>x</script>',
@@ -223,6 +225,16 @@ test('a view’s stylesheet keeps its rules and none that load, import or move i
     '@unknown{.a{b:c}}',
     '@media x{@import url(y);}',
   ]) assert.equal(cleanSheet(bad, prefix), null, bad);
+  // An escape in a selector (Tailwind's) is kept; nowhere else.
+  assert.equal(cleanSheet('.text-\\[10px\\]{font-size:10px}.w-1\\/2{width:50%}'), '.text-\\[10px\\]{font-size:10px}.w-1\\/2{width:50%}');
+  // Tailwind v4's nesting and @property syntax, kept; held to the same rules inside.
+  assert.equal(
+    cleanSheet('.h\\:x{&:hover{@media (hover:hover){color:blue}}}@property --a{syntax:"<length>";inherits:false;initial-value:0}'),
+    '.h\\:x{&:hover{@media (hover:hover){color:blue}}}@property --a{syntax:"<length>";inherits:false;initial-value:0}',
+  );
+  assert.equal(cleanSheet('.a{color:red;&:hover{color:\\72 ed}}'), null, 'an escape in a nested declaration');
+  assert.equal(cleanSheet('.a{&:hover{@font-feature-values x{}}}'), null, 'an unknown at-rule nested');
+  assert.equal(cleanSheet('.a{color:red;&:hover{background:url(https://e.vil/b)}}', prefix), '.a{color:red;&:hover{background:none}}');
   // url(): only the island's own path.
   assert.equal(cleanSheet('.a{background:url(https://e.vil/beacon)}', prefix), '.a{background:none}');
   assert.equal(cleanSheet('.a{background:url(/s/abc/x.png)}', prefix), '.a{background:none}');
