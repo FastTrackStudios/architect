@@ -301,10 +301,11 @@ strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["d
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "full"] }
 tokio = { version = "1.53.1", default-features = false, features = ["tracing"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 toml = { version = "0.8.2" }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
-tungstenite = { version = "0.29.0", features = ["native-tls"] }
+tungstenite = { version = "0.29.0", features = ["__rustls-tls", "native-tls"] }
 twox-hash = { version = "2.1.4" }
 wayland-backend = { version = "0.3.17", default-features = false, features = ["client_system", "dlopen"] }
 wayland-protocols = { version = "0.32.13", default-features = false, features = ["client", "staging", "unstable"] }
@@ -371,9 +372,10 @@ simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
-tungstenite = { version = "0.29.0", features = ["native-tls"] }
+tungstenite = { version = "0.29.0", features = ["__rustls-tls", "native-tls"] }
 twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-darwin.build-dependencies]
@@ -435,9 +437,10 @@ simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
-tungstenite = { version = "0.29.0", features = ["native-tls"] }
+tungstenite = { version = "0.29.0", features = ["__rustls-tls", "native-tls"] }
 twox-hash = { version = "2.1.4" }
 
 [target.x86_64-apple-darwin.build-dependencies]
@@ -500,9 +503,10 @@ simdutf8 = { version = "0.1.5" }
 spin = { version = "0.10.1", default-features = false, features = ["once", "rwlock", "spin_mutex"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs", "early-data"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
-tungstenite = { version = "0.29.0", features = ["native-tls"] }
+tungstenite = { version = "0.29.0", features = ["__rustls-tls", "native-tls"] }
 twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-ios.build-dependencies]
