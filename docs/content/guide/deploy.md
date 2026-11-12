@@ -65,6 +65,7 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_ENROL_ORG` | none | the issuer org (slug) it enrols in at `ARCHITECT_ENROL_AT` |
 | `ARCHITECT_ENROL_ROLE` | `member` | the role it asks for, at most the session's own in the org |
 | `ARCHITECT_PEERS` | none | `endpoint@host:port,…`: nodes it dials directly |
+| `ARCHITECT_APPLE_APP_IDS` | none | `<team id>.<bundle id>,…`: the iOS apps its share links open in as universal links ([below](#a-link-opens-architect)); none: no `apple-app-site-association` |
 | `ARCHITECT_IROH` | `n0` | `n0` (relays and lookup) or `local` (loopback only, for tests) |
 | `ARCHITECT_IROH_BIND` | any port (`0.0.0.0:7777` in the image) | the iroh UDP socket |
 | `ARCHITECT_MCP_TOKEN_FILE` | none | `/mcp` is served only with this bearer |
@@ -320,6 +321,37 @@ prefix to the node and a code never clashes with the web front end's paths
 | **Revoke** | final; the link is `404` from the next request on, and its pages are deleted |
 | **Domain** | optional: the same share at the root of a host of its own |
 | **Audiences** | optional: named slices of the scope, each a filter on a link of its own ([below](#one-share-many-audiences)) (`ShareAudience`) |
+
+### A link opens Architect
+
+A share link is Architect itself, not only a page (#629): a person with
+the app opens it there, as a guest of that link, and a browser shows the
+page.
+
+- **The guest service.** The app reads a link through `ShareGuest`
+  (`features/spaces/src/guest.rs`), a read-only host service at
+  `POST /s/<code>/_guest/<method>`: `link` (its title, layer, audience
+  and notes in list order), `read` (one note as plain blocks of what its
+  page says: `GuestNote`, `PlainBlock`), `files` (its files at the
+  link's layer). Each call is checked by the same two functions as
+  every request for the link's pages and files
+  (`apps/desktop/src/node/shares.rs` `Shares::open`, `admit`): live,
+  the audience, the audience's filter now, the layer. A guest never
+  gets a note's markdown (`GuestNote::source` is empty): only what the
+  page says, built from the page's own sanitised prose
+  (`features/sites/src/plain.rs` `blocks`, written beside each page as
+  `_note.json`). Its answers are `private, no-store`, `no-referrer`.
+- **Universal links.** With `ARCHITECT_APPLE_APP_IDS` set, the node
+  serves `/.well-known/apple-app-site-association` naming those apps for
+  `/s/*` (never `/s/_*`, its sign-in, or a link's guest service)
+  (`apps/desktop/src/node/shares.rs` `apple_app_site_association`). The
+  App Store build claims FasTrack's own domain; any other node's links
+  open in the app through `architect://open?url=<the link>`
+  (`features/spaces/src/guest.rs` `app_link`).
+- **What the app opens.** `ShareUrl::parse`: `https:` only, or `http:`
+  to this machine; no credentials; a share link's path. A link the OS
+  hands the app that points at this machine or a private network is
+  opened only once the person says so (`ShareUrl::is_local`).
 
 ### Blocks extensions draw
 
@@ -830,7 +862,8 @@ web front end:
 | `/health` | liveness and readiness |
 | `/s` | share links `/s/<code>/` and their sign-in `/s/_signin` |
 | `/node` | the node's HTTP face (`POST /node/status`, which the web app reads) |
-| `/blobs`, `/.well-known` | reserved for the node |
+| `/.well-known` | `apple-app-site-association`, when `ARCHITECT_APPLE_APP_IDS` is set |
+| `/blobs` | reserved for the node |
 
 The chart's Ingress writes exactly this, with `X-Forwarded-Proto` left to
 the controller (the share sign-in cookie is `Secure` behind `https`).

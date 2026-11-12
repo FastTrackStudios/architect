@@ -587,6 +587,29 @@ pub async fn start_with_shell(
             .with_shares(shares.clone())
             .mount(host);
     }
+    // A share link's guests (#629): `POST /s/<code>/_guest/<method>`,
+    // which the gate passes through, each call checked as the link's
+    // pages are.
+    host = host.plugin(shares::GuestLane(shares.clone()).into_http_router());
+    // Universal links: the iOS apps this node's links open in, from its
+    // configuration; absent when none is configured.
+    if let Some(body) = shares::apple_app_site_association(&config.apple_app_ids) {
+        host = host.plugin(architect::http::axum::Router::new().route(
+            "/.well-known/apple-app-site-association",
+            architect::http::axum::routing::get(move || {
+                let body = body.clone();
+                async move {
+                    (
+                        [(
+                            architect::http::axum::http::header::CONTENT_TYPE,
+                            "application/json",
+                        )],
+                        body,
+                    )
+                }
+            }),
+        ));
+    }
     if let Some(file) = &config.mcp_token_file {
         match read_secret(file) {
             Some(token) => {
