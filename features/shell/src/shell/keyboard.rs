@@ -184,7 +184,10 @@ impl KeyboardTaps {
         self.stroke.set(s);
         self.tap.set(was_tap);
         if !was_tap {
-            super::input_debug::note(format!("scroll ended at {:.0},{:.0}: no keyboard", c.x, c.y));
+            super::input_debug::note(format!(
+                "scroll ended at {:.0},{:.0}: no keyboard",
+                c.x, c.y
+            ));
         }
     }
 

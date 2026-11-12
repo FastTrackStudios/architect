@@ -72,8 +72,7 @@ fn gate_open() -> bool {
 }
 
 fn set_gate(open: bool) {
-    *GATE.lock().unwrap_or_else(PoisonError::into_inner) =
-        open.then(|| Instant::now() + GATE_OPEN);
+    *GATE.lock().unwrap_or_else(PoisonError::into_inner) = open.then(|| Instant::now() + GATE_OPEN);
 }
 
 /// `UIResponder`'s `becomeFirstResponder`, which winit's view inherits.
@@ -113,7 +112,10 @@ fn gate_first_responder() {
         return;
     }
     let Some(cls) = AnyClass::get(c"WinitUIView") else {
-        tracing::info!(ios.keyboard = "not-yet", "ios: no WinitUIView yet; gated when the shell mounts");
+        tracing::info!(
+            ios.keyboard = "not-yet",
+            "ios: no WinitUIView yet; gated when the shell mounts"
+        );
         return;
     };
     GATED.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -121,7 +123,9 @@ fn gate_first_responder() {
     let sel = sel!(becomeFirstResponder);
     // The one a call on the superclass runs (UIResponder's), looked up
     // through its superclasses.
-    let Some(inherited) = sup.instance_method(sel).map(objc2::runtime::Method::implementation)
+    let Some(inherited) = sup
+        .instance_method(sel)
+        .map(objc2::runtime::Method::implementation)
     else {
         return;
     };
@@ -137,7 +141,10 @@ fn gate_first_responder() {
             c"B@:".as_ptr(),
         );
     }
-    tracing::info!(ios.keyboard = "gated", "ios: the keyboard comes up on a tap");
+    tracing::info!(
+        ios.keyboard = "gated",
+        "ios: the keyboard comes up on a tap"
+    );
 }
 
 /// The gate, now that the window (and winit's view class) exists.
@@ -170,7 +177,12 @@ pub(super) fn lower_keyboard() {
         crate::shell::input_debug::note(format!(
             "keyboard: lowered (was first responder {was}, resigned {resigned})"
         ));
-        tracing::info!(ios.keyboard = "lowered", was, resigned, "ios: the keyboard is put away");
+        tracing::info!(
+            ios.keyboard = "lowered",
+            was,
+            resigned,
+            "ios: the keyboard is put away"
+        );
     }
 }
 

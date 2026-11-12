@@ -88,18 +88,50 @@ thread_local! {
 }
 
 /// Each format command's id, name and what it does to the note.
-type Format = (&'static str, &'static str, fn(&EditorState) -> Option<TransactionSpec>);
+type Format = (
+    &'static str,
+    &'static str,
+    fn(&EditorState) -> Option<TransactionSpec>,
+);
 
 const FORMATS: [Format; 9] = [
     ("NOTE_UNDO", "Undo in the note", undo),
     ("NOTE_REDO", "Redo in the note", redo),
-    ("NOTE_BOLD", "Bold", architect_editor::state::commands::toggle_bold),
-    ("NOTE_ITALIC", "Italic", architect_editor::state::commands::toggle_italic),
-    ("NOTE_LINK", "Link", architect_editor::state::commands::toggle_link),
-    ("NOTE_TASK", "Checklist item", architect_editor::state::commands::toggle_task),
-    ("NOTE_LIST", "List", architect_editor::state::commands::cycle_list),
-    ("NOTE_INDENT", "Indent", architect_editor::state::commands::indent_more),
-    ("NOTE_OUTDENT", "Outdent", architect_editor::state::commands::indent_less),
+    (
+        "NOTE_BOLD",
+        "Bold",
+        architect_editor::state::commands::toggle_bold,
+    ),
+    (
+        "NOTE_ITALIC",
+        "Italic",
+        architect_editor::state::commands::toggle_italic,
+    ),
+    (
+        "NOTE_LINK",
+        "Link",
+        architect_editor::state::commands::toggle_link,
+    ),
+    (
+        "NOTE_TASK",
+        "Checklist item",
+        architect_editor::state::commands::toggle_task,
+    ),
+    (
+        "NOTE_LIST",
+        "List",
+        architect_editor::state::commands::cycle_list,
+    ),
+    (
+        "NOTE_INDENT",
+        "Indent",
+        architect_editor::state::commands::indent_more,
+    ),
+    (
+        "NOTE_OUTDENT",
+        "Outdent",
+        architect_editor::state::commands::indent_less,
+    ),
 ];
 
 /// The format commands (`NOTE_BOLD`, …, group Format), on the note last
@@ -115,7 +147,12 @@ pub fn use_format_commands() {
                 // The read ends before the edit writes.
                 let spec = edit(&t.state.peek());
                 if let Some(spec) = spec {
-                    architect_editor::ui::dispatch_with_history(t.state, t.history, spec, Some(t.sink));
+                    architect_editor::ui::dispatch_with_history(
+                        t.state,
+                        t.history,
+                        spec,
+                        Some(t.sink),
+                    );
                 }
             },
         );

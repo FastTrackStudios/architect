@@ -331,7 +331,8 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
 #[component]
 pub fn WindowTaps() -> Element {
     use dioxus_native::winit::event::ElementState;
-    let stroke = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(architect_shell::TapStroke::default())));
+    let stroke =
+        use_hook(|| std::rc::Rc::new(std::cell::Cell::new(architect_shell::TapStroke::default())));
     let window = dioxus_native::use_window();
     dioxus_native::use_window_event(move |event, _| {
         let scale = window.scale_factor();
