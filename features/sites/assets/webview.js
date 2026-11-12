@@ -9,16 +9,25 @@
   // that it is ready, and its answer to the page's heartbeat.
   //
   // What makes traffic past `connect-src` is taken away here, before any
-  // of the bundle runs: WebRTC (`RTCPeerConnection` and its kin; also
-  // `webrtc 'block'` in the policy, which not every engine honours), and
-  // the Presentation API. A frame whose extension declares
+  // of the bundle runs: WebRTC (`RTCPeerConnection` and its kin: this is
+  // the control on every engine; the policy's `webrtc 'block'` is
+  // forward-looking only, no engine enforces it), and the Presentation API. A frame whose extension declares
   // `capabilities.webrtc = ["peer-connections"]` and whose operator grants
   // it is served a variant of this document whose policy allows WebRTC
   // and which leaves it (the node rewrites the line below; nothing a page,
   // a note or a message says can).
   var RTC = false;
   if (!RTC) {
-    ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate", "RTCRtpSender", "RTCRtpReceiver", "RTCRtpTransceiver", "RTCCertificate"].forEach(function (name) {
+    // By name, and by pattern: every own global of the frame that is
+    // WebRTC's (`RTC…`, `webkitRTC…`, `mozRTC…`), so one an engine adds is
+    // gone too.
+    var names = ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate", "RTCRtpSender", "RTCRtpReceiver", "RTCRtpTransceiver", "RTCCertificate"];
+    try {
+      Object.getOwnPropertyNames(globalThis).forEach(function (name) {
+        if (/^(webkit|moz)?RTC/.test(name) && names.indexOf(name) < 0) names.push(name);
+      });
+    } catch (e) {}
+    names.forEach(function (name) {
       try { delete globalThis[name]; } catch (e) {}
       try { Object.defineProperty(globalThis, name, { value: undefined, writable: false, configurable: false, enumerable: false }); } catch (e) {}
     });

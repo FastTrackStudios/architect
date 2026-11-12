@@ -931,13 +931,17 @@
     var t = r ? tracks[r.i] : null;
     var items = [];
     if (t && hasView(t)) {
-      items.push({ label: "Open chart", run: function () { viewSong(r.i, false); } });
-      if (known[t.src] && known[t.src].lyrics) items.push({ label: "Lyrics", run: function () { viewSong(r.i, true); } });
+      items.push({ id: "chart", label: "Open chart", run: function () { viewSong(r.i, false); } });
+      if (known[t.src] && known[t.src].lyrics) items.push({ id: "lyrics", label: "Lyrics", run: function () { viewSong(r.i, true); } });
     }
-    if (page) items.push({ label: t ? "Song page and downloads" : "Chart and downloads", href: page });
+    if (page) items.push({ id: "page", label: t ? "Song page and downloads" : "Chart and downloads", href: page });
     return items;
   }
+  // Filled again when the song's page arrives (it may add Lyrics): the
+  // item that had the keyboard has it again, so the arrows and a screen
+  // reader keep their place.
   function fillMenu(box, row) {
+    var had = doc.activeElement && box.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-action") : null;
     box.textContent = "";
     if (box.classList.contains("site-row-menu-sheet")) {
       var head = doc.createElement("p");
@@ -950,6 +954,7 @@
       item.className = "site-row-menu-item";
       item.setAttribute("role", "menuitem");
       item.setAttribute("tabindex", "-1");
+      item.setAttribute("data-action", it.id);
       if (it.href) item.setAttribute("href", it.href);
       else item.setAttribute("type", "button");
       item.textContent = it.label;
@@ -958,6 +963,7 @@
         if (it.run) it.run();
       });
       box.appendChild(item);
+      if (had && had === it.id && item.focus) item.focus();
     });
   }
   function menuMove(by) {
@@ -1640,6 +1646,7 @@
         dead = true;
         clearTimeout(readyBy);
         clearInterval(beat.timer);
+        doc.removeEventListener("visibilitychange", seen);
         if (chan) { try { chan.port1.close(); } catch (e) {} }
         if (frame.parentNode) frame.parentNode.removeChild(frame);
       },
@@ -1654,7 +1661,22 @@
       slot.hidden = true;
       mine.classList.remove("site-now-yielded");
     }
-    var readyBy = setTimeout(function () { if (!ready) die("not ready in time"); }, WEB_READY_MS);
+    // While the page is hidden (another app, a locked phone) its timers
+    // and the frame's may stop: nothing heard then is a sign of death. The
+    // checks wait for it to be shown, and the beat starts again from there.
+    function late() {
+      if (ready || dead) return;
+      if (doc.hidden) { readyBy = setTimeout(late, WEB_READY_MS); return; }
+      die("not ready in time");
+    }
+    var readyBy = setTimeout(late, WEB_READY_MS);
+    function seen() {
+      if (doc.hidden || dead) return;
+      beat.answered = beat.sent;
+      beat.at = Date.now();
+      if (!ready) { clearTimeout(readyBy); readyBy = setTimeout(late, WEB_READY_MS); }
+    }
+    doc.addEventListener("visibilitychange", seen);
     frame.addEventListener("load", function () {
       loads += 1;
       // Its one document, loaded once: any other load is the frame gone
@@ -1689,7 +1711,7 @@
           feed(snapshot(), true);
           // The heartbeat, while it shows: unanswered too long, it is gone.
           beat.timer = setInterval(function () {
-            if (dead) return;
+            if (dead || doc.hidden) return;
             if (beat.sent > beat.answered && Date.now() - beat.at > WEB_LATE_MS) { die("it stopped answering"); return; }
             if (beat.sent === beat.answered) {
               beat.sent += 1;
