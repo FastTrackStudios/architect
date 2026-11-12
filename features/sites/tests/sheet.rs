@@ -118,7 +118,10 @@ fn nothing_of_a_row_reaches_past_its_block() {
                 continue;
             };
             let prop = prop.trim();
-            let horizontal = matches!(prop, "margin-right" | "margin-left" | "margin" | "margin-inline" | "margin-inline-end");
+            let horizontal = matches!(
+                prop,
+                "margin-right" | "margin-left" | "margin" | "margin-inline" | "margin-inline-end"
+            );
             assert!(
                 !(horizontal && value.contains('-')),
                 "{selector} {{ {prop}:{value} }}"
