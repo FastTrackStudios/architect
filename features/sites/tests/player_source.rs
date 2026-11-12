@@ -1,4 +1,5 @@
-//! The page's player with an outside clock attached (#528), under node:
+//! The page's player under node (an outside clock attached, #528; a
+//! setlist's playlist, Click and Loop):
 //! `features/sites/test/player-source.test.mjs` runs
 //! `assets/player.js` in a small fake DOM, a fake engine as the
 //! playhead's source, and checks that the followers (a chart's bars)
@@ -49,8 +50,8 @@ fn node() -> Option<Command> {
     })
 }
 
-#[test]
-fn an_attached_source_drives_the_playhead_and_the_page_player_yields() {
+/// Runs `test/<file>` under node; at least `least` of its tests pass.
+fn node_tests(file: &str, least: usize) {
     let Some(mut node) = node() else {
         assert!(
             std::env::var("ARCHITECT_WASI_WEB_REQUIRED").is_err(),
@@ -59,7 +60,7 @@ fn an_attached_source_drives_the_playhead_and_the_page_player_yields() {
         eprintln!("skipped: no node");
         return;
     };
-    let test = here().join("test/player-source.test.mjs");
+    let test = here().join("test").join(file);
     let mut child = node
         .args(["--test", "--test-reporter=tap"])
         .arg(&test)
@@ -86,5 +87,19 @@ fn an_attached_source_drives_the_playhead_and_the_page_player_yields() {
         String::from_utf8_lossy(&out.stderr)
     );
     let passed = tap.lines().filter(|l| l.starts_with("ok ")).count();
-    assert!(passed >= 8, "{passed} of the node tests ran:\n{tap}");
+    assert!(passed >= least, "{passed} of the node tests ran:\n{tap}");
+}
+
+#[test]
+fn an_attached_source_drives_the_playhead_and_the_page_player_yields() {
+    node_tests("player-source.test.mjs", 8);
+}
+
+/// A setlist's playlist (`test/player-playlist.test.mjs`): two sets one
+/// list with section labels, next across a section, a song with no
+/// recording, art given or refused, Click's ticks across a tempo change
+/// and after a seek, Loop's bounds.
+#[test]
+fn a_setlist_is_one_playlist_with_click_and_loop() {
+    node_tests("player-playlist.test.mjs", 9);
 }

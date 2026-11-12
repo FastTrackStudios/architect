@@ -612,3 +612,87 @@ fn a_vault_index_html_is_not_published() {
         "{said:?}"
     );
 }
+
+/// A note's art (`art:`) is one of its files, under its scope's rules: a
+/// note in the scope shows it (the build copies it, the listing names
+/// it); a note outside the scope, or art outside a folder scope, never.
+#[test]
+fn a_notes_art_is_its_file_and_never_reaches_past_the_scope() {
+    use architect_sites::listing::{parse_filter, select};
+    let dir = tempfile::tempdir().expect("tempdir");
+    let v = dir.path();
+    touch(
+        v,
+        "Set/joy.md",
+        "---\ntitle: Joy\nart: \"[[joy cover.jpg]]\"\n---\nJoy.\n",
+    );
+    touch(v, "Set/joy cover.jpg", "jpg");
+    // Art named outside the folder scope.
+    touch(
+        v,
+        "Set/noel.md",
+        "---\ntitle: Noel\nart: \"[[Private/noel.png]]\"\n---\nNoel.\n",
+    );
+    touch(v, "Private/noel.png", "png");
+    // A note outside the scope, with art of its own.
+    touch(
+        v,
+        "Private/eve.md",
+        "---\ntitle: Eve\nart: \"[[eve.png]]\"\n---\nEve.\n",
+    );
+    touch(v, "Private/eve.png", "png");
+    // Art that is no image is no art.
+    touch(
+        v,
+        "Set/hymn.md",
+        "---\ntitle: Hymn\nart: \"[[hymn.pdf]]\"\n---\nHymn.\n",
+    );
+    touch(v, "Set/hymn.pdf", "pdf");
+
+    let vault = vault::obsidian::Vault::open(v).expect("vault");
+    let folder = Scope::Folder("Set".to_owned());
+    let all = parse_filter("").expect("filter");
+    let listed = select(&vault, &folder, &all);
+    let art: Vec<(&str, Option<&str>)> =
+        listed.iter().map(|e| (e.title.as_str(), e.art())).collect();
+    assert_eq!(
+        art,
+        [
+            ("Hymn", None),
+            ("Joy", Some("Set/joy cover.jpg")),
+            ("Noel", None)
+        ]
+    );
+    assert!(
+        !listed
+            .iter()
+            .any(|e| e.files.iter().any(|f| f.starts_with("Private/")))
+    );
+    // A note list holding Joy alone: Eve's art is nowhere.
+    let joy_only = Scope::Notes(vec!["Set/joy.md".to_owned()]);
+    let listed = select(&vault, &joy_only, &all);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].art(), Some("Set/joy cover.jpg"));
+
+    let out = tempfile::tempdir().expect("out");
+    let mut opts = Options::new(v, "");
+    opts.base = "/s/x/".to_owned();
+    opts.scope = folder;
+    build(&opts, &blocks(), &out.path().join("site")).expect("build");
+    assert!(
+        out.path().join("site/Set/joy cover.jpg").is_file(),
+        "its art is published"
+    );
+    assert!(
+        !out.path().join("site/Private/noel.png").exists(),
+        "art outside the folder is not"
+    );
+    assert!(
+        !out.path().join("site/Private/eve.png").exists(),
+        "a note outside has none"
+    );
+    assert!(
+        !out.path().join("site/Set/hymn.pdf").exists(),
+        "a pdf is no art"
+    );
+}

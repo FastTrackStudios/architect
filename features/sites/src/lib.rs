@@ -37,6 +37,7 @@
 //! [`build`] does all of it: [`Site::read`] then [`write()`].
 
 pub mod archive;
+pub mod art;
 mod assets;
 mod bases;
 mod blocks;

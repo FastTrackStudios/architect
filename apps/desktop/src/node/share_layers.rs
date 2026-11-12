@@ -622,6 +622,7 @@ mod tests {
             title: path.into(),
             properties,
             files: files.iter().map(|f| (*f).to_owned()).collect(),
+            art: None,
         }
     }
 

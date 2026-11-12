@@ -42,16 +42,28 @@
 // a player: its tracks (`[data-track][data-media]`, each with
 // `data-title`, `data-subtitle` and `data-page`, the page that shows it
 // playing) are the queue, every playlist of the page one after the other
-// in document order (a setlist's sets play through); the page's own
-// `<audio>`/`<video>` are not queued there (one played by hand plays
-// alone). A tap on a row plays it and the page stays where it is; a
-// `[data-playlist-play]` in it plays it from the top; the track playing
-// is marked aria-current="true". Songs follow each other without a page
-// load. The bar's song opens the now-playing view: a position bar at the
-// top, the playing track's `[data-now-playing]` element, the controls
-// under it (a view bringing its own: `[data-progress]`, `[data-transport]`
-// in it), its lyrics a tap away and its page linked. Back, a swipe down or
+// in document order; the page's own `<audio>`/`<video>` are not queued
+// there (one played by hand plays alone). Playlists one after another
+// with nothing but headings between them are ONE list (a setlist's sets):
+// each heading becomes a section label in it (`[data-playlist-section]`,
+// never a track). A row of a song with no recording (`[data-page]`, no
+// `data-track`) opens its page. A tap on a row plays it and the page
+// stays where it is; the track playing is marked aria-current="true". A
+// row's `[data-track-art]` tile shows the song's art when the link has
+// one for its page (the queue's `art`, by page: the node's, from the
+// note's `art:` under the link's scope and layer), else stays as drawn.
+// Songs follow each other without a page load. The bar (a card: the
+// song's art, its title, Click, Loop, play) opens the now-playing view: a
+// position bar at the top, the playing track's `[data-now-playing]`
+// element, the controls under it (a view bringing its own:
+// `[data-progress]`, `[data-transport]` in it). Back, a swipe down or
 // Escape closes it; what plays goes on.
+//
+// Click (a metronome on the song's own beats: its view's
+// `[data-at][data-beat]` marks, beat 1 accented, Web Audio scheduled
+// ahead against the media clock) and Loop (the section playing, of its
+// view's `data-sections`, again and again) are each viewer's, kept with
+// the player's place.
 //
 // A view from another page is fetched only from a page this link (or
 // site) built: a URL under the site's own mount, ending in `/`, no `_`
@@ -138,6 +150,105 @@
     return u.pathname;
   }
 
+  // The first element of `node` (itself included) with attribute `attr`.
+  function firstOf(node, attr) {
+    if (node.hasAttribute && node.hasAttribute(attr)) return node;
+    var all = node.querySelectorAll("[" + attr + "]");
+    return all && all.length ? all[0] : null;
+  }
+  function isHeading(n) {
+    return !!n && /^H[1-6]$/.test(String(n.tagName || "").toUpperCase());
+  }
+  // The list a playlist's rows are in.
+  function rowsOf(list) {
+    var kids = list.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      if (/^(OL|UL)$/.test(String(kids[i].tagName).toUpperCase())) return kids[i];
+    }
+    return null;
+  }
+  // A section label for `heading`: a row of the list that is no track,
+  // with the heading's id (a link to it still lands).
+  function sectionRow(heading) {
+    var li = doc.createElement("li");
+    li.setAttribute("data-playlist-section", "");
+    // Its words, not its anchor's `#`.
+    Array.prototype.slice.call(heading.querySelectorAll(".site-anchor")).forEach(function (a) {
+      a.parentNode.removeChild(a);
+    });
+    li.textContent = String(heading.textContent || "").replace(/\s+/g, " ").trim();
+    var id = heading.getAttribute("id");
+    if (id) li.setAttribute("id", id);
+    return li;
+  }
+  // Playlists one after another with nothing but headings between them
+  // (each in the box the site draws a block in) are one: the later lists'
+  // rows join the first's, each heading between a section label, and the
+  // heading right above the first one too. A lone playlist stays as it is.
+  function joinPlaylists() {
+    var host = null, hostBox = null, hostList = null, above = null, joined = false;
+    Array.prototype.slice.call(doc.querySelectorAll("[data-playlist]")).forEach(function (list) {
+      var box = (list.closest && list.closest(".site-block")) || list;
+      var heads = [], n = box.previousElementSibling;
+      while (isHeading(n)) { heads.unshift(n); n = n.previousElementSibling; }
+      var into = host && hostList && n === hostBox ? hostList : null;
+      var mine = rowsOf(list);
+      if (!into || !mine) {
+        host = list; hostBox = box; hostList = mine; joined = false;
+        above = heads.length ? heads[heads.length - 1] : null;
+        return;
+      }
+      if (!joined && above) {
+        into.insertBefore(sectionRow(above), into.firstChild);
+        above.parentNode.removeChild(above);
+      }
+      joined = true;
+      host.setAttribute("data-playlist-joined", "");
+      heads.forEach(function (h) {
+        into.appendChild(sectionRow(h));
+        h.parentNode.removeChild(h);
+      });
+      while (mine.firstChild) into.appendChild(mine.firstChild);
+      // What follows its rows (a link's files) follows the joined list.
+      var after = false;
+      Array.prototype.slice.call(list.children).forEach(function (c) {
+        if (c === mine) { after = true; return; }
+        if (after) host.appendChild(c);
+      });
+      box.parentNode.removeChild(box);
+    });
+  }
+  // `tile` with the art at `src` over it; the tile as drawn if it fails.
+  function showArt(tile, src) {
+    var old = firstOf(tile, "data-art");
+    if (old && old !== tile && old.getAttribute("src") === src) return old;
+    if (old && old !== tile) old.parentNode.removeChild(old);
+    var img = doc.createElement("img");
+    img.setAttribute("data-art", "");
+    img.setAttribute("alt", "");
+    img.setAttribute("decoding", "async");
+    img.addEventListener("error", function () {
+      if (img.parentNode) img.parentNode.removeChild(img);
+      tile.removeAttribute("data-has-art");
+    });
+    img.setAttribute("src", src);
+    tile.setAttribute("data-has-art", "");
+    tile.appendChild(img);
+    return img;
+  }
+
+  // `raw` as a file of the link mounted at `mount`: same origin, no
+  // query, under the mount; its path, else null.
+  function ownFile(raw, mount) {
+    if (typeof raw !== "string" || !raw) return null;
+    var u;
+    try { u = new URL(raw, location.href); } catch (e) { return null; }
+    if (u.origin !== location.origin || u.search || u.hash || u.username || u.password) return null;
+    return u.pathname.indexOf(mount) === 0 && u.pathname.indexOf("/..") < 0 ? u.pathname : null;
+  }
+  // A page's art (its path), by the page's path.
+  var artBy = {};
+
   // The queue: the link's, else this page's media in document order.
   var tracks = [];
   var queueEl = doc.querySelector('script#site-queue[type="application/json"]');
@@ -149,6 +260,14 @@
         return { src: path(t.src), page: path(t.page || here), title: t.title || "", kind: t.kind || "audio" };
       });
       scope = q.scope || scope;
+      // Each page's art, as the node gives it: only a file under the link.
+      var linkRoot = normal(scope);
+      if (q.art && typeof q.art === "object" && linkRoot) {
+        Object.keys(q.art).forEach(function (page) {
+          var file = ownFile(q.art[page], linkRoot);
+          if (file) artBy[path(page)] = file;
+        });
+      }
     } catch (e) {
       tracks = [];
     }
@@ -161,9 +280,20 @@
     }
   });
   // The page's playlists: their tracks are the queue, the page stays.
+  joinPlaylists();
   var rows = [];
+  var songRows = [];
   var listed = [];
   Array.prototype.forEach.call(doc.querySelectorAll("[data-playlist]"), function (list) {
+    var set = list.getAttribute("data-title") || list.getAttribute("aria-label") || "";
+    Array.prototype.forEach.call(list.querySelectorAll("[data-page]"), function (row) {
+      var page = builtPage(row.getAttribute("data-page"));
+      var tile = firstOf(row, "data-track-art");
+      if (tile && page && artBy[page]) showArt(tile, artBy[page]);
+      if (row.hasAttribute("data-track") && row.hasAttribute("data-media")) return;
+      // A song with no recording: its row opens its page.
+      if (page) songRows.push({ el: row, page: page });
+    });
     Array.prototype.forEach.call(list.querySelectorAll("[data-track][data-media]"), function (row) {
       var src = path(row.getAttribute("data-media"));
       rows.push({ el: row, src: src });
@@ -175,8 +305,10 @@
         view: !!page,
         title: row.getAttribute("data-title") || row.textContent.trim(),
         subtitle: row.getAttribute("data-subtitle") || "",
-        set: list.getAttribute("data-title") || list.getAttribute("aria-label") || "",
+        set: set,
         kind: "audio",
+        art: page ? artBy[page] || null : null,
+        tile: firstOf(row, "data-track-art"),
       });
     });
   });
@@ -201,6 +333,8 @@
 
   var saved = load();
   var follow = saved.follow !== false;
+  // Click and Loop, as this viewer left them.
+  var prefs = { click: saved.click === true, loop: saved.loop === true };
   var cur = -1;
   var el = null;
   // What the bar says over the song's subtitle until it plays again.
@@ -292,7 +426,7 @@
     var s = snapshot();
     // A source standing in for no track of the page keeps what was kept.
     if (source && !s.src) return;
-    store({ src: s.src, time: s.time, playing: s.playing, follow: follow });
+    store({ src: s.src, time: s.time, playing: s.playing, follow: follow, click: prefs.click, loop: prefs.loop });
   }
 
   var frame = 0;
@@ -357,7 +491,7 @@
     if (i !== cur) noteText = null;
     var media = inlineFor(t.src);
     if (!media && follow && !stay && !shell && t.page !== here) {
-      store({ src: t.src, time: time || 0, playing: play, follow: follow });
+      store({ src: t.src, time: time || 0, playing: play, follow: follow, click: prefs.click, loop: prefs.loop });
       location.href = t.page;
       return;
     }
@@ -388,6 +522,12 @@
   }
 
   function next(auto) {
+    // Looping a section that ends with the song: back to its start.
+    var held = auto ? looped() : null;
+    if (held) {
+      select(cur, held.start, true, true);
+      return;
+    }
     if (cur + 1 < tracks.length) select(cur + 1, 0, true, shell);
     else if (auto) emit(true);
   }
@@ -643,7 +783,17 @@
     play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15L20 12z"/></svg>',
     pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h4v15H6zM14 4.5h4v15h-4z"/></svg>',
     down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.3 8.3 12 15l6.7-6.7 1.4 1.4L12 17.8 3.9 9.7z"/></svg>',
+    // A metronome: its body, its pendulum.
+    click: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M9 2.5h6l4.6 19H4.4zm1.3 1.8-3.5 15.4h10.4L13.7 4.3z"/><path d="m11.2 17.6 6.3-11 1.5.9-6.3 11z"/><path d="M6.3 17.2h11.4v2.5H6.3z"/></svg>',
+    loop: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 1.5 21.5 6 17 10.5V7.2H7.5A2.5 2.5 0 0 0 5 9.7V12H3V9.7a4.5 4.5 0 0 1 4.5-4.5H17zM7 22.5 2.5 18 7 13.5v3.3h9.5a2.5 2.5 0 0 0 2.5-2.5V12h2v2.3a4.5 4.5 0 0 1-4.5 4.5H7z"/><path d="M11 9.5h2v5h-2z"/></svg>',
+    page: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M5 2h9.4L20 7.6V22H5zm2 2v16h11V9h-5V4zm8 .4V7h2.6z"/></svg>',
+    words: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v2H3zm0 6h18v2H3zm0 6h11v2H3z"/></svg>',
   };
+  // Click and Loop: a toggle each, on when pressed.
+  function toggles() {
+    return '<button type="button" class="site-player-opt" data-act="click" aria-pressed="false" aria-label="Click" title="Click: a beat with the song">' + ICON.click + "</button>" +
+      '<button type="button" class="site-player-opt" data-act="loop" aria-pressed="false" aria-label="Loop section" title="Loop the section playing">' + ICON.loop + "</button>";
+  }
   function controls() {
     return '<button type="button" class="site-player-skip" data-act="previous" aria-label="Previous">' + ICON.previous + "</button>" +
       '<button type="button" class="site-player-toggle" data-act="toggle" aria-label="Play">' + ICON.play + "</button>" +
@@ -654,6 +804,8 @@
     else if (a === "next") next(false);
     else if (a === "close") close_();
     else if (a === "lyrics") lyrics_();
+    else if (a === "click") clickToggle();
+    else if (a === "loop") loopToggle();
     else if (snapshot().playing) playhead.pause();
     else playhead.play();
   }
@@ -663,12 +815,18 @@
     bar.className = "site-player";
     bar.setAttribute("role", "region");
     bar.setAttribute("aria-label", "Player");
+    // A card: the song's art and title (a tap opens its view), then its
+    // buttons; on a playlist's page Click, Loop and play (previous and
+    // next are in the view), elsewhere previous, play, next.
     bar.innerHTML =
-      '<div class="site-player-line" aria-hidden="true"><span></span></div>' +
+      '<span class="site-player-art" aria-hidden="true"></span>' +
       '<span class="site-player-what"><a class="site-player-title"></a><span class="site-player-note"></span></span>' +
       '<span class="site-player-time">0:00</span>' +
-      controls() +
-      (shell ? "" : '<label class="site-player-follow" title="Go to each song\'s page as it plays"><input type="checkbox"> Follow</label>');
+      (shell ? toggles() + '<button type="button" class="site-player-toggle" data-act="toggle" aria-label="Play">' + ICON.play + "</button>" : controls()) +
+      (shell ? "" : '<label class="site-player-follow" title="Go to each song\'s page as it plays"><input type="checkbox"> Follow</label>') +
+      '<div class="site-player-line" aria-hidden="true"><span></span></div>';
+    if (shell) bar.classList.add("site-player-card");
+    ui.art = bar.querySelector(".site-player-art");
     ui.line = bar.querySelector(".site-player-line span");
     ui.title = bar.querySelector(".site-player-title");
     ui.note = bar.querySelector(".site-player-note");
@@ -682,15 +840,18 @@
       });
     }
     bar.addEventListener("click", function (ev) {
-      var title = ev.target.closest(".site-player-title");
-      if (title && hasView(tracks[cur])) {
-        // The song's view, not its page.
-        ev.preventDefault();
-        open_();
+      wake();
+      var a = ev.target.closest("[data-act]");
+      if (a) {
+        act(a.getAttribute("data-act"));
         return;
       }
-      var a = ev.target.closest("[data-act]");
-      if (a) act(a.getAttribute("data-act"));
+      if (ev.target.closest("label, input")) return;
+      // The card's song (anywhere but its buttons): its view, not its page.
+      if (hasView(tracks[cur])) {
+        ev.preventDefault();
+        open_();
+      }
     });
     doc.body.appendChild(bar);
     doc.body.classList.add("site-has-player");
@@ -707,15 +868,16 @@
       if (line_ && line_.closest("[data-follow-playhead]") && r.el.contains(line_)) return;
       var i = indexOf(r.src);
       if (i < 0) return;
+      wake();
       if (i === cur && el) act("toggle");
       else select(i, 0, true, true);
     });
   });
-  Array.prototype.forEach.call(doc.querySelectorAll("[data-playlist] [data-playlist-play]"), function (b) {
-    b.addEventListener("click", function () {
-      var first = b.closest("[data-playlist]").querySelector("[data-track][data-media]");
-      var i = first ? indexOf(path(first.getAttribute("data-media"))) : -1;
-      if (i >= 0) select(i, 0, true, true);
+  // A song with no recording: its row is a way to its page (its chart).
+  songRows.forEach(function (r) {
+    r.el.addEventListener("click", function (ev) {
+      if (ev.target.closest("a")) return;
+      location.href = r.page;
     });
   });
 
@@ -745,13 +907,15 @@
     sheet.setAttribute("aria-label", "Now playing");
     sheet.innerHTML =
       '<div class="site-now-head"><button type="button" class="site-now-close" data-act="close" aria-label="Close">' + ICON.down + "</button>" +
-      '<div class="site-now-what"><span class="site-now-title"></span><span class="site-now-note"></span></div><span class="site-now-spacer"></span></div>' +
+      '<div class="site-now-what"><span class="site-now-title"></span><span class="site-now-note"></span></div>' +
+      '<button type="button" class="site-now-lyrics" data-act="lyrics" aria-pressed="false" aria-label="Lyrics" title="Lyrics" hidden>' + ICON.words + "</button>" +
+      '<a class="site-now-page" aria-label="Song page and downloads" title="Song page and downloads">' + ICON.page + "</a></div>" +
       '<div class="site-now-island site-now-island-top" hidden></div>' +
       '<div class="site-now-progress"><span class="site-now-at">0:00</span><div class="site-now-seek" role="slider" tabindex="0" aria-label="Position" aria-valuemin="0"><span></span></div><span class="site-now-left">–:––</span></div>' +
       '<div class="site-now-body"></div>' +
       '<div class="site-now-island site-now-island-bottom" hidden></div>' +
-      '<div class="site-now-controls"><div class="site-now-buttons">' + controls() + "</div></div>" +
-      '<div class="site-now-more"><button type="button" class="site-now-lyrics" data-act="lyrics" aria-pressed="false" hidden>Lyrics</button><a class="site-now-page">Song page and downloads</a></div>';
+      '<div class="site-now-controls"><div class="site-now-buttons">' +
+      toggles().replace("</button>", "</button>" + controls()) + "</div></div>";
     ui.nowTitle = sheet.querySelector(".site-now-title");
     ui.nowNote = sheet.querySelector(".site-now-note");
     ui.nowPage = sheet.querySelector(".site-now-page");
@@ -1000,14 +1164,7 @@
     }
     say("Loading…");
     var page = t.page;
-    var got = fetched[page] || (fetched[page] = fetch(page, { credentials: "same-origin", redirect: "error", headers: { Accept: "text/html" } })
-      .then(function (r) {
-        var type = r.headers.get("content-type") || "";
-        if (!r.ok) throw new Error(r.status === 503 ? "Its page is being built: try again in a moment." : "Its page could not be loaded (" + r.status + ").");
-        if (r.headers.get("x-architect-page") !== "built" || !/^text\/html/i.test(type)) throw new Error("Its page is not one this link built.");
-        return r.text();
-      })
-      .then(function (html) { return new DOMParser().parseFromString(html, "text/html"); }));
+    var got = pageDoc(page);
     Promise.all([got, rules()]).then(function (both) {
       var parsed = both[0], r = both[1];
       if (wanted !== t.src) return;
@@ -1038,6 +1195,18 @@
       delete fetched[page];
       if (wanted === t.src) say(e && e.message ? e.message : "Its page could not be loaded.");
     });
+  }
+  // Page `page` (one this link built), fetched once and parsed (inert: a
+  // parsed document runs nothing); a failure is not kept.
+  function pageDoc(page) {
+    return fetched[page] || (fetched[page] = fetch(page, { credentials: "same-origin", redirect: "error", headers: { Accept: "text/html" } })
+      .then(function (r) {
+        var type = r.headers.get("content-type") || "";
+        if (!r.ok) throw new Error(r.status === 503 ? "Its page is being built: try again in a moment." : "Its page could not be loaded (" + r.status + ").");
+        if (r.headers.get("x-architect-page") !== "built" || !/^text\/html/i.test(type)) throw new Error("Its page is not one this link built.");
+        return r.text();
+      })
+      .then(function (html) { return new DOMParser().parseFromString(html, "text/html"); }));
   }
   function lyrics_() {
     var on = !sheet.classList.contains("site-now-showing-lyrics");
@@ -1248,6 +1417,244 @@
     });
   }
 
+
+  // ── A song's beats and sections (Click, Loop) ─────────────────────
+  // Read from its view (`[data-now-playing]`), on this page or on its own
+  // page (fetched once, as the view is): its beats, the `[data-at]` marks
+  // with a `data-beat` (1 is a bar's first), and its `data-sections`.
+  // Numbers only: nothing of the fetched page is put on this one.
+  var songs = {}, known = {};
+  function readSong(node) {
+    var seen = {};
+    var beats = Array.prototype.map.call(node.querySelectorAll("[data-at][data-beat]"), function (n) {
+      return { at: parseFloat(n.getAttribute("data-at")), one: n.getAttribute("data-beat") === "1" };
+    }).filter(function (b) {
+      if (!isFinite(b.at) || b.at < 0 || seen[b.at]) return false;
+      seen[b.at] = true;
+      return true;
+    }).sort(function (a, b) { return a.at - b.at; });
+    return { beats: beats.slice(0, 20000), sections: sectionsOf(node) };
+  }
+  var NONE = { beats: [], sections: [] };
+  function songOf(t) {
+    if (!t) return Promise.resolve(NONE);
+    if (songs[t.src]) return songs[t.src];
+    var mine = viewIn(doc, t.src);
+    var got = mine ? Promise.resolve(readSong(mine))
+      : t.view && t.page && t.page !== here ? pageDoc(t.page).then(function (parsed) {
+        var found = viewIn(parsed, t.src, new URL(t.page, location.href).href);
+        return found ? readSong(found) : NONE;
+      }) : Promise.resolve(NONE);
+    songs[t.src] = got.then(function (x) {
+      known[t.src] = x;
+      paintOpts();
+      return x;
+    }, function () {
+      // Its page did not load: no beats, no sections, for this visit
+      // (asked again would be every frame).
+      known[t.src] = NONE;
+      return NONE;
+    });
+    return songs[t.src];
+  }
+  function songNow() {
+    var t = tracks[cur];
+    return (t && known[t.src]) || NONE;
+  }
+
+  // ── Click ─────────────────────────────────────────────────────────
+  // A tick on each beat, scheduled a little ahead on the Web Audio clock
+  // from where the media is (its time, its rate), never a timer a beat.
+  // A jump (a seek, a loop back, a rate change, another song) silences
+  // what was scheduled and starts again from there.
+  var CLICK_AHEAD = 0.15, CLICK_EVERY = 25, CLICK_JUMP = 0.25;
+  var metro = { ctx: null, timer: 0, next: -1, at: null, src: null, voices: [] };
+  // The audio context, made (and let sound) inside a tap: iOS starts one
+  // only there.
+  function wake() {
+    if (!prefs.click) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!metro.ctx && AC) {
+      try { metro.ctx = new AC(); } catch (e) { metro.ctx = null; }
+    }
+    var c = metro.ctx;
+    if (!c) return;
+    if (c.state === "suspended" && c.resume) {
+      try { c.resume(); } catch (e) {}
+    }
+    try {
+      var b = c.createBufferSource();
+      b.buffer = c.createBuffer(1, 1, 22050);
+      b.connect(c.destination);
+      b.start(0);
+    } catch (e) {}
+  }
+  function hush() {
+    metro.voices.forEach(function (v) { try { v.stop(0); } catch (e) {} });
+    metro.voices = [];
+    metro.next = -1;
+    metro.at = null;
+  }
+  function voice(when, accent) {
+    var c = metro.ctx;
+    var o = c.createOscillator(), g = c.createGain();
+    o.frequency.value = accent ? 1760 : 1175;
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(accent ? 0.5 : 0.3, when + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.045);
+    o.connect(g);
+    g.connect(c.destination);
+    o.start(when);
+    o.stop(when + 0.05);
+    metro.voices.push(o);
+    o.onended = function () { metro.voices = metro.voices.filter(function (v) { return v !== o; }); };
+  }
+  // The index of the first of `beats` at or after `t`.
+  function beatFrom(beats, t) {
+    var lo = 0, hi = beats.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (beats[mid].at < t - 0.005) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+  function clickTick() {
+    var c = metro.ctx, s = snapshot();
+    var beats = s.src && known[s.src] ? known[s.src].beats : [];
+    if (!prefs.click || !c || c.state !== "running" || !s.playing || !beats.length) {
+      if (metro.voices.length || metro.at) hush();
+      return;
+    }
+    var now = c.currentTime, rate = s.rate || 1;
+    if (metro.src !== s.src) { hush(); metro.src = s.src; }
+    if (metro.at) {
+      var expect = metro.at.time + (now - metro.at.ctx) * metro.at.rate;
+      if (Math.abs(s.time - expect) > CLICK_JUMP || rate !== metro.at.rate) hush();
+    }
+    if (metro.next < 0) metro.next = beatFrom(beats, s.time);
+    while (metro.next < beats.length) {
+      var b = beats[metro.next];
+      var dt = (b.at - s.time) / rate;
+      if (dt > CLICK_AHEAD) break;
+      metro.next++;
+      if (dt >= -0.03) voice(now + Math.max(0, dt), b.one);
+    }
+    metro.at = { time: s.time, ctx: now, rate: rate };
+  }
+  function clickRun(on) {
+    if (on && !metro.timer) metro.timer = setInterval(clickTick, CLICK_EVERY);
+    if (!on && metro.timer) {
+      clearInterval(metro.timer);
+      metro.timer = 0;
+    }
+    if (!on) hush();
+  }
+  function clickToggle() {
+    prefs.click = !prefs.click;
+    if (prefs.click) wake();
+    clickRun(prefs.click);
+    save(true);
+    paintOpts();
+  }
+
+  // ── Loop ──────────────────────────────────────────────────────────
+  // The section the playhead is in, again and again: at its end, back to
+  // its start. A seek out of it loops the one it lands in.
+  var loop = { src: null, sec: null };
+  function sectionAt(list, t) {
+    var found = null;
+    for (var i = 0; i < list.length; i++) if (list[i].start <= t + 0.001) found = list[i];
+    return found;
+  }
+  function looped() {
+    var t = tracks[cur];
+    return prefs.loop && t && loop.src === t.src ? loop.sec : null;
+  }
+  function loopCheck(s) {
+    if (!prefs.loop || source || !s.src) return;
+    var list = known[s.src] ? known[s.src].sections : [];
+    if (!list.length) return;
+    if (loop.src !== s.src || !loop.sec) loop = { src: s.src, sec: sectionAt(list, s.time) };
+    var sec = loop.sec;
+    if (!sec) return;
+    if (s.time >= sec.end - 0.02 && s.time < sec.end + 0.75) {
+      if (s.playing) playhead.seek(sec.start);
+      return;
+    }
+    if (s.time < sec.start - 0.05 || s.time >= sec.end + 0.75) loop.sec = sectionAt(list, s.time);
+  }
+  function loopToggle() {
+    prefs.loop = !prefs.loop;
+    loop = { src: null, sec: null };
+    save(true);
+    paintOpts();
+  }
+  playhead.subscribe(loopCheck);
+
+  // The toggles as they are: pressed when on, and of no use (disabled)
+  // for a song with no beats (Click) or no sections (Loop).
+  function paintOpts() {
+    var song = songNow();
+    var opts = [
+      ["click", prefs.click, song.beats.length > 0, "Click: a beat with the song", "Click: this song's chart has no beats"],
+      ["loop", prefs.loop, song.sections.length > 0, "Loop the section playing", "Loop: this song's chart has no sections"],
+    ];
+    opts.forEach(function (o) {
+      Array.prototype.forEach.call(doc.querySelectorAll('.site-player [data-act="' + o[0] + '"], .site-now [data-act="' + o[0] + '"]'), function (b) {
+        b.setAttribute("aria-pressed", o[1] ? "true" : "false");
+        if (o[2]) b.removeAttribute("disabled"); else b.setAttribute("disabled", "");
+        b.setAttribute("title", o[2] ? o[3] : o[4]);
+      });
+    });
+  }
+
+  // The card's art: the song's, else its row's tile, else one drawn from
+  // its title; the card tinted from it.
+  var artFor = null;
+  function hue(text) {
+    var h = 0x811c9dc5;
+    var t = String(text || "").toLowerCase();
+    for (var i = 0; i < t.length; i++) {
+      h ^= t.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h % 360;
+  }
+  function initials(text) {
+    var words = String(text || "").split(/[^0-9A-Za-zÀ-ɏ]+/).filter(Boolean);
+    return words.slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase(); }).join("") || "♪";
+  }
+  function paintArt(t) {
+    if (!ui.art || artFor === t) return;
+    artFor = t;
+    ui.art.textContent = "";
+    ui.art.removeAttribute("style");
+    bar.style.removeProperty("--site-player-tint");
+    if (!t) return;
+    var tile = t.tile;
+    var h = tile && isFinite(parseInt(tile.getAttribute("data-hue"), 10)) ? parseInt(tile.getAttribute("data-hue"), 10) : hue(t.title);
+    ui.art.textContent = tile ? String(tile.textContent || "").trim().slice(0, 3) : initials(t.title);
+    ui.art.style.setProperty("background", "hsl(" + h + " 42% 40%)");
+    bar.style.setProperty("--site-player-tint", "hsl(" + h + " 50% 45%)");
+    var src = t.art || (t.page && artBy[t.page]) || null;
+    if (src) {
+      var img = showArt(ui.art, src);
+      img.addEventListener("load", function () { tintFrom(img); });
+    }
+  }
+  // The card tinted from its art's colours (its own file, same origin).
+  function tintFrom(img) {
+    try {
+      var c = doc.createElement("canvas");
+      c.width = c.height = 6;
+      var x = c.getContext("2d");
+      x.drawImage(img, 0, 0, 6, 6);
+      var d = x.getImageData(0, 0, 6, 6).data, r = 0, g = 0, b = 0, n = d.length / 4;
+      for (var i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
+      bar.style.setProperty("--site-player-tint", "rgb(" + Math.round(r / n) + " " + Math.round(g / n) + " " + Math.round(b / n) + ")");
+    } catch (e) {}
+  }
+
   // The lock screen and the headset: the song, and its buttons.
   var session = window.navigator && window.navigator.mediaSession;
   var sessionFor = null, sessionAt = 0;
@@ -1314,6 +1721,10 @@
       });
     }
     bar.classList.toggle("site-player-on", !!t);
+    if (shell) {
+      paintArt(t);
+      if (t && !songs[t.src]) songOf(t);
+    }
     ui.title.textContent = t ? t.title : tracks.length === 1 ? "1 track" : tracks.length + " tracks";
     if (t && t.page) ui.title.href = t.page; else ui.title.removeAttribute("href");
     if (hasView(t)) ui.title.setAttribute("aria-haspopup", "dialog");
@@ -1344,7 +1755,9 @@
     }
   }
 
-  // Resume where the last page left off.
+  // Resume where the last page left off (Click waits for a tap to sound).
+  if (prefs.click) clickRun(true);
+  paintOpts();
   var at = saved.src ? indexOf(path(saved.src)) : -1;
   if (at >= 0) select(at, saved.time || 0, !!saved.playing, true);
   else emit(true);

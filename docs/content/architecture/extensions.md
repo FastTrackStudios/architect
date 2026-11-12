@@ -1760,22 +1760,33 @@ that opens from the bar (studio#445). Attributes again, no script:
 
 | Attribute | On | Means |
 | --- | --- | --- |
-| `data-playlist` | a list | its tracks are the page's queue, in document order (every playlist of the page, one after the other); a tap on one plays it and the page stays; the next one starts without a page load |
+| `data-playlist` | a list | its tracks are the page's queue, in document order (every playlist of the page, one after the other); a tap on one plays it and the page stays; the next one starts without a page load. Playlists one after another with nothing but headings between them (each in its block's box) are joined into one: each heading becomes a section label of it, keeping its `id` |
+| `data-playlist-section` | a row of it | a section's label (a set's name): never a track; numbering, the queue and next/previous run on through it |
 | `data-track` + `data-media="<url>"` | a row of it | a track: its recording; `aria-current="true"` and `data-state` (`playing` or `paused`) while it is the one playing; a link in it still goes where it says |
 | `data-title`, `data-subtitle` | the row | what the bar and the view say of it |
-| `data-page="<url>"` | the row | the page whose `[data-now-playing]` shows it: a page this link (or site) built, under its mount, ending in `/`, no `_` segment, no query; anything else is ignored (no view, no link) |
-| `data-playlist-play` | a button in the list | plays it from its first track |
+| `data-page="<url>"` | the row | the page whose `[data-now-playing]` shows it: a page this link (or site) built, under its mount, ending in `/`, no `_` segment, no query; anything else is ignored (no view, no link). A row with `data-page` and no `data-track` is a song with no recording: in the list, quieter, and a tap opens that page |
+| `data-track-mark`, `data-track-art`, `data-track-title`, `data-track-meta`, `data-track-length`, `data-track-open` | inside a row | its parts as the page's sheet lays them out (number, a square tile, title over one muted line, length, a small link to its page); the player lays the song's art over its `data-track-art` tile when the link has art for its `data-page` (the queue's `art`, from the note's `art:`), and draws the bar's art from the same tile (`data-hue` its colour) |
+| `data-playlist-play` | a button in the list | no longer drawn: a row plays from where it is, the bar plays the list |
 | `data-now-playing` + `data-media="<url>"` | a block's element | what the now-playing view shows while that recording plays: moved in from this page, or fetched from the track's `data-page` (once), with its block's box so its sheet comes too; its `[data-follow-playhead]` boxes follow there |
 | `data-transport` | inside the view | the view brings its own controls: the player's are not drawn under it |
 | `data-progress` | inside the view | the view brings its own position bar: the player's is not drawn above it |
 
 Every playlist of a page is one queue, in document order (a setlist's
 sets play through); the page's own `<audio>`/`<video>` are not queued
-there, and one played by hand ends without starting the list. The bar's
-song (a link to its page, as on any site) opens the view instead when
-there is one: from the top, where it is (a bar to seek on), the view, the
-controls, then the song's lyrics (its page's synced lyrics, a tap away)
-and its page and downloads. Back, a swipe down on its head or Escape
+there, and one played by hand ends without starting the list. On a
+playlist's page the bar is a card floating over the page: the song's art,
+its title over its subtitle, **Click**, **Loop** and play, a thin line of
+where it is along its foot; a tap on it (anywhere but a button) opens the
+view: from the top, where it is (a bar to seek on), the view filling the
+width, the controls in one row (Click, previous, play, next, Loop), the
+song's lyrics and its page as icons in its head. **Click** ticks on each
+of the song's beats (its view's `[data-at][data-beat]` marks, `data-beat="1"`
+accented), scheduled ahead on Web Audio against the recording's clock and
+started again after a seek, a pause or a rate change; **Loop** plays the
+section of its view's `data-sections` the playhead is in again and again
+(a seek moves it). Each is disabled for a song with none, and kept for the
+viewer with the player's place. The view's numbers are read from the
+song's page (fetched once, as the view is); nothing of it runs. Back, a swipe down on its head or Escape
 closes it, focus goes back to the bar, and what plays goes on. On a
 phone the view covers the page (modal: the page behind is inert); from
 900 px it is a panel beside the list. A recording the node refuses stops
@@ -1876,9 +1887,14 @@ for again next time.
 
 ```html
 <div data-playlist>
-  <button data-playlist-play>Play</button>
   <ol>
-    <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="D · 128 bpm">…<a href="../joy/">Chart</a></li>
+    <li data-playlist-section>Presidents Songs</li>
+    <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="Chris Tomlin · D · 128 bpm">
+      <span data-track-mark>1</span><span data-track-art data-hue="96" style="background:hsl(96 42% 40%)">JT</span>
+      <span data-track-text><span data-track-title>Joy to the World</span><span data-track-meta>Chris Tomlin · D · 128 bpm</span></span>
+      <span data-track-length>3:51</span><a data-track-open href="../joy/" aria-label="Chart">…</a>
+    </li>
+    <li data-page="../noel/" data-title="Noel">…a song with no recording…</li>
   </ol>
 </div>
 <!-- on Joy's page -->

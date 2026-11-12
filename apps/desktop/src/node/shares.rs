@@ -2531,7 +2531,11 @@ async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) ->
             section,
             "<script type=\"application/json\" id=\"site-islands\">{islands}</script>"
         );
-        let json = serde_json::json!({ "scope": link.mount, "tracks": tracks });
+        let art = listed
+            .as_ref()
+            .map(|l| art_by_page(l, link.mount))
+            .unwrap_or_default();
+        let json = serde_json::json!({ "scope": link.mount, "tracks": tracks, "art": art });
         // JSON in a script element: `</` must not close it.
         let json = json.to_string().replace("</", "<\\/");
         let _ = write!(
@@ -2576,6 +2580,27 @@ fn queue(listed: &Listed, mount: &str) -> Vec<serde_json::Value> {
         }
     }
     tracks
+}
+
+/// Each listed note's art (`art:`, `architect_sites::art`) by its page,
+/// both as the page's player names them (`{"/s/x/joy/": "/s/x/Joy/cover.jpg"}`):
+/// what a playlist's rows and the player's card show beside a song. Only
+/// a note the link lists, only art still among its files (its scope's
+/// and its layer's), so a note outside the link shows none.
+fn art_by_page(listed: &Listed, mount: &str) -> serde_json::Map<String, serde_json::Value> {
+    let base = mount.trim_end_matches('/');
+    listed
+        .entries
+        .iter()
+        .filter_map(|entry| {
+            let art = entry.art()?;
+            let page = listed.pages.get(&entry.path)?;
+            Some((
+                format!("{base}{page}"),
+                serde_json::Value::String(format!("{base}/{}", architect_sites::encode_path(art))),
+            ))
+        })
+        .collect()
 }
 
 /// How much of a file is read, and sent, at a time.
@@ -3069,12 +3094,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn art_is_a_listed_notes_own_file() {
+        let entry = |path: &str, files: &[&str], art: Option<&str>| Entry {
+            path: path.to_owned(),
+            title: path.to_owned(),
+            properties: serde_json::Map::new(),
+            files: files.iter().map(|f| (*f).to_owned()).collect(),
+            art: art.map(str::to_owned),
+        };
+        let listed = Listed {
+            groups: Vec::new(),
+            entries: Arc::new(vec![
+                // Its art among its files: shown.
+                entry(
+                    "Set/Joy.md",
+                    &["Set/Joy.mp3", "Set/Joy cover.jpg"],
+                    Some("Set/Joy cover.jpg"),
+                ),
+                // No art.
+                entry("Set/Noel.md", &["Set/Noel.mp3"], None),
+                // Its art taken out of its files (a layer above the link's).
+                entry("Set/Eve.md", &["Set/Eve.mp3"], Some("Set/Eve.png")),
+                // Listed but with no page of the link.
+                entry("Set/Draft.md", &["Set/d.png"], Some("Set/d.png")),
+            ]),
+            pages: [
+                ("Set/Joy.md".to_owned(), "/joy/".to_owned()),
+                ("Set/Noel.md".to_owned(), "/noel/".to_owned()),
+                ("Set/Eve.md".to_owned(), "/eve/".to_owned()),
+            ]
+            .into(),
+            root: PathBuf::new(),
+        };
+        let art = art_by_page(&listed, "/s/abc/");
+        assert_eq!(
+            serde_json::Value::Object(art),
+            serde_json::json!({ "/s/abc/joy/": "/s/abc/Set/Joy%20cover.jpg" })
+        );
+    }
+
+    #[test]
     fn the_queue_is_the_lists_order_and_only_its_media() {
         let entry = |path: &str, title: &str, files: &[&str]| Entry {
             path: path.to_owned(),
             title: title.to_owned(),
             properties: serde_json::Map::new(),
             files: files.iter().map(|f| (*f).to_owned()).collect(),
+            art: None,
         };
         // List order is the listing's, not the names': b before a.
         let entries = vec![

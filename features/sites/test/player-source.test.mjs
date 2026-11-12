@@ -36,7 +36,7 @@ class Node {
     this.listeners = {};
     this.textContent = '';
     this.hidden = false;
-    this.style = {};
+    this.style = { setProperty(k, v) { this[k] = v; }, removeProperty(k) { delete this[k]; } };
     const classes = new Set();
     this.classList = {
       add: (c) => classes.add(c),

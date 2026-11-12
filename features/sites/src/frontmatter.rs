@@ -19,6 +19,8 @@ pub struct Meta {
     pub tags: Vec<String>,
     /// `draft: true` or `publish: false`: left out of the site.
     pub hidden: bool,
+    /// `art:`, as written: the link to its image ([`crate::art`]).
+    pub art: Option<String>,
 }
 
 impl Meta {
@@ -77,6 +79,7 @@ impl Meta {
             weight,
             tags,
             hidden: flag("draft") == Some(true) || flag("publish") == Some(false),
+            art: crate::art::art_link(fields),
         }
     }
 }
