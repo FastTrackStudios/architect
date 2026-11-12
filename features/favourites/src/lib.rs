@@ -173,6 +173,31 @@ impl TypeFavourites {
     }
 }
 
+/// Whether `place` is a place relative to the note: letters, digits,
+/// `-`, `_`, `.`, `~`, `/` and one `#` anchor; not starting with `/` or
+/// `.`, no `..` or empty segment. Whatever a WHATWG URL parser would
+/// normalise into another origin (`\`, `%`, `:`, `//`) is refused here.
+#[must_use]
+pub fn place_ok(place: &str) -> bool {
+    let (path, anchor) = place.split_once('#').unwrap_or((place, ""));
+    let plain = |s: &str| {
+        s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | '/'))
+    };
+    !place.is_empty()
+        && place.len() <= MAX_NAME
+        && plain(path)
+        && anchor
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && !path.starts_with('/')
+        && !path.starts_with('.')
+        && (path.is_empty()
+            || path.split('/').enumerate().all(|(i, seg)| {
+                seg != ".." && seg != "." && (!seg.is_empty() || i == path.split('/').count() - 1)
+            }))
+}
+
 /// `a-z`, `0-9`, `-` (and `.` for a state such as `player.playing`).
 fn is_id(s: &str) -> bool {
     !s.is_empty()
@@ -208,10 +233,11 @@ fn check_face(id: &str, label: &str, icon: &str, target: Option<&Target>) -> Res
                 Target::Action(a) => a
                     .chars()
                     .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'),
-                // Relative only: never another site, never above the note.
-                Target::Place(p) => {
-                    !p.contains(':') && !p.starts_with('/') && !p.split('/').any(|s| s == "..")
-                }
+                // Relative only, and nothing a URL parser reads otherwise:
+                // a plain path and an anchor, never another site (no `\`,
+                // which a browser reads as `/`, so `\\host` would be
+                // `//host`; no `%`, `:`, `?`, `@`), never above the note.
+                Target::Place(p) => place_ok(p),
             };
         if !ok {
             return Err(format!("{kind} target {text:?} is not one"));
@@ -275,6 +301,24 @@ on = { label = "Pause", icon = "pause" }
         bad(&|f| f.tabs[0].icon = "<svg>".into());
         bad(&|f| f.tabs[0].target = Target::Place("https://evil.example/".into()));
         bad(&|f| f.tabs[0].target = Target::Place("../../secret".into()));
+        // What a browser would read as another site, or a path it rewrites.
+        for evil in [
+            "\\evil.example/",
+            "\\\\evil.example",
+            "/\\evil",
+            "%5cevil.example",
+            "a\\b",
+            "//evil.example",
+            "a?b=c",
+            "a\u{0}b",
+            "a\tb",
+            "x@evil.example",
+            "./a",
+            "a//b",
+        ] {
+            bad(&|f| f.tabs[0].target = Target::Place(evil.into()));
+        }
+        assert!(place_ok("#notes") && place_ok("Charts/") && place_ok("Charts/Joy#bar-1"));
         bad(&|f| f.tabs[0].target = Target::Action("rm -rf".into()));
         bad(&|f| f.tabs = vec![f.tabs[0].clone(); MAX_TABS + 1]);
         bad(&|f| f.primary.as_mut().unwrap().state = None);

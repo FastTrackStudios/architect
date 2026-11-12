@@ -770,6 +770,32 @@ mod tests {
         assert!(!current.is_empty());
     }
 
+    /// A `[[favourites]]` declaration that breaks a rule (a label too
+    /// long, six tabs) is dropped, never the manifest: its share layers
+    /// still place files, so no link holds back everything for it.
+    #[test]
+    fn a_bad_favourites_declaration_never_makes_placement_unknown() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tabs: String = (0..6)
+            .map(|i| format!("[[favourites.tabs]]\nid = \"t{i}\"\nlabel = \"Tab {i}\"\nicon = \"music\"\ntarget = {{ view = \"page\" }}\n"))
+            .collect();
+        install(
+            tmp.path(),
+            "demo.songs",
+            &format!("{OWNER}\n[[favourites]]\nnote_type = \"song\"\n{tabs}"),
+        );
+        let rules = LayerRules::new(Some(tmp.path().to_owned()), Vec::new(), None);
+        let current = rules.current();
+        assert!(current.broken.is_empty(), "{:?}", current.broken);
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        assert_eq!(
+            LayerRules::place(&current, &entries)
+                .unwrap()
+                .get("Joy/Media/Bass.ogg"),
+            Some(&Listen::Full)
+        );
+    }
+
     #[test]
     fn rules_are_kept_after_an_uninstall_until_forgotten() {
         let tmp = tempfile::tempdir().unwrap();
