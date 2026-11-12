@@ -7533,7 +7533,12 @@ pub mod email_password {
                     "http://127.0.0.1/oauth/callback".into(),
                     "app.fasttrackstudio.architect:/oauth/callback".into(),
                 ],
-                scopes: vec!["openid".into(), "profile".into(), "email".into(), "offline_access".into()],
+                scopes: vec![
+                    "openid".into(),
+                    "profile".into(),
+                    "email".into(),
+                    "offline_access".into(),
+                ],
                 public_client: true,
                 skip_consent: true,
                 first_party: true,
@@ -7586,10 +7591,13 @@ pub mod email_password {
                 "http://localhost:5000/oauth/callback",
                 "https://evil.example/oauth/callback",
             ] {
-                assert!(matches!(
-                    auth.authorize_oidc(authorize("architect", bad)).await,
-                    Err(AuthFlowError::InvalidInput(_))
-                ), "{bad}");
+                assert!(
+                    matches!(
+                        auth.authorize_oidc(authorize("architect", bad)).await,
+                        Err(AuthFlowError::InvalidInput(_))
+                    ),
+                    "{bad}"
+                );
             }
             // The loopback redirect on the app's port.
             let redirect = "http://127.0.0.1:53124/oauth/callback";
@@ -7608,19 +7616,25 @@ pub mod email_password {
                 refresh_token: None,
             };
             // Another port than the one it was sent to: refused.
-            assert!(auth
-                .exchange_oidc_token(redeem(&code, "http://127.0.0.1:1/oauth/callback", verifier))
+            assert!(
+                auth.exchange_oidc_token(redeem(
+                    &code,
+                    "http://127.0.0.1:1/oauth/callback",
+                    verifier
+                ))
                 .await
-                .is_err());
+                .is_err()
+            );
             let tokens = auth
                 .exchange_oidc_token(redeem(&code, redirect, verifier))
                 .await
                 .expect("redeem");
             // The code is used: a replay is refused.
-            assert!(auth
-                .exchange_oidc_token(redeem(&code, redirect, verifier))
-                .await
-                .is_err());
+            assert!(
+                auth.exchange_oidc_token(redeem(&code, redirect, verifier))
+                    .await
+                    .is_err()
+            );
 
             let trade = |client_id: &str, token: &str| ExchangeForSession {
                 client_id: client_id.into(),
@@ -7632,11 +7646,16 @@ pub mod email_password {
             };
             // Another client may not trade it, nor mint sessions at all.
             assert!(matches!(
-                auth.exchange_for_session(trade("other", &tokens.access_token)).await,
+                auth.exchange_for_session(trade("other", &tokens.access_token))
+                    .await,
                 Err(AuthFlowError::PermissionDenied)
             ));
             // Not a token: refused. Asking for something else: refused.
-            assert!(auth.exchange_for_session(trade("architect", "not-a-token")).await.is_err());
+            assert!(
+                auth.exchange_for_session(trade("architect", "not-a-token"))
+                    .await
+                    .is_err()
+            );
             let mut wrong = trade("architect", &tokens.access_token);
             wrong.requested_token_type = ACCESS_TOKEN_TYPE.into();
             assert!(auth.exchange_for_session(wrong).await.is_err());
@@ -7645,7 +7664,10 @@ pub mod email_password {
                 .exchange_for_session(trade("architect", &tokens.access_token))
                 .await
                 .expect("trade");
-            assert_ne!(session.token, browser.token, "a new session, not the browser's");
+            assert_ne!(
+                session.token, browser.token,
+                "a new session, not the browser's"
+            );
             assert_eq!(session.user.id, browser.user.id);
             let current = auth
                 .current_session(CurrentSession {
@@ -7656,7 +7678,8 @@ pub mod email_password {
             assert_eq!(current.user.id, browser.user.id);
             // Once per token.
             assert!(matches!(
-                auth.exchange_for_session(trade("architect", &tokens.access_token)).await,
+                auth.exchange_for_session(trade("architect", &tokens.access_token))
+                    .await,
                 Err(AuthFlowError::InvalidCredentials)
             ));
 
@@ -7666,11 +7689,19 @@ pub mod email_password {
                 .await
                 .expect("authorize other")
                 .code;
-            let mut other_redeem = redeem(&other_code, "http://127.0.0.1:4000/oauth/callback", verifier);
+            let mut other_redeem = redeem(
+                &other_code,
+                "http://127.0.0.1:4000/oauth/callback",
+                verifier,
+            );
             other_redeem.client_id = "other".into();
-            let other_tokens = auth.exchange_oidc_token(other_redeem).await.expect("redeem other");
+            let other_tokens = auth
+                .exchange_oidc_token(other_redeem)
+                .await
+                .expect("redeem other");
             assert!(matches!(
-                auth.exchange_for_session(trade("architect", &other_tokens.access_token)).await,
+                auth.exchange_for_session(trade("architect", &other_tokens.access_token))
+                    .await,
                 Err(AuthFlowError::InvalidCredentials)
             ));
 
@@ -7692,7 +7723,8 @@ pub mod email_password {
             .await
             .expect("revoke");
             assert!(matches!(
-                auth.exchange_for_session(trade("architect", &revoked.access_token)).await,
+                auth.exchange_for_session(trade("architect", &revoked.access_token))
+                    .await,
                 Err(AuthFlowError::InvalidCredentials)
             ));
         }
@@ -13394,9 +13426,9 @@ pub mod oidc_provider {
         ArchitectAuth, AuthStorage, CurrentSession, VerifyJwt,
         commands::{
             ACCESS_TOKEN_TYPE, AuthorizeOidc, EXCHANGE_WINDOW_SECONDS, ExchangeForSession,
-            ExchangeOidcToken, GetOidcUserInfo, OidcAuthorization, SESSION_TOKEN_TYPE,
-            OidcClientRegistration, OidcDiscovery, OidcTokenResponse, OidcUserInfo,
-            RegisterOidcClient, RevokeOidcToken,
+            ExchangeOidcToken, GetOidcUserInfo, OidcAuthorization, OidcClientRegistration,
+            OidcDiscovery, OidcTokenResponse, OidcUserInfo, RegisterOidcClient, RevokeOidcToken,
+            SESSION_TOKEN_TYPE,
         },
         config::OidcClientConfig,
         crypto::{decrypt_secret, encrypt_secret, generate_token, hash_token},
@@ -14241,7 +14273,6 @@ pub mod oidc_provider {
             && req.password().is_none()
     }
 
-
     fn ensure_client_scopes(client: &OidcClientConfig, scope: &str) -> Result<(), AuthFlowError> {
         for requested in scope.split_whitespace() {
             if !client.scopes.iter().any(|allowed| allowed == requested) {
@@ -14321,7 +14352,10 @@ pub mod oidc_provider {
         #[test]
         fn a_loopback_redirect_takes_any_port_and_nothing_else_does() {
             let reg = "http://127.0.0.1/oauth/callback";
-            assert!(redirect_matches(reg, "http://127.0.0.1:53124/oauth/callback"));
+            assert!(redirect_matches(
+                reg,
+                "http://127.0.0.1:53124/oauth/callback"
+            ));
             assert!(redirect_matches(reg, "http://127.0.0.1/oauth/callback"));
             assert!(redirect_matches(
                 "http://[::1]/oauth/callback",
@@ -14329,18 +14363,39 @@ pub mod oidc_provider {
             ));
             // Another path, host, scheme or a name: refused.
             assert!(!redirect_matches(reg, "http://127.0.0.1:53124/other"));
-            assert!(!redirect_matches(reg, "http://127.0.0.2:53124/oauth/callback"));
-            assert!(!redirect_matches(reg, "https://127.0.0.1:53124/oauth/callback"));
-            assert!(!redirect_matches(reg, "http://localhost:53124/oauth/callback"));
-            assert!(!redirect_matches(reg, "http://evil@127.0.0.1:1/oauth/callback"));
-            assert!(!redirect_matches(reg, "http://127.0.0.1:1/oauth/callback?x=1"));
+            assert!(!redirect_matches(
+                reg,
+                "http://127.0.0.2:53124/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "https://127.0.0.1:53124/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "http://localhost:53124/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "http://evil@127.0.0.1:1/oauth/callback"
+            ));
+            assert!(!redirect_matches(
+                reg,
+                "http://127.0.0.1:1/oauth/callback?x=1"
+            ));
             // Not loopback: exact only.
             let web = "https://architect.fasttrackstudio.app/auth/callback";
             assert!(redirect_matches(web, web));
-            assert!(!redirect_matches(web, "https://architect.fasttrackstudio.app:444/auth/callback"));
+            assert!(!redirect_matches(
+                web,
+                "https://architect.fasttrackstudio.app:444/auth/callback"
+            ));
             let app = "app.fasttrackstudio.architect:/oauth/callback";
             assert!(redirect_matches(app, app));
-            assert!(!redirect_matches(app, "app.fasttrackstudio.architect:/other"));
+            assert!(!redirect_matches(
+                app,
+                "app.fasttrackstudio.architect:/other"
+            ));
         }
     }
 }

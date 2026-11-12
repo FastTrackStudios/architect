@@ -226,18 +226,36 @@ mod tests {
     #[test]
     fn only_the_issuers_own_pages_open() {
         let issuer = "https://auth.fasttrackstudio.app";
-        assert!(on_issuer("https://auth.fasttrackstudio.app/device?user_code=ABCD-EFGH", issuer));
+        assert!(on_issuer(
+            "https://auth.fasttrackstudio.app/device?user_code=ABCD-EFGH",
+            issuer
+        ));
         assert!(on_issuer("https://auth.fasttrackstudio.app", issuer));
-        assert!(on_issuer("https://auth.fasttrackstudio.app/", "https://auth.fasttrackstudio.app/"));
+        assert!(on_issuer(
+            "https://auth.fasttrackstudio.app/",
+            "https://auth.fasttrackstudio.app/"
+        ));
         // Another host, one that only starts like it, another scheme or port.
         assert!(!on_issuer("https://evil.example/device", issuer));
-        assert!(!on_issuer("https://auth.fasttrackstudio.app.evil.example/device", issuer));
+        assert!(!on_issuer(
+            "https://auth.fasttrackstudio.app.evil.example/device",
+            issuer
+        ));
         assert!(!on_issuer("http://auth.fasttrackstudio.app/device", issuer));
-        assert!(!on_issuer("https://auth.fasttrackstudio.app:8443/device", issuer));
+        assert!(!on_issuer(
+            "https://auth.fasttrackstudio.app:8443/device",
+            issuer
+        ));
         assert!(!on_issuer("app.fasttrackstudio.architect:/x", issuer));
         // A local issuer, as the dev stack runs it.
-        assert!(on_issuer("http://127.0.0.1:7411/device?user_code=X", "http://127.0.0.1:7411"));
-        assert!(!on_issuer("http://127.0.0.1:7412/device", "http://127.0.0.1:7411"));
+        assert!(on_issuer(
+            "http://127.0.0.1:7411/device?user_code=X",
+            "http://127.0.0.1:7411"
+        ));
+        assert!(!on_issuer(
+            "http://127.0.0.1:7412/device",
+            "http://127.0.0.1:7411"
+        ));
         // No issuer: nothing opens.
         assert!(!on_issuer("https://x/", ""));
     }

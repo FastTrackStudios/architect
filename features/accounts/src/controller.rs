@@ -420,12 +420,18 @@ impl Accounts {
         #[cfg(not(target_os = "ios"))]
         let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
             Ok(l) => l,
-            Err(e) => return self.sign_in_failed(attempt, format!("Could not listen for the sign-in: {e}")),
+            Err(e) => {
+                return self
+                    .sign_in_failed(attempt, format!("Could not listen for the sign-in: {e}"));
+            }
         };
         #[cfg(not(target_os = "ios"))]
         let redirect_uri = match listener.local_addr() {
             Ok(at) => redirect::loopback_redirect(at.port()),
-            Err(e) => return self.sign_in_failed(attempt, format!("Could not listen for the sign-in: {e}")),
+            Err(e) => {
+                return self
+                    .sign_in_failed(attempt, format!("Could not listen for the sign-in: {e}"));
+            }
         };
         let url = auth_client::oidc::authorize_url(
             self.0.issuer.origin(),
@@ -435,7 +441,10 @@ impl Accounts {
             redirect::SCOPE,
         );
         if !crate::browser::on_issuer(&url, self.0.issuer.origin()) {
-            return self.sign_in_failed(attempt, "The sign-in page is not on the issuer: not opened.".to_owned());
+            return self.sign_in_failed(
+                attempt,
+                "The sign-in page is not on the issuer: not opened.".to_owned(),
+            );
         }
         // iOS's sheet hands back where it landed (or nothing: cancelled).
         let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
@@ -513,7 +522,10 @@ impl Accounts {
                 if self.still(attempt)
                     && let Err(e) = self.adopt(signed)
                 {
-                    self.sign_in_failed(attempt, format!("Signed in, but this device could not keep the session: {e}"));
+                    self.sign_in_failed(
+                        attempt,
+                        format!("Signed in, but this device could not keep the session: {e}"),
+                    );
                 }
             }
             Err(e) => self.sign_in_failed(attempt, sentence(&e)),
@@ -599,7 +611,10 @@ impl Accounts {
                     if self.still(attempt)
                         && let Err(e) = self.adopt(*signed)
                     {
-                        self.sign_in_failed(attempt, format!("Signed in, but this device could not keep the session: {e}"));
+                        self.sign_in_failed(
+                            attempt,
+                            format!("Signed in, but this device could not keep the session: {e}"),
+                        );
                     }
                     return;
                 }

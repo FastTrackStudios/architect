@@ -25,9 +25,9 @@
 
 #[cfg(feature = "http")]
 pub mod browser;
+mod model;
 #[cfg(feature = "http")]
 pub mod redirect;
-mod model;
 mod secrets;
 mod store;
 
