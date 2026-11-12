@@ -208,30 +208,31 @@ async fn single_name(path: &Path) -> bool {
 /// Clone `from` into a new file at `to` (`FICLONE`: btrfs, XFS, bcachefs
 /// share extents, copy on write), synced. Fails where it is not offered
 /// (leaving nothing at `to`).
+#[cfg(target_os = "linux")]
 async fn reflink(from: &Path, to: &Path) -> io::Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        let (from, to) = (from.to_owned(), to.to_owned());
-        tokio::task::spawn_blocking(move || {
-            let src = std::fs::File::open(&from)?;
-            let dst = std::fs::File::create(&to)?;
-            let done = rustix::fs::ioctl_ficlone(&dst, &src)
-                .map_err(io::Error::from)
-                .and_then(|()| dst.sync_all());
-            if done.is_err() {
-                drop(dst);
-                let _ = std::fs::remove_file(&to);
-            }
-            done
-        })
-        .await
-        .map_err(io::Error::other)?
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (from, to);
-        Err(io::Error::from(io::ErrorKind::Unsupported))
-    }
+    let (from, to) = (from.to_owned(), to.to_owned());
+    tokio::task::spawn_blocking(move || {
+        let src = std::fs::File::open(&from)?;
+        let dst = std::fs::File::create(&to)?;
+        let done = rustix::fs::ioctl_ficlone(&dst, &src)
+            .map_err(io::Error::from)
+            .and_then(|()| dst.sync_all());
+        if done.is_err() {
+            drop(dst);
+            let _ = std::fs::remove_file(&to);
+        }
+        done
+    })
+    .await
+    .map_err(io::Error::other)?
+}
+
+/// [`reflink`] where `FICLONE` is not offered: unsupported, at once. Not
+/// an `async fn` (it awaits nothing); the same call shape.
+#[cfg(not(target_os = "linux"))]
+fn reflink(from: &Path, to: &Path) -> std::future::Ready<io::Result<()>> {
+    let _ = (from, to);
+    std::future::ready(Err(io::Error::from(io::ErrorKind::Unsupported)))
 }
 
 /// Put staged bytes at `to` and sync the directory. With `no_clobber`, a
