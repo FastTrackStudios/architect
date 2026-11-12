@@ -12,30 +12,13 @@ use std::sync::{Arc, Mutex};
 
 use architect_devices::Admission;
 use vault_live::Backend;
-use vault_proto::{IfMatch, VaultSync as _, VaultSyncError};
+use vault_proto::{IfMatch, VaultSync as _};
 
 use super::catalog::VaultCatalog;
 
-/// Why the node refused.
-#[architect::error]
-#[derive(Eq)]
-pub enum NodeError {
-    #[error("no such vault or note: {0}")]
-    #[architect(http_status = 404)]
-    NotFound(String),
-    #[error("{0}")]
-    #[architect(http_status = 400)]
-    Refused(String),
-}
-
-impl From<VaultSyncError> for NodeError {
-    fn from(e: VaultSyncError) -> Self {
-        match e {
-            VaultSyncError::NotFound => Self::NotFound("the vault or the note".to_owned()),
-            other => Self::Refused(other.to_string()),
-        }
-    }
-}
+// The notes service, its error and its note are vault-proto's (feature
+// `notes`), so an app can call it too.
+pub use vault_proto::notes::{NodeError, NoteRef};
 
 /// What a node is: its name and endpoint, what it holds and who it knows.
 #[architect::wire]
@@ -114,14 +97,6 @@ pub struct FilesStore {
     pub incoming_used: Option<u64>,
 }
 
-/// A note in a vault.
-#[architect::wire]
-#[derive(Eq)]
-pub struct NoteRef {
-    pub vault: String,
-    pub path: String,
-}
-
 /// [`Node`]'s declaration: one service per module, as the generated
 /// names (`http`, `prelude`) are per module.
 pub mod node {
@@ -139,24 +114,9 @@ pub mod node {
     pub use prelude::*;
 }
 
-/// [`Notes`]'s declaration.
+/// [`Notes`]'s declaration: `vault_proto::notes::notes`.
 pub mod notes {
-    use super::{NodeError, NoteRef};
-
-    /// The notes of the vaults this node holds.
-    #[architect::service(actions)]
-    pub trait Notes {
-        /// Every note this node holds.
-        #[action(effect = read_only)]
-        async fn list(&self) -> Result<Vec<NoteRef>, NodeError>;
-        /// A note's markdown.
-        #[action(effect = read_only)]
-        async fn read(&self, vault: String, path: String) -> Result<String, NodeError>;
-        /// Write a note's markdown; it reaches every peer on the next sweep.
-        async fn write(&self, vault: String, path: String, text: String) -> Result<(), NodeError>;
-    }
-
-    pub use prelude::*;
+    pub use vault_proto::notes::notes::*;
 }
 
 pub use node::Node;

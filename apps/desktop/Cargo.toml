@@ -83,7 +83,7 @@ auth-proto = { workspace = true, features = ["vox"] }
 # lanes that move those between nodes.
 crdt = { workspace = true, features = ["vox"] }
 vault-live = { workspace = true }
-vault-proto = { workspace = true, features = ["vox"] }
+vault-proto = { workspace = true, features = ["vox", "notes"] }
 vault-collab = { workspace = true }
 # Sites (#364): a vault published, rebuilt when it changes.
 architect-sites = { workspace = true }

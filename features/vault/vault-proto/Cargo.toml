@@ -30,9 +30,12 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+# The notes a node holds (`notes::Notes`): the node serves it, an app
+# pulls an org's vault with it.
+notes = ["vox", "architect/action-list"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
 fake = ["dep:fake", "architect/fake"]
-full = ["vox", "server", "fake"]
+full = ["vox", "notes", "server", "fake"]
 
 [lints]
 workspace = true

@@ -43,6 +43,8 @@ mod file;
 mod graph;
 pub mod grouping;
 mod manifest;
+#[cfg(feature = "notes")]
+pub mod notes;
 mod page;
 mod page_meta;
 mod service;
