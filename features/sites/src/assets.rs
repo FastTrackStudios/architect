@@ -57,6 +57,7 @@ pub fn site_css() -> Cow<'static, str> {
 /// folder when it names one, at every call.
 #[must_use]
 pub fn site_js() -> Cow<'static, str> {
+    static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let (site, player) = (dev_asset("site.js"), dev_asset("player.js"));
     if site.is_some() || player.is_some() {
         return Cow::Owned(format!(
@@ -68,7 +69,6 @@ pub fn site_js() -> Cow<'static, str> {
                 .unwrap_or(include_str!("../assets/player.js"))
         ));
     }
-    static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     Cow::Borrowed(JS.get_or_init(|| {
         format!(
             "{}\n{}\n{}",
