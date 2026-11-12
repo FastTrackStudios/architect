@@ -405,7 +405,7 @@ share-webview-test:
 # The suite on the classic-WebDriver path Safari takes, in Firefox
 # (geckodriver from nixpkgs): what keeps that path from rotting without a Mac.
 share-webview-test-classic:
-    DRIVER=gecko GECKODRIVER="$(nix build --no-link --print-out-paths nixpkgs#geckodriver)/bin/geckodriver" just share-webview-test
+    DRIVER=gecko GECKODRIVER="$(nix build --no-link --print-out-paths "$(sed -n 's/^ *url: \(github:NixOS\/nixpkgs\/[0-9a-f]*\)$/\1/p' devenv.yaml | head -1)#geckodriver")/bin/geckodriver" just share-webview-test
 
 # A share page on a phone, measured in Firefox (one title at the top, the
 # list's gutters, the card above the tab bar): apps/web/test/share-layout.test.mjs.

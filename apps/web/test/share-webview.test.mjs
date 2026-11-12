@@ -58,6 +58,9 @@ function which(cmd) {
 // or on the PATH): the Safari path, run where there is no Mac.
 const browser = DRIVER === 'safari' ? which('safaridriver') : DRIVER === 'gecko' ? process.env.GECKODRIVER || which('geckodriver') : process.env.FIREFOX || which('firefox');
 const skip = NODE && browser ? false : `needs ARCHITECT_ISLAND_NODE (just share-webview-test) and ${DRIVER === 'safari' ? 'safaridriver' : DRIVER === 'gecko' ? 'geckodriver (GECKODRIVER=…)' : 'a Firefox (FIREFOX=…)'}`;
+// CI (.github/workflows/browser.yml) has a browser: missing one there is a
+// failure, never a skip.
+if (process.env.ARCHITECT_BROWSER_REQUIRED && skip) throw new Error(`ARCHITECT_BROWSER_REQUIRED: ${skip}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const put = (root, rel, body) => { const p = join(root, rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, body); };
 function wav(seconds) {

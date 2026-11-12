@@ -1,0 +1,66 @@
+name: browser
+
+# A share page in a real browser (headless Firefox), the suites that need
+# one: the island's web view against a hostile bundle on the classic
+# WebDriver path Safari takes (no script evaluated in the page:
+# apps/web/test/share-webview.test.mjs, DRIVER=gecko), and a share page on
+# a phone, measured (apps/web/test/share-layout.test.mjs). After a merge to
+# main, nightly, and by hand on any branch.
+#
+# On the THEBATTLESHIP pool, in the repo's dev shell (they build the
+# island_node example from the workspace, which kache shares with the other
+# jobs). Firefox, geckodriver and Node come from the dev shell's own
+# nixpkgs pin (devenv.yaml), so they are the ones a local
+# `nix build github:NixOS/nixpkgs/<that pin>#firefox` gives.
+# ARCHITECT_BROWSER_REQUIRED makes a missing browser a failure, not a skip.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_WARNINGS: deny
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+  ARCHITECT_BROWSER_REQUIRED: "1"
+
+jobs:
+  share:
+    name: Share pages in Firefox
+    runs-on: [self-hosted, thebattleship]
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: devenv shell -- bash -e {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/shared-rust
+        with:
+          kind: browser
+      - name: Firefox, geckodriver and Node (the dev shell's nixpkgs)
+        run: |
+          pin=$(sed -n 's/^ *url: \(github:NixOS\/nixpkgs\/[0-9a-f]*\)$/\1/p' devenv.yaml | head -1)
+          test -n "$pin"
+          build() { nix build --no-link --print-out-paths "$pin#$1"; }
+          echo "FIREFOX=$(build firefox)/bin/firefox" >> "$GITHUB_ENV"
+          echo "GECKODRIVER=$(build geckodriver)/bin/geckodriver" >> "$GITHUB_ENV"
+          echo "NODE=$(build nodejs_24)/bin/node" >> "$GITHUB_ENV"
+      - name: the island node
+        run: cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+      # The browser runs outside the dev shell's libraries.
+      - name: a share page on a phone, measured
+        run: |
+          ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" \
+            env -u LD_LIBRARY_PATH "$NODE" --test apps/web/test/share-layout.test.mjs
+      - name: the web view against a hostile bundle (Safari's classic path)
+        if: ${{ !cancelled() }}
+        run: |
+          DRIVER=gecko ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" \
+            env -u LD_LIBRARY_PATH "$NODE" --test apps/web/test/share-webview.test.mjs
