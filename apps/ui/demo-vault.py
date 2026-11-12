@@ -649,7 +649,10 @@ def inbox():
         ("Voice memo: chorus melody", "share", "2026-10-31T23:15:00", "Hum: da da DUM. Add to [[Slow River]]?"),
     ]
     for t, s, c, b in caps:
-        W(f"Inbox/{t}.md", {"title": t, "type": "capture", "captured": c, "source": s, "processed": False},
+        # The file's name has no colon (the title keeps it): cargo cannot
+        # package a path with one, so a build that vendors this repo (crane)
+        # failed, and Windows cannot check one out.
+        W(f"Inbox/{t.replace(':', '')}.md", {"title": t, "type": "capture", "captured": c, "source": s, "processed": False},
           f"{b}\n")
 
 
