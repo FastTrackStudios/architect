@@ -327,7 +327,7 @@ details[open] > summary > .site-tree-chevron { transform: scale(0.45) rotate(45d
   body { font-size: 16.5px; }
   .site-header { gap: 8px; padding: 0 10px; }
   .site-menu { display: grid; }
-  .site-brand span:last-child { display: none; }
+  .site-brand-name { display: none; }
   .site-header-link { display: none; }
   .site-search-key { display: none; }
   .site-search input { padding-right: 10px; }
@@ -635,17 +635,21 @@ body.site-now-open .site-player { visibility: hidden; }
 .site-shell-title { display: none; }
 /* On a desk the page's heading is its title: the site's name beside the
    mark goes when it says the same. */
-body.site-shell-same-title .site-brand span:last-child { display: none; }
+body.site-shell-same-title .site-brand-name { display: none; }
 @media (max-width: 820px) {
+  /* The bars at the foot: the tab bar's pill (58 px) over the safe area
+     (applied here once), the card 8 px above it, the page clear of both. */
   body.site-shell {
-    --site-tabs: calc(74px + max(env(safe-area-inset-bottom, 0px), 8px));
-    padding-bottom: calc(var(--site-tabs) + 12px);
+    --site-tabs-pad: max(env(safe-area-inset-bottom, 0px), 8px);
+    --site-tabs: calc(58px + var(--site-tabs-pad));
+    --site-card: 60px;
+    padding-bottom: calc(var(--site-tabs) + 8px);
   }
-  body.site-shell.site-has-player { padding-bottom: calc(var(--site-tabs) + 80px); }
+  body.site-shell.site-has-player { padding-bottom: calc(var(--site-tabs) + 8px + var(--site-card) + 8px); }
   body.site-shell .site-tabs {
     display: flex; align-items: flex-end; gap: 8px;
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 55;
-    padding: 8px calc(16px + env(safe-area-inset-right, 0px)) max(env(safe-area-inset-bottom, 0px), 8px) calc(16px + env(safe-area-inset-left, 0px));
+    padding: 8px calc(16px + env(safe-area-inset-right, 0px)) var(--site-tabs-pad) calc(16px + env(safe-area-inset-left, 0px));
     pointer-events: none;
   }
   .site-tabs > * { pointer-events: auto; }
@@ -673,8 +677,12 @@ body.site-shell-same-title .site-brand span:last-child { display: none; }
     -webkit-backdrop-filter: saturate(1.4) blur(14px); backdrop-filter: saturate(1.4) blur(14px); -webkit-tap-highlight-color: transparent;
   }
   .site-tabs-round svg { width: 24px; height: 24px; fill: currentColor; }
-  /* The card, right above the tabs. */
-  body.site-shell .site-player.site-player-card { bottom: calc(var(--site-tabs) + 2px); }
+  /* The card, 8 px above the tabs, on their gutters, its own height. */
+  body.site-shell .site-player.site-player-card {
+    left: calc(16px + env(safe-area-inset-left, 0px)); right: calc(16px + env(safe-area-inset-right, 0px));
+    bottom: calc(var(--site-tabs) + 8px); width: auto; transform: none;
+    height: var(--site-card); min-height: 0; box-sizing: border-box;
+  }
   /* The round button plays: the card keeps Click and Loop. */
   body.site-shell-plays .site-player-card > .site-player-toggle { display: none; }
   body.site-shell-plays .site-player-card { padding-right: 6px; }
@@ -682,7 +690,7 @@ body.site-shell-same-title .site-brand span:last-child { display: none; }
   body.site-shell .site-header .site-menu, body.site-shell .site-header .site-search, body.site-shell .site-header-link { display: none; }
   body.site-shell .site-brand { min-width: 0; flex: 1; }
   /* One title, at the top: the page's. Its heading and crumbs give way. */
-  body.site-shell .site-brand span:last-child { display: none; }
+  body.site-shell .site-brand-name { display: none; }
   body.site-shell .site-shell-title { display: inline; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   body.site-shell .site-crumbs, body.site-shell .site-title { display: none; }
   body.site-shell .site-header { padding-top: env(safe-area-inset-top, 0px); height: calc(var(--site-header) + env(safe-area-inset-top, 0px)); }
@@ -693,7 +701,7 @@ body.site-shell-same-title .site-brand span:last-child { display: none; }
   body.site-shell .site-nav { bottom: 0; z-index: 57; }
   body.site-shell.site-nav-open .site-scrim { z-index: 56; }
   /* A tab of the player: its view in the page's place, above the bars. */
-  body.site-shell .site-now.site-now-tab { padding-bottom: var(--site-tabs); }
+  body.site-shell .site-now.site-now-tab { padding-bottom: calc(var(--site-tabs) + 8px); }
   body.site-shell .site-now.site-now-tab .site-now-controls { padding-bottom: 4px; }
   body.site-shell.site-now-tabbed .site-tabs { z-index: 65; }
   /* Typing: the bars step aside for the keyboard. */

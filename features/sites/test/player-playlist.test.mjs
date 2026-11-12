@@ -805,7 +805,13 @@ test('a frame that is never ready, or stops answering, is given up', async () =>
 // ── The shell, as the review found it ───────────────────────────────
 
 test('the shell: no tab from the address that is no tab, nor one that leaves the share', () => {
-  assert.doesNotThrow(() => setlist({ shell: SHELL_SPEC, hash: '#tab=constructor' }));
+  // A name every object inherits is no tab: the page's own tab is current,
+  // nothing thrown, nothing opened.
+  let asked;
+  assert.doesNotThrow(() => { asked = setlist({ shell: SHELL_SPEC, hash: '#tab=constructor' }); });
+  const current = asked.body.querySelectorAll('.site-tab').filter((t) => t.getAttribute('aria-current') === 'page').map((t) => t.getAttribute('data-tab'));
+  assert.deepEqual(current, ['setlist'], 'the page\'s own tab');
+  assert.deepEqual(asked.errors, []);
   const spec = {
     ...SHELL_SPEC,
     tabs: [

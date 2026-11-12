@@ -173,7 +173,7 @@ fn Header(site: Rc<Site>) -> Element {
             }
             a { class: "site-brand", href: "{site.base}",
                 span { class: "site-mark", dangerous_inner_html: ICON_MARK }
-                span { "{site.title}" }
+                span { class: "site-brand-name", "{site.title}" }
             }
             div { class: "site-search", role: "search",
                 span { class: "site-search-icon", dangerous_inner_html: ICON_SEARCH }
