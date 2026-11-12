@@ -184,7 +184,9 @@ every `cargo test`, `cargo nextest` and `cargo run` in the repo runs with
 `architect_accounts::Keychain` panics rather than open it
 (`features/accounts/src/keychain.rs` `secret_store`, `FileSecrets` in
 `features/accounts/src/secrets.rs`). A release build keeps its sessions in
-the keychain, under `ARCHITECT_KEYCHAIN_SERVICE` when set.
+the keychain, under `ARCHITECT_KEYCHAIN_SERVICE` when set, and ignores
+`ARCHITECT_SECRET_STORE` (except `memory`) and `ARCHITECT_FORBID_KEYCHAIN`:
+whoever can set its environment cannot move its sessions into a file.
 
 ## Running the pieces alone
 
