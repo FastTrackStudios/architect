@@ -82,15 +82,14 @@ release-notes`). Architect, the app, is released from the same tag
 
 | Job | What the release gets |
 | --- | --- |
-| `release` | the GitHub release and its notes, and `release-facts.json`: whether the release migrates data (a change file's `Data-Migration:` line, `.changes/README`), signed with the rest by `sums` so a deployer can trust it |
+| `release` | the GitHub release, as a DRAFT, with its notes and `release-facts.json`: whether the release migrates data (a change file's `Data-Migration:` line, `.changes/README`), signed with the rest by `sums` so a deployer can trust it |
 | `node` | `ghcr.io/fasttrackstudios/architect:<X.Y.Z>`, `:sha-<short>`, `:latest` (the headless node, [deploy](@/guide/deploy.md)), and `architect-node-<tag>-x86_64-linux.tar.gz` |
 | `web` | `ghcr.io/fasttrackstudios/architect-web:<X.Y.Z>`, `:sha-<short>`, `:latest` (the site, the docs and the web app, [the web front end](@/guide/web.md)), and `architect-web-<X.Y.Z>.tar.gz`, what the server serves. Waits for `release` only: the site's `/download` names the release's files by convention and checks them in the browser |
 | `linux` | `Architect-linux-x86_64.AppImage` (`scripts/desktop/linux.sh`) and `latest-linux.json`: the version, the AppImage's URL and its sha256, for the updater |
 | `macos` | `Architect-macos-arm64.dmg`, Developer-ID signed and notarized (`scripts/desktop/macos.sh`), and `latest-macos.json`. Built on airlock; on while the repo variable `ARCHITECT_MACOS_RELEASE` is `true` |
 | `ios` | the Architect app for iPhone and iPad (`apps/mobile`) on TestFlight, marketing version `X.Y.Z` and a unix-time build number, noted in the release's notes (`.github/workflows/ios.yml`). Built on airlock; it never holds the release, and the repo variable `ARCHITECT_IOS_RELEASE` set to `false` turns it off |
 | `nix-bump` | a PR (branch `chore/nix-desktop-<tag>`) pointing the flake's `architect-desktop` at the new AppImage, for the highest release only; it warns instead of failing |
-| `sums` | `SHA256SUMS` over every asset, and `SHA256SUMS.minisig` signed with the org key when the `release-signing` environment has `FTS_RELEASE_MINISIGN_KEY` |
-| `dispatch` | after `sums`, for a stable `vX.Y.Z` only: starts the repos that pin the release (keyflow's and studio's `bump-architect.yml`, infra's `release-bump.yml`), each of which verifies the release itself and merges its own pin-bump PR only once its own CI is green. Three tokens, each minted for one of those repositories with `actions: write` only (`scripts/check-token-mints.py` checks every workflow's mints). Inert until the repo variable `RELEASE_DISPATCH` is `on` and the `release-dispatch` environment (`v*` tags only) has `BOT_ENVIRONMENT=release-dispatch` and the secret `RELEASE_DISPATCH_APP_KEY` |
+| `sums` | `SHA256SUMS` over exactly the assets the jobs above report (each reports its files' sha256 as a job output), refusing an asset no job made, a missing one or one changed after upload (`scripts/release-sums.sh`); `SHA256SUMS.minisig` signed with the org key when the `release-signing` environment has `FTS_RELEASE_MINISIGN_KEY`; then it publishes the draft. Nothing reads a release whose assets are not signed |
 
 `:latest` goes only to the highest release. Packages pushed with
 `GITHUB_TOKEN` start private on GHCR, so each image is made public once

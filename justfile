@@ -448,3 +448,7 @@ release-notes-test:
 check-token-mints:
     python3 scripts/check-token-mints.py --self-test
     python3 scripts/check-token-mints.py
+
+# release-sums.sh: signs only what the build jobs reported (PR checks run it)
+release-sums-test:
+    bash scripts/release-sums-test.sh

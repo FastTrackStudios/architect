@@ -128,6 +128,7 @@ jobs:
           python3 scripts/check-token-mints.py --self-test
           python3 scripts/check-token-mints.py
           bash scripts/release-notes-test.sh
+          bash scripts/release-sums-test.sh
       # xtask alone, without the workspace-hack (`--cfg no_workspace_hack`,
       # as `xtask boundaries` resolves) and in its own target dir: through
       # the hack its debug build compiles most of the third-party graph

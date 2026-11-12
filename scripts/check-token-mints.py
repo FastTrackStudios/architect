@@ -1,139 +1,133 @@
 #!/usr/bin/env python3
-"""Fail when a workflow mints a GitHub App token wider than its hop needs.
+"""Fail when a workflow mints or reaches a GitHub App key wider than its hop needs.
 
 The fts-forge App is installed org-wide with broad permissions, so every
-token is narrowed when it is minted (actions/create-github-app-token).
-For every `.github/workflows/*.yml` this checks that each mint:
+token is narrowed when it is minted (actions/create-github-app-token), and
+the key itself is reachable only where a mint needs it. This PARSES every
+`.github/workflows/*.y*ml` (formatting cannot hide a mint) and fails when:
 
-  - is listed in ALLOWED for its workflow and job;
-  - names exactly ONE repository (`repositories:`), the listed one;
-  - asks only for the listed `permission-*` (never workflows,
-    administration or organization-*), and asks for at least one;
-  - reads the key from the listed secret: a bot job's own name that
-    exists in its environment only, never FORGE_APP_PRIVATE_KEY (an org
-    secret and a repo secret carry that name, and a job outside its
-    environment would silently fall back to them);
-  - runs in the listed `environment:`;
-
-and that no job exports a token as an output or writes one to
-$GITHUB_OUTPUT / $GITHUB_ENV / $GITHUB_STEP_SUMMARY.
+  - a mint (any `uses:` of actions/create-github-app-token, quoted or not,
+    at any indentation) is not listed in ALLOWED for its workflow and job;
+  - a mint names more or other than ONE listed repository, asks for a
+    permission outside its list (never workflows, administration,
+    organization-*, secrets, members, environments), or asks for none;
+  - its private-key is not exactly `${{ secrets.<its key> }}`, or it does
+    not run in its listed environment;
+  - an App key secret (BOT_KEYS) appears ANYWHERE else: a `run:` script, an
+    `env:`, a `with:` of another action (a curl or `gh api` mint);
+  - `toJSON(secrets)` appears anywhere; a job passes `secrets: inherit`
+    without being listed in INHERIT;
+  - a job exports a minted token as an output, or a step writes one to
+    $GITHUB_OUTPUT / $GITHUB_ENV / $GITHUB_STEP_SUMMARY.
 
 A LEGACY entry is an existing mint that predates the release bots and
-still reads FORGE_APP_PRIVATE_KEY (the owner moves those keys; see the
-release-chain design, infra#3). It is reported on every run, never silently
-allowed to grow. Run by PR checks (`just check-token-mints`); `--self-test`
-checks that a wide mint fails.
+reads FORGE_APP_PRIVATE_KEY; it is printed on every run. `--self-test`
+checks that each of these shapes fails. Needs PyYAML, or mikefarah's `yq`.
 """
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# workflow -> job -> rule
-ALLOWED: dict[str, dict[str, dict]] = {
-    "release.yml": {
-        # start the downstream pin bumps: one token per repository, each
-        # `actions: write` only
-        "dispatch": dict(repos=("keyflow", "studio", "infra"), perms={"actions": "write"},
-                         secret="RELEASE_DISPATCH_APP_KEY", environment="release-dispatch"),
-    },
-}
+# ---- per repo -------------------------------------------------------------
+# workflow -> job -> rule (repos: the ONE-repo choices a mint may name).
+# Architect mints NO App token: its release starts nothing downstream (the
+# downstream bots poll; the dispatch job was dropped, owner 2026-11-12).
+ALLOWED: dict[str, dict[str, dict]] = {}
+# (workflow, job) pairs allowed `secrets: inherit`, with the reason
+INHERIT: dict[tuple[str, str], str] = {}
+# ---------------------------------------------------------------------------
 
+BOT_KEYS = {"FORGE_APP_PRIVATE_KEY", "PIN_BUMP_APP_KEY", "RELEASE_DISPATCH_APP_KEY",
+            "RELEASE_QUEUE_APP_KEY", "RELEASE_BUMP_APP_KEY"}
 FORBIDDEN = re.compile(r"^(workflows|administration|organization.*|members|secrets|environments)$")
-MINT = re.compile(r"^\s*-?\s*uses:\s*actions/create-github-app-token@")
+MINT = re.compile(r"^\s*['\"]?actions/create-github-app-token@")
 
 
-def jobs(text: str) -> dict[str, tuple[int, int]]:
-    """job id -> (first line, end line), 0-based, for the top-level `jobs:`."""
-    lines = text.splitlines()
-    out: dict[str, tuple[int, int]] = {}
-    start = next((i for i, l in enumerate(lines) if re.match(r"^jobs:\s*$", l)), None)
-    if start is None:
-        return out
-    cur, first = None, 0
-    for i in range(start + 1, len(lines)):
-        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", lines[i])
-        if m:
-            if cur:
-                out[cur] = (first, i)
-            cur, first = m.group(1), i
-        elif lines[i] and not lines[i].startswith(" ") and not lines[i].startswith("#"):
-            break
-    if cur:
-        out[cur] = (first, len(lines))
-    return out
+def load(path: Path):
+    text = path.read_text()
+    try:
+        import yaml  # type: ignore
+
+        class Loader(yaml.SafeLoader):
+            pass
+        # `on:` must stay the key "on", not the boolean.
+        Loader.yaml_implicit_resolvers = {k: [r for r in v if r[0] != "tag:yaml.org,2002:bool"]
+                                          for k, v in Loader.yaml_implicit_resolvers.items()}
+        return yaml.load(text, Loader=Loader)
+    except ImportError:
+        yq = shutil.which("yq")
+        if not yq:
+            sys.exit("check-token-mints: needs PyYAML or mikefarah's yq to parse the workflows")
+        out = subprocess.run([yq, "-o=json", "eval", ".", str(path)], check=True,
+                             capture_output=True, text=True).stdout
+        return json.loads(out)
 
 
-def step_keys(lines: list[str], i: int) -> dict[str, str]:
-    """The `with:` (and sibling) keys of the step whose `uses:` is line i."""
-    step_indent = None
-    for back in range(i, max(i - 8, -1), -1):
-        if lines[back].lstrip().startswith("- "):
-            step_indent = len(lines[back]) - len(lines[back].lstrip())
-            break
-    if step_indent is None:
-        step_indent = len(lines[i]) - len(lines[i].lstrip()) - 2
-    keys: dict[str, str] = {}
-    for back in range(i, -1, -1):  # keys above `uses:` in the same step
-        line = lines[back]
-        kv = re.match(r"^\s*-?\s*([A-Za-z0-9_-]+):\s*(.*?)\s*$", line)
-        if kv:
-            keys.setdefault(kv.group(1), kv.group(2).strip("'\""))
-        if line.lstrip().startswith("- "):
-            break
-    for nxt in lines[i + 1:]:
-        if not nxt.strip():
-            continue
-        if len(nxt) - len(nxt.lstrip()) <= step_indent:
-            break
-        kv = re.match(r"^\s*([A-Za-z0-9_-]+):\s*(.*?)\s*$", nxt)
-        if kv:
-            keys[kv.group(1)] = kv.group(2).strip("'\"")
-    return keys
+def strings(node, where=()):
+    """Every string in a parsed document, with its key path."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from strings(v, where + (str(k),))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from strings(v, where + (str(i),))
+    elif isinstance(node, str):
+        yield where, node
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
     bad, legacy = [], []
     for path in sorted((root / ".github" / "workflows").glob("*.y*ml")):
-        text = path.read_text()
         name = path.name
-        lines = text.splitlines()
-        for m in re.finditer(r"^    outputs:\s*\n((?:      .*\n)+)", text, re.M):
-            if ".outputs.token" in m.group(1):
-                bad.append(f"{name}: a job exports a minted token as an output")
-        for n, line in enumerate(lines, 1):
-            if re.search(r"(outputs\.token|\$\{?GH_TOKEN|\$\{?TOKEN)\b.*>>\s*\"?\$\{?GITHUB_(OUTPUT|ENV|STEP_SUMMARY)", line):
-                bad.append(f"{name}:{n}: a token written to $GITHUB_OUTPUT/ENV/STEP_SUMMARY")
-        spans = jobs(text)
-        for job, (first, end) in spans.items():
-            env_m = next((re.match(r"^    environment:\s*(\S+)\s*$", lines[k]) for k in range(first, end)
-                          if re.match(r"^    environment:", lines[k])), None)
-            environment = env_m.group(1) if env_m else None
-            for i in range(first, end):
-                if not MINT.match(lines[i]):
+        doc = load(path) or {}
+        jobs = doc.get("jobs") or {}
+        mint_keys: set[tuple] = set()
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            env = job.get("environment")
+            env = env.get("name") if isinstance(env, dict) else env
+            if job.get("secrets") == "inherit" and (name, job_id) not in INHERIT:
+                bad.append(f"{name} (job {job_id}): `secrets: inherit` not listed in INHERIT")
+            for out_k, out_v in (job.get("outputs") or {}).items():
+                if isinstance(out_v, str) and ".outputs.token" in out_v:
+                    bad.append(f"{name} (job {job_id}): exports a minted token as output {out_k}")
+            for i, step in enumerate(job.get("steps") or []):
+                if not isinstance(step, dict):
                     continue
-                where = f"{name}:{i + 1} (job {job})"
-                rule = ALLOWED.get(name, {}).get(job)
+                run = step.get("run") or ""
+                # The token inside the echo/printf that writes the file (a
+                # `[ -n "$TOKEN" ]; then echo present=true >> …` is fine).
+                if re.search(r"(echo|printf)[^;|&\n]*(outputs\.token|\$\{?\w*TOKEN\b)[^;|&\n]*>>\s*\"?\$\{?GITHUB_(OUTPUT|ENV|STEP_SUMMARY)", run):
+                    bad.append(f"{name} (job {job_id}, step {i}): a token written to $GITHUB_OUTPUT/ENV/STEP_SUMMARY")
+                uses = step.get("uses") or ""
+                if not (isinstance(uses, str) and MINT.match(uses)):
+                    continue
+                where = f"{name} (job {job_id}, step {i})"
+                mint_keys.add(("jobs", job_id, "steps", str(i), "with", "private-key"))
+                rule = ALLOWED.get(name, {}).get(job_id)
                 if rule is None:
-                    bad.append(f"{where}: a token mint not in scripts/check-token-mints.py's ALLOWED")
+                    bad.append(f"{where}: a token mint not in ALLOWED")
                     continue
-                keys = step_keys(lines, i)
-                repos = tuple(r for r in re.split(r"[,\s]+", keys.get("repositories", "")) if r)
-                # A bot mint names exactly one of its job's repositories (a job
-                # that wakes three repos mints three tokens); a LEGACY one
-                # names exactly its listed set.
+                w = {k: str(v) for k, v in (step.get("with") or {}).items()}
+                repos = tuple(r for r in re.split(r"[,\s]+", w.get("repositories", "")) if r)
                 if rule.get("legacy"):
                     if repos != tuple(rule["repos"]):
                         bad.append(f"{where}: repositories must be {','.join(rule['repos'])}, is {','.join(repos) or 'missing'}")
+                    legacy.append(f"{where}: LEGACY, {rule['legacy']}")
                 elif len(repos) != 1:
                     bad.append(f"{where}: a bot token is minted for exactly one repository, is {','.join(repos) or 'missing'}")
                 elif repos[0] not in rule["repos"]:
                     bad.append(f"{where}: repository {repos[0]} is not one of {','.join(rule['repos'])}")
-                asked = {k[len("permission-"):]: v for k, v in keys.items() if k.startswith("permission-")}
+                asked = {k[len("permission-"):]: v for k, v in w.items() if k.startswith("permission-")}
                 if not asked:
                     bad.append(f"{where}: no permission-* (the token would get every permission the App has)")
                 for perm, level in sorted(asked.items()):
@@ -141,20 +135,19 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         bad.append(f"{where}: permission-{perm} is not allowed here")
                     elif level != rule["perms"][perm] and not (rule["perms"][perm] == "write" and level == "read"):
                         bad.append(f"{where}: permission-{perm}: {level}, allowed {rule['perms'][perm]}")
-                if keys.get("owner") not in ("FastTrackStudios", None):
+                if w.get("owner", "FastTrackStudios") != "FastTrackStudios":
                     bad.append(f"{where}: owner must be FastTrackStudios")
-                key = re.search(r"secrets\.([A-Za-z0-9_]+)", keys.get("private-key", ""))
-                if not key or key.group(1) != rule["secret"]:
-                    bad.append(f"{where}: private-key must be secrets.{rule['secret']}")
-                if environment != rule["environment"]:
-                    bad.append(f"{where}: must run in environment {rule['environment']}, runs in {environment}")
-                if rule.get("legacy"):
-                    legacy.append(f"{where}: LEGACY, {rule['legacy']}")
-        if "secrets.FORGE_APP_PRIVATE_KEY" in text:
-            legit = {j for j, r in ALLOWED.get(name, {}).items() if r["secret"] == "FORGE_APP_PRIVATE_KEY"}
-            for job, (first, end) in spans.items():
-                if job not in legit and any("secrets.FORGE_APP_PRIVATE_KEY" in l for l in lines[first:end]):
-                    bad.append(f"{name} (job {job}): reads FORGE_APP_PRIVATE_KEY (bots read their environment's own key)")
+                if not re.fullmatch(r"\$\{\{\s*secrets\." + re.escape(rule["secret"]) + r"\s*\}\}", w.get("private-key", "").strip()):
+                    bad.append(f"{where}: private-key must be exactly ${{{{ secrets.{rule['secret']} }}}}")
+                if env != rule["environment"]:
+                    bad.append(f"{where}: must run in environment {rule['environment']}, runs in {env}")
+        # The keys anywhere else, and the whole secrets context.
+        for keypath, s in strings(doc):
+            if re.search(r"toJSON\(\s*secrets\s*\)", s):
+                bad.append(f"{name} ({'.'.join(keypath)}): toJSON(secrets)")
+            for m in re.finditer(r"secrets\.([A-Za-z0-9_]+)", s):
+                if m.group(1) in BOT_KEYS and keypath not in mint_keys:
+                    bad.append(f"{name} ({'.'.join(keypath)}): secrets.{m.group(1)} outside a mint's private-key")
     return bad, legacy
 
 
@@ -163,44 +156,85 @@ def main(root: Path = ROOT) -> int:
     for line in legacy:
         print(f"  {line}")
     if bad:
-        print("token mints wider than their hop needs:")
-        print("\n".join(f"  {b}" for b in bad))
+        print("App keys or tokens reach further than their hop needs:")
+        print("\n".join(f"  {b}" for b in dict.fromkeys(bad)))
         return 1
-    print("ok: every bot token is minted for one repository, with its listed permissions, in its environment")
+    print("ok: every bot token is minted for one repository, with its listed permissions, in its environment, "
+          "and no App key is reachable anywhere else")
     return 0
 
 
-WIDE = """jobs:
-  {job}:
-    outputs:
-      t: ${{{{ steps.forge.outputs.token }}}}
+# The shapes the security review found the line-based check missed, and the
+# ones it caught; each must fail.
+CASES = {
+    "unscoped mint in a 4-space-indented job": """
+jobs:
+    open:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/create-github-app-token@0000000000000000000000000000000000000000
+              with:
+                  private-key: ${{ secrets.PIN_BUMP_APP_KEY }}
+""",
+    "quoted uses": """
+jobs:
+  open:
     steps:
-      - uses: actions/create-github-app-token@0000000000000000000000000000000000000000
-        id: forge
-        with:
-          private-key: ${{{{ secrets.FORGE_APP_PRIVATE_KEY }}}}
-          repositories: a,b
-          permission-workflows: write
+      - uses: "actions/create-github-app-token@0000000000000000000000000000000000000000"
+        with: {private-key: "${{ secrets.FORGE_APP_PRIVATE_KEY }}", repositories: "a,b", permission-workflows: write}
+""",
+    "a curl mint with the bot key in run": """
+jobs:
+  other:
+    steps:
+      - run: |
+          curl -H "x: ${{ secrets.PIN_BUMP_APP_KEY }}" https://api.github.com/app/installations
+""",
+    "the bot key in env": """
+jobs:
+  other:
+    env:
+      K: ${{ secrets.RELEASE_QUEUE_APP_KEY }}
+    steps:
+      - run: gh api app/installations
+""",
+    "toJSON(secrets)": """
+jobs:
+  other:
+    steps:
+      - run: echo '${{ toJSON(secrets) }}' > /dev/null
+""",
+    "secrets: inherit": """
+jobs:
+  other:
+    uses: ./.github/workflows/x.yml
+    secrets: inherit
+""",
+    "an exported token": """
+jobs:
+  open:
+    outputs:
+      t: ${{ steps.forge.outputs.token }}
+    steps:
       - run: echo "$GH_TOKEN" >> "$GITHUB_OUTPUT"
-"""
+""",
+}
 
 
 def self_test() -> int:
-    """A wide mint, two repos, the shared key, no environment must all fail."""
-    workflow, jobs_ = next((w, j) for w, j in ALLOWED.items() if any(not r.get("legacy") for r in j.values()))
-    job = next(j for j, r in jobs_.items() if not r.get("legacy"))
-    with tempfile.TemporaryDirectory() as d:
-        wf = Path(d) / ".github" / "workflows"
-        wf.mkdir(parents=True)
-        (wf / workflow).write_text(WIDE.format(job=job))
-        bad, _ = check(Path(d))
-        need = ("exactly one repository", "permission-workflows", "private-key must be",
-                "must run in environment", "as an output", "written to")
-        missing = [n for n in need if not any(n in b for b in bad)]
-        if missing:
-            print(f"self-test FAILED: a wide mint was not caught for: {missing}")
-            return 1
-    print("self-test ok: a wide mint fails on every rule")
+    failed = []
+    for case, text in CASES.items():
+        with tempfile.TemporaryDirectory() as d:
+            wf = Path(d) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "case.yml").write_text("name: case\non: push\n" + text)
+            bad, _ = check(Path(d))
+            if not bad:
+                failed.append(case)
+    if failed:
+        print(f"self-test FAILED: not caught: {failed}")
+        return 1
+    print(f"self-test ok: {len(CASES)} wide or leaking shapes all fail")
     return 0
 
 
