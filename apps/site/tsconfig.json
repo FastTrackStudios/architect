@@ -5,7 +5,7 @@
      top-level await and are never bundled. As the hub does with its
      `tools/`, they are left out here rather than pull @types/bun into the
      app's config; Biome still formats and lints them. */
-  "exclude": ["scripts", "node_modules", ".output", ".vercel"],
+  "exclude": ["scripts", "node_modules", ".output"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

@@ -478,7 +478,7 @@ impl Stack {
                     "-c",
                 ])
                 .arg(format!(
-                    "bun install --frozen-lockfile && bash scripts/assets.sh && exec bun x vite dev --host 127.0.0.1 --port {}",
+                    "bun install --frozen-lockfile && exec bun x vite dev --host 127.0.0.1 --port {}",
                     self.ports.site
                 ))
                 .current_dir(self.root.join("apps/site"));

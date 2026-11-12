@@ -1,6 +1,6 @@
 [package]
 name = "architect-web"
-description = "Architect in a browser: the web app's shell (OIDC redirect sign-in with PKCE as client `architect`, the node's status over same-origin HTTP), bundled with the landing page and the docs into one static site (`just web`, the `architect-web` image)."
+description = "Architect in a browser: the web app's shell (OIDC redirect sign-in with PKCE as client `architect`, the node's status over same-origin HTTP), bundled with the site (`apps/site`) and the docs into one static site (`just web`, the `architect-web` image)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

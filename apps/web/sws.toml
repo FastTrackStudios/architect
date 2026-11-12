@@ -12,6 +12,18 @@ compression = true
 directory-listing = false
 
 [advanced]
+# The site's pages are files named <page>.html (apps/site, prerendered):
+# served at /<page> (scripts/web-routes.md, rule 2). static-web-server has
+# no "try P.html", so each page is listed: /download, /changelog,
+# /extensions and /extensions/<id> (a glob group, $1, never a slash).
+[[advanced.rewrites]]
+source = "/{download,changelog,extensions}"
+destination = "/$1.html"
+
+[[advanced.rewrites]]
+source = "/extensions/{*}"
+destination = "/extensions/$1.html"
+
 # The sign-in's way back (the path every first-party client is registered
 # with) is the app's page; it reads the code and moves to /app/.
 [[advanced.rewrites]]
@@ -22,12 +34,17 @@ destination = "/app/index.html"
 source = "/auth/callback/"
 destination = "/app/index.html"
 
-# Nothing is cached: the image's files all carry the store's 1970 mtime,
-# so a Last-Modified revalidation would keep an old release's files
-# forever. The bundle is small.
+# Nothing is cached but the site's content-hashed assets: the image's
+# files all carry the store's 1970 mtime, so a Last-Modified revalidation
+# would keep an old release's files forever.
 [[advanced.headers]]
 source = "/**"
 [advanced.headers.headers]
 Cache-Control = "no-store"
 X-Content-Type-Options = "nosniff"
 Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[advanced.headers]]
+source = "/assets/**"
+[advanced.headers.headers]
+Cache-Control = "public, max-age=31536000, immutable"

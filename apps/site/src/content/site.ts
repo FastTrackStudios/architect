@@ -28,15 +28,12 @@ export const SITE = {
 } as const;
 
 /**
- * OPEN DECISION (#534): the node's public hostname once this site owns
- * `architect.fasttrackstudio.app`. The web app (`/app/…`) and share links
- * (`/s/…`) are served by the node, never through Vercel; this site only
- * REDIRECTS them here, path and query kept (scripts/assemble.sh reads this
- * constant). A placeholder until the hostname and its DNS are decided.
+ * The paths the node owns on this same origin: the web app (`/app/…`) and
+ * share links (`/s/…`). The site links them as plain same-origin paths;
+ * the server in front of the web bundle routes `/s/` to the node and
+ * serves `/app/` from the bundle (scripts/web-bundle.sh, its ROUTES.md).
+ * Never prerendered or link-checked here.
  */
-export const NODE_ORIGIN = "https://app.architect.fasttrackstudio.app";
-
-/** The paths the node owns: redirected there, never rendered here. */
 export const NODE_PATHS = ["/app", "/s"] as const;
 
 /** The docs: `docs/content` built by `architect site build`, copied in at /docs/. */

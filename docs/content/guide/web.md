@@ -1,6 +1,6 @@
 +++
 title = "The web front end"
-description = "architect.fasttrackstudio.app: the landing page, the docs and the web app as one static site, its own image (architect-web), signed in with the issuer's redirect flow and PKCE."
+description = "architect.fasttrackstudio.app: the site, the docs and the web app as one static bundle the server serves, signed in with the issuer's redirect flow and PKCE."
 weight = 76
 +++
 
@@ -11,7 +11,7 @@ paths to the node and everything else to the front end.
 
 | Path | What | From |
 | --- | --- | --- |
-| `/` | the landing page | `apps/web/landing` (a slot, below) |
+| `/`, `/download`, `/changelog`, `/extensions` | the site | `apps/site`, prerendered ([the site](@/guide/shipping.md)) |
 | `/docs/` | these docs | `docs/content`, built by `architect site build --base /docs/` |
 | `/app/` | the web app | `apps/web` (wasm) and `apps/web/app` |
 | `/auth/callback` | where the issuer sends the browser back (the app's page) | `apps/web/sws.toml` |
@@ -22,21 +22,20 @@ keeps the routing static: no server decides by cookie, and a bookmark of
 `/app/` always opens the app.
 
 **Not a single-page fallback.** An unknown path is a real `404`
-(`apps/web/site/404.html`), never the app's page answering `200`. A node
+(the site's `404.html`), never the app's page answering `200`. A node
 path the proxy forgot to route then fails visibly instead of returning
 HTML (the trap Task's routing records).
 
-## The landing page slot
+## How it is served
 
-`/` is `apps/web/landing/`: a self-contained static site with its
-`index.html` at the folder's root and relative asset paths. The bundle
-copies the folder to the site's root as is. The page there today is a
-placeholder; the designed landing page replaces the folder and changes
-nothing else (no Rust, chart or image change). It must leave alone the
-paths the bundle owns (`/docs/`, `/app/`, `/auth/callback`, `/style.css`,
-`/404.html`, `/version.json`) and the ones the node owns (listed in
-[deploy](@/guide/deploy.md)); static-web-server serves it with
-`Cache-Control: no-store` and no single-page fallback.
+The bundle is plain files, served by one rule: the path, then
+`<path>.html`, then `<path>/index.html`, else `404.html` with a 404.
+`scripts/web-routes.md` (in every bundle as `ROUTES.md`) is the whole
+contract a server must keep, with a Caddy example: the node's paths and
+`/auth/callback` ahead of the files, and a long cache only for the
+site's content-hashed `assets/`. `apps/web/sws.toml` does the same for
+static-web-server (`just web`, the `architect-web` image), which needs
+each page's clean URL listed as a rewrite.
 
 ## Build and run it
 
@@ -45,9 +44,9 @@ just web            # builds target/web-bundle, serves it on http://localhost:80
 just web-test       # the same bundle in a headless Firefox (apps/web/test/web.test.mjs)
 ```
 
-`scripts/web-bundle.sh` builds the bundle: the app's wasm
-(`wasm32-unknown-unknown`, release) through `wasm-bindgen` at
-`Cargo.lock`'s version, the landing page, and the docs. `just web` serves
+`scripts/web-bundle.sh` builds the bundle: the site (`apps/site`, with
+bun), the app's wasm (`wasm32-unknown-unknown`, release) through
+`wasm-bindgen` at `Cargo.lock`'s version, and the docs. `just web` serves
 it with static-web-server and the image's own config (`apps/web/sws.toml`),
 so local routing is the deployed routing. Port 8080 is a redirect the
 issuer knows (`http://localhost:8080/auth/callback`), so signing in works
