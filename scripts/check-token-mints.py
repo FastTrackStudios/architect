@@ -4,7 +4,9 @@
 The fts-forge App is installed org-wide with broad permissions, so every
 token is narrowed when it is minted (actions/create-github-app-token), and
 the key itself is reachable only where a mint needs it. This PARSES every
-`.github/workflows/*.y*ml` (formatting cannot hide a mint) and fails when:
+`.github/workflows/*.y*ml` and every composite action
+(`.github/actions/**/action.y*ml`, its `runs.steps`), so formatting cannot
+hide a mint, and fails when:
 
   - a mint (any `uses:` of actions/create-github-app-token, quoted or not,
     at any indentation) is not listed in ALLOWED for its workflow and job;
@@ -18,7 +20,13 @@ the key itself is reachable only where a mint needs it. This PARSES every
   - `toJSON(secrets)` appears anywhere; a job passes `secrets: inherit`
     without being listed in INHERIT;
   - a job exports a minted token as an output, or a step writes one to
-    $GITHUB_OUTPUT / $GITHUB_ENV / $GITHUB_STEP_SUMMARY.
+    $GITHUB_OUTPUT / $GITHUB_ENV / $GITHUB_STEP_SUMMARY / $GITHUB_PATH: the
+    whole command that writes the file is read, i.e. its pipeline
+    (`… | tee -a "$GITHUB_ENV"`), a `{ …; }` or `( … )` group redirected as
+    one (one line or several), a heredoc, line continuations. A token is
+    `outputs.token`, `secrets.*`, or a variable named *TOKEN*. (A token
+    copied into a differently named variable first is beyond a lint: that
+    is what the review of the workflows is for.)
 
 A LEGACY entry is an existing mint that predates the release bots and
 reads FORGE_APP_PRIVATE_KEY; it is printed on every run. `--self-test`
@@ -83,12 +91,67 @@ def strings(node, where=()):
         yield where, node
 
 
+TARGET = r"\"?\$\{?GITHUB_(?:OUTPUT|ENV|STEP_SUMMARY|PATH)\b"
+WRITE = re.compile(r"(?:>>?|\btee\b(?:\s+-\w+)*)\s*" + TARGET)
+TOKEN = re.compile(r"outputs\.token|secrets\.|\$\{?\w*TOKEN\w*")
+
+
+def writes(script: str) -> list[str]:
+    """The text of every command in `script` that writes a GITHUB_* file."""
+    text = script.replace("\\\n", " ")
+    found = []
+    for m in WRITE.finditer(text):
+        start, end = m.start(), m.end()
+        # Back over a redirected group: `{ …; } >> F` or `( … ) >> F`.
+        j = start - 1
+        while j >= 0 and text[j] in " \t":
+            j -= 1
+        if j >= 0 and text[j] in "})":
+            close, open_ = text[j], "{" if text[j] == "}" else "("
+            depth, k = 0, j
+            while k >= 0:
+                if text[k] == close:
+                    depth += 1
+                elif text[k] == open_:
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k -= 1
+            start = max(k, 0)
+        # Back to the start of the pipeline: the previous ; && || or newline
+        # (not a `|`: `echo $T | tee -a F` is one command).
+        k = start
+        while k > 0 and text[k - 1] != "\n" and text[k - 1] != ";" \
+                and text[k - 2:k] not in ("&&", "||"):
+            k -= 1
+        start = k
+        # Forward to the end of the command, and through a heredoc's body.
+        nl = text.find("\n", end)
+        end = len(text) if nl < 0 else nl
+        cmd = text[start:end]
+        h = re.search(r"<<-?\s*['\"]?(\w+)", cmd)
+        if h:
+            term = re.compile(r"^\s*" + re.escape(h.group(1)) + r"\s*$", re.M)
+            t = term.search(text, end)
+            cmd = text[start:t.end() if t else len(text)]
+        found.append(cmd)
+    return found
+
+
+def files(root: Path):
+    """(name, parsed, steps per job) for every workflow and composite action."""
+    for path in sorted((root / ".github" / "workflows").glob("*.y*ml")):
+        doc = load(path) or {}
+        yield path.name, doc, doc.get("jobs") or {}
+    for path in sorted((root / ".github" / "actions").glob("**/action.y*ml")):
+        doc = load(path) or {}
+        runs = doc.get("runs") or {}
+        yield str(path.relative_to(root)), doc, {"(composite)": {"steps": runs.get("steps") or []}}
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     bad, legacy = [], []
-    for path in sorted((root / ".github" / "workflows").glob("*.y*ml")):
-        name = path.name
-        doc = load(path) or {}
-        jobs = doc.get("jobs") or {}
+    for name, doc, jobs in files(root):
         mint_keys: set[tuple] = set()
         for job_id, job in jobs.items():
             if not isinstance(job, dict):
@@ -104,10 +167,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                 if not isinstance(step, dict):
                     continue
                 run = step.get("run") or ""
-                # The token inside the echo/printf that writes the file (a
+                # The token inside the command that writes the file (a
                 # `[ -n "$TOKEN" ]; then echo present=true >> …` is fine).
-                if re.search(r"(echo|printf)[^;|&\n]*(outputs\.token|\$\{?\w*TOKEN\b)[^;|&\n]*>>\s*\"?\$\{?GITHUB_(OUTPUT|ENV|STEP_SUMMARY)", run):
-                    bad.append(f"{name} (job {job_id}, step {i}): a token written to $GITHUB_OUTPUT/ENV/STEP_SUMMARY")
+                for cmd in writes(run if isinstance(run, str) else ""):
+                    if TOKEN.search(cmd):
+                        bad.append(f"{name} (job {job_id}, step {i}): a token written to a GITHUB_* file: {cmd.strip()[:80]}")
                 uses = step.get("uses") or ""
                 if not (isinstance(uses, str) and MINT.match(uses)):
                     continue
@@ -222,6 +286,74 @@ jobs:
     uses: ./.github/workflows/x.yml
     secrets: inherit
 """,
+    "a brace group on one line": """
+jobs:
+  other:
+    steps:
+      - run: '{ echo "X=$GH_TOKEN"; } >> "$GITHUB_ENV"'
+""",
+    "a brace group over several lines": """
+jobs:
+  other:
+    steps:
+      - run: |
+          {
+            echo "A=1"
+            echo "X=$GH_TOKEN"
+          } >> "$GITHUB_ENV"
+""",
+    "a subshell": """
+jobs:
+  other:
+    steps:
+      - run: |
+          ( echo "A=1"; printf 'X=%s\\n' "${{ steps.forge.outputs.token }}" ) >>$GITHUB_OUTPUT
+""",
+    "tee -a": """
+jobs:
+  other:
+    steps:
+      - run: echo "X=$GH_TOKEN" | tee -a "$GITHUB_ENV"
+""",
+    "through a pipe": """
+jobs:
+  other:
+    steps:
+      - run: printf %s "$FORGE_TOKEN" | base64 >> "${GITHUB_ENV}"
+""",
+    "a heredoc": """
+jobs:
+  other:
+    steps:
+      - run: |
+          cat >> "$GITHUB_ENV" <<EOF
+          X=${{ secrets.NPM_TOKEN }}
+          EOF
+""",
+    "a line continuation": """
+jobs:
+  other:
+    steps:
+      - run: |
+          echo "X=$GH_TOKEN" \\
+            >> "$GITHUB_ENV"
+""",
+    "a composite action's mint": {".github/actions/x/action.yml": """
+name: x
+runs:
+  using: composite
+  steps:
+    - uses: actions/create-github-app-token@0000000000000000000000000000000000000000
+      with: {private-key: "${{ inputs.k }}", app-id: "1"}
+"""},
+    "a composite action writing a token": {".github/actions/y/action.yaml": """
+name: y
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: '{ echo "T=$GH_TOKEN"; } >> "$GITHUB_ENV"'
+"""},
     "an exported token": """
 jobs:
   open:
@@ -233,20 +365,50 @@ jobs:
 }
 
 
+# And shapes that must PASS (no token reaches the file).
+GOOD = {
+    "a presence check, then a write": """
+jobs:
+  other:
+    steps:
+      - run: |
+          if [ -n "$REGISTRY_TOKEN" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; fi
+          [ -n "$GH_TOKEN" ] && echo ok=1 >> "$GITHUB_OUTPUT"
+          { echo "a=1"; echo "b=2"; } >> "$GITHUB_OUTPUT"
+          echo "### done" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh api x --jq .sha > "$RUNNER_TEMP/sha"
+""",
+    "a composite action with no token": {".github/actions/z/action.yml": """
+name: z
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: echo "dir=$RUNNER_TEMP" >> "$GITHUB_OUTPUT"
+"""},
+}
+
+
+def run_case(text) -> list[str]:
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / ".github" / "workflows").mkdir(parents=True)
+        if isinstance(text, dict):
+            for rel, body in text.items():
+                f = Path(d) / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text(body)
+        else:
+            (Path(d) / ".github" / "workflows" / "case.yml").write_text("name: case\non: push\n" + text)
+        return check(Path(d))[0]
+
+
 def self_test() -> int:
-    failed = []
-    for case, text in CASES.items():
-        with tempfile.TemporaryDirectory() as d:
-            wf = Path(d) / ".github" / "workflows"
-            wf.mkdir(parents=True)
-            (wf / "case.yml").write_text("name: case\non: push\n" + text)
-            bad, _ = check(Path(d))
-            if not bad:
-                failed.append(case)
-    if failed:
-        print(f"self-test FAILED: not caught: {failed}")
+    missed = [case for case, text in CASES.items() if not run_case(text)]
+    wrong = {case: bad for case, text in GOOD.items() if (bad := run_case(text))}
+    if missed or wrong:
+        print(f"self-test FAILED: not caught: {missed}; flagged though fine: {wrong}")
         return 1
-    print(f"self-test ok: {len(CASES)} wide or leaking shapes all fail")
+    print(f"self-test ok: {len(CASES)} wide or leaking shapes all fail, {len(GOOD)} fine ones pass")
     return 0
 
 
