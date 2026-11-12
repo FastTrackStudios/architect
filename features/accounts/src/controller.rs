@@ -508,8 +508,12 @@ impl Accounts {
         match signed {
             Ok(signed) => {
                 crate::browser::close();
-                if self.still(attempt) {
-                    let _ = self.adopt(signed);
+                // A session the device cannot keep (the keychain said no)
+                // is no sign-in: said, not left waiting.
+                if self.still(attempt)
+                    && let Err(e) = self.adopt(signed)
+                {
+                    self.sign_in_failed(attempt, format!("Signed in, but this device could not keep the session: {e}"));
                 }
             }
             Err(e) => self.sign_in_failed(attempt, sentence(&e)),
@@ -592,8 +596,10 @@ impl Accounts {
                 Ok(Polled::Approved(signed)) => {
                     // Signed in: the sheet's work is done.
                     crate::browser::close();
-                    if self.still(attempt) {
-                        let _ = self.adopt(*signed);
+                    if self.still(attempt)
+                        && let Err(e) = self.adopt(*signed)
+                    {
+                        self.sign_in_failed(attempt, format!("Signed in, but this device could not keep the session: {e}"));
                     }
                     return;
                 }
