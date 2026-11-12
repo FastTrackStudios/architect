@@ -16,7 +16,8 @@ pub const SITE_CSS: &str = include_str!("../assets/site.css");
 /// What a reader does on the page: search, the theme toggle, the phone
 /// menu, the contents' current heading; and the player (#511): media,
 /// a share link's queue, and the playhead blocks follow
-/// (`assets/player.js`, inert on a page with neither).
+/// (`assets/player.js`, inert on a page with neither); a share link's
+/// phone shell (`assets/shell.js`, inert without the node's `site-shell`).
 ///
 /// Between them, the share pages' allow-lists as the player and every
 /// embedder of the web runtime hold to them (`features/extensions/web/
@@ -28,10 +29,11 @@ pub fn site_js() -> &'static str {
     static JS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     JS.get_or_init(|| {
         format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             include_str!("../assets/site.js"),
             classic_rules(),
-            include_str!("../assets/player.js")
+            include_str!("../assets/player.js"),
+            include_str!("../assets/shell.js")
         )
     })
 }

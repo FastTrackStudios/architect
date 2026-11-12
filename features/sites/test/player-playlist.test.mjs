@@ -22,6 +22,7 @@ import vm from 'node:vm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PLAYER = readFileSync(process.env.ARCHITECT_PLAYER_JS || join(here, '../assets/player.js'), 'utf8');
+const SHELL = readFileSync(join(here, '../assets/shell.js'), 'utf8');
 
 // ── A DOM just big enough ────────────────────────────────────────────
 
@@ -192,7 +193,7 @@ const block = (rows, extra = []) => el('div', { class: 'site-block site-block-01
 
 /// The setlist's page: two sets under their headings, as an existing note
 /// draws them, and (for Click and Loop) the first song's view on the page.
-function setlist({ art = null, view = null } = {}) {
+function setlist({ art = null, view = null, shell = null } = {}) {
   const body = new Node('body');
   const article = body.appendChild(el('article'));
   article.appendChild(el('h2', { id: 'presidents-songs' }, [el('a', { class: 'site-anchor', href: '#presidents-songs' }, [], '#')], 'Presidents Songs'));
@@ -208,31 +209,35 @@ function setlist({ art = null, view = null } = {}) {
   ], [el('p', { class: 'files' }, [], 'Files')]));
   if (view) body.appendChild(view);
   const queue = JSON.stringify({ scope: L, tracks: [], art: art || {} });
-  return run(body, queue);
+  return run(body, queue, shell);
 }
 
-function run(body, queue) {
+function run(body, queue, shell = null) {
   const frames = [];
   const store = new Map();
   const timers = [];
   const audio = new FakeAudio();
   const queueEl = queue ? Object.assign(new Node('script'), { ownText: queue }) : null;
+  const shellEl = shell ? Object.assign(new Node('script'), { ownText: JSON.stringify(shell) }) : null;
+  const replaced = [];
   const document = {
     body,
     documentElement: new Node('html'),
     currentScript: null,
-    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : null),
+    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-shell') ? shellEl : null),
+    getElementById: () => null,
     querySelectorAll: (sel) => body.querySelectorAll(sel),
     createElement: (tag) => (tag === 'audio' ? new Media('') : new Node(tag)),
     dispatchEvent: () => {},
     addEventListener: () => {},
     createComment: () => new Node('#comment'),
   };
-  const location = { href: `http://node.test${L}merry/`, origin: 'http://node.test' };
+  const location = { href: `http://node.test${L}merry/`, origin: 'http://node.test', pathname: `${L}merry/`, search: '', hash: '' };
   const window = {
     document,
     location,
-    history: { state: null, pushState() {}, back() {} },
+    history: { state: null, pushState() {}, back() {}, replaceState(_, __, url) { replaced.push(url); location.hash = url.slice(url.indexOf('#')); } },
+    scrollTo() {},
     sessionStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) },
     requestAnimationFrame: (fn) => frames.push(fn),
     cancelAnimationFrame: () => {},
@@ -252,7 +257,7 @@ function run(body, queue) {
     JSON,
   };
   Object.assign(window, { window });
-  vm.runInNewContext(PLAYER, window);
+  vm.runInNewContext(PLAYER + '\n' + SHELL, window);
   const playhead = window.architect.playhead;
   const audioEl = () => body.all().find((n) => n instanceof Media);
   /// The media at `t`, its clock moved on with the audio clock's.
@@ -262,7 +267,7 @@ function run(body, queue) {
     a.currentTime = t;
   };
   return {
-    body, playhead, audio, window, location,
+    body, playhead, audio, window, location, replaced,
     tick: () => timers.forEach((f) => f && f()),
     frame: () => frames.splice(0).forEach((f) => f()),
     audioEl, at,
@@ -440,4 +445,63 @@ test('Loop holds the section playing, and a seek moves it', async () => {
   p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: (s) => (s === '[data-act]' ? button : null) }, preventDefault() {} });
   assert.equal(at(7.2), 7.2);
   assert.deepEqual(plain(JSON.parse(p.window.sessionStorage.getItem(`architect.player:${L}`))).loop, false);
+});
+
+// ── The phone shell ─────────────────────────────────────────────────
+
+const SHELL_SPEC = {
+  home: `${L}merry/`,
+  type: 'setlist',
+  tabs: [
+    { id: 'setlist', label: 'Setlist', icon: '<svg></svg>', target: { view: 'page' } },
+    { id: 'charts', label: 'Charts', icon: '<svg></svg>', target: { view: 'player.now' } },
+    { id: 'lyrics', label: 'Lyrics', icon: '<svg></svg>', target: { view: 'player.lyrics' } },
+    // A view this page does not have: left out.
+    { id: 'browse', label: 'Browse', icon: '<svg></svg>', target: { view: 'browse' } },
+  ],
+  primary: { id: 'play', label: 'Play', icon: '<svg></svg>', target: { action: 'PLAYER_TOGGLE' }, state: 'playing', on: { label: 'Pause', icon: '<svg></svg>', target: { action: 'PLAYER_TOGGLE' } } },
+};
+
+test('the shell: a type\'s tabs, Charts as a tab of the player, the card going there, the round button playing', () => {
+  const p = setlist({ shell: SHELL_SPEC });
+  const tabs = p.body.querySelectorAll('.site-tab');
+  assert.deepEqual(tabs.map((t) => t.getAttribute('data-tab')), ['setlist', 'charts', 'lyrics'], 'no navigator here: no Browse');
+  assert.equal(tabs[0].getAttribute('aria-current'), 'page', 'its page is the setlist tab');
+  assert.ok(p.body.classList.contains('site-shell'));
+  // Charts with nothing playing: the first song, ready, its view a tab.
+  tabs[1].click();
+  assert.equal(p.playhead.src, `${L}Sleigh.mp3`);
+  assert.equal(p.playhead.playing, false);
+  assert.equal(p.location.hash, '#tab=charts');
+  const sheet = p.body.querySelectorAll('.site-now')[0];
+  assert.equal(sheet.hidden, false);
+  assert.ok(sheet.classList.contains('site-now-tab'), 'a tab, not a sheet over the page');
+  assert.equal(sheet.getAttribute('aria-modal'), null);
+  assert.equal(tabs[1].getAttribute('aria-current'), 'page');
+  // Lyrics: the same view, its words.
+  tabs[2].click();
+  assert.ok(sheet.classList.contains('site-now-showing-lyrics'));
+  assert.equal(p.location.hash, '#tab=lyrics');
+  // Back to the list: the view closes.
+  tabs[0].click();
+  assert.equal(sheet.hidden, true);
+  assert.equal(p.location.hash, '#tab=setlist');
+  // The round button plays and pauses the set.
+  const round = p.body.querySelectorAll('.site-tabs-round')[0];
+  round.click();
+  assert.equal(p.playhead.playing, true);
+  assert.equal(round.getAttribute('aria-label'), 'Pause');
+  round.click();
+  assert.equal(p.playhead.playing, false);
+  assert.ok(p.body.classList.contains('site-shell-plays'), 'the card leaves play to it');
+  // The card goes to the Charts tab.
+  p.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: () => null }, preventDefault() {} });
+  assert.equal(p.location.hash, '#tab=charts');
+  assert.ok(sheet.classList.contains('site-now-tab'));
+});
+
+test('no shell without the node\'s site-shell', () => {
+  const p = setlist();
+  assert.equal(p.body.querySelectorAll('.site-tabs').length, 0);
+  assert.equal(p.window.architect.shell, undefined);
 });

@@ -2048,7 +2048,11 @@ relative to the open note, and whoever draws the shell resolves it (a
 share link's phone shell its own views; the app's shell its views and its
 Action List). A tab whose target the shell does not know is left out; a
 `state` it does not know shows the first face only. A type that declares
-none keeps the shell's own tabs.
+none keeps the shell's own tabs. A share link's phone shell
+(`features/sites/src/shell.rs`) opens the views `page` (the link's root
+note's page), `search`, `browse`, `player.now` (the now-playing view, as
+a tab) and `player.lyrics`, runs `PLAYER_TOGGLE` and knows the state
+`playing`; its own tabs are Home, Search and Browse.
 
 ### Share layers
 

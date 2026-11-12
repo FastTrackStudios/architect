@@ -59,6 +59,10 @@ architect-theme = { workspace = true }
 # and the claims an extension makes on blocks (`Claim`, `[[embeds]]`).
 architect-pages = { workspace = true }
 architect-extensions = { workspace = true }
+# A share's phone shell: a note type's favourites (the tabs), and Lucide's
+# icons by name (`architect-shell`'s data, no UI).
+architect-favourites = { workspace = true }
+architect-shell = { workspace = true }
 # The layout: pure components, rendered to a string once per page.
 dioxus = { workspace = true }
 dioxus-ssr = { workspace = true }
@@ -70,6 +74,7 @@ architect-settings = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 
 [dev-dependencies]
+toml = { workspace = true }
 tempfile = "3"
 # Its own embed renderers, so `cargo test --workspace` builds the tests
 # with them: tests/wasi.rs mounts a real component's embed view.

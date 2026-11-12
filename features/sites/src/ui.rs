@@ -109,7 +109,7 @@ pub fn Head(site: Rc<Site>, view: View, assets: Rc<Assets>) -> Element {
     };
     rsx! {
         meta { charset: "utf-8" }
-        meta { name: "viewport", content: "width=device-width, initial-scale=1" }
+        meta { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" }
         meta { name: "color-scheme", content: "light dark" }
         title { "{title}" }
         if let Some(description) = description {
