@@ -52,6 +52,8 @@ pub mod package;
 pub mod project;
 pub mod reapack;
 pub mod share_layers;
+/// `[[favourites]]`: a note type's tabs and primary action.
+pub use architect_favourites as favourites;
 pub mod toolbar;
 pub mod toolbar_edit;
 

@@ -3,10 +3,13 @@ import { Link } from "@tanstack/react-router";
 import { Cmd } from "#/components/ui/cmd";
 import { GET } from "#/content/landing";
 import { NIX_RUN } from "#/content/site";
-import { type Asset, RELEASE } from "#/lib/data";
+import { RELEASE } from "#/lib/data";
+import type { ReleaseAsset } from "#/lib/release-assets";
+import { useReleaseAssets } from "#/lib/release-check";
 
 /** The close: every way to get it, then where to read on. */
 export function Get() {
+	const { assets } = useReleaseAssets(RELEASE.tag);
 	return (
 		<section id={GET.id} className="get wrap" aria-labelledby="get-title">
 			<div className="feature-head">
@@ -16,8 +19,8 @@ export function Get() {
 				</a>
 			</div>
 			<ul className="get-list">
-				<Platform k={GET.linux.k} v={GET.linux.v} asset={RELEASE.linux} />
-				<Platform k={GET.macos.k} v={GET.macos.v} asset={RELEASE.macos} />
+				<Platform k={GET.linux.k} v={GET.linux.v} asset={assets.linux} />
+				<Platform k={GET.macos.k} v={GET.macos.v} asset={assets.macos} />
 				<li>
 					<h3>{GET.nix.k}</h3>
 					<Cmd text={NIX_RUN} copy={GET.copy} copied={GET.copied} />
@@ -51,14 +54,15 @@ function Platform({
 }: {
 	k: string;
 	v: string;
-	asset: Asset | null;
+	asset: ReleaseAsset;
 }) {
+	const there = asset.state !== "missing";
 	return (
 		<li>
 			<h3>
-				{k} <span>{asset ? v : GET.missing}</span>
+				{k} <span>{there ? v : GET.missing}</span>
 			</h3>
-			{asset ? (
+			{there ? (
 				<a className="btn" href={asset.url}>
 					{GET.download}
 				</a>

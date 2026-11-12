@@ -1314,6 +1314,7 @@ dependencies = [
  "architect-editor",
  "architect-extension-archive",
  "architect-extensions",
+ "architect-favourites",
  "architect-guide",
  "architect-input",
  "architect-navigator-api",
@@ -1364,6 +1365,15 @@ dependencies = [
  "wasmtime-wasi",
  "web-sys",
  "wit-parser 0.261.0",
+]
+
+[[package]]
+name = "architect-favourites"
+version = "0.1.0"
+dependencies = [
+ "architect-workspace-hack",
+ "serde",
+ "toml 0.8.2",
 ]
 
 [[package]]

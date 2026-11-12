@@ -6,8 +6,9 @@ import { defineConfig } from "vite";
 import { PAGES, SKIP_PRERENDER } from "./src/content/pages.ts";
 
 /**
- * Every page is prerendered: the deploy is `.output/public` as static
- * files (scripts/assemble.sh), so no page needs a server at request time.
+ * Every page is prerendered: `.output/public` is the root of the web
+ * bundle (scripts/web-bundle.sh), plain static files, so no page needs a
+ * server at request time.
  * The Nitro server build exists because the hub's toolchain makes one;
  * it is used only to render the pages at build time and is never deployed.
  */
@@ -19,8 +20,8 @@ const config = defineConfig({
 			prerender: {
 				enabled: true,
 				crawlLinks: true,
-				// /download.html, not /download/index.html: Vercel's cleanUrls
-				// serves it at /download (scripts/assemble.sh).
+				// /download.html, not /download/index.html: the bundle's server
+				// tries P, then P.html, then P/index.html (scripts/serve.ts).
 				autoSubfolderIndex: false,
 				failOnError: true,
 				// Only PAGES and what they link to: no /extensions/ twin of /extensions.

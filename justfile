@@ -346,8 +346,8 @@ vault-reset:
 alias lab-vault-reset := vault-reset
 
 
-# The web front end (#431): the landing page at /, the docs at /docs/ and
-# the web app at /app/, one static bundle (scripts/web-bundle.sh) into
+# The web front end (#431): the site (apps/site) at /, the docs at /docs/
+# and the web app at /app/, one static bundle (scripts/web-bundle.sh) into
 # target/web-bundle, served by static-web-server with the image's own
 # config (apps/web/sws.toml) on PORT (0: build only). 8080 is a redirect
 # the issuer knows (`http://localhost:8080/auth/callback`), so sign-in
@@ -362,7 +362,7 @@ web PORT="8080":
     fi
 
 # The web front end in a real browser (apps/web/test/web.test.mjs): the
-# landing page, the docs, the app's sign-in redirect (caught before it
+# site's pages, the docs, the app's sign-in redirect (caught before it
 # leaves) and its callbacks, and the node's paths answering 404 here; in
 # a headless Firefox (FIREFOX=… names one).
 web-test PORT="18080":
@@ -406,6 +406,14 @@ share-webview-test:
 # (geckodriver from nixpkgs): what keeps that path from rotting without a Mac.
 share-webview-test-classic:
     DRIVER=gecko GECKODRIVER="$(nix build --no-link --print-out-paths nixpkgs#geckodriver)/bin/geckodriver" just share-webview-test
+
+# The site's /download (apps/site): its link logic (bun test), then the
+# built page in a headless Firefox with GitHub's API stubbed: every file
+# there, the Mac build missing, the API down, rate limited
+# (apps/site/test/download.browser.mjs; SCREENSHOTS=<dir> keeps the shots).
+site-download-test:
+    cd apps/site && bun install --frozen-lockfile && bun run test && bun run build
+    cd apps/site && env -u LD_LIBRARY_PATH node --test test/download.browser.mjs
 
 share-player-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --bin architect-desktop

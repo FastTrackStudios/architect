@@ -610,6 +610,8 @@ pub fn same_file(a: &std::fs::Metadata, b: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use super::*;
 
     fn entry(path: &str, kind: Option<&str>, files: &[&str]) -> Entry {
@@ -769,6 +771,61 @@ mod tests {
         assert!(current.broken[0].contains("other/extension.toml"));
         assert!(LayerRules::place(&current, &entries).is_none());
         assert!(!current.is_empty());
+    }
+
+    /// A `[[favourites]]` declaration that breaks a rule (a label too
+    /// long, six tabs) is dropped, never the manifest: its share layers
+    /// still place files, so no link holds back everything for it.
+    #[test]
+    fn a_bad_favourites_declaration_never_makes_placement_unknown() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut tabs = String::new();
+        for i in 0..6 {
+            let _ = write!(
+                tabs,
+                "[[favourites.tabs]]\nid = \"t{i}\"\nlabel = \"Tab {i}\"\nicon = \"music\"\ntarget = {{ view = \"page\" }}\n"
+            );
+        }
+        install(
+            tmp.path(),
+            "demo.songs",
+            &format!("{OWNER}\n[[favourites]]\nnote_type = \"song\"\n{tabs}"),
+        );
+        let rules = LayerRules::new(Some(tmp.path().to_owned()), Vec::new(), None);
+        let current = rules.current();
+        assert!(current.broken.is_empty(), "{:?}", current.broken);
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        assert_eq!(
+            LayerRules::place(&current, &entries)
+                .unwrap()
+                .get("Joy/Media/Bass.ogg"),
+            Some(&Listen::Full)
+        );
+    }
+
+    /// A `[[favourites]]` declaration of the wrong shape (a misspelt key)
+    /// is dropped like a bad one: the manifest reads, its share layers
+    /// still place the files, nothing is held back.
+    #[test]
+    fn a_misshapen_favourites_declaration_never_makes_placement_unknown() {
+        let tmp = tempfile::tempdir().unwrap();
+        install(
+            tmp.path(),
+            "demo.songs",
+            &format!(
+                "{OWNER}\n[[favourites]]\nnote_type = \"song\"\n[[favourites.tabs]]\nid = \"song\"\nlable = \"Song\"\nicon = \"music\"\ntarget = {{ view = \"page\" }}\n"
+            ),
+        );
+        let rules = LayerRules::new(Some(tmp.path().to_owned()), Vec::new(), None);
+        let current = rules.current();
+        assert!(current.broken.is_empty(), "{:?}", current.broken);
+        let entries = [entry("Joy/Joy.md", Some("song"), &["Joy/Media/Bass.ogg"])];
+        assert_eq!(
+            LayerRules::place(&current, &entries)
+                .unwrap()
+                .get("Joy/Media/Bass.ogg"),
+            Some(&Listen::Full)
+        );
     }
 
     #[test]

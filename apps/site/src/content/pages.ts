@@ -15,8 +15,8 @@ export const PAGES = [
 ];
 
 /**
- * Links that leave this app: the docs (a separate build, copied in at
- * deploy), the node's paths (redirects), and /guides/ (linked by the
+ * Links that leave this app: the docs (a separate build, copied in by
+ * scripts/web-bundle.sh), the node's paths (the web app, share links), and /guides/ (linked by the
  * landing page, served by nothing today). Never crawled.
  */
 export const SKIP_PRERENDER = ["/docs", "/app", "/s/", "/guides"];
