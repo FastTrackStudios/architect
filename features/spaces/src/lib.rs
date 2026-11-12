@@ -53,8 +53,8 @@ pub use service::{
     spaces_service_rpc_service_descriptor,
 };
 pub use share::{
-    Audience, KeptLayers, Listen, NewAudience, NewShare, Share, ShareAccess, ShareAudience,
-    ShareChange, ShareComment, ShareFault, ShareScope, ShareState, Verdict, Viewer,
+    Audience, KeptLayers, LayersReport, Listen, NewAudience, NewShare, Share, ShareAccess,
+    ShareAudience, ShareChange, ShareComment, ShareFault, ShareScope, ShareState, Verdict, Viewer,
 };
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub use share_note::{comments_note, parse_comments, parse_share_note, share_note};

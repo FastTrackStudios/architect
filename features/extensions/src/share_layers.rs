@@ -15,7 +15,8 @@
 //!
 //! Each pattern is matched against an attached file's path relative to
 //! the folder of the note that attaches it (a file outside that folder:
-//! its vault path), whole, in any ASCII case (as `note_type` is): `*` and
+//! its vault path), whole, in any case (Unicode lowercase, character by
+//! character; `note_type` the same, its spaces trimmed): `*` and
 //! `?` stay within one segment, `**` is any number of segments. Matching
 //! takes time linear in the pattern times the path, never exponential,
 //! and [`ShareLayersDecl::check`] bounds what a manifest may ask
@@ -38,7 +39,7 @@ pub const MAX_STARS: usize = 8;
 /// One `[[share_layers]]` rule: the files of notes of `note_type`, by
 /// layer.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ShareLayersDecl {
     /// The notes it is about, by their frontmatter `type:` (`song`).
     pub note_type: String,
@@ -77,7 +78,12 @@ impl ShareLayersDecl {
     /// Whether it is about notes of `note_type` (any case).
     #[must_use]
     pub fn is_for(&self, note_type: &str) -> bool {
-        self.note_type.eq_ignore_ascii_case(note_type.trim())
+        let (mine, theirs) = (self.note_type.trim(), note_type.trim());
+        mine.chars().count() == theirs.chars().count()
+            && mine
+                .chars()
+                .zip(theirs.chars())
+                .all(|(a, b)| same_char(a, b))
     }
 
     /// Its note type named, and each pattern a relative path within the
@@ -128,9 +134,12 @@ impl ShareLayersDecl {
     }
 }
 
-/// Whether `path` matches `pattern`, whole, segment by segment, in any
-/// ASCII case. Linear in the pattern times the path: one wildcard is
-/// retried at a time, never a tree of them.
+/// Whether `path` matches `pattern`, whole, segment by segment.
+///
+/// In any case (Unicode lowercase, character by character: `Gänse*` is
+/// `GÄNSE.ogg`; the Unicode form is not folded: spell it as the vault
+/// does). Linear in the pattern times the path: one wildcard is retried
+/// at a time, never a tree of them.
 #[must_use]
 pub fn glob(pattern: &str, path: &str) -> bool {
     let pattern: Vec<&str> = pattern.split('/').collect();
@@ -147,8 +156,13 @@ fn one(pattern: &str, name: &str) -> bool {
         &pattern,
         &name,
         |c| *c == '*',
-        |p, n| *p == '?' || p.eq_ignore_ascii_case(n),
+        |p, n| *p == '?' || same_char(*p, *n),
     )
+}
+
+/// `a` and `b` alike in any case: equal, or equal lower cased (Unicode).
+fn same_char(a: char, b: char) -> bool {
+    a == b || a.to_lowercase().eq(b.to_lowercase())
 }
 
 /// `items` matched whole by `pattern`, where `star(p)` matches any run
@@ -291,7 +305,7 @@ mod tests {
         );
     }
 
-    /// A note type and a pattern both match in any ASCII case.
+    /// A note type and a pattern both match in any case.
     #[test]
     fn note_types_and_patterns_ignore_ascii_case() {
         let rule = song();
@@ -325,5 +339,40 @@ mod tests {
             .check()
             .is_err()
         );
+    }
+
+    /// A misspelled list is not ignored: the manifest does not read.
+    #[test]
+    fn an_unknown_key_is_refused() {
+        let text = "id = \"x.y\"\nname = \"X\"\nversion = \"0.1.0\"\nkind = \"data\"\n\n[[share_layers]]\nnote_type = \"song\"\nfulll = [\"Media/**\"]\n";
+        assert!(crate::manifest::Manifest::parse(text).is_err());
+    }
+
+    /// Spaces around a note type are not part of it.
+    #[test]
+    fn a_note_type_with_spaces_matches() {
+        let rule = ShareLayersDecl {
+            note_type: " Song ".into(),
+            ..song()
+        };
+        assert!(rule.is_for("song"));
+        assert!(rule.is_for(" SONG"));
+    }
+
+    /// Case is folded beyond ASCII: `Gänse*` is `GÄNSE.ogg`.
+    #[test]
+    fn case_folding_is_unicode() {
+        assert!(glob("Media/Gänse*", "MEDIA/GÄNSE.ogg"));
+        assert!(glob("Ä?", "äb"));
+        let rule = ShareLayersDecl {
+            note_type: "Lied".into(),
+            ..song()
+        };
+        assert!(rule.is_for("LIED"));
+        let umlaut = ShareLayersDecl {
+            note_type: "Stück".into(),
+            ..song()
+        };
+        assert!(umlaut.is_for("STÜCK"));
     }
 }

@@ -9,7 +9,7 @@
 use architect_permissions::{MethodPermit, ServicePermits};
 
 use crate::share::{
-    KeptLayers, Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareFault,
+    LayersReport, Listen, NewAudience, NewShare, Share, ShareChange, ShareComment, ShareFault,
 };
 
 #[architect::rpc]
@@ -51,14 +51,20 @@ pub trait ShareLinks {
     ) -> Result<Share, ShareFault>;
 
     /// The layer rules the node keeps for extensions no longer installed
-    /// (#528): they still place files, so removing an extension never
-    /// opens a link.
-    async fn kept_layers(&self) -> Result<Vec<KeptLayers>, ShareFault>;
+    /// (#528), which still place files so removing an extension never
+    /// opens a link, and its notices about its rules.
+    async fn kept_layers(&self) -> Result<LayersReport, ShareFault>;
 
-    /// Forget the kept layer rules of `extension`: its files are placed by
-    /// the rules installed now. Refused for an installed extension (its
-    /// rules are its manifest's) and for one nothing is kept of.
-    async fn forget_layers(&self, extension: String) -> Result<Vec<KeptLayers>, ShareFault>;
+    /// Forget the kept layer rules of `extension` (its id or its folder):
+    /// its files are placed by the rules installed now. Refused for an
+    /// installed extension (its rules are its manifest's) and for one
+    /// nothing is kept of.
+    async fn forget_layers(&self, extension: String) -> Result<LayersReport, ShareFault>;
+
+    /// Acknowledge the node's notices about its layer rules: a kept-rules
+    /// file that did not read (set aside; files stay held back until
+    /// this) and rules a reinstall lowered. Answers what is left.
+    async fn acknowledge_layers(&self) -> Result<LayersReport, ShareFault>;
 
     /// The comments left on a share, oldest first.
     async fn comments(&self, code: String) -> Result<Vec<ShareComment>, ShareFault>;
@@ -77,6 +83,7 @@ pub const SHARE_PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("audience_listen", "write", "vaults/**").audited(),
         MethodPermit::new("kept_layers", "read", "vaults/**"),
         MethodPermit::new("forget_layers", "write", "vaults/**").audited(),
+        MethodPermit::new("acknowledge_layers", "write", "vaults/**").audited(),
         MethodPermit::new("comments", "read", "vaults/**"),
     ],
 };
