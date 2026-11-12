@@ -100,8 +100,9 @@ impl AccountsUi {
         let file = self.snapshot();
         let me = *self;
         let Some(active) = file.active().cloned() else {
-            let mut menu = shell::Menu::new()
-                .item("Sign in…", icon!(LogIn), move |()| me.accounts().sign_in());
+            let mut menu = shell::Menu::new().item("Sign in…", icon!(LogIn), move |()| {
+                me.accounts().sign_in()
+            });
             if !file.accounts.is_empty() {
                 menu = menu.item("Accounts…", icon!(Users), move |()| {
                     me.open(Sheet::Accounts);
@@ -339,7 +340,6 @@ fn StatusLine(status: Status) -> Element {
         }
     }
 }
-
 
 /// The sign-in sheet: the browser sign-in under way (its code, the page
 /// again, Cancel), or the button that starts it. No field here takes a

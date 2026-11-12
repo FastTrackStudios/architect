@@ -43,7 +43,11 @@ pub fn loopback_redirect(port: u16) -> String {
 /// v4 draws on the OS's generator).
 #[must_use]
 pub fn new_pkce() -> Pkce {
-    let (a, b, c) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let (a, b, c) = (
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+    );
     let mut verifier = [0_u8; 32];
     verifier[..16].copy_from_slice(a.as_bytes());
     verifier[16..].copy_from_slice(b.as_bytes());
@@ -89,7 +93,10 @@ pub fn callback(url: &str, pkce: &Pkce) -> Result<String, CallbackError> {
     if let Some(e) = error {
         return Err(CallbackError::Refused(e));
     }
-    if pkce.check_state(state.as_deref().unwrap_or_default()).is_err() {
+    if pkce
+        .check_state(state.as_deref().unwrap_or_default())
+        .is_err()
+    {
         return Err(CallbackError::WrongState);
     }
     code.filter(|c| !c.is_empty()).ok_or(CallbackError::NoCode)
@@ -100,10 +107,16 @@ pub fn callback(url: &str, pkce: &Pkce) -> Result<String, CallbackError> {
 #[must_use]
 pub fn exchange_body(client_id: &str, access_token: &str) -> String {
     form(&[
-        ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
+        (
+            "grant_type",
+            "urn:ietf:params:oauth:grant-type:token-exchange",
+        ),
         ("client_id", client_id),
         ("subject_token", access_token),
-        ("subject_token_type", "urn:ietf:params:oauth:token-type:access_token"),
+        (
+            "subject_token_type",
+            "urn:ietf:params:oauth:token-type:access_token",
+        ),
         (
             "requested_token_type",
             "urn:fasttrackstudio:params:oauth:token-type:session",
@@ -190,19 +203,34 @@ mod tests {
     fn a_callback_gives_its_code_only_for_this_attempts_state() {
         let p = pkce();
         assert_eq!(
-            callback("app.fasttrackstudio.architect:/oauth/callback?code=c0de&state=st8", &p),
+            callback(
+                "app.fasttrackstudio.architect:/oauth/callback?code=c0de&state=st8",
+                &p
+            ),
             Ok("c0de".to_owned())
         );
-        assert_eq!(callback("/oauth/callback?state=st8&code=a%2Bb", &p), Ok("a+b".to_owned()));
+        assert_eq!(
+            callback("/oauth/callback?state=st8&code=a%2Bb", &p),
+            Ok("a+b".to_owned())
+        );
         // Another attempt's state (a stale tab, a forged link).
-        assert_eq!(callback("/oauth/callback?code=c0de&state=other", &p), Err(CallbackError::WrongState));
-        assert_eq!(callback("/oauth/callback?code=c0de", &p), Err(CallbackError::WrongState));
+        assert_eq!(
+            callback("/oauth/callback?code=c0de&state=other", &p),
+            Err(CallbackError::WrongState)
+        );
+        assert_eq!(
+            callback("/oauth/callback?code=c0de", &p),
+            Err(CallbackError::WrongState)
+        );
         // The issuer said no.
         assert_eq!(
             callback("/oauth/callback?error=access_denied&state=st8", &p),
             Err(CallbackError::Refused("access_denied".to_owned()))
         );
-        assert_eq!(callback("/oauth/callback?state=st8", &p), Err(CallbackError::NoCode));
+        assert_eq!(
+            callback("/oauth/callback?state=st8", &p),
+            Err(CallbackError::NoCode)
+        );
     }
 
     #[test]
@@ -213,15 +241,22 @@ mod tests {
         );
         assert_eq!(loopback_target("GET /favicon.ico HTTP/1.1\r\n"), None);
         assert_eq!(loopback_target("POST /oauth/callback HTTP/1.1\r\n"), None);
-        assert_eq!(loopback_redirect(53124), "http://127.0.0.1:53124/oauth/callback");
+        assert_eq!(
+            loopback_redirect(53124),
+            "http://127.0.0.1:53124/oauth/callback"
+        );
     }
 
     #[test]
     fn the_exchange_form_names_the_session_it_asks_for() {
         let body = exchange_body("architect", "eyJ.a-b_c");
-        assert!(body.contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange"));
+        assert!(
+            body.contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange")
+        );
         assert!(body.contains("subject_token=eyJ.a-b_c"));
-        assert!(body.contains("requested_token_type=urn%3Afasttrackstudio%3Aparams%3Aoauth%3Atoken-type%3Asession"));
+        assert!(body.contains(
+            "requested_token_type=urn%3Afasttrackstudio%3Aparams%3Aoauth%3Atoken-type%3Asession"
+        ));
         // Two attempts never share a verifier or a state.
         let (a, b) = (new_pkce(), new_pkce());
         assert_ne!(a.verifier(), b.verifier());

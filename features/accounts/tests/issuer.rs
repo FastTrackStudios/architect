@@ -41,7 +41,12 @@ fn native_client(issue_sessions: bool) -> architect_auth::OidcClientConfig {
             "http://127.0.0.1/oauth/callback".into(),
             "app.fasttrackstudio.architect:/oauth/callback".into(),
         ],
-        scopes: vec!["openid".into(), "profile".into(), "email".into(), "offline_access".into()],
+        scopes: vec![
+            "openid".into(),
+            "profile".into(),
+            "email".into(),
+            "offline_access".into(),
+        ],
         public_client: true,
         skip_consent: true,
         disabled: false,
@@ -332,7 +337,6 @@ async fn each_account_has_its_orgs_and_keeps_the_one_it_is_in() {
     assert!(a.orgs().current().is_none() && a.active_session().scope().is_all());
 }
 
-
 /// The person's browser on the issuer: signed in as `email`, it opens the
 /// sign-in page the app opened and follows the issuer's redirect, which
 /// must lead to the app's loopback port; answers that redirect.
@@ -370,9 +374,15 @@ async fn a_browser_sign_in_comes_back_on_the_apps_loopback_port_signed_in() {
     a.sign_in();
     until("the sign-in page", || a.browser().is_some()).await;
     let wait = a.browser().unwrap();
-    assert!(wait.url.starts_with(&format!("{origin}/oauth2/authorize?")), "the issuer's own page");
+    assert!(
+        wait.url.starts_with(&format!("{origin}/oauth2/authorize?")),
+        "the issuer's own page"
+    );
     assert!(wait.url.contains("code_challenge_method=S256"));
-    assert!(wait.user_code.is_empty(), "no code to type: the browser comes back");
+    assert!(
+        wait.user_code.is_empty(),
+        "no code to type: the browser comes back"
+    );
 
     let back = browser_signs_in(&origin, &wait.url, "ada@local.test").await;
     // The browser lands on the app's port: a page saying to go back.
@@ -381,7 +391,10 @@ async fn a_browser_sign_in_comes_back_on_the_apps_loopback_port_signed_in() {
     assert!(landed.text().await.unwrap().contains("signed in"));
 
     until("the account", || a.active().is_some()).await;
-    assert_eq!(a.active().and_then(|x| x.email).as_deref(), Some("ada@local.test"));
+    assert_eq!(
+        a.active().and_then(|x| x.email).as_deref(),
+        Some("ada@local.test")
+    );
     assert_eq!(a.sheet(), None);
     assert_eq!(secrets.len(), 1, "the session, in the keychain");
     // A session the issuer's services take (what orgs and devices need).
