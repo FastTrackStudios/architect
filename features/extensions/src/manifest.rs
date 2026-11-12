@@ -1977,7 +1977,6 @@ mod webrtc_tests {
     }
 }
 
-
 #[cfg(test)]
 mod favourites_tests {
     /// `[[favourites]]` reads into the manifest, and one that breaks a
