@@ -4,10 +4,135 @@
 //!
 //! Each secret is an entry of the store's service name, its account the
 //! key. The service is [`DEFAULT_SERVICE`] unless [`SERVICE_ENV`] names
-//! another: a test or a throwaway session keeps its own entries apart from
-//! the person's.
+//! another, for a real, signed build.
+//!
+//! **Development builds and tests never touch it** ([`secret_store`]). An
+//! unsigned binary rebuilt again and again is a new code identity to macOS
+//! each time, so reading an entry an earlier build wrote asks the person
+//! ("wants to use your confidential information"), on every launch, and
+//! "Always Allow" cannot stick. So:
+//!
+//! - [`STORE_ENV`] picks the store: `file:<path>`, `file` (the app
+//!   folder's `secrets.json`), `memory`, or `keychain`. The dev stack sets
+//!   `file:` for its app.
+//! - With none, a debug build on macOS or the iOS simulator keeps its
+//!   sessions in the app folder's file ([`crate::FileSecrets`]) and says so
+//!   once; a release build keeps the keychain.
+//! - [`FORBID_ENV`] (`ARCHITECT_FORBID_KEYCHAIN=1`: every `cargo test`,
+//!   `cargo nextest` and `cargo run` in the repo, `.cargo/config.toml`, and
+//!   the dev stack) makes any keychain access panic, and [`secret_store`]
+//!   choose the file instead.
 
-use crate::secrets::{SecretError, SecretStore};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::secrets::{FileSecrets, MemorySecrets, SecretError, SecretStore};
+
+/// Picks the store: `file:<path>`, `file`, `memory` or `keychain`.
+pub const STORE_ENV: &str = "ARCHITECT_SECRET_STORE";
+
+/// `1`: this process must never open the platform keychain (tests, the dev
+/// stack); [`Keychain`] panics if it is used.
+pub const FORBID_ENV: &str = "ARCHITECT_FORBID_KEYCHAIN";
+
+/// Whether [`FORBID_ENV`] forbids the keychain here: a debug build only.
+/// A release build ignores it, so whoever can set the app's environment
+/// (`launchctl setenv`) cannot move its sessions out of the keychain.
+#[must_use]
+pub fn keychain_forbidden() -> bool {
+    cfg!(debug_assertions) && std::env::var(FORBID_ENV).is_ok_and(|v| v.trim() == "1")
+}
+
+/// The secrets file a store keeps in `dir` (the app's folder).
+pub const SECRETS_FILE: &str = "secrets.json";
+
+/// Which store a process uses ([`choose_store`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StoreChoice {
+    /// The platform keychain, under this service.
+    Keychain(String),
+    /// A file only its owner reads.
+    File(PathBuf),
+    /// Memory, for the process's life.
+    Memory,
+}
+
+/// Whether this build is a development one that the keychain would keep
+/// asking about: a debug build on macOS or the iOS simulator.
+#[must_use]
+pub const fn development_build() -> bool {
+    cfg!(debug_assertions)
+        && (cfg!(target_os = "macos") || cfg!(all(target_os = "ios", target_abi = "sim")))
+}
+
+/// The store for a process, from its environment (`env`), whether the
+/// keychain is forbidden, whether it is a development build and whether
+/// it is a debug one: see the module's docs. `dir` is the app's folder.
+///
+/// A release build (`debug` false) takes from its environment only
+/// `memory` (a session kept for the process alone, never on disk) and the
+/// keychain's service name: never a file, never "forbidden", so its
+/// sessions cannot be moved into a file someone chose.
+#[must_use]
+pub fn choose_store(
+    env: impl Fn(&str) -> Option<String>,
+    default_service: &str,
+    dir: &Path,
+    forbidden: bool,
+    development: bool,
+    debug: bool,
+) -> StoreChoice {
+    let file = || StoreChoice::File(dir.join(SECRETS_FILE));
+    let service = || {
+        env(SERVICE_ENV)
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| default_service.to_owned())
+    };
+    if !debug {
+        return match env(STORE_ENV).as_deref().map(str::trim) {
+            Some("memory") => StoreChoice::Memory,
+            _ => StoreChoice::Keychain(service()),
+        };
+    }
+    match env(STORE_ENV).as_deref().map(str::trim) {
+        Some("memory") => StoreChoice::Memory,
+        Some("file") => file(),
+        Some(v) if v.starts_with("file:") && v.len() > 5 => {
+            StoreChoice::File(PathBuf::from(v.get(5..).unwrap_or_default()))
+        }
+        Some("keychain") if !forbidden => StoreChoice::Keychain(service()),
+        _ if forbidden || development => file(),
+        _ => StoreChoice::Keychain(service()),
+    }
+}
+
+/// The store this process keeps sessions in ([`choose_store`] from its
+/// environment); it says once when it is a file because this is a
+/// development build or the keychain is forbidden.
+#[must_use]
+pub fn secret_store(default_service: &str, dir: &Path) -> Arc<dyn SecretStore> {
+    let explicit = std::env::var(STORE_ENV).is_ok();
+    match choose_store(
+        |k| std::env::var(k).ok(),
+        default_service,
+        dir,
+        keychain_forbidden(),
+        development_build(),
+        cfg!(debug_assertions),
+    ) {
+        StoreChoice::Keychain(service) => Arc::new(Keychain::new(service)),
+        StoreChoice::File(path) => {
+            if !explicit {
+                tracing::info!(
+                    path = %path.display(),
+                    "accounts: a development build keeps its sessions in a file, not the keychain"
+                );
+            }
+            Arc::new(FileSecrets::new(path))
+        }
+        StoreChoice::Memory => Arc::new(MemorySecrets::new()),
+    }
+}
 
 /// The Architect app's entries.
 pub const DEFAULT_SERVICE: &str = "app.fasttrackstudio.architect";
@@ -47,8 +172,25 @@ impl Keychain {
     }
 
     fn entry(&self, key: &str) -> Result<keyring::Entry, SecretError> {
+        // A test or the dev stack opening the keychain would ask the person
+        // at the screen, again and again: never.
+        forbid_if_forbidden(&self.service);
         keyring::Entry::new(&self.service, key).map_err(unavailable)
     }
+}
+
+/// Panics when [`FORBID_ENV`] forbids the keychain: a test or the dev
+/// stack reaching it is a bug to stop at once, not an error to carry.
+#[allow(
+    clippy::panic,
+    reason = "a process forbidden the keychain must not reach it"
+)]
+fn forbid_if_forbidden(service: &str) {
+    assert!(
+        !keychain_forbidden(),
+        "{FORBID_ENV}=1: this process must not open the platform keychain \
+         (service {service}); use `secret_store` or `FileSecrets`"
+    );
 }
 
 #[allow(clippy::needless_pass_by_value)] // as `map_err` hands it
@@ -74,5 +216,138 @@ impl SecretStore for Keychain {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(unavailable(e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        move |k| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| (*v).to_owned())
+        }
+    }
+
+    #[test]
+    fn development_builds_and_tests_keep_sessions_in_a_file() {
+        let dir = Path::new("/app");
+        let file = StoreChoice::File(dir.join(SECRETS_FILE));
+        let kc = |s: &str| StoreChoice::Keychain(s.to_owned());
+        // A release build: the keychain, its service as named.
+        assert_eq!(
+            choose_store(env(&[]), "svc", dir, false, false, true),
+            kc("svc")
+        );
+        assert_eq!(
+            choose_store(
+                env(&[(SERVICE_ENV, "other")]),
+                "svc",
+                dir,
+                false,
+                false,
+                true
+            ),
+            kc("other")
+        );
+        // A development build: the file, unless it asks for the keychain.
+        assert_eq!(choose_store(env(&[]), "svc", dir, false, true, true), file);
+        assert_eq!(
+            choose_store(
+                env(&[(STORE_ENV, "keychain")]),
+                "svc",
+                dir,
+                false,
+                true,
+                true
+            ),
+            kc("svc")
+        );
+        // Forbidden: never the keychain, asked for or not.
+        assert_eq!(choose_store(env(&[]), "svc", dir, true, false, true), file);
+        assert_eq!(
+            choose_store(
+                env(&[(STORE_ENV, "keychain")]),
+                "svc",
+                dir,
+                true,
+                false,
+                true
+            ),
+            file
+        );
+        // Named stores.
+        assert_eq!(
+            choose_store(
+                env(&[(STORE_ENV, "file:/tmp/s.json")]),
+                "svc",
+                dir,
+                false,
+                false,
+                true
+            ),
+            StoreChoice::File(PathBuf::from("/tmp/s.json"))
+        );
+        assert_eq!(
+            choose_store(env(&[(STORE_ENV, "file")]), "svc", dir, false, false, true),
+            file
+        );
+        assert_eq!(
+            choose_store(
+                env(&[(STORE_ENV, "memory")]),
+                "svc",
+                dir,
+                false,
+                false,
+                true
+            ),
+            StoreChoice::Memory
+        );
+    }
+
+    #[test]
+    fn a_release_build_keeps_its_sessions_in_the_keychain_whatever_its_environment_says() {
+        let dir = Path::new("/app");
+        let kc = StoreChoice::Keychain("svc".to_owned());
+        for (store, forbidden) in [
+            ("file:/tmp/planted.json", false),
+            ("file", false),
+            ("keychain", false),
+            ("anything", true),
+        ] {
+            let env = move |k: &str| (k == STORE_ENV).then(|| store.to_owned());
+            assert_eq!(
+                choose_store(env, "svc", dir, forbidden, false, false),
+                kc,
+                "{store}"
+            );
+        }
+        // No store named, forbidden or a development-looking build: the keychain.
+        assert_eq!(choose_store(env(&[]), "svc", dir, true, true, false), kc);
+        // Memory alone is taken: nothing reaches a disk.
+        assert_eq!(
+            choose_store(
+                env(&[(STORE_ENV, "memory")]),
+                "svc",
+                dir,
+                false,
+                false,
+                false
+            ),
+            StoreChoice::Memory
+        );
+    }
+
+    #[test]
+    fn a_test_process_cannot_open_the_keychain() {
+        // Every test runs with ARCHITECT_FORBID_KEYCHAIN=1 (.cargo/config.toml).
+        assert!(keychain_forbidden(), "tests run with {FORBID_ENV}=1");
+        let reached = std::panic::catch_unwind(|| {
+            Keychain::new("app.fasttrackstudio.architect.test").get("k")
+        });
+        assert!(reached.is_err(), "the keychain is never opened from a test");
     }
 }

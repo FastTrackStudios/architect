@@ -284,9 +284,14 @@ struct Inner {
     /// The islands its pages' players may draw (studio#445), served at
     /// `/_ext/` (`architect_sites::island`).
     islands: std::sync::OnceLock<Arc<[architect_sites::SiteIsland]>>,
-    /// Note types' favourites (`[[favourites]]`): a share's phone shell's
-    /// tabs, by its root note's type (`architect_sites::shell`).
-    favourites: std::sync::OnceLock<Arc<[architect_favourites::TypeFavourites]>>,
+    /// Note types' favourites (`[[favourites]]`), each with the extension
+    /// that declared it: a share's phone shell's tabs, by its root note's
+    /// type (`architect_sites::shell`), and the web app's listing. The
+    /// declarations alone beside them.
+    favourites: std::sync::OnceLock<(
+        Arc<[architect_favourites::Listed]>,
+        Arc<[architect_favourites::TypeFavourites]>,
+    )>,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -340,16 +345,22 @@ impl Shares {
         self.0.islands.get().map_or(&[], |i| i)
     }
 
-    /// With note types' `favourites`: a share's phone shell shows its root
-    /// note's type's tabs; the first call holds.
+    /// With note types' `favourites`, each with the extension that
+    /// declared it: a share's phone shell shows its root note's type's
+    /// tabs; the first call holds.
     #[must_use]
-    pub fn with_favourites(self, favourites: Vec<architect_favourites::TypeFavourites>) -> Self {
-        let _ = self.0.favourites.set(favourites.into());
+    pub fn with_favourites(self, favourites: Vec<architect_favourites::Listed>) -> Self {
+        let alone: Vec<_> = favourites.iter().map(|l| l.favourites.clone()).collect();
+        let _ = self.0.favourites.set((favourites.into(), alone.into()));
         self
     }
 
     fn favourites(&self) -> &[architect_favourites::TypeFavourites] {
-        self.0.favourites.get().map_or(&[], |f| f)
+        self.0.favourites.get().map_or(&[], |f| &f.1)
+    }
+
+    fn listed_favourites(&self) -> &[architect_favourites::Listed] {
+        self.0.favourites.get().map_or(&[], |f| &f.0)
     }
 
     /// Every share, as the table holds it now.
@@ -1254,10 +1265,18 @@ impl Shares {
         let Some(issuer) = &self.0.issuer else {
             return Viewer::Anonymous;
         };
-        let user = match issuer.client::<auth_proto::AuthServiceClient>().await {
-            Ok(auth) => auth.whoami(token.clone()).await.map_err(|e| e.to_string()),
-            Err(e) => Err(e),
-        };
+        // Every issuer call is bounded (`IssuerLane::within`, which also
+        // drops a stalled connection): an issuer that never answers makes
+        // the viewer anonymous promptly instead of hanging the page.
+        let user = issuer
+            .within(async {
+                match issuer.client::<auth_proto::AuthServiceClient>().await {
+                    Ok(auth) => auth.whoami(token.clone()).await.map_err(|e| e.to_string()),
+                    Err(e) => Err(e),
+                }
+            })
+            .await
+            .unwrap_or_else(|| Err(ISSUER_SILENT.to_owned()));
         let user = match user {
             Ok(user) => user,
             Err(why) => {
@@ -1268,17 +1287,33 @@ impl Shares {
                 return Viewer::Anonymous;
             }
         };
-        let member = match (
-            &self.0.org,
-            issuer
-                .client::<auth_proto::OrganizationServiceClient>()
-                .await,
-        ) {
-            (Some(org), Ok(client)) => IdentityServer(client)
-                .orgs(&token)
-                .await
-                .is_ok_and(|orgs| orgs.iter().any(|o| o.id == org.id)),
-            _ => false,
+        let member = match &self.0.org {
+            Some(org) => {
+                issuer
+                    .within(async {
+                        match issuer
+                            .client::<auth_proto::OrganizationServiceClient>()
+                            .await
+                        {
+                            Ok(client) => IdentityServer(client)
+                                .orgs(&token)
+                                .await
+                                .is_ok_and(|orgs| orgs.iter().any(|o| o.id == org.id)),
+                            Err(_) => false,
+                        }
+                    })
+                    .await
+            }
+            None => Some(false),
+        };
+        // No answer: not a member this time, and not remembered as one
+        // who is not.
+        let Some(member) = member else {
+            return Viewer::Person {
+                user_id: user.id.to_string(),
+                email: user.email.map(|e| e.to_lowercase()),
+                member: false,
+            };
         };
         let who = Viewer::Person {
             user_id: user.id.to_string(),
@@ -1528,12 +1563,80 @@ fn guest_headers(mut response: Response) -> Response {
     response
 }
 
+/// Where the web app (`/app/`, #495) reads the node's islands: what a
+/// share page carries embedded (`architect_sites::island::page_json`),
+/// the same for everyone who asks.
+pub const ISLANDS_LISTING: &str = "/_ext/islands.json";
+
+/// [`ISLANDS_LISTING`]: the islands, their folders, views and each web
+/// file's digest, as JSON. Never cached (`no-cache`): the paths it names
+/// are content-addressed and change with a new island, the listing keeps
+/// its name. The app pins each file it fetches by the digest it reads
+/// here; nothing in it is a secret.
+fn islands_listing(shares: &Shares) -> Response {
+    let body = architect_sites::island::page_json(shares.islands()).to_string();
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    // Data, never a page: the share's policy, should one be opened.
+    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+    response
+}
+
+/// Where the web app (`/app/`, #607) reads the note types' favourites:
+/// the distribution's extensions' `[[favourites]]`, the same for everyone
+/// who asks.
+pub const FAVOURITES_LISTING: &str = "/_ext/favourites.json";
+
+/// [`FAVOURITES_LISTING`]: every `[[favourites]]` declaration that keeps
+/// the manifest's rules (`TypeFavourites::check`), each with the
+/// extension that declared it and what its capabilities let it run
+/// (`architect_favourites::Listed`: the app drops a target it may not
+/// name), as JSON (`{"favourites": [{"by": …, "favourites": …}]}`), and
+/// nothing else: no vault, no share, no extension's other parts. Never
+/// cached (`no-cache`): a new release declares again under the same name.
+fn favourites_listing(shares: &Shares) -> Response {
+    let list: Vec<&architect_favourites::Listed> = shares
+        .listed_favourites()
+        .iter()
+        .filter(|f| f.favourites.check().is_ok())
+        .collect();
+    let body = serde_json::json!({ "favourites": list }).to_string();
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+    response
+}
+
 /// What the node answers under `/_ext/`: an island's file, the runtime or
 /// the sandbox document (`architect_sites::island::serve`), `404` for
 /// anything else. Every answer is `nosniff` and cached for good (each
 /// path is named by its content); the sandbox document carries its own
 /// policy (`sandbox_headers`), and a `.js` or `.wasm` the share's.
 fn islands(shares: &Shares, path: &str) -> Response {
+    if path == ISLANDS_LISTING {
+        return islands_listing(shares);
+    }
+    if path == FAVOURITES_LISTING {
+        return favourites_listing(shares);
+    }
     let Some((body, kind)) = architect_sites::island::serve(shares.islands(), path) else {
         let mut response = page(StatusCode::NOT_FOUND, "Not found", "<p>No such file.</p>");
         let headers = response.headers_mut();
@@ -3338,6 +3441,10 @@ fn own_origin(headers: &HeaderMap, secure: bool) -> bool {
     origin.eq_ignore_ascii_case(&format!("{scheme}://{host}"))
 }
 
+/// Why an issuer call failed when it got no answer within the lane's
+/// timeout (`IssuerLane::within`).
+const ISSUER_SILENT: &str = "the issuer did not answer in time";
+
 async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
     let (Some(issuer), Some(origin)) = (&shares.0.issuer, &shares.0.issuer_origin) else {
         return page(
@@ -3346,13 +3453,18 @@ async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
             "<p>This node signs nobody in.</p>",
         );
     };
-    let started = match issuer.client::<auth_proto::AuthServiceClient>().await {
-        Ok(auth) => auth
-            .start_device_sign_in("architect-share".to_owned())
-            .await
-            .map_err(|e| e.to_string()),
-        Err(e) => Err(e),
-    };
+    let started = issuer
+        .within(async {
+            match issuer.client::<auth_proto::AuthServiceClient>().await {
+                Ok(auth) => auth
+                    .start_device_sign_in("architect-share".to_owned())
+                    .await
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(e),
+            }
+        })
+        .await
+        .unwrap_or_else(|| Err(ISSUER_SILENT.to_owned()));
     let started = match started {
         Ok(s) => s,
         Err(why) => {
@@ -3449,13 +3561,18 @@ async fn wait_signin(shares: &Shares, headers: &HeaderMap, secure: bool) -> Resp
             "<p>That sign-in ran out. Open the link again to start over.</p>",
         );
     };
-    let polled = match issuer.client::<auth_proto::AuthServiceClient>().await {
-        Ok(auth) => auth
-            .poll_device_sign_in(device_code, Some("architect-share".to_owned()))
-            .await
-            .map_err(|e| format!("{e:?}")),
-        Err(e) => Err(e),
-    };
+    let polled = issuer
+        .within(async {
+            match issuer.client::<auth_proto::AuthServiceClient>().await {
+                Ok(auth) => auth
+                    .poll_device_sign_in(device_code, Some("architect-share".to_owned()))
+                    .await
+                    .map_err(|e| format!("{e:?}")),
+                Err(e) => Err(e),
+            }
+        })
+        .await
+        .unwrap_or_else(|| Err(ISSUER_SILENT.to_owned()));
     match polled {
         Ok(bundle) => {
             shares
@@ -3491,6 +3608,21 @@ async fn wait_signin(shares: &Shares, headers: &HeaderMap, secure: bool) -> Resp
             response.headers_mut().insert(
                 "refresh",
                 HeaderValue::from_static("3; url=/s/_signin/wait"),
+            );
+            response
+        }
+        // No answer is not a refusal: the sign-in stays pending and the
+        // page asks again.
+        Err(why) if why == ISSUER_SILENT => {
+            tracing::warn!("a share sign-in's poll got no answer from the issuer");
+            let mut response = page(
+                StatusCode::BAD_GATEWAY,
+                "Sign-in unavailable",
+                "<p>The sign-in server did not answer. This page tries again by itself.</p>",
+            );
+            response.headers_mut().insert(
+                "refresh",
+                HeaderValue::from_static("5; url=/s/_signin/wait"),
             );
             response
         }
@@ -3640,6 +3772,88 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An issuer that takes connections and never answers.
+    async fn stalled_issuer() -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let held = tokio::spawn(async move {
+            // Each connection held open, unanswered, until the test ends.
+            while let Ok((socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let _held = socket;
+                    std::future::pending::<()>().await;
+                });
+            }
+        });
+        (url, held)
+    }
+
+    /// A stalled issuer fails share sign-ins closed, promptly: a signed-in
+    /// viewer is anonymous, and starting or polling a sign-in answers that
+    /// the sign-in server did not answer, each within the lane's timeout
+    /// rather than never.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stalled_issuer_fails_share_sign_ins_closed_within_the_timeout() {
+        let (issuer, held) = stalled_issuer().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let backend = Backend::single("notes", tmp.path().join("vault")).unwrap();
+        let shares = Shares::new(
+            backend,
+            tmp.path(),
+            None,
+            Some(&issuer),
+            architect_sites::Blocks::default(),
+            LayerRules::default(),
+        );
+        let bound = super::super::org::ISSUER_TIMEOUT + Duration::from_secs(5);
+
+        let nonce = "stalled-test".to_owned();
+        shares
+            .0
+            .signins
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                nonce.clone(),
+                Pending {
+                    device_code: "device".into(),
+                    to: "/s/x/".into(),
+                    until: Instant::now() + Duration::from_secs(60),
+                },
+            );
+        let mut signed_in = HeaderMap::new();
+        signed_in.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer not-a-real-token"),
+        );
+        let mut waiting = HeaderMap::new();
+        waiting.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{SIGNIN_COOKIE}={nonce}")).unwrap(),
+        );
+        let (viewer, started, polled) = tokio::join!(
+            tokio::time::timeout(bound, shares.viewer(&signed_in)),
+            tokio::time::timeout(bound, start_signin(&shares, "/s/x/".into(), false)),
+            tokio::time::timeout(bound, wait_signin(&shares, &waiting, false)),
+        );
+        let viewer = viewer.expect("a viewer's sign-in hung on a stalled issuer");
+        assert!(matches!(viewer, Viewer::Anonymous));
+        let started = started.expect("starting a share sign-in hung on a stalled issuer");
+        assert_eq!(started.status(), StatusCode::BAD_GATEWAY);
+        let polled = polled.expect("polling a share sign-in hung on a stalled issuer");
+        assert_eq!(polled.status(), StatusCode::BAD_GATEWAY);
+        assert!(
+            shares
+                .0
+                .signins
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(&nonce),
+            "no answer is not a refusal: the sign-in stays pending"
+        );
+        held.abort();
+    }
 
     /// Signing in is not something a share page's frame, or another site,
     /// can make a visitor start by sending them there.

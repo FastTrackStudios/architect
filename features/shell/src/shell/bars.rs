@@ -42,6 +42,7 @@ pub(super) fn BottomBar(
         div {
             style: "flex-shrink: 0; display: flex; align-items: flex-end; gap: 8px; \
                     padding: 8px {20.0 + ins.right}px {bottom}px {20.0 + ins.left}px;",
+            onpointerdown: move |e: PointerEvent| super::input_debug::hit("the tabs", &e),
             div {
                 style: "flex: 1; min-width: 0; height: 54px; box-sizing: border-box; display: flex; align-items: center; gap: 2px; \
                         padding: 4px; border-radius: 27px; background: {t.pill}; border: 1px solid {t.rule}; \
@@ -72,11 +73,13 @@ fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool
     rsx! {
         button {
             "aria-label": tab.label,
+            "data-tab": id,
+            "aria-current": if on { "page" } else { "false" },
             style: "position: relative; flex: 1 1 0; height: {height}; display: flex; flex-direction: column; \
                     align-items: center; justify-content: center; gap: 3px; border: none; border-radius: {radius}px; \
                     background: {fill}; color: {colour}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 22, color: colour.into() })}
+            {tab.draw(Icon { size: 22, color: colour.into() })}
             if labelled { span { "{tab.label}" } }
             if let Some(b) = tab.badge.clone() { Badge { text: b } }
         }
@@ -144,6 +147,7 @@ pub(super) fn RoundButton(action: Action) -> Element {
         button {
             class: "tip-host",
             "aria-label": "{label}",
+            "data-primary": "round",
             "data-swiping": "{swiping()}",
             style: "position: relative; width: {size}px; height: {size}px; flex-shrink: 0; box-sizing: border-box; border-radius: {size / 2.0}px; \
                     display: flex; align-items: center; justify-content: center; padding: 0; background: {bg}; \
@@ -168,7 +172,7 @@ pub(super) fn RoundButton(action: Action) -> Element {
             },
             match (&swipe, swiping()) {
                 (Some(s), true) => (s.icon)(Icon { size: icon, color: fg.clone() }),
-                _ => (action.icon)(Icon { size: icon, color: fg.clone() }),
+                _ => action.draw(Icon { size: icon, color: fg.clone() }),
             }
             if let Some(n) = action.badge {
                 span {
@@ -210,11 +214,12 @@ fn PlainButton(action: Action, labelled: bool) -> Element {
     rsx! {
         button {
             "aria-label": "{action.label}",
+            "data-primary": "plain",
             style: "flex: 0 0 64px; min-height: 52px; display: flex; flex-direction: column; align-items: center; \
                     justify-content: center; gap: 3px; border: none; border-radius: 10px; background: transparent; \
                     color: {t.ink}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: 22, color: t.ink.clone() })}
+            {action.draw(Icon { size: 22, color: t.ink.clone() })}
             if labelled { span { "{action.label}" } }
         }
     }
@@ -283,11 +288,13 @@ fn RailTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
     rsx! {
         button {
             "aria-label": tab.label,
+            "data-tab": id,
+            "aria-current": if on { "page" } else { "false" },
             style: "position: relative; height: 58px; display: flex; flex-direction: column; align-items: center; \
                     justify-content: center; gap: 4px; border: none; border-radius: 12px; background: {fill}; \
                     color: {colour}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 21, color: colour.into() })}
+            {tab.draw(Icon { size: 21, color: colour.into() })}
             span { "{tab.label}" }
             if let Some(b) = tab.badge.clone() { Badge { text: b } }
         }
@@ -307,11 +314,13 @@ pub(super) fn SideTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) ->
     rsx! {
         button {
             "aria-label": tab.label,
+            "data-tab": id,
+            "aria-current": if on { "page" } else { "false" },
             style: "height: 40px; display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 0 12px; \
                     border: none; border-radius: 10px; background: {fill}; color: {colour}; font-family: {t.font}; \
                     font-size: 15px; font-weight: {weight}; text-align: left;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 19, color: colour.into() })}
+            {tab.draw(Icon { size: 19, color: colour.into() })}
             span { style: "flex: 1; text-align: left;", "{tab.label}" }
             if let Some(b) = tab.badge.clone() {
                 span { style: "min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; \

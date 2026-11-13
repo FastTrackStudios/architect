@@ -109,8 +109,9 @@ in
     ready.exec = "${curl} -sf -o /dev/null ${url "node"}/health";
   };
   # The Architect app (apps/desktop) under the fleet's dx, its issuer the
-  # local auth server and its orgs' node the local node, with a folder and
-  # keychain service of its own, on a scratch copy of the demo vault
+  # local auth server and its orgs' node the local node, with a folder of
+  # its own (its sessions a file there, never the keychain), on a scratch
+  # copy of the demo vault
   # (`just vault-reset`). Without Rust hot-patching: it builds a different
   # ("fat") binary from `dx build`, and dx calls it experimental. rsx hot
   # reload stays.
@@ -127,12 +128,21 @@ in
       failure_threshold = 2;
     };
   };
-  # Off by default: `devenv up web` (the web app, its issuer the local
-  # one) and `devenv up site` (apps/site's dev server).
+  # Off by default (`just dev plain` starts both): `devenv up web`, the
+  # web app (apps/web) under `dx serve --platform web`, rebuilt on a save,
+  # its issuer the local one, `/app/?demo` the app on the demo vault; and
+  # `devenv up site`, apps/site's dev server, whose `/app/…` links lead to
+  # the web app's.
   processes.web = {
     exec = "${xdev} web";
     after = [ "devenv:processes:auth" ];
     start.enable = false;
+    # Up once dx serves the built app's page (while it builds, dx answers
+    # with its own "building" page, which names no `id="app"`).
+    ready = {
+      exec = "${curl} -sf ${url "web"}/app/ | ${pkgs.gnugrep}/bin/grep -q 'id=\"app\"'";
+      period = 2;
+    };
   };
   processes.site = {
     exec = "${xdev} site";

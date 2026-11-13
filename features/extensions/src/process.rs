@@ -42,7 +42,7 @@ use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::sync::{Notify, watch};
 
 use crate::contrib::{Contribution, Contributions, StateWrite};
-use crate::host::{Context, Instance, Runner, invocation_json, now_ms};
+use crate::host::{Context, Instance, Runner, now_ms};
 use crate::manifest::{API, ActionDecl, Kind, Manifest};
 use crate::package::Package;
 use crate::proto::{ProcessExtensionClient, ProcessExtensionStreamClient, SOCKET};
@@ -1217,7 +1217,7 @@ impl Instance for Loaded {
                 message: e.to_string(),
                 expected: None,
             })?;
-            let context = invocation_json(caller.invocation()).to_string();
+            let context = crate::invocation::caller_json(caller).to_string();
             let (process, id) = (process.clone(), id.clone());
             let run: ActionFuture = Box::pin(async move {
                 process

@@ -54,8 +54,26 @@ use uuid::Uuid;
 
 use super::service::node::NodeHttpClient;
 
-/// How long a resolved session is trusted before the issuer is asked again.
-const SESSION_TTL: Duration = Duration::from_secs(60);
+/// How long a resolved bearer is trusted before the issuer is asked again,
+/// and how often an open live note checks its bearer still opens it
+/// (`Config::lane_recheck_secs`; this is its default).
+pub const RECHECK: Duration = Duration::from_secs(30);
+
+/// How long an open live note outlives an issuer that cannot be reached.
+///
+/// Counted from the last check the issuer answered
+/// (`Config::lane_issuer_grace_secs`; this is its default). Past it the
+/// session ends. A new call is never admitted on an old answer.
+pub const ISSUER_GRACE: Duration = Duration::from_secs(300);
+
+/// The longest the org lane waits for the issuer to answer one call.
+///
+/// `whoami` or the org list, its connection included; never longer than
+/// the re-check interval. An issuer that holds a call without answering
+/// is then unreachable, as one that refuses the connection is: an open
+/// live note falls under [`ISSUER_GRACE`], and a new call is refused
+/// rather than left hanging.
+pub const ISSUER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// What each role of the org may do on this node, org-relative: the
 /// gate's rules for the enrolment lane and the documents' for the
@@ -80,6 +98,7 @@ const NOTES_PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("list", "read", "vaults/**"),
         MethodPermit::new("read", "read", "vaults/**"),
         MethodPermit::new("write", "write", "vaults/**").audited(),
+        MethodPermit::new("create", "write", "vaults/**").audited(),
     ],
 };
 
@@ -103,10 +122,19 @@ pub struct OrgLane {
     pub members: Members,
     pub engine: Arc<ConfinedEngine>,
     gate: Arc<PermissionsGate>,
+    /// The gate's sessions resolver, which a live note's watch also asks
+    /// (it tells a refusal from an issuer it cannot reach).
+    sessions: Arc<IssuerSessions>,
     router: LayerRouter,
     issuer: IssuerLane,
-    vaults: bool,
+    /// The vaults' live notes (`DocSync`), added per connection: each
+    /// session watches that connection's bearer ([`VaultSync`]).
+    vaults: Option<(crdt::DocRegistry, super::VaultCatalog)>,
     shares: bool,
+    recheck: Duration,
+    issuer_grace: Duration,
+    /// Browser origins besides the node's own that may open the lane.
+    origins: Arc<[String]>,
 }
 
 impl OrgLane {
@@ -122,27 +150,59 @@ impl OrgLane {
             device_enrolment_service_descriptor(),
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
         );
-        let gate = gate(&engine, &members, &issuer, false, false);
+        let sessions = Arc::new(IssuerSessions::new(issuer.clone()).with_ttl(RECHECK));
+        let gate = gate(&engine, &members, &issuer, &sessions, false, false, RECHECK);
         Self {
             org,
             members,
             engine,
             gate,
+            sessions,
             router,
             issuer,
-            vaults: false,
+            vaults: None,
             shares: false,
+            recheck: RECHECK,
+            issuer_grace: ISSUER_GRACE,
+            origins: Arc::from(Vec::new()),
         }
     }
 
-    fn make_gate(&self) -> Arc<PermissionsGate> {
-        gate(
+    fn rebuild_gate(&mut self) {
+        self.issuer = self
+            .issuer
+            .clone()
+            .with_timeout(self.recheck.min(ISSUER_TIMEOUT));
+        self.sessions = Arc::new(IssuerSessions::new(self.issuer.clone()).with_ttl(self.recheck));
+        self.gate = gate(
             &self.engine,
             &self.members,
             &self.issuer,
-            self.vaults,
+            &self.sessions,
+            self.vaults.is_some(),
             self.shares,
-        )
+            self.recheck,
+        );
+    }
+
+    /// Trust a resolved bearer for `every` (default [`RECHECK`]) and check
+    /// an open live note's bearer as often: signed out, expired or no
+    /// longer a member, its session ends within about twice `every`.
+    #[must_use]
+    pub fn with_recheck(mut self, every: Duration) -> Self {
+        self.recheck = every.max(Duration::from_millis(100));
+        self.rebuild_gate();
+        self
+    }
+
+    /// Keep an open live note for `grace` (default [`ISSUER_GRACE`]) after
+    /// the issuer last answered for its bearer, while the issuer cannot be
+    /// reached; then end it. A refusal ends it at once, and a new call is
+    /// refused while the issuer is unreachable.
+    #[must_use]
+    pub const fn with_issuer_grace(mut self, grace: Duration) -> Self {
+        self.issuer_grace = grace;
+        self
     }
 
     /// Serve the vaults' share links on the lane too
@@ -155,7 +215,7 @@ impl OrgLane {
             architect_spaces::ShareLinksDispatcher::new(super::shares::SharesLane(shares)),
         );
         self.shares = true;
-        self.gate = self.make_gate();
+        self.rebuild_gate();
         self
     }
 
@@ -169,13 +229,34 @@ impl OrgLane {
         catalog: super::VaultCatalog,
         notes: LayerRouter,
     ) -> Self {
-        self.router = self.router.merge_router(notes).with(
-            crdt::sync::doc_sync_service_descriptor(),
-            crdt::sync::DocSyncDispatcher::new(VaultSync { registry, catalog }),
-        );
-        self.vaults = true;
-        self.gate = self.make_gate();
+        self.router = self.router.merge_router(notes);
+        self.vaults = Some((registry, catalog));
+        self.rebuild_gate();
         self
+    }
+
+    /// Let browsers on `origins` (`https://host[:port]`) open the lane
+    /// besides the node's own origin ([`origin_allowed`]).
+    #[must_use]
+    pub fn with_origins(mut self, origins: Vec<String>) -> Self {
+        self.origins = Arc::from(origins);
+        self
+    }
+
+    /// The lane's services for one connection: each live note watches the
+    /// bearer its own call was admitted with ([`VaultSync`]).
+    fn connection_router(&self) -> LayerRouter {
+        let Some((registry, catalog)) = &self.vaults else {
+            return self.router.clone();
+        };
+        self.router.clone().with(
+            crdt::sync::doc_sync_service_descriptor(),
+            crdt::sync::DocSyncDispatcher::new(VaultSync {
+                registry: registry.clone(),
+                catalog: catalog.clone(),
+                lane: self.clone(),
+            }),
+        )
     }
 
     /// Whether a person may open note `doc_id` live: a member of the org
@@ -205,15 +286,50 @@ impl OrgLane {
                 if head.param("slug") != Some(lane.org.slug.as_str()) {
                     return Err(StatusCode::NOT_FOUND);
                 }
+                if !origin_allowed(&head.headers, &lane.origins) {
+                    return Err(StatusCode::FORBIDDEN);
+                }
                 Ok(PermissionsGate::wrap_shared_with_bearer(
                     Arc::clone(&lane.gate),
-                    lane.router.clone(),
+                    lane.connection_router(),
                     head.bearer().map(str::to_owned),
                 )
                 .scoped(lane.org.id.clone()))
             }
         })
     }
+}
+
+/// Whether a WebSocket upgrade with these `headers` may open the lane.
+///
+/// A browser always sends `Origin` on an upgrade: it must be the node's
+/// own (the app is served on the same origin as the lane: its authority
+/// is the request's `Host`, or the `X-Forwarded-Host` a proxy in front
+/// set) or one of `extra`. An upgrade with no `Origin` is a native client
+/// (another node, the desktop app, a test): it goes on to the bearer
+/// check, which is what admits anyone. Defence in depth: the bearer rides
+/// a subprotocol that only script on the page can add, not a cookie a
+/// foreign page's request would carry.
+#[must_use]
+pub fn origin_allowed(headers: &architect::http::axum::http::HeaderMap, extra: &[String]) -> bool {
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    let Some(origin) = header("origin") else {
+        return true;
+    };
+    let origin = origin.trim_end_matches('/');
+    if extra.iter().any(|o| o.eq_ignore_ascii_case(origin)) {
+        return true;
+    }
+    let Some(authority) = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    [header("host"), header("x-forwarded-host")]
+        .into_iter()
+        .flatten()
+        .any(|host| host.eq_ignore_ascii_case(authority))
 }
 
 /// The lane's gate: the org's engine, callers resolved by the issuer;
@@ -223,14 +339,17 @@ fn gate(
     engine: &Arc<ConfinedEngine>,
     members: &Members,
     issuer: &IssuerLane,
+    sessions: &Arc<IssuerSessions>,
     vaults: bool,
     shares: bool,
+    recheck: Duration,
 ) -> Arc<PermissionsGate> {
     let identity = MembersResolver::new(
-        IssuerSessions::new(issuer.clone()),
+        SharedSessions(Arc::clone(sessions)),
         IssuerOrgs(issuer.clone()),
         members.clone(),
-    );
+    )
+    .with_ttl(recheck);
     let engine: Arc<dyn PermissionEngine> = engine.clone();
     let mut gate = PermissionsGate::new(engine, Arc::new(identity))
         .permit(device_enrolment_service_descriptor(), &ENROL_PERMITS);
@@ -254,10 +373,74 @@ fn gate(
 /// `DocSync` for a client that names a note by its id alone: the note is
 /// registered with its vault first (as the peer lane's `resolve` does by
 /// name), then the registry serves the session.
+///
+/// The gate admits a session once, when it attaches; the session is then
+/// one call held open for as long as the note is. So it watches the
+/// credential that call was admitted with
+/// ([`architect::permissions_gate::caller_bearer`]: the call's own
+/// `authorization`, else the connection's bearer), whichever way it came:
+/// every [`OrgLane::with_recheck`] interval it is resolved again (the
+/// issuer asked once the cache has run out), and once it no longer opens
+/// the note (signed out, its grant revoked, expired, no longer a member)
+/// the session ends. A session admitted with no credential ends at once:
+/// an anonymous caller opens no note.
 #[derive(Clone)]
 struct VaultSync {
     registry: crdt::DocRegistry,
     catalog: super::VaultCatalog,
+    lane: OrgLane,
+}
+
+/// Whether to keep a live note after one re-check of its bearer.
+#[derive(Debug, PartialEq, Eq)]
+enum Recheck {
+    Keep,
+    End,
+}
+
+impl OrgLane {
+    /// Returns once `bearer` no longer opens `doc_id` (at once without
+    /// one). An issuer that cannot be reached keeps the session until
+    /// [`Self::with_issuer_grace`] after it last answered.
+    async fn watch(&self, bearer: Option<&str>, doc_id: Uuid) {
+        let Some(bearer) = bearer.filter(|b| !b.is_empty()) else {
+            tracing::info!(%doc_id, "org lane: a live note with no credential; its session ends");
+            return;
+        };
+        let identity = self.gate.identity_resolver();
+        let mut answered = Instant::now();
+        loop {
+            tokio::time::sleep(self.recheck).await;
+            let checked = self.sessions.check(bearer).await;
+            let verdict = match checked {
+                Checked::User(_) => {
+                    // Membership too (the issuer's org list), then the note.
+                    let who = identity.resolve(Some(bearer)).await;
+                    if self.opens(&who, doc_id) {
+                        answered = Instant::now();
+                        Recheck::Keep
+                    } else {
+                        Recheck::End
+                    }
+                }
+                other => after_failed_check(&other, answered.elapsed(), self.issuer_grace),
+            };
+            if verdict == Recheck::End {
+                tracing::info!(%doc_id, "org lane: a live note's sign-in ended; its session ends");
+                return;
+            }
+        }
+    }
+}
+
+/// A re-check the issuer did not answer with a person: refused, the
+/// session ends; unreachable, it is kept while the last answer is younger
+/// than `grace`.
+fn after_failed_check(checked: &Checked, since_answered: Duration, grace: Duration) -> Recheck {
+    match checked {
+        Checked::Unreachable if since_answered < grace => Recheck::Keep,
+        _ => Recheck::End,
+    }
 }
 
 impl crdt::sync::DocSync for VaultSync {
@@ -268,6 +451,8 @@ impl crdt::sync::DocSync for VaultSync {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<crdt::sync::SyncDown>,
     ) -> Result<(), crdt::sync::SyncError> {
+        // Read before the first await: the call's task-local.
+        let bearer = architect::permissions_gate::caller_bearer();
         let held = self
             .catalog
             .notes()
@@ -278,7 +463,92 @@ impl crdt::sync::DocSync for VaultSync {
             doc_id,
             name: at.name,
         })?;
-        crdt::sync::DocSync::sync(&self.registry, doc_id, from, up, down).await
+        let session = crdt::sync::DocSync::sync(&self.registry, doc_id, from, up, down);
+        tokio::select! {
+            ended = session => ended,
+            () = self.lane.watch(bearer.as_deref(), doc_id) => Err(crdt::sync::SyncError::Internal(
+                "the sign-in ended: sign in again".to_owned(),
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Checked, Recheck, after_failed_check, origin_allowed};
+    use architect::http::axum::http::HeaderMap;
+    use std::time::Duration;
+
+    /// N4: an issuer that cannot be reached keeps a live note for the
+    /// grace after its last answer, then ends it; a refusal ends it at
+    /// once, however recent the last answer.
+    #[test]
+    fn an_unreachable_issuer_keeps_a_live_note_for_the_grace_only() {
+        let grace = Duration::from_secs(300);
+        let at = |secs| Duration::from_secs(secs);
+        assert_eq!(
+            after_failed_check(&Checked::Unreachable, at(10), grace),
+            Recheck::Keep
+        );
+        assert_eq!(
+            after_failed_check(&Checked::Unreachable, at(299), grace),
+            Recheck::Keep
+        );
+        assert_eq!(
+            after_failed_check(&Checked::Unreachable, at(300), grace),
+            Recheck::End
+        );
+        assert_eq!(
+            after_failed_check(&Checked::Refused, at(0), grace),
+            Recheck::End
+        );
+    }
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, v.parse().unwrap());
+        }
+        h
+    }
+
+    /// #628 L3: the lane's own origin and the listed ones open it, a
+    /// native client (no `Origin`) goes on to the bearer check, any other
+    /// page is refused.
+    #[test]
+    fn only_the_app_s_origin_opens_the_lane_from_a_browser() {
+        let extra = ["http://127.0.0.1:7413".to_owned()];
+        let host = ("host", "node.example.com");
+        assert!(origin_allowed(&headers(&[host]), &extra));
+        assert!(origin_allowed(
+            &headers(&[host, ("origin", "https://node.example.com")]),
+            &extra
+        ));
+        assert!(origin_allowed(
+            &headers(&[
+                ("host", "127.0.0.1:7412"),
+                ("origin", "http://127.0.0.1:7413")
+            ]),
+            &extra
+        ));
+        assert!(origin_allowed(
+            &headers(&[
+                ("host", "10.0.0.5:8080"),
+                ("x-forwarded-host", "node.example.com"),
+                ("origin", "https://node.example.com"),
+            ]),
+            &extra
+        ));
+        for foreign in [
+            "https://evil.example",
+            "null",
+            "https://node.example.com.evil.example",
+        ] {
+            assert!(
+                !origin_allowed(&headers(&[host, ("origin", foreign)]), &extra),
+                "{foreign}"
+            );
+        }
     }
 }
 
@@ -287,6 +557,7 @@ impl crdt::sync::DocSync for VaultSync {
 pub struct IssuerLane {
     pool: Arc<architect::connect::Pool>,
     target: architect::connect::Endpoint,
+    timeout: Duration,
 }
 
 impl IssuerLane {
@@ -295,7 +566,26 @@ impl IssuerLane {
         Self {
             pool: Arc::new(architect::connect::Pool::new()),
             target: architect::connect::Endpoint::url(super::vox_url(issuer)),
+            timeout: ISSUER_TIMEOUT,
         }
+    }
+
+    /// Give up on a call ([`Self::within`]) after `timeout`.
+    #[must_use]
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// `call` (a connection and what it asks), or `None` once the lane's
+    /// timeout has passed without an answer; the connection is then
+    /// dropped, so the next call dials again.
+    pub(super) async fn within<T>(&self, call: impl Future<Output = T>) -> Option<T> {
+        let answered = tokio::time::timeout(self.timeout, call).await.ok();
+        if answered.is_none() {
+            self.evict();
+        }
+        answered
     }
 
     pub(super) async fn client<C>(&self) -> Result<C, String>
@@ -313,12 +603,29 @@ impl IssuerLane {
     }
 }
 
-/// An issuer session as the gate's caller: `Principal::User` of the
-/// person it is (the issuer's `whoami`), cached for [`SESSION_TTL`];
-/// anything else is anonymous.
+/// An issuer session (or a first-party web app's access token) as the
+/// gate's caller.
+///
+/// `Principal::User` of the person it is (the issuer's `whoami`), cached
+/// for [`RECHECK`] (`with_ttl`); anything else is anonymous, including an
+/// issuer that cannot be reached (a new call fails closed). A bearer
+/// signed out at the issuer keeps working here until its cache entry runs
+/// out.
 pub struct IssuerSessions {
     issuer: IssuerLane,
+    ttl: Duration,
     seen: Mutex<HashMap<String, (Principal, Instant)>>,
+}
+
+/// What the issuer said of a bearer.
+#[derive(Debug)]
+pub(crate) enum Checked {
+    /// This person (answered now, or within the cache's lifetime).
+    User(Principal),
+    /// The issuer answered: not a sign-in it honours.
+    Refused,
+    /// No answer: the issuer could not be reached, or the call broke.
+    Unreachable,
 }
 
 impl IssuerSessions {
@@ -326,15 +633,72 @@ impl IssuerSessions {
     pub fn new(issuer: IssuerLane) -> Self {
         Self {
             issuer,
+            ttl: RECHECK,
             seen: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Trust a resolved bearer for `ttl`.
+    #[must_use]
+    pub const fn with_ttl(mut self, ttl: Duration) -> Self {
+        self.ttl = ttl;
+        self
     }
 
     fn cached(&self, token: &str) -> Option<Principal> {
         let seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
         seen.get(token)
-            .filter(|(_, at)| at.elapsed() < SESSION_TTL)
+            .filter(|(_, at)| at.elapsed() < self.ttl)
             .map(|(who, _)| who.clone())
+    }
+
+    /// Asks the issuer who `token` is (or the cache, while fresh). The
+    /// token is a credential: nothing here logs it.
+    pub(crate) async fn check(&self, token: &str) -> Checked {
+        if let Some(who) = self.cached(token) {
+            return Checked::User(who);
+        }
+        let asked = self.issuer.within(async {
+            match self.issuer.client::<auth_proto::AuthServiceClient>().await {
+                Ok(auth) => auth.whoami(token.to_owned()).await.map_err(|e| {
+                    // A refusal is the issuer's answer; a broken or
+                    // timed-out call is no answer at all.
+                    let refused = matches!(
+                        e,
+                        vox::VoxError::User(_)
+                            | vox::VoxError::InvalidPayload(_)
+                            | vox::VoxError::UnknownMethod
+                    );
+                    (refused, e.to_string())
+                }),
+                Err(e) => Err((false, e)),
+            }
+        });
+        let answer = asked
+            .await
+            .unwrap_or_else(|| Err((false, "the issuer did not answer in time".to_owned())));
+        match answer {
+            Ok(user) => {
+                let who = Principal::User {
+                    user_id: user.id.to_string(),
+                };
+                {
+                    let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+                    seen.retain(|_, (_, at)| at.elapsed() < self.ttl);
+                    seen.insert(token.to_owned(), (who.clone(), Instant::now()));
+                }
+                Checked::User(who)
+            }
+            Err((true, why)) => {
+                tracing::debug!(%why, "org lane: a bearer the issuer refused");
+                Checked::Refused
+            }
+            Err((false, why)) => {
+                tracing::debug!(%why, "org lane: the issuer did not answer");
+                self.issuer.evict();
+                Checked::Unreachable
+            }
+        }
     }
 }
 
@@ -344,33 +708,21 @@ impl IdentityResolver for IssuerSessions {
             let Some(token) = bearer_token.filter(|t| !t.is_empty()) else {
                 return Principal::Anonymous;
             };
-            if let Some(who) = self.cached(token) {
-                return who;
+            match self.check(token).await {
+                Checked::User(who) => who,
+                Checked::Refused | Checked::Unreachable => Principal::Anonymous,
             }
-            let answer = match self.issuer.client::<auth_proto::AuthServiceClient>().await {
-                Ok(auth) => auth
-                    .whoami(token.to_owned())
-                    .await
-                    .map_err(|e| e.to_string()),
-                Err(e) => Err(e),
-            };
-            let who = match answer {
-                Ok(user) => Principal::User {
-                    user_id: user.id.to_string(),
-                },
-                Err(why) => {
-                    tracing::debug!(%why, "org lane: a session the issuer did not resolve");
-                    if why.contains("connect") || why.contains("closed") {
-                        self.issuer.evict();
-                    }
-                    return Principal::Anonymous;
-                }
-            };
-            let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-            seen.retain(|_, (_, at)| at.elapsed() < SESSION_TTL);
-            seen.insert(token.to_owned(), (who.clone(), Instant::now()));
-            who
         })
+    }
+}
+
+/// The lane's one [`IssuerSessions`] as the gate's resolver, shared with
+/// its live notes' watches.
+struct SharedSessions(Arc<IssuerSessions>);
+
+impl IdentityResolver for SharedSessions {
+    fn resolve<'a>(&'a self, bearer_token: Option<&'a str>) -> BoxIdentityFuture<'a> {
+        self.0.resolve(bearer_token)
     }
 }
 
@@ -380,11 +732,16 @@ struct IssuerOrgs(IssuerLane);
 impl Directory for IssuerOrgs {
     fn orgs<'a>(&'a self, token: &'a str) -> BoxOrgsFuture<'a> {
         Box::pin(async move {
-            let client = self
-                .0
-                .client::<auth_proto::OrganizationServiceClient>()
-                .await?;
-            IdentityServer(client).orgs(token).await
+            self.0
+                .within(async {
+                    let client = self
+                        .0
+                        .client::<auth_proto::OrganizationServiceClient>()
+                        .await?;
+                    IdentityServer(client).orgs(token).await
+                })
+                .await
+                .unwrap_or_else(|| Err("the issuer did not answer in time".to_owned()))
         })
     }
 }

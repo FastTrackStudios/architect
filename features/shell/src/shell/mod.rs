@@ -5,6 +5,8 @@ mod bar;
 mod bars;
 mod busy;
 mod chrome;
+mod favourites;
+mod input_debug;
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod mac;
@@ -34,7 +36,16 @@ use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
 pub use busy::BusyBadge;
 pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
-pub use keyboard::{Keyboard, install_keyboard, keyboard, set_keyboard_height, set_typing};
+pub use favourites::{
+    Declared, Favourites, PlaceOpened, Presses, SLOTS, Shows, declare, declared_tab_id, place_kept,
+    resolve_favourites, set_note, use_presses,
+};
+pub use input_debug::{foot_bottom, input_debug, set_input_debug};
+pub use keyboard::{
+    Foot, Keyboard, KeyboardTaps, TAP_SLOP, TapStroke, hide_keyboard, install_keyboard, keyboard,
+    set_keyboard_height, set_soft_keyboard, set_typing, show_keyboard, soft_keyboard, tap_raises,
+    use_keyboard_taps,
+};
 #[cfg(target_os = "macos")]
 pub use mac::fit_traffic_lights;
 pub use page::{
@@ -81,6 +92,9 @@ pub struct Tab {
     pub id: &'static str,
     pub label: &'static str,
     pub icon: IconFn,
+    /// A Lucide icon by its name (`list-music`), drawn in place of
+    /// `icon`: a tab named in data (a manifest's favourites).
+    pub glyph: Option<&'static str>,
     /// Something waiting there ("3"); `None` for nothing.
     pub badge: Option<String>,
 }
@@ -92,8 +106,25 @@ impl Tab {
             id,
             label,
             icon,
+            glyph: None,
             badge: None,
         }
+    }
+
+    /// A tab whose icon is Lucide's `glyph` (`list-music`), by name: one
+    /// named in data. A name Lucide has not draws [`named_icon`]'s puzzle.
+    #[must_use]
+    pub fn named(id: &'static str, label: &'static str, glyph: &'static str) -> Self {
+        Self {
+            glyph: Some(glyph),
+            ..Self::new(id, label, named_icon(glyph))
+        }
+    }
+
+    /// Its icon, drawn at `icon`'s size and colour.
+    #[must_use]
+    pub fn draw(&self, icon: Icon) -> Element {
+        draw_icon(self.icon, self.glyph, icon)
     }
 
     /// Mark the tab with what is waiting there.
@@ -111,6 +142,9 @@ impl Tab {
 pub struct Action {
     pub label: String,
     pub icon: IconFn,
+    /// A Lucide icon by its name, drawn in place of `icon` (as
+    /// [`Tab::glyph`]).
+    pub glyph: Option<&'static str>,
     pub on_press: Callback<()>,
     /// Say the label beside the icon ("Process 5"), not just show it.
     pub show_label: bool,
@@ -139,6 +173,7 @@ impl Action {
         Self {
             label: label.into(),
             icon,
+            glyph: None,
             on_press: Callback::new(on_press),
             show_label: false,
             swipe_up: None,
@@ -180,6 +215,34 @@ impl Action {
     pub const fn with_label(mut self) -> Self {
         self.show_label = true;
         self
+    }
+
+    /// Its icon Lucide's `glyph` (`play`), by name (as [`Tab::named`]).
+    #[must_use]
+    pub fn glyph(mut self, glyph: &'static str) -> Self {
+        self.icon = named_icon(glyph);
+        self.glyph = Some(glyph);
+        self
+    }
+
+    /// Its icon, drawn at `icon`'s size and colour.
+    #[must_use]
+    pub fn draw(&self, icon: Icon) -> Element {
+        draw_icon(self.icon, self.glyph, icon)
+    }
+}
+
+/// `glyph` by name from Lucide's table when it has it, else `fallback`.
+fn draw_icon(fallback: IconFn, glyph: Option<&'static str>, icon: Icon) -> Element {
+    match glyph.filter(|g| crate::lucide::glyphs(g).is_some()) {
+        Some(name) => rsx! {
+            crate::lucide::LucideIcon {
+                name: name.to_owned(),
+                size: u32::try_from(icon.size).unwrap_or(16),
+                color: icon.color.to_string(),
+            }
+        },
+        None => fallback(icon),
     }
 }
 
@@ -977,6 +1040,12 @@ const TWO_WIDTH: f64 = 480.0;
 pub mod layer {
     /// A resize edge over its side.
     pub const EDGE: u8 = 5;
+    /// A phone's foot (the action bar, the tabs, the editing bar).
+    ///
+    /// Over the page, whose positioned content Blitz hit-tests even where the
+    /// page's `overflow: hidden` keeps it from being drawn (a calendar's
+    /// events below the fold took the tabs' presses).
+    pub const FOOT: u8 = 8;
     /// Floating panes (10 and up, the last drawn on top).
     pub const FLOAT: u8 = 10;
     /// Minimised floats' chips.
@@ -1114,6 +1183,10 @@ pub fn AppShell(
     /// adds its own: [`use_bar_action`]); at most [`BAR_MAX`] show.
     #[props(default)]
     actions: Vec<BarAction>,
+    /// The Now Playing bar (`architect_playhead::ui::NowPlayingBar`):
+    /// above a phone's tab bar, at a desk's or a tablet's page foot over
+    /// the status bar. It draws nothing while nothing is queued.
+    now_playing: Option<Element>,
     children: Element,
 ) -> Element {
     let stored = architect_theme::use_themed::<ShellTheme>();
@@ -1221,17 +1294,34 @@ pub fn AppShell(
             motion.to_then(0.0, move || shown.set(None));
         }
     });
-    // The docked sides open and fold on a spring: 0 folded away, 1 open.
+    // The docked sides: 0 folded away, 1 open. They open and fold on a
+    // spring when the person folds or opens one (`Shell::toggle`,
+    // `Shell::set_sidebar_layout`), and are simply there otherwise: the
+    // sidebar's content arriving after load, the page's preferred layout,
+    // the window's size. Sprung then, a sidebar would slide open just as
+    // the app shows, its rows drawn but clipped, and a click on one would
+    // land on the page beside it.
     let docked_now = (
         frame == Frame::Sidebar && !shell.folded(),
         has_right && shell.docked(Side::Right) && !right_away(),
     );
+    let chosen_now = (fold(), right_away(), desk_layouts.read().clone());
     let left_open = use_motion(f64::from(u8::from(docked_now.0)), Spring::PANEL, 0.001);
     let right_open = use_motion(f64::from(u8::from(docked_now.1)), Spring::PANEL, 0.001);
-    use_effect(use_reactive!(|docked_now| {
+    let chosen_before = use_hook(|| CopyValue::new(chosen_now.clone()));
+    use_effect(use_reactive!(|docked_now, chosen_now| {
         let (left, right) = docked_now;
-        left_open.to(f64::from(u8::from(left)));
-        right_open.to(f64::from(u8::from(right)));
+        let mut chosen_before = chosen_before;
+        let by_the_person = *chosen_before.peek() != chosen_now;
+        chosen_before.set(chosen_now);
+        for (motion, open) in [(left_open, left), (right_open, right)] {
+            let to = f64::from(u8::from(open));
+            if by_the_person {
+                motion.to(to);
+            } else if (motion.target() - to).abs() > f64::EPSILON {
+                motion.jump(to);
+            }
+        }
     }));
     // Two columns start as wide as both need; back to one, the width one
     // column had.
@@ -1285,12 +1375,19 @@ pub fn AppShell(
         340.0
     };
 
+    // The finger's stroke for the keyboard's sake: a tap that ends on a
+    // field brings it up (the root's click, below), a scroll does not.
+    let taps = keyboard::use_keyboard_taps();
+    let (tap_down, tap_move, tap_up, tap_click) = (taps.clone(), taps.clone(), taps.clone(), taps);
+    let onclick = move |_: MouseEvent| tap_click.click();
     let (touch_at, resize_at) = (touch.clone(), resize.clone());
     let onpointerdown = move |e: PointerEvent| {
+        let c = e.client_coordinates();
+        tap_down.down(&e);
+        input_debug::hit("the page", &e);
         if !phone || resize_at.get().is_some() {
             return;
         }
-        let c = e.client_coordinates();
         touch_at.set(Some(Touch {
             x0: c.x,
             y0: c.y,
@@ -1303,6 +1400,7 @@ pub fn AppShell(
     let (touch_mv, resize_mv) = (touch.clone(), resize.clone());
     let onpointermove = move |e: PointerEvent| {
         let c = e.client_coordinates();
+        tap_move.moved(&e);
         if let Some(r) = resize_mv.get() {
             let dx = c.x - r.x0;
             let (mut w, grow, other) = match r.side {
@@ -1349,7 +1447,8 @@ pub fn AppShell(
         }
     };
     let (touch_end, resize_end) = (touch.clone(), resize.clone());
-    let onpointerup = move |_: PointerEvent| {
+    let onpointerup = move |e: PointerEvent| {
+        tap_up.up(&e);
         if resize_end.take().is_some() {
             return;
         }
@@ -1517,12 +1616,15 @@ pub fn AppShell(
 
     rsx! {
         div {
-            style: "position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; \
+            // A stacking context (`z-index: 0`): the shell's layers stay
+            // inside it, under whatever the app draws over the shell.
+            style: "position: relative; z-index: 0; width: 100%; height: 100%; overflow: hidden; display: flex; \
                     flex-direction: {root_dir}; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
             onpointerdown,
             onpointermove,
             onpointerup,
             onpointercancel,
+            onclick,
             document::Style { {shell_css(&t)} }
             crate::motion::MotionFrames {}
             // A desk's title bar runs across the whole window, over the ribbon,
@@ -1604,6 +1706,11 @@ pub fn AppShell(
                 style: "position: relative; left: {page_shift}px; flex: 1; min-width: 0; min-height: 0; \
                         display: flex; flex-direction: column;",
                 {children}
+                if !in_bar {
+                    if let Some(np) = now_playing.clone() {
+                        div { style: "position: relative; z-index: {layer::FOOT}; flex-shrink: 0;", {np} }
+                    }
+                }
                 // A desk's status bar is the page's foot: it starts where the
                 // left side (rail, sidebar) ends and stops at the right side,
                 // so the sidebars run to the window's bottom (Obsidian's).
@@ -1646,7 +1753,14 @@ pub fn AppShell(
                 }
             }
             if in_bar {
-                PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
+                // Its own layer: a press on it is its own, whatever the
+                // page hides under it (`layer::FOOT`).
+                div { style: "position: relative; z-index: {layer::FOOT}; flex-shrink: 0; display: flex; flex-direction: column;",
+                    if let Some(np) = now_playing {
+                        {np}
+                    }
+                    PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
+                }
             }
             }
             if desk && status_style == StatusStyle::Badge {
@@ -1669,7 +1783,7 @@ pub fn AppShell(
             // A side open over the page.
             if over {
                 div {
-                    style: "position: absolute; top: 0; left: 0; width: 100%; height: 100%; \
+                    style: "position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: {layer::SHEET}; \
                             background: {t.scrim}; opacity: {amount.clamp(0.0, 1.0)};",
                     onclick: move |_| drawer.set(None),
                 }
@@ -1707,6 +1821,10 @@ pub fn AppShell(
             }
             // The page's layer over everything (`use_shell_cover`).
             {cover()}
+            // What the shell hears of touches and the keyboard, when asked.
+            if input_debug() {
+                input_debug::InputDebugOverlay { screen }
+            }
         }
     }
 }
@@ -1784,7 +1902,7 @@ fn Drawer(side: Side, x: f64, width: f64, screen: Screen, children: Element) -> 
     };
     rsx! {
         div {
-            style: "position: absolute; top: 0; left: {x}px; width: {width}px; height: 100%; \
+            style: "position: absolute; top: 0; left: {x}px; width: {width}px; height: 100%; z-index: {layer::SHEET}; \
                     display: flex; flex-direction: column; overflow-y: scroll; box-sizing: border-box; \
                     background: {t.sheet}; box-shadow: 0 0 48px rgba(0,0,0,0.55); \
                     padding: {ins.top + 8.0}px {pad_r}px {ins.bottom + 8.0}px {pad_l}px;",
@@ -2384,7 +2502,7 @@ fn FootRow(action: Action) -> Element {
                     border-radius: 7px; background: transparent; color: {t.ink_2}; font-family: {t.font}; \
                     font-size: 13px; font-weight: 550; text-align: left;",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: 16, color: t.ink_3.clone() })}
+            {action.draw(Icon { size: 16, color: t.ink_3.clone() })}
             span { "{action.label}" }
         }
     }
@@ -2403,7 +2521,7 @@ pub(super) fn FootIcon(action: Action) -> Element {
             style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; align-self: center; border: none; \
                     border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: 18, color: t.ink_3 })}
+            {action.draw(Icon { size: 18, color: t.ink_3 })}
             span { class: "tip", style: "left: 40px; top: 5px;", "{action.label}" }
         }
     }
@@ -2424,10 +2542,12 @@ fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element 
         button {
             class: "lp tip-host",
             "aria-label": tab.label,
+            "data-tab": id,
+            "aria-current": if on { "page" } else { "false" },
             style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; \
                     background: {fill}; display: flex; align-items: center; justify-content: center;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 18, color: colour.into() })}
+            {tab.draw(Icon { size: 18, color: colour.into() })}
             span { class: "tip", style: "left: 40px; top: 5px;", "{tab.label}" }
             if tab.badge.is_some() {
                 span { style: "position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 3px; \

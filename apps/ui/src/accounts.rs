@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use architect::action::ActionList;
 use architect_accounts::ui::{AccountsUi, use_accounts};
-use architect_accounts::{AccountStore, Accounts, Issuer, Keychain};
+use architect_accounts::{AccountStore, Accounts, Issuer};
 use architect_orgs::{Capabilities, OrgHandle, Orgs, Selection};
 use dioxus::prelude::*;
 
@@ -40,8 +40,11 @@ pub fn use_app_accounts(list: &Arc<ActionList>, files: bool) -> Option<AccountsU
     }
     let list = list.clone();
     Some(use_accounts(Some(list), || {
-        let secrets = Arc::new(Keychain::from_env(architect_accounts::DEFAULT_SERVICE));
-        let store = AccountStore::open(&app_dir_or_temp(), secrets);
+        // The keychain in a release build; a file in a development build or
+        // a test, which the keychain would keep asking the person about.
+        let dir = app_dir_or_temp();
+        let secrets = architect_accounts::secret_store(architect_accounts::DEFAULT_SERVICE, &dir);
+        let store = AccountStore::open(&dir, secrets);
         Accounts::new(
             Arc::new(store),
             Issuer::new(architect_accounts::issuer_from_env()),

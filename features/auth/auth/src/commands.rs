@@ -393,6 +393,7 @@ pub struct OidcDiscovery {
     pub userinfo_endpoint: String,
     pub jwks_uri: String,
     pub registration_endpoint: String,
+    pub revocation_endpoint: String,
     pub scopes_supported: Vec<String>,
     pub response_types_supported: Vec<String>,
     pub grant_types_supported: Vec<String>,
@@ -451,6 +452,15 @@ pub struct ExchangeOidcToken {
     pub client_secret: Option<String>,
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
+}
+
+/// RFC 7009 token revocation: `token` (a refresh token or an access
+/// token) issued to `client_id`; its whole grant ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RevokeOidcToken {
+    pub token: String,
+    pub client_id: String,
+    pub client_secret: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

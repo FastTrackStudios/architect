@@ -174,6 +174,31 @@ impl Running {
         }
     }
 
+    /// Whether note `path` in vault `vault` is deleted (its document's
+    /// tombstone), or `None` while its document is not open: this never
+    /// opens it, so it can watch a delete without racing one.
+    pub fn note_deleted(
+        &self,
+        vault: &str,
+        path: &str,
+    ) -> impl Future<Output = Option<bool>> + Send + 'static {
+        use crdt::loro::{LoroValue, ValueOrContainer};
+        let registry = self.registry.clone();
+        let doc_id = vault_proto::collab_doc_id(vault, path);
+        async move {
+            if !registry.is_open(doc_id).await {
+                return None;
+            }
+            let doc = registry.doc(doc_id).await.ok()?;
+            Some(matches!(
+                doc.loro()
+                    .get_map(vault_proto::COLLAB_META_CONTAINER)
+                    .get(vault_proto::COLLAB_META_DELETED),
+                Some(ValueOrContainer::Value(LoroValue::Bool(true)))
+            ))
+        }
+    }
+
     /// Stop it: its tasks, then its endpoint.
     pub async fn stop(mut self) {
         // The mount's threads call into this runtime: unmount off it.
@@ -275,7 +300,7 @@ pub async fn start_with_shell(
     given: architect_sites::Blocks,
     layers: Vec<architect_sites::ShareLayersDecl>,
     islands: Vec<architect_sites::SiteIsland>,
-    favourites: Vec<architect_favourites::TypeFavourites>,
+    favourites: Vec<architect_favourites::Listed>,
 ) -> Result<Running, StartError> {
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the
@@ -343,7 +368,12 @@ pub async fn start_with_shell(
         _ => None,
     };
     let lane = match (&node_org, &config.issuer) {
-        (Some(org), Some(issuer)) => Some(org::OrgLane::new(org.clone(), &admission, issuer)),
+        (Some(org), Some(issuer)) => Some(
+            org::OrgLane::new(org.clone(), &admission, issuer)
+                .with_recheck(Duration::from_secs(config.lane_recheck_secs.max(1)))
+                .with_issuer_grace(Duration::from_secs(config.lane_issuer_grace_secs))
+                .with_origins(config.lane_origins.clone()),
+        ),
         _ => None,
     };
     let mut access = NodeAccess::new(admission.clone(), Shares::new());
@@ -404,6 +434,7 @@ pub async fn start_with_shell(
         admission: admission.clone(),
         account: Arc::new(Mutex::new(service::AccountView::default())),
         files: files.clone(),
+        hosts: config.host_org.clone(),
     };
 
     // ── The account ──────────────────────────────────────────────────
