@@ -59,6 +59,10 @@ pub struct Options {
     /// link to one is dropped with its text. Nothing held back is ever on
     /// disk under the site, so no request can reach its bytes there.
     pub hold_back: BTreeSet<String>,
+    /// Write each page's prose as plain blocks too (`<page>/_note.json`,
+    /// [`crate::plain`]): what a share link's guest reads in the app
+    /// (#629). Off by default.
+    pub page_data: bool,
 }
 
 impl Options {
@@ -80,6 +84,7 @@ impl Options {
             scope: Scope::Vault,
             filter: None,
             hold_back: BTreeSet::new(),
+            page_data: false,
         }
     }
 }
@@ -165,6 +170,9 @@ pub struct Site {
     pub theme: String,
     pub url: Option<String>,
     pub live_reload: Option<String>,
+    /// Whether each page's plain blocks are written beside it
+    /// ([`Options::page_data`]).
+    pub page_data: bool,
     /// Every page, in reading order; the home page first.
     pub pages: Vec<Page>,
     /// The tree the sidebar draws; its root is the home page.
@@ -282,6 +290,7 @@ impl Site {
                 .as_ref()
                 .map(|u| u.trim_end_matches('/').to_owned()),
             live_reload: opts.live_reload.clone(),
+            page_data: opts.page_data,
             pages: Vec::new(),
             nav: NavNode::default(),
             tags: Vec::new(),

@@ -30,6 +30,7 @@
 //! - `files`: a space over a folder grants its members that folder in
 //!   `architect-files`, generated per call.
 
+pub mod guest;
 mod model;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod server;
@@ -41,6 +42,10 @@ mod share_note;
 #[cfg(feature = "vox")]
 mod share_service;
 
+pub use guest::{
+    BlockKind, GUEST_PERMITS, GuestFault, GuestLink, GuestNote, ListedFile, ListedNote, PlainBlock,
+    Refused, ShareGuest, ShareUrl,
+};
 pub use model::{
     COMMENTER, EDITOR, FILES_PREFIX, Holding, MANAGER, Member, NewSpace, OrgSpaces, SPACES_PREFIX,
     Space, SpaceAudit, SpaceChange, SpaceGrant, SpaceId, SpacePatch, SpacePolicy, SpaceRole,

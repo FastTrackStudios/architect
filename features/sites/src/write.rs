@@ -116,7 +116,7 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
         // (`architect::host::BUILT_PAGE`): a vault file is never copied
         // under that name.
         let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
-        if name == "index.html" || name == "404.html" {
+        if name == "index.html" || name == "404.html" || name == crate::plain::NOTE_FILE {
             report.problems.push(crate::site::Problem {
                 page: rel.clone(),
                 message: "not published: a file named index.html or 404.html would be served as one of the site's own pages".to_owned(),
@@ -164,6 +164,16 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
             &at.join("index.html"),
             &ui::render(&shared, View::Page(i), &assets),
         )?;
+        if site.page_data && page.rel_path.is_some() {
+            let note = crate::plain::note(site, page);
+            let json = facet_json::to_string(&note).map_err(|e| {
+                WriteError::Io(
+                    at.join(crate::plain::NOTE_FILE),
+                    std::io::Error::other(e.to_string()),
+                )
+            })?;
+            put(&at.join(crate::plain::NOTE_FILE), &json)?;
+        }
         report.pages = report.pages.saturating_add(1);
     }
     let tags_dir = dir.join("tags");

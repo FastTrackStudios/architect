@@ -53,6 +53,7 @@ mod markdown;
 pub mod media;
 #[cfg(feature = "pages")]
 mod page_blocks;
+pub mod plain;
 pub mod sanitize;
 mod scope;
 mod search;

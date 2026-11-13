@@ -3232,6 +3232,387 @@ async fn a_file_that_left_the_list_and_is_now_held_is_not_served() {
     w.host.stop().await;
 }
 
+// ── A link's guests (#629) ───────────────────────────────────────────
+
+/// The status a guest's call answers with, as the page's would be.
+fn guest_status<T>(
+    answer: &Result<T, architect::ClientError<architect_spaces::GuestFault>>,
+) -> u16 {
+    use architect_spaces::GuestFault;
+    match answer {
+        Ok(_) => 200,
+        Err(architect::ClientError::App(GuestFault::Gone)) => 404,
+        Err(architect::ClientError::App(GuestFault::SignIn)) => 401,
+        Err(architect::ClientError::App(GuestFault::Denied | GuestFault::Held(_))) => 403,
+        Err(architect::ClientError::App(GuestFault::Building)) => 503,
+        Err(other) => panic!("not an answer of the node's: {other:?}"),
+    }
+}
+
+fn guest(w: &World) -> architect_spaces::guest::ShareGuestHttpClient {
+    architect_spaces::guest::ShareGuestHttpClient::at(w.url(""))
+}
+
+/// The guest service answers exactly as the link's pages do, for the
+/// same visitor: one table over the shares above (a folder link, its
+/// two audiences, an org link, an invited link, a revoked and an
+/// expired one; nobody, a member, an outsider, a session that is none),
+/// each note's page against `read` of that note.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_guest_reads_exactly_what_the_page_gives_the_same_visitor() {
+    let w = world().await;
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let (set, violin, cello) = setlist(&w).await;
+    let violin_code = violin
+        .trim_start_matches("/s/")
+        .trim_end_matches('/')
+        .to_owned();
+    let cello_code = cello
+        .trim_start_matches("/s/")
+        .trim_end_matches('/')
+        .to_owned();
+    let track = || ShareScope::Notes(vec!["Shared/track.md".to_owned()]);
+    let org = w.share(track(), Audience::Org, ShareAccess::Read).await;
+    let invited = w
+        .share(
+            track(),
+            Audience::Invited(vec!["ada@local.test".to_owned()]),
+            ShareAccess::Read,
+        )
+        .await;
+    let revoked = w.share(track(), Audience::Link, ShareAccess::Read).await;
+    let expiring = links
+        .create(NewShare {
+            vault: "notes".to_owned(),
+            scope: track(),
+            title: None,
+            audience: Audience::Link,
+            access: ShareAccess::Read,
+            expires_at: Some(node::shares::now() + 2),
+            domain: None,
+            listen: Listen::default(),
+        })
+        .await
+        .unwrap();
+    // Every link built.
+    page_with(
+        &w.url(&format!("{}04-noel-cello/", set.path())),
+        None,
+        "Noel",
+    )
+    .await;
+    page_with(&w.url(&format!("{violin}01-joy-violin/")), None, "violin").await;
+    page_with(&w.url(&format!("{cello}02-joy-cello/")), None, "cello").await;
+    page_with(
+        &w.url(&format!("/s/{}/", org.code)),
+        Some(&w.alan),
+        "Mix notes.",
+    )
+    .await;
+    page_with(&w.url(&format!("/s/{}/", revoked.code)), None, "Mix notes.").await;
+    links.revoke(revoked.code.clone()).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let anon = String::new();
+    let garbage = "not-a-session".to_owned();
+    // (link code, page below it, note path, who)
+    let table: Vec<(&str, &str, &str, &String)> = vec![
+        (&set.code, "01-joy-violin/", "Set/01-joy-violin.md", &anon),
+        (&set.code, "04-noel-cello/", "Set/04-noel-cello.md", &anon),
+        (&set.code, "plan/", "Private/plan.md", &anon),
+        (
+            &violin_code,
+            "01-joy-violin/",
+            "Set/01-joy-violin.md",
+            &anon,
+        ),
+        (
+            &violin_code,
+            "03-silent-violin/",
+            "Set/03-silent-violin.md",
+            &anon,
+        ),
+        (&violin_code, "02-joy-cello/", "Set/02-joy-cello.md", &anon),
+        (&cello_code, "04-noel-cello/", "Set/04-noel-cello.md", &anon),
+        (&cello_code, "01-joy-violin/", "Set/01-joy-violin.md", &anon),
+        (&org.code, "", "Shared/track.md", &anon),
+        (&org.code, "", "Shared/track.md", &w.alan),
+        (&org.code, "", "Shared/track.md", &w.grace),
+        (&org.code, "", "Shared/track.md", &w.ada),
+        (&org.code, "", "Shared/track.md", &garbage),
+        (&invited.code, "", "Shared/track.md", &w.ada),
+        (&invited.code, "", "Shared/track.md", &w.alan),
+        (&invited.code, "", "Shared/track.md", &anon),
+        (&revoked.code, "", "Shared/track.md", &anon),
+        (&expiring.code, "", "Shared/track.md", &anon),
+        ("aaaaaaaaaaaaaaaa", "", "Shared/track.md", &anon),
+    ];
+    let client = guest(&w);
+    let mut seen = Vec::new();
+    for (code, page, path, who) in table {
+        let auth = (!who.is_empty()).then_some(who.as_str());
+        let page_status = get(&w.url(&format!("/s/{code}/{page}")), auth)
+            .await
+            .0
+            .as_u16();
+        let read = client
+            .read(code.to_owned(), who.clone(), path.to_owned())
+            .await;
+        let read_status = guest_status(&read);
+        let link_status = guest_status(&client.link(code.to_owned(), who.clone()).await);
+        let row = format!(
+            "{code} {page} {path} {}",
+            if who.is_empty() { "nobody" } else { "someone" }
+        );
+        assert_eq!(read_status, page_status, "read: {row}");
+        if page_status != 404 {
+            // The link itself opens to exactly those its pages open to.
+            assert_eq!(link_status, page_status, "link: {row}");
+        }
+        seen.push(page_status);
+    }
+    // The table covers every answer.
+    for status in [200, 401, 403, 404] {
+        assert!(seen.contains(&status), "no row answered {status}");
+    }
+    w.host.stop().await;
+}
+
+/// A guest reads a note as plain blocks of what its page says, and the
+/// link as its notes in list order; nothing the page leaves out.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_guest_reads_a_link_as_its_notes_and_a_note_as_its_pages_words() {
+    use architect_spaces::BlockKind;
+    let w = world().await;
+    let share = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    page_with(
+        &w.url(&format!("/s/{}/track/", share.code)),
+        None,
+        "Mix notes.",
+    )
+    .await;
+    let client = guest(&w);
+    let link = client
+        .link(share.code.clone(), String::new())
+        .await
+        .unwrap();
+    assert_eq!(link.link, format!("/s/{}/", share.code));
+    assert_eq!(link.audience, "link");
+    let paths: Vec<&str> = link.notes.iter().map(|n| n.path.as_str()).collect();
+    assert!(
+        paths.contains(&"Shared/track.md") && paths.contains(&"Shared/index.md"),
+        "{paths:?}"
+    );
+    assert!(!paths.iter().any(|p| p.starts_with("Private/")));
+
+    let note = client
+        .read(
+            share.code.clone(),
+            String::new(),
+            "Shared/track.md".to_owned(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(note.title, "Track");
+    assert_eq!(note.page, format!("/s/{}/track/", share.code));
+    assert!(note.source.is_none(), "a guest never gets the note's text");
+    assert!(
+        note.blocks
+            .iter()
+            .any(|b| b.kind == BlockKind::Paragraph && b.text == "Mix notes."),
+        "{:?}",
+        note.blocks
+    );
+    // The album links a private note (plain text there) and embeds a
+    // private picture (not on the link): neither comes through.
+    let index = client
+        .read(
+            share.code.clone(),
+            String::new(),
+            "Shared/index.md".to_owned(),
+        )
+        .await
+        .unwrap();
+    let said = format!("{:?}", index.blocks);
+    assert!(said.contains("the plan"), "{said}");
+    assert!(
+        !said.contains("secret") && !said.contains("cover.png") && !said.contains("Private/"),
+        "{said}"
+    );
+    let images: Vec<&str> = index
+        .blocks
+        .iter()
+        .filter(|b| b.kind == BlockKind::Image)
+        .filter_map(|b| b.src.as_deref())
+        .collect();
+    assert_eq!(
+        images,
+        [format!("/s/{}/Shared/art.png", share.code)],
+        "{said}"
+    );
+    // Every medium a guest is pointed at is served by the link.
+    assert_eq!(get(&w.url(images[0]), None).await.0, StatusCode::OK);
+
+    // A note outside the link: the same answer as one that is nowhere.
+    let outside = client
+        .read(
+            share.code.clone(),
+            String::new(),
+            "Private/plan.md".to_owned(),
+        )
+        .await;
+    assert_eq!(guest_status(&outside), 404);
+
+    // The service's answers are kept by nobody and name no referrer.
+    let res = reqwest::Client::new()
+        .post(w.url(&format!("/s/{}/_guest/link", share.code)))
+        .json(&serde_json::json!({ "token": "" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["cache-control"], "private, no-store");
+    assert_eq!(res.headers()["referrer-policy"], "no-referrer");
+    // Any origin (a web app elsewhere) may call it, without credentials.
+    assert_eq!(res.headers()["access-control-allow-origin"], "*");
+    assert!(
+        !res.headers()
+            .contains_key("access-control-allow-credentials")
+    );
+    let pre = reqwest::Client::new()
+        .request(
+            reqwest::Method::OPTIONS,
+            w.url(&format!("/s/{}/_guest/read", share.code)),
+        )
+        .header("origin", "https://app.example")
+        .header("access-control-request-method", "POST")
+        .header("access-control-request-headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pre.status(), StatusCode::NO_CONTENT);
+    assert_eq!(pre.headers()["access-control-allow-methods"], "POST");
+
+    // Revoked: gone, from the next call on.
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    links.revoke(share.code.clone()).await.unwrap();
+    assert_eq!(
+        guest_status(&client.link(share.code.clone(), String::new()).await),
+        404
+    );
+    assert_eq!(
+        guest_status(
+            &client
+                .read(
+                    share.code.clone(),
+                    String::new(),
+                    "Shared/track.md".to_owned()
+                )
+                .await
+        ),
+        404
+    );
+    w.host.stop().await;
+}
+
+/// A guest lists exactly the files `_files.json` lists, at the link's
+/// layer and never past it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_guests_files_are_the_links_at_its_layer() {
+    let w = world().await;
+    let (share, url) = reference_link(&w).await;
+    let client = guest(&w);
+    for (asked, query) in [
+        (None, ""),
+        (Some("page"), "?listen=page"),
+        (Some("full"), "?listen=full"),
+    ] {
+        let files = client
+            .files(share.code.clone(), String::new(), asked.map(str::to_owned))
+            .await
+            .unwrap();
+        let mut theirs: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        let json = json_at(&format!("{url}_files.json{query}")).await;
+        let mut page: Vec<String> = json["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap().to_owned())
+            .collect();
+        theirs.sort();
+        page.sort();
+        assert_eq!(theirs, page, "listen {asked:?}");
+        // Never a stem on a Reference link, whatever is asked.
+        assert!(!theirs.iter().any(|f| f.contains("Bass")), "{theirs:?}");
+        // Every file listed is served by the link.
+        for file in &files {
+            let status = get(&w.url(&file.url), None).await.0;
+            assert_eq!(status, StatusCode::OK, "{}", file.path);
+        }
+    }
+    w.host.stop().await;
+}
+
+/// `/.well-known/apple-app-site-association` names the configured apps
+/// for the share links alone; with none configured it is not there.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_node_claims_its_links_for_the_configured_apps_alone() {
+    let w = world().await;
+    let (status, _, _) = get(&w.url("/.well-known/apple-app-site-association"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    w.host.stop().await;
+
+    let body = node::shares::apple_app_site_association(&[
+        "28C2G63DA7.app.fasttrackstudio.architect".to_owned(),
+    ])
+    .unwrap();
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let details = &json["applinks"]["details"][0];
+    assert_eq!(
+        details["appIDs"][0],
+        "28C2G63DA7.app.fasttrackstudio.architect"
+    );
+    let components = details["components"].as_array().unwrap();
+    // Sign-in and the guest service are excluded first; then the links.
+    assert_eq!(components[0]["/"], "/s/_*");
+    assert_eq!(components[0]["exclude"], true);
+    assert_eq!(components[1]["exclude"], true);
+    assert_eq!(components.last().unwrap()["/"], "/s/*");
+    assert!(node::shares::apple_app_site_association(&[]).is_none());
+
+    // Configured: served as JSON, no redirect.
+    let tmp = tempfile::tempdir().unwrap();
+    let config = Config {
+        name: "aasa".to_owned(),
+        bind: "127.0.0.1:0".to_owned(),
+        data_dir: tmp.path().join("data"),
+        iroh: IrohMode::Local,
+        apple_app_ids: vec!["28C2G63DA7.app.fasttrackstudio.architect".to_owned()],
+        ..Config::default()
+    };
+    let host = node::start_with(config, architect_sites::Blocks::new())
+        .await
+        .unwrap();
+    let res = reqwest::Client::new()
+        .get(format!(
+            "http://{}/.well-known/apple-app-site-association",
+            host.http
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-type"], "application/json");
+    assert_eq!(res.text().await.unwrap(), body);
+    host.stop().await;
+}
+
 // ── Symlinks ─────────────────────────────────────────────────────────
 
 /// A link follows no symlink: not one to a file outside the vault, not
@@ -3346,6 +3727,31 @@ async fn a_link_serves_nothing_through_a_symlink() {
     for path in ["planted.png", "planted/secret.png", "planted/"] {
         let (status, _, body) = get_bytes(&w.url(&format!("{link}{path}"))).await;
         leaks(path, status, &body);
+    }
+
+    // A guest's read of a note: the page's `_note.json` swapped for a
+    // symlink (here to a forged one outside) is refused, never followed.
+    let client = guest(&w);
+    let read = || {
+        client.read(
+            share.code.clone(),
+            String::new(),
+            "Shared/leak.md".to_owned(),
+        )
+    };
+    assert_eq!(read().await.unwrap().title, "Leak");
+    let note = built.join("leak").join(architect_sites::plain::NOTE_FILE);
+    let forged =
+        std::fs::read_to_string(&note)
+            .unwrap()
+            .replacen("\"Leak\"", &format!("\"{SECRET}\""), 1);
+    assert!(forged.contains(SECRET), "{forged}");
+    std::fs::write(outside.join("note.json"), forged).unwrap();
+    std::fs::remove_file(&note).unwrap();
+    symlink(outside.join("note.json"), &note).unwrap();
+    match read().await {
+        Err(architect::ClientError::App(architect_spaces::GuestFault::Building)) => {}
+        other => panic!("a guest read through a symlink: {other:?}"),
     }
     w.host.stop().await;
 }

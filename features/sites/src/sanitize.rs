@@ -1094,7 +1094,7 @@ fn numeric(name: &str) -> Option<(&str, u32)> {
 /// `value` with its character references decoded, as a browser reads an
 /// attribute: what is checked, and then written (escaped).
 /// A named one it does not know becomes U+FFFD, which no scheme has.
-fn decode(value: &str) -> String {
+pub(crate) fn decode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut rest = value;
     while let Some((before, after)) = rest.split_once('&') {

@@ -95,9 +95,10 @@ use architect_spaces::share::{
     validate, validate_audience, validate_domain,
 };
 use architect_spaces::{
-    LayersReport, Listen, NewAudience, NewShare, Share, ShareAudience, ShareChange, ShareComment,
-    ShareFault, ShareLinks, ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments,
-    parse_share_note, share_note,
+    GuestFault, GuestLink, GuestNote, LayersReport, ListedFile, ListedNote, Listen, NewAudience,
+    NewShare, Share, ShareAudience, ShareChange, ShareComment, ShareFault, ShareGuest, ShareLinks,
+    ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments, parse_share_note,
+    share_note,
 };
 use tokio::sync::{Notify, watch};
 use vault_live::Backend;
@@ -497,6 +498,8 @@ impl Shares {
             opts.base = base;
             opts.scope = scope(&share.scope);
             opts.filter = filter;
+            // Each page's plain blocks, for the link's guests (#629).
+            opts.page_data = true;
             if let Some(set) = held.get(&cap) {
                 opts.hold_back.clone_from(set);
             }
@@ -831,8 +834,11 @@ impl Shares {
             return Guard::Building;
         };
         let decoded = decode(rest);
+        // A page's own files (its HTML, its plain blocks for a guest)
+        // are the page: checked as its note.
         let key = decoded
             .strip_suffix("index.html")
+            .or_else(|| decoded.strip_suffix(architect_sites::plain::NOTE_FILE))
             .filter(|dir| dir.ends_with('/'))
             .unwrap_or(&decoded);
         let dir = format!("{}/", key.trim_end_matches('/'));
@@ -1237,10 +1243,11 @@ impl Shares {
             .map(|h| h.share.code.clone())
     }
 
-    /// Who is asking: the issuer session in the bearer or the cookie,
-    /// resolved by the issuer (cached a minute).
-    async fn viewer(&self, headers: &HeaderMap) -> Viewer {
-        let Some(token) = bearer(headers).or_else(|| cookie(headers, SESSION_COOKIE)) else {
+    /// Who holds issuer session `token`, resolved by the issuer (cached
+    /// a minute): the bearer or the `architect_session` cookie of a
+    /// page's request, a guest's `token`. None: nobody signed in.
+    async fn viewer_of(&self, token: Option<String>) -> Viewer {
+        let Some(token) = token.filter(|t| !t.trim().is_empty()) else {
             return Viewer::Anonymous;
         };
         {
@@ -1488,10 +1495,72 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         }
         return islands(&shares, request.uri().path());
     }
+    let guest = is_guest_path(request.uri().path());
+    // A web app on another origin calls a link's guest service too: the
+    // code is the credential and a session travels in the body, never a
+    // cookie, so any origin may, without credentials.
+    if guest && request.method() == Method::OPTIONS {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        let headers = response.headers_mut();
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("POST"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("content-type, authorization"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_MAX_AGE,
+            HeaderValue::from_static("600"),
+        );
+        return guest_headers(response);
+    }
     match answer(shares, request).await {
         Ok(response) => with_policy(response),
+        // A link's guest service (`ShareGuest`, mounted on the node's
+        // router): its answers as private as the link's own.
+        Err(request) if guest => guest_headers(next.run(*request).await),
         Err(request) => next.run(*request).await,
     }
+}
+
+/// The path of a link's guest service: `/s/<code>/_guest/…`.
+fn is_guest_path(path: &str) -> bool {
+    path.strip_prefix(LINKS)
+        .and_then(|r| r.strip_prefix('/'))
+        .and_then(|r| r.split_once('/'))
+        .is_some_and(|(code, rest)| is_code(code) && rest.starts_with(GUEST_SEGMENT))
+}
+
+/// The segment below a link its guest service is at.
+const GUEST_SEGMENT: &str = "_guest/";
+
+/// What every answer of a guest service carries: no referrer, not
+/// stored, not indexed, not sniffed.
+fn guest_headers(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-store"),
+    );
+    headers.insert(
+        "x-robots-tag",
+        HeaderValue::from_static("noindex, nofollow"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    response
 }
 
 /// Where the web app (`/app/`, #495) reads the node's islands: what a
@@ -1618,6 +1687,32 @@ fn islands(shares: &Shares, path: &str) -> Response {
     response
 }
 
+/// `/.well-known/apple-app-site-association` (#629), from the node's
+/// configuration (`apple_app_ids`).
+///
+/// It names the iOS apps that open this node's share links (`/s/*`,
+/// never its sign-in `/s/_*` or a link's guest service) as universal
+/// links. None configured: not served (None).
+#[must_use]
+pub fn apple_app_site_association(app_ids: &[String]) -> Option<String> {
+    if app_ids.is_empty() {
+        return None;
+    }
+    let body = serde_json::json!({
+        "applinks": {
+            "details": [{
+                "appIDs": app_ids,
+                "components": [
+                    { "/": format!("{LINKS}/_*"), "exclude": true, "comment": "the node's sign-in" },
+                    { "/": format!("{LINKS}/*/_guest/*"), "exclude": true, "comment": "a link's guest service" },
+                    { "/": format!("{LINKS}/*"), "comment": "share links" }
+                ]
+            }]
+        }
+    });
+    Some(body.to_string())
+}
+
 /// The Content-Security-Policy of every page of a share or a Site the node
 /// serves (#520's review).
 ///
@@ -1705,6 +1800,10 @@ async fn answer(shares: Shares, request: Request) -> Result<Response, Box<Reques
     if let Some(rest) = below.strip_prefix('_') {
         return Ok(signin(&shares, rest, request).await);
     }
+    // A link's guest service: the router's (it opens the link itself).
+    if is_guest_path(&path) {
+        return Err(Box::new(request));
+    }
     let mut parts = below.splitn(2, '/');
     let first = parts.next().unwrap_or_default();
     let Some((share, audience)) = Some(first)
@@ -1742,21 +1841,22 @@ async fn serve(
     request: Request,
 ) -> Response {
     let code = share.code.as_str();
-    if share.state(now()) != ShareState::Live {
-        return page(
-            StatusCode::NOT_FOUND,
-            "Not found",
-            "<p>There is nothing at this link.</p>",
-        );
-    }
-    let viewer = if share.audience.signed_in() {
-        shares.viewer(request.headers()).await
-    } else {
-        Viewer::Anonymous
-    };
-    match share.admits(&viewer) {
-        Verdict::Open => {}
-        Verdict::SignIn => {
+    let viewer = match shares
+        .open(
+            &share,
+            bearer(request.headers()).or_else(|| cookie(request.headers(), SESSION_COOKIE)),
+        )
+        .await
+    {
+        Ok(viewer) => viewer,
+        Err(Closed::Gone) => {
+            return page(
+                StatusCode::NOT_FOUND,
+                "Not found",
+                "<p>There is nothing at this link.</p>",
+            );
+        }
+        Err(Closed::SignIn) => {
             let to = format!("{}{}", mount.trim_end_matches('/'), rest);
             let body = format!(
                 "<p>This link is for {}. Sign in to open it.</p><p><a class=\"button\" href=\"{LINKS}/_signin?to={}\">Sign in</a></p>",
@@ -1769,7 +1869,7 @@ async fn serve(
             );
             return page(StatusCode::UNAUTHORIZED, "Sign in", &body);
         }
-        Verdict::Denied => {
+        Err(Closed::Denied) => {
             return page(
                 StatusCode::FORBIDDEN,
                 "Not shared with you",
@@ -1779,7 +1879,7 @@ async fn serve(
                 ),
             );
         }
-    }
+    };
     let base = if mount == "/" { "domain" } else { "site" };
     let dir = audience.as_ref().map_or_else(
         || shares.0.out.join(code).join(base),
@@ -1803,29 +1903,21 @@ async fn serve(
             comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
         }
         _ => {
-            // A rebuild swaps the folder in with two renames; in between
-            // it is not there for a moment. Wait that out first, so every
-            // check below sees the folder that will answer.
-            for _ in 0..SWAP_WAITS {
-                if dir.is_dir() {
-                    break;
+            match admit(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
+                Admit::Open => {}
+                Admit::Hidden => return private(&share, not_found(&dir).await),
+                Admit::Held(needs) => return private(&share, layer_refusal(link.listen, needs)),
+                Admit::Building => return private(&share, being_built()),
+                Admit::Empty => {
+                    return private(
+                        &share,
+                        page(
+                            StatusCode::NOT_FOUND,
+                            "Nothing here yet",
+                            "<p>Nothing is shared on this link yet.</p>",
+                        ),
+                    );
                 }
-                tokio::time::sleep(SWAP_WAIT).await;
-            }
-            // An audience's link: checked now, against the vault as it
-            // is, whatever was built.
-            if let Some(audience) = &audience {
-                if let Some(refusal) = refuse(shares, &share, audience, rest).await {
-                    return private(&share, refusal);
-                }
-            }
-            // A file above the link's layer, by any name: refused here,
-            // whatever the page shows.
-            match needs_layer(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
-                Hold::Serve => {}
-                Hold::Held(needs) => return private(&share, layer_refusal(link.listen, needs)),
-                Hold::Hidden => return private(&share, not_found(&dir).await),
-                Hold::Building => return private(&share, being_built()),
             }
             let mut response = file(&dir, rest, &headers).await;
             // Comments go on a page that is there, never on a 404 (whose
@@ -1841,45 +1933,99 @@ async fn serve(
     }
 }
 
-/// The answer to a request an audience's link does not serve; `None`
-/// when it does ([`Guard`]).
-async fn refuse(
+/// Why a link is not open to a caller ([`Shares::open`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Closed {
+    /// Expired, revoked or unknown.
+    Gone,
+    /// For signed-in people, and nobody is.
+    SignIn,
+    /// Signed in, but not as anyone it is for.
+    Denied,
+}
+
+/// Whether a path below a link is served ([`admit`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admit {
+    Open,
+    /// Answered as a path that is nowhere: another audience's note or
+    /// file, or one above the layer the link does not list.
+    Hidden,
+    /// Above the link's layer: it needs this one.
+    Held(Listen),
+    /// Being built, or not readable now.
+    Building,
+    /// An audience nothing is in.
+    Empty,
+}
+
+impl Shares {
+    /// Whether `share` is open to the holder of issuer session `token`
+    /// now: live, and its audience admits them. The first check of every
+    /// request to a link, a page's or a guest's ([`GuestLane`]).
+    async fn open(&self, share: &Share, token: Option<String>) -> Result<Viewer, Closed> {
+        if share.state(now()) != ShareState::Live {
+            return Err(Closed::Gone);
+        }
+        let viewer = if share.audience.signed_in() {
+            self.viewer_of(token).await
+        } else {
+            Viewer::Anonymous
+        };
+        match share.admits(&viewer) {
+            Verdict::Open => Ok(viewer),
+            Verdict::SignIn => Err(Closed::SignIn),
+            Verdict::Denied => Err(Closed::Denied),
+        }
+    }
+}
+
+/// Whether `rest` (a path below the link, built into `dir`) is served
+/// to a caller [`Shares::open`] let in: the second check of every request
+/// to a link, a page's or a guest's. An audience's link is checked
+/// against the vault as it is now ([`Guard`]), then a file against the
+/// link's layer ([`Shares::above`]).
+async fn admit(
     shares: &Shares,
     share: &Share,
-    audience: &ShareAudience,
+    audience: Option<&ShareAudience>,
+    dir: &Path,
     rest: &str,
-) -> Option<Response> {
-    let asked = {
-        let (shares, share, audience, rest) = (
-            shares.clone(),
-            share.clone(),
-            audience.clone(),
-            rest.to_owned(),
-        );
-        blocking(move || shares.guard(&share, &audience, &rest)).await
-    };
-    match asked.unwrap_or(Guard::Refused) {
-        Guard::Open => None,
-        // Answered as a path that is nowhere is (the site's own 404), so
-        // the link says nothing of another audience's note or file.
-        Guard::Refused => Some(
-            not_found(
-                &shares
-                    .audience_dir(&share.code, &audience.code)
-                    .join("site"),
-            )
-            .await,
-        ),
-        Guard::Building => Some(page(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Being built",
-            "<p>This link's pages are being built. Try again in a moment.</p>",
-        )),
-        Guard::Empty => Some(page(
-            StatusCode::NOT_FOUND,
-            "Nothing here yet",
-            "<p>Nothing is shared on this link yet.</p>",
-        )),
+    listen: Listen,
+) -> Admit {
+    // A rebuild swaps the folder in with two renames; in between it is
+    // not there for a moment. Wait that out first, so every check below
+    // sees the folder that will answer.
+    for _ in 0..SWAP_WAITS {
+        if dir.is_dir() {
+            break;
+        }
+        tokio::time::sleep(SWAP_WAIT).await;
+    }
+    if let Some(audience) = audience {
+        let asked = {
+            let (shares, share, audience, rest) = (
+                shares.clone(),
+                share.clone(),
+                audience.clone(),
+                rest.to_owned(),
+            );
+            blocking(move || shares.guard(&share, &audience, &rest)).await
+        };
+        match asked.unwrap_or(Guard::Refused) {
+            Guard::Open => {}
+            // Answered as a path that is nowhere is, so the link says
+            // nothing of another audience's note or file.
+            Guard::Refused => return Admit::Hidden,
+            Guard::Building => return Admit::Building,
+            Guard::Empty => return Admit::Empty,
+        }
+    }
+    match needs_layer(shares, share, audience, dir, rest, listen).await {
+        Hold::Serve => Admit::Open,
+        Hold::Held(needs) => Admit::Held(needs),
+        Hold::Hidden => Admit::Hidden,
+        Hold::Building => Admit::Building,
     }
 }
 
@@ -2140,8 +2286,20 @@ async fn comment(
     // not have is answered as one that is nowhere: the same either way.
     if let Some(audience) = audience {
         let key = page_key(&form.page);
-        if let Some(refusal) = refuse(shares, share, audience, &key).await {
-            return refusal;
+        let dir = shares
+            .audience_dir(&share.code, &audience.code)
+            .join("site");
+        match admit(shares, share, Some(audience), &dir, &key, Listen::Full).await {
+            Admit::Open | Admit::Held(_) => {}
+            Admit::Hidden => return not_found(&dir).await,
+            Admit::Building => return being_built(),
+            Admit::Empty => {
+                return page(
+                    StatusCode::NOT_FOUND,
+                    "Nothing here yet",
+                    "<p>Nothing is shared on this link yet.</p>",
+                );
+            }
         }
         if !shares.has_page(share, &audience.code, &key) {
             return not_found(
@@ -2545,12 +2703,80 @@ async fn files_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
             return response;
         }
     };
+    let (notes, files) = match listing(shares, link, asked).await {
+        Ok(found) => found,
+        Err(Admit::Building) => {
+            let mut response = (
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({ "error": "which layer each file is in is not known now (an extension's manifest or the vault does not read); try again later" }).to_string(),
+            )
+                .into_response();
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            return response;
+        }
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let notes: Vec<serde_json::Value> = notes
+        .into_iter()
+        .map(|n| {
+            serde_json::json!({
+                "path": n.path,
+                "title": n.title,
+                "type": n.kind,
+                "page": n.page,
+                "files": n.files,
+            })
+        })
+        .collect();
+    let files: Vec<serde_json::Value> = files
+        .into_iter()
+        .map(|f| {
+            serde_json::json!({
+                "path": f.path,
+                "url": f.url,
+                "size": f.size,
+                "sha256": f.sha256,
+                "layer": f.layer,
+                "note": f.note,
+            })
+        })
+        .collect();
+    let body = serde_json::json!({
+        "link": link.mount,
+        "title": link.title(),
+        "listen": asked.label(),
+        "max": link.listen.label(),
+        "notes": notes,
+        "files": files,
+    });
+    let mut response = (StatusCode::OK, body.to_string()).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
+}
+
+/// What `link` lists now at layer `asked` (never past the link's): its
+/// notes in list order, each with its type, page and files, and each
+/// file once, with its size, sha256, layer and URL. The listing of
+/// `<link>_files.json` and of the link's guests ([`GuestLane`]) alike.
+/// `Err(Admit::Building)` while where files are is not known (below
+/// Full).
+async fn listing(
+    shares: &Shares,
+    link: &Link<'_>,
+    asked: Listen,
+) -> Result<(Vec<ListedNote>, Vec<ListedFile>), Admit> {
     let at = Link {
-        listen: asked,
+        listen: asked.min(link.listen),
         ..*link
     };
     let Some(listed) = shares.listed_for(&at, &Grouping::Order).await else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return Err(Admit::Building);
     };
     let found = {
         let (shares, share) = (shares.clone(), link.share.clone());
@@ -2571,32 +2797,27 @@ async fn files_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
         .await
     };
     let Some((held, placed)) = found else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return Err(Admit::Building);
     };
-    if placed.is_none() && asked < Listen::Full {
-        let mut response = (
-            StatusCode::SERVICE_UNAVAILABLE,
-            serde_json::json!({ "error": "which layer each file is in is not known now (an extension's manifest or the vault does not read); try again later" }).to_string(),
-        )
-            .into_response();
-        response.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-        return response;
+    if placed.is_none() && at.listen < Listen::Full {
+        return Err(Admit::Building);
     }
     let base = link.mount.trim_end_matches('/');
     let mut notes = Vec::new();
     let mut files = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for entry in listed.entries.iter() {
-        notes.push(serde_json::json!({
-            "path": entry.path,
-            "title": entry.title,
-            "type": entry.properties.get("type").and_then(|t| t.as_str()),
-            "page": listed.pages.get(&entry.path).map(|p| format!("{base}{p}")),
-            "files": entry.files,
-        }));
+        notes.push(ListedNote {
+            path: entry.path.clone(),
+            title: entry.title.clone(),
+            kind: entry
+                .properties
+                .get("type")
+                .and_then(|t| t.as_str())
+                .map(str::to_owned),
+            page: listed.pages.get(&entry.path).map(|p| format!("{base}{p}")),
+            files: entry.files.clone(),
+        });
         for file in &entry.files {
             if !seen.insert(file.as_str()) {
                 continue;
@@ -2610,32 +2831,193 @@ async fn files_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
                         .map_or(0, |m| m.len());
                     (size, None)
                 },
-                |(size, hash)| (*size, Some(hash.as_str())),
+                |(size, hash)| (*size, Some(hash.clone())),
             );
-            files.push(serde_json::json!({
-                "path": file,
-                "url": format!("{base}/{}", architect_sites::encode_path(file)),
-                "size": size,
-                "sha256": sha256,
-                "layer": placed.as_ref().map(|p| p.get(file).copied().unwrap_or(Listen::Page).label()),
-                "note": entry.path,
-            }));
+            files.push(ListedFile {
+                path: file.clone(),
+                url: format!("{base}/{}", architect_sites::encode_path(file)),
+                size,
+                sha256,
+                layer: placed.as_ref().map(|p| {
+                    p.get(file)
+                        .copied()
+                        .unwrap_or(Listen::Page)
+                        .label()
+                        .to_owned()
+                }),
+                note: entry.path.clone(),
+            });
         }
     }
-    let body = serde_json::json!({
-        "link": link.mount,
-        "title": link.title(),
-        "listen": asked.label(),
-        "max": link.listen.label(),
-        "notes": notes,
-        "files": files,
-    });
-    let mut response = (StatusCode::OK, body.to_string()).into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    response
+    Ok((notes, files))
+}
+
+// ── The link's guests (#629) ─────────────────────────────────────────
+
+/// [`ShareGuest`], the read-only host service of a link's guests.
+///
+/// On the node at `POST /s/<code>/_guest/<method>`. Each call is made as
+/// `Principal::Guest { link_id: <code> }` and checked by [`Shares::open`]
+/// and [`admit`], the two checks every request for the link's pages and
+/// files goes through: what a guest reads is what the page gives the
+/// same visitor, as data.
+#[derive(Clone)]
+pub struct GuestLane(pub Shares);
+
+/// The guest service's one wire.
+impl architect::Services for GuestLane {
+    fn layers() -> impl architect::Layer<Self> {
+        architect::layers![architect_spaces::guest::Service]
+    }
+}
+
+/// [`GuestFault`] for a path [`admit`] did not let through.
+fn shut(admit: Admit) -> GuestFault {
+    match admit {
+        Admit::Held(needs) => GuestFault::Held(needs.label().to_owned()),
+        Admit::Building => GuestFault::Building,
+        Admit::Open | Admit::Hidden | Admit::Empty => GuestFault::Gone,
+    }
+}
+
+impl GuestLane {
+    /// The link `code` opens and its audience, open to the holder of
+    /// `token` now.
+    async fn opened(
+        &self,
+        code: &str,
+        token: String,
+    ) -> Result<(Share, Option<ShareAudience>), GuestFault> {
+        let (share, audience) = Some(code)
+            .filter(|c| is_code(c))
+            .and_then(|c| self.0.link(c))
+            .ok_or(GuestFault::Gone)?;
+        match self.0.open(&share, Some(token)).await {
+            Ok(_) => Ok((share, audience)),
+            Err(Closed::Gone) => Err(GuestFault::Gone),
+            Err(Closed::SignIn) => Err(GuestFault::SignIn),
+            Err(Closed::Denied) => Err(GuestFault::Denied),
+        }
+    }
+
+    /// Where the link's pages are built.
+    fn dir(&self, share: &Share, audience: Option<&ShareAudience>) -> PathBuf {
+        audience.map_or_else(
+            || self.0.0.out.join(&share.code).join("site"),
+            |a| self.0.audience_dir(&share.code, &a.code).join("site"),
+        )
+    }
+}
+
+/// Who a link is for, in a word.
+const fn audience_word(audience: &architect_spaces::Audience) -> &'static str {
+    match audience {
+        architect_spaces::Audience::Public => "public",
+        architect_spaces::Audience::Link => "link",
+        architect_spaces::Audience::Org => "org",
+        architect_spaces::Audience::Invited(_) => "invited",
+    }
+}
+
+impl ShareGuest for GuestLane {
+    async fn link(&self, code: String, token: String) -> Result<GuestLink, GuestFault> {
+        let (share, audience) = self.opened(&code, token).await?;
+        let mount = link_path(&code);
+        let link = Link {
+            share: &share,
+            audience: audience.as_ref(),
+            mount: &mount,
+            listen: share.listen_for(audience.as_ref()),
+        };
+        let (notes, _) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
+        Ok(GuestLink {
+            link: mount.clone(),
+            title: link.title(),
+            listen: link.listen.label().to_owned(),
+            audience: audience_word(&share.audience).to_owned(),
+            notes,
+        })
+    }
+
+    async fn read(
+        &self,
+        code: String,
+        token: String,
+        path: String,
+    ) -> Result<GuestNote, GuestFault> {
+        let (share, audience) = self.opened(&code, token).await?;
+        let mount = link_path(&code);
+        let link = Link {
+            share: &share,
+            audience: audience.as_ref(),
+            mount: &mount,
+            listen: share.listen_for(audience.as_ref()),
+        };
+        // A note the link lists now, with a page of the link's.
+        let (notes, _) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
+        let listed = notes
+            .into_iter()
+            .find(|n| n.path == path)
+            .ok_or(GuestFault::Gone)?;
+        let page = listed.page.clone().ok_or(GuestFault::Gone)?;
+        let below = page
+            .strip_prefix(mount.trim_end_matches('/'))
+            .filter(|b| b.starts_with('/') && b.ends_with('/'))
+            .ok_or(GuestFault::Gone)?
+            .to_owned();
+        let rest = format!("{below}{}", architect_sites::plain::NOTE_FILE);
+        let dir = self.dir(&share, audience.as_ref());
+        match admit(&self.0, &share, audience.as_ref(), &dir, &rest, link.listen).await {
+            Admit::Open => {}
+            other => return Err(shut(other)),
+        }
+        // The built output's own file, never through a symlink (#674): one
+        // planted in the output, or swapped in since the build, is refused.
+        let rel = format!(
+            "{}{}",
+            below.trim_start_matches('/'),
+            architect_sites::plain::NOTE_FILE
+        );
+        let text = blocking(move || {
+            let mut file = architect_sites::listing::open_own(&dir, &rel)?;
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut file, &mut text).map(|_| text)
+        })
+        .await
+        .and_then(Result::ok)
+        .ok_or(GuestFault::Building)?;
+        let mut note: GuestNote = facet_json::from_str(&text).map_err(|_| GuestFault::Building)?;
+        note.path = listed.path;
+        note.kind = listed.kind;
+        note.page = page;
+        // Its text is not given to guests: it can say more than the page.
+        note.source = None;
+        Ok(note)
+    }
+
+    async fn files(
+        &self,
+        code: String,
+        token: String,
+        listen: Option<String>,
+    ) -> Result<Vec<ListedFile>, GuestFault> {
+        let (share, audience) = self.opened(&code, token).await?;
+        let mount = link_path(&code);
+        let link = Link {
+            share: &share,
+            audience: audience.as_ref(),
+            mount: &mount,
+            listen: share.listen_for(audience.as_ref()),
+        };
+        let asked = match listen.as_deref().map(Listen::parse) {
+            None => link.listen,
+            Some(Ok(l)) => l.min(link.listen),
+            // A layer that does not read asks for nothing more.
+            Some(Err(_)) => Listen::Page,
+        };
+        let (_, files) = listing(&self.0, &link, asked).await.map_err(shut)?;
+        Ok(files)
+    }
 }
 
 /// A page of the link, with a bar to its files page and its archive
@@ -3488,7 +3870,7 @@ mod tests {
             HeaderValue::from_str(&format!("{SIGNIN_COOKIE}={nonce}")).unwrap(),
         );
         let (viewer, started, polled) = tokio::join!(
-            tokio::time::timeout(bound, shares.viewer(&signed_in)),
+            tokio::time::timeout(bound, shares.viewer_of(bearer(&signed_in))),
             tokio::time::timeout(bound, start_signin(&shares, "/s/x/".into(), false)),
             tokio::time::timeout(bound, wait_signin(&shares, &waiting, false)),
         );

@@ -24,6 +24,7 @@
 //! | `ARCHITECT_ENROL_AT` | `enrol_at` | none | another node's HTTP origin: this node enrols itself in `enrol_org` there, once |
 //! | `ARCHITECT_ENROL_ORG` | `enrol_org` | none | the issuer org (slug) to enrol in there; its vaults are that org's |
 //! | `ARCHITECT_ENROL_ROLE` | `enrol_role` | `member` | the role it asks for: at most the session's own in the org |
+//! | `ARCHITECT_APPLE_APP_IDS` | `apple_app_ids` | none | `<team id>.<bundle id>,…` (`28C2G63DA7.app.fasttrackstudio.architect`): the iOS apps that open this node's share links (`/s/*`) as universal links, named in `/.well-known/apple-app-site-association`; none: that file is not served (#629) |
 //! | `ARCHITECT_PEERS` | `peers` | none | `endpoint@host:port,…`: nodes dialled directly (no lookup) |
 //! | `ARCHITECT_IROH` | `iroh` | `n0` | `n0` (relays and lookup) or `local` (loopback, no relay: tests) |
 //! | `ARCHITECT_IROH_BIND` | `iroh_bind` | any port | the iroh UDP socket (`0.0.0.0:7777`, for a fixed port) |
@@ -95,6 +96,7 @@ pub struct Config {
     pub enrol_org: Option<String>,
     pub enrol_role: String,
     pub peers: Vec<String>,
+    pub apple_app_ids: Vec<String>,
     pub iroh: IrohMode,
     pub iroh_bind: Option<String>,
     pub mcp_token_file: Option<PathBuf>,
@@ -238,6 +240,7 @@ impl Default for Config {
             enrol_org: None,
             enrol_role: "member".to_owned(),
             peers: Vec::new(),
+            apple_app_ids: Vec::new(),
             iroh: IrohMode::N0,
             iroh_bind: None,
             mcp_token_file: None,
@@ -390,6 +393,9 @@ impl Config {
         }
         if let Some(v) = get("ARCHITECT_PEERS") {
             self.peers = list(&v);
+        }
+        if let Some(v) = get("ARCHITECT_APPLE_APP_IDS") {
+            self.apple_app_ids = list(&v);
         }
         if let Some(v) = get("ARCHITECT_IROH") {
             self.iroh = match v.trim() {

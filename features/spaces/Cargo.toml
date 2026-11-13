@@ -33,6 +33,9 @@ architect-permissions = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
 uuid = { version = "1", default-features = false }
+# A share link read as a browser reads it (WHATWG), before anything is
+# sent to it (`guest`, #629).
+url = "2"
 vox = { workspace = true, optional = true }
 architect-files = { workspace = true, optional = true }
 
