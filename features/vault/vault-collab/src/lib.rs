@@ -62,6 +62,12 @@
 //! - Flush and inbound-merge for one doc serialize on a per-doc
 //!   `tokio::sync::Mutex`, so the `read text → write file → record
 //!   sha` window can't interleave with a concurrent merge.
+//! - **Never hold that per-doc lock across [`DocRegistry::doc`]**: the
+//!   registry holds its creation lock while the factory (`open_doc`)
+//!   runs, and `open_doc` takes the per-doc lock, so the order is always
+//!   creation lock → per-doc lock. Code that must act on what an open
+//!   finds (a delete) says so before the open (`Shared::pending_deletes`)
+//!   instead of locking around it.
 
 #![cfg(not(target_arch = "wasm32"))]
 // Moved from Task as it was (#333), under Task's lints. Architect's
@@ -139,12 +145,22 @@ struct Shared {
     locks: Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
     /// Vault ids that already have an inbound listener.
     watched: Mutex<HashSet<String>>,
+    /// Documents whose file a `Delete` event is being applied to. Set by
+    /// [`apply_delete`] before it fetches the document and cleared when
+    /// it is done, so an open in between (its own, or an attach's) sets
+    /// the tombstone itself, under the reconcile lock it already holds,
+    /// instead of scheduling a write-back that brings the file back.
+    pending_deletes: Mutex<HashSet<Uuid>>,
     /// Where documents persist (one dir per doc id) — how a delete finds
     /// out a file had a document even when nobody opened it since boot.
     crdt_root: PathBuf,
     /// Ids of plain documents: not vault files, opened over file
     /// persistence with no reconciliation ([`VaultCollab::with_plain_docs`]).
     plain: std::sync::RwLock<Option<PlainDocs>>,
+    /// Tests only: each open document's write-behind progress, and a pause
+    /// in [`apply_delete`] between fetching the document and locking it.
+    #[cfg(test)]
+    probes: test_probes::Probes,
 }
 
 /// Which ids a [`VaultCollab`] also opens as plain documents.
@@ -176,14 +192,21 @@ impl VaultCollab {
     /// shrink it so flush assertions don't wait a wall-clock second.
     #[must_use]
     pub fn with_debounce(backend: Backend, crdt_root: PathBuf, debounce: Duration) -> Self {
+        Self::build(backend, crdt_root, debounce, IDLE_EVICTION)
+    }
+
+    fn build(backend: Backend, crdt_root: PathBuf, debounce: Duration, idle: Duration) -> Self {
         let shared = Arc::new(Shared {
             backend: backend.clone(),
             debounce,
             flushed: Mutex::new(HashMap::new()),
             locks: Mutex::new(HashMap::new()),
             watched: Mutex::new(HashSet::new()),
+            pending_deletes: Mutex::new(HashSet::new()),
             crdt_root: crdt_root.clone(),
             plain: std::sync::RwLock::new(None),
+            #[cfg(test)]
+            probes: test_probes::Probes::default(),
         });
 
         let factory_shared = shared.clone();
@@ -211,7 +234,7 @@ impl VaultCollab {
                         .is_ok()
             }
         })
-        .with_idle_eviction(IDLE_EVICTION);
+        .with_idle_eviction(idle);
 
         Self { registry, shared }
     }
@@ -401,6 +424,16 @@ async fn open_doc(
             }
             doc.loro().commit();
         }
+        // No file because it was just deleted: the delete being applied
+        // (`apply_delete`, waiting for this open) is recorded here, under
+        // this lock, so nothing is scheduled that writes the file back.
+        None if is_pending_delete(shared, doc_id) => {
+            if !vault_doc::is_deleted(doc.loro()) {
+                vault_doc::set_deleted(doc.loro(), true);
+                vault_doc::commit_as(doc.loro(), "deleted: vault file");
+            }
+            forget_flushed(shared, doc_id);
+        }
         // No file: a document first made elsewhere writes it — unless it
         // is a deleted one, whose file is meant to be gone.
         None => {
@@ -439,7 +472,11 @@ fn spawn_write_behind(
     flush_now: bool,
 ) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    #[cfg(test)]
+    let progress = shared.probes.track(doc_id);
     if flush_now {
+        #[cfg(test)]
+        progress.sent();
         let _ = tx.send(());
     }
     // `subscribe_root` fires for every committed change — local
@@ -448,8 +485,12 @@ fn spawn_write_behind(
     // WeakCrdtDoc rule); detaching ties its lifetime to the doc, so
     // eviction ⇒ sender drops ⇒ the worker exits.
     let bridge = tx.clone();
+    #[cfg(test)]
+    let bridge_progress = progress.clone();
     doc.loro()
         .subscribe_root(Arc::new(move |_| {
+            #[cfg(test)]
+            bridge_progress.sent();
             let _ = bridge.send(());
         }))
         .detach();
@@ -463,11 +504,18 @@ fn spawn_write_behind(
             if rx.recv().await.is_none() {
                 break; // doc dropped (evicted) — worker retires
             }
+            #[cfg(test)]
+            let mut taken = 1;
             // …then absorb the burst until it goes quiet.
             let mut closed = false;
             loop {
                 match tokio::time::timeout(shared.debounce, rx.recv()).await {
-                    Ok(Some(())) => {}
+                    Ok(Some(())) => {
+                        #[cfg(test)]
+                        {
+                            taken += 1;
+                        }
+                    }
                     Ok(None) => {
                         closed = true;
                         break;
@@ -476,6 +524,8 @@ fn spawn_write_behind(
                 }
             }
             flush(&shared, doc_id, &weak, &vault_id, &path).await;
+            #[cfg(test)]
+            progress.flushed(taken);
             if closed {
                 break;
             }
@@ -610,19 +660,77 @@ async fn apply_delete(shared: &Arc<Shared>, registry: &DocRegistry, vault_id: &s
             return;
         }
     }
-    let lock = doc_lock(shared, doc_id);
-    let _g = lock.lock().await;
-    if shared.backend.get_file(vault_id, path).is_ok() {
-        return; // written again since the event
-    }
+    // Said before the open, so an open that finds no file (this one, or an
+    // attach's racing it) sets the tombstone under the reconcile lock it
+    // already holds. Otherwise a document with content (saved in an earlier
+    // run, or evicted) schedules an immediate write-back from the open, and
+    // if that write takes the lock first the file is back and the delete
+    // lost. Cleared on every way out.
+    let _pending = PendingDelete::mark(shared, doc_id);
+    // Opened before its lock is taken, never under it: opening a closed
+    // document runs `open_doc`, which takes this same lock, while the
+    // registry holds its creation lock. Under the lock, that wedged the
+    // document, this vault's listener and every attach on the registry.
     let Ok(doc) = registry.doc(doc_id).await else {
         return;
     };
+    #[cfg(test)]
+    shared.probes.pause_before_delete_lock().await;
+    let lock = doc_lock(shared, doc_id);
+    let _g = lock.lock().await;
+    if shared.backend.get_file(vault_id, path).is_ok() {
+        // Written again since the event: a revival, whose `Put` follows.
+        // A file this document wrote back cannot be what is here, since
+        // nothing schedules that write while the delete is pending.
+        return;
+    }
     if vault_doc::is_deleted(doc.loro()) {
         return;
     }
     vault_doc::set_deleted(doc.loro(), true);
     vault_doc::commit_as(doc.loro(), "deleted: vault file");
+    forget_flushed(shared, doc_id);
+}
+
+/// A `Delete` being applied to `doc_id`, recorded in
+/// [`Shared::pending_deletes`] for as long as this lives.
+struct PendingDelete<'a> {
+    shared: &'a Shared,
+    doc_id: Uuid,
+}
+
+impl<'a> PendingDelete<'a> {
+    fn mark(shared: &'a Shared, doc_id: Uuid) -> Self {
+        shared
+            .pending_deletes
+            .lock()
+            .expect("pending deletes lock poisoned")
+            .insert(doc_id);
+        Self { shared, doc_id }
+    }
+}
+
+impl Drop for PendingDelete<'_> {
+    fn drop(&mut self) {
+        self.shared
+            .pending_deletes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.doc_id);
+    }
+}
+
+fn is_pending_delete(shared: &Shared, doc_id: Uuid) -> bool {
+    shared
+        .pending_deletes
+        .lock()
+        .expect("pending deletes lock poisoned")
+        .contains(&doc_id)
+}
+
+/// The file this document wrote is gone: nothing to guard echoes of, and
+/// nothing `remove_mirror` may delete.
+fn forget_flushed(shared: &Shared, doc_id: Uuid) {
     shared
         .flushed
         .lock()
@@ -669,6 +777,15 @@ async fn apply_inbound(
     if !registry.is_open(doc_id).await {
         return; // closed/evicted — the next open re-seeds from disk
     }
+    // Fetched before its lock is taken, as in `apply_delete`: evicted
+    // since `is_open`, it opens here, and opening takes this lock. That
+    // open is the "next open" above: `open_doc` merges this very file and
+    // records it, so the echo check below returns. Kept rather than a
+    // lookup that never opens: the registry has none, and the outcome is
+    // the same.
+    let Ok(doc) = registry.doc(doc_id).await else {
+        return;
+    };
 
     let lock = doc_lock(shared, doc_id);
     let _g = lock.lock().await;
@@ -683,9 +800,6 @@ async fn apply_inbound(
     if is_echo(shared, doc_id, &file_sha) {
         return;
     }
-    let Ok(doc) = registry.doc(doc_id).await else {
-        return;
-    };
 
     let base = {
         let flushed = shared.flushed.lock().expect("flushed lock poisoned");
@@ -878,6 +992,85 @@ impl DocSync for VaultCollab {
     }
 }
 
+/// What tests watch instead of sleeping: how far each document's
+/// write-behind has got, and a pause they control in [`apply_delete`].
+#[cfg(test)]
+mod test_probes {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use uuid::Uuid;
+
+    #[derive(Default)]
+    pub struct Probes {
+        progress: Mutex<HashMap<Uuid, Arc<Progress>>>,
+        delete_pause: Mutex<Option<Arc<Pause>>>,
+    }
+
+    /// Change signals sent to a document's write-behind, and how many of
+    /// them a finished flush has covered. Equal: every change committed so
+    /// far is on disk (or was found clean), and nothing more is scheduled.
+    #[derive(Default)]
+    pub struct Progress {
+        sent: AtomicUsize,
+        flushed: AtomicUsize,
+    }
+
+    impl Progress {
+        pub fn sent(&self) {
+            self.sent.fetch_add(1, Ordering::SeqCst);
+        }
+        pub fn flushed(&self, n: usize) {
+            self.flushed.fetch_add(n, Ordering::SeqCst);
+        }
+    }
+
+    /// One pause: `reached` when the paused task gets there, and it waits
+    /// for `release`.
+    #[derive(Default)]
+    pub struct Pause {
+        pub reached: tokio::sync::Notify,
+        pub release: tokio::sync::Notify,
+    }
+
+    impl Probes {
+        /// A fresh counter pair for a document's new write-behind worker.
+        pub fn track(&self, doc_id: Uuid) -> Arc<Progress> {
+            let p = Arc::new(Progress::default());
+            self.progress
+                .lock()
+                .expect("probe lock")
+                .insert(doc_id, p.clone());
+            p
+        }
+
+        /// No write-behind work outstanding for `doc_id` (or no worker).
+        pub fn settled(&self, doc_id: Uuid) -> bool {
+            self.progress
+                .lock()
+                .expect("probe lock")
+                .get(&doc_id)
+                .is_none_or(|p| p.flushed.load(Ordering::SeqCst) == p.sent.load(Ordering::SeqCst))
+        }
+
+        /// The next `apply_delete` stops between fetching the document and
+        /// taking its lock until the pause is released.
+        pub fn pause_next_delete(&self) -> Arc<Pause> {
+            let pause = Arc::new(Pause::default());
+            *self.delete_pause.lock().expect("probe lock") = Some(pause.clone());
+            pause
+        }
+
+        pub async fn pause_before_delete_lock(&self) {
+            let pause = self.delete_pause.lock().expect("probe lock").take();
+            if let Some(pause) = pause {
+                pause.reached.notify_one();
+                pause.release.notified().await;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -956,6 +1149,172 @@ mod tests {
         backend.get_file("v1", path).is_ok()
     }
 
+    /// The `Delete` for `doc_id` is applied (its marker cleared, so
+    /// `apply_delete` has returned) and every write the document's
+    /// write-behind had scheduled has run: nothing left can bring the file
+    /// back, so its absence now is its absence.
+    async fn delete_applied(collab: &VaultCollab, doc_id: Uuid) {
+        let shared = collab.shared.clone();
+        eventually("the delete applied", async || {
+            !is_pending_delete(&shared, doc_id)
+        })
+        .await;
+        eventually("the write-behind settled", async || {
+            shared.probes.settled(doc_id)
+        })
+        .await;
+    }
+
+    /// The vault listener is subscribed, so an event sent now reaches it.
+    async fn listening(backend: &Backend) {
+        let chan = backend.channel("v1").await;
+        eventually("the vault listener", async || chan.receiver_count() > 0).await;
+    }
+
+    /// Persisted (seed or edits) under `crdt_root`, as a closed or
+    /// restarted node finds it.
+    async fn persisted(crdt_root: &std::path::Path, doc_id: Uuid) {
+        let p = FilePersistence::new(crdt_root);
+        eventually("the document persisted", async || {
+            !crdt::Persistence::load_updates(&p, doc_id)
+                .await
+                .unwrap()
+                .is_empty()
+        })
+        .await;
+    }
+
+    /// Delete `path` with `apply_delete` paused between fetching the
+    /// document and locking it, for as long as the fetch's own write-behind
+    /// needs to do everything it scheduled — the widest the race can be.
+    /// Then let it finish and say what is left.
+    async fn delete_with_the_widest_race(collab: &VaultCollab, backend: &Backend, doc_id: Uuid) {
+        let pause = collab.shared.probes.pause_next_delete();
+        remove(backend, "n.md").await;
+        tokio::time::timeout(Duration::from_secs(10), pause.reached.notified())
+            .await
+            .expect("the delete reached its pause");
+        let shared = collab.shared.clone();
+        eventually("the open's write-behind settled", async || {
+            shared.probes.settled(doc_id)
+        })
+        .await;
+        pause.release.notify_one();
+        delete_applied(collab, doc_id).await;
+    }
+
+    /// A note saved in an earlier run (its document persisted, its route
+    /// not registered on this backend) whose file is deleted: the open the
+    /// delete makes sets the tombstone, and schedules no write that brings
+    /// the file back, however late the delete gets its lock.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_note_saved_in_an_earlier_run_stays_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let crdt_root = tmp.path().join("crdt");
+        let doc_id = {
+            let backend = Backend::single("v1", tmp.path().join("vault")).unwrap();
+            put(&backend, "n.md", "saved before\n").await;
+            let doc_id = backend.open_collab("v1", "n.md").unwrap().doc_id;
+            let collab = VaultCollab::with_debounce(backend, crdt_root.clone(), DEBOUNCE);
+            let doc = collab.registry().doc(doc_id).await.unwrap();
+            assert!(!vault_doc::doc::is_blank(doc.loro()));
+            persisted(&crdt_root, doc_id).await;
+            doc_id
+        };
+
+        let backend = Backend::single("v1", tmp.path().join("vault")).unwrap();
+        let collab = VaultCollab::with_debounce(backend.clone(), crdt_root, DEBOUNCE);
+        collab.watch_vault("v1");
+        listening(&backend).await;
+        delete_with_the_widest_race(&collab, &backend, doc_id).await;
+
+        let doc = collab.registry().doc(doc_id).await.unwrap();
+        assert!(
+            vault_doc::is_deleted(doc.loro()),
+            "the delete was lost: no tombstone"
+        );
+        assert!(
+            !exists(&backend, "n.md"),
+            "the deleted note's file came back"
+        );
+    }
+
+    /// The same for a note saved this run and then closed for being idle.
+    /// Today the open's write-back finds nothing to write here (this run
+    /// still remembers what it last wrote, `Shared::flushed`), so this
+    /// passes without the pending delete too; it is what fails if that
+    /// memory is ever pruned on eviction without keeping the delete safe.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_note_saved_then_evicted_stays_deleted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let crdt_root = tmp.path().join("crdt");
+        let backend = Backend::single("v1", tmp.path().join("vault")).unwrap();
+        let collab = VaultCollab::build(
+            backend.clone(),
+            crdt_root.clone(),
+            DEBOUNCE,
+            Duration::from_millis(150),
+        );
+        collab.watch_vault("v1");
+        put(&backend, "n.md", "saved this run\n").await;
+        let doc_id = backend.open_collab("v1", "n.md").unwrap().doc_id;
+        {
+            let doc = collab.registry().doc(doc_id).await.unwrap();
+            assert!(!vault_doc::doc::is_blank(doc.loro()));
+            persisted(&crdt_root, doc_id).await;
+        }
+        let r = collab.registry().clone();
+        eventually("closed for being idle", async || !r.is_open(doc_id).await).await;
+        listening(&backend).await;
+        delete_with_the_widest_race(&collab, &backend, doc_id).await;
+
+        let doc = collab.registry().doc(doc_id).await.unwrap();
+        assert!(
+            vault_doc::is_deleted(doc.loro()),
+            "the delete was lost: no tombstone"
+        );
+        assert!(
+            !exists(&backend, "n.md"),
+            "the deleted note's file came back"
+        );
+    }
+
+    /// The other direction: a file written again right after it was
+    /// deleted, before the delete is applied, is a revival. The delete
+    /// leaves it alone and the document keeps no tombstone.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_file_written_again_before_its_delete_is_applied_is_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let crdt_root = tmp.path().join("crdt");
+        let backend = Backend::single("v1", tmp.path().join("vault")).unwrap();
+        let collab = VaultCollab::with_debounce(backend.clone(), crdt_root.clone(), DEBOUNCE);
+        collab.watch_vault("v1");
+        put(&backend, "n.md", "first\n").await;
+        let doc_id = backend.open_collab("v1", "n.md").unwrap().doc_id;
+        listening(&backend).await;
+
+        let pause = collab.shared.probes.pause_next_delete();
+        remove(&backend, "n.md").await;
+        tokio::time::timeout(Duration::from_secs(10), pause.reached.notified())
+            .await
+            .expect("the delete reached its pause");
+        put(&backend, "n.md", "second\n").await;
+        pause.release.notify_one();
+        delete_applied(&collab, doc_id).await;
+
+        let doc = collab.registry().doc(doc_id).await.unwrap();
+        let d = doc.clone();
+        eventually("the revival merged", async || {
+            d.loro().get_text(COLLAB_BODY_CONTAINER).to_string() == "second\n"
+        })
+        .await;
+        assert!(
+            !vault_doc::is_deleted(doc.loro()),
+            "a revived file was tombstoned"
+        );
+        assert_eq!(read(&backend, "n.md"), "second\n");
+    }
+
     // t[verify offline.peers] — a delete travels with the document:
     // deleting the file marks it, a tombstone from elsewhere removes the
     // file instead of being undone, and writing the file again revives it
@@ -972,7 +1331,7 @@ mod tests {
         remove(&backend, "n.md").await;
         let d = doc.clone();
         eventually("the tombstone", async || vault_doc::is_deleted(d.loro())).await;
-        tokio::time::sleep(DEBOUNCE * 4).await;
+        delete_applied(&collab, ack.doc_id).await;
         assert!(
             !exists(&backend, "n.md"),
             "a flush recreated a deleted file"
@@ -990,6 +1349,57 @@ mod tests {
         vault_doc::commit_as(doc.loro(), "deleted elsewhere");
         let b = backend.clone();
         eventually("the mirror removed", async || !exists(&b, "n.md")).await;
+    }
+
+    /// A note's file deleted while its document is closed (registered,
+    /// never opened this run, or evicted): the document learns it is
+    /// deleted, and every other document still opens. Opening it under its
+    /// own reconcile lock deadlocked the registry's creation lock, so no
+    /// note on the node attached again until a restart. Run on a runtime
+    /// of its own, so a wedged registry fails the test instead of hanging
+    /// it.
+    #[test]
+    fn a_delete_of_a_closed_document_leaves_the_registry_open() {
+        let (done_tx, done) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(delete_of_a_closed_document());
+            let _ = done_tx.send(());
+        });
+        done.recv_timeout(Duration::from_secs(30))
+            .expect("the registry wedged after a closed document's file was deleted");
+    }
+
+    async fn delete_of_a_closed_document() {
+        let (_tmp, backend, collab) = setup();
+        collab.watch_vault("v1");
+        put(&backend, "gone.md", "about to go").await;
+        put(&backend, "other.md", "still here").await;
+        let gone = backend.open_collab("v1", "gone.md").unwrap().doc_id;
+        let other = backend.open_collab("v1", "other.md").unwrap().doc_id;
+        assert!(!collab.registry().is_open(gone).await);
+
+        remove(&backend, "gone.md").await;
+        let r = collab.registry().clone();
+        eventually("the closed document opened for the delete", async || {
+            r.is_open(gone).await
+        })
+        .await;
+        let opened = collab.registry().doc(other).await.unwrap();
+        assert_eq!(
+            opened.loro().get_text(COLLAB_BODY_CONTAINER).to_string(),
+            "still here"
+        );
+        let doc = collab.registry().doc(gone).await.unwrap();
+        eventually("the tombstone", async || vault_doc::is_deleted(doc.loro())).await;
+        delete_applied(&collab, gone).await;
+        assert!(
+            !exists(&backend, "gone.md"),
+            "a flush recreated a deleted file"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

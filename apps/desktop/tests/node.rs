@@ -62,12 +62,18 @@ const ORG: &str = "test-org";
 const MCP_TOKEN: &str = "test-mcp-bearer";
 
 async fn issuer() -> String {
+    issuer_with(Vec::new()).await
+}
+
+/// The issuer with OIDC `clients` registered.
+async fn issuer_with(clients: Vec<architect_auth::OidcClientConfig>) -> String {
     let db = Database::connect("sqlite::memory:").await.unwrap();
     Migrator::up(&db, None).await.unwrap();
     let config = ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
         database_url: "sqlite::memory:".into(),
         session_ttl_seconds: 3600,
+        oidc_clients: clients,
         ..ServerConfig::local()
     };
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db.clone())).unwrap();
@@ -225,7 +231,7 @@ async fn a_note_syncs_between_two_headless_nodes_through_the_always_on_one() {
     // An agent writes on the always-on node over MCP; the laptop gets it.
     assert_eq!(
         architect_desktop::node::service::notes::notes_actions::IDS,
-        ["NOTES_LIST", "NOTES_READ", "NOTES_WRITE"]
+        ["NOTES_LIST", "NOTES_READ", "NOTES_WRITE", "NOTES_CREATE"]
     );
     let wrote = mcp(
         &always,
@@ -625,6 +631,8 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     );
     host.host_org = Some("indie".to_owned());
     let host = node::start(host).await.unwrap();
+    // Its status names the org it hosts: what a web app opens.
+    assert_eq!(status(&host).await.hosts.as_deref(), Some("indie"));
 
     // Alan, a member, signed in at the issuer: the notes, then one live.
     let alan_dir = tmp.path().join("alan-web");
@@ -677,6 +685,632 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     host.stop().await;
 }
 
+/// The status line of a WebSocket upgrade to the org lane at `node`, from
+/// a browser page on `origin` (none: a native client).
+async fn upgrade_status(node: &Running, origin: Option<&str>) -> String {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut stream = tokio::net::TcpStream::connect(node.http).await.unwrap();
+    let origin = origin.map_or_else(String::new, |o| format!("Origin: {o}\r\n"));
+    let request = format!(
+        "GET /org/indie/vox HTTP/1.1\r\nHost: {}\r\n{origin}Connection: Upgrade\r\n\
+         Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: vox.v1\r\n\r\n",
+        node.http
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut buf = [0_u8; 256];
+    let n = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    String::from_utf8_lossy(&buf[..n])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Where a browser's sign-in comes back to, in these tests.
+const WEB_CALLBACK: &str = "http://127.0.0.1:9/auth/callback";
+
+/// A web app the issuer knows: `first_party` as the browser app
+/// (`architect`, registered `first_party`, with rotation as production's).
+fn web_client(id: &str, first_party: bool) -> architect_auth::OidcClientConfig {
+    architect_auth::OidcClientConfig {
+        client_id: id.to_owned(),
+        client_secret: None,
+        name: id.to_owned(),
+        redirect_uris: vec![WEB_CALLBACK.to_owned()],
+        scopes: vec!["openid".into(), "email".into(), "profile".into()],
+        public_client: true,
+        skip_consent: true,
+        first_party,
+        rotate_refresh_tokens: first_party,
+        disabled: false,
+    }
+}
+
+/// The browser's redirect sign-in as `client` for the person holding
+/// `session` (`apps/web`'s, with PKCE): its token response.
+async fn signed_in_by_redirect(
+    origin: &str,
+    client: &str,
+    session: &str,
+) -> auth_client::oidc::TokenResponse {
+    use auth_client::oidc;
+    let pkce = oidc::Pkce::from_entropy([7; 32], [9; 16]);
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let authorize =
+        oidc::authorize_url(origin, client, WEB_CALLBACK, &pkce, "openid email profile");
+    let answer = http
+        .get(authorize)
+        .bearer_auth(session)
+        .send()
+        .await
+        .unwrap();
+    let back = answer
+        .headers()
+        .get("location")
+        .and_then(|l| l.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let code = back
+        .split(['?', '&'])
+        .find_map(|kv| kv.strip_prefix("code="))
+        .unwrap_or_else(|| panic!("no code in the redirect ({})", answer.status()))
+        .to_owned();
+    let body = oidc::token_request_body(client, WEB_CALLBACK, &code, &pkce);
+    let text = http
+        .post(format!("{origin}{}", oidc::TOKEN_PATH))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    oidc::token_response_from(&text).unwrap()
+}
+
+/// #628: a browser signed in by redirect holds only the issuer's access
+/// token (client `architect`, no issuer session). The node relays it to
+/// the issuer's `whoami` and org list, which take a first party's access
+/// token, so the org lane serves it, live; the node verifies no JWT
+/// itself. A third party's access token and an id token stay anonymous.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_browser_signed_in_by_redirect_reaches_the_org_lane_with_its_access_token() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::{DocSyncClient, SyncedDoc};
+
+    let origin = issuer_with(vec![
+        web_client("architect", true),
+        web_client("elsewhere", false),
+    ])
+    .await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host_dir = tmp.path().join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        host_dir.join("data/vaults/notes/hello.md"),
+        "# Hello\n\nThe org's note.\n",
+    )
+    .unwrap();
+    let mut host = config(
+        "indie-host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    let host = node::start(host).await.unwrap();
+
+    // Alan, a member, signs in to the web app by redirect.
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let alan = token_in(&alan_dir);
+    let web_app = signed_in_by_redirect(&origin, "architect", &alan).await;
+    let notes: NotesClient = web(&host, Some(web_app.access_token.clone())).await;
+    let listed = notes.list().await.unwrap();
+    assert!(listed.iter().any(|n| n.path == "hello.md"), "{listed:?}");
+
+    let sync: DocSyncClient = web(&host, Some(web_app.access_token.clone())).await;
+    // The web app's text area over the browser's replica, as `apps/web`
+    // opens a note: it shows the note as read, before the session has
+    // attached.
+    let replica = crdt::CrdtDoc::ephemeral();
+    let read = notes
+        .read("notes".to_owned(), "hello.md".to_owned())
+        .await
+        .unwrap();
+    let mut text = architect_web::live_text::LiveText::new(
+        replica.loro().clone(),
+        vault_proto::COLLAB_BODY_CONTAINER,
+        read.clone(),
+    );
+    // Typed at once, before the session attached: the document does not
+    // hold the note yet, so it is not taken (taken, it would add a second
+    // copy of the note, or text at the wrong place).
+    assert_eq!(
+        text.typed(&format!("Typed too soon. {read}")).unwrap(),
+        architect_web::live_text::Typed::NotLive
+    );
+    let (attached_tx, mut attached) = tokio::sync::mpsc::unbounded_channel();
+    let mut synced = SyncedDoc::new(
+        vault_proto::collab_doc_id("notes", "hello.md"),
+        replica.clone(),
+    )
+    .on_attached(std::sync::Arc::new(move || {
+        let _ = attached_tx.send(());
+    }));
+    let session = tokio::spawn(async move {
+        let _ = synced.run(&sync).await;
+    });
+    tokio::time::timeout(Duration::from_secs(20), attached.recv())
+        .await
+        .expect("the session attached");
+    let shown = text.attach();
+    assert!(shown.contains("The org's note."), "{shown}");
+    let typed = format!("{shown}\nTyped by redirect.\n");
+    assert!(matches!(
+        text.typed(&typed).unwrap(),
+        architect_web::live_text::Typed::Merged { .. }
+    ));
+    until("the host's file has it", || {
+        reads(&note(&host), "Typed by redirect.")
+    })
+    .await;
+    session.abort();
+    // Once, not twice, and nothing typed before the attach.
+    let file = std::fs::read_to_string(note(&host)).unwrap();
+    assert_eq!(file.matches("The org's note.").count(), 1, "{file}");
+    assert!(!file.contains("Typed too soon."), "{file}");
+
+    // #628 H1: a new note never empties one made since the listing.
+    std::fs::write(
+        host_dir.join("data/vaults/notes/Untitled.md"),
+        "Someone else's note, made after this tab listed the vault.\n",
+    )
+    .unwrap();
+    let refused = notes
+        .create("notes".to_owned(), "Untitled.md".to_owned(), String::new())
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            Err(vox::VoxError::User(e)) if matches!(**e, vault_proto::notes::NotesError::Exists(_))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(host_dir.join("data/vaults/notes/Untitled.md")).unwrap(),
+        "Someone else's note, made after this tab listed the vault.\n"
+    );
+    notes
+        .create(
+            "notes".to_owned(),
+            "Untitled 2.md".to_owned(),
+            String::new(),
+        )
+        .await
+        .expect("a free name is made");
+    assert_eq!(
+        std::fs::read_to_string(host_dir.join("data/vaults/notes/Untitled 2.md")).unwrap(),
+        ""
+    );
+
+    // #628 L3: a page on another origin cannot open the lane; the app's
+    // own origin and a native client (no `Origin`) reach the bearer check.
+    for (origin, want) in [
+        (Some("https://evil.example".to_owned()), "403"),
+        (Some(format!("http://{}", host.http)), "101"),
+        (None, "101"),
+    ] {
+        let status = upgrade_status(&host, origin.as_deref()).await;
+        assert!(status.contains(want), "{origin:?}: {status}");
+    }
+
+    // A third party's access token, and the browser's id token: anonymous.
+    let other = signed_in_by_redirect(&origin, "elsewhere", &alan).await;
+    for (label, token) in [
+        ("a third party's access token", other.access_token),
+        ("an id token", web_app.id_token.clone().unwrap_or_default()),
+    ] {
+        let refused: NotesClient = web(&host, Some(token)).await;
+        assert!(refused.list().await.is_err(), "{label} was let in");
+    }
+
+    host.stop().await;
+}
+
+/// #628 M2, N2: a browser's live note session ends once the credential
+/// its call was admitted with stops resolving: here its grant is revoked
+/// at the issuer, as the web app's Sign out does. The node re-checks that
+/// credential every `lane_recheck_secs`, so the session does not outlive
+/// the sign-in until the connection happens to drop. The credential is
+/// watched however it came: the connection's bearer (the browser's
+/// subprotocol), or the call's own `authorization`, with or without
+/// another bearer on the connection.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_note_session_ends_when_its_web_sign_in_is_revoked() {
+    live_note_ends_on_revoke(Bearer::Connection).await;
+}
+
+/// N2: the review's variant: no bearer on the connection, the token sent
+/// with the call (`authorization` metadata), as a native client may.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_note_opened_with_a_per_call_bearer_ends_when_it_is_revoked() {
+    live_note_ends_on_revoke(Bearer::PerCall).await;
+}
+
+/// N2: a connection signed in as one sign-in that makes the call as
+/// another: the call's credential is the one watched.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_note_watches_the_call_s_bearer_not_the_connection_s() {
+    live_note_ends_on_revoke(Bearer::PerCallOverAnother).await;
+}
+
+/// Which way the revoked token reaches the org lane.
+#[derive(Clone, Copy)]
+enum Bearer {
+    Connection,
+    PerCall,
+    PerCallOverAnother,
+}
+
+/// A host that hosts `indie` with `hello.md`, its lane re-checking every
+/// second, asking the issuer at `issuer`; its directory.
+async fn indie_host(tmp: &Path, origin: &str, issuer: &str, grace_secs: u64) -> Running {
+    let host_dir = tmp.join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        host_dir.join("data/vaults/notes/hello.md"),
+        "# Hello\n\nThe org's note.\n",
+    )
+    .unwrap();
+    let mut host = config(
+        "indie-host",
+        &host_dir,
+        issuer,
+        session_of(origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    host.lane_recheck_secs = 1;
+    host.lane_issuer_grace_secs = grace_secs;
+    node::start(host).await.unwrap()
+}
+
+/// `hello.md` opened live over `sync`: the running session, once attached.
+async fn attached(
+    sync: crdt::sync::DocSyncClient,
+) -> tokio::task::JoinHandle<Result<(), crdt::PersistError>> {
+    use crdt::sync::SyncedDoc;
+    let replica = crdt::CrdtDoc::ephemeral();
+    let (attached_tx, mut attached) = tokio::sync::mpsc::unbounded_channel();
+    let mut synced = SyncedDoc::new(
+        vault_proto::collab_doc_id("notes", "hello.md"),
+        replica.clone(),
+    )
+    .on_attached(std::sync::Arc::new(move || {
+        let _ = attached_tx.send(());
+    }));
+    let session = tokio::spawn(async move { synced.run(&sync).await });
+    tokio::time::timeout(Duration::from_secs(20), attached.recv())
+        .await
+        .expect("the session attached");
+    session
+}
+
+/// `client` sending `token` with every call (`authorization` metadata).
+fn per_call(client: crdt::sync::DocSyncClient, token: &str) -> crdt::sync::DocSyncClient {
+    let store = std::sync::Arc::new(auth_client::MemoryTokenStore::new());
+    auth_client::TokenStore::save(&*store, &auth_client::StoredSession::new(token)).unwrap();
+    client.with_middleware(auth_client::TokenStoreMiddleware::new(store))
+}
+
+async fn live_note_ends_on_revoke(bearer: Bearer) {
+    use crdt::sync::DocSyncClient;
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host = indie_host(tmp.path(), &origin, &origin, 300).await;
+
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let web_app = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir)).await;
+    let token = web_app.access_token.clone();
+    let sync: DocSyncClient = match bearer {
+        Bearer::Connection => web(&host, Some(token.clone())).await,
+        Bearer::PerCall => per_call(web(&host, None).await, &token),
+        Bearer::PerCallOverAnother => {
+            let other = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir)).await;
+            per_call(web(&host, Some(other.access_token)).await, &token)
+        }
+    };
+    let session = attached(sync).await;
+
+    // Still open a few re-checks later: the sign-in is good.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(!session.is_finished(), "the session ended while signed in");
+
+    // Sign out: the web app revokes its grant.
+    let revoked = reqwest::Client::new()
+        .post(format!("{origin}/oauth2/revoke"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(auth_client::oidc::revoke_request_body("architect", &token))
+        .send()
+        .await
+        .unwrap();
+    assert!(revoked.status().is_success(), "{}", revoked.status());
+    let ended = tokio::time::timeout(Duration::from_secs(15), session).await;
+    assert!(
+        ended.is_ok(),
+        "the live session outlived the revoked sign-in"
+    );
+
+    host.stop().await;
+}
+
+/// A TCP forwarder to `to` (`http://host:port`) that can be cut: then
+/// every connection through it drops and no new one is accepted, as when
+/// the issuer goes away. Its origin, and the switch.
+async fn cuttable(to: &str) -> (String, tokio::sync::watch::Sender<bool>) {
+    forwarder(to, false).await
+}
+
+/// A TCP forwarder to `to` that can stall: then it relays nothing more,
+/// yet holds every connection open and accepts new ones, as an issuer
+/// that hangs (or a path that blackholes) does. Its origin, and the switch.
+async fn stallable(to: &str) -> (String, tokio::sync::watch::Sender<bool>) {
+    forwarder(to, true).await
+}
+
+async fn forwarder(to: &str, stall: bool) -> (String, tokio::sync::watch::Sender<bool>) {
+    let target = to.trim_start_matches("http://").to_owned();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let (cut, cut_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        let mut stop = cut_rx.clone();
+        loop {
+            tokio::select! {
+                _ = stop.changed(), if !stall => return,
+                accepted = listener.accept() => {
+                    let Ok((mut inbound, _)) = accepted else { return };
+                    let (target, mut stop) = (target.clone(), cut_rx.clone());
+                    tokio::spawn(async move {
+                        if *stop.borrow() {
+                            // Stalled: held open (in scope), never answered.
+                            std::future::pending::<()>().await;
+                        }
+                        let Ok(mut outbound) = tokio::net::TcpStream::connect(&target).await else {
+                            return;
+                        };
+                        tokio::select! {
+                            _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound) => {}
+                            _ = stop.changed() => {
+                                if stall {
+                                    // Both ends stay open in scope.
+                                    std::future::pending::<()>().await;
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    });
+    (origin, cut)
+}
+
+/// N4: the issuer goes away. An open live note is kept for
+/// `lane_issuer_grace_secs` after the issuer last answered for it, then
+/// ends; a new call meanwhile is refused (it fails closed).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreachable_issuer_ends_a_live_note_after_the_grace_and_refuses_new_calls() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::DocSyncClient;
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let (via, cut) = cuttable(&origin).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host = indie_host(tmp.path(), &origin, &via, 6).await;
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let token = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir))
+        .await
+        .access_token;
+    let notes: NotesClient = web(&host, Some(token.clone())).await;
+    assert!(
+        notes.list().await.is_ok(),
+        "listed while the issuer answers"
+    );
+    let sync: DocSyncClient = web(&host, Some(token.clone())).await;
+    let session = attached(sync).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!session.is_finished(), "the session ended while signed in");
+
+    cut.send(true).unwrap();
+    let cut_at = std::time::Instant::now();
+    // Within the grace: kept, but a new call is not admitted on an old answer.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(
+        !session.is_finished(),
+        "the session ended at once when the issuer went away"
+    );
+    let fresh: NotesClient = web(&host, Some(token)).await;
+    assert!(
+        fresh.list().await.is_err(),
+        "a new call was admitted while the issuer was unreachable"
+    );
+    // Past it: ended.
+    let ended = tokio::time::timeout(Duration::from_secs(20), session).await;
+    assert!(ended.is_ok(), "the live session outlived the grace");
+    assert!(
+        cut_at.elapsed() >= Duration::from_secs(5),
+        "ended before the grace ran out ({:?})",
+        cut_at.elapsed()
+    );
+
+    host.stop().await;
+}
+
+/// R1: the issuer stalls (holds every call, answers none), then the
+/// person's sign-in is revoked there. The open live note still ends once
+/// the grace is over, and a new call is refused, not left hanging: a call
+/// to the issuer that gets no answer in time is no answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stalled_issuer_ends_a_live_note_after_the_grace_and_refuses_new_calls() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::DocSyncClient;
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let (via, stall) = stallable(&origin).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host = indie_host(tmp.path(), &origin, &via, 6).await;
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let token = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir))
+        .await
+        .access_token;
+    let sync: DocSyncClient = web(&host, Some(token.clone())).await;
+    let session = attached(sync).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!session.is_finished(), "the session ended while signed in");
+
+    stall.send(true).unwrap();
+    let stalled_at = std::time::Instant::now();
+    // Signed out at the issuer itself, which the node cannot hear now.
+    let revoked = reqwest::Client::new()
+        .post(format!("{origin}/oauth2/revoke"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(auth_client::oidc::revoke_request_body("architect", &token))
+        .send()
+        .await
+        .unwrap();
+    assert!(revoked.status().is_success(), "{}", revoked.status());
+
+    // Past the bearer's cache: a new call is refused, promptly.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let fresh: NotesClient = web(&host, Some(token)).await;
+    let listed = tokio::time::timeout(Duration::from_secs(10), fresh.list()).await;
+    assert!(
+        matches!(listed, Ok(Err(_))),
+        "a new call was not refused while the issuer stalled: {listed:?}"
+    );
+    // The live note ends once the grace is over.
+    let ended = tokio::time::timeout(Duration::from_secs(20), session).await;
+    assert!(ended.is_ok(), "the live session outlived the grace");
+    assert!(
+        stalled_at.elapsed() >= Duration::from_secs(5),
+        "ended before the grace ran out ({:?})",
+        stalled_at.elapsed()
+    );
+
+    host.stop().await;
+}
+
+/// Everything logged, for [`the_node_never_logs_a_browser_bearer_even_at_trace`].
+#[derive(Clone, Default)]
+struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// #628 N5, R2: a node logging at TRACE (`RUST_LOG=trace`, even with a
+/// directive naming the WebSocket library's module, through the filter
+/// every host logs with, `architect::host::log_filter`) writes no
+/// credential: not a browser's access token sent on the connection or
+/// with a call, not as the gated org lane resolves it at the issuer and
+/// not as an open live note re-checks it there, and not the node's own
+/// session. Without the filter's cap, `tungstenite` dumps the node's
+/// `whoami` frames to the issuer, token and all.
+///
+/// One process per test (nextest), so the subscriber is global: the
+/// node's tasks on every thread and the `log` records of the WebSocket
+/// library are captured.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_node_never_logs_a_browser_bearer_even_at_trace() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::DocSyncClient;
+    use tracing_subscriber::Layer as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+
+    let captured = Captured::default();
+    let writer = captured.clone();
+    // A more specific directive for the WebSocket library too (R2): the
+    // cap holds against it.
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(move || writer.clone())
+                .with_filter(architect::host::log_filter(
+                    tracing_subscriber::EnvFilter::new(
+                        "trace,tungstenite::protocol=trace,tokio_tungstenite=trace",
+                    ),
+                )),
+        )
+        .try_init()
+        .expect("the only subscriber in this process");
+    tracing::trace!("capture-check");
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host = indie_host(tmp.path(), &origin, &origin, 300).await;
+    let node_session = token_in(&tmp.path().join("host"));
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let on_connection = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir))
+        .await
+        .access_token;
+    let with_calls = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir))
+        .await
+        .access_token;
+
+    let notes: NotesClient = web(&host, Some(on_connection.clone())).await;
+    assert!(notes.list().await.is_ok());
+    let session = attached(web(&host, Some(on_connection.clone())).await).await;
+    let per_call_session = attached(per_call(
+        web::<DocSyncClient>(&host, None).await,
+        &with_calls,
+    ))
+    .await;
+    // A few re-checks of both at the issuer.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert!(!session.is_finished() && !per_call_session.is_finished());
+    session.abort();
+    per_call_session.abort();
+    host.stop().await;
+
+    let logged = String::from_utf8_lossy(&captured.0.lock().unwrap()).into_owned();
+    assert!(logged.contains("capture-check"), "the capture works");
+    assert!(logged.contains("TRACE"), "captured at TRACE");
+    for (what, secret) in [
+        ("the connection's access token", on_connection.as_str()),
+        ("a call's access token", with_calls.as_str()),
+        ("the node's own session", node_session.trim()),
+    ] {
+        // Its signature alone would do: no part of it is logged.
+        let tail = secret.rsplit('.').next().unwrap_or(secret);
+        assert!(
+            !logged.contains(secret) && !logged.contains(tail),
+            "the node logged {what}"
+        );
+    }
+}
+
 /// `ARCHITECT_IROH=local` (what `devenv up`'s node runs with, #541): read
 /// from the environment, the node's iroh endpoint has no relay and is
 /// bound to loopback alone, so it can neither find nor be found by a peer
@@ -713,4 +1347,108 @@ async fn a_local_node_has_no_relay_and_listens_on_loopback_only() {
         "{:?}",
         shown.iroh_addrs
     );
+}
+
+/// Whether `path` in `notes` opens live over `sync` within `within`.
+async fn attaches_within(sync: crdt::sync::DocSyncClient, path: &str, within: Duration) -> bool {
+    use crdt::sync::SyncedDoc;
+    let (attached_tx, mut attached) = tokio::sync::mpsc::unbounded_channel();
+    let mut synced = SyncedDoc::new(
+        vault_proto::collab_doc_id("notes", path),
+        crdt::CrdtDoc::ephemeral(),
+    )
+    .on_attached(std::sync::Arc::new(move || {
+        let _ = attached_tx.send(());
+    }));
+    let session = tokio::spawn(async move { synced.run(&sync).await });
+    let opened = tokio::time::timeout(within, attached.recv()).await.is_ok();
+    session.abort();
+    opened
+}
+
+/// Until `node` has applied the delete of `path` in `notes`: its document
+/// open (the delete opens a closed one) with its tombstone set. Each look
+/// is bounded, so a wedged registry fails this instead of hanging it.
+async fn deleted_on(node: &Running, path: &str) {
+    for _ in 0..800 {
+        let seen = tokio::time::timeout(Duration::from_secs(5), node.note_deleted("notes", path))
+            .await
+            .expect("the node's document registry is wedged");
+        if seen == Some(true) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the node never applied the delete of {path}");
+}
+
+/// Whether any directory under `root` is named `name` and holds a file.
+fn persisted_under(root: &Path, name: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        let path = e.path();
+        path.is_dir()
+            && ((e.file_name() == name
+                && std::fs::read_dir(&path).is_ok_and(|mut d| d.next().is_some()))
+                || persisted_under(&path, name))
+    })
+}
+
+/// A note made over the org lane (as the web app's New note does), its
+/// file then deleted on disk while its document is closed: every other
+/// note still opens live. The node used to open that document under its
+/// own reconcile lock while the registry held its creation lock, and no
+/// note on the node attached again until a restart.
+///
+/// Then a note that was open live (its document saved) on a node that has
+/// since restarted: deleting its file must not bring it back. The delete
+/// opens the saved document, whose open used to schedule writing the old
+/// text back; that write could beat the delete to the note's lock. The
+/// interleaving itself is pinned down in `vault-collab`'s tests; this is
+/// the same path end to end.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_note_deleted_on_disk_leaves_every_other_note_live() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::DocSyncClient;
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host = indie_host(tmp.path(), &origin, &origin, 300).await;
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let web_app = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir)).await;
+    let token = web_app.access_token.clone();
+
+    let notes: NotesClient = web(&host, Some(token.clone())).await;
+    notes
+        .create("notes".into(), "Untitled.md".into(), String::new())
+        .await
+        .unwrap();
+    // Its file deleted on disk; its document is not open.
+    let file = host.state.vault_root("notes").unwrap().join("Untitled.md");
+    std::fs::remove_file(&file).unwrap();
+    deleted_on(&host, "Untitled.md").await;
+
+    let sync: DocSyncClient = web(&host, Some(token.clone())).await;
+    assert!(
+        attaches_within(sync, "hello.md", Duration::from_secs(20)).await,
+        "another note no longer opens live"
+    );
+    // `hello.md` was open live: its document is saved.
+    let hello = vault_proto::collab_doc_id("notes", "hello.md").to_string();
+    until("hello.md's document saved", || {
+        persisted_under(&tmp.path().join("host"), &hello)
+    })
+    .await;
+    host.stop().await;
+
+    // Restarted: `hello.md`'s document is closed, and saved with its text.
+    let host = indie_host(tmp.path(), &origin, &origin, 300).await;
+    let file = host.state.vault_root("notes").unwrap().join("hello.md");
+    std::fs::remove_file(&file).unwrap();
+    deleted_on(&host, "hello.md").await;
+    assert!(!file.exists(), "the deleted note's file came back");
+    host.stop().await;
 }

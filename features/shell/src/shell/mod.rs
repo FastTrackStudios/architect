@@ -1294,17 +1294,34 @@ pub fn AppShell(
             motion.to_then(0.0, move || shown.set(None));
         }
     });
-    // The docked sides open and fold on a spring: 0 folded away, 1 open.
+    // The docked sides: 0 folded away, 1 open. They open and fold on a
+    // spring when the person folds or opens one (`Shell::toggle`,
+    // `Shell::set_sidebar_layout`), and are simply there otherwise: the
+    // sidebar's content arriving after load, the page's preferred layout,
+    // the window's size. Sprung then, a sidebar would slide open just as
+    // the app shows, its rows drawn but clipped, and a click on one would
+    // land on the page beside it.
     let docked_now = (
         frame == Frame::Sidebar && !shell.folded(),
         has_right && shell.docked(Side::Right) && !right_away(),
     );
+    let chosen_now = (fold(), right_away(), desk_layouts.read().clone());
     let left_open = use_motion(f64::from(u8::from(docked_now.0)), Spring::PANEL, 0.001);
     let right_open = use_motion(f64::from(u8::from(docked_now.1)), Spring::PANEL, 0.001);
-    use_effect(use_reactive!(|docked_now| {
+    let chosen_before = use_hook(|| CopyValue::new(chosen_now.clone()));
+    use_effect(use_reactive!(|docked_now, chosen_now| {
         let (left, right) = docked_now;
-        left_open.to(f64::from(u8::from(left)));
-        right_open.to(f64::from(u8::from(right)));
+        let mut chosen_before = chosen_before;
+        let by_the_person = *chosen_before.peek() != chosen_now;
+        chosen_before.set(chosen_now);
+        for (motion, open) in [(left_open, left), (right_open, right)] {
+            let to = f64::from(u8::from(open));
+            if by_the_person {
+                motion.to(to);
+            } else if (motion.target() - to).abs() > f64::EPSILON {
+                motion.jump(to);
+            }
+        }
     }));
     // Two columns start as wide as both need; back to one, the width one
     // column had.

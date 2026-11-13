@@ -38,7 +38,8 @@ pub struct Slots {
 }
 
 /// The web app's own set.
-fn own_set(commands: Commands) -> Favourites {
+fn own_set(commands: &Commands) -> Favourites {
+    let commands = *commands;
     Favourites::new(
         vec![
             Tab::new("vault", "Vault", icon!(NotebookText)),
@@ -52,7 +53,7 @@ fn own_set(commands: Commands) -> Favourites {
 }
 
 /// What the web app's own tab `id` opens.
-pub fn own_tab(id: &str, workspace: Signal<Workspace>, commands: Commands) {
+pub fn own_tab(id: &str, workspace: Signal<Workspace>, commands: &Commands) {
     match id {
         "vault" => {
             let note = vault::frame_on_show(&workspace.peek()).map(|(_, _, n)| n);
@@ -77,8 +78,9 @@ pub fn own_tab(id: &str, workspace: Signal<Workspace>, commands: Commands) {
 pub fn use_web_favourites(
     workspace: Signal<Workspace>,
     source: &MemorySource,
-    commands: Commands,
+    commands: &Commands,
 ) -> Slots {
+    let commands = *commands;
     // What plays, and whether: a primary's `playing` face follows it.
     let now = architect_playhead::ui::use_playhead();
     let what_plays = use_memo(move || now().active.map(|a| (a.source, a.playing)));
@@ -123,7 +125,7 @@ pub fn use_web_favourites(
             }
         });
     }
-    let default = own_set(commands);
+    let default = own_set(&commands);
     let vault_slots = |set| Slots {
         set,
         current: Some("vault"),
@@ -164,7 +166,7 @@ pub fn use_web_favourites(
             &d.favourites,
             |target| {
                 let what = opens(&d.by, target, &reach)?;
-                let shows = shows(&what, &path);
+                let on_show = shows(&what, &path);
                 let label = label_for(&d.favourites, target);
                 let key = format!("{path}\0{ty}\0{}\0{label}\0{what:?}", d.by.extension);
                 let (path, ty) = (path.clone(), ty.clone());
@@ -180,10 +182,10 @@ pub fn use_web_favourites(
                                 Some(ty.clone()),
                             )));
                         }
-                        run(&what, &by, &label, &path, workspace, commands);
+                        run(&what, &by, &label, &path, workspace, &commands);
                     })
                 });
-                Some((press, shows))
+                Some((press, on_show))
             },
             |state| {
                 state == architect_playhead::PLAYING_STATE
@@ -277,7 +279,7 @@ fn run(
     label: &str,
     note: &str,
     workspace: Signal<Workspace>,
-    commands: Commands,
+    commands: &Commands,
 ) {
     match what {
         Opens::Note => vault::show(workspace, note),
