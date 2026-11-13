@@ -131,6 +131,8 @@ async fn token_post(config: &Config, body: String) -> Result<String, String> {
 }
 
 thread_local! {
+    /// The app's config, once read: what Sign out needs to revoke.
+    static CONFIG: RefCell<Option<Config>> = const { RefCell::new(None) };
     /// Which distribution this bundle is (`/app/distribution.json`), read
     /// once at start.
     static DIST: RefCell<Distribution> = RefCell::new(Distribution::default());
@@ -172,6 +174,12 @@ async fn read_distribution() {
 
 #[wasm_bindgen(start)]
 pub fn start() {
+    // Once: the library's start (the bundle) and the program's `main`
+    // (`dx serve`, src/main.rs) both come here in a dev build.
+    thread_local!(static STARTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    if STARTED.with(|s| s.replace(true)) {
+        return;
+    }
     spawn_local(async {
         if let Err(why) = run().await {
             draw(&Screen::Broken(why));
@@ -199,6 +207,7 @@ async fn run() -> Result<(), String> {
         return Err(format!("{APP}config.json answered {status}"));
     }
     let config = Rc::new(Config::parse(&text)?);
+    CONFIG.with(|c| *c.borrow_mut() = Some((*config).clone()));
     wire(Rc::clone(&config))?;
     let problem = match route {
         Route::App | Route::Demo => None,
@@ -237,8 +246,11 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
                 }
             }
             Some("sign-out") => {
-                let _ = LocalStore.clear();
-                draw(&Screen::SignedOut { problem: None });
+                let config = Rc::clone(&config);
+                spawn_local(async move {
+                    revoke(&config).await;
+                    draw(&Screen::SignedOut { problem: None });
+                });
             }
             _ => {}
         }
@@ -247,6 +259,40 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
         .map_err(js)?;
     click.forget();
     Ok(())
+}
+
+/// Ends the session at the issuer and here, then shows the app signed
+/// out (the account menu's Sign out, in the app).
+pub fn sign_out() {
+    spawn_local(async {
+        if let Some(config) = CONFIG.with(|c| c.borrow().clone()) {
+            revoke(&config).await;
+        } else {
+            let _ = LocalStore.clear();
+        }
+        if let Ok(w) = window() {
+            let _ = w.location().assign(APP);
+        }
+    });
+}
+
+/// Revokes the stored sign-in's grant at the issuer (RFC 7009: its
+/// refresh token and access tokens stop working, so a copy of either is
+/// dead too), then forgets it here. Forgotten here even when the issuer
+/// cannot be reached: the person asked to be signed out.
+async fn revoke(config: &Config) {
+    if let Ok(Some(session)) = LocalStore.load() {
+        let token = session.refresh_token.as_deref().unwrap_or(&session.token);
+        let body = oidc::revoke_request_body(&config.client_id, token);
+        let _ = fetch(
+            "POST",
+            &format!("{}{}", config.issuer, oidc::REVOKE_PATH),
+            Some(&body),
+            &[("content-type", "application/x-www-form-urlencoded")],
+        )
+        .await;
+    }
+    let _ = LocalStore.clear();
 }
 
 /// Send the browser to the issuer, its verifier parked in this tab.
@@ -305,6 +351,7 @@ async fn redeem(config: &Config, code: &str, state: &str) -> Result<(), String> 
 
 /// The stored session, renewed first when it is about to run out.
 async fn session(config: &Config) -> Option<StoredSession> {
+    let presented = LocalStore.load().ok().flatten();
     let refreshed = oidc::refresh_if_needed(&LocalStore, &config.client_id, now(), |body| {
         token_post(config, body)
     })
@@ -313,6 +360,14 @@ async fn session(config: &Config) -> Option<StoredSession> {
         Ok(Refresh::Fresh(s) | Refresh::Refreshed(s) | Refresh::NoRefreshToken(s)) => Some(s),
         Ok(Refresh::SignedOut) => None,
         Err(_) => {
+            // A refresh token is single use: another tab that renewed
+            // first left a newer session here. Not signed out then.
+            let stored = LocalStore.load().ok().flatten();
+            if let Some(stored) = stored
+                .filter(|s| presented.as_ref().map(|p| &p.refresh_token) != Some(&s.refresh_token))
+            {
+                return Some(stored);
+            }
             let _ = LocalStore.clear();
             None
         }
@@ -375,12 +430,84 @@ async fn show(config: &Config) {
     draw(&Screen::SignedIn {
         person: person.clone(),
         node: None,
+        lane: None,
     });
     let node = node_status().await;
+    // The node hosts the account's org: the app on its vaults.
+    let lane = match node.as_ref().ok().and_then(|s| s.hosts.clone()) {
+        Some(org) => match open_org(&org, &session.token).await {
+            Ok(vault) => {
+                if let Some(lane) = vault.org.clone() {
+                    wasm_bindgen_futures::spawn_local(keep_lane_signed_in(
+                        config.clone(),
+                        lane,
+                        session.clone(),
+                    ));
+                }
+                let who = person
+                    .name
+                    .clone()
+                    .or_else(|| person.email.clone())
+                    .unwrap_or_default();
+                crate::app::mount(crate::app::Mode::Org {
+                    vault,
+                    person: who,
+                    org,
+                });
+                return;
+            }
+            Err(why) => Some(why),
+        },
+        None => None,
+    };
     draw(&Screen::SignedIn {
         person,
         node: Some(node),
+        lane,
     });
+}
+
+/// Renews the session before it runs out and dials the org's lane again
+/// with each new token (the lane's bearer is fixed when it is dialled; an
+/// expired one leaves the lane anonymous). Signed out, it says so.
+async fn keep_lane_signed_in(
+    config: Config,
+    lane: crate::app::org::OrgVaults,
+    mut session: StoredSession,
+) {
+    loop {
+        let wait = session.expires_at_unix.map_or(300, |at| {
+            at.saturating_sub(oidc::REFRESH_MARGIN_SECS)
+                .saturating_sub(now())
+                .clamp(15, 3_600)
+        });
+        let ms = u32::try_from(wait.saturating_mul(1_000)).unwrap_or(u32::MAX);
+        gloo_timers::future::TimeoutFuture::new(ms).await;
+        let Some(renewed) = self::session(&config).await else {
+            lane.report("Your session ended: sign in again to keep editing.");
+            return;
+        };
+        if renewed.token != session.token
+            && let Err(why) = lane.redial(renewed.token.clone()).await
+        {
+            lane.report(format!("Your org's vaults did not reconnect: {why}"));
+        }
+        session = renewed;
+    }
+}
+
+/// The org's vaults over its lane, listed, their texts read after.
+async fn open_org(org: &str, token: &str) -> Result<crate::app::vault::WebVault, String> {
+    let lane = crate::app::org::OrgVaults::open(org, token.to_owned()).await?;
+    #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
+    // a time in ms, well inside i64
+    let now = js_sys::Date::now() as i64;
+    let (source, notes) = lane.list(org, now).await?;
+    lane.fill(source.clone(), notes, now);
+    Ok(crate::app::vault::WebVault {
+        source,
+        org: Some(lane),
+    })
 }
 
 /// The node behind this host, over its HTTP face.

@@ -60,7 +60,7 @@ In short: (1) the gate is fail-closed by default, and observe-only is the migrat
 4. Install: on a host, `EngineHost::new(router, gate, bind)` gates `/vox`, the iroh lane and every `vox_at` lane (`EngineHost::ungated` is the explicit opt-out; `crates/architect/tests/host_gate.rs`). By hand: `router.with_permissions(gate)`, or per connection `PermissionsGate::wrap_shared_with_bearer(Arc::new(gate), router, bearer)`; for a transport-proved peer, `PermissionsGate::wrap_shared_with_proved_caller(gate, router, Principal::Host { endpoint })`.
 5. Check: `coverage(&router).is_complete()` in a test.
 6. Serve the oracle from the same pair: `Permissions::new(gate.engine(), gate.identity_resolver())` + `PermissionsServiceDispatcher`, so it cannot disagree with enforcement.
-7. Handlers see the caller with `architect::permissions_gate::caller()` (`Option<Principal>`); test `a_handler_sees_the_caller_the_gate_resolved`. Action List handlers get it as `ActionCaller` instead.
+7. Handlers see the caller with `architect::permissions_gate::caller()` (`Option<Principal>`); test `a_handler_sees_the_caller_the_gate_resolved`. Action List handlers get it as `ActionCaller` instead. A call held open (a live session) re-checks the credential it was admitted with, `architect::permissions_gate::caller_bearer()` (the call's own `authorization`, else the connection's), never the connection's alone: per-call metadata wins at the gate (`apps/desktop/src/node/org.rs` `VaultSync`). It is a credential: never log it.
 
 ## C. How a client authenticates, and the Principal that results
 

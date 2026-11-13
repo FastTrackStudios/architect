@@ -239,13 +239,63 @@ default set and the sets the note types it knows declare, and
 sidebar (a phone's left drawer) is never a slot: it stays the way to
 everything, the default set's places among them.
 
+A type's own set comes from the extensions' `[[favourites]]`
+([Favourites](@/architecture/extensions.md#favourites)), made into the bar
+by `declare`: the app reads each target (what a press opens there, or
+nothing), a tab it cannot open is left out, the first four of the rest are
+the slots (`Tab::named` draws a manifest's Lucide icon by name), and the
+primary action shows its second face while the app says its `state` is on;
+a type with no primary keeps the default's round button. A declared tab's
+press is the set's own (`Favourites::press`, asked first by the app's
+`on_tab`); its id is the type's and its own (`declared_tab_id`), so it never
+meets an app's tab. The open note is the workspace's document on show: a
+note's pane, or an extension's view opened on one, and its type is its
+`type` property, read again whenever the vault says the file changed
+(`SourceEvent::touches`), so editing `type` switches the slots.
+
+While a declared set is on show, the current tab is the one whose place is
+on show (`Shows`, `Favourites::current`): the note, a view on it, the note
+a `{place}` opened. It is marked `aria-current="page"` (with `data-tab`) on
+a phone's bar, a tablet's rail and sidebar rows, and a desk's ribbon alike.
+A tab that runs an action, quick open or the navigator is never current.
+
+A `{place}` keeps its set: while the note a place tab opened is on show,
+the slots stay those of the note it was opened from (`PlaceOpened`,
+`set_note`), with the place's tab current, whatever the place's own type.
+Showing anything else (the note again included, then anything else) ends
+it: the note on show picks the slots again. So does the note it was opened
+from going, or its `type` changing, here or on another device: both apps
+read it again when the vault says it changed (`place_kept`).
+
+A declared tab's press is made once for its note, type and target and
+kept for the root's life (`Presses`, `use_presses`), not again on every
+render of the root.
+
 The Architect app's default set is Inbox, Vault, Project and Schedule, with
 Capture as the round button (`apps/ui/src/favourites.rs` `default_set`).
 Each opens its real surface in the Vault's workspace (`Surface`): the
 inbox deck, the last note shown, the projects list, and the calendar's
-day. The Go menu, ⌘K and ⌃⌘1–4 go to the same four. A type's own set comes
-from the extensions' `[[favourites]]` declaration (#604); wiring it to the
-open note's type is #607.
+day. The Go menu, ⌘K and ⌃⌘1–4 go to the same four. The loaded
+extensions' declarations are read there too (`declared`, `opens`): `page`
+is the open note, `search` quick open, a view of the declaring extension's
+own (`<view>` or `<its id>/<view>`) that view on the open note, an
+`{action}` one the app has that the declaring extension may run
+([who may name what](@/architecture/extensions.md#favourites)), a
+`{place}` a note beside the open one; the open note comes from the Vault's
+page (`VaultFocus`). A primary's state is on while its extension keeps
+runtime state of that name (`EXT_STATE_SET`, `state_on`: its own, source
+`ext:<id>`).
+
+The app in a browser takes the same path (`apps/web/src/app/favourites.rs`):
+its own set is Vault, Files, Search and New note, and the declarations come
+from the node (`GET /_ext/favourites.json`, read by
+`apps/web/src/favourites.rs` `listing`, each with the extension that
+declared it, held to the same rule); any view the declaring extension's
+island lists opens in a frame of its own as a tab of the workspace
+(`apps/web/src/app/vault.rs` `open_frame`), handed the open note and its
+playhead source as a claimed view is
+([a view by a note's type](@/architecture/extensions.md#views-that-follow-playback)), `browse`
+opens the navigator, and a browser knows no state yet (the first face).
 
 The person orders the tabs (Task's Customize: drag to move, hide, bring
 back), per device. The first four are the bar; the rest are in the left

@@ -20,3 +20,5 @@ sort_index: 2
 ```
 
 Fingerstyle: [[Fingerstyle patterns]].
+
+%%Capo 2 when the room is cold; a note to myself.%%

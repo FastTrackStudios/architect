@@ -219,6 +219,27 @@ pub enum ConfigError {
         source: serde_json::Error,
     },
     #[error(
+        "{var}: client `{client_id}` has the key `{key}`, which this issuer does not know and \
+         which looks like a misspelled `{meant}`; refusing to start rather than run without \
+         the `{meant}` it meant"
+    )]
+    OidcClientKey {
+        var: &'static str,
+        client_id: String,
+        key: String,
+        meant: &'static str,
+    },
+    #[error(
+        "{var}: client `{client_id}` has the key `{key}` holding an object, which this issuer \
+         does not read; client settings sit at the top of the client, so refusing to start \
+         rather than ignore settings written inside it"
+    )]
+    OidcClientNested {
+        var: &'static str,
+        client_id: String,
+        key: String,
+    },
+    #[error(
         "AUTH_SECRET must be at least 32 bytes (got {0}) — architect-auth refuses shorter keys"
     )]
     SecretTooShort(usize),
@@ -228,7 +249,14 @@ pub enum ConfigError {
 ///
 /// A separate type from [`OidcClientConfig`] because the engine's config
 /// struct derives no serde — and because the JSON form gets defaults for
-/// the fields a deployment rarely sets.
+/// the fields a deployment rarely sets. A key it does not know is ignored
+/// with a warning at start-up naming the client and the key (a key a later
+/// version adds must not stop the issuer for every app it signs in),
+/// except a near-miss or synonym of a key that matters ([`GUARDED_KEYS`],
+/// [`SYNONYMS`]): a misspelled `first_party`, or an `enabled: false` meant
+/// as `disabled: true`, must not quietly leave the client as it was, so
+/// that is an error. So is an unknown key holding an object, since settings
+/// nested in it would be ignored.
 #[derive(Debug, serde::Deserialize)]
 struct OidcClientJson {
     client_id: String,
@@ -247,8 +275,112 @@ struct OidcClientJson {
     /// granting a third party access, they are just signing in.
     #[serde(default)]
     skip_consent: bool,
+    /// The issuer's own app: its access tokens answer `whoami` and
+    /// `list_organizations`. Never set it for a third party.
+    #[serde(default)]
+    first_party: bool,
+    /// Single-use refresh tokens (public clients only).
+    #[serde(default)]
+    rotate_refresh_tokens: bool,
     #[serde(default)]
     disabled: bool,
+    /// Every key this version does not know; see [`unknown_key`]. A map
+    /// because `flatten` needs one; the values are read only to refuse an
+    /// object, never kept past parsing nor reported.
+    #[serde(flatten)]
+    unknown: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+/// The client keys a near-miss of which is refused rather than ignored,
+/// since the deployment meant the key: every key this version reads, and
+/// the session key a later issuer reads (`LATER_KEYS`). Each grants,
+/// withholds or routes something, and a misspelled boolean reads `false`.
+const GUARDED_KEYS: &[&str] = &[
+    "client_id",
+    "client_secret",
+    "redirect_uris",
+    "scopes",
+    "public_client",
+    "skip_consent",
+    "first_party",
+    "rotate_refresh_tokens",
+    "disabled",
+    "issue_sessions",
+];
+
+/// Guarded keys this version does not read yet: written exactly, they are
+/// ignored like any unknown key (a config written for a newer issuer still
+/// starts this one); a near-miss is still refused.
+const LATER_KEYS: &[&str] = &["issue_sessions"];
+
+/// Other words for the two keys that widen access when missing: a client
+/// turned off as `enabled: false` or `revoked: true` would stay on, and
+/// rotation asked for under another name would leave refresh tokens
+/// reusable. `(folded word, meant)`; a folded key equal to the word (or to
+/// `is` and the word), or for `rotat` containing it, is refused.
+const SYNONYMS: &[(&str, &str)] = &[
+    ("enabled", "disabled"),
+    ("enable", "disabled"),
+    ("active", "disabled"),
+    ("inactive", "disabled"),
+    ("revoked", "disabled"),
+    ("suspended", "disabled"),
+    ("blocked", "disabled"),
+    ("rotat", "rotate_refresh_tokens"),
+];
+
+/// What an unknown client key is: `Some(meant)` when it is a near-miss of
+/// the guarded key `meant` (the same once case, `-`, `_` and spaces are
+/// ignored, or within two edits of it; one edit for a key of under eight
+/// letters) or one of its [`SYNONYMS`], else `None`, an unrelated key that
+/// is ignored.
+fn unknown_key(key: &str) -> Option<&'static str> {
+    fn folded(key: &str) -> Vec<char> {
+        key.chars()
+            .filter(|c| !matches!(c, '-' | '_' | ' '))
+            .flat_map(char::to_lowercase)
+            .collect()
+    }
+    if LATER_KEYS.contains(&key) {
+        return None;
+    }
+    let key = folded(key);
+    let text: String = key.iter().collect();
+    if let Some(&(_, meant)) = SYNONYMS.iter().find(|(word, _)| {
+        if *word == "rotat" {
+            text.contains(word)
+        } else {
+            text == *word || text.strip_prefix("is") == Some(*word)
+        }
+    }) {
+        return Some(meant);
+    }
+    GUARDED_KEYS.iter().copied().find(|meant| {
+        let meant = folded(meant);
+        let near = if meant.len() < 8 { 1 } else { 2 };
+        edit_distance(&key, &meant) <= near
+    })
+}
+
+/// Levenshtein distance between `a` and `b`, in characters.
+fn edit_distance(a: &[char], b: &[char]) -> usize {
+    // `prev`: the distance from the part of `a` read so far to each
+    // prefix of `b`.
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut row = Vec::with_capacity(prev.len());
+        row.push(i.saturating_add(1));
+        for ((cb, &diagonal), &above) in b.iter().zip(&prev).zip(prev.iter().skip(1)) {
+            let left = row.last().copied().unwrap_or(usize::MAX);
+            row.push(if ca == cb {
+                diagonal
+            } else {
+                diagonal.min(above).min(left).saturating_add(1)
+            });
+        }
+        prev = row;
+    }
+    prev.last().copied().unwrap_or(0)
 }
 
 fn default_scopes() -> Vec<String> {
@@ -266,6 +398,8 @@ impl From<OidcClientJson> for OidcClientConfig {
             scopes: value.scopes,
             public_client: value.public_client,
             skip_consent: value.skip_consent,
+            first_party: value.first_party,
+            rotate_refresh_tokens: value.rotate_refresh_tokens,
             disabled: value.disabled,
         }
     }
@@ -438,9 +572,53 @@ fn read_oidc_clients(var: &'static str) -> Result<Vec<OidcClientConfig>, ConfigE
     if raw.trim().is_empty() {
         return Ok(Vec::new());
     }
+    let (clients, ignored) = parse_oidc_clients(var, &raw)?;
+    for (client_id, key) in ignored {
+        tracing::warn!(
+            var,
+            client_id,
+            key,
+            "OIDC CLIENT CONFIG: unknown key IGNORED (this issuer does not know it; check its \
+             spelling, or whether it needs a newer issuer)"
+        );
+    }
+    Ok(clients)
+}
+
+/// `raw` (a JSON client list from `var`) as clients, and the unknown keys
+/// it ignored as `(client_id, key)`. A near-miss of one of the
+/// [`GUARDED_KEYS`] is an error instead.
+fn parse_oidc_clients(
+    var: &'static str,
+    raw: &str,
+) -> Result<(Vec<OidcClientConfig>, Vec<(String, String)>), ConfigError> {
     let parsed: Vec<OidcClientJson> =
-        serde_json::from_str(&raw).map_err(|source| ConfigError::OidcClients { var, source })?;
-    Ok(parsed.into_iter().map(OidcClientConfig::from).collect())
+        serde_json::from_str(raw).map_err(|source| ConfigError::OidcClients { var, source })?;
+    let mut ignored = Vec::new();
+    for client in &parsed {
+        for (key, value) in &client.unknown {
+            if value.is_object() {
+                return Err(ConfigError::OidcClientNested {
+                    var,
+                    client_id: client.client_id.clone(),
+                    key: key.clone(),
+                });
+            }
+            if let Some(meant) = unknown_key(key) {
+                return Err(ConfigError::OidcClientKey {
+                    var,
+                    client_id: client.client_id.clone(),
+                    key: key.clone(),
+                    meant,
+                });
+            }
+            ignored.push((client.client_id.clone(), key.clone()));
+        }
+    }
+    Ok((
+        parsed.into_iter().map(OidcClientConfig::from).collect(),
+        ignored,
+    ))
 }
 
 /// Read a secret from `<VAR>_FILE` if set, else `<VAR>` — the
@@ -455,4 +633,105 @@ fn optional_secret(var: &'static str) -> Result<Option<String>, ConfigError> {
 
 fn optional(var: &str) -> Option<String> {
     architect::config::var(var)
+}
+
+#[cfg(test)]
+mod oidc_client_json_tests {
+    use super::{ConfigError, parse_oidc_clients};
+
+    fn client_with(extra: &str) -> String {
+        format!(
+            r#"[{{"client_id":"architect","redirect_uris":["https://a.example/cb"],"first_party":true{extra}}}]"#
+        )
+    }
+
+    /// A key this version does not know (a later version's, a note) is
+    /// ignored and reported with its client; the client is read as usual.
+    /// Its value is never reported.
+    #[test]
+    fn an_unknown_client_key_is_ignored_and_named() {
+        for key in ["issue_sessions", "comment", "note", "logo_uri", "contacts"] {
+            let raw = client_with(&format!(r#","{key}":"secret-looking-value""#));
+            let (clients, ignored) =
+                parse_oidc_clients("AUTH_OIDC_CLIENTS", &raw).expect("an unknown key starts");
+            assert!(clients[0].first_party, "{key}");
+            assert_eq!(ignored, vec![("architect".to_owned(), key.to_owned())]);
+            assert!(!format!("{ignored:?}").contains("secret-looking-value"));
+        }
+    }
+
+    /// A key that looks like one that grants something is refused, not
+    /// read as `false`: misspelled, in another case, or with `-` for `_`.
+    #[test]
+    fn a_near_miss_of_a_granting_key_is_an_error() {
+        for (key, meant) in [
+            ("first_pary", "first_party"),
+            ("firstParty", "first_party"),
+            ("First-Party", "first_party"),
+            ("rotate_refresh_token", "rotate_refresh_tokens"),
+            ("rotate-refresh-tokens", "rotate_refresh_tokens"),
+            ("skip_consnt", "skip_consent"),
+            ("SkipConsent", "skip_consent"),
+            ("public-client", "public_client"),
+            ("disable", "disabled"),
+            ("redirect_uri", "redirect_uris"),
+            ("redirectUris", "redirect_uris"),
+            ("redirect_urls", "redirect_uris"),
+            ("issue_session", "issue_sessions"),
+            ("issueSessions", "issue_sessions"),
+            ("issue-sessions", "issue_sessions"),
+            ("isue_sessions", "issue_sessions"),
+            ("scope", "scopes"),
+            ("client_secrets", "client_secret"),
+            ("enabled", "disabled"),
+            ("Active", "disabled"),
+            ("revoked", "disabled"),
+            ("is-suspended", "disabled"),
+            ("refresh_token_rotation", "rotate_refresh_tokens"),
+            ("rotate_tokens", "rotate_refresh_tokens"),
+        ] {
+            let raw = client_with(&format!(r#","{key}":true"#));
+            match parse_oidc_clients("AUTH_OIDC_CLIENTS_EXTRA", &raw) {
+                Err(ConfigError::OidcClientKey {
+                    client_id,
+                    key: k,
+                    meant: m,
+                    ..
+                }) => {
+                    assert_eq!(
+                        (client_id.as_str(), k.as_str(), m),
+                        ("architect", key, meant)
+                    );
+                }
+                other => panic!("{key}: {other:?}"),
+            }
+        }
+    }
+
+    /// Settings nested in an unknown object would be ignored, so an
+    /// unknown key holding an object is refused; its contents are not
+    /// reported.
+    #[test]
+    fn an_unknown_key_holding_an_object_is_an_error() {
+        let raw = client_with(r#","settings":{"disabled":true,"rotate_refresh_tokens":true}"#);
+        match parse_oidc_clients("AUTH_OIDC_CLIENTS", &raw) {
+            Err(e @ ConfigError::OidcClientNested { .. }) => {
+                let shown = e.to_string();
+                assert!(
+                    shown.contains("`settings`") && !shown.contains("rotate"),
+                    "{shown}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The keys this version knows read as before.
+    #[test]
+    fn known_keys_read_with_nothing_ignored() {
+        let raw = client_with(r#","rotate_refresh_tokens":true,"public_client":true"#);
+        let (clients, ignored) = parse_oidc_clients("AUTH_OIDC_CLIENTS", &raw).unwrap();
+        assert!(ignored.is_empty());
+        assert!(clients[0].rotate_refresh_tokens && clients[0].public_client);
+    }
 }

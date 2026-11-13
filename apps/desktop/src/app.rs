@@ -317,7 +317,7 @@ pub fn run(distribution: Distribution) -> ExitCode {
         }
         _ => {}
     }
-    if architect_presence::single_instance(architect_app::presence::id())
+    if architect_presence::single_instance(&dist.instance_id())
         == architect_presence::Launch::HandedOff
     {
         return ExitCode::SUCCESS;

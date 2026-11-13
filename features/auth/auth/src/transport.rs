@@ -935,11 +935,11 @@ pub mod vox {
             self.auth.refresh_session(RefreshSession { token }).await
         }
 
+        // A session token, or the issuer's own first-party access token
+        // (`ArchitectAuth::access_token_caller`): what an org's node
+        // relays for a browser signed in by redirect.
         async fn whoami(&self, token: String) -> Result<AuthUser, AuthFlowError> {
-            self.auth
-                .current_session(CurrentSession { token })
-                .await
-                .map(|bundle| bundle.user)
+            self.auth.organization_caller(&token).await
         }
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {

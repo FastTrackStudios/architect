@@ -842,6 +842,21 @@ impl Manifest {
         action_prefix(&self.id)
     }
 
+    /// Who declares its `[[favourites]]`: its id and what its
+    /// capabilities let it run (`architect_favourites::Declarer`).
+    #[must_use]
+    pub fn declarer(&self) -> architect_favourites::Declarer {
+        architect_favourites::Declarer {
+            extension: self.id.clone(),
+            actions: self.capabilities.actions.clone(),
+            effect: match self.capabilities.effect {
+                Reach::ReadOnly => architect_favourites::Effect::ReadOnly,
+                Reach::Mutating => architect_favourites::Effect::Mutating,
+                Reach::Destructive => architect_favourites::Effect::Destructive,
+            },
+        }
+    }
+
     /// Checks what can be checked without its files: its id, its API,
     /// its namespaces, that each action can run, that each setting can be
     /// drawn.
@@ -1400,21 +1415,12 @@ pub fn decl_of(section: &Section, page: bool) -> SectionDecl {
     }
 }
 
-/// The action namespace of extension `id` ([`Manifest::action_prefix`]).
+/// The action namespace of extension `id` ([`Manifest::action_prefix`]):
+/// `architect_favourites::action_prefix`, the one a browser's favourites
+/// use.
 #[must_use]
 pub fn action_prefix(id: &str) -> String {
-    let mut out = String::with_capacity(id.len().saturating_add(1));
-    for c in id.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_uppercase());
-        } else if !out.ends_with('_') {
-            out.push('_');
-        }
-    }
-    if !out.ends_with('_') {
-        out.push('_');
-    }
-    out
+    architect_favourites::action_prefix(id)
 }
 
 /// Whether a manifest's `api` is one this build runs: the same major,

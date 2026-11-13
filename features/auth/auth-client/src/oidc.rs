@@ -72,6 +72,8 @@ use crate::{StoredSession, TokenStore, TokenStoreError};
 
 /// Where codes and refresh tokens are redeemed, relative to the issuer.
 pub const TOKEN_PATH: &str = "/oauth2/token";
+/// Where a sign-out ends its grant (RFC 7009): [`revoke_request_body`].
+pub const REVOKE_PATH: &str = "/oauth2/revoke";
 
 /// How long before its expiry [`refresh_if_needed`] renews a token.
 ///
@@ -273,6 +275,19 @@ pub fn refresh_request_body(client_id: &str, refresh_token: &str) -> String {
         encode(refresh_token),
         encode(client_id),
     )
+}
+
+/// The form-encoded body that ends a sign-in's grant at the issuer.
+///
+/// As a public client: its refresh token and access tokens stop working
+/// (the issuer session the person signed in with stays). `token` is the
+/// refresh token, or the access token when there is none.
+///
+/// Post it to [`REVOKE_PATH`] with
+/// `content-type: application/x-www-form-urlencoded`; any 200 is done.
+#[must_use]
+pub fn revoke_request_body(client_id: &str, token: &str) -> String {
+    format!("token={}&client_id={}", encode(token), encode(client_id))
 }
 
 /// A `/oauth2/token` answer, for a code redemption or a refresh.
@@ -527,7 +542,7 @@ mod tests {
     use super::{
         DEFAULT_SCOPE, OidcError, Pkce, Refresh, RefreshError, access_token_from, authorize_url,
         challenge_for, encode, refresh_if_needed, refresh_now, refresh_request_body,
-        token_request_body, token_response_from, user_from,
+        revoke_request_body, token_request_body, token_response_from, user_from,
     };
     use crate::{MemoryTokenStore, StoredSession, TokenStore};
 
@@ -733,6 +748,14 @@ mod tests {
         );
         // A public client: no secret goes out.
         assert!(!body.contains("client_secret"));
+    }
+
+    #[test]
+    fn the_revoke_body_names_the_token_and_the_client() {
+        assert_eq!(
+            revoke_request_body("architect", "rt+/="),
+            "token=rt%2B%2F%3D&client_id=architect"
+        );
     }
 
     const ROTATED: &str = r#"{"access_token":"at-2","refresh_token":"rt-2","expires_in":3600}"#;
