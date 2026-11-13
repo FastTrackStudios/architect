@@ -968,12 +968,12 @@ The songs live in [[Songs/Amazing Grace]]. #lab/sample
 
 SETLIST = "Merry & Bright"
 SETS = [
-    ("Presidents Songs", [
+    ("Opening Set", [
         ("Sleigh Ride", "Tori Kelly", "B", 86, "4/4", 186.0),
         ("Silent Night", "for KING & COUNTRY", "A", 83, "3/4", 300.0),
         ("Joy to the World (Unspeakable Joy)", "Chris Tomlin", "D", 128, "4/4", 230.8),
     ]),
-    ("Tree Lighting Concert Set", [
+    ("Concert Set", [
         ("Feliz Navidad", None, None, None, None, None),
         ("What Christmas Means", None, None, None, None, None),
         ("This Christmas", "Donny Hathaway", "F", 93, "4/4", 249.6),
@@ -1070,7 +1070,7 @@ def christmas():
                 lines.append(f"{n} | {title} | {note} | {summary} | {recording} | {artist} | {length:.1f} | | | {cover}")
             else:
                 lines.append(f"{n} | {title} | {note} | | | | | | | {cover}")
-    fm_lines = ["---", f"title: {SETLIST}", "type: setlist", "date: 2026-12-04", "sets:"]
+    fm_lines = ["---", f"title: {SETLIST}", "type: setlist", "sets:"]
     i = 0
     for set_name, songs in SETS:
         fm_lines.append(f"  - name: {set_name}")

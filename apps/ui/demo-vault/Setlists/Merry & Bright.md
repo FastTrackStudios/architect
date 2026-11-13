@@ -1,14 +1,13 @@
 ---
 title: Merry & Bright
 type: setlist
-date: 2026-12-04
 sets:
-  - name: Presidents Songs
+  - name: Opening Set
     songs:
     - "[[Songs/Christmas/Sleigh Ride/Sleigh Ride|Sleigh Ride]]"
     - "[[Songs/Christmas/Silent Night/Silent Night|Silent Night]]"
     - "[[Songs/Christmas/Joy to the World (Unspeakable Joy)/Joy to the World (Unspeakable Joy)|Joy to the World (Unspeakable Joy)]]"
-  - name: Tree Lighting Concert Set
+  - name: Concert Set
     songs:
     - "[[Songs/Christmas/Feliz Navidad/Feliz Navidad|Feliz Navidad]]"
     - "[[Songs/Christmas/What Christmas Means/What Christmas Means|What Christmas Means]]"
@@ -33,11 +32,11 @@ tags: [music/christmas, setlist]
 A Christmas set in two parts. Its songs' covers are drawn for this demo (`apps/ui/demo-vault.py`), and every recording is the demo's silent one. Four songs have no recording yet.
 
 ```studio-setlist
-## Presidents Songs
+## Opening Set
 1 | Sleigh Ride | Songs/Christmas/Sleigh Ride/Sleigh Ride.md | B · 86 bpm · 4/4 | Recordings/Christmas/Sleigh Ride.mp3 | Tori Kelly | 186.0 | | | Songs/Christmas/Sleigh Ride/cover.svg
 2 | Silent Night | Songs/Christmas/Silent Night/Silent Night.md | A · 83 bpm · 3/4 | Recordings/Christmas/Silent Night.mp3 | for KING & COUNTRY | 300.0 | | | Songs/Christmas/Silent Night/cover.svg
 3 | Joy to the World (Unspeakable Joy) | Songs/Christmas/Joy to the World (Unspeakable Joy)/Joy to the World (Unspeakable Joy).md | D · 128 bpm · 4/4 | Recordings/Christmas/Joy to the World (Unspeakable Joy).mp3 | Chris Tomlin | 230.8 | | | Songs/Christmas/Joy to the World (Unspeakable Joy)/cover.svg
-## Tree Lighting Concert Set
+## Concert Set
 4 | Feliz Navidad | Songs/Christmas/Feliz Navidad/Feliz Navidad.md | | | | | | | Songs/Christmas/Feliz Navidad/cover.svg
 5 | What Christmas Means | Songs/Christmas/What Christmas Means/What Christmas Means.md | | | | | | | Songs/Christmas/What Christmas Means/cover.svg
 6 | This Christmas | Songs/Christmas/This Christmas/This Christmas.md | F · 93 bpm · 4/4 | Recordings/Christmas/This Christmas.mp3 | Donny Hathaway | 249.6 | | | Songs/Christmas/This Christmas/cover.svg

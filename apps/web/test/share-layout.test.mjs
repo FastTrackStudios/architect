@@ -79,8 +79,8 @@ async function node({ shell }) {
   const dir = mkdtempSync(join(tmpdir(), 'layout-'));
   const vault = join(dir, 'vault');
   const rows = Array.from({ length: 101 }, (_, i) => row(i + 1));
-  rows.splice(3, 0, '<li data-playlist-section="">Tree Lighting Concert Set</li>');
-  rows.unshift('<li data-playlist-section="">Presidents Songs</li>');
+  rows.splice(3, 0, '<li data-playlist-section="">Concert Set</li>');
+  rows.unshift('<li data-playlist-section="">Opening Set</li>');
   put(vault, 'Gig/list.md', `---\ntitle: ${TITLE}\ntype: setlist\n---\n<div class="studio-setlist" data-playlist="" data-playlist-join=""><ol style="list-style:none;margin:0;padding:0">${rows.join('')}</ol><p data-playlist-files=""><a href="${L}/_files/">Files</a> · <a href="${L}/_archive.zip">Download all</a></p></div>\n`);
   put(vault, 'Gig/media/song.wav', wav(30));
   const share = { code: CODE, vault: 'notes', scope: { Folder: 'Gig' }, title: 'The gig', audience: 'Link', access: 'Read', expires_at: null, revoked_at: null, created_at: 1, created_by: 'test', domain: null };
