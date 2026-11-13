@@ -301,6 +301,50 @@ fn an_extension_drawing_a_guests_content_cannot_read_the_persons_vault() {
     assert_eq!(read_as(&ext, &pages, true), "no read|no list|no run");
 }
 
+/// A page that runs an action and shows what it answered.
+const WHO: &str = r#"
+local ran, out = pcall(function() return actions.run("LAB_VAULT_WHO") end)
+render(function()
+  return span():attr("id", "out"):child(ran and tostring(out) or "no run")
+end)
+"#;
+
+/// An extension page's run of an action that asks who ran it
+/// (`SHARE_OPEN`, #634) is a script's, never the person's own door: with
+/// no principal (`AppHost` runs as the app) it still says where it came
+/// from, so the action asks the person first, as for an agent's.
+#[test]
+fn an_extension_pages_action_run_is_a_scripts_not_the_persons() {
+    static WHO_RAN: architect::action::ActionMeta = architect::action::ActionMeta {
+        id: "LAB_VAULT_WHO",
+        trait_name: "",
+        method_name: "",
+        display_name: "Who ran this",
+        description: "Where its run came from.",
+        category: "Lab",
+        group: "Lab",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    };
+    let docs = Memo::default();
+    let (ext, pages, _tmp) = extensions(&docs);
+    ext.host()
+        .list()
+        .register_with(
+            &WHO_RAN,
+            architect::action::Effect::ReadOnly,
+            |caller, (): ()| {
+                Ok(caller
+                    .invocation()
+                    .map_or("the person", |i| i.source.name())
+                    .to_owned())
+            },
+        )
+        .unwrap();
+    assert_eq!(out_of(&ext, &pages, "who.luau", WHO), "script");
+}
+
 #[test]
 fn a_tsx_page_creates_edits_and_moves_a_document() {
     let docs = Memo::default();

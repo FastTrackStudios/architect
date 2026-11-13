@@ -11,7 +11,7 @@
 //! claims (`Embeds::resolve`) is drawn by it once the note's text is given
 //! to guests (`GuestNote::source`), else plain, with "Open in browser".
 //! The extension draws it only through its page, on a host that reaches
-//! nothing of the person's (`EmbedView`'s `guest`).
+//! nothing of the person's (`GuestEmbedView`).
 //!
 //! The rules (`docs/content/guide/deploy.md`, "A link opens Architect"):
 //! a link is read with `ShareUrl::parse` (https, or http to this machine;
@@ -122,25 +122,43 @@ pub fn links_in(args: impl IntoIterator<Item = String>) -> Vec<String> {
         .collect()
 }
 
-/// The host of an org host as the account keeps it (`https://n.example`,
-/// `http://127.0.0.1:7422/`, a bare `n.example`), lower case, no port.
-fn host_of(origin: &str) -> String {
-    let rest = origin.split_once("://").map_or(origin, |(_, r)| r);
+/// The host and port of an org host as the account keeps it
+/// (`https://n.example`, `http://127.0.0.1:7422/`, a bare `n.example`):
+/// the host lower case; the port it names, or its scheme's (443, 80),
+/// or None for a bare host that names neither.
+fn host_of(origin: &str) -> (String, Option<u16>) {
+    let (scheme, rest) = origin
+        .split_once("://")
+        .map_or((None, origin), |(s, r)| (Some(s), r));
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    let host = if authority.starts_with('[') {
-        authority
-            .split_once(']')
-            .map_or(authority, |(h, _)| h)
-            .trim_start_matches('[')
+    let (host, port) = if authority.starts_with('[') {
+        let (h, after) = authority.split_once(']').unwrap_or((authority, ""));
+        (h.trim_start_matches('['), after.strip_prefix(':'))
     } else {
-        authority.split(':').next().unwrap_or_default()
+        authority
+            .split_once(':')
+            .map_or((authority, None), |(h, p)| (h, Some(p)))
     };
-    host.trim_end_matches('.').to_ascii_lowercase()
+    let port = match port {
+        Some(p) => p.parse().ok(),
+        None => match scheme.map(str::to_ascii_lowercase).as_deref() {
+            Some("https") => Some(443),
+            Some("http") => Some(80),
+            _ => None,
+        },
+    };
+    (host.trim_end_matches('.').to_ascii_lowercase(), port)
 }
 
-/// Whether a link's node is one the app knows: the hosted Architect, or
-/// a node the account uses for one of its orgs (`known`, as [`trusts`]
-/// takes them; the port is not asked about).
+/// The port a link's requests go to.
+fn port_of(url: &ShareUrl) -> Option<u16> {
+    url::Url::parse(&url.origin()).ok()?.port_or_known_default()
+}
+
+/// Whether a link's node is one the app knows: the hosted Architect on
+/// 443, or a node the account uses for one of its orgs (`known`, as
+/// [`trusts`] takes them), on the port that entry names (its own, or its
+/// scheme's): another port of the same name may be another server.
 #[must_use]
 pub fn known_host(url: &ShareUrl, known: &[String]) -> bool {
     let host = url
@@ -149,7 +167,12 @@ pub fn known_host(url: &ShareUrl, known: &[String]) -> bool {
         .trim_end_matches(']')
         .trim_end_matches('.')
         .to_ascii_lowercase();
-    host == HOME_HOST || known.iter().any(|k| host_of(k) == host)
+    let port = port_of(url);
+    (host == HOME_HOST && port == Some(443))
+        || known.iter().any(|k| {
+            let (h, p) = host_of(k);
+            h == host && p.is_none_or(|p| Some(p) == port)
+        })
 }
 
 /// Whether a link asks the person first.
@@ -630,6 +653,45 @@ pub struct Opened {
     pub url: Option<ShareUrl>,
     pub phase: Phase,
     pub note: Option<NoteView>,
+    /// Where the link came from: kept for as long as it is open, so
+    /// reading it again ("Try again") asks what its first opening asked.
+    pub from: Source,
+    /// The person said yes to [`Ask::Local`]: this machine or a private
+    /// network is where they expect it to be.
+    pub local_ok: bool,
+}
+
+impl Opened {
+    /// Whether opening it (again) looks up its host first: unless the
+    /// person opened it or said yes to a private network, its host is
+    /// resolved, a private address asks, and the requests go to the
+    /// public addresses it found alone. A yes to an unknown node is not
+    /// a yes to a private network, and a "Try again" checks again: the
+    /// DNS may answer otherwise the second time.
+    #[must_use]
+    pub fn checks_address(&self) -> bool {
+        self.from != Source::Person && !self.local_ok
+    }
+
+    /// The person said yes to (or asked again for) this link: whether a
+    /// private network is now allowed.
+    #[must_use]
+    pub fn local_ok_after_yes(&self) -> bool {
+        self.local_ok || self.phase == Phase::Asking(Ask::Local)
+    }
+}
+
+/// Where an opening goes once its host is looked up: on to the addresses
+/// to pin it to, or to a phase that stops it. A lookup that found nothing
+/// (it failed, or answered no address) stops it as unreachable: the
+/// request's own lookup could answer otherwise, a private address the
+/// check never saw.
+fn after_lookup(resolved: Resolved) -> Result<Vec<std::net::SocketAddr>, Phase> {
+    match resolved {
+        Resolved::Local => Err(Phase::Asking(Ask::Local)),
+        Resolved::Public(addrs) => Ok(addrs),
+        Resolved::Unknown => Err(Phase::Failed(Why::Unreachable)),
+    }
 }
 
 /// The session to send to a node's origin: empty unless it is trusted.
@@ -696,16 +758,20 @@ impl Guest {
                     url: None,
                     phase: Phase::Failed(Why::Refused(why.to_string())),
                     note: None,
+                    from,
+                    local_ok: false,
                 }));
             }
             Ok(url) => match self.asks(&url, from) {
-                Ask::No => self.start(url, from == Source::Person),
+                Ask::No => self.start(url, from, false),
                 ask => {
                     self.bump();
                     self.open.set(Some(Opened {
                         url: Some(url),
                         phase: Phase::Asking(ask),
                         note: None,
+                        from,
+                        local_ok: false,
                     }));
                 }
             },
@@ -716,15 +782,14 @@ impl Guest {
     /// The person said yes to a link that asked first; or read the open
     /// link again.
     pub fn retry(self) {
-        if let Some(Opened {
-            url: Some(url),
-            phase,
-            ..
-        }) = self.opened()
-        {
+        let Some(opened) = self.opened() else {
+            return;
+        };
+        if let Some(url) = opened.url.clone() {
             // A yes to an unknown node is not a yes to a private network:
-            // the address it resolves to is still asked about.
-            self.start(url, phase != Phase::Asking(Ask::Unknown));
+            // the address it resolves to is still asked about, on every
+            // reading ([`Opened::checks_address`]).
+            self.start(url, opened.from, opened.local_ok_after_yes());
         }
     }
 
@@ -742,18 +807,23 @@ impl Guest {
         Session::new(url, token)
     }
 
-    /// Open `url`: read the link and its first note, then keep both
-    /// current until the link closes, goes or another opens.
-    fn start(mut self, url: ShareUrl, confirmed: bool) {
+    /// Open `url` (from `from`; `local_ok`: the person said yes to a
+    /// private network): read the link and its first note, then keep
+    /// both current until the link closes, goes or another opens.
+    fn start(mut self, url: ShareUrl, from: Source, local_ok: bool) {
         self.bump();
         self.current.set(None);
         let at = *self.generation.peek();
         let session = self.session(url.clone());
-        self.open.set(Some(Opened {
+        let opened = Opened {
             url: Some(url),
             phase: Phase::Loading,
             note: None,
-        }));
+            from,
+            local_ok,
+        };
+        let check = opened.checks_address();
+        self.open.set(Some(opened));
         let mut open = self.open;
         let generation = self.generation;
         let current = move || *generation.peek() == at;
@@ -762,18 +832,17 @@ impl Guest {
             // one that resolves to public addresses is read from those
             // alone, so a second answer from the DNS can't move it.
             let mut session = session;
-            if !confirmed {
-                match session.resolve().await {
-                    Resolved::Local => {
+            if check {
+                match after_lookup(session.resolve().await) {
+                    Ok(addrs) => session = session.pinned(addrs),
+                    Err(phase) => {
                         if current() {
                             if let Some(o) = open.write().as_mut() {
-                                o.phase = Phase::Asking(Ask::Local);
+                                o.phase = phase;
                             }
                         }
                         return;
                     }
-                    Resolved::Public(addrs) => session = session.pinned(addrs),
-                    Resolved::Unknown => {}
                 }
             }
             if !current() {
@@ -951,12 +1020,14 @@ pub fn use_guest(
 }
 
 /// Who ran `SHARE_OPEN`: the person only from the app's own doors (⌘K,
-/// the menu, a key, a toolbar) with no principal; anything else (an
-/// agent, a script, a hook, a peer) is asked about as the OS's links are.
+/// the menu, a key, a toolbar), which say so (`Commands::run_from`), with
+/// no principal; anything else (an agent, a script, an extension's page,
+/// a hook, a peer, a run that says nothing of where it came from) is
+/// asked about as the OS's links are.
 fn source_of(caller: &architect::action::ActionCaller) -> Source {
     use architect::action::InvocationSource as From;
     let by_person = caller.principal().is_none()
-        && caller.invocation().is_none_or(|i| {
+        && caller.invocation().is_some_and(|i| {
             matches!(
                 i.source,
                 From::Palette | From::Menu | From::Key | From::ContextMenu | From::Toolbar
@@ -1290,13 +1361,12 @@ fn GuestNoteView(guest: Guest, note: GuestNote, url: Option<ShareUrl>) -> Elemen
                 Some((claim, source)) => rsx! {
                     // A guest's content: drawn only by the extension's
                     // page, on a host with no action, no host-service call
-                    // and no vault of the person's (`guest`).
-                    architect_extensions::embeds::EmbedView {
+                    // and no vault of the person's.
+                    architect_extensions::embeds::GuestEmbedView {
                         claim,
                         source,
                         props: serde_json::json!({ "guest": true }),
                         fallback: plain,
-                        guest: true,
                     }
                 },
                 None => plain,
@@ -1424,7 +1494,10 @@ mod tests {
                 Ask::No
             );
             assert_eq!(asks_first(&url("node.example"), from, &known), Ask::No);
-            assert_eq!(asks_first(&url("other.example"), from, &known), Ask::No);
+            assert_eq!(
+                asks_first(&url("other.example:8443"), from, &known),
+                Ask::No
+            );
             assert_eq!(asks_first(&url("evil.example"), from, &known), Ask::Unknown);
             assert_eq!(
                 asks_first(&url("node.example.evil.example"), from, &known),
@@ -1459,11 +1532,105 @@ mod tests {
         let peer = ActionCaller::new(architect::action::Principal::Service {
             name: "model".to_owned(),
         });
+        let key = ActionCaller::app().with_invocation(Invocation::new(InvocationSource::Key));
+        let menu = ActionCaller::app().with_invocation(Invocation::new(InvocationSource::Menu));
         assert_eq!(source_of(&palette), Source::Person);
-        assert_eq!(source_of(&ActionCaller::app()), Source::Person);
+        assert_eq!(source_of(&key), Source::Person);
+        assert_eq!(source_of(&menu), Source::Person);
+        // A run that says nothing of where it came from (an extension's
+        // page, as `AppHost` runs it with no invocation) is not the person's.
+        assert_eq!(source_of(&ActionCaller::app()), Source::Agent);
         assert_eq!(source_of(&agent), Source::Agent);
         assert_eq!(source_of(&script), Source::Agent);
         assert_eq!(source_of(&peer), Source::Agent);
+    }
+
+    #[test]
+    fn an_extension_pages_share_open_asks_first() {
+        use architect::action::{ActionCaller, Invocation, InvocationSource};
+        // As `architect_pages::host::AppHost` runs a page's action.
+        let page = ActionCaller::app().with_invocation(Invocation::new(InvocationSource::Script));
+        let from = source_of(&page);
+        assert_eq!(from, Source::Agent);
+        let unknown = ShareUrl::parse(&format!("https://evil.example/s/{CODE}/")).unwrap();
+        let lan = ShareUrl::parse(&format!("https://10.0.0.5/s/{CODE}/")).unwrap();
+        assert_eq!(asks_first(&unknown, from, &[]), Ask::Unknown);
+        assert_eq!(asks_first(&lan, from, &[]), Ask::Local);
+        // And once it opens, its host is still checked.
+        let opened = Opened {
+            url: Some(unknown),
+            phase: Phase::Loading,
+            note: None,
+            from,
+            local_ok: false,
+        };
+        assert!(opened.checks_address());
+    }
+
+    fn opened(from: Source, phase: Phase, local_ok: bool) -> Opened {
+        Opened {
+            url: Some(ShareUrl::parse(&format!("https://evil.example/s/{CODE}/")).unwrap()),
+            phase,
+            note: None,
+            from,
+            local_ok,
+        }
+    }
+
+    #[test]
+    fn trying_again_checks_the_address_again_unless_the_person_said_local_is_fine() {
+        // Yes to an unknown node, then it timed out: "Try again" looks the
+        // host up again (the DNS may now answer 10.0.0.5) and pins it.
+        let yes_unknown = opened(Source::Os, Phase::Asking(Ask::Unknown), false);
+        let local_ok = yes_unknown.local_ok_after_yes();
+        assert!(!local_ok);
+        let failed = opened(Source::Os, Phase::Failed(Why::Unreachable), local_ok);
+        assert!(failed.checks_address());
+        assert!(!failed.local_ok_after_yes());
+        let agent = opened(Source::Agent, Phase::Failed(Why::Building), false);
+        assert!(agent.checks_address());
+        // Yes to a private network: kept across "Try again".
+        let yes_local = opened(Source::Os, Phase::Asking(Ask::Local), false);
+        assert!(yes_local.local_ok_after_yes());
+        let failed = opened(Source::Os, Phase::Failed(Why::Unreachable), true);
+        assert!(!failed.checks_address());
+        assert!(failed.local_ok_after_yes());
+        // The person's own link is as a browser's address bar.
+        assert!(!opened(Source::Person, Phase::Failed(Why::Unreachable), false).checks_address());
+    }
+
+    #[test]
+    fn a_host_that_does_not_resolve_is_not_read() {
+        let public: std::net::SocketAddr = "93.184.216.34:443".parse().unwrap();
+        assert!(after_lookup(Resolved::Unknown) == Err(Phase::Failed(Why::Unreachable)));
+        assert!(after_lookup(Resolved::Local) == Err(Phase::Asking(Ask::Local)));
+        assert!(after_lookup(Resolved::Public(vec![public])) == Ok(vec![public]));
+    }
+
+    #[test]
+    fn a_known_node_is_known_on_its_own_port_alone() {
+        let url = |host: &str| ShareUrl::parse(&format!("https://{host}/s/{CODE}/")).unwrap();
+        let known = vec![
+            "https://node.example".to_owned(),
+            "https://other.example:8443/".to_owned(),
+            "bare.example".to_owned(),
+            "pinned.example:9443".to_owned(),
+        ];
+        assert!(known_host(&url(HOME_HOST), &[]));
+        assert!(known_host(&url(&format!("{HOME_HOST}:443")), &[]));
+        assert!(!known_host(&url(&format!("{HOME_HOST}:8443")), &[]));
+        assert!(known_host(&url("node.example"), &known));
+        assert!(!known_host(&url("node.example:8443"), &known));
+        assert!(known_host(&url("other.example:8443"), &known));
+        assert!(!known_host(&url("other.example"), &known));
+        assert!(!known_host(&url("other.example:9000"), &known));
+        // A bare name names no port.
+        assert!(known_host(&url("bare.example:7000"), &known));
+        assert!(known_host(&url("pinned.example:9443"), &known));
+        assert!(!known_host(&url("pinned.example"), &known));
+        let local = ShareUrl::parse(&format!("http://127.0.0.1:7422/s/{CODE}/")).unwrap();
+        assert!(known_host(&local, &["http://127.0.0.1:7422/".to_owned()]));
+        assert!(!known_host(&local, &["http://127.0.0.1:7423/".to_owned()]));
     }
 
     #[test]
