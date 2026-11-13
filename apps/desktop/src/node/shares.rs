@@ -515,6 +515,7 @@ impl Shares {
             self.build_one(share, &domain, &at.join("domain"));
         } else {
             let _ = std::fs::remove_dir_all(at.join("domain"));
+            let _ = std::fs::remove_dir_all(architect_sites::data_dir(&at.join("domain")));
         }
         // Each audience: the notes its filter holds for, and no others.
         for audience in &share.audiences {
@@ -565,6 +566,7 @@ impl Shares {
             Err(error) => {
                 tracing::warn!(code = %share.code, base = %opts.base, %error, "a share did not build");
                 let _ = std::fs::remove_dir_all(out);
+                let _ = std::fs::remove_dir_all(architect_sites::data_dir(out));
                 None
             }
         }
@@ -834,11 +836,9 @@ impl Shares {
             return Guard::Building;
         };
         let decoded = decode(rest);
-        // A page's own files (its HTML, its plain blocks for a guest)
-        // are the page: checked as its note.
+        // A page's own file (its HTML) is the page: checked as its note.
         let key = decoded
             .strip_suffix("index.html")
-            .or_else(|| decoded.strip_suffix(architect_sites::plain::NOTE_FILE))
             .filter(|dir| dir.ends_with('/'))
             .unwrap_or(&decoded);
         let dir = format!("{}/", key.trim_end_matches('/'));
@@ -2960,7 +2960,7 @@ impl ShareGuest for GuestLane {
             listen: share.listen_for(audience.as_ref()),
         };
         // A note the link lists now, with a page of the link's.
-        let (notes, _) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
+        let (notes, files) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
         let listed = notes
             .into_iter()
             .find(|n| n.path == path)
@@ -2971,14 +2971,18 @@ impl ShareGuest for GuestLane {
             .filter(|b| b.starts_with('/') && b.ends_with('/'))
             .ok_or(GuestFault::Gone)?
             .to_owned();
-        let rest = format!("{below}{}", architect_sites::plain::NOTE_FILE);
+        // Admitted as its page is.
+        let rest = format!("{below}index.html");
         let dir = self.dir(&share, audience.as_ref());
         match admit(&self.0, &share, audience.as_ref(), &dir, &rest, link.listen).await {
             Admit::Open => {}
             other => return Err(shut(other)),
         }
-        // The built output's own file, never through a symlink (#674): one
-        // planted in the output, or swapped in since the build, is refused.
+        // The page's data, from the build's data folder beside the served
+        // one (no URL of the link reaches it), never through a symlink
+        // (#674): one planted there, or swapped in since the build, is
+        // refused.
+        let dir = architect_sites::data_dir(&dir);
         let rel = format!(
             "{}{}",
             below.trim_start_matches('/'),
@@ -2993,11 +2997,26 @@ impl ShareGuest for GuestLane {
         .and_then(Result::ok)
         .ok_or(GuestFault::Building)?;
         let mut note: GuestNote = facet_json::from_str(&text).map_err(|_| GuestFault::Building)?;
+        // What the view that draws its type may read of it (#648, #669),
+        // decided here, by this node's islands, never by the caller: its
+        // text (as the build wrote it for this link) only to a view that
+        // reads the note, and the link's files only to one that reads
+        // files too.
+        let reads = architect_sites::island::note_reads(
+            self.0.islands(),
+            listed.kind.as_deref().unwrap_or_default(),
+        );
+        if !reads.text {
+            note.source = None;
+        }
+        note.files = if reads.files {
+            view_files(&listed, files)
+        } else {
+            Vec::new()
+        };
         note.path = listed.path;
         note.kind = listed.kind;
         note.page = page;
-        // Its text is not given to guests: it can say more than the page.
-        note.source = None;
         Ok(note)
     }
 
@@ -3024,6 +3043,26 @@ impl ShareGuest for GuestLane {
         let (_, files) = listing(&self.0, &link, asked).await.map_err(shut)?;
         Ok(files)
     }
+}
+
+/// The files of the link a view on `note` may read
+/// ([`GuestNote::files`]): the note's own first, then the rest of the
+/// link's in list order (a setlist's view draws its songs' art), only
+/// images and synced lyrics, within the caps of
+/// [`architect_spaces::view::within_caps`]. `files` is the link's listing
+/// at its layer: nothing past what the link serves its guest. A file the
+/// vault has not hashed yet is left out: the app checks every file it is
+/// handed against its `sha256`, and takes none without one.
+fn view_files(note: &ListedNote, files: Vec<ListedFile>) -> Vec<ListedFile> {
+    let (own, rest): (Vec<ListedFile>, Vec<ListedFile>) = files
+        .into_iter()
+        .filter(|f| f.sha256.is_some())
+        .partition(|f| note.files.contains(&f.path));
+    architect_spaces::view::within_caps(
+        own.into_iter().chain(rest),
+        |f| f.path.as_str(),
+        |f| f.size,
+    )
 }
 
 /// A page of the link, with a bar to its files page and its archive

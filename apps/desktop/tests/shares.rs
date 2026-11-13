@@ -151,6 +151,16 @@ async fn world() -> World {
 
 /// [`world`], its node started by an embedder that hands it `blocks`.
 async fn world_with(blocks: architect_sites::Blocks) -> World {
+    world_full(blocks, Vec::new(), |_| {}).await
+}
+
+/// [`world`], its node drawing `islands` (#669), `seed` writing more
+/// into its vault (the vault's folder) before it starts.
+async fn world_full(
+    blocks: architect_sites::Blocks,
+    islands: Vec<architect_sites::SiteIsland>,
+    seed: impl FnOnce(&Path),
+) -> World {
     let origin = issuer().await;
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("host");
@@ -204,6 +214,7 @@ async fn world_with(blocks: architect_sites::Blocks) -> World {
         "Embedded/song.md",
         "---\ntitle: Song\n---\n```kf\n| D | A |\n```\n\n```chart\n| C |\n```\n",
     );
+    seed(&vault);
     let grace = session_of(&origin, &dir, "grace@local.test").await;
     let config = Config {
         name: "indie-host".to_owned(),
@@ -217,7 +228,9 @@ async fn world_with(blocks: architect_sites::Blocks) -> World {
         sweep_secs: 3600,
         ..Config::default()
     };
-    let host = node::start_with(config, blocks).await.unwrap();
+    let host = node::start_with_islands(config, blocks, Vec::new(), islands)
+        .await
+        .unwrap();
     let alan = session_of(&origin, &tmp.path().join("alan"), "alan@local.test").await;
     let ada = session_of(&origin, &tmp.path().join("ada"), "ada@local.test").await;
     World {
@@ -3662,6 +3675,291 @@ async fn the_node_claims_its_links_for_the_configured_apps_alone() {
     host.stop().await;
 }
 
+// ── What a guest's view reads (#648, #669) ───────────────────────────
+
+/// An island whose web bundle claims `setlist` notes with view `list`,
+/// reading the note (`embed_note`) or not, its extension declaring
+/// `reads`.
+fn setlist_island(reads_note: bool, reads: &[&str]) -> architect_sites::SiteIsland {
+    use std::borrow::Cow;
+    let island = architect_sites::SiteIsland::new(
+        "demo.setlist",
+        vec![
+            (
+                "web-setlist.js".to_owned(),
+                Cow::Borrowed(b"export function mount(){}".as_slice()),
+            ),
+            (
+                "web-setlist_bg.wasm".to_owned(),
+                Cow::Borrowed(b"\0asm\x01\0\0\0".as_slice()),
+            ),
+        ],
+    )
+    .web("web-setlist.js")
+    .reads(reads.iter().copied());
+    if reads_note {
+        island.embed_note("list", ["setlist"], ["date"])
+    } else {
+        island.embed("list", ["setlist"])
+    }
+}
+
+/// A gig's folder: a setlist that links its song, a note outside the
+/// link and its picture, a comment, art, lyrics, audio, a file over the
+/// cap, a symlink out of the vault and one inside it to the private
+/// picture: no symlink is ever shared.
+fn seed_gig(vault: &Path) {
+    touch(
+        vault,
+        "Gig/set.md",
+        "---\ntitle: The gig\ntype: setlist\ndate: 2026-12-24\nsecret: the alarm code\n---\n\
+         1. [[Gig/joy|Joy]]\n2. [[Private/plan|the plan]] and [[Private/plan]]\n\
+         %%a private note%%\n<!-- an html note -->\n\n\
+         ![[Gig/art/joy.png]]\n\n![[Private/cover.png]]\n\n![[Gig/joy.lrc]]\n\n\
+         ![[Gig/joy.mp3]]\n\n![[Gig/big.png]]\n\n![[Gig/evil.png]]\n\n![[Gig/inner.png]]\n",
+    );
+    touch(
+        vault,
+        "Gig/joy.md",
+        "---\ntitle: Joy\ntype: song\ncover: art/joy.png\n---\nJoy to the world.\n",
+    );
+    touch(vault, "Gig/art/joy.png", "png joy");
+    touch(vault, "Gig/joy.lrc", "[00:01.00]Joy to the world");
+    touch(vault, "Gig/joy.mp3", "mp3 joy");
+    std::fs::write(
+        vault.join("Gig/big.png"),
+        vec![
+            b'p';
+            usize::try_from(architect_spaces::view::VIEW_FILE_MAX)
+                .unwrap()
+                .saturating_add(1)
+        ],
+    )
+    .unwrap();
+    let outside = vault.parent().unwrap().join("outside.png");
+    std::fs::write(&outside, "outside secret").unwrap();
+    std::os::unix::fs::symlink(&outside, vault.join("Gig/evil.png")).unwrap();
+    std::os::unix::fs::symlink("../Private/cover.png", vault.join("Gig/inner.png")).unwrap();
+}
+
+/// A link to the gig, its pages built.
+async fn gig_link(w: &World) -> Share {
+    let share = w
+        .share(
+            ShareScope::Folder("Gig".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    page_with(&w.url(&format!("/s/{}/set/", share.code)), None, "Joy").await;
+    share
+}
+
+/// sha256 of `bytes`, lower-case hex.
+fn hex_sha256(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            use std::fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
+/// A guest's view on a shared setlist reads its text as the page shows it
+/// and the link's images and lyrics, and nothing past the link: not a
+/// note or file outside it, not what a path trick names, not the build's
+/// data as a file.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link() {
+    let w = world_full(
+        architect_sites::Blocks::new(),
+        vec![setlist_island(true, &["documents", "files"])],
+        seed_gig,
+    )
+    .await;
+    let share = gig_link(&w).await;
+    let code = share.code.clone();
+    let client = guest(&w);
+    let set = client
+        .read(code.clone(), String::new(), "Gig/set.md".to_owned())
+        .await
+        .unwrap();
+
+    // Its text, as the page shows it.
+    let text = set.source.clone().expect("the view reads the note");
+    assert!(text.contains("1. [[Gig/joy|Joy]]"), "{text}");
+    assert!(text.contains("2. the plan and Private/plan"), "{text}");
+    assert!(text.contains("![[Gig/art/joy.png]]"), "{text}");
+    for never in [
+        "a private note",
+        "an html note",
+        "[[Private/plan",
+        "Private/cover.png",
+        "the alarm code",
+        "secret:",
+        "---",
+    ] {
+        assert!(!text.contains(never), "{never:?} in {text}");
+    }
+
+    // Its files: the link's images and lyrics, its own first; never audio,
+    // a file over the cap, one outside the link or a symlink, out of the
+    // vault or inside it.
+    let paths: Vec<&str> = set.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["Gig/art/joy.png", "Gig/joy.lrc"], "{:?}", set.files);
+    for f in &set.files {
+        assert!(f.url.starts_with(&format!("/s/{code}/")), "{}", f.url);
+        let (status, _, bytes) = get_bytes(&w.url(&f.url)).await;
+        assert_eq!(status, StatusCode::OK, "{}", f.url);
+        assert_eq!(u64::try_from(bytes.len()).unwrap(), f.size, "{}", f.path);
+        let sha = f.sha256.as_deref().expect("a guest's file is hashed");
+        assert_eq!(sha, hex_sha256(&bytes), "{}", f.path);
+    }
+
+    // A note of the link whose type no island reads: its words only.
+    let song = client
+        .read(code.clone(), String::new(), "Gig/joy.md".to_owned())
+        .await
+        .unwrap();
+    assert!(song.source.is_none() && song.files.is_empty(), "{song:?}");
+
+    // A note outside the link, and every path trick on it: one answer,
+    // the same as for a note that is nowhere.
+    let abs = w.tmp.path().join("host/data/vaults/notes/Private/plan.md");
+    for path in [
+        "Private/plan.md",
+        "Gig/../Private/plan.md",
+        "/Gig/set.md",
+        "Gig//set.md",
+        "Gig%2Fset.md",
+        "Gig/set.md%00",
+        "Gig\\set.md",
+        "./Gig/set.md",
+        abs.to_str().unwrap(),
+        "Gig/evil.png",
+        "Gig/inner.png",
+    ] {
+        let read = client
+            .read(code.clone(), String::new(), path.to_owned())
+            .await;
+        assert_eq!(guest_status(&read), 404, "{path}");
+    }
+
+    // The build's guest data is read only through the guest service,
+    // which asks the islands first: it is written beside the served
+    // folder, never in it, so no spelling of a URL reaches it, not even
+    // on a filesystem that folds case (`ſ`) or trailing dots and spaces.
+    let served = w.tmp.path().join(format!("host/data/shares/{code}/site"));
+    let data = architect_sites::data_dir(&served);
+    assert!(
+        data.join("set")
+            .join(architect_sites::plain::NOTE_FILE)
+            .is_file(),
+        "{}",
+        data.display()
+    );
+    assert!(!data.starts_with(&served), "{}", data.display());
+    let mut walk = vec![served.clone()];
+    while let Some(dir) = walk.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            assert!(!name.contains("_note"), "{}", entry.path().display());
+            if entry.file_type().unwrap().is_dir() {
+                walk.push(entry.path());
+            }
+        }
+    }
+    for path in [
+        format!("/s/{code}/set/_note.json"),
+        format!("/s/{code}/set/%5Fnote.json"),
+        format!("/s/{code}/set/_NOTE.JSON"),
+        format!("/s/{code}/set/_note.j%C5%BFon"),
+        format!("/s/{code}/set/_note.json."),
+        format!("/s/{code}/set/_note.json%20"),
+        format!("/s/{code}/set/_note.json::$DATA"),
+        format!("/s/{code}/set/_note.json/"),
+        format!("/s/{code}/_note.json"),
+        format!("/s/{code}/../site.data/set/_note.json"),
+        format!("/s/{code}/%2e%2e/site.data/set/_note.json"),
+    ] {
+        let (status, body) = raw_get(w.host.http, &path, "127.0.0.1").await;
+        assert_eq!(status, 404, "{path}");
+        assert!(
+            !body.contains("a private") && !body.contains("[[Gig"),
+            "{path}: {body}"
+        );
+    }
+
+    // The byte route: nothing outside the link, however the path is
+    // spelled, and never the target of a symlink out of the vault.
+    for path in [
+        format!("/s/{code}/../Private/cover.png"),
+        format!("/s/{code}/%2e%2e/Private/cover.png"),
+        format!("/s/{code}/Gig%2F..%2F..%2FPrivate%2Fcover.png"),
+        format!("/s/{code}/..%2fPrivate%2fcover.png"),
+        format!("/s/{code}/%2FPrivate/cover.png"),
+        format!("/s/{code}//etc/passwd"),
+        format!("/s/{code}/Private/cover.png"),
+        format!("/s/{code}/Gig/evil.png"),
+        format!("/s/{code}/Gig%5Cevil.png"),
+    ] {
+        let (status, body) = raw_get(w.host.http, &path, "127.0.0.1").await;
+        assert_ne!(status, 200, "{path}");
+        assert!(
+            !body.contains("private png")
+                && !body.contains("outside secret")
+                && !body.contains("root:"),
+            "{path}: {body}"
+        );
+    }
+    let listed = client
+        .files(code.clone(), String::new(), None)
+        .await
+        .unwrap();
+    assert!(
+        !listed.iter().any(|f| f.path.contains("evil")
+            || f.path.contains("inner")
+            || f.path.starts_with("Private/")),
+        "{listed:?}"
+    );
+    w.host.stop().await;
+}
+
+/// The node hands a guest's view only what its extension declared: the
+/// text only to a claim that reads the note of an extension that
+/// declares `documents`, the files only with `files` too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_view_that_did_not_declare_the_read_gets_nothing() {
+    // (reads the note in its claim, declares, text?, files?)
+    for (reads_note, reads, text, files) in [
+        (true, &["documents"][..], true, false),
+        (true, &["files"][..], false, false),
+        (true, &[][..], false, false),
+        (false, &["documents", "files"][..], false, false),
+        (true, &["documents", "files"][..], true, true),
+    ] {
+        let w = world_full(
+            architect_sites::Blocks::new(),
+            vec![setlist_island(reads_note, reads)],
+            seed_gig,
+        )
+        .await;
+        let share = gig_link(&w).await;
+        let set = guest(&w)
+            .read(share.code.clone(), String::new(), "Gig/set.md".to_owned())
+            .await
+            .unwrap();
+        let row = format!("claim reads: {reads_note}, declares {reads:?}");
+        assert_eq!(set.source.is_some(), text, "{row}");
+        assert_eq!(!set.files.is_empty(), files, "{row}");
+        // Its page's words, whatever the view may read.
+        assert!(!set.blocks.is_empty(), "{row}");
+        w.host.stop().await;
+    }
+}
+
 // ── Symlinks ─────────────────────────────────────────────────────────
 
 /// A link follows no symlink: not one to a file outside the vault, not
@@ -3789,7 +4087,9 @@ async fn a_link_serves_nothing_through_a_symlink() {
         )
     };
     assert_eq!(read().await.unwrap().title, "Leak");
-    let note = built.join("leak").join(architect_sites::plain::NOTE_FILE);
+    let note = architect_sites::data_dir(&built)
+        .join("leak")
+        .join(architect_sites::plain::NOTE_FILE);
     let forged =
         std::fs::read_to_string(&note)
             .unwrap()

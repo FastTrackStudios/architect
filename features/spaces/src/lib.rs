@@ -27,6 +27,8 @@
 //!   for an audience, with an expiry and an access; [`ShareLinks`] is
 //!   its wire (`vox`), [`share_note`] how it is kept in the vault
 //!   (`server`).
+//! - [`view`]: what an extension's view on a note is handed of it, the
+//!   rules the node (for a share link's guest) and the app keep alike.
 //! - `files`: a space over a folder grants its members that folder in
 //!   `architect-files`, generated per call.
 
@@ -41,6 +43,7 @@ pub mod share;
 mod share_note;
 #[cfg(feature = "vox")]
 mod share_service;
+pub mod view;
 
 pub use guest::{
     BlockKind, GUEST_PERMITS, GuestFault, GuestLink, GuestNote, ListedFile, ListedNote, PlainBlock,

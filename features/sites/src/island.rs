@@ -746,6 +746,61 @@ fn content_type(path: &str) -> &'static str {
 /// its extension declares (`[capabilities] reads`).
 pub const READS_NOTE: &str = "documents";
 
+/// The read capability that hands a note-reading view the note's files.
+///
+/// An extension declares it (`[capabilities] reads`) beside
+/// [`READS_NOTE`] (#669): art, chart images, synced lyrics
+/// (`architect_spaces::view`).
+pub const READS_FILES: &str = "files";
+
+/// What the view that draws a note of a type may read of it, as the node
+/// decides it for a share link's guest ([`note_reads`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoteReads {
+    /// Its text (`GuestNote::source`): the claim names [`READS_NOTE`] and
+    /// its extension declares it.
+    pub text: bool,
+    /// The link's files it references (`GuestNote::files`): [`Self::text`]
+    /// and its extension declares [`READS_FILES`] too.
+    pub files: bool,
+}
+
+/// What the view `islands` draw a note of type `note_type` with may read.
+///
+/// The island is the one the app chooses (`apps/web/src/ext_host.rs`
+/// `claimed`): the first listed with a web bundle that claims the type,
+/// and its first claim of it, matched without regard to case. Nothing
+/// when none claims it.
+#[must_use]
+pub fn note_reads(islands: &[SiteIsland], note_type: &str) -> NoteReads {
+    let t = note_type.trim();
+    if t.is_empty() {
+        return NoteReads::default();
+    }
+    let claimed = islands
+        .iter()
+        .filter(|i| i.id_ok() && i.web.is_some())
+        .find_map(|i| {
+            i.embeds
+                .iter()
+                .find(|c| {
+                    c.note_types
+                        .iter()
+                        .any(|n| n.trim().eq_ignore_ascii_case(t))
+                })
+                .map(|c| (i, c))
+        });
+    let Some((island, claim)) = claimed else {
+        return NoteReads::default();
+    };
+    let declares = |r: &str| island.reads.iter().any(|x| x == r);
+    let text = claim.properties.is_some() && declares(READS_NOTE);
+    NoteReads {
+        text,
+        files: text && declares(READS_FILES),
+    }
+}
+
 /// One of an island's claims on note types ([`SiteIsland::embed`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct NoteClaim {
