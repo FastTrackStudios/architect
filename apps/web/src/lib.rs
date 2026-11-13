@@ -33,12 +33,30 @@
 //! so one bundle serves any host: the chart's `ConfigMap` replaces the
 //! file with the deployment's issuer.
 //!
+//! **The demo** (`/app/?demo`, [`DEMO`], the landing page's Demo button) is
+//! the app itself (`app`: the shell, the workspace, the navigator, ⌘K and
+//! settings, the components the desktop and phone apps draw with, on
+//! dioxus-web) on the demo vault ([`demo`]), in the tab's memory: no
+//! sign-in, nothing sent anywhere, gone on reload.
+//!
 //! This module is the part that needs no browser (the config, where a
 //! URL leads, what each screen shows), tested natively; `browser` (wasm32
 //! only) does the storage, the requests and the DOM.
 
 #[cfg(target_arch = "wasm32")]
+mod app;
+#[cfg(target_arch = "wasm32")]
 mod browser;
+pub mod demo;
+pub mod ext_host;
+pub mod favourites;
+pub mod keys;
+pub mod live_text;
+#[cfg(any(target_arch = "wasm32", test))]
+mod read_only;
+
+#[cfg(target_arch = "wasm32")]
+pub use browser::start;
 
 use std::fmt::Write as _;
 
@@ -56,6 +74,8 @@ pub const SCOPE: &str = "openid email profile offline_access";
 /// The node's status, over its HTTP face, on this origin
 /// (`apps/desktop/src/node/service.rs` `Node`).
 pub const NODE_STATUS: &str = "/node/status";
+/// The demo's URL: the app on the demo vault, in memory.
+pub const DEMO: &str = "/app/?demo";
 /// Which distribution this bundle is (#491), beside the app.
 pub const DISTRIBUTION: &str = "/app/distribution.json";
 /// Where the desktop app is downloaded.
@@ -180,20 +200,26 @@ pub enum Route {
     Refused(String),
     /// The app itself.
     App,
+    /// The app on the demo vault, in memory ([`DEMO`]).
+    Demo,
 }
 
 /// Where `path` with `query` (without its `?`) leads.
 #[must_use]
 pub fn route(path: &str, query: &str) -> Route {
-    if path.trim_end_matches('/') != CALLBACK {
-        return Route::App;
-    }
     let param = |name: &str| {
         query.split('&').find_map(|pair| {
-            let (k, v) = pair.split_once('=')?;
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
             (k == name).then(|| decode(v))
         })
     };
+    if path.trim_end_matches('/') != CALLBACK {
+        return if param("demo").is_some() {
+            Route::Demo
+        } else {
+            Route::App
+        };
+    }
     if let Some(error) = param("error") {
         return Route::Refused(param("error_description").unwrap_or(error));
     }
@@ -201,6 +227,74 @@ pub fn route(path: &str, query: &str) -> Route {
         (Some(code), Some(state)) if !code.is_empty() => Route::Callback { code, state },
         _ => Route::Refused("the issuer sent no code".to_owned()),
     }
+}
+
+/// The folder a new note goes in on the org's vaults, always inside one.
+///
+/// `folder` when one is on show, else the vault of the note `active` (its
+/// path, `<vault>/…`), else the first vault. The navigator's root is the
+/// org: a note at it would be in no vault, so never saved. `None` with no
+/// vault at all.
+#[must_use]
+pub fn org_note_folder(folder: &str, vaults: &[String], active: Option<&str>) -> Option<String> {
+    if !folder.is_empty() {
+        return Some(folder.to_owned());
+    }
+    active
+        .and_then(|p| p.split_once('/'))
+        .map(|(v, _)| v)
+        .filter(|v| vaults.iter().any(|known| known == v))
+        .or_else(|| vaults.first().map(String::as_str))
+        .map(str::to_owned)
+}
+
+/// `Untitled.md`, `Untitled 2.md`, … `Untitled 999.md` in `folder` (the
+/// vault's root when empty).
+pub fn untitled_paths(folder: &str) -> impl Iterator<Item = String> + '_ {
+    (1..=999_u32).map(move |n| {
+        let name = if n == 1 {
+            "Untitled.md".to_owned()
+        } else {
+            format!("Untitled {n}.md")
+        };
+        if folder.is_empty() {
+            name
+        } else {
+            format!("{folder}/{name}")
+        }
+    })
+}
+
+/// The first free `Untitled.md`, `Untitled 2.md`, … in `folder` (the
+/// vault's root when empty).
+#[must_use]
+pub fn untitled_path(folder: &str, taken: impl Fn(&str) -> bool) -> Option<String> {
+    untitled_paths(folder).find(|p| !taken(p))
+}
+
+/// Makes the first of `paths` that `create` can make; the path made.
+///
+/// `create` answers `Ok(true)` when it made the note, `Ok(false)` when a
+/// note is there already (made by someone else since this tab listed the
+/// vault), so the next name is tried.
+///
+/// # Errors
+///
+/// `create` failed otherwise, or every path was taken.
+pub async fn create_first<F, Fut>(
+    paths: impl IntoIterator<Item = String>,
+    mut create: F,
+) -> Result<String, String>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<bool, String>>,
+{
+    for path in paths {
+        if create(path.clone()).await? {
+            return Ok(path);
+        }
+    }
+    Err("every Untitled name there is taken".to_owned())
 }
 
 /// Percent-decode a query value (`+` is a space).
@@ -263,6 +357,10 @@ pub struct NodeStatus {
     pub version: String,
     #[serde(default)]
     pub org: Option<String>,
+    /// The org whose vaults it serves on `/org/{slug}/vox`: what the app
+    /// opens, signed in.
+    #[serde(default)]
+    pub hosts: Option<String>,
     #[serde(default)]
     pub vaults: u32,
     #[serde(default)]
@@ -282,6 +380,9 @@ pub enum Screen {
     SignedIn {
         person: Person,
         node: Option<Result<NodeStatus, String>>,
+        /// Why the org's vaults did not open (the lane refused or was not
+        /// there); `None` when the node names no org.
+        lane: Option<String>,
     },
     /// The app cannot start (no usable config).
     Broken(String),
@@ -308,10 +409,11 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
             format!(
                 "<section class=\"card\"><h2>Sign in to {name}</h2>\
                  <p>Your notes, projects and files, on every device and in sync.</p>{problem}\
-                 <p><button class=\"primary\" data-action=\"sign-in\">Sign in</button></p>{built_in}</section>"
+                 <p class=\"row\"><button class=\"primary\" data-action=\"sign-in\">Sign in</button>\
+                 <a class=\"button\" href=\"{DEMO}\">Try the demo</a></p>{built_in}</section>"
             )
         }
-        Screen::SignedIn { person, node } => {
+        Screen::SignedIn { person, node, lane } => {
             let who = person
                 .name
                 .as_deref()
@@ -340,10 +442,20 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
                     s.devices
                 ),
             };
+            let lane = lane
+                .as_deref()
+                .map(|why| {
+                    format!(
+                        "<p class=\"problem\">Your org's vaults did not open: {}</p>",
+                        escape(why)
+                    )
+                })
+                .unwrap_or_default();
             format!(
-                "<section class=\"card\"><h2>Signed in as {}{email}</h2>{node}\
-                 <p>The full app is the desktop app for now; its views come to the browser here.</p>\
+                "<section class=\"card\"><h2>Signed in as {}{email}</h2>{node}{lane}\
+                 <p>Your org's vaults open here when this node hosts your org.</p>\
                  <p class=\"row\"><a class=\"button primary\" href=\"{DOWNLOADS}\">Download the desktop app</a>\
+                 <a class=\"button\" href=\"{DEMO}\">Open the demo</a>\
                  <a class=\"button\" href=\"/docs/\">Docs</a>\
                  <button data-action=\"sign-out\">Sign out</button></p>{built_in}</section>",
                 escape(who)
@@ -374,6 +486,11 @@ mod tests {
     fn the_callback_is_read_and_everything_else_is_the_app() {
         assert_eq!(route("/app/", ""), Route::App);
         assert_eq!(route("/app/anything", "code=x"), Route::App);
+        // The landing page's Demo button.
+        assert_eq!(route("/app/", "demo"), Route::Demo);
+        assert_eq!(route("/app/", "x=1&demo="), Route::Demo);
+        assert_eq!(route("/app/", "demonstrate"), Route::App);
+        assert!(matches!(route("/auth/callback", "demo"), Route::Refused(_)));
         assert_eq!(
             route("/auth/callback", "code=a%2Fb&state=s+1"),
             Route::Callback {
@@ -406,10 +523,12 @@ mod tests {
                     name: "home".into(),
                     version: "0.30.0".into(),
                     org: None,
+                    hosts: None,
                     vaults: 2,
                     notes: 9,
                     devices: 3,
                 })),
+                lane: Some("<i>no</i>".into()),
             },
             &Distribution::default(),
         );
@@ -418,11 +537,78 @@ mod tests {
         assert!(html.contains("2 (9 notes)"));
         assert!(html.contains("data-action=\"sign-out\""));
         assert!(
+            html.contains("did not open: &lt;i&gt;no&lt;/i&gt;"),
+            "{html}"
+        );
+        assert!(
             view(
                 &Screen::SignedOut { problem: None },
                 &Distribution::default()
             )
             .contains("data-action=\"sign-in\"")
+        );
+    }
+
+    /// #628: a new note at the navigator's root went in no vault
+    /// (`Untitled.md`) and was never written.
+    #[test]
+    fn a_new_note_on_the_org_is_always_inside_a_vault() {
+        let vaults = vec!["demo".to_owned(), "team".to_owned()];
+        assert_eq!(org_note_folder("", &vaults, None).as_deref(), Some("demo"));
+        assert_eq!(
+            org_note_folder("", &vaults, Some("team/Plans/a.md")).as_deref(),
+            Some("team")
+        );
+        // An active path outside the vaults is ignored.
+        assert_eq!(
+            org_note_folder("", &vaults, Some("Welcome.md")).as_deref(),
+            Some("demo")
+        );
+        assert_eq!(
+            org_note_folder("team/Plans", &vaults, None).as_deref(),
+            Some("team/Plans")
+        );
+        assert_eq!(org_note_folder("", &[], None), None);
+        let path = untitled_path("demo", |p| p == "demo/Untitled.md").unwrap();
+        assert_eq!(path, "demo/Untitled 2.md");
+        assert_eq!(untitled_path("", |_| false).as_deref(), Some("Untitled.md"));
+    }
+
+    /// Polls a future that never waits (the fakes below answer at once).
+    fn ready<T>(f: impl std::future::Future<Output = T>) -> T {
+        let mut f = std::pin::pin!(f);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        match f.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(v) => v,
+            std::task::Poll::Pending => panic!("the fake waited"),
+        }
+    }
+
+    /// #628 H1: `Untitled.md` was made by someone else after this tab
+    /// listed the vault. The node refuses to make it again (it would be
+    /// emptied), and the next name is made instead.
+    #[test]
+    fn a_new_note_never_takes_a_name_made_since_the_listing() {
+        let on_node = std::cell::RefCell::new(vec!["demo/Untitled.md".to_owned()]);
+        let create = |path: String| {
+            let made = !on_node.borrow().contains(&path);
+            if made {
+                on_node.borrow_mut().push(path);
+            }
+            std::future::ready(Ok::<bool, String>(made))
+        };
+        // The tab's listing does not know `Untitled.md`.
+        let listed = |_: &str| false;
+        let tried = untitled_paths("demo").filter(|p| !listed(p));
+        assert_eq!(
+            ready(create_first(tried, create)).as_deref(),
+            Ok("demo/Untitled 2.md")
+        );
+        // A refusal for another reason is said, not skipped past.
+        let failing = |_: String| std::future::ready(Err::<bool, String>("offline".into()));
+        assert_eq!(
+            ready(create_first(untitled_paths("demo"), failing)),
+            Err("offline".to_owned())
         );
     }
 

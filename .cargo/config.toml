@@ -58,3 +58,12 @@ rustflags = [
   "-C", "force-frame-pointers=yes",
   "--cfg", 'getrandom_backend="wasm_js"',
 ]
+
+# ── The platform keychain: never from a test or a dev run ─────────────
+# A rebuilt, unsigned binary is a new code identity to macOS each time, so
+# reading the keychain asks the person at the screen again and again. Every
+# `cargo test`, `cargo nextest` and `cargo run` here gets this, and
+# `architect_accounts::Keychain` panics if it is used anyway; the app keeps
+# its sessions in a file instead (`features/accounts/src/keychain.rs`).
+[env]
+ARCHITECT_FORBID_KEYCHAIN = "1"

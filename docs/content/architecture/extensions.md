@@ -1667,6 +1667,155 @@ would be drawn by the extension's own Dioxus tree into an element of the
 page (linked views work as they are), or a page's tree rendered into
 a shadow root, its height read with a `ResizeObserver`.
 
+### The playhead and the Now Playing bar
+
+The app has one media service, the playhead (`features/playhead`,
+`architect.playhead`, #589), and one Now Playing bar, the shell's own
+(`architect_shell::AppShell`'s `now_playing`, drawn by
+`architect_playhead::ui::NowPlayingBar`): above a phone's tab bar, at a
+desk's page foot, the same in the web app. Any extension puts what it
+plays on the deck as its **source** and controls it; several can each
+have one; the bar shows the **active** one and lists the rest. Nothing in
+it knows what a source means to its extension.
+
+A source is one extension's queue (`PLAYHEAD_SET`, method `set`):
+
+```json
+{ "name": "Studio", "play": false, "slots": ["click", "open"],
+  "queue": [{ "id": "Setlists/Gig.md#1", "title": "Amazing Grace", "subtitle": "John Newton",
+              "art": "Art/grace.jpg", "duration": 192.5, "media": "Recordings/Amazing Grace.mp3",
+              "sections": [{ "name": "Verse 1", "start": 0, "end": 20, "color": "#2563eb" }],
+              "marks": [{ "at": 1.5, "text": "Amazing grace", "kind": "line" }],
+              "tempo": { "bpm": 72, "at": 0.4, "meter": 3 } }] }
+```
+
+Everything but `queue` is optional. `index` picks the current item (clamped
+to the queue); a `SET` without `index` keeps the item that is current
+when its `id` is still in the queue, else starts at the first, so a view
+that sends the same list again does not send the source back to its
+first song. `time` is where to start, seconds.
+
+Every time in it is seconds from 0 to 24 h
+(`architect_playhead::MAX_SECONDS`, 86 400): an item's `duration`, the
+`SET`'s `time`, a section's `start` and `end`, a mark's `at` and a tempo's
+`at`. A `SET` with one above it is refused whole, as any other invalid
+value is, and a media length above it is not taken. An item's `tempo` is
+its beat for the bar's Click (`architect_playhead::model::Tempo`): `bpm`
+20 to 400 (`BPM`), its first downbeat `at` (0 or more, default 0), and
+`meter` beats a bar, 1 to 16 (`METER`, default 4), the first of each
+accented; one tempo for the whole item.
+
+`slots` is what the bar draws beside its play button
+(`architect_playhead::model::Slot`): at most two (`MAX_SLOTS`), each once,
+of `"click"` (Click on and off: a tick on each beat of the item's
+`tempo`) and `"open"` (the bar's detail: previous, next, the position and
+the sources). The bar always draws `open`, after the others when it is
+not asked for, so the detail is one focus away from the keyboard
+(`features/playhead/src/ui.rs` `slots_drawn`). Click is one app-wide
+setting (`architect_playhead::click`, `set_click`); it is drawn only in
+an app that sounds it (`clicks`, said once by `sounds_click`): the web
+app (`apps/web/src/app/click.rs`), scheduled ahead on the Web Audio clock
+with at most 16 beats a look, its audio context suspended while Click is
+off or nothing plays. Desktop and phone do not sound it and draw no
+Click.
+
+`media` and `art` are vault paths, never URLs: one rule,
+`architect_playhead::model::vault_path`, which the web app's frame host
+re-exports. It refuses a scheme or drive (`:`), a leading `/`, `\`, `?`,
+`#`, `%`, control and invisible format characters, look-alikes of `/` and
+`.` (U+FF0F, U+2215, U+2044, U+FF0E, U+2024, U+FE52), and an empty, `.` or
+`..` segment or one ending in a dot or a space; spaces inside a name are
+kept. The app turns a path into a stream itself, and gives an item a
+length from its media only when it resolved that media
+(`Reading::resolved`). An empty queue removes the source. A `SET` whose
+current item keeps its `id` keeps playing where it was. Without `media`
+an item plays on a silent clock over its `duration`.
+
+An item with media nobody hears here (a native app, a path the web app
+does not stream, a refused `play()`) plays on the silent clock; the state
+says so (`unheard: true`) and the bar shows "Not heard here". One with no
+known length as well never ends on its own, so the deck passes over it
+(the next item plays) or, at the last, stops there; its id is listed in
+the state's `unplayable` and the bar shows "Can't be played". A seek is
+refused while the item's length is unknown, and past its end is clamped
+to it.
+
+Every view gets the same state (`PLAYHEAD_STATE`, `Deck::state`):
+`source`, `name`, `active`, `playing`, `time` at `at` (ms since the
+epoch; extrapolate while `playing`), `rate`, `duration`, `index`,
+`tracks`, `clock` (`media` or `silent`), `unheard`, `unplayable`, `item`,
+`queue`, `slots`, and the share page's flat keys (`title`, `subtitle`, `artist`,
+`sections`).
+
+| Method (action) | Arguments | Who |
+| --- | --- | --- |
+| `set` (`PLAYHEAD_SET`) | the source | an extension: its own; the app names `source` |
+| `play`, `pause`, `next`, `previous` | `source?` | an extension: its own; the app: `source` or the active one |
+| `seek` | `t`, `source?` | the same |
+| `item` | `index` or `id`, `play?`, `source?` | the same |
+| `toggle` | `source?` | the same: play, or pause what plays (a favourite's round button) |
+| `state` | `source?` | reads: an extension its own, the app any |
+| `sources` | none | the app: every source (the bar's switcher); an extension: its own entry and whether it is active, nothing of any other (`Deck::listing_for`) |
+| `activate` | `source` | the app only (the bar's switcher) |
+
+Who calls is the host's to say, never the arguments': every action's
+context carries `caller`, the calling extension's id from the call's
+principal (`architect_extensions::invocation::caller_json`), and an
+extension naming another's source is refused (`not your source`). Playing
+a source makes it the active one and pauses the one before.
+
+It fails closed (`Caller::of_context`): with no `caller`, a call is the
+app's only when its invocation is the app's own (`deck::APP_SOURCES`: the
+app, ⌘K, a menu, a key, a toolbar, an agent over MCP); a hook, a script or
+a context that says nothing is refused. The host runs an extension's
+declared work as that extension (`architect_extensions::host`
+`as_extension`): a preset's target, a hook's action and a hook's script
+carry `Principal::extension(owner, …)`, for whoever ran it, so a preset
+that names `PLAYHEAD_SET {"source": "<another>"}` is `not your source`
+whoever presses it. The app's own sources have ids outside the
+extension-id grammar (the web app's Notes source is `app:notes`), and an
+extension whose id is `vault`, `app` or `playhead` holds none
+(`deck::reserved`).
+
+The same contract reaches every runtime: a linked or process extension
+calls the service (`[uses] "architect.playhead" = "^0.1"`) and hooks the
+app event `playhead.changed` (`[[hooks]] on = "app:playhead.changed"`, with
+`capabilities.events = ["playhead.changed"]`). Each extension hears it per
+owner (`architect_playhead::heard_by`, raised by
+`architect_playhead::raise_changed` through `Host::raise_app_each`): its
+own source's state, and of another source's change only `{active}`,
+whether its own is the active one. A linked view reads
+`architect_playhead::ui::use_playhead`; a web bundle in the web app's
+frame host gets the state as its props and asks `PLAYHEAD_SEEK`, `_PLAY`,
+`_PAUSE`, `_NEXT`, `_PREVIOUS`, `_ITEM` and `_SET` (`architect_playhead::FRAME_ASKS`),
+rate-limited (8 a second and a burst of 16 per frame, 32 and 64 for all
+frames together: `ext_host::take_ask`), as its island's extension. Every
+view of one extension (a setlist, its lyrics, its transport) is handed
+the same source's state, whichever view set it.
+
+A favourite's primary (#607) plays and pauses with `target = { action =
+"PLAYHEAD_TOGGLE" }` (its extension's capabilities name `PLAYHEAD_`) and
+shows Pause by `state = "playing"`: the app keeps each source's playing as
+its extension's own runtime state (`ext:<id>`, key `playing`,
+`architect_playhead::PLAYING_STATE`), so the extension writes nothing.
+Pressed from the bar or ⌘K it is the app's press, on the active source;
+pressed as a favourite's declared target it runs as the extension that
+declared it (`apps/ui/src/favourites.rs` `run_declared` natively,
+`architect_playhead::press_as` in the browser), so it moves that
+extension's own source, the one its face reads.
+
+What is heard is a `Clock` (`architect_playhead::clock`): the web app's
+own audio element (`apps/web/src/app/audio.rs`, the page's
+`media-src 'self'`, Media Session), a silent clock in the native apps
+(audible native playback comes later), and later an engine attached as
+the clock (studio#400, #528). The Media Session shows the item's title,
+subtitle and its source's name on the lock screen, a headset and a car's
+display, for every item, heard or not: a private note's title on the Notes
+source leaves the app that way, by the owner's choice. The playhead is not
+synced state: a
+position is one device's; what a source plays comes from its
+extension's documents, which sync through `crdt::docs`.
+
 ### Views that follow playback
 
 A chart whose bar is marked as the song plays, lyrics whose line is: a
@@ -1863,7 +2012,95 @@ after its frame fails (the rules above), the page's own list (or its "No
 lyrics") is there. Studio's is Session's lyrics panel, fixed to its
 Confidence Monitor.
 
-||||||| cc3c1c7a
+**In the web app (#495, route A): the same frames beside a note.** The
+node lists its islands at `/_ext/islands.json` (`page_json`, never
+cached; `apps/desktop/src/node/shares.rs` `ISLANDS_LISTING`), and the web
+app (`/app/`) runs their views in frames of the same web view document,
+with nothing of the share page's script: the host is Rust,
+`apps/web/src/ext_host.rs` (the decisions: which listed bundle to
+believe, each file against its digest, the asks, the heartbeat, the
+theme) and `apps/web/src/app/frames.rs` `ExtensionFrame` (the frame, its
+port, its timers). A song note (`tags: [song]`) shows its island's
+progress, transport and lyrics views beside it, driven by the app's own
+playhead over the note's ` ```lrc ` lines (`apps/web/src/app/song.rs`
+`SongViews`); the app's own controls and lyrics show until a view is
+ready and for good if it dies. The frame gets the bundle's bytes, the
+theme's colours and the view's props, never the session token or a
+cookie; its asks are the playhead's intents only, rate-limited (8 a
+second and a burst of 16 per frame, 32 and 64 for all frames together). The digests guard a bundle's files against a
+cache or a mirror that swapped one after the listing was made; they are
+no guard against the node, which is the app's own origin and writes the
+frame's policy in its response headers. The app loads frames only from
+the document whose policy blocks WebRTC: a listing naming the
+`webview-rtc` document is refused with its island, since WebRTC is the
+app's to grant (#614) and it grants none yet (`ext_host.rs`
+`webview_ok`). The app's page allows `frame-src 'self'` and
+nothing else new (`scripts/web-routes.md`). Host calls into a vault over
+the port (a member's org lane, a share's guest) are #495's next step.
+`apps/web/test/app-ext-host.test.mjs` (`just app-ext-host-test`) runs the
+hostile bundles against it.
+
+**A view by a note's type (#495, #589).** An island may claim note types
+for its views, as its manifest's `[[embeds]] view = … claims = {
+note_type = […] }` says (`SiteIsland::embed(view, note_types)`, a web
+bundle's only; listed as `embeds: [{view, note_type}]`). The web app draws
+that view at the head of a note whose `type` property it claims (without
+regard to case; `apps/web/src/app/embed.rs` `NoteEmbed`), in a frame like
+the others. Nothing in the app knows what kind of note it is: the claim
+chooses the view.
+
+- **Which island.** The first island in the listing's order that claims
+  the type draws it, with its first claim of it (`apps/web/src/ext_host.rs`
+  `claimed`). The choice is made from the listing alone: only that
+  island's bundle is fetched and checked, and a note whose type nobody
+  claims fetches nothing.
+- **What of the note it is handed.** `note_props` in
+  `apps/web/src/ext_host.rs` is the one gate between a vault's note and a
+  frame, wherever a view is mounted on a note, and it takes who is
+  viewing (`Audience`; no caller can leave it out). A view gets the note
+  only when its claim names reading it (`SiteIsland::embed_note(view,
+  note_types, properties)`, listed with `reads: ["documents"]` and the
+  `properties` it declares) and its extension declares it too
+  (`SiteIsland::reads`, its manifest's `[capabilities] reads`, listed as
+  the island's `reads`); otherwise `note` is `null`. A signed-in member
+  (and the demo) gets `{path, title, type, properties, body}`, the body
+  without its `%%comments%%`. A share's guest gets `{title, type,
+  properties}` with only the declared properties: no body, no vault path.
+  What a guest gets of a note's text is the owner's decision, still open
+  (#648); this is the conservative answer until then, and the web app has
+  no guest path yet.
+- **What it may ask.** Beside the note, the playhead's state of its
+  extension's source, flat, as `architect.playhead` v0.1 gives a frame
+  (#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source,
+  checked against the contract's limits: a `name`, a `queue` of at most
+  500 items, each with a unique `id`, a `title`, `media` and `art` only as
+  vault-relative paths (`architect_playhead::model::vault_path`, above),
+  a `duration` when it has no media, sections and marks within their
+  limits; `index`, `time` and `play`; anything else refuses the whole
+  source) and `PLAYHEAD_ITEM` (`{id}` or `{index}`, and `play`). A
+  `source` naming another extension is refused (`not your source`). No
+  ask is taken before the frame is ready or while the page is hidden. A
+  refusal's reason, in the contract's words, is on the frame's holder
+  (`data-ext-refused`); the protocol has no answer to an ask. A message
+  may be 64 KiB, checked before it is copied out of the browser.
+- **Its height.** A view at a note's head is as tall as it says, up to
+  60 % of the window (at least 240 px: `ext_host::head_height`); past
+  that it scrolls inside its own box, so a 500-item list is all there
+  without pushing the note away at 390 px wide. `MAX_HEIGHT` (4000 px)
+  stays the most a `size` message may say.
+- **Its source.** The island's extension's own on the app's deck
+  (`architect_playhead`), the same one the Now Playing bar shows and
+  moves; #659's per-view stand-in is gone. Whether `media` is a path the
+  note references is enforced when the web app resolves media from a
+  signed-in vault (#628; the rules at `apps/web/src/app/audio.rs`
+  `media_url`).
+
+A favourite's `{view}` ([Favourites](#favourites)) opens any view its
+extension's island lists (`Island::views`: its share-page slots and its
+claims) the same way, in a pane of its own, with the same props and asks
+(`apps/web/src/app/vault.rs` `FrameView`, `embed.rs` `Embedded`); the
+note it is handed goes through the same gate (`note_props`).
+
 What reaches the network from a web view, and what stops it:
 
 - **By its policy** (`sandbox allow-scripts`, an opaque origin): every
@@ -2007,7 +2244,7 @@ for again next time.
 ```html
 <div data-playlist>
   <ol>
-    <li data-playlist-section>Presidents Songs</li>
+    <li data-playlist-section>Opening Set</li>
     <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="Chris Tomlin · D · 128 bpm">
       <span data-track-mark>1</span><span data-track-art data-hue="96" style="background:hsl(96 42% 40%)">JT</span>
       <span data-track-text><span data-track-title>Joy to the World</span><span data-track-meta>Chris Tomlin · D · 128 bpm</span></span>
@@ -2139,6 +2376,43 @@ none keeps the shell's own tabs. A share link's phone shell
 note's page), `search`, `browse`, `player.now` (the now-playing view, as
 a tab) and `player.lyrics`, runs `PLAYER_TOGGLE` and knows the state
 `playing`; its own tabs are Home, Search and Browse.
+
+The app's shell (desktop, phone and browser) opens `page` (the open
+note), `search` (quick open), a view of the declaring extension's own
+(`<view id>`, or `<its id>/<view id>`) showing the open note, an action it
+has, and a `place` that names a note beside the open one; `player.*` is a
+share page's and is left out there
+([the app shell](@/architecture/app-shell.md#favourites-the-slots-follow-what-is-open)).
+
+**Who may name what.** A declaration names only what its own extension
+may reach, as every other contribution that names an action does
+(`features/extensions/src/contrib.rs` `Rules::reaches`,
+`features/extensions/src/host.rs` `gate`,
+`features/extensions/src/capabilities.rs` `Capabilities::may_run`):
+
+- a view: its own extension's only. Another extension's view, loaded or
+  not, is left out (natively `apps/ui/src/favourites.rs` `opens`; in a
+  browser only the views its own island lists, `Island::views`);
+- an action: one in its own namespace (`action_prefix`: `acme.charts` →
+  `ACME_CHARTS_`), or one its `capabilities.actions` names whose effect is
+  at most its `capabilities.effect`. A destructive action is never a
+  favourite's, its own neither: a tab's press asks no one;
+- anything else is left out, as an unknown target is: no tab, never a
+  dead one.
+
+The node lists every declaration of its extensions, read-only and never
+cached, at `GET /_ext/favourites.json` for the app in a browser
+(`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`), each with the
+extension that declared it and what its capabilities let it run
+(`features/favourites/src/lib.rs` `Listed`, `Declarer`), so the browser
+applies the same rule (`Declarer::may_target`, `may_open_view_of`). The
+rule is one function, `architect_favourites::may_run`, which
+`Capabilities::may_run` calls too, and `manifest::action_prefix` is
+`architect_favourites::action_prefix`: `architect-favourites` is serde
+only, so the browser bundle takes it, and nothing is copied to drift. The browser reads at most 256 KiB of the
+listing and 64 declarations. A note type is at most 64 characters. A
+`place` takes no spaces, so a note whose name has one is out of a place's
+reach.
 
 ### Share layers
 

@@ -762,6 +762,42 @@ impl AuthStorage for AuthSeaOrmStorage {
             .map_err(map_db_err)
     }
 
+    async fn delete_expired_verifications(
+        &self,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<u64, AuthFlowError> {
+        AuthVerificationEntity::delete_many()
+            .filter(AuthVerificationColumn::ExpiresAt.lte(now))
+            .exec(&self.db)
+            .await
+            .map(|result| result.rows_affected)
+            .map_err(map_db_err)
+    }
+
+    async fn swap_verification_value(
+        &self,
+        id: Uuid,
+        expected_value_hash: &str,
+        new_value_hash: &str,
+    ) -> Result<bool, AuthFlowError> {
+        // One conditional UPDATE: the database decides the one winner.
+        AuthVerificationEntity::update_many()
+            .col_expr(
+                AuthVerificationColumn::ValueHash,
+                sea_orm::sea_query::Expr::value(new_value_hash),
+            )
+            .col_expr(
+                AuthVerificationColumn::UpdatedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(AuthVerificationColumn::Id.eq(id))
+            .filter(AuthVerificationColumn::ValueHash.eq(expected_value_hash))
+            .exec(&self.db)
+            .await
+            .map(|result| result.rows_affected == 1)
+            .map_err(map_db_err)
+    }
+
     async fn mark_email_verified(&self, user_id: Uuid) -> Result<(), AuthFlowError> {
         let user = AuthUserEntity::find_by_id(user_id)
             .one(&self.db)

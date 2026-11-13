@@ -2,12 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Architect</title>
   <!-- Served at /app/ and at /auth/callback (the sign-in's way back), so
        every URL here is absolute. connect-src: this origin (the node) and
-       the issuer, wherever the config puts it. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https:; style-src 'self'; img-src 'self' data:">
+       the issuer, wherever the config puts it. style-src 'unsafe-inline':
+       the app's components (dioxus-web) style with style attributes and
+       <style> elements; scripts stay this origin's and the wasm's only
+       (no eval). img-src data: the demo vault's images. frame-src 'self':
+       an extension's view runs in the node's sandboxed web view document
+       under /_ext/ (#495), never anything off this origin. media-src
+       'self': the Now Playing bar's audio element (#589), this origin's
+       recordings only. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; frame-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/app/style.css">
 </head>
 <body>

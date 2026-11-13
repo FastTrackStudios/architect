@@ -412,3 +412,72 @@ fn a_page_prefers_a_layout_and_every_layout_stays_a_press_away() {
     assert_eq!(layout(&mut dom), SidebarLayout::Two);
     assert_eq!(SidebarLayout::Two.columns(), 2);
 }
+
+fn tablet(width: f64, height: f64) -> Screen {
+    Screen {
+        width,
+        height,
+        touch: true,
+        insets: Insets {
+            top: 24.0,
+            right: 0.0,
+            bottom: 20.0,
+            left: 0.0,
+        },
+    }
+}
+
+thread_local! {
+    static TABLET: std::cell::Cell<(f64, f64)> = const { std::cell::Cell::new((0.0, 0.0)) };
+}
+
+/// A tablet's shell at `TABLET`'s size, Vault current.
+fn tablet_shell() -> Element {
+    let (w, h) = TABLET.with(std::cell::Cell::get);
+    rsx! {
+        AppShell {
+            screen: tablet(w, h),
+            tabs: vec![
+                Tab::new("inbox", "Inbox", crate::icon!(Inbox)),
+                Tab::new("vault", "Vault", crate::icon!(Check)),
+            ],
+            current: Some("vault"),
+            on_tab: |_| (),
+            left: rsx! { div { "the left side" } },
+            div { "the page" }
+        }
+    }
+}
+
+/// Every way the shell draws its tabs says which is current
+/// (`aria-current`) and which tab each is (`data-tab`): a tablet's rail
+/// and its docked sidebar's rows as a phone's bar and a desk's ribbon do.
+#[test]
+fn every_tab_says_which_it_is_and_whether_it_is_current() {
+    let current = |style: &str| {
+        format!(
+            "attr data-tab None \"vault\"\nattr aria-current None \"page\"\nattr style None \"{style}"
+        )
+    };
+    let other = "attr data-tab None \"inbox\"\nattr aria-current None \"false\"";
+    let mut seen = (false, false);
+    for size in [
+        (1366.0, 1024.0),
+        (1180.0, 820.0),
+        (820.0, 1180.0),
+        (744.0, 1133.0),
+    ] {
+        TABLET.with(|t| t.set(size));
+        let r = record(tablet_shell);
+        seen.0 |= r.contains(&current("position: relative; height: 58px;"));
+        seen.1 |= r.contains(&current("height: 40px;"));
+        if r.contains("height: 58px;") || r.contains("height: 40px;") {
+            assert!(
+                r.contains(other),
+                "the other tab is not current at {size:?}"
+            );
+        }
+    }
+    assert!(seen.0, "a rail's tab");
+    assert!(seen.1, "a docked sidebar's row");
+}

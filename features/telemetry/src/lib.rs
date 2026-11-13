@@ -80,8 +80,7 @@ mod native {
         let filter = EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new(env_filter_default));
 
-        let registry = tracing_subscriber::registry()
-            .with(filter)
+        let registry = super::capped_registry(filter)
             .with(tracing_subscriber::fmt::layer())
             .with(tracing_layer());
 
@@ -105,6 +104,47 @@ mod native {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{init, init_tracing, init_tracing_full, tracing_layer};
+
+/// Libraries whose verbose logging writes credentials.
+///
+/// At DEBUG and TRACE `tungstenite` dumps every WebSocket frame, and a vox
+/// call's frames carry its bearer. The same list as
+/// `architect::host::CREDENTIAL_LOGGING_TARGETS` (a test holds them equal;
+/// this crate does not depend on `architect`).
+pub const CREDENTIAL_LOGGING_TARGETS: &[&str] = &["tungstenite", "tokio_tungstenite"];
+
+/// Whether `meta` is a record no subscriber this crate installs lets
+/// through: DEBUG or TRACE from one of the [`CREDENTIAL_LOGGING_TARGETS`]
+/// or a module of one.
+#[must_use]
+pub fn writes_credentials(meta: &tracing::Metadata<'_>) -> bool {
+    *meta.level() > tracing::Level::INFO
+        && CREDENTIAL_LOGGING_TARGETS.iter().any(|t| {
+            meta.target()
+                .strip_prefix(t)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+        })
+}
+
+/// The registry [`init_tracing_full`] builds on.
+///
+/// `filter`, and a global filter that refuses every record that
+/// [`writes_credentials`]. The cap is its own layer, and-ed with `filter`
+/// for every layer added on top (fmt, Sentry, the OTLP log bridge), so no
+/// `RUST_LOG` directive (`trace`, `tungstenite::protocol=trace`, …) can log
+/// or export a bearer.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn capped_registry(
+    filter: tracing_subscriber::EnvFilter,
+) -> impl tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::filter::filter_fn(|meta| {
+            !writes_credentials(meta)
+        }))
+}
 
 /// The OTLP guard, or `()` when the `otel` feature is off — so
 /// [`native::init_tracing_full`]'s signature doesn't change with the

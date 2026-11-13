@@ -15,7 +15,10 @@
 //! - `just <recipe>` against the `justfile`;
 //! - `cargo xtask <command>` / `cargo run -p xtask -- <command>` against
 //!   this binary's own subcommands;
-//! - `cargo … -p <package>` against the packages under the root.
+//! - `cargo … -p <package>` against the packages under the root;
+//! - a merge's conflict marker left in (a line starting `<<<<<<< `,
+//!   `||||||| ` or `>>>>>>> `), which renders as text and hides which side
+//!   of the merge the page means.
 //!
 //! Not checked, on purpose: tokens with a placeholder (`<f>`, `*`, `…`,
 //! `$X`), paths in other repositories written with a repo prefix
@@ -58,6 +61,7 @@ pub enum Kind {
     Recipe,
     Xtask,
     Package,
+    Conflict,
 }
 
 impl fmt::Display for Finding {
@@ -68,6 +72,13 @@ impl fmt::Display for Finding {
             Kind::Recipe => "just recipe",
             Kind::Xtask => "cargo xtask command",
             Kind::Package => "package",
+            Kind::Conflict => {
+                return write!(
+                    f,
+                    "{}:{}: conflict marker `{}` left from a merge",
+                    self.file, self.line, self.name
+                );
+            }
         };
         write!(
             f,
@@ -83,6 +94,17 @@ const PLACEHOLDER: &[char] = &['<', '>', '*', '{', '}', '…', '$', '|'];
 const SOURCE_LINKS: &[&str] = &["/src/branch/main/", "/blob/main/", "/tree/main/"];
 const REPO: &str = "architect";
 
+/// A merge's conflict marker at the start of `line`, if it is one: seven
+/// `<`, `|` or `>` and then a space or nothing. (`=======` alone is a
+/// heading's underline in markdown, so it is not one; a conflict always
+/// carries one of the others.)
+fn conflict_marker(line: &str) -> Option<&str> {
+    ["<<<<<<<", "|||||||", ">>>>>>>"].into_iter().find(|m| {
+        line.strip_prefix(m)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+    })
+}
+
 /// Every finding in one markdown file's `text`.
 pub fn check_text(file: &str, text: &str, facts: &Facts) -> Vec<Finding> {
     let mut out = Vec::new();
@@ -97,6 +119,15 @@ pub fn check_text(file: &str, text: &str, facts: &Facts) -> Vec<Finding> {
         }
         if raw.contains(ON) {
             off = false;
+            continue;
+        }
+        if !off && let Some(marker) = conflict_marker(raw) {
+            out.push(Finding {
+                file: file.to_owned(),
+                line,
+                kind: Kind::Conflict,
+                name: marker.to_owned(),
+            });
             continue;
         }
         if raw.trim_start().starts_with("```") {
@@ -140,7 +171,7 @@ pub fn check_text(file: &str, text: &str, facts: &Facts) -> Vec<Finding> {
                     Kind::Recipe => facts.recipes.contains(name),
                     Kind::Xtask => facts.xtask.contains(name),
                     Kind::Package => facts.packages.contains(name),
-                    Kind::Path | Kind::Page => true,
+                    Kind::Path | Kind::Page | Kind::Conflict => true,
                 };
                 if !known {
                     found(kind, name);
@@ -458,6 +489,24 @@ mod tests {
                     and crates/nope in prose, `/vox`, `https://example.com/a/b`.\n\
                     ```rust\nlet x = a / b; // just a sketch\n```\n";
         assert_eq!(names(text), vec![]);
+    }
+
+    #[test]
+    fn a_conflict_marker_left_from_a_merge_fails() {
+        let text = "Ours.\n||||||| cc3c1c7a\nBase.\n=======\nTheirs.\n>>>>>>> branch\n\
+                    ```\n<<<<<<< HEAD\n```\n<<<<<<<\nA title\n=======\n\
+                    `<<<<<<<` in a span, <<<<<<<< eight, |||||||x\n";
+        assert_eq!(
+            names(text),
+            vec![
+                (Kind::Conflict, "|||||||".to_owned()),
+                (Kind::Conflict, ">>>>>>>".to_owned()),
+                (Kind::Conflict, "<<<<<<<".to_owned()),
+                (Kind::Conflict, "<<<<<<<".to_owned()),
+            ]
+        );
+        let shown = check_text("a.md", "||||||| cc3c1c7a\n", &facts())[0].to_string();
+        assert_eq!(shown, "a.md:1: conflict marker `|||||||` left from a merge");
     }
 
     #[test]

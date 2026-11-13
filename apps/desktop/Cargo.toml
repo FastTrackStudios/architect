@@ -83,7 +83,8 @@ auth-proto = { workspace = true, features = ["vox"] }
 # lanes that move those between nodes.
 crdt = { workspace = true, features = ["vox"] }
 vault-live = { workspace = true }
-vault-proto = { workspace = true, features = ["vox"] }
+# `actions`: `Notes` on the node's Action List (`NOTES_*`).
+vault-proto = { workspace = true, features = ["vox", "actions"] }
 vault-collab = { workspace = true }
 # Sites (#364): a vault published, rebuilt when it changes.
 architect-sites = { workspace = true }
@@ -113,6 +114,14 @@ architect-accounts = { workspace = true, features = ["actions"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# tests/node.rs: a browser's redirect sign-in (PKCE), as apps/web runs it.
+auth-client = { workspace = true }
+# tests/node.rs: the web app's text area against a live note
+# (`architect_web::live_text`), on the real lane.
+architect-web = { path = "../web" }
+# tests/islands.rs: each listed file checked against its digest.
+sha2 = { workspace = true }
+base64 = { workspace = true }
 # The A2UI surface the parity test renders (tests/actions.rs).
 architect-a2ui = { workspace = true }
 architect-mcp = { workspace = true, features = ["parity"] }
@@ -124,6 +133,8 @@ architect-settings = { workspace = true }
 architect-workspace = { workspace = true, features = ["home"] }
 futures = "0.3"
 tempfile = "3"
+# tests/node.rs: the node's logs captured at TRACE, with its own filter.
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

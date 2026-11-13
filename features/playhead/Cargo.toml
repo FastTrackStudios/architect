@@ -1,0 +1,63 @@
+[package]
+name = "architect-playhead"
+description = "The playhead (features/playhead/extension.toml, #589): the app's one media service and its Now Playing bar. Any extension puts a queue it plays on the deck as its source and controls it (`architect.playhead`); the bar shows the active source on desktop, phone and the web app. Wasm-clean; `ui` adds the bar, `extension` the linked extension."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-playhead"
+path = "src/main.rs"
+required-features = ["extension"]
+
+[[test]]
+name = "service"
+required-features = ["extension"]
+
+[[test]]
+name = "guards"
+required-features = ["host"]
+
+[features]
+# On by default, as the palette's: `cargo build -p architect-playhead
+# --bin architect-playhead` (`cargo xtask builtins`, a development copy)
+# builds the process. The workspace dependency turns it off; each app
+# names the features it wants.
+default = ["extension"]
+# The bar and `use_playhead` (Dioxus, the shell's theme).
+ui = ["dep:dioxus", "dep:architect-shell", "dep:futures-timer", "dep:lucide-dioxus"]
+# Its `linked::Extension` (and the guest, its process copy); an app adds
+# `linked`. Off, the deck alone, for an app with no extension host (the
+# web app answers its frames' asks itself, through `ask`).
+extension = ["dep:architect-extensions"]
+# `raise_changed`, for the app that hosts extensions (`apps/ui`): the
+# host, which the guest process leaves out.
+host = ["extension", "architect-extensions/host"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+# `at` in every state: the wall clock, a browser's too.
+web-time = "1.1"
+dioxus = { workspace = true, optional = true }
+architect-shell = { workspace = true, features = ["ui"], optional = true }
+futures-timer = { workspace = true, optional = true }
+lucide-dioxus = { workspace = true, optional = true }
+architect-extensions = { workspace = true, features = ["guest"], optional = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

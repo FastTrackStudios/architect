@@ -21,6 +21,7 @@ mod decks;
 pub mod distribution;
 mod embedded;
 mod extensions;
+mod favourites;
 mod files;
 mod first_run;
 pub mod guest;
@@ -127,15 +128,21 @@ const ALL_TABS: [(&str, &str, &str); 4] = [
     ("LAB_GO_VAULT", "Go to Vault", "vault"),
 ];
 
-/// The tabs this app shows: the sandbox's four, the Architect app's Vault
-/// (its Inbox, Tasks and Schedule come with capture and projects, #352,
-/// #344).
+/// The tabs this app goes to: the sandbox's four, the Architect app's
+/// Inbox, Vault, Project and Schedule (`favourites::TABS`, its default
+/// favourites).
 fn tabs() -> &'static [(&'static str, &'static str, &'static str)] {
     if crate::distribution().is_sandbox() {
         &ALL_TABS
     } else {
-        ALL_TABS.get(3..).unwrap_or_default()
+        &favourites::TABS
     }
+}
+
+/// Whether `route` is a tab's list (the sandbox's made-up lists), not the
+/// Vault's workspace or an extension's tab.
+fn on_a_list(route: Route) -> bool {
+    matches!(route, Route::Tab(t) if t != "vault" && !favourites::in_vault(t))
 }
 
 /// What a Done, Delete or Move changed, for Undo.
@@ -245,6 +252,18 @@ impl Lab {
     /// To a tab's list or an item afresh: no way back, no project picked,
     /// and the last change no longer said over the list (⌘Z still undoes
     /// it).
+    /// To tab `to`, and an Architect app favourite's surface opened in
+    /// the Vault's workspace (the projects list, the calendar's day, the
+    /// inbox deck, the last note), as its press does. `open` is passed in:
+    /// the app's root provides the commands, so they are not in the
+    /// root's own context.
+    pub fn go_tab(self, to: &'static str, open: &favourites::Opener) {
+        self.jump(Route::Tab(to));
+        if favourites::in_vault(to) {
+            open.open(to);
+        }
+    }
+
     pub fn jump(mut self, to: Route) {
         self.back.write().clear();
         self.project.set(None);
@@ -260,7 +279,7 @@ impl Lab {
     /// details have something from the start.
     fn select_first(mut self) {
         let first = self.shown_ids().first().copied();
-        let on_list = matches!(*self.route.peek(), Route::Tab(t) if t != "vault");
+        let on_list = on_a_list(*self.route.peek());
         self.selected.set(first.filter(|_| on_list));
     }
 
@@ -979,7 +998,17 @@ pub fn LabApp() -> Element {
     // Every command (a view's own too) and the palette's state, on the
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
-    guide::use_lab_actions(&list, &lab);
+    // What opens a favourite's surface: a tab's press, ⌃⌘1–4, `LAB_GO`.
+    let opener = favourites::Opener {
+        commands,
+        capture: capture_ui,
+    };
+    // The Vault's note on show, as its page tells it: the type whose
+    // favourites the slots show.
+    let focus = favourites::VaultFocus::provide();
+    // The declared tabs' presses, made once each (`shell::Presses`).
+    let presses = shell::use_presses();
+    guide::use_lab_actions(&list, &lab, &opener);
     // Guided tours, from ⌘K (Help) or the Action List (`GUIDE_TOUR_START`):
     // the Architect tour (its place kept in a window's lab), and two of the
     // lab's scenarios.
@@ -1037,7 +1066,7 @@ pub fn LabApp() -> Element {
             architect_commands::Command::new(id, label)
                 .group("Go")
                 .shortcut(format!("⌃⌘{}", n.saturating_add(1))),
-            move || lab.jump(Route::Tab(to)),
+            move || lab.go_tab(to, &opener),
         );
     }
     // Keyflow's "New Chart" is a root command, so ⌘K has it from every view.
@@ -1052,6 +1081,22 @@ pub fn LabApp() -> Element {
             },
         );
     }
+    // The note's Typing Toolbar: Bold, a link, a list… on the note typed in.
+    note_editor::use_format_commands();
+    // What the shell hears of touches and the keyboard, drawn over the app:
+    // for checking on a phone what a simulator does not show.
+    let input_debug = use_signal(shell::input_debug);
+    architect_commands::use_command(
+        architect_commands::Command::new("SHELL_INPUT_DEBUG", "Debug: touches and keyboard")
+            .group("Help")
+            .checked(input_debug()),
+        move || {
+            let on = !shell::input_debug();
+            shell::set_input_debug(on);
+            let mut shown = input_debug;
+            shown.set(on);
+        },
+    );
     architect_commands::use_command(
         architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Details")
             .group("View")
@@ -1293,7 +1338,9 @@ pub fn LabApp() -> Element {
         .contributed(move |menu| ext_ui.menu_rows(menu));
     let route = (lab.route)();
     let inbox_count = lab.lists.read().count("inbox");
-    let all_tabs = [
+    // The sandbox's made-up tabs; the Architect app's are its favourites,
+    // below, once the capture button is made.
+    let sandbox_tabs = [
         {
             let inbox = shell::Tab::new("inbox", "Inbox", icon!(Inbox));
             // A clear Inbox shows no count.
@@ -1310,15 +1357,6 @@ pub fn LabApp() -> Element {
         // below loads it into the Vault.
         shell::Tab::new("embedded", "Embedded", icon!(LayoutGrid)),
     ];
-    let mut tabs: Vec<shell::Tab> = if crate::distribution().is_sandbox() {
-        all_tabs.into()
-    } else {
-        all_tabs.into_iter().filter(|t| t.id == "vault").collect()
-    };
-    // An open share link, beside the vaults and never one of them.
-    if guest.is_open() {
-        tabs.push(guest::tab());
-    }
     // Which workspace the lab shows; `None` is all of them.
     // The person's organizations (the identity server's, here made up):
     // the switcher, and what each role may do.
@@ -1402,6 +1440,46 @@ pub fn LabApp() -> Element {
         let _ = commands.run_with("TIME_OPEN", "{}");
     })
     .with_badge(to_process);
+    // The bottom slots and the round button: the sandbox's own; the
+    // Architect app's favourites for what is open (`favourites`), Inbox,
+    // Vault, Project and Schedule and Capture unless the open note's type
+    // declares its own.
+    // `declared_on`: the tab current is the declared one whose place is
+    // on show (`shell::Favourites::current`), not the route's.
+    let (mut tabs, separate, set, declared_on): (
+        Vec<shell::Tab>,
+        Option<shell::Action>,
+        shell::Favourites,
+        Option<shell::Shows>,
+    ) = if crate::distribution().is_sandbox() {
+        (
+            sandbox_tabs.into(),
+            Some(capture),
+            shell::Favourites::default(),
+            None,
+        )
+    } else {
+        let default = favourites::default_set(to_process, capture_ui.is_some().then_some(capture));
+        // The note whose type picks the set: the one on show, or the one
+        // a `{place}` tab on show was opened from.
+        let owner = focus.set_note();
+        let ty = owner.as_ref().and_then(|(_, t)| t.clone());
+        let declared = match (&owner, ty.as_deref()) {
+            (Some((path, _)), Some(ty)) => {
+                declared_favourites(ext_ui, &commands, &lab, focus, &presses, path, ty)
+            }
+            _ => Vec::new(),
+        };
+        let set = shell::resolve_favourites(&default, &declared, ty.as_deref());
+        let on = (!declared.is_empty())
+            .then(|| focus.note.read().as_ref().map(favourites::OpenNote::shows))
+            .flatten();
+        (set.slots().to_vec(), set.primary.clone(), set, on)
+    };
+    // An open share link, beside the vaults and never one of them.
+    if guest.is_open() {
+        tabs.push(guest::tab());
+    }
     // The sidebar's foot, above the switcher and the account (bottom to
     // top: Account, Workspace, Settings, Theme).
     let foot = vec![
@@ -1497,6 +1575,10 @@ pub fn LabApp() -> Element {
                 theme::SystemScheme {}
                 architect_commands::WindowKeys {}
                 ListKeys {}
+                // A tap on a field anywhere in the app brings the keyboard
+                // up, heard from the window: the sheets, ⌘K and settings
+                // keep their clicks to themselves.
+                screen::WindowTaps {}
                 // The Dock icon, its badge and menu, the menu-bar item,
                 // background mode and opening at login.
                 presence::LabPresence { presence: presence::declare(lab, inbox_count, capture_ui.is_some()), inbox: inbox_count }
@@ -1515,8 +1597,15 @@ pub fn LabApp() -> Element {
                         title: crate::distribution().name(),
                         tabs,
                         // The help is over a tab, not one of them.
-                        current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
+                        current: declared_on.as_ref().map_or_else(
+                            || (!matches!(route, Route::Help(_))).then(|| route.tab()),
+                            |on| set.current(on),
+                        ),
                         on_tab: move |id: &'static str| {
+                            // A declared favourite's own press first.
+                            if set.press(id) {
+                                return;
+                            }
                             if ext_ui.is_tab(id) {
                                 lab.jump(Route::Tab(id));
                             } else if id == "embedded" {
@@ -1526,10 +1615,10 @@ pub fn LabApp() -> Element {
                                     r#"{"name":"Embedded views"}"#,
                                 );
                             } else {
-                                lab.jump(Route::Tab(id));
+                                lab.go_tab(id, &opener);
                             }
                         },
-                        separate: (crate::distribution().is_sandbox() || capture_ui.is_some()).then_some(capture),
+                        separate,
                         brand: rsx! { Brand {} },
                         account,
                         workspaces,
@@ -1539,11 +1628,15 @@ pub fn LabApp() -> Element {
                         left: crate::distribution().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
-                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault" && t != guest::TAB && !ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
+                        right: if (lab.right)() && on_a_list(route) && !matches!(route, Route::Tab(t) if t == guest::TAB || ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
                         on_pull: move |()| lab.jump(Route::Tab("vault")),
                         window: window_chrome,
                         status,
                         status_style: (lab.status)(),
+                        // The Now Playing bar (#589): whatever an extension
+                        // queued on the playhead, on a silent clock here
+                        // (audible native playback is a later step).
+                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar {} },
                         // A phone's action bar (a page adds its own: the
                         // Vault, its tabs).
                         actions: vec![
@@ -1557,8 +1650,15 @@ pub fn LabApp() -> Element {
                         // Sidebar: Rail / One column / Two columns, on ⌘K.
                         SidebarCommands {}
                         match route {
-                            Route::Tab("vault") if needs_vault() => rsx! { first_run::FirstRun { on_open: vault_opened } },
-                            Route::Tab("vault") => rsx! { vault::VaultPage {} },
+                            // The Vault's workspace, under the Architect app's
+                            // four alike (one arm: it stays mounted between them).
+                            Route::Tab(t) if t == "vault" || favourites::in_vault(t) => rsx! {
+                                if needs_vault() {
+                                    first_run::FirstRun { on_open: vault_opened }
+                                } else {
+                                    vault::VaultPage {}
+                                }
+                            },
                             Route::Tab(guest::TAB) => rsx! { guest::GuestPage { guest } },
                             Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
@@ -1582,6 +1682,136 @@ pub fn LabApp() -> Element {
             screen::DeviceChrome {}
         }
     }
+}
+
+/// The favourites the loaded extensions declare for note type `ty`, for
+/// note `note`: each target read against what the app has and what the
+/// declaring extension may name (`favourites::opens`), each press what it
+/// opens.
+fn declared_favourites(
+    ext_ui: architect_extensions::interface::ExtensionUi,
+    commands: &architect_commands::Commands,
+    lab: &Lab,
+    focus: favourites::VaultFocus,
+    presses: &shell::Presses,
+    note: &str,
+    ty: &str,
+) -> Vec<shell::Declared> {
+    let (commands, lab) = (*commands, *lab);
+    // Read so a load or an unload declares again.
+    let _ = ext_ui.revision();
+    let host = ext_ui.host();
+    let loaded = host.loaded();
+    let decls: Vec<_> = loaded
+        .iter()
+        .flat_map(|l| {
+            l.manifest
+                .favourites
+                .iter()
+                .map(|f| (l.manifest.id.clone(), f.clone()))
+        })
+        .filter(|(_, f)| f.is_for(ty))
+        .collect();
+    if decls.is_empty() {
+        return Vec::new();
+    }
+    let views: Vec<(String, String)> = loaded
+        .iter()
+        .flat_map(|l| {
+            l.manifest
+                .views
+                .iter()
+                .map(|v| (l.manifest.id.clone(), v.id.clone()))
+        })
+        .collect();
+    let actions: std::collections::BTreeMap<String, architect_extensions::favourites::Effect> =
+        commands
+            .all()
+            .into_iter()
+            .filter(|c| c.enabled)
+            .map(|c| (c.id, favourites::effect(c.effect)))
+            .collect();
+    let capabilities: Vec<(String, architect_extensions::manifest::Capabilities)> = loaded
+        .iter()
+        .map(|l| (l.manifest.id.clone(), l.manifest.capabilities.clone()))
+        .collect();
+    let root = crate::notes::open_vault().map(|v| v.root());
+    let exists = |p: &str| root.as_ref().is_some_and(|r| r.join(p).is_file());
+    let reach = favourites::Reach {
+        views: &views,
+        actions: &actions,
+        capabilities: &capabilities,
+        note,
+        exists: &exists,
+    };
+    let path = note.to_owned();
+    let note_type = ty.to_owned();
+    let list = host.list().clone();
+    let run = move |by: &str, what: favourites::Opens| {
+        // The Vault's workspace on show (it stays mounted under the four).
+        let to_vault = |lab: Lab| {
+            if !matches!(*lab.route.peek(), Route::Tab(t) if t == "vault" || favourites::in_vault(t))
+            {
+                lab.jump(Route::Tab("vault"));
+            }
+        };
+        let show = |p: &str, target| {
+            if let Some(ws) = *focus.workspace.peek() {
+                vault::show_note(ws, p, target);
+            }
+        };
+        match what {
+            favourites::Opens::Note => {
+                to_vault(lab);
+                show(&path, architect_workspace::Target::Here);
+            }
+            favourites::Opens::Path(p) => {
+                // The place keeps this set while it is on show.
+                let mut opened = focus.opened;
+                opened.set(Some((
+                    shell::PlaceOpened {
+                        place: p.clone(),
+                        from: path.clone(),
+                    },
+                    Some(note_type.clone()),
+                )));
+                to_vault(lab);
+                show(&p, architect_workspace::Target::Tab);
+            }
+            favourites::Opens::QuickOpen => {
+                let _ = commands.run(favourites::QUICK_OPEN);
+            }
+            // A command of the app's own UI (not on the list): the app's.
+            favourites::Opens::Action(id) if list.info(&id).is_none() => {
+                let _ = commands.run(&id);
+            }
+            favourites::Opens::Action(id) => {
+                // As the extension that declared it (#660 M3).
+                let (list, by) = (list.clone(), by.to_owned());
+                spawn(async move {
+                    let _ = favourites::run_declared(&list, &by, &id).await;
+                });
+            }
+            favourites::Opens::View { extension, view } => {
+                to_vault(lab);
+                let list = list.clone();
+                let args =
+                    serde_json::json!({ "extension": extension, "view": view, "state": path });
+                spawn(async move {
+                    let _ = list
+                        .run_json_async("EXT_VIEW_OPEN", args.to_string().as_bytes())
+                        .await;
+                });
+            }
+        }
+    };
+    let now = architect_extensions::host::now_ms();
+    let state = host.contributions().state(now);
+    favourites::declared(&decls, ty, &reach, presses, run, |extension, key| {
+        state
+            .iter()
+            .any(|e| favourites::state_on(&e.source, &e.key, &e.text, extension, key))
+    })
 }
 
 /// The shell's sidebar layouts on the palette (inside the shell, whose
@@ -1626,7 +1856,7 @@ fn ListKeys() -> Element {
     dioxus_native::use_window_event(move |event, _| match event {
         WindowEvent::ModifiersChanged(m) => held.set(m.state()),
         WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-            let on_list = matches!(*lab.route.peek(), Route::Tab(t) if t != "vault");
+            let on_list = on_a_list(*lab.route.peek());
             let over = commands.overlay.peek().is_some()
                 || lab.settings.is_some_and(|s| s.open.peek().is_some());
             if !on_list || over || !held.peek().is_empty() {

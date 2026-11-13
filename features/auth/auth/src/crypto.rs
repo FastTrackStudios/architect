@@ -117,6 +117,24 @@ pub fn hash_token(secret: &str, token: &str) -> String {
     URL_SAFE_NO_PAD.encode(hasher.finalize())
 }
 
+/// HMAC-SHA256 of `message` keyed with `secret` (RFC 2104), base64url:
+/// a tag only the holder of `secret` can make. HKDF's extract step is
+/// exactly this HMAC (RFC 5869 2.2: salt as the key).
+#[must_use]
+pub fn hmac_token(secret: &str, message: &str) -> String {
+    let (tag, _) = Hkdf::<Sha256>::extract(Some(secret.as_bytes()), message.as_bytes());
+    URL_SAFE_NO_PAD.encode(tag)
+}
+
+/// Whether two tags (an [`hmac_token`] and one presented) are the same, in
+/// time that does not depend on where they first differ. Their lengths are
+/// not secret.
+#[must_use]
+pub(crate) fn tags_match(ours: &str, presented: &str) -> bool {
+    use subtle::ConstantTimeEq as _;
+    bool::from(ours.as_bytes().ct_eq(presented.as_bytes()))
+}
+
 // r[impl auth.oauth.token-encryption]
 // r[impl auth.twofactor.secret-encryption]
 // r[impl auth.core.secret-aead]
@@ -295,8 +313,34 @@ mod tests {
 
     use super::{
         SecretKeyRing, decrypt_secret, decrypt_secret_with_keyring, encrypt_secret,
-        encrypt_secret_with_keyring, generate_token, hash_password, hash_token, verify_password,
+        encrypt_secret_with_keyring, generate_token, hash_password, hash_token, hmac_token,
+        tags_match, verify_password,
     };
+
+    /// RFC 4231 test case 2 (its tag
+    /// 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843, in
+    /// base64url): a real HMAC-SHA256, not a keyed hash.
+    #[test]
+    fn hmac_token_is_hmac_sha256() {
+        assert_eq!(
+            hmac_token("Jefe", "what do ya want for nothing?"),
+            "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM"
+        );
+    }
+
+    /// Grant tags compare whole (`subtle`), by value: equal matches; a
+    /// change anywhere, a prefix or an empty tag does not.
+    #[test]
+    fn tags_match_only_the_same_tag() {
+        let tag = hmac_token("secret", "oidc-grant-id:abc");
+        assert!(tags_match(&tag, &tag.clone()));
+        let mut last = tag.clone();
+        last.pop();
+        last.push(if tag.ends_with('A') { 'B' } else { 'A' });
+        assert!(!tags_match(&tag, &last));
+        assert!(!tags_match(&tag, &tag[..tag.len() - 1]));
+        assert!(!tags_match(&tag, ""));
+    }
 
     // r[verify auth.email.password-hash]
     #[test]

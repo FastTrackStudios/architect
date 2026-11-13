@@ -48,3 +48,19 @@ Referrer-Policy = "strict-origin-when-cross-origin"
 source = "/assets/**"
 [advanced.headers.headers]
 Cache-Control = "public, max-age=31536000, immutable"
+
+# The web app's page: its Content-Security-Policy as a header too
+# (frame-ancestors holds only as one), for production's issuer
+# (scripts/web-routes.md; a deployment with another issuer names its own).
+# `/app/*` is the one glob static-web-server matches for `/app/` itself;
+# on the page's script, style and config the header is ignored.
+[[advanced.headers]]
+source = "/app/*"
+[advanced.headers.headers]
+Content-Security-Policy = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self' https://auth.fasttrackstudio.app; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'"
+
+
+[[advanced.headers]]
+source = "/auth/callback{,/}"
+[advanced.headers.headers]
+Content-Security-Policy = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self' https://auth.fasttrackstudio.app; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'"

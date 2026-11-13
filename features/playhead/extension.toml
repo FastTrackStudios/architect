@@ -1,0 +1,119 @@
+# The playhead (features/playhead/src/lib.rs, #589): the app's one media
+# service. Any extension puts what it plays on the deck as its source (a
+# queue of items) and controls it; the shell's Now Playing bar shows the
+# active source. One Rust value (`Playhead`, a linked::Extension): the
+# app links it in as a built-in; its program (src/main.rs) serves the
+# same value as a process for a development copy (EXT_CLONE
+# {"id":"playhead"}), which keeps a deck of its own.
+id = "playhead"
+name = "Now Playing"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "The Now Playing bar and the playhead behind it: any extension can put a queue it plays in the bar and control it; several can each have one, and the bar shows and switches between them."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-playhead"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/playhead"
+
+# Its API for others (`services.call("architect.playhead", "play", …)`):
+# method `m` is its action PLAYHEAD_<M>. An extension acts on its own
+# source only; who calls is the host's to say (the action context's
+# `caller`), never an argument's.
+[provides]
+"architect.playhead" = "0.1.0"
+
+[capabilities]
+effect = "mutating"
+
+[[actions]]
+id = "PLAYHEAD_SET"
+name = "Now Playing: set a queue"
+description = "Sets or replaces your source: `queue` (items `{id, title, subtitle?, art?, duration?, media?, sections?, marks?}`; `media` and `art` are vault paths, never URLs; `duration` is required without media), `name?`, `index?`, `time?`, `play?`. An empty queue removes it. The app names whose source with `source`."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"source":{"type":"string"},"name":{"type":"string"},"queue":{"type":"array","items":{"type":"object"}},"index":{"type":"integer"},"time":{"type":"number"},"play":{"type":"boolean"}},"required":["queue"]}'
+
+[[actions]]
+id = "PLAYHEAD_PLAY"
+name = "Now Playing: play"
+description = "Plays the source (yours; for the app `source` or the active one), which then shows in the bar; the one that played before pauses."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"source":{"type":"string"}}}'
+
+[[actions]]
+id = "PLAYHEAD_PAUSE"
+name = "Now Playing: pause"
+description = "Pauses the source (yours; for the app `source` or the active one)."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"source":{"type":"string"}}}'
+
+[[actions]]
+id = "PLAYHEAD_TOGGLE"
+name = "Now Playing: play or pause"
+description = "Plays the source (yours; for the app `source` or the active one), or pauses it while it plays: what a favourite's round button runs (state `playing`)."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"source":{"type":"string"}}}'
+
+[[actions]]
+id = "PLAYHEAD_SEEK"
+name = "Now Playing: seek"
+description = "Moves the source to `t` seconds into its current item (0 to its length)."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"t":{"type":"number"},"source":{"type":"string"}},"required":["t"]}'
+
+[[actions]]
+id = "PLAYHEAD_NEXT"
+name = "Now Playing: next"
+description = "The source's next item (at the last, its end)."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"source":{"type":"string"}}}'
+
+[[actions]]
+id = "PLAYHEAD_PREVIOUS"
+name = "Now Playing: previous"
+description = "More than 3 seconds in, the current item's start; else the previous item."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"source":{"type":"string"}}}'
+
+[[actions]]
+id = "PLAYHEAD_ITEM"
+name = "Now Playing: play an item"
+description = "Makes item `index` (or the one with `id`) current, from its start; `play` plays it."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"index":{"type":"integer"},"id":{"type":"string"},"play":{"type":"boolean"},"source":{"type":"string"}}}'
+
+[[actions]]
+id = "PLAYHEAD_STATE"
+name = "Now Playing: state"
+description = "A source's state (yours; for the app `source` or the active one): `{source, name, active, playing, time, at, rate, duration, index, tracks, clock, item, queue, title, subtitle, artist, sections}`; null when there is none."
+group = "Now Playing"
+effect = "read_only"
+params = '{"type":"object","properties":{"source":{"type":"string"}}}'
+
+[[actions]]
+id = "PLAYHEAD_SOURCES"
+name = "Now Playing: sources"
+description = "Every source and the active one: `{active, sources: [{source, name, playing, title, subtitle, index, tracks}]}`."
+group = "Now Playing"
+effect = "read_only"
+
+[[actions]]
+id = "PLAYHEAD_ACTIVATE"
+name = "Now Playing: show a source"
+description = "Shows source `source` in the bar, paused where it was (the app only: the bar's switcher)."
+group = "Now Playing"
+effect = "mutating"
+params = '{"type":"object","properties":{"source":{"type":"string"}},"required":["source"]}'

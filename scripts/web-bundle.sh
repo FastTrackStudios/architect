@@ -6,7 +6,15 @@
 #                   changelog.html, extensions.html (+ extensions/<id>.html),
 #                   404.html, their hashed assets/ and fonts/
 #   OUT/docs/       docs/content, built by `architect site build --base /docs/`
-#   OUT/app/        the web app (apps/web): its page, its wasm, config.json
+#   OUT/app/        the web app (apps/web): its page (index.html, style.css),
+#                   start.js (written here), config.json; never cached
+#   OUT/assets/app-<sha12>/  its code and face, named by their content and
+#                   so cached for good under the site's /assets/ rule: the
+#                   wasm and the JS wasm-bindgen writes beside it
+#                   (architect_web.js, snippets/: dioxus-web's
+#                   interpreter), its face (Inter-Variable.woff2, OFL:
+#                   Inter-OFL.txt). start.js imports from there and puts
+#                   the folder on <html data-assets> for the app
 #   OUT/ROUTES.md   how a server must serve OUT (scripts/web-routes.md)
 #
 # What `just web` serves, the release attaches as architect-web-<v>.tar.gz
@@ -17,13 +25,16 @@
 #   scripts/web-bundle.sh OUT            # builds what it needs (dev shell)
 #
 # Prebuilt pieces skip their build (flake.nix passes all of them):
-#   ARCHITECT_WEB_WASM   architect_web.wasm (wasm32-unknown-unknown, release)
+#   ARCHITECT_WEB_WASM   architect_web.wasm (wasm32-unknown-unknown, profile `web`)
 #   ARCHITECT_CLI        the `architect` CLI binary (apps/cli)
 #   WASM_BINDGEN         a wasm-bindgen at Cargo.lock's version
 #   ARCHITECT_SITE       apps/site's prerendered output (its .output/public)
 # and two more for a check without Rust (site.yml: a release's bundle's):
 #   ARCHITECT_WEB_BOUND  a folder with wasm-bindgen's output (architect_web.js,
-#                        architect_web_bg.wasm), instead of the wasm and bindgen
+#                        architect_web_bg.wasm, snippets/ when it has one),
+#                        instead of the wasm and bindgen: a release bundle's
+#                        app/ (an older one holds them there, a newer one in
+#                        ../assets/app-*/; either is found)
 #   ARCHITECT_DOCS       a built docs folder, instead of the CLI
 # Otherwise the site is built here with bun (`bun install --frozen-lockfile`,
 # `bun run build`), from a bun and node on the PATH or nixpkgs' (nix shell).
@@ -89,9 +100,10 @@ fi
 bound="${ARCHITECT_WEB_BOUND:-}"
 wasm="${ARCHITECT_WEB_WASM:-}"
 if [ -z "$bound" ] && [ -z "$wasm" ]; then
-    (cd "$root" && cargo build -q --release -p architect-web --target wasm32-unknown-unknown)
+    # The `web` profile (Cargo.toml): size first, what the browser fetches.
+    (cd "$root" && cargo build -q --profile web -p architect-web --lib --target wasm32-unknown-unknown)
     target="$(cd "$root" && cargo metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
-    wasm="$target/wasm32-unknown-unknown/release/architect_web.wasm"
+    wasm="$target/wasm32-unknown-unknown/web/architect_web.wasm"
 fi
 
 bindgen="${WASM_BINDGEN:-}"
@@ -116,11 +128,38 @@ cp "$root"/apps/web/app/* "$out/app/"
 if [ -n "${ARCHITECT_DISTRIBUTION:-}" ]; then
     cp "$ARCHITECT_DISTRIBUTION" "$out/app/distribution.json"
 fi
+# The app's code and face, staged, then put under a folder named by their
+# content: a new build is a new folder, an old one stays cached as it was.
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
 if [ -n "$bound" ]; then
-    cp "$bound/architect_web.js" "$bound/architect_web_bg.wasm" "$out/app/"
+    from="$bound"
+    if [ ! -f "$from/architect_web.js" ]; then
+        from="$(find "$bound/../assets" -maxdepth 1 -type d -name 'app-*' 2>/dev/null | head -1)"
+    fi
+    [ -n "$from" ] && [ -f "$from/architect_web.js" ] \
+        || { echo "web-bundle: no architect_web.js in $bound" >&2; exit 1; }
+    cp "$from/architect_web.js" "$from/architect_web_bg.wasm" "$stage/"
+    if [ -d "$from/snippets" ]; then
+        cp -r "$from/snippets" "$stage/"
+    fi
 else
-    "$bindgen" --target web --no-typescript --out-dir "$out/app" "$wasm"
+    "$bindgen" --target web --no-typescript --out-dir "$stage" "$wasm"
 fi
+cp "$root/apps/web/assets/Inter-Variable.woff2" "$root/apps/web/assets/Inter-OFL.txt" "$stage/"
+if command -v sha256sum >/dev/null; then sum() { sha256sum; }; else sum() { shasum -a 256; }; fi
+hash="$( (cd "$stage" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s ' "$f"; sum < "$f"; done) | sum | cut -c1-12)"
+assets="/assets/app-$hash/"
+mkdir -p "$out$assets"
+cp -r "$stage/." "$out$assets"
+cat > "$out/app/start.js" <<EOF
+// The web app's start (apps/web/app/index.html), written by
+// scripts/web-bundle.sh: its code and face are under $assets, named by
+// their content (cached for good); this file and the page never are.
+import init from '${assets}architect_web.js';
+document.documentElement.dataset.assets = '$assets';
+init({ module_or_path: '${assets}architect_web_bg.wasm' });
+EOF
 
 if [ -n "${ARCHITECT_DOCS:-}" ]; then
     cp -r "$ARCHITECT_DOCS" "$out/docs"
@@ -136,7 +175,7 @@ else
 fi
 
 # What the server's package asserts, and the pages the site links.
-for f in index.html 404.html app/index.html app/config.json app/architect_web_bg.wasm docs/index.html \
+for f in index.html 404.html app/index.html app/config.json app/start.js "${assets#/}architect_web_bg.wasm" docs/index.html \
     download.html changelog.html extensions.html; do
     [ -s "$out/$f" ] || { echo "web-bundle: $f is missing" >&2; exit 1; }
 done

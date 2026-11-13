@@ -65,8 +65,11 @@ architect-calendar = { workspace = true }
 # The theme picker, architect's built-in extension.
 architect-theme-picker = { workspace = true }
 # ⌘K and ⌘O: the Command Palette, a linked extension (#381).
-architect-command-palette = { workspace = true }
+architect-command-palette = { workspace = true, features = ["extension"] }
 architect-settings-sheet = { workspace = true }
+# The playhead and its Now Playing bar (#589): `architect.playhead`, linked
+# in as a built-in; the bar in the shell's `now_playing` slot.
+architect-playhead = { workspace = true, features = ["ui", "host"] }
 # Navigator, the sidebar's navigator as a built-in extension (GPL-3.0, as
 # architect-navigator: the lab already ships under it).
 architect-navigator-extension = { workspace = true }
@@ -126,6 +129,10 @@ tempfile = "3"
 # colours in a Blitz document.
 blitz-dom = { workspace = true }
 blitz-traits = { workspace = true }
+# A manifest's `[[favourites]]` as written (src/favourites.rs tests).
+toml = { workspace = true }
+# A favourite's press run on a real action list (src/favourites.rs tests).
+futures = "0.3"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 # FILES_* (src/files.rs): the agent's HTTP client runs on a runtime of its
