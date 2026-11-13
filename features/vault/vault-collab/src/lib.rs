@@ -680,8 +680,9 @@ async fn apply_delete(shared: &Arc<Shared>, registry: &DocRegistry, vault_id: &s
     let _g = lock.lock().await;
     if shared.backend.get_file(vault_id, path).is_ok() {
         // Written again since the event: a revival, whose `Put` follows.
-        // A file this document wrote back cannot be what is here, since
-        // nothing schedules that write while the delete is pending.
+        // Not always: a write-back scheduled before the delete was marked
+        // pending (an attach or a debounced edit ahead of the event) lands
+        // here too and keeps the file (#666).
         return;
     }
     if vault_doc::is_deleted(doc.loro()) {
@@ -1322,6 +1323,7 @@ mod tests {
     async fn a_delete_is_a_tombstone_that_travels_and_a_rewrite_revives() {
         let (_tmp, backend, collab) = setup();
         collab.watch_vault("v1");
+        listening(&backend).await;
         put(&backend, "n.md", "keep me").await;
         let ack = backend.open_collab("v1", "n.md").unwrap();
         let doc = collab.registry().doc(ack.doc_id).await.unwrap();
@@ -1376,6 +1378,7 @@ mod tests {
     async fn delete_of_a_closed_document() {
         let (_tmp, backend, collab) = setup();
         collab.watch_vault("v1");
+        listening(&backend).await;
         put(&backend, "gone.md", "about to go").await;
         put(&backend, "other.md", "still here").await;
         let gone = backend.open_collab("v1", "gone.md").unwrap().doc_id;
