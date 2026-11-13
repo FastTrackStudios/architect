@@ -19317,6 +19317,7 @@ dependencies = [
  "facet",
  "futures",
  "indexmap",
+ "libc",
  "notify",
  "notify-debouncer-mini",
  "regex",

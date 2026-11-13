@@ -1996,6 +1996,19 @@ async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
     if built {
         path = path.join("index.html");
     }
+    // Only a file of the link's built output, resolved: a symlink in it
+    // is never followed out of it.
+    match (dir.canonicalize(), path.canonicalize()) {
+        (Ok(root), Ok(resolved)) if resolved.starts_with(&root) => path = resolved,
+        (Err(_), _) => {
+            return page(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Being built",
+                "<p>This link's pages are being built. Try again in a moment.</p>",
+            );
+        }
+        _ => return not_found(dir).await,
+    }
     let kind = content_type(&path);
     if !kind.starts_with("text/html") && path.is_file() {
         if let Ok(response) = architect::http::ranged::serve_file(headers, &path, kind).await {
@@ -2590,7 +2603,11 @@ async fn files_json(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
             }
             let (size, sha256) = held.get(file).map_or_else(
                 || {
-                    let size = std::fs::metadata(listed.root.join(file)).map_or(0, |m| m.len());
+                    // Never a symlink's target's size.
+                    let size = std::fs::symlink_metadata(listed.root.join(file))
+                        .ok()
+                        .filter(std::fs::Metadata::is_file)
+                        .map_or(0, |m| m.len());
                     (size, None)
                 },
                 |(size, hash)| (*size, Some(hash.as_str())),
@@ -2825,8 +2842,9 @@ async fn archive(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
         shares: shares.clone(),
         code: code.clone(),
     };
+    let root = listed.root;
     tokio::spawn(async move {
-        if let Err(error) = write_archive(files, &still, &tx).await {
+        if let Err(error) = write_archive(&root, files, &still, &tx).await {
             tracing::warn!(%code, %error, "a share archive stopped");
             // The download ends short of its directory: an archive that
             // does not open, never one that looks whole and is not.
@@ -2888,12 +2906,15 @@ impl Still {
 }
 
 /// Write `files` (each: its path in the archive, the file to read) to
-/// `to` as a zip, a piece at a time. A file that is gone is left out.
+/// `to` as a zip, a piece at a time. A file that is gone, or no longer
+/// a plain file of the vault at `root` (swapped for a symlink since it
+/// was listed), is left out: none is read through a symlink.
 ///
 /// # Errors
 ///
 /// A file could not be read through, or nobody is reading any more.
 async fn write_archive(
+    root: &Path,
     files: Vec<(String, PathBuf, String)>,
     still: &Still,
     to: &tokio::sync::mpsc::Sender<std::io::Result<Vec<u8>>>,
@@ -2910,8 +2931,15 @@ async fn write_archive(
                 "the link no longer serves the rest",
             ));
         }
-        let Ok(mut file) = tokio::fs::File::open(&path).await else {
-            tracing::debug!(path = %path.display(), "a shared file is gone; left out of the archive");
+        // Opened only as the vault's own file, as it is now.
+        let opened = {
+            let (root, rel) = (root.to_path_buf(), vault_path.clone());
+            blocking(move || architect_sites::listing::open_own(&root, &rel).ok())
+                .await
+                .flatten()
+        };
+        let Some(mut file) = opened.map(tokio::fs::File::from_std) else {
+            tracing::debug!(path = %path.display(), "a shared file is gone or not the vault's; left out of the archive");
             continue;
         };
         let modified = file.metadata().await.ok().and_then(|m| m.modified().ok());

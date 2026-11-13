@@ -124,11 +124,18 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
             continue;
         }
         let from = site.root.join(rel);
+        // The vault's own file as it is now, never through a symlink: one
+        // swapped in since the vault was read is not followed.
+        let Ok(mut source) = vault::obsidian::open_own(&site.root, rel) else {
+            continue;
+        };
         if let Some(to) = inside(dir, rel) {
             if let Some(parent) = to.parent() {
                 create(parent)?;
             }
-            std::fs::copy(&from, &to).map_err(|e| WriteError::Io(from.clone(), e))?;
+            let mut target =
+                std::fs::File::create(&to).map_err(|e| WriteError::Io(to.clone(), e))?;
+            std::io::copy(&mut source, &mut target).map_err(|e| WriteError::Io(from.clone(), e))?;
             report.files = report.files.saturating_add(1);
         }
     }
