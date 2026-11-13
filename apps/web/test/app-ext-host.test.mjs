@@ -304,7 +304,7 @@ async function firefox() {
   const profile = mkdtempSync(join(tmpdir(), 'app-ext-ff-'));
   // Nothing is heard: its output at zero; autoplay allowed, so the app's
   // audio element can be seen playing.
-  writeFileSync(join(profile, 'user.js'), 'user_pref("media.volume_scale", "0.0");\nuser_pref("media.autoplay.default", 0);\nuser_pref("media.autoplay.blocking_policy", 0);\n');
+  writeFileSync(join(profile, 'user.js'), 'user_pref("media.volume_scale", "0.0");\nuser_pref("media.autoplay.default", 0);\nuser_pref("media.autoplay.blocking_policy", 0);\nuser_pref("ui.systemUsesDarkTheme", 0);\n');
   const port = await freePort();
   const runtime = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
   const env = { ...process.env, XDG_RUNTIME_DIR: runtime, MOZ_HEADLESS: '1' };
@@ -725,6 +725,73 @@ test('the Now Playing bar shows the queue, its presses reach the frames and a fr
       await press(b, 'now-playing-title');
       await sleep(400);
       await b.shot(join(process.env.SHOTS, 'now-playing-390-open-firefox.png'));
+    }
+  } finally { await w.close(); }
+});
+
+// #667 H1, M2, M3: a far time refused at the contract; `^` drawn whatever
+// a source asks, a button the keyboard reaches; a frame's element in the
+// scheme its document is handed when the person's theme is not the
+// system's (the system light here, the person's choice dark).
+test('a far time is refused, ^ is always there, and a frame keeps its document\'s scheme', { skip }, async () => {
+  // A line of the frame's own text on its transparent page: what an
+  // opaque backdrop would put a box behind.
+  const shown = `${QUEUE}\n  document.body.style.margin = "0"; const p = document.createElement("p"); p.style.margin = "8px 0"; p.textContent = "The transport view, in its frame (transparent)"; document.body.appendChild(p);`;
+  const w = await world({ progress: QUIET, transport: shown, lyrics: QUIET }, 'transport');
+  const { b } = w;
+  try {
+    await openSong(b, w.f.origin);
+    await ready1(b);
+    await until(async () => (await bar(b))?.title === 'Amazing Grace', 10000, 'the bar');
+    // The review's probe: 2e15 s long, at 1.36e15 s, 400 bpm, playing.
+    await ask(b, 'transport', 'PLAYHEAD_SET', { name: 'Demo', play: true, time: 1.36e15,
+      queue: [{ id: 'x', title: 'Forever', duration: 2e15, tempo: { bpm: 400 } }] });
+    await until(async () => /seconds/.test((await mark(b, 'transport')).refused), 5000, 'the far time refused');
+    assert.equal((await bar(b)).title, 'Amazing Grace');
+
+    // Only Click asked: `^` is drawn after it, a real button.
+    await ask(b, 'transport', 'PLAYHEAD_SET', { name: 'Demo', slots: ['click'], queue: [
+      { id: 'a', title: 'Blue Moon Walk', subtitle: 'Cody Wright', duration: 180, tempo: { bpm: 96 } },
+      { id: 'c', title: 'Amazing Grace', subtitle: 'John Newton', media: 'Recordings/Amazing Grace.mp3' },
+    ] });
+    await until(() => b.eval(`!!document.querySelector('[data-testid=now-playing-click]')`), 5000, 'Click drawn');
+    const open = await until(() => b.eval(`(() => { const e = document.querySelector('[data-testid=now-playing-open]'); if (!e) return null;
+      e.focus(); return JSON.stringify({ tag: e.tagName, focused: document.activeElement === e, after: !!e.previousElementSibling && e.previousElementSibling.dataset.testid }); })()`), 5000, '^ drawn').then(JSON.parse);
+    assert.deepEqual(open, { tag: 'BUTTON', focused: true, after: 'now-playing-click' });
+
+    // The person's theme dark, the system light: the frame's element and
+    // its document both dark.
+    const schemesNow = async () => {
+      const c = await frameOf(b, 'transport');
+      const el = await b.eval(`getComputedStyle(document.querySelector('[data-testid=ext-frame] iframe')).colorScheme`);
+      const doc = await b.evalIn(c, 'getComputedStyle(document.documentElement).colorScheme');
+      return `${el}|${doc}`;
+    };
+    await until(async () => (await schemesNow()) === 'light|light', 10000, 'the frame light with the system');
+    // Picked by hand while the frame is up: Settings, Appearance, Dark.
+    assert.ok(await b.eval(`(() => { const e = document.querySelector('[aria-label=Settings]'); if (!e) return false; e.click(); return true; })()`));
+    await until(() => clickText(b, 'Appearance'), 10000, 'the Appearance page');
+    await sleep(300);
+    await until(() => b.eval(`(() => { const e = [...document.querySelectorAll('button span')].find((s) => s.children.length === 0 && s.textContent.trim() === 'Dark'); if (!e) return false; e.closest('button').click(); return true; })()`), 10000, 'the Dark mode card');
+    await until(() => b.eval(`(() => { const d = document.querySelector('[aria-label="Close settings"]'); if (!d) return false; d.click(); return true; })()`), 5000, 'settings closed');
+    assert.equal(await b.eval('matchMedia("(prefers-color-scheme: dark)").matches'), false, 'the system is light');
+    await until(async () => (await schemesNow()) === 'dark|dark', 10000, 'the frame dark, element and document');
+
+    if (process.env.SHOTS) {
+      mkdirSync(process.env.SHOTS, { recursive: true });
+      await until(async () => (await bar(b))?.title === 'Amazing Grace', 10000, 'the bar');
+      const frameInView = `(() => { const e = document.querySelector('[data-testid=note-embed]'); if (e) e.scrollIntoView({ block: 'center' }); return !!e; })()`;
+      await b.eval(frameInView);
+      await sleep(600);
+      await b.shot(join(process.env.SHOTS, 'm3-desk-dark-on-light-system.png'));
+      await b.size(390, 844);
+      await sleep(800);
+      await b.eval(frameInView);
+      await sleep(300);
+      await b.shot(join(process.env.SHOTS, 'm2-m3-390-dark-on-light-system.png'));
+      await press(b, 'now-playing-open');
+      await sleep(500);
+      await b.shot(join(process.env.SHOTS, 'm2-390-detail-open.png'));
     }
   } finally { await w.close(); }
 });
