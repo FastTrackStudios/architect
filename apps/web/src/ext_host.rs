@@ -92,6 +92,12 @@ pub use architect_playhead::FRAME_ASKS as INTENTS;
 /// drawn on: the app's documents.
 pub const READS_NOTE: &str = "documents";
 
+/// The read capability that hands a note-reading view the note's files.
+///
+/// An extension declares it beside [`READS_NOTE`] (#669): art, chart
+/// images and synced lyrics, within `architect_spaces::view`'s caps.
+pub const READS_FILES: &str = "files";
+
 /// A view of an island drawn at the head of a note whose `type` it claims.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Embed {
@@ -153,6 +159,17 @@ impl Island {
     pub fn declares_reading_notes(&self) -> bool {
         self.reads.iter().any(|r| r == READS_NOTE)
     }
+
+    /// Whether its view on a note of type `note_type` is handed the note's
+    /// files ([`note_props`]): its claim reads the note, and its extension
+    /// declares [`READS_NOTE`] and [`READS_FILES`]. A caller fetches files
+    /// for a view only when this holds.
+    #[must_use]
+    pub fn reads_files_of(&self, note_type: &str) -> bool {
+        self.claim_for(note_type).is_some_and(|c| c.reads_note)
+            && self.declares_reading_notes()
+            && self.reads.iter().any(|r| r == READS_FILES)
+    }
 }
 
 /// The island that draws a note of type `note_type`, and its claim.
@@ -175,11 +192,80 @@ pub enum Audience {
     /// (`/app/?demo`, the person's own vault in memory): the note, its
     /// `%%comments%%` removed.
     Member,
-    /// A share link's guest (#629). What a guest gets of a note's text is
-    /// the owner's decision, still open (#648); until it is made, the
-    /// conservative answer: its title, its type and the properties the
-    /// claim declares for that type. No body, no vault path.
+    /// A share link's guest (#629): what the sharer shared (#648, #669).
+    /// The note as the link's node handed it (`ShareGuest::read`, never a
+    /// vault file): its title, its type, the properties the claim declares
+    /// for that type, its text (as the share's build wrote it, the node
+    /// giving it only to a view that reads the note) and the link's files
+    /// the node gave for it. No vault path.
     Guest,
+}
+
+/// A file a view on a note may read, fetched and checked by the app
+/// (#669): an image as a `data:` URL, synced lyrics as text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewFile {
+    /// Its path: in the vault for a member, in the link for a guest.
+    pub path: String,
+    /// What it is.
+    pub kind: architect_spaces::view::ViewFileKind,
+    /// Its size, bytes.
+    pub size: u64,
+    /// An image's `data:` URL, or the lyrics' text.
+    pub content: String,
+}
+
+impl ViewFile {
+    /// `bytes` of the file at `path` as a view is handed it, or why not:
+    /// a kind a view reads, a vault path ([`vault_path`]), within
+    /// [`architect_spaces::view::VIEW_FILE_MAX`], and lyrics in UTF-8.
+    ///
+    /// # Errors
+    ///
+    /// The file is not one a view may be handed.
+    pub fn of(path: &str, bytes: &[u8]) -> Result<Self, String> {
+        use architect_spaces::view::{VIEW_FILE_MAX, ViewFileKind};
+        use base64::Engine as _;
+        let kind =
+            ViewFileKind::of(path).ok_or_else(|| format!("{path}: not a file a view reads"))?;
+        if !vault_path(path) {
+            return Err(format!("{path}: not a path in a vault"));
+        }
+        let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if size > VIEW_FILE_MAX {
+            return Err(format!("{path}: larger than {VIEW_FILE_MAX} bytes"));
+        }
+        let content = match kind {
+            ViewFileKind::Image(mime) => format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            ),
+            ViewFileKind::Lyrics => String::from_utf8(bytes.to_vec())
+                .map_err(|_| format!("{path}: lyrics not in UTF-8"))?,
+        };
+        Ok(Self {
+            path: path.to_owned(),
+            kind,
+            size,
+            content,
+        })
+    }
+
+    /// As a view is handed it: `{path, kind, size, data}` for an image,
+    /// `{path, kind, size, text}` for lyrics.
+    fn props(&self) -> Value {
+        let key = match self.kind {
+            architect_spaces::view::ViewFileKind::Image(_) => "data",
+            architect_spaces::view::ViewFileKind::Lyrics => "text",
+        };
+        let mut v = serde_json::json!({
+            "path": self.path, "kind": self.kind.word(), "size": self.size,
+        });
+        if let Some(o) = v.as_object_mut() {
+            o.insert(key.to_owned(), Value::String(self.content.clone()));
+        }
+        v
+    }
 }
 
 /// A note as the app read it from the vault, before the gate.
@@ -193,8 +279,14 @@ pub struct Note<'a> {
     pub note_type: &'a str,
     /// Its frontmatter, each value as text.
     pub properties: &'a [(String, String)],
-    /// Its markdown after the frontmatter.
+    /// Its markdown after the frontmatter: a member's from the vault, a
+    /// guest's as the link's node handed it (`GuestNote::source`; empty
+    /// when it gave none).
     pub body: &'a str,
+    /// Its files a view may read (#669), fetched and checked by the caller
+    /// only when [`Island::reads_files_of`] holds: a member's from their
+    /// vault, a guest's only those the link's node handed for the note.
+    pub files: &'a [ViewFile],
 }
 
 /// What `island`'s views are handed of `note` for `audience`.
@@ -205,8 +297,14 @@ pub struct Note<'a> {
 ///
 /// - [`Audience::Member`]: `{path, title, type, properties, body}`, the
 ///   body without its `%%comments%%`;
-/// - [`Audience::Guest`]: `{title, type, properties}`, only the properties
-///   the claim declares.
+/// - [`Audience::Guest`]: `{title, type, properties, body}`, only the
+///   properties the claim declares, the body as the node gave it, again
+///   without its `%%comments%%`; never a vault path.
+///
+/// Either has `files` (`[{path, kind, size, data | text}]`) too when its
+/// extension declares [`READS_FILES`] ([`Island::reads_files_of`]): the
+/// files given, each a kind a view reads at a vault path, within
+/// `architect_spaces::view::within_caps`.
 #[must_use]
 pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value {
     let Some(claim) = island.claim_for(note.note_type) else {
@@ -221,7 +319,7 @@ pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value
             properties.insert(k.clone(), Value::String(v.clone()));
         }
     }
-    match audience {
+    let mut props = match audience {
         Audience::Member => serde_json::json!({
             "path": note.path,
             "title": note.title,
@@ -233,108 +331,31 @@ pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value
             "title": note.title,
             "type": note.note_type,
             "properties": properties,
+            "body": without_comments(note.body),
         }),
+    };
+    if island.reads_files_of(note.note_type)
+        && let Some(o) = props.as_object_mut()
+    {
+        let files = architect_spaces::view::within_caps(
+            note.files.iter().filter(|f| {
+                vault_path(&f.path)
+                    && architect_spaces::view::ViewFileKind::of(&f.path) == Some(f.kind)
+            }),
+            |f| f.path.as_str(),
+            |f| f.size,
+        );
+        o.insert(
+            "files".to_owned(),
+            Value::Array(files.into_iter().map(ViewFile::props).collect()),
+        );
     }
+    props
 }
 
-/// `body` without its `%%comments%%`.
-///
-/// A comment may span lines, and a `%%` never closed hides the rest. A
-/// `%%` inside code is text, not a comment's edge: a fenced block (three
-/// or more backticks or tildes, closed by as many) is kept whole, and so
-/// is an inline code span on one line.
-#[must_use]
-pub fn without_comments(body: &str) -> String {
-    let mut out = String::with_capacity(body.len());
-    let mut fence: Option<(char, usize)> = None;
-    let mut hidden = false;
-    for line in body.split_inclusive('\n') {
-        if !hidden {
-            if let Some((mark, len)) = fence {
-                out.push_str(line);
-                if fence_of(line).is_some_and(|(c, n, bare)| c == mark && n >= len && bare) {
-                    fence = None;
-                }
-                continue;
-            }
-            if let Some((mark, len, _)) = fence_of(line) {
-                fence = Some((mark, len));
-                out.push_str(line);
-                continue;
-            }
-        }
-        hidden = uncommented(line, hidden, &mut out);
-    }
-    out
-}
-
-/// A line's code fence: its mark, how many, and whether nothing follows
-/// them (what a closing fence is).
-fn fence_of(line: &str) -> Option<(char, usize, bool)> {
-    let text = line.trim_start_matches(' ');
-    if line.len().saturating_sub(text.len()) > 3 {
-        return None;
-    }
-    let mark = text.chars().next().filter(|c| matches!(c, '`' | '~'))?;
-    let len = text.chars().take_while(|c| *c == mark).count();
-    (len >= 3).then(|| (mark, len, text.trim_start_matches(mark).trim().is_empty()))
-}
-
-/// One line outside a fence onto `out` without its comments, given
-/// whether it starts inside one; whether it ends inside one.
-fn uncommented(line: &str, mut hidden: bool, out: &mut String) -> bool {
-    let mut rest = line;
-    loop {
-        if hidden {
-            let Some((_, tail)) = rest.split_once("%%") else {
-                return true;
-            };
-            hidden = false;
-            rest = tail;
-            continue;
-        }
-        let Some(comment) = rest.find("%%") else {
-            out.push_str(rest);
-            return false;
-        };
-        if let Some(tick) = rest.find('`').filter(|tick| *tick < comment) {
-            let (before, from) = rest.split_at_checked(tick).unwrap_or((rest, ""));
-            out.push_str(before);
-            let len = from.chars().take_while(|c| *c == '`').count();
-            let (run, after) = from.split_at_checked(len).unwrap_or((from, ""));
-            out.push_str(run);
-            // A span is kept whole; a run never closed is only text.
-            let (span, tail) = code_span_end(after, len)
-                .and_then(|end| after.split_at_checked(end))
-                .unwrap_or(("", after));
-            out.push_str(span);
-            rest = tail;
-        } else {
-            let (before, from) = rest.split_at_checked(comment).unwrap_or((rest, ""));
-            out.push_str(before);
-            rest = from.strip_prefix("%%").unwrap_or(from);
-            hidden = true;
-        }
-    }
-}
-
-/// Where the code span opened by `len` backticks ends in `after`: just
-/// past the next run of exactly `len`.
-fn code_span_end(after: &str, len: usize) -> Option<usize> {
-    let mut seen = 0_usize;
-    let mut rest = after;
-    loop {
-        let tick = rest.find('`')?;
-        let from = rest.get(tick..)?;
-        let run = from.chars().take_while(|c| *c == '`').count();
-        let next = tick.checked_add(run)?;
-        seen = seen.checked_add(next)?;
-        if run == len {
-            return Some(seen);
-        }
-        rest = rest.get(next..)?;
-    }
-}
+/// `body` without its `%%comments%%`: the one rule, shared with the node
+/// that hands a share's guest the same text (`architect_spaces::view`).
+pub use architect_spaces::view::without_comments;
 
 /// One island's web bundle, as the listing names it and this host
 /// believes it.
@@ -953,6 +974,96 @@ mod tests {
         ("private", "the alarm code"),
     ];
 
+    #[test]
+    fn a_view_that_declares_files_is_handed_them_checked_and_capped() {
+        use architect_spaces::view::{VIEW_FILE_MAX, VIEW_FILES_MAX};
+        let properties: Vec<(String, String)> = vec![("type".into(), "playlist".into())];
+        let art = ViewFile::of("Art/Joy.png", b"\x89PNG").unwrap();
+        let lrc = ViewFile::of("Songs/Joy.lrc", b"[00:01.00]Joy").unwrap();
+        let files = vec![art.clone(), lrc.clone()];
+        let note = Note {
+            files: &files,
+            ..the_note(&properties)
+        };
+        let claim = json!({"view": "list", "note_type": ["playlist"], "reads": ["documents"]});
+        for audience in [Audience::Member, Audience::Guest] {
+            let with = note_props(
+                audience,
+                &note_world(&["documents", "files"], claim.clone()),
+                &note,
+            );
+            assert_eq!(
+                with["files"],
+                json!([
+                    {"path": "Art/Joy.png", "kind": "image", "size": 4, "data": "data:image/png;base64,iVBORw=="},
+                    {"path": "Songs/Joy.lrc", "kind": "lyrics", "size": 13, "text": "[00:01.00]Joy"},
+                ]),
+                "{audience:?}"
+            );
+            // Not declared: no files, though the caller had some.
+            let without = note_props(audience, &note_world(&["documents"], claim.clone()), &note);
+            assert!(without.get("files").is_none(), "{audience:?}");
+            // `files` alone is no read of the note: nothing at all.
+            let alone = note_props(audience, &note_world(&["files"], claim.clone()), &note);
+            assert_eq!(alone, Value::Null);
+        }
+        // What a view never reads, a path a vault never holds, too large.
+        assert!(ViewFile::of("Songs/Joy.mp3", b"x").is_err());
+        assert!(ViewFile::of("Songs/Joy.svg", b"<svg/>").is_err());
+        for bad in [
+            "../Joy.png",
+            "/etc/Joy.png",
+            "a/%2e%2e/Joy.png",
+            "a\\Joy.png",
+            "C:/Joy.png",
+            "a/./Joy.png",
+        ] {
+            assert!(ViewFile::of(bad, b"x").is_err(), "{bad}");
+        }
+        let big = vec![0_u8; usize::try_from(VIEW_FILE_MAX).unwrap() + 1];
+        assert!(ViewFile::of("Art/Big.png", &big).is_err());
+        assert!(ViewFile::of("Songs/Bad.lrc", &[0xff, 0xfe]).is_err());
+        // A file whose kind was changed after its check, a path that is
+        // not a vault's: left out by the gate itself.
+        let forged = vec![
+            ViewFile {
+                kind: architect_spaces::view::ViewFileKind::Lyrics,
+                ..art
+            },
+            ViewFile {
+                path: "../x.lrc".into(),
+                ..lrc.clone()
+            },
+        ];
+        let note = Note {
+            files: &forged,
+            ..the_note(&properties)
+        };
+        let got = note_props(
+            Audience::Guest,
+            &note_world(&["documents", "files"], claim.clone()),
+            &note,
+        );
+        assert_eq!(got["files"], json!([]));
+        // At most the count cap, whatever the caller offers.
+        let many: Vec<ViewFile> = (0..100)
+            .map(|i| ViewFile {
+                path: format!("L/{i}.lrc"),
+                ..lrc.clone()
+            })
+            .collect();
+        let note = Note {
+            files: &many,
+            ..the_note(&properties)
+        };
+        let got = note_props(
+            Audience::Member,
+            &note_world(&["documents", "files"], claim),
+            &note,
+        );
+        assert_eq!(got["files"].as_array().map(Vec::len), Some(VIEW_FILES_MAX));
+    }
+
     fn the_note(properties: &[(String, String)]) -> Note<'_> {
         Note {
             path: "Private/Folders/Merry.md",
@@ -960,6 +1071,7 @@ mod tests {
             note_type: "playlist",
             properties,
             body: "One %%a private comment%% two\n%%across\nlines%%three %%never closed",
+            files: &[],
         }
     }
 
@@ -978,12 +1090,14 @@ mod tests {
         assert_eq!(member["body"], "One  two\nthree ");
         assert_eq!(member["properties"]["private"], "the alarm code");
         assert!(!member.to_string().contains("comment"));
-        // A guest: title, type and the declared properties; no body, no
-        // path, nothing undeclared.
+        // A guest (#648, #669): title, type, the declared properties and
+        // the body the node gave, its comments gone too; no path, nothing
+        // undeclared, and no files (its extension declares no `files`).
         let guest = note_props(Audience::Guest, &island, &note);
         assert_eq!(
             guest,
-            json!({"title": "Merry", "type": "playlist", "properties": {"date": "2026-12-24"}})
+            json!({"title": "Merry", "type": "playlist", "properties": {"date": "2026-12-24"},
+                   "body": "One  two\nthree "})
         );
         // The claim names no read, or the extension does not declare it,
         // or nothing claims the type: no note at all.

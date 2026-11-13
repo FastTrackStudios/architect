@@ -258,6 +258,19 @@ fn a_rebuild_replaces_a_site_but_never_another_folder() {
         "{err}"
     );
     assert!(mine.join("notes.txt").is_file());
+
+    // A site without page data never claims a `<out>.data` beside it: one
+    // holding something else, or empty, is left alone.
+    let theirs = out_dir.path().join("site.data");
+    touch(&theirs, "keep.txt", "not the build's");
+    build(&opts, &blocks(), &out).unwrap();
+    assert!(theirs.join("keep.txt").is_file());
+    std::fs::remove_file(theirs.join("keep.txt")).unwrap();
+    build(&opts, &blocks(), &out).unwrap();
+    assert!(
+        theirs.is_dir(),
+        "an empty folder of the owner's was removed"
+    );
 }
 
 /// A vault with a shared folder and private notes it links to.
