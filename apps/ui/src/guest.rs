@@ -139,14 +139,12 @@ fn host_of(origin: &str) -> (String, Option<u16>) {
             .split_once(':')
             .map_or((authority, None), |(h, p)| (h, Some(p)))
     };
-    let port = match port {
-        Some(p) => p.parse().ok(),
-        None => match scheme.map(str::to_ascii_lowercase).as_deref() {
-            Some("https") => Some(443),
-            Some("http") => Some(80),
-            _ => None,
-        },
+    let by_scheme = || match scheme.map(str::to_ascii_lowercase).as_deref() {
+        Some("https") => Some(443),
+        Some("http") => Some(80),
+        _ => None,
     };
+    let port = port.map_or_else(by_scheme, |p| p.parse().ok());
     (host.trim_end_matches('.').to_ascii_lowercase(), port)
 }
 
@@ -155,10 +153,12 @@ fn port_of(url: &ShareUrl) -> Option<u16> {
     url::Url::parse(&url.origin()).ok()?.port_or_known_default()
 }
 
-/// Whether a link's node is one the app knows: the hosted Architect on
-/// 443, or a node the account uses for one of its orgs (`known`, as
-/// [`trusts`] takes them), on the port that entry names (its own, or its
-/// scheme's): another port of the same name may be another server.
+/// Whether a link's node is one the app knows, on its own port.
+///
+/// The hosted Architect on 443, or a node the account uses for one of
+/// its orgs (`known`, as [`trusts`] takes them) on the port that entry
+/// names (its own, or its scheme's): another port of the same name may
+/// be another server.
 #[must_use]
 pub fn known_host(url: &ShareUrl, known: &[String]) -> bool {
     let host = url
