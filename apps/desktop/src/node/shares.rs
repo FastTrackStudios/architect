@@ -74,7 +74,6 @@
 //! sees a password.
 
 use std::collections::{BTreeSet, HashMap};
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
@@ -97,8 +96,7 @@ use architect_spaces::share::{
 use architect_spaces::{
     GuestFault, GuestLink, GuestNote, LayersReport, ListedFile, ListedNote, Listen, NewAudience,
     NewShare, Share, ShareAudience, ShareChange, ShareComment, ShareFault, ShareGuest, ShareLinks,
-    ShareScope, ShareState, Verdict, Viewer, comments_note, parse_comments, parse_share_note,
-    share_note,
+    ShareScope, ShareState, Verdict, Viewer, parse_comments, parse_share_note, share_note,
 };
 use tokio::sync::{Notify, watch};
 use vault_live::Backend;
@@ -106,12 +104,12 @@ use vault_proto::{IfMatch, VaultSync as _};
 
 use super::org::{IssuerLane, NodeOrg};
 use super::share_layers::{LayerRules, same_file, within};
+use super::share_shell;
 
 /// The cookie a signed-in viewer's issuer session is kept in.
 pub const SESSION_COOKIE: &str = "architect_session";
 /// The comments section's start: its look, then its heading. The site's
 /// own tokens (`--site-*`) colour it, so it follows the theme.
-const COMMENTS_HEAD: &str = "<style>.share-comments{max-width:42rem;margin:2rem auto;padding:0 1rem}.share-comment{border-top:1px solid var(--site-rule,#8884);padding:.5rem 0}.share-comments form{display:flex;flex-direction:column;gap:.5rem;margin-top:1rem}.share-comments input,.share-comments textarea{font:inherit;padding:.5rem;border-radius:.4rem;border:1px solid var(--site-rule,#8886);background:transparent;color:inherit}.share-comments textarea{min-height:5rem}.share-comments button{align-self:flex-start;font:inherit;padding:.4rem 1rem;border-radius:.4rem;border:0;background:var(--site-accent,#3b6ef5);color:#fff}</style><section id=\"comments\" class=\"share-comments\"><h2>Comments</h2>";
 /// The cookie a sign-in in progress is kept in, and its path.
 const SIGNIN_COOKIE: &str = "architect_signin";
 const SIGNIN_PATH: &str = "/s/_signin";
@@ -121,9 +119,6 @@ const SETTLE: Duration = Duration::from_millis(400);
 const RULES_EVERY: Duration = Duration::from_secs(2);
 /// How long a resolved viewer is trusted before the issuer is asked again.
 const VIEWER_TTL: Duration = Duration::from_secs(60);
-/// The most comments a share keeps; the longest one.
-const MAX_COMMENTS: usize = 2000;
-const MAX_COMMENT: usize = 4000;
 
 /// Set by [`fail_vault_views_for_tests`]: every vault view is unreadable.
 static VIEWS_FAIL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -285,13 +280,8 @@ struct Inner {
     /// `/_ext/` (`architect_sites::island`).
     islands: std::sync::OnceLock<Arc<[architect_sites::SiteIsland]>>,
     /// Note types' favourites (`[[favourites]]`), each with the extension
-    /// that declared it: a share's phone shell's tabs, by its root note's
-    /// type (`architect_sites::shell`), and the web app's listing. The
-    /// declarations alone beside them.
-    favourites: std::sync::OnceLock<(
-        Arc<[architect_favourites::Listed]>,
-        Arc<[architect_favourites::TypeFavourites]>,
-    )>,
+    /// that declared it: the web app's listing.
+    favourites: std::sync::OnceLock<Arc<[architect_favourites::Listed]>>,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -346,21 +336,16 @@ impl Shares {
     }
 
     /// With note types' `favourites`, each with the extension that
-    /// declared it: a share's phone shell shows its root note's type's
-    /// tabs; the first call holds.
+    /// declared it, for the web app (`/_ext/favourites.json`); the first
+    /// call holds.
     #[must_use]
     pub fn with_favourites(self, favourites: Vec<architect_favourites::Listed>) -> Self {
-        let alone: Vec<_> = favourites.iter().map(|l| l.favourites.clone()).collect();
-        let _ = self.0.favourites.set((favourites.into(), alone.into()));
+        let _ = self.0.favourites.set(favourites.into());
         self
     }
 
-    fn favourites(&self) -> &[architect_favourites::TypeFavourites] {
-        self.0.favourites.get().map_or(&[], |f| &f.1)
-    }
-
     fn listed_favourites(&self) -> &[architect_favourites::Listed] {
-        self.0.favourites.get().map_or(&[], |f| &f.0)
+        self.0.favourites.get().map_or(&[], |f| f)
     }
 
     /// Every share, as the table holds it now.
@@ -1181,15 +1166,6 @@ impl Shares {
         self.save(share).await
     }
 
-    /// Whether the link `code` of `share` has a page at `key` (`/joy/`).
-    fn has_page(&self, share: &Share, code: &str, key: &str) -> bool {
-        let table = self.0.table.read().unwrap_or_else(PoisonError::into_inner);
-        table
-            .get(&share.code)
-            .and_then(|h| h.manifests.get(code))
-            .is_some_and(|m| m.pages.contains_key(key) || (key == "/" && !m.pages.is_empty()))
-    }
-
     /// Have every vault's shares built again (the layer rules changed).
     fn kick_all(&self) {
         for vault in self.0.backend.vault_ids() {
@@ -1213,24 +1189,6 @@ impl Shares {
             .get_file(&share.vault, &comments_note_path(code))
             .map(|b| parse_comments(&String::from_utf8_lossy(&b.0)))
             .unwrap_or_default()
-    }
-
-    async fn add_comment(&self, share: &Share, comment: ShareComment) -> Result<(), ShareFault> {
-        let mut all = self.comments(&share.code);
-        all.push(comment);
-        if all.len() > MAX_COMMENTS {
-            return Err(ShareFault::Invalid(
-                "this share has all the comments it can take".to_owned(),
-            ));
-        }
-        let text = comments_note(&share.code, &all);
-        put(
-            self.0.backend.clone(),
-            share.vault.clone(),
-            comments_note_path(&share.code),
-            text,
-        )
-        .await
     }
 
     /// The share served at `host` (a domain of its own), if any.
@@ -1520,7 +1478,13 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
         Ok(response) => with_policy(response),
         // A link's guest service (`ShareGuest`, mounted on the node's
         // router): its answers as private as the link's own.
-        Err(request) if guest => guest_headers(next.run(*request).await),
+        // The node's own sign-in cookie, from the app on this origin (the
+        // browser sends it only to a same-site request: `SameSite=Lax`),
+        // stands in for a token the call leaves empty ([`GuestLane`]).
+        Err(request) if guest => {
+            let session = cookie(request.headers(), SESSION_COOKIE);
+            guest_headers(GUEST_COOKIE.scope(session, next.run(*request)).await)
+        }
         Err(request) => next.run(*request).await,
     }
 }
@@ -1531,6 +1495,12 @@ fn is_guest_path(path: &str) -> bool {
         .and_then(|r| r.strip_prefix('/'))
         .and_then(|r| r.split_once('/'))
         .is_some_and(|(code, rest)| is_code(code) && rest.starts_with(GUEST_SEGMENT))
+}
+
+tokio::task_local! {
+    /// A guest call's `architect_session` cookie, set by [`gate`] around
+    /// the call.
+    static GUEST_COOKIE: Option<String>;
 }
 
 /// The segment below a link its guest service is at.
@@ -1749,10 +1719,14 @@ pub fn content_security_policy() -> HeaderValue {
         .clone()
 }
 
-/// `response` with [`content_security_policy`] and `nosniff`.
+/// `response` with [`content_security_policy`] and `nosniff`; an answer
+/// that has a policy of its own (the web app's page, `share_shell`) keeps
+/// it.
 fn with_policy(mut response: Response) -> Response {
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+    headers
+        .entry(header::CONTENT_SECURITY_POLICY)
+        .or_insert_with(content_security_policy);
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -1838,6 +1812,15 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) 
 /// Answer `rest` (a path below the link, from `/`) of `share`, or of
 /// its `audience` when the link is one audience's; the link is at
 /// `mount`.
+///
+/// A page path (`/`, anything ending in `/`, a built page's folder) is
+/// the web app's page ([`share_shell`]), which opens the link as its
+/// guest; the files page (`_files/`) too, where the app shows the
+/// link's files. Every other path is a file of the link, its bytes. Both
+/// go through the same two checks ([`Shares::open`], [`admit`]), so an
+/// expired, revoked or refused link and a page that is nowhere answer as
+/// before. On a share's own domain (`mount` `/`) the link is a Site
+/// instead: its built pages, as `ARCHITECT_SITES` are served.
 async fn serve(
     shares: &Shares,
     share: Share,
@@ -1847,51 +1830,52 @@ async fn serve(
     request: Request,
 ) -> Response {
     let code = share.code.as_str();
-    let viewer = match shares
+    let domain = mount == "/";
+    let issuer = shares.0.issuer_origin.as_deref();
+    let head = |open: bool| share_shell::Head {
+        title: open.then(|| {
+            Link {
+                share: &share,
+                audience: audience.as_ref(),
+                mount,
+                listen: share.listen_for(audience.as_ref()),
+            }
+            .title()
+        }),
+        public: matches!(share.audience, architect_spaces::Audience::Public),
+    };
+    let page_path = !domain && is_page_path(rest);
+    if let Err(closed) = shares
         .open(
             &share,
             bearer(request.headers()).or_else(|| cookie(request.headers(), SESSION_COOKIE)),
         )
         .await
     {
-        Ok(viewer) => viewer,
-        Err(Closed::Gone) => {
-            return page(
-                StatusCode::NOT_FOUND,
-                "Not found",
-                "<p>There is nothing at this link.</p>",
-            );
-        }
-        Err(Closed::SignIn) => {
-            let to = format!("{}{}", mount.trim_end_matches('/'), rest);
-            let body = format!(
-                "<p>This link is for {}. Sign in to open it.</p><p><a class=\"button\" href=\"{LINKS}/_signin?to={}\">Sign in</a></p>",
-                if matches!(share.audience, architect_spaces::Audience::Org) {
-                    "the members of an organization"
-                } else {
-                    "the people it was shared with"
-                },
-                escape(&encode(&to))
-            );
-            return page(StatusCode::UNAUTHORIZED, "Sign in", &body);
-        }
-        Err(Closed::Denied) => {
-            return page(
+        return match closed {
+            Closed::Gone => gone(),
+            // The app asks the guest service, hears why, and offers the
+            // sign-in (`/s/_signin`): the page names nothing of the link.
+            Closed::SignIn if page_path => private(
+                &share,
+                share_shell::answer(StatusCode::UNAUTHORIZED, &head(false), issuer),
+            ),
+            Closed::Denied if page_path => private(
+                &share,
+                share_shell::answer(StatusCode::FORBIDDEN, &head(false), issuer),
+            ),
+            Closed::SignIn => plain(StatusCode::UNAUTHORIZED, "Sign in to open this link."),
+            Closed::Denied => plain(
                 StatusCode::FORBIDDEN,
-                "Not shared with you",
-                &format!(
-                    "<p>This link was not shared with the account you are signed in as.</p>{}",
-                    signout_form("/")
-                ),
-            );
-        }
-    };
-    let base = if mount == "/" { "domain" } else { "site" };
+                "This link was not shared with the account you are signed in as.",
+            ),
+        };
+    }
+    let base = if domain { "domain" } else { "site" };
     let dir = audience.as_ref().map_or_else(
         || shares.0.out.join(code).join(base),
         |a| shares.audience_dir(code, &a.code).join("site"),
     );
-    let method = request.method().clone();
     let link = Link {
         share: &share,
         audience: audience.as_ref(),
@@ -1902,41 +1886,111 @@ async fn serve(
     let headers = request.headers().clone();
     match rest {
         "/_live" => live(shares, code),
-        "/_files" | "/_files/" => private(&share, files_page(shares, &link, &query).await),
         "/_files.json" => private(&share, files_json(shares, &link, &query).await),
         "/_archive.zip" => private(&share, archive(shares, &link, &query).await),
-        "/_comment" if method == architect::http::axum::http::Method::POST => {
-            comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
+        // The files page is the app's Files view of the link.
+        "/_files" | "/_files/" if !domain => private(
+            &share,
+            share_shell::answer(StatusCode::OK, &head(true), issuer),
+        ),
+        _ if page_path || (!domain && is_built_page(&dir, rest)) => {
+            // Admitted as the page it opens is: a page another audience
+            // holds, or none, is nowhere.
+            let page = format!("{}/index.html", rest.trim_end_matches('/'));
+            match admit(shares, &share, audience.as_ref(), &dir, &page, link.listen).await {
+                Admit::Open if is_built_page(&dir, rest) => private(
+                    &share,
+                    share_shell::answer(StatusCode::OK, &head(true), issuer),
+                ),
+                Admit::Open | Admit::Hidden | Admit::Held(_) => private(&share, gone()),
+                // The app hears the same from the guest service and
+                // waits; the page is the app all the same.
+                Admit::Building => private(&share, {
+                    let mut r =
+                        share_shell::answer(StatusCode::SERVICE_UNAVAILABLE, &head(true), issuer);
+                    r.headers_mut()
+                        .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
+                    r
+                }),
+                Admit::Empty => private(
+                    &share,
+                    share_shell::answer(StatusCode::NOT_FOUND, &head(true), issuer),
+                ),
+            }
         }
         _ => {
+            // A file: never a page the build wrote (its HTML is the
+            // build's, read by nobody), but a domain's.
+            if !domain && is_page_file(rest) {
+                return private(&share, gone());
+            }
             match admit(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
                 Admit::Open => {}
-                Admit::Hidden => return private(&share, not_found(&dir).await),
-                Admit::Held(needs) => return private(&share, layer_refusal(link.listen, needs)),
-                Admit::Building => return private(&share, being_built()),
-                Admit::Empty => {
+                Admit::Hidden => {
                     return private(
                         &share,
-                        page(
-                            StatusCode::NOT_FOUND,
-                            "Nothing here yet",
-                            "<p>Nothing is shared on this link yet.</p>",
-                        ),
+                        if domain {
+                            not_found(&dir).await
+                        } else {
+                            gone()
+                        },
                     );
                 }
+                Admit::Held(needs) => return private(&share, layer_refusal(link.listen, needs)),
+                Admit::Building => return private(&share, being_built()),
+                Admit::Empty => return private(&share, gone()),
             }
-            let mut response = file(&dir, rest, &headers).await;
-            // Comments go on a page that is there, never on a 404 (whose
-            // body would then tell a refused path from one that is nowhere).
-            if share.comments() && response.status() == StatusCode::OK && is_html(&response) {
-                response = with_comments(shares, &share, rest, mount, response).await;
-            }
-            if response.status() == StatusCode::OK && is_html(&response) {
-                response = with_files_bar(shares, &link, response).await;
-            }
+            let response = file(&dir, rest, &headers, domain).await;
             private(&share, response)
         }
     }
+}
+
+/// Whether `rest` (below a link, from `/`) names a page: the link's
+/// root, or anything ending in `/`.
+fn is_page_path(rest: &str) -> bool {
+    rest.ends_with('/')
+}
+
+/// Whether `rest` is a folder the build wrote a page into (`/joy`
+/// without its slash), its page a file of the link's own output.
+fn is_built_page(dir: &Path, rest: &str) -> bool {
+    let decoded = decode(rest);
+    if decoded
+        .split('/')
+        .any(|s| s == ".." || s == "." || s.contains('\\') || s.contains('\0'))
+    {
+        return false;
+    }
+    let page = dir.join(decoded.trim_start_matches('/')).join("index.html");
+    match (dir.canonicalize(), page.canonicalize()) {
+        (Ok(root), Ok(resolved)) => resolved.starts_with(&root) && resolved.is_file(),
+        _ => false,
+    }
+}
+
+/// Whether `rest` names a page the build wrote (`index.html`, its
+/// `404.html`): never served on a link.
+fn is_page_file(rest: &str) -> bool {
+    let decoded = decode(rest);
+    let last = decoded.rsplit('/').next().unwrap_or_default();
+    last.eq_ignore_ascii_case("index.html") || decoded.eq_ignore_ascii_case("/404.html")
+}
+
+/// `404`: nothing at this link (expired, revoked, unknown, or a path
+/// that is nowhere on it: all one answer).
+fn gone() -> Response {
+    plain(StatusCode::NOT_FOUND, "There is nothing at this link.")
+}
+
+/// A plain-text answer of the node's own.
+fn plain(status: StatusCode, text: &'static str) -> Response {
+    let mut response = (status, text).into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
 }
 
 /// Why a link is not open to a caller ([`Shares::open`]).
@@ -2061,13 +2115,11 @@ async fn needs_layer(
         .unwrap_or(Hold::Held(Listen::Full))
 }
 
-/// `503`: the link's pages are being built (or a file of it cannot be
-/// read now).
+/// `503`: the link is being built (or a file of it cannot be read now).
 fn being_built() -> Response {
-    let mut response = page(
+    let mut response = plain(
         StatusCode::SERVICE_UNAVAILABLE,
-        "Being built",
-        "<p>This link's pages are being built. Try again in a moment.</p>",
+        "This link is being built. Try again in a moment.",
     );
     // When to ask again ([`private`] keeps it out of every cache).
     response
@@ -2079,18 +2131,21 @@ fn being_built() -> Response {
 /// `403` for a file of layer `needs` on a link that plays to `cap`: the
 /// layer named in the body and in `x-architect-layer`.
 fn layer_refusal(cap: Listen, needs: Listen) -> Response {
-    let mut response = page(
+    let mut response = (
         StatusCode::FORBIDDEN,
-        "Not on this link",
-        &format!(
-            "<p>This file is in the <b>{needs}</b> layer. This link plays to <b>{cap}</b>.</p>",
+        format!(
+            "This file is in the {needs} layer. This link plays to {cap}.",
             needs = needs.label(),
             cap = cap.label()
         ),
+    )
+        .into_response();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
     );
-    response
-        .headers_mut()
-        .insert("x-architect-layer", HeaderValue::from_static(needs.label()));
+    headers.insert("x-architect-layer", HeaderValue::from_static(needs.label()));
     response
 }
 
@@ -2123,28 +2178,30 @@ fn private(share: &Share, mut response: Response) -> Response {
     response
 }
 
-/// The built file at `rest` under `dir`, or the site's 404 page. A page
-/// is read whole (comments and the bar go into it); any other file is
-/// streamed and answers `Range` (`206`, `Accept-Ranges`), so a page's
-/// `<audio>` and `<video>` seek without downloading the file (#511).
 /// How long, and how many times, a request waits for a link's folder
 /// being swapped in by a rebuild (in [`serve`], before any check).
 const SWAP_WAIT: Duration = Duration::from_millis(20);
 const SWAP_WAITS: usize = 10;
 
-async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
+/// The built file at `rest` under `dir`. A file is streamed and
+/// answers `Range` (`206`, `Accept-Ranges`), so the app's `<audio>` seeks
+/// without downloading it (#511). On a share's own domain (`site`, a Site)
+/// a folder answers its page and a path that is nowhere the site's 404
+/// page; on a link, a plain `404`.
+async fn file(dir: &Path, rest: &str, headers: &HeaderMap, site: bool) -> Response {
     let decoded = decode(rest);
     let safe = !decoded
         .split('/')
         .any(|s| s == ".." || s == "." || s.contains('\\') || s.contains('\0'));
     if !safe {
-        return page(StatusCode::NOT_FOUND, "Not found", "<p>No such page.</p>");
+        return missing(dir, site).await;
     }
     let mut path = dir.join(decoded.trim_start_matches('/'));
-    // A folder answers with the page the builder wrote there (it copies
-    // no vault file as `index.html`), marked so the page's player can tell
-    // it from an attachment (`architect::host::BUILT_PAGE`).
-    let built = decoded.ends_with('/') || path.is_dir();
+    // On a Site, a folder answers with the page the builder wrote there
+    // (it copies no vault file as `index.html`), marked so the site's
+    // player can tell it from an attachment (`architect::host::BUILT_PAGE`).
+    // On a link no page is served ([`is_page_file`]).
+    let built = site && (decoded.ends_with('/') || path.is_dir());
     if built {
         path = path.join("index.html");
     }
@@ -2152,17 +2209,14 @@ async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
     // is never followed out of it.
     match (dir.canonicalize(), path.canonicalize()) {
         (Ok(root), Ok(resolved)) if resolved.starts_with(&root) => path = resolved,
-        (Err(_), _) => {
-            return page(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Being built",
-                "<p>This link's pages are being built. Try again in a moment.</p>",
-            );
-        }
-        _ => return not_found(dir).await,
+        (Err(_), _) => return being_built(),
+        _ => return missing(dir, site).await,
+    }
+    if !path.is_file() {
+        return missing(dir, site).await;
     }
     let kind = content_type(&path);
-    if !kind.starts_with("text/html") && path.is_file() {
+    if !kind.starts_with("text/html") {
         if let Ok(response) = architect::http::ranged::serve_file(headers, &path, kind).await {
             return response;
         }
@@ -2182,13 +2236,14 @@ async fn file(dir: &Path, rest: &str, headers: &HeaderMap) -> Response {
             }
             response
         }
-        Err(_) if !dir.exists() => page(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Being built",
-            "<p>This link's pages are being built. Try again in a moment.</p>",
-        ),
-        Err(_) => not_found(dir).await,
+        Err(_) if !dir.exists() => being_built(),
+        Err(_) => missing(dir, site).await,
     }
+}
+
+/// Nothing at a path: on a Site its 404 page, on a link [`gone`].
+async fn missing(dir: &Path, site: bool) -> Response {
+    if site { not_found(dir).await } else { gone() }
 }
 
 /// The answer for a path that is not in the link built into `dir`: its
@@ -2251,182 +2306,6 @@ fn live(shares: &Shares, code: &str) -> Response {
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
-}
-
-#[derive(serde::Deserialize)]
-struct CommentForm {
-    page: String,
-    text: String,
-    #[serde(default)]
-    name: String,
-}
-
-/// `POST _comment`: a comment on a page, for a share that takes them.
-async fn comment(
-    shares: &Shares,
-    share: &Share,
-    audience: Option<&ShareAudience>,
-    viewer: &Viewer,
-    mount: &str,
-    request: Request,
-) -> Response {
-    if !share.comments() {
-        return page(
-            StatusCode::FORBIDDEN,
-            "Read only",
-            "<p>This link takes no comments.</p>",
-        );
-    }
-    let Ok(bytes) = architect::http::axum::body::to_bytes(request.into_body(), 64 * 1024).await
-    else {
-        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
-    };
-    let Ok(form) = serde_urlencoded_form::<CommentForm>(&bytes) else {
-        return StatusCode::BAD_REQUEST.into_response();
-    };
-    let text = form.text.trim();
-    if text.is_empty() || text.chars().count() > MAX_COMMENT || !form.page.starts_with('/') {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    // An audience comments on its own pages only, and a page it does
-    // not have is answered as one that is nowhere: the same either way.
-    if let Some(audience) = audience {
-        let key = page_key(&form.page);
-        let dir = shares
-            .audience_dir(&share.code, &audience.code)
-            .join("site");
-        match admit(shares, share, Some(audience), &dir, &key, Listen::Full).await {
-            Admit::Open | Admit::Held(_) => {}
-            Admit::Hidden => return not_found(&dir).await,
-            Admit::Building => return being_built(),
-            Admit::Empty => {
-                return page(
-                    StatusCode::NOT_FOUND,
-                    "Nothing here yet",
-                    "<p>Nothing is shared on this link yet.</p>",
-                );
-            }
-        }
-        if !shares.has_page(share, &audience.code, &key) {
-            return not_found(
-                &shares
-                    .audience_dir(&share.code, &audience.code)
-                    .join("site"),
-            )
-            .await;
-        }
-    }
-    let by = match viewer {
-        Viewer::Person { email, user_id, .. } => email.clone().unwrap_or_else(|| user_id.clone()),
-        Viewer::Anonymous => {
-            let name: String = form.name.trim().chars().take(60).collect();
-            if name.is_empty() {
-                "Someone".to_owned()
-            } else {
-                format!("{name} (not signed in)")
-            }
-        }
-    };
-    let c = ShareComment {
-        page: page_key(&form.page),
-        by,
-        text: text.to_owned(),
-        at: now(),
-    };
-    if let Err(e) = shares.add_comment(share, c).await {
-        return page(
-            StatusCode::BAD_REQUEST,
-            "Not saved",
-            &format!("<p>{}</p>", escape(&e.to_string())),
-        );
-    }
-    let back = format!(
-        "{}{}#comments",
-        mount.trim_end_matches('/'),
-        page_key(&form.page)
-    );
-    Redirect::to(&back).into_response()
-}
-
-/// A page's path as comments are keyed: from `/`, ending in `/`.
-fn page_key(rest: &str) -> String {
-    let path = rest.split(['?', '#']).next().unwrap_or("/");
-    let path = path.strip_suffix("index.html").unwrap_or(path);
-    if path.ends_with('/') {
-        path.to_owned()
-    } else {
-        format!("{path}/")
-    }
-}
-
-/// The page with its comments, and the form, before `</main>`.
-async fn with_comments(
-    shares: &Shares,
-    share: &Share,
-    rest: &str,
-    mount: &str,
-    response: Response,
-) -> Response {
-    let (parts, body) = response.into_parts();
-    let Ok(bytes) = architect::http::axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
-        return Response::from_parts(parts, Body::empty());
-    };
-    let html = String::from_utf8_lossy(&bytes);
-    let key = page_key(rest);
-    let mut section = String::from(COMMENTS_HEAD);
-    let comments: Vec<ShareComment> = shares
-        .comments(&share.code)
-        .into_iter()
-        .filter(|c| c.page == key)
-        .collect();
-    if comments.is_empty() {
-        section.push_str("<p class=\"share-comments-none\">No comments yet.</p>");
-    }
-    for c in comments {
-        let _ = write!(
-            section,
-            "<article class=\"share-comment\"><header><b>{}</b></header><p>{}</p></article>",
-            escape(&c.by),
-            escape(&c.text).replace('\n', "<br>")
-        );
-    }
-    let _ = write!(
-        section,
-        "<form method=\"post\" action=\"{}_comment\"><input type=\"hidden\" name=\"page\" value=\"{}\"><input name=\"name\" placeholder=\"Your name\" maxlength=\"60\"><textarea name=\"text\" required maxlength=\"{MAX_COMMENT}\" placeholder=\"Leave a comment\"></textarea><button type=\"submit\">Comment</button></form></section>",
-        escape(mount),
-        escape(&key)
-    );
-    before_main_end(parts, &html, &section)
-}
-
-/// `html` with `section` put before its `</main>` (else its `</body>`,
-/// else at its end), as the response `parts` began.
-fn before_main_end(
-    parts: architect::http::axum::http::response::Parts,
-    html: &str,
-    section: &str,
-) -> Response {
-    let at = html.rfind("</main>").or_else(|| html.rfind("</body>"));
-    let out = at.map_or_else(
-        || format!("{html}{section}"),
-        |i| {
-            format!(
-                "{}{section}{}",
-                html.get(..i).unwrap_or_default(),
-                html.get(i..).unwrap_or_default()
-            )
-        },
-    );
-    let mut response = Response::from_parts(parts, Body::from(out));
-    response.headers_mut().remove(header::CONTENT_LENGTH);
-    response
-}
-
-fn is_html(response: &Response) -> bool {
-    response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .is_some_and(|t| t.as_bytes().starts_with(b"text/html"))
 }
 
 // ── Files: the views and the archive (#510) ─────────────────────────
@@ -2543,139 +2422,6 @@ struct ViewQuery {
 fn view_of(query: &str) -> Option<(Grouping, Option<String>)> {
     let asked = serde_urlencoded_form::<ViewQuery>(query.as_bytes()).ok()?;
     Some((Grouping::parse(&asked.by)?, asked.group))
-}
-
-/// The look of the files page and of the bar pages link to it with: the
-/// site's own tokens (`--site-*`), so both follow its theme.
-const FILES_STYLE: &str = "<style>.share-files{max-width:46rem;margin:2rem auto;padding:0 1rem;font:16px/1.5 system-ui,sans-serif}.share-files h1{margin:.2rem 0 1rem}.share-views{display:flex;flex-wrap:wrap;gap:.4rem;margin:1rem 0}.share-views a{padding:.3rem .8rem;border-radius:999px;border:1px solid var(--site-rule,#8886);text-decoration:none;color:inherit}.share-views a[aria-current]{background:var(--site-accent,#3b6ef5);border-color:transparent;color:#fff}.share-download{display:inline-block;padding:.4rem 1rem;border-radius:.4rem;background:var(--site-accent,#3b6ef5);color:#fff;text-decoration:none}.share-group{border-top:1px solid var(--site-rule,#8884);margin-top:1.2rem;padding-top:.6rem}.share-group header{display:flex;align-items:baseline;justify-content:space-between;gap:1rem}.share-group h2{font-size:1.1rem;margin:.2rem 0}.share-group ol{padding-left:1.6rem}.share-group ul{list-style:none;padding-left:0;margin:.1rem 0 .5rem}.share-group ul a{font-size:.95em}.share-files-bar{max-width:42rem;margin:2rem auto 1rem;padding:.6rem 1rem;border-top:1px solid var(--site-rule,#8884);display:flex;gap:1rem;align-items:center}@media(prefers-color-scheme:dark){body.share-files-page{background:#111;color:#eee}}</style>";
-
-/// `<link>_files/`: what the link lists, in the view asked for, with
-/// the other views a click away and "Download all" on the page and on
-/// each group.
-async fn files_page(shares: &Shares, link: &Link<'_>, query: &str) -> Response {
-    let Some((by, _)) = view_of(query) else {
-        return page(
-            StatusCode::BAD_REQUEST,
-            "No such view",
-            "<p>A view is <code>order</code>, <code>note</code> or <code>property:&lt;name&gt;</code>.</p>",
-        );
-    };
-    let Some(listed) = shares.listed_for(link, &by).await else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-    let here = format!("{}_files/", link.mount);
-    let zip = format!("{}_archive.zip", link.mount);
-    let title = link.title();
-    let mut html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\"><title>Files · {t}</title>{FILES_STYLE}</head><body class=\"share-files-page\"><main class=\"share-files\" data-view=\"{view}\"><p><a href=\"{home}\">← {t}</a></p><h1>Files</h1>",
-        t = escape(&title),
-        view = escape(&by.label()),
-        home = escape(link.mount),
-    );
-    // The views, each a link: in order, by note, by each property.
-    let mut views = vec![
-        (Grouping::Order, "In order".to_owned()),
-        (Grouping::Note, "By note".to_owned()),
-    ];
-    views.extend(
-        listing::property_keys(&listed.entries)
-            .into_iter()
-            .take(12)
-            .map(|key| (Grouping::Property(key.clone()), format!("By {key}"))),
-    );
-    if !views.iter().any(|(view, _)| *view == by) {
-        views.push((by.clone(), by.label()));
-    }
-    html.push_str("<nav class=\"share-views\" aria-label=\"View\">");
-    for (view, name) in &views {
-        let _ = write!(
-            html,
-            "<a href=\"{}?by={}\"{}>{}</a>",
-            escape(&here),
-            escape(&encode(&view.label())),
-            if *view == by {
-                " aria-current=\"page\""
-            } else {
-                ""
-            },
-            escape(name)
-        );
-    }
-    html.push_str("</nav>");
-    let files: usize = listed.groups.iter().map(|g| g.files.len()).sum();
-    if files == 0 {
-        html.push_str("<p class=\"share-files-none\">No files are attached here.</p>");
-    } else {
-        let _ = write!(
-            html,
-            "<p><a class=\"share-download\" href=\"{}?by={}\" download>Download all ({files} {})</a></p>",
-            escape(&zip),
-            escape(&encode(&by.label())),
-            if files == 1 { "file" } else { "files" }
-        );
-    }
-    for group in &listed.groups {
-        html.push_str("<section class=\"share-group\">");
-        if by != Grouping::Order {
-            let name = match (&by, group.label.is_empty()) {
-                (Grouping::Property(key), true) => format!("No {key}"),
-                _ => group.label.clone(),
-            };
-            let _ = write!(html, "<header><h2>{}</h2>", escape(&name));
-            if !group.files.is_empty() {
-                let _ = write!(
-                    html,
-                    "<a href=\"{}?by={}&amp;group={}\" download>Download ({})</a>",
-                    escape(&zip),
-                    escape(&encode(&by.label())),
-                    escape(&encode(&group.label)),
-                    group.files.len()
-                );
-            }
-            html.push_str("</header>");
-        }
-        html.push_str("<ol>");
-        for &i in &group.entries {
-            let Some(entry) = listed.entries.get(i) else {
-                continue;
-            };
-            html.push_str("<li>");
-            match listed.pages.get(&entry.path) {
-                Some(path) => {
-                    let _ = write!(
-                        html,
-                        "<a href=\"{}{}\">{}</a>",
-                        escape(link.mount.trim_end_matches('/')),
-                        escape(&encode(path)),
-                        escape(&entry.title)
-                    );
-                }
-                None => html.push_str(&escape(&entry.title)),
-            }
-            if !entry.files.is_empty() {
-                html.push_str("<ul>");
-                for file in &entry.files {
-                    let _ = write!(
-                        html,
-                        "<li><a href=\"{}{}\">{}</a></li>",
-                        escape(link.mount),
-                        escape(&encode(file)),
-                        escape(file.rsplit('/').next().unwrap_or(file))
-                    );
-                }
-                html.push_str("</ul>");
-            }
-            html.push_str("</li>");
-        }
-        html.push_str("</ol></section>");
-    }
-    html.push_str("</main></body></html>");
-    let mut response = (StatusCode::OK, html).into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/html; charset=utf-8"),
-    );
-    response
 }
 
 #[derive(serde::Deserialize)]
@@ -2823,6 +2569,11 @@ async fn listing(
                 .map(str::to_owned),
             page: listed.pages.get(&entry.path).map(|p| format!("{base}{p}")),
             files: entry.files.clone(),
+            // Only art the link serves at this layer: one of its files.
+            art: entry
+                .art()
+                .filter(|a| entry.files.iter().any(|f| f == a))
+                .map(str::to_owned),
         });
         for file in &entry.files {
             if !seen.insert(file.as_str()) {
@@ -2898,6 +2649,17 @@ impl GuestLane {
             .filter(|c| is_code(c))
             .and_then(|c| self.0.link(c))
             .ok_or(GuestFault::Gone)?;
+        // No token in the call: the browser's sign-in to this node, if it
+        // sent one.
+        let token = if token.is_empty() {
+            GUEST_COOKIE
+                .try_with(Clone::clone)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        } else {
+            token
+        };
         match self.0.open(&share, Some(token)).await {
             Ok(_) => Ok((share, audience)),
             Err(Closed::Gone) => Err(GuestFault::Gone),
@@ -3063,173 +2825,6 @@ fn view_files(note: &ListedNote, files: Vec<ListedFile>) -> Vec<ListedFile> {
         |f| f.path.as_str(),
         |f| f.size,
     )
-}
-
-/// A page of the link, with a bar to its files page and its archive
-/// when it lists any file, and its queue ([`queue`]) when any of them
-/// plays.
-async fn with_files_bar(shares: &Shares, link: &Link<'_>, response: Response) -> Response {
-    let listed = shares.listed_for(link, &Grouping::Order).await;
-    let files: usize = listed
-        .iter()
-        .flat_map(|l| l.groups.iter())
-        .map(|g| g.files.len())
-        .sum();
-    let tracks = listed
-        .as_ref()
-        .map(|l| queue(l, link.mount))
-        .unwrap_or_default();
-    // The phone shell: its root note's type's tabs, or the share's own.
-    let base = link.mount.trim_end_matches('/');
-    let (root_type, root_page) = listed.as_ref().and_then(root_note).map_or_else(
-        || (String::new(), link.mount.to_owned()),
-        |(t, page)| (t, format!("{base}{page}")),
-    );
-    let shell = architect_sites::shell::shell_json(
-        architect_sites::shell::favourites_for(shares.favourites(), &root_type),
-        &root_page,
-    )
-    .to_string()
-    .replace("</", "<\\/");
-    let shell = format!("<script type=\"application/json\" id=\"site-shell\">{shell}</script>");
-    let art = listed
-        .as_ref()
-        .map(|l| art_by_page(l, link.mount))
-        .unwrap_or_default();
-    let (parts, body) = response.into_parts();
-    let Ok(bytes) = architect::http::axum::body::to_bytes(body, 16 * 1024 * 1024).await else {
-        return Response::from_parts(parts, Body::empty());
-    };
-    let mut section = shell;
-    if files > 0 {
-        let _ = write!(
-            section,
-            "{FILES_STYLE}<nav class=\"share-files-bar\" aria-label=\"Files\"><a href=\"{m}_files/\">Files ({files})</a><a class=\"share-download\" href=\"{m}_archive.zip?by=note\" download>Download all</a></nav>",
-            m = escape(link.mount)
-        );
-    }
-    if !tracks.is_empty() {
-        // What the page's player may draw on its now-playing view
-        // (studio#445): the runtime, the sandbox, the islands.
-        let islands = architect_sites::island::page_json(shares.islands())
-            .to_string()
-            .replace("</", "<\\/");
-        let _ = write!(
-            section,
-            "<script type=\"application/json\" id=\"site-islands\">{islands}</script>"
-        );
-    }
-    // The queue, and the art of the link's songs: art too when nothing
-    // plays (a setlist with no recordings still shows its covers).
-    if let Some(script) = queue_script(link.mount, &tracks, &art) {
-        section.push_str(&script);
-    }
-    before_main_end(parts, &String::from_utf8_lossy(&bytes), &section)
-}
-
-/// The link's root note: the note at its page `/`, else the first it
-/// lists (a setlist shared with its songs: the setlist). Its type (the
-/// frontmatter's `type:`, or its list's first; empty without one) and its
-/// page below the link.
-fn root_note(listed: &Listed) -> Option<(String, String)> {
-    let at_root = listed
-        .pages
-        .iter()
-        .find(|(_, page)| page.as_str() == "/")
-        .map(|(note, _)| note.as_str());
-    let entry = match at_root {
-        Some(root) => listed.entries.iter().find(|e| e.path == root)?,
-        None => listed
-            .entries
-            .iter()
-            .find(|e| listed.pages.contains_key(&e.path))?,
-    };
-    let page = listed.pages.get(&entry.path)?.clone();
-    let kind = match entry.properties.get("type") {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        Some(serde_json::Value::Array(list)) => list
-            .first()
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_owned(),
-        _ => String::new(),
-    };
-    Some((kind, page))
-}
-
-/// A link's queue (#511): every audio or video file of the notes it
-/// lists, in list order (a note's own in the order it names them), each
-/// with the page of its note, as the page's player reads it (`src`,
-/// `page`, `title`, `kind`). Read per request, so an audience's queue
-/// is its filter's.
-fn queue(listed: &Listed, mount: &str) -> Vec<serde_json::Value> {
-    let base = mount.trim_end_matches('/');
-    let mut tracks = Vec::new();
-    for entry in listed.entries.iter() {
-        let page = listed
-            .pages
-            .get(&entry.path)
-            .map_or_else(|| format!("{base}/"), |p| format!("{base}{p}"));
-        let media: Vec<_> = entry
-            .files
-            .iter()
-            .filter_map(|f| Some((f, architect_sites::media::media_kind(f)?)))
-            .collect();
-        for (file, kind) in &media {
-            let name = file.rsplit('/').next().unwrap_or(file);
-            let title = if media.len() > 1 {
-                format!("{}: {name}", entry.title)
-            } else {
-                entry.title.clone()
-            };
-            tracks.push(serde_json::json!({
-                "src": format!("{base}/{}", architect_sites::encode_path(file)),
-                "page": page,
-                "title": title,
-                "kind": kind.tag(),
-            }));
-        }
-    }
-    tracks
-}
-
-/// The page's `site-queue` script: the link's tracks and its pages' art;
-/// None when there is neither.
-fn queue_script(
-    mount: &str,
-    tracks: &[serde_json::Value],
-    art: &serde_json::Map<String, serde_json::Value>,
-) -> Option<String> {
-    if tracks.is_empty() && art.is_empty() {
-        return None;
-    }
-    let json = serde_json::json!({ "scope": mount, "tracks": tracks, "art": art });
-    // JSON in a script element: `</` must not close it.
-    let json = json.to_string().replace("</", "<\\/");
-    Some(format!(
-        "<script type=\"application/json\" id=\"site-queue\">{json}</script>"
-    ))
-}
-
-/// Each listed note's art (`art:`, `architect_sites::art`) by its page,
-/// both as the page's player names them (`{"/s/x/joy/": "/s/x/Joy/cover.jpg"}`):
-/// what a playlist's rows and the player's card show beside a song. Only
-/// a note the link lists, only art still among its files (its scope's
-/// and its layer's), so a note outside the link shows none.
-fn art_by_page(listed: &Listed, mount: &str) -> serde_json::Map<String, serde_json::Value> {
-    let base = mount.trim_end_matches('/');
-    listed
-        .entries
-        .iter()
-        .filter_map(|entry| {
-            let art = entry.art()?;
-            let page = listed.pages.get(&entry.path)?;
-            Some((
-                format!("{base}{page}"),
-                serde_json::Value::String(format!("{base}/{}", architect_sites::encode_path(art))),
-            ))
-        })
-        .collect()
 }
 
 /// How much of a file is read, and sent, at a time.
@@ -4030,159 +3625,8 @@ mod tests {
         );
     }
 
-    /// Art reaches the page with no track to play: a setlist with no
-    /// recordings still shows its covers.
-    #[test]
-    fn art_goes_out_without_a_queue() {
-        let mut art = serde_json::Map::new();
-        art.insert(
-            "/s/abc/joy/".to_owned(),
-            serde_json::json!("/s/abc/Joy/cover.jpg"),
-        );
-        let script = queue_script("/s/abc/", &[], &art).unwrap();
-        assert!(
-            script.contains("\"tracks\":[]") && script.contains("/s/abc/Joy/cover.jpg"),
-            "{script}"
-        );
-        assert!(queue_script("/s/abc/", &[], &serde_json::Map::new()).is_none());
-    }
-
-    #[test]
-    fn art_is_a_listed_notes_own_file() {
-        let entry = |path: &str, files: &[&str], art: Option<&str>| Entry {
-            path: path.to_owned(),
-            title: path.to_owned(),
-            properties: serde_json::Map::new(),
-            files: files.iter().map(|f| (*f).to_owned()).collect(),
-            art: art.map(str::to_owned),
-        };
-        let listed = Listed {
-            groups: Vec::new(),
-            entries: Arc::new(vec![
-                // Its art among its files: shown.
-                entry(
-                    "Set/Joy.md",
-                    &["Set/Joy.mp3", "Set/Joy cover.jpg"],
-                    Some("Set/Joy cover.jpg"),
-                ),
-                // No art.
-                entry("Set/Noel.md", &["Set/Noel.mp3"], None),
-                // Its art taken out of its files (a layer above the link's).
-                entry("Set/Eve.md", &["Set/Eve.mp3"], Some("Set/Eve.png")),
-                // Listed but with no page of the link.
-                entry("Set/Draft.md", &["Set/d.png"], Some("Set/d.png")),
-            ]),
-            pages: [
-                ("Set/Joy.md".to_owned(), "/joy/".to_owned()),
-                ("Set/Noel.md".to_owned(), "/noel/".to_owned()),
-                ("Set/Eve.md".to_owned(), "/eve/".to_owned()),
-            ]
-            .into(),
-            root: PathBuf::new(),
-        };
-        let art = art_by_page(&listed, "/s/abc/");
-        assert_eq!(
-            serde_json::Value::Object(art),
-            serde_json::json!({ "/s/abc/joy/": "/s/abc/Set/Joy%20cover.jpg" })
-        );
-    }
-
-    #[test]
-    fn the_shells_root_is_the_note_at_the_root_else_the_first_listed() {
-        let entry = |path: &str, kind: Option<&str>| Entry {
-            path: path.to_owned(),
-            title: path.to_owned(),
-            properties: kind
-                .map(|k| std::iter::once(("type".to_owned(), serde_json::json!(k))).collect())
-                .unwrap_or_default(),
-            files: Vec::new(),
-            art: None,
-        };
-        let listed = |pages: &[(&str, &str)]| Listed {
-            groups: Vec::new(),
-            entries: Arc::new(vec![
-                entry("Setlists/Eve.md", Some("setlist")),
-                entry("Songs/Joy.md", Some("song")),
-            ]),
-            pages: pages
-                .iter()
-                .map(|(n, p)| ((*n).to_owned(), (*p).to_owned()))
-                .collect(),
-            root: PathBuf::new(),
-        };
-        // A setlist shared with its songs: the first listed, at its page.
-        assert_eq!(
-            root_note(&listed(&[
-                ("Setlists/Eve.md", "/setlists/eve/"),
-                ("Songs/Joy.md", "/songs/joy/")
-            ])),
-            Some(("setlist".to_owned(), "/setlists/eve/".to_owned()))
-        );
-        // A note at the link's root wins.
-        assert_eq!(
-            root_note(&listed(&[
-                ("Setlists/Eve.md", "/setlists/eve/"),
-                ("Songs/Joy.md", "/")
-            ])),
-            Some(("song".to_owned(), "/".to_owned()))
-        );
-        assert_eq!(root_note(&listed(&[])), None);
-    }
-
-    #[test]
-    fn the_queue_is_the_lists_order_and_only_its_media() {
-        let entry = |path: &str, title: &str, files: &[&str]| Entry {
-            path: path.to_owned(),
-            title: title.to_owned(),
-            properties: serde_json::Map::new(),
-            files: files.iter().map(|f| (*f).to_owned()).collect(),
-            art: None,
-        };
-        // List order is the listing's, not the names': b before a.
-        let entries = vec![
-            entry("Set/b.md", "Bee", &["Set/b chart.pdf", "Set/b take.mp3"]),
-            entry("Set/a.md", "Ay", &["Set/a.mp3", "Set/a.mp4", "Set/a.lrc"]),
-            entry("Set/c.md", "Sea", &["Set/c.pdf"]),
-        ];
-        let listed = Listed {
-            groups: Vec::new(),
-            entries: Arc::new(entries),
-            pages: [
-                ("Set/b.md".to_owned(), "/b/".to_owned()),
-                ("Set/a.md".to_owned(), "/a/".to_owned()),
-            ]
-            .into(),
-            root: PathBuf::new(),
-        };
-        let tracks = queue(&listed, "/s/abc/");
-        let got: Vec<(&str, &str, &str, &str)> = tracks
-            .iter()
-            .map(|t| {
-                (
-                    t["src"].as_str().unwrap_or_default(),
-                    t["page"].as_str().unwrap_or_default(),
-                    t["title"].as_str().unwrap_or_default(),
-                    t["kind"].as_str().unwrap_or_default(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            got,
-            [
-                ("/s/abc/Set/b%20take.mp3", "/s/abc/b/", "Bee", "audio"),
-                ("/s/abc/Set/a.mp3", "/s/abc/a/", "Ay: a.mp3", "audio"),
-                ("/s/abc/Set/a.mp4", "/s/abc/a/", "Ay: a.mp4", "video"),
-            ]
-        );
-        // On a domain, at the root.
-        assert_eq!(queue(&listed, "/")[0]["src"], "/Set/b%20take.mp3");
-    }
-
     #[test]
     fn paths_and_cookies() {
-        assert_eq!(page_key("/track/"), "/track/");
-        assert_eq!(page_key("/track/index.html"), "/track/");
-        assert_eq!(page_key("/"), "/");
         assert_eq!(safe_to("//evil.example"), "/");
         assert_eq!(safe_to("https://evil.example"), "/");
         assert_eq!(safe_to("/abc/x/"), "/abc/x/");

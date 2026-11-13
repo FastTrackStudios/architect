@@ -142,7 +142,11 @@ node:
   #   /org            /org/<slug>/vox: the org lane (vaults, share links)
   #   /mcp            MCP (only with node.mcp)
   #   /health         liveness and readiness
-  #   /s              share links /s/<code>/ and their sign-in /s/_signin
+  #   /s              share links /s/<code>/ and their sign-in /s/_signin. A
+  #                   link's page is the node's copy of the web app's page
+  #                   (#646), which loads /app/start.js and assets/app-*/
+  #                   from the web front end on this host: keep web.enabled
+  #                   (or serve the same release's web bundle beside it)
   #   /node           the node's HTTP face (POST /node/status)
   #   /blobs          reserved for the node (files' bytes over HTTP)
   #   /.well-known    reserved for the node

@@ -12,7 +12,9 @@ yq() { if type -P yq >/dev/null && command yq --version 2>&1 | grep -q mikefarah
 # Every prefix the node serves (apps/desktop/src/node: /vox and /health from
 # EngineHost, /org/<slug>/vox the org lane, /mcp, /s share links, /node the
 # HTTP face) and the two it reserves. A prefix taken out of values.yaml
-# fails here.
+# fails here. `/s` stays the node's whole: a share link's page is the
+# node's answer (the web app's page, #646), its script the web front end's
+# `/app/` (routed to web below).
 want=(/vox /org /mcp /health /s /node /blobs /.well-known)
 
 out="$(helm template t "$chart" --set ingress.enabled=true --set host=a.test \
@@ -28,6 +30,8 @@ check() { # <host> <path> <want>
 }
 for p in "${want[@]}" /notes; do check a.test "$p" t-architect-node:http; done
 check a.test / t-architect-web:http
+# A share link's page loads the app from /app/ on the web front end.
+[ -z "$(backend a.test /app)" ] || { echo "FAIL  /app routed on its own, not by /"; fail=1; }
 check s3.a.test / t-architect-node:s3
 
 # Nothing else goes to the node, and nothing is listed twice.

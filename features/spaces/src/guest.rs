@@ -343,6 +343,11 @@ pub struct ListedNote {
     pub page: Option<String>,
     /// The files it attaches that the link serves.
     pub files: Vec<String>,
+    /// Its art (`cover:`/`art:`), one of `files`: a list's tile and the
+    /// Now Playing card's picture (#646). None when it has none, or the
+    /// link does not serve it.
+    #[facet(default)]
+    pub art: Option<String>,
 }
 
 /// One file a link serves, at the layer asked for.

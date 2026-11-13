@@ -54,6 +54,7 @@ pub mod org;
 mod s3;
 pub mod service;
 pub mod share_layers;
+pub mod share_shell;
 pub mod shares;
 
 use std::collections::BTreeMap;
