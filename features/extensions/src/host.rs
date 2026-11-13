@@ -2484,7 +2484,7 @@ mod linked {
 
     use architect::action::{ActionCaller, ActionError, ActionFuture, CallerAsyncHandler};
 
-    use super::{Context, Instance, invocation_json, json_args, now_ms};
+    use super::{Context, Instance, json_args, now_ms};
     use crate::contrib::{Contribution, Contributions, StateWrite};
     use crate::linked::Builder;
     use crate::manifest::{ActionDecl, Kind, Manifest};
@@ -2571,7 +2571,7 @@ mod linked {
             let id = decl.id.clone();
             Ok(Arc::new(move |caller: &ActionCaller, args: &[u8]| {
                 let args = json_args(&id, args)?;
-                let cx = invocation_json(caller.invocation());
+                let cx = crate::invocation::caller_json(caller);
                 let (work, id) = (run(args, cx), id.clone());
                 let out: ActionFuture = Box::pin(async move {
                     work.await

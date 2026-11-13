@@ -710,6 +710,11 @@ impl Stack {
             &public.join("app/config.json"),
             config.to_string().as_bytes(),
         )?;
+        // The demo's recording (silent), which the Now Playing bar plays.
+        write(
+            &public.join("app/demo-recording.mp3"),
+            &read(&web.join("app/demo-recording.mp3"))?,
+        )?;
         write(
             &public.join("favicon.svg"),
             &read(&self.root.join("apps/site/public/favicon.svg"))?,

@@ -1003,7 +1003,7 @@ impl WebComponent {
                 let sent = tx.unbounded_send(Run {
                     action: id.clone(),
                     args: String::from_utf8_lossy(args).into_owned(),
-                    invocation: crate::invocation::invocation_json(caller.invocation()).to_string(),
+                    invocation: crate::invocation::caller_json(caller).to_string(),
                     reply,
                 });
                 let id = id.clone();

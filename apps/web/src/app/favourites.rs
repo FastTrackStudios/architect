@@ -13,7 +13,9 @@
 //! beside it; a tab the browser cannot open, or that names what its
 //! extension may not, is left out. The tab current is the one whose place
 //! is on show; a `{place}` keeps the set while its note is on show. Its
-//! primary action shows its first face: the browser knows no state yet.
+//! primary action shows its second face while its state is on: `playing`
+//! is its extension's source playing on the playhead (#589; the round
+//! button's action is `PLAYHEAD_TOGGLE`, a command here).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -77,6 +79,10 @@ pub fn use_web_favourites(
     source: &MemorySource,
     commands: Commands,
 ) -> Slots {
+    // What plays, and whether: a primary's `playing` face follows it.
+    let now = architect_playhead::ui::use_playhead();
+    let what_plays = use_memo(move || now().active.map(|a| (a.source, a.playing)));
+    let _ = what_plays();
     let declared_list = use_resource(frames::favourites);
     let islands = use_resource(frames::island_views);
     // A place a tab opened, the note whose set it keeps and that note's
@@ -178,7 +184,10 @@ pub fn use_web_favourites(
                 });
                 Some((press, shows))
             },
-            |_| false,
+            |state| {
+                state == architect_playhead::PLAYING_STATE
+                    && architect_playhead::playing(&d.by.extension)
+            },
         );
         if let Some(made) = made {
             declared.push(made);

@@ -1667,6 +1667,78 @@ would be drawn by the extension's own Dioxus tree into an element of the
 page (linked views work as they are), or a page's tree rendered into
 a shadow root, its height read with a `ResizeObserver`.
 
+### The playhead and the Now Playing bar
+
+The app has one media service, the playhead (`features/playhead`,
+`architect.playhead`, #589), and one Now Playing bar, the shell's own
+(`architect_shell::AppShell`'s `now_playing`, drawn by
+`architect_playhead::ui::NowPlayingBar`): above a phone's tab bar, at a
+desk's page foot, the same in the web app. Any extension puts what it
+plays on the deck as its **source** and controls it; several can each
+have one; the bar shows the **active** one and lists the rest. Nothing in
+it knows what a source means to its extension.
+
+A source is one extension's queue (`PLAYHEAD_SET`, method `set`):
+
+```json
+{ "name": "Studio", "index": 0, "play": false,
+  "queue": [{ "id": "Setlists/Gig.md#1", "title": "Amazing Grace", "subtitle": "John Newton",
+              "art": "Art/grace.jpg", "duration": 192.5, "media": "Recordings/Amazing Grace.mp3",
+              "sections": [{ "name": "Verse 1", "start": 0, "end": 20, "color": "#2563eb" }],
+              "marks": [{ "at": 1.5, "text": "Amazing grace", "kind": "line" }] }] }
+```
+
+`media` and `art` are vault paths, never URLs (`architect_playhead::model::vault_path`):
+the app turns a path into a stream itself. An empty queue removes the
+source. A `SET` whose current item keeps its `id` keeps playing where it
+was. Without `media` an item plays on a silent clock over its `duration`.
+
+Every view gets the same state (`PLAYHEAD_STATE`, `Deck::state`):
+`source`, `name`, `active`, `playing`, `time` at `at` (ms since the
+epoch; extrapolate while `playing`), `rate`, `duration`, `index`,
+`tracks`, `clock` (`media` or `silent`), `item`, `queue`, and the share
+page's flat keys (`title`, `subtitle`, `artist`, `sections`).
+
+| Method (action) | Arguments | Who |
+| --- | --- | --- |
+| `set` (`PLAYHEAD_SET`) | the source | an extension: its own; the app names `source` |
+| `play`, `pause`, `next`, `previous` | `source?` | an extension: its own; the app: `source` or the active one |
+| `seek` | `t`, `source?` | the same |
+| `item` | `index` or `id`, `play?`, `source?` | the same |
+| `toggle` | `source?` | the same: play, or pause what plays (a favourite's round button) |
+| `state`, `sources` | `source?` | reads |
+| `activate` | `source` | the app only (the bar's switcher) |
+
+Who calls is the host's to say, never the arguments': every action's
+context carries `caller`, the calling extension's id from the call's
+principal (`architect_extensions::invocation::caller_json`), and an
+extension naming another's source is refused (`not your source`). Playing
+a source makes it the active one and pauses the one before.
+
+The same contract reaches every runtime: a linked or process extension
+calls the service (`[uses] "architect.playhead" = "^0.1"`) and hooks the
+app event `playhead.changed` (its detail the state); a linked view reads
+`architect_playhead::ui::use_playhead`; a web bundle in the web app's
+frame host gets the state as its props and asks `PLAYHEAD_SEEK`, `_PLAY`,
+`_PAUSE`, `_NEXT`, `_PREVIOUS`, `_ITEM` and `_SET` (`architect_playhead::FRAME_ASKS`),
+rate-limited, as its island's extension.
+
+A favourite's primary (#607) plays and pauses with `target = { action =
+"PLAYHEAD_TOGGLE" }` (its extension's capabilities name `PLAYHEAD_`) and
+shows Pause by `state = "playing"`: the app keeps each source's playing as
+its extension's own runtime state (`ext:<id>`, key `playing`,
+`architect_playhead::PLAYING_STATE`), so the extension writes nothing.
+Pressed from the bar, ⌘K or a favourite, it is the app's press, on the
+active source.
+
+What is heard is a `Clock` (`architect_playhead::clock`): the web app's
+own audio element (`apps/web/src/app/audio.rs`, the page's
+`media-src 'self'`, Media Session), a silent clock in the native apps
+(audible native playback comes later), and later an engine attached as
+the clock (studio#400, #528). The playhead is not synced state: a
+position is one device's; what a source plays comes from its
+extension's documents, which sync through `crdt::docs`.
+
 ### Views that follow playback
 
 A chart whose bar is marked as the song plays, lyrics whose line is: a

@@ -686,6 +686,10 @@ fn WebNote(path: String) -> Element {
         .iter()
         .map(|(k, v)| (k.clone(), shown(v)))
         .collect();
+    // A note's recording (its `recording` property, a vault path) plays on
+    // the app's own source in the Now Playing bar (#589).
+    let recording = prop("recording");
+    let note_title = prop("title").unwrap_or_else(|| title_of(&path));
     rsx! {
         document::Style { {LAYOUT} }
         div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink};",
@@ -696,11 +700,14 @@ fn WebNote(path: String) -> Element {
                         // share's guest is `Audience::Guest` (#629, #648).
                         audience: crate::ext_host::Audience::Member,
                         path: path.clone(),
-                        title: prop("title").unwrap_or_else(|| title_of(&path)),
+                        title: note_title.clone(),
                         note_type: note_type.clone(),
                         properties: shown_properties,
                         body: body.clone(),
                     }
+                }
+                if let Some(r) = recording {
+                    super::recording::RecordingRow { path: path.clone(), title: note_title, recording: r }
                 }
                 if !properties.is_empty() {
                     dl { "data-testid": "note-properties",

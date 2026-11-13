@@ -952,6 +952,43 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         {
             extensions = with;
         }
+        // The playhead (#589): `architect.playhead`, every extension's way
+        // into the Now Playing bar. Each change is the app event
+        // `playhead.changed` (its detail the source's state), which a
+        // process extension hooks to follow it.
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&architect_playhead::Playhead)
+        {
+            extensions = with;
+            let host = extensions.host().clone();
+            let _ = host.define_event(architect_extensions::events::AppEvent {
+                name: architect_playhead::CHANGED.to_owned(),
+                title: "Now Playing changes".to_owned(),
+                description: "A source on the playhead was set, played, paused, sought, moved to another item or removed; its detail is that source's state (PLAYHEAD_STATE).".to_owned(),
+                detail: None,
+            });
+            architect_playhead::on_change(move |state| {
+                let _ = host.raise_app(architect_playhead::CHANGED, state);
+                // Its source's playing, as its extension's own runtime
+                // state: a favourite's primary shows Pause by it (#607).
+                if let Some(id) = state.get("source").and_then(serde_json::Value::as_str) {
+                    let on = state.get("playing") == Some(&serde_json::Value::Bool(true));
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+                    let _ = host.contributions().set_state(
+                        architect_extensions::contrib::StateWrite {
+                            source: format!("ext:{id}"),
+                            key: architect_playhead::PLAYING_STATE.to_owned(),
+                            text: on.to_string(),
+                            ..Default::default()
+                        },
+                        now,
+                    );
+                }
+            });
+        }
         // The settings page: its window, ⌘, (the app's APP_SETTINGS, which
         // the lab lets it own) and its point, settings.sections.
         extensions

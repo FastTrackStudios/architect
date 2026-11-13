@@ -33,10 +33,20 @@
 //   before ready and while the page is hidden are refused; a hostile
 //   `PLAYHEAD_SET` is refused whole and a full 500-item queue fits.
 //
-// Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the PATH), in a
+// The Now Playing bar (#589) on the same stack: the song's folder is the
+// island's queue on the playhead, the bar shows it, its presses reach the
+// frames' props, a frame's asks move the bar, a note's recording is a
+// second source the bar switches to, and a frame moves only its own
+// extension's source, within the rate limit. The app's own audio element
+// streams the demo's silent recording with `Range`.
+//
+// Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the PATH), its
+// volume at zero and autoplay allowed (the profile's prefs). On Linux in a
 // mount namespace whose runtime dir and /run/pipewire are empty (`unshare
 // -r -m`): a headless Firefox otherwise opens a stream on the machine's
-// live audio graph. `just app-ext-host-test` builds and runs it.
+// live audio graph; on a Mac, headless as it is (its output at zero and the
+// file silent). `just app-ext-host-test` builds and runs it; SHOTS=<dir>
+// writes the bar's screenshots (390 px and desk width) there.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -232,6 +242,7 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '
 /// `tamper`), the rest the bundle's files, the app's page with its policy.
 async function front(nodeOrigin, { tamper = false } = {}) {
   const policy = appPolicy();
+  const media = [];
   const port = await freePort();
   const target = new URL(nodeOrigin);
   const fetched = [];
@@ -254,13 +265,26 @@ async function front(nodeOrigin, { tamper = false } = {}) {
     if (!file.startsWith(normalize(BUNDLE))) { res.statusCode = 403; res.end(); return; }
     if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html');
     if (!existsSync(file)) { res.statusCode = 404; res.end(); return; }
+    // A recording, ranged as the node's files are (`206`, `Content-Range`).
+    if (extname(file) === '.mp3') {
+      const body = readFileSync(file);
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+      const h = { 'content-type': 'audio/mpeg', 'accept-ranges': 'bytes', 'cache-control': 'no-store' };
+      if (!m) { media.push(`200 ${path}`); res.writeHead(200, { ...h, 'content-length': body.length }); res.end(body); return; }
+      const start = m[1] ? Number(m[1]) : Math.max(0, body.length - Number(m[2]));
+      const end = m[1] && m[2] ? Math.min(Number(m[2]), body.length - 1) : body.length - 1;
+      media.push(`206 ${path} ${start}-${end}`);
+      res.writeHead(206, { ...h, 'content-range': `bytes ${start}-${end}/${body.length}`, 'content-length': end - start + 1 });
+      res.end(body.subarray(start, end + 1));
+      return;
+    }
     const headers = { 'content-type': TYPES[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' };
     if (path === '/app/' || path === '/app/index.html') headers['content-security-policy'] = policy;
     res.writeHead(200, headers);
     res.end(readFileSync(file));
   });
   await new Promise((ok) => srv.listen(port, '127.0.0.1', ok));
-  return { origin: `http://127.0.0.1:${port}`, policy, fetched, close: () => srv.close() };
+  return { origin: `http://127.0.0.1:${port}`, policy, fetched, media, close: () => srv.close() };
 }
 
 function attacker() {
@@ -278,13 +302,19 @@ function attacker() {
 
 async function firefox() {
   const profile = mkdtempSync(join(tmpdir(), 'app-ext-ff-'));
+  // Nothing is heard: its output at zero; autoplay allowed, so the app's
+  // audio element can be seen playing.
+  writeFileSync(join(profile, 'user.js'), 'user_pref("media.volume_scale", "0.0");\nuser_pref("media.autoplay.default", 0);\nuser_pref("media.autoplay.blocking_policy", 0);\n');
   const port = await freePort();
   const runtime = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
   const env = { ...process.env, XDG_RUNTIME_DIR: runtime, MOZ_HEADLESS: '1' };
   delete env.LD_LIBRARY_PATH; delete env.PIPEWIRE_REMOTE; delete env.PULSE_SERVER;
   // Away from the audio graph, or not at all.
   const hide = 'mount -t tmpfs none "$XDG_RUNTIME_DIR" && { [ ! -d /run/pipewire ] || mount -t tmpfs none /run/pipewire; } && exec "$0" "$@"';
-  const proc = spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, '--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)], { stdio: 'ignore', env, detached: true });
+  const args = ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)];
+  const proc = process.platform === 'darwin'
+    ? spawn(browser, args, { stdio: 'ignore', env, detached: true })
+    : spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);
@@ -308,6 +338,8 @@ async function firefox() {
     hide: async () => { const other = (await send('browsingContext.create', { type: 'tab' })).context; await send('browsingContext.activate', { context: other }); return other; },
     show: async (other) => { await send('browsingContext.close', { context: other }); await send('browsingContext.activate', { context }); },
     go: (url) => send('browsingContext.navigate', { context, url, wait: 'complete' }),
+    size: (width, height) => send('browsingContext.setViewport', { context, viewport: { width, height } }),
+    shot: async (file) => { const r = await send('browsingContext.captureScreenshot', { context }); writeFileSync(file, Buffer.from(r.data, 'base64')); },
     eval: (e) => evalIn(context, e),
     evalIn,
     tops: async () => (await send('browsingContext.getTree', {})).contexts.length,
@@ -574,3 +606,142 @@ async function openNoteOnly(w) {
   await until(() => click('Amazing Grace'), 10000, 'the song note');
   await until(() => b.eval(`!!document.querySelector('[data-note="Songs/Amazing Grace.md"]')`), 15000, 'the song note open');
 }
+// ── The Now Playing bar (#589) ──────────────────────────────────────
+
+/// A queue view, as Studio's (studio#490 `queue.rs`) speaks #589 v0.1: it
+/// sets its source and makes its song current, and writes what it was
+/// handed last to its body.
+const QUEUE = `
+  globalThis.architectPage.subscribe((p) => {
+    document.body.dataset.props = JSON.stringify({ source: p.source, name: p.name, active: p.active, title: p.title,
+      playing: p.playing, index: p.index, tracks: p.tracks, time: p.time, clock: p.clock, item: p.item && p.item.id, note: p.note && p.note.path });
+  });
+  globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Demo", queue: [
+    { id: "a", title: "Blue Moon Walk", subtitle: "Cody Wright", duration: 180 },
+    { id: "b", title: "Slow River", subtitle: "Traditional", duration: 90 },
+    { id: "c", title: "Amazing Grace", subtitle: "John Newton", media: "Recordings/Amazing Grace.mp3" },
+  ] });
+  globalThis.architectPage.ask("PLAYHEAD_ITEM", { id: "c" });
+`;
+
+const BAR = `JSON.stringify((() => { const e = document.querySelector('[data-testid=now-playing]'); if (!e) return null;
+  const q = (id) => (e.querySelector('[data-testid=' + id + ']') || {}).textContent || '';
+  return { source: e.dataset.source, playing: e.dataset.playing === 'true', time: Number(e.dataset.time), index: Number(e.dataset.index),
+    title: q('now-playing-title'), subtitle: q('now-playing-subtitle'), name: q('now-playing-source') }; })())`;
+const bar = async (b) => JSON.parse(await b.eval(BAR));
+const press = (b, id) => b.eval(`(() => { const e = document.querySelector('[data-testid=${id}]'); if (!e) return false; e.click(); return true; })()`);
+const propsOf = async (b, view) => { const c = await frameOf(b, view); return c && JSON.parse((await b.evalIn(c, 'document.body.dataset.props || "null"')) || 'null'); };
+const ask = async (b, view, action, args) => { const c = await frameOf(b, view); return b.evalIn(c, `globalThis.architectPage.ask(${JSON.stringify(action)}, ${JSON.stringify(args ?? null)}); true`); };
+const clickText = (b, txt) => b.eval(`(() => { const all = [...document.querySelectorAll('*')].filter((e) => e.children.length === 0 && !e.closest('[data-testid=now-playing]') && e.textContent.trim() === ${JSON.stringify(txt)}); const e = all[all.length - 1]; if (!e) return false; (e.closest('button,[role=treeitem],[role=button],a,li,div') || e).click(); return true; })()`);
+const ready1 = (b) => until(async () => (await marks(b)).filter((m) => m.state === 'ready').length === 1, 20000, 'the claimed frame ready');
+
+test('the Now Playing bar shows the queue, its presses reach the frames and a frame\'s asks move it', { skip }, async () => {
+  const w = await world({ progress: QUIET, transport: QUEUE, lyrics: QUIET }, 'transport');
+  const { b } = w;
+  try {
+    const r = await fetch(`${w.f.origin}/app/`);
+    assert.match(r.headers.get('content-security-policy'), /media-src 'self'/);
+    await openSong(b, w.f.origin);
+    await ready1(b);
+    // The view's queue, its song current, in the bar.
+    const shown = await until(async () => { const s = await bar(b); return s && s.title === 'Amazing Grace' && s; }, 10000, 'the bar');
+    assert.equal(shown.source, 'demo.view');
+    assert.match(shown.subtitle, /John Newton/);
+    assert.match(shown.name, /Demo/);
+    assert.equal(shown.playing, false);
+    let p = await until(() => propsOf(b, 'transport'), 10000, 'the transport frame\'s props');
+    p = await until(async () => { const q = await propsOf(b, 'transport'); return q && q.item === 'c' && q; }, 10000, 'its song current');
+    assert.deepEqual([p.source, p.title, p.index, p.tracks, p.playing, p.note], ['demo.view', 'Amazing Grace', 2, 3, false, 'Songs/Amazing Grace.md']);
+
+    // The bar's play reaches the frames, and the app's audio element
+    // streams the recording with ranges.
+    assert.ok(await press(b, 'now-playing-toggle'));
+    await until(async () => (await propsOf(b, 'transport')).playing === true, 5000, 'the frame to hear play');
+    assert.equal((await bar(b)).playing, true);
+    await until(() => b.eval(`(() => { const a = document.querySelector('[data-testid=now-playing-audio]'); return !!a && a.src.endsWith('/app/demo-recording.mp3') && !a.paused && a.currentTime > 0.3; })()`), 10000, 'the recording to play');
+    assert.ok(w.f.media.some((m) => m.startsWith('206 /app/demo-recording.mp3')), `ranged: ${w.f.media.join(', ')}`);
+    assert.equal(await b.eval('navigator.mediaSession && navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : null'), 'Amazing Grace');
+    assert.equal((await propsOf(b, 'transport')).clock, 'media');
+    // Only the page's own element plays: no frame has one.
+    for (const c of await b.frames()) assert.equal(await b.evalIn(c, 'document.querySelectorAll("audio,video").length'), 0);
+
+    // A frame's asks move the bar.
+    await ask(b, 'transport', 'PLAYHEAD_ITEM', { index: 0, play: true });
+    await until(async () => (await bar(b)).title === 'Blue Moon Walk', 5000, 'the bar on the first song');
+    // The bar's next and previous reach the frames.
+    assert.ok(await press(b, 'now-playing-next'));
+    await until(async () => (await propsOf(b, 'transport')).title === 'Slow River', 5000, 'the frames on the next song');
+    assert.ok(await press(b, 'now-playing-previous'));
+    await until(async () => (await propsOf(b, 'transport')).title === 'Blue Moon Walk', 5000, 'the frames on the previous song');
+    await ask(b, 'transport', 'PLAYHEAD_PAUSE');
+    await until(async () => (await bar(b)).playing === false, 5000, 'the bar paused');
+    await ask(b, 'transport', 'PLAYHEAD_SEEK', { t: 30 });
+    await until(async () => Math.abs((await bar(b)).time - 30) < 0.5, 5000, 'the bar at 30 s');
+    assert.equal((await mark(b, 'transport')).refused, '');
+
+    if (process.env.SHOTS) {
+      mkdirSync(process.env.SHOTS, { recursive: true });
+      await sleep(400);
+      await b.shot(join(process.env.SHOTS, 'now-playing-desk-firefox.png'));
+      await b.size(390, 844);
+      await until(async () => !!(await bar(b)), 5000, 'the bar at 390 px');
+      await sleep(600);
+      await b.shot(join(process.env.SHOTS, 'now-playing-390-firefox.png'));
+      await press(b, 'now-playing-title');
+      await sleep(400);
+      await b.shot(join(process.env.SHOTS, 'now-playing-390-open-firefox.png'));
+    }
+  } finally { await w.close(); }
+});
+
+test('two sources coexist, the bar switches between them, and a frame moves only its own', { skip }, async () => {
+  const w = await world({ progress: QUIET, transport: QUEUE, lyrics: QUIET }, 'transport');
+  const { b } = w;
+  try {
+    await openSong(b, w.f.origin);
+    await ready1(b);
+    await until(async () => (await bar(b))?.source === 'demo.view', 10000, 'the song in the bar');
+    // A note's recording: the app's own source, played from the note.
+    await until(() => clickText(b, 'Inbox'), 10000, 'the Inbox folder');
+    await sleep(300);
+    await until(async () => (await clickText(b, 'Voice memo: chorus melody')) || clickText(b, 'Voice memo chorus melody'), 10000, 'the voice memo');
+    await until(() => press(b, 'note-recording-play'), 10000, 'its recording\'s play');
+    const memo = await until(async () => { const s = await bar(b); return s.source === 'vault' && s.playing && s; }, 5000, 'the memo playing in the bar');
+    assert.match(memo.title, /Voice memo/);
+    assert.match(memo.name, /Notes/);
+    // The switcher lists both; the song comes back paused where it was.
+    assert.ok(await press(b, 'now-playing-source'));
+    const listed = await until(() => b.eval(`JSON.stringify([...document.querySelectorAll('[data-testid=now-playing-sources] [data-source]')].map((e) => e.dataset.source))`).then(JSON.parse).then((l) => l.length && l), 5000, 'the sources');
+    assert.deepEqual(listed.sort(), ['demo.view', 'vault']);
+    assert.ok(await b.eval(`(() => { document.querySelector('[data-testid=now-playing-sources] [data-source="demo.view"]').click(); return true; })()`));
+    await until(async () => { const s = await bar(b); return s.source === 'demo.view' && !s.playing; }, 5000, 'the song shown, paused');
+
+    // Back on the song: its frames move their own source only.
+    await until(() => clickText(b, 'Songs'), 10000, 'the Songs folder');
+    await sleep(300);
+    await until(() => clickText(b, 'Amazing Grace'), 10000, 'the song note');
+    await ready1(b);
+    await ask(b, 'transport', 'PLAYHEAD_PLAY', { source: 'vault' });
+    await until(async () => (await mark(b, 'transport')).refused === 'not your source', 5000, 'another\'s source refused');
+    await ask(b, 'transport', 'PLAYHEAD_ACTIVATE', { source: 'demo.view' });
+    await until(async () => (await mark(b, 'transport')).refused === 'not an ask a frame makes', 5000, 'switching refused');
+    await ask(b, 'transport', 'PLAYHEAD_SET', { queue: [{ id: 'x', title: 'X', media: 'https://evil.test/x.mp3' }] });
+    await until(async () => /vault path/.test((await mark(b, 'transport')).refused), 5000, 'a URL refused as media');
+    await ask(b, 'transport', 'PLAYHEAD_PLAY');
+    await until(async () => { const s = await bar(b); return s.source === 'demo.view' && s.playing; }, 5000, 'its own playing');
+    // The memo was not moved by any of it, and is paused now the song plays.
+    assert.ok(await press(b, 'now-playing-source'));
+    await until(() => b.eval(`(() => { const e = document.querySelector('[data-testid=now-playing-sources] [data-source="vault"]'); if (!e) return false; e.click(); return true; })()`), 5000, 'the memo in the switcher');
+    await until(async () => { const s = await bar(b); return s.source === 'vault' && !s.playing && /Voice memo/.test(s.title); }, 5000, 'the memo shown, paused');
+    // The rate limit holds for the new asks too.
+    const c = await frameOf(b, 'transport');
+    await b.evalIn(c, 'for (let i = 0; i < 100; i++) globalThis.architectPage.ask("PLAYHEAD_ITEM", { index: i % 3 }); true');
+    await until(async () => (await mark(b, 'transport')).refused === 'too many requests', 5000, 'the flood refused');
+    if (process.env.SHOTS) {
+      mkdirSync(process.env.SHOTS, { recursive: true });
+      assert.ok(await press(b, 'now-playing-source'));
+      await sleep(400);
+      await b.shot(join(process.env.SHOTS, 'now-playing-desk-sources-firefox.png'));
+    }
+  } finally { await w.close(); }
+});

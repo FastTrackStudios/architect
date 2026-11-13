@@ -19,7 +19,8 @@
 //! 3. the frame says `ready`; the app sends `props` (data only) and a
 //!    `ping` every [`BEAT_MS`], which the frame answers with `pong`;
 //! 4. the frame may say `size` (its height), `ask` (one of
-//!    [`INTENTS`], rate-limited by [`Bucket`]) or `error`.
+//!    [`INTENTS`], rate-limited by [`Bucket`], answered by the playhead,
+//!    `architect_playhead::ask`, as the island's extension) or `error`.
 //!
 //! An island lists its views ([`Island::views`]: the share page's
 //! progress, transport and lyrics slots and its claims) and may claim note
@@ -55,30 +56,14 @@ pub const MAX_HEIGHT: f64 = 4_000.0;
 /// At most this many asks a second, with a burst of twice that.
 pub const ASKS_PER_SECOND: f64 = 8.0;
 /// The most bytes a message from a frame may take as JSON; larger is
-/// dropped unread (`architect.playhead` v0.1: a whole queue fits one
-/// `PLAYHEAD_SET`).
+/// dropped unread. A `PLAYHEAD_SET` of a queue with its timed marks fits.
 pub const MAX_MESSAGE: usize = 64 * 1024;
 
-/// What a frame may ask the app: the playhead's intents, nothing else
-/// (what an island's `capabilities.actions` holds; host calls into a
-/// vault are #495's next step, authorised in the app and the node).
-pub const INTENTS: &[&str] = &[
-    "PLAYHEAD_SEEK",
-    "PLAYHEAD_PLAY",
-    "PLAYHEAD_PAUSE",
-    "PLAYHEAD_NEXT",
-    "PLAYHEAD_PREVIOUS",
-    // `architect.playhead` v0.1 (#589): its source, and one item of it.
-    "PLAYHEAD_SET",
-    "PLAYHEAD_ITEM",
-];
-
-/// The most items a source's queue may hold (#589).
-pub const QUEUE_MAX: usize = 500;
-/// The most sections an item may hold (#589).
-pub const SECTIONS_MAX: usize = 200;
-/// The most marks an item may hold (#589).
-pub const MARKS_MAX: usize = 2000;
+/// What a frame may ask the app: the playhead's controls of its own
+/// extension's source (#589), nothing else (host calls into a vault are
+/// #495's next step, authorised in the app and the node). Its props are
+/// its source's state, so it reads nothing.
+pub use architect_playhead::FRAME_ASKS as INTENTS;
 
 /// The read capability a claim names, and its extension declares
 /// (`[capabilities] reads`), for its view to be handed the note it is
@@ -639,354 +624,9 @@ pub const fn ask_refused(ready: bool, hidden: bool) -> Option<&'static str> {
     }
 }
 
-/// An ask the app answers: one of [`INTENTS`], with its arguments.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Intent {
-    /// To `t` seconds into the current item.
-    Seek(f64),
-    /// Play.
-    Play,
-    /// Pause.
-    Pause,
-    /// The next item.
-    Next,
-    /// The previous item (or this one's start).
-    Previous,
-    /// Its source (`PLAYHEAD_SET`; an empty queue removes it).
-    Set(Source),
-    /// Make this item current, at 0, and play it if `play`
-    /// (`PLAYHEAD_ITEM`).
-    Item(Pick, bool),
-}
-
-/// Which item a `PLAYHEAD_ITEM` makes current.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Pick {
-    /// The item of this id.
-    Id(String),
-    /// The item at this place in the queue.
-    Index(usize),
-}
-
-/// A source as `PLAYHEAD_SET` gives it (#589).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Source {
-    /// Its name, shown as the source's (empty: the extension's).
-    pub name: String,
-    /// Its items.
-    pub queue: Vec<QueueItem>,
-    /// The item to make current (clamped to the queue), if given.
-    pub index: Option<usize>,
-    /// Where in it to start, seconds, if given.
-    pub time: Option<f64>,
-    /// Whether to start playing now.
-    pub play: bool,
-}
-
-/// An item of a source's queue (#589), what this host keeps of it.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct QueueItem {
-    /// The extension's own id for it.
-    pub id: String,
-    pub title: String,
-    pub subtitle: String,
-    /// Seconds: given, or none (then its media's own length).
-    pub duration: Option<f64>,
-    /// A vault path to its audio.
-    pub media: Option<String>,
-    /// A vault path to its image.
-    pub art: Option<String>,
-    /// Its sections, checked against the contract's limits.
-    pub sections: Vec<ItemSection>,
-    /// Its marks (timed lyric lines and cues), checked likewise.
-    pub marks: Vec<ItemMark>,
-}
-
-/// A section of a queue's item.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ItemSection {
-    /// 1 to 40 characters.
-    pub name: String,
-    /// Its start, seconds.
-    pub start: f64,
-    /// Its end, seconds, not before its start.
-    pub end: f64,
-    /// `#rrggbb`.
-    pub color: Option<String>,
-}
-
-/// A mark of a queue's item.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ItemMark {
-    /// When, seconds.
-    pub at: f64,
-    /// 1 to 300 characters.
-    pub text: String,
-    /// At most 32 characters (`line`, `cue`).
-    pub kind: Option<String>,
-}
-
-impl QueueItem {
-    /// The item as a view's props carry it: what was given, checked.
-    #[must_use]
-    pub fn to_json(&self) -> Value {
-        let sections: Vec<Value> = self
-            .sections
-            .iter()
-            .map(|s| {
-                serde_json::json!({"name": s.name, "start": s.start, "end": s.end, "color": s.color})
-            })
-            .collect();
-        let marks: Vec<Value> = self
-            .marks
-            .iter()
-            .map(|m| serde_json::json!({"at": m.at, "text": m.text, "kind": m.kind}))
-            .collect();
-        serde_json::json!({
-            "id": self.id,
-            "title": self.title,
-            "subtitle": self.subtitle,
-            "duration": self.duration,
-            "media": self.media,
-            "art": self.art,
-            "sections": sections,
-            "marks": marks,
-        })
-    }
-
-    /// Its sections as a view's props carry them.
-    #[must_use]
-    pub fn sections_json(&self) -> Value {
-        self.to_json()
-            .get("sections")
-            .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new()))
-    }
-}
-
-/// `v[k]` as a string of 1 to `max` characters; `Err` for one too long or
-/// not a string, `Ok(None)` for none.
-fn field(v: &Value, k: &str, max: usize) -> Result<Option<String>, String> {
-    match v.get(k) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(s)) if s.chars().count() <= max => {
-            Ok(Some(s.clone()).filter(|s| !s.is_empty()))
-        }
-        Some(_) => Err(format!("{k} is at most {max} characters")),
-    }
-}
-
-/// `v[k]` as a required string of 1 to `max` characters.
-fn required(v: &Value, k: &str, max: usize) -> Result<String, String> {
-    field(v, k, max)?.ok_or_else(|| format!("{k} is required"))
-}
-
-/// `v[k]` as seconds (finite, not negative), if given.
-fn seconds(v: &Value, k: &str) -> Result<Option<f64>, String> {
-    match v.get(k) {
-        None | Some(Value::Null) => Ok(None),
-        Some(n) => n
-            .as_f64()
-            .filter(|d| d.is_finite() && *d >= 0.0)
-            .map(Some)
-            .ok_or_else(|| format!("{k} is not a time in seconds")),
-    }
-}
-
-/// A vault-relative path, as `architect.playhead` v0.1 takes `media` and
-/// `art`.
-///
-/// 1 to 1024 bytes; no scheme or drive (`:`), not absolute (a
-/// leading `/`), no `\`, no `?` or `#` (a query or fragment once it is a
-/// URL), no `%` (percent-encoding), no control character, no empty, `.`
-/// or `..` segment.
-///
-/// Whether it is a path the note references is the deck's to enforce
-/// when it resolves the media (#589).
-#[must_use]
-pub fn vault_path(p: &str) -> bool {
-    !p.is_empty()
-        && p.len() <= 1024
-        && !p
-            .chars()
-            .any(|c| matches!(c, ':' | '\\' | '?' | '#' | '%') || c.is_control())
-        && p.split('/').all(|s| !s.is_empty() && s != "." && s != "..")
-}
-
-fn color_ok(c: &str) -> bool {
-    c.len() == 7
-        && c.strip_prefix('#')
-            .is_some_and(|h| h.chars().all(|c| c.is_ascii_hexdigit()))
-}
-
-fn section_of(v: &Value) -> Result<ItemSection, String> {
-    let start = seconds(v, "start")?.ok_or("a section's start is required")?;
-    let end = seconds(v, "end")?.ok_or("a section's end is required")?;
-    let color = field(v, "color", 7)?;
-    if end < start {
-        return Err("a section ends before it starts".to_owned());
-    }
-    if color.as_deref().is_some_and(|c| !color_ok(c)) {
-        return Err("a section's color is #rrggbb".to_owned());
-    }
-    Ok(ItemSection {
-        name: required(v, "name", 40)?,
-        start,
-        end,
-        color,
-    })
-}
-
-fn mark_of(v: &Value) -> Result<ItemMark, String> {
-    Ok(ItemMark {
-        at: seconds(v, "at")?.ok_or("a mark's at is required")?,
-        text: required(v, "text", 300)?,
-        kind: field(v, "kind", 32)?,
-    })
-}
-
-/// `v[k]`, an array of at most `max`, each read by `one`.
-fn list_of<T>(
-    v: &Value,
-    k: &str,
-    max: usize,
-    one: fn(&Value) -> Result<T, String>,
-) -> Result<Vec<T>, String> {
-    match v.get(k) {
-        None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::Array(list)) if list.len() <= max => list.iter().map(one).collect(),
-        Some(Value::Array(_)) => Err(format!("{k}: at most {max}")),
-        Some(_) => Err(format!("{k} is a list")),
-    }
-}
-
-fn item_of(i: &Value) -> Result<QueueItem, String> {
-    let id = field(i, "id", 256)?.ok_or("an item's id is 1 to 256 characters")?;
-    let media = field(i, "media", 1024)?;
-    let art = field(i, "art", 1024)?;
-    if media.as_deref().is_some_and(|m| !vault_path(m)) {
-        return Err("media must be a vault path".to_owned());
-    }
-    if art.as_deref().is_some_and(|a| !vault_path(a)) {
-        return Err("art must be a vault path".to_owned());
-    }
-    let duration = match i.get("duration") {
-        None | Some(Value::Null) => None,
-        Some(d) => Some(
-            d.as_f64()
-                .filter(|d| d.is_finite() && *d > 0.0)
-                .ok_or("duration is a length in seconds")?,
-        ),
-    };
-    if media.is_none() && duration.is_none() {
-        return Err("an item without media needs a duration".to_owned());
-    }
-    Ok(QueueItem {
-        title: required(i, "title", 200)?,
-        subtitle: field(i, "subtitle", 200)?.unwrap_or_default(),
-        sections: list_of(i, "sections", SECTIONS_MAX, section_of)?,
-        marks: list_of(i, "marks", MARKS_MAX, mark_of)?,
-        id,
-        duration,
-        media,
-        art,
-    })
-}
-
-/// A `PLAYHEAD_SET`'s source, as #589 v0.1 bounds it: a `name` of at most
-/// 64 characters, at most [`QUEUE_MAX`] items, each with a unique `id` (1
-/// to 256), a `title` (1 to 200), a `subtitle` (at most 200), `media` and
-/// `art` vault paths ([`vault_path`]), a `duration` when it has no
-/// `media`, at most [`SECTIONS_MAX`] sections and [`MARKS_MAX`] marks;
-/// `index`, `time` and `play` as given. Anything else refuses the whole
-/// source, with why.
-fn source_of(args: &Value) -> Result<Source, String> {
-    let name = field(args, "name", 64)?.unwrap_or_default();
-    let items = args
-        .get("queue")
-        .and_then(Value::as_array)
-        .ok_or("queue is required")?;
-    if items.len() > QUEUE_MAX {
-        return Err(format!("queue: at most {QUEUE_MAX} items"));
-    }
-    let mut ids = std::collections::BTreeSet::new();
-    let mut queue = Vec::with_capacity(items.len());
-    for i in items {
-        let item = item_of(i)?;
-        if !ids.insert(item.id.clone()) {
-            return Err(format!("item {} is in the queue twice", item.id));
-        }
-        queue.push(item);
-    }
-    let index = match args.get("index") {
-        None | Some(Value::Null) => None,
-        Some(n) => Some(
-            n.as_u64()
-                .and_then(|n| usize::try_from(n).ok())
-                .ok_or("index is a place in the queue")?,
-        ),
-    };
-    Ok(Source {
-        name,
-        queue,
-        index,
-        time: seconds(args, "time")?,
-        play: args.get("play").and_then(Value::as_bool).unwrap_or(false),
-    })
-}
-
-/// `action` with `args` as an [`Intent`], if it is one and its arguments
-/// are what it takes (a seek within `0..=duration`), asked by a frame of
-/// the extension `caller`.
-///
-/// # Errors
-///
-/// Why it is refused, as `architect.playhead` v0.1 words it: not one of
-/// [`INTENTS`], `"not your source"` for a `source` naming another
-/// extension, `"t is outside 0..=duration"`, a field's limit.
-pub fn intent(action: &str, args: &Value, duration: f64, caller: &str) -> Result<Intent, String> {
-    if !INTENTS.contains(&action) {
-        return Err(format!("{action} is not something a view may ask"));
-    }
-    // A frame acts on its own extension's source only.
-    match args.get("source") {
-        None | Some(Value::Null) => {}
-        Some(Value::String(s)) if s == caller => {}
-        Some(_) => return Err("not your source".to_owned()),
-    }
-    match action {
-        "PLAYHEAD_SEEK" => {
-            let t = args
-                .get("t")
-                .and_then(Value::as_f64)
-                .ok_or("t is required")?;
-            (t.is_finite() && t >= 0.0 && duration > 0.0 && t <= duration)
-                .then_some(Intent::Seek(t))
-                .ok_or_else(|| "t is outside 0..=duration".to_owned())
-        }
-        "PLAYHEAD_PLAY" => Ok(Intent::Play),
-        "PLAYHEAD_PAUSE" => Ok(Intent::Pause),
-        "PLAYHEAD_NEXT" => Ok(Intent::Next),
-        "PLAYHEAD_PREVIOUS" => Ok(Intent::Previous),
-        "PLAYHEAD_SET" => source_of(args).map(Intent::Set),
-        "PLAYHEAD_ITEM" => {
-            let pick = match (field(args, "id", 256)?, args.get("index")) {
-                (Some(id), _) => Pick::Id(id),
-                (None, Some(n)) => Pick::Index(
-                    n.as_u64()
-                        .and_then(|n| usize::try_from(n).ok())
-                        .ok_or("index is a place in the queue")?,
-                ),
-                (None, None) => return Err("an id or an index is required".to_owned()),
-            };
-            Ok(Intent::Item(
-                pick,
-                args.get("play").and_then(Value::as_bool).unwrap_or(false),
-            ))
-        }
-        _ => Err(format!("{action} is not something a view may ask")),
-    }
-}
+/// Whether `p` is a vault-relative path, as `architect.playhead` takes
+/// `media` and `art`: the deck's one rule, shared with the frame host.
+pub use architect_playhead::model::vault_path;
 
 /// What a frame said, read from its message (JSON of at most
 /// [`MAX_MESSAGE`] bytes); anything else is [`Said::Nothing`].
@@ -1419,20 +1059,8 @@ mod tests {
         );
     }
 
-    fn ask(action: &str, args: Value) -> Result<Intent, String> {
-        intent(action, &args, 10.0, "studio.transport")
-    }
-
-    fn set(queue: Value) -> Result<Intent, String> {
-        ask("PLAYHEAD_SET", json!({"name": "N", "queue": queue}))
-    }
-
-    fn one(item: Value) -> Result<Intent, String> {
-        set(json!([item]))
-    }
-
     #[test]
-    fn asks_are_the_playheads_intents_and_rate_limited() {
+    fn asks_are_the_playheads_controls_and_rate_limited() {
         let mut b = Bucket::new(0.0);
         let burst = (0..100).filter(|_| b.take(0.0)).count();
         assert_eq!(burst, 16);
@@ -1440,31 +1068,26 @@ mod tests {
         // A second later: eight more.
         let more = (0..100).filter(|_| b.take(1000.0)).count();
         assert_eq!(more, 8);
-        assert_eq!(
-            ask("PLAYHEAD_SEEK", json!({"t": 3.5})),
-            Ok(Intent::Seek(3.5))
-        );
-        for t in [json!(30), json!(-1)] {
-            assert_eq!(
-                ask("PLAYHEAD_SEEK", json!({ "t": t })).unwrap_err(),
-                "t is outside 0..=duration"
-            );
+        // #656's five, and ITEM and SET; no reads, no switching sources,
+        // nothing of a vault's.
+        assert_eq!(INTENTS.len(), 7);
+        for a in [
+            "PLAYHEAD_ITEM",
+            "PLAYHEAD_SET",
+            "PLAYHEAD_SEEK",
+            "PLAYHEAD_PLAY",
+        ] {
+            assert!(INTENTS.contains(&a), "{a}");
         }
-        assert!(ask("PLAYHEAD_SEEK", json!({})).is_err());
-        assert_eq!(ask("PLAYHEAD_PLAY", Value::Null), Ok(Intent::Play));
-        assert!(ask("VAULT_READ", json!({"path": "a"})).is_err());
-        assert!(ask("SHARE_CREATE", Value::Null).is_err());
-        // Only its own source (#589).
-        assert_eq!(
-            ask("PLAYHEAD_PLAY", json!({"source": "other.ext"})).unwrap_err(),
-            "not your source"
-        );
-        assert_eq!(
-            ask("PLAYHEAD_PLAY", json!({"source": "studio.transport"})),
-            Ok(Intent::Play)
-        );
-        let args = json!({"t": 1, "id": "a", "queue": [{"id": "a", "title": "A", "duration": 2}]});
-        assert!(INTENTS.iter().all(|a| intent(a, &args, 10.0, "x").is_ok()));
+        for a in [
+            "PLAYHEAD_ACTIVATE",
+            "PLAYHEAD_STATE",
+            "PLAYHEAD_SOURCES",
+            "VAULT_READ",
+            "SHARE_CREATE",
+        ] {
+            assert!(!INTENTS.contains(&a), "{a}");
+        }
         // Not before the view is mounted, not while the page is hidden.
         assert_eq!(ask_refused(false, false), Some("not ready"));
         assert_eq!(ask_refused(true, true), Some("the page is hidden"));
@@ -1473,150 +1096,8 @@ mod tests {
     }
 
     #[test]
-    fn a_source_is_what_the_contract_bounds_or_refused_whole() {
-        let item = |extra: Value| {
-            let mut i = json!({"id": "a", "title": "A", "duration": 2});
-            for (k, v) in extra.as_object().unwrap() {
-                i[k] = v.clone();
-            }
-            one(i)
-        };
-        let Ok(Intent::Set(source)) = ask(
-            "PLAYHEAD_SET",
-            json!({"name": "N", "index": 1, "time": 4.5, "play": true, "queue": [
-                {"id": "a", "title": "A", "subtitle": "S", "media": "Media/a.ogg", "art": "Art/a b.jpg",
-                 "sections": [{"name": "Verse 1", "start": 0, "end": 20.5, "color": "#2563eb"}],
-                 "marks": [{"at": 1.5, "text": "Amazing grace", "kind": "line"}]},
-                {"id": "b", "title": "B", "duration": 3},
-            ]}),
-        ) else {
-            panic!("a good source")
-        };
-        assert_eq!(
-            (source.index, source.time, source.play),
-            (Some(1), Some(4.5), true)
-        );
-        let a = &source.queue[0];
-        assert_eq!(a.media.as_deref(), Some("Media/a.ogg"));
-        assert_eq!(a.to_json()["art"], "Art/a b.jpg");
-        assert_eq!(a.to_json()["sections"][0]["color"], "#2563eb");
-        assert_eq!(a.to_json()["marks"][0]["kind"], "line");
-        assert_eq!(a.sections_json()[0]["name"], "Verse 1");
-        assert_eq!(
-            set(json!([])),
-            Ok(Intent::Set(Source {
-                name: "N".to_owned(),
-                ..Source::default()
-            }))
-        );
-        // Each limit holds at its edge and refuses one past it.
-        let at = |n: usize| "x".repeat(n);
-        for (k, max) in [("id", 256), ("title", 200), ("subtitle", 200)] {
-            assert!(item(json!({ k: at(max) })).is_ok(), "{k} of {max}");
-            assert!(
-                item(json!({ k: at(max + 1) })).is_err(),
-                "{k} of {}",
-                max + 1
-            );
-        }
-        assert!(ask("PLAYHEAD_SET", json!({"name": at(64), "queue": []})).is_ok());
-        assert!(ask("PLAYHEAD_SET", json!({"name": at(65), "queue": []})).is_err());
-        let sections = |n: usize| Value::Array(vec![json!({"name": "S", "start": 0, "end": 1}); n]);
-        assert!(item(json!({"sections": sections(SECTIONS_MAX)})).is_ok());
-        assert!(item(json!({"sections": sections(SECTIONS_MAX + 1)})).is_err());
-        let marks = |n: usize| Value::Array(vec![json!({"at": 0, "text": "t"}); n]);
-        assert!(item(json!({"marks": marks(MARKS_MAX)})).is_ok());
-        assert!(item(json!({"marks": marks(MARKS_MAX + 1)})).is_err());
-        for bad in [
-            json!({"sections": [{"name": at(41), "start": 0, "end": 1}]}),
-            json!({"sections": [{"name": "S", "start": 2, "end": 1}]}),
-            json!({"sections": [{"name": "S", "start": 0, "end": 1, "color": "red"}]}),
-            json!({"sections": [{"start": 0, "end": 1}]}),
-            json!({"marks": [{"at": 0, "text": at(301)}]}),
-            json!({"marks": [{"at": 0, "text": "t", "kind": at(33)}]}),
-            json!({"marks": [{"at": -1, "text": "t"}]}),
-            json!({"art": "https://evil.test/a.jpg"}),
-        ] {
-            assert!(item(bad.clone()).is_err(), "{bad}");
-        }
-        for bad in [
-            json!([{"title": "no id", "duration": 1}]),
-            json!([{"id": "a", "duration": 1}]),
-            json!([{"id": "a", "title": "A"}]),
-            json!([{"id": "a", "title": "A", "duration": 1}, {"id": "a", "title": "B", "duration": 1}]),
-        ] {
-            assert!(set(bad.clone()).is_err(), "{bad}");
-        }
-        let many = |n: usize| -> Value {
-            (0..n)
-                .map(|n| json!({"id": n.to_string(), "title": "t", "duration": 1}))
-                .collect()
-        };
-        assert!(set(many(QUEUE_MAX)).is_ok());
-        assert!(set(many(QUEUE_MAX + 1)).is_err());
-        assert_eq!(
-            ask("PLAYHEAD_ITEM", json!({"id": "a", "play": true})),
-            Ok(Intent::Item(Pick::Id("a".to_owned()), true))
-        );
-        assert_eq!(
-            ask("PLAYHEAD_ITEM", json!({"index": 3})),
-            Ok(Intent::Item(Pick::Index(3), false))
-        );
-        assert!(ask("PLAYHEAD_ITEM", json!({})).is_err());
-        assert!(ask("PLAYHEAD_ITEM", json!({"index": -1})).is_err());
-    }
-
-    #[test]
-    fn media_is_a_vault_relative_path_and_nothing_else() {
-        for good in [
-            "Media/a.ogg",
-            "Recordings/Amazing Grace.m4a",
-            "a",
-            "Songs/Merry & Bright/01 – Joy.flac",
-        ] {
-            assert!(vault_path(good), "{good}");
-            assert!(
-                one(json!({"id": "a", "title": "A", "media": good})).is_ok(),
-                "{good}"
-            );
-        }
-        for bad in [
-            "",
-            "https://evil.test/a.ogg",
-            "data:audio/ogg;base64,AAAA",
-            "C:/a.ogg",
-            "/a.ogg",
-            "Media\\a.ogg",
-            "../a.ogg",
-            "Media/../../a.ogg",
-            "Media/./a.ogg",
-            "Media//a.ogg",
-            "Media/",
-            "Media/a.ogg?x=1",
-            "Media/a.ogg#t=10",
-            "%2e%2e/a.ogg",
-            "Media/a%20b.ogg",
-            "Media/a\u{0}.ogg",
-            "Media/a\n.ogg",
-            "Media/a\u{7f}.ogg",
-        ] {
-            assert!(!vault_path(bad), "{bad:?}");
-            assert_eq!(
-                one(json!({"id": "a", "title": "A", "media": bad})).unwrap_err(),
-                if bad.is_empty() {
-                    "an item without media needs a duration"
-                } else {
-                    "media must be a vault path"
-                },
-                "{bad:?}"
-            );
-        }
-        assert!(!vault_path(&"a".repeat(1025)));
-    }
-
-    #[test]
     fn a_whole_queue_fits_one_message() {
-        let queue: Vec<Value> = (0..QUEUE_MAX)
+        let queue: Vec<Value> = (0..architect_playhead::model::MAX_QUEUE)
             .map(|n| json!({"id": format!("Setlists/Merry.md#{n}"), "title": format!("Song number {n}"), "subtitle": "Traditional", "duration": 192.5}))
             .collect();
         let message = json!({"t": "ask", "action": "PLAYHEAD_SET", "args": {"name": "Studio", "queue": queue}}).to_string();
@@ -1628,7 +1109,8 @@ mod tests {
         let Said::Ask(action, args) = said(&message) else {
             panic!("a whole queue is heard")
         };
-        assert!(intent(&action, &args, 0.0, "studio").is_ok());
+        assert_eq!(action, "PLAYHEAD_SET");
+        assert!(architect_playhead::Spec::parse(&args).is_ok());
     }
 
     #[test]

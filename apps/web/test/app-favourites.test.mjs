@@ -232,7 +232,12 @@ async function firefox() {
   delete env.LD_LIBRARY_PATH; delete env.PIPEWIRE_REMOTE; delete env.PULSE_SERVER;
   // Away from the audio graph, or not at all.
   const hide = 'mount -t tmpfs none "$XDG_RUNTIME_DIR" && { [ ! -d /run/pipewire ] || mount -t tmpfs none /run/pipewire; } && exec "$0" "$@"';
-  const proc = spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, '--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)], { stdio: 'ignore', env, detached: true });
+  // A Mac: headless as it is, its output at zero (no namespace to hide in).
+  writeFileSync(join(profile, 'user.js'), 'user_pref("media.volume_scale", "0.0");\n');
+  const args = ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)];
+  const proc = process.platform === 'darwin'
+    ? spawn(browser, args, { stdio: 'ignore', env, detached: true })
+    : spawn('unshare', ['-r', '-m', 'sh', '-c', hide, browser, ...args], { stdio: 'ignore', env, detached: true });
   let ws;
   for (let i = 0; i < 80 && !ws; i++) {
     await sleep(250);

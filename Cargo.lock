@@ -841,6 +841,7 @@ dependencies = [
  "architect-navigator-extension",
  "architect-orgs",
  "architect-pages",
+ "architect-playhead",
  "architect-presence",
  "architect-projects",
  "architect-sandbox-board",
@@ -1742,6 +1743,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-playhead"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-settings",
+ "architect-shell",
+ "architect-workspace-hack",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "lucide-dioxus",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "web-time",
+]
+
+[[package]]
 name = "architect-presence"
 version = "0.1.0"
 dependencies = [
@@ -2309,6 +2329,7 @@ dependencies = [
  "architect-commands",
  "architect-favourites",
  "architect-navigator",
+ "architect-playhead",
  "architect-settings",
  "architect-shell",
  "architect-theme",

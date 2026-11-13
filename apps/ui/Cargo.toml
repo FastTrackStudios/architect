@@ -63,6 +63,9 @@ architect-theme-picker = { workspace = true }
 # ⌘K and ⌘O: the Command Palette, a linked extension (#381).
 architect-command-palette = { workspace = true, features = ["extension"] }
 architect-settings-sheet = { workspace = true }
+# The playhead and its Now Playing bar (#589): `architect.playhead`, linked
+# in as a built-in; the bar in the shell's `now_playing` slot.
+architect-playhead = { workspace = true, features = ["ui", "extension"] }
 # Navigator, the sidebar's navigator as a built-in extension (GPL-3.0, as
 # architect-navigator: the lab already ships under it).
 architect-navigator-extension = { workspace = true }

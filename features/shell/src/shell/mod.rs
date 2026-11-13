@@ -1183,6 +1183,10 @@ pub fn AppShell(
     /// adds its own: [`use_bar_action`]); at most [`BAR_MAX`] show.
     #[props(default)]
     actions: Vec<BarAction>,
+    /// The Now Playing bar (`architect_playhead::ui::NowPlayingBar`):
+    /// above a phone's tab bar, at a desk's or a tablet's page foot over
+    /// the status bar. It draws nothing while nothing is queued.
+    now_playing: Option<Element>,
     children: Element,
 ) -> Element {
     let stored = architect_theme::use_themed::<ShellTheme>();
@@ -1685,6 +1689,11 @@ pub fn AppShell(
                 style: "position: relative; left: {page_shift}px; flex: 1; min-width: 0; min-height: 0; \
                         display: flex; flex-direction: column;",
                 {children}
+                if !in_bar {
+                    if let Some(np) = now_playing.clone() {
+                        div { style: "position: relative; z-index: {layer::FOOT}; flex-shrink: 0;", {np} }
+                    }
+                }
                 // A desk's status bar is the page's foot: it starts where the
                 // left side (rail, sidebar) ends and stops at the right side,
                 // so the sidebars run to the window's bottom (Obsidian's).
@@ -1730,6 +1739,9 @@ pub fn AppShell(
                 // Its own layer: a press on it is its own, whatever the
                 // page hides under it (`layer::FOOT`).
                 div { style: "position: relative; z-index: {layer::FOOT}; flex-shrink: 0; display: flex; flex-direction: column;",
+                    if let Some(np) = now_playing {
+                        {np}
+                    }
                     PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
                 }
             }

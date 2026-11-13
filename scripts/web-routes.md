@@ -68,8 +68,13 @@ as a header too (`frame-ancestors` holds only as a header), with its own
 issuer's origin (`app/config.json`'s `issuer`):
 
 ```
-Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://<issuer>; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self'; connect-src 'self' https://<issuer>; base-uri 'none'; form-action 'self'; object-src 'none'; frame-src 'self'; frame-ancestors 'none'
 ```
+
+`media-src 'self'` is for the Now Playing bar's audio (#589): the app's
+own `<audio>` element (`apps/web/src/app/audio.rs`), never a frame's,
+plays a recording streamed from this origin with `Range` (the node's
+files, the demo's recording). Nothing off this origin plays.
 
 `frame-src 'self'` is for extensions' views (#495): each runs in an
 `<iframe sandbox="allow-scripts">` on the node's web view document

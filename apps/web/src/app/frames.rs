@@ -14,8 +14,11 @@
 //! Nothing of the app reaches a frame but the bundle's bytes, the theme's
 //! colours and the view's props: no session token, no cookie (the frame's
 //! origin is opaque), no handle on the app's document. What a frame may
-//! ask is a playhead intent (`ext_host::INTENTS`), rate-limited, checked
-//! here; anything else it says is dropped.
+//! ask is one of the playhead's controls (`ext_host::INTENTS`),
+//! rate-limited, answered by the deck (`architect_playhead::ask`) as the
+//! frame's island's extension, so it moves its own source only (#589);
+//! anything else it says is dropped. What it asked last, or why it was
+//! refused, is on its holder (`data-ext-asked`, `data-ext-refused`).
 //!
 //! In the demo (`/app/?demo`) the only requests are GETs of the node's
 //! public `/_ext/` files, without credentials; a host with no node (a
@@ -37,7 +40,9 @@ use web_sys::{
     RequestInit, RequestRedirect, Response,
 };
 
-use crate::ext_host::{self, Beat, Bucket, Intent, Island, Said, Tick};
+use architect_playhead::Caller;
+
+use crate::ext_host::{self, Beat, Bucket, Island, Said, Tick};
 
 fn window() -> Option<web_sys::Window> {
     web_sys::window()
@@ -251,7 +256,6 @@ pub enum FrameState {
 enum Event {
     Ready,
     Died(String),
-    Ask(Intent),
 }
 
 /// The DOM half of one frame: its element, its port and its timers, and
@@ -273,7 +277,6 @@ struct Frame {
     created: f64,
     rtts: Vec<f64>,
     props: Option<String>,
-    duration: f64,
     ready_by: Option<i32>,
     beating: Option<i32>,
     events: Option<Coroutine<Event>>,
@@ -488,12 +491,14 @@ fn heard(shared: &Shared, data: &JsValue) {
                 f.mark("data-ext-refused", "too many requests");
                 return;
             }
-            match ext_host::intent(&action, &args, f.duration, &f.bundle.island.id) {
-                Ok(i) => {
-                    if let Some(events) = f.events {
-                        events.send(Event::Ask(i));
-                    }
-                }
+            if !ext_host::INTENTS.contains(&action.as_str()) {
+                f.mark("data-ext-refused", "not an ask a frame makes");
+                return;
+            }
+            // As its island's extension: its own source, nobody else's.
+            let me = Caller::Extension(f.bundle.island.id.clone());
+            match architect_playhead::ask(&me, &action, &args) {
+                Ok(_) => f.mark("data-ext-asked", &action),
                 Err(why) => f.mark("data-ext-refused", &why),
             }
         }
@@ -676,16 +681,14 @@ fn stop(shared: &Shared) {
 /// View `view` of `bundle`'s island in a frame of its own; `fallback`
 /// (the app's own control) shows until it is ready and for good if it
 /// dies. `fill`: as tall as its box (else as tall as it says). Its asks,
-/// checked and rate-limited, come out as `on_ask`.
+/// checked and rate-limited, move its island's source on the deck.
 #[component]
 pub fn ExtensionFrame(
     bundle: Rc<Bundle>,
     view: String,
     #[props(default)] fill: bool,
     props: ReadSignal<Value>,
-    duration: f64,
     theme: FrameTheme,
-    on_ask: EventHandler<Intent>,
     fallback: Element,
 ) -> Element {
     let key = format!("{}/{view}", bundle.island.id);
@@ -701,7 +704,6 @@ pub fn ExtensionFrame(
             match e {
                 Event::Ready => state.set(FrameState::Ready),
                 Event::Died(why) => state.set(FrameState::Gone(why)),
-                Event::Ask(i) => on_ask.call(i),
             }
         }
     });
@@ -723,7 +725,6 @@ pub fn ExtensionFrame(
             created: 0.0,
             rtts: Vec::new(),
             props: None,
-            duration,
             ready_by: None,
             beating: None,
             events: Some(events),
@@ -740,7 +741,6 @@ pub fn ExtensionFrame(
         use_effect(move || {
             let text = props.read().to_string();
             let mut f = shared.borrow_mut();
-            f.duration = duration;
             if f.props.as_deref() != Some(text.as_str()) {
                 f.props = Some(text);
                 f.send_props();

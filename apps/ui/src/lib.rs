@@ -1605,6 +1605,10 @@ pub fn LabApp() -> Element {
                         window: window_chrome,
                         status,
                         status_style: (lab.status)(),
+                        // The Now Playing bar (#589): whatever an extension
+                        // queued on the playhead, on a silent clock here
+                        // (audible native playback is a later step).
+                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar {} },
                         // A phone's action bar (a page adds its own: the
                         // Vault, its tabs).
                         actions: vec![
