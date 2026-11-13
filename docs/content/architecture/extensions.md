@@ -2244,7 +2244,7 @@ for again next time.
 ```html
 <div data-playlist>
   <ol>
-    <li data-playlist-section>Presidents Songs</li>
+    <li data-playlist-section>Opening Set</li>
     <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="Chris Tomlin · D · 128 bpm">
       <span data-track-mark>1</span><span data-track-art data-hue="96" style="background:hsl(96 42% 40%)">JT</span>
       <span data-track-text><span data-track-title>Joy to the World</span><span data-track-meta>Chris Tomlin · D · 128 bpm</span></span>
