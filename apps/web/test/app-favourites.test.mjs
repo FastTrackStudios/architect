@@ -43,14 +43,28 @@ const freePort = () => new Promise((ok) => { const srv = createNetServer(); srv.
 const WASM = Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
 /// Each view draws its name and what it is handed: the note's title and
-/// body, and its playhead's time.
+/// body, and its playhead's time. The view at the note's head sets its
+/// extension's queue, as Studio's setlist does (studio#490); every view
+/// of the extension (its lyrics, in a pane) is handed that source's state
+/// and keeps the item it is on (`data-item`).
 const glue = `
 export default async function init() {}
 export function mount(view) {
   document.body.dataset.view = view;
   document.body.style.cssText = "margin:0;font:15px system-ui;color:var(--foreground, #222);background:var(--background, #fff)";
+  let set = false;
   globalThis.architectPage.subscribe((p) => {
+    // Once shown (its first props come after ready).
+    if (view === "progress" && !set && !p.tracks) {
+      set = true;
+      globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Demo", queue: [
+        { id: "Songs/Amazing Grace.md#1", title: "Blue Moon Walk", duration: 180 },
+        { id: "Songs/Amazing Grace.md#2", title: "Amazing Grace", duration: 240 },
+      ] });
+      globalThis.architectPage.ask("PLAYHEAD_ITEM", { id: "Songs/Amazing Grace.md#2" });
+    }
     const note = p.note || {};
+    document.body.dataset.item = (p.item && p.item.id) || "";
     document.body.dataset.note = note.path || "";
     document.body.dataset.keys = Object.keys(p).sort().join(",");
     const box = document.createElement("div");
@@ -337,6 +351,9 @@ test('the slots follow the open note\'s type at 390 px, and a tab opens its view
     assert.equal(notePath, 'Songs/Amazing Grace.md');
     for (const k of ['note', 'playing', 'time', 'queue', 'source']) assert.ok(keys.split(',').includes(k), `${k} in ${keys}`);
     assert.ok(!keys.split(',').includes('lyrics'), 'no song-shaped props');
+    // Another view of the same extension than the one that set the queue:
+    // handed that source's state, its item the one playing.
+    await until(() => b.evalIn(lyrics, 'document.body.dataset.item === "Songs/Amazing Grace.md#2"'), 10000, 'the lyrics view on the item the queue view plays');
     const frames = JSON.parse(await b.eval(`JSON.stringify([...document.querySelectorAll('iframe')].map((f) => [f.getAttribute('sandbox'), new URL(f.src).pathname]))`));
     assert.ok(frames.length >= 1);
     for (const [sandbox, path] of frames) {

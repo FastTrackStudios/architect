@@ -268,7 +268,7 @@ pub fn declared(
     ty: &str,
     reach: &Reach<'_>,
     presses: &architect_shell::Presses,
-    run: impl Fn(Opens) + Clone + 'static,
+    run: impl Fn(&str, Opens) + Clone + 'static,
     state_on: impl Fn(&str, &str) -> bool,
 ) -> Vec<Declared> {
     decls
@@ -282,13 +282,34 @@ pub fn declared(
                     let shows = what.shows(reach.note);
                     let key = format!("{}\0{ty}\0{extension}\0{what:?}", reach.note);
                     let run = run.clone();
-                    let press = presses.get(key, || Callback::new(move |()| run(what.clone())));
+                    let by = extension.clone();
+                    let press =
+                        presses.get(key, || Callback::new(move |()| run(&by, what.clone())));
                     Some((press, shows))
                 },
                 |state| state_on(extension, state),
             )
         })
         .collect()
+}
+
+/// Runs a favourite's declared action `id` as the extension `by` that
+/// declared it, never as the app: what it reaches checks whose call it is
+/// by that (the playhead's `PLAYHEAD_TOGGLE` then toggles `by`'s own
+/// source, the one its face reads, not whichever is active; #660 M3).
+///
+/// # Errors
+///
+/// The action's own.
+pub async fn run_declared(
+    list: &architect::action::ActionList,
+    by: &str,
+    id: &str,
+) -> Result<Vec<u8>, architect::action::ActionError> {
+    use architect::action::{ActionCaller, Invocation, InvocationSource, Principal};
+    let caller = ActionCaller::new(Principal::extension(by, None))
+        .with_invocation(Invocation::new(InvocationSource::App));
+    list.run_json_async_with(&caller, id, &[]).await
 }
 
 /// Whether runtime state entry (`source`, `key`, `text`) turns extension
@@ -366,6 +387,62 @@ pub fn in_vault(id: &str) -> bool {
 mod tests {
     use super::*;
     use architect_shell::resolve_favourites;
+
+    /// #660 M3: B plays; A's note is open, A's source paused, so A's
+    /// primary shows Play. Pressed, it plays A's own source (B pauses: one
+    /// thing heard at a time), never just pauses B, the active one.
+    #[test]
+    fn a_favourites_toggle_moves_its_declarers_own_source() {
+        use architect::action::ActionList;
+        use architect_extensions::extensions::Extensions;
+        use architect_extensions::host::{Host, SharedSections};
+        use architect_extensions::install::Installs;
+        use architect_playhead::Caller;
+        use serde_json::json;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let list = ActionList::new();
+        let host = Host::new(
+            list.clone(),
+            SharedSections::new(architect_settings::Registry::new()),
+        );
+        let ext = Extensions::new(host, Installs::new(tmp.path().join("i")))
+            .with_linked(&architect_playhead::Playhead)
+            .unwrap();
+        ext.install_contribution_actions().unwrap();
+        let _ = ext.sync();
+        let set = |id: &str| {
+            architect_playhead::ask(
+                &Caller::Extension(id.to_owned()),
+                "PLAYHEAD_SET",
+                &json!({"queue": [{"id": "1", "title": id, "duration": 60}]}),
+            )
+            .unwrap();
+        };
+        set("lab.a");
+        set("lab.b");
+        architect_playhead::ask(
+            &Caller::Extension("lab.b".into()),
+            "PLAYHEAD_PLAY",
+            &json!({}),
+        )
+        .unwrap();
+        assert!(!architect_playhead::playing("lab.a"));
+        futures::executor::block_on(run_declared(&list, "lab.a", "PLAYHEAD_TOGGLE")).unwrap();
+        assert!(
+            architect_playhead::playing("lab.a"),
+            "A's primary moved another source"
+        );
+        assert!(!architect_playhead::playing("lab.b"));
+        for id in ["lab.a", "lab.b"] {
+            architect_playhead::ask(
+                &Caller::Extension(id.to_owned()),
+                "PLAYHEAD_SET",
+                &json!({"queue": []}),
+            )
+            .unwrap();
+        }
+    }
 
     #[test]
     fn the_default_four_in_the_owners_order() {
@@ -582,7 +659,7 @@ on = { label = "Stop", icon = "pause" }
                 exists: &exists,
             };
             let decls = vec![("lab.cook".to_owned(), decl(RECIPE))];
-            let run = |_: Opens| {};
+            let run = |_: &str, _: Opens| {};
             let set = declared(
                 &decls,
                 "Recipe",

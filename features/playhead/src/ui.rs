@@ -11,6 +11,12 @@
 //! A phone gets one compact row above its tab bar (a thin position line
 //! on its top edge, the art, the title, play/pause and next); a press on
 //! the title opens the rest under it. A desk gets one row with all of it.
+//!
+//! Every button is a 44 px target; the position line is a slider a
+//! keyboard reaches (arrows: 5 s, Home/End). When the item has media
+//! nobody hears here, the bar says so ("Not heard here") rather than
+//! looking like it plays, and an item it had to pass over or stop at
+//! ("Can't be played": media with no known length) is named.
 
 use architect_shell::{FormFactor, use_shell};
 use dioxus::prelude::*;
@@ -38,6 +44,10 @@ pub struct Showing {
     pub time: f64,
     /// The item's length, seconds.
     pub duration: f64,
+    /// The item has media nobody hears here (the deck's silent clock).
+    pub unheard: bool,
+    /// The item cannot be played: media nobody hears and no known length.
+    pub unplayable: bool,
 }
 
 /// The deck as the bar shows it.
@@ -66,6 +76,10 @@ pub fn read() -> Now {
             playing: s.transport.playing,
             time: s.time(now),
             duration: s.duration(),
+            unheard: d
+                .state(&s.id, now)
+                .is_some_and(|v| v.get("unheard") == Some(&Value::Bool(true))),
+            unplayable: s.item().is_some_and(|i| s.unplayable.contains(&i.id)),
         }),
         sources: d
             .sources()
@@ -75,14 +89,16 @@ pub fn read() -> Now {
     })
 }
 
-/// The deck, read again on each change and four times a second while it
-/// plays. It also moves a source on at its item's end when nothing heard
-/// does ([`crate::tick`]), so the app mounts it once (the bar does).
+/// The deck, read again on each change and while it plays.
+///
+/// It looks ten times a second. It also moves a source on at its item's
+/// end when nothing heard does ([`crate::tick`]), so the app mounts it
+/// once (the bar does).
 pub fn use_playhead() -> Signal<Now> {
     let mut now = use_signal(read);
     use_future(move || async move {
         loop {
-            futures_timer::Delay::new(std::time::Duration::from_millis(250)).await;
+            futures_timer::Delay::new(std::time::Duration::from_millis(100)).await;
             crate::tick();
             let was = now.peek().clone();
             let playing = was.active.as_ref().is_some_and(|a| a.playing);
@@ -142,10 +158,26 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
         s.index > 0 || s.time > 0.0,
         s.index.saturating_add(1) < s.tracks,
     );
-    let size = if phone { 40 } else { 44 };
+    let size = 44;
     let ink = t.ink.to_string();
     let ink3 = t.ink_3.to_string();
     let duration = s.duration;
+    let time_now = s.time;
+    // The keyboard's way along the line: 5 s a press, Home and End.
+    let keys = move |e: KeyboardEvent| {
+        if duration <= 0.0 {
+            return;
+        }
+        let to = match e.key() {
+            Key::Named(NamedKey::ArrowRight | NamedKey::ArrowUp) => (time_now + 5.0).min(duration),
+            Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowDown) => (time_now - 5.0).max(0.0),
+            Key::Named(NamedKey::Home) => 0.0,
+            Key::Named(NamedKey::End) => duration,
+            _ => return,
+        };
+        e.prevent_default();
+        press("PLAYHEAD_SEEK", &json!({ "t": to }));
+    };
     let seek = move |e: MouseEvent| {
         let w = *line_w.peek();
         if w > 0.0 && duration > 0.0 {
@@ -185,6 +217,14 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                 if item.subtitle.is_some() && phone { " · " }
                 if phone { "{s.name}" }
             }
+            if s.unplayable || s.unheard {
+                span {
+                    "data-testid": "now-playing-unheard",
+                    role: "status",
+                    style: "font-size: 11px; font-weight: 600; color: {t.ink_3};",
+                    if s.unplayable { "Can't be played" } else { "Not heard here" }
+                }
+            }
         }
     };
     let (prev_fade, next_fade) = (
@@ -192,11 +232,12 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
         if next_ok { 1.0 } else { 0.35 },
     );
     let pointer = if many { "pointer" } else { "default" };
-    let round = "border: 0; background: transparent; padding: 0; width: 36px; height: 36px; border-radius: 999px; \
+    let round = "border: 0; background: transparent; padding: 0; width: 44px; height: 44px; border-radius: 999px; \
                  display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;";
     let previous = rsx! {
         button {
             "data-testid": "now-playing-previous", "aria-label": "Previous",
+            disabled: !prev_ok,
             style: "{round} opacity: {prev_fade};",
             onclick: move |e: MouseEvent| { e.stop_propagation(); press("PLAYHEAD_PREVIOUS", &json!({})); },
             SkipBack { size: 18, color: ink.clone() }
@@ -222,6 +263,7 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
     let next = rsx! {
         button {
             "data-testid": "now-playing-next", "aria-label": "Next",
+            disabled: !next_ok,
             style: "{round} opacity: {next_fade};",
             onclick: move |e: MouseEvent| { e.stop_propagation(); press("PLAYHEAD_NEXT", &json!({})); },
             SkipForward { size: 18, color: ink }
@@ -233,13 +275,16 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
             span { "data-testid": "now-playing-time", "{clock_text(s.time)}" }
             div {
                 "data-testid": "now-playing-line",
-                role: "slider", "aria-label": "Position",
+                role: "slider", "aria-label": "Position", tabindex: "0",
                 "aria-valuemin": "0", "aria-valuemax": "{s.duration:.0}", "aria-valuenow": "{s.time:.1}",
-                style: "position: relative; flex: 1; height: 16px; cursor: pointer;",
+                "aria-valuetext": "{clock_text(s.time)} of {clock_text(s.duration)}",
+                "aria-disabled": "{s.duration <= 0.0}",
+                style: "position: relative; flex: 1; height: 44px; cursor: pointer;",
                 onmounted: measure,
                 onclick: seek,
-                div { style: "position: absolute; left: 0; right: 0; top: 7px; height: 3px; border-radius: 2px; background: {t.rule};" }
-                div { style: "position: absolute; left: 0; width: {pct}%; top: 7px; height: 3px; border-radius: 2px; background: {t.accent};" }
+                onkeydown: keys,
+                div { style: "position: absolute; left: 0; right: 0; top: 20px; height: 4px; border-radius: 2px; background: {t.rule};" }
+                div { style: "position: absolute; left: 0; width: {pct}%; top: 20px; height: 4px; border-radius: 2px; background: {t.accent};" }
             }
             span { "{clock_text(s.duration)}" }
         }
@@ -249,8 +294,10 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
             button {
                 "data-testid": "now-playing-source",
                 "aria-label": "Source: {s.name}",
+                "aria-haspopup": if many { "menu" } else { "false" },
+                "aria-expanded": "{menu() && many}",
                 style: "border: 1px solid {t.rule}; background: transparent; color: {t.ink_3}; border-radius: 999px; \
-                        padding: 4px 10px; font: inherit; font-size: 12px; display: flex; align-items: center; gap: 4px; \
+                        min-height: 44px; padding: 4px 12px; font: inherit; font-size: 12px; display: flex; align-items: center; gap: 4px; \
                         cursor: {pointer}; max-width: 160px;",
                 onclick: move |e: MouseEvent| {
                     e.stop_propagation();
@@ -268,6 +315,11 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                 div {
                     "data-testid": "now-playing-sources",
                     role: "menu",
+                    onkeydown: move |e: KeyboardEvent| {
+                        if e.key() == Key::Named(NamedKey::Escape) {
+                            menu.set(false);
+                        }
+                    },
                     style: "position: absolute; right: 0; bottom: calc(100% + 6px); min-width: 180px; z-index: 30; \
                             background: {t.sheet}; border: 1px solid {t.rule}; border-radius: 10px; padding: 4px; \
                             box-shadow: {t.shadow_float}; display: flex; flex-direction: column;",
@@ -279,7 +331,7 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                             key: "{id}",
                             role: "menuitem",
                             "data-source": "{id}",
-                            style: "border: 0; text-align: left; padding: 8px 10px; border-radius: 6px; font: inherit; font-size: 13px; \
+                            style: "border: 0; text-align: left; min-height: 44px; padding: 8px 10px; border-radius: 6px; font: inherit; font-size: 13px; \
                                     cursor: pointer; color: {t.ink}; background: {bg};",
                             onclick: {
                                 move |e: MouseEvent| {
@@ -310,10 +362,26 @@ pub fn NowPlayingBar(#[props(default)] art: Option<Callback<String, Option<Strin
                 // The position, on the row's top edge.
                 div { style: "position: absolute; left: 0; top: -1px; height: 2px; width: {pct}%; background: {t.accent};" }
                 div {
-                    style: "display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer;",
+                    style: "display: flex; align-items: center; gap: 10px; padding: 6px 12px; cursor: pointer;",
                     onclick: move |_| { let o = *open.peek(); open.set(!o); },
-                    {art_box}
-                    {words}
+                    // The art and words open the rest: a button to a
+                    // keyboard and a screen reader too.
+                    div {
+                        "data-testid": "now-playing-more",
+                        role: "button", tabindex: "0",
+                        "aria-expanded": "{open()}",
+                        "aria-label": "More controls: {item.title}",
+                        style: "flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 10px;",
+                        onkeydown: move |e: KeyboardEvent| {
+                            if matches!(e.key(), Key::Named(NamedKey::Enter)) || e.key() == Key::Character(" ".to_owned()) {
+                                e.prevent_default();
+                                let o = *open.peek();
+                                open.set(!o);
+                            }
+                        },
+                        {art_box}
+                        {words}
+                    }
                     {toggle}
                     {next}
                 }

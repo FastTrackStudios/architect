@@ -40,7 +40,20 @@ const DEMO: &[&str] = &[
 /// app has one: the demo's recordings. A signed-in org's vault streams
 /// through the node's files (`/files/{org}/{root}/content/{path}` with a
 /// read ticket) once the web app opens one (#628); until then its items
-/// play on the silent clock.
+/// play on the silent clock, and an item whose media is not resolved here
+/// gets no length from it (`Reading::resolved`).
+//
+// TODO(#628): before this builds a node URL for a signed-in vault, the
+// three rules of #589's media requirement (#660 M2):
+// 1. resolve `media` and `art` only when the source's note (or, for a
+//    queue of several notes, one of the notes the source draws from)
+//    links or embeds that path; otherwise play the item on the silent
+//    clock and never report a length for it;
+// 2. percent-encode each path segment when building the URL (the path is
+//    already `architect_playhead::model::vault_path`-checked: no `%`, `?`,
+//    `#`, `..`);
+// 3. the node checks the path again under the viewer's rights on the
+//    stream itself (a read ticket for the viewer, never handed to a frame).
 #[must_use]
 pub fn media_url(path: &str) -> Option<String> {
     if !architect_playhead::model::vault_path(path) {
@@ -57,6 +70,9 @@ struct AudioClock {
     /// The browser refused to play it (its autoplay rule, a file it
     /// cannot play): the silent clock goes on until the next item or press.
     refused: Rc<Cell<bool>>,
+    /// What a refused `play()` calls: one for the element's life, not one
+    /// leaked per press.
+    on_refused: Closure<dyn FnMut(JsValue)>,
 }
 
 impl Clock for AudioClock {
@@ -85,10 +101,7 @@ impl Clock for AudioClock {
             // Refused (no gesture, no file): the silent clock goes on.
             self.refused.set(false);
             if let Ok(p) = self.el.play() {
-                let refused = self.refused.clone();
-                let no = Closure::<dyn FnMut(JsValue)>::new(move |_| refused.set(true));
-                let _ = p.catch(&no);
-                no.forget();
+                let _ = p.catch(&self.on_refused);
             }
         }
     }
@@ -118,6 +131,8 @@ impl Clock for AudioClock {
             moving: !self.el.paused() && !self.el.seeking() && self.el.ready_state() >= 3,
             ended: self.el.ended(),
             failed: self.el.error().is_some() || self.refused.get(),
+            // `src` is set only from `media_url`: the app resolved it.
+            resolved: true,
         })
     }
 }
@@ -158,6 +173,12 @@ fn sync() {
             p.shown = key;
         }
     });
+}
+
+/// [`sync`] from inside a callback that may run while the player is
+/// borrowed: on the next turn.
+fn sync_later() {
+    wasm_bindgen_futures::spawn_local(async { sync() });
 }
 
 fn get(o: &JsValue, k: &str) -> Option<JsValue> {
@@ -259,12 +280,22 @@ pub fn start() {
         let _ = el.add_event_listener_with_callback(ev, on.as_ref().unchecked_ref());
         on.forget();
     }
+    let refused = Rc::new(Cell::new(false));
+    let on_refused = {
+        let refused = refused.clone();
+        Closure::<dyn FnMut(JsValue)>::new(move |_| {
+            refused.set(true);
+            // Heard at once: the bar stops saying it plays.
+            sync_later();
+        })
+    };
     PLAYER.with(|p| {
         *p.borrow_mut() = Some(Player {
             clock: AudioClock {
                 el,
                 src: None,
-                refused: Rc::new(Cell::new(false)),
+                refused,
+                on_refused,
             },
             follower: Follower::default(),
             shown: None,
@@ -272,7 +303,7 @@ pub fn start() {
     });
     architect_playhead::with(|d| d.audible = true);
     // Every change, at once: inside the press that made it.
-    architect_playhead::on_change(|_| sync());
+    architect_playhead::on_change("web.audio", |_| sync());
     handlers();
     wasm_bindgen_futures::spawn_local(async {
         loop {

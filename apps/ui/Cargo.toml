@@ -127,6 +127,8 @@ blitz-dom = { workspace = true }
 blitz-traits = { workspace = true }
 # A manifest's `[[favourites]]` as written (src/favourites.rs tests).
 toml = { workspace = true }
+# A favourite's press run on a real action list (src/favourites.rs tests).
+futures = "0.3"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 # FILES_* (src/files.rs): the agent's HTTP client runs on a runtime of its

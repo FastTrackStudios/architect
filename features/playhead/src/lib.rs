@@ -41,7 +41,7 @@ use serde_json::{Value, json};
 pub use crate::clock::{Clock, Follower, Reading, Silent};
 pub use crate::deck::{Caller, Control, Deck, Pick, Source};
 #[cfg(feature = "extension")]
-pub use crate::extension::Playhead;
+pub use crate::extension::{Playhead, raise_changed};
 pub use crate::model::{Item, Mark, Section, Spec};
 
 /// Its id: its actions are `PLAYHEAD_*`.
@@ -50,7 +50,13 @@ pub const ID: &str = "playhead";
 /// The service it provides: method `m` is `PLAYHEAD_<M>`.
 pub const SERVICE: &str = "architect.playhead";
 
-/// The app event raised on each change, its detail the source's state.
+/// The app event raised on each change.
+///
+/// Each extension hears it with [`heard_by`]: its own source's state, or
+/// only whether its source is the active one, never another source's
+/// (#660 M1). A hook takes it as
+/// `on = "app:playhead.changed"` with `capabilities.events =
+/// ["playhead.changed"]`.
 pub const CHANGED: &str = "playhead.changed";
 
 /// Every action an extension may run on it (the frame host lets a web
@@ -103,7 +109,7 @@ pub fn now_ms() -> f64 {
 static DECK: Mutex<Option<Deck>> = Mutex::new(None);
 
 type Listener = Arc<dyn Fn(&Value) + Send + Sync>;
-static LISTENER: Mutex<Option<Listener>> = Mutex::new(None);
+static LISTENERS: Mutex<Vec<(&'static str, Listener)>> = Mutex::new(Vec::new());
 
 /// Works on the app's one deck.
 pub fn with<R>(f: impl FnOnce(&mut Deck) -> R) -> R {
@@ -117,20 +123,42 @@ pub fn revision() -> u64 {
     with(|d| d.revision())
 }
 
-/// Called with a source's state on each change (the app raises
-/// [`CHANGED`] from it); replaces the one before.
-pub fn on_change(listener: impl Fn(&Value) + Send + Sync + 'static) {
-    *LISTENER.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(listener));
+/// Calls `listener` with a source's whole state on each change (the app
+/// raises [`CHANGED`] from it, the web app's audio element follows it).
+///
+/// Each listener is kept under its `key`: a second call with the same key
+/// replaces that one only, so two parts of an app never cut each other
+/// off (#660 L8).
+pub fn on_change(key: &'static str, listener: impl Fn(&Value) + Send + Sync + 'static) {
+    let mut ls = LISTENERS.lock().unwrap_or_else(PoisonError::into_inner);
+    ls.retain(|(k, _)| *k != key);
+    ls.push((key, Arc::new(listener)));
 }
 
 fn changed(state: &Value) {
-    let l = LISTENER
+    let ls: Vec<Listener> = LISTENERS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .clone();
-    if let Some(l) = l {
+        .iter()
+        .map(|(_, l)| l.clone())
+        .collect();
+    for l in ls {
         l(state);
     }
+}
+
+/// What extension `extension` hears of the change `state`.
+///
+/// The whole state when the source is its own, else only `{active}`:
+/// whether its own source is the active one now. The app hears every
+/// state whole; no extension hears another's queue, items or media.
+#[must_use]
+pub fn heard_by(extension: &str, state: &Value) -> Value {
+    if state.get("source").and_then(Value::as_str) == Some(extension) && !deck::reserved(extension)
+    {
+        return state.clone();
+    }
+    json!({ "active": with(|d| d.active() == Some(extension)) && !deck::reserved(extension) })
 }
 
 fn source_arg(args: &Value) -> Option<String> {
@@ -179,7 +207,8 @@ pub fn control(action: &str, args: &Value) -> Result<(Control, Option<String>), 
 /// What every runtime's call comes to. A control answers the state of the source it
 /// moved; `PLAYHEAD_STATE` a source's state (the caller's own, or for the
 /// app the active one; `null` when there is none); `PLAYHEAD_SOURCES`
-/// every source.
+/// every source for the app, an extension's own entry and whether it is
+/// active for an extension (`Deck::listing_for`).
 ///
 /// # Errors
 ///
@@ -197,7 +226,7 @@ pub fn ask(caller: &Caller, action: &str, args: &Value) -> Result<Value, String>
                 Ok(d.state(&id, now).unwrap_or(Value::Null))
             });
         }
-        "PLAYHEAD_SOURCES" => return Ok(with(|d| d.listing())),
+        "PLAYHEAD_SOURCES" => return Ok(with(|d| d.listing_for(caller))),
         _ => {}
     }
     let (c, source) = if action == "PLAYHEAD_TOGGLE" {
@@ -237,6 +266,22 @@ pub fn ask(caller: &Caller, action: &str, args: &Value) -> Result<Value, String>
     Ok(state)
 }
 
+/// A favourite's declared playhead target `action`, pressed.
+///
+/// Run as the extension `declarer` that declared it, so it moves that
+/// extension's own source, the one its face reads (#660 M3). `None` when
+/// `action` is not the playhead's (the app runs it).
+#[must_use]
+pub fn press_as(declarer: &str, action: &str) -> Option<Result<Value, String>> {
+    ACTIONS.contains(&action).then(|| {
+        ask(
+            &Caller::Extension(declarer.to_owned()),
+            action,
+            &Value::Object(serde_json::Map::new()),
+        )
+    })
+}
+
 /// With nothing heard: past its item's end, the active source goes on
 /// (the app calls it a few times a second).
 pub fn tick() {
@@ -261,7 +306,7 @@ mod tests {
         // The one test that owns the global deck.
         let heard = Arc::new(Mutex::new(Vec::<String>::new()));
         let h = heard.clone();
-        on_change(move |s| {
+        on_change("test", move |s| {
             h.lock().unwrap().push(format!(
                 "{} {}",
                 s["source"].as_str().unwrap_or("?"),

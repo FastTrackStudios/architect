@@ -84,22 +84,37 @@ pub struct Spec {
     pub play: bool,
 }
 
-/// Whether `path` is a path in a vault: relative, `/`-separated, no
-/// scheme, no `..`, nothing empty, no `\` and no control characters.
+/// Whether `path` is a path in a vault, as `media` and `art` must be.
+///
+/// The one rule for both, shared by the deck and the web app's frame host
+/// (`apps/web/src/ext_host.rs` re-exports it): 1 to 1024 bytes,
+/// `/`-separated and relative. Refused: a scheme or drive (`:`), a
+/// leading `/`, `\`, a query or fragment once it is a URL (`?`, `#`),
+/// percent-encoding (`%`), control characters, invisible format
+/// characters (zero-width, direction marks, the BOM, the soft hyphen),
+/// slashes and dots that only look like `/` and `.` (U+FF0F, U+2215,
+/// U+2044, U+FF0E, U+2024, U+FE52), and an empty, `.` or `..` segment or
+/// one that ends in a dot or a space. Spaces inside a name are kept.
 #[must_use]
 pub fn vault_path(path: &str) -> bool {
-    let scheme = path
-        .split_once(':')
-        .is_some_and(|(head, _)| !head.contains('/'));
     !path.is_empty()
         && path.len() <= 1024
-        && !scheme
-        && !path.starts_with('/')
-        && !path.contains('\\')
-        && !path.chars().any(char::is_control)
-        && path
-            .split('/')
-            .all(|s| !s.is_empty() && s != "." && s != "..")
+        && !path.chars().any(refused_char)
+        && path.split('/').all(|s| {
+            !s.is_empty() && s != "." && s != ".." && !s.ends_with('.') && !s.ends_with(' ')
+        })
+}
+
+/// A character no vault path holds: one with a meaning once the path is
+/// a URL or a file name elsewhere, one nobody sees, or one that passes
+/// for `/` or `.`.
+const fn refused_char(c: char) -> bool {
+    matches!(c, ':' | '\\' | '?' | '#' | '%')
+        || c.is_control()
+        // Look-alikes of `/` and `.`.
+        || matches!(c, '\u{FF0F}' | '\u{2215}' | '\u{2044}' | '\u{29F8}' | '\u{FF0E}' | '\u{2024}' | '\u{FE52}')
+        // Invisible format characters (Unicode's Cf, as names use them).
+        || matches!(c, '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}')
 }
 
 fn text(v: &Value, key: &str, max: usize, what: &str) -> Result<Option<String>, String> {
@@ -248,7 +263,10 @@ mod tests {
         for ok in [
             "Recordings/Amazing Grace.m4a",
             "a.mp3",
-            "Songs/Verse: one/take 2.wav",
+            "a",
+            "Songs/Merry & Bright/01 – Joy.flac",
+            "Songs/Verse one/take 2.wav",
+            "Art/a b.jpg",
         ] {
             assert!(vault_path(ok), "{ok}");
         }
@@ -258,16 +276,45 @@ mod tests {
             "data:audio/wav;base64,AAAA",
             "blob:https://x/1",
             "javascript:alert(1)",
+            "C:/a.ogg",
+            "Songs/Verse: one/take 2.wav",
             "/etc/passwd",
             "../outside.mp3",
             "a/../../b.mp3",
             "a//b.mp3",
+            "a/",
             "a\\b.mp3",
             "./a.mp3",
+            "a/./b.mp3",
             "a/\n.mp3",
+            "a\u{0}.mp3",
+            "a\u{7f}.mp3",
+            // A query, a fragment, percent-encoding (#660 M2).
+            "Recordings/%2e%2e/%2e%2e/secret.m4a",
+            "Recordings%2F..%2Fsecret.m4a",
+            "Recordings/a.mp3?download=1",
+            "Recordings/a.mp3#t=10",
+            "Media/a%20b.ogg",
+            // Look-alike slashes and dots, a segment ending in a dot or a
+            // space, invisible characters (#659 re-check N3).
+            "Recordings\u{FF0F}..\u{FF0F}secret.m4a",
+            "Recordings/\u{FF0E}\u{FF0E}/secret.m4a",
+            "Recordings\u{2215}a.m4a",
+            "Recordings\u{2044}a.m4a",
+            "Recordings/a\u{2024}m4a",
+            "Recordings./a.m4a",
+            "Recordings/a.m4a.",
+            "Recordings /a.m4a",
+            "Recordings/a.m4a ",
+            "Recordings/\u{200B}a.m4a",
+            "Recordings/a\u{202E}a4m.mp3",
+            "\u{FEFF}Recordings/a.m4a",
+            "Recordings/a\u{00AD}b.m4a",
         ] {
             assert!(!vault_path(bad), "{bad:?}");
         }
+        assert!(vault_path(&"a".repeat(1024)));
+        assert!(!vault_path(&"a".repeat(1025)));
     }
 
     #[test]

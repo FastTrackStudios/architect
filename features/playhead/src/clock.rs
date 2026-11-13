@@ -30,6 +30,10 @@ pub struct Reading {
     /// Whether it cannot be heard (no stream for the media here, a file
     /// it cannot play, play refused): the deck's own clock goes on.
     pub failed: bool,
+    /// Whether the app resolved the current item's media to a stream it
+    /// plays: only then is `duration` the deck's (#589's media
+    /// requirement: no length for a path it would not stream).
+    pub resolved: bool,
 }
 
 /// What makes the deck heard.
@@ -171,20 +175,26 @@ mod tests {
         c.log.clear();
         f.follow(&d, &mut c, 0.0);
         assert!(c.log.is_empty(), "nothing changed, nothing told");
+        // No seek before its length is known.
+        assert!(d.apply(&me, Control::Seek(7.0), None, 0.0).is_err());
         d.apply(&me, Control::Play, None, 0.0).unwrap();
-        d.apply(&me, Control::Seek(7.0), None, 0.0).unwrap();
         f.follow(&d, &mut c, 0.0);
-        assert_eq!(c.log, ["seek 7", "play"]);
+        assert_eq!(c.log, ["play"]);
         c.log.clear();
         c.reading = Some(Reading {
-            time: 9.0,
+            time: 1.0,
             duration: Some(60.0),
             moving: true,
             ended: false,
             failed: false,
+            resolved: true,
         });
-        assert!(f.report(&mut d, &c, 2_000.0));
-        assert_eq!(d.state("s", 2_000.0).unwrap()["duration"], 60.0);
+        assert!(f.report(&mut d, &c, 1_000.0));
+        assert_eq!(d.state("s", 1_000.0).unwrap()["duration"], 60.0);
+        d.apply(&me, Control::Seek(7.0), None, 1_000.0).unwrap();
+        f.follow(&d, &mut c, 1_000.0);
+        assert_eq!(c.log, ["seek 7"]);
+        c.log.clear();
         d.apply(&me, Control::Next, None, 2_000.0).unwrap();
         f.follow(&d, &mut c, 2_000.0);
         assert_eq!(c.log, ["load Some(\"R/b.m4a\")", "seek 0", "play"]);

@@ -53,8 +53,30 @@ pub const BEAT_MS: u32 = 2_000;
 pub const LATE_MS: f64 = 6_000.0;
 /// The tallest a frame may say it is, px.
 pub const MAX_HEIGHT: f64 = 4_000.0;
-/// At most this many asks a second, with a burst of twice that.
+/// The most of the window's height a view at a note's head takes.
+///
+/// At least [`HEAD_MIN`] px; taller, it scrolls inside its own box, so a
+/// long list (a 500-item queue) is all there without pushing the note
+/// away at 390 px wide (#657, #660).
+pub const HEAD_SHARE: f64 = 0.6;
+/// The least a view at a note's head is given before it scrolls, px.
+pub const HEAD_MIN: f64 = 240.0;
+
+/// How tall a view at a note's head is drawn, px: the height it says
+/// (`size`), up to [`HEAD_SHARE`] of a window `viewport` px tall (at
+/// least [`HEAD_MIN`]); past that its frame scrolls.
+#[must_use]
+pub fn head_height(said: f64, viewport: f64) -> f64 {
+    let cap = (viewport * HEAD_SHARE).max(HEAD_MIN);
+    said.clamp(0.0, cap)
+}
+
+/// At most this many asks a second from one frame, with a burst of twice
+/// that.
 pub const ASKS_PER_SECOND: f64 = 8.0;
+/// At most this many asks a second from every frame together, with a
+/// burst of twice that: one frame cannot use it up (#657, #660 L2).
+pub const ALL_ASKS_PER_SECOND: f64 = 32.0;
 /// The most bytes a message from a frame may take as JSON; larger is
 /// dropped unread. A `PLAYHEAD_SET` of a queue with its timed marks fits.
 pub const MAX_MESSAGE: usize = 64 * 1024;
@@ -583,31 +605,60 @@ pub fn check(name: &str, bytes: &[u8], digest: &str) -> Result<(), String> {
 pub struct Bucket {
     tokens: f64,
     at: f64,
+    rate: f64,
 }
 
 impl Bucket {
-    /// Full at `now` (ms).
+    /// One frame's, full at `now` (ms).
     #[must_use]
     pub const fn new(now: f64) -> Self {
+        Self::at_rate(now, ASKS_PER_SECOND)
+    }
+
+    /// Every frame's together ([`ALL_ASKS_PER_SECOND`]), full at `now`.
+    #[must_use]
+    pub const fn all(now: f64) -> Self {
+        Self::at_rate(now, ALL_ASKS_PER_SECOND)
+    }
+
+    const fn at_rate(now: f64, rate: f64) -> Self {
         Self {
-            tokens: ASKS_PER_SECOND * 2.0,
+            tokens: rate * 2.0,
             at: now,
+            rate,
         }
+    }
+
+    fn fill(&mut self, now: f64) {
+        let elapsed = (now - self.at).max(0.0) / 1000.0;
+        self.tokens = elapsed.mul_add(self.rate, self.tokens).min(self.rate * 2.0);
+        self.at = now;
     }
 
     /// Whether an ask at `now` (ms) is let through.
     pub fn take(&mut self, now: f64) -> bool {
-        let elapsed = (now - self.at).max(0.0) / 1000.0;
-        self.tokens = elapsed
-            .mul_add(ASKS_PER_SECOND, self.tokens)
-            .min(ASKS_PER_SECOND * 2.0);
-        self.at = now;
+        self.fill(now);
         if self.tokens < 1.0 {
             return false;
         }
         self.tokens -= 1.0;
         true
     }
+}
+
+/// Whether a frame's ask at `now` is let through: its own bucket, then
+/// every frame's. One frame that floods spends only its own, so the
+/// others' asks still pass; together they never pass the shared bound.
+pub fn take_ask(frame: &mut Bucket, all: &mut Bucket, now: f64) -> bool {
+    if !frame.take(now) {
+        return false;
+    }
+    if all.take(now) {
+        return true;
+    }
+    // Refused by the shared bound: the frame's token is given back.
+    frame.tokens = (frame.tokens + 1.0).min(frame.rate * 2.0);
+    false
 }
 
 /// Why a frame's ask is not heard now, if it is not: before its view is
@@ -1068,6 +1119,24 @@ mod tests {
         // A second later: eight more.
         let more = (0..100).filter(|_| b.take(1000.0)).count();
         assert_eq!(more, 8);
+        // One frame flooding spends its own bucket, not the others' (#660
+        // L2): a second frame's asks still pass.
+        let mut all = Bucket::all(0.0);
+        let (mut flood, mut calm) = (Bucket::new(0.0), Bucket::new(0.0));
+        let flooded = (0..1000)
+            .filter(|_| take_ask(&mut flood, &mut all, 0.0))
+            .count();
+        assert_eq!(flooded, 16);
+        assert!((0..5).all(|_| take_ask(&mut calm, &mut all, 1.0)));
+        // Many frames together never pass the shared bound.
+        let mut all = Bucket::all(0.0);
+        let passed: usize = (0..20)
+            .map(|_| {
+                let mut f = Bucket::new(0.0);
+                (0..100).filter(|_| take_ask(&mut f, &mut all, 0.0)).count()
+            })
+            .sum();
+        assert_eq!(passed, 64);
         // #656's five, and ITEM and SET; no reads, no switching sources,
         // nothing of a vault's.
         assert_eq!(INTENTS.len(), 7);
@@ -1093,6 +1162,17 @@ mod tests {
         assert_eq!(ask_refused(true, true), Some("the page is hidden"));
         assert_eq!(ask_refused(false, true), Some("not ready"));
         assert_eq!(ask_refused(true, false), None);
+    }
+
+    #[test]
+    fn a_view_at_a_notes_head_scrolls_past_a_share_of_the_window() {
+        // A phone, 390 x 844: a 500-row list (22000 px) is 506 px tall and
+        // scrolls inside; a short view is as tall as it says.
+        assert!((head_height(22_000.0, 844.0) - 506.4).abs() < 1e-9);
+        assert!((head_height(120.0, 844.0) - 120.0).abs() < f64::EPSILON);
+        // A short window still gives a view room.
+        assert!((head_height(4_000.0, 200.0) - HEAD_MIN).abs() < f64::EPSILON);
+        assert!(head_height(-5.0, 844.0).abs() < f64::EPSILON);
     }
 
     #[test]

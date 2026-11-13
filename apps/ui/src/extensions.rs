@@ -954,8 +954,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         }
         // The playhead (#589): `architect.playhead`, every extension's way
         // into the Now Playing bar. Each change is the app event
-        // `playhead.changed` (its detail the source's state), which a
-        // process extension hooks to follow it.
+        // `playhead.changed`, which a process extension hooks to follow
+        // it: its own source's state, or only `{active}` for a change of
+        // another's (`architect_playhead::heard_by`, #660 M1).
         if let Ok(with) = extensions
             .clone()
             .with_linked(&architect_playhead::Playhead)
@@ -965,14 +966,18 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             let _ = host.define_event(architect_extensions::events::AppEvent {
                 name: architect_playhead::CHANGED.to_owned(),
                 title: "Now Playing changes".to_owned(),
-                description: "A source on the playhead was set, played, paused, sought, moved to another item or removed; its detail is that source's state (PLAYHEAD_STATE).".to_owned(),
+                description: "A source on the playhead was set, played, paused, sought, moved to another item or removed. An extension hears its own source's state (PLAYHEAD_STATE), and of another's change only {active}: whether its own source is the active one.".to_owned(),
                 detail: None,
             });
-            architect_playhead::on_change(move |state| {
-                let _ = host.raise_app(architect_playhead::CHANGED, state);
+            architect_playhead::on_change("app.event", move |state| {
+                let _ = architect_playhead::raise_changed(&host, state);
                 // Its source's playing, as its extension's own runtime
                 // state: a favourite's primary shows Pause by it (#607).
-                if let Some(id) = state.get("source").and_then(serde_json::Value::as_str) {
+                if let Some(id) = state
+                    .get("source")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|id| !architect_playhead::deck::reserved(id))
+                {
                     let on = state.get("playing") == Some(&serde_json::Value::Bool(true));
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)

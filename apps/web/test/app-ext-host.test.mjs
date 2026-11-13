@@ -469,11 +469,14 @@ test('a frame that floods its port is booted once and its height held', { skip }
     const m = await mark(w.b, 'transport');
     assert.equal(m.state, 'ready');
     assert.equal(m.refused, 'too many requests');
+    // At the note's head: held at a share of the window, scrolling inside
+    // (`ext_host::head_height`), however tall it says it is.
+    const cap = Math.max(240, (await w.b.eval('innerHeight')) * 0.6);
     const held = await until(async () => {
       const h = parseFloat((await mark(w.b, 'transport')).height);
-      return h === 4000 && h;
+      return Math.abs(h - cap) < 1 && h;
     }, 5000, 'the frame to be held at the cap');
-    assert.equal(held, 4000);
+    assert.ok(Math.abs(held - cap) < 1, `${held} px, the cap ${cap}`);
   } finally { await w.close(); }
 });
 
@@ -564,9 +567,13 @@ test('a note\'s type picks its island from the listing; the view gets the note t
     assert.ok(bundles().length > 0 && bundles().every((p) => p.startsWith(folder('demo.second'))), `fetched: ${bundles().join(', ')}`);
     // The whole queue came through; what was refused, with why.
     const full = await until(async () => { const x = await embed(b); return x.queue === 500 && x; }, 20000, 'the 500-item queue');
+    // At the note's head it is at most a share of the window, and scrolls
+    // inside its own box (#657, #660): the note is not pushed away.
+    const tall = JSON.parse(await b.eval(`JSON.stringify([document.querySelector('[data-testid=note-embed] iframe').getBoundingClientRect().height, innerHeight])`));
+    assert.ok(tall[0] <= Math.max(240, tall[1] * 0.6) + 1, `a frame ${tall[0]} px tall in a window ${tall[1]} px`);
     assert.match(full.current, /^Setlists\/Merry\.md#\d+$/);
     const refused = JSON.parse(await b.eval('JSON.stringify(window.__refused)'));
-    for (const why of ['not ready', 'media must be a vault path', 'queue: at most 500 items']) assert.ok(refused.includes(why), `${why} in ${JSON.stringify(refused)}`);
+    for (const why of ['not ready', 'media must be a vault path', 'at most 500 items']) assert.ok(refused.some((r) => r.includes(why)), `${why} in ${JSON.stringify(refused)}`);
     assert.equal(await b.eval(`document.querySelectorAll('[data-pwned]').length`), 0, 'a title is never markup');
     // What it was handed: the note, without its comments.
     const c = await frameOf(b, 'second');
@@ -612,22 +619,27 @@ async function openNoteOnly(w) {
 /// sets its source and makes its song current, and writes what it was
 /// handed last to its body.
 const QUEUE = `
+  let set = false;
   globalThis.architectPage.subscribe((p) => {
     document.body.dataset.props = JSON.stringify({ source: p.source, name: p.name, active: p.active, title: p.title,
       playing: p.playing, index: p.index, tracks: p.tracks, time: p.time, clock: p.clock, item: p.item && p.item.id, note: p.note && p.note.path });
+    // Once shown (its first props come after ready): an ask before is
+    // refused.
+    if (set || p.tracks) return;
+    set = true;
+    globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Demo", queue: [
+      { id: "a", title: "Blue Moon Walk", subtitle: "Cody Wright", duration: 180 },
+      { id: "b", title: "Slow River", subtitle: "Traditional", duration: 90 },
+      { id: "c", title: "Amazing Grace", subtitle: "John Newton", media: "Recordings/Amazing Grace.mp3" },
+    ] });
+    globalThis.architectPage.ask("PLAYHEAD_ITEM", { id: "c" });
   });
-  globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Demo", queue: [
-    { id: "a", title: "Blue Moon Walk", subtitle: "Cody Wright", duration: 180 },
-    { id: "b", title: "Slow River", subtitle: "Traditional", duration: 90 },
-    { id: "c", title: "Amazing Grace", subtitle: "John Newton", media: "Recordings/Amazing Grace.mp3" },
-  ] });
-  globalThis.architectPage.ask("PLAYHEAD_ITEM", { id: "c" });
 `;
 
 const BAR = `JSON.stringify((() => { const e = document.querySelector('[data-testid=now-playing]'); if (!e) return null;
   const q = (id) => (e.querySelector('[data-testid=' + id + ']') || {}).textContent || '';
   return { source: e.dataset.source, playing: e.dataset.playing === 'true', time: Number(e.dataset.time), index: Number(e.dataset.index),
-    title: q('now-playing-title'), subtitle: q('now-playing-subtitle'), name: q('now-playing-source') }; })())`;
+    title: q('now-playing-title'), subtitle: q('now-playing-subtitle'), name: q('now-playing-source'), unheard: q('now-playing-unheard') }; })())`;
 const bar = async (b) => JSON.parse(await b.eval(BAR));
 const press = (b, id) => b.eval(`(() => { const e = document.querySelector('[data-testid=${id}]'); if (!e) return false; e.click(); return true; })()`);
 const propsOf = async (b, view) => { const c = await frameOf(b, view); return c && JSON.parse((await b.evalIn(c, 'document.body.dataset.props || "null"')) || 'null'); };
@@ -657,7 +669,9 @@ test('the Now Playing bar shows the queue, its presses reach the frames and a fr
     // streams the recording with ranges.
     assert.ok(await press(b, 'now-playing-toggle'));
     await until(async () => (await propsOf(b, 'transport')).playing === true, 5000, 'the frame to hear play');
-    assert.equal((await bar(b)).playing, true);
+    // The bar reads the deck on its own beat: waited for, never assumed
+    // (#660: this raced the frame's props in 2 runs of 3).
+    await until(async () => (await bar(b)).playing === true, 5000, 'the bar playing');
     await until(() => b.eval(`(() => { const a = document.querySelector('[data-testid=now-playing-audio]'); return !!a && a.src.endsWith('/app/demo-recording.mp3') && !a.paused && a.currentTime > 0.3; })()`), 10000, 'the recording to play');
     assert.ok(w.f.media.some((m) => m.startsWith('206 /app/demo-recording.mp3')), `ranged: ${w.f.media.join(', ')}`);
     assert.equal(await b.eval('navigator.mediaSession && navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : null'), 'Amazing Grace');
@@ -678,6 +692,22 @@ test('the Now Playing bar shows the queue, its presses reach the frames and a fr
     await ask(b, 'transport', 'PLAYHEAD_SEEK', { t: 30 });
     await until(async () => Math.abs((await bar(b)).time - 30) < 0.5, 5000, 'the bar at 30 s');
     assert.equal((await mark(b, 'transport')).refused, '');
+    // A seek before its item's length is known is refused, past it clamped.
+    await ask(b, 'transport', 'PLAYHEAD_SEEK', { t: 1e9 });
+    await until(async () => Math.abs((await bar(b)).time - 180) < 0.5, 5000, 'the bar clamped at the end');
+
+    // Media nobody can hear here and no length: not "playing" in silence.
+    // Passed over to the next, or stopped at the last, and said so (#660 M4).
+    await ask(b, 'transport', 'PLAYHEAD_SET', { name: 'Demo', queue: [{ id: 'u', title: 'Unheard', media: 'Private/elsewhere.mp3' }], play: true });
+    const stopped = await until(async () => { const s = await bar(b); return s.title === 'Unheard' && !s.playing && s.unheard && s; }, 10000, 'the unplayable item stopped and named');
+    assert.equal(stopped.unheard, "Can't be played");
+    // Back to the queue for what follows.
+    await ask(b, 'transport', 'PLAYHEAD_SET', { name: 'Demo', queue: [
+      { id: 'a', title: 'Blue Moon Walk', subtitle: 'Cody Wright', duration: 180 },
+      { id: 'b', title: 'Slow River', subtitle: 'Traditional', duration: 90 },
+      { id: 'c', title: 'Amazing Grace', subtitle: 'John Newton', media: 'Recordings/Amazing Grace.mp3' },
+    ], index: 2 });
+    await until(async () => (await bar(b)).title === 'Amazing Grace', 5000, 'the queue back');
 
     if (process.env.SHOTS) {
       mkdirSync(process.env.SHOTS, { recursive: true });
@@ -706,13 +736,13 @@ test('two sources coexist, the bar switches between them, and a frame moves only
     await sleep(300);
     await until(async () => (await clickText(b, 'Voice memo: chorus melody')) || clickText(b, 'Voice memo chorus melody'), 10000, 'the voice memo');
     await until(() => press(b, 'note-recording-play'), 10000, 'its recording\'s play');
-    const memo = await until(async () => { const s = await bar(b); return s.source === 'vault' && s.playing && s; }, 5000, 'the memo playing in the bar');
+    const memo = await until(async () => { const s = await bar(b); return s.source === 'app:notes' && s.playing && s; }, 5000, 'the memo playing in the bar');
     assert.match(memo.title, /Voice memo/);
     assert.match(memo.name, /Notes/);
     // The switcher lists both; the song comes back paused where it was.
     assert.ok(await press(b, 'now-playing-source'));
     const listed = await until(() => b.eval(`JSON.stringify([...document.querySelectorAll('[data-testid=now-playing-sources] [data-source]')].map((e) => e.dataset.source))`).then(JSON.parse).then((l) => l.length && l), 5000, 'the sources');
-    assert.deepEqual(listed.sort(), ['demo.view', 'vault']);
+    assert.deepEqual(listed.sort(), ['app:notes', 'demo.view']);
     assert.ok(await b.eval(`(() => { document.querySelector('[data-testid=now-playing-sources] [data-source="demo.view"]').click(); return true; })()`));
     await until(async () => { const s = await bar(b); return s.source === 'demo.view' && !s.playing; }, 5000, 'the song shown, paused');
 
@@ -721,7 +751,7 @@ test('two sources coexist, the bar switches between them, and a frame moves only
     await sleep(300);
     await until(() => clickText(b, 'Amazing Grace'), 10000, 'the song note');
     await ready1(b);
-    await ask(b, 'transport', 'PLAYHEAD_PLAY', { source: 'vault' });
+    await ask(b, 'transport', 'PLAYHEAD_PLAY', { source: 'app:notes' });
     await until(async () => (await mark(b, 'transport')).refused === 'not your source', 5000, 'another\'s source refused');
     await ask(b, 'transport', 'PLAYHEAD_ACTIVATE', { source: 'demo.view' });
     await until(async () => (await mark(b, 'transport')).refused === 'not an ask a frame makes', 5000, 'switching refused');
@@ -731,8 +761,8 @@ test('two sources coexist, the bar switches between them, and a frame moves only
     await until(async () => { const s = await bar(b); return s.source === 'demo.view' && s.playing; }, 5000, 'its own playing');
     // The memo was not moved by any of it, and is paused now the song plays.
     assert.ok(await press(b, 'now-playing-source'));
-    await until(() => b.eval(`(() => { const e = document.querySelector('[data-testid=now-playing-sources] [data-source="vault"]'); if (!e) return false; e.click(); return true; })()`), 5000, 'the memo in the switcher');
-    await until(async () => { const s = await bar(b); return s.source === 'vault' && !s.playing && /Voice memo/.test(s.title); }, 5000, 'the memo shown, paused');
+    await until(() => b.eval(`(() => { const e = document.querySelector('[data-testid=now-playing-sources] [data-source="app:notes"]'); if (!e) return false; e.click(); return true; })()`), 5000, 'the memo in the switcher');
+    await until(async () => { const s = await bar(b); return s.source === 'app:notes' && !s.playing && /Voice memo/.test(s.title); }, 5000, 'the memo shown, paused');
     // The rate limit holds for the new asks too.
     const c = await frameOf(b, 'transport');
     await b.evalIn(c, 'for (let i = 0; i < 100; i++) globalThis.architectPage.ask("PLAYHEAD_ITEM", { index: i % 3 }); true');

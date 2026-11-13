@@ -1718,7 +1718,7 @@ fn declared_favourites(
     let path = note.to_owned();
     let note_type = ty.to_owned();
     let list = host.list().clone();
-    let run = move |what: favourites::Opens| {
+    let run = move |by: &str, what: favourites::Opens| {
         // The Vault's workspace on show (it stays mounted under the four).
         let to_vault = |lab: Lab| {
             if !matches!(*lab.route.peek(), Route::Tab(t) if t == "vault" || favourites::in_vault(t))
@@ -1752,8 +1752,16 @@ fn declared_favourites(
             favourites::Opens::QuickOpen => {
                 let _ = commands.run(favourites::QUICK_OPEN);
             }
-            favourites::Opens::Action(id) => {
+            // A command of the app's own UI (not on the list): the app's.
+            favourites::Opens::Action(id) if list.info(&id).is_none() => {
                 let _ = commands.run(&id);
+            }
+            favourites::Opens::Action(id) => {
+                // As the extension that declared it (#660 M3).
+                let (list, by) = (list.clone(), by.to_owned());
+                spawn(async move {
+                    let _ = favourites::run_declared(&list, &by, &id).await;
+                });
             }
             favourites::Opens::View { extension, view } => {
                 to_vault(lab);

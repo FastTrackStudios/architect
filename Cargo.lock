@@ -865,6 +865,7 @@ dependencies = [
  "dioxus-native",
  "editor-keyflow",
  "facet",
+ "futures",
  "futures-channel",
  "futures-timer",
  "futures-util",

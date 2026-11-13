@@ -11,8 +11,9 @@ use architect_shell::use_shell;
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
-/// The app's own source: a note's recording.
-pub const OWN: &str = "vault";
+/// The app's own source: a note's recording. Outside the extension-id
+/// grammar (`:`), so no extension can hold it (`architect_playhead::deck::reserved`).
+pub const OWN: &str = "app:notes";
 
 fn press(owner: &str, action: &str, mut args: Value) {
     if let Some(o) = args.as_object_mut() {

@@ -168,6 +168,7 @@ pub fn use_web_favourites(
                 let label = label_for(&d.favourites, target);
                 let key = format!("{path}\0{ty}\0{}\0{label}\0{what:?}", d.by.extension);
                 let (path, ty) = (path.clone(), ty.clone());
+                let by = d.by.extension.clone();
                 let press = presses.get(key, || {
                     Callback::new(move |()| {
                         if let Opens::Path(place) = &what {
@@ -179,7 +180,7 @@ pub fn use_web_favourites(
                                 Some(ty.clone()),
                             )));
                         }
-                        run(&what, &label, &path, workspace, commands);
+                        run(&what, &by, &label, &path, workspace, commands);
                     })
                 });
                 Some((press, shows))
@@ -268,8 +269,16 @@ fn use_file_changes(
     changed
 }
 
-/// Opens what a declared tab (`label`) opens, on note `note`.
-fn run(what: &Opens, label: &str, note: &str, workspace: Signal<Workspace>, commands: Commands) {
+/// Opens what a declared tab (`label`) of extension `by` opens, on note
+/// `note`.
+fn run(
+    what: &Opens,
+    by: &str,
+    label: &str,
+    note: &str,
+    workspace: Signal<Workspace>,
+    commands: Commands,
+) {
     match what {
         Opens::Note => vault::show(workspace, note),
         Opens::Path(p) => vault::show(workspace, p),
@@ -277,8 +286,12 @@ fn run(what: &Opens, label: &str, note: &str, workspace: Signal<Workspace>, comm
         Opens::Files => {
             let _ = commands.run(vault::FILES);
         }
+        // The playhead's, as the extension that declared it (#660 M3):
+        // its own source, the one its face reads.
         Opens::Action(id) => {
-            let _ = commands.run(id);
+            if architect_playhead::press_as(by, id).is_none() {
+                let _ = commands.run(id);
+            }
         }
         Opens::View { island, view } => vault::open_frame(workspace, island, view, note, label),
     }

@@ -1688,16 +1688,33 @@ A source is one extension's queue (`PLAYHEAD_SET`, method `set`):
               "marks": [{ "at": 1.5, "text": "Amazing grace", "kind": "line" }] }] }
 ```
 
-`media` and `art` are vault paths, never URLs (`architect_playhead::model::vault_path`):
-the app turns a path into a stream itself. An empty queue removes the
-source. A `SET` whose current item keeps its `id` keeps playing where it
-was. Without `media` an item plays on a silent clock over its `duration`.
+`media` and `art` are vault paths, never URLs: one rule,
+`architect_playhead::model::vault_path`, which the web app's frame host
+re-exports. It refuses a scheme or drive (`:`), a leading `/`, `\`, `?`,
+`#`, `%`, control and invisible format characters, look-alikes of `/` and
+`.` (U+FF0F, U+2215, U+2044, U+FF0E, U+2024, U+FE52), and an empty, `.` or
+`..` segment or one ending in a dot or a space; spaces inside a name are
+kept. The app turns a path into a stream itself, and gives an item a
+length from its media only when it resolved that media
+(`Reading::resolved`). An empty queue removes the source. A `SET` whose
+current item keeps its `id` keeps playing where it was. Without `media`
+an item plays on a silent clock over its `duration`.
+
+An item with media nobody hears here (a native app, a path the web app
+does not stream, a refused `play()`) plays on the silent clock; the state
+says so (`unheard: true`) and the bar shows "Not heard here". One with no
+known length as well never ends on its own, so the deck passes over it
+(the next item plays) or, at the last, stops there; its id is listed in
+the state's `unplayable` and the bar shows "Can't be played". A seek is
+refused while the item's length is unknown, and past its end is clamped
+to it.
 
 Every view gets the same state (`PLAYHEAD_STATE`, `Deck::state`):
 `source`, `name`, `active`, `playing`, `time` at `at` (ms since the
 epoch; extrapolate while `playing`), `rate`, `duration`, `index`,
-`tracks`, `clock` (`media` or `silent`), `item`, `queue`, and the share
-page's flat keys (`title`, `subtitle`, `artist`, `sections`).
+`tracks`, `clock` (`media` or `silent`), `unheard`, `unplayable`, `item`,
+`queue`, and the share page's flat keys (`title`, `subtitle`, `artist`,
+`sections`).
 
 | Method (action) | Arguments | Who |
 | --- | --- | --- |
@@ -1706,7 +1723,8 @@ page's flat keys (`title`, `subtitle`, `artist`, `sections`).
 | `seek` | `t`, `source?` | the same |
 | `item` | `index` or `id`, `play?`, `source?` | the same |
 | `toggle` | `source?` | the same: play, or pause what plays (a favourite's round button) |
-| `state`, `sources` | `source?` | reads |
+| `state` | `source?` | reads: an extension its own, the app any |
+| `sources` | none | the app: every source (the bar's switcher); an extension: its own entry and whether it is active, nothing of any other (`Deck::listing_for`) |
 | `activate` | `source` | the app only (the bar's switcher) |
 
 Who calls is the host's to say, never the arguments': every action's
@@ -1715,27 +1733,55 @@ principal (`architect_extensions::invocation::caller_json`), and an
 extension naming another's source is refused (`not your source`). Playing
 a source makes it the active one and pauses the one before.
 
+It fails closed (`Caller::of_context`): with no `caller`, a call is the
+app's only when its invocation is the app's own (`deck::APP_SOURCES`: the
+app, ⌘K, a menu, a key, a toolbar, an agent over MCP); a hook, a script or
+a context that says nothing is refused. The host runs an extension's
+declared work as that extension (`architect_extensions::host`
+`as_extension`): a preset's target, a hook's action and a hook's script
+carry `Principal::extension(owner, …)`, for whoever ran it, so a preset
+that names `PLAYHEAD_SET {"source": "<another>"}` is `not your source`
+whoever presses it. The app's own sources have ids outside the
+extension-id grammar (the web app's Notes source is `app:notes`), and an
+extension whose id is `vault`, `app` or `playhead` holds none
+(`deck::reserved`).
+
 The same contract reaches every runtime: a linked or process extension
 calls the service (`[uses] "architect.playhead" = "^0.1"`) and hooks the
-app event `playhead.changed` (its detail the state); a linked view reads
+app event `playhead.changed` (`[[hooks]] on = "app:playhead.changed"`, with
+`capabilities.events = ["playhead.changed"]`). Each extension hears it per
+owner (`architect_playhead::heard_by`, raised by
+`architect_playhead::raise_changed` through `Host::raise_app_each`): its
+own source's state, and of another source's change only `{active}`,
+whether its own is the active one. A linked view reads
 `architect_playhead::ui::use_playhead`; a web bundle in the web app's
 frame host gets the state as its props and asks `PLAYHEAD_SEEK`, `_PLAY`,
 `_PAUSE`, `_NEXT`, `_PREVIOUS`, `_ITEM` and `_SET` (`architect_playhead::FRAME_ASKS`),
-rate-limited, as its island's extension.
+rate-limited (8 a second and a burst of 16 per frame, 32 and 64 for all
+frames together: `ext_host::take_ask`), as its island's extension. Every
+view of one extension (a setlist, its lyrics, its transport) is handed
+the same source's state, whichever view set it.
 
 A favourite's primary (#607) plays and pauses with `target = { action =
 "PLAYHEAD_TOGGLE" }` (its extension's capabilities name `PLAYHEAD_`) and
 shows Pause by `state = "playing"`: the app keeps each source's playing as
 its extension's own runtime state (`ext:<id>`, key `playing`,
 `architect_playhead::PLAYING_STATE`), so the extension writes nothing.
-Pressed from the bar, ⌘K or a favourite, it is the app's press, on the
-active source.
+Pressed from the bar or ⌘K it is the app's press, on the active source;
+pressed as a favourite's declared target it runs as the extension that
+declared it (`apps/ui/src/favourites.rs` `run_declared` natively,
+`architect_playhead::press_as` in the browser), so it moves that
+extension's own source, the one its face reads.
 
 What is heard is a `Clock` (`architect_playhead::clock`): the web app's
 own audio element (`apps/web/src/app/audio.rs`, the page's
 `media-src 'self'`, Media Session), a silent clock in the native apps
 (audible native playback comes later), and later an engine attached as
-the clock (studio#400, #528). The playhead is not synced state: a
+the clock (studio#400, #528). The Media Session shows the item's title,
+subtitle and its source's name on the lock screen, a headset and a car's
+display, for every item, heard or not: a private note's title on the Notes
+source leaves the app that way, by the owner's choice. The playhead is not
+synced state: a
 position is one device's; what a source plays comes from its
 extension's documents, which sync through `crdt::docs`.
 
@@ -1950,7 +1996,7 @@ playhead over the note's ` ```lrc ` lines (`apps/web/src/app/song.rs`
 ready and for good if it dies. The frame gets the bundle's bytes, the
 theme's colours and the view's props, never the session token or a
 cookie; its asks are the playhead's intents only, rate-limited (8 a
-second, a burst of 16). The digests guard a bundle's files against a
+second and a burst of 16 per frame, 32 and 64 for all frames together). The digests guard a bundle's files against a
 cache or a mirror that swapped one after the listing was made; they are
 no guard against the node, which is the app's own origin and writes the
 frame's policy in its response headers. The app loads frames only from
@@ -1997,8 +2043,7 @@ chooses the view.
   (#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source,
   checked against the contract's limits: a `name`, a `queue` of at most
   500 items, each with a unique `id`, a `title`, `media` and `art` only as
-  vault-relative paths (`vault_path`: no scheme, no leading `/`, no `\`,
-  `?`, `#`, `%` or control character, no empty, `.` or `..` segment),
+  vault-relative paths (`architect_playhead::model::vault_path`, above),
   a `duration` when it has no media, sections and marks within their
   limits; `index`, `time` and `play`; anything else refuses the whole
   source) and `PLAYHEAD_ITEM` (`{id}` or `{index}`, and `play`). A
@@ -2007,17 +2052,17 @@ chooses the view.
   refusal's reason, in the contract's words, is on the frame's holder
   (`data-ext-refused`); the protocol has no answer to an ask. A message
   may be 64 KiB, checked before it is copied out of the browser.
-- **The stand-in deck.** Until the playhead's deck and the Now Playing bar
-  land, the source and its silent clock are kept per view in `embed.rs`;
-  they take its place with the same asks and props. Where it differs from
-  v0.1, for the deck to pick up: it is per frame, so two frames of one
-  extension keep two sources (the contract has one per extension); a
-  source's `name` is not defaulted to the manifest's; `media` is never
-  played or resolved, so a media item's `duration` is only what it was
-  given; there is no `PLAYHEAD_STATE`, `PLAYHEAD_SOURCES` or active-source
-  switching; a remount starts the source fresh. Whether `media` must also
-  be a path the note references is the deck's to enforce when it
-  resolves it (#589).
+- **Its height.** A view at a note's head is as tall as it says, up to
+  60 % of the window (at least 240 px: `ext_host::head_height`); past
+  that it scrolls inside its own box, so a 500-item list is all there
+  without pushing the note away at 390 px wide. `MAX_HEIGHT` (4000 px)
+  stays the most a `size` message may say.
+- **Its source.** The island's extension's own on the app's deck
+  (`architect_playhead`), the same one the Now Playing bar shows and
+  moves; #659's per-view stand-in is gone. Whether `media` is a path the
+  note references is enforced when the web app resolves media from a
+  signed-in vault (#628; the rules at `apps/web/src/app/audio.rs`
+  `media_url`).
 
 A favourite's `{view}` ([Favourites](#favourites)) opens any view its
 extension's island lists (`Island::views`: its share-page slots and its

@@ -21,16 +21,57 @@ pub enum Caller {
     Extension(String),
 }
 
+/// The invocation sources that are the app's own (a person's press in
+/// its UI, a key, ⌘K, a menu, an agent over MCP acting as the person):
+/// only these, with no extension named, act as [`Caller::App`].
+pub const APP_SOURCES: &[&str] = &[
+    "app",
+    "palette",
+    "menu",
+    "context_menu",
+    "key",
+    "agent",
+    "toolbar",
+];
+
+/// Whether `id` is a source only the app may hold: `vault`, `app`,
+/// `playhead`, or anything outside the extension-id grammar (the app's
+/// own sources are `app:<name>`, which no extension id can be).
+#[must_use]
+pub fn reserved(id: &str) -> bool {
+    matches!(id, "vault" | "app" | "playhead")
+        || id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+}
+
 impl Caller {
-    /// The caller an action's invocation context names (`caller`, which
-    /// the host adds from the call's principal): an extension, else the
-    /// app.
-    #[must_use]
-    pub fn of_context(cx: &Value) -> Self {
-        cx.get("caller")
+    /// The caller an action's invocation context names, failing closed.
+    ///
+    /// `caller` (which the host adds from the call's principal) is an
+    /// extension. With none, the app only when the invocation is the
+    /// app's own ([`APP_SOURCES`]); a hook, a script, or a context that
+    /// says nothing is refused (#660 H2).
+    ///
+    /// # Errors
+    ///
+    /// Who called is not known to be the app or an extension.
+    pub fn of_context(cx: &Value) -> Result<Self, String> {
+        if let Some(id) = cx
+            .get("caller")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
-            .map_or(Self::App, |id| Self::Extension(id.to_owned()))
+        {
+            return Ok(Self::Extension(id.to_owned()));
+        }
+        match cx.get("source").and_then(Value::as_str) {
+            Some(s) if APP_SOURCES.contains(&s) => Ok(Self::App),
+            Some(s) => Err(format!(
+                "a {s} run names no extension: the playhead does not act for it"
+            )),
+            None => Err("who called is not known: the playhead does not act for it".to_owned()),
+        }
     }
 }
 
@@ -127,6 +168,9 @@ pub struct Source {
     pub epoch: u64,
     /// When it was last made active (the deck's count).
     active_seq: u64,
+    /// Items it skipped or stopped at: media nobody can hear here and no
+    /// known length (#660 M4). Cleared when its queue is set again.
+    pub unplayable: Vec<String>,
 }
 
 impl Source {
@@ -134,6 +178,13 @@ impl Source {
     #[must_use]
     pub fn item(&self) -> Option<&Item> {
         self.queue.get(self.index)
+    }
+
+    /// Whether its current item has media but no length known: it can be
+    /// timed only by a clock that hears it.
+    #[must_use]
+    pub fn length_unknown(&self) -> bool {
+        self.duration() <= 0.0
     }
 
     /// The current item's length: its media's, else as given.
@@ -229,6 +280,7 @@ impl Deck {
     /// An extension naming another's source; nothing to act on.
     pub fn target(&self, caller: &Caller, source: Option<&str>) -> Result<String, String> {
         match caller {
+            Caller::Extension(me) if reserved(me) => Err("not your source".to_owned()),
             Caller::Extension(me) => match source {
                 Some(s) if s != me => Err("not your source".to_owned()),
                 _ => Ok(me.clone()),
@@ -280,11 +332,14 @@ impl Deck {
             Control::Seek(t) => {
                 let s = self.source_mut(&id).ok_or("no source")?;
                 let d = s.duration();
-                if !(t.is_finite() && t >= 0.0 && (d <= 0.0 || t <= d)) {
+                if d <= 0.0 {
+                    return Err("its length is not known yet".to_owned());
+                }
+                if !(t.is_finite() && t >= 0.0) {
                     return Err("t is outside 0..=duration".to_owned());
                 }
                 let i = s.index;
-                s.jump(i, t, now);
+                s.jump(i, t.min(d), now);
             }
             Control::Next => {
                 let s = self.source_mut(&id).ok_or("no source")?;
@@ -397,6 +452,7 @@ impl Deck {
                 let carry = spec.time.is_none() && s.item().map(|i| &i.id) == new_current.as_ref();
                 s.name = name;
                 s.queue = spec.queue;
+                s.unplayable.clear();
                 if carry {
                     s.index = spec.index;
                 } else {
@@ -419,6 +475,7 @@ impl Deck {
                 media_duration: None,
                 epoch: 0,
                 active_seq: 0,
+                unplayable: Vec::new(),
             }),
         }
         if self.active.is_none() {
@@ -436,21 +493,26 @@ impl Deck {
         let Some(id) = self.active.clone() else {
             return false;
         };
-        // Not heard: the deck's own clock keeps the time and the ends.
+        // Not heard: the deck's own clock keeps the time and the ends; an
+        // item it cannot time is passed over.
         let heard = !reading.failed;
         let flipped = self.audible != heard;
         self.audible = heard;
         if !heard {
-            if flipped {
+            let passed = self.pass_unplayable(&id, now);
+            if flipped && !passed {
                 self.revision = self.revision.wrapping_add(1);
             }
-            return flipped;
+            return flipped || passed;
         }
         let Some(s) = self.source_mut(&id) else {
             return flipped;
         };
+        // A length only from media the app resolved for this item: never
+        // for a path it would not stream (#589's media requirement).
         let length = reading
             .duration
+            .filter(|_| reading.resolved)
             .filter(|d| d.is_finite() && *d > 0.0)
             .filter(|d| s.media_duration.is_none_or(|m| (m - d).abs() > 0.01));
         let changed = length.is_some();
@@ -468,6 +530,33 @@ impl Deck {
             self.revision = self.revision.wrapping_add(1);
         }
         changed
+    }
+
+    /// Source `id`, playing an item nobody hears here whose length is not
+    /// known: marked unplayable and passed over (the next item plays), or
+    /// at the last, stopped there. Whether it did.
+    fn pass_unplayable(&mut self, id: &str, now: f64) -> bool {
+        let Some(s) = self.source_mut(id) else {
+            return false;
+        };
+        if !s.transport.playing || !s.length_unknown() {
+            return false;
+        }
+        let Some(item) = s.item().map(|i| i.id.clone()) else {
+            return false;
+        };
+        if !s.unplayable.contains(&item) {
+            s.unplayable.push(item);
+        }
+        if s.index.saturating_add(1) < s.queue.len() {
+            s.jump(s.index.saturating_add(1), 0.0, now);
+            s.transport.playing = true;
+        } else {
+            s.transport = Transport::still(0.0, now);
+            s.epoch = s.epoch.wrapping_add(1);
+        }
+        self.revision = self.revision.wrapping_add(1);
+        true
     }
 
     fn ended(&mut self, id: &str, now: f64) -> bool {
@@ -497,8 +586,15 @@ impl Deck {
             return false;
         };
         let heard = audible && s.item().is_some_and(|i| i.media.is_some());
-        let d = s.duration();
-        if heard || !s.transport.playing || d <= 0.0 || s.time(now) < d {
+        if heard || !s.transport.playing {
+            return false;
+        }
+        // Nobody hears it and its length is not known: it never ends on
+        // its own, so it is passed over (#660 M4).
+        if s.length_unknown() {
+            return self.pass_unplayable(&id, now);
+        }
+        if s.time(now) < s.duration() {
             return false;
         }
         self.ended(&id, now)
@@ -518,6 +614,9 @@ impl Deck {
         let s = self.source(id)?;
         let item = s.item();
         let time = s.time(now);
+        let clock = self.clock_of(s);
+        // Media nobody hears here: the bar says so rather than "playing".
+        let unheard = clock == "silent" && item.is_some_and(|i| i.media.is_some());
         Some(json!({
             "source": s.id,
             "name": s.name,
@@ -529,7 +628,9 @@ impl Deck {
             "duration": s.duration(),
             "index": s.index,
             "tracks": s.queue.len(),
-            "clock": self.clock_of(s),
+            "clock": clock,
+            "unheard": unheard,
+            "unplayable": s.unplayable,
             "item": item,
             "queue": s.queue,
             "title": item.map(|i| i.title.clone()),
@@ -539,7 +640,37 @@ impl Deck {
         }))
     }
 
-    /// Every source, for the bar's switcher (`PLAYHEAD_SOURCES`).
+    /// What `PLAYHEAD_SOURCES` answers `caller`: for the app, every source
+    /// (the bar's switcher, [`Self::listing`]); for an extension, its own
+    /// entry, if it has one, and whether it is the active one, nothing of
+    /// any other source (#660 M1).
+    #[must_use]
+    pub fn listing_for(&self, caller: &Caller) -> Value {
+        match caller {
+            Caller::App => self.listing(),
+            Caller::Extension(me) => {
+                let mine = |s: &&Source| s.id == *me && !reserved(me);
+                json!({
+                    "active": self.active.as_deref() == Some(me.as_str()) && !reserved(me),
+                    "sources": self.sources.iter().filter(mine).map(Self::entry).collect::<Vec<_>>(),
+                })
+            }
+        }
+    }
+
+    fn entry(s: &Source) -> Value {
+        json!({
+            "source": s.id,
+            "name": s.name,
+            "playing": s.transport.playing,
+            "title": s.item().map(|i| i.title.clone()),
+            "subtitle": s.item().and_then(|i| i.subtitle.clone()),
+            "index": s.index,
+            "tracks": s.queue.len(),
+        })
+    }
+
+    /// Every source, for the bar's switcher (the app's `PLAYHEAD_SOURCES`).
     #[must_use]
     pub fn listing(&self) -> Value {
         json!({
@@ -596,11 +727,17 @@ mod tests {
         d.apply(&ext("studio"), Control::Seek(40.0), None, 10_000.0)
             .unwrap();
         assert_eq!(d.state("studio", 11_000.0).unwrap()["time"], 41.0);
-        assert_eq!(
-            d.apply(&ext("studio"), Control::Seek(101.0), None, 0.0)
-                .unwrap_err(),
-            "t is outside 0..=duration"
-        );
+        // Past the end: clamped to it; before 0, or not a number: refused.
+        d.apply(&ext("studio"), Control::Seek(101.0), None, 0.0)
+            .unwrap();
+        assert_eq!(d.state("studio", 0.0).unwrap()["time"], 100.0);
+        for t in [-1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                d.apply(&ext("studio"), Control::Seek(t), None, 0.0)
+                    .unwrap_err(),
+                "t is outside 0..=duration"
+            );
+        }
         // Previous, more than 3 s in: this item's start.
         d.apply(&ext("studio"), Control::Previous, None, 11_000.0)
             .unwrap();
@@ -803,7 +940,8 @@ mod tests {
                 duration: Some(120.0),
                 moving: false,
                 ended: false,
-                failed: false
+                failed: false,
+                resolved: true,
             },
             500.0
         ));
@@ -815,6 +953,7 @@ mod tests {
                 moving: true,
                 ended: false,
                 failed: false,
+                resolved: true,
             },
             3_000.0,
         );
@@ -833,6 +972,7 @@ mod tests {
                 time: 2.5,
                 duration: Some(120.0),
                 moving: true,
+                resolved: true,
                 ..Reading::default()
             },
             3_500.0,
@@ -846,7 +986,8 @@ mod tests {
                 duration: Some(120.0),
                 moving: false,
                 ended: true,
-                failed: false
+                failed: false,
+                resolved: true,
             },
             6_000.0
         ));
@@ -865,9 +1006,26 @@ mod tests {
     fn the_caller_comes_from_the_hosts_context() {
         assert_eq!(
             Caller::of_context(&json!({"source": "script", "caller": "studio"})),
-            ext("studio")
+            Ok(ext("studio"))
         );
-        assert_eq!(Caller::of_context(&json!({"source": "app"})), Caller::App);
-        assert_eq!(Caller::of_context(&Value::Null), Caller::App);
+        assert_eq!(
+            Caller::of_context(&json!({"source": "app"})),
+            Ok(Caller::App)
+        );
+        assert_eq!(
+            Caller::of_context(&json!({"source": "palette"})),
+            Ok(Caller::App)
+        );
+        // Fails closed: a hook, a script, an opener or nothing said is
+        // never the app (#660 H2).
+        for cx in [
+            json!({"source": "hook", "event": "startup"}),
+            json!({"source": "script"}),
+            json!({"source": "open", "path": "a.md"}),
+            json!({}),
+            Value::Null,
+        ] {
+            assert!(Caller::of_context(&cx).is_err(), "{cx}");
+        }
     }
 }

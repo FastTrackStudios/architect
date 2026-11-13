@@ -276,6 +276,8 @@ struct Frame {
     beat: Beat,
     created: f64,
     rtts: Vec<f64>,
+    /// Its own asks ([`ext_host::take_ask`]).
+    asks: Option<Bucket>,
     props: Option<String>,
     ready_by: Option<i32>,
     beating: Option<i32>,
@@ -472,6 +474,13 @@ fn heard(shared: &Shared, data: &JsValue) {
             if f.fill {
                 return;
             }
+            // At a note's head: up to a share of the window, then it
+            // scrolls inside its own box (`ext_host::head_height`).
+            let viewport = window()
+                .and_then(|w| w.inner_height().ok())
+                .and_then(|v| v.as_f64())
+                .unwrap_or(ext_host::MAX_HEIGHT);
+            let h = ext_host::head_height(h, viewport);
             if let Some(el) = &f.iframe {
                 let _ = el.style().set_property("height", &format!("{h}px"));
             }
@@ -483,9 +492,13 @@ fn heard(shared: &Shared, data: &JsValue) {
                 f.mark("data-ext-refused", why);
                 return;
             }
+            // Its own bucket, then every frame's: one frame cannot starve
+            // the others (#657, #660 L2).
+            let t = now();
+            let mine = f.asks.get_or_insert_with(|| Bucket::new(t));
             let allowed = BUCKET.with(|b| {
                 let mut b = b.borrow_mut();
-                b.get_or_insert_with(|| Bucket::new(now())).take(now())
+                ext_host::take_ask(mine, b.get_or_insert_with(|| Bucket::all(t)), t)
             });
             if !allowed {
                 f.mark("data-ext-refused", "too many requests");
@@ -724,6 +737,7 @@ pub fn ExtensionFrame(
             beat: Beat::default(),
             created: 0.0,
             rtts: Vec::new(),
+            asks: None,
             props: None,
             ready_by: None,
             beating: None,
