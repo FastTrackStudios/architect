@@ -14,7 +14,9 @@
 //! source, flat, as `architect.playhead` v0.1 gives a frame (#589:
 //! `source`, `name`, `active`, `playing`, `time`, `at`, `rate`,
 //! `duration`, `index`, `tracks`, `clock`, `item`, `queue`, `title`,
-//! `subtitle`, `artist`, `sections`). It may set its source
+//! `subtitle`, `artist`, `sections`), each item with `art` the app can
+//! show given its image as `art_src`, a `data:` URL ([`with_art`]). It
+//! may set its source
 //! (`PLAYHEAD_SET`), make one item current (`PLAYHEAD_ITEM`) and use the
 //! playhead's intents on it.
 //!
@@ -76,10 +78,30 @@ fn props_of(source: &str, note: &Value) -> Value {
             "title": null, "subtitle": null, "artist": null, "sections": [],
         })
     });
+    with_art(&mut s);
     if let Some(o) = s.as_object_mut() {
         o.insert("note".to_owned(), note.clone());
     }
     s
+}
+
+/// Each item's art the app can show (`item` and every `queue` item with
+/// `art`, a vault path) as `art_src`, an image's `data:` URL
+/// (`crate::demo::image_url`): a frame has no network and its policy
+/// allows `img-src data:` only, so the app hands it the image itself.
+fn with_art(state: &mut Value) {
+    let add = |i: &mut Value| {
+        let src = i["art"].as_str().and_then(crate::demo::image_url);
+        if let (Some(src), Some(o)) = (src, i.as_object_mut()) {
+            o.insert("art_src".to_owned(), Value::from(src));
+        }
+    };
+    if let Some(i) = state.get_mut("item") {
+        add(i);
+    }
+    if let Some(q) = state.get_mut("queue").and_then(Value::as_array_mut) {
+        q.iter_mut().for_each(add);
+    }
 }
 
 /// The view that claims a note of type `note_type`, at the note's head;
