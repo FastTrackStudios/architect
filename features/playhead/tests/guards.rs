@@ -266,8 +266,8 @@ action = "{heard}"
 }
 
 /// An extension whose declared work names the playhead's actions: a
-/// preset that empties `lab.alpha`'s source, and a hook that pauses
-/// whatever is active, on an app event it hears.
+/// preset that empties `lab.alpha`'s source, and hooks (through presets,
+/// with no press at all) that pause and play, on app events it hears.
 struct Evil;
 impl Extension for Evil {
     fn manifest(&self) -> &'static str {
@@ -281,15 +281,28 @@ path = "x"
 [capabilities]
 effect = "mutating"
 actions = ["PLAYHEAD_"]
-events = ["lab.poke"]
+events = ["lab.poke", "lab.play"]
 [[actions]]
 id = "LAB_EVIL_STOP"
 name = "Play"
 effect = "mutating"
 preset = { action = "PLAYHEAD_SET", args = '{"source":"lab.alpha","queue":[]}' }
+[[actions]]
+id = "LAB_EVIL_PAUSE"
+name = "Pause"
+effect = "mutating"
+preset = { action = "PLAYHEAD_PAUSE", args = '{}' }
+[[actions]]
+id = "LAB_EVIL_PLAY"
+name = "Play"
+effect = "mutating"
+preset = { action = "PLAYHEAD_PLAY", args = '{}' }
 [[hooks]]
 on = "app:lab.poke"
-action = "PLAYHEAD_PAUSE"
+action = "LAB_EVIL_PAUSE"
+[[hooks]]
+on = "app:lab.play"
+action = "LAB_EVIL_PLAY"
 "#
     }
     fn build(&self, _: &mut Builder) {}
@@ -436,6 +449,58 @@ fn a_hook_cannot_move_another_source() {
         alpha["playing"],
         json!(true),
         "lab.evil's hook paused lab.alpha: {alpha}"
+    );
+    // It ran, as lab.evil, which has no source to pause.
+    let logs = ext.host().logs().since("lab.evil", None, 20);
+    assert!(
+        logs.iter().any(|l| l.text.contains("no source")),
+        "{logs:?}"
+    );
+}
+
+/// The host runs a hook's action as its extension (#660 H2): a hook that
+/// plays plays its own extension's source, not the active one, and is
+/// not refused as a call from no one.
+#[test]
+fn a_hook_runs_as_its_extension() {
+    let alpha = Player(manifest("lab.alpha", "LAB_ALPHA_CALL"), "LAB_ALPHA_CALL");
+    let (_tmp, list, exts) = host_with(&[&alpha, &Evil]);
+    exts.host()
+        .define_event(AppEvent {
+            name: "lab.play".to_owned(),
+            title: "Play".to_owned(),
+            ..AppEvent::default()
+        })
+        .unwrap();
+    run(
+        &list,
+        "LAB_ALPHA_CALL",
+        json!({"method": "set", "args": {"name": "Alpha",
+        "queue": [{"id": "1", "title": "A", "duration": 60}]}}),
+    )
+    .unwrap();
+    architect_playhead::ask(
+        &ext("lab.evil"),
+        "PLAYHEAD_SET",
+        &json!({"queue": [{"id": "e", "title": "E", "duration": 60}]}),
+    )
+    .unwrap();
+    assert_eq!(exts.host().raise_app("lab.play", &json!({})), Ok(1));
+    run_hooks();
+    let (evil, alpha) = (
+        architect_playhead::playing("lab.evil"),
+        architect_playhead::playing("lab.alpha"),
+    );
+    architect_playhead::ask(&ext("lab.evil"), "PLAYHEAD_SET", &json!({"queue": []})).unwrap();
+    let _ = run(
+        &list,
+        "LAB_ALPHA_CALL",
+        json!({"method": "set", "args": {"queue": []}}),
+    );
+    let logs = exts.host().logs().since("lab.evil", None, 20);
+    assert!(
+        evil && !alpha,
+        "the hook played evil {evil}, alpha {alpha}: {logs:?}"
     );
 }
 

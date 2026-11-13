@@ -313,6 +313,13 @@ mod tests {
                 s["playing"]
             ));
         });
+        // A second listener under another key: both hear (#660 L8); the
+        // same key again replaces only its own.
+        let other = Arc::new(Mutex::new(0_usize));
+        let o = other.clone();
+        on_change("other", move |_| *o.lock().unwrap() += 100);
+        let o = other.clone();
+        on_change("other", move |_| *o.lock().unwrap() += 1);
         let studio = Caller::Extension("studio".into());
         let set = json!({"name": "Studio", "queue": [{"id": "a", "title": "A", "duration": 10}]});
         let s = ask(&studio, "PLAYHEAD_SET", &set).unwrap();
@@ -367,6 +374,7 @@ mod tests {
                 "studio false"
             ]
         );
+        assert_eq!(*other.lock().unwrap(), log.len(), "every change, once each");
         ask(&memo, "PLAYHEAD_SET", &json!({"queue": []})).unwrap();
         ask(&studio, "PLAYHEAD_SET", &json!({"queue": []})).unwrap();
         assert_eq!(
