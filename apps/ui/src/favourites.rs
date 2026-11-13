@@ -258,7 +258,8 @@ pub fn opens(declaring: &str, target: &Target, reach: &Reach<'_>) -> Option<Open
 }
 
 /// The sets the loaded extensions declare for note type `ty`, each target
-/// read by [`opens`] and its press made by `run`; a primary action's
+/// read by [`opens`] and its press made by `run` (once per note, type and
+/// target, kept in `presses`, not on every render); a primary action's
 /// state is on while `state_on(extension, state)` says so (its own runtime
 /// state, source `ext:<id>`).
 #[must_use]
@@ -266,6 +267,7 @@ pub fn declared(
     decls: &[(String, architect_extensions::favourites::TypeFavourites)],
     ty: &str,
     reach: &Reach<'_>,
+    presses: &architect_shell::Presses,
     run: impl Fn(Opens) + Clone + 'static,
     state_on: impl Fn(&str, &str) -> bool,
 ) -> Vec<Declared> {
@@ -278,8 +280,10 @@ pub fn declared(
                 |target| {
                     let what = opens(extension, target, reach)?;
                     let shows = what.shows(reach.note);
+                    let key = format!("{}\0{ty}\0{extension}\0{what:?}", reach.note);
                     let run = run.clone();
-                    Some((Callback::new(move |()| run(what.clone())), shows))
+                    let press = presses.get(key, || Callback::new(move |()| run(what.clone())));
+                    Some((press, shows))
                 },
                 |state| state_on(extension, state),
             )
@@ -579,7 +583,14 @@ on = { label = "Stop", icon = "pause" }
             };
             let decls = vec![("lab.cook".to_owned(), decl(RECIPE))];
             let run = |_: Opens| {};
-            let set = declared(&decls, "Recipe", &reach, run, |_, _| false);
+            let set = declared(
+                &decls,
+                "Recipe",
+                &reach,
+                &architect_shell::Presses::default(),
+                run,
+                |_, _| false,
+            );
             assert_eq!(set.len(), 1);
             let default = default_set(0, None);
             let open = resolve_favourites(&default, &set, Some("recipe"));
@@ -600,16 +611,31 @@ on = { label = "Stop", icon = "pause" }
                 ..on_steps
             };
             assert_eq!(open.current(&on_page.shows()), Some("recipe:page"));
-            let on = declared(&decls, "recipe", &reach, run, |e, s| {
-                e == "lab.cook" && s == "cooking"
-            });
+            let on = declared(
+                &decls,
+                "recipe",
+                &reach,
+                &architect_shell::Presses::default(),
+                run,
+                |e, s| e == "lab.cook" && s == "cooking",
+            );
             let open = resolve_favourites(&default, &on, Some("recipe"));
             assert_eq!(
                 open.primary.as_ref().map(|a| a.label.as_str()),
                 Some("Stop")
             );
             // Another type, or none: the default four.
-            assert!(declared(&decls, "song", &reach, run, |_, _| false).is_empty());
+            assert!(
+                declared(
+                    &decls,
+                    "song",
+                    &reach,
+                    &architect_shell::Presses::default(),
+                    run,
+                    |_, _| false
+                )
+                .is_empty()
+            );
             assert_eq!(
                 resolve_favourites(&default, &[], None).ids(),
                 ["inbox", "vault", "project", "schedule"]

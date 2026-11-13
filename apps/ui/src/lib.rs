@@ -982,6 +982,8 @@ pub fn LabApp() -> Element {
     // The Vault's note on show, as its page tells it: the type whose
     // favourites the slots show.
     let focus = favourites::VaultFocus::provide();
+    // The declared tabs' presses, made once each (`shell::Presses`).
+    let presses = shell::use_presses();
     guide::use_lab_actions(&list, &lab, &opener);
     // Guided tours, from ⌘K (Help) or the Action List (`GUIDE_TOUR_START`):
     // the Architect tour (its place kept in a window's lab), and two of the
@@ -1440,7 +1442,7 @@ pub fn LabApp() -> Element {
         let ty = owner.as_ref().and_then(|(_, t)| t.clone());
         let declared = match (&owner, ty.as_deref()) {
             (Some((path, _)), Some(ty)) => {
-                declared_favourites(ext_ui, &commands, &lab, focus, path, ty)
+                declared_favourites(ext_ui, &commands, &lab, focus, &presses, path, ty)
             }
             _ => Vec::new(),
         };
@@ -1658,6 +1660,7 @@ fn declared_favourites(
     commands: &architect_commands::Commands,
     lab: &Lab,
     focus: favourites::VaultFocus,
+    presses: &shell::Presses,
     note: &str,
     ty: &str,
 ) -> Vec<shell::Declared> {
@@ -1763,7 +1766,7 @@ fn declared_favourites(
     };
     let now = architect_extensions::host::now_ms();
     let state = host.contributions().state(now);
-    favourites::declared(&decls, ty, &reach, run, |extension, key| {
+    favourites::declared(&decls, ty, &reach, presses, run, |extension, key| {
         state
             .iter()
             .any(|e| favourites::state_on(&e.source, &e.key, &e.text, extension, key))

@@ -1415,21 +1415,12 @@ pub fn decl_of(section: &Section, page: bool) -> SectionDecl {
     }
 }
 
-/// The action namespace of extension `id` ([`Manifest::action_prefix`]).
+/// The action namespace of extension `id` ([`Manifest::action_prefix`]):
+/// `architect_favourites::action_prefix`, the one a browser's favourites
+/// use.
 #[must_use]
 pub fn action_prefix(id: &str) -> String {
-    let mut out = String::with_capacity(id.len().saturating_add(1));
-    for c in id.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_uppercase());
-        } else if !out.ends_with('_') {
-            out.push('_');
-        }
-    }
-    if !out.ends_with('_') {
-        out.push('_');
-    }
-    out
+    architect_favourites::action_prefix(id)
 }
 
 /// Whether a manifest's `api` is one this build runs: the same major,

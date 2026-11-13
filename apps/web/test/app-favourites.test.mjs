@@ -166,7 +166,7 @@ async function node(favourites = FAVOURITES) {
       ...process.env, ARCHITECT_BIND: `127.0.0.1:${port}`, ARCHITECT_DATA_DIR: join(dir, 'data'), ARCHITECT_VAULTS: `notes=${vault}`,
       ARCHITECT_IROH: 'local', ARCHITECT_NAME: 'app-favourites-test', ARCHITECT_ISLAND_FOLDER: folder, ARCHITECT_ISLAND_ID: 'demo.view',
       ARCHITECT_ISLAND_VIEW: 'progress', ARCHITECT_ISLAND_TRANSPORT: 'transport', ARCHITECT_ISLAND_LYRICS: 'lyrics',
-      ARCHITECT_ISLAND_EMBEDS: 'progress=song', ARCHITECT_FAVOURITES: join(dir, 'favourites.toml'),
+      ARCHITECT_ISLAND_EMBEDS: 'progress=song=', ARCHITECT_ISLAND_READS: 'documents', ARCHITECT_FAVOURITES: join(dir, 'favourites.toml'),
     },
   });
   const origin = `http://127.0.0.1:${port}`;

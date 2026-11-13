@@ -263,7 +263,13 @@ A `{place}` keeps its set: while the note a place tab opened is on show,
 the slots stay those of the note it was opened from (`PlaceOpened`,
 `set_note`), with the place's tab current, whatever the place's own type.
 Showing anything else (the note again included, then anything else) ends
-it: the note on show picks the slots again.
+it: the note on show picks the slots again. So does the note it was opened
+from going, or its `type` changing, here or on another device: both apps
+read it again when the vault says it changed (`place_kept`).
+
+A declared tab's press is made once for its note, type and target and
+kept for the root's life (`Presses`, `use_presses`), not again on every
+render of the root.
 
 The Architect app's default set is Inbox, Vault, Project and Schedule, with
 Capture as the round button (`apps/ui/src/favourites.rs` `default_set`).

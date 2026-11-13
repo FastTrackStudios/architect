@@ -131,17 +131,25 @@ pub fn note_on_show(w: &Workspace, vault: &MemorySource) -> Option<(String, Opti
     if !is_note(&path) {
         return None;
     }
-    let text = vault.read_text(&path)?;
-    let ty = note_from_markdown(&path, &text, 0, 0)
-        .properties
-        .into_iter()
-        .find(|(k, _)| k == "type")
-        .and_then(|(_, v)| match v {
-            PropertyValue::Text(t) => Some(t.trim().to_owned()),
-            _ => None,
-        })
-        .filter(|t| !t.is_empty());
+    let ty = type_of(vault, &path)?;
     Some((path, ty))
+}
+
+/// Note `path`'s `type` as the vault has it now: `None` when it is not in
+/// the vault, `Some(None)` when it has no type.
+pub fn type_of(vault: &MemorySource, path: &str) -> Option<Option<String>> {
+    let text = vault.read_text(path)?;
+    Some(
+        note_from_markdown(path, &text, 0, 0)
+            .properties
+            .into_iter()
+            .find(|(k, _)| k == "type")
+            .and_then(|(_, v)| match v {
+                PropertyValue::Text(t) => Some(t.trim().to_owned()),
+                _ => None,
+            })
+            .filter(|t| !t.is_empty()),
+    )
 }
 
 /// The island view on show, when the document on show is one:
