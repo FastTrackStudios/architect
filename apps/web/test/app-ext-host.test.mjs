@@ -135,7 +135,12 @@ const FLOOD = `
   for (let i = 0; i < 500; i++) orig.call(port, { t: "ready" });
   for (let i = 0; i < 5000; i++) orig.call(port, { t: "size", height: (i % 2) ? 100 : 99999 });
   for (let i = 0; i < 1000; i++) orig.call(port, { t: "ask", action: "PLAYHEAD_SEEK", args: { t: (i % 10) + 1 } });
-  setTimeout(() => globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 20 + boots }), 4000);
+  // The last word on its height is far over the cap, so the height the
+  // test reads is the cap's doing and not this script's.
+  setTimeout(() => {
+    orig.call(port, { t: "size", height: 99999 });
+    globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 20 + boots });
+  }, 4000);
 `;
 
 /// Answers no heartbeat: its pongs are swallowed.
@@ -393,7 +398,11 @@ test('a frame that floods its port is booted once and its height held', { skip }
     const m = await mark(w.b, 'transport');
     assert.equal(m.state, 'ready');
     assert.equal(m.refused, 'too many requests');
-    assert.ok(parseFloat(m.height) <= 4000, `height ${m.height}`);
+    const held = await until(async () => {
+      const h = parseFloat((await mark(w.b, 'transport')).height);
+      return h === 4000 && h;
+    }, 5000, 'the frame to be held at the cap');
+    assert.equal(held, 4000);
   } finally { await w.close(); }
 });
 

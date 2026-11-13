@@ -1878,7 +1878,14 @@ playhead over the note's ` ```lrc ` lines (`apps/web/src/app/song.rs`
 ready and for good if it dies. The frame gets the bundle's bytes, the
 theme's colours and the view's props, never the session token or a
 cookie; its asks are the playhead's intents only, rate-limited (8 a
-second, a burst of 16). The app's page allows `frame-src 'self'` and
+second, a burst of 16). The digests guard a bundle's files against a
+cache or a mirror that swapped one after the listing was made; they are
+no guard against the node, which is the app's own origin and writes the
+frame's policy in its response headers. The app loads frames only from
+the document whose policy blocks WebRTC: a listing naming the
+`webview-rtc` document is refused with its island, since WebRTC is the
+app's to grant (#614) and it grants none yet (`ext_host.rs`
+`webview_ok`). The app's page allows `frame-src 'self'` and
 nothing else new (`scripts/web-routes.md`). Host calls into a vault over
 the port (a member's org lane, a share's guest) are #495's next step.
 `apps/web/test/app-ext-host.test.mjs` (`just app-ext-host-test`) runs the

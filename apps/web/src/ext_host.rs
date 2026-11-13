@@ -69,8 +69,8 @@ pub struct Island {
     pub id: String,
     /// Its folder on the node, `/_ext/island/<id>.<hash>/`.
     pub folder: String,
-    /// The web view document its frames load (`/_ext/webview.<hash>.html`,
-    /// or `webview-rtc` when its WebRTC is declared and granted).
+    /// The web view document its frames load (`/_ext/webview.<hash>.html`;
+    /// never `webview-rtc`, see [`webview_ok`]).
     pub webview: String,
     /// Its wasm-bindgen glue, which exports `mount(view)`.
     pub entry: String,
@@ -121,11 +121,19 @@ fn hex_after<'a>(s: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
     (!mid.is_empty() && mid.chars().all(|c| c.is_ascii_hexdigit())).then_some(mid)
 }
 
-/// Whether `path` is one of the node's web view documents.
+/// Whether `path` is the node's web view document the app loads frames
+/// from: the one whose policy blocks WebRTC. The `webview-rtc` document
+/// is refused, and with it the island that names it: the app grants no
+/// extension WebRTC yet (#614), and a listing must not grant it to itself.
+///
+/// The frame's policy is the node's response headers, which the app
+/// cannot read. So the digests guard a bundle's files against a cache or
+/// a mirror that swapped one after the listing was made; they are no
+/// guard against the node itself, which is the app's own origin and
+/// trusted as the app is.
 #[must_use]
 pub fn webview_ok(path: &str) -> bool {
     hex_after(path, "/_ext/webview.", ".html").is_some()
-        || hex_after(path, "/_ext/webview-rtc.", ".html").is_some()
 }
 
 /// Whether `folder` is an island's folder on the node.
@@ -614,6 +622,8 @@ mod tests {
             "/_ext/webview.zz.html",
             "//evil.test/_ext/webview.00.html",
             "/s/x/webview.00.html",
+            // WebRTC is the app's to grant, never the listing's (#614).
+            "/_ext/webview-rtc.0123abcd.html",
             "javascript:alert(1)",
         ] {
             assert!(broken(&|i| i["web"]["webview"] = json!(bad)), "{bad}");
