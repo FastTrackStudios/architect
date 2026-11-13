@@ -54,6 +54,7 @@ pub mod keys;
 pub mod live_text;
 #[cfg(any(target_arch = "wasm32", test))]
 mod read_only;
+pub mod view_files;
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::start;

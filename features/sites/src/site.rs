@@ -59,7 +59,8 @@ pub struct Options {
     /// link to one is dropped with its text. Nothing held back is ever on
     /// disk under the site, so no request can reach its bytes there.
     pub hold_back: BTreeSet<String>,
-    /// Write each page's prose as plain blocks too (`<page>/_note.json`,
+    /// Write each page's prose as plain blocks too (`<page>/_note.json`
+    /// in the data folder beside the site, [`crate::data_dir`],
     /// [`crate::plain`]): what a share link's guest reads in the app
     /// (#629). Off by default.
     pub page_data: bool,
@@ -114,6 +115,10 @@ pub struct Page {
     pub children: Vec<usize>,
     /// Whether it is a folder's page.
     pub is_section: bool,
+    /// Its text as a share link's guest's view is handed it (#648, #669):
+    /// written only with [`Options::page_data`], and only as the page
+    /// shows it (`crate::guest_text`).
+    pub source: Option<String>,
 }
 
 /// A step of a page's breadcrumbs.
@@ -448,6 +453,11 @@ impl Site {
                 .ok()?;
                 Some(text)
             };
+            // The text a guest's view is handed, from the same resolution
+            // the page is drawn with: nothing the page does not show.
+            let source = opts.page_data.then(|| {
+                crate::guest_text::guest_text(frontmatter::body(&note.page.raw), &resolve)
+            });
             let rendered = markdown::render(&Input {
                 body: frontmatter::body(&note.page.raw),
                 page: rel,
@@ -512,6 +522,7 @@ impl Site {
                 page.words = rendered.words;
                 page.tags = tags.into_iter().collect();
                 page.backlinks = backlinks.into_iter().collect();
+                page.source = source;
             }
         }
         site.attachments = used_attachments.into_iter().collect();
@@ -674,6 +685,7 @@ impl Site {
             crumbs: Vec::new(),
             children: Vec::new(),
             is_section: false,
+            source: None,
         }
     }
 

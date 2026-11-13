@@ -45,6 +45,7 @@ mod blocks;
 mod component_blocks;
 mod element_html;
 mod frontmatter;
+mod guest_text;
 mod installed;
 pub mod island;
 pub mod listing;
@@ -82,7 +83,7 @@ pub use scope::Scope;
 pub use search::SearchEntry;
 pub use site::{Crumb, NavNode, Options, Page, Problem, Site, SiteError};
 pub use url::{encode_path, fragment_id, slug_segment};
-pub use write::{Report, SwapHook, WriteError, set_swap_hook, write};
+pub use write::{Report, SwapHook, WriteError, data_dir, set_swap_hook, write};
 
 /// Read the vault in `opts.vault`, draw it with `blocks`, and write the
 /// site to `out`.
