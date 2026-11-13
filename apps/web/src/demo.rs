@@ -195,7 +195,7 @@ mod tests {
     fn no_demo_svg_carries_script_or_an_outside_reference() {
         let svgs: Vec<_> = super::files()
             .into_iter()
-            .filter(|f| f.path.ends_with(".svg"))
+            .filter(|f| super::ext(f.path).eq_ignore_ascii_case("svg"))
             .collect();
         assert!(!svgs.is_empty());
         for f in svgs {
