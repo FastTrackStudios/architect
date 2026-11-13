@@ -157,6 +157,15 @@ fn WebApp() -> Element {
         move || settings.show(None),
     );
     let demo = mode == Mode::Demo;
+    // The card's art: an item's `art` (a vault path) as the demo vault's
+    // image, a `data:` URL (`crate::demo::image_url`).
+    let art = use_callback(move |p: String| {
+        if demo {
+            crate::demo::image_url(&p)
+        } else {
+            None
+        }
+    });
     architect_commands::use_command(Command::new("WEB_SIGN_IN", "Sign in").group("App"), sign_in);
     // The Now Playing bar's presses on ⌘K, and a favourite's round button
     // (`PLAYHEAD_TOGGLE`, #607): the app's own, on the active source.
@@ -247,7 +256,7 @@ fn WebApp() -> Element {
                             shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
                             shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn)),
                         ],
-                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar {} },
+                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art } },
                         vault::VaultPage {}
                     }
                 }
