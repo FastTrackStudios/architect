@@ -80,6 +80,9 @@ pub struct SiteIsland {
     progress: Option<String>,
     transport: Option<String>,
     lyrics: Option<String>,
+    /// Its note embeds ([`Self::embed`]): a view and the note types it
+    /// claims.
+    embeds: Vec<(String, Vec<String>)>,
     stylesheet: Option<String>,
     web: Option<String>,
     /// The operator's grant of WebRTC ([`Self::grant_webrtc`]).
@@ -149,6 +152,7 @@ impl SiteIsland {
             progress: None,
             transport: None,
             lyrics: None,
+            embeds: Vec::new(),
             stylesheet: None,
             web,
             webrtc_granted: false,
@@ -242,6 +246,30 @@ impl SiteIsland {
     #[must_use]
     pub fn lyrics(mut self, view: impl Into<String>) -> Self {
         self.lyrics = Some(view.into());
+        self
+    }
+
+    /// Its view `view` drawn at the head of a note whose `type` is one of
+    /// `note_types` (its manifest's `[[embeds]] view = … claims = {
+    /// note_type = […] }`), in the web app's frame host. Drawn only from
+    /// its web bundle ([`Self::web`]); the app gives it the note (`{note:
+    /// {path, title, type, properties, body}}`) and where the app's queue
+    /// is. Empty names are left out; matched without regard to case.
+    #[must_use]
+    pub fn embed<S: Into<String>>(
+        mut self,
+        view: impl Into<String>,
+        note_types: impl IntoIterator<Item = S>,
+    ) -> Self {
+        let types: Vec<String> = note_types
+            .into_iter()
+            .map(Into::into)
+            .filter(|t| !t.is_empty())
+            .collect();
+        let view = view.into();
+        if !view.is_empty() && !types.is_empty() {
+            self.embeds.push((view, types));
+        }
         self
     }
 
@@ -673,6 +701,17 @@ pub fn page_json(islands: &[SiteIsland]) -> serde_json::Value {
                 "transport": i.transport,
                 // Its lyrics view: a web bundle's only.
                 "lyrics": i.web.as_ref().and(i.lyrics.as_ref()),
+                // Its note embeds: a web bundle's only.
+                "embeds": i
+                    .web
+                    .as_ref()
+                    .map(|_| {
+                        i.embeds
+                            .iter()
+                            .map(|(view, types)| serde_json::json!({"view": view, "note_type": types}))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
                 // Only with its digest: the player pins it as it pins the
                 // component's files.
                 "stylesheet": i.stylesheet_integrity().and(i.stylesheet.as_deref()),
@@ -1025,6 +1064,14 @@ mod tests {
             page_json(std::slice::from_ref(&web))["islands"][0]["lyrics"],
             "words"
         );
+        // A note embed is a web bundle's too, and lists the types it claims.
+        let listed = page_json(std::slice::from_ref(&web.embed("list", ["playlist", ""])));
+        assert_eq!(
+            listed["islands"][0]["embeds"],
+            serde_json::json!([{"view": "list", "note_type": ["playlist"]}])
+        );
+        let bare = page_json(std::slice::from_ref(&words.embed("list", ["playlist"])));
+        assert_eq!(bare["islands"][0]["embeds"], serde_json::json!([]));
         // No stylesheet without a valid name and its digest.
         let files = vec![("a.css".to_owned(), Cow::Borrowed(b".a{}".as_slice()))];
         let sheet = SiteIsland::new("x", files.clone()).stylesheet("a.css");

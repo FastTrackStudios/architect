@@ -1891,6 +1891,24 @@ the port (a member's org lane, a share's guest) are #495's next step.
 `apps/web/test/app-ext-host.test.mjs` (`just app-ext-host-test`) runs the
 hostile bundles against it.
 
+**A view by a note's type (#495, #589).** An island may claim note types
+for its views, as its manifest's `[[embeds]] view = … claims = {
+note_type = […] }` says (`SiteIsland::embed(view, note_types)`, a web
+bundle's only; listed as `embeds: [{view, note_type}]`). The web app draws
+that view at the head of a note whose `type` property it claims (without
+regard to case; `apps/web/src/app/embed.rs` `NoteEmbed`), in a frame like
+the others. Nothing in the app knows what kind of note it is: the claim
+chooses the view. The view is given `note` (`{path, title, type,
+properties, body}`, as data) beside the playhead's state of its
+extension's source, flat, as `architect.playhead` v0.1 gives a frame
+(#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source: a
+`name` and a `queue` of at most 500 items, each with a unique `id`, a
+`title`, `media` only as a vault path, a `duration` when it has no media;
+anything else refuses the whole source) and `PLAYHEAD_ITEM` (`{id,
+play}`). Until the playhead's deck and the Now Playing bar land, the
+source and its silent clock are kept per view in `embed.rs`; they take its
+place with the same asks and props.
+
 ||||||| cc3c1c7a
 What reaches the network from a web view, and what stops it:
 

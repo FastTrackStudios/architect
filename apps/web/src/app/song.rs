@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use super::frames::{Bundle, ExtensionFrame, FrameTheme, use_island};
 use crate::ext_host::{self, Intent, Line, Section};
 
-fn now_ms() -> f64 {
+pub(super) fn now_ms() -> f64 {
     web_sys::window()
         .and_then(|w| w.performance())
         .map_or(0.0, |p| p.now())
@@ -27,14 +27,14 @@ fn now_ms() -> f64 {
 
 /// Where the song is: `time` seconds at `at` (ms), playing or not.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Clock {
-    time: f64,
-    at: f64,
-    playing: bool,
+pub(super) struct Clock {
+    pub(super) time: f64,
+    pub(super) at: f64,
+    pub(super) playing: bool,
 }
 
 impl Clock {
-    fn time(self, duration: f64) -> f64 {
+    pub(super) fn time(self, duration: f64) -> f64 {
         if self.playing {
             (self.time + (now_ms() - self.at) / 1000.0).min(duration)
         } else {
@@ -71,7 +71,7 @@ pub const LAYOUT: &str = "
 ";
 
 /// The theme a frame is handed: the shell's colours and its font.
-fn frame_theme() -> FrameTheme {
+pub(super) fn frame_theme() -> FrameTheme {
     let t = use_shell().theme;
     let dark = architect_theme::use_resolved().scheme().is_dark();
     FrameTheme {
@@ -157,6 +157,8 @@ pub fn SongViews(title: String, artist: String, body: String, duration: Option<S
                 at: now_ms(),
                 playing: false,
             },
+            // A song note's views have no queue.
+            Intent::Set(..) | Intent::Item(..) => return,
         };
         clock.set(next);
         time.set(next.time);

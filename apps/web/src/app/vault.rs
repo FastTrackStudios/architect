@@ -499,6 +499,12 @@ fn WebNote(path: String) -> Element {
     let song_title = prop("title").unwrap_or_else(|| title_of(&path));
     let song_artist = prop("artist").unwrap_or_default();
     let song_duration = prop("duration");
+    // An extension's view claiming the note's type, at its head (#495).
+    let note_type = prop("type").unwrap_or_default();
+    let shown_properties: Vec<(String, String)> = properties
+        .iter()
+        .map(|(k, v)| (k.clone(), shown(v)))
+        .collect();
     rsx! {
         document::Style { {LAYOUT} }
         document::Style { {super::song::LAYOUT} }
@@ -514,6 +520,15 @@ fn WebNote(path: String) -> Element {
                 }
             }
             div { class: "web-note", "data-note": "{path}",
+                if !note_type.is_empty() {
+                    super::embed::NoteEmbed {
+                        path: path.clone(),
+                        title: prop("title").unwrap_or_else(|| title_of(&path)),
+                        note_type: note_type.clone(),
+                        properties: shown_properties,
+                        body: body.clone(),
+                    }
+                }
                 if !properties.is_empty() {
                     dl { "data-testid": "note-properties",
                         style: "display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 16px; \

@@ -26,6 +26,7 @@
 // Nothing is `Send` in a browser.
 #![allow(clippy::future_not_send)]
 
+mod embed;
 mod frames;
 mod keys;
 mod page;

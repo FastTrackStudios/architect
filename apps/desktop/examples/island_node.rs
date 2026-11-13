@@ -8,7 +8,9 @@
 //! slot's view `ARCHITECT_ISLAND_TRANSPORT` and a lyrics view
 //! `ARCHITECT_ISLAND_LYRICS` when set (Studio's island as Studio declares
 //! it: `progress`, `transport`, `lyrics`, for the web app's frame host on
-//! the local stack, #495), WebRTC granted when
+//! the local stack, #495), note embeds from `ARCHITECT_ISLAND_EMBEDS`
+//! (`view=type,type;view=type`: a view drawn at the head of a note of
+//! those types in the web app), WebRTC granted when
 //! `ARCHITECT_ISLAND_WEBRTC=1` (and declared); with no
 //! `ARCHITECT_ISLAND_FOLDER`, no island. `ARCHITECT_FAVOURITES` names a
 //! TOML file of `[[favourites]]` (a distribution's compiled-in extensions'
@@ -55,6 +57,13 @@ fn island(folder: &str) -> SiteIsland {
         .transport(transport);
     if let Ok(lyrics) = std::env::var("ARCHITECT_ISLAND_LYRICS") {
         island = island.lyrics(lyrics);
+    }
+    if let Ok(embeds) = std::env::var("ARCHITECT_ISLAND_EMBEDS") {
+        for one in embeds.split(';') {
+            if let Some((view, types)) = one.split_once('=') {
+                island = island.embed(view.trim(), types.split(',').map(str::trim));
+            }
+        }
     }
     if let Ok(sheet) = std::env::var("ARCHITECT_ISLAND_SHEET") {
         island = island.stylesheet(sheet);

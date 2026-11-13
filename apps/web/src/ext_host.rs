@@ -22,6 +22,12 @@
 //! 4. the frame may say `size` (its height), `ask` (one of
 //!    [`INTENTS`], rate-limited by [`Bucket`]) or `error`.
 //!
+//! Besides its slots by a song (progress, transport, lyrics), an island
+//! may claim note types ([`Embed`]): its view is drawn at the head of a
+//! note of that `type`, given the note, and may set its source in the
+//! app's playhead (`PLAYHEAD_SET`) and make one of its items current
+//! (`PLAYHEAD_ITEM`), as `architect.playhead` v0.1 has them (#589).
+//!
 //! The frame dies (taken out, the app's own control back) on a second
 //! `load` (it left its document), on `error`, when not ready within
 //! [`READY_MS`] or when a ping goes unanswered past [`LATE_MS`]. Nothing
@@ -59,7 +65,38 @@ pub const INTENTS: &[&str] = &[
     "PLAYHEAD_PAUSE",
     "PLAYHEAD_NEXT",
     "PLAYHEAD_PREVIOUS",
+    // `architect.playhead` v0.1 (#589): its source, and one item of it.
+    "PLAYHEAD_SET",
+    "PLAYHEAD_ITEM",
 ];
+
+/// The most items a source's queue may hold (#589).
+pub const QUEUE_MAX: usize = 500;
+
+/// A view of an island drawn at the head of a note whose `type` it claims.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Embed {
+    /// Its view (`mount(view)`).
+    pub view: String,
+    /// The note types it claims, as listed.
+    pub note_types: Vec<String>,
+}
+
+impl Island {
+    /// The view it draws at the head of a note of type `note_type`, if it
+    /// claims it (without regard to case).
+    #[must_use]
+    pub fn embed_for(&self, note_type: &str) -> Option<&str> {
+        let t = note_type.trim();
+        if t.is_empty() {
+            return None;
+        }
+        self.embeds
+            .iter()
+            .find(|e| e.note_types.iter().any(|n| n.eq_ignore_ascii_case(t)))
+            .map(|e| e.view.as_str())
+    }
+}
 
 /// One island's web bundle, as the listing names it and this host
 /// believes it.
@@ -84,6 +121,8 @@ pub struct Island {
     pub transport: Option<String>,
     /// The lyrics' view.
     pub lyrics: Option<String>,
+    /// Its views drawn at the head of a note by its type.
+    pub embeds: Vec<Embed>,
 }
 
 /// Whether `name`'s extension is exactly `ext` (as the node checks it,
@@ -224,7 +263,43 @@ fn island_of(v: &Value) -> Option<Island> {
         progress: text(v, "progress"),
         transport: text(v, "transport"),
         lyrics: text(v, "lyrics"),
+        embeds: embeds_of(v),
     })
+}
+
+/// An island's listed note embeds: each a view name and one to 16 note
+/// types, at most 16 of them; a malformed one is left out.
+fn embeds_of(v: &Value) -> Vec<Embed> {
+    let name = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 64
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    v.get("embeds")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|e| {
+                    let view = e.get("view")?.as_str().filter(|s| name(s))?;
+                    let types: Vec<String> = e
+                        .get("note_type")?
+                        .as_array()?
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter(|s| name(s))
+                        .map(str::to_owned)
+                        .take(16)
+                        .collect();
+                    (!types.is_empty()).then(|| Embed {
+                        view: view.to_owned(),
+                        note_types: types,
+                    })
+                })
+                .take(16)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The islands of the node's listing ([`LISTING`]) this host believes: a
@@ -308,6 +383,81 @@ pub enum Intent {
     Next,
     /// The previous song (or this one's start).
     Previous,
+    /// Its source: `name` and its queue (`PLAYHEAD_SET`; an empty queue
+    /// removes it).
+    Set(String, Vec<QueueItem>),
+    /// Make the item of this id current, at 0, and play it if `play`
+    /// (`PLAYHEAD_ITEM`).
+    Item(String, bool),
+}
+
+/// An item of a source's queue (#589), what this host keeps of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueueItem {
+    /// The extension's own id for it.
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    /// Seconds: given, or none (then its media's own length).
+    pub duration: Option<f64>,
+    /// A vault path to its audio.
+    pub media: Option<String>,
+}
+
+/// `v[k]` as a string of 1 to `max` characters; `Err` for one too long or
+/// not a string, `Ok(None)` for none.
+fn field(v: &Value, k: &str, max: usize) -> Result<Option<String>, ()> {
+    match v.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.chars().count() <= max => {
+            Ok(Some(s.clone()).filter(|s| !s.is_empty()))
+        }
+        Some(_) => Err(()),
+    }
+}
+
+/// A vault path: no scheme, not absolute, no `\`, no `..` segment.
+fn vault_path(p: &str) -> bool {
+    !p.contains(':') && !p.starts_with('/') && !p.contains('\\') && !p.split('/').any(|s| s == "..")
+}
+
+/// A `PLAYHEAD_SET`'s source, as #589 v0.1 bounds it: a `name` of at most
+/// 64 characters, at most [`QUEUE_MAX`] items, each with a unique `id` (1
+/// to 256), a `title` (1 to 200), a `subtitle` (at most 200), `media` a
+/// vault path, and a `duration` when it has no `media`. Anything else
+/// refuses the whole source.
+fn source_of(args: &Value) -> Option<(String, Vec<QueueItem>)> {
+    let name = field(args, "name", 64).ok()?.unwrap_or_default();
+    let items = args.get("queue")?.as_array()?;
+    if items.len() > QUEUE_MAX {
+        return None;
+    }
+    let mut ids = std::collections::BTreeSet::new();
+    let queue = items
+        .iter()
+        .map(|i| {
+            let id = field(i, "id", 256).ok()??;
+            let media = field(i, "media", 1024).ok()?;
+            let duration = match i.get("duration") {
+                None | Some(Value::Null) => None,
+                Some(d) => Some(d.as_f64().filter(|d| d.is_finite() && *d > 0.0)?),
+            };
+            if !ids.insert(id.clone())
+                || media.as_deref().is_some_and(|m| !vault_path(m))
+                || (media.is_none() && duration.is_none())
+            {
+                return None;
+            }
+            Some(QueueItem {
+                id,
+                title: field(i, "title", 200).ok()??,
+                subtitle: field(i, "subtitle", 200).ok()?.unwrap_or_default(),
+                duration,
+                media,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some((name, queue))
 }
 
 /// `action` with `args` as an [`Intent`], if it is one and its arguments
@@ -324,6 +474,13 @@ pub fn intent(action: &str, args: &Value, duration: f64) -> Option<Intent> {
         "PLAYHEAD_PAUSE" => Some(Intent::Pause),
         "PLAYHEAD_NEXT" => Some(Intent::Next),
         "PLAYHEAD_PREVIOUS" => Some(Intent::Previous),
+        "PLAYHEAD_SET" => source_of(args).map(|(n, q)| Intent::Set(n, q)),
+        "PLAYHEAD_ITEM" => field(args, "id", 256).ok().flatten().map(|id| {
+            Intent::Item(
+                id,
+                args.get("play").and_then(Value::as_bool).unwrap_or(false),
+            )
+        }),
         _ => None,
     }
 }
@@ -586,6 +743,24 @@ mod tests {
     }
 
     #[test]
+    fn a_note_type_draws_the_view_that_claims_it() {
+        let mut l = listing();
+        l["islands"][0]["embeds"] = json!([
+            {"view": "list", "note_type": ["Playlist", "bad type"]},
+            {"view": "../x", "note_type": ["other"]},
+            {"view": "none", "note_type": []},
+        ]);
+        let it = &islands(&l)[0];
+        assert_eq!(it.embeds.len(), 1);
+        assert_eq!(it.embed_for("playlist"), Some("list"));
+        assert_eq!(it.embed_for(" PLAYLIST "), Some("list"));
+        assert_eq!(it.embed_for("other"), None);
+        assert_eq!(it.embed_for(""), None);
+        // An island that lists none claims none.
+        assert!(islands(&listing())[0].embeds.is_empty());
+    }
+
+    #[test]
     fn a_listed_island_is_believed_whole_or_not_at_all() {
         let all = islands(&listing());
         assert_eq!(all.len(), 1);
@@ -682,11 +857,48 @@ mod tests {
         );
         assert_eq!(intent("VAULT_READ", &json!({"path": "a"}), 10.0), None);
         assert_eq!(intent("SHARE_CREATE", &Value::Null, 10.0), None);
-        assert!(
-            INTENTS
-                .iter()
-                .all(|a| intent(a, &json!({"t": 1}), 10.0).is_some())
+        let args = json!({"t": 1, "id": "a", "queue": [{"id": "a", "title": "A", "duration": 2}]});
+        assert!(INTENTS.iter().all(|a| intent(a, &args, 10.0).is_some()));
+        // A source (#589): items with an id and a title, media a vault path,
+        // a duration when there is no media.
+        let set = |queue: Value| intent("PLAYHEAD_SET", &json!({"name": "N", "queue": queue}), 0.0);
+        assert_eq!(
+            set(json!([{"id": "a", "title": "A", "subtitle": "S", "media": "Media/a.ogg"}])),
+            Some(Intent::Set(
+                "N".to_owned(),
+                vec![QueueItem {
+                    id: "a".to_owned(),
+                    title: "A".to_owned(),
+                    subtitle: "S".to_owned(),
+                    duration: None,
+                    media: Some("Media/a.ogg".to_owned()),
+                }]
+            ))
         );
+        assert_eq!(
+            set(json!([])),
+            Some(Intent::Set("N".to_owned(), Vec::new()))
+        );
+        for bad in [
+            json!([{"title": "no id", "duration": 1}]),
+            json!([{"id": "a", "duration": 1}]),
+            json!([{"id": "a", "title": "A"}]),
+            json!([{"id": "a", "title": "A", "media": "https://x/a.ogg"}]),
+            json!([{"id": "a", "title": "A", "media": "../a.ogg"}]),
+            json!([{"id": "a", "title": "A", "media": "/a.ogg"}]),
+            json!([{"id": "a", "title": "A", "duration": 1}, {"id": "a", "title": "B", "duration": 1}]),
+        ] {
+            assert_eq!(set(bad.clone()), None, "{bad}");
+        }
+        let many: Vec<Value> = (0..=QUEUE_MAX)
+            .map(|n| json!({"id": n.to_string(), "title": "t", "duration": 1}))
+            .collect();
+        assert_eq!(set(Value::Array(many)), None);
+        assert_eq!(
+            intent("PLAYHEAD_ITEM", &json!({"id": "a", "play": true}), 0.0),
+            Some(Intent::Item("a".to_owned(), true))
+        );
+        assert_eq!(intent("PLAYHEAD_ITEM", &json!({}), 0.0), None);
     }
 
     #[test]
