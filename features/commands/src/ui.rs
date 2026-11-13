@@ -203,7 +203,9 @@ pub fn use_commands_provider() -> Commands {
     });
     // A phone's bar buttons run what the palette and the keys run.
     use_context_provider(|| architect_shell::CommandRunner {
-        run: Callback::new(move |id: String| commands.run(&id)),
+        run: Callback::new(move |id: String| {
+            commands.run_from(&id, architect::action::InvocationSource::Toolbar)
+        }),
         enabled: Callback::new(move |id: String| {
             commands
                 .declared()
@@ -428,23 +430,47 @@ impl Commands {
 
     /// Runs command `id`. False when there is none, or it is disabled. An
     /// async action from a list (a saved script) is spawned, and counts as
-    /// run once started.
+    /// run once started. It runs as the app's own code, invoked from
+    /// nowhere in particular; the person's doors (⌘K, a key, the menu bar)
+    /// say so with [`Self::run_from`].
     #[must_use = "false when there is no such command, or it cannot run"]
     pub fn run(&self, id: &str) -> bool {
-        let found = {
-            let scoped = self.scoped.read();
-            let scoped = scoped.borrow();
-            scoped
-                .iter()
-                .rev()
-                .find(|s| s.command.id == id && s.command.enabled)
-                .map(|s| s.run.clone())
-        };
-        let mut recents = self.recents;
-        if let Some(run) = found {
-            recents.write().touch(id);
-            run();
-            return true;
+        self.run_as(id, None, None)
+    }
+
+    /// Runs command `id` as the person did, from `source` (⌘K, a key, the
+    /// menu bar, a bar button): a listed action sees that invocation, so
+    /// one that asks who ran it (`SHARE_OPEN`) knows it was the person.
+    #[must_use = "false when there is no such command, or it cannot run"]
+    pub fn run_from(&self, id: &str, source: architect::action::InvocationSource) -> bool {
+        self.run_as(id, None, Some(source))
+    }
+
+    /// Runs command `id`, with `args` (JSON) when given, invoked from
+    /// `source` when given: a scoped command (it takes neither), a listed
+    /// action, or a custom one.
+    fn run_as(
+        &self,
+        id: &str,
+        args: Option<&str>,
+        source: Option<architect::action::InvocationSource>,
+    ) -> bool {
+        if args.is_none() {
+            let found = {
+                let scoped = self.scoped.read();
+                let scoped = scoped.borrow();
+                scoped
+                    .iter()
+                    .rev()
+                    .find(|s| s.command.id == id && s.command.enabled)
+                    .map(|s| s.run.clone())
+            };
+            if let Some(run) = found {
+                let mut recents = self.recents;
+                recents.write().touch(id);
+                run();
+                return true;
+            }
         }
         let list = self
             .lists
@@ -453,19 +479,25 @@ impl Commands {
             .find(|l| l.info(id).is_some_and(|i| i.enabled))
             .cloned();
         if let Some(list) = list {
+            let mut recents = self.recents;
             recents.write().touch(id);
+            let caller = source.map_or_else(architect::action::ActionCaller::app, |s| {
+                architect::action::ActionCaller::app()
+                    .with_invocation(architect::action::Invocation::new(s))
+            });
+            let args = args.unwrap_or_default().as_bytes().to_vec();
             if !list.is_async(id) {
-                return list.run(id).is_ok();
+                return list.run_json_with(&caller, id, &args).is_ok();
             }
             // An async action (a saved script, a service call) is awaited
             // off the key's turn; started is all a key can know.
             let id = id.to_owned();
             spawn(async move {
-                let _ = list.run_json_async(&id, b"").await;
+                let _ = list.run_json_async_with(&caller, &id, &args).await;
             });
             return true;
         }
-        self.run_custom(id)
+        args.is_none() && self.run_custom(id)
     }
 
     /// The escape hatch ([`crate::keymap::ESCAPE_HATCH`]): the person's
@@ -480,28 +512,37 @@ impl Commands {
 
     /// Runs action `id` with `args` (JSON). False when there is no such
     /// action in the app's lists, it is disabled, or it said no. An async
-    /// action is spawned, and counts as run once started.
+    /// action is spawned, and counts as run once started. As [`Self::run`],
+    /// from nowhere in particular; [`Self::run_with_from`] says where.
     #[must_use = "false when it did not run"]
     pub fn run_with(&self, id: &str, args: &str) -> bool {
-        let list = self
+        self.run_listed(id, args, None)
+    }
+
+    /// [`Self::run_with`], as the person did from `source` (⌘K's asked
+    /// arguments, a menu row's, a key's).
+    #[must_use = "false when it did not run"]
+    pub fn run_with_from(
+        &self,
+        id: &str,
+        args: &str,
+        source: architect::action::InvocationSource,
+    ) -> bool {
+        self.run_listed(id, args, Some(source))
+    }
+
+    fn run_listed(
+        &self,
+        id: &str,
+        args: &str,
+        source: Option<architect::action::InvocationSource>,
+    ) -> bool {
+        let listed = self
             .lists
             .read()
             .iter()
-            .find(|l| l.info(id).is_some_and(|i| i.enabled))
-            .cloned();
-        list.is_some_and(|list| {
-            let mut recents = self.recents;
-            recents.write().touch(id);
-            if !list.is_async(id) {
-                return list.run_json(id, args.as_bytes()).is_ok();
-            }
-            let id = id.to_owned();
-            let args = args.as_bytes().to_vec();
-            spawn(async move {
-                let _ = list.run_json_async(&id, &args).await;
-            });
-            true
-        })
+            .any(|l| l.info(id).is_some_and(|i| i.enabled));
+        listed && self.run_as(id, Some(args), source)
     }
 
     /// Runs action `id` (with `args`, JSON, when given) as the app, saying
@@ -558,20 +599,11 @@ impl Commands {
     /// when there is no such command, it is disabled or it failed.
     #[must_use = "false when there is no such command, or it cannot run"]
     pub fn run_pick(&self, pick: &MenuPick) -> bool {
-        let Some(args) = &pick.args else {
-            return self.run(&pick.command);
-        };
-        let list = self
-            .lists
-            .read()
-            .iter()
-            .find(|l| l.info(&pick.command).is_some_and(|i| i.enabled))
-            .cloned();
-        list.is_some_and(|list| {
-            let mut recents = self.recents;
-            recents.write().touch(&pick.command);
-            list.run_json(&pick.command, args.as_bytes()).is_ok()
-        })
+        use architect::action::InvocationSource::Menu;
+        pick.args.as_ref().map_or_else(
+            || self.run_from(&pick.command, Menu),
+            |args| self.run_with_from(&pick.command, args, Menu),
+        )
     }
 
     /// Where the Action Lists' events have got to: it moves on with each
