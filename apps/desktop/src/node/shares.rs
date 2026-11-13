@@ -3053,13 +3053,12 @@ impl ShareGuest for GuestLane {
     }
 }
 
-/// A page of the link, with a bar to its files page and its archive
-/// when it lists any file, and its queue ([`queue`]) when any of them
-/// plays.
-/// This page's address at the node's public origin (`ARCHITECT_PUBLIC_ORIGIN`,
-/// already checked as an origin): what "Open in Architect" hands the app.
-/// None with no origin configured, and on a share's own domain (`mount`
-/// `/`), where the page has no `/s/<code>/` path for the app to open.
+/// This page's address at the node's public origin: what "Open in
+/// Architect" hands the app.
+///
+/// The origin is `ARCHITECT_PUBLIC_ORIGIN`, already checked as one. None
+/// with no origin configured, and on a share's own domain (`mount` `/`),
+/// where the page has no `/s/<code>/` path for the app to open.
 #[must_use]
 pub fn page_address(origin: Option<&str>, mount: &str, rest: &str) -> Option<String> {
     let origin = origin?;
@@ -3084,6 +3083,9 @@ fn open_in_app(here: &str) -> String {
     )
 }
 
+/// A page of the link, with "Open in Architect" when `here` is its
+/// address ([`open_in_app`]), a bar to its files page and its archive when
+/// it lists any file, and its queue ([`queue`]) when any of them plays.
 async fn with_files_bar(
     shares: &Shares,
     link: &Link<'_>,
