@@ -3563,7 +3563,6 @@ async fn a_guests_files_are_the_links_at_its_layer() {
 /// it: `*` any run of characters (`/` too), `?` any one, the rest itself;
 /// the query is not part of the path.
 fn aasa_matches(pattern: &str, path: &str) -> bool {
-    let path = path.split('?').next().unwrap_or_default();
     fn go(p: &[u8], s: &[u8]) -> bool {
         match p.split_first() {
             None => s.is_empty(),
@@ -3572,6 +3571,7 @@ fn aasa_matches(pattern: &str, path: &str) -> bool {
             Some((c, rest)) => s.first() == Some(c) && go(rest, &s[1..]),
         }
     }
+    let path = path.split('?').next().unwrap_or_default();
     go(pattern.as_bytes(), path.as_bytes())
 }
 
