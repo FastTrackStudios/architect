@@ -34,6 +34,7 @@
 #![allow(clippy::future_not_send)]
 
 mod audio;
+mod click;
 mod embed;
 mod favourites;
 mod frames;
@@ -125,6 +126,7 @@ fn WebApp() -> Element {
     });
     // The app's audio element, following the playhead (#589).
     use_hook(audio::start);
+    use_hook(click::start);
     let theme = theme::use_web_theme(&list);
     let assets = use_hook(theme::assets);
     let settings = settings::use_web_settings();
@@ -167,6 +169,17 @@ fn WebApp() -> Element {
         move || settings.show(None),
     );
     let demo = matches!(mode, Mode::Demo);
+    // The card's art: an item's `art` (a vault path) as the demo vault's
+    // image, a `data:` URL (`crate::demo::image_url`).
+    let art = use_callback(move |p: String| {
+        if demo {
+            crate::demo::image_url(&p)
+        } else {
+            None
+        }
+    });
+    // The same for an extension's frames, so a frame and the card agree.
+    use_context_provider(|| embed::ArtSource(art));
     // The demo's way out; signed in, the account's menu signs out.
     if demo {
         architect_commands::use_command(
@@ -309,7 +322,7 @@ fn WebApp() -> Element {
                         .into_iter()
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
-                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar {} },
+                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art } },
                         vault::VaultPage {}
                     }
                 }

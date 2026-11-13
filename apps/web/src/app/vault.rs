@@ -651,8 +651,14 @@ fn FramePane(
                     body: &body,
                 },
             );
+            // Keyed by island and view, in a list (the only place a key
+            // remounts): a pane that goes from one view to another gets a
+            // new frame, never the last view's frame under the new name.
+            let id = format!("{}/{view}", b.island.id);
             rsx! {
-                super::embed::Embedded { bundle: b, view, note, pane: true }
+                for k in [id] {
+                    super::embed::Embedded { key: "{k}", bundle: b.clone(), view: view.clone(), note: note.clone(), pane: true }
+                }
             }
         }
         Some(_) => rsx! {
@@ -991,7 +997,10 @@ fn NoteText(path: String, text: String) -> Element {
                     }
                 }
                 if let Some(r) = recording {
-                    super::recording::RecordingRow { path: path.clone(), title: note_title, recording: r }
+                    super::recording::RecordingRow {
+                        path: path.clone(), title: note_title, recording: r,
+                        artist: prop("artist"), cover: prop("cover"),
+                    }
                 }
                 if !properties.is_empty() {
                     dl { "data-testid": "note-properties",

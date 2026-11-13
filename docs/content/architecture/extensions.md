@@ -1681,12 +1681,43 @@ it knows what a source means to its extension.
 A source is one extension's queue (`PLAYHEAD_SET`, method `set`):
 
 ```json
-{ "name": "Studio", "index": 0, "play": false,
+{ "name": "Studio", "play": false, "slots": ["click", "open"],
   "queue": [{ "id": "Setlists/Gig.md#1", "title": "Amazing Grace", "subtitle": "John Newton",
               "art": "Art/grace.jpg", "duration": 192.5, "media": "Recordings/Amazing Grace.mp3",
               "sections": [{ "name": "Verse 1", "start": 0, "end": 20, "color": "#2563eb" }],
-              "marks": [{ "at": 1.5, "text": "Amazing grace", "kind": "line" }] }] }
+              "marks": [{ "at": 1.5, "text": "Amazing grace", "kind": "line" }],
+              "tempo": { "bpm": 72, "at": 0.4, "meter": 3 } }] }
 ```
+
+Everything but `queue` is optional. `index` picks the current item (clamped
+to the queue); a `SET` without `index` keeps the item that is current
+when its `id` is still in the queue, else starts at the first, so a view
+that sends the same list again does not send the source back to its
+first song. `time` is where to start, seconds.
+
+Every time in it is seconds from 0 to 24 h
+(`architect_playhead::MAX_SECONDS`, 86 400): an item's `duration`, the
+`SET`'s `time`, a section's `start` and `end`, a mark's `at` and a tempo's
+`at`. A `SET` with one above it is refused whole, as any other invalid
+value is, and a media length above it is not taken. An item's `tempo` is
+its beat for the bar's Click (`architect_playhead::model::Tempo`): `bpm`
+20 to 400 (`BPM`), its first downbeat `at` (0 or more, default 0), and
+`meter` beats a bar, 1 to 16 (`METER`, default 4), the first of each
+accented; one tempo for the whole item.
+
+`slots` is what the bar draws beside its play button
+(`architect_playhead::model::Slot`): at most two (`MAX_SLOTS`), each once,
+of `"click"` (Click on and off: a tick on each beat of the item's
+`tempo`) and `"open"` (the bar's detail: previous, next, the position and
+the sources). The bar always draws `open`, after the others when it is
+not asked for, so the detail is one focus away from the keyboard
+(`features/playhead/src/ui.rs` `slots_drawn`). Click is one app-wide
+setting (`architect_playhead::click`, `set_click`); it is drawn only in
+an app that sounds it (`clicks`, said once by `sounds_click`): the web
+app (`apps/web/src/app/click.rs`), scheduled ahead on the Web Audio clock
+with at most 16 beats a look, its audio context suspended while Click is
+off or nothing plays. Desktop and phone do not sound it and draw no
+Click.
 
 `media` and `art` are vault paths, never URLs: one rule,
 `architect_playhead::model::vault_path`, which the web app's frame host
@@ -1713,7 +1744,7 @@ Every view gets the same state (`PLAYHEAD_STATE`, `Deck::state`):
 `source`, `name`, `active`, `playing`, `time` at `at` (ms since the
 epoch; extrapolate while `playing`), `rate`, `duration`, `index`,
 `tracks`, `clock` (`media` or `silent`), `unheard`, `unplayable`, `item`,
-`queue`, and the share page's flat keys (`title`, `subtitle`, `artist`,
+`queue`, `slots`, and the share page's flat keys (`title`, `subtitle`, `artist`,
 `sections`).
 
 | Method (action) | Arguments | Who |
@@ -2213,7 +2244,7 @@ for again next time.
 ```html
 <div data-playlist>
   <ol>
-    <li data-playlist-section>Presidents Songs</li>
+    <li data-playlist-section>Opening Set</li>
     <li data-track data-media="../Media/Joy.mp4" data-page="../joy/" data-title="Joy to the World" data-subtitle="Chris Tomlin · D · 128 bpm">
       <span data-track-mark>1</span><span data-track-art data-hue="96" style="background:hsl(96 42% 40%)">JT</span>
       <span data-track-text><span data-track-title>Joy to the World</span><span data-track-meta>Chris Tomlin · D · 128 bpm</span></span>

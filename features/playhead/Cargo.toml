@@ -18,14 +18,25 @@ required-features = ["extension"]
 name = "service"
 required-features = ["extension"]
 
+[[test]]
+name = "guards"
+required-features = ["host"]
+
 [features]
-default = []
+# On by default, as the palette's: `cargo build -p architect-playhead
+# --bin architect-playhead` (`cargo xtask builtins`, a development copy)
+# builds the process. The workspace dependency turns it off; each app
+# names the features it wants.
+default = ["extension"]
 # The bar and `use_playhead` (Dioxus, the shell's theme).
 ui = ["dep:dioxus", "dep:architect-shell", "dep:futures-timer", "dep:lucide-dioxus"]
 # Its `linked::Extension` (and the guest, its process copy); an app adds
 # `linked`. Off, the deck alone, for an app with no extension host (the
 # web app answers its frames' asks itself, through `ask`).
 extension = ["dep:architect-extensions"]
+# `raise_changed`, for the app that hosts extensions (`apps/ui`): the
+# host, which the guest process leaves out.
+host = ["extension", "architect-extensions/host"]
 
 [dependencies]
 serde = { workspace = true }

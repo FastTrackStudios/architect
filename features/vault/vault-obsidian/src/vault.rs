@@ -102,14 +102,14 @@ impl Vault {
 
         for entry in entries {
             match entry.kind {
-                VaultEntryKind::Markdown => match load_page(&entry) {
+                VaultEntryKind::Markdown => match load_page(root, &entry) {
                     Ok(p) => pages.push(p),
                     Err(e) => {
                         tracing::warn!(path = %entry.rel_path, ?e, "page load failed");
                         unread.push(format!("{}: {e}", entry.rel_path));
                     }
                 },
-                VaultEntryKind::Base => match load_base(&entry) {
+                VaultEntryKind::Base => match load_base(root, &entry) {
                     Ok(b) => bases.push(b),
                     Err(e) => {
                         tracing::warn!(path = %entry.rel_path, ?e, "base load failed");
@@ -242,8 +242,19 @@ fn page_has_tag(p: &VaultPage, tag: &str) -> bool {
     false
 }
 
-fn load_page(entry: &VaultEntry) -> Result<VaultPage, LoadError> {
-    let raw = std::fs::read_to_string(&entry.abs_path).map_err(|e| LoadError::Io(e.to_string()))?;
+/// `entry`'s text, read never through a symlink
+/// ([`crate::walker::open_own`]).
+fn read_own(root: &Path, entry: &VaultEntry) -> Result<String, LoadError> {
+    use std::io::Read as _;
+    let mut raw = String::new();
+    crate::walker::open_own(root, &entry.rel_path)
+        .and_then(|mut file| file.read_to_string(&mut raw))
+        .map_err(|e| LoadError::Io(e.to_string()))?;
+    Ok(raw)
+}
+
+fn load_page(root: &Path, entry: &VaultEntry) -> Result<VaultPage, LoadError> {
+    let raw = read_own(root, entry)?;
     let parsed = parse_page(&raw);
     let mtime = std::fs::metadata(&entry.abs_path)
         .and_then(|m| m.modified())
@@ -259,8 +270,8 @@ fn load_page(entry: &VaultEntry) -> Result<VaultPage, LoadError> {
     })
 }
 
-fn load_base(entry: &VaultEntry) -> Result<VaultBase, LoadError> {
-    let raw = std::fs::read_to_string(&entry.abs_path).map_err(|e| LoadError::Io(e.to_string()))?;
+fn load_base(root: &Path, entry: &VaultEntry) -> Result<VaultBase, LoadError> {
+    let raw = read_own(root, entry)?;
     let parsed = bases::parse(&raw).map_err(|e| e.to_string());
     let mtime = std::fs::metadata(&entry.abs_path)
         .and_then(|m| m.modified())
