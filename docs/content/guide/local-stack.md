@@ -77,7 +77,7 @@ build takes a couple of minutes, not the release bundle's; after that an
 crate it uses is rebuilt in seconds and the page reloads.
 
 - **The page** is the bundle's. `cargo xtask dev run web` writes
-  `apps/web/index.html` from `apps/web/app/index.html` at every start
+  an `index.html` beside `apps/web/Dioxus.toml` from `apps/web/app/index.html` at every start
   (`xtask/src/dev/mod.rs` `dev_page`; git-ignored): without its
   Content-Security-Policy (dx loads the app and its hot reload with inline
   scripts, and the local issuer is plain http) and without `start.js` (dx
@@ -85,8 +85,8 @@ crate it uses is rebuilt in seconds and the page reloads.
   and `just web-test` serve the real page with the real headers. Start
   `dx serve` through the stack, never bare in `apps/web`: without that
   page the app has nothing to mount in.
-- **Its files** are `apps/web/dev/public` (`apps/web/Dioxus.toml`
-  `public_dir`; written at the same moment, git-ignored): the page's
+- **Its files** are the folder `apps/web/Dioxus.toml` names as
+  `public_dir` (`dev/public` there; written at the same moment, git-ignored): the page's
   `style.css`, a `config.json` naming the local issuer, the site's icon
   and the app's face. An edit to `apps/web/app/style.css` or
   `apps/web/app/index.html` shows after the `web` process starts again.
