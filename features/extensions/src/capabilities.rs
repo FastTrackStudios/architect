@@ -449,26 +449,23 @@ impl Capabilities {
         id: &str,
         effect: Reach,
     ) -> Result<(), (&'static str, String)> {
-        if id.starts_with(own) {
-            return Ok(());
-        }
-        if !prefix_in(id, &self.actions) {
-            return Err((
+        // The rule itself is `architect_favourites::may_run`, which a
+        // browser's favourites use too: one rule, nothing to drift.
+        match architect_favourites::may_run(own, &self.actions, self.effect, id, effect) {
+            Ok(()) => Ok(()),
+            Err(architect_favourites::Refused::Namespace) => Err((
                 "actions",
                 format!("{id} is not in a namespace this extension may run"),
-            ));
-        }
-        if effect > self.effect {
-            return Err((
+            )),
+            Err(architect_favourites::Refused::Effect) => Err((
                 "effect",
                 format!(
                     "{id} is {}: this extension may run {} actions at most",
                     effect.name(),
                     self.effect.name()
                 ),
-            ));
+            )),
         }
-        Ok(())
     }
 
     /// Whether it may read `what` ([`READS`]).
@@ -609,5 +606,53 @@ mod tests {
         assert!(may.may_use("notify"));
         assert!(!may.may_use("clipboard"), "not granted");
         assert_eq!(asks.grows_from(&granted).len(), 1);
+    }
+
+    /// A favourite's action rule in a browser
+    /// (`architect_favourites::Declarer::may_target`) is `may_run`'s, a
+    /// destructive action never: both are `architect_favourites::may_run`,
+    /// and this holds the two effect scales and the mapping between them.
+    #[test]
+    fn a_favourites_action_rule_is_may_runs() {
+        use architect_favourites::{Declarer, Effect};
+        let effect = |r: Reach| match r {
+            Reach::ReadOnly => Effect::ReadOnly,
+            Reach::Mutating => Effect::Mutating,
+            Reach::Destructive => Effect::Destructive,
+        };
+        let ids = [
+            "ACME_CHARTS_OPEN",
+            "ACME_CHARTSX_OPEN",
+            "PLAYER_TOGGLE",
+            "VAULT_DELETE",
+            "APP_SETTINGS",
+        ];
+        let reaches = [Reach::ReadOnly, Reach::Mutating, Reach::Destructive];
+        for named in [&[][..], &["PLAYER_"][..], &["*"][..]] {
+            for most in reaches {
+                let c = caps(named, most, &[]);
+                let d = Declarer {
+                    extension: "acme.charts".into(),
+                    actions: c.actions.clone(),
+                    effect: effect(most),
+                };
+                assert_eq!(
+                    crate::manifest::action_prefix("acme.charts"),
+                    architect_favourites::action_prefix("acme.charts")
+                );
+                for id in ids {
+                    for e in reaches {
+                        let may_run = c
+                            .may_run(&crate::manifest::action_prefix(&d.extension), id, e)
+                            .is_ok();
+                        assert_eq!(
+                            d.may_target(id, effect(e)),
+                            may_run && e != Reach::Destructive,
+                            "{id} {e:?} with {named:?} up to {most:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

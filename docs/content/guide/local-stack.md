@@ -18,7 +18,7 @@ Keyflow (`scripts/run-it.sh` here):
 
 | Recipe | What it runs |
 | --- | --- |
-| `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below (`devenv up mock-oauth auth node app web site`). |
+| `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below, all of it at once (`devenv up mock-oauth auth node app web site`): the desktop app's window and the web app, both under `dx serve` and rebuilt on a save, and the site with hot reload. |
 | `just demo` | The quickest look, nothing watched: the issuer and a node with a share link (Studio's when it is beside this one, else the demo seed's, `/s/ksqx75iaaaaaaaae/`). Sign in as `ada@local.test`, password `development-password`. |
 | `just website` | The public site alone (`apps/site`: landing, download, changelog, extensions, docs) with hot reload, on 7414. `just docs-serve` still serves `docs/content` alone. |
 | `just phone` | Studio's running stack's node on this tailnet over HTTPS (`tailscale serve`, never funnel), for a phone. |
@@ -48,8 +48,8 @@ in this order, each waiting for the one before it to answer:
 | `auth` | 7411 | `mock-oauth` | The auth server (`apps/auth-server`): SQLite on disk under the stack's state, a secret of its own generated on its first start, filled as below. |
 | `node` | 7412 | `auth` | `architect-desktop serve`, built without the window: signed in to the local auth server, hosting the fill's org and a vault of the demo's content, `ARCHITECT_IROH=local`, files in a local folder. |
 | `app` | (a window) | `node` | The Architect app under `dx serve`: its issuer the local auth server, its orgs' node the local node (`ARCHITECT_ORG_HOST`), a folder of its own with its sessions in a file there (never the keychain), a scratch copy of the demo vault. |
-| `web` | 7413 | `auth` | Off by default (`devenv up web`): the web front end (`scripts/web-bundle.sh`), its `config.json` pointed at the local issuer. |
-| `site` | 7414 | | Off by default (`devenv up site`): `apps/site`'s dev server. |
+| `web` | 7413 | `auth` | Off by default (`devenv up web`; `just dev plain` starts it): the web app (`apps/web`) under `dx serve --platform web`, at `/app/` (`/app/?demo`: the app on the demo vault), its `config.json` naming the local issuer. Below. |
+| `site` | 7414 | | Off by default (`devenv up site`; `just dev plain` starts it): `apps/site`'s dev server, hot-reloaded; its `/app/…` links go to the web app's server. |
 
 The ports are `dev-stack.toml`'s, the one place to change them
 (`devenv.nix` reads them from there too). They stay clear of what a fleet
@@ -65,6 +65,49 @@ secret, the snapshot, the node's identity and data, the app's folder, and
 
 `just dev-status` says what is running, the fill and why, the snapshot's
 age, the URLs to open and the development password.
+
+### The web app, rebuilt on save
+
+`just dev plain` (or `devenv up web`) serves the web app at
+`http://127.0.0.1:7413/app/`, the demo at `/app/?demo`. dx builds
+`apps/web`'s program (`apps/web/src/main.rs`, which calls the same
+`start` the bundle's library does) in a debug profile, so the first
+build takes a couple of minutes, not the release bundle's; after that an
+`rsx!` edit shows without a reload and any other save in `apps/web` or a
+crate it uses is rebuilt in seconds and the page reloads.
+
+- **The page** is the bundle's. `cargo xtask dev run web` writes
+  an `index.html` beside `apps/web/Dioxus.toml` from `apps/web/app/index.html` at every start
+  (`xtask/src/dev/mod.rs` `dev_page`; git-ignored): without its
+  Content-Security-Policy (dx loads the app and its hot reload with inline
+  scripts, and the local issuer is plain http) and without `start.js` (dx
+  puts its own loader in). The policy is the bundle's to prove: `just web`
+  and `just web-test` serve the real page with the real headers. Start
+  `dx serve` through the stack, never bare in `apps/web`: without that
+  page the app has nothing to mount in.
+- **Its files** are the folder `apps/web/Dioxus.toml` names as
+  `public_dir` (`dev/public` there; written at the same moment, git-ignored): the page's
+  `style.css`, a `config.json` naming the local issuer, the site's icon
+  and the app's face. An edit to `apps/web/app/style.css` or
+  `apps/web/app/index.html` shows after the `web` process starts again.
+- **Signing in** works as `ada@local.test`: the local issuer registers
+  the client `architect` with this origin's `/auth/callback`, the scopes
+  the app asks for and this origin for CORS (`auth_env`).
+- **The node's paths** (`/node`, `/org`, `/vox`, `/s`, `/_ext`) are sent
+  to the stack's node by dx's dev server (`apps/web/Dioxus.toml`
+  `[[web.proxy]]`), WebSockets too, as production's reverse proxy does:
+  the signed-in page shows the node's status. The port there is
+  `dev-stack.toml`'s, kept equal by a test; a run that moves the node
+  with `DEV_STACK_PORT_NODE` has no node behind the web app.
+- **The release bundle is not built this way**: `scripts/web-bundle.sh`
+  builds the library with the `web` profile and its own wasm-bindgen
+  (`just web`), as before.
+
+The desktop app the stack opens is an instance of its own: an app run on
+a folder of its own (`ARCHITECT_CONFIG_DIR`) claims its one instance
+under that folder too (`apps/distribution/src/lib.rs`
+`Distribution::instance_id`), so it opens beside an installed Architect
+that is running instead of handing its launch to it and ending.
 
 ## Two ways to fill it
 

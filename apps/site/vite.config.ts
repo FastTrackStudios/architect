@@ -1,7 +1,7 @@
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 import { PAGES, SKIP_PRERENDER } from "./src/content/pages.ts";
 
@@ -12,9 +12,38 @@ import { PAGES, SKIP_PRERENDER } from "./src/content/pages.ts";
  * The Nitro server build exists because the hub's toolchain makes one;
  * it is used only to render the pages at build time and is never deployed.
  */
+/**
+ * On the local stack (`devenv up web site`, docs/content/guide/local-stack.md)
+ * the web app has a dev server of its own (`dx serve`), named by
+ * ARCHITECT_WEB_DEV: this one sends `/app/…` there, so the Demo and
+ * "Open the web app" links lead to it as they do in the bundle, where
+ * both are one origin. Dev server only; unset, nothing changes.
+ */
+const webApp = (): Plugin => ({
+	name: "architect-web-dev",
+	apply: "serve",
+	configureServer(server) {
+		const app = process.env.ARCHITECT_WEB_DEV?.replace(/\/$/, "");
+		if (!app) return;
+		server.middlewares.use((req, res, next) => {
+			const url = req.url ?? "";
+			if (
+				url !== "/app" &&
+				!url.startsWith("/app/") &&
+				!url.startsWith("/app?")
+			)
+				return next();
+			res.statusCode = 302;
+			res.setHeader("Location", app + url);
+			res.end();
+		});
+	},
+});
+
 const config = defineConfig({
 	resolve: { tsconfigPaths: true },
 	plugins: [
+		webApp(),
 		nitro(),
 		tanstackStart({
 			prerender: {

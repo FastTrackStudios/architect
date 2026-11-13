@@ -172,6 +172,12 @@ async fn read_distribution() {
 
 #[wasm_bindgen(start)]
 pub fn start() {
+    // Once: the library's start (the bundle) and the program's `main`
+    // (`dx serve`, src/main.rs) both come here in a dev build.
+    thread_local!(static STARTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    if STARTED.with(|s| s.replace(true)) {
+        return;
+    }
     spawn_local(async {
         if let Err(why) = run().await {
             draw(&Screen::Broken(why));

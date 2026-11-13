@@ -841,6 +841,7 @@ dependencies = [
  "architect-navigator-extension",
  "architect-orgs",
  "architect-pages",
+ "architect-playhead",
  "architect-presence",
  "architect-projects",
  "architect-sandbox-board",
@@ -864,6 +865,7 @@ dependencies = [
  "dioxus-native",
  "editor-keyflow",
  "facet",
+ "futures",
  "futures-channel",
  "futures-timer",
  "futures-util",
@@ -878,6 +880,7 @@ dependencies = [
  "tag",
  "tempfile",
  "tokio",
+ "toml 0.8.2",
  "tracing",
  "vault",
  "vault-doc",
@@ -1169,6 +1172,7 @@ dependencies = [
  "architect-workspace-hack",
  "auth-proto",
  "auth-server",
+ "base64 0.22.1",
  "clap",
  "crdt",
  "dioxus",
@@ -1182,6 +1186,7 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -1739,6 +1744,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-playhead"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-settings",
+ "architect-shell",
+ "architect-workspace-hack",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "lucide-dioxus",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "web-time",
+]
+
+[[package]]
 name = "architect-presence"
 version = "0.1.0"
 dependencies = [
@@ -1958,6 +1982,7 @@ dependencies = [
 name = "architect-shell"
 version = "0.1.0"
 dependencies = [
+ "architect-favourites",
  "architect-theme",
  "architect-workspace-hack",
  "block2 0.6.2",
@@ -1972,6 +1997,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-ui-kit",
  "raw-window-handle 0.6.2",
+ "toml 0.8.2",
  "tracing",
  "web-time",
 ]
@@ -2302,7 +2328,9 @@ dependencies = [
  "architect",
  "architect-command-palette",
  "architect-commands",
+ "architect-favourites",
  "architect-navigator",
+ "architect-playhead",
  "architect-settings",
  "architect-shell",
  "architect-theme",
@@ -2312,12 +2340,15 @@ dependencies = [
  "auth-client",
  "base64 0.22.1",
  "dioxus",
+ "futures-channel",
  "futures-timer",
+ "futures-util",
  "include_dir",
  "js-sys",
  "lucide-dioxus",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

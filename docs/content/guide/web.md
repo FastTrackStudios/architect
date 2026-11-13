@@ -44,6 +44,11 @@ just web            # builds target/web-bundle, serves it on http://localhost:80
 just web-test       # the same bundle in a headless Firefox (apps/web/test/web.test.mjs)
 ```
 
+To work on the app, not the bundle: `just dev plain` (or `devenv up
+web`) serves it under `dx serve` at `http://127.0.0.1:7413/app/`,
+rebuilt on a save, signed in at the local issuer
+([the local stack](@/guide/local-stack.md)).
+
 `scripts/web-bundle.sh` builds the bundle: the site (`apps/site`, with
 bun), the app's wasm (`wasm32-unknown-unknown`, release) through
 `wasm-bindgen` at `Cargo.lock`'s version, and the docs. `just web` serves

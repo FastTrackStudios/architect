@@ -77,7 +77,7 @@ use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Config, Engine, ResourceLimiter, Store, UpdateDeadline};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::host::{Context, Instance, Runner, invocation_json};
+use crate::host::{Context, Instance, Runner};
 use crate::hostapi::ExtensionApi;
 use crate::hostcall::{HostError, HostRequest};
 use crate::logs::{Level, Logs};
@@ -1804,7 +1804,7 @@ impl Instance for Loaded {
             let sent = jobs.unbounded_send(Job::Invoke {
                 action: id.clone(),
                 args,
-                invocation: invocation_json(caller.invocation()).to_string(),
+                invocation: crate::invocation::caller_json(caller).to_string(),
                 who: caller.principal().cloned(),
                 reply,
             });
