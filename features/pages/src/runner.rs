@@ -166,6 +166,13 @@ pub struct Services {
 /// An inline embed page's input, shared by its session and its thread.
 pub type EmbedCell = Arc<Mutex<EmbedInput>>;
 
+/// What a page opened reaches: its extension's (through `gate`), or,
+/// drawing a guest's content, nothing of the person's.
+enum Reach {
+    Gated(Option<Gate>),
+    Guest,
+}
+
 /// The topic an embed's new input reaches its page as
 /// ([`Inbox::Shared`]): never a shared-state key (those have no `$`).
 pub const EMBED_TOPIC: &str = "$embed";
@@ -567,7 +574,7 @@ impl Pages {
         view: &str,
         gate: Option<Gate>,
     ) -> Result<PageSession, String> {
-        self.open_as(page, extension, view, gate, None)
+        self.open_as(page, extension, view, Reach::Gated(gate), None)
     }
 
     /// Opens `page` as `extension`'s inline embed `view`, given `input`
@@ -588,7 +595,31 @@ impl Pages {
             page,
             extension,
             view,
-            gate,
+            Reach::Gated(gate),
+            Some(Arc::new(Mutex::new(input))),
+        )
+    }
+
+    /// Opens `page` as `extension`'s inline embed `view` drawing a
+    /// guest's content (`input`, a share link's note): on
+    /// [`AppHost::guest`], reaching nothing of the person's, whatever
+    /// its extension may.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::open`].
+    pub fn open_guest_embed(
+        &self,
+        page: &PageFile,
+        extension: &str,
+        view: &str,
+        input: EmbedInput,
+    ) -> Result<PageSession, String> {
+        self.open_as(
+            page,
+            extension,
+            view,
+            Reach::Guest,
             Some(Arc::new(Mutex::new(input))),
         )
     }
@@ -598,7 +629,7 @@ impl Pages {
         page: &PageFile,
         extension: &str,
         view: &str,
-        gate: Option<Gate>,
+        reach: Reach,
         embed: Option<EmbedCell>,
     ) -> Result<PageSession, String> {
         let load = self
@@ -608,11 +639,15 @@ impl Pages {
             .cloned()
             .ok_or_else(|| format!("this app does not run .{} pages", page.kind.extension()))?;
         let mut host = self.0.host.clone();
-        if let Some(gate) = gate {
-            host = host.with_gate(gate);
-            if !extension.is_empty() {
-                host = host.with_extension(extension);
+        match reach {
+            Reach::Guest => host = host.guest(),
+            Reach::Gated(Some(gate)) => {
+                host = host.with_gate(gate);
+                if !extension.is_empty() {
+                    host = host.with_extension(extension);
+                }
             }
+            Reach::Gated(None) => {}
         }
         let (inbox, asked) = mpsc::channel();
         let (frames_to, frames) = fmpsc::unbounded();

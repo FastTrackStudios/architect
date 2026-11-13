@@ -362,14 +362,27 @@ page.
   `architect://` scheme, a second launch's hand-off, the launch's own
   arguments). A note is drawn by the extension that claims its type
   (`Embeds::resolve`) once a note's text is given to guests; until then
-  as its page's words, with "Open in browser". The account's session is
+  as its page's words, with "Open in browser". The extension draws a
+  guest's content only through its page, on a host that runs no action,
+  makes no host-service call and keeps its settings and shared state
+  apart (`features/pages/src/host.rs` `AppHost::guest`): it reads and
+  writes nothing of yours. A linked or process view, which runs with
+  your own session, never draws it. On a phone the tab takes the bar's
+  fourth place while a link is open (`Tab::kept`). The account's session is
   sent only to a node the account already uses for an org of its own
   (`trusts`). A revoke or an expiry empties the tab on the link's next
   news (`_live`) or within five minutes.
 - **What the app opens.** `ShareUrl::parse`: `https:` only, or `http:`
   to this machine; no credentials; a share link's path. A link the OS
-  hands the app that points at this machine or a private network is
-  opened only once the person says so (`ShareUrl::is_local`).
+  hands the app, or an agent's `SHARE_OPEN`, asks the person first
+  (`asks_first`) when it points at this machine or a private network
+  (`ShareUrl::is_local`, or a name that resolves there), or at a node
+  that is neither `architect.fasttrackstudio.app` nor one of the
+  account's ("Open a shared link from <host>?"); nothing is fetched
+  before the yes. A link the person types or pastes opens directly. A
+  name checked as public is read from the addresses it was checked at,
+  so the DNS can't move it afterwards. An image is fetched only when its
+  URL, parsed and normalised, is on the link's node below the link.
 
 ### Blocks extensions draw
 

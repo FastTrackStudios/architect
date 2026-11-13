@@ -52,6 +52,8 @@ architect-sandbox-board = { path = "../sandbox/board" }
 # service and its rules; a client that follows no redirect.
 architect-spaces = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# An image of the link's, its URL parsed and normalised before it is fetched.
+url = "2"
 # Which distribution runs, and what it compiles in (#491).
 architect-distribution = { workspace = true }
 # First-party extensions the app ships, on by default (#368, #375).
@@ -150,6 +152,10 @@ rfd = { workspace = true }
 # FILES_* (src/files.rs) on a phone: the agent ARCHITECT_FILES_AGENT names,
 # through the same client on its own runtime.
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+# A share link's "Open in browser" (src/guest.rs): UIApplication's openURL.
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true, default-features = false, features = ["std", "NSDictionary", "NSString", "NSURL"] }
+objc2-ui-kit = { workspace = true, default-features = false, features = ["std", "block2", "UIApplication", "UIResponder"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 # The device's agent (src/files.rs): its config's defaults, and starting it

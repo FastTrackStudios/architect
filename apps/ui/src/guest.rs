@@ -9,8 +9,9 @@
 //! read through the link's guest service (`architect_spaces::ShareGuest`)
 //! and drawn as plain blocks; a note whose type an installed extension
 //! claims (`Embeds::resolve`) is drawn by it once the note's text is given
-//! to guests (`GuestNote::source`, not yet), else plain, with "Open in
-//! browser".
+//! to guests (`GuestNote::source`), else plain, with "Open in browser".
+//! The extension draws it only through its page, on a host that reaches
+//! nothing of the person's (`EmbedView`'s `guest`).
 //!
 //! The rules (`docs/content/guide/deploy.md`, "A link opens Architect"):
 //! a link is read with `ShareUrl::parse` (https, or http to this machine;
@@ -67,10 +68,27 @@ pub struct OpenOut {
 /// Where a link came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
-    /// The person: typed, pasted, picked in ⌘K, or an agent's call.
+    /// The person: typed, pasted or picked in ⌘K, the menu, a key.
     Person,
     /// The OS: a universal link, the app's scheme, a launch's arguments.
     Os,
+    /// `SHARE_OPEN` run by anything but the person (an agent, a script, a
+    /// hook): asked about as the OS's links are.
+    Agent,
+}
+
+/// The node the hosted Architect runs on: its links open straight away.
+pub const HOME_HOST: &str = "architect.fasttrackstudio.app";
+
+/// Whether a link opens straight away or asks the person first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ask {
+    /// Open it.
+    No,
+    /// It points at this machine or a private network.
+    Local,
+    /// Its node is neither the hosted Architect nor one of the account's.
+    Unknown,
 }
 
 // ── The inbox: links from anywhere, opened by the window ─────────────
@@ -104,11 +122,52 @@ pub fn links_in(args: impl IntoIterator<Item = String>) -> Vec<String> {
         .collect()
 }
 
-/// Whether a link asks the person first: one the OS handed over that
-/// points at this machine or a private network.
+/// The host of an org host as the account keeps it (`https://n.example`,
+/// `http://127.0.0.1:7422/`, a bare `n.example`), lower case, no port.
+fn host_of(origin: &str) -> String {
+    let rest = origin.split_once("://").map_or(origin, |(_, r)| r);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = if authority.starts_with('[') {
+        authority
+            .split_once(']')
+            .map_or(authority, |(h, _)| h)
+            .trim_start_matches('[')
+    } else {
+        authority.split(':').next().unwrap_or_default()
+    };
+    host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// Whether a link's node is one the app knows: the hosted Architect, or
+/// a node the account uses for one of its orgs (`known`, as [`trusts`]
+/// takes them; the port is not asked about).
 #[must_use]
-pub fn asks_first(url: &ShareUrl, from: Source) -> bool {
-    from == Source::Os && url.is_local()
+pub fn known_host(url: &ShareUrl, known: &[String]) -> bool {
+    let host = url
+        .host()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    host == HOME_HOST || known.iter().any(|k| host_of(k) == host)
+}
+
+/// Whether a link asks the person first. One the person opened does not,
+/// as a browser's address bar does not. One the OS handed over or an
+/// agent asked for does when it points at this machine or a private
+/// network ([`Ask::Local`], first) or at a node the app does not know
+/// ([`Ask::Unknown`]: nothing is fetched until the person says yes).
+#[must_use]
+pub fn asks_first(url: &ShareUrl, from: Source, known: &[String]) -> Ask {
+    if from == Source::Person {
+        Ask::No
+    } else if url.is_local() {
+        Ask::Local
+    } else if known_host(url, known) {
+        Ask::No
+    } else {
+        Ask::Unknown
+    }
 }
 
 /// Whether the account may send its session to `origin`.
@@ -197,6 +256,7 @@ impl Why {
     target_os = "ios"
 ))]
 mod net {
+    use std::net::SocketAddr;
     use std::time::Duration;
 
     use architect::ClientError;
@@ -237,10 +297,17 @@ mod net {
     }
 
     /// A client that follows no redirect: a node's answer is its own.
-    fn http(timeout: Option<Duration>) -> reqwest::Client {
+    /// With `pinned`, it connects to those addresses for `host` and never
+    /// asks the DNS again, so a name checked as public stays so (no DNS
+    /// rebinding between the check and the requests).
+    fn http(timeout: Option<Duration>, pinned: Option<(&str, &[SocketAddr])>) -> reqwest::Client {
         let builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
         let builder = match timeout {
             Some(t) => builder.timeout(t),
+            None => builder,
+        };
+        let builder = match pinned {
+            Some((host, addrs)) => builder.resolve_to_addrs(host, addrs),
             None => builder,
         };
         builder.build().unwrap_or_default()
@@ -253,6 +320,18 @@ mod net {
         url: ShareUrl,
         http: reqwest::Client,
         token: String,
+        /// The addresses its host was checked at ([`Self::pinned`]).
+        pinned: Option<Vec<SocketAddr>>,
+    }
+
+    /// What a link's host resolves to.
+    pub enum Resolved {
+        /// This machine or a private network, at one address at least.
+        Local,
+        /// Public addresses only, to connect to and nothing else.
+        Public(Vec<SocketAddr>),
+        /// Nothing (the request then fails as unreachable).
+        Unknown,
     }
 
     const fn why(e: &ClientError<GuestFault>) -> Why {
@@ -275,9 +354,28 @@ mod net {
         pub fn new(url: ShareUrl, token: String) -> Self {
             Self {
                 url,
-                http: http(Some(TIMEOUT)),
+                http: http(Some(TIMEOUT), None),
                 token,
+                pinned: None,
             }
+        }
+
+        fn bare_host(&self) -> String {
+            self.url
+                .host()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_owned()
+        }
+
+        /// This session, connecting only to `addrs` (those its host was
+        /// checked at).
+        #[must_use]
+        pub fn pinned(mut self, addrs: Vec<SocketAddr>) -> Self {
+            let host = self.bare_host();
+            self.http = http(Some(TIMEOUT), Some((&host, &addrs)));
+            self.pinned = Some(addrs);
+            self
         }
 
         fn client(&self) -> ShareGuestHttpClient {
@@ -312,10 +410,8 @@ mod net {
         /// URL; None when it is not one of the link's, not an image, too
         /// big, or not there.
         pub async fn image(&self, src: String) -> Option<String> {
-            if !src.starts_with(&self.url.mount()) || src.split('/').any(|s| s == "..") {
-                return None;
-            }
-            let (http, url) = (self.http.clone(), format!("{}{src}", self.url.origin()));
+            let url = super::image_url(&self.url, &src)?;
+            let http = self.http.clone();
             on_runtime(async move {
                 let mut res = http.get(url).send().await.ok()?;
                 if !res.status().is_success() {
@@ -346,30 +442,44 @@ mod net {
             .flatten()
         }
 
-        /// Whether the link's host resolves to this machine or a private
-        /// network (a public-looking name can hide one).
-        pub async fn resolves_local(&self) -> bool {
-            let host = self
+        /// What the link's host resolves to: this machine or a private
+        /// network (a public-looking name can hide one), or the public
+        /// addresses to pin the session to ([`Self::pinned`]).
+        pub async fn resolve(&self) -> Resolved {
+            let host = self.bare_host();
+            let port = self
                 .url
-                .host()
-                .trim_start_matches('[')
-                .trim_end_matches(']')
-                .to_owned();
+                .host_label()
+                .rsplit_once(':')
+                .and_then(|(_, p)| p.parse().ok())
+                .filter(|_| !self.url.host_label().ends_with(']'))
+                .unwrap_or(443);
             on_runtime(async move {
-                tokio::net::lookup_host((host.as_str(), 443))
-                    .await
-                    .is_ok_and(|mut found| {
-                        found.any(|a| architect_spaces::guest::is_private_address(a.ip()))
-                    })
+                let Ok(found) = tokio::net::lookup_host((host.as_str(), port)).await else {
+                    return Resolved::Unknown;
+                };
+                let found: Vec<SocketAddr> = found.collect();
+                if found.is_empty() {
+                    Resolved::Unknown
+                } else if found
+                    .iter()
+                    .any(|a| architect_spaces::guest::is_private_address(a.ip()))
+                {
+                    Resolved::Local
+                } else {
+                    Resolved::Public(found)
+                }
             })
             .await
-            .unwrap_or(false)
+            .unwrap_or(Resolved::Unknown)
         }
 
         /// Wait for news of the link: an event on its `_live` stream (a
         /// rebuild, a revoke), or [`EVERY`] with none.
         pub async fn changed(&self) {
-            let (http, url) = (http(None), format!("{}_live", self.url.link()));
+            let host = self.bare_host();
+            let pinned = self.pinned.as_deref().map(|a| (host.as_str(), a));
+            let (http, url) = (http(None, pinned), format!("{}_live", self.url.link()));
             let _ = on_runtime(async move {
                 let wait = async {
                     let res = http.get(url).send().await;
@@ -415,6 +525,14 @@ mod net {
     #[derive(Clone)]
     pub struct Session;
 
+    pub enum Resolved {
+        Local,
+        #[allow(dead_code)]
+        Public(Vec<std::net::SocketAddr>),
+        #[allow(dead_code)]
+        Unknown,
+    }
+
     impl Session {
         pub const fn new(_url: ShareUrl, _token: String) -> Self {
             Self
@@ -428,8 +546,12 @@ mod net {
         pub async fn image(&self, _src: String) -> Option<String> {
             None
         }
-        pub async fn resolves_local(&self) -> bool {
-            true
+        #[must_use]
+        pub fn pinned(self, _addrs: Vec<std::net::SocketAddr>) -> Self {
+            self
+        }
+        pub async fn resolve(&self) -> Resolved {
+            Resolved::Local
         }
         pub async fn changed(&self) {
             std::future::pending::<()>().await;
@@ -437,16 +559,46 @@ mod net {
     }
 }
 
-use net::Session;
+use net::{Resolved, Session};
+
+/// Where to fetch an image of the link (`src`, as its note gave it).
+///
+/// `src` parsed against the link's origin and normalised as a browser
+/// would before fetching it. `None` unless it is on that origin, below the
+/// link (`/s/<code>/…`), names a file there, and carries no query,
+/// fragment, credentials, empty segment, or encoded dot, slash, backslash
+/// or NUL a server could decode into another path (as #673's
+/// `guest_file_url` in `apps/web/src/view_files.rs`).
+#[must_use]
+pub fn image_url(link: &ShareUrl, src: &str) -> Option<String> {
+    let base = url::Url::parse(&link.origin()).ok()?;
+    let parsed = base.join(src).ok()?;
+    let path = parsed.path();
+    let rest = path.strip_prefix(&link.mount())?;
+    let lower = path.to_ascii_lowercase();
+    let plain = parsed.origin() == base.origin()
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+        && !rest.is_empty()
+        && !rest.ends_with('/')
+        && !rest.split('/').any(str::is_empty)
+        && !["%2e", "%2f", "%5c", "%00"]
+            .iter()
+            .any(|e| lower.contains(e));
+    plain.then(|| parsed.to_string())
+}
 
 // ── The window's state ───────────────────────────────────────────────
 
 /// Where an open link is.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Phase {
-    /// The OS handed over a link to this machine or a private network:
-    /// the person says whether to open it.
-    Asking,
+    /// The OS or an agent handed over a link to this machine, a private
+    /// network or a node the app does not know: the person says whether
+    /// to open it.
+    Asking(Ask),
     Loading,
     Open(GuestLink),
     Failed(Why),
@@ -480,6 +632,8 @@ pub struct Opened {
 
 /// The session to send to a node's origin: empty unless it is trusted.
 type Trust = Arc<dyn Fn(&str) -> String>;
+/// The nodes the account uses for its orgs ([`trusts`], [`known_host`]).
+type Known = Arc<dyn Fn() -> Vec<String>>;
 
 /// The Shared tab's state and what opens a link in it. Cheap to copy.
 #[derive(Clone, Copy)]
@@ -490,6 +644,10 @@ pub struct Guest {
     /// Which opening is current: a newer one ends the older one's work.
     generation: Signal<u64>,
     trust: Signal<Trust>,
+    known: Signal<Known>,
+    /// The open link's session as its first read made it (pinned to the
+    /// addresses it was checked at): a note shown later goes the same way.
+    current: Signal<Option<Session>>,
     lab: Lab,
 }
 
@@ -522,6 +680,7 @@ impl Guest {
     /// Open `raw` (from `from`) in the Shared tab.
     pub fn open(mut self, raw: &str, from: Source) {
         self.images.write().clear();
+        self.current.set(None);
         match ShareUrl::parse(raw) {
             Err(why) => {
                 self.bump();
@@ -531,15 +690,20 @@ impl Guest {
                     note: None,
                 }));
             }
-            Ok(url) if asks_first(&url, from) => {
-                self.bump();
-                self.open.set(Some(Opened {
-                    url: Some(url),
-                    phase: Phase::Asking,
-                    note: None,
-                }));
-            }
-            Ok(url) => self.start(url, from == Source::Person),
+            Ok(url) => match {
+                let known = (self.known.peek())();
+                asks_first(&url, from, &known)
+            } {
+                Ask::No => self.start(url, from == Source::Person),
+                ask => {
+                    self.bump();
+                    self.open.set(Some(Opened {
+                        url: Some(url),
+                        phase: Phase::Asking(ask),
+                        note: None,
+                    }));
+                }
+            },
         }
         self.lab.jump(Route::Tab(TAB));
     }
@@ -547,8 +711,15 @@ impl Guest {
     /// The person said yes to a link that asked first; or read the open
     /// link again.
     pub fn retry(self) {
-        if let Some(Opened { url: Some(url), .. }) = self.opened() {
-            self.start(url, true);
+        if let Some(Opened {
+            url: Some(url),
+            phase,
+            ..
+        }) = self.opened()
+        {
+            // A yes to an unknown node is not a yes to a private network:
+            // the address it resolves to is still asked about.
+            self.start(url, phase != Phase::Asking(Ask::Unknown));
         }
     }
 
@@ -556,6 +727,7 @@ impl Guest {
     pub fn close(mut self) {
         self.bump();
         self.open.set(None);
+        self.current.set(None);
         self.images.write().clear();
         self.lab.jump(Route::Tab("vault"));
     }
@@ -569,6 +741,7 @@ impl Guest {
     /// current until the link closes, goes or another opens.
     fn start(mut self, url: ShareUrl, confirmed: bool) {
         self.bump();
+        self.current.set(None);
         let at = *self.generation.peek();
         let session = self.session(url.clone());
         self.open.set(Some(Opened {
@@ -580,22 +753,39 @@ impl Guest {
         let generation = self.generation;
         let current = move || *generation.peek() == at;
         dioxus::core::spawn_forever(async move {
-            // A name that resolves to a private network asks first too.
-            if !confirmed && session.resolves_local().await {
-                if current() {
-                    if let Some(o) = open.write().as_mut() {
-                        o.phase = Phase::Asking;
+            // A name that resolves to a private network asks first too;
+            // one that resolves to public addresses is read from those
+            // alone, so a second answer from the DNS can't move it.
+            let mut session = session;
+            if !confirmed {
+                match session.resolve().await {
+                    Resolved::Local => {
+                        if current() {
+                            if let Some(o) = open.write().as_mut() {
+                                o.phase = Phase::Asking(Ask::Local);
+                            }
+                        }
+                        return;
                     }
+                    Resolved::Public(addrs) => session = session.pinned(addrs),
+                    Resolved::Unknown => {}
                 }
+            }
+            if !current() {
                 return;
             }
+            let mut kept = self.current;
+            kept.set(Some(session.clone()));
             let mut first = true;
             loop {
                 let link = session.link().await;
                 if !current() {
                     return;
                 }
+                // Revoked, expired, or no longer this account's to read:
+                // nothing of it is kept.
                 let gone = matches!(link, Err(Why::Gone));
+                let shut = gone || matches!(link, Err(Why::SignIn | Why::Denied));
                 let first_note = link
                     .as_ref()
                     .ok()
@@ -606,13 +796,14 @@ impl Guest {
                         Ok(link) => Phase::Open(link),
                         Err(why) => Phase::Failed(why),
                     };
-                    if gone {
-                        // Revoked or expired: nothing of it is kept.
+                    if shut {
                         o.note = None;
                     }
                 }
-                if gone {
+                if shut {
                     self.images.write().clear();
+                }
+                if gone {
                     return;
                 }
                 // The note on show, read again (the first one, at first).
@@ -656,6 +847,14 @@ impl Guest {
                 Err(why) => NoteView::Failed(path, why),
             });
         }
+        if matches!(
+            self.open.peek().as_ref().and_then(|o| o.note.as_ref()),
+            Some(NoteView::Failed(_, Why::SignIn | Why::Denied | Why::Gone))
+        ) {
+            // The note's words went with the failure; its images go too.
+            self.images.write().clear();
+            return;
+        }
         for src in images {
             if self.images.peek().contains_key(&src) {
                 continue;
@@ -677,7 +876,11 @@ impl Guest {
             o.note = Some(NoteView::Loading(path.clone()));
         }
         let at = *self.generation.peek();
-        let session = self.session(url);
+        let session = self
+            .current
+            .peek()
+            .clone()
+            .unwrap_or_else(|| self.session(url));
         dioxus::core::spawn_forever(async move {
             self.load_note(&session, path, at).await;
         });
@@ -685,28 +888,34 @@ impl Guest {
 }
 
 /// The Shared tab's state, `SHARE_OPEN` on `list`, and the window taking
-/// the links handed to it ([`incoming`]). `trust` answers the session to
-/// send to a node's origin (empty: none).
+/// the links handed to it ([`incoming`]). `known` answers the nodes the
+/// account uses for its orgs; `trust` the session to send to a node's
+/// origin (empty: none).
 pub fn use_guest(
     list: &Arc<ActionList>,
     lab: Lab,
+    known: impl Fn() -> Vec<String> + 'static,
     trust: impl Fn(&str) -> String + 'static,
 ) -> Guest {
     let open = use_signal(|| None);
     let images = use_signal(HashMap::new);
     let generation = use_signal(|| 0_u64);
     let trust = use_signal(move || -> Trust { Arc::new(trust) });
+    let known = use_signal(move || -> Known { Arc::new(known) });
+    let current = use_signal(|| None);
     let guest = Guest {
         open,
         images,
         generation,
         trust,
+        known,
+        current,
         lab,
     };
     use_hook(|| {
-        let _ = list.register(&SHARE_OPEN, Effect::ReadOnly, |args: OpenArgs| {
+        let _ = list.register_with(&SHARE_OPEN, Effect::ReadOnly, |caller, args: OpenArgs| {
             let url = ShareUrl::parse(&args.url).map_err(|why| why.to_string())?;
-            incoming(args.url.trim(), Source::Person);
+            incoming(args.url.trim(), source_of(caller));
             Ok(OpenOut {
                 host: url.host_label(),
             })
@@ -734,10 +943,32 @@ pub fn use_guest(
     guest
 }
 
-/// The Shared tab in the shell's tabs.
+/// Who ran `SHARE_OPEN`: the person only from the app's own doors (⌘K,
+/// the menu, a key, a toolbar) with no principal; anything else (an
+/// agent, a script, a hook, a peer) is asked about as the OS's links are.
+fn source_of(caller: &architect::action::ActionCaller) -> Source {
+    use architect::action::InvocationSource as From;
+    let by_person = caller.principal().is_none()
+        && caller.invocation().is_none_or(|i| {
+            matches!(
+                i.source,
+                From::Palette | From::Menu | From::Key | From::ContextMenu | From::Toolbar
+            )
+        });
+    if by_person {
+        Source::Person
+    } else {
+        Source::Agent
+    }
+}
+
+/// The Shared tab in the shell's tabs. On a phone it is kept on the bar
+/// and takes the fourth place (`architect_shell::phone_tabs`): the
+/// person's last favourite, still in ⌘K and the sidebar, gives way while
+/// the link is open, so the link is one tap away after leaving it.
 #[must_use]
 pub fn tab() -> architect_shell::Tab {
-    architect_shell::Tab::new(TAB, "Shared", icon!(Link2))
+    architect_shell::Tab::new(TAB, "Shared", icon!(Link2)).kept()
 }
 
 // ── The Shared tab ───────────────────────────────────────────────────
@@ -754,7 +985,28 @@ fn open_in_browser(url: &str) {
         };
         let _ = std::process::Command::new(opener).arg(url).spawn();
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(target_os = "ios")]
+    {
+        use objc2_foundation::{NSDictionary, NSString, NSURL};
+        // Buttons run on the main thread; elsewhere there is no app to ask.
+        let Some(mtm) = objc2::MainThreadMarker::new() else {
+            return;
+        };
+        let Some(url) = NSURL::URLWithString(&NSString::from_str(url)) else {
+            return;
+        };
+        let app = objc2_ui_kit::UIApplication::sharedApplication(mtm);
+        let options = NSDictionary::new();
+        // SAFETY: the options are an empty dictionary of the declared key
+        // and value types; no completion handler is passed.
+        unsafe { app.openURL_options_completionHandler(&url, &options, None) };
+    }
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "ios"
+    )))]
     {
         let _ = url;
     }
@@ -789,7 +1041,16 @@ fn button_style(t: &architect_shell::ShellTheme) -> String {
 /// The Shared tab: the open link, never one of the person's vaults.
 #[component]
 pub fn GuestPage(guest: Guest) -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let t = shell.theme.clone();
+    // On a touch screen the header sits below the status bar and the
+    // notch, as a page's bar does (`architect_shell::PageBar`).
+    let ins = shell.screen.insets;
+    let (pad_top, pad_left, pad_right) = if shell.desk() {
+        (14.0, 16.0, 16.0)
+    } else {
+        (14.0 + ins.top, 16.0 + ins.left, 16.0 + ins.right)
+    };
     let Some(opened) = guest.opened() else {
         return rsx! {
             div { style: "padding: 32px; color: {t.ink_3}; font-size: 14px;",
@@ -806,6 +1067,10 @@ pub fn GuestPage(guest: Guest) -> Element {
         Some(NoteView::Ready(n)) => page_url(u, &n.page),
         _ => u.page_url(u.rest()),
     });
+    // A link that doesn't work has no page to open either.
+    let header_browser = browser
+        .clone()
+        .filter(|_| !matches!(opened.phase, Phase::Failed(Why::Gone | Why::Refused(_))));
     let (title, whom) = match &opened.phase {
         Phase::Open(link) if !link.title.is_empty() => {
             (link.title.clone(), for_whom(&link.audience))
@@ -823,7 +1088,7 @@ pub fn GuestPage(guest: Guest) -> Element {
         div { class: "guest-page",
             style: "display: flex; flex-direction: column; height: 100%; min-height: 0; background: {t.sheet}; color: {t.ink};",
             div { class: "guest-head",
-                style: "display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid {t.rule};",
+                style: "display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: {pad_top}px {pad_right}px 14px {pad_left}px; border-bottom: 1px solid {t.rule};",
                 div { style: "display: flex; flex-direction: column; gap: 2px; flex: 1 1 200px; min-width: 0;",
                     div { style: "display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 700;",
                         Link2 { size: 16, color: t.ink_3.to_string() }
@@ -831,7 +1096,7 @@ pub fn GuestPage(guest: Guest) -> Element {
                     }
                     div { class: "guest-from", style: "font-size: 12px; color: {t.ink_3};", "{from}" }
                 }
-                if let Some(url) = browser.clone() {
+                if let Some(url) = header_browser {
                     button { style: "{button}", onclick: move |_| open_in_browser(&url),
                         ExternalLink { size: 14, color: t.ink_2.to_string() }
                         "Open in browser"
@@ -844,10 +1109,14 @@ pub fn GuestPage(guest: Guest) -> Element {
                 }
             }
             match opened.phase.clone() {
-                Phase::Asking => rsx! {
+                Phase::Asking(ask) => rsx! {
                     Notice {
-                        title: "Open a link to your own network?",
-                        line: format!("This link points at this computer or one on your own network: {host}. Open it only if you expected it."),
+                        title: if ask == Ask::Unknown { format!("Open a shared link from {host}?") } else { "Open a link to your own network?".to_owned() },
+                        line: if ask == Ask::Unknown {
+                            format!("{host} is not a node you use. Nothing is read from it until you open the link. Open it only if you expected it.")
+                        } else {
+                            format!("This link points at this computer or one on your own network: {host}. Open it only if you expected it.")
+                        },
                         div { style: "display: flex; gap: 8px;",
                             button { style: "{button}", onclick: move |_| guest.retry(), "Open it" }
                             button { style: "{button}", onclick: move |_| guest.close(), "Cancel" }
@@ -1011,11 +1280,15 @@ fn GuestNoteView(guest: Guest, note: GuestNote, url: Option<ShareUrl>) -> Elemen
             }
             match drawn {
                 Some((claim, source)) => rsx! {
+                    // A guest's content: drawn only by the extension's
+                    // page, on a host with no action, no host-service call
+                    // and no vault of the person's (`guest`).
                     architect_extensions::embeds::EmbedView {
                         claim,
                         source,
                         props: serde_json::json!({ "guest": true }),
                         fallback: plain,
+                        guest: true,
                     }
                 },
                 None => plain,
@@ -1120,11 +1393,69 @@ mod tests {
     fn the_os_asks_first_for_a_private_network_the_person_does_not() {
         let local = ShareUrl::parse(&format!("http://127.0.0.1:7422/s/{CODE}/")).unwrap();
         let lan = ShareUrl::parse(&format!("https://192.168.1.4/s/{CODE}/")).unwrap();
-        let public = ShareUrl::parse(&format!("https://n.example/s/{CODE}/")).unwrap();
-        assert!(asks_first(&local, Source::Os));
-        assert!(asks_first(&lan, Source::Os));
-        assert!(!asks_first(&public, Source::Os));
-        assert!(!asks_first(&local, Source::Person));
+        let known = ["http://127.0.0.1:7422".to_owned()];
+        assert_eq!(asks_first(&local, Source::Os, &[]), Ask::Local);
+        assert_eq!(asks_first(&lan, Source::Os, &[]), Ask::Local);
+        // A private node the account uses still asks: the prompt stays.
+        assert_eq!(asks_first(&local, Source::Os, &known), Ask::Local);
+        assert_eq!(asks_first(&local, Source::Agent, &[]), Ask::Local);
+        assert_eq!(asks_first(&local, Source::Person, &[]), Ask::No);
+    }
+
+    #[test]
+    fn an_unknown_node_asks_first_a_known_one_opens() {
+        let url = |host: &str| ShareUrl::parse(&format!("https://{host}/s/{CODE}/")).unwrap();
+        let known = vec![
+            "https://node.example".to_owned(),
+            "https://Other.Example:8443/".to_owned(),
+        ];
+        for from in [Source::Os, Source::Agent] {
+            assert_eq!(asks_first(&url(HOME_HOST), from, &[]), Ask::No);
+            assert_eq!(
+                asks_first(&url("ARCHITECT.fasttrackstudio.app"), from, &[]),
+                Ask::No
+            );
+            assert_eq!(asks_first(&url("node.example"), from, &known), Ask::No);
+            assert_eq!(asks_first(&url("other.example"), from, &known), Ask::No);
+            assert_eq!(asks_first(&url("evil.example"), from, &known), Ask::Unknown);
+            assert_eq!(
+                asks_first(&url("node.example.evil.example"), from, &known),
+                Ask::Unknown
+            );
+            assert_eq!(
+                asks_first(&url("fasttrackstudio.app"), from, &known),
+                Ask::Unknown
+            );
+            assert_eq!(asks_first(&url("node.example"), from, &[]), Ask::Unknown);
+        }
+        // The app scheme names the same node as the link inside it.
+        let app = ShareUrl::parse(&architect_spaces::guest::app_link(&format!(
+            "https://evil.example/s/{CODE}/"
+        )))
+        .unwrap();
+        assert_eq!(asks_first(&app, Source::Os, &known), Ask::Unknown);
+        // The person's own link opens, as in a browser's address bar.
+        assert_eq!(
+            asks_first(&url("evil.example"), Source::Person, &known),
+            Ask::No
+        );
+    }
+
+    #[test]
+    fn an_agents_share_open_is_asked_about_the_palettes_is_not() {
+        use architect::action::{ActionCaller, Invocation, InvocationSource};
+        let palette =
+            ActionCaller::app().with_invocation(Invocation::new(InvocationSource::Palette));
+        let agent = ActionCaller::app().with_invocation(Invocation::new(InvocationSource::Agent));
+        let script = ActionCaller::app().with_invocation(Invocation::new(InvocationSource::Script));
+        let peer = ActionCaller::new(architect::action::Principal::Service {
+            name: "model".to_owned(),
+        });
+        assert_eq!(source_of(&palette), Source::Person);
+        assert_eq!(source_of(&ActionCaller::app()), Source::Person);
+        assert_eq!(source_of(&agent), Source::Agent);
+        assert_eq!(source_of(&script), Source::Agent);
+        assert_eq!(source_of(&peer), Source::Agent);
     }
 
     #[test]
@@ -1138,6 +1469,37 @@ mod tests {
         assert!(!trusts(&hosts, "https://evil.example"));
         assert!(!trusts(&hosts, "https://node.example.evil.example"));
         assert!(!trusts(&[], "https://node.example"));
+    }
+
+    #[test]
+    fn an_image_is_fetched_only_from_below_its_link() {
+        let link = ShareUrl::parse(&format!("https://n.example/s/{CODE}/")).unwrap();
+        let ok = |src: &str| image_url(&link, src);
+        assert_eq!(
+            ok(&format!("/s/{CODE}/Art/joy.png")).as_deref(),
+            Some(format!("https://n.example/s/{CODE}/Art/joy.png").as_str())
+        );
+        for bad in [
+            format!("/s/{CODE}/%2e%2e/x.png"),
+            format!("/s/{CODE}/%2E%2E/x.png"),
+            format!("/s/{CODE}/../x.png"),
+            format!("/s/{CODE}/a/../../x.png"),
+            format!("/s/{CODE}/a%2f..%2fx.png"),
+            format!("/s/{CODE}/a%5cx.png"),
+            format!("/s/{CODE}//x.png"),
+            format!("/s/{CODE}/x.png?y=1"),
+            format!("/s/{CODE}/x.png#y"),
+            format!("/s/{CODE}/"),
+            format!("/s/{CODE}"),
+            format!("https://evil.example/s/{CODE}/x.png"),
+            format!("//evil.example/s/{CODE}/x.png"),
+            format!("https://u:p@n.example/s/{CODE}/x.png"),
+            format!("http://n.example/s/{CODE}/x.png"),
+            "/s/othercodeothercode/x.png".to_owned(),
+            "/x.png".to_owned(),
+        ] {
+            assert_eq!(ok(&bad), None, "{bad}");
+        }
     }
 
     #[test]

@@ -34,6 +34,7 @@ api = "0.1"
 [capabilities]
 reads = ["documents"]
 writes = ["documents"]
+actions = ["LAB_VAULT"]
 "#;
 
 const TSX: &str = r#"import { h, useState, useEffect, documents } from "architect";
@@ -215,6 +216,89 @@ fn made_as_the_extension(docs: &Memo) {
         [("Page edit".to_owned(), format!("extension:{ID}"))],
         "one step, as the extension"
     );
+}
+
+/// A page that reads the person's documents, through its extension's
+/// host calls and through an action, and says what it got.
+const READER: &str = r#"
+local ok, got = pcall(function() return documents.read("private/diary.md") end)
+local listed, all = pcall(function() return documents.list() end)
+local ran, out = pcall(function() return actions.run("LAB_VAULT_READ") end)
+local said = (ok and got or "no read") .. "|" .. (listed and tostring(#all) or "no list") .. "|" .. (ran and tostring(out) or "no run")
+render(function()
+  return span():attr("id", "out"):child(said)
+end)
+"#;
+
+/// What `READER` says opened as its extension's embed, or as a guest's.
+fn read_as(ext: &Extensions, pages: &Pages, guest: bool) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("reader.luau");
+    std::fs::write(&path, READER).unwrap();
+    let manifest = ext.host().get(ID).unwrap().manifest;
+    let page = PageFile::new(&path, Origin::Override).unwrap();
+    let input = architect_extensions::contrib::EmbedInput {
+        claim: "note:setlist".to_owned(),
+        source: "a shared note".to_owned(),
+        props: serde_json::json!({ "guest": true }),
+    };
+    let mut session = if guest {
+        pages.open_guest_embed(&page, ID, "page", input).unwrap()
+    } else {
+        pages
+            .open_embed(&page, ID, "page", Some(gate(&manifest)), input)
+            .unwrap()
+    };
+    let (to, _from) = futures::channel::mpsc::unbounded::<ViewEvent>();
+    let mut view = RemoteDocument::new(to);
+    let started = Instant::now();
+    loop {
+        if let Some(out) = text_of(&view, "#out").filter(|t| !t.is_empty()) {
+            return out;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "no answer; log: {:?}",
+            session.status().log.lines()
+        );
+        apply(&mut session, &mut view);
+    }
+}
+
+#[test]
+fn an_extension_drawing_a_guests_content_cannot_read_the_persons_vault() {
+    static VAULT_READ: architect::action::ActionMeta = architect::action::ActionMeta {
+        id: "LAB_VAULT_READ",
+        trait_name: "",
+        method_name: "",
+        display_name: "Read the vault",
+        description: "The person's vault, as text.",
+        category: "Lab",
+        group: "Lab",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    };
+    let docs = Memo::default();
+    docs.texts
+        .lock()
+        .unwrap()
+        .insert("private/diary.md".to_owned(), "the person's own".to_owned());
+    let (ext, pages, _tmp) = extensions(&docs);
+    // The person's vault behind an action the extension's namespace holds.
+    let vault = docs;
+    let list = ext.host().list();
+    list.register(
+        &VAULT_READ,
+        architect::action::Effect::ReadOnly,
+        move |(): ()| vault.read("private/diary.md").map_err(|e| e.to_string()),
+    )
+    .unwrap();
+    // As its own embed it reads what its capabilities grant.
+    let own = read_as(&ext, &pages, false);
+    assert_eq!(own, "the person's own|1|the person's own");
+    // Drawing a guest's content, it reaches none of it.
+    assert_eq!(read_as(&ext, &pages, true), "no read|no list|no run");
 }
 
 #[test]

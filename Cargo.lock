@@ -876,6 +876,9 @@ dependencies = [
  "links",
  "loro",
  "lucide-dioxus",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-ui-kit",
  "reqwest 0.12.28",
  "rfd",
  "serde_json",
@@ -884,6 +887,7 @@ dependencies = [
  "tokio",
  "toml 0.8.2",
  "tracing",
+ "url",
  "vault",
  "vault-doc",
 ]

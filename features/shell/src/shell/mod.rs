@@ -86,7 +86,8 @@ macro_rules! icon {
     };
 }
 
-/// One of the app's sections. The first four are the bottom bar.
+/// One of the app's sections. The first four are a phone's bottom bar
+/// (a [`Tab::kept`] one always: [`phone_tabs`]).
 #[derive(Clone, PartialEq, Eq)]
 pub struct Tab {
     pub id: &'static str,
@@ -97,6 +98,9 @@ pub struct Tab {
     pub glyph: Option<&'static str>,
     /// Something waiting there ("3"); `None` for nothing.
     pub badge: Option<String>,
+    /// Kept on a phone's bar even past its first four: it takes the
+    /// fourth place (an open share link's Shared tab, #629).
+    pub kept: bool,
 }
 
 impl Tab {
@@ -108,6 +112,7 @@ impl Tab {
             icon,
             glyph: None,
             badge: None,
+            kept: false,
         }
     }
 
@@ -135,6 +140,27 @@ impl Tab {
         self.badge = Some(badge.to_string());
         self
     }
+
+    /// Keep the tab on a phone's bar wherever it sits in the list: it
+    /// takes the place of the last of the first four.
+    #[must_use]
+    pub const fn kept(mut self) -> Self {
+        self.kept = true;
+        self
+    }
+}
+
+/// The tabs a phone's bar shows: at most four, the kept ones always (in
+/// the last places), the rest in order before them.
+#[must_use]
+pub fn phone_tabs(tabs: Vec<Tab>) -> Vec<Tab> {
+    const PLACES: usize = 4;
+    let kept = tabs.iter().filter(|t| t.kept).count().min(PLACES);
+    let (kept_tabs, rest): (Vec<Tab>, Vec<Tab>) = tabs.into_iter().partition(|t| t.kept);
+    rest.into_iter()
+        .take(PLACES.saturating_sub(kept))
+        .chain(kept_tabs.into_iter().take(kept))
+        .collect()
 }
 
 /// A button: the separate one at the bottom, or a page's main action.
@@ -2333,6 +2359,19 @@ fn ResizeEdge(side: Side, on_start: EventHandler<PointerEvent>) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kept_tab_takes_the_fourth_place_on_a_phone() {
+        let tab = |id| Tab::named(id, id, "link");
+        let ids = |tabs: Vec<Tab>| tabs.iter().map(|t| t.id).collect::<Vec<_>>();
+        let five = || ["a", "b", "c", "d", "e"].map(tab).to_vec();
+        assert_eq!(ids(phone_tabs(five())), ["a", "b", "c", "d"]);
+        let mut with_kept = five();
+        with_kept.push(tab("shared").kept());
+        assert_eq!(ids(phone_tabs(with_kept)), ["a", "b", "c", "shared"]);
+        let short = vec![tab("a"), tab("shared").kept()];
+        assert_eq!(ids(phone_tabs(short)), ["a", "shared"]);
+    }
 
     #[test]
     fn the_default_theme_is_the_default_shell_theme() {
