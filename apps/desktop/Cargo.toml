@@ -113,6 +113,9 @@ architect-accounts = { workspace = true, features = ["actions"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# tests/islands.rs: each listed file checked against its digest.
+sha2 = { workspace = true }
+base64 = { workspace = true }
 # The A2UI surface the parity test renders (tests/actions.rs).
 architect-a2ui = { workspace = true }
 architect-mcp = { workspace = true, features = ["parity"] }

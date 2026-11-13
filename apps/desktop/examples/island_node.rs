@@ -3,7 +3,12 @@
 //! starts one (its config from `ARCHITECT_*`), and with the built web
 //! folder at `ARCHITECT_ISLAND_FOLDER` as an island, its view
 //! `ARCHITECT_ISLAND_VIEW` in both slots of the now-playing view, its
-//! stylesheet `ARCHITECT_ISLAND_SHEET` when set, WebRTC granted when
+//! stylesheet `ARCHITECT_ISLAND_SHEET` when set, its id
+//! `ARCHITECT_ISLAND_ID` (`lab.wasi-counter` when unset), the transport
+//! slot's view `ARCHITECT_ISLAND_TRANSPORT` and a lyrics view
+//! `ARCHITECT_ISLAND_LYRICS` when set (Studio's island as Studio declares
+//! it: `progress`, `transport`, `lyrics`, for the web app's frame host on
+//! the local stack, #495), WebRTC granted when
 //! `ARCHITECT_ISLAND_WEBRTC=1` (and declared); with no
 //! `ARCHITECT_ISLAND_FOLDER`, no island. `ARCHITECT_FAVOURITES` names a
 //! TOML file of `[[favourites]]` (a distribution's compiled-in extensions'
@@ -43,9 +48,14 @@ fn island(folder: &str) -> SiteIsland {
     let view = std::env::var("ARCHITECT_ISLAND_VIEW").unwrap_or_else(|_| "counter".to_owned());
     let mut list = Vec::new();
     files(Path::new(folder), Path::new(folder), &mut list);
-    let mut island = SiteIsland::new("lab.wasi-counter", list)
-        .progress(view.clone())
-        .transport(view);
+    let id = std::env::var("ARCHITECT_ISLAND_ID").unwrap_or_else(|_| "lab.wasi-counter".to_owned());
+    let transport = std::env::var("ARCHITECT_ISLAND_TRANSPORT").unwrap_or_else(|_| view.clone());
+    let mut island = SiteIsland::new(id, list)
+        .progress(view)
+        .transport(transport);
+    if let Ok(lyrics) = std::env::var("ARCHITECT_ISLAND_LYRICS") {
+        island = island.lyrics(lyrics);
+    }
     if let Ok(sheet) = std::env::var("ARCHITECT_ISLAND_SHEET") {
         island = island.stylesheet(sheet);
     }

@@ -1459,12 +1459,43 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
     }
 }
 
+/// Where the web app (`/app/`, #495) reads the node's islands: what a
+/// share page carries embedded (`architect_sites::island::page_json`),
+/// the same for everyone who asks.
+pub const ISLANDS_LISTING: &str = "/_ext/islands.json";
+
+/// [`ISLANDS_LISTING`]: the islands, their folders, views and each web
+/// file's digest, as JSON. Never cached (`no-cache`): the paths it names
+/// are content-addressed and change with a new island, the listing keeps
+/// its name. The app pins each file it fetches by the digest it reads
+/// here; nothing in it is a secret.
+fn islands_listing(shares: &Shares) -> Response {
+    let body = architect_sites::island::page_json(shares.islands()).to_string();
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    // Data, never a page: the share's policy, should one be opened.
+    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+    response
+}
+
 /// What the node answers under `/_ext/`: an island's file, the runtime or
 /// the sandbox document (`architect_sites::island::serve`), `404` for
 /// anything else. Every answer is `nosniff` and cached for good (each
 /// path is named by its content); the sandbox document carries its own
 /// policy (`sandbox_headers`), and a `.js` or `.wasm` the share's.
 fn islands(shares: &Shares, path: &str) -> Response {
+    if path == ISLANDS_LISTING {
+        return islands_listing(shares);
+    }
     let Some((body, kind)) = architect_sites::island::serve(shares.islands(), path) else {
         let mut response = page(StatusCode::NOT_FOUND, "Not found", "<p>No such file.</p>");
         let headers = response.headers_mut();

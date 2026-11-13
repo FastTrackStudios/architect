@@ -486,9 +486,33 @@ fn WebNote(path: String) -> Element {
         }
     };
     let editing = architect_shell::use_editing_actions("editor:note", &[]);
+    // A song (`tags: [song]`): its extension views beside it (#495).
+    let prop = |name: &str| {
+        properties
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| shown(v))
+    };
+    let song = properties.iter().any(|(k, v)| {
+        k == "tags" && matches!(v, PropertyValue::List(l) if l.iter().any(|t| t == "song"))
+    });
+    let song_title = prop("title").unwrap_or_else(|| title_of(&path));
+    let song_artist = prop("artist").unwrap_or_default();
+    let song_duration = prop("duration");
     rsx! {
         document::Style { {LAYOUT} }
-        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink};",
+        document::Style { {super::song::LAYOUT} }
+        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink}; \
+                      container-type: inline-size; container-name: note;",
+          div { class: "web-note-row",
+            if song {
+                super::song::SongViews {
+                    title: song_title,
+                    artist: song_artist,
+                    body: body.clone(),
+                    duration: song_duration,
+                }
+            }
             div { class: "web-note", "data-note": "{path}",
                 if !properties.is_empty() {
                     dl { "data-testid": "note-properties",
@@ -509,6 +533,7 @@ fn WebNote(path: String) -> Element {
                     onfocusout: move |_| editing.blur(),
                 }
             }
+          }
         }
     }
 }

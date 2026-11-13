@@ -10,22 +10,28 @@
 //!   (the editor's web view needs `eval`, which the page refuses: `page`);
 //! - ⌘K and ⌘O: the commands (`architect_commands`) drawn by the Command
 //!   Palette's views (`architect_command_palette::views`, without its
-//!   extension: a browser has no extension host yet, #495);
+//!   extension: the browser runs no linked extension, #495);
+//! - a song note's extension views (`song`): the node's island (Studio's
+//!   progress bar, transport and lyrics) in sandboxed frames of their own
+//!   (`frames`, route A of #495), driven by the app's playhead;
 //! - settings (`architect_settings::SettingsPage`): Appearance and the
 //!   navigator's sections, kept in this browser (`localStorage`);
 //! - the theme store (`architect_theme`), the system's light or dark.
 //!
 //! What a browser has no way to do yet is left out, not shown dead: pop-out
-//! windows, a folder on this device, the files agent, extensions (linked
-//! ones need the Luau host, #495), capture's system-wide key, the menu bar.
+//! windows, a folder on this device, the files agent, linked extensions
+//! (they need the Luau host, #495) and host calls from a frame into a vault
+//! (#495's next step), capture's system-wide key, the menu bar.
 
 // Nothing is `Send` in a browser.
 #![allow(clippy::future_not_send)]
 
+mod frames;
 mod keys;
 mod page;
 mod screen;
 mod settings;
+mod song;
 mod theme;
 pub mod vault;
 

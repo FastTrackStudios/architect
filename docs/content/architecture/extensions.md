@@ -1863,6 +1863,27 @@ after its frame fails (the rules above), the page's own list (or its "No
 lyrics") is there. Studio's is Session's lyrics panel, fixed to its
 Confidence Monitor.
 
+**In the web app (#495, route A): the same frames beside a note.** The
+node lists its islands at `/_ext/islands.json` (`page_json`, never
+cached; `apps/desktop/src/node/shares.rs` `ISLANDS_LISTING`), and the web
+app (`/app/`) runs their views in frames of the same web view document,
+with nothing of the share page's script: the host is Rust,
+`apps/web/src/ext_host.rs` (the decisions: which listed bundle to
+believe, each file against its digest, the asks, the heartbeat, the
+theme) and `apps/web/src/app/frames.rs` `ExtensionFrame` (the frame, its
+port, its timers). A song note (`tags: [song]`) shows its island's
+progress, transport and lyrics views beside it, driven by the app's own
+playhead over the note's ` ```lrc ` lines (`apps/web/src/app/song.rs`
+`SongViews`); the app's own controls and lyrics show until a view is
+ready and for good if it dies. The frame gets the bundle's bytes, the
+theme's colours and the view's props, never the session token or a
+cookie; its asks are the playhead's intents only, rate-limited (8 a
+second, a burst of 16). The app's page allows `frame-src 'self'` and
+nothing else new (`scripts/web-routes.md`). Host calls into a vault over
+the port (a member's org lane, a share's guest) are #495's next step.
+`apps/web/test/app-ext-host.test.mjs` (`just app-ext-host-test`) runs the
+hostile bundles against it.
+
 ||||||| cc3c1c7a
 What reaches the network from a web view, and what stops it:
 

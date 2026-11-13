@@ -14,6 +14,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # The demo vault (`apps/ui/demo-vault`), built in: `/app/?demo` (src/demo.rs).
 include_dir = { workspace = true }
+# The extension frame host (src/ext_host.rs, #495): each file of an
+# island's bundle checked against the node's digest before a frame gets it.
+sha2 = { workspace = true }
+base64 = { workspace = true }
 
 # The browser half runs on wasm32-unknown-unknown only; natively the crate
 # is its pure part (routes, config, views), which its tests cover.
@@ -22,7 +26,7 @@ auth-client = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Document", "Element", "Event", "EventTarget", "Headers", "History", "HtmlElement", "KeyboardEvent", "Navigator", "VisualViewport", "Location", "MediaQueryList", "Request", "RequestInit", "Response", "Storage", "Window"] }
+web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Document", "Element", "Event", "EventTarget", "Headers", "History", "HtmlElement", "HtmlIFrameElement", "KeyboardEvent", "MessageChannel", "MessageEvent", "MessagePort", "Navigator", "Performance", "VisualViewport", "Location", "MediaQueryList", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestRedirect", "Response", "Storage", "Window"] }
 # The app (src/app): the same components as the desktop and phone apps
 # (apps/ui), on dioxus-web.
 dioxus = { workspace = true, features = ["web"] }
@@ -37,8 +41,9 @@ architect-navigator = { workspace = true, features = ["ui"] }
 architect-theme = { workspace = true, features = ["dioxus", "actions"] }
 architect-ui = { workspace = true }
 lucide-dioxus = { workspace = true }
-base64 = { workspace = true }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
+# The frame host's events into its views (src/app/frames.rs).
+futures-util = { version = "0.3", default-features = false }
 
 [lints]
 workspace = true
