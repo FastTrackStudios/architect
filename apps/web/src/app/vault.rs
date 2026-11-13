@@ -997,7 +997,10 @@ fn NoteText(path: String, text: String) -> Element {
                     }
                 }
                 if let Some(r) = recording {
-                    super::recording::RecordingRow { path: path.clone(), title: note_title, recording: r }
+                    super::recording::RecordingRow {
+                        path: path.clone(), title: note_title, recording: r,
+                        artist: prop("artist"), cover: prop("cover"),
+                    }
                 }
                 if !properties.is_empty() {
                     dl { "data-testid": "note-properties",
