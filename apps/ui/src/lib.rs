@@ -24,6 +24,7 @@ mod extensions;
 mod favourites;
 mod files;
 mod first_run;
+pub mod guest;
 mod guide;
 mod items;
 #[cfg(feature = "keyflow-lab")]
@@ -894,6 +895,32 @@ pub fn LabApp() -> Element {
             settings: Some(settings),
         }
     });
+    // A share link opened as a guest (#629): the Shared tab, SHARE_OPEN,
+    // and the links the OS hands the window. The account's session goes
+    // only to a node it already uses for an org of its own.
+    let org_hosts = move || -> Vec<String> {
+        let mut hosts: Vec<String> = accounts
+            .and_then(|a| a.accounts().active())
+            .map(|a| a.org_hosts.iter().map(|h| h.host.clone()).collect())
+            .unwrap_or_default();
+        hosts.extend(architect_accounts::org_host_from_env());
+        hosts
+    };
+    let guest = guest::use_guest(&list, lab, org_hosts, move |origin: &str| {
+        let Some(accounts) = accounts.map(|a| a.accounts()) else {
+            return String::new();
+        };
+        if !guest::trusts(&org_hosts(), origin) {
+            return String::new();
+        }
+        accounts
+            .store()
+            .active_session()
+            .ok()
+            .flatten()
+            .map(|s| s.token)
+            .unwrap_or_default()
+    });
     // The lab's signals follow the settings.
     {
         let text = |key: &str| {
@@ -1422,7 +1449,7 @@ pub fn LabApp() -> Element {
     // declares its own.
     // `declared_on`: the tab current is the declared one whose place is
     // on show (`shell::Favourites::current`), not the route's.
-    let (tabs, separate, set, declared_on): (
+    let (mut tabs, separate, set, declared_on): (
         Vec<shell::Tab>,
         Option<shell::Action>,
         shell::Favourites,
@@ -1452,6 +1479,10 @@ pub fn LabApp() -> Element {
             .flatten();
         (set.slots().to_vec(), set.primary.clone(), set, on)
     };
+    // An open share link, beside the vaults and never one of them.
+    if guest.is_open() {
+        tabs.push(guest::tab());
+    }
     // The sidebar's foot, above the switcher and the account (bottom to
     // top: Account, Workspace, Settings, Theme).
     let foot = vec![
@@ -1600,7 +1631,7 @@ pub fn LabApp() -> Element {
                         left: crate::distribution().is_sandbox().then(|| rsx! { pages::LeftSide {} }),
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
-                        right: if (lab.right)() && on_a_list(route) && !matches!(route, Route::Tab(t) if ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
+                        right: if (lab.right)() && on_a_list(route) && !matches!(route, Route::Tab(t) if t == guest::TAB || ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
                         on_pull: move |()| lab.jump(Route::Tab("vault")),
                         window: window_chrome,
                         status,
@@ -1631,6 +1662,7 @@ pub fn LabApp() -> Element {
                                     vault::VaultPage {}
                                 }
                             },
+                            Route::Tab(guest::TAB) => rsx! { guest::GuestPage { guest } },
                             Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                             Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },

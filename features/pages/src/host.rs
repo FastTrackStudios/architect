@@ -250,6 +250,27 @@ impl AppHost {
         self
     }
 
+    /// This host for a page drawing a guest's content (a share link's
+    /// note, #629): it reaches nothing of the person's. No action runs,
+    /// none is listed, no host-service call is made (documents, the
+    /// network, the interface: those are its extension's, and a guest's
+    /// content has no extension's grants), and its settings and shared
+    /// state are its own, in memory. The theme and its notices stay.
+    #[must_use]
+    pub fn guest(mut self) -> Self {
+        self.caller = ActionCaller::new(architect::action::Principal::Guest {
+            link_id: String::new(),
+            display: None,
+        });
+        self.extension = None;
+        self.gate = Some(Arc::new(|_| {
+            Err("a guest's content runs no action of the person's".to_owned())
+        }));
+        self.shared = SharedState::new();
+        self.settings = Arc::new(MemorySettings::default());
+        self
+    }
+
     #[must_use]
     pub const fn shared_state(&self) -> &SharedState {
         &self.shared
@@ -369,6 +390,14 @@ impl PageHost for AppHost {
             return Err(why);
         }
         let (list, mut caller) = (self.list.clone(), self.caller.clone());
+        // A page's run is a script's, never the person's own door (⌘K, a
+        // key, the menu): an action that asks who ran it (`SHARE_OPEN`)
+        // asks the person first, as for an agent's.
+        if caller.invocation().is_none() {
+            caller = caller.with_invocation(architect::action::Invocation::new(
+                architect::action::InvocationSource::Script,
+            ));
+        }
         // A service call and a host call are the page's extension's own.
         if (id == SERVICE_CALL || id == PAGE_CALL)
             && let Some(ext) = &self.extension

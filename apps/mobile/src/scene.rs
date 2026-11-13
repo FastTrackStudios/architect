@@ -6,6 +6,13 @@
 //! app's window scene as soon as both exist: when the scene connects (the
 //! delegate), or when the window is made ([`window_created`]), whichever is
 //! second.
+//!
+//! A link the app is opened with (#629) comes here too: a universal link
+//! (`https://<node>/s/<code>/…`, an `NSUserActivity` of web browsing) or
+//! the app's scheme (`architect://open?url=…`, a URL context), when the
+//! scene connects (a cold start) or later. Each is handed to the window
+//! as the OS's ([`architect_app::guest::incoming`]), which opens it in the
+//! Shared tab with the same checks as any link.
 
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -14,9 +21,11 @@ use std::ptr::NonNull;
 use objc2::rc::Retained;
 use objc2::runtime::NSObjectProtocol;
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class};
+use objc2_foundation::{NSSet, NSURL, NSUserActivity};
 use objc2_ui_kit::{
-    UIApplication, UICoordinateSpace, UIResponder, UIScene, UISceneConnectionOptions,
-    UISceneDelegate, UISceneSession, UIView, UIWindow, UIWindowScene, UIWindowSceneDelegate,
+    UIApplication, UICoordinateSpace, UIOpenURLContext, UIResponder, UIScene,
+    UISceneConnectionOptions, UISceneDelegate, UISceneSession, UIView, UIWindow, UIWindowScene,
+    UIWindowSceneDelegate,
 };
 
 define_class!(
@@ -35,9 +44,24 @@ define_class!(
             &self,
             scene: &UIScene,
             _session: &UISceneSession,
-            _options: &UISceneConnectionOptions,
+            options: &UISceneConnectionOptions,
         ) {
             join(MainThreadMarker::from(scene));
+            // A cold start by a link: the scheme's, or a universal link.
+            open_contexts(&options.URLContexts());
+            for activity in options.userActivities().iter() {
+                open_activity(&activity);
+            }
+        }
+
+        #[unsafe(method(scene:openURLContexts:))]
+        fn open_url_contexts(&self, _scene: &UIScene, contexts: &NSSet<UIOpenURLContext>) {
+            open_contexts(contexts);
+        }
+
+        #[unsafe(method(scene:continueUserActivity:))]
+        fn continue_activity(&self, _scene: &UIScene, activity: &NSUserActivity) {
+            open_activity(activity);
         }
 
         #[unsafe(method(sceneDidBecomeActive:))]
@@ -48,6 +72,35 @@ define_class!(
 
     unsafe impl UIWindowSceneDelegate for SceneDelegate {}
 );
+
+/// Hand `url` to the window, as a link the OS gave the app: a share link
+/// or `architect://open?url=<one>`. Any other URL (`architect://vault`,
+/// the app's own) is not a share link and is left alone, as the desktop
+/// leaves it to the tabs: it never reaches the Shared tab.
+fn open_url(url: &NSURL) {
+    let Some(text) = url.absoluteString() else {
+        return;
+    };
+    for link in architect_app::guest::links_in([text.to_string()]) {
+        architect_app::guest::incoming(link, architect_app::guest::Source::Os);
+    }
+}
+
+/// The app's scheme: each URL context's URL.
+fn open_contexts(contexts: &NSSet<UIOpenURLContext>) {
+    for context in contexts.iter() {
+        open_url(&context.URL());
+    }
+}
+
+/// A universal link: a web-browsing activity's URL.
+fn open_activity(activity: &NSUserActivity) {
+    if activity.activityType().to_string() == "NSUserActivityTypeBrowsingWeb" {
+        if let Some(url) = activity.webpageURL() {
+            open_url(&url);
+        }
+    }
+}
 
 thread_local! {
     static WINDOW: RefCell<Option<Retained<UIWindow>>> = const { RefCell::new(None) };

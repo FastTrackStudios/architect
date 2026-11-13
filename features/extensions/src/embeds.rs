@@ -198,7 +198,7 @@ impl Host {
 }
 
 #[cfg(feature = "ui")]
-pub use view::{BaseViewEmbed, EmbedAsk, EmbedPages, EmbedView, WidgetView};
+pub use view::{BaseViewEmbed, EmbedAsk, EmbedPages, EmbedView, GuestEmbedView, WidgetView};
 
 #[cfg(feature = "ui")]
 mod view {
@@ -220,6 +220,9 @@ mod view {
         pub gate: architect_scripting::luau::Gate,
         /// What it is given, live.
         pub input: Signal<EmbedInput>,
+        /// A guest's content (a share link's note, #629): the page runs
+        /// on a host that reaches nothing of the person's, `gate` unused.
+        pub guest: bool,
     }
 
     impl std::fmt::Debug for EmbedAsk {
@@ -244,12 +247,43 @@ mod view {
     /// the host's properties for it (a note's frontmatter, a fence's info
     /// string); the view is drawn again when either changes. The
     /// `ExtensionUi` in context says what is loaded.
+    ///
+    /// The person's own content only: a guest's (a share link's note) is
+    /// [`GuestEmbedView`]'s, which never draws with the person's reach.
     #[component]
     pub fn EmbedView(
         claim: Claim,
         source: String,
         #[props(default)] props: Value,
         #[props(default)] fallback: Option<Element>,
+    ) -> Element {
+        embed_view(&claim, source, props, fallback, false)
+    }
+
+    /// A guest's content (a share link's note, #629) that `claim` claims:
+    /// as [`EmbedView`], but never drawn with the person's reach. Only a
+    /// page embed draws it, on a host with no action, no host-service
+    /// call and no vault (`architect_pages::host::AppHost::guest`); a
+    /// linked or process view, which runs with the person's own session,
+    /// does not, and `fallback` shows. A component of its own, not a
+    /// prop, so no caller can forget to say so.
+    #[component]
+    pub fn GuestEmbedView(
+        claim: Claim,
+        source: String,
+        #[props(default)] props: Value,
+        #[props(default)] fallback: Option<Element>,
+    ) -> Element {
+        embed_view(&claim, source, props, fallback, true)
+    }
+
+    // A component's body: its hooks run in the component that calls it.
+    fn embed_view(
+        claim: &Claim,
+        source: String,
+        props: Value,
+        fallback: Option<Element>,
+        guest: bool,
     ) -> Element {
         let now = EmbedInput {
             claim: claim.to_string(),
@@ -268,10 +302,46 @@ mod view {
         };
         let _ = ui.revision();
         let host = ui.host();
-        let Some(spec) = Embeds::new(host.clone()).resolve(&claim) else {
+        let Some(spec) = Embeds::new(host.clone()).resolve(claim) else {
             return plain();
         };
+        if guest {
+            return draw_guest(&host, spec, input, plain);
+        }
         draw(&host, spec, input, plain)
+    }
+
+    /// `spec` drawn for a guest's content, given `input`: only by a page
+    /// (its own or its view's), on a host that reaches nothing of the
+    /// person's (`architect_pages::host::AppHost::guest`); else `plain`.
+    /// A linked view runs in the app's process with the person's session,
+    /// a process view with its own connection's: neither can be kept from
+    /// the person's vaults, so neither draws a guest's content.
+    fn draw_guest(
+        host: &crate::host::Host,
+        spec: EmbedSpec,
+        input: Signal<EmbedInput>,
+        plain: impl Fn() -> Element,
+    ) -> Element {
+        if host.get(&spec.extension).is_none() {
+            return plain();
+        }
+        let Some(pages) = try_consume_context::<EmbedPages>() else {
+            return plain();
+        };
+        let key = format!("{}/{}", spec.extension, spec.embed.id);
+        let ask = EmbedAsk {
+            // Unused for a guest: nothing passes.
+            gate: std::sync::Arc::new(|_| Err("a guest's content runs nothing".to_owned())),
+            input,
+            spec,
+            guest: true,
+        };
+        (pages.0)(&ask).map_or_else(plain, |page| {
+            rsx! {
+                div { class: "embed", "data-embed": "{key}", "data-guest": "true", style: "{BOX}", {page} }
+            }
+        })
     }
 
     /// An extension's embed `id` mounted by an editor's widget decoration
@@ -357,6 +427,7 @@ mod view {
                 gate: crate::host::gate(&loaded.manifest),
                 input,
                 spec: spec.clone(),
+                guest: false,
             };
             if let Some(page) = (pages.0)(&ask) {
                 return rsx! {

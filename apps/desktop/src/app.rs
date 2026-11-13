@@ -312,6 +312,7 @@ pub fn run(distribution: Distribution) -> ExitCode {
             let rest: Vec<String> = std::env::args().skip(2).collect();
             return extensions(&rest);
         }
+        Some("links") => return links(dist.name(), std::env::args().nth(2).as_deref()),
         Some("distribution") => {
             return crate::distribution_command(dist, std::env::args().nth(2).as_deref());
         }
@@ -345,4 +346,43 @@ pub fn run(distribution: Distribution) -> ExitCode {
     let window = window.with_decorations(false);
     architect_workspace::native::launch_with_fonts(Window, window, architect_app::FONTS);
     ExitCode::SUCCESS
+}
+
+/// `<app> links register`: this binary opens the app's links
+/// (`architect://open?url=…`, #629). An installed bundle declares them
+/// itself (the `AppImage`'s desktop entry, the Mac's `Info.plist`).
+fn links(name: &str, verb: Option<&str>) -> ExitCode {
+    if verb != Some("register") {
+        eprintln!("usage: <app> links register");
+        return ExitCode::FAILURE;
+    }
+    if !cfg!(target_os = "linux") {
+        eprintln!("links: an installed app declares its links itself; nothing to do here");
+        return ExitCode::SUCCESS;
+    }
+    let (Ok(exe), Some((data, config))) = (std::env::current_exe(), crate::links::xdg_homes())
+    else {
+        eprintln!("links: no executable path or home folder");
+        return ExitCode::FAILURE;
+    };
+    match crate::links::register(name, architect_app::presence::id(), &exe, &data, &config) {
+        Ok(done) => {
+            // Best effort: desktops that cache the entries read them again.
+            let _ = std::process::Command::new("update-desktop-database")
+                .arg(data.join("applications"))
+                .status();
+            println!(
+                "{} opens {}:// links: {} (default in {})",
+                exe.display(),
+                architect_spaces::guest::APP_SCHEME,
+                done.entry.display(),
+                done.mimeapps.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(why) => {
+            eprintln!("links: {why}");
+            ExitCode::FAILURE
+        }
+    }
 }

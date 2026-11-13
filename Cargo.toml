@@ -383,6 +383,7 @@ architect-distribution = { path = "apps/distribution" }
 # iOS: the UIScene lifecycle the mobile app adopts (apps/mobile).
 objc2 = "0.6"
 objc2-ui-kit = "0.3"
+objc2-foundation = "0.3"
 futures-timer = "3"
 # The platform's file pickers (architect-extensions `pickers`); blitz-shell
 # builds it already, with these (default) features.

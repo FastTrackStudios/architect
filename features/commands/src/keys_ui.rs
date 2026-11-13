@@ -309,7 +309,7 @@ impl Commands {
                 // A key bound to a command that cannot run now (disabled,
                 // gone) is not used: it goes on to the page.
                 InputCommand::Action(id) | InputCommand::ActionWithArgs { action: id, .. } => {
-                    used |= self.run(&id);
+                    used |= self.run_from(&id, architect::action::InvocationSource::Key);
                 }
                 InputCommand::Hold(chord) => {
                     held.set(Some(display_chord(&chord)));
@@ -357,7 +357,7 @@ impl Commands {
                     query.set(String::new());
                 } else {
                     self.close();
-                    let _ = self.run(id);
+                    let _ = self.run_from(id, architect::action::InvocationSource::Palette);
                 }
             }
             Pick::Open(scope, item) => {
@@ -697,7 +697,11 @@ fn answer_step(commands: &Commands, text: &str) {
         return;
     }
     commands.close();
-    let _ = commands.run_with(&asking.id, &args_json(&asking.answers));
+    let _ = commands.run_with_from(
+        &asking.id,
+        &args_json(&asking.answers),
+        architect::action::InvocationSource::Palette,
+    );
 }
 
 /// An action's bindings in the action list window: each with its context

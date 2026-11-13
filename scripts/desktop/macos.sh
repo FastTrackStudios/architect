@@ -141,6 +141,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>LSApplicationCategoryType</key><string>$category</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key><string>$BUNDLE_ID.links</string>
+            <key>CFBundleURLSchemes</key><array><string>architect</string></array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST
