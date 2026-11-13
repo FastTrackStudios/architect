@@ -117,17 +117,45 @@ pub fn register(
 ) -> Result<Registered, String> {
     let file = format!("{id}.links.desktop");
     let entry = data_home.join("applications").join(&file);
-    let write = |path: &Path, text: &str| {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
-    };
+    let write = |path: &Path, text: &str| replace(path, text);
     write(&entry, &desktop_entry(name, exe, id))?;
     let mimeapps = config_home.join("mimeapps.list");
     let before = std::fs::read_to_string(&mimeapps).unwrap_or_default();
     write(&mimeapps, &with_default(&before, &scheme_type(), &file))?;
     Ok(Registered { entry, mimeapps })
+}
+
+/// Write `text` to `path` whole or not at all: to a temporary file beside
+/// it, then renamed over it, so a crash or a full disk never leaves half a
+/// `mimeapps.list` (which every other app's defaults live in too). A
+/// symlinked file (a dotfiles manager's) is written where it points, and
+/// the link kept.
+fn replace(path: &Path, text: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    let at = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    let target = if path.is_symlink() {
+        std::fs::canonicalize(path).map_err(|e| at(path, e))?
+    } else {
+        path.to_path_buf()
+    };
+    let dir = target
+        .parent()
+        .ok_or_else(|| format!("{}: no folder", target.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| at(dir, e))?;
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let written = std::fs::File::create(&temp).and_then(|mut f| {
+        f.write_all(text.as_bytes())?;
+        f.sync_all()
+    });
+    if let Err(e) = written.and_then(|()| std::fs::rename(&temp, &target)) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(at(&target, e));
+    }
+    Ok(())
 }
 
 /// `$XDG_DATA_HOME` and `$XDG_CONFIG_HOME`, or their defaults under
@@ -218,5 +246,39 @@ mod tests {
         .unwrap();
         let again = std::fs::read_to_string(config.join("mimeapps.list")).unwrap();
         assert_eq!(again, list);
+        // Written whole, by a rename: no temporary file is left beside it.
+        let left: Vec<_> = std::fs::read_dir(&config)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["mimeapps.list"], "{left:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_list_is_written_where_it_points_and_stays_a_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (data, config, dotfiles) = (
+            tmp.path().join("data"),
+            tmp.path().join("config"),
+            tmp.path().join("dotfiles"),
+        );
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::create_dir_all(&dotfiles).unwrap();
+        let real = dotfiles.join("mimeapps.list");
+        std::fs::write(&real, "[Default Applications]\ntext/html=firefox.desktop\n").unwrap();
+        std::os::unix::fs::symlink(&real, config.join("mimeapps.list")).unwrap();
+        register(
+            "Architect",
+            "app.fasttrackstudio.architect",
+            Path::new("/usr/bin/architect-desktop"),
+            &data,
+            &config,
+        )
+        .unwrap();
+        assert!(config.join("mimeapps.list").is_symlink());
+        let list = std::fs::read_to_string(&real).unwrap();
+        assert!(list.contains("text/html=firefox.desktop"), "{list}");
+        assert!(list.contains("x-scheme-handler/architect="), "{list}");
     }
 }

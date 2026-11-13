@@ -62,6 +62,9 @@ pub struct Mount {
     pub extension: String,
     pub view: String,
     pub gate: Option<Gate>,
+    /// Drawing a guest's content (a share link's note, #629): the page
+    /// runs on [`crate::host::AppHost::guest`], `gate` unused.
+    pub guest: bool,
 }
 
 impl PartialEq for Mount {
@@ -69,6 +72,7 @@ impl PartialEq for Mount {
         self.page == other.page
             && self.extension == other.extension
             && self.view == other.view
+            && self.guest == other.guest
             && self.pages.same(&other.pages)
     }
 }
@@ -119,6 +123,7 @@ pub fn use_view_pages(pages: Pages) -> ViewPages {
                 extension: ask.extension.clone(),
                 view: ask.view.clone(),
                 gate: Some(Arc::clone(&ask.gate)),
+                guest: false,
             };
             let key = mount.page.path.display().to_string();
             Some(rsx! { PageView { key: "{key}", mount } })
@@ -148,6 +153,7 @@ pub fn use_embed_pages(pages: Pages) -> EmbedPages {
                 extension: ask.spec.extension.clone(),
                 view: ask.spec.view.clone(),
                 gate: Some(Arc::clone(&ask.gate)),
+                guest: ask.guest,
             };
             let key = mount.page.path.display().to_string();
             let (input, max_height) = (ask.input, ask.spec.max_height);
@@ -298,6 +304,12 @@ async fn follow(
 ) {
     let fit = embed.is_some();
     let (opened, inputs) = match embed {
+        Some((input, inputs)) if mount.guest => (
+            mount
+                .pages
+                .open_guest_embed(&mount.page, &mount.extension, &mount.view, input),
+            inputs,
+        ),
         Some((input, inputs)) => (
             mount.pages.open_embed(
                 &mount.page,

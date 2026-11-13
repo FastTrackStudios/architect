@@ -898,16 +898,19 @@ pub fn LabApp() -> Element {
     // A share link opened as a guest (#629): the Shared tab, SHARE_OPEN,
     // and the links the OS hands the window. The account's session goes
     // only to a node it already uses for an org of its own.
-    let guest = guest::use_guest(&list, lab, move |origin: &str| {
-        let Some(accounts) = accounts.map(|a| a.accounts()) else {
-            return String::new();
-        };
+    let org_hosts = move || -> Vec<String> {
         let mut hosts: Vec<String> = accounts
-            .active()
+            .and_then(|a| a.accounts().active())
             .map(|a| a.org_hosts.iter().map(|h| h.host.clone()).collect())
             .unwrap_or_default();
         hosts.extend(architect_accounts::org_host_from_env());
-        if !guest::trusts(&hosts, origin) {
+        hosts
+    };
+    let guest = guest::use_guest(&list, lab, org_hosts, move |origin: &str| {
+        let Some(accounts) = accounts.map(|a| a.accounts()) else {
+            return String::new();
+        };
+        if !guest::trusts(&org_hosts(), origin) {
             return String::new();
         }
         accounts

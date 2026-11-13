@@ -1702,10 +1702,16 @@ pub fn apple_app_site_association(app_ids: &[String]) -> Option<String> {
         "applinks": {
             "details": [{
                 "appIDs": app_ids,
+                // First match wins; `*` is any run of characters, `/`
+                // too. Only a link's pages are the app's: every name the
+                // node reserves (`_archive.zip`, `_files/`, `_files.json`,
+                // `_guest/`, `_live`, `_note.json`) and every file (media,
+                // a PDF, an image: no trailing `/`) stays the browser's, so
+                // "Download all" downloads (#676).
                 "components": [
                     { "/": format!("{LINKS}/_*"), "exclude": true, "comment": "the node's sign-in" },
-                    { "/": format!("{LINKS}/*/_guest/*"), "exclude": true, "comment": "a link's guest service" },
-                    { "/": format!("{LINKS}/*"), "comment": "share links" }
+                    { "/": format!("{LINKS}/*/_*"), "exclude": true, "comment": "a link's reserved names: its guest service, files, archive, news" },
+                    { "/": format!("{LINKS}/*/"), "comment": "a share link's pages" }
                 ]
             }]
         }

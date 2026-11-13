@@ -349,7 +349,10 @@ page.
   links.
 - **Universal links.** With `ARCHITECT_APPLE_APP_IDS` set, the node
   serves `/.well-known/apple-app-site-association` naming those apps for
-  `/s/*` (never `/s/_*`, its sign-in, or a link's guest service)
+  a link's pages alone (`/s/*/`): never `/s/_*` (its sign-in), a name
+  the node reserves (`/s/*/_*`: the guest service, `_files/`,
+  `_archive.zip`, `_live`), or a file (no trailing `/`: media, a PDF, an
+  image), so "Download all" downloads
   (`apps/desktop/src/node/shares.rs` `apple_app_site_association`). The
   App Store build claims FasTrack's own domain; any other node's links
   open in the app through `architect://open?url=<the link>`
@@ -362,7 +365,13 @@ page.
   `architect://` scheme, a second launch's hand-off, the launch's own
   arguments). A note is drawn by the extension that claims its type
   (`Embeds::resolve`) once a note's text is given to guests; until then
-  as its page's words, with "Open in browser". The account's session is
+  as its page's words, with "Open in browser". The extension draws a
+  guest's content only through its page, on a host that runs no action,
+  makes no host-service call and keeps its settings and shared state
+  apart (`features/pages/src/host.rs` `AppHost::guest`): it reads and
+  writes nothing of yours. A linked or process view, which runs with
+  your own session, never draws it. On a phone the tab takes the bar's
+  fourth place while a link is open (`Tab::kept`). The account's session is
   sent only to a node the account already uses for an org of its own
   (`trusts`). A revoke or an expiry empties the tab on the link's next
   news (`_live`) or within five minutes.
@@ -386,8 +395,15 @@ page.
   share's own domain, which has no `/s/<code>/` path.
 - **What the app opens.** `ShareUrl::parse`: `https:` only, or `http:`
   to this machine; no credentials; a share link's path. A link the OS
-  hands the app that points at this machine or a private network is
-  opened only once the person says so (`ShareUrl::is_local`).
+  hands the app, or an agent's `SHARE_OPEN`, asks the person first
+  (`asks_first`) when it points at this machine or a private network
+  (`ShareUrl::is_local`, or a name that resolves there), or at a node
+  that is neither `architect.fasttrackstudio.app` nor one of the
+  account's ("Open a shared link from <host>?"); nothing is fetched
+  before the yes. A link the person types or pastes opens directly. A
+  name checked as public is read from the addresses it was checked at,
+  so the DNS can't move it afterwards. An image is fetched only when its
+  URL, parsed and normalised, is on the link's node below the link.
 
 ### Blocks extensions draw
 
