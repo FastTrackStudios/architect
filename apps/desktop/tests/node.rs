@@ -1366,11 +1366,48 @@ async fn attaches_within(sync: crdt::sync::DocSyncClient, path: &str, within: Du
     opened
 }
 
+/// Until `node` has applied the delete of `path` in `notes`: its document
+/// open (the delete opens a closed one) with its tombstone set. Each look
+/// is bounded, so a wedged registry fails this instead of hanging it.
+async fn deleted_on(node: &Running, path: &str) {
+    for _ in 0..800 {
+        let seen = tokio::time::timeout(Duration::from_secs(5), node.note_deleted("notes", path))
+            .await
+            .expect("the node's document registry is wedged");
+        if seen == Some(true) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the node never applied the delete of {path}");
+}
+
+/// Whether any directory under `root` is named `name` and holds a file.
+fn persisted_under(root: &Path, name: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        let path = e.path();
+        path.is_dir()
+            && ((e.file_name() == name
+                && std::fs::read_dir(&path).is_ok_and(|mut d| d.next().is_some()))
+                || persisted_under(&path, name))
+    })
+}
+
 /// A note made over the org lane (as the web app's New note does), its
 /// file then deleted on disk while its document is closed: every other
 /// note still opens live. The node used to open that document under its
 /// own reconcile lock while the registry held its creation lock, and no
 /// note on the node attached again until a restart.
+///
+/// Then a note that was open live (its document saved) on a node that has
+/// since restarted: deleting its file must not bring it back. The delete
+/// opens the saved document, whose open used to schedule writing the old
+/// text back; that write could beat the delete to the note's lock. The
+/// interleaving itself is pinned down in `vault-collab`'s tests; this is
+/// the same path end to end.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_note_deleted_on_disk_leaves_every_other_note_live() {
     use architect_desktop::node::service::notes::NotesClient;
@@ -1392,12 +1429,26 @@ async fn a_note_deleted_on_disk_leaves_every_other_note_live() {
     // Its file deleted on disk; its document is not open.
     let file = host.state.vault_root("notes").unwrap().join("Untitled.md");
     std::fs::remove_file(&file).unwrap();
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    deleted_on(&host, "Untitled.md").await;
 
-    let sync: DocSyncClient = web(&host, Some(token)).await;
+    let sync: DocSyncClient = web(&host, Some(token.clone())).await;
     assert!(
         attaches_within(sync, "hello.md", Duration::from_secs(20)).await,
         "another note no longer opens live"
     );
+    // `hello.md` was open live: its document is saved.
+    let hello = vault_proto::collab_doc_id("notes", "hello.md").to_string();
+    until("hello.md's document saved", || {
+        persisted_under(&tmp.path().join("host"), &hello)
+    })
+    .await;
+    host.stop().await;
+
+    // Restarted: `hello.md`'s document is closed, and saved with its text.
+    let host = indie_host(tmp.path(), &origin, &origin, 300).await;
+    let file = host.state.vault_root("notes").unwrap().join("hello.md");
+    std::fs::remove_file(&file).unwrap();
+    deleted_on(&host, "hello.md").await;
+    assert!(!file.exists(), "the deleted note's file came back");
     host.stop().await;
 }

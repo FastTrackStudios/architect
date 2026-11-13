@@ -174,6 +174,31 @@ impl Running {
         }
     }
 
+    /// Whether note `path` in vault `vault` is deleted (its document's
+    /// tombstone), or `None` while its document is not open: this never
+    /// opens it, so it can watch a delete without racing one.
+    pub fn note_deleted(
+        &self,
+        vault: &str,
+        path: &str,
+    ) -> impl Future<Output = Option<bool>> + Send + 'static {
+        use crdt::loro::{LoroValue, ValueOrContainer};
+        let registry = self.registry.clone();
+        let doc_id = vault_proto::collab_doc_id(vault, path);
+        async move {
+            if !registry.is_open(doc_id).await {
+                return None;
+            }
+            let doc = registry.doc(doc_id).await.ok()?;
+            Some(matches!(
+                doc.loro()
+                    .get_map(vault_proto::COLLAB_META_CONTAINER)
+                    .get(vault_proto::COLLAB_META_DELETED),
+                Some(ValueOrContainer::Value(LoroValue::Bool(true)))
+            ))
+        }
+    }
+
     /// Stop it: its tasks, then its endpoint.
     pub async fn stop(mut self) {
         // The mount's threads call into this runtime: unmount off it.
