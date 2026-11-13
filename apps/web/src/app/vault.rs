@@ -170,38 +170,57 @@ fn show_note(mut workspace: Signal<Workspace>, path: &str, target: Target) {
     open_in_main(workspace, note_pane(path), target);
 }
 
-/// A new note in `folder`, written to the vault (and the node) and opened.
+/// A new note in `folder`, opened. In the demo it is made in the tab's
+/// memory; on the org's vaults it is written to the node first (inside a
+/// vault: `crate::org_note_folder`), and opens once the node has it.
 fn new_note(workspace: Signal<Workspace>, web: &WebVault, folder: &str) {
-    let vault = &web.source;
+    let vault = web.source.clone();
     let names = vault.files();
-    let path = (1..=999)
-        .map(|n: u32| {
-            let name = if n == 1 {
-                "Untitled.md".to_owned()
-            } else {
-                format!("Untitled {n}.md")
-            };
-            if folder.is_empty() {
-                name
-            } else {
-                format!("{folder}/{name}")
-            }
-        })
-        .find(|p| !names.iter().any(|f| f.path == *p));
-    let Some(path) = path else { return };
-    if vault
-        .write(&[FileOp::CreateFile {
-            path: path.clone(),
-            text: String::new(),
-        }])
-        .is_ok()
-    {
-        edited();
-        if let Some(org) = &web.org {
-            org.write_later(&path, String::new());
+    let taken = |p: &str| names.iter().any(|f| f.path == p);
+    let Some(org) = web.org.clone() else {
+        let Some(path) = crate::untitled_path(folder, taken) else {
+            return;
+        };
+        if vault
+            .write(&[FileOp::CreateFile {
+                path: path.clone(),
+                text: String::new(),
+            }])
+            .is_ok()
+        {
+            edited();
+            show_note(workspace, &path, Target::Tab);
         }
-        show_note(workspace, &path, Target::Tab);
-    }
+        return;
+    };
+    let active = active_note(workspace);
+    let Some(folder) = crate::org_note_folder(folder, &org.vaults(), active.as_deref()) else {
+        org.report("There is no vault to put a new note in.");
+        return;
+    };
+    let Some(path) = crate::untitled_path(&folder, taken) else {
+        return;
+    };
+    spawn(async move {
+        match org.create(&path).await {
+            Ok(()) => {
+                let now = now();
+                vault.set_text(note_from_markdown(&path, "", now, now), String::new());
+                show_note(workspace, &path, Target::Tab);
+            }
+            Err(e) => org.report(format!("{} was not made: {e}", title_of(&path))),
+        }
+    });
+}
+
+/// The path of the note on show, if a note is.
+fn active_note(workspace: Signal<Workspace>) -> Option<String> {
+    let w = workspace.peek();
+    w.active
+        .as_ref()
+        .and_then(|id| w.pane(id))
+        .filter(|p| p.view.0 == NOTE)
+        .map(|p| p.state.clone())
 }
 
 /// Where the Vault starts: the navigator in the left dock, the Welcome
@@ -387,7 +406,11 @@ pub fn FilesView() -> Element {
     let vault = use_context::<WebVault>();
     let VaultWorkspace(workspace) = use_context::<VaultWorkspace>();
     let nav = use_navigator(move || {
-        let source: Arc<dyn NavigatorSource> = Arc::new(vault.source);
+        // On the org's vaults the layout is read-only (`super::org::NodeLayout`).
+        let source: Arc<dyn NavigatorSource> = match vault.org {
+            Some(_) => Arc::new(super::org::NodeLayout(vault.source)),
+            None => Arc::new(vault.source),
+        };
         source
     });
     let phone = use_context::<Signal<Screen>>()().form() == FormFactor::Phone;
@@ -447,26 +470,31 @@ fn shown(v: &PropertyValue) -> String {
 }
 
 /// One note: an image drawn from its URL, a markdown note as its text
-/// (read from the node first when it has not been yet), anything else
-/// said so.
+/// (read from the node first when it has not been yet; why not, when the
+/// read fails), anything else said so.
 #[component]
 fn WebNote(path: String) -> Element {
     let vault = use_context::<WebVault>();
     let t = use_shell().theme;
     let source = vault.source.clone();
-    let mut text = use_signal(|| source.read_text(&path));
+    let mut text = use_signal(|| source.read_text(&path).map(Ok::<String, String>));
     {
-        let (path, org, source) = (path.clone(), vault.org.clone(), source.clone());
+        let (path, org, source) = (path.clone(), vault.org, source.clone());
         use_hook(move || {
             if text.peek().is_none()
                 && is_note(&path)
                 && let Some(org) = org
             {
                 spawn(async move {
-                    if let Some(read) = org.read(&path).await {
-                        source
-                            .set_text(note_from_markdown(&path, &read, now(), now()), read.clone());
-                        text.set(Some(read));
+                    match org.read(&path).await {
+                        Ok(read) => {
+                            source.set_text(
+                                note_from_markdown(&path, &read, now(), now()),
+                                read.clone(),
+                            );
+                            text.set(Some(Ok(read)));
+                        }
+                        Err(e) => text.set(Some(Err(e))),
                     }
                 });
             }
@@ -490,17 +518,102 @@ fn WebNote(path: String) -> Element {
         };
     }
     match text() {
-        Some(text) => rsx! { NoteText { path, text } },
+        Some(Ok(text)) => rsx! { NoteText { path, text } },
+        Some(Err(why)) => rsx! {
+            div { style: "flex: 1; padding: 32px; color: {t.ink_3};", "data-testid": "note-failed",
+                p { style: "color: {t.ink};", "{title_of(&path)} could not be opened." }
+                p { "{why}" }
+            }
+        },
         None => rsx! {
             div { style: "flex: 1; padding: 32px; color: {t.ink_3};", p { "Opening {title_of(&path)}…" } }
         },
     }
 }
 
+/// A note's text area, reached through the DOM: its value is set once
+/// and then only from the live document, keeping the caret, never while
+/// an IME composes (`crate::live_text`). Not a controlled input: setting
+/// a text area's value moves its caret to the end and ends a composition.
+struct Editor {
+    id: String,
+    /// What the text area showed when it was last read or written.
+    shown: std::cell::RefCell<String>,
+    composing: std::cell::Cell<bool>,
+    live: Option<std::rc::Rc<super::org::LiveNote>>,
+    /// The note's text into the vault (the navigator's preview follows).
+    keep: Box<dyn Fn(&str)>,
+}
+
+impl Editor {
+    fn area(&self) -> Option<web_sys::HtmlTextAreaElement> {
+        use wasm_bindgen::JsCast as _;
+        web_sys::window()?
+            .document()?
+            .get_element_by_id(&self.id)?
+            .dyn_into()
+            .ok()
+    }
+
+    /// What was typed since the text area was last read, into the
+    /// document (moved past what the document received meanwhile), or
+    /// into the vault in the demo.
+    fn absorb(&self) {
+        let Some(area) = self.area() else { return };
+        let typed = area.value();
+        let shown = self.shown.borrow().clone();
+        let Some(user) = crate::live_text::splice(&shown, &typed) else {
+            return;
+        };
+        if let Some(live) = &self.live {
+            let remote = crate::live_text::splice(&shown, &live.body());
+            live.apply(&crate::live_text::rebase(&user, remote.as_ref()));
+        } else {
+            edited();
+            (self.keep)(&typed);
+        }
+        *self.shown.borrow_mut() = typed;
+    }
+
+    /// The text area brought to the live document: typing first taken
+    /// in, then the document's text shown with the caret where its text
+    /// went. Not while an IME composes (after it ends).
+    fn show_document(&self) {
+        let Some(live) = &self.live else {
+            self.absorb();
+            return;
+        };
+        if self.composing.get() {
+            return;
+        }
+        self.absorb();
+        let body = live.body();
+        if let Some(area) = self.area() {
+            let now = area.value();
+            if now != body {
+                let caret =
+                    |at: Option<u32>| at.map(|at| crate::live_text::caret_after(at, &now, &body));
+                let (start, end) = (
+                    caret(area.selection_start().ok().flatten()),
+                    caret(area.selection_end().ok().flatten()),
+                );
+                area.set_value(&body);
+                if let (Some(start), Some(end)) = (start, end) {
+                    let _ = area.set_selection_range(start, end);
+                }
+            }
+        }
+        (self.keep)(&body);
+        *self.shown.borrow_mut() = body;
+    }
+}
+
 /// A markdown note's text, editable: its properties above it, as they are.
 /// On the org's vaults it is live with the node while it is open
 /// (`super::org::LiveNote`): typing goes to the node's document, and
-/// another's typing comes into this one.
+/// another's typing comes into this one. It may be typed in from the
+/// first attach on, once the node's copy is in the document: typing into
+/// the empty document before that would add the note a second time.
 #[component]
 fn NoteText(path: String, text: String) -> Element {
     let vault = use_context::<WebVault>();
@@ -509,7 +622,10 @@ fn NoteText(path: String, text: String) -> Element {
     let (front, body0) = architect_navigator::markdown::split_block(&text);
     let front = front.into_owned();
     let properties = note_from_markdown(&path, &text, 0, 0).properties;
-    let mut body = use_signal(|| body0.to_owned());
+    // Set once: the text area's value is the DOM's from then on.
+    let initial = use_hook(|| body0.to_owned());
+    let mut ready = use_signal(|| vault.org.is_none());
+    let mut lost = use_signal(|| None::<String>);
     let created = use_hook(|| {
         source
             .files()
@@ -517,54 +633,74 @@ fn NoteText(path: String, text: String) -> Element {
             .find(|f| f.path == path)
             .map_or_else(now, |f| f.created)
     });
-    // The note's text in the vault: the navigator's preview follows.
-    let keep = {
-        let (source, path, front) = (source.clone(), path.clone(), front.clone());
-        move |b: &str| {
+    let editor = use_hook(|| {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let (source, path_kept, front) = (source.clone(), path.clone(), front.clone());
+        let keep = Box::new(move |b: &str| {
             let full = format!("{front}{b}");
-            source.set_text(note_from_markdown(&path, &full, created, now()), full);
-        }
-    };
-    let live = use_hook(|| {
-        let (org, path, keep) = (vault.org.clone(), path.clone(), keep.clone());
-        let (live, mut changes) = org?.live(&path)?;
-        let live = std::rc::Rc::new(live);
-        let heard = std::rc::Rc::clone(&live);
-        spawn(async move {
-            use futures_util::StreamExt as _;
-            let mut first = true;
-            while changes.next().await.is_some() {
-                let now_body = heard.body();
-                // A first, empty answer is a document not filled yet: the
-                // text read stays.
-                if first && now_body.is_empty() && !body.peek().is_empty() {
-                    first = false;
-                    continue;
-                }
-                first = false;
-                if *body.peek() != now_body {
-                    keep(&now_body);
-                    body.set(now_body);
-                }
-            }
+            source.set_text(note_from_markdown(&path_kept, &full, created, now()), full);
         });
-        Some(live)
+        let live = vault.org.as_ref().and_then(|org| org.live(&path));
+        let (live, changes) = match live {
+            Some((live, changes)) => (Some(std::rc::Rc::new(live)), Some(changes)),
+            None => (None, None),
+        };
+        let editor = std::rc::Rc::new(Editor {
+            id: format!("note-text-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
+            shown: std::cell::RefCell::new(body0.to_owned()),
+            composing: std::cell::Cell::new(false),
+            live,
+            keep,
+        });
+        if let Some(mut changes) = changes {
+            let heard = std::rc::Rc::clone(&editor);
+            spawn(async move {
+                use super::org::Heard;
+                use futures_util::StreamExt as _;
+                while let Some(h) = changes.next().await {
+                    match h {
+                        Heard::Attached => {
+                            heard.show_document();
+                            lost.set(None);
+                            if !*ready.peek() {
+                                ready.set(true);
+                            }
+                        }
+                        Heard::Changed => {
+                            if *ready.peek() {
+                                heard.show_document();
+                            }
+                        }
+                        Heard::Lost(why) => lost.set(Some(why)),
+                    }
+                }
+            });
+        }
+        editor
     });
+    let editing = architect_shell::use_editing_actions("editor:note", &[]);
     let on_input = {
-        let (path, keep) = (path.clone(), keep);
-        move |e: FormEvent| {
-            let typed = e.value();
-            keep(&typed);
-            edited();
-            match (&live, &vault.org) {
-                (Some(live), _) => live.set_body(&typed),
-                (None, Some(org)) => org.write_later(&path, format!("{front}{typed}")),
-                (None, None) => {}
+        let editor = std::rc::Rc::clone(&editor);
+        move |_: FormEvent| {
+            if !editor.composing.get() {
+                editor.show_document();
             }
-            body.set(typed);
         }
     };
-    let editing = architect_shell::use_editing_actions("editor:note", &[]);
+    let on_compose = {
+        let editor = std::rc::Rc::clone(&editor);
+        move |_: CompositionEvent| editor.composing.set(true)
+    };
+    let on_composed = {
+        let editor = std::rc::Rc::clone(&editor);
+        move |_: CompositionEvent| {
+            editor.composing.set(false);
+            editor.show_document();
+        }
+    };
+    let id = editor.id.clone();
+    let read_only = !ready();
     rsx! {
         document::Style { {LAYOUT} }
         div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink};",
@@ -578,12 +714,28 @@ fn NoteText(path: String, text: String) -> Element {
                         }
                     }
                 }
+                if read_only {
+                    p { "data-testid": "note-connecting", style: "margin: 0 0 12px; font-size: 13px; color: {t.ink_3};",
+                        "Connecting to the node… The note can be edited once it is live."
+                    }
+                }
+                if let Some(why) = lost() {
+                    p { "data-testid": "note-lost", role: "status",
+                        style: "margin: 0 0 12px; font-size: 13px; color: {t.ink_3};",
+                        "Not live ({why}). Reconnecting; what you type is kept and sent then."
+                    }
+                }
                 textarea {
+                    id: "{id}",
                     "data-testid": "note-text",
+                    "data-live": if read_only { "connecting" } else { "ready" },
                     "aria-label": "{title_of(&path)}",
                     spellcheck: "true",
-                    value: "{body}",
+                    readonly: read_only,
+                    value: "{initial}",
                     oninput: on_input,
+                    oncompositionstart: on_compose,
+                    oncompositionend: on_composed,
                     onfocusin: move |_| editing.focus(),
                     onfocusout: move |_| editing.blur(),
                 }

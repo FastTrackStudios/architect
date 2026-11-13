@@ -257,7 +257,7 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
 
 /// Forgets the session and shows the app signed out (the account menu's
 /// Sign out, in the app).
-pub(crate) fn sign_out() {
+pub fn sign_out() {
     let _ = LocalStore.clear();
     if let Ok(w) = window() {
         let _ = w.location().assign(APP);
@@ -397,6 +397,13 @@ async fn show(config: &Config) {
     let lane = match node.as_ref().ok().and_then(|s| s.hosts.clone()) {
         Some(org) => match open_org(&org, &session.token).await {
             Ok(vault) => {
+                if let Some(lane) = vault.org.clone() {
+                    wasm_bindgen_futures::spawn_local(keep_lane_signed_in(
+                        config.clone(),
+                        lane,
+                        session.clone(),
+                    ));
+                }
                 let who = person
                     .name
                     .clone()
@@ -418,6 +425,35 @@ async fn show(config: &Config) {
         node: Some(node),
         lane,
     });
+}
+
+/// Renews the session before it runs out and dials the org's lane again
+/// with each new token (the lane's bearer is fixed when it is dialled; an
+/// expired one leaves the lane anonymous). Signed out, it says so.
+async fn keep_lane_signed_in(
+    config: Config,
+    lane: crate::app::org::OrgVaults,
+    mut session: StoredSession,
+) {
+    loop {
+        let wait = session.expires_at_unix.map_or(300, |at| {
+            at.saturating_sub(oidc::REFRESH_MARGIN_SECS)
+                .saturating_sub(now())
+                .clamp(15, 3_600)
+        });
+        let ms = u32::try_from(wait.saturating_mul(1_000)).unwrap_or(u32::MAX);
+        gloo_timers::future::TimeoutFuture::new(ms).await;
+        let Some(renewed) = self::session(&config).await else {
+            lane.report("Your session ended: sign in again to keep editing.");
+            return;
+        };
+        if renewed.token != session.token
+            && let Err(why) = lane.redial(renewed.token.clone()).await
+        {
+            lane.report(format!("Your org's vaults did not reconnect: {why}"));
+        }
+        session = renewed;
+    }
 }
 
 /// The org's vaults over its lane, listed, their texts read after.

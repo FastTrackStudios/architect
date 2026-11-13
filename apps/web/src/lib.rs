@@ -49,6 +49,7 @@ mod app;
 mod browser;
 pub mod demo;
 pub mod keys;
+pub mod live_text;
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::start;
@@ -222,6 +223,45 @@ pub fn route(path: &str, query: &str) -> Route {
         (Some(code), Some(state)) if !code.is_empty() => Route::Callback { code, state },
         _ => Route::Refused("the issuer sent no code".to_owned()),
     }
+}
+
+/// The folder a new note goes in on the org's vaults, always inside one.
+///
+/// `folder` when one is on show, else the vault of the note `active` (its
+/// path, `<vault>/…`), else the first vault. The navigator's root is the
+/// org: a note at it would be in no vault, so never saved. `None` with no
+/// vault at all.
+#[must_use]
+pub fn org_note_folder(folder: &str, vaults: &[String], active: Option<&str>) -> Option<String> {
+    if !folder.is_empty() {
+        return Some(folder.to_owned());
+    }
+    active
+        .and_then(|p| p.split_once('/'))
+        .map(|(v, _)| v)
+        .filter(|v| vaults.iter().any(|known| known == v))
+        .or_else(|| vaults.first().map(String::as_str))
+        .map(str::to_owned)
+}
+
+/// The first free `Untitled.md`, `Untitled 2.md`, … in `folder` (the
+/// vault's root when empty).
+#[must_use]
+pub fn untitled_path(folder: &str, taken: impl Fn(&str) -> bool) -> Option<String> {
+    (1..=999_u32)
+        .map(|n| {
+            let name = if n == 1 {
+                "Untitled.md".to_owned()
+            } else {
+                format!("Untitled {n}.md")
+            };
+            if folder.is_empty() {
+                name
+            } else {
+                format!("{folder}/{name}")
+            }
+        })
+        .find(|p| !taken(p))
 }
 
 /// Percent-decode a query value (`+` is a space).
@@ -474,6 +514,31 @@ mod tests {
             )
             .contains("data-action=\"sign-in\"")
         );
+    }
+
+    /// #628: a new note at the navigator's root went in no vault
+    /// (`Untitled.md`) and was never written.
+    #[test]
+    fn a_new_note_on_the_org_is_always_inside_a_vault() {
+        let vaults = vec!["demo".to_owned(), "team".to_owned()];
+        assert_eq!(org_note_folder("", &vaults, None).as_deref(), Some("demo"));
+        assert_eq!(
+            org_note_folder("", &vaults, Some("team/Plans/a.md")).as_deref(),
+            Some("team")
+        );
+        // An active path outside the vaults is ignored.
+        assert_eq!(
+            org_note_folder("", &vaults, Some("Welcome.md")).as_deref(),
+            Some("demo")
+        );
+        assert_eq!(
+            org_note_folder("team/Plans", &vaults, None).as_deref(),
+            Some("team/Plans")
+        );
+        assert_eq!(org_note_folder("", &[], None), None);
+        let path = untitled_path("demo", |p| p == "demo/Untitled.md").unwrap();
+        assert_eq!(path, "demo/Untitled 2.md");
+        assert_eq!(untitled_path("", |_| false).as_deref(), Some("Untitled.md"));
     }
 
     #[test]

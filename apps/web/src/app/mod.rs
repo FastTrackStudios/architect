@@ -181,7 +181,7 @@ fn WebApp() -> Element {
                 shell::Menu::new()
                     .item("Settings", icon!(Settings2), move |()| settings.show(None))
                     .item("Sign out", icon!(LogOut), move |()| {
-                        crate::browser::sign_out()
+                        crate::browser::sign_out();
                     }),
             ),
     };
@@ -193,15 +193,39 @@ fn WebApp() -> Element {
             .hint("Every command")
             .on_press(move |()| commands.show(Overlay::Palette)),
     ];
+    // What failed on the org's vaults (a read, a new note, the session):
+    // the latest, in the status line, until pressed.
+    let mut problem = use_signal(|| None::<String>);
+    use_hook(|| {
+        if let Some(org) = &web_vault.org {
+            let mut problems = org.problems();
+            spawn(async move {
+                use futures_util::StreamExt as _;
+                while let Some(p) = problems.next().await {
+                    problem.set(Some(p));
+                }
+            });
+        }
+    });
     match &mode {
         Mode::Demo => {}
         Mode::Org { org, .. } => {
             status.retain(|s| s.id != "demo");
             status.insert(
                 0,
-                shell::StatusItem::new("org", format!("{org} · on the node"))
-                    .hint("Your org's vaults: every edit is written to the node"),
+                shell::StatusItem::new("org", format!("{org} · on the node")).hint(
+                    "Your org's vaults: a note's text and new notes are written to the node; \
+                     renaming, moving and deleting are in the desktop app",
+                ),
             );
+            if let Some(p) = problem() {
+                status.insert(
+                    1,
+                    shell::StatusItem::new("problem", format!("⚠ {p}"))
+                        .hint("Press to dismiss")
+                        .on_press(move |()| problem.set(None)),
+                );
+            }
         }
     }
     // A phone's demo: a strip over the top says so, the shell laid out

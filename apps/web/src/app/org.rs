@@ -2,35 +2,45 @@
 //! org lane (`/org/{slug}/vox` on this origin) with the session as the
 //! bearer (the WebSocket's `vox.bearer.<token>` subprotocol, never the
 //! URL). Its `Notes` (`vault_proto::notes`) are listed into the app's
-//! `MemorySource` (each vault a folder), read in the background, and an
-//! edit is written back when the typing rests.
+//! `MemorySource` (each vault a folder) and read in the background.
+//!
+//! The bearer is the issuer's short-lived access token (client
+//! `architect`): the node asks the issuer's `whoami` and org list about
+//! it, and verifies nothing itself. The lane is dialled again with each
+//! renewed token ([`OrgVaults::redial`]); every open note's session moves
+//! to the new lane.
 //!
 //! An open note is live: its body on the lane's `DocSync`
 //! (`crdt::sync::SyncedDoc` on `vault_proto::collab_doc_id`), so typing
 //! here reaches the node's document and file, and another's typing shows
-//! here as it comes ([`LiveNote`]).
+//! here as it comes ([`LiveNote`]). A new note is written with
+//! `Notes::write` before it opens. Renaming, moving and deleting notes,
+//! and their tags and properties, are not sent to the node yet: the
+//! navigator's layout is read-only here ([`NodeLayout`]) and says so.
 //!
 //! Kept in the tab's memory only: a reload lists and reads again (no
-//! IndexedDB/OPFS copy yet), and with the node out of reach nothing is
-//! shown but why.
+//! IndexedDB/OPFS copy yet). What fails is reported ([`OrgVaults::problems`]).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
-
 use std::sync::Arc;
 
 use architect::connect::{Endpoint, Pool};
 use architect_navigator::markdown::note_from_markdown;
-use architect_navigator::{MemorySource, Millis, NavigatorSource as _, NoteFile};
+use architect_navigator::source::{FileOp, FolderMeta, Listener, Subscription};
+use architect_navigator::{MemorySource, Millis, NavigatorSource, NoteFile};
 use crdt::CrdtDoc;
 use crdt::sync::{DocSyncClient, SyncedDoc};
-use futures_channel::mpsc::UnboundedReceiver;
+use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use futures_util::StreamExt as _;
+use futures_util::future::{Either, select};
 use vault_proto::notes::{NoteRef, NotesClient};
 use wasm_bindgen_futures::spawn_local;
 
-/// How long typing rests before it is written to the node, ms.
-const WRITE_AFTER_MS: u32 = 600;
+use crate::live_text::Splice;
+
+/// How long a dropped note session waits before it attaches again, ms.
+const RETRY_MS: u32 = 2_000;
 
 /// The org lane on this origin: `wss://<host>/org/<slug>/vox`.
 #[must_use]
@@ -47,15 +57,42 @@ pub fn lane_url(slug: &str) -> Option<String> {
     ))
 }
 
-/// The org's vaults over its lane.
+/// The lane's clients, as dialled with one token.
 #[derive(Clone)]
-pub struct OrgVaults {
+struct Lane {
     notes: NotesClient,
     sync: DocSyncClient,
-    /// Each pending write's turn: the latest typing wins, written once it
-    /// rests.
-    pending: Rc<RefCell<HashMap<String, u64>>>,
 }
+
+async fn dial(slug: &str, token: String) -> Result<Lane, String> {
+    let url = lane_url(slug).ok_or("no address for the org's lane")?;
+    let at = Endpoint::url(url).with_bearer(token);
+    let pool = Pool::new();
+    let notes: NotesClient = pool
+        .client(&at)
+        .await
+        .map_err(|e| format!("the org's lane: {e}"))?;
+    let sync: DocSyncClient = pool
+        .client(&at)
+        .await
+        .map_err(|e| format!("the org's lane: {e}"))?;
+    Ok(Lane { notes, sync })
+}
+
+struct Inner {
+    slug: String,
+    lane: RefCell<Lane>,
+    /// Each open note's session, woken when the lane is dialled again.
+    redialled: RefCell<Vec<UnboundedSender<()>>>,
+    /// Whoever shows what failed.
+    problems: RefCell<Vec<UnboundedSender<String>>>,
+    /// The vaults, in the order listed.
+    vaults: RefCell<Vec<String>>,
+}
+
+/// The org's vaults over its lane.
+#[derive(Clone)]
+pub struct OrgVaults(Rc<Inner>);
 
 impl OrgVaults {
     /// Dials the lane as the person with `token`.
@@ -64,22 +101,51 @@ impl OrgVaults {
     ///
     /// The lane cannot be reached, or refuses the session.
     pub async fn open(slug: &str, token: String) -> Result<Self, String> {
-        let url = lane_url(slug).ok_or("no address for the org's lane")?;
-        let at = Endpoint::url(url).with_bearer(token);
-        let pool = Pool::new();
-        let notes: NotesClient = pool
-            .client(&at)
-            .await
-            .map_err(|e| format!("the org's lane: {e}"))?;
-        let sync: DocSyncClient = pool
-            .client(&at)
-            .await
-            .map_err(|e| format!("the org's lane: {e}"))?;
-        Ok(Self {
-            notes,
-            sync,
-            pending: Rc::default(),
-        })
+        let lane = dial(slug, token).await?;
+        Ok(Self(Rc::new(Inner {
+            slug: slug.to_owned(),
+            lane: RefCell::new(lane),
+            redialled: RefCell::default(),
+            problems: RefCell::default(),
+            vaults: RefCell::default(),
+        })))
+    }
+
+    /// Dials the lane again with a renewed `token`: what comes next goes
+    /// over it, and every open note's session attaches again on it.
+    ///
+    /// # Errors
+    ///
+    /// The lane cannot be reached with it; the old lane stays.
+    pub async fn redial(&self, token: String) -> Result<(), String> {
+        let lane = dial(&self.0.slug, token).await?;
+        *self.0.lane.borrow_mut() = lane;
+        self.0
+            .redialled
+            .borrow_mut()
+            .retain(|tx| tx.unbounded_send(()).is_ok());
+        Ok(())
+    }
+
+    fn notes(&self) -> NotesClient {
+        self.0.lane.borrow().notes.clone()
+    }
+
+    /// What fails from now on, one message each.
+    #[must_use]
+    pub fn problems(&self) -> UnboundedReceiver<String> {
+        let (tx, rx) = unbounded();
+        self.0.problems.borrow_mut().push(tx);
+        rx
+    }
+
+    /// Says what failed to whoever shows it.
+    pub fn report(&self, problem: impl Into<String>) {
+        let problem = problem.into();
+        self.0
+            .problems
+            .borrow_mut()
+            .retain(|tx| tx.unbounded_send(problem.clone()).is_ok());
     }
 
     /// Every note of the org's vaults, as a vault of folders (one per
@@ -93,96 +159,144 @@ impl OrgVaults {
         name: &str,
         now: Millis,
     ) -> Result<(MemorySource, Vec<NoteRef>), String> {
-        let notes = self.notes.list().await.map_err(|e| e.to_string())?;
+        let notes = self.notes().list().await.map_err(|e| e.to_string())?;
         let mut source = MemorySource::new(name);
         let mut files = Vec::new();
+        let mut vaults: Vec<String> = Vec::new();
         for n in &notes {
+            if !vaults.contains(&n.vault) {
+                vaults.push(n.vault.clone());
+            }
             source = source.with_folder(n.vault.clone());
             if let Some((folder, _)) = n.path.rsplit_once('/') {
                 source = source.with_folder(format!("{}/{folder}", n.vault));
             }
             files.push(NoteFile::new(format!("{}/{}", n.vault, n.path), now, now));
         }
+        *self.0.vaults.borrow_mut() = vaults;
         Ok((source.with_files(files), notes))
     }
 
+    /// The vaults, as listed.
+    #[must_use]
+    pub fn vaults(&self) -> Vec<String> {
+        self.0.vaults.borrow().clone()
+    }
+
     /// Reads each note into `source`, one after another, so the navigator
-    /// fills its previews, tags and tasks as they come.
+    /// fills its previews, tags and tasks as they come. Notes that cannot
+    /// be read are counted and reported once.
     pub fn fill(&self, source: MemorySource, notes: Vec<NoteRef>, now: Millis) {
-        let client = self.notes.clone();
+        let this = self.clone();
         spawn_local(async move {
+            let mut failed = 0_usize;
+            let mut first = None;
             for n in notes {
                 let path = format!("{}/{}", n.vault, n.path);
                 if source.read_text(&path).is_some() {
                     continue;
                 }
-                if let Ok(text) = client.read(n.vault, n.path).await {
-                    source.set_text(note_from_markdown(&path, &text, now, now), text);
+                match this.notes().read(n.vault, n.path).await {
+                    Ok(text) => {
+                        source.set_text(note_from_markdown(&path, &text, now, now), text);
+                    }
+                    Err(e) => {
+                        failed = failed.saturating_add(1);
+                        first.get_or_insert_with(|| format!("{path}: {e}"));
+                    }
                 }
+            }
+            if let Some(first) = first {
+                this.report(format!(
+                    "{failed} note{} could not be read ({first})",
+                    if failed == 1 { "" } else { "s" }
+                ));
             }
         });
     }
 
     /// Reads one note now (opening it before `fill` reached it).
-    pub async fn read(&self, path: &str) -> Option<String> {
-        let (vault, rest) = path.split_once('/')?;
-        self.notes
+    ///
+    /// # Errors
+    ///
+    /// Not a vault's note, or the node did not answer it.
+    pub async fn read(&self, path: &str) -> Result<String, String> {
+        let (vault, rest) = path
+            .split_once('/')
+            .ok_or_else(|| format!("{path} is in no vault"))?;
+        self.notes()
             .read(vault.to_owned(), rest.to_owned())
             .await
-            .ok()
+            .map_err(|e| e.to_string())
     }
 
-    /// Writes `text` as the note at `path` once the typing rests: the
-    /// latest of a run of edits, once.
-    pub fn write_later(&self, path: &str, text: String) {
-        let Some((vault, rest)) = path.split_once('/') else {
-            return;
-        };
-        let (vault, rest) = (vault.to_owned(), rest.to_owned());
-        let turn = {
-            let mut pending = self.pending.borrow_mut();
-            let turn = pending.get(path).copied().unwrap_or(0).wrapping_add(1);
-            pending.insert(path.to_owned(), turn);
-            turn
-        };
-        let (client, pending, key) = (
-            self.notes.clone(),
-            Rc::clone(&self.pending),
-            path.to_owned(),
-        );
-        spawn_local(async move {
-            gloo_timers::future::TimeoutFuture::new(WRITE_AFTER_MS).await;
-            if pending.borrow().get(&key).copied() != Some(turn) {
-                return;
-            }
-            pending.borrow_mut().remove(&key);
-            let _ = client.write(vault, rest, text).await;
-        });
+    /// Makes the note at `path` (`<vault>/<path in it>`), empty, on the
+    /// node: done before it opens, so its live document starts from the
+    /// file.
+    ///
+    /// # Errors
+    ///
+    /// Not inside a vault, or the node refused the write.
+    pub async fn create(&self, path: &str) -> Result<(), String> {
+        let (vault, rest) = path
+            .split_once('/')
+            .filter(|(v, r)| !v.is_empty() && !r.is_empty())
+            .ok_or_else(|| format!("{path} is in no vault"))?;
+        self.notes()
+            .write(vault.to_owned(), rest.to_owned(), String::new())
+            .await
+            .map_err(|e| e.to_string())
     }
-}
 
-impl OrgVaults {
     /// The note at `path` kept live with the node while the returned
-    /// [`LiveNote`] is kept; each change that reaches it (the first catch-up
-    /// too) wakes the receiver.
+    /// [`LiveNote`] is kept; what happens to it comes on the receiver.
+    /// The session attaches again after a drop, and on each re-dial.
     #[must_use]
-    pub fn live(&self, path: &str) -> Option<(LiveNote, UnboundedReceiver<()>)> {
+    pub fn live(&self, path: &str) -> Option<(LiveNote, UnboundedReceiver<Heard>)> {
         let (vault, rest) = path.split_once('/')?;
         let replica = CrdtDoc::ephemeral();
-        let (tx, rx) = futures_channel::mpsc::unbounded::<()>();
-        let attached = tx.clone();
+        let (tx, rx) = unbounded::<Heard>();
+        let (imported, attached) = (tx.clone(), tx.clone());
         let mut synced = SyncedDoc::new(vault_proto::collab_doc_id(vault, rest), replica.clone())
             .on_import(Arc::new(move |_: &[u8]| {
-                let _ = tx.unbounded_send(());
+                let _ = imported.unbounded_send(Heard::Changed);
             }))
             .on_attached(Arc::new(move || {
-                let _ = attached.unbounded_send(());
+                let _ = attached.unbounded_send(Heard::Attached);
             }));
-        let (stop, stopped) = futures_channel::oneshot::channel::<()>();
-        let client = self.sync.clone();
+        let (stop, mut stopped) = futures_channel::oneshot::channel::<()>();
+        let (redial_tx, mut redialled) = unbounded::<()>();
+        self.0.redialled.borrow_mut().push(redial_tx);
+        let this = self.clone();
         spawn_local(async move {
-            let run = std::pin::pin!(synced.run(&client));
-            let _ = futures_util::future::select(run, stopped).await;
+            loop {
+                let client = this.0.lane.borrow().sync.clone();
+                let ended = {
+                    let run = std::pin::pin!(synced.run(&client));
+                    let interrupted = std::pin::pin!(select(&mut stopped, redialled.next()));
+                    match select(run, interrupted).await {
+                        Either::Left((ended, _)) => Some(ended),
+                        // Closed: the note is gone.
+                        Either::Right((Either::Left(_), _)) => return,
+                        // A new lane: attach on it now.
+                        Either::Right((Either::Right(_), _)) => None,
+                    }
+                };
+                if let Some(ended) = ended {
+                    let why = match ended {
+                        Ok(()) => "the node ended the session".to_owned(),
+                        Err(e) => e.to_string(),
+                    };
+                    if tx.unbounded_send(Heard::Lost(why)).is_err() {
+                        return;
+                    }
+                    let wait = gloo_timers::future::TimeoutFuture::new(RETRY_MS);
+                    let interrupted = select(&mut stopped, redialled.next());
+                    if let Either::Right((Either::Left(_), _)) = select(wait, interrupted).await {
+                        return;
+                    }
+                }
+            }
         });
         Some((
             LiveNote {
@@ -192,6 +306,18 @@ impl OrgVaults {
             rx,
         ))
     }
+}
+
+/// What an open note's session says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Heard {
+    /// Caught up with the node: the document holds what the node holds
+    /// (the first time, the note may be edited).
+    Attached,
+    /// Something arrived from the node.
+    Changed,
+    /// The session ended (it attaches again shortly).
+    Lost(String),
 }
 
 /// An open note's body, live with the node; dropped, its session ends.
@@ -210,38 +336,81 @@ impl LiveNote {
             .to_string()
     }
 
-    /// Makes the body read `new`: the span that changed replaced, one
+    /// Applies `ops` (`crate::live_text::rebase`'s) to the body, one
     /// commit, sent to the node.
-    pub fn set_body(&self, new: &str) {
+    pub fn apply(&self, ops: &[Splice]) {
+        if ops.is_empty() {
+            return;
+        }
         let text = self
             .replica
             .loro()
             .get_text(vault_proto::COLLAB_BODY_CONTAINER);
-        let old: Vec<char> = text.to_string().chars().collect();
-        let new: Vec<char> = new.chars().collect();
-        let start = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
-        let tail = old
-            .iter()
-            .rev()
-            .zip(new.iter().rev())
-            .take(old.len().min(new.len()).saturating_sub(start))
-            .take_while(|(a, b)| a == b)
-            .count();
-        let removed = old.len().saturating_sub(start).saturating_sub(tail);
-        let added: String = new
-            .get(start..new.len().saturating_sub(tail))
-            .unwrap_or_default()
-            .iter()
-            .collect();
-        if removed == 0 && added.is_empty() {
-            return;
-        }
-        if removed > 0 {
-            let _ = text.delete(start, removed);
-        }
-        if !added.is_empty() {
-            let _ = text.insert(start, &added);
+        for op in ops {
+            if op.removed > 0 {
+                let _ = text.delete(op.start, op.removed);
+            }
+            if !op.added.is_empty() {
+                let _ = text.insert(op.start, &op.added);
+            }
         }
         self.replica.loro().commit();
+    }
+}
+
+/// The navigator's view of the org's vaults: the notes as listed and
+/// read, read-only. Renames, moves, deletes, tags and properties change
+/// files the node does not take from the browser yet; doing them in the
+/// tab's memory alone would look saved and not be. New notes go through
+/// the app ([`OrgVaults::create`]).
+pub struct NodeLayout(pub MemorySource);
+
+/// Why the navigator does nothing, said where it tried.
+pub const READ_ONLY: &str = "Renaming, moving, deleting, tags and properties are read-only in the \
+                             browser for now: do them in the desktop app. Editing a note's text \
+                             and new notes are saved.";
+
+impl NavigatorSource for NodeLayout {
+    fn name(&self) -> String {
+        self.0.name()
+    }
+    fn folders(&self) -> Vec<String> {
+        self.0.folders()
+    }
+    fn child_order(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+        self.0.child_order()
+    }
+    fn files(&self) -> Vec<NoteFile> {
+        self.0.files()
+    }
+    fn browses_properties(&self) -> bool {
+        self.0.browses_properties()
+    }
+    fn mounts(&self) -> Vec<architect_navigator::Mount> {
+        self.0.mounts()
+    }
+    fn folder_meta(&self) -> std::collections::BTreeMap<String, FolderMeta> {
+        self.0.folder_meta()
+    }
+    fn subscribe(&self, listener: Listener) -> Subscription {
+        self.0.subscribe(listener)
+    }
+    fn resource_url(&self, path: &str) -> Option<String> {
+        self.0.resource_url(path)
+    }
+    fn can_write(&self) -> bool {
+        false
+    }
+    fn write(&self, _ops: &[FileOp]) -> Result<(), String> {
+        Err(READ_ONLY.to_owned())
+    }
+    fn search_text(&self, query: &str) -> Option<Vec<String>> {
+        self.0.search_text(query)
+    }
+    fn search_excerpts(&self, query: &str) -> Option<Vec<(String, String)>> {
+        self.0.search_excerpts(query)
+    }
+    fn read_text(&self, path: &str) -> Option<String> {
+        self.0.read_text(path)
     }
 }
