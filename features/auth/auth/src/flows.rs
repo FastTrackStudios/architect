@@ -4634,18 +4634,40 @@ pub mod email_password {
             assert!(orgs(&web.access_token).await.is_ok());
 
             // Refused: a third party's access token, an id token (its
-            // audience is the client), and a JWT from outside the code flow
-            // (no client, no scope).
-            let bare = auth
-                .issue_jwt(IssueJwt {
-                    session_token: bundle.token.clone(),
+            // audience is the client), and JWTs that carry an access
+            // token's claims but were not minted as one.
+            let session_jwt = |extra: serde_json::Value| {
+                let (auth, session) = (&auth, bundle.token.clone());
+                async move {
+                    auth.sign_session_jwt(session, None, None, Some(extra))
+                        .await
+                        .expect("sign")
+                        .token
+                }
+            };
+            // The web app's own claims, its live grant among them: each
+            // case below changes one thing.
+            let access_claims = auth
+                .verify_jwt(crate::VerifyJwt {
+                    token: web.access_token.clone(),
                     audience: None,
-                    expires_in_seconds: None,
-                    claims_json: Some(r#"{"client_id":"architect","scope":"email"}"#.into()),
                 })
                 .await
-                .expect("issue")
-                .token;
+                .expect("verify")
+                .claims
+                .extra
+                .expect("claims");
+            assert_eq!(access_claims["token_use"], "access");
+            let with = |key: &str, value: serde_json::Value| {
+                let mut claims = access_claims.clone();
+                claims[key] = value;
+                claims
+            };
+            let without = |key: &str| {
+                let mut claims = access_claims.clone();
+                claims.as_object_mut().expect("object").remove(key);
+                claims
+            };
             let plain = auth
                 .issue_jwt(IssueJwt {
                     session_token: bundle.token.clone(),
@@ -4656,19 +4678,89 @@ pub mod email_password {
                 .await
                 .expect("issue")
                 .token;
+            let no_openid = session_jwt(with("scope", serde_json::json!("email"))).await;
+            let id_use = session_jwt(with("token_use", serde_json::json!("id"))).await;
+            let no_use = session_jwt(without("token_use")).await;
+            let no_grant = session_jwt(without("grant")).await;
+            // A grant the issuer never made (or revoked).
+            let dead_grant =
+                session_jwt(with("grant", uuid::Uuid::new_v4().to_string().into())).await;
+            // The same claims as the web app's token pass.
+            assert!(
+                whoami(&session_jwt(access_claims.clone()).await)
+                    .await
+                    .is_ok()
+            );
             for (label, token) in [
                 ("third party", &other.access_token),
                 ("id token", &web.id_token),
-                ("no openid scope", &bare),
+                ("no openid scope", &no_openid),
                 ("no client", &plain),
+                ("token_use id", &id_use),
+                ("no token_use", &no_use),
+                ("no grant", &no_grant),
+                ("a grant not in force", &dead_grant),
             ] {
                 assert!(whoami(token).await.is_err(), "whoami takes the {label}");
                 assert!(orgs(token).await.is_err(), "the org list takes the {label}");
             }
 
+            // `issue_jwt` mints none of an access token's claims (L1).
+            for reserved in ["client_id", "token_use", "grant"] {
+                let refused = auth
+                    .issue_jwt(IssueJwt {
+                        session_token: bundle.token.clone(),
+                        audience: None,
+                        expires_in_seconds: None,
+                        claims_json: Some(format!(r#"{{"{reserved}":"architect"}}"#)),
+                    })
+                    .await;
+                assert!(
+                    matches!(refused, Err(AuthFlowError::InvalidInput(_))),
+                    "issue_jwt set `{reserved}`: {refused:?}"
+                );
+            }
+            // Nor one that outlives its session.
+            let ten_years = auth
+                .issue_jwt(IssueJwt {
+                    session_token: bundle.token.clone(),
+                    audience: None,
+                    expires_in_seconds: Some(10 * 365 * 24 * 3600),
+                    claims_json: None,
+                })
+                .await
+                .expect("issue");
+            assert!(ten_years.expires_at <= bundle.session.expires_at);
+
             // Never at the device, refresh or sign-out calls.
+            let registration = || auth_proto::DeviceRegistration {
+                device_id: uuid::Uuid::new_v4(),
+                name: "phone".into(),
+                platform: "ios".into(),
+                endpoint_id: None,
+                relay_url: None,
+                offer_org: None,
+            };
             assert!(auth.list_devices(&web.access_token).await.is_err());
+            assert!(
+                auth.register_device(&web.access_token, registration())
+                    .await
+                    .is_err()
+            );
+            let device = registration();
+            let device_id = device.device_id;
+            auth.register_device(&bundle.token, device)
+                .await
+                .expect("a session registers a device");
+            assert!(
+                auth.forget_device(&web.access_token, device_id)
+                    .await
+                    .is_err()
+            );
             assert!(auth.list_devices(&bundle.token).await.is_ok());
+            auth.forget_device(&bundle.token, device_id)
+                .await
+                .expect("a session forgets it");
             assert!(
                 auth.refresh_session(crate::RefreshSession {
                     token: web.access_token.clone(),
@@ -4686,6 +4778,32 @@ pub mod email_password {
                 "the access token signed nothing out"
             );
 
+            // The client disabled: its access token is refused.
+            let disabled = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .oidc_client(OidcClientConfig {
+                    disabled: true,
+                    ..client("architect", true)
+                })
+                .storage(auth.storage.clone())
+                .build()
+                .expect("build auth");
+            assert!(
+                auth_proto::AuthService::whoami(&disabled, web.access_token.clone())
+                    .await
+                    .is_err(),
+                "a disabled client's token answered whoami"
+            );
+            assert!(
+                disabled
+                    .list_organizations(ListOrganizations {
+                        session_token: web.access_token.clone(),
+                    })
+                    .await
+                    .is_err()
+            );
+
             // The session signed out, its access token is dead too.
             auth.sign_out(SignOut {
                 token: bundle.token.clone(),
@@ -4694,6 +4812,256 @@ pub mod email_password {
             .expect("sign out");
             assert!(whoami(&web.access_token).await.is_err());
             assert!(orgs(&web.access_token).await.is_err());
+        }
+
+        /// No client may be named like the JWT audience: its id tokens
+        /// would verify as access tokens (#628 L1).
+        #[test]
+        fn a_client_named_like_the_jwt_audience_is_refused() {
+            let built = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .oidc_client(OidcClientConfig {
+                    client_id: "architect-auth".into(),
+                    client_secret: None,
+                    name: "x".into(),
+                    redirect_uris: vec!["https://x.example.com/cb".into()],
+                    scopes: vec!["openid".into()],
+                    public_client: true,
+                    skip_consent: true,
+                    disabled: false,
+                })
+                .storage(MemoryStorage::default())
+                .build();
+            assert!(matches!(
+                built,
+                Err(crate::config::ConfigError::ClientIsJwtAudience(_))
+            ));
+        }
+
+        /// The web app's sign-in (`offline_access`, public client
+        /// `architect`) and a confidential one, as `(auth, session, web
+        /// tokens)`.
+        async fn signed_in_with_refresh() -> (
+            ArchitectAuth<MemoryStorage>,
+            AuthSessionBundle,
+            crate::OidcTokenResponse,
+        ) {
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .oidc_client(OidcClientConfig {
+                    client_id: "architect".into(),
+                    client_secret: None,
+                    name: "Architect".into(),
+                    redirect_uris: vec!["https://app.example.com/auth/callback".into()],
+                    scopes: vec!["openid".into(), "email".into(), "offline_access".into()],
+                    public_client: true,
+                    skip_consent: true,
+                    disabled: false,
+                })
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let bundle = auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: "ada@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    name: None,
+                    username: None,
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("create user");
+            let verifier = "correct-horse-battery-staple-verifier";
+            let redirect = "https://app.example.com/auth/callback".to_owned();
+            let authorization = auth
+                .authorize_oidc(AuthorizeOidc {
+                    session_token: bundle.token.clone(),
+                    client_id: "architect".into(),
+                    redirect_uri: redirect.clone(),
+                    response_type: "code".into(),
+                    scope: Some("openid email offline_access".into()),
+                    state: None,
+                    nonce: None,
+                    code_challenge: Some(
+                        base64::engine::general_purpose::URL_SAFE_NO_PAD
+                            .encode(sha2::Sha256::digest(verifier.as_bytes())),
+                    ),
+                    code_challenge_method: Some("S256".into()),
+                    prompt: None,
+                })
+                .await
+                .expect("authorize");
+            let tokens = auth
+                .exchange_oidc_token(ExchangeOidcToken {
+                    grant_type: "authorization_code".into(),
+                    code: Some(authorization.code),
+                    redirect_uri: Some(redirect),
+                    client_id: "architect".into(),
+                    client_secret: None,
+                    code_verifier: Some(verifier.into()),
+                    refresh_token: None,
+                })
+                .await
+                .expect("exchange");
+            (auth, bundle, tokens)
+        }
+
+        async fn refreshed(
+            auth: &ArchitectAuth<MemoryStorage>,
+            refresh_token: &str,
+        ) -> Result<crate::OidcTokenResponse, AuthFlowError> {
+            auth.exchange_oidc_token(ExchangeOidcToken {
+                grant_type: "refresh_token".into(),
+                code: None,
+                redirect_uri: None,
+                client_id: "architect".into(),
+                client_secret: None,
+                code_verifier: None,
+                refresh_token: Some(refresh_token.to_owned()),
+            })
+            .await
+        }
+
+        /// #628 M2: Sign out in the web app revokes its grant at the
+        /// issuer (RFC 7009). Its refresh token mints nothing more, and
+        /// its access token is refused at `whoami` and the org list. The
+        /// issuer session it signed in from stays, so other apps signed in
+        /// from it stay signed in.
+        // r[verify auth.oidc.revocation]
+        #[tokio::test]
+        async fn revoking_a_web_sign_in_ends_its_refresh_and_access_tokens() {
+            let (auth, bundle, web) = signed_in_with_refresh().await;
+            let refresh = web.refresh_token.clone().expect("offline_access");
+            let whoami = |token: &str| auth_proto::AuthService::whoami(&auth, token.to_owned());
+            assert!(whoami(&web.access_token).await.is_ok());
+
+            // Another client's revocation of it is refused, and changes nothing.
+            assert!(
+                auth.revoke_oidc_token(crate::RevokeOidcToken {
+                    token: refresh.clone(),
+                    client_id: "elsewhere".into(),
+                    client_secret: None,
+                })
+                .await
+                .is_err()
+            );
+            assert!(whoami(&web.access_token).await.is_ok());
+
+            auth.revoke_oidc_token(crate::RevokeOidcToken {
+                token: refresh.clone(),
+                client_id: "architect".into(),
+                client_secret: None,
+            })
+            .await
+            .expect("revoke");
+            assert!(
+                refreshed(&auth, &refresh).await.is_err(),
+                "refreshed after revoke"
+            );
+            assert!(
+                whoami(&web.access_token).await.is_err(),
+                "access token outlived revoke"
+            );
+            assert!(
+                auth.list_organizations(ListOrganizations {
+                    session_token: web.access_token.clone(),
+                })
+                .await
+                .is_err()
+            );
+            assert!(
+                whoami(&bundle.token).await.is_ok(),
+                "the issuer session stays"
+            );
+            // Again, or an unknown token: not an error (RFC 7009 2.2).
+            for token in [refresh.clone(), "not-a-token".to_owned()] {
+                auth.revoke_oidc_token(crate::RevokeOidcToken {
+                    token,
+                    client_id: "architect".into(),
+                    client_secret: None,
+                })
+                .await
+                .expect("revoking a dead token");
+            }
+
+            // Revoking by the access token (no refresh token kept) ends the
+            // grant as well.
+            let (auth, _, web) = signed_in_with_refresh().await;
+            auth.revoke_oidc_token(crate::RevokeOidcToken {
+                token: web.access_token.clone(),
+                client_id: "architect".into(),
+                client_secret: None,
+            })
+            .await
+            .expect("revoke");
+            assert!(
+                auth_proto::AuthService::whoami(&auth, web.access_token.clone())
+                    .await
+                    .is_err()
+            );
+            assert!(
+                refreshed(&auth, &web.refresh_token.expect("offline_access"))
+                    .await
+                    .is_err()
+            );
+        }
+
+        /// #628 M2: a public client's refresh token is single use. Used
+        /// again within a few seconds (two tabs renewing together) it is
+        /// refused and nothing else happens; used again later, someone
+        /// holds a copy, and the whole grant is revoked.
+        // r[verify auth.oidc.refresh-rotation]
+        #[tokio::test]
+        async fn a_refresh_token_rotates_and_a_reused_one_revokes_its_grant() {
+            let (auth, _, web) = signed_in_with_refresh().await;
+            let first = web.refresh_token.clone().expect("offline_access");
+            let second = refreshed(&auth, &first).await.expect("refresh");
+            let second_refresh = second.refresh_token.clone().expect("rotated");
+            assert_ne!(second_refresh, first);
+            // Within the grace: refused, the grant untouched.
+            assert!(
+                refreshed(&auth, &first).await.is_err(),
+                "the old token minted again"
+            );
+            let third = refreshed(&auth, &second_refresh)
+                .await
+                .expect("the new token works");
+            assert!(
+                auth_proto::AuthService::whoami(&auth, third.access_token.clone())
+                    .await
+                    .is_ok()
+            );
+
+            // The used token presented again, past the grace.
+            {
+                let mut inner = auth.storage.inner.lock().expect("lock");
+                for v in inner.verifications.values_mut() {
+                    if v.value_hash.contains("rotated_grant") {
+                        let mut marker: serde_json::Value =
+                            serde_json::from_str(&v.value_hash).expect("json");
+                        marker["at"] = serde_json::json!(0);
+                        v.value_hash = marker.to_string();
+                    }
+                }
+            }
+            assert!(refreshed(&auth, &first).await.is_err());
+            // Every token of the grant is dead: the newest refresh token
+            // and the access token minted with it.
+            assert!(
+                refreshed(&auth, &third.refresh_token.expect("rotated"))
+                    .await
+                    .is_err(),
+                "the grant survived a reused refresh token"
+            );
+            assert!(
+                auth_proto::AuthService::whoami(&auth, third.access_token)
+                    .await
+                    .is_err()
+            );
         }
 
         fn auth_with_oauth_proxy() -> ArchitectAuth<MemoryStorage> {
@@ -12347,6 +12715,11 @@ pub mod jwt {
 
     const DEFAULT_JWT_TTL_SECONDS: i64 = 900;
 
+    /// Claims only the OIDC code flow sets (`issue_oidc_tokens`): what
+    /// tells an access token from an id token or a JWT minted by
+    /// [`ArchitectAuth::issue_jwt`], and which grant it belongs to.
+    pub(crate) const RESERVED_CLAIMS: &[&str] = &["client_id", "token_use", "grant"];
+
     impl<S> ArchitectAuth<S>
     where
         S: AuthStorage,
@@ -12355,9 +12728,52 @@ pub mod jwt {
         // r[impl auth.jwt.claims]
         // r[impl auth.jwt.rotation]
         pub async fn issue_jwt(&self, input: IssueJwt) -> Result<JwtToken, AuthFlowError> {
+            let extra = input
+                .claims_json
+                .map(|claims| {
+                    serde_json::from_str::<serde_json::Value>(&claims)
+                        .map_err(|_| AuthFlowError::InvalidInput("claims_json must be JSON".into()))
+                })
+                .transpose()?;
+            // The claims that make an OIDC token what it is are the code
+            // flow's alone (`issue_oidc_tokens`): a session holder cannot
+            // mint a token that passes for one.
+            if let Some(reserved) = extra
+                .as_ref()
+                .and_then(serde_json::Value::as_object)
+                .and_then(|claims| {
+                    RESERVED_CLAIMS
+                        .iter()
+                        .find(|name| claims.contains_key(**name))
+                })
+            {
+                return Err(AuthFlowError::InvalidInput(format!(
+                    "claims_json may not set `{reserved}`"
+                )));
+            }
+            self.sign_session_jwt(
+                input.session_token,
+                input.audience,
+                input.expires_in_seconds,
+                extra,
+            )
+            .await
+        }
+
+        /// A JWT for the session behind `session_token`, with `extra`
+        /// claims as given (the code flow's own, unchecked). It lives
+        /// `expires_in_seconds` (default 15 minutes), never past the
+        /// session's own end.
+        pub(crate) async fn sign_session_jwt(
+            &self,
+            session_token: String,
+            audience: Option<String>,
+            expires_in_seconds: Option<i64>,
+            extra: Option<serde_json::Value>,
+        ) -> Result<JwtToken, AuthFlowError> {
             let bundle = self
                 .current_session(CurrentSession {
-                    token: input.session_token,
+                    token: session_token,
                 })
                 .await?;
             let key = self
@@ -12368,22 +12784,12 @@ pub mod jwt {
                 .find(|key| key.id == self.config.jwt.active_key_id)
                 .ok_or_else(|| AuthFlowError::Internal("active JWT key missing".into()))?;
             let now = Utc::now();
-            let expires_at = crate::expiry::after(
-                now,
-                input.expires_in_seconds.unwrap_or(DEFAULT_JWT_TTL_SECONDS),
-            );
-            let extra = input
-                .claims_json
-                .map(|claims| {
-                    serde_json::from_str::<serde_json::Value>(&claims)
-                        .map_err(|_| AuthFlowError::InvalidInput("claims_json must be JSON".into()))
-                })
-                .transpose()?;
+            let expires_at =
+                crate::expiry::after(now, expires_in_seconds.unwrap_or(DEFAULT_JWT_TTL_SECONDS))
+                    .min(bundle.session.expires_at);
             let claims = JwtClaims {
                 iss: self.config.jwt.issuer.clone(),
-                aud: input
-                    .audience
-                    .unwrap_or_else(|| self.config.jwt.audience.clone()),
+                aud: audience.unwrap_or_else(|| self.config.jwt.audience.clone()),
                 sub: bundle.user.id.to_string(),
                 sid: bundle.session.id.to_string(),
                 iat: now.timestamp(),
@@ -12486,17 +12892,22 @@ pub mod oidc_provider {
     use sha2::{Digest, Sha256};
 
     use crate::{
-        ArchitectAuth, AuthStorage, CurrentSession, IssueJwt, VerifyJwt,
+        ArchitectAuth, AuthStorage, CurrentSession, VerifyJwt,
         commands::{
             AuthorizeOidc, ExchangeOidcToken, GetOidcUserInfo, OidcAuthorization,
             OidcClientRegistration, OidcDiscovery, OidcTokenResponse, OidcUserInfo,
-            RegisterOidcClient,
+            RegisterOidcClient, RevokeOidcToken,
         },
         config::OidcClientConfig,
         crypto::{generate_token, hash_token},
     };
 
     const SUPPORTED_SCOPES: &[&str] = &["openid", "profile", "email", "offline_access"];
+
+    /// How long a refresh token already exchanged may be presented again
+    /// without its grant being revoked: two tabs of one app renewing at
+    /// the same moment. Past it, a second use means the token was copied.
+    const REFRESH_REUSE_GRACE_SECONDS: i64 = 30;
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
     struct OidcCodeState {
@@ -12507,6 +12918,36 @@ pub mod oidc_provider {
         nonce: Option<String>,
         code_challenge: Option<String>,
         code_challenge_method: Option<String>,
+        /// The grant every token of this sign-in belongs to (one per code
+        /// exchange, kept across refreshes); revoking it ends them all.
+        /// `None` in a code or refresh entry stored before grants.
+        #[serde(default)]
+        grant: Option<String>,
+    }
+
+    /// What a public client's refresh token becomes once exchanged
+    /// (rotated): presented again, it is refused, and past
+    /// [`REFRESH_REUSE_GRACE_SECONDS`] its grant is revoked.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    struct RotatedRefresh {
+        rotated_grant: String,
+        client_id: String,
+        at: i64,
+    }
+
+    /// A stored refresh entry: live, or already used.
+    enum RefreshEntry {
+        Live(OidcCodeState),
+        Rotated(RotatedRefresh),
+    }
+
+    fn refresh_entry(value: &str) -> Result<RefreshEntry, AuthFlowError> {
+        if let Ok(rotated) = serde_json::from_str::<RotatedRefresh>(value) {
+            return Ok(RefreshEntry::Rotated(rotated));
+        }
+        serde_json::from_str::<OidcCodeState>(value)
+            .map(RefreshEntry::Live)
+            .map_err(|_| AuthFlowError::InvalidCredentials)
     }
 
     impl<S> ArchitectAuth<S>
@@ -12523,6 +12964,7 @@ pub mod oidc_provider {
                 userinfo_endpoint: format!("{base_url}/oauth2/userinfo"),
                 jwks_uri: format!("{base_url}/auth/jwt/jwks"),
                 registration_endpoint: format!("{base_url}/oauth2/register"),
+                revocation_endpoint: format!("{base_url}/oauth2/revoke"),
                 scopes_supported: SUPPORTED_SCOPES
                     .iter()
                     .map(|scope| (*scope).into())
@@ -12659,6 +13101,7 @@ pub mod oidc_provider {
                 nonce: input.nonce,
                 code_challenge: input.code_challenge,
                 code_challenge_method: input.code_challenge_method,
+                grant: None,
             };
             self.storage
                 .create_verification(AuthVerificationCreate {
@@ -12764,9 +13207,12 @@ pub mod oidc_provider {
             }
             validate_pkce(&state, input.code_verifier.as_deref())?;
             self.storage.delete_verification(verification.id).await?;
-            self.issue_oidc_tokens(state).await
+            self.issue_oidc_tokens(state)
+                .await
+                .map(|(tokens, _)| tokens)
         }
 
+        // r[impl auth.oidc.refresh-rotation]
         async fn exchange_oidc_refresh_token(
             &self,
             input: ExchangeOidcToken,
@@ -12785,12 +13231,171 @@ pub mod oidc_provider {
             if verification.expires_at <= Utc::now() {
                 return Err(AuthFlowError::InvalidCredentials);
             }
-            let state: OidcCodeState = serde_json::from_str(&verification.value_hash)
-                .map_err(|_| AuthFlowError::InvalidCredentials)?;
+            let state = match refresh_entry(&verification.value_hash)? {
+                RefreshEntry::Live(state) => state,
+                // Used before. Within the grace another tab of the same
+                // app renewed first; past it, someone holds a copy.
+                RefreshEntry::Rotated(rotated) => {
+                    if rotated.client_id == input.client_id
+                        && Utc::now().timestamp().saturating_sub(rotated.at)
+                            > REFRESH_REUSE_GRACE_SECONDS
+                    {
+                        self.revoke_oidc_grant(&rotated.rotated_grant).await?;
+                    }
+                    return Err(AuthFlowError::InvalidCredentials);
+                }
+            };
             if state.client_id != input.client_id {
                 return Err(AuthFlowError::InvalidCredentials);
             }
-            self.issue_oidc_tokens(state).await
+            if let Some(grant) = state.grant.as_deref()
+                && !self.oidc_grant_live(grant).await?
+            {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            // A public client's refresh token is single-use (RFC 9700
+            // 4.14.2): the next one replaces it. A confidential client
+            // proves itself with its secret and keeps the old behaviour.
+            let rotates = self.oidc_client(&input.client_id)?.public_client;
+            if rotates {
+                self.storage.delete_verification(verification.id).await?;
+            }
+            let (response, grant) = self.issue_oidc_tokens(state).await?;
+            if rotates {
+                self.storage
+                    .create_verification(AuthVerificationCreate {
+                        identifier,
+                        value_hash: serde_json::to_string(&RotatedRefresh {
+                            rotated_grant: grant,
+                            client_id: input.client_id,
+                            at: Utc::now().timestamp(),
+                        })
+                        .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
+                        expires_at: verification.expires_at,
+                    })
+                    .await?;
+            }
+            Ok(response)
+        }
+
+        /// RFC 7009: ends the grant `input.token` belongs to (a refresh
+        /// token, used or not, or an access token), so neither its refresh
+        /// tokens nor its access tokens are taken any more. The issuer
+        /// session the person signed in with stays: other apps signed in
+        /// from it are not signed out. A token that is unknown, expired or
+        /// already revoked is not an error.
+        ///
+        /// # Errors
+        ///
+        /// The client's credentials are wrong, or the token was issued to
+        /// another client.
+        // r[impl auth.oidc.revocation]
+        pub async fn revoke_oidc_token(&self, input: RevokeOidcToken) -> Result<(), AuthFlowError> {
+            self.validate_oidc_client_secret(&input.client_id, input.client_secret.as_deref())?;
+            let identifier = oidc_refresh_identifier(&self.config.secret, &input.token);
+            if let Some(entry) = self
+                .storage
+                .find_latest_verification_by_identifier(&identifier)
+                .await?
+            {
+                let (client_id, grant) = match refresh_entry(&entry.value_hash)? {
+                    RefreshEntry::Live(state) => (state.client_id, state.grant),
+                    RefreshEntry::Rotated(rotated) => {
+                        (rotated.client_id, Some(rotated.rotated_grant))
+                    }
+                };
+                if client_id != input.client_id {
+                    return Err(AuthFlowError::PermissionDenied);
+                }
+                self.storage.delete_verification(entry.id).await?;
+                if let Some(grant) = grant {
+                    self.revoke_oidc_grant(&grant).await?;
+                }
+                return Ok(());
+            }
+            // An access token: its signature is enough to name its grant
+            // (a token whose session already ended is dead anyway).
+            let Ok(verification) = self
+                .verify_jwt(VerifyJwt {
+                    token: input.token,
+                    audience: None,
+                })
+                .await
+            else {
+                return Ok(());
+            };
+            let claim = |name: &str| {
+                verification
+                    .claims
+                    .extra
+                    .as_ref()
+                    .and_then(|extra| extra.get(name))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            };
+            if let Some(grant) = claim("grant") {
+                if claim("client_id").as_deref() != Some(input.client_id.as_str()) {
+                    return Err(AuthFlowError::PermissionDenied);
+                }
+                self.revoke_oidc_grant(&grant).await?;
+            }
+            Ok(())
+        }
+
+        /// Whether grant `grant` is still in force: not revoked, and used
+        /// within the refresh token's lifetime.
+        pub(crate) async fn oidc_grant_live(&self, grant: &str) -> Result<bool, AuthFlowError> {
+            Ok(self
+                .storage
+                .find_latest_verification_by_identifier(&oidc_grant_identifier(
+                    &self.config.secret,
+                    grant,
+                ))
+                .await?
+                .is_some_and(|record| record.expires_at > Utc::now()))
+        }
+
+        /// Keeps grant `grant` in force for another refresh token's (or,
+        /// longer, access token's) lifetime from now.
+        async fn keep_oidc_grant(&self, grant: &str) -> Result<(), AuthFlowError> {
+            let identifier = oidc_grant_identifier(&self.config.secret, grant);
+            let previous = self
+                .storage
+                .find_latest_verification_by_identifier(&identifier)
+                .await?;
+            self.storage
+                .create_verification(AuthVerificationCreate {
+                    identifier,
+                    value_hash: String::new(),
+                    expires_at: crate::expiry::expires_in(
+                        self.config
+                            .oidc
+                            .refresh_token_ttl_seconds
+                            .max(self.config.oidc.access_token_ttl_seconds),
+                    ),
+                })
+                .await?;
+            if let Some(previous) = previous {
+                self.storage.delete_verification(previous.id).await?;
+            }
+            Ok(())
+        }
+
+        async fn revoke_oidc_grant(&self, grant: &str) -> Result<(), AuthFlowError> {
+            let identifier = oidc_grant_identifier(&self.config.secret, grant);
+            // `keep_oidc_grant` leaves one record; a few more if two
+            // renewals raced.
+            for _ in 0..8 {
+                let Some(record) = self
+                    .storage
+                    .find_latest_verification_by_identifier(&identifier)
+                    .await?
+                else {
+                    break;
+                };
+                self.storage.delete_verification(record.id).await?;
+            }
+            Ok(())
         }
 
         fn validate_oidc_client_secret(
@@ -12808,30 +13413,43 @@ pub mod oidc_provider {
             Ok(())
         }
 
+        /// The tokens of grant `state.grant` (a new grant on a code
+        /// exchange): an access token and an id token, told apart by
+        /// `token_use`, and a refresh token with `offline_access`. Also
+        /// the grant's id.
         async fn issue_oidc_tokens(
             &self,
-            state: OidcCodeState,
-        ) -> Result<OidcTokenResponse, AuthFlowError> {
-            let extra = json!({
-                "scope": state.scope.clone(),
-                "client_id": state.client_id.clone(),
-                "nonce": state.nonce.clone(),
-            });
-            let access_token = self
-                .issue_jwt(IssueJwt {
-                    session_token: state.session_token.clone(),
-                    audience: None,
-                    expires_in_seconds: Some(self.config.oidc.access_token_ttl_seconds),
-                    claims_json: Some(extra.to_string()),
+            mut state: OidcCodeState,
+        ) -> Result<(OidcTokenResponse, String), AuthFlowError> {
+            let grant = state
+                .grant
+                .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
+                .clone();
+            self.keep_oidc_grant(&grant).await?;
+            let claims = |token_use: &str| {
+                json!({
+                    "scope": state.scope.clone(),
+                    "client_id": state.client_id.clone(),
+                    "nonce": state.nonce.clone(),
+                    "grant": grant.clone(),
+                    "token_use": token_use,
                 })
+            };
+            let access_token = self
+                .sign_session_jwt(
+                    state.session_token.clone(),
+                    None,
+                    Some(self.config.oidc.access_token_ttl_seconds),
+                    Some(claims("access")),
+                )
                 .await?;
             let id_token = self
-                .issue_jwt(IssueJwt {
-                    session_token: state.session_token.clone(),
-                    audience: Some(state.client_id.clone()),
-                    expires_in_seconds: Some(self.config.oidc.access_token_ttl_seconds),
-                    claims_json: Some(extra.to_string()),
-                })
+                .sign_session_jwt(
+                    state.session_token.clone(),
+                    Some(state.client_id.clone()),
+                    Some(self.config.oidc.access_token_ttl_seconds),
+                    Some(claims("id")),
+                )
                 .await?;
             let refresh_token = if state
                 .scope
@@ -12854,14 +13472,17 @@ pub mod oidc_provider {
             } else {
                 None
             };
-            Ok(OidcTokenResponse {
-                access_token: access_token.token,
-                id_token: id_token.token,
-                refresh_token,
-                token_type: "Bearer".into(),
-                expires_in: self.config.oidc.access_token_ttl_seconds,
-                scope: state.scope,
-            })
+            Ok((
+                OidcTokenResponse {
+                    access_token: access_token.token,
+                    id_token: id_token.token,
+                    refresh_token,
+                    token_type: "Bearer".into(),
+                    expires_in: self.config.oidc.access_token_ttl_seconds,
+                    scope: state.scope,
+                },
+                grant,
+            ))
         }
     }
 
@@ -12922,6 +13543,10 @@ pub mod oidc_provider {
 
     fn oidc_refresh_identifier(secret: &str, refresh_token: &str) -> String {
         format!("oidc-refresh:{}", hash_token(secret, refresh_token))
+    }
+
+    fn oidc_grant_identifier(secret: &str, grant: &str) -> String {
+        format!("oidc-grant:{}", hash_token(secret, grant))
     }
 }
 pub mod anonymous {
@@ -15409,6 +16034,18 @@ pub mod organizations {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|scope| scope.split_whitespace().any(|s| s == "openid"));
             if !openid {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            // An access token, not an id token (or anything else the issuer
+            // signs), of a grant that was not revoked (sign-out).
+            if extra.get("token_use").and_then(serde_json::Value::as_str) != Some("access") {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let grant = extra
+                .get("grant")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if !self.oidc_grant_live(grant).await? {
                 return Err(AuthFlowError::InvalidCredentials);
             }
             let user_id: uuid::Uuid = verification

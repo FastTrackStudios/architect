@@ -517,6 +517,17 @@ impl<S> ArchitectAuthBuilder<S> {
             });
         }
 
+        let jwt_audience = self.jwt_audience.unwrap_or_else(|| "architect-auth".into());
+        // A client named like the JWT audience would get id tokens that
+        // verify as access tokens (an id token's audience is its client).
+        if let Some(client) = self
+            .oidc_clients
+            .iter()
+            .find(|client| client.client_id == jwt_audience)
+        {
+            return Err(ConfigError::ClientIsJwtAudience(client.client_id.clone()));
+        }
+
         let base_url = self
             .base_url
             .unwrap_or_else(|| "http://localhost:3000".into());
@@ -548,7 +559,7 @@ impl<S> ArchitectAuthBuilder<S> {
                 sms: self.sms,
                 jwt: JwtConfig {
                     issuer: self.jwt_issuer.unwrap_or_else(|| "architect-auth".into()),
-                    audience: self.jwt_audience.unwrap_or_else(|| "architect-auth".into()),
+                    audience: jwt_audience,
                     active_key_id: jwt_active_key_id,
                     keys: jwt_keys,
                 },
@@ -593,4 +604,8 @@ pub enum ConfigError {
     MissingSecret,
     #[error("auth secret must be at least 32 bytes")]
     SecretTooShort,
+    #[error(
+        "OIDC client `{0}` has the JWT audience as its id: its id tokens would pass for access tokens"
+    )]
+    ClientIsJwtAudience(String),
 }
