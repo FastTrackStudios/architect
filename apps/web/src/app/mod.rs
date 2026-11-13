@@ -71,12 +71,14 @@ pub enum Mode {
         /// The org's slug.
         org: String,
     },
-    /// A share link's guest (#629, #669): the link's notes as its node
-    /// hands them, no vault, nothing signed in (`guest`). Internal for
-    /// now: `/app/#share=<code>`; #646 serves it at `/s/<code>/`.
+    /// A share link's guest (#629, #646): `/s/<code>/…`, the link's notes
+    /// as its node hands them, no vault (`guest`).
     Guest {
         /// The link's code.
         code: String,
+        /// The path below the link it was opened at (`/`, `/joy/`,
+        /// `/_files/`).
+        rest: String,
     },
 }
 
@@ -182,11 +184,15 @@ fn WebApp() -> Element {
         move || settings.show(None),
     );
     let demo = matches!(mode, Mode::Demo);
+    let guest = matches!(mode, Mode::Guest { .. });
     // The card's art: an item's `art` (a vault path) as the demo vault's
-    // image, a `data:` URL (`crate::demo::image_url`).
+    // image, a `data:` URL (`crate::demo::image_url`); a share link's, the
+    // link's own file (`guest::file_url`).
     let art = use_callback(move |p: String| {
         if demo {
             crate::demo::image_url(&p)
+        } else if guest {
+            guest::file_url(&p)
         } else {
             None
         }
@@ -243,14 +249,17 @@ fn WebApp() -> Element {
                         crate::browser::sign_out();
                     }),
             ),
-        Mode::Guest { .. } => {
-            shell::Account::new("Guest")
-                .detail("A shared link")
-                .menu(
-                    shell::Menu::new()
-                        .item("Settings", icon!(Settings2), move |()| settings.show(None)),
-                )
-        }
+        // Signed in or not, a link opens as its guest; "Sign in" goes to
+        // the person's own vaults (`/app/`).
+        Mode::Guest { .. } => shell::Account::new("Guest").detail("A shared link").menu(
+            shell::Menu::new()
+                .item("Sign in", icon!(LogIn), move |()| {
+                    if let Some(w) = web_sys::window() {
+                        let _ = w.location().assign(crate::APP);
+                    }
+                })
+                .item("Settings", icon!(Settings2), move |()| settings.show(None)),
+        ),
     };
     let mut status = vec![
         shell::StatusItem::new("demo", "Demo: nothing is saved")
@@ -351,8 +360,8 @@ fn WebApp() -> Element {
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
                         now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art } },
-                        if let Mode::Guest { code } = &mode {
-                            guest::GuestPage { code: code.clone() }
+                        if let Mode::Guest { code, rest } = &mode {
+                            guest::GuestPage { code: code.clone(), rest: rest.clone() }
                         } else {
                             vault::VaultPage {}
                         }

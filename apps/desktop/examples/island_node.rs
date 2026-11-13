@@ -1,5 +1,5 @@
-//! A node with an island (studio#445), for the browser test
-//! `apps/web/test/share-island.test.mjs`: as `architect-desktop serve`
+//! A node with an island (studio#445), for the web app's browser tests
+//! (`apps/web/test/app-*.test.mjs`): as `architect-desktop serve`
 //! starts one (its config from `ARCHITECT_*`), and with the built web
 //! folder at `ARCHITECT_ISLAND_FOLDER` as an island, its view
 //! `ARCHITECT_ISLAND_VIEW` in both slots of the now-playing view, its
@@ -18,8 +18,7 @@
 //! the first, from the same variables with `ARCHITECT_ISLAND2_` (its
 //! folder `ARCHITECT_ISLAND2_FOLDER`). `ARCHITECT_FAVOURITES` names a
 //! TOML file of `[[favourites]]` and the `[by]` that declared them (a
-//! distribution's compiled-in extensions' declarations: a share page's
-//! phone shell, `apps/web/test/share-layout.test.mjs`; the web app's
+//! distribution's compiled-in extensions' declarations: the web app's
 //! listing, `apps/web/test/app-favourites.test.mjs`).
 //! An island or favourites are otherwise only what a distribution links
 //! in: this is a test's stand-in, never a node's configuration.
@@ -88,7 +87,7 @@ fn island(prefix: &str, folder: &str) -> SiteIsland {
     if let Ok(sheet) = var("SHEET") {
         island = island.stylesheet(sheet);
     }
-    // The operator's grant of WebRTC (`share-webview.test.mjs`): it takes
+    // The operator's grant of WebRTC (`SiteIsland::grant_webrtc`): it takes
     // effect only when the island's manifest declares it too.
     if var("WEBRTC").is_ok_and(|v| v == "1") {
         island = island.grant_webrtc();

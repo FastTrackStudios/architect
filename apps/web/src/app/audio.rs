@@ -66,8 +66,12 @@ pub fn media_url(path: &str) -> Option<String> {
     if !architect_playhead::model::vault_path(path) {
         return None;
     }
-    DEMO.contains(&path)
-        .then(|| "/app/demo-recording.mp3".to_owned())
+    if DEMO.contains(&path) {
+        return Some("/app/demo-recording.mp3".to_owned());
+    }
+    // A share link's recording: the link's own URL for a file it serves
+    // (`guest::file_url`), checked by the node as every request for it.
+    super::guest::file_url(path).filter(|_| crate::guest_view::plays(path))
 }
 
 /// The audio element, as a clock.

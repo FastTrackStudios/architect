@@ -5,7 +5,7 @@
 // carried in `_site/site.<hash>.js`), on
 // - a Site the node serves (`ARCHITECT_SITES`), and
 // - a static Site (`architect site serve`, the same site router).
-// `just share-player-test` runs it (ARCHITECT_DESKTOP, ARCHITECT_CLI).
+// `just site-player-test` runs it (ARCHITECT_DESKTOP, ARCHITECT_CLI).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -19,7 +19,7 @@ function firefox() {
   try { return execFileSync('sh', ['-c', 'command -v firefox']).toString().trim() || null; } catch { return null; }
 }
 const cli = process.env.ARCHITECT_CLI;
-const skip = desktop && cli && firefox() ? false : 'needs ARCHITECT_DESKTOP and ARCHITECT_CLI (just share-player-test) and a Firefox (FIREFOX=…)';
+const skip = desktop && cli && firefox() ? false : 'needs ARCHITECT_DESKTOP and ARCHITECT_CLI (just site-player-test) and a Firefox (FIREFOX=…)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function put(root, rel, body) {

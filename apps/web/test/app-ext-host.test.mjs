@@ -10,8 +10,8 @@
 // `[[embeds]]`) in a frame of the island's bundle at the note's head,
 // handed the note and its playhead source as data.
 //
-// The share page's probes (apps/web/test/share-webview.test.mjs), now in
-// the app, and the app's own rules (#495 Constraints):
+// The probes the node-rendered share page's suite ran (retired with the
+// page, #646), in the app, and the app's own rules (#495 Constraints):
 //
 // - every way out of the frame (fetch, WebSocket, beacon, images, CSS,
 //   links, `<a ping>`, popups, top navigation, WebRTC/STUN, child frames

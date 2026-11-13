@@ -6,8 +6,9 @@
 // folder (a share note seeded in its vault) and drawing setlists with an
 // island whose `list` view reports what it was handed.
 //
-// `/app/#share=<code>`, the app as the link's guest (the internal entry
-// #646 builds on), at 390 px wide:
+// `/s/<code>/set/`, the app as the link's guest at the setlist's page
+// (#646: the node answers the link's pages with the app's page), at 390 px
+// wide:
 //
 // - with `reads = ["documents", "files"]`: the setlist's view is handed its
 //   text as the link's build wrote it (no `%%comments%%`, no link past the
@@ -261,10 +262,9 @@ async function asGuest(reads, shot) {
   const f = await front(n.origin);
   const b = await firefox();
   try {
-    await b.go(`${f.origin}/app/#share=${CODE}`);
+    await b.go(`${f.origin}/s/${CODE}/set/`);
     await until(() => b.eval(`!!document.querySelector('[data-testid=guest-note]')`), 60000, 'the guest note');
-    // The setlist, from the link's notes.
-    await until(() => b.eval(`(() => { const e = document.querySelector('[data-guest-note="Merry and Bright"]'); if (!e) return false; e.click(); return true; })()`), 10000, 'the setlist in the link\'s notes');
+    // The setlist's page opens the setlist.
     await until(() => b.eval(`(document.querySelector('[data-testid=guest-note] h2') || {}).textContent === 'Merry and Bright'`), 15000, 'the setlist note');
     const got = await until(async () => { const r = await report(b); return r === undefined ? null : { r }; }, 30000, 'the view\'s report').catch(async (e) => {
       const why = await b.eval(`JSON.stringify({ frames: [...document.querySelectorAll('[data-testid=ext-frame]')].map((x) => ({ view: x.dataset.extView, state: x.dataset.extState, why: x.dataset.extWhy })), embed: !!document.querySelector('[data-testid=note-embed]'), note: (document.querySelector('[data-testid=guest-note]') || {}).outerHTML?.slice(0, 600) })`).catch((x) => x.message);
