@@ -65,10 +65,17 @@ fn frame_theme() -> FrameTheme {
     }
 }
 
+/// How the app shows an item's `art` (a vault path): the image as a
+/// `data:` URL, or `None` where it has none to show. Provided by the app
+/// beside the Now Playing card's own (`app::App`): the demo's vault in
+/// demo mode, nothing signed in, so a frame and the card always agree.
+#[derive(Clone, Copy)]
+pub struct ArtSource(pub Callback<String, Option<String>>);
+
 /// Source `source`'s state on the deck, flat (#589), with the note: what
 /// a view is handed. Before its extension set a source, the state of an
 /// empty one.
-fn props_of(source: &str, note: &Value) -> Value {
+fn props_of(source: &str, note: &Value, art: Option<ArtSource>) -> Value {
     let now = architect_playhead::now_ms();
     let mut s = architect_playhead::with(|d| d.state(source, now)).unwrap_or_else(|| {
         json!({
@@ -78,7 +85,9 @@ fn props_of(source: &str, note: &Value) -> Value {
             "title": null, "subtitle": null, "artist": null, "sections": [],
         })
     });
-    with_art(&mut s);
+    if let Some(ArtSource(art)) = art {
+        with_art(&mut s, |p| art.call(p.to_owned()));
+    }
     if let Some(o) = s.as_object_mut() {
         o.insert("note".to_owned(), note.clone());
     }
@@ -86,12 +95,13 @@ fn props_of(source: &str, note: &Value) -> Value {
 }
 
 /// Each item's art the app can show (`item` and every `queue` item with
-/// `art`, a vault path) as `art_src`, an image's `data:` URL
-/// (`crate::demo::image_url`): a frame has no network and its policy
-/// allows `img-src data:` only, so the app hands it the image itself.
-fn with_art(state: &mut Value) {
+/// `art`, a vault path) as `art_src`, an image's `data:` URL from
+/// `resolve` (the app's [`ArtSource`]): a frame has no network and its
+/// policy allows `img-src data:` only, so the app hands it the image
+/// itself.
+fn with_art(state: &mut Value, resolve: impl Fn(&str) -> Option<String>) {
     let add = |i: &mut Value| {
-        let src = i["art"].as_str().and_then(crate::demo::image_url);
+        let src = i["art"].as_str().and_then(&resolve);
         if let (Some(src), Some(o)) = (src, i.as_object_mut()) {
             o.insert("art_src".to_owned(), Value::from(src));
         }
@@ -170,10 +180,11 @@ pub fn Embedded(
     #[props(default)] pane: bool,
 ) -> Element {
     let note = use_memo(use_reactive((&note,), |(n,)| n));
+    let art = try_use_context::<ArtSource>();
     let source = bundle.island.id.clone();
     let mut state = use_signal({
         let source = source.clone();
-        move || props_of(&source, &note.peek())
+        move || props_of(&source, &note.peek(), art)
     });
     // On every change of the deck, and ten times a second while it plays.
     {
@@ -188,7 +199,7 @@ pub fn Embedded(
                     let playing = state.peek()["playing"] == json!(true);
                     if playing || rev != seen {
                         seen = rev;
-                        state.set(props_of(&source, &note.peek()));
+                        state.set(props_of(&source, &note.peek(), art));
                     }
                 }
             }
@@ -197,7 +208,7 @@ pub fn Embedded(
     // A new note: handed at once.
     {
         let source = source.clone();
-        use_effect(move || state.set(props_of(&source, &note())));
+        use_effect(move || state.set(props_of(&source, &note(), art)));
     }
     let props = use_memo(move || state());
     let theme = frame_theme();
