@@ -83,7 +83,11 @@ fn folder_name(out: &Path) -> String {
 pub fn write(site: &Site, out: &Path) -> Result<Report, WriteError> {
     ensure_replaceable(out)?;
     let data = data_dir(out);
-    ensure_replaceable(&data)?;
+    // Only a build with page data claims `<out>.data`; without it a folder
+    // of that name is left alone unless this build wrote it (its marker).
+    if site.page_data {
+        ensure_replaceable(&data)?;
+    }
     let staging = fresh_staging(out)?;
     let mut report = Report {
         out: out.to_path_buf(),
@@ -97,7 +101,7 @@ pub fn write(site: &Site, out: &Path) -> Result<Report, WriteError> {
         let data_staging = fresh_staging(&data)?;
         write_data(site, &data_staging)?;
         swap(&data_staging, &data, false)?;
-    } else if data.exists() {
+    } else if data.join(MARKER).exists() {
         remove(&data)?;
     }
     swap(&staging, out, true)?;
