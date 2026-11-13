@@ -21,7 +21,7 @@ use architect_workspace::{
     Workspace, WorkspaceView, use_pane,
 };
 use dioxus::prelude::*;
-use lucide_dioxus::{FileText, Files, Layers, SquarePen};
+use lucide_dioxus::{FileText, Files, Layers, Puzzle, SquarePen};
 
 /// ⌘K's (and a phone's bar's) New note.
 pub const NEW_NOTE: &str = "VAULT_NEW_NOTE";
@@ -30,6 +30,10 @@ pub const FILES: &str = "VAULT_FILES";
 
 /// The view a note of the vault is; its pane's state is the note's path.
 const NOTE: &str = "vault.note";
+
+/// The view an island's view on a note is (a favourite's `{view}`, #607);
+/// its pane's state is `crate::favourites::frame_state`.
+const FRAME: &str = "ext.frame";
 
 /// Whether a note of the demo was edited or made since the page loaded:
 /// leaving the demo then asks first (`super::sign_in`).
@@ -102,6 +106,90 @@ pub struct VaultWorkspace(Signal<Workspace>);
 /// The Vault's workspace over `vault`, in context; call above the shell.
 pub fn use_vault_workspace(vault: &MemorySource) -> VaultWorkspace {
     use_context_provider(|| VaultWorkspace(Signal::new(first_workspace(vault))))
+}
+
+impl VaultWorkspace {
+    /// The workspace itself.
+    #[must_use]
+    pub const fn signal(&self) -> Signal<Workspace> {
+        self.0
+    }
+}
+
+/// The note on show: the document on show's note (a note's pane, or an
+/// island's view on one), its path and its `type` property.
+#[must_use]
+pub fn note_on_show(w: &Workspace, vault: &MemorySource) -> Option<(String, Option<String>)> {
+    let pane = w.current_document().and_then(|id| w.pane(id))?;
+    let path = match pane.view.0.as_str() {
+        NOTE => pane.state.clone(),
+        FRAME => crate::favourites::read_frame_state(&pane.state)?
+            .2
+            .to_owned(),
+        _ => return None,
+    };
+    if !is_note(&path) {
+        return None;
+    }
+    let text = vault.read_text(&path)?;
+    let ty = note_from_markdown(&path, &text, 0, 0)
+        .properties
+        .into_iter()
+        .find(|(k, _)| k == "type")
+        .and_then(|(_, v)| match v {
+            PropertyValue::Text(t) => Some(t.trim().to_owned()),
+            _ => None,
+        })
+        .filter(|t| !t.is_empty());
+    Some((path, ty))
+}
+
+/// The island view on show, when the document on show is one:
+/// `(island, view, note)`.
+#[must_use]
+pub fn frame_on_show(w: &Workspace) -> Option<(String, String, String)> {
+    let pane = w.current_document().and_then(|id| w.pane(id))?;
+    (pane.view.0 == FRAME)
+        .then(|| crate::favourites::read_frame_state(&pane.state))
+        .flatten()
+        .map(|(i, v, n)| (i.to_owned(), v.to_owned(), n.to_owned()))
+}
+
+/// Island `island`'s view `view` on note `note`, titled `title`: its pane
+/// forward when one is open, else a new tab beside the note.
+pub fn open_frame(
+    mut workspace: Signal<Workspace>,
+    island: &str,
+    view: &str,
+    note: &str,
+    title: &str,
+) {
+    let state = crate::favourites::frame_state(island, view, note);
+    let open = workspace
+        .read()
+        .panes
+        .iter()
+        .find(|p| p.view.0 == FRAME && p.state == state)
+        .map(|p| p.id.clone());
+    if let Some(id) = open {
+        let _ = workspace.write().activate(&id);
+        return;
+    }
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut pane = Pane::new(
+        format!("frame-{n}"),
+        FRAME,
+        format!("{title} · {}", title_of(note)),
+    );
+    pane.state = state;
+    open_in_main(workspace, pane, Target::Tab);
+}
+
+/// Note `path` on show (a favourite's `page` or `{place}`).
+pub fn show(workspace: Signal<Workspace>, path: &str) {
+    show_note(workspace, path, Target::Tab);
 }
 
 fn note_pane(path: &str) -> Pane {
@@ -230,6 +318,7 @@ fn views() -> Views {
                 .home(Target::Dock(Side::Left)),
         )
         .view(View::new(NOTE, "Note", |_| rsx! { NoteView {} }).icon(icon!(FileText)))
+        .view(View::new(FRAME, "Extension view", |_| rsx! { FrameView {} }).icon(icon!(Puzzle)))
 }
 
 fn screen_class(screen: &Screen) -> FormClass {
@@ -417,6 +506,46 @@ fn NoteView() -> Element {
     rsx! {
         for id in [id] {
             WebNote { key: "{id}", path: path.clone() }
+        }
+    }
+}
+
+/// An island's view on a note (a favourite's `{view}`), filling its pane,
+/// driven by the note's playhead as beside the note (`super::song`).
+#[component]
+fn FrameView() -> Element {
+    let pane = use_pane();
+    let state = pane.state();
+    let vault = use_context::<WebVault>();
+    let t = use_shell().theme;
+    let Some((island, view, note)) = crate::favourites::read_frame_state(&state) else {
+        return rsx! {};
+    };
+    let Some(text) = vault.source.read_text(note) else {
+        return rsx! {
+            div { style: "flex: 1; padding: 32px; color: {t.ink_3};", p { "{title_of(note)} is no longer in the vault." } }
+        };
+    };
+    let (_, body) = architect_navigator::markdown::split_block(&text);
+    let properties = note_from_markdown(note, &text, 0, 0).properties;
+    let prop = |name: &str| {
+        properties
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| shown(v))
+    };
+    let key = state.clone();
+    rsx! {
+        div { key: "{key}", style: "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; color: {t.ink};",
+            document::Style { {super::song::LAYOUT} }
+            super::song::SongViews {
+                title: prop("title").unwrap_or_else(|| title_of(note)),
+                artist: prop("artist").unwrap_or_default(),
+                body: body.to_owned(),
+                duration: prop("duration"),
+                island: Some(island.to_owned()),
+                only: Some(view.to_owned()),
+            }
         }
     }
 }

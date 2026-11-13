@@ -5,6 +5,7 @@ bpm: 72
 artist: John Newton
 duration: "1:10"
 tags: [song]
+type: song
 album: "[[Projects/Album/project|Album]]"
 sort_index: 3
 ---

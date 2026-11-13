@@ -618,6 +618,8 @@ clone
 id 85
 push 85
 attr aria-label None "Inbox"
+attr data-tab None "inbox"
+attr aria-current None "page"
 attr style None "position: relative; flex: 1 1 0; height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: none; border-radius: 23px; background: rgba(255,255,255,0.10); color: #e4e4e7; font-family: Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; font-size: 11px; font-weight: 650;"
 listen click
 pop
@@ -652,6 +654,8 @@ clone
 id 90
 push 90
 attr aria-label None "Tasks"
+attr data-tab None "tasks"
+attr aria-current None "false"
 attr style None "position: relative; flex: 1 1 0; height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: none; border-radius: 23px; background: transparent; color: #8f8f99; font-family: Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; font-size: 11px; font-weight: 650;"
 listen click
 pop
