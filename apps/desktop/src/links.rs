@@ -129,7 +129,8 @@ pub fn register(
 /// it, then renamed over it, so a crash or a full disk never leaves half a
 /// `mimeapps.list` (which every other app's defaults live in too). A
 /// symlinked file (a dotfiles manager's) is written where it points, and
-/// the link kept.
+/// the link kept. The file keeps its mode (a private `0600` list stays
+/// private); a new one gets the umask's.
 fn replace(path: &Path, text: &str) -> Result<(), String> {
     use std::io::Write as _;
     let at = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
@@ -147,7 +148,11 @@ fn replace(path: &Path, text: &str) -> Result<(), String> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let temp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+    let kept = std::fs::metadata(&target).ok().map(|m| m.permissions());
     let written = std::fs::File::create(&temp).and_then(|mut f| {
+        if let Some(mode) = kept {
+            f.set_permissions(mode)?;
+        }
         f.write_all(text.as_bytes())?;
         f.sync_all()
     });
@@ -280,5 +285,29 @@ mod tests {
         let list = std::fs::read_to_string(&real).unwrap();
         assert!(list.contains("text/html=firefox.desktop"), "{list}");
         assert!(list.contains("x-scheme-handler/architect="), "{list}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_rewritten_list_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let (data, config) = (tmp.path().join("data"), tmp.path().join("config"));
+        std::fs::create_dir_all(&config).unwrap();
+        let list = config.join("mimeapps.list");
+        std::fs::write(&list, "[Default Applications]\ntext/html=firefox.desktop\n").unwrap();
+        std::fs::set_permissions(&list, std::fs::Permissions::from_mode(0o600)).unwrap();
+        register(
+            "Architect",
+            "app.fasttrackstudio.architect",
+            Path::new("/usr/bin/architect-desktop"),
+            &data,
+            &config,
+        )
+        .unwrap();
+        let mode = std::fs::metadata(&list).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o600, "{mode:o}");
+        let text = std::fs::read_to_string(&list).unwrap();
+        assert!(text.contains("x-scheme-handler/architect="), "{text}");
     }
 }
