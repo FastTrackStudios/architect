@@ -1839,10 +1839,15 @@ impl PartialEq for Host {
 /// sidebar and ribbon, which are not under the [`WorkspaceView`]).
 #[component]
 fn HostScope(host: Host, children: Element) -> Element {
+    // The shell can draw a slot the host filled once more after the host
+    // is gone (a route that leaves the workspace in its first frames: a
+    // share link the app was launched with, #629): then nothing.
     use_context_provider(|| host);
+    let Ok(decks) = host.decks.try_peek().map(|d| *d) else {
+        return rsx! {};
+    };
     // The decks too: what the shell draws for the host (its sidebar, the
     // left dock's views) is outside the app's tree that holds them.
-    let decks = *host.decks.peek();
     if let Some(decks) = decks {
         use_context_provider(|| decks);
     }
