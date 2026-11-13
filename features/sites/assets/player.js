@@ -288,6 +288,18 @@
       tracks.push({ src: src, page: here, title: el.textContent.trim() || src.split("/").pop(), kind: el.tagName.toLowerCase() });
     }
   });
+  // What the bar says with nothing loaded: on a playlist's page (the card)
+  // the page's name over how many songs it lists (and how many of them
+  // play, when not all do); else how many tracks there are.
+  function idle() {
+    if (!shell) return { title: tracks.length === 1 ? "1 track" : tracks.length + " tracks", note: "" };
+    var heading = doc.querySelector(".site-title");
+    var name = (heading && heading.textContent.trim()) || doc.title || "";
+    var songs = rows.length + songRows.length;
+    var note = songs === 1 ? "1 song" : songs + " songs";
+    if (tracks.length !== songs) note += " · " + tracks.length + " with recording" + (tracks.length === 1 ? "" : "s");
+    return { title: name || note, note: name ? note : "" };
+  }
   // The page's playlists: their tracks are the queue, the page stays.
   joinPlaylists();
   var rows = [];
@@ -841,12 +853,16 @@
       '<div class="site-player-line" aria-hidden="true"><span></span></div>';
     if (shell) bar.classList.add("site-player-card");
     ui.art = bar.querySelector(".site-player-art");
-    // Its tile from the start: the note, not an empty square, before any
-    // song is loaded ("5 tracks").
-    if (shell) paintArt(null);
     ui.line = bar.querySelector(".site-player-line span");
     ui.title = bar.querySelector(".site-player-title");
     ui.note = bar.querySelector(".site-player-note");
+    // From the start, before any song is loaded: the note on its tile (not
+    // an empty square), the page's name and how many songs it lists.
+    if (shell) {
+      paintArt(null);
+      ui.title.textContent = idle().title;
+      ui.note.textContent = idle().note;
+    }
     ui.time = bar.querySelector(".site-player-time");
     ui.follow = bar.querySelector(".site-player-follow input");
     if (ui.follow) {
@@ -907,7 +923,7 @@
   // beside the button on a desk; arrows move, Escape closes and gives the
   // button back its focus.
   var menu = null;
-  var deskMenu = window.matchMedia ? window.matchMedia("(min-width: 900px)") : { matches: true };
+  var deskMenu = window.matchMedia ? window.matchMedia("(--site-desk)") : { matches: true };
   function closeMenu(back) {
     if (!menu) return;
     var m = menu;
@@ -1046,7 +1062,8 @@
   // kept: the next open asks again).
   var fetched = {};
   var opener = null;
-  var wide = window.matchMedia ? window.matchMedia("(min-width: 900px)") : { matches: false };
+  // A desk (`architect_sites::assets::DESK`): the sheet beside the page.
+  var wide = window.matchMedia ? window.matchMedia("(--site-desk)") : { matches: false };
   function hasView(t) {
     return !!(sheet && t && (t.view || viewIn(doc, t.src)));
   }
@@ -2126,7 +2143,7 @@
     if (!t) return;
     var tile = t.tile;
     var h = tile && isFinite(parseInt(tile.getAttribute("data-hue"), 10)) ? parseInt(tile.getAttribute("data-hue"), 10) : hue(t.title);
-    ui.art.style.setProperty("background", "hsl(" + h + " 42% 40%)");
+    ui.art.style.setProperty("background", "hsl(" + h + " 42% 32%)");
     bar.style.setProperty("--site-player-tint", "hsl(" + h + " 50% 45%)");
     var src = t.art || (t.page && artBy[t.page]) || null;
     if (src) {
@@ -2227,11 +2244,11 @@
       paintArt(t);
       if (t && !songs[t.src]) songOf(t);
     }
-    ui.title.textContent = t ? t.title : tracks.length === 1 ? "1 track" : tracks.length + " tracks";
+    ui.title.textContent = t ? t.title : idle().title;
     if (t && t.page) ui.title.href = t.page; else ui.title.removeAttribute("href");
     if (hasView(t)) ui.title.setAttribute("aria-haspopup", "dialog");
     else ui.title.removeAttribute("aria-haspopup");
-    ui.note.textContent = noteText || (t ? t.subtitle || "" : "");
+    ui.note.textContent = noteText || (t ? t.subtitle || "" : idle().note);
     ui.note.classList.toggle("site-player-warn", !!noteText);
     ui.time.textContent = clock(s.time) + " / " + clock(s.duration);
     ui.line.style.width = (part * 100).toFixed(2) + "%";

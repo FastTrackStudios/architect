@@ -21,8 +21,41 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const PLAYER = readFileSync(process.env.ARCHITECT_PLAYER_JS || join(here, '../assets/player.js'), 'utf8');
-const SHELL = readFileSync(join(here, '../assets/shell.js'), 'utf8');
+// The layout's media queries as the node serves them: read from their one
+// definition (`architect_sites::assets`: PHONE, PHONE_FLAT, NOT_PHONE,
+// DESK) and filled in where the scripts write `(--site-…)`.
+const ASSETS = readFileSync(join(here, '../src/assets.rs'), 'utf8');
+const QUERY = Object.fromEntries(['PHONE', 'PHONE_FLAT', 'NOT_PHONE', 'DESK'].map((name) => {
+  const m = new RegExp(`pub const ${name}: &str = "([^"]*)";`).exec(ASSETS);
+  if (!m) throw new Error(`architect_sites::assets::${name} not found`);
+  return [name, m[1]];
+}));
+const queries = (js) => js
+  .replaceAll('(--site-phone-flat)', QUERY.PHONE_FLAT)
+  .replaceAll('(--site-not-phone)', QUERY.NOT_PHONE)
+  .replaceAll('(--site-desk)', QUERY.DESK)
+  .replaceAll('(--site-phone)', QUERY.PHONE);
+const PLAYER = queries(readFileSync(process.env.ARCHITECT_PLAYER_JS || join(here, '../assets/player.js'), 'utf8'));
+const SHELL = queries(readFileSync(join(here, '../assets/shell.js'), 'utf8'));
+
+/// Whether media query list `q` holds for a screen `width` × `height`
+/// with a `coarse` pointer or a fine one: what this DOM's matchMedia says.
+function mediaMatches(q, { width, height, coarse }) {
+  return q.split(',').some((clause) => clause.split(/\s+and\s+/).every((f) => {
+    const m = /\(\s*([a-z-]+)\s*:\s*([a-z0-9]+)\s*\)/.exec(f.trim());
+    if (!m) return false;
+    const [, name, value] = m;
+    const n = parseFloat(value);
+    switch (name) {
+      case 'max-width': return width <= n;
+      case 'min-width': return width >= n;
+      case 'max-height': return height <= n;
+      case 'min-height': return height >= n;
+      case 'pointer': return value === (coarse ? 'coarse' : 'fine');
+      default: return false;
+    }
+  }));
+}
 
 // ── A DOM just big enough ────────────────────────────────────────────
 
@@ -197,9 +230,10 @@ const block = (rows, extra = [], join = { class: 'studio-setlist' }) => el('div'
 
 /// The setlist's page: two sets under their headings, as an existing note
 /// draws them, and (for Click and Loop) the first song's view on the page.
-function setlist({ art = null, view = null, shell = null, width, hash } = {}) {
+function setlist({ art = null, view = null, shell = null, width, height, coarse, hash, title = null } = {}) {
   const body = new Node('body');
   const article = body.appendChild(el('article'));
+  if (title) article.appendChild(el('h1', { class: 'site-title' }, [], title));
   article.appendChild(el('h2', { id: 'presidents-songs' }, [el('a', { class: 'site-anchor', href: '#presidents-songs' }, [], '#')], 'Presidents Songs'));
   article.appendChild(block([
     row(1, 'Sleigh Ride', `${L}sleigh/`, `${L}Sleigh.mp3`),
@@ -213,7 +247,7 @@ function setlist({ art = null, view = null, shell = null, width, hash } = {}) {
   ], [el('p', { class: 'files' }, [], 'Files')]));
   if (view) body.appendChild(view);
   const queue = JSON.stringify({ scope: L, tracks: [], art: art || {} });
-  return run(body, queue, { shell, width, hash });
+  return run(body, queue, { shell, width, height, coarse, hash });
 }
 
 function run(body, queue, opts = {}) {
@@ -234,7 +268,7 @@ function run(body, queue, opts = {}) {
     body,
     documentElement: new Node('html'),
     currentScript: null,
-    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-shell') ? shellEl : sel.startsWith('script#site-islands') ? islandsEl : null),
+    querySelector: (sel) => (sel.startsWith('script#site-queue') ? queueEl : sel.startsWith('script#site-shell') ? shellEl : sel.startsWith('script#site-islands') ? islandsEl : body.querySelectorAll(sel)[0] || null),
     getElementById: () => null,
     querySelectorAll: (sel) => body.querySelectorAll(sel),
     createElement: (tag) => {
@@ -286,11 +320,11 @@ function run(body, queue, opts = {}) {
     addEventListener: () => {},
     getComputedStyle: () => ({ overflowX: 'visible', overflowY: 'visible' }),
     // A phone's width unless the test says (390 px).
-    matchMedia: (q) => {
-      const width = opts.width || 390;
-      const max = /max-width:\s*(\d+)px/.exec(q), min = /min-width:\s*(\d+)px/.exec(q);
-      return { matches: max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false, addEventListener() {} };
-    },
+    // A phone (390 × 844, a finger) unless the test says.
+    matchMedia: (q) => ({
+      matches: mediaMatches(q, { width: opts.width || 390, height: opts.height || 844, coarse: opts.coarse ?? (!opts.width || opts.width <= 820) }),
+      addEventListener() {},
+    }),
     CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init.detail; } },
     AudioContext: function () { return audio; },
     fetch: opts.fetch || (() => Promise.reject(new Error('no network in this test'))),
@@ -688,6 +722,27 @@ test('a row\'s menu: its chart, its page; Escape closes it and gives the button 
   assert.equal(p.playhead.src, null);
 });
 
+test('the card with nothing loaded: the setlist\'s name, its songs (and how many play), the note', () => {
+  const p = setlist({ title: 'Merry & Bright' });
+  p.frame();
+  const bar = p.body.querySelectorAll('.site-player')[0];
+  assert.equal(bar.querySelector('.site-player-title').textContent, 'Merry & Bright');
+  assert.equal(bar.querySelector('.site-player-note').textContent, '5 songs · 4 with recordings');
+  assert.ok(bar.querySelector('.site-player-art').hasAttribute('data-glyph'), 'the note, not an empty square');
+  // Once a song is loaded: the song.
+  p.body.querySelectorAll('[data-title="Sleigh Ride"]')[0].click();
+  p.frame();
+  assert.equal(bar.querySelector('.site-player-title').textContent, 'Sleigh Ride');
+  // Every song with a recording: the count alone.
+  const body = new Node('body');
+  body.appendChild(el('h1', { class: 'site-title' }, [], 'Two'));
+  body.appendChild(block([row(1, 'A', `${L}a/`, `${L}A.mp3`), row(2, 'B', `${L}b/`, `${L}B.mp3`)]));
+  const two = run(body, JSON.stringify({ scope: L, tracks: [], art: {} }));
+  two.frame();
+  const card = two.body.querySelectorAll('.site-player')[0];
+  assert.equal(card.querySelector('.site-player-note').textContent, '2 songs');
+});
+
 test('the card shows a music note, never letters nor what the tile says (its key), and never an empty square', () => {
   const body = new Node('body');
   const r = row(1, 'Sleigh Ride', `${L}sleigh/`, `${L}Sleigh.mp3`);
@@ -842,6 +897,25 @@ test('the shell is a phone\'s: on a desk the card opens the player\'s own sheet,
   assert.ok(!phone.body.querySelectorAll('.site-tabs')[0].hasAttribute('inert'), 'the tabs stay live');
   phone.body.querySelectorAll('.site-tab')[0].click();
   assert.equal(phone.body.children.filter((n) => n.hasAttribute('inert')).length, 0, 'and nothing once it closes');
+});
+
+test('a phone turned on its side keeps the shell: Charts stays a tab; a desk as wide is no phone', () => {
+  // 844 × 390, a finger: the phone's (its PHONE query's second clause).
+  const turned = setlist({ shell: SHELL_SPEC, width: 844, height: 390, coarse: true });
+  assert.ok(turned.body.classList.contains('site-shell'), 'the shell');
+  turned.body.querySelectorAll('.site-tab')[1].click();
+  const sheet = turned.body.querySelectorAll('.site-now')[0];
+  assert.equal(sheet.hidden, false);
+  assert.ok(sheet.classList.contains('site-now-tab'), 'Charts as a tab, not a side panel');
+  // A desk's window as wide and as short, a mouse: its own sheet.
+  const desk = setlist({ shell: SHELL_SPEC, width: 844, height: 390, coarse: false });
+  desk.body.querySelectorAll('[data-title="Sleigh Ride"]')[0].click();
+  desk.body.querySelectorAll('.site-player')[0].listeners.click[0].fn({ target: { closest: () => null }, preventDefault() {} });
+  assert.ok(!desk.body.querySelectorAll('.site-now')[0].classList.contains('site-now-tab'), 'a desk: its own sheet');
+  // The widest phone on its side (932 × 430) is no desk: no side panel.
+  const wide = setlist({ shell: SHELL_SPEC, width: 932, height: 430, coarse: true });
+  wide.body.querySelectorAll('.site-tab')[1].click();
+  assert.ok(wide.body.querySelectorAll('.site-now')[0].classList.contains('site-now-tab'));
 });
 
 // ── The Lyrics tab: an island's lyrics view (studio's Confidence Monitor)

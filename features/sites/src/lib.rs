@@ -64,6 +64,7 @@ mod write;
 
 pub use architect_extensions::contrib::Claim;
 pub use architect_extensions::share_layers::{self, ShareLayersDecl};
+pub use assets::{DESK, NOT_PHONE, PHONE, PHONE_FLAT};
 pub use bases::BaseBlocks;
 pub use blocks::{Block, BlockRenderer, Blocks, Drawn, FnBlock};
 #[cfg(feature = "wasi")]
