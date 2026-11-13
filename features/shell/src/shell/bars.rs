@@ -288,6 +288,8 @@ fn RailTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
     rsx! {
         button {
             "aria-label": tab.label,
+            "data-tab": id,
+            "aria-current": if on { "page" } else { "false" },
             style: "position: relative; height: 58px; display: flex; flex-direction: column; align-items: center; \
                     justify-content: center; gap: 4px; border: none; border-radius: 12px; background: {fill}; \
                     color: {colour}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
@@ -312,6 +314,8 @@ pub(super) fn SideTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) ->
     rsx! {
         button {
             "aria-label": tab.label,
+            "data-tab": id,
+            "aria-current": if on { "page" } else { "false" },
             style: "height: 40px; display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 0 12px; \
                     border: none; border-radius: 10px; background: {fill}; color: {colour}; font-family: {t.font}; \
                     font-size: 15px; font-weight: {weight}; text-align: left;",

@@ -842,6 +842,21 @@ impl Manifest {
         action_prefix(&self.id)
     }
 
+    /// Who declares its `[[favourites]]`: its id and what its
+    /// capabilities let it run (`architect_favourites::Declarer`).
+    #[must_use]
+    pub fn declarer(&self) -> architect_favourites::Declarer {
+        architect_favourites::Declarer {
+            extension: self.id.clone(),
+            actions: self.capabilities.actions.clone(),
+            effect: match self.capabilities.effect {
+                Reach::ReadOnly => architect_favourites::Effect::ReadOnly,
+                Reach::Mutating => architect_favourites::Effect::Mutating,
+                Reach::Destructive => architect_favourites::Effect::Destructive,
+            },
+        }
+    }
+
     /// Checks what can be checked without its files: its id, its API,
     /// its namespaces, that each action can run, that each setting can be
     /// drawn.

@@ -46,6 +46,8 @@ lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 # The frame host's events into its views (src/app/frames.rs).
 futures-util = { version = "0.3", default-features = false }
+# The vault's changes to the note on show (src/app/favourites.rs).
+futures-channel = "0.3"
 
 [lints]
 workspace = true

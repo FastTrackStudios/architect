@@ -34,6 +34,11 @@
 //! its Action List. Nothing here is a site's or a platform's: a target is
 //! a view id, an action id, or a place relative to the open note.
 //! Nothing runs: a shell that does not know a target leaves its tab out.
+//!
+//! A declaration names only what its own extension may reach
+//! ([`Declarer`]): its own views, and actions in its own namespace or one
+//! its capabilities name, never a destructive one. A shell drops any
+//! other target, as it drops one it does not know.
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +48,8 @@ pub const MAX_TABS: usize = 5;
 pub const MAX_LABEL: usize = 24;
 /// The longest id, icon name or target, in bytes.
 pub const MAX_NAME: usize = 96;
+/// The longest note type, in characters.
+pub const MAX_TYPE: usize = 64;
 
 /// One `[[favourites]]`: the tabs and the primary action of notes of
 /// `note_type`.
@@ -139,8 +146,9 @@ impl TypeFavourites {
     ///
     /// What is wrong, for the manifest's report.
     pub fn check(&self) -> Result<(), String> {
-        if self.note_type.trim().is_empty() {
-            return Err("a note_type".to_owned());
+        let ty = self.note_type.trim();
+        if ty.is_empty() || ty.chars().count() > MAX_TYPE || ty.chars().any(char::is_control) {
+            return Err(format!("a note_type of 1 to {MAX_TYPE} characters"));
         }
         if self.tabs.len() > MAX_TABS {
             return Err(format!("at most {MAX_TABS} tabs"));
@@ -171,6 +179,87 @@ impl TypeFavourites {
         }
         Ok(())
     }
+}
+
+/// How much an action changes, as a manifest's `capabilities.effect` says
+/// it (`architect-extensions`' `Reach`, the same three steps).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Effect {
+    #[default]
+    ReadOnly,
+    Mutating,
+    Destructive,
+}
+
+/// The extension that declared a set of favourites and what its
+/// capabilities let it run.
+///
+/// The same rule as every other contribution that names an action
+/// (`architect-extensions`' `Capabilities::may_run`, `host::gate`): its own
+/// namespace ([`action_prefix`]), or a prefix its `capabilities.actions`
+/// names up to its `capabilities.effect`. A tab's press asks no one, so a
+/// destructive action is never a favourite's, even its own.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Declarer {
+    /// Its id (`studio.setlists`).
+    pub extension: String,
+    /// Its `capabilities.actions`: the prefixes it may run past its own.
+    pub actions: Vec<String>,
+    /// Its `capabilities.effect`: the most an action it runs may change.
+    pub effect: Effect,
+}
+
+impl Declarer {
+    /// Whether a favourite of its may run action `id`, which does `effect`.
+    #[must_use]
+    pub fn may_target(&self, id: &str, effect: Effect) -> bool {
+        if effect == Effect::Destructive || self.extension.is_empty() {
+            return false;
+        }
+        id.starts_with(&action_prefix(&self.extension))
+            || (self
+                .actions
+                .iter()
+                .any(|p| p == "*" || id.starts_with(p.as_str()))
+                && effect <= self.effect)
+    }
+
+    /// Whether a favourite of its may open a view of `extension`'s: its own
+    /// views only.
+    #[must_use]
+    pub fn may_open_view_of(&self, extension: &str) -> bool {
+        !self.extension.is_empty() && self.extension == extension
+    }
+}
+
+/// One declaration of a node's listing (`/_ext/favourites.json`): who made
+/// it and what it may run, and the declaration.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Listed {
+    pub by: Declarer,
+    pub favourites: TypeFavourites,
+}
+
+/// The action namespace of extension `id`: its id upper-cased, each run of
+/// other characters one `_` (`fts.metronome` → `FTS_METRONOME_`), as
+/// `architect-extensions`' `manifest::action_prefix` makes it.
+#[must_use]
+pub fn action_prefix(id: &str) -> String {
+    let mut out = String::with_capacity(id.len().saturating_add(1));
+    for c in id.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_uppercase());
+        } else if !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    if !out.ends_with('_') {
+        out.push('_');
+    }
+    out
 }
 
 /// Whether `place` is a place relative to the note.
@@ -322,6 +411,8 @@ on = { label = "Pause", icon = "pause" }
             f.check().unwrap_err()
         };
         bad(&|f| f.note_type = " ".into());
+        bad(&|f| f.note_type = "x".repeat(MAX_TYPE + 1));
+        bad(&|f| f.note_type = "set\nlist".into());
         bad(&|f| f.tabs[1].id = "setlist".into());
         bad(&|f| f.tabs[0].id = "Set list".into());
         bad(&|f| f.tabs[0].label = "x".repeat(MAX_LABEL + 1));
@@ -360,5 +451,38 @@ on = { label = "Pause", icon = "pause" }
         bad(&|f| f.primary.as_mut().unwrap().state = None);
         // An unknown key is refused, not ignored.
         assert!(toml::from_str::<TypeFavourites>("note_type = \"x\"\nicons = 1\n").is_err());
+    }
+
+    #[test]
+    fn a_declarer_names_only_its_own_actions_or_what_its_capabilities_reach() {
+        let none = Declarer {
+            extension: "acme.charts".into(),
+            ..Declarer::default()
+        };
+        assert_eq!(action_prefix("acme.charts"), "ACME_CHARTS_");
+        assert!(none.may_target("ACME_CHARTS_OPEN", Effect::Mutating));
+        // Another's, or the app's: not without capabilities.
+        assert!(!none.may_target("VAULT_DELETE", Effect::ReadOnly));
+        assert!(!none.may_target("ACME_CHARTSX_OPEN", Effect::ReadOnly));
+        // Never a destructive one, even its own.
+        assert!(!none.may_target("ACME_CHARTS_WIPE", Effect::Destructive));
+        let some = Declarer {
+            extension: "acme.charts".into(),
+            actions: vec!["PLAYER_".into()],
+            effect: Effect::Mutating,
+        };
+        assert!(some.may_target("PLAYER_TOGGLE", Effect::Mutating));
+        assert!(!some.may_target("PLAYER_CLEAR", Effect::Destructive));
+        assert!(!some.may_target("VAULT_NEW_NOTE", Effect::ReadOnly));
+        let read_only = Declarer {
+            actions: vec!["*".into()],
+            ..none.clone()
+        };
+        assert!(read_only.may_target("APP_SETTINGS", Effect::ReadOnly));
+        assert!(!read_only.may_target("VAULT_NEW_NOTE", Effect::Mutating));
+        // Its own views only.
+        assert!(none.may_open_view_of("acme.charts"));
+        assert!(!none.may_open_view_of("acme.other"));
+        assert!(!Declarer::default().may_open_view_of(""));
     }
 }

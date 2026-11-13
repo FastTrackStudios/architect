@@ -195,40 +195,33 @@ pub fn use_island_of(id: Option<String>) -> Resource<Result<Rc<Bundle>, String>>
     })
 }
 
-/// The node's islands this app believes, each with its views' names
-/// (`(id, views)`): what a favourite's `{view}` may open.
+/// The node's islands this app believes, each with every view its listing
+/// names (`(id, views)`, `Island::views`): what a favourite's `{view}` of
+/// that island's extension may open.
 pub async fn island_views() -> Vec<(String, Vec<String>)> {
     listing()
         .await
         .iter()
-        .map(|i| {
-            let views = [&i.progress, &i.transport, &i.lyrics]
-                .into_iter()
-                .flatten()
-                .cloned()
-                .collect();
-            (i.id.clone(), views)
-        })
+        .map(|i| (i.id.clone(), i.views()))
         .collect()
 }
 
 thread_local! {
     /// The node's favourites listing, read once a page.
-    static FAVOURITES: RefCell<Option<Rc<Vec<architect_favourites::TypeFavourites>>>> =
+    static FAVOURITES: RefCell<Option<Rc<Vec<architect_favourites::Listed>>>> =
         const { RefCell::new(None) };
 }
 
-/// The note types' favourites the node lists and this app believes
-/// (`crate::favourites::listing`): none without a node.
-pub async fn favourites() -> Rc<Vec<architect_favourites::TypeFavourites>> {
+/// The note types' favourites the node lists and this app believes, each
+/// with the extension that declared it (`crate::favourites::listing_bytes`:
+/// a listing past its size limit is none): none without a node.
+pub async fn favourites() -> Rc<Vec<architect_favourites::Listed>> {
     if let Some(l) = FAVOURITES.with(|l| l.borrow().clone()) {
         return l;
     }
     let list = get(crate::favourites::LISTING, RequestCache::NoCache)
         .await
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .map(|v| crate::favourites::listing(&v))
+        .map(|bytes| crate::favourites::listing_bytes(&bytes))
         .unwrap_or_default();
     let list = Rc::new(list);
     FAVOURITES.with(|l| *l.borrow_mut() = Some(list.clone()));

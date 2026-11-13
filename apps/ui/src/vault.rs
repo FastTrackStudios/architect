@@ -468,36 +468,78 @@ fn first_workspace() -> Workspace {
 
 /// Tells the app's root (`crate::favourites::VaultFocus`) the note on
 /// show: the document on show's file when it is a note of the vault on
-/// disk (a note's pane, or an extension's view opened on one), and its
-/// `type`; nothing once the page goes.
+/// disk (a note's pane, or an extension's view opened on one), the view
+/// it is in, and its `type`, read again whenever the vault says the file
+/// changed (its `type` edited, here or outside); nothing once the page
+/// goes. A note a `{place}` tab opened keeps its set only while it, or the
+/// note it was opened from, is on show.
 fn use_vault_focus(workspace: Signal<Workspace>) {
     let focus = try_use_context::<crate::favourites::VaultFocus>();
-    let on_show: Option<String> = {
+    let on_show: Option<(String, String)> = {
         let w = workspace.read();
         w.current_document()
             .and_then(|id| w.pane(id))
-            .map(|p| p.state.clone())
-            .filter(|s| {
+            .map(|p| (p.state.clone(), p.view.0.clone()))
+            .filter(|(s, _)| {
                 std::path::Path::new(s)
                     .extension()
                     .is_some_and(|e| e.eq_ignore_ascii_case("md"))
             })
     };
-    use_effect(use_reactive!(|on_show| {
+    // Bumped when the vault changes the file on show.
+    let mut changed = use_signal(|| 0_u64);
+    let disk = use_lab_vault().disk;
+    let at = use_signal(|| None::<String>);
+    use_hook(move || {
+        let (tx, mut rx) = futures_channel::mpsc::unbounded::<SourceEvent>();
+        let sub = disk.peek().as_ref().map(|d| {
+            d.subscribe(Box::new(move |e| {
+                let _ = tx.unbounded_send(e.clone());
+            }))
+        });
+        spawn(async move {
+            use futures_util::StreamExt as _;
+            while let Some(event) = rx.next().await {
+                if at.peek().as_deref().is_some_and(|p| event.touches(p)) {
+                    let n = changed.peek().wrapping_add(1);
+                    changed.set(n);
+                }
+            }
+        });
+        std::rc::Rc::new(sub)
+    });
+    let revision = changed();
+    use_effect(use_reactive!(|on_show, revision| {
+        let _ = revision;
         let Some(mut focus) = focus else { return };
         if focus.workspace.peek().is_none() {
             focus.workspace.set(Some(workspace));
         }
-        let text = on_show.as_ref().and_then(|path| {
+        let mut at = at;
+        let path = on_show.as_ref().map(|(p, _)| p.clone());
+        if *at.peek() != path {
+            at.set(path.clone());
+        }
+        let text = path.as_ref().and_then(|path| {
             crate::notes::open_vault()
                 .and_then(|v| std::fs::read_to_string(v.root().join(path)).ok())
         });
         let note = on_show
             .zip(text)
-            .map(|(path, text)| crate::favourites::OpenNote {
+            .map(|((path, view), text)| crate::favourites::OpenNote {
                 path,
                 note_type: crate::favourites::note_type(&text),
+                // An extension's view's kind is `<extension>/<view>`.
+                view: view.contains('/').then_some(view),
             });
+        // A place's set lasts while it or its note is on show.
+        let kept = focus.opened.peek().as_ref().is_some_and(|(o, _)| {
+            note.as_ref()
+                .is_some_and(|n| n.path == o.place || n.path == o.from)
+        });
+        if !kept && focus.opened.peek().is_some() {
+            focus.opened.set(None);
+        }
         if *focus.note.peek() != note {
             focus.note.set(note);
         }
@@ -506,6 +548,7 @@ fn use_vault_focus(workspace: Signal<Workspace>) {
         if let Some(mut focus) = focus {
             focus.workspace.set(None);
             focus.note.set(None);
+            focus.opened.set(None);
         }
     });
 }

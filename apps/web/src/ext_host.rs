@@ -2,8 +2,7 @@
 //!
 //! What the node's islands listing says and whether to believe it, each
 //! file against its digest, the asks a frame may make and how often, the
-//! heartbeat, the theme handed in, and a song note's timed lyrics. The
-//! DOM half (the frames, their ports, the timers) is `app::frames`.
+//! heartbeat, and the theme handed in. The DOM half (the frames, their ports, the timers) is `app::frames`.
 //!
 //! The frame side is the node's web view document
 //! (`features/sites/assets/webview.js`, its policy
@@ -22,13 +21,14 @@
 //! 4. the frame may say `size` (its height), `ask` (one of
 //!    [`INTENTS`], rate-limited by [`Bucket`]) or `error`.
 //!
-//! Besides its slots by a song (progress, transport, lyrics), an island
-//! may claim note types ([`Embed`]): its view is drawn at the head of a
-//! note of that `type` ([`claimed`]: the first island listed that claims
-//! it), given what [`note_props`] lets through of the note for who is
-//! viewing, and may set its source in the app's playhead (`PLAYHEAD_SET`)
-//! and make one of its items current (`PLAYHEAD_ITEM`), as
-//! `architect.playhead` v0.1 has them (#589).
+//! An island lists its views ([`Island::views`]: the share page's
+//! progress, transport and lyrics slots and its claims) and may claim note
+//! types ([`Embed`]): its view is drawn at the head of a note of that
+//! `type` ([`claimed`]: the first island listed that claims it), given
+//! what [`note_props`] lets through of the note for who is viewing, and
+//! may set its source in the app's playhead (`PLAYHEAD_SET`) and make one
+//! of its items current (`PLAYHEAD_ITEM`), as `architect.playhead` v0.1
+//! has them (#589).
 //!
 //! The frame dies (taken out, the app's own control back) on a second
 //! `load` (it left its document), on `error`, when not ready within
@@ -101,6 +101,24 @@ pub struct Embed {
 }
 
 impl Island {
+    /// Every view its listing names, once each, in the listing's order: the
+    /// views a favourite's `{view}` of its extension may open.
+    #[must_use]
+    pub fn views(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let named = [&self.progress, &self.transport, &self.lyrics];
+        for v in named
+            .into_iter()
+            .flatten()
+            .chain(self.embeds.iter().map(|e| &e.view))
+        {
+            if !out.contains(v) {
+                out.push(v.clone());
+            }
+        }
+        out
+    }
+
     /// Its claim on notes of type `note_type` (without regard to case):
     /// the first of its embeds listed that claims it.
     #[must_use]
@@ -624,15 +642,15 @@ pub const fn ask_refused(ready: bool, hidden: bool) -> Option<&'static str> {
 /// An ask the app answers: one of [`INTENTS`], with its arguments.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
-    /// To `t` seconds into the song.
+    /// To `t` seconds into the current item.
     Seek(f64),
     /// Play.
     Play,
     /// Pause.
     Pause,
-    /// The next song.
+    /// The next item.
     Next,
-    /// The previous song (or this one's start).
+    /// The previous item (or this one's start).
     Previous,
     /// Its source (`PLAYHEAD_SET`; an empty queue removes it).
     Set(Source),
@@ -1107,94 +1125,6 @@ pub fn theme_vars<'a>(
         .collect()
 }
 
-/// A timed line of a song's lyrics.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Line {
-    /// When, seconds.
-    pub at: f64,
-    /// The words.
-    pub text: String,
-}
-
-/// A song's section, from its lyrics' `[Name]` lines.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Section {
-    /// Its name.
-    pub name: String,
-    /// Its start, seconds.
-    pub start: f64,
-    /// Its end, seconds.
-    pub end: f64,
-}
-
-/// `[mm:ss.xx]` as seconds.
-fn stamp(s: &str) -> Option<f64> {
-    let (m, rest) = s.split_once(':')?;
-    let m: f64 = m.trim().parse().ok()?;
-    let sec: f64 = rest.trim().parse().ok()?;
-    (m >= 0.0 && (0.0..60.0).contains(&sec)).then_some(m.mul_add(60.0, sec))
-}
-
-/// A note body's timed lyrics: its first ` ```lrc ` fence, a line each
-/// `[mm:ss.xx] words`; a line whose words are `[Name]` starts section
-/// `Name` (ending where the next starts, the last at `duration`).
-#[must_use]
-pub fn lyrics(body: &str, duration: f64) -> (Vec<Line>, Vec<Section>) {
-    let mut lines = Vec::new();
-    let mut marks: Vec<(String, f64)> = Vec::new();
-    let mut inside = false;
-    for raw in body.lines() {
-        let l = raw.trim();
-        if !inside {
-            inside = l == "```lrc";
-            continue;
-        }
-        if l.starts_with("```") {
-            break;
-        }
-        let Some((at, words)) = l
-            .strip_prefix('[')
-            .and_then(|r| r.split_once(']'))
-            .and_then(|(t, w)| stamp(t).map(|at| (at, w.trim())))
-        else {
-            continue;
-        };
-        if let Some(name) = words.strip_prefix('[').and_then(|w| w.strip_suffix(']')) {
-            marks.push((name.chars().take(40).collect(), at));
-        } else if !words.is_empty() && lines.len() < 2000 {
-            lines.push(Line {
-                at,
-                text: words.chars().take(300).collect(),
-            });
-        }
-    }
-    lines.sort_by(|a, b| a.at.total_cmp(&b.at));
-    marks.sort_by(|a, b| a.1.total_cmp(&b.1));
-    let sections = marks
-        .iter()
-        .enumerate()
-        .map(|(i, (name, start))| Section {
-            name: name.clone(),
-            start: *start,
-            end: marks
-                .get(i.saturating_add(1))
-                .map_or(duration, |m| m.1)
-                .max(*start),
-        })
-        .collect();
-    (lines, sections)
-}
-
-/// A song note's length in seconds: its `duration` property (seconds, or
-/// `m:ss`), else ten seconds past its last timed line, else three minutes.
-#[must_use]
-pub fn duration(property: Option<&str>, lines: &[Line]) -> f64 {
-    property
-        .and_then(|p| p.trim().parse::<f64>().ok().or_else(|| stamp(p)))
-        .filter(|d| d.is_finite() && *d > 0.0)
-        .unwrap_or_else(|| lines.last().map_or(180.0, |l| l.at + 10.0))
-}
-
 #[cfg(test)]
 // The helpers take JSON by value so a case reads as a literal.
 #[allow(
@@ -1398,6 +1328,20 @@ mod tests {
             "~~~~md\n%%\n~~~\n%%\n~~~~\nz"
         );
         assert_eq!(without_comments("a %%b\n```\nc\n```\nd%% e"), "a  e");
+    }
+
+    #[test]
+    fn an_islands_views_are_every_view_it_lists_once() {
+        let mut l = listing();
+        l["islands"][0]["embeds"] = json!([
+            {"view": "list", "note_type": ["playlist"]},
+            {"view": "lyrics", "note_type": ["poem"]},
+        ]);
+        let it = &islands(&l)[0];
+        assert_eq!(it.views(), ["progress", "transport", "lyrics", "list"]);
+        l["islands"][0]["lyrics"] = Value::Null;
+        l["islands"][0]["transport"] = Value::Null;
+        assert_eq!(islands(&l)[0].views(), ["progress", "list", "lyrics"]);
     }
 
     #[test]
@@ -1738,39 +1682,5 @@ mod tests {
             ("--font", "Inter, system-ui"),
         ]);
         assert_eq!(vars.keys().collect::<Vec<_>>(), ["--font", "--foreground"]);
-    }
-
-    #[test]
-    fn a_song_notes_timed_lyrics_and_sections() {
-        let body = "Words.\n\n```lrc\n[00:00.00] [Verse 1]\n[00:01.50] Amazing grace\n[00:05.00] how sweet the sound\n[00:20.00] [Verse 2]\n[00:21.00] 'Twas grace\nnot a line\n[99:99] bad\n```\n\n```lrc\n[00:30] ignored\n```\n";
-        let (lines, sections) = lyrics(body, 40.0);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(
-            lines[0],
-            Line {
-                at: 1.5,
-                text: "Amazing grace".to_owned()
-            }
-        );
-        assert_eq!(
-            sections,
-            [
-                Section {
-                    name: "Verse 1".to_owned(),
-                    start: 0.0,
-                    end: 20.0
-                },
-                Section {
-                    name: "Verse 2".to_owned(),
-                    start: 20.0,
-                    end: 40.0
-                },
-            ]
-        );
-        assert_eq!(duration(None, &lines), 31.0);
-        assert_eq!(duration(Some("2:30"), &lines), 150.0);
-        assert_eq!(duration(Some("95"), &lines), 95.0);
-        assert_eq!(duration(Some("x"), &[]), 180.0);
-        assert!(lyrics("no fence", 10.0).0.is_empty());
     }
 }
