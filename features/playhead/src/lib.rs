@@ -41,7 +41,9 @@ use serde_json::{Value, json};
 pub use crate::clock::{Clock, Follower, Reading, Silent};
 pub use crate::deck::{Caller, Control, Deck, Pick, Source};
 #[cfg(feature = "extension")]
-pub use crate::extension::{Playhead, raise_changed};
+pub use crate::extension::Playhead;
+#[cfg(feature = "host")]
+pub use crate::extension::raise_changed;
 pub use crate::model::{Item, Mark, Section, Spec};
 
 /// Its id: its actions are `PLAYHEAD_*`.

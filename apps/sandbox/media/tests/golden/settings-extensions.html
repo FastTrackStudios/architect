@@ -114,7 +114,7 @@
                 <div style="flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: row;">
                   <div style="width: 44px; flex-shrink: 0; display: flex; flex-direction: column; background: #09090b;">
                     <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; border-right: 1px solid #2b2b31;">
-                      <button class="lp tip-host" aria-label="Inbox" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: rgba(45,212,191,0.14); display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="41">
+                      <button class="lp tip-host" aria-label="Inbox" data-tab="inbox" aria-current="page" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: rgba(45,212,191,0.14); display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="41">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" fill="none" stroke="#2dd4bf" stroke-width="2">
                           <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
                           <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
@@ -124,7 +124,7 @@
                         </span>
                         <span style="position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 3px; background: #2dd4bf;" />
                       </button>
-                      <button class="lp tip-host" aria-label="Tasks" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="49">
+                      <button class="lp tip-host" aria-label="Tasks" data-tab="tasks" aria-current="false" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="49">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" fill="none" stroke="#8f8f99" stroke-width="2">
                           <path d="M13 5h8" />
                           <path d="M13 12h8" />
@@ -136,7 +136,7 @@
                           Tasks
                         </span>
                       </button>
-                      <button class="lp tip-host" aria-label="Schedule" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="54">
+                      <button class="lp tip-host" aria-label="Schedule" data-tab="schedule" aria-current="false" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="54">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" fill="none" stroke="#8f8f99" stroke-width="2">
                           <path d="M8 2v3" />
                           <path d="M16 2v3" />
@@ -153,7 +153,7 @@
                           Schedule
                         </span>
                       </button>
-                      <button class="lp tip-host" aria-label="Vault" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="59">
+                      <button class="lp tip-host" aria-label="Vault" data-tab="vault" aria-current="false" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="59">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" fill="none" stroke="#8f8f99" stroke-width="2">
                           <path d="M2 6h4" />
                           <path d="M2 10h4" />
@@ -168,7 +168,7 @@
                           Vault
                         </span>
                       </button>
-                      <button class="lp tip-host" aria-label="Embedded" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="64">
+                      <button class="lp tip-host" aria-label="Embedded" data-tab="embedded" aria-current="false" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="64">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" fill="none" stroke="#8f8f99" stroke-width="2">
                           <rect width="7" height="7" x="3" y="3" rx="1" />
                           <rect width="7" height="7" x="14" y="3" rx="1" />
@@ -179,7 +179,7 @@
                           Embedded
                         </span>
                       </button>
-                      <button class="lp tip-host" aria-label="Board" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="349">
+                      <button class="lp tip-host" aria-label="Board" data-tab="lab.board/board" aria-current="false" style="position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="350">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" fill="none" stroke="#8f8f99" stroke-width="2">
                           <rect width="7" height="9" x="3" y="3" rx="1" />
                           <rect width="7" height="5" x="14" y="3" rx="1" />
@@ -508,8 +508,9 @@
                         </div>
                       </div>
                     </div>
+                    <div style="position: relative; z-index: 8; flex-shrink: 0;" />
                     <div style="height: 24px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 0 10px; background: #17171b; border-top: 1px solid #2b2b31; color: #8f8f99; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; font-size: 11px; white-space: nowrap; overflow: hidden;">
-                      <div class="" title="What is on the board" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="354">
+                      <div class="" title="What is on the board" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="355">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" fill="none" stroke="#8f8f99" stroke-width="2">
                           <path d="M12 17v5" />
                           <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
@@ -519,12 +520,12 @@
                         </span>
                       </div>
                       <span style="flex: 1;" />
-                      <div class="lp" title="Every command" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: pointer; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="359">
+                      <div class="lp" title="Every command" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: pointer; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="360">
                         <span>
                           ⌘K Commands
                         </span>
                       </div>
-                      <div class="" title="Every change is saved and synced" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="260">
+                      <div class="" title="Every change is saved and synced" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="261">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" fill="none" stroke="#8f8f99" stroke-width="2">
                           <path d="M18 6 7 17l-5-5" />
                           <path d="m22 10-7.5 7.5L13 16" />
@@ -533,7 +534,7 @@
                           Synced
                         </span>
                       </div>
-                      <div class="" title="" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="266">
+                      <div class="" title="" style="display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 2px; border-radius: 4px; background: transparent; color: #8f8f99; font-weight: 500; cursor: default; flex-shrink: 0;" click="&lt;rust func&gt;" data-dioxus-id="267">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="13" height="13" fill="none" stroke="#8f8f99" stroke-width="2">
                           <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
                           <path d="M16 3.128a4 4 0 0 1 0 7.744" />
@@ -546,7 +547,7 @@
                       </div>
                     </div>
                     <div style="position: absolute; right: 20px; bottom: 44px;">
-                      <button class="tip-host" aria-label="Capture" data-swiping="false" style="position: relative; width: 44px; height: 44px; flex-shrink: 0; box-sizing: border-box; border-radius: 22px; display: flex; align-items: center; justify-content: center; padding: 0; background: #1a1a1f; border: 1px solid #2b2b31; color: #e4e4e7; box-shadow: 0 6px 20px rgba(0,0,0,0.35); " pointerdown="&lt;rust func&gt;" data-dioxus-id="272" pointermove="&lt;rust func&gt;" pointercancel="&lt;rust func&gt;" pointerup="&lt;rust func&gt;" click="&lt;rust func&gt;">
+                      <button class="tip-host" data-primary="round" aria-label="Capture" data-swiping="false" style="position: relative; width: 44px; height: 44px; flex-shrink: 0; box-sizing: border-box; border-radius: 22px; display: flex; align-items: center; justify-content: center; padding: 0; background: #1a1a1f; border: 1px solid #2b2b31; color: #e4e4e7; box-shadow: 0 6px 20px rgba(0,0,0,0.35); " pointerdown="&lt;rust func&gt;" data-dioxus-id="273" pointermove="&lt;rust func&gt;" pointercancel="&lt;rust func&gt;" pointerup="&lt;rust func&gt;" click="&lt;rust func&gt;">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" fill="none" stroke="#e4e4e7" stroke-width="2">
                           <path d="M14.086 18.412A2 2 0 0112.67 19H5v-7.672a2 2 0 01.586-1.414L11.75 3.75a6 6 0 118.49 8.49z" />
                           <path d="M16 8 2 22" />
@@ -585,7 +586,7 @@
                           </span>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 6px;">
-                          <button class="lp" style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 9px; border: 1px solid #2b2b31; background: #1a1a1f; color: #e4e4e7; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; font-size: 14px; text-align: left;" click="&lt;rust func&gt;" data-dioxus-id="299">
+                          <button class="lp" style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 9px; border: 1px solid #2b2b31; background: #1a1a1f; color: #e4e4e7; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; font-size: 14px; text-align: left;" click="&lt;rust func&gt;" data-dioxus-id="300">
                             <span style="flex: 1; text-align: left;">
                               Open
                             </span>
@@ -593,7 +594,7 @@
                               ↵
                             </span>
                           </button>
-                          <button class="lp" style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 9px; border: 1px solid #2b2b31; background: #1a1a1f; color: #e4e4e7; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; font-size: 14px; text-align: left;" click="&lt;rust func&gt;" data-dioxus-id="305">
+                          <button class="lp" style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 9px; border: 1px solid #2b2b31; background: #1a1a1f; color: #e4e4e7; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; font-size: 14px; text-align: left;" click="&lt;rust func&gt;" data-dioxus-id="306">
                             <span style="flex: 1; text-align: left;">
                               Done
                             </span>
@@ -601,7 +602,7 @@
                               ⌘↵
                             </span>
                           </button>
-                          <button class="lp" style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 9px; border: 1px solid #2b2b31; background: #1a1a1f; color: #e4e4e7; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; font-size: 14px; text-align: left;" click="&lt;rust func&gt;" data-dioxus-id="310">
+                          <button class="lp" style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 9px; border: 1px solid #2b2b31; background: #1a1a1f; color: #e4e4e7; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; font-size: 14px; text-align: left;" click="&lt;rust func&gt;" data-dioxus-id="311">
                             <span style="flex: 1; text-align: left;">
                               Move to…
                             </span>
@@ -611,12 +612,12 @@
                           </button>
                         </div>
                       </div>
-                      <div style="position: absolute; top: 0; left: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 5;" pointerdown="&lt;rust func&gt;" data-dioxus-id="315" />
+                      <div style="position: absolute; top: 0; left: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 5;" pointerdown="&lt;rust func&gt;" data-dioxus-id="316" />
                     </div>
                   </div>
                 </div>
                 <div style="position: absolute; top: 0px; left: 12px; height: 40px; display: flex; align-items: center; z-index: 30;">
-                  <button class="lp" aria-label="Toggle the sidebar" style="width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="318">
+                  <button class="lp" aria-label="Toggle the sidebar" style="width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="319">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="17" height="17" fill="none" stroke="#a1a1aa" stroke-width="2">
                       <rect width="18" height="18" x="3" y="3" rx="2" />
                       <path d="M9 3v18" />
@@ -624,7 +625,7 @@
                   </button>
                 </div>
                 <div style="position: absolute; top: 0px; right: 12px; height: 40px; display: flex; align-items: center; z-index: 30;">
-                  <button class="lp" aria-label="Toggle the details" style="width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="322">
+                  <button class="lp" aria-label="Toggle the details" style="width: 28px; height: 28px; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="323">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="17" height="17" fill="none" stroke="#a1a1aa" stroke-width="2">
                       <rect width="18" height="18" x="3" y="3" rx="2" />
                       <path d="M15 3v18" />
@@ -635,8 +636,8 @@
             </div>
           </div>
         </div>
-        <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 60; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="373">
-          <div style="width: 92%; max-width: 1100px; height: 86%; max-height: 760px; display: flex; overflow: hidden; border-radius: 14px; background: #09090b; border: 1px solid #2b2b31; box-shadow: 0 16px 44px rgba(0,0,0,0.55); font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; color: #e4e4e7;" click="&lt;rust func&gt;" data-dioxus-id="375">
+        <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 60; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center;" click="&lt;rust func&gt;" data-dioxus-id="374">
+          <div style="width: 92%; max-width: 1100px; height: 86%; max-height: 760px; display: flex; overflow: hidden; border-radius: 14px; background: #09090b; border: 1px solid #2b2b31; box-shadow: 0 16px 44px rgba(0,0,0,0.55); font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif; color: #e4e4e7;" click="&lt;rust func&gt;" data-dioxus-id="376">
             <div style="flex: 0 0 248px; display: flex; flex-direction: column; background: #0e0e11; border-right: 1px solid #2b2b31; padding: 14px 10px; gap: 2px; overflow-y: scroll;">
               <div class="focus-ring" style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin-bottom: 10px; border-radius: 8px; background: #09090b; border: 1px solid #2b2b31;">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" fill="none" stroke="#8f8f99" stroke-width="2">
@@ -646,9 +647,9 @@
                 <span style="position: absolute; margin-left: 24px; color: #8f8f99; font-size: 13px; pointer-events: none;">
                   Search settings
                 </span>
-                <input type="text" aria-label="Search settings" value="" style="flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: #e4e4e7; font-size: 13px; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif;" input="&lt;rust func&gt;" data-dioxus-id="379" />
+                <input type="text" aria-label="Search settings" value="" style="flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: #e4e4e7; font-size: 13px; font-family: Inter, -apple-system, &#x27;SF Pro Text&#x27;, system-ui, &#x27;Segoe UI&#x27;, Roboto, &#x27;Helvetica Neue&#x27;, sans-serif;" input="&lt;rust func&gt;" data-dioxus-id="380" />
               </div>
-              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="390">
+              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="391">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" fill="none" stroke="#8f8f99" stroke-width="2">
                   <rect width="18" height="18" x="3" y="3" rx="2" />
                   <path d="M3 15h18" />
@@ -657,7 +658,7 @@
                   Workspace
                 </span>
               </button>
-              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="396">
+              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="397">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" fill="none" stroke="#8f8f99" stroke-width="2">
                   <path d="M12 4v16" />
                   <path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" />
@@ -667,7 +668,7 @@
                   Editor
                 </span>
               </button>
-              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="401">
+              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="402">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" fill="none" stroke="#8f8f99" stroke-width="2">
                   <path d="M10 8h.01" />
                   <path d="M12 12h.01" />
@@ -683,7 +684,7 @@
                   Keyboard
                 </span>
               </button>
-              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="406">
+              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="407">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" fill="none" stroke="#8f8f99" stroke-width="2">
                   <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" />
                   <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
@@ -695,7 +696,7 @@
                   Appearance
                 </span>
               </button>
-              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: rgba(45,212,191,0.14); color: #e4e4e7; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="410">
+              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: rgba(45,212,191,0.14); color: #e4e4e7; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="411">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" fill="none" stroke="#2dd4bf" stroke-width="2">
                   <path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z" />
                 </svg>
@@ -703,7 +704,7 @@
                   Extensions
                 </span>
               </button>
-              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="415">
+              <button style="height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: #a1a1aa; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;" click="&lt;rust func&gt;" data-dioxus-id="416">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" fill="none" stroke="#8f8f99" stroke-width="2">
                   <path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" />
                   <path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" />
@@ -727,7 +728,7 @@
                   Extensions
                 </span>
                 <span style="flex: 1;" />
-                <button style="width: 28px; height: 28px; border: none; border-radius: 6px; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer;" aria-label="Close settings" click="&lt;rust func&gt;" data-dioxus-id="385">
+                <button style="width: 28px; height: 28px; border: none; border-radius: 6px; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer;" aria-label="Close settings" click="&lt;rust func&gt;" data-dioxus-id="386">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" fill="none" stroke="#a1a1aa" stroke-width="2">
                     <path d="M18 6 6 18" />
                     <path d="m6 6 12 12" />
@@ -743,25 +744,25 @@
                   <div style="display: flex; flex-direction: column; gap: 14px; font-family: inherit; color: var(--foreground);">
                     <div style="position: relative; z-index: 1; background: var(--background); flex: none; max-width: 100%; overflow-x: auto;">
                       <div class="flex items-center gap-0.5 bg-secondary/50 rounded px-0.5 py-0.5">
-                        <button class="px-2.5 py-1 text-xs font-semibold rounded bg-accent text-accent-foreground" click="&lt;rust func&gt;" data-dioxus-id="494">
+                        <button class="px-2.5 py-1 text-xs font-semibold rounded bg-accent text-accent-foreground" click="&lt;rust func&gt;" data-dioxus-id="495">
                           All
                         </button>
-                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="492">
+                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="493">
                           Extensions
                         </button>
-                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="490">
+                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="491">
                           Luau scripts
                         </button>
-                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="473">
+                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="474">
                           Workers
                         </button>
-                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="485">
+                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="486">
                           Themes
                         </button>
-                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="481">
+                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="482">
                           Pages
                         </button>
-                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="484">
+                        <button class="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors" click="&lt;rust func&gt;" data-dioxus-id="485">
                           Layouts and keys
                         </button>
                       </div>
@@ -769,14 +770,14 @@
                     <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
                       <div style="flex: 1 1 260px; max-width: 360px; display: flex; flex-direction: column; gap: 8px;">
                         <div style="position: relative; z-index: 1; background: var(--background); flex: none;">
-                          <input class="w-full bg-input/30 border-input focus-visible:border-ring border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-muted-foreground h-9 rounded-lg" type="text" value="" placeholder="Search every kind" input="&lt;rust func&gt;" data-dioxus-id="476" />
+                          <input class="w-full bg-input/30 border-input focus-visible:border-ring border px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 placeholder:text-muted-foreground h-9 rounded-lg" type="text" value="" placeholder="Search every kind" input="&lt;rust func&gt;" data-dioxus-id="477" />
                         </div>
                         <div style="position: relative; z-index: 1; background: var(--background); flex: none; font-size: 12px; color: var(--muted-foreground);">
-                          58 item(s) · by name, kind, source
+                          59 item(s) · by name, kind, source
                         </div>
                         <div class="manager-list" style="display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px;">
                           <div style="background: var(--accent); border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="472">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="473">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -795,7 +796,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="452">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="453">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -814,7 +815,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="445">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="446">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -833,7 +834,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="430">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="431">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -852,7 +853,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1012">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1013">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -871,7 +872,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1022">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1023">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -890,7 +891,26 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1032">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1033">
+                              <div class="flex items-center gap-3 min-w-0">
+                                <div class="min-w-0">
+                                  <div class="flex items-center gap-2">
+                                    <p class="text-sm font-medium text-foreground truncate">
+                                      Now Playing
+                                    </p>
+                                    <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-secondary text-muted-foreground flex-shrink-0">
+                                      extension
+                                    </span>
+                                  </div>
+                                  <p class="text-xs text-muted-foreground truncate">
+                                    0.1.0 · Built in
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div style=" border-bottom: 1px solid var(--border);">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1043">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -909,7 +929,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1042">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1053">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -928,7 +948,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1052">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1063">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -947,7 +967,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1062">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1073">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -966,7 +986,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1072">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1083">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -985,7 +1005,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1082">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1093">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1004,7 +1024,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1092">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1103">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1023,7 +1043,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1102">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1113">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1042,7 +1062,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1112">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1123">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1061,7 +1081,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1122">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1133">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1080,7 +1100,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1132">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1143">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1099,7 +1119,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1142">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1153">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1118,7 +1138,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1152">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1163">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1137,7 +1157,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1162">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1173">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1156,7 +1176,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1172">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1183">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1175,7 +1195,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1182">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1193">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1194,7 +1214,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1192">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1203">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1213,7 +1233,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1202">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1213">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1232,7 +1252,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1212">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1223">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1251,7 +1271,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1222">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1233">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1270,7 +1290,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1232">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1243">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1289,7 +1309,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1242">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1253">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1308,7 +1328,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1252">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1263">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1327,7 +1347,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1262">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1273">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1346,7 +1366,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1272">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1283">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1365,7 +1385,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1282">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1293">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1384,7 +1404,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1292">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1303">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1403,7 +1423,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1302">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1313">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1422,7 +1442,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1312">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1323">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1441,7 +1461,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1322">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1333">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1460,7 +1480,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1332">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1343">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1479,7 +1499,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1342">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1353">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1498,7 +1518,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1352">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1363">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1517,7 +1537,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1362">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1373">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1536,7 +1556,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1372">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1383">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1555,7 +1575,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1382">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1393">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1574,7 +1594,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1392">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1403">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1593,7 +1613,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1402">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1413">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1612,7 +1632,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1412">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1423">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1631,7 +1651,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1422">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1433">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1650,7 +1670,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1432">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1443">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1669,7 +1689,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1442">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1453">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1688,7 +1708,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1452">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1463">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1707,7 +1727,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1462">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1473">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1726,7 +1746,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1472">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1483">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1745,7 +1765,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1482">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1493">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1764,7 +1784,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1492">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1503">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1783,7 +1803,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1502">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1513">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1802,7 +1822,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1512">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1523">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1821,7 +1841,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1522">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1533">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1840,7 +1860,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1532">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1543">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1859,7 +1879,7 @@
                             </div>
                           </div>
                           <div style=" border-bottom: 1px solid var(--border);">
-                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1542">
+                            <div class="flex items-center justify-between p-3 rounded-xl border border-border bg-card/50 cursor-pointer hover:bg-accent/30 transition-colors" click="&lt;rust func&gt;" data-dioxus-id="1553">
                               <div class="flex items-center gap-3 min-w-0">
                                 <div class="min-w-0">
                                   <div class="flex items-center gap-2">
@@ -1940,7 +1960,7 @@
                             </div>
                             <div class="flex items-center p-6 pt-0">
                               <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                                <button type="button" class="inline-flex items-center justify-center font-medium border bg-clip-padding text-sm transition-colors focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&amp;_svg:not([class*=&#x27;size-&#x27;])]:size-4 border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground h-9 gap-1.5 px-3 rounded-lg" click="&lt;rust func&gt;" data-dioxus-id="1599">
+                                <button type="button" class="inline-flex items-center justify-center font-medium border bg-clip-padding text-sm transition-colors focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&amp;_svg:not([class*=&#x27;size-&#x27;])]:size-4 border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground h-9 gap-1.5 px-3 rounded-lg" click="&lt;rust func&gt;" data-dioxus-id="1610">
                                   Turn off
                                 </button>
                               </div>
@@ -2022,17 +2042,17 @@
               
             </div>
             <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
-              <button data-testid="guide-tour-skip" style="height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid #3f3f46; background: transparent; color: #d4d4d8; font-size: 12px;" click="&lt;rust func&gt;" data-dioxus-id="340">
+              <button data-testid="guide-tour-skip" style="height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid #3f3f46; background: transparent; color: #d4d4d8; font-size: 12px;" click="&lt;rust func&gt;" data-dioxus-id="341">
                 Skip
               </button>
               <span style="flex: 1 1 0;" />
-              <button data-testid="guide-tour-back" style="height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid #3f3f46; background: transparent; color: #d4d4d8; font-size: 12px; opacity: 1;" click="&lt;rust func&gt;" data-dioxus-id="341">
+              <button data-testid="guide-tour-back" style="height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid #3f3f46; background: transparent; color: #d4d4d8; font-size: 12px; opacity: 1;" click="&lt;rust func&gt;" data-dioxus-id="342">
                 Back
               </button>
               <span style="display: none; color: #a1a1aa; font-size: 12px;">
                 Waiting for you…
               </span>
-              <button data-testid="guide-tour-next" style="display: block; height: 28px; padding: 0 14px; border-radius: 7px; border: none; background: #60a5fa; color: #0b1220; font-size: 12px; font-weight: 600;" click="&lt;rust func&gt;" data-dioxus-id="343">
+              <button data-testid="guide-tour-next" style="display: block; height: 28px; padding: 0 14px; border-radius: 7px; border: none; background: #60a5fa; color: #0b1220; font-size: 12px; font-weight: 600;" click="&lt;rust func&gt;" data-dioxus-id="344">
                 Next
               </button>
             </div>
