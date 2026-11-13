@@ -229,6 +229,24 @@ insets, whether winit's view has the keyboard, and the last presses with
 what in the foot heard them. On a phone the two lines meet while the
 keyboard is up; where they do not, the reported height is wrong.
 
+### Favourites: the slots follow what is open
+
+On a phone the four tabs and the round button are **favourites**, not a
+fixed set (`features/shell/src/shell/favourites.rs`): an app gives its
+default set and the sets the note types it knows declare, and
+`resolve_favourites` picks the set for the open note's type (`Favourites`,
+`Declared`, `SLOTS`). Leaving that type brings the default back. The
+sidebar (a phone's left drawer) is never a slot: it stays the way to
+everything, the default set's places among them.
+
+The Architect app's default set is Inbox, Vault, Project and Schedule, with
+Capture as the round button (`apps/ui/src/favourites.rs` `default_set`).
+Each opens its real surface in the Vault's workspace (`Surface`): the
+inbox deck, the last note shown, the projects list, and the calendar's
+day. The Go menu, ⌘K and ⌃⌘1–4 go to the same four. A type's own set comes
+from the extensions' `[[favourites]]` declaration (#604); wiring it to the
+open note's type is #607.
+
 The person orders the tabs (Task's Customize: drag to move, hide, bring
 back), per device. The first four are the bar; the rest are in the left
 sidebar's list and the command palette. A section added later (a plugin
