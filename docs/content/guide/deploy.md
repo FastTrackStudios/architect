@@ -38,7 +38,7 @@ WASI components draw a share's blocks ([below](#blocks-extensions-draw)). The de
 | **Its lanes over iroh** | The node's documents (`crdt::p2p::node_router`: `DocSync` and `DocPeer`), served to the devices its `Admission` lets in. A revoked device's connections close (`architect_devices::serve`). |
 | **A sync peer for the vaults** | Each markdown file of each vault is a document (`vault_collab::VaultCollab`, written behind to the file; an edit on disk is merged in). `apps/desktop/src/node/catalog.rs` `VaultCatalog` names them on the peer lane. With each peer it dials, the node keeps a live `DocSync` bridge per note (below), so an edit reaches the others within a second. Every `ARCHITECT_SWEEP_SECS` it also sweeps each peer (`crdt::peer::pull_with`), the fallback for what a bridge missed. |
 | **Sites** | Each vault in `ARCHITECT_SITES` is built as a Site ([sites](@/features/sites.md)) and rebuilt when the vault changes. |
-| **Share links** | `/s/<code>/`: a share's scope of a vault as a Site, to the audience it names, until it expires or is revoked ([below](#share-links)). |
+| **Share links** | `/s/<code>/`: a share's scope of a vault, opened in the web app as a guest of the link, to the audience it names, until it expires or is revoked ([below](#share-links)). |
 | **The HTTP face and vox** | `apps/desktop/src/node/service.rs` `Node` (`status`) over same-origin vox at `/vox`, its HTTP face (`POST /node/status`) and the Action List (`NODE_STATUS`). |
 | **MCP** | `/mcp`, only when `ARCHITECT_MCP_TOKEN_FILE` holds a bearer: `NODE_STATUS` and the `NOTES_LIST`, `NOTES_READ`, `NOTES_WRITE` and `NOTES_CREATE` actions (`apps/desktop/src/node/service.rs` `Notes`). An agent writes a note on the always-on node, and every device that syncs with it gets the note. |
 | **Health** | `GET /health` answers `ok`; `GET /version.json` gives the build. |
@@ -326,9 +326,54 @@ prefix to the node and a code never clashes with the web front end's paths
 
 ### A link opens Architect
 
-A share link is Architect itself, not only a page (#629): a person with
-the app opens it there, as a guest of that link, and a browser shows the
-page.
+A share link is Architect itself (#629, #646): a person with the app
+opens it there, as a guest of that link, and a browser opens the web app
+as a guest of it. The node renders no note of a link to HTML for anyone
+to read.
+
+- **In a browser.** `GET /s/<code>/` and every page path below it
+  (anything ending in `/`, a page's folder, and `_files/`) answer the web
+  app's own page (`apps/web/app/index.html`, compiled into the node:
+  `apps/desktop/src/node/share_shell.rs`), with a `<head>` for link
+  previews (`<title>`, `description` and `og:*` from the link's title,
+  only once the link is open to the caller; `robots` `noindex` unless the
+  link is public), one `<noscript>` line, and the app's own
+  Content-Security-Policy as a header (`share_shell::policy`, the one
+  `scripts/web-routes.md` gives, with the node's issuer). The page loads
+  the app from `/app/start.js` on the same origin; the app reads the code
+  and the path from its location (`apps/web/src/lib.rs` `share_route`)
+  and draws the link from its guest service (`apps/web/src/app/guest.rs`
+  `GuestPage`): the link's notes in their sets (headings over lists in
+  the link's root note, `apps/web/src/guest_view.rs` `sections`), each
+  with its art and a play button for its recording; a note as the view
+  its type's island claims, handed what the node gives a guest, then its
+  page's words and images; the link's recordings on the Now Playing bar
+  (streamed from the link's own file URLs); its files and "Download all";
+  a rebuild or a revoke read again through `_live`. The page path and
+  the link are checked as before (`Shares::open`, `admit`): expired,
+  revoked, unknown, a page another audience holds or one that is nowhere
+  is the same plain `404`; a link for signed-in people answers the app's
+  page with `401` or `403` and names nothing of the link, and the app
+  offers the node's sign-in (`/s/_signin`). The guest service takes that
+  sign-in's cookie from a page on the node's origin when a call carries
+  no token, and the app sends this browser's own session when it is
+  signed in. Signed in, as anyone, the app still opens a link as its
+  guest; "Sign in" in its account menu goes to your own vaults (`/app/`).
+- **Who serves the page.** The node, for `/s/<code>/…`; the bundle's
+  `/app/start.js`, `/app/style.css` and `assets/app-<hash>/` come from
+  whatever serves the web bundle on the same origin. In production that
+  is the reverse proxy in front of both (the chart's Ingress, Caddy):
+  `/s` to the node, the rest to the bundle, as before. With `just dev`
+  the web app's dev server proxies `/s` to the node and writes its own
+  `/app/start.js`, which starts its build (`xtask/src/dev/mod.rs`
+  `DEV_START`). A node with no web bundle beside it (no
+  `ARCHITECT_WEB_APP`) answers a plain `503` saying the link opens in the
+  web app, which this server does not serve ([Routing](#routing)).
+- **A share with a domain of its own** (`ShareChange::Domain`) stays a
+  Site at that host's root: its built pages, as `ARCHITECT_SITES` are
+  served. No web bundle and no `/s/<code>/_guest` are on that host, and a
+  domain is a publication. Its `/s/<code>/` link opens the web app like
+  any other.
 
 - **The guest service.** The app reads a link through `ShareGuest`
   (`features/spaces/src/guest.rs`), a read-only host service at
@@ -362,9 +407,9 @@ page.
   target is ever shared. Its answers are `private, no-store`, `no-referrer`, and
   any origin may call it without credentials (`Access-Control-Allow-Origin: *`):
   the code is the credential, and a session travels in the body, never a
-  cookie. It is the one way an app, the web app or an extension's view
-  reads a link; the node-rendered page is there until the web app shows
-  links.
+  cookie (the node's own sign-in cookie stands in for an empty token on
+  its own origin). It is the one way an app, the web app or an
+  extension's view reads a link.
 - **Universal links.** With `ARCHITECT_APPLE_APP_IDS` set, the node
   serves `/.well-known/apple-app-site-association` naming those apps for
   a link's pages alone (`/s/*/`): never `/s/_*` (its sign-in), a name
@@ -420,9 +465,12 @@ page.
 
 ### Blocks extensions draw
 
-A share's pages, and a Site's, draw the fences extensions claim, as the
-app draws them in a note (#488): a ```` ```kf ```` fence is the chart on
-`/s/<code>/`, not its source. The node asks, in this order:
+A Site's pages draw the fences extensions claim, as the app draws them
+in a note (#488): a ```` ```kf ```` fence is the chart, not its source. A
+share's build draws them too, and a link's guest reads a drawn block as
+its words and its claim (`architect_spaces::BlockKind::Drawn`); in the
+web app the extension that claims the note's type draws it (#646). The
+node asks, in this order:
 
 1. **The extensions installed on it**, a package folder each under
    `ARCHITECT_EXTENSIONS` (`<data dir>/extensions/<id>/extension.toml`, as
@@ -458,8 +506,8 @@ a string, comment, escape, `var()`, custom property, at-rule, anything
 that loads, or a `position` other than `static`/`relative` are dropped.
 Each block sits in a box the site draws (`contain`, `overflow`), and its
 SVG sheet is scoped to that box ([Sites](@/features/sites.md) has the
-lists). Every page of a
-share or a Site the node serves carries a Content-Security-Policy
+lists). Every page of a Site the node serves, and every file of a share
+link, carries a Content-Security-Policy
 (`apps/desktop/src/node/shares.rs` `content_security_policy`): scripts
 from the node and the site's theme script by hash only, images also from
 `https:` and `data:`, forms posted only to the node, no plugins or
@@ -501,23 +549,28 @@ architect-desktop actions run SHARE_REVOKE --arg code=<code>
 layer, ahead of a Site mounted at `/`):
 
 - Each live share is built as a scoped Site (`architect_sites::Scope`) at
-  `/s/<code>/` into `<data>/shares/<code>/`. It is rebuilt whenever its vault
-  changes: an edit on disk, from a peer's live bridge (#412) or from a web
-  client on the org lane. An open page reloads itself through `/s/<code>/_live`,
-  an event stream that fires after each rebuild. A revoke fires it as well,
-  so the page reloads to `404`.
+  `/s/<code>/` into `<data>/shares/<code>/`: what its guests read (each
+  page's plain blocks, `_note.json` beside the served folder) and the
+  files it serves; its HTML pages are never served on the link. It is
+  rebuilt whenever its vault changes: an edit on disk, from a peer's
+  live bridge (#412) or from a web client on the org lane. The web app
+  reads the link again on `/s/<code>/_live`, an event stream that fires
+  after each rebuild. A revoke fires it as well, and the link reads as
+  gone.
 - **Nothing outside the scope is in it, so nothing outside it can be
   served.** A link to a note outside the scope is plain text with no URL. An
   embed of one is left out. No backlink, base row, search entry or tag page
   lists one. Under a folder scope only the folder's own attachments are
-  copied ([sites](@/features/sites.md)). A path that is not a built page is
-  `404`, and so is any `..`.
+  copied ([sites](@/features/sites.md)). A path that is not a built page or
+  a file of the link is `404`, and so are any `..` and a page the build
+  wrote asked for by its file (`index.html`, `404.html`).
 - **The audience is checked on every request.** `org` and `invited` need a
   person signed in at the issuer: their session as `Authorization: Bearer`
   (the #413 bearer), or the `architect_session` cookie. The node resolves it
   with the issuer's `whoami` and `orgs`, and caches the answer for a minute.
-  With nobody signed in the link is `401` with a Sign in button, and a person
-  it was not shared with gets `403`. An expired, revoked or unknown code is
+  With nobody signed in a page of the link is the app's page with `401`
+  (the app offers the sign-in), a file plain `401`, and a person it was not
+  shared with gets `403`. An expired, revoked or unknown code is
   `404`, and so is anything else under `/s/` that is not a live link.
 - **Signing in** (`/s/_signin`) is the issuer's device sign-in. The node
   starts one and links to its approval page, the person approves it there
@@ -540,15 +593,14 @@ layer, ahead of a Site mounted at `/`):
 - **Answers keep the code private:** `Referrer-Policy: no-referrer` on every
   response; `X-Robots-Tag: noindex` unless the share is public; `private,
   no-store` for a signed-in audience.
-- **Comments.** A share that takes comments shows each page's comments and a
-  form under it (`POST /s/<code>/_comment`). The comment is signed by the
-  person if they are signed in, and by the name typed, marked "not signed
-  in", if not. A read-only share refuses with `403`.
+- **Comments.** The node-rendered page's comment form went with the page
+  (#646): a link takes no comment from a form. A share's comments stay in
+  their note and its owners list them (`ShareLinks::comments`); a guest's
+  comments come back as a method of the guest service.
 
 `apps/desktop/tests/shares.rs` tests all of it against the in-process issuer:
-the scope never leaks, each audience, expiry and revoke, a live edit on the
-shared page, comments, a domain, named audiences, the files page and the
-archive.
+the scope never leaks, each audience, expiry and revoke, a live edit read by
+the link's guest, a domain, named audiences, the files and the archive.
 
 ### One share, many audiences
 
@@ -597,12 +649,15 @@ on today's vault, so a file belongs to the notes that link or embed it. Give
 each part its own note (`instrument: violin`, `song: Joy to the World`, the
 PDF embedded) and a filter on the note is a filter on its file.
 
-### The files page and Download all
+### Files and Download all
 
-Every link has a files page, `<link>_files/`, and each page of a link that
-lists files points to it. It lists what the link shows, read from the vault
-when it is asked for, with an audience's filter applied, and switches
-between three views with a click (`?by=`):
+Every link has its files in the web app: `<link>_files/` opens the app on
+the link's Files view (`apps/web/src/app/guest.rs` `FilesView`), each file
+a download, grouped by note in list order, and "Download all". What it
+lists is the guest service's `files` (the same as `<link>_files.json`):
+what the link shows, read from the vault when it is asked for, with an
+audience's filter and the link's layer applied. The archive takes a view
+(`?by=`):
 
 | View | `by` | In the archive |
 | --- | --- | --- |
@@ -611,11 +666,10 @@ between three views with a click (`?by=`):
 | **By a property**: a group per value (a note with several values is in each) | `property:<key>` | `violin/01 Joy to the World/Violin I.pdf`: a folder per value, its notes numbered in it |
 
 List order is the scope's: a note list's own order, a base's rows in its
-views' order, otherwise by path (`architect_sites::Scope::ordered`). The
-page offers a view for every property some listed note gives a plain value.
+views' order, otherwise by path (`architect_sites::Scope::ordered`).
 
-**Download all**, on the page and on each group, is
-`<link>_archive.zip?by=<view>[&group=<label>]`: a zip of the files in view,
+**Download all** in the app is `<link>_archive.zip?by=note`; any view or
+group is `<link>_archive.zip?by=<view>[&group=<label>]`: a zip of the files in view,
 in the folders above. The node writes it to the response while it reads the
 files (`features/sites/src/archive.rs` `ZipWriter`): it is never whole in
 memory and never on disk, files are stored as they are, and it carries no
@@ -630,86 +684,43 @@ architect-desktop actions run SHARE_ARCHIVE --arg code=<code> --arg by=property:
 ### A link that plays
 
 A setlist shared as a link plays in the browser, with nothing to install
-(#511, first part). Give each song its own note, its recording embedded
+(#511, #646). Give each song its own note, its recording embedded
 (`![[media/joy.mp3]]`) and its synced lyrics beside it (`![[media/joy.lrc]]`,
-or an `lrc` fence in the note):
+or an `lrc` fence in the note), and its art as its `art:` property
+(`art: "[[cover.jpg]]"`):
 
-- **Native players, streamed with ranges.** An embedded audio or video file
-  (`mp3`, `m4a`, `aac`, `wav`, `ogg`, `opus`, `flac`; `mp4`, `m4v`, `webm`,
-  `mov`) is drawn as the browser's own `<audio>` or `<video>`
-  (`features/sites/src/media.rs` `media_kind`). The node serves every file of
-  a link but its pages with HTTP ranges: `206` with `Content-Range` and
-  `Accept-Ranges: bytes`, `416` past the end
-  (`architect::http::ranged::serve_file`), so a player seeks without fetching
-  the file. A range is a request like any other: the audience and the
-  audience's filter are checked first, and the other audience's file is
-  `404` on a link, ranged or not.
-- **A queue in list order.** Each page of a link carries the link's queue:
-  every audio and video file of the notes the link lists, in list order (the
-  order the files page uses), read per request, so an audience's queue is
-  its filter's (`apps/desktop/src/node/shares.rs` `queue`). A bar at the
-  foot of the page plays it: previous, play, next, the song (a link to its
-  page) and the time. When a song ends the next one starts.
-- **A playlist plays in place.** A page whose blocks are a playlist (a
-  setlist's songs: `[data-playlist]`, [views that follow playback](@/architecture/extensions.md#views-that-follow-playback))
-  is the player, laid out as a streaming app's playlist: one list (a
-  setlist's sets are labels in it), each song a row with its art, a tap on
-  one plays it there, and the songs follow each other with no page load.
-  A song note's art is its `art:` property (`art: "[[cover.jpg]]"`, an
-  image beside it): shown when the note is in the link and the file in its
-  layer, a tile of the song's initials otherwise. The card at the foot
-  (the song, Click, Loop, play) opens the now-playing view: where the song
-  is at the top, its chart (its `[data-now-playing]`, fetched only from a
-  page the link built) filling the screen and the controls under it, its
-  lyrics and page a tap away. Click ticks with the song's beats; Loop
-  repeats the section playing. Without a playlist the bar's song is a link
-  to its page, as before.
-- **On a phone, the app's foot.** A share page on a phone wears
-  Architect's phone shell: a pill of labelled tabs at the foot, a round
-  button beside it, the player's card floating just above, the page
-  scrolling under both; the header keeps the site's mark, the page's own
-  title (the one title on a phone: the page's heading and crumbs give way)
-  and the theme. On a desk the page's heading is its title (the site's
-  name beside the mark goes when it says the same) and its crumbs stay. The tabs are the share's root note's type's favourites (an
-  extension's `[[favourites]]`, the note at the link's root, else the
-  first it lists: a setlist shared with its songs is the setlist): a
-  setlist's are Setlist, Charts (the now-playing view of the song playing,
-  or the first, as a tab: the card opens it), Lyrics, and the round button
-  plays and pauses the set. A share whose root note's type declares none
-  has Home, Search and Browse. The tab shown is in the address
-  (`#tab=<id>`), so a reload or a shared link lands on it; a field being
-  typed in hides the bars. While a tab of the player shows, the page
-  behind it is inert. On a desk the page keeps its header and navigator,
-  the card opens the player's own view and the address keeps its hash. (`architect_sites::shell`; `features/sites/assets/shell.js`.)
-- **Across pages.** A link's pages are separate documents, so moving between
-  songs loads a new page. The player keeps the song, the time and whether it
-  was playing in the tab's `sessionStorage` and picks up where it was on the
-  next page, the same when a rebuild reloads the page (`_live`). With
-  **Follow** on (the default), the next song is played on its own page, so
-  its chart and lyrics are the ones on screen; off, it plays on in the bar
-  while you read another page. A browser that will not start sound without a
-  click leaves the player paused at that time, saying so, until you press
-  play. There is a short gap at each hand-over: playback is not gapless.
-- **Lyrics that follow.** An `.lrc` file or fence is drawn as its lines; the
-  line at the playhead is marked and scrolled into view inside the block,
-  and a click on a line seeks there. The LRC is read when the link is built
-  (`features/sites/src/lyrics.rs` `parse_lrc`); the page only reads the
-  seconds on each line.
-- **Blocks follow the same playhead.** The page's player is
-  `architect.playhead`, the contract every block on the page follows, the
-  extensions' too ([views that follow playback](@/architecture/extensions.md#views-that-follow-playback)).
-  An audio engine running on the page (Studio's) attaches to it as its
-  clock (`architect.playhead.attach`): the blocks then follow the engine
-  and the page's own player steps aside.
+- **The link's recordings on the Now Playing bar.** The web app queues
+  every audio and video file of the notes the link lists, in list order
+  (`apps/web/src/guest_view.rs` `queue`), as its own source on the
+  playhead, with each note's art (`ListedNote::art`, only when the link
+  serves it). A row's play button plays its song; the bar's card shows
+  the song and its art and opens the now-playing view. The app's one
+  `<audio>` element plays a file from the link's own URL
+  (`apps/web/src/app/guest.rs` `file_url`), so there is no page load
+  between songs.
+- **Streamed with ranges.** The node serves every file of a link with HTTP
+  ranges: `206` with `Content-Range` and `Accept-Ranges: bytes`, `416` past
+  the end (`architect::http::ranged::serve_file`), so the player seeks
+  without fetching the file. A range is a request like any other: the
+  audience and the audience's filter are checked first, and the other
+  audience's file is `404` on a link, ranged or not.
+- **Lyrics and charts.** A note's synced lyrics reach a guest as its
+  words (the build's lines); a chart a fence draws reaches it as a drawn
+  block's words and claim. Drawing them so they follow playback is the
+  view of the extension that claims the note's type, handed the note's
+  text and the link's art and lyrics when it declares `reads`
+  ([what a guest's view reads](#a-link-opens-architect)); for Studio's
+  charts and lyrics that is Studio's island.
 
 Not yet: streaming from `architect-files` and its renditions (a small proxy
 before the full file, #490; today the files are the vault's own, copied into
-the link), a gapless hand-over, and the same queue in the app's setlist pane.
+the link).
 
 Tested on a headless node (`apps/desktop/tests/shares.rs`
-`media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order`):
-a song's audio and video stream with ranges, its lyrics follow, and the
-queue is the link's order.
+`media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order`)
+and in a headless Firefox (`apps/web/test/app-share-guest.test.mjs`, `just
+app-share-guest-test`): the link's notes in their sets with their art and
+play buttons, a note and its picture, the files and their archive.
 
 ### How far a link plays
 
@@ -745,7 +756,7 @@ link goes (`features/spaces/src/share.rs` `Listen`):
   places is a page file.
 - **Named nowhere, never on disk.** Each link is built for its layer: a
   held-back file is not copied into its folder at all, and is in no page of
-  it (no player, link, embed or lyrics), its search index, its files page,
+  it (no player, link, embed or lyrics), its search index, its files listing,
   its archive or its queue. The node answers `403` for it from where files
   are placed, by its path, before it looks at the disk; a folder being
   swapped in by a rebuild is waited for first, and one it cannot read is
@@ -936,7 +947,7 @@ web front end:
 | `/org` | `/org/<slug>/vox`, the org lane (vaults, share links) |
 | `/mcp` | MCP, with its bearer |
 | `/health` | liveness and readiness |
-| `/s` | share links `/s/<code>/` and their sign-in `/s/_signin` |
+| `/s` | share links: `/s/<code>/…` (the web app's page for a page path, the link's files, `_files.json`, `_archive.zip`, `_live`, its guest service `_guest/`) and their sign-in `/s/_signin` |
 | `/node` | the node's HTTP face (`POST /node/status`, which the web app reads) |
 | `/.well-known` | `apple-app-site-association`, when `ARCHITECT_APPLE_APP_IDS` is set |
 | `/blobs` | reserved for the node |

@@ -1,12 +1,24 @@
-//! A share link opened in the app as its guest (#629, #669): the first
-//! step of #646, where `/s/<code>/` serves this app in guest mode.
+//! A share link opened in the web app as its guest (#629, #646): what
+//! `https://<node>/s/<code>/…` is. The node answers every page path of a
+//! link with this app's page (`apps/desktop/src/node/share_shell.rs`); the
+//! app reads the code and the path from its location (`crate::route`) and
+//! draws the link from its guest service on this origin (`ShareGuest`,
+//! through `ShareGuestHttpClient`):
 //!
-//! Internal for now: reached only at `/app/#share=<code>` (a fragment, so
-//! the code never reaches a server's logs), linked from nowhere, and
-//! `/s/<code>/` still serves the node's page. It is what #646 builds on:
-//! the link's guest service on this origin (`ShareGuest`, through
-//! `ShareGuestHttpClient`), the link's notes in its order, and a note drawn
-//! by the view its type's island claims, as a guest (`Audience::Guest`).
+//! - the link's notes, in its order, in the sets its root note lays out
+//!   (`crate::guest_view::sections`), each with its art and a play button
+//!   when it has a recording;
+//! - the chosen note: the view its type's island claims, as a guest
+//!   (`Audience::Guest`), handed what the node gave a guest, then its
+//!   page's words and images as plain blocks;
+//! - the link's recordings on the Now Playing bar, streamed from the
+//!   link's own file URLs ([`file_url`]);
+//! - its files by note, each a download, and "Download all" (the link's
+//!   `_archive.zip`);
+//! - a link for signed-in people: the app's own session when this browser
+//!   has one, else the node's sign-in (`/s/_signin`), whose cookie the
+//!   node takes in a guest call on this origin;
+//! - `_live`: a rebuild or a revoke reads the link again.
 //!
 //! Everything a guest's view is handed comes from the link's node, never
 //! from a vault: the note's text as the node gave it (none unless the
@@ -24,15 +36,22 @@
 use std::fmt::Write as _;
 use std::rc::Rc;
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+
+use architect_playhead::Caller;
 use architect_shell::use_shell;
 use architect_spaces::guest::ShareGuestHttpClient;
-use architect_spaces::{GuestFault, GuestLink, GuestNote, ListedFile};
+use architect_spaces::{BlockKind, GuestFault, GuestLink, GuestNote, ListedFile, PlainBlock};
 use dioxus::prelude::*;
+use serde_json::json;
 use wasm_bindgen::JsCast as _;
+use wasm_bindgen::prelude::Closure;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{RequestCredentials, RequestInit, RequestRedirect, Response};
 
 use crate::ext_host::{Audience, ViewFile};
+use crate::guest_view::{self, Open, Section};
 
 /// This page's origin.
 fn origin() -> Option<String> {
@@ -159,43 +178,261 @@ async fn files_of(code: &str, note: &GuestNote) -> Vec<ViewFile> {
     architect_spaces::view::within_caps(out, |f| f.path.as_str(), |f| f.size)
 }
 
-/// Link `code`, as its guest: its notes, and the one chosen drawn.
+/// The Now Playing source of the link's recordings: the app's own,
+/// outside the extension-id grammar (`:`), so no extension holds it.
+pub const SOURCE: &str = "app:share";
+
+thread_local! {
+    /// The open link's files: vault path to its URL on this origin, as the
+    /// node listed them. What the audio element and the card's art
+    /// resolve a path with ([`file_url`]); nothing else is.
+    static FILES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+/// The open link's URL for a file at vault path `path`, when the link
+/// serves it: the Now Playing bar's media and art, a view's art.
+#[must_use]
+pub fn file_url(path: &str) -> Option<String> {
+    FILES.with(|f| f.borrow().get(path).cloned())
+}
+
+/// The token a guest call carries: this browser's session, else none
+/// (the node then reads its own sign-in's cookie).
+fn token() -> String {
+    crate::browser::stored_token().unwrap_or_default()
+}
+
+/// What the guest service answered for the link.
+#[derive(Clone, PartialEq)]
+struct Opened {
+    link: Rc<GuestLink>,
+    files: Rc<Vec<ListedFile>>,
+}
+
+/// Why the link is not open, as the view says it.
+#[derive(Clone, PartialEq)]
+enum Shut {
+    SignIn,
+    Denied,
+    Gone,
+    Building,
+    Held(String),
+    Unreachable,
+}
+
+impl Shut {
+    fn of(e: &architect::ClientError<GuestFault>) -> Self {
+        match e {
+            architect::ClientError::App(GuestFault::SignIn) => Self::SignIn,
+            architect::ClientError::App(GuestFault::Denied) => Self::Denied,
+            architect::ClientError::App(GuestFault::Gone) => Self::Gone,
+            architect::ClientError::App(GuestFault::Building) => Self::Building,
+            architect::ClientError::App(GuestFault::Held(l)) => Self::Held(l.clone()),
+            _ => Self::Unreachable,
+        }
+    }
+}
+
+/// This page's path and query, for the sign-in to come back to.
+fn here() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().pathname().ok())
+        .unwrap_or_else(|| "/".to_owned())
+}
+
+/// The location shows `path` (a page of the link), without a reload.
+fn show_path(path: &str) {
+    if let Some(h) = web_sys::window().and_then(|w| w.history().ok()) {
+        let _ = h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(path));
+    }
+}
+
+/// `to` as a query value.
+fn query_value(to: &str) -> String {
+    to.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                char::from(b).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// The link's recordings as the app's own source, not playing, and its
+/// files as the paths [`file_url`] resolves.
+fn load_player(opened: &Opened) {
+    let o = origin().unwrap_or_default();
+    let code = opened
+        .link
+        .link
+        .trim_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    let map: HashMap<String, String> = opened
+        .files
+        .iter()
+        .filter_map(|f| {
+            let url = crate::view_files::guest_file_url(&o, &code, &f.url)?;
+            Some((f.path.clone(), url))
+        })
+        .collect();
+    let served: HashSet<&str> = map.keys().map(String::as_str).collect();
+    let queue = guest_view::queue(&opened.link, &served);
+    FILES.with(|f| *f.borrow_mut() = map.clone());
+    if queue.is_empty() {
+        return;
+    }
+    let same = architect_playhead::with(|d| {
+        d.source(SOURCE).is_some_and(|s| {
+            s.queue.len() == queue.len()
+                && s.queue
+                    .iter()
+                    .zip(&queue)
+                    .all(|(i, q)| q["id"].as_str() == Some(i.id.as_str()))
+        })
+    });
+    if !same {
+        let _ = architect_playhead::ask(
+            &Caller::App,
+            "PLAYHEAD_SET",
+            &json!({ "source": SOURCE, "name": opened.link.title, "queue": queue }),
+        );
+    }
+}
+
+/// Play item `id` of the link's source.
+fn play(id: &str) {
+    let _ = architect_playhead::ask(
+        &Caller::App,
+        "PLAYHEAD_ITEM",
+        &json!({ "source": SOURCE, "id": id, "play": true }),
+    );
+}
+
+/// Link `code` as its guest, opened at `rest` (below the link).
 #[component]
-pub fn GuestPage(code: String) -> Element {
+pub fn GuestPage(code: String, rest: String) -> Element {
     let t = use_shell().theme;
-    let link = use_resource({
+    // Moves on with every `_live` event, and while the link is built.
+    let mut revision = use_signal(|| 0_u64);
+    use_hook({
         let code = code.clone();
         move || {
-            let code = code.clone();
-            async move {
-                let c = client().ok_or("no origin")?;
-                c.link(code, String::new()).await.map_err(|e| said(&e))
+            let url = format!("{}_live", architect_spaces::share::link_path(&code));
+            if let Ok(events) = web_sys::EventSource::new(&url) {
+                let on = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |_| {
+                    revision.with_mut(|r| *r = r.wrapping_add(1));
+                });
+                events.set_onmessage(Some(on.as_ref().unchecked_ref()));
+                on.forget();
+                // A revoke ends the stream and the next one is refused:
+                // read the link once more, which says it is gone.
+                let gone = Closure::<dyn FnMut(web_sys::Event)>::new({
+                    let events = events.clone();
+                    move |_| {
+                        if events.ready_state() == web_sys::EventSource::CLOSED {
+                            revision.with_mut(|r| *r = r.wrapping_add(1));
+                        }
+                    }
+                });
+                events.set_onerror(Some(gone.as_ref().unchecked_ref()));
+                gone.forget();
             }
         }
     });
-    let mut chosen = use_signal(|| None::<String>);
-    let state = link.read().clone();
+    let opened = use_resource({
+        let code = code.clone();
+        move || {
+            let code = code.clone();
+            let _ = revision();
+            async move {
+                let c = client().ok_or(Shut::Unreachable)?;
+                let link = c
+                    .link(code.clone(), token())
+                    .await
+                    .map_err(|e| Shut::of(&e))?;
+                let files = c
+                    .files(code, token(), None)
+                    .await
+                    .map_err(|e| Shut::of(&e))?;
+                Ok::<_, Shut>(Opened {
+                    link: Rc::new(link),
+                    files: Rc::new(files),
+                })
+            }
+        }
+    });
+    // While it is being built: ask again in a moment.
+    let building = matches!(&*opened.read(), Some(Err(Shut::Building)));
+    use_effect(use_reactive!(|building| {
+        if building {
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(3_000).await;
+                revision.with_mut(|r| *r = r.wrapping_add(1));
+            });
+        }
+    }));
+    let mut open = use_signal(|| None::<Open>);
+    // Open a note or the files: the location follows, without a reload.
+    let choose = use_callback(move |next: Open| {
+        if let Some(Ok(o)) = &*opened.peek() {
+            let page = match &next {
+                Open::Note(p) => o
+                    .link
+                    .notes
+                    .iter()
+                    .find(|n| &n.path == p)
+                    .and_then(|n| n.page.clone()),
+                Open::Files => Some(format!("{}_files/", o.link.link)),
+                Open::Nothing => None,
+            };
+            if let Some(page) = page {
+                show_path(&page);
+            }
+        }
+        open.set(Some(next));
+    });
+    let state = opened.read().clone();
+    if let Some(Ok(o)) = &state {
+        load_player(o);
+    }
     let body = match state {
-        None => rsx! { p { style: "color: {t.ink_3};", "Opening the link…" } },
-        Some(Err(why)) => rsx! { p { "data-testid": "guest-problem", "{why}" } },
-        Some(Ok(l)) => {
-            let first = l
-                .notes
-                .iter()
-                .find(|n| n.kind.is_some())
-                .or_else(|| l.notes.first());
-            let path = chosen().or_else(|| first.map(|n| n.path.clone()));
+        None => rsx! { p { style: "color: {t.ink_3};", "Opening the shared link…" } },
+        Some(Err(shut)) => rsx! { Closed { shut } },
+        Some(Ok(o)) => {
+            let at = open().unwrap_or_else(|| guest_view::open(&o.link, &rest));
             rsx! {
-                GuestNotes { link: Rc::new(l.clone()), chosen: path.clone(), on_choose: move |p| chosen.set(Some(p)) }
-                if let Some(path) = path {
-                    GuestNoteView { key: "{path}", code, path }
+                LinkHead { opened: o.clone(), at: at.clone(), on_open: choose }
+                match at.clone() {
+                    Open::Files => rsx! { FilesView { opened: o.clone() } },
+                    // The root note: its list first (what a setlist is
+                    // opened for), then its words; any other, its words.
+                    Open::Note(path) if guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
+                        div { style: "display: flex; flex-direction: column; gap: 20px;",
+                            NoteList { opened: o.clone(), chosen: path.clone(), on_open: choose }
+                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone() }
+                        }
+                    },
+                    Open::Note(path) => rsx! {
+                        div { style: "display: flex; flex-direction: column; gap: 20px;",
+                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone() }
+                            NoteList { opened: o.clone(), chosen: path, on_open: choose }
+                        }
+                    },
+                    Open::Nothing => rsx! {
+                        p { "data-testid": "guest-problem", "This page is not on the link any more." }
+                        NoteList { opened: o.clone(), chosen: String::new(), on_open: choose }
+                    },
                 }
             }
         }
     };
     rsx! {
         div { "data-testid": "guest-page",
-            style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 20px 16px 96px; color: {t.ink};",
+            style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 16px 16px 120px; color: {t.ink};",
             div { style: "max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;",
                 {body}
             }
@@ -203,28 +440,211 @@ pub fn GuestPage(code: String) -> Element {
     }
 }
 
-/// The link's title and its notes, the chosen one marked.
+/// Why the link does not open, and what to do.
 #[component]
-fn GuestNotes(
-    link: Rc<GuestLink>,
-    chosen: Option<String>,
-    on_choose: EventHandler<String>,
-) -> Element {
+fn Closed(shut: Shut) -> Element {
     let t = use_shell().theme;
+    let signin = format!("/s/_signin?to={}", query_value(&here()));
+    let (title, line) = match &shut {
+        Shut::SignIn => ("Sign in to open this link", "It is for signed-in people: the members of an organization, or the people it was shared with.".to_owned()),
+        Shut::Denied => ("Not shared with you", "This link was not shared with the account you are signed in as.".to_owned()),
+        Shut::Gone => ("Nothing at this link", "It may have expired or been taken down.".to_owned()),
+        Shut::Building => ("Being built", "This link is being built. It opens in a moment.".to_owned()),
+        Shut::Held(layer) => ("Not on this link", format!("This needs the {layer} layer.")),
+        Shut::Unreachable => ("Not reachable", "The link's node did not answer. Try again in a moment.".to_owned()),
+    };
     rsx! {
-        h1 { style: "margin: 0; font-size: 22px;", "data-testid": "guest-title", "{link.title}" }
-        nav { style: "display: flex; flex-wrap: wrap; gap: 6px;",
-            for n in link.notes.iter().cloned() {
-                button {
-                    key: "{n.path}",
-                    "data-guest-note": "{n.title}",
-                    style: if chosen.as_deref() == Some(n.path.as_str()) {
-                        format!("padding: 4px 10px; border-radius: 999px; border: 1px solid {}; background: {}; color: {};", t.accent, t.accent, t.accent_ink)
-                    } else {
-                        format!("padding: 4px 10px; border-radius: 999px; border: 1px solid {}; background: transparent; color: {};", t.rule, t.ink)
-                    },
-                    onclick: move |_| on_choose.call(n.path.clone()),
-                    "{n.title}"
+        section { "data-testid": "guest-problem", "data-why": "{title}",
+            style: "display: flex; flex-direction: column; gap: 10px; padding: 24px 0;",
+            h1 { style: "margin: 0; font-size: 22px;", "{title}" }
+            p { style: "margin: 0; color: {t.ink_2}; line-height: 1.5;", "{line}" }
+            if shut == Shut::SignIn {
+                a { "data-testid": "guest-sign-in", href: "{signin}",
+                    style: "align-self: flex-start; padding: 8px 16px; border-radius: 999px; background: {t.accent}; color: {t.accent_ink}; text-decoration: none; font-weight: 600;",
+                    "Sign in"
+                }
+            }
+        }
+    }
+}
+
+/// The link's title, who it is for, and the way to its files.
+#[component]
+fn LinkHead(opened: Opened, at: Open, on_open: EventHandler<Open>) -> Element {
+    let t = use_shell().theme;
+    let link = opened.link.clone();
+    let count = opened.files.len();
+    let whom = match link.audience.as_str() {
+        "public" => "Public",
+        "org" => "For an organization's members",
+        "invited" => "For the people it was shared with",
+        _ => "Anyone with the link",
+    };
+    let files_on = at == Open::Files;
+    let root = guest_view::root_note(&link).map(|n| n.path.clone());
+    let pill = |on: bool| {
+        if on {
+            format!(
+                "padding: 5px 12px; border-radius: 999px; border: 1px solid {}; background: {}; color: {}; font: inherit; font-size: 13px; cursor: pointer;",
+                t.accent, t.accent, t.accent_ink
+            )
+        } else {
+            format!(
+                "padding: 5px 12px; border-radius: 999px; border: 1px solid {}; background: transparent; color: {}; font: inherit; font-size: 13px; cursor: pointer;",
+                t.rule, t.ink
+            )
+        }
+    };
+    rsx! {
+        header { style: "display: flex; flex-direction: column; gap: 8px;",
+            div { style: "font-size: 12px; color: {t.ink_3}; letter-spacing: 0.02em;", "Shared with you · {whom}" }
+            h1 { "data-testid": "guest-title", style: "margin: 0; font-size: 24px; line-height: 1.2;", "{link.title}" }
+            nav { style: "display: flex; flex-wrap: wrap; gap: 6px;",
+                if let Some(root) = root {
+                    button { "data-testid": "guest-notes-tab", style: pill(!files_on),
+                        onclick: move |_| on_open.call(Open::Note(root.clone())),
+                        "Notes ({link.notes.len()})"
+                    }
+                }
+                if count > 0 {
+                    button { "data-testid": "guest-files-tab", style: pill(files_on),
+                        onclick: move |_| on_open.call(Open::Files),
+                        "Files ({count})"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The link's notes, in its sets, the chosen one marked: each row its
+/// number, art, title and a play button for its recording.
+#[component]
+fn NoteList(opened: Opened, chosen: String, on_open: EventHandler<Open>) -> Element {
+    let t = use_shell().theme;
+    let link = opened.link.clone();
+    let root = guest_view::root_note(&link).map(|n| n.path.clone());
+    // The root note's outline, for its sets; read again with the link.
+    let code = link
+        .link
+        .trim_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    let asked = root.clone();
+    let outline = use_resource(use_reactive!(|(asked, code, opened)| {
+        let _ = &opened;
+        let root = asked;
+        async move {
+            let root = root?;
+            let c = client()?;
+            c.read(code, token(), root).await.ok().map(|n| n.blocks)
+        }
+    }));
+    let blocks = outline.read().clone().flatten().unwrap_or_default();
+    let sections: Vec<Section> = guest_view::sections(&link, root.as_deref(), &blocks);
+    let playing = architect_playhead::ui::use_playhead();
+    let now = playing().active.as_ref().and_then(|a| {
+        (a.source == SOURCE && a.playing)
+            .then(|| a.item.as_ref().map(|i| i.id.clone()))
+            .flatten()
+    });
+    let mut number = 0_usize;
+    rsx! {
+        section { "data-testid": "guest-list", style: "display: flex; flex-direction: column; gap: 4px;",
+            for (s, section) in sections.into_iter().enumerate() {
+                if let Some(label) = section.label.clone() {
+                    div { key: "set-{s}", "data-guest-set": "{label}",
+                        style: "margin: 14px 0 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: {t.ink_3};",
+                        "{label}"
+                    }
+                }
+                for i in section.notes {
+                    if let Some(n) = link.notes.get(i).cloned() {
+                        {
+                            number += 1;
+                            let on = n.path == chosen;
+                            let art = n.art.as_deref().and_then(file_url);
+                            let track = n.files.iter().find(|f| guest_view::plays(f) && file_url(f).is_some()).map(|f| format!("{}#{f}", n.path));
+                            let is_now = track.is_some() && track == now;
+                            let path = n.path.clone();
+                            rsx! {
+                                div { key: "{n.path}", "data-guest-note": "{n.title}",
+                                    style: format!("display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 10px; background: {};", if on { t.active.to_string() } else { "transparent".to_owned() }),
+                                    span { style: "flex: none; width: 24px; text-align: right; font-size: 13px; color: {t.ink_3}; font-variant-numeric: tabular-nums;", "{number}" }
+                                    match art {
+                                        Some(src) => rsx! { img { src: "{src}", alt: "", style: "flex: none; width: 40px; height: 40px; border-radius: 6px; object-fit: cover;" } },
+                                        None => rsx! { div { style: "flex: none; width: 40px; height: 40px; border-radius: 6px; background: {t.pill};" } },
+                                    }
+                                    button { style: "flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; color: {t.ink}; font: inherit; font-size: 15px; cursor: pointer; padding: 6px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
+                                        onclick: move |_| on_open.call(Open::Note(path.clone())),
+                                        "{n.title}"
+                                    }
+                                    if let Some(id) = track {
+                                        button { "data-guest-play": "{n.title}",
+                                            "aria-label": if is_now { "Pause" } else { "Play" },
+                                            style: "flex: none; width: 34px; height: 34px; border-radius: 999px; border: 1px solid {t.rule}; background: transparent; color: {t.ink}; cursor: pointer; font-size: 13px;",
+                                            onclick: move |_| {
+                                                if is_now {
+                                                    architect_playhead::ui::press("PLAYHEAD_TOGGLE", &json!({}));
+                                                } else {
+                                                    play(&id);
+                                                }
+                                            },
+                                            if is_now { "❚❚" } else { "▶" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The link's files by note, each a download, and "Download all".
+#[component]
+fn FilesView(opened: Opened) -> Element {
+    let t = use_shell().theme;
+    let o = origin().unwrap_or_default();
+    let link = opened.link.clone();
+    let code = link
+        .link
+        .trim_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    let groups = guest_view::files_by_note(&link, &opened.files);
+    let total = opened.files.len();
+    let all = format!("{}_archive.zip?by=note", link.link);
+    rsx! {
+        section { "data-testid": "guest-files", style: "display: flex; flex-direction: column; gap: 14px;",
+            if total == 0 {
+                p { style: "color: {t.ink_3};", "No files are attached here." }
+            } else {
+                a { "data-testid": "guest-download-all", href: "{all}", download: "",
+                    style: "align-self: flex-start; padding: 8px 16px; border-radius: 999px; background: {t.accent}; color: {t.accent_ink}; text-decoration: none; font-weight: 600;",
+                    "Download all ({total})"
+                }
+            }
+            for (note, files) in groups {
+                div { key: "{note.path}", style: "border-top: 1px solid {t.rule}; padding-top: 10px;",
+                    div { style: "font-weight: 600; margin-bottom: 6px;", "{note.title}" }
+                    for f in files {
+                        if let Some(url) = crate::view_files::guest_file_url(&o, &code, &f.url) {
+                            a { key: "{f.path}", href: "{url}", download: "", "data-guest-file": "{f.path}",
+                                style: "display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; color: {t.ink}; text-decoration: none; font-size: 14px;",
+                                span { style: "min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
+                                    {f.path.rsplit('/').next().unwrap_or(&f.path).to_owned()}
+                                }
+                                span { style: "flex: none; color: {t.ink_3}; font-variant-numeric: tabular-nums;", {guest_view::size(f.size)} }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -232,35 +652,35 @@ fn GuestNotes(
 }
 
 /// Note `path` of link `code`: the view its type's island claims, handed
-/// what the node gave a guest, then its page's words.
+/// what the node gave a guest, then its page's words and images.
 #[component]
 fn GuestNoteView(code: String, path: String) -> Element {
-    let t = use_shell().theme;
-    let note = use_resource({
-        move || {
-            let (code, path) = (code.clone(), path.clone());
+    // Read again when the note asked for changes (props are not signals).
+    let note = use_resource(use_reactive!(|(code, path)| {
+        {
             async move {
                 let c = client().ok_or("no origin")?;
                 let note = c
-                    .read(code.clone(), String::new(), path)
+                    .read(code.clone(), token(), path)
                     .await
                     .map_err(|e| said(&e))?;
                 let files = files_of(&code, &note).await;
-                Ok::<_, String>((Rc::new(note), files))
+                Ok::<_, String>((Rc::new(note), files, code))
             }
         }
-    });
+    }));
     let state = note.read().clone();
     match state {
         None => rsx! {},
         Some(Err(why)) => rsx! { p { "data-testid": "guest-problem", "{why}" } },
-        Some(Ok((note, files))) => {
+        Some(Ok((note, files, code))) => {
             let kind = note.kind.clone().unwrap_or_default();
             let count = files.len();
             rsx! {
-                section { "data-testid": "guest-note", "data-files": "{count}",
+                article { "data-testid": "guest-note", "data-files": "{count}",
                     "data-text": "{note.source.is_some()}",
-                    h2 { style: "margin: 4px 0 8px; font-size: 18px;", "{note.title}" }
+                    style: "display: flex; flex-direction: column; gap: 10px;",
+                    h2 { style: "margin: 0; font-size: 20px;", "{note.title}" }
                     if !kind.is_empty() {
                         super::embed::NoteEmbed {
                             audience: Audience::Guest,
@@ -273,11 +693,81 @@ fn GuestNoteView(code: String, path: String) -> Element {
                             files,
                         }
                     }
-                    for (i, b) in note.blocks.iter().enumerate() {
-                        if !b.text.is_empty() {
-                            p { key: "{i}", style: "margin: 8px 0; color: {t.ink_2}; line-height: 1.6;", "{b.text}" }
+                    Blocks { code, blocks: note.blocks.clone() }
+                }
+            }
+        }
+    }
+}
+
+/// A page's plain blocks: text as text, images from below the link.
+#[component]
+fn Blocks(code: String, blocks: Vec<PlainBlock>) -> Element {
+    let t = use_shell().theme;
+    let o = origin().unwrap_or_default();
+    // A medium's fallback line (its file's path, under it): the medium
+    // is said once.
+    let echoes: Vec<bool> = blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            b.kind == BlockKind::Paragraph
+                && !b.text.contains(' ')
+                && i.checked_sub(1)
+                    .and_then(|p| blocks.get(p))
+                    .is_some_and(|m| {
+                        matches!(m.kind, BlockKind::Audio | BlockKind::Video)
+                            && !m.text.is_empty()
+                            && b.text.ends_with(m.text.as_str())
+                    })
+        })
+        .collect();
+    rsx! {
+        for (i, b) in blocks.into_iter().enumerate().filter(|(i, _)| !echoes.get(*i).copied().unwrap_or(false)) {
+            {
+                let key = i.to_string();
+                match b.kind {
+                    BlockKind::Heading => {
+                        let size = 22_i32.saturating_sub(2_i32.saturating_mul(i32::from(b.level))).max(14);
+                        rsx! { div { key: "{key}", style: "font-size: {size}px; font-weight: 700; margin-top: 6px;", "{b.text}" } }
+                    }
+                    BlockKind::Paragraph => rsx! {
+                        p { key: "{key}", style: "margin: 0; color: {t.ink_2}; line-height: 1.6; white-space: pre-wrap;", "{b.text}" }
+                    },
+                    BlockKind::Quote => rsx! {
+                        blockquote { key: "{key}", style: "margin: 0; color: {t.ink_2}; line-height: 1.6; border-left: 3px solid {t.rule}; padding-left: 12px;", "{b.text}" }
+                    },
+                    BlockKind::List => {
+                        let ordered = b.level == 1;
+                        rsx! {
+                            div { key: "{key}", style: "display: flex; flex-direction: column; gap: 4px; color: {t.ink_2}; line-height: 1.5;",
+                                for (n, item) in b.items.iter().enumerate() {
+                                    div { key: "{n}",
+                                        if ordered { "{n.saturating_add(1)}. {item}" } else { "• {item}" }
+                                    }
+                                }
+                            }
                         }
                     }
+                    BlockKind::Code => rsx! {
+                        pre { key: "{key}",
+                            style: "margin: 0; padding: 10px 12px; border-radius: 8px; background: {t.pill}; font-family: ui-monospace, Menlo, monospace; font-size: 13px; white-space: pre-wrap; overflow-x: auto;",
+                            "{b.text}"
+                        }
+                    },
+                    BlockKind::Rule => rsx! { div { key: "{key}", style: "height: 1px; background: {t.rule}; margin: 8px 0;" } },
+                    BlockKind::Image => {
+                        match b.src.as_deref().and_then(|s| crate::view_files::guest_file_url(&o, &code, s)) {
+                            Some(src) => rsx! { img { key: "{key}", "data-guest-image": "{b.text}", src: "{src}", alt: "{b.text}", style: "max-width: 100%; height: auto; border-radius: 8px; align-self: flex-start;" } },
+                            None => rsx! { div { key: "{key}", style: "font-size: 13px; color: {t.ink_3};", "Image: {b.text}" } },
+                        }
+                    }
+                    BlockKind::Audio | BlockKind::Video => rsx! {
+                        div { key: "{key}", style: "font-size: 13px; color: {t.ink_3};", "{b.text}: in the Now Playing bar" }
+                    },
+                    BlockKind::Drawn => rsx! {
+                        div { key: "{key}", style: "font-size: 13px; color: {t.ink_3}; white-space: pre-wrap;", "{b.text}" }
+                    },
                 }
             }
         }

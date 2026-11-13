@@ -1,11 +1,9 @@
 name: browser
 
-# A share page in a real browser (headless Firefox), the suites that need
-# one: the island's web view against a hostile bundle on the classic
-# WebDriver path Safari takes (no script evaluated in the page:
-# apps/web/test/share-webview.test.mjs, DRIVER=gecko), and a share page on
-# a phone, measured (apps/web/test/share-layout.test.mjs), and the web
-# app's extension frame host against hostile bundles
+# The web app in a real browser (headless Firefox), the suites that need
+# one: a share link opened as its guest (apps/web/test/app-share-guest.test.mjs
+# and app-guest-content.test.mjs, #646: `/s/<code>/` is the app's page from
+# the node), the web app's extension frame host against hostile bundles
 # (apps/web/test/app-ext-host.test.mjs, #495: the release bundle behind a
 # front that sends `/_ext/` to the node), and the web app's bottom slots
 # following the open note's type (apps/web/test/app-favourites.test.mjs,
@@ -38,7 +36,7 @@ env:
 
 jobs:
   share:
-    name: Share pages in Firefox
+    name: The web app in Firefox
     runs-on: [self-hosted, thebattleship]
     timeout-minutes: 45
     defaults:
@@ -60,19 +58,15 @@ jobs:
       - name: the island node
         run: cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
       # The browser runs outside the dev shell's libraries.
-      - name: a share page on a phone, measured
+      - name: a share link opened as its guest
         run: |
-          ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" \
-            env -u LD_LIBRARY_PATH "$NODE" --test apps/web/test/share-layout.test.mjs
-      - name: the web view against a hostile bundle (Safari's classic path)
-        if: ${{ !cancelled() }}
-        run: |
-          DRIVER=gecko ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" \
-            env -u LD_LIBRARY_PATH "$NODE" --test apps/web/test/share-webview.test.mjs
+          bash scripts/web-bundle.sh target/web-bundle
+          ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
+            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-share-guest.test.mjs apps/web/test/app-guest-content.test.mjs
       - name: the web app's extension frames against hostile bundles
         if: ${{ !cancelled() }}
         run: |
-          bash scripts/web-bundle.sh target/web-bundle
+          test -d target/web-bundle/app || bash scripts/web-bundle.sh target/web-bundle
           ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
             env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-ext-host.test.mjs
       - name: the web app's bottom slots following the open note's type
