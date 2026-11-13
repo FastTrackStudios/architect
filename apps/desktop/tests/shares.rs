@@ -3559,8 +3559,24 @@ async fn a_guests_files_are_the_links_at_its_layer() {
     w.host.stop().await;
 }
 
+/// A path matches an association component's `/` pattern as iOS reads
+/// it: `*` any run of characters (`/` too), `?` any one, the rest itself;
+/// the query is not part of the path.
+fn aasa_matches(pattern: &str, path: &str) -> bool {
+    let path = path.split('?').next().unwrap_or_default();
+    fn go(p: &[u8], s: &[u8]) -> bool {
+        match p.split_first() {
+            None => s.is_empty(),
+            Some((b'*', rest)) => (0..=s.len()).any(|i| go(rest, &s[i..])),
+            Some((b'?', rest)) => !s.is_empty() && go(rest, &s[1..]),
+            Some((c, rest)) => s.first() == Some(c) && go(rest, &s[1..]),
+        }
+    }
+    go(pattern.as_bytes(), path.as_bytes())
+}
+
 /// `/.well-known/apple-app-site-association` names the configured apps
-/// for the share links alone; with none configured it is not there.
+/// for the share links' pages alone; with none configured it is not there.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_node_claims_its_links_for_the_configured_apps_alone() {
     let w = world().await;
@@ -3579,11 +3595,44 @@ async fn the_node_claims_its_links_for_the_configured_apps_alone() {
         "28C2G63DA7.app.fasttrackstudio.architect"
     );
     let components = details["components"].as_array().unwrap();
-    // Sign-in and the guest service are excluded first; then the links.
+    // Sign-in and the link's reserved names are excluded first; then its
+    // pages, and nothing else.
     assert_eq!(components[0]["/"], "/s/_*");
     assert_eq!(components[0]["exclude"], true);
+    assert_eq!(components[1]["/"], "/s/*/_*");
     assert_eq!(components[1]["exclude"], true);
-    assert_eq!(components.last().unwrap()["/"], "/s/*");
+    assert_eq!(components.last().unwrap()["/"], "/s/*/");
+    // As iOS reads the components: the first that matches decides.
+    let claims = |path: &str| {
+        components
+            .iter()
+            .find(|c| aasa_matches(c["/"].as_str().unwrap(), path))
+            .is_some_and(|c| c["exclude"] != true)
+    };
+    for page in [
+        "/s/merrybrightstack/",
+        "/s/merrybrightstack/joy/",
+        "/s/merrybrightstack/Songs/Joy/",
+    ] {
+        assert!(claims(page), "{page} opens the app");
+    }
+    for not in [
+        "/s/_signin/",
+        "/s/merrybrightstack/_archive.zip",
+        "/s/merrybrightstack/_archive.zip?by=order",
+        "/s/merrybrightstack/_files/",
+        "/s/merrybrightstack/_files.json",
+        "/s/merrybrightstack/_guest/link",
+        "/s/merrybrightstack/_live",
+        "/s/merrybrightstack/joy/_note.json",
+        "/s/merrybrightstack/Songs/Joy.mp3",
+        "/s/merrybrightstack/Art/joy.png",
+        "/s/merrybrightstack/Charts/Joy.pdf",
+        "/s/merrybrightstack",
+        "/elsewhere/",
+    ] {
+        assert!(!claims(not), "{not} stays the browser's");
+    }
     assert!(node::shares::apple_app_site_association(&[]).is_none());
 
     // Configured: served as JSON, no redirect.

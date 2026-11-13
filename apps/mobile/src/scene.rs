@@ -73,10 +73,16 @@ define_class!(
     unsafe impl UIWindowSceneDelegate for SceneDelegate {}
 );
 
-/// Hand `url` to the window, as a link the OS gave the app.
+/// Hand `url` to the window, as a link the OS gave the app: a share link
+/// or `architect://open?url=<one>`. Any other URL (`architect://vault`,
+/// the app's own) is not a share link and is left alone, as the desktop
+/// leaves it to the tabs: it never reaches the Shared tab.
 fn open_url(url: &NSURL) {
-    if let Some(text) = url.absoluteString() {
-        architect_app::guest::incoming(text.to_string(), architect_app::guest::Source::Os);
+    let Some(text) = url.absoluteString() else {
+        return;
+    };
+    for link in architect_app::guest::links_in([text.to_string()]) {
+        architect_app::guest::incoming(link, architect_app::guest::Source::Os);
     }
 }
 

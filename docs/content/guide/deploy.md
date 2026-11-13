@@ -349,7 +349,10 @@ page.
   links.
 - **Universal links.** With `ARCHITECT_APPLE_APP_IDS` set, the node
   serves `/.well-known/apple-app-site-association` naming those apps for
-  `/s/*` (never `/s/_*`, its sign-in, or a link's guest service)
+  a link's pages alone (`/s/*/`): never `/s/_*` (its sign-in), a name
+  the node reserves (`/s/*/_*`: the guest service, `_files/`,
+  `_archive.zip`, `_live`), or a file (no trailing `/`: media, a PDF, an
+  image), so "Download all" downloads
   (`apps/desktop/src/node/shares.rs` `apple_app_site_association`). The
   App Store build claims FasTrack's own domain; any other node's links
   open in the app through `architect://open?url=<the link>`
