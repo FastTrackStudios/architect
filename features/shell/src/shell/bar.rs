@@ -15,7 +15,8 @@
 use dioxus::prelude::*;
 
 use super::bars::BottomBar;
-use super::keyboard::use_keyboard_lift;
+use super::input_debug;
+use super::keyboard::{Foot, show_keyboard, soft_keyboard, use_keyboard_lift};
 use super::typing::{KeyboardBar, Typing, TypingContent, TypingItem, TypingTools};
 use super::{Action, Icon, IconFn, Screen, Shell, Tab, use_shell};
 
@@ -429,7 +430,8 @@ pub(super) fn PhoneFoot(
     let lift = keyboard.lift();
     let ins = screen.insets;
     let model = (shell.bars)();
-    if now.editing() {
+    let foot = now.foot(soft_keyboard());
+    if foot == Foot::Editing {
         let typing = model.typing();
         // Filled by whoever put `TypingTools` in context (the toolbars of
         // place `typing`); else the editor's own actions.
@@ -451,9 +453,13 @@ pub(super) fn PhoneFoot(
     }
     let items = model.shown(&shell.bar_actions);
     let tab_bar = !tabs.is_empty() || separate.is_some();
+    // A field has the focus and the keyboard is down (Hide, an
+    // `autofocus`, a scroll that began on it): the button that brings it
+    // up, first on the bar.
+    let keyboard_button = foot == Foot::TabsWithKeyboardButton;
     rsx! {
-        if !items.is_empty() {
-            ActionBar { items, bottom: if tab_bar { 0.0 } else { ins.bottom }, screen }
+        if !items.is_empty() || keyboard_button {
+            ActionBar { items, keyboard_button, bottom: if tab_bar { 0.0 } else { ins.bottom }, screen }
         }
         if tab_bar {
             BottomBar { tabs, current, on_tab, separate, screen }
@@ -475,7 +481,7 @@ fn run(id: &str) {
 /// The action bar: its buttons spread along a row over the tabs (or the
 /// home indicator, with no tabs).
 #[component]
-fn ActionBar(items: Vec<BarAction>, bottom: f64, screen: Screen) -> Element {
+fn ActionBar(items: Vec<BarAction>, keyboard_button: bool, bottom: f64, screen: Screen) -> Element {
     let t = use_shell().theme;
     let ins = screen.insets;
     let runner = try_use_context::<CommandRunner>();
@@ -486,6 +492,23 @@ fn ActionBar(items: Vec<BarAction>, bottom: f64, screen: Screen) -> Element {
                     align-items: center; justify-content: space-around; \
                     padding: 0 {12.0 + ins.right}px {bottom}px {12.0 + ins.left}px; \
                     background: {t.desk}; border-top: 1px solid {t.rule};",
+            onpointerdown: move |e: PointerEvent| input_debug::hit("the action bar", &e),
+            if keyboard_button {
+                button {
+                    class: "lp",
+                    tabindex: "-1",
+                    "aria-label": "Show the keyboard",
+                    "data-bar-item": "show-keyboard",
+                    style: "position: relative; width: {BUTTON}px; height: {BUTTON}px; flex-shrink: 0; padding: 0; border: none; \
+                            border-radius: 12px; background: transparent; display: flex; align-items: center; \
+                            justify-content: center;",
+                    // The field keeps the focus: the keyboard comes up for it.
+                    onpointerdown: move |e: PointerEvent| e.prevent_default(),
+                    onmousedown: move |e: MouseEvent| e.prevent_default(),
+                    onclick: move |_| show_keyboard(),
+                    lucide_dioxus::Keyboard { size: 22, color: t.ink_2.to_string() }
+                }
+            }
             for item in items {
                 BarButton {
                     key: "{item.id}",

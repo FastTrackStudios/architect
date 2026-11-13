@@ -21,10 +21,21 @@
 //!   ([`raise_keyboard`]), winit's view (which takes the typing) is made
 //!   the first responder, as Blitz's own focus does.
 //!
+//! - **The keyboard comes up when asked** (`super`'s rule): Blitz asks
+//!   winit's view to become the first responder whenever a field takes
+//!   the focus, which a press that becomes a scroll and an `autofocus` do.
+//!   `-[WinitUIView becomeFirstResponder]` is made to refuse unless the
+//!   gate is open: [`raise_keyboard`] opens it (a tap on a field, the
+//!   keyboard button, an app opening a composer) for a moment, and
+//!   [`lower_keyboard`] shuts it and resigns, so Hide works even where
+//!   Blitz still holds the field's focus (winit then thinks its IME is on
+//!   and never asks again; the next tap raises it from here).
+//!
 //! Moved here from Task (`task:apps/mobile/src/keyboard_bar.rs`).
 
 use std::ptr::NonNull;
-use std::sync::{Once, OnceLock};
+use std::sync::{Mutex, Once, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use block2::RcBlock;
 use objc2::MainThreadMarker;
@@ -42,7 +53,143 @@ pub(super) fn install() {
     ONCE.call_once(|| {
         hear_keyboard();
         web_view_keyboard();
+        gate_first_responder();
     });
+}
+
+/// How long the gate stays open after a tap or a button asked: long
+/// enough for the field a tap opens (a composer's `autofocus`) to take the
+/// keyboard on the next frames.
+const GATE_OPEN: Duration = Duration::from_millis(800);
+
+/// Until when winit's view may become the first responder.
+static GATE: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn gate_open() -> bool {
+    GATE.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_some_and(|until| Instant::now() < until)
+}
+
+fn set_gate(open: bool) {
+    *GATE.lock().unwrap_or_else(PoisonError::into_inner) = open.then(|| Instant::now() + GATE_OPEN);
+}
+
+/// `UIResponder`'s `becomeFirstResponder`, which winit's view inherits.
+static BECOME: OnceLock<usize> = OnceLock::new();
+
+type Become = unsafe extern "C-unwind" fn(*mut AnyObject, Sel) -> Bool;
+
+/// `-[WinitUIView becomeFirstResponder]`: the inherited one, while the
+/// gate is open.
+unsafe extern "C-unwind" fn gated_become(this: *mut AnyObject, cmd: Sel) -> Bool {
+    if !gate_open() {
+        crate::shell::input_debug::note("keyboard: focus without a tap, no keyboard");
+        tracing::info!(
+            ios.keyboard = "refused",
+            "ios: a field took the focus without a tap; no keyboard"
+        );
+        return Bool::NO;
+    }
+    let Some(&imp) = BECOME.get() else {
+        return Bool::NO;
+    };
+    // SAFETY: `imp` is UIResponder's own implementation of the selector,
+    // read from the superclass before it was overridden here.
+    unsafe {
+        let inherited: Become = std::mem::transmute(imp);
+        inherited(this, cmd)
+    }
+}
+
+/// Puts the gate in front of winit's view taking the keyboard, once:
+/// winit registers its view's class with its first view, so before the
+/// window exists (`install`, before launch) there is nothing to gate yet,
+/// and the shell asks again when it mounts ([`gate_when_ready`]).
+fn gate_first_responder() {
+    static GATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if GATED.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(cls) = AnyClass::get(c"WinitUIView") else {
+        tracing::info!(
+            ios.keyboard = "not-yet",
+            "ios: no WinitUIView yet; gated when the shell mounts"
+        );
+        return;
+    };
+    GATED.store(true, std::sync::atomic::Ordering::Relaxed);
+    let Some(sup) = cls.superclass() else { return };
+    let sel = sel!(becomeFirstResponder);
+    // The one a call on the superclass runs (UIResponder's), looked up
+    // through its superclasses.
+    let Some(inherited) = sup
+        .instance_method(sel)
+        .map(objc2::runtime::Method::implementation)
+    else {
+        return;
+    };
+    let _ = BECOME.set(inherited as usize);
+    // SAFETY: the replacement has the selector's signature (`- (BOOL)
+    // becomeFirstResponder`, `B@:`) and forwards to the inherited one.
+    unsafe {
+        let imp: Imp = std::mem::transmute::<Become, Imp>(gated_become);
+        class_replaceMethod(
+            std::ptr::from_ref(cls).cast_mut(),
+            sel,
+            imp,
+            c"B@:".as_ptr(),
+        );
+    }
+    tracing::info!(
+        ios.keyboard = "gated",
+        "ios: the keyboard comes up on a tap"
+    );
+}
+
+/// The gate, now that the window (and winit's view class) exists.
+pub(super) fn gate_when_ready() {
+    gate_first_responder();
+}
+
+/// The view that takes the typing: the key window's root view (winit's).
+fn typing_view(mtm: MainThreadMarker) -> Option<objc2::rc::Retained<objc2_ui_kit::UIView>> {
+    UIApplication::sharedApplication(mtm)
+        .connectedScenes()
+        .iter()
+        .filter_map(|s| s.downcast::<UIWindowScene>().ok())
+        .find_map(|s| s.keyWindow())
+        .and_then(|w| w.rootViewController())
+        .and_then(|c| c.view())
+}
+
+/// Puts the keyboard away and shuts the gate: Hide.
+pub(super) fn lower_keyboard() {
+    set_gate(false);
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if let Some(view) = typing_view(mtm) {
+        let was = view.isFirstResponder();
+        let resigned = view.resignFirstResponder();
+        // Whatever else in the window holds it.
+        let _ = view.endEditing(true);
+        crate::shell::input_debug::note(format!(
+            "keyboard: lowered (was first responder {was}, resigned {resigned})"
+        ));
+        tracing::info!(
+            ios.keyboard = "lowered",
+            was,
+            resigned,
+            "ios: the keyboard is put away"
+        );
+    }
+}
+
+/// Whether winit's view has the keyboard now (the debug overlay's).
+pub(super) fn has_keyboard() -> Option<bool> {
+    let mtm = MainThreadMarker::new()?;
+    typing_view(mtm).map(|v| v.isFirstResponder())
 }
 
 /// Feeds the keyboard's height from UIKit's notifications.
@@ -91,9 +238,11 @@ fn settled_height(note: &NSNotification) -> Option<f64> {
     Some((screen.bounds().size.height - frame.origin.y).max(0.0))
 }
 
-/// A field has the text focus: the window's view takes the keyboard if it
-/// can and has not (Blitz's `autofocus` field).
+/// The person asked for the keyboard (a tap on a field, the keyboard
+/// button, a composer opened): the gate opens for a moment, and the
+/// window's view takes the keyboard if it can and has not.
 pub(super) fn raise_keyboard() {
+    set_gate(true);
     // Not by WebKit's class being there: its accessibility bundle loads it
     // into a Blitz app too. A web view's content view has the keyboard
     // already (`allow_focus_from_code`), and the view under it cannot take
@@ -101,19 +250,15 @@ pub(super) fn raise_keyboard() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    let view = UIApplication::sharedApplication(mtm)
-        .connectedScenes()
-        .iter()
-        .filter_map(|s| s.downcast::<UIWindowScene>().ok())
-        .find_map(|s| s.keyWindow())
-        .and_then(|w| w.rootViewController())
-        .and_then(|c| c.view());
-    if let Some(view) = view.filter(|v| !v.isFirstResponder() && v.canBecomeFirstResponder()) {
+    if let Some(view) =
+        typing_view(mtm).filter(|v| !v.isFirstResponder() && v.canBecomeFirstResponder())
+    {
         let raised = view.becomeFirstResponder();
+        crate::shell::input_debug::note(format!("keyboard: raised ({raised})"));
         tracing::info!(
             ios.keyboard = "raised",
             raised,
-            "ios: a field focused from code raised the keyboard"
+            "ios: the keyboard came up, asked for"
         );
     }
 }

@@ -42,6 +42,7 @@ pub(super) fn BottomBar(
         div {
             style: "flex-shrink: 0; display: flex; align-items: flex-end; gap: 8px; \
                     padding: 8px {20.0 + ins.right}px {bottom}px {20.0 + ins.left}px;",
+            onpointerdown: move |e: PointerEvent| super::input_debug::hit("the tabs", &e),
             div {
                 style: "flex: 1; min-width: 0; height: 54px; box-sizing: border-box; display: flex; align-items: center; gap: 2px; \
                         padding: 4px; border-radius: 27px; background: {t.pill}; border: 1px solid {t.rule}; \

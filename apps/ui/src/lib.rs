@@ -1028,6 +1028,22 @@ pub fn LabApp() -> Element {
             },
         );
     }
+    // The note's Typing Toolbar: Bold, a link, a list… on the note typed in.
+    note_editor::use_format_commands();
+    // What the shell hears of touches and the keyboard, drawn over the app:
+    // for checking on a phone what a simulator does not show.
+    let input_debug = use_signal(shell::input_debug);
+    architect_commands::use_command(
+        architect_commands::Command::new("SHELL_INPUT_DEBUG", "Debug: touches and keyboard")
+            .group("Help")
+            .checked(input_debug()),
+        move || {
+            let on = !shell::input_debug();
+            shell::set_input_debug(on);
+            let mut shown = input_debug;
+            shown.set(on);
+        },
+    );
     architect_commands::use_command(
         architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Details")
             .group("View")
@@ -1469,6 +1485,10 @@ pub fn LabApp() -> Element {
                 theme::SystemScheme {}
                 architect_commands::WindowKeys {}
                 ListKeys {}
+                // A tap on a field anywhere in the app brings the keyboard
+                // up, heard from the window: the sheets, ⌘K and settings
+                // keep their clicks to themselves.
+                screen::WindowTaps {}
                 // The Dock icon, its badge and menu, the menu-bar item,
                 // background mode and opening at login.
                 presence::LabPresence { presence: presence::declare(lab, inbox_count, capture_ui.is_some()), inbox: inbox_count }
