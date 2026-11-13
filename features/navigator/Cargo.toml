@@ -61,6 +61,8 @@ vault-proto = { workspace = true }
 serde_json = { workspace = true, optional = true }
 # The search's Latin accent folding (`é` is `e`).
 unicode-normalization = "0.1"
+# A note's frontmatter, for an in-memory vault (`markdown::note_from_markdown`).
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 architect-navigator = { path = ".", features = ["ui", "vault"] }

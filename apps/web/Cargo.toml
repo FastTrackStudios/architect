@@ -1,6 +1,6 @@
 [package]
 name = "architect-web"
-description = "Architect in a browser: the web app's shell (OIDC redirect sign-in with PKCE as client `architect`, the node's status over same-origin HTTP), bundled with the site (`apps/site`) and the docs into one static site (`just web`, the `architect-web` image)."
+description = "Architect in a browser: the app's shell, workspace, navigator, ⌘K palette and settings on dioxus-web (the same components as the desktop and phone apps), OIDC redirect sign-in with PKCE as client `architect`, and `/app/?demo` on the demo vault in memory; bundled with the site (`apps/site`) and the docs into one static site (`just web`, the `architect-web` image)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The demo vault (`apps/ui/demo-vault`), built in: `/app/?demo` (src/demo.rs).
+include_dir = { workspace = true }
 
 # The browser half runs on wasm32-unknown-unknown only; natively the crate
 # is its pure part (routes, config, views), which its tests cover.
@@ -20,7 +22,23 @@ auth-client = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Crypto", "Document", "Element", "Event", "EventTarget", "Headers", "History", "HtmlElement", "Location", "Request", "RequestInit", "Response", "Storage", "Window"] }
+web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Document", "Element", "Event", "EventTarget", "Headers", "History", "HtmlElement", "KeyboardEvent", "Navigator", "VisualViewport", "Location", "MediaQueryList", "Request", "RequestInit", "Response", "Storage", "Window"] }
+# The app (src/app): the same components as the desktop and phone apps
+# (apps/ui), on dioxus-web.
+dioxus = { workspace = true, features = ["web"] }
+architect = { workspace = true, features = ["action-list"] }
+architect-shell = { workspace = true, features = ["ui"] }
+architect-workspace = { workspace = true, features = ["ui"] }
+architect-commands = { workspace = true, features = ["ui"] }
+# ⌘K and ⌘O: the Command Palette's views, without its extension (#495).
+architect-command-palette = { workspace = true }
+architect-settings = { workspace = true, features = ["ui", "appearance"] }
+architect-navigator = { workspace = true, features = ["ui"] }
+architect-theme = { workspace = true, features = ["dioxus", "actions"] }
+architect-ui = { workspace = true }
+lucide-dioxus = { workspace = true }
+base64 = { workspace = true }
+futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 
 [lints]
 workspace = true

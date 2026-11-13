@@ -91,12 +91,24 @@ the file in the bundle.
 
 ## What the app does today
 
-The app is its shell: sign-in, who is signed in, the node's status over
+**The demo** (`/app/?demo`, the landing page's Demo button) is the app
+itself, the same components the desktop and phone apps draw with, on
+dioxus-web (`apps/web/src/app/mod.rs`): the shell, the Vault's workspace
+(tabs, splits, docks; a phone's bar, drawer and tab switcher), the
+navigator over the demo vault (`apps/ui/demo-vault`, built in), ⌘K and ⌘O,
+and the settings page. It runs in the tab's memory: nothing is signed in,
+nothing is sent, a reload starts again. Notes are edited as their markdown
+in a text area: the editor's web view runs JavaScript through `eval`,
+which the page's Content-Security-Policy refuses (`style-src` allows
+inline styles, the components' own; `script-src` is `'self'
+'wasm-unsafe-eval'` only). Settings are kept in this browser's
+`localStorage`. Pop-out windows, folders on the device, the files agent
+and extensions (#495) are not in the browser.
+
+Signed in, the app shows who is signed in, the node's status over
 same-origin HTTP (`POST /node/status`,
-`apps/desktop/src/node/service.rs` `Node`), and links to the docs and the
-desktop download. The app's own views (the vault, projects, files) are
-Blitz-native and not built for the browser yet. They come to `/app/` as
-they are ported.
+`apps/desktop/src/node/service.rs` `Node`), and links to the demo, the
+docs and the desktop download.
 
 The sandbox's browser demo, which used to be `apps/web`, is
 `apps/sandbox/web` (`just sandbox-web`).

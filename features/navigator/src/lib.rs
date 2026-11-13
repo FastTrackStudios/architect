@@ -37,6 +37,7 @@ pub mod index;
 pub mod keys;
 pub mod layout;
 pub mod list;
+pub mod markdown;
 pub mod mounts;
 pub mod pattern;
 pub mod period;

@@ -493,12 +493,16 @@ pub(super) fn WorkspaceCommands() -> Element {
     .zip(docks)
     {
         let pop = Command::new(pop_id, pop_label).group("Docks");
-        let pop = if out {
+        // Where the app opens no other windows (a browser), that is the
+        // reason, whatever the dock holds.
+        let pop = if !host.has_windows() {
+            pop.disabled("this app opens no other windows")
+        } else if out {
             pop.disabled("it is in its own window")
         } else if !full {
             pop.disabled("the dock is empty")
         } else {
-            pop.enabled_if(host.has_windows(), "this app opens no other windows")
+            pop
         };
         use_command(pop, move || {
             host.write(

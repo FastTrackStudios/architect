@@ -585,6 +585,16 @@ impl MemorySource {
         });
     }
 
+    /// Keeps `text` as the note at `path`'s (what [`NavigatorSource::read_text`]
+    /// and the search read), and replaces its file with `file` (its
+    /// preview, tags and properties made from the text, as
+    /// [`crate::markdown::note_from_markdown`] does): an edit in an
+    /// in-memory vault, heard by the view as one change.
+    pub fn set_text(&self, file: NoteFile, text: impl Into<String>) {
+        self.texts_mut().insert(file.path.clone(), text.into());
+        self.put(file);
+    }
+
     /// Removes the file at `path`.
     pub fn remove(&self, path: &str) {
         if self.files_mut().remove(path).is_some() {

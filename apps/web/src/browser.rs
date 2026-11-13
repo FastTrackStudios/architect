@@ -146,6 +146,12 @@ fn draw(screen: &Screen) {
     }
 }
 
+/// The distribution's name (`/app/distribution.json`, read at start):
+/// what the app calls itself.
+pub fn app_name() -> String {
+    DIST.with(|d| d.borrow().name.clone())
+}
+
 /// Reads `/app/distribution.json` into [`DIST`], and names the page and
 /// its header after it. Missing, the bundle is the Architect app's.
 async fn read_distribution() {
@@ -174,7 +180,19 @@ pub fn start() {
 }
 
 async fn run() -> Result<(), String> {
+    let window = window()?;
+    let location = window.location();
+    let path = location.pathname().map_err(js)?;
+    let search = location.search().map_err(js)?;
+    let route = route(&path, search.trim_start_matches('?'));
+    // The demo: the app at once, on the demo vault in memory, nothing
+    // asked of the issuer or the node.
+    // Which distribution this is, first: the demo is named for it too.
     read_distribution().await;
+    if route == Route::Demo {
+        crate::app::mount(crate::app::Mode::Demo);
+        return Ok(());
+    }
     draw(&Screen::Loading);
     let (status, text) = fetch("GET", &format!("{APP}config.json"), None, &[]).await?;
     if status != 200 {
@@ -182,12 +200,8 @@ async fn run() -> Result<(), String> {
     }
     let config = Rc::new(Config::parse(&text)?);
     wire(Rc::clone(&config))?;
-    let window = window()?;
-    let location = window.location();
-    let path = location.pathname().map_err(js)?;
-    let search = location.search().map_err(js)?;
-    let problem = match route(&path, search.trim_start_matches('?')) {
-        Route::App => None,
+    let problem = match route {
+        Route::App | Route::Demo => None,
         Route::Callback { code, state } => redeem(&config, &code, &state).await.err(),
         Route::Refused(why) => Some(why),
     };

@@ -33,12 +33,22 @@
 //! so one bundle serves any host: the chart's `ConfigMap` replaces the
 //! file with the deployment's issuer.
 //!
+//! **The demo** (`/app/?demo`, [`DEMO`], the landing page's Demo button) is
+//! the app itself (`app`: the shell, the workspace, the navigator, ⌘K and
+//! settings, the components the desktop and phone apps draw with, on
+//! dioxus-web) on the demo vault ([`demo`]), in the tab's memory: no
+//! sign-in, nothing sent anywhere, gone on reload.
+//!
 //! This module is the part that needs no browser (the config, where a
 //! URL leads, what each screen shows), tested natively; `browser` (wasm32
 //! only) does the storage, the requests and the DOM.
 
 #[cfg(target_arch = "wasm32")]
+mod app;
+#[cfg(target_arch = "wasm32")]
 mod browser;
+pub mod demo;
+pub mod keys;
 
 use std::fmt::Write as _;
 
@@ -56,6 +66,8 @@ pub const SCOPE: &str = "openid email profile offline_access";
 /// The node's status, over its HTTP face, on this origin
 /// (`apps/desktop/src/node/service.rs` `Node`).
 pub const NODE_STATUS: &str = "/node/status";
+/// The demo's URL: the app on the demo vault, in memory.
+pub const DEMO: &str = "/app/?demo";
 /// Which distribution this bundle is (#491), beside the app.
 pub const DISTRIBUTION: &str = "/app/distribution.json";
 /// Where the desktop app is downloaded.
@@ -180,20 +192,26 @@ pub enum Route {
     Refused(String),
     /// The app itself.
     App,
+    /// The app on the demo vault, in memory ([`DEMO`]).
+    Demo,
 }
 
 /// Where `path` with `query` (without its `?`) leads.
 #[must_use]
 pub fn route(path: &str, query: &str) -> Route {
-    if path.trim_end_matches('/') != CALLBACK {
-        return Route::App;
-    }
     let param = |name: &str| {
         query.split('&').find_map(|pair| {
-            let (k, v) = pair.split_once('=')?;
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
             (k == name).then(|| decode(v))
         })
     };
+    if path.trim_end_matches('/') != CALLBACK {
+        return if param("demo").is_some() {
+            Route::Demo
+        } else {
+            Route::App
+        };
+    }
     if let Some(error) = param("error") {
         return Route::Refused(param("error_description").unwrap_or(error));
     }
@@ -308,7 +326,8 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
             format!(
                 "<section class=\"card\"><h2>Sign in to {name}</h2>\
                  <p>Your notes, projects and files, on every device and in sync.</p>{problem}\
-                 <p><button class=\"primary\" data-action=\"sign-in\">Sign in</button></p>{built_in}</section>"
+                 <p class=\"row\"><button class=\"primary\" data-action=\"sign-in\">Sign in</button>\
+                 <a class=\"button\" href=\"{DEMO}\">Try the demo</a></p>{built_in}</section>"
             )
         }
         Screen::SignedIn { person, node } => {
@@ -344,6 +363,7 @@ pub fn view(screen: &Screen, dist: &Distribution) -> String {
                 "<section class=\"card\"><h2>Signed in as {}{email}</h2>{node}\
                  <p>The full app is the desktop app for now; its views come to the browser here.</p>\
                  <p class=\"row\"><a class=\"button primary\" href=\"{DOWNLOADS}\">Download the desktop app</a>\
+                 <a class=\"button\" href=\"{DEMO}\">Open the demo</a>\
                  <a class=\"button\" href=\"/docs/\">Docs</a>\
                  <button data-action=\"sign-out\">Sign out</button></p>{built_in}</section>",
                 escape(who)
@@ -374,6 +394,11 @@ mod tests {
     fn the_callback_is_read_and_everything_else_is_the_app() {
         assert_eq!(route("/app/", ""), Route::App);
         assert_eq!(route("/app/anything", "code=x"), Route::App);
+        // The landing page's Demo button.
+        assert_eq!(route("/app/", "demo"), Route::Demo);
+        assert_eq!(route("/app/", "x=1&demo="), Route::Demo);
+        assert_eq!(route("/app/", "demonstrate"), Route::App);
+        assert!(matches!(route("/auth/callback", "demo"), Route::Refused(_)));
         assert_eq!(
             route("/auth/callback", "code=a%2Fb&state=s+1"),
             Route::Callback {

@@ -349,7 +349,7 @@ architect-commands = { path = "features/commands" }
 # The palette and launcher engine (MIT): sources, items, ranking.
 architect-palette = { path = "features/palette" }
 # The Command Palette, ⌘K and ⌘O as a built-in extension (MIT).
-architect-command-palette = { path = "features/palette/extension" }
+architect-command-palette = { path = "features/palette/extension", default-features = false }
 architect-settings = { path = "features/settings" }
 architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
@@ -710,6 +710,16 @@ strip = "debuginfo"
 
 [profile.wasm-dev.package."*"]
 opt-level = 3
+
+# The web app's wasm (apps/web, `scripts/web-bundle.sh`): small over fast,
+# what a browser downloads and compiles before the first paint (#172).
+# No wasm-opt pass: `-Oz` made the gzipped file larger.
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
 
 # ── Dependencies: the fleet's settings ──
 # Everything from here to the end of the profiles is the fleet's dev

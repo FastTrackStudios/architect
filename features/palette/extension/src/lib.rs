@@ -19,15 +19,25 @@
 //! Other extensions reach it as the `architect.palette` service:
 //! `palette.show` and `palette.search` ([`SHOW_ACTION`], [`SEARCH_ACTION`]).
 
+#[cfg(feature = "extension")]
 use std::sync::{Mutex, PoisonError};
 
+#[cfg(feature = "extension")]
 use architect_extensions::hostcall::HostRequest;
+#[cfg(feature = "extension")]
 use architect_extensions::linked::{Builder, Extension, Handle};
 use architect_palette::{Item, Recents, rank};
+#[cfg(feature = "extension")]
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
+#[cfg(feature = "extension")]
 pub mod remote;
+/// Its views over an app's `Commands`.
+///
+/// Without feature `extension` (a browser's app, with no extension host)
+/// they are all there is: the app gives them to
+/// `Commands::set_palette_views` itself.
 pub mod views;
 
 /// Its manifest.
@@ -50,15 +60,19 @@ pub const SHOW_ACTION: &str = "COMMAND_PALETTE_SHOW";
 pub const SEARCH_ACTION: &str = "COMMAND_PALETTE_SEARCH";
 
 /// How many rows `palette.search` answers unless asked.
+#[cfg(feature = "extension")]
 const LIMIT: usize = 20;
 
+#[cfg(feature = "extension")]
 /// The Command Palette.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CommandPalette;
 
+#[cfg(feature = "extension")]
 /// The host it was built for: its process views ask through it.
 static HANDLE: Mutex<Option<Handle>> = Mutex::new(None);
 
+#[cfg(feature = "extension")]
 /// The host this extension was built for.
 pub(crate) fn handle() -> Option<Handle> {
     HANDLE
@@ -67,6 +81,7 @@ pub(crate) fn handle() -> Option<Handle> {
         .clone()
 }
 
+#[cfg(feature = "extension")]
 /// Runs the app's action `action` with `args`.
 pub(crate) async fn run(host: &Handle, action: &str, args: Value) -> Result<Value, String> {
     host.host(HostRequest::Run {
@@ -129,6 +144,7 @@ pub fn search(list: &Value, query: &str, limit: usize) -> Value {
     json!({ "items": rows })
 }
 
+#[cfg(feature = "extension")]
 /// Its `palette` view: linked in, the app's palette; in a process, its own.
 #[component]
 fn Palette() -> Element {
@@ -139,6 +155,7 @@ fn Palette() -> Element {
     }
 }
 
+#[cfg(feature = "extension")]
 /// Its `quick-open` view.
 #[component]
 fn QuickOpen() -> Element {
@@ -149,6 +166,7 @@ fn QuickOpen() -> Element {
     }
 }
 
+#[cfg(feature = "extension")]
 impl Extension for CommandPalette {
     fn manifest(&self) -> &'static str {
         MANIFEST

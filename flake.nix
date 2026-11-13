@@ -155,9 +155,11 @@
             cargoArtifacts = null;
             doCheck = false;
             CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+            # Cargo.toml's `web` profile: size first (opt-level z, fat LTO).
+            CARGO_PROFILE = "web";
             cargoExtraArgs = "--package architect-web --lib";
             installPhaseCommand = ''
-              install -Dm644 target/wasm32-unknown-unknown/release/architect_web.wasm $out/architect_web.wasm
+              install -Dm644 target/wasm32-unknown-unknown/web/architect_web.wasm $out/architect_web.wasm
             '';
           };
           # The `architect` CLI (apps/cli): it builds the docs site.

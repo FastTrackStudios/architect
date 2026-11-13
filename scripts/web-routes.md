@@ -16,8 +16,11 @@ assets/           the site's scripts and styles, content-hashed names
 fonts/            the site's font (Archivo) and its licence
 favicon.svg, logo.svg
 docs/             the docs, every page a folder with index.html (/docs/…/)
-app/              the web app: index.html, start.js, style.css, the wasm,
+app/              the web app's page: index.html, start.js, style.css,
                   config.json (the server's own copy replaces it)
+assets/app-<sha12>/  the web app's code and face, named by their content:
+                  the wasm and its JS (architect_web.js, snippets/), its
+                  font (Inter-Variable.woff2); start.js imports from here
 ROUTES.md         this file
 ```
 
@@ -59,7 +62,22 @@ What the server adds around them, as before this bundle carried the site:
   sign-in's way back;
 - `app/config.json` is the server's own.
 
-The bundle sets no Content-Security-Policy. A server that adds one must
+The web app's page (`/app/`, `/app/index.html` and `/auth/callback`)
+carries a Content-Security-Policy `<meta>`, and a server sends this one
+as a header too (`frame-ancestors` holds only as a header), with its own
+issuer's origin (`app/config.json`'s `issuer`):
+
+```
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://<issuer>; base-uri 'none'; form-action 'self'; object-src 'none'; frame-ancestors 'none'
+```
+
+Never `'unsafe-eval'`: the app's bundle still links wasm-bindgen's
+`new Function` import and dioxus-web's `eval`, and this policy is what
+stops them (the app answers its own evaluations without them,
+`apps/web/src/app/page.rs`). `apps/web/sws.toml` sends it for
+production's issuer.
+
+The rest of the bundle sets no Content-Security-Policy. A server that adds one must
 let the site's pages call GitHub's API (`connect-src 'self'
 https://api.github.com`): `/download` and the landing page ask it which
 of the release's files are up (`apps/site/src/lib/release-check.ts`);
@@ -82,8 +100,10 @@ is what a static server does not get from the files alone:
 
 ## Caching
 
-`assets/*` names carry a content hash (`index-DnYs32fa.css`): they may be
-cached for good (`Cache-Control: public, max-age=31536000, immutable`).
-Nothing else may: the pages, `fonts/`, `docs/` and `app/` (its wasm,
-`start.js` and `config.json` keep their names across releases) keep a
-short or no cache (`no-cache` or `no-store`).
+`assets/*` names carry a content hash (`index-DnYs32fa.css`, the web
+app's whole folder `assets/app-<sha12>/`): they may be cached for good
+(`Cache-Control: public, max-age=31536000, immutable`). Nothing else may:
+the pages, `fonts/`, `docs/` and `app/` (`index.html`, `start.js` and
+`config.json` keep their names across releases; `start.js` names the
+release's `assets/app-…/`) keep a short or no cache (`no-cache` or
+`no-store`).
