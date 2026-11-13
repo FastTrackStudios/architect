@@ -189,6 +189,34 @@ mod tests {
         assert_eq!(super::image_url("https://evil.test/a.svg"), None);
     }
 
+    /// Every SVG of the demo vault can be handed to a frame as art: no
+    /// script, handler, embedded document or outside reference in any.
+    #[test]
+    fn no_demo_svg_carries_script_or_an_outside_reference() {
+        let svgs: Vec<_> = super::files()
+            .into_iter()
+            .filter(|f| f.path.ends_with(".svg"))
+            .collect();
+        assert!(!svgs.is_empty());
+        for f in svgs {
+            let text = f.text().unwrap_or_default().to_ascii_lowercase();
+            for bad in [
+                "<script",
+                "foreignobject",
+                "href",
+                " on",
+                "javascript:",
+                "url(http",
+                "url(//",
+                "<iframe",
+                "<object",
+                "<embed",
+            ] {
+                assert!(!text.contains(bad), "{}: {bad}", f.path);
+            }
+        }
+    }
+
     #[test]
     fn the_christmas_setlist_is_in_the_demo_with_a_cover_a_song() {
         let files = super::files();

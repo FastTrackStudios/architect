@@ -178,6 +178,8 @@ fn WebApp() -> Element {
             None
         }
     });
+    // The same for an extension's frames, so a frame and the card agree.
+    use_context_provider(|| embed::ArtSource(art));
     // The demo's way out; signed in, the account's menu signs out.
     if demo {
         architect_commands::use_command(
