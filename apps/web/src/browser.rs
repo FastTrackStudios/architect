@@ -201,6 +201,17 @@ async fn run() -> Result<(), String> {
         crate::app::mount(crate::app::Mode::Demo);
         return Ok(());
     }
+    // A share link's guest (#669, internal until #646): the code in the
+    // fragment, never sent to a server; nothing asked of the issuer.
+    if let Some(code) = location
+        .hash()
+        .ok()
+        .and_then(|h| h.strip_prefix("#share=").map(str::to_owned))
+        .filter(|c| architect_spaces::share::is_code(c))
+    {
+        crate::app::mount(crate::app::Mode::Guest { code });
+        return Ok(());
+    }
     draw(&Screen::Loading);
     let (status, text) = fetch("GET", &format!("{APP}config.json"), None, &[]).await?;
     if status != 200 {

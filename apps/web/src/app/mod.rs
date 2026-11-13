@@ -38,6 +38,7 @@ mod click;
 mod embed;
 mod favourites;
 mod frames;
+mod guest;
 mod keys;
 pub mod org;
 mod page;
@@ -69,6 +70,13 @@ pub enum Mode {
         person: String,
         /// The org's slug.
         org: String,
+    },
+    /// A share link's guest (#629, #669): the link's notes as its node
+    /// hands them, no vault, nothing signed in (`guest`). Internal for
+    /// now: `/app/#share=<code>`; #646 serves it at `/s/<code>/`.
+    Guest {
+        /// The link's code.
+        code: String,
     },
 }
 
@@ -116,6 +124,11 @@ fn WebApp() -> Element {
             org: None,
         },
         Mode::Org { vault, .. } => vault.clone(),
+        // No vault: everything a guest sees comes from the link's node.
+        Mode::Guest { .. } => vault::WebVault {
+            source: architect_navigator::MemorySource::new("Shared"),
+            org: None,
+        },
     });
     let workspace = vault::use_vault_workspace(&web_vault.source).signal();
     let screen = screen::use_browser_screen();
@@ -230,6 +243,14 @@ fn WebApp() -> Element {
                         crate::browser::sign_out();
                     }),
             ),
+        Mode::Guest { .. } => {
+            shell::Account::new("Guest")
+                .detail("A shared link")
+                .menu(
+                    shell::Menu::new()
+                        .item("Settings", icon!(Settings2), move |()| settings.show(None)),
+                )
+        }
     };
     let mut status = vec![
         shell::StatusItem::new("demo", "Demo: nothing is saved")
@@ -255,6 +276,13 @@ fn WebApp() -> Element {
     });
     match &mode {
         Mode::Demo => {}
+        Mode::Guest { .. } => {
+            status.retain(|s| s.id != "demo");
+            status.insert(
+                0,
+                shell::StatusItem::new("guest", "Shared with you").hint("A share link, read-only"),
+            );
+        }
         Mode::Org { org, .. } => {
             status.retain(|s| s.id != "demo");
             status.insert(
@@ -323,7 +351,11 @@ fn WebApp() -> Element {
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
                         now_playing: rsx! { architect_playhead::ui::NowPlayingBar { art } },
-                        vault::VaultPage {}
+                        if let Mode::Guest { code } = &mode {
+                            guest::GuestPage { code: code.clone() }
+                        } else {
+                            vault::VaultPage {}
+                        }
                     }
                 }
             }

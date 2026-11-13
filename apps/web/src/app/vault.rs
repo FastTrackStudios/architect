@@ -635,11 +635,18 @@ fn FramePane(
     body: String,
 ) -> Element {
     let t = use_shell().theme;
+    let vault = use_context::<WebVault>();
     let bundle = super::frames::use_island_of(Some(island));
     let state = bundle.read().clone();
     match state {
         None => rsx! {},
         Some(Ok(b)) if b.island.views().contains(&view) => {
+            let files = match audience {
+                crate::ext_host::Audience::Member => {
+                    super::embed::member_files(&vault, &b.island, &note_type, &path)
+                }
+                crate::ext_host::Audience::Guest => Vec::new(),
+            };
             let note = crate::ext_host::note_props(
                 audience,
                 &b.island,
@@ -649,6 +656,7 @@ fn FramePane(
                     note_type: &note_type,
                     properties: &properties,
                     body: &body,
+                    files: &files,
                 },
             );
             // Keyed by island and view, in a list (the only place a key

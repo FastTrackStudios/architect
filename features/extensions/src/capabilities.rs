@@ -13,7 +13,7 @@ use crate::manifest::{Capabilities, Reach};
 
 /// What of the app's state an extension may read
 /// ([`Capabilities::reads`]).
-pub const READS: [&str; 4] = [ORG, SELECTION, DOCUMENTS, EDITOR];
+pub const READS: [&str; 5] = [ORG, SELECTION, DOCUMENTS, EDITOR, FILES];
 /// The current organization.
 pub const ORG: &str = "org";
 /// What is selected and focused.
@@ -21,6 +21,13 @@ pub const SELECTION: &str = "selection";
 /// The app's documents: open them, read them (`reads`), and list and
 /// watch them; change them (`writes`).
 pub const DOCUMENTS: &str = "documents";
+/// The images and lyrics files of a note its view draws (#669).
+///
+/// Art, chart images and synced lyrics, read-only and size-capped
+/// (`architect_spaces::view`): from the person's own vault, or for a
+/// share link's guest only from what the link shares. Handed in with the
+/// note, so it needs [`DOCUMENTS`] too.
+pub const FILES: &str = "files";
 /// The editor being typed in (`crate::editor`): its text, selection and
 /// the block the cursor is in (`reads`); edit it, take keys in it, draw
 /// marks and widgets in it, add slash-menu rows (`writes`).
@@ -205,6 +212,7 @@ fn read_words(r: &str) -> String {
         SELECTION => "See what you have selected and focused".to_owned(),
         DOCUMENTS => "Open, read, list and watch your documents".to_owned(),
         EDITOR => "See the text and selection of the editor you are typing in".to_owned(),
+        FILES => "See the images and lyrics files of a note it shows".to_owned(),
         other => format!("Read {other}"),
     }
 }

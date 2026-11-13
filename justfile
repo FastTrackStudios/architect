@@ -444,6 +444,15 @@ app-ext-host-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-ext-host.test.mjs
 
+# What a share link's guest's view reads in the web app (#648, #669): the
+# release bundle behind a front sending `/_ext/` and `/s/` to a node that
+# shares a gig with an island reading setlists, Firefox headless over
+# BiDi off the audio graph, at 390 px; `SHOTS=<dir>` keeps screenshots.
+app-guest-content-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-guest-content.test.mjs
+
 # The web app's bottom slots as favourites (#607) at 390 px: the default
 # set, a note type's declared set from the node's `/_ext/favourites.json`,
 # a tab opening its island view; `ARCHITECT_SHOTS=<dir>` keeps screenshots.
