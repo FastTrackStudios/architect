@@ -121,10 +121,11 @@ fn hex_after<'a>(s: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
     (!mid.is_empty() && mid.chars().all(|c| c.is_ascii_hexdigit())).then_some(mid)
 }
 
-/// Whether `path` is the node's web view document the app loads frames
-/// from: the one whose policy blocks WebRTC. The `webview-rtc` document
-/// is refused, and with it the island that names it: the app grants no
-/// extension WebRTC yet (#614), and a listing must not grant it to itself.
+/// Whether `path` is the node's web view document that blocks WebRTC.
+///
+/// The `webview-rtc` document is refused, and with it the island that
+/// names it: the app grants no extension WebRTC yet (#614), and a listing
+/// must not grant it to itself.
 ///
 /// The frame's policy is the node's response headers, which the app
 /// cannot read. So the digests guard a bundle's files against a cache or
