@@ -13,9 +13,10 @@
 //! - ⌘K and ⌘O: the commands (`architect_commands`) drawn by the Command
 //!   Palette's views (`architect_command_palette::views`, without its
 //!   extension: the browser runs no linked extension, #495);
-//! - a song note's extension views (`song`): the node's island (Studio's
-//!   progress bar, transport and lyrics) in sandboxed frames of their own
-//!   (`frames`, route A of #495), driven by the app's playhead;
+//! - extensions' views in sandboxed frames of their own (`frames`, route A
+//!   of #495): the view an island claims a note's type with, at the
+//!   note's head (`embed`), and any view a favourite of its extension
+//!   opens, in a pane, handed the note and its playhead source;
 //! - settings (`architect_settings::SettingsPage`): Appearance and the
 //!   navigator's sections, kept in this browser (`localStorage`);
 //! - the theme store (`architect_theme`), the system's light or dark.
@@ -35,7 +36,6 @@ mod keys;
 mod page;
 mod screen;
 mod settings;
-mod song;
 mod theme;
 pub mod vault;
 

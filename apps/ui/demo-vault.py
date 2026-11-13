@@ -948,6 +948,10 @@ The songs live in [[Songs/Amazing Grace]]. #lab/sample
     W("Songs/Amazing Grace.md", {"title": "Amazing Grace", "key": "G", "bpm": 72, "tags": ["song"], "type": "song",
                                  "album": "[[Projects/Album/project|Album]]", "sort_index": 3},
       "A hymn, in [[Welcome]]'s sample. Verse one in G.")
+    # A note beside the songs with no `type` (a `{place}` tab's target in
+    # apps/web/test/app-favourites.test.mjs).
+    W("Songs/Chords.md", {"title": "Chords", "tags": ["music/songs"]},
+      "The chord shapes the songs share: G, C, D and Em.")
 
 
 LOGO_SVG = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='#4f7cff'/><circle cx='32' cy='32' r='16' fill='white'/></svg>

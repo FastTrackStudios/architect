@@ -1947,6 +1947,12 @@ chooses the view.
   be a path the note references is the deck's to enforce when it
   resolves it (#589).
 
+A favourite's `{view}` ([Favourites](#favourites)) opens any view its
+extension's island lists (`Island::views`: its share-page slots and its
+claims) the same way, in a pane of its own, with the same props and asks
+(`apps/web/src/app/vault.rs` `FrameView`, `embed.rs` `Embedded`); the
+note it is handed goes through the same gate (`note_props`).
+
 What reaches the network from a web view, and what stops it:
 
 - **By its policy** (`sandbox allow-scripts`, an opaque origin): every
@@ -2224,15 +2230,39 @@ a tab) and `player.lyrics`, runs `PLAYER_TOGGLE` and knows the state
 `playing`; its own tabs are Home, Search and Browse.
 
 The app's shell (desktop, phone and browser) opens `page` (the open
-note), `search` (quick open), an extension's view as
-`<extension id>/<view id>` (or a bare view id of the declaring extension's
-own) showing the open note, an action it has, and a `place` that names a
-note beside the open one; `player.*` is a share page's and is left out
-there ([the app shell](@/architecture/app-shell.md#favourites-the-slots-follow-what-is-open)).
+note), `search` (quick open), a view of the declaring extension's own
+(`<view id>`, or `<its id>/<view id>`) showing the open note, an action it
+has, and a `place` that names a note beside the open one; `player.*` is a
+share page's and is left out there
+([the app shell](@/architecture/app-shell.md#favourites-the-slots-follow-what-is-open)).
+
+**Who may name what.** A declaration names only what its own extension
+may reach, as every other contribution that names an action does
+(`features/extensions/src/contrib.rs` `Rules::reaches`,
+`features/extensions/src/host.rs` `gate`,
+`features/extensions/src/capabilities.rs` `Capabilities::may_run`):
+
+- a view: its own extension's only. Another extension's view, loaded or
+  not, is left out (natively `apps/ui/src/favourites.rs` `opens`; in a
+  browser only the views its own island lists, `Island::views`);
+- an action: one in its own namespace (`action_prefix`: `acme.charts` →
+  `ACME_CHARTS_`), or one its `capabilities.actions` names whose effect is
+  at most its `capabilities.effect`. A destructive action is never a
+  favourite's, its own neither: a tab's press asks no one;
+- anything else is left out, as an unknown target is: no tab, never a
+  dead one.
+
 The node lists every declaration of its extensions, read-only and never
 cached, at `GET /_ext/favourites.json` for the app in a browser
-(`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`). A `place` takes
-no spaces, so a note whose name has one is out of a place's reach.
+(`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`), each with the
+extension that declared it and what its capabilities let it run
+(`features/favourites/src/lib.rs` `Listed`, `Declarer`), so the browser
+applies the same rule (`Declarer::may_target`, `may_open_view_of`; it
+cannot reach `architect-extensions`, so a test there holds it to
+`Capabilities::may_run`). The browser reads at most 256 KiB of the
+listing and 64 declarations. A note type is at most 64 characters. A
+`place` takes no spaces, so a note whose name has one is out of a place's
+reach.
 
 ### Share layers
 

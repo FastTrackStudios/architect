@@ -17,8 +17,10 @@
 //! `ARCHITECT_ISLAND_FOLDER`, no island. A second island, listed after
 //! the first, from the same variables with `ARCHITECT_ISLAND2_` (its
 //! folder `ARCHITECT_ISLAND2_FOLDER`). `ARCHITECT_FAVOURITES` names a
-//! TOML file of `[[favourites]]` (a distribution's compiled-in extensions'
-//! declarations: a share page's phone shell, `apps/web/test/share-layout.test.mjs`).
+//! TOML file of `[[favourites]]` and the `[by]` that declared them (a
+//! distribution's compiled-in extensions' declarations: a share page's
+//! phone shell, `apps/web/test/share-layout.test.mjs`; the web app's
+//! listing, `apps/web/test/app-favourites.test.mjs`).
 //! An island or favourites are otherwise only what a distribution links
 //! in: this is a test's stand-in, never a node's configuration.
 #![allow(
@@ -94,15 +96,32 @@ fn island(prefix: &str, folder: &str) -> SiteIsland {
     island
 }
 
-/// `[[favourites]]` from the TOML file at `path`.
-fn favourites(path: &str) -> Vec<architect_favourites::TypeFavourites> {
+/// `[[favourites]]` from the TOML file at `path`, each declared by its
+/// `[by]` (`extension`, `actions`, `effect`: what the declaring
+/// extension's capabilities let it run), else by the island
+/// (`ARCHITECT_ISLAND_ID`) with no capabilities.
+fn favourites(path: &str) -> Vec<architect_favourites::Listed> {
     let text = std::fs::read_to_string(path).expect("the favourites file");
     let table: toml::Table = toml::from_str(&text).expect("TOML");
-    table
+    let by: architect_favourites::Declarer = table.get("by").cloned().map_or_else(
+        || architect_favourites::Declarer {
+            extension: std::env::var("ARCHITECT_ISLAND_ID")
+                .unwrap_or_else(|_| "lab.wasi-counter".to_owned()),
+            ..Default::default()
+        },
+        |v| v.try_into().expect("[by]"),
+    );
+    let all: Vec<architect_favourites::TypeFavourites> = table
         .get("favourites")
         .cloned()
         .map(|v| v.try_into().expect("[[favourites]]"))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    all.into_iter()
+        .map(|favourites| architect_favourites::Listed {
+            by: by.clone(),
+            favourites,
+        })
+        .collect()
 }
 
 fn main() {

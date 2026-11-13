@@ -18,6 +18,11 @@
 //! out, never shown dead. The desktop and phone app (`apps/ui`) and the
 //! app in a browser (`apps/web`) both take this one path.
 //!
+//! The tab current is the one whose place is on show ([`Shows`],
+//! [`Favourites::current`]): the note, a view on it, a note a `{place}`
+//! opened. A `{place}` keeps its set: while the note it opened is on show,
+//! the slots stay those of the note it was opened from ([`set_note`]).
+//!
 //! [`AppShell`]: super::AppShell
 
 use architect_favourites::{Face, Target, TypeFavourites};
@@ -39,6 +44,43 @@ pub struct Favourites {
     pub primary: Option<Action>,
     /// A tab's press, by its id: the tabs [`declare`] made.
     pub presses: Vec<(&'static str, Callback<()>)>,
+    /// What each tab [`declare`] made shows once pressed, by its id.
+    pub shows: Vec<(&'static str, Shows)>,
+}
+
+/// What is on show, as a declared tab opens it: what makes a tab current.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Shows {
+    /// A note, by its path: the note itself (`page`) or one a `{place}`
+    /// names.
+    Note(String),
+    /// An extension's view on a note.
+    View {
+        extension: String,
+        view: String,
+        note: String,
+    },
+    /// Nothing a tab stays on: an action, quick open, the navigator.
+    Elsewhere,
+}
+
+/// A note a declared `{place}` tab opened, and the note whose set it was.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlaceOpened {
+    /// The note the place is.
+    pub place: String,
+    /// The note whose set's tab opened it.
+    pub from: String,
+}
+
+/// The note whose type picks the slots: the note on show, or, while it is
+/// a note a `{place}` tab opened, the note that tab's set was for.
+#[must_use]
+pub fn set_note<'a>(on_show: &'a str, opened: Option<&'a PlaceOpened>) -> &'a str {
+    match opened {
+        Some(o) if o.place == on_show => &o.from,
+        _ => on_show,
+    }
 }
 
 impl Favourites {
@@ -48,7 +90,22 @@ impl Favourites {
             tabs,
             primary,
             presses: Vec::new(),
+            shows: Vec::new(),
         }
+    }
+
+    /// The tab whose place is on show (`on_show`), among the slots: a
+    /// declared tab only, and never one that stays on nothing.
+    #[must_use]
+    pub fn current(&self, on_show: &Shows) -> Option<&'static str> {
+        if *on_show == Shows::Elsewhere {
+            return None;
+        }
+        let slots = self.ids();
+        self.shows
+            .iter()
+            .find(|(id, s)| s == on_show && slots.contains(id))
+            .map(|(id, _)| *id)
     }
 
     /// The tabs the bar shows: the first [`SLOTS`].
@@ -146,8 +203,9 @@ pub fn declared_tab_id(note_type: &str, id: &str) -> &'static str {
 
 /// `decl` as the app can show it, or `None` when it shows no tab of it.
 ///
-/// Each tab's target is read by `open`: what a press does there, or `None`
-/// for a target the app cannot open, and the tab is left out; the first
+/// Each tab's target is read by `open`: what a press does there and what
+/// it shows then, or `None` for a target the app cannot open (or the
+/// declaring extension may not name), and the tab is left out; the first
 /// [`SLOTS`] of what is left are the tabs. Its primary action is read the
 /// same way, showing its second face (`on`) while `state_on` says its
 /// `state` is on. A declaration that does not
@@ -155,7 +213,7 @@ pub fn declared_tab_id(note_type: &str, id: &str) -> &'static str {
 #[must_use]
 pub fn declare(
     decl: &TypeFavourites,
-    mut open: impl FnMut(&Target) -> Option<Callback<()>>,
+    mut open: impl FnMut(&Target) -> Option<(Callback<()>, Shows)>,
     state_on: impl Fn(&str) -> bool,
 ) -> Option<Declared> {
     decl.check().ok()?;
@@ -164,13 +222,14 @@ pub fn declare(
         if set.tabs.len() == SLOTS {
             break;
         }
-        let Some(press) = open(&fav.target) else {
+        let Some((press, shows)) = open(&fav.target) else {
             continue;
         };
         let id = declared_tab_id(&decl.note_type, &fav.id);
         set.tabs
             .push(Tab::named(id, intern(&fav.label), intern(&fav.icon)));
         set.presses.push((id, press));
+        set.shows.push((id, shows));
     }
     if set.tabs.is_empty() {
         return None;
@@ -189,7 +248,7 @@ pub fn declare(
             }) => (label, icon, target.as_ref().unwrap_or(&p.target)),
             None => (&p.label, &p.icon, &p.target),
         };
-        let press = open(target)?;
+        let (press, _) = open(target)?;
         Some(
             Action::new(label.clone(), named_icon(icon), move |()| press.call(()))
                 .glyph(intern(icon)),
@@ -204,7 +263,10 @@ mod tests {
     #![allow(clippy::as_conversions)]
 
     // Named, so the prelude's own `Action` does not shadow the shell's.
-    use super::{Action, Declared, Favourites, SLOTS, Tab, declare, resolve_favourites};
+    use super::{
+        Action, Declared, Favourites, PlaceOpened, SLOTS, Shows, Tab, declare, resolve_favourites,
+        set_note,
+    };
     use crate::icon;
     use dioxus::prelude::*;
     use lucide_dioxus::{CalendarDays, Feather, FolderKanban, Inbox, ListMusic, NotebookText};
@@ -333,14 +395,28 @@ on = { label = "Stop", icon = "pause" }
         .unwrap()
     }
 
-    /// What this test's app opens: everything but `player.*`.
-    fn opens(t: &architect_favourites::Target) -> Option<Callback<()>> {
+    /// What this test's app opens: everything but `player.*`, on note
+    /// `Food/Soup.md`.
+    fn opens(t: &architect_favourites::Target) -> Option<(Callback<()>, Shows)> {
         use architect_favourites::Target;
-        let known = match t {
-            Target::View(v) => !v.starts_with("player."),
-            Target::Action(_) | Target::Place(_) => true,
+        let shows = match t {
+            Target::View(v) if v.starts_with("player.") => return None,
+            Target::View(v) if v == "page" => Shows::Note("Food/Soup.md".into()),
+            Target::View(v) => Shows::View {
+                extension: "demo.cook".into(),
+                view: v.rsplit('/').next().unwrap_or(v).into(),
+                note: "Food/Soup.md".into(),
+            },
+            Target::Place(p) => Shows::Note(format!("Food/{}", p.trim_end_matches('/'))),
+            Target::Action(_) => Shows::Elsewhere,
         };
-        known.then(|| Callback::new(|()| {}))
+        Some((Callback::new(|()| {}), shows))
+    }
+
+    /// What an app that opens everything makes of a target.
+    #[allow(clippy::unnecessary_wraps)] // `declare`'s `open`, as an app's
+    fn any(_: &architect_favourites::Target) -> Option<(Callback<()>, Shows)> {
+        Some((Callback::new(|()| {}), Shows::Elsewhere))
     }
 
     #[test]
@@ -376,13 +452,58 @@ on = { label = "Stop", icon = "pause" }
     }
 
     #[test]
+    fn the_tab_whose_place_is_on_show_is_current() {
+        in_runtime(current_tab);
+    }
+
+    fn current_tab() {
+        let d = declare(&a_recipe(), opens, |_| false).unwrap().favourites;
+        assert_eq!(
+            d.current(&Shows::Note("Food/Soup.md".into())),
+            Some("recipe:page")
+        );
+        let steps = Shows::View {
+            extension: "demo.cook".into(),
+            view: "steps".into(),
+            note: "Food/Soup.md".into(),
+        };
+        assert_eq!(d.current(&steps), Some("recipe:steps"));
+        assert_eq!(
+            d.current(&Shows::Note("Food/Notes".into())),
+            Some("recipe:notes")
+        );
+        // An action stays on nothing; another note is no tab's.
+        assert_eq!(d.current(&Shows::Elsewhere), None);
+        assert_eq!(d.current(&Shows::Note("Other.md".into())), None);
+        // The default set's tabs are the app's to mark.
+        assert_eq!(default().current(&Shows::Note("Food/Soup.md".into())), None);
+    }
+
+    #[test]
+    fn a_place_keeps_the_set_it_was_opened_from() {
+        let opened = PlaceOpened {
+            place: "Food/Charts/Opener.md".into(),
+            from: "Food/Soup.md".into(),
+        };
+        assert_eq!(
+            set_note("Food/Charts/Opener.md", Some(&opened)),
+            "Food/Soup.md"
+        );
+        // Anything else on show picks its own.
+        assert_eq!(set_note("Other.md", Some(&opened)), "Other.md");
+        assert_eq!(
+            set_note("Food/Charts/Opener.md", None),
+            "Food/Charts/Opener.md"
+        );
+    }
+
+    #[test]
     fn more_than_four_tabs_keep_the_first_four() {
         in_runtime(more_than_four);
     }
 
     fn more_than_four() {
-        let all = |_: &architect_favourites::Target| Some(Callback::new(|()| {}));
-        let d = declare(&a_recipe(), all, |_| false).unwrap();
+        let d = declare(&a_recipe(), any, |_| false).unwrap();
         assert_eq!(d.favourites.tabs.len(), SLOTS);
         assert_eq!(
             d.favourites.labels(),

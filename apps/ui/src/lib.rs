@@ -1418,27 +1418,38 @@ pub fn LabApp() -> Element {
     // Architect app's favourites for what is open (`favourites`), Inbox,
     // Vault, Project and Schedule and Capture unless the open note's type
     // declares its own.
-    let (tabs, separate, set): (Vec<shell::Tab>, Option<shell::Action>, shell::Favourites) =
-        if crate::distribution().is_sandbox() {
-            (
-                sandbox_tabs.into(),
-                Some(capture),
-                shell::Favourites::default(),
-            )
-        } else {
-            let default =
-                favourites::default_set(to_process, capture_ui.is_some().then_some(capture));
-            let open = focus.note.read().clone();
-            let ty = open.as_ref().and_then(|n| n.note_type.clone());
-            let declared = match (&open, ty.as_deref()) {
-                (Some(note), Some(ty)) => {
-                    declared_favourites(ext_ui, &commands, &lab, focus, note, ty)
-                }
-                _ => Vec::new(),
-            };
-            let set = shell::resolve_favourites(&default, &declared, ty.as_deref());
-            (set.slots().to_vec(), set.primary.clone(), set)
+    // `declared_on`: the tab current is the declared one whose place is
+    // on show (`shell::Favourites::current`), not the route's.
+    let (tabs, separate, set, declared_on): (
+        Vec<shell::Tab>,
+        Option<shell::Action>,
+        shell::Favourites,
+        Option<shell::Shows>,
+    ) = if crate::distribution().is_sandbox() {
+        (
+            sandbox_tabs.into(),
+            Some(capture),
+            shell::Favourites::default(),
+            None,
+        )
+    } else {
+        let default = favourites::default_set(to_process, capture_ui.is_some().then_some(capture));
+        // The note whose type picks the set: the one on show, or the one
+        // a `{place}` tab on show was opened from.
+        let owner = focus.set_note();
+        let ty = owner.as_ref().and_then(|(_, t)| t.clone());
+        let declared = match (&owner, ty.as_deref()) {
+            (Some((path, _)), Some(ty)) => {
+                declared_favourites(ext_ui, &commands, &lab, focus, path, ty)
+            }
+            _ => Vec::new(),
         };
+        let set = shell::resolve_favourites(&default, &declared, ty.as_deref());
+        let on = (!declared.is_empty())
+            .then(|| focus.note.read().as_ref().map(favourites::OpenNote::shows))
+            .flatten();
+        (set.slots().to_vec(), set.primary.clone(), set, on)
+    };
     // The sidebar's foot, above the switcher and the account (bottom to
     // top: Account, Workspace, Settings, Theme).
     let foot = vec![
@@ -1556,7 +1567,10 @@ pub fn LabApp() -> Element {
                         title: crate::distribution().name(),
                         tabs,
                         // The help is over a tab, not one of them.
-                        current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
+                        current: declared_on.as_ref().map_or_else(
+                            || (!matches!(route, Route::Help(_))).then(|| route.tab()),
+                            |on| set.current(on),
+                        ),
                         on_tab: move |id: &'static str| {
                             // A declared favourite's own press first.
                             if set.press(id) {
@@ -1635,15 +1649,16 @@ pub fn LabApp() -> Element {
     }
 }
 
-/// The favourites the loaded extensions declare for note type `ty`, while
-/// `note` is on show: each target read against what the app has
-/// (`favourites::opens`), each press what it opens.
+/// The favourites the loaded extensions declare for note type `ty`, for
+/// note `note`: each target read against what the app has and what the
+/// declaring extension may name (`favourites::opens`), each press what it
+/// opens.
 fn declared_favourites(
     ext_ui: architect_extensions::interface::ExtensionUi,
     commands: &architect_commands::Commands,
     lab: &Lab,
     focus: favourites::VaultFocus,
-    note: &favourites::OpenNote,
+    note: &str,
     ty: &str,
 ) -> Vec<shell::Declared> {
     let (commands, lab) = (*commands, *lab);
@@ -1673,21 +1688,28 @@ fn declared_favourites(
                 .map(|v| (l.manifest.id.clone(), v.id.clone()))
         })
         .collect();
-    let actions: std::collections::BTreeSet<String> = commands
-        .all()
-        .into_iter()
-        .filter(|c| c.enabled)
-        .map(|c| c.id)
+    let actions: std::collections::BTreeMap<String, architect_extensions::favourites::Effect> =
+        commands
+            .all()
+            .into_iter()
+            .filter(|c| c.enabled)
+            .map(|c| (c.id, favourites::effect(c.effect)))
+            .collect();
+    let capabilities: Vec<(String, architect_extensions::manifest::Capabilities)> = loaded
+        .iter()
+        .map(|l| (l.manifest.id.clone(), l.manifest.capabilities.clone()))
         .collect();
     let root = crate::notes::open_vault().map(|v| v.root());
     let exists = |p: &str| root.as_ref().is_some_and(|r| r.join(p).is_file());
     let reach = favourites::Reach {
         views: &views,
         actions: &actions,
-        note: &note.path,
+        capabilities: &capabilities,
+        note,
         exists: &exists,
     };
-    let path = note.path.clone();
+    let path = note.to_owned();
+    let note_type = ty.to_owned();
     let list = host.list().clone();
     let run = move |what: favourites::Opens| {
         // The Vault's workspace on show (it stays mounted under the four).
@@ -1708,6 +1730,15 @@ fn declared_favourites(
                 show(&path, architect_workspace::Target::Here);
             }
             favourites::Opens::Path(p) => {
+                // The place keeps this set while it is on show.
+                let mut opened = focus.opened;
+                opened.set(Some((
+                    shell::PlaceOpened {
+                        place: p.clone(),
+                        from: path.clone(),
+                    },
+                    Some(note_type.clone()),
+                )));
                 to_vault(lab);
                 show(&p, architect_workspace::Target::Tab);
             }
@@ -1733,11 +1764,9 @@ fn declared_favourites(
     let now = architect_extensions::host::now_ms();
     let state = host.contributions().state(now);
     favourites::declared(&decls, ty, &reach, run, |extension, key| {
-        state.iter().any(|e| {
-            e.source == extension
-                && e.key == key
-                && !matches!(e.text.trim(), "" | "off" | "false" | "0")
-        })
+        state
+            .iter()
+            .any(|e| favourites::state_on(&e.source, &e.key, &e.text, extension, key))
     })
 }
 

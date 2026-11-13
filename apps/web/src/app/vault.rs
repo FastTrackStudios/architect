@@ -510,8 +510,9 @@ fn NoteView() -> Element {
     }
 }
 
-/// An island's view on a note (a favourite's `{view}`), filling its pane,
-/// driven by the note's playhead as beside the note (`super::song`).
+/// An island's view on a note (a favourite's `{view}`, #607), filling its
+/// pane: any view the island lists (`Island::views`), handed the note and
+/// its source's playhead state as a claimed view is (`super::embed`).
 #[component]
 fn FrameView() -> Element {
     let pane = use_pane();
@@ -527,26 +528,76 @@ fn FrameView() -> Element {
         };
     };
     let (_, body) = architect_navigator::markdown::split_block(&text);
-    let properties = note_from_markdown(note, &text, 0, 0).properties;
+    let properties: Vec<(String, String)> = note_from_markdown(note, &text, 0, 0)
+        .properties
+        .iter()
+        .map(|(k, v)| (k.clone(), shown(v)))
+        .collect();
     let prop = |name: &str| {
         properties
             .iter()
             .find(|(k, _)| k == name)
-            .map(|(_, v)| shown(v))
+            .map(|(_, v)| v.clone())
     };
     let key = state.clone();
     rsx! {
         div { key: "{key}", style: "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; color: {t.ink};",
-            document::Style { {super::song::LAYOUT} }
-            super::song::SongViews {
+            FramePane {
+                island: island.to_owned(),
+                view: view.to_owned(),
+                // The signed-in person's own vault, or the demo; a share's
+                // guest is `Audience::Guest` (#629, #648).
+                audience: crate::ext_host::Audience::Member,
+                path: note.to_owned(),
                 title: prop("title").unwrap_or_else(|| title_of(note)),
-                artist: prop("artist").unwrap_or_default(),
+                note_type: prop("type").unwrap_or_default(),
+                properties: properties.clone(),
                 body: body.to_owned(),
-                duration: prop("duration"),
-                island: Some(island.to_owned()),
-                only: Some(view.to_owned()),
             }
         }
+    }
+}
+
+/// Island `island`'s view `view`, once its bundle is checked and only when
+/// the island lists it; a word in its place otherwise. The note reaches it
+/// through the gate (`ext_host::note_props`) for `audience`.
+#[component]
+fn FramePane(
+    island: String,
+    view: String,
+    audience: crate::ext_host::Audience,
+    path: String,
+    title: String,
+    note_type: String,
+    properties: Vec<(String, String)>,
+    body: String,
+) -> Element {
+    let t = use_shell().theme;
+    let bundle = super::frames::use_island_of(Some(island.clone()));
+    let state = bundle.read().clone();
+    match state {
+        None => rsx! {},
+        Some(Ok(b)) if b.island.views().contains(&view) => {
+            let note = crate::ext_host::note_props(
+                audience,
+                &b.island,
+                &crate::ext_host::Note {
+                    path: &path,
+                    title: &title,
+                    note_type: &note_type,
+                    properties: &properties,
+                    body: &body,
+                },
+            );
+            rsx! {
+                super::embed::Embedded { bundle: b, view, note, pane: true }
+            }
+        }
+        Some(_) => rsx! {
+            div { "data-testid": "ext-view-missing", style: "flex: 1; padding: 32px; color: {t.ink_3};",
+                p { "This view is not on this server." }
+            }
+        },
     }
 }
 
@@ -615,19 +666,12 @@ fn WebNote(path: String) -> Element {
         }
     };
     let editing = architect_shell::use_editing_actions("editor:note", &[]);
-    // A song (`tags: [song]`): its extension views beside it (#495).
     let prop = |name: &str| {
         properties
             .iter()
             .find(|(k, _)| k == name)
             .map(|(_, v)| shown(v))
     };
-    let song = properties.iter().any(|(k, v)| {
-        k == "tags" && matches!(v, PropertyValue::List(l) if l.iter().any(|t| t == "song"))
-    });
-    let song_title = prop("title").unwrap_or_else(|| title_of(&path));
-    let song_artist = prop("artist").unwrap_or_default();
-    let song_duration = prop("duration");
     // An extension's view claiming the note's type, at its head (#495).
     let note_type = prop("type").unwrap_or_default();
     let shown_properties: Vec<(String, String)> = properties
@@ -636,18 +680,7 @@ fn WebNote(path: String) -> Element {
         .collect();
     rsx! {
         document::Style { {LAYOUT} }
-        document::Style { {super::song::LAYOUT} }
-        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink}; \
-                      container-type: inline-size; container-name: note;",
-          div { class: "web-note-row",
-            if song {
-                super::song::SongViews {
-                    title: song_title,
-                    artist: song_artist,
-                    body: body.clone(),
-                    duration: song_duration,
-                }
-            }
+        div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink};",
             div { class: "web-note", "data-note": "{path}",
                 if !note_type.is_empty() {
                     super::embed::NoteEmbed {
@@ -680,7 +713,6 @@ fn WebNote(path: String) -> Element {
                     onfocusout: move |_| editing.blur(),
                 }
             }
-          }
         }
     }
 }

@@ -5,14 +5,16 @@
 //!
 //! The declarations are the loaded extensions' `[[favourites]]`
 //! ([`declared`]), each target read here ([`opens`]): `{view = "page"}` is
-//! the open note, `{view = "search"}` quick open, `{view = "<extension
-//! id>/<view>"}` (or a bare view of the declaring extension's own) that
-//! extension's view on the open note, `{action}` an action the app has,
+//! the open note, `{view = "search"}` quick open, `{view = "<view>"}` (or
+//! `"<its own id>/<view>"`) a view of the declaring extension's own on the
+//! open note, `{action}` an action the app has that the declaring
+//! extension may run (its own namespace, or one its capabilities name up
+//! to their effect; never a destructive one: a tab's press asks no one),
 //! `{place}` a note beside the open one. Anything else (a share page's
-//! `player.*` views, an action or a view no loaded extension has, a
-//! heading or a folder) is left out. The open note is the Vault's
+//! `player.*` views, another extension's view, an action it may not run,
+//! a heading or a folder) is left out. The open note is the Vault's
 //! workspace's document on show ([`VaultFocus`]); its type its `type`
-//! property.
+//! property, read again whenever the file changes.
 //!
 //! Each favourite opens its real surface ([`Surface`]) in the Vault's
 //! workspace, the same one desk and phone alike: the inbox deck (the
@@ -25,10 +27,10 @@
 //! The sandbox keeps its made-up Inbox, Tasks, Schedule, Vault and
 //! Embedded (`crate::ALL_TABS`).
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
-use architect_extensions::favourites::Target;
-use architect_shell::{Action, Declared, Favourites, Tab, icon};
+use architect_extensions::favourites::{Declarer, Effect, Target};
+use architect_shell::{Action, Declared, Favourites, PlaceOpened, Shows, Tab, icon};
 use architect_workspace::Workspace;
 use dioxus::prelude::*;
 use lucide_dioxus::{CalendarDays, FolderKanban, Inbox, NotebookText};
@@ -62,20 +64,39 @@ pub fn default_set(to_process: usize, capture: Option<Action>) -> Favourites {
     )
 }
 
-/// The note on show in the Vault's workspace: its path in the vault and
-/// its `type` property, when it has one.
+/// The note on show in the Vault's workspace: its path in the vault, its
+/// `type` property when it has one, and the extension view it is shown in
+/// (`<extension>/<view>`), if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenNote {
     pub path: String,
     pub note_type: Option<String>,
+    pub view: Option<String>,
+}
+
+impl OpenNote {
+    /// What is on show, as a declared tab would have opened it.
+    #[must_use]
+    pub fn shows(&self) -> Shows {
+        match self.view.as_deref().and_then(|v| v.split_once('/')) {
+            Some((extension, view)) => Shows::View {
+                extension: extension.to_owned(),
+                view: view.to_owned(),
+                note: self.path.clone(),
+            },
+            None => Shows::Note(self.path.clone()),
+        }
+    }
 }
 
 /// The Vault's workspace as the app's root sees it (in context, written by
-/// `crate::vault::VaultPage` while it is mounted): the note on show, and
-/// the workspace a favourite opens a note in.
+/// `crate::vault::VaultPage` while it is mounted): the note on show, the
+/// note whose set a `{place}` tab kept (and its type), and the workspace a
+/// favourite opens a note in.
 #[derive(Clone, Copy)]
 pub struct VaultFocus {
     pub note: Signal<Option<OpenNote>>,
+    pub opened: Signal<Option<(PlaceOpened, Option<String>)>>,
     pub workspace: Signal<Option<Signal<Workspace>>>,
 }
 
@@ -84,7 +105,21 @@ impl VaultFocus {
     pub fn provide() -> Self {
         use_context_provider(|| Self {
             note: Signal::new(None),
+            opened: Signal::new(None),
             workspace: Signal::new(None),
+        })
+    }
+
+    /// The note whose type picks the slots, and its type: the note on show,
+    /// or the note a `{place}` tab on show was opened from
+    /// (`architect_shell::set_note`).
+    #[must_use]
+    pub fn set_note(&self) -> Option<(String, Option<String>)> {
+        let note = self.note.read().clone()?;
+        let opened = self.opened.read().clone();
+        Some(match opened {
+            Some((o, ty)) if o.place == note.path => (o.from, ty),
+            _ => (note.path, note.note_type),
         })
     }
 }
@@ -120,41 +155,94 @@ pub enum Opens {
     Path(String),
 }
 
+impl Opens {
+    /// What is on show once it opened, on note `note`.
+    #[must_use]
+    pub fn shows(&self, note: &str) -> Shows {
+        match self {
+            Self::Note => Shows::Note(note.to_owned()),
+            Self::Path(p) => Shows::Note(p.clone()),
+            Self::View { extension, view } => Shows::View {
+                extension: extension.clone(),
+                view: view.clone(),
+                note: note.to_owned(),
+            },
+            Self::QuickOpen | Self::Action(_) => Shows::Elsewhere,
+        }
+    }
+}
+
 /// What the app has to open a target with: the loaded extensions' views
-/// (`(extension, view)`), the actions and commands it can run, the open
-/// note's path, and whether a path is a file of the vault.
+/// (`(extension, view)`), the actions and commands it can run and how much
+/// each changes, the loaded extensions' capabilities, the open note's
+/// path, and whether a path is a file of the vault.
 pub struct Reach<'a> {
     pub views: &'a [(String, String)],
-    pub actions: &'a BTreeSet<String>,
+    pub actions: &'a BTreeMap<String, Effect>,
+    pub capabilities: &'a [(String, architect_extensions::manifest::Capabilities)],
     pub note: &'a str,
     pub exists: &'a dyn Fn(&str) -> bool,
+}
+
+/// How much a command changes, as a manifest names it.
+#[must_use]
+pub const fn effect(e: architect_commands::Effect) -> Effect {
+    match e {
+        architect_commands::Effect::ReadOnly => Effect::ReadOnly,
+        architect_commands::Effect::Mutating => Effect::Mutating,
+        architect_commands::Effect::Destructive => Effect::Destructive,
+    }
+}
+
+/// Whether extension `declaring` may name action `id`, which does `e`, as
+/// a favourite: `Capabilities::may_run` over its own namespace and its
+/// capabilities (as `host::gate` lets any of its actions run), never a
+/// destructive one.
+fn may_run(declaring: &str, id: &str, e: Effect, reach: &Reach<'_>) -> bool {
+    use architect_extensions::manifest::{Reach as Level, action_prefix};
+    let level = match e {
+        Effect::ReadOnly => Level::ReadOnly,
+        Effect::Mutating => Level::Mutating,
+        Effect::Destructive => return false,
+    };
+    reach
+        .capabilities
+        .iter()
+        .find(|(ext, _)| ext == declaring)
+        .is_some_and(|(_, c)| c.may_run(&action_prefix(declaring), id, level).is_ok())
 }
 
 /// Quick open, as the Command Palette runs it.
 pub const QUICK_OPEN: &str = "COMMAND_PALETTE_OPEN_ANYTHING";
 
 /// What `target`, declared by extension `declaring`, opens here; `None`
-/// for what the app cannot open (the tab is left out).
+/// for what the app cannot open or `declaring` may not name (the tab is
+/// left out).
 #[must_use]
 pub fn opens(declaring: &str, target: &Target, reach: &Reach<'_>) -> Option<Opens> {
     match target {
         Target::View(v) if v == "page" => Some(Opens::Note),
         Target::View(v) if v == "search" => reach
             .actions
-            .contains(QUICK_OPEN)
+            .contains_key(QUICK_OPEN)
             .then_some(Opens::QuickOpen),
         Target::View(v) => {
             let (extension, view) = v.split_once('/').unwrap_or((declaring, v));
-            reach
-                .views
-                .iter()
-                .any(|(e, w)| e == extension && w == view)
-                .then(|| Opens::View {
-                    extension: extension.to_owned(),
-                    view: view.to_owned(),
-                })
+            let own = Declarer {
+                extension: declaring.to_owned(),
+                ..Declarer::default()
+            };
+            (own.may_open_view_of(extension)
+                && reach.views.iter().any(|(e, w)| e == extension && w == view))
+            .then(|| Opens::View {
+                extension: extension.to_owned(),
+                view: view.to_owned(),
+            })
         }
-        Target::Action(a) => reach.actions.contains(a).then(|| Opens::Action(a.clone())),
+        Target::Action(a) => {
+            let e = *reach.actions.get(a)?;
+            may_run(declaring, a, e, reach).then(|| Opens::Action(a.clone()))
+        }
         Target::Place(p) => {
             let path = architect_extensions::favourites::place_path(reach.note, p)?;
             let md = format!("{path}.md");
@@ -171,7 +259,8 @@ pub fn opens(declaring: &str, target: &Target, reach: &Reach<'_>) -> Option<Open
 
 /// The sets the loaded extensions declare for note type `ty`, each target
 /// read by [`opens`] and its press made by `run`; a primary action's
-/// state is on while `state_on(extension, state)` says so.
+/// state is on while `state_on(extension, state)` says so (its own runtime
+/// state, source `ext:<id>`).
 #[must_use]
 pub fn declared(
     decls: &[(String, architect_extensions::favourites::TypeFavourites)],
@@ -188,13 +277,24 @@ pub fn declared(
                 d,
                 |target| {
                     let what = opens(extension, target, reach)?;
+                    let shows = what.shows(reach.note);
                     let run = run.clone();
-                    Some(Callback::new(move |()| run(what.clone())))
+                    Some((Callback::new(move |()| run(what.clone())), shows))
                 },
                 |state| state_on(extension, state),
             )
         })
         .collect()
+}
+
+/// Whether runtime state entry (`source`, `key`, `text`) turns extension
+/// `extension`'s state `state` on: its own (an extension's state is
+/// `ext:<id>`'s), and not empty, `off`, `false` or `0`.
+#[must_use]
+pub fn state_on(source: &str, key: &str, text: &str, extension: &str, state: &str) -> bool {
+    source.strip_prefix("ext:") == Some(extension)
+        && key == state
+        && !matches!(text.trim(), "" | "off" | "false" | "0")
 }
 
 /// What a favourite opens in the Vault's workspace.
@@ -329,19 +429,50 @@ target = { place = "Shopping" }
 id = "cook"
 label = "Cook"
 icon = "play"
-target = { action = "COOK_TOGGLE" }
+target = { action = "LAB_COOK_TOGGLE" }
 state = "cooking"
 on = { label = "Stop", icon = "pause" }
 "#;
 
+    fn caps(actions: &[&str], effect: Level) -> architect_extensions::manifest::Capabilities {
+        architect_extensions::manifest::Capabilities {
+            actions: actions.iter().map(|a| (*a).to_owned()).collect(),
+            effect,
+            ..Default::default()
+        }
+    }
+
+    use architect_extensions::manifest::Reach as Level;
+
+    /// The app's actions: the recipe extension's own, the player's, the
+    /// app's own and a destructive one of its own.
+    fn actions() -> BTreeMap<String, Effect> {
+        [
+            ("LAB_COOK_TOGGLE", Effect::Mutating),
+            ("LAB_COOK_BURN", Effect::Destructive),
+            ("PLAYER_TOGGLE", Effect::Mutating),
+            ("VAULT_DELETE", Effect::Destructive),
+            ("APP_SETTINGS", Effect::ReadOnly),
+            (QUICK_OPEN, Effect::ReadOnly),
+        ]
+        .into_iter()
+        .map(|(a, e)| (a.to_owned(), e))
+        .collect()
+    }
+
     #[test]
     fn a_declared_target_opens_what_the_app_has_and_nothing_else() {
-        let views = vec![("lab.cook".to_owned(), "steps".to_owned())];
-        let actions: BTreeSet<String> = ["COOK_TOGGLE".to_owned()].into();
+        let views = vec![
+            ("lab.cook".to_owned(), "steps".to_owned()),
+            ("lab.other".to_owned(), "board".to_owned()),
+        ];
+        let actions = actions();
+        let capabilities = vec![("lab.cook".to_owned(), caps(&[], Level::ReadOnly))];
         let exists = |p: &str| p == "Food/Shopping.md";
         let reach = Reach {
             views: &views,
             actions: &actions,
+            capabilities: &capabilities,
             note: "Food/Soup.md",
             exists: &exists,
         };
@@ -362,19 +493,73 @@ on = { label = "Stop", icon = "pause" }
                     extension: "lab.cook".into(),
                     view: "steps".into()
                 }),
-                // Another extension's view that is not loaded.
+                // Another extension's view, loaded or not: never.
                 None,
                 Some(Opens::Path("Food/Shopping.md".into())),
             ]
         );
         assert_eq!(
+            opens("lab.cook", &Target::View("lab.other/board".into()), &reach),
+            None,
+            "another extension's loaded view"
+        );
+        assert_eq!(
+            opens("lab.cook", &Target::View("lab.cook/steps".into()), &reach),
+            Some(Opens::View {
+                extension: "lab.cook".into(),
+                view: "steps".into()
+            })
+        );
+        assert_eq!(
             opens("lab.cook", &Target::Action("NOT_HERE".into()), &reach),
             None
         );
-        assert_eq!(opens("x", &Target::View("search".into()), &reach), None);
+        assert_eq!(
+            opens("x", &Target::View("search".into()), &reach),
+            Some(Opens::QuickOpen)
+        );
         // A heading alone, or a folder: not opened from a tab yet.
         assert_eq!(opens("x", &Target::Place("#steps".into()), &reach), None);
         assert_eq!(opens("x", &Target::Place("Shopping/".into()), &reach), None);
+    }
+
+    #[test]
+    fn a_favourites_action_is_one_its_extension_may_run() {
+        let views = Vec::new();
+        let actions = actions();
+        let exists = |_: &str| false;
+        let run = |caps: Vec<(String, architect_extensions::manifest::Capabilities)>, id: &str| {
+            let reach = Reach {
+                views: &views,
+                actions: &actions,
+                capabilities: &caps,
+                note: "Food/Soup.md",
+                exists: &exists,
+            };
+            opens("lab.cook", &Target::Action(id.to_owned()), &reach)
+        };
+        let none = || vec![("lab.cook".to_owned(), caps(&[], Level::ReadOnly))];
+        // Its own: yes; the app's or another's, with no capabilities: no.
+        assert_eq!(
+            run(none(), "LAB_COOK_TOGGLE"),
+            Some(Opens::Action("LAB_COOK_TOGGLE".into()))
+        );
+        assert_eq!(run(none(), "PLAYER_TOGGLE"), None);
+        assert_eq!(run(none(), "APP_SETTINGS"), None);
+        // A destructive one never, its own or one it may reach.
+        assert_eq!(run(none(), "LAB_COOK_BURN"), None);
+        let all = || vec![("lab.cook".to_owned(), caps(&["*"], Level::Destructive))];
+        assert_eq!(run(all(), "VAULT_DELETE"), None);
+        // What its capabilities name, up to their effect.
+        let player = |e: Level| vec![("lab.cook".to_owned(), caps(&["PLAYER_"], e))];
+        assert_eq!(
+            run(player(Level::Mutating), "PLAYER_TOGGLE"),
+            Some(Opens::Action("PLAYER_TOGGLE".into()))
+        );
+        assert_eq!(run(player(Level::ReadOnly), "PLAYER_TOGGLE"), None);
+        assert_eq!(run(player(Level::Mutating), "APP_SETTINGS"), None);
+        // An extension that is not loaded may run nothing but… nothing.
+        assert_eq!(run(Vec::new(), "LAB_COOK_TOGGLE"), None);
     }
 
     #[test]
@@ -382,11 +567,13 @@ on = { label = "Stop", icon = "pause" }
         let dom = VirtualDom::new(|| rsx! {});
         dom.in_scope(ScopeId::ROOT, || {
             let views = vec![("lab.cook".to_owned(), "steps".to_owned())];
-            let actions: BTreeSet<String> = ["COOK_TOGGLE".to_owned()].into();
+            let actions = actions();
+            let capabilities = vec![("lab.cook".to_owned(), caps(&[], Level::ReadOnly))];
             let exists = |p: &str| p == "Food/Shopping.md";
             let reach = Reach {
                 views: &views,
                 actions: &actions,
+                capabilities: &capabilities,
                 note: "Food/Soup.md",
                 exists: &exists,
             };
@@ -401,6 +588,18 @@ on = { label = "Stop", icon = "pause" }
                 open.primary.as_ref().map(|a| a.label.as_str()),
                 Some("Cook")
             );
+            // The tab current is the one whose place is on show.
+            let on_steps = OpenNote {
+                path: "Food/Soup.md".into(),
+                note_type: Some("recipe".into()),
+                view: Some("lab.cook/steps".into()),
+            };
+            assert_eq!(open.current(&on_steps.shows()), Some("recipe:steps"));
+            let on_page = OpenNote {
+                view: None,
+                ..on_steps
+            };
+            assert_eq!(open.current(&on_page.shows()), Some("recipe:page"));
             let on = declared(&decls, "recipe", &reach, run, |e, s| {
                 e == "lab.cook" && s == "cooking"
             });
@@ -416,6 +615,73 @@ on = { label = "Stop", icon = "pause" }
                 ["inbox", "vault", "project", "schedule"]
             );
         });
+    }
+
+    #[test]
+    fn a_place_on_show_keeps_the_set_of_the_note_it_was_opened_from() {
+        let dom = VirtualDom::new(|| rsx! {});
+        dom.in_scope(ScopeId::ROOT, || {
+            let focus = VaultFocus {
+                note: Signal::new(Some(OpenNote {
+                    path: "Food/Shopping.md".into(),
+                    note_type: Some("list".into()),
+                    view: None,
+                })),
+                opened: Signal::new(Some((
+                    PlaceOpened {
+                        place: "Food/Shopping.md".into(),
+                        from: "Food/Soup.md".into(),
+                    },
+                    Some("recipe".into()),
+                ))),
+                workspace: Signal::new(None),
+            };
+            assert_eq!(
+                focus.set_note(),
+                Some(("Food/Soup.md".into(), Some("recipe".into())))
+            );
+            let mut note = focus.note;
+            note.set(Some(OpenNote {
+                path: "Other.md".into(),
+                note_type: None,
+                view: None,
+            }));
+            assert_eq!(focus.set_note(), Some(("Other.md".into(), None)));
+        });
+    }
+
+    #[test]
+    fn a_primarys_state_is_its_extensions_own() {
+        assert!(state_on(
+            "ext:lab.cook",
+            "cooking",
+            "1",
+            "lab.cook",
+            "cooking"
+        ));
+        assert!(!state_on(
+            "ext:lab.cook",
+            "cooking",
+            "off",
+            "lab.cook",
+            "cooking"
+        ));
+        assert!(!state_on(
+            "ext:lab.cook",
+            "other",
+            "1",
+            "lab.cook",
+            "cooking"
+        ));
+        // Another's, or the bare id an agent may not write as.
+        assert!(!state_on(
+            "ext:lab.other",
+            "cooking",
+            "1",
+            "lab.cook",
+            "cooking"
+        ));
+        assert!(!state_on("lab.cook", "cooking", "1", "lab.cook", "cooking"));
     }
 
     #[test]
