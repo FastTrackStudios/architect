@@ -47,6 +47,15 @@
 // live audio graph; on a Mac, headless as it is (its output at zero and the
 // file silent). `just app-ext-host-test` builds and runs it; SHOTS=<dir>
 // writes the bar's screenshots (390 px and desk width) there.
+//
+// The demo's Christmas setlist (`Setlists/Merry & Bright.md`, made by
+// `apps/ui/demo-vault.py --christmas`): a setlist view's queue carries each
+// song's cover (a vault path), the frame is handed it as `art_src` (a
+// `data:` URL) and the card draws it, title over artist; a song note's
+// recording does the same from the note. With STUDIO_ISLAND=<folder>
+// (Studio's `just island-web <folder>`, `island.css` beside it), Studio's
+// own setlist view draws the set, its songs with no recording greyed, a
+// row pressed plays on the card.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -204,10 +213,15 @@ async function node(bundle, claim, islands) {
   const list = islands || [{ id: 'demo.view', bundle, embeds: `${claim}=song=`, reads: 'documents' }];
   list.forEach((one, n) => {
     const prefix = n === 0 ? 'ARCHITECT_ISLAND' : 'ARCHITECT_ISLAND2';
-    const folder = join(dir, `island-${n}`);
-    put(folder, 'web-view.js', one.bundle);
-    put(folder, 'web-view_bg.wasm', WASM);
-    put(folder, 'architect.json', JSON.stringify({ module: 'web-view.js', manifest: { id: one.id, capabilities: {} } }));
+    // A built island's folder as it is (Studio's `just island-web`), or
+    // one written here from `bundle`.
+    const folder = one.folder || join(dir, `island-${n}`);
+    if (!one.folder) {
+      put(folder, 'web-view.js', one.bundle);
+      put(folder, 'web-view_bg.wasm', WASM);
+      put(folder, 'architect.json', JSON.stringify({ module: 'web-view.js', manifest: { id: one.id, capabilities: {} } }));
+    }
+    if (one.sheet) env[`${prefix}_SHEET`] = one.sheet;
     Object.assign(env, {
       [`${prefix}_FOLDER`]: folder, [`${prefix}_ID`]: one.id,
       [`${prefix}_VIEW`]: 'progress', [`${prefix}_TRANSPORT`]: 'transport', [`${prefix}_LYRICS`]: 'lyrics',
@@ -846,4 +860,117 @@ test('two sources coexist, the bar switches between them, and a frame moves only
       await b.shot(join(process.env.SHOTS, 'now-playing-desk-sources-firefox.png'));
     }
   } finally { await w.close(); }
+});
+
+// ── The demo's Christmas setlist ────────────────────────────────────
+
+/// A setlist view: the note's ```studio-setlist rows with a recording as
+/// its source, each with its cover (the row's tenth field) as `art`; what
+/// it was handed of their art written to its body.
+const SETLIST = `
+  let set = false;
+  const svg = (i) => !!i && typeof i.art_src === 'string' && i.art_src.startsWith('data:image/svg+xml;base64,');
+  globalThis.architectPage.subscribe((p) => {
+    document.body.dataset.props = JSON.stringify({ tracks: p.tracks, item: p.item && p.item.id,
+      itemArt: svg(p.item), queueArt: (p.queue || []).filter(svg).length });
+    if (set || p.tracks || !p.note || !p.note.body) return;
+    set = true;
+    const rows = p.note.body.split('\\n').map((l) => l.split('|').map((f) => f.trim()))
+      .filter((f) => f.length >= 10 && /^[0-9]+$/.test(f[0]) && f[4]);
+    globalThis.architectPage.ask("PLAYHEAD_SET", { name: p.note.title, queue: rows.map((f) => (
+      { id: f[2], title: f[1], subtitle: f[5], duration: Number(f[6]), media: f[4], art: f[9] })) });
+  });
+`;
+
+/// Opens the navigator's folder `name` in its tree (its chevron: a press
+/// on its name selects it).
+const expand = (b, name) => b.eval(`(() => { const row = [...document.querySelectorAll('[role=treeitem]')].find((r) => [...r.querySelectorAll('*')].some((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(name)})); const c = row && row.querySelector('.nv-chevron'); if (!c) return false; if (row.getAttribute('aria-expanded') !== 'true') c.click(); return true; })()`);
+
+const artSrc = (b) => b.eval(`document.querySelector('[data-testid=now-playing-art] img')?.getAttribute('src') || ''`);
+
+test('the demo setlist: each song\'s cover reaches its frame as data and the card draws it', { skip }, async () => {
+  const n = await node(null, null, [{ id: 'demo.view', bundle: glue({ progress: QUIET, transport: SETLIST, lyrics: QUIET }), embeds: 'transport=setlist=', reads: 'documents' }]);
+  const f = await front(n.origin);
+  const b = await firefox();
+  try {
+    await openNote(b, f.origin, ['Setlists'], 'Merry & Bright');
+    // Five of its nine songs have a recording; each queued with its cover.
+    const p = await until(async () => { const q = await propsOf(b, 'transport'); return q && q.tracks === 5 && q; }, 15000, 'the five songs queued');
+    assert.equal(p.queueArt, 5, 'every queued song handed its cover');
+    await ask(b, 'transport', 'PLAYHEAD_ITEM', { id: 'Songs/Christmas/Silent Night/Silent Night.md', play: true });
+    const s = await until(async () => { const s = await bar(b); return s && s.title === 'Silent Night' && s; }, 10000, 'the card on Silent Night');
+    assert.match(s.subtitle, /for KING & COUNTRY/);
+    assert.match(await artSrc(b), /^data:image\/svg\+xml;base64,/);
+    await until(async () => (await propsOf(b, 'transport')).itemArt, 5000, 'the current song\'s cover in the props');
+    await until(() => b.eval(`document.querySelector('[data-testid=now-playing-audio]')?.src.endsWith('/app/demo-recording.mp3')`), 5000, 'the demo recording');
+    // Art that is not the demo vault's image is never drawn.
+    await ask(b, 'transport', 'PLAYHEAD_SET', { name: 'X', queue: [{ id: 'x', title: 'X', duration: 10, art: 'Attachments/Brief.pdf' }], play: true });
+    await until(async () => (await bar(b)).title === 'X', 5000, 'the card on X');
+    assert.equal(await artSrc(b), '');
+  } finally { await b.close(); f.close(); n.close(); }
+});
+
+test('a demo song note plays its recording on the card under its artist, with its cover', { skip }, async () => {
+  const w = await world({ progress: QUIET, transport: QUIET, lyrics: QUIET }, 'lyrics');
+  const { b } = w;
+  try {
+    await b.go(`${w.f.origin}/app/?demo`);
+    await until(() => b.eval(`!!document.querySelector('[data-testid=note-text]')`), 60000, 'the demo');
+    for (const folder of ['Songs', 'Christmas']) await until(() => expand(b, folder), 10000, `the folder ${folder} expanded`);
+    await openNote(b, w.f.origin, ['Sleigh Ride'], 'Sleigh Ride', false);
+    await until(() => press(b, 'note-recording-play'), 10000, 'the note\'s Play recording');
+    const s = await until(async () => { const s = await bar(b); return s && s.title === 'Sleigh Ride' && s; }, 10000, 'the card on Sleigh Ride');
+    assert.match(s.subtitle, /Tori Kelly/);
+    assert.match(await artSrc(b), /^data:image\/svg\+xml;base64,/);
+    if (process.env.SHOTS) {
+      mkdirSync(process.env.SHOTS, { recursive: true });
+      for (const [width, name] of [[390, 'phone-390'], [1280, 'desk-1280']]) {
+        await b.size(width, width === 390 ? 844 : 900);
+        await sleep(700);
+        await b.shot(join(process.env.SHOTS, `song-note-recording-${name}.png`));
+      }
+    }
+  } finally { await w.close(); }
+});
+
+const STUDIO = process.env.STUDIO_ISLAND;
+const ROWS = `JSON.stringify([...document.querySelectorAll('.sl-row')].map((r) => ({ name: r.querySelector('.sl-name')?.textContent, disabled: r.getAttribute('aria-disabled') === 'true', current: r.hasAttribute('data-current') })))`;
+
+test('Studio\'s setlist view draws the demo setlist and a row pressed plays on the card', { skip: skip || (STUDIO ? false : 'needs STUDIO_ISLAND=<Studio `just island-web` folder>') }, async () => {
+  const n = await node(null, null, [{ id: 'studio.transport', folder: STUDIO, sheet: 'island.css', embeds: 'setlist.playlist=setlist=date', reads: 'documents' }]);
+  const f = await front(n.origin);
+  const b = await firefox();
+  const shots = process.env.SHOTS;
+  try {
+    // Opened on a desk (a phone's navigator is a drawer), then seen at
+    // 390 px too.
+    await openNote(b, f.origin, ['Setlists'], 'Merry & Bright');
+    // Its one frame, once the host says it is ready.
+    await until(async () => (await mark(b, 'setlist.playlist'))?.state === 'ready', 20000, 'Studio\'s setlist view ready');
+    // The frame drawing the rows (its context, found again if it is
+    // rebuilt).
+    const view = async () => { for (const f of await b.frames()) { const r = JSON.parse(await b.evalIn(f, ROWS).catch(() => '[]')); if (r.length) return { f, r }; } return null; };
+    const { r: rows } = await until(async () => { const v = await view(); return v && v.r.length === 9 && v; }, 20000, 'nine rows');
+    // A press on the row named `name`, in the frame as it is now.
+    const pressRow = async (name) => { const v = await until(view, 10000, 'the view'); return b.evalIn(v.f, `[...document.querySelectorAll('.sl-row')].find((r) => r.querySelector('.sl-name').textContent === ${JSON.stringify(name)}).click(); true`); };
+    assert.deepEqual(rows.map((r) => r.name), ['Sleigh Ride', 'Silent Night', 'Joy to the World (Unspeakable Joy)', 'Feliz Navidad', 'What Christmas Means', 'This Christmas', "Rockin' Around the Christmas Tree", 'Last Christmas', 'All I Want for Christmas Is You']);
+    assert.deepEqual(rows.filter((r) => r.disabled).map((r) => r.name), ['Feliz Navidad', 'What Christmas Means', "Rockin' Around the Christmas Tree", 'Last Christmas']);
+    const shot = async (file) => { if (!shots) return; mkdirSync(shots, { recursive: true }); await sleep(900); await b.shot(join(shots, file)); };
+    await shot('studio-setlist-desk-1280.png');
+    await b.size(390, 844);
+    await shot('studio-setlist-phone-390.png');
+    // A greyed row asks nothing; a row with a recording plays.
+    await until(async () => (await view())?.r.length === 9, 20000, 'the rows at 390 px');
+    await pressRow('Feliz Navidad');
+    await sleep(600);
+    assert.notEqual((await bar(b))?.title, 'Feliz Navidad');
+    await pressRow('This Christmas');
+    const s = await until(async () => { const s = await bar(b); return s && s.title === 'This Christmas' && s.playing && s; }, 10000, 'the card playing This Christmas');
+    assert.match(s.subtitle, /Donny Hathaway/);
+    await until(async () => (await view())?.r.find((r) => r.current)?.name === 'This Christmas', 5000, 'its row marked');
+    await shot('studio-setlist-playing-phone-390.png');
+    await b.size(1280, 900);
+    await shot('studio-setlist-playing-desk-1280.png');
+    await press(b, 'now-playing-toggle');
+  } finally { await b.close(); f.close(); n.close(); }
 });
