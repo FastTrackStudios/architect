@@ -161,7 +161,8 @@ impl ShareUrl {
     /// the link.
     #[must_use]
     pub fn host_label(&self) -> String {
-        self.port.map_or_else(|| self.host.clone(), |port| format!("{}:{port}", self.host))
+        self.port
+            .map_or_else(|| self.host.clone(), |port| format!("{}:{port}", self.host))
     }
 
     /// The host alone, as written in the URL.
