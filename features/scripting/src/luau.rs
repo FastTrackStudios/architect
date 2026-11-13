@@ -477,8 +477,14 @@ impl Runtime {
         // script's wake.
         lua.set_app_data(owner);
         let globals = lua.globals();
-        globals.set("actions", self.actions_table(&lua, caller, trace)?)?;
-        globals.set("state", self.state_table(&lua, caller, trace)?)?;
+        // What the script runs is the script's, not whoever started it: a
+        // script run from ⌘K must not hand its inner calls the person's
+        // palette press (an action that asks first for any caller but the
+        // person would not ask). Its principal and the rest of the
+        // invocation stay.
+        let inner = as_script(caller);
+        globals.set("actions", self.actions_table(&lua, &inner, trace)?)?;
+        globals.set("state", self.state_table(&lua, &inner, trace)?)?;
         let print = log_function(&lua, trace)?;
         globals.set("print", print.clone())?;
         globals.set("log", print)?;
@@ -1158,9 +1164,41 @@ fn located(kind: ErrorKind, message: &str) -> ScriptError {
     ScriptError::new(kind, line, rest)
 }
 
+/// `caller` as a script's: its invocation's source is `Script`, the rest
+/// of it (and the principal) as it was.
+fn as_script(caller: &ActionCaller) -> ActionCaller {
+    let mut invocation = caller.invocation().cloned().unwrap_or_default();
+    invocation.source = architect::action::InvocationSource::Script;
+    caller.clone().with_invocation(invocation)
+}
+
 #[cfg(test)]
 mod tests {
     use super::located;
+
+    /// A script started from ⌘K runs its inner calls as a script: the
+    /// palette's press is not handed on, the principal and the rest stay.
+    #[test]
+    fn a_scripts_inner_calls_are_the_scripts_not_the_palettes() {
+        use architect::action::{ActionCaller, Invocation, InvocationSource, Principal};
+        let mut pressed = Invocation::new(InvocationSource::Palette);
+        pressed.pane = Some("p1".to_owned());
+        let person = ActionCaller::app().with_invocation(pressed);
+        let inner = super::as_script(&person);
+        let got = inner.invocation().expect("an invocation");
+        assert_eq!(got.source, InvocationSource::Script);
+        assert_eq!(got.pane.as_deref(), Some("p1"));
+        assert!(inner.principal().is_none());
+        // An untagged caller gets one; a principal stays.
+        assert_eq!(
+            super::as_script(&ActionCaller::app())
+                .invocation()
+                .map(|i| i.source),
+            Some(InvocationSource::Script)
+        );
+        let agent = ActionCaller::new(Principal::extension("acme".to_owned(), None));
+        assert!(super::as_script(&agent).principal().is_some());
+    }
     use crate::ErrorKind;
 
     #[test]
