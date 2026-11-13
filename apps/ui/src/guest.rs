@@ -152,8 +152,10 @@ pub fn known_host(url: &ShareUrl, known: &[String]) -> bool {
     host == HOME_HOST || known.iter().any(|k| host_of(k) == host)
 }
 
-/// Whether a link asks the person first. One the person opened does not,
-/// as a browser's address bar does not. One the OS handed over or an
+/// Whether a link asks the person first.
+///
+/// One the person opened does not, as a browser's address bar does not.
+/// One the OS handed over or an
 /// agent asked for does when it points at this machine or a private
 /// network ([`Ask::Local`], first) or at a node the app does not know
 /// ([`Ask::Unknown`]: nothing is fetched until the person says yes).
@@ -677,6 +679,12 @@ impl Guest {
         self.open.read().clone()
     }
 
+    /// Whether `url` (from `from`) asks the person first.
+    fn asks(&self, url: &ShareUrl, from: Source) -> Ask {
+        let known = (self.known.peek())();
+        asks_first(url, from, &known)
+    }
+
     /// Open `raw` (from `from`) in the Shared tab.
     pub fn open(mut self, raw: &str, from: Source) {
         self.images.write().clear();
@@ -690,10 +698,7 @@ impl Guest {
                     note: None,
                 }));
             }
-            Ok(url) => match {
-                let known = (self.known.peek())();
-                asks_first(&url, from, &known)
-            } {
+            Ok(url) => match self.asks(&url, from) {
                 Ask::No => self.start(url, from == Source::Person),
                 ask => {
                     self.bump();
@@ -888,7 +893,9 @@ impl Guest {
 }
 
 /// The Shared tab's state, `SHARE_OPEN` on `list`, and the window taking
-/// the links handed to it ([`incoming`]). `known` answers the nodes the
+/// the links handed to it ([`incoming`]).
+///
+/// `known` answers the nodes the
 /// account uses for its orgs; `trust` the session to send to a node's
 /// origin (empty: none).
 pub fn use_guest(
@@ -962,8 +969,9 @@ fn source_of(caller: &architect::action::ActionCaller) -> Source {
     }
 }
 
-/// The Shared tab in the shell's tabs. On a phone it is kept on the bar
-/// and takes the fourth place (`architect_shell::phone_tabs`): the
+/// The Shared tab in the shell's tabs.
+///
+/// On a phone it is kept on the bar and takes the fourth place (`architect_shell::phone_tabs`): the
 /// person's last favourite, still in ⌘K and the sidebar, gives way while
 /// the link is open, so the link is one tap away after leaving it.
 #[must_use]
