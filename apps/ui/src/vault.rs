@@ -527,6 +527,10 @@ fn screensets() -> Screensets {
         Screenset::new("Project")
             .slot(5)
             .layout(FormClass::Desk, project_workspace()),
+        #[cfg(all(feature = "process-views", target_os = "linux"))]
+        Screenset::new("Process views")
+            .slot(6)
+            .layout(FormClass::Desk, crate::process_views::workspace()),
     ];
     // "New Chart" (⌘K): the source editor beside its preview.
     #[cfg(feature = "keyflow-lab")]

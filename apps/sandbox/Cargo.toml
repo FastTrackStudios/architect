@@ -13,6 +13,7 @@ path = "src/main.rs"
 [features]
 keyflow-lab = ["architect-desktop/keyflow-lab"]
 wasi = ["architect-desktop/wasi"]
+process-views = ["architect-desktop/process-views"]
 
 [dependencies]
 architect-desktop = { path = "../desktop" }

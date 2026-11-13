@@ -171,8 +171,11 @@ impl PaintWake {
     }
 }
 
-/// A Blitz event as the view's input, in its logical pixels.
-fn view_input(event: &UiEvent) -> Option<ViewInput> {
+/// A Blitz event as the view's input, in its logical pixels: what a
+/// [`PaintWidget`] hands its view, and what a host that forwards a pane's
+/// events elsewhere (a process view) sends.
+#[must_use]
+pub fn view_input(event: &UiEvent) -> Option<ViewInput> {
     Some(match event {
         UiEvent::PointerDown(p) => pointer(p, "start", |x, y| ViewInput::PointerDown {
             x,

@@ -103,8 +103,7 @@ pub fn launch_with_fonts(
     let live = crate::shot::LiveDocument::new(doc.inner.clone());
     doc.vdom
         .in_scope(ScopeId::ROOT, move || provide_context(live));
-    let config =
-        WindowConfig::with_attributes(Box::new(doc), DioxusNativeWindowRenderer::new(), window);
+    let config = WindowConfig::with_attributes(Box::new(doc), window_renderer(), window);
     let app = App {
         inner: DioxusNativeApplication::new(proxy, queue, config),
         desk,
@@ -117,6 +116,24 @@ pub fn launch_with_fonts(
     // An event loop that cannot run has no window to say so in; the
     // process ends either way.
     let _ = event_loop.run_app(app);
+}
+
+/// The main window's renderer. With `external-textures` its GPU device
+/// can import dma-buf textures where the driver offers it (a process
+/// view's frames, `architect-process-view`); wgpu asks only for what the
+/// adapter has, so elsewhere it is the plain renderer.
+fn window_renderer() -> DioxusNativeWindowRenderer {
+    #[cfg(feature = "external-textures")]
+    {
+        DioxusNativeWindowRenderer::with_features_and_limits(
+            Some(dioxus_native::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
+            None,
+        )
+    }
+    #[cfg(not(feature = "external-textures"))]
+    {
+        DioxusNativeWindowRenderer::new()
+    }
 }
 
 /// A document for `vdom`: the bundle's assets and `data:` URIs load, and
