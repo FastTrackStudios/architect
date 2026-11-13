@@ -230,6 +230,16 @@ pub enum ConfigError {
         meant: &'static str,
     },
     #[error(
+        "{var}: client `{client_id}` has the key `{key}` holding an object, which this issuer \
+         does not read; client settings sit at the top of the client, so refusing to start \
+         rather than ignore settings written inside it"
+    )]
+    OidcClientNested {
+        var: &'static str,
+        client_id: String,
+        key: String,
+    },
+    #[error(
         "AUTH_SECRET must be at least 32 bytes (got {0}) — architect-auth refuses shorter keys"
     )]
     SecretTooShort(usize),
@@ -242,9 +252,11 @@ pub enum ConfigError {
 /// the fields a deployment rarely sets. A key it does not know is ignored
 /// with a warning at start-up naming the client and the key (a key a later
 /// version adds must not stop the issuer for every app it signs in),
-/// except a near-miss of a key that matters ([`GUARDED_KEYS`]): a
-/// misspelled `first_party` or `rotate_refresh_tokens` must not quietly
-/// read `false`, so that is an error.
+/// except a near-miss or synonym of a key that matters ([`GUARDED_KEYS`],
+/// [`SYNONYMS`]): a misspelled `first_party`, or an `enabled: false` meant
+/// as `disabled: true`, must not quietly leave the client as it was, so
+/// that is an error. So is an unknown key holding an object, since settings
+/// nested in it would be ignored.
 #[derive(Debug, serde::Deserialize)]
 struct OidcClientJson {
     client_id: String,
@@ -273,10 +285,10 @@ struct OidcClientJson {
     #[serde(default)]
     disabled: bool,
     /// Every key this version does not know; see [`unknown_key`]. A map
-    /// because `flatten` needs one; the values are never kept.
+    /// because `flatten` needs one; the values are read only to refuse an
+    /// object, never kept past parsing nor reported.
     #[serde(flatten)]
-    #[allow(clippy::zero_sized_map_values)]
-    unknown: std::collections::BTreeMap<String, serde::de::IgnoredAny>,
+    unknown: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// The client keys a near-miss of which is refused rather than ignored,
@@ -301,10 +313,27 @@ const GUARDED_KEYS: &[&str] = &[
 /// starts this one); a near-miss is still refused.
 const LATER_KEYS: &[&str] = &["issue_sessions"];
 
+/// Other words for the two keys that widen access when missing: a client
+/// turned off as `enabled: false` or `revoked: true` would stay on, and
+/// rotation asked for under another name would leave refresh tokens
+/// reusable. `(folded word, meant)`; a folded key equal to the word (or to
+/// `is` and the word), or for `rotat` containing it, is refused.
+const SYNONYMS: &[(&str, &str)] = &[
+    ("enabled", "disabled"),
+    ("enable", "disabled"),
+    ("active", "disabled"),
+    ("inactive", "disabled"),
+    ("revoked", "disabled"),
+    ("suspended", "disabled"),
+    ("blocked", "disabled"),
+    ("rotat", "rotate_refresh_tokens"),
+];
+
 /// What an unknown client key is: `Some(meant)` when it is a near-miss of
 /// the guarded key `meant` (the same once case, `-`, `_` and spaces are
 /// ignored, or within two edits of it; one edit for a key of under eight
-/// letters), else `None`, an unrelated key that is ignored.
+/// letters) or one of its [`SYNONYMS`], else `None`, an unrelated key that
+/// is ignored.
 fn unknown_key(key: &str) -> Option<&'static str> {
     fn folded(key: &str) -> Vec<char> {
         key.chars()
@@ -316,6 +345,16 @@ fn unknown_key(key: &str) -> Option<&'static str> {
         return None;
     }
     let key = folded(key);
+    let text: String = key.iter().collect();
+    if let Some(&(_, meant)) = SYNONYMS.iter().find(|(word, _)| {
+        if *word == "rotat" {
+            text.contains(word)
+        } else {
+            text == *word || text.strip_prefix("is") == Some(*word)
+        }
+    }) {
+        return Some(meant);
+    }
     GUARDED_KEYS.iter().copied().find(|meant| {
         let meant = folded(meant);
         let near = if meant.len() < 8 { 1 } else { 2 };
@@ -557,7 +596,14 @@ fn parse_oidc_clients(
         serde_json::from_str(raw).map_err(|source| ConfigError::OidcClients { var, source })?;
     let mut ignored = Vec::new();
     for client in &parsed {
-        for key in client.unknown.keys() {
+        for (key, value) in &client.unknown {
+            if value.is_object() {
+                return Err(ConfigError::OidcClientNested {
+                    var,
+                    client_id: client.client_id.clone(),
+                    key: key.clone(),
+                });
+            }
             if let Some(meant) = unknown_key(key) {
                 return Err(ConfigError::OidcClientKey {
                     var,
@@ -604,7 +650,7 @@ mod oidc_client_json_tests {
     /// Its value is never reported.
     #[test]
     fn an_unknown_client_key_is_ignored_and_named() {
-        for key in ["issue_sessions", "comment", "note", "enabled", "logo_uri"] {
+        for key in ["issue_sessions", "comment", "note", "logo_uri", "contacts"] {
             let raw = client_with(&format!(r#","{key}":"secret-looking-value""#));
             let (clients, ignored) =
                 parse_oidc_clients("AUTH_OIDC_CLIENTS", &raw).expect("an unknown key starts");
@@ -637,6 +683,12 @@ mod oidc_client_json_tests {
             ("isue_sessions", "issue_sessions"),
             ("scope", "scopes"),
             ("client_secrets", "client_secret"),
+            ("enabled", "disabled"),
+            ("Active", "disabled"),
+            ("revoked", "disabled"),
+            ("is-suspended", "disabled"),
+            ("refresh_token_rotation", "rotate_refresh_tokens"),
+            ("rotate_tokens", "rotate_refresh_tokens"),
         ] {
             let raw = client_with(&format!(r#","{key}":true"#));
             match parse_oidc_clients("AUTH_OIDC_CLIENTS_EXTRA", &raw) {
@@ -653,6 +705,24 @@ mod oidc_client_json_tests {
                 }
                 other => panic!("{key}: {other:?}"),
             }
+        }
+    }
+
+    /// Settings nested in an unknown object would be ignored, so an
+    /// unknown key holding an object is refused; its contents are not
+    /// reported.
+    #[test]
+    fn an_unknown_key_holding_an_object_is_an_error() {
+        let raw = client_with(r#","settings":{"disabled":true,"rotate_refresh_tokens":true}"#);
+        match parse_oidc_clients("AUTH_OIDC_CLIENTS", &raw) {
+            Err(e @ ConfigError::OidcClientNested { .. }) => {
+                let shown = e.to_string();
+                assert!(
+                    shown.contains("`settings`") && !shown.contains("rotate"),
+                    "{shown}"
+                );
+            }
+            other => panic!("{other:?}"),
         }
     }
 
