@@ -343,7 +343,11 @@ pub async fn start_with_shell(
         _ => None,
     };
     let lane = match (&node_org, &config.issuer) {
-        (Some(org), Some(issuer)) => Some(org::OrgLane::new(org.clone(), &admission, issuer)),
+        (Some(org), Some(issuer)) => Some(
+            org::OrgLane::new(org.clone(), &admission, issuer)
+                .with_recheck(Duration::from_secs(config.lane_recheck_secs.max(1)))
+                .with_origins(config.lane_origins.clone()),
+        ),
         _ => None,
     };
     let mut access = NodeAccess::new(admission.clone(), Shares::new());

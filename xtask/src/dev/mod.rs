@@ -372,6 +372,12 @@ impl Stack {
                     "ARCHITECT_HOST_ORG",
                     fill.map_or_else(|| fill::DEMO_NODE_ORG.to_owned(), |f| f.node_org.clone()),
                 ),
+                // The web app's origin (`dx serve`'s proxy may not keep the
+                // `Host` the browser asked): it opens the org lane.
+                pair(
+                    "ARCHITECT_LANE_ORIGINS",
+                    format!("http://127.0.0.1:{0},http://localhost:{0}", p.web),
+                ),
                 // No relays and no lookup: it cannot find or be found by a
                 // peer anywhere but this machine.
                 pair("ARCHITECT_IROH", "local".to_owned()),

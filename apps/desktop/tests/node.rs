@@ -231,7 +231,7 @@ async fn a_note_syncs_between_two_headless_nodes_through_the_always_on_one() {
     // An agent writes on the always-on node over MCP; the laptop gets it.
     assert_eq!(
         architect_desktop::node::service::notes::notes_actions::IDS,
-        ["NOTES_LIST", "NOTES_READ", "NOTES_WRITE"]
+        ["NOTES_LIST", "NOTES_READ", "NOTES_WRITE", "NOTES_CREATE"]
     );
     let wrote = mcp(
         &always,
@@ -685,6 +685,31 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     host.stop().await;
 }
 
+/// The status line of a WebSocket upgrade to the org lane at `node`, from
+/// a browser page on `origin` (none: a native client).
+async fn upgrade_status(node: &Running, origin: Option<&str>) -> String {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut stream = tokio::net::TcpStream::connect(node.http).await.unwrap();
+    let origin = origin.map_or_else(String::new, |o| format!("Origin: {o}\r\n"));
+    let request = format!(
+        "GET /org/indie/vox HTTP/1.1\r\nHost: {}\r\n{origin}Connection: Upgrade\r\n\
+         Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: vox.v1\r\n\r\n",
+        node.http
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut buf = [0_u8; 256];
+    let n = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    String::from_utf8_lossy(&buf[..n])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
 /// Where a browser's sign-in comes back to, in these tests.
 const WEB_CALLBACK: &str = "http://127.0.0.1:9/auth/callback";
 
@@ -791,36 +816,100 @@ async fn a_browser_signed_in_by_redirect_reaches_the_org_lane_with_its_access_to
     assert!(listed.iter().any(|n| n.path == "hello.md"), "{listed:?}");
 
     let sync: DocSyncClient = web(&host, Some(web_app.access_token.clone())).await;
+    // The web app's text area over the browser's replica, as `apps/web`
+    // opens a note: it shows the note as read, before the session has
+    // attached.
     let replica = crdt::CrdtDoc::ephemeral();
+    let read = notes
+        .read("notes".to_owned(), "hello.md".to_owned())
+        .await
+        .unwrap();
+    let mut text = architect_web::live_text::LiveText::new(
+        replica.loro().clone(),
+        vault_proto::COLLAB_BODY_CONTAINER,
+        read.clone(),
+    );
+    // Typed at once, before the session attached: the document does not
+    // hold the note yet, so it is not taken (taken, it would add a second
+    // copy of the note, or text at the wrong place).
+    assert_eq!(
+        text.typed(&format!("Typed too soon. {read}")).unwrap(),
+        architect_web::live_text::Typed::NotLive
+    );
+    let (attached_tx, mut attached) = tokio::sync::mpsc::unbounded_channel();
     let mut synced = SyncedDoc::new(
         vault_proto::collab_doc_id("notes", "hello.md"),
         replica.clone(),
-    );
+    )
+    .on_attached(std::sync::Arc::new(move || {
+        let _ = attached_tx.send(());
+    }));
     let session = tokio::spawn(async move {
         let _ = synced.run(&sync).await;
     });
-    let body = || {
-        replica
-            .loro()
-            .get_text(vault_proto::COLLAB_BODY_CONTAINER)
-            .to_string()
-    };
-    until("the note reaches the browser", || {
-        body().contains("The org's note.")
-    })
-    .await;
-    let text = replica.loro().get_text(vault_proto::COLLAB_BODY_CONTAINER);
-    text.insert(text.len_unicode(), "\nTyped by redirect.\n")
-        .unwrap();
-    replica.loro().commit();
+    tokio::time::timeout(Duration::from_secs(20), attached.recv())
+        .await
+        .expect("the session attached");
+    let shown = text.attach();
+    assert!(shown.contains("The org's note."), "{shown}");
+    let typed = format!("{shown}\nTyped by redirect.\n");
+    assert!(matches!(
+        text.typed(&typed).unwrap(),
+        architect_web::live_text::Typed::Merged { .. }
+    ));
     until("the host's file has it", || {
         reads(&note(&host), "Typed by redirect.")
     })
     .await;
     session.abort();
-    // Once, not twice: the browser's replica had the node's text first.
+    // Once, not twice, and nothing typed before the attach.
     let file = std::fs::read_to_string(note(&host)).unwrap();
     assert_eq!(file.matches("The org's note.").count(), 1, "{file}");
+    assert!(!file.contains("Typed too soon."), "{file}");
+
+    // #628 H1: a new note never empties one made since the listing.
+    std::fs::write(
+        host_dir.join("data/vaults/notes/Untitled.md"),
+        "Someone else's note, made after this tab listed the vault.\n",
+    )
+    .unwrap();
+    let refused = notes
+        .create("notes".to_owned(), "Untitled.md".to_owned(), String::new())
+        .await;
+    assert!(
+        matches!(
+            &refused,
+            Err(vox::VoxError::User(e)) if matches!(**e, vault_proto::notes::NotesError::Exists(_))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(host_dir.join("data/vaults/notes/Untitled.md")).unwrap(),
+        "Someone else's note, made after this tab listed the vault.\n"
+    );
+    notes
+        .create(
+            "notes".to_owned(),
+            "Untitled 2.md".to_owned(),
+            String::new(),
+        )
+        .await
+        .expect("a free name is made");
+    assert_eq!(
+        std::fs::read_to_string(host_dir.join("data/vaults/notes/Untitled 2.md")).unwrap(),
+        ""
+    );
+
+    // #628 L3: a page on another origin cannot open the lane; the app's
+    // own origin and a native client (no `Origin`) reach the bearer check.
+    for (origin, want) in [
+        (Some("https://evil.example".to_owned()), "403"),
+        (Some(format!("http://{}", host.http)), "101"),
+        (None, "101"),
+    ] {
+        let status = upgrade_status(&host, origin.as_deref()).await;
+        assert!(status.contains(want), "{origin:?}: {status}");
+    }
 
     // A third party's access token, and the browser's id token: anonymous.
     let other = signed_in_by_redirect(&origin, "elsewhere", &alan).await;
@@ -831,6 +920,77 @@ async fn a_browser_signed_in_by_redirect_reaches_the_org_lane_with_its_access_to
         let refused: NotesClient = web(&host, Some(token)).await;
         assert!(refused.list().await.is_err(), "{label} was let in");
     }
+
+    host.stop().await;
+}
+
+/// #628 M2: a browser's live note session ends once its bearer stops
+/// resolving: here its grant is revoked at the issuer, as the web app's
+/// Sign out does. The node re-checks the bearer of an open session every
+/// `lane_recheck_secs`, so the session does not outlive the sign-in until
+/// the connection happens to drop.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_note_session_ends_when_its_web_sign_in_is_revoked() {
+    use crdt::sync::{DocSyncClient, SyncedDoc};
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host_dir = tmp.path().join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        host_dir.join("data/vaults/notes/hello.md"),
+        "# Hello\n\nThe org's note.\n",
+    )
+    .unwrap();
+    let mut host = config(
+        "indie-host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    host.lane_recheck_secs = 1;
+    let host = node::start(host).await.unwrap();
+
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let web_app = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir)).await;
+    let sync: DocSyncClient = web(&host, Some(web_app.access_token.clone())).await;
+    let replica = crdt::CrdtDoc::ephemeral();
+    let (attached_tx, mut attached) = tokio::sync::mpsc::unbounded_channel();
+    let mut synced = SyncedDoc::new(
+        vault_proto::collab_doc_id("notes", "hello.md"),
+        replica.clone(),
+    )
+    .on_attached(std::sync::Arc::new(move || {
+        let _ = attached_tx.send(());
+    }));
+    let session = tokio::spawn(async move { synced.run(&sync).await });
+    tokio::time::timeout(Duration::from_secs(20), attached.recv())
+        .await
+        .expect("the session attached");
+
+    // Still open a few re-checks later: the sign-in is good.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert!(!session.is_finished(), "the session ended while signed in");
+
+    // Sign out: the web app revokes its grant.
+    let revoked = reqwest::Client::new()
+        .post(format!("{origin}/oauth2/revoke"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(auth_client::oidc::revoke_request_body(
+            "architect",
+            &web_app.access_token,
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert!(revoked.status().is_success(), "{}", revoked.status());
+    let ended = tokio::time::timeout(Duration::from_secs(15), session).await;
+    assert!(
+        ended.is_ok(),
+        "the live session outlived the revoked sign-in"
+    );
 
     host.stop().await;
 }

@@ -21,6 +21,11 @@ pub enum NotesError {
     #[error("no such vault or note: {0}")]
     #[architect(http_status = 404)]
     NotFound(String),
+    /// [`Notes::create`] found a note at that path already: it is left
+    /// as it is.
+    #[error("{0} exists already")]
+    #[architect(http_status = 409)]
+    Exists(String),
     #[error("{0}")]
     #[architect(http_status = 400)]
     Refused(String),
@@ -50,6 +55,10 @@ pub trait Notes {
     async fn read(&self, vault: String, path: String) -> Result<String, NotesError>;
     /// Write a note's markdown; it reaches every peer on the next sweep.
     async fn write(&self, vault: String, path: String, text: String) -> Result<(), NotesError>;
+    /// Make a new note with `text`, only if no note is at `path`:
+    /// [`NotesError::Exists`] otherwise, the note there untouched. What a
+    /// "New note" calls, so it never empties someone's note of that name.
+    async fn create(&self, vault: String, path: String, text: String) -> Result<(), NotesError>;
 }
 
 pub use prelude::*;

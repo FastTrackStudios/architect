@@ -54,8 +54,10 @@ use uuid::Uuid;
 
 use super::service::node::NodeHttpClient;
 
-/// How long a resolved session is trusted before the issuer is asked again.
-const SESSION_TTL: Duration = Duration::from_secs(60);
+/// How long a resolved bearer is trusted before the issuer is asked again,
+/// and how often an open live note checks its bearer still opens it
+/// (`Config::lane_recheck_secs`; this is its default).
+pub const RECHECK: Duration = Duration::from_secs(30);
 
 /// What each role of the org may do on this node, org-relative: the
 /// gate's rules for the enrolment lane and the documents' for the
@@ -80,6 +82,7 @@ const NOTES_PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("list", "read", "vaults/**"),
         MethodPermit::new("read", "read", "vaults/**"),
         MethodPermit::new("write", "write", "vaults/**").audited(),
+        MethodPermit::new("create", "write", "vaults/**").audited(),
     ],
 };
 
@@ -105,8 +108,13 @@ pub struct OrgLane {
     gate: Arc<PermissionsGate>,
     router: LayerRouter,
     issuer: IssuerLane,
-    vaults: bool,
+    /// The vaults' live notes (`DocSync`), added per connection: each
+    /// session watches that connection's bearer ([`VaultSync`]).
+    vaults: Option<(crdt::DocRegistry, super::VaultCatalog)>,
     shares: bool,
+    recheck: Duration,
+    /// Browser origins besides the node's own that may open the lane.
+    origins: Arc<[String]>,
 }
 
 impl OrgLane {
@@ -122,7 +130,7 @@ impl OrgLane {
             device_enrolment_service_descriptor(),
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
         );
-        let gate = gate(&engine, &members, &issuer, false, false);
+        let gate = gate(&engine, &members, &issuer, false, false, RECHECK);
         Self {
             org,
             members,
@@ -130,8 +138,10 @@ impl OrgLane {
             gate,
             router,
             issuer,
-            vaults: false,
+            vaults: None,
             shares: false,
+            recheck: RECHECK,
+            origins: Arc::from(Vec::new()),
         }
     }
 
@@ -140,9 +150,20 @@ impl OrgLane {
             &self.engine,
             &self.members,
             &self.issuer,
-            self.vaults,
+            self.vaults.is_some(),
             self.shares,
+            self.recheck,
         )
+    }
+
+    /// Trust a resolved bearer for `every` (default [`RECHECK`]) and check
+    /// an open live note's bearer as often: signed out, expired or no
+    /// longer a member, its session ends within about twice `every`.
+    #[must_use]
+    pub fn with_recheck(mut self, every: Duration) -> Self {
+        self.recheck = every.max(Duration::from_millis(100));
+        self.gate = self.make_gate();
+        self
     }
 
     /// Serve the vaults' share links on the lane too
@@ -169,13 +190,37 @@ impl OrgLane {
         catalog: super::VaultCatalog,
         notes: LayerRouter,
     ) -> Self {
-        self.router = self.router.merge_router(notes).with(
-            crdt::sync::doc_sync_service_descriptor(),
-            crdt::sync::DocSyncDispatcher::new(VaultSync { registry, catalog }),
-        );
-        self.vaults = true;
+        self.router = self.router.merge_router(notes);
+        self.vaults = Some((registry, catalog));
         self.gate = self.make_gate();
         self
+    }
+
+    /// Let browsers on `origins` (`https://host[:port]`) open the lane
+    /// besides the node's own origin ([`origin_allowed`]).
+    #[must_use]
+    pub fn with_origins(mut self, origins: Vec<String>) -> Self {
+        self.origins = Arc::from(origins);
+        self
+    }
+
+    /// The lane's services for one connection, whose bearer is `bearer`:
+    /// its live notes watch that bearer ([`VaultSync`]).
+    fn connection_router(&self, bearer: Option<&str>) -> LayerRouter {
+        let Some((registry, catalog)) = &self.vaults else {
+            return self.router.clone();
+        };
+        self.router.clone().with(
+            crdt::sync::doc_sync_service_descriptor(),
+            crdt::sync::DocSyncDispatcher::new(VaultSync {
+                registry: registry.clone(),
+                catalog: catalog.clone(),
+                watch: bearer.map(|bearer| Watch {
+                    bearer: bearer.to_owned(),
+                    lane: self.clone(),
+                }),
+            }),
+        )
     }
 
     /// Whether a person may open note `doc_id` live: a member of the org
@@ -205,15 +250,50 @@ impl OrgLane {
                 if head.param("slug") != Some(lane.org.slug.as_str()) {
                     return Err(StatusCode::NOT_FOUND);
                 }
+                if !origin_allowed(&head.headers, &lane.origins) {
+                    return Err(StatusCode::FORBIDDEN);
+                }
                 Ok(PermissionsGate::wrap_shared_with_bearer(
                     Arc::clone(&lane.gate),
-                    lane.router.clone(),
+                    lane.connection_router(head.bearer()),
                     head.bearer().map(str::to_owned),
                 )
                 .scoped(lane.org.id.clone()))
             }
         })
     }
+}
+
+/// Whether a WebSocket upgrade with these `headers` may open the lane.
+///
+/// A browser always sends `Origin` on an upgrade: it must be the node's
+/// own (the app is served on the same origin as the lane: its authority
+/// is the request's `Host`, or the `X-Forwarded-Host` a proxy in front
+/// set) or one of `extra`. An upgrade with no `Origin` is a native client
+/// (another node, the desktop app, a test): it goes on to the bearer
+/// check, which is what admits anyone. Defence in depth: the bearer rides
+/// a subprotocol that only script on the page can add, not a cookie a
+/// foreign page's request would carry.
+#[must_use]
+pub fn origin_allowed(headers: &architect::http::axum::http::HeaderMap, extra: &[String]) -> bool {
+    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    let Some(origin) = header("origin") else {
+        return true;
+    };
+    let origin = origin.trim_end_matches('/');
+    if extra.iter().any(|o| o.eq_ignore_ascii_case(origin)) {
+        return true;
+    }
+    let Some(authority) = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    [header("host"), header("x-forwarded-host")]
+        .into_iter()
+        .flatten()
+        .any(|host| host.eq_ignore_ascii_case(authority))
 }
 
 /// The lane's gate: the org's engine, callers resolved by the issuer;
@@ -225,12 +305,14 @@ fn gate(
     issuer: &IssuerLane,
     vaults: bool,
     shares: bool,
+    recheck: Duration,
 ) -> Arc<PermissionsGate> {
     let identity = MembersResolver::new(
-        IssuerSessions::new(issuer.clone()),
+        IssuerSessions::new(issuer.clone()).with_ttl(recheck),
         IssuerOrgs(issuer.clone()),
         members.clone(),
-    );
+    )
+    .with_ttl(recheck);
     let engine: Arc<dyn PermissionEngine> = engine.clone();
     let mut gate = PermissionsGate::new(engine, Arc::new(identity))
         .permit(device_enrolment_service_descriptor(), &ENROL_PERMITS);
@@ -254,10 +336,40 @@ fn gate(
 /// `DocSync` for a client that names a note by its id alone: the note is
 /// registered with its vault first (as the peer lane's `resolve` does by
 /// name), then the registry serves the session.
+///
+/// The gate admits a session once, when it attaches; the session is then
+/// one call held open for as long as the note is. So it `watch`es the
+/// connection's bearer: every [`OrgLane::with_recheck`] interval the bearer
+/// is resolved again (the issuer asked once the cache has run out), and
+/// once it no longer opens the note (signed out, its grant revoked,
+/// expired, no longer a member) the session ends. A connection with no
+/// bearer of its own has nothing to watch: its calls carried theirs.
 #[derive(Clone)]
 struct VaultSync {
     registry: crdt::DocRegistry,
     catalog: super::VaultCatalog,
+    watch: Option<Watch>,
+}
+
+#[derive(Clone)]
+struct Watch {
+    bearer: String,
+    lane: OrgLane,
+}
+
+impl Watch {
+    /// Returns once the bearer no longer opens `doc_id`.
+    async fn until_refused(&self, doc_id: Uuid) {
+        let identity = self.lane.gate.identity_resolver();
+        loop {
+            tokio::time::sleep(self.lane.recheck).await;
+            let who = identity.resolve(Some(&self.bearer)).await;
+            if !self.lane.opens(&who, doc_id) {
+                tracing::info!(%doc_id, "org lane: a live note's sign-in ended; its session ends");
+                return;
+            }
+        }
+    }
 }
 
 impl crdt::sync::DocSync for VaultSync {
@@ -278,7 +390,69 @@ impl crdt::sync::DocSync for VaultSync {
             doc_id,
             name: at.name,
         })?;
-        crdt::sync::DocSync::sync(&self.registry, doc_id, from, up, down).await
+        let session = crdt::sync::DocSync::sync(&self.registry, doc_id, from, up, down);
+        let Some(watch) = &self.watch else {
+            return session.await;
+        };
+        tokio::select! {
+            ended = session => ended,
+            () = watch.until_refused(doc_id) => Err(crdt::sync::SyncError::Internal(
+                "the sign-in ended: sign in again".to_owned(),
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::origin_allowed;
+    use architect::http::axum::http::HeaderMap;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, v.parse().unwrap());
+        }
+        h
+    }
+
+    /// #628 L3: the lane's own origin and the listed ones open it, a
+    /// native client (no `Origin`) goes on to the bearer check, any other
+    /// page is refused.
+    #[test]
+    fn only_the_app_s_origin_opens_the_lane_from_a_browser() {
+        let extra = ["http://127.0.0.1:7413".to_owned()];
+        let host = ("host", "node.example.com");
+        assert!(origin_allowed(&headers(&[host]), &extra));
+        assert!(origin_allowed(
+            &headers(&[host, ("origin", "https://node.example.com")]),
+            &extra
+        ));
+        assert!(origin_allowed(
+            &headers(&[
+                ("host", "127.0.0.1:7412"),
+                ("origin", "http://127.0.0.1:7413")
+            ]),
+            &extra
+        ));
+        assert!(origin_allowed(
+            &headers(&[
+                ("host", "10.0.0.5:8080"),
+                ("x-forwarded-host", "node.example.com"),
+                ("origin", "https://node.example.com"),
+            ]),
+            &extra
+        ));
+        for foreign in [
+            "https://evil.example",
+            "null",
+            "https://node.example.com.evil.example",
+        ] {
+            assert!(
+                !origin_allowed(&headers(&[host, ("origin", foreign)]), &extra),
+                "{foreign}"
+            );
+        }
     }
 }
 
@@ -313,11 +487,16 @@ impl IssuerLane {
     }
 }
 
-/// An issuer session as the gate's caller: `Principal::User` of the
-/// person it is (the issuer's `whoami`), cached for [`SESSION_TTL`];
-/// anything else is anonymous.
+/// An issuer session (or a first-party web app's access token) as the
+/// gate's caller.
+///
+/// `Principal::User` of the person it is (the issuer's `whoami`), cached
+/// for [`RECHECK`] (`with_ttl`); anything else is anonymous. A bearer
+/// signed out at the issuer keeps working here until its cache entry runs
+/// out.
 pub struct IssuerSessions {
     issuer: IssuerLane,
+    ttl: Duration,
     seen: Mutex<HashMap<String, (Principal, Instant)>>,
 }
 
@@ -326,14 +505,22 @@ impl IssuerSessions {
     pub fn new(issuer: IssuerLane) -> Self {
         Self {
             issuer,
+            ttl: RECHECK,
             seen: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Trust a resolved bearer for `ttl`.
+    #[must_use]
+    pub const fn with_ttl(mut self, ttl: Duration) -> Self {
+        self.ttl = ttl;
+        self
     }
 
     fn cached(&self, token: &str) -> Option<Principal> {
         let seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
         seen.get(token)
-            .filter(|(_, at)| at.elapsed() < SESSION_TTL)
+            .filter(|(_, at)| at.elapsed() < self.ttl)
             .map(|(who, _)| who.clone())
     }
 }
@@ -367,7 +554,7 @@ impl IdentityResolver for IssuerSessions {
                 }
             };
             let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-            seen.retain(|_, (_, at)| at.elapsed() < SESSION_TTL);
+            seen.retain(|_, (_, at)| at.elapsed() < self.ttl);
             seen.insert(token.to_owned(), (who.clone(), Instant::now()));
             who
         })

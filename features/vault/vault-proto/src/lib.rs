@@ -43,7 +43,9 @@ mod file;
 mod graph;
 pub mod grouping;
 mod manifest;
-/// The `Notes` service: a node's notes, listed, read and written.
+/// The `Notes` service: a node's notes, listed, read and written (a
+/// service on the wire: with `vox`).
+#[cfg(feature = "vox")]
 pub mod notes;
 mod page;
 mod page_meta;

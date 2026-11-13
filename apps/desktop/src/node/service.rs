@@ -270,17 +270,41 @@ impl Notes for NodeState {
     }
 
     async fn write(&self, vault: String, path: String, text: String) -> Result<(), NotesError> {
+        self.put_note(vault, path, text, IfMatch::Force).await
+    }
+
+    async fn create(&self, vault: String, path: String, text: String) -> Result<(), NotesError> {
+        self.put_note(vault, path, text, IfMatch::CreateOnly).await
+    }
+}
+
+impl NodeState {
+    /// `text` into the note at `path`, as `if_match` allows: a note there
+    /// already refuses [`IfMatch::CreateOnly`] ([`NotesError::Exists`]).
+    async fn put_note(
+        &self,
+        vault: String,
+        path: String,
+        text: String,
+        if_match: IfMatch,
+    ) -> Result<(), NotesError> {
         // Registered first, so an open document merges the write as a
         // change rather than the next open finding it.
         self.backend.register_collab(&vault, &path)?;
         // `put_file` announces the write under a blocking lock: off the
-        // runtime's worker threads.
+        // runtime's worker threads. The existence check is under that lock
+        // too, so two creates of one path cannot both succeed.
         let backend = self.backend.clone();
+        let at = format!("{vault}/{path}");
         tokio::task::spawn_blocking(move || {
-            backend.put_file(&vault, &path, text.into_bytes(), IfMatch::Force)
+            backend.put_file(&vault, &path, text.into_bytes(), if_match)
         })
         .await
-        .map_err(|e| NotesError::Refused(e.to_string()))??;
+        .map_err(|e| NotesError::Refused(e.to_string()))?
+        .map_err(|e| match e {
+            VaultSyncError::Conflict { .. } => NotesError::Exists(at),
+            other => other.into(),
+        })?;
         Ok(())
     }
 }
