@@ -1,4 +1,6 @@
-/* The web app shell's look (apps/web/app, served at /app/). */
+/* The web app's page (apps/web/app, served at /app/): the sign-in and
+   status screens' look. The app itself (body[data-mode=app], src/app)
+   draws with its own components' styles: nothing here reaches it. */
 :root {
   --bg: #111113; --fg: #ececef; --muted: #9b9ba4; --rule: #2a2a30; --card: #18181b;
   --accent: #6d7cff; --accent-fg: #fff; --problem: #f87171;
@@ -7,7 +9,7 @@
 @media (prefers-color-scheme: light) {
   :root { --bg: #fbfbfc; --fg: #18181b; --muted: #5d5d66; --rule: #e4e4e9; --card: #fff; --accent: #4452e8; --problem: #b91c1c; color-scheme: light; }
 }
-* { box-sizing: border-box; }
+body:not([data-mode="app"]) * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: inherit; }
 header.top { display: flex; align-items: center; gap: 24px; max-width: 1080px; margin: 0 auto; padding: 20px 24px; }
@@ -20,8 +22,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 24px 80px; }
 .hero h1 { font-size: clamp(36px, 6vw, 60px); line-height: 1.05; letter-spacing: -.03em; margin: 0 0 20px; }
 .hero p { font-size: 19px; color: var(--muted); margin: 0 0 32px; }
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.button, button { display: inline-block; font: inherit; font-size: 15px; padding: 10px 18px; border-radius: 10px; border: 1px solid var(--rule); background: transparent; color: var(--fg); text-decoration: none; cursor: pointer; }
-.button.primary, button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+:is(.button, body:not([data-mode="app"]) button) { display: inline-block; font: inherit; font-size: 15px; padding: 10px 18px; border-radius: 10px; border: 1px solid var(--rule); background: transparent; color: var(--fg); text-decoration: none; cursor: pointer; }
+:is(.button.primary, body:not([data-mode="app"]) button.primary) { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; border-top: 1px solid var(--rule); padding-top: 40px; }
 .grid h3 { margin: 0 0 6px; font-size: 16px; }
 .grid p { margin: 0; color: var(--muted); font-size: 15px; }
@@ -33,3 +35,7 @@ footer { max-width: 1080px; margin: 0 auto; padding: 24px; border-top: 1px solid
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; margin: 16px 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+/* The app: the whole window, no site header (src/app/mod.rs `mount`). */
+body[data-mode="app"] { overflow: hidden; overscroll-behavior: none; }
+body[data-mode="app"] header.top { display: none; }
+body[data-mode="app"] main#app { position: fixed; inset: 0; max-width: none; margin: 0; padding: 0; }

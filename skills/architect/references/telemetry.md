@@ -7,7 +7,7 @@ Crate `features/telemetry` (`architect_telemetry`). Native only; wasm gets stubs
 | Piece | What it does | Entry points |
 |---|---|---|
 | Sentry init | error/crash reporting; DSN from build time or env; `service` tag; no PII | `features/telemetry/src/lib.rs` `init` |
-| Subscriber install | `EnvFilter` + fmt + Sentry layer, `try_init` | `features/telemetry/src/lib.rs` `init_tracing`, `init_tracing_full`, `tracing_layer` |
+| Subscriber install | `EnvFilter` + the credential cap + fmt + Sentry layer (+ OTLP), `try_init`; the cap is a global filter no `RUST_LOG` directive widens: never DEBUG/TRACE from `tungstenite`/`tokio_tungstenite`, whose frames carry bearers | `features/telemetry/src/lib.rs` `init_tracing`, `init_tracing_full`, `capped_registry`, `writes_credentials`, `CREDENTIAL_LOGGING_TARGETS`, `tracing_layer` |
 | Wide events | attach dynamic fields to the current span | `features/telemetry/src/lib.rs` `wide::set`, `set_display` |
 | Stage timing | per-stage ms on a span; in-process ring buffer | `features/telemetry/src/timing.rs` `Stages`, `record`, `recent`, `clear`, `Recorder`, `DIRECTIVE`, `DIRECTIVES`, `no_marks` |
 | OTLP export | traces + logs + metrics over http/protobuf (feature `otel`) | `features/telemetry/src/lib.rs` `otel::init`, `OtelGuard`, `enabled`, `OtelHandle` |

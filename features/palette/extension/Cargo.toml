@@ -14,6 +14,14 @@ doctest = false
 [[bin]]
 name = "architect-command-palette"
 path = "src/main.rs"
+required-features = ["extension"]
+
+[features]
+default = ["extension"]
+# The extension: its manifest's `Extension` value, linked in or run as a
+# process (`guest`). Off, the crate is its views over an app's `Commands`
+# alone (`views`), for an app with no extension host (the web app, #495).
+extension = ["dep:architect-extensions"]
 
 [dependencies]
 # The engine it ranks with.
@@ -21,7 +29,7 @@ architect-palette = { workspace = true }
 # The app's commands and the palette kit it draws with.
 architect-commands = { workspace = true, features = ["ui"] }
 # The trait and the guest (its process copy); an app adds `linked`.
-architect-extensions = { workspace = true, features = ["guest"] }
+architect-extensions = { workspace = true, features = ["guest"], optional = true }
 dioxus = { workspace = true }
 serde_json = { workspace = true }
 

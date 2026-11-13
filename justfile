@@ -13,7 +13,7 @@ default:
 # seed, no Studio). Arguments go to Studio's `just dev` (keyflow=local,
 # desktop=on, watch=off).
 
-# Everything locally, rebuilt on save: Studio's node with this Architect, issuer, web app, site (`plain`: Architect's own stack)
+# Everything locally, rebuilt on save: Studio's node with this Architect, issuer, web app, site (`plain`: Architect's own stack, the desktop app and the web app under dx serve, and the site)
 dev *ARGS:
     @bash scripts/run-it.sh dev {{ARGS}}
 
@@ -401,6 +401,14 @@ web-test PORT="18080":
     for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:{{PORT}}/" && break; sleep 0.1; done
     ARCHITECT_WEB_ORIGIN="http://127.0.0.1:{{PORT}}" node --test apps/web/test/web.test.mjs
 
+# The app on the org's vaults, signed in, in a real browser
+# (apps/web/test/org-vaults.test.mjs): read-only until a note is live, the
+# navigator changing nothing, a new note never emptying another, the lane
+# dialled again with a renewed token, Sign out revoking the sign-in.
+# Against the running local stack (`just dev`); WEB is its web app.
+web-org-test WEB="http://127.0.0.1:7413":
+    ARCHITECT_ORG_WEB="{{WEB}}" ARCHITECT_ORG_VAULT="${DEVENV_STATE:-$PWD/.devenv/state}/stack/node/data/vaults/demo" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/org-vaults.test.mjs
+
 # A share link's player in a real browser (#511): the headless node
 # (`architect-desktop serve`, built without the window) on a vault of its
 # own with a link share of a two-song gig, in a headless Firefox
@@ -426,6 +434,23 @@ share-island-test:
 share-webview-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" env -u LD_LIBRARY_PATH node --test apps/web/test/share-webview.test.mjs
+
+# The web app's extension frames (#495) against hostile bundles in a real
+# browser: the release bundle (scripts/web-bundle.sh) behind a front that
+# sends `/_ext/` to a node with an island (island_node), Firefox headless
+# over BiDi, kept off the audio graph (`unshare -r -m`).
+app-ext-host-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-ext-host.test.mjs
+
+# The web app's bottom slots as favourites (#607) at 390 px: the default
+# set, a note type's declared set from the node's `/_ext/favourites.json`,
+# a tab opening its island view; `ARCHITECT_SHOTS=<dir>` keeps screenshots.
+app-favourites-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-favourites.test.mjs
 
 # The suite on the classic-WebDriver path Safari takes, in Firefox
 # (geckodriver from nixpkgs): what keeps that path from rotting without a Mac.

@@ -52,7 +52,7 @@ Before writing a widget in an app, check this list: consumers have re-implemente
 
 - **Dead CSS is silent:** an architect-ui-only class renders unstyled downstream unless `UTILITIES_CSS` is injected or the crate scanned.
 - **`assets/utilities.css` is generated and committed.** After any class change run `just ui-css` (needs `tailwindcss` on PATH) and commit; `just ui-css-check` compares the working tree to the index, and CI does not run it.
-- **Snapshot and parity gates are local-only.** CI runs fmt, check, clippy, test, boundaries, docs and a wasm check that excludes the UI and story crates; nothing in CI runs `ui-snapshot` or parity.
+- **Snapshot and parity gates are local-only.** CI runs fmt, check, clippy, test, boundaries, docs and a wasm check of the UI crates the web app mounts (shell, workspace, commands, settings, navigator, orgs, accounts, theme, guide, capture, the editor's `web` view; not their Blitz `native` features nor the story crates); nothing in CI runs `ui-snapshot` or parity.
 - **`ui-snapshot check` fails on a fresh tree** for scenes without a reference PNG ("NO REFERENCE"); `features/ui/ui-snapshot/tests/reference` holds only the icons scene.
 - **Debug builds:** story rendering panics in debug, and `features/ui/architect-ui/tests/snapshots.rs` is ignored under `debug_assertions`. Run story VRT with `cargo test --release -p architect-ui`; refresh baselines with `FTS_STORY_UPDATE_SNAPSHOTS=1`.
 - **Parity needs a release showcase build plus Xvfb, xdotool and ImageMagick;** its tests in `features/ui/architect-ui/tests/parity.rs` are `#[ignore]`d.

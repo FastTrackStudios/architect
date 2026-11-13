@@ -71,9 +71,12 @@ impl NavigatorState {
         &self.pins
     }
 
-    /// A note's colour from its frontmatter (`frontmatterColorField`).
+    /// A note's colour from its frontmatter (`frontmatterColorField`): a
+    /// CSS colour only ([`css_colour`]), since it is drawn into a `style`
+    /// and a note may be another person's.
     pub(super) fn frontmatter_colour(&self, key: &str) -> Option<&str> {
         self.frontmatter_of(key, &self.settings.frontmatter_color_field)
+            .and_then(css_colour)
     }
 
     /// `target`'s own icon: set by a person, or (a note's) in its
@@ -147,7 +150,10 @@ impl NavigatorState {
         if let Some(page) = self.project_page(path)
             && let Some(c) = self
                 .frontmatter_colour(&format!("file:{page}"))
-                .or_else(|| self.project_prop(&page, &["color", "colour"]))
+                .or_else(|| {
+                    self.project_prop(&page, &["color", "colour"])
+                        .and_then(css_colour)
+                })
         {
             return Some(c);
         }
@@ -362,6 +368,81 @@ impl NavigatorState {
                     }
                 }
             }
+        }
+    }
+}
+
+/// `value` when it is a CSS colour and nothing more: a hex colour
+/// (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`), `rgb()`/`rgba()`/`hsl()`/
+/// `hsla()` of numbers, or a named colour (letters only). Anything else
+/// (a `;`, a `url(…)`, quotes, another declaration) is not a colour: what
+/// a note's frontmatter says is drawn into a `style` attribute, and a note
+/// may be another member's.
+#[must_use]
+pub fn css_colour(value: &str) -> Option<&str> {
+    let v = value.trim();
+    let ok = v.strip_prefix('#').map_or_else(
+        || {
+            v.find('(')
+                .map_or_else(|| named_colour(v), |open| colour_function(v, open))
+        },
+        hex_colour,
+    );
+    ok.then_some(v)
+}
+
+fn hex_colour(hex: &str) -> bool {
+    matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// `rgb(…)`, `rgba(…)`, `hsl(…)` or `hsla(…)` of numbers alone.
+fn colour_function(v: &str, open: usize) -> bool {
+    let (name, rest) = v.split_at(open);
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "rgb" | "rgba" | "hsl" | "hsla"
+    ) && rest.ends_with(')')
+        && rest.len() <= 64
+        && rest
+            .trim_start_matches('(')
+            .trim_end_matches(')')
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '%' | ' ' | '/' | '-'))
+}
+
+fn named_colour(v: &str) -> bool {
+    !v.is_empty() && v.len() <= 32 && v.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+#[cfg(test)]
+mod colour_tests {
+    use super::css_colour;
+
+    #[test]
+    fn only_a_css_colour_reaches_a_style() {
+        for good in [
+            "#abc",
+            "#abcd",
+            "#a1b2c3",
+            "#a1b2c3d4",
+            "rebeccapurple",
+            "rgb(1, 2, 3)",
+            "rgba(1,2,3,0.5)",
+            "hsl(120 50% 50% / 0.3)",
+        ] {
+            assert_eq!(css_colour(good), Some(good), "{good}");
+        }
+        for bad in [
+            "red; position: fixed; inset: 0",
+            "url(https://x.test/a.png)",
+            "rgb(1,2,3); top:0",
+            "expression(alert(1))",
+            "#12345",
+            "\"red\"",
+            "var(--x)",
+            "",
+        ] {
+            assert_eq!(css_colour(bad), None, "{bad}");
         }
     }
 }

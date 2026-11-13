@@ -53,7 +53,9 @@ client adds `architect::trace_context::TraceContextMiddleware` with
 ## Code tour
 
 1. `features/telemetry/src/lib.rs` `init_tracing_full`: Sentry, the
-   `EnvFilter`, the fmt layer, then the OTLP layers.
+   `EnvFilter` and the credential cap (`capped_registry`: never DEBUG or
+   TRACE from `tungstenite`, whose frames carry bearers, whatever
+   `RUST_LOG` says), the fmt layer, then the OTLP layers.
 2. `features/telemetry/src/lib.rs` `otel` module, `init`: the OTLP exporters,
    the W3C propagator, the global meter and the process metrics.
 3. `features/telemetry/src/lib.rs` `wide` module, `set`, `set_display`: an

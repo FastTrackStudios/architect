@@ -66,6 +66,75 @@ async fn vox_at_resolves_each_upgrade_from_its_params_and_bearer() {
     assert!(plain.starts_with("http/1.1 101"), "{plain}");
 }
 
+/// Everything the host logs, at every level, kept to read back.
+#[derive(Clone, Default)]
+struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A browser's bearer rides in `Sec-WebSocket-Protocol` (a WebSocket has
+/// no other header to put it in). The host logs neither that header nor
+/// the token, at any level, whether the upgrade is taken or refused: the
+/// token only reaches the resolver (#628). A reverse proxy in front must
+/// redact the header in its own access log.
+#[tokio::test]
+async fn the_host_never_logs_a_browser_bearer() {
+    use tracing_subscriber::util::SubscriberInitExt as _;
+    let captured = Captured::default();
+    let writer = captured.clone();
+    let _logs = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(move || writer.clone())
+        .finish()
+        .set_default();
+    tracing::info!("capture-check");
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
+        .vox_at("/org/{slug}/vox", resolve_org)
+        .into_app();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let at = listener.local_addr().unwrap();
+    tokio::spawn(async move { architect::http::axum::serve(listener, app).await });
+
+    let ok = upgrade(
+        at,
+        "/org/acme/vox",
+        "Sec-WebSocket-Protocol: vox.v1, vox.bearer.t0ken\r\n",
+    )
+    .await;
+    assert!(ok.starts_with("http/1.1 101"), "{ok}");
+    let refused = upgrade(
+        at,
+        "/org/acme/vox",
+        "Sec-WebSocket-Protocol: vox.v1, vox.bearer.s3cret-refused\r\n",
+    )
+    .await;
+    assert!(refused.starts_with("http/1.1 401"), "{refused}");
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let logged = String::from_utf8_lossy(&captured.0.lock().unwrap()).to_lowercase();
+    assert!(
+        logged.contains("capture-check"),
+        "the capture works: {logged}"
+    );
+    for secret in [
+        "t0ken",
+        "s3cret-refused",
+        "vox.bearer",
+        "sec-websocket-protocol",
+    ] {
+        assert!(!logged.contains(secret), "the host logged `{secret}`");
+    }
+}
+
 #[tokio::test]
 async fn vox_at_the_root_replaces_the_built_in_vox() {
     let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")

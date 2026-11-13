@@ -249,6 +249,46 @@ pub enum SourceEvent {
     Reset,
 }
 
+impl SourceEvent {
+    /// Whether it may have changed the file at `path`: its text, or where
+    /// it is (a shell reads a note's `type` again on it).
+    #[must_use]
+    pub fn touches(&self, path: &str) -> bool {
+        match self {
+            Self::FileCreated(f) | Self::FileModified(f) => f.path == path,
+            Self::FileDeleted(p) => p == path,
+            Self::FileRenamed { from, file } => from == path || file.path == path,
+            Self::FolderDeleted(f) => is_within(path, f),
+            Self::FolderRenamed { from, to } => is_within(path, from) || is_within(path, to),
+            Self::Reset => true,
+            Self::FolderCreated(_) => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod touches {
+    use super::{NoteFile, SourceEvent};
+
+    #[test]
+    fn an_event_touches_the_files_it_changed() {
+        let f = |p: &str| NoteFile::new(p, 0, 0);
+        assert!(SourceEvent::FileModified(f("Songs/A.md")).touches("Songs/A.md"));
+        assert!(!SourceEvent::FileModified(f("Songs/B.md")).touches("Songs/A.md"));
+        assert!(SourceEvent::FileDeleted("Songs/A.md".into()).touches("Songs/A.md"));
+        assert!(
+            SourceEvent::FileRenamed {
+                from: "Songs/A.md".into(),
+                file: f("Songs/C.md")
+            }
+            .touches("Songs/A.md")
+        );
+        assert!(SourceEvent::FolderDeleted("Songs".into()).touches("Songs/A.md"));
+        assert!(!SourceEvent::FolderCreated("Songs".into()).touches("Songs/A.md"));
+        assert!(SourceEvent::Reset.touches("x.md"));
+    }
+}
+
 /// A change the navigator asks of a source: a folder note made or let
 /// go, a note's place in a manual order, a periodic note made, tags and
 /// properties set (`crate::tags`, `crate::properties`).
@@ -583,6 +623,16 @@ impl MemorySource {
         } else {
             SourceEvent::FileCreated(file)
         });
+    }
+
+    /// Keeps `text` as the note at `path`'s (what [`NavigatorSource::read_text`]
+    /// and the search read), and replaces its file with `file` (its
+    /// preview, tags and properties made from the text, as
+    /// [`crate::markdown::note_from_markdown`] does): an edit in an
+    /// in-memory vault, heard by the view as one change.
+    pub fn set_text(&self, file: NoteFile, text: impl Into<String>) {
+        self.texts_mut().insert(file.path.clone(), text.into());
+        self.put(file);
     }
 
     /// Removes the file at `path`.

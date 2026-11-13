@@ -37,6 +37,9 @@
 //! module:
 //!
 //! - `http::router(backend) -> axum::Router` — every method as a route.
+//!   A service with a vox face serves it through its vox host, so its
+//!   `router`, `mount` and `BindHttp` need the consumer's `vox` feature too;
+//!   its typed client does not. An HTTP-only service needs no `vox`.
 //! - `http::<Method>Args` — the named-field argument struct each route
 //!   decodes its body into. An argument called `token` may also arrive as
 //!   `Authorization: Bearer …`, so a browser can keep the credential in a

@@ -192,9 +192,110 @@ focus, which the host forwards
 (`dioxus_native::on_text_focus_change(architect_shell::set_typing)`).
 The bar eases after the keyboard on the shell's `Motion`. On iOS the
 same call takes a web view's own ⌃ ⌄ ✓ accessory bar away (moved here
-from `task:apps/mobile/src/keyboard_bar.rs`) and makes a field focused
-from code raise the keyboard, in a web view and in Blitz (whose
-`autofocus` never asks for it).
+from `task:apps/mobile/src/keyboard_bar.rs`).
+
+Where the keyboard is the screen's own (iOS: `soft_keyboard`), it comes
+up only when the person asks for it, as in any iOS app:
+
+- **A tap that ends on a field.** Each finger's stroke is followed
+  (`features/shell/src/shell/keyboard.rs` `TapStroke`: past `TAP_SLOP` it
+  is a scroll), and its release brings the keyboard up when a field has
+  the focus (`tap_raises`). The shell's root hears its own
+  (`KeyboardTaps`, `use_keyboard_taps`); the Architect app hears every
+  finger at the window (`apps/ui/src/screen.rs` `WindowTaps`), since its
+  sheets, ⌘K and settings are beside the shell and keep their clicks from
+  bubbling. A press that becomes a scroll, and an `autofocus`
+  (a note opening), give the field the focus and no keyboard: Blitz asks
+  winit's view to become the first responder whenever a field is focused,
+  and `features/shell/src/shell/keyboard/ios.rs` refuses it unless a tap
+  or a button opened the gate a moment before.
+- **The keyboard button.** A field with the focus and the keyboard down
+  (after Hide, an `autofocus`) shows a keyboard button first on the
+  action bar (`Keyboard::foot`, `Foot::TabsWithKeyboardButton`).
+- **An app that opens a field on purpose** calls `show_keyboard` (the
+  capture composer does, from its button).
+
+On such a screen the editing bar rides the keyboard only while it is up;
+`hide_keyboard` (the bar's round button) resigns the keyboard whatever
+holds the focus. Elsewhere (a desk window standing in for a phone) a
+typed field has the editing bar, as before.
+
+`ARCHITECT_INPUT_DEBUG=1`, or the Architect app's ⌘K command "Debug:
+touches and keyboard" (`SHELL_INPUT_DEBUG`), draws what the shell hears
+over the app (`features/shell/src/shell/input_debug.rs`): a cyan line at
+the keyboard's top as UIKit reported it and a magenta one at the foot's
+bottom edge as laid out (`foot_bottom`), the keyboard and the screen's
+insets, whether winit's view has the keyboard, and the last presses with
+what in the foot heard them. On a phone the two lines meet while the
+keyboard is up; where they do not, the reported height is wrong.
+
+### Favourites: the slots follow what is open
+
+On a phone the four tabs and the round button are **favourites**, not a
+fixed set (`features/shell/src/shell/favourites.rs`): an app gives its
+default set and the sets the note types it knows declare, and
+`resolve_favourites` picks the set for the open note's type (`Favourites`,
+`Declared`, `SLOTS`). Leaving that type brings the default back. The
+sidebar (a phone's left drawer) is never a slot: it stays the way to
+everything, the default set's places among them.
+
+A type's own set comes from the extensions' `[[favourites]]`
+([Favourites](@/architecture/extensions.md#favourites)), made into the bar
+by `declare`: the app reads each target (what a press opens there, or
+nothing), a tab it cannot open is left out, the first four of the rest are
+the slots (`Tab::named` draws a manifest's Lucide icon by name), and the
+primary action shows its second face while the app says its `state` is on;
+a type with no primary keeps the default's round button. A declared tab's
+press is the set's own (`Favourites::press`, asked first by the app's
+`on_tab`); its id is the type's and its own (`declared_tab_id`), so it never
+meets an app's tab. The open note is the workspace's document on show: a
+note's pane, or an extension's view opened on one, and its type is its
+`type` property, read again whenever the vault says the file changed
+(`SourceEvent::touches`), so editing `type` switches the slots.
+
+While a declared set is on show, the current tab is the one whose place is
+on show (`Shows`, `Favourites::current`): the note, a view on it, the note
+a `{place}` opened. It is marked `aria-current="page"` (with `data-tab`) on
+a phone's bar, a tablet's rail and sidebar rows, and a desk's ribbon alike.
+A tab that runs an action, quick open or the navigator is never current.
+
+A `{place}` keeps its set: while the note a place tab opened is on show,
+the slots stay those of the note it was opened from (`PlaceOpened`,
+`set_note`), with the place's tab current, whatever the place's own type.
+Showing anything else (the note again included, then anything else) ends
+it: the note on show picks the slots again. So does the note it was opened
+from going, or its `type` changing, here or on another device: both apps
+read it again when the vault says it changed (`place_kept`).
+
+A declared tab's press is made once for its note, type and target and
+kept for the root's life (`Presses`, `use_presses`), not again on every
+render of the root.
+
+The Architect app's default set is Inbox, Vault, Project and Schedule, with
+Capture as the round button (`apps/ui/src/favourites.rs` `default_set`).
+Each opens its real surface in the Vault's workspace (`Surface`): the
+inbox deck, the last note shown, the projects list, and the calendar's
+day. The Go menu, ⌘K and ⌃⌘1–4 go to the same four. The loaded
+extensions' declarations are read there too (`declared`, `opens`): `page`
+is the open note, `search` quick open, a view of the declaring extension's
+own (`<view>` or `<its id>/<view>`) that view on the open note, an
+`{action}` one the app has that the declaring extension may run
+([who may name what](@/architecture/extensions.md#favourites)), a
+`{place}` a note beside the open one; the open note comes from the Vault's
+page (`VaultFocus`). A primary's state is on while its extension keeps
+runtime state of that name (`EXT_STATE_SET`, `state_on`: its own, source
+`ext:<id>`).
+
+The app in a browser takes the same path (`apps/web/src/app/favourites.rs`):
+its own set is Vault, Files, Search and New note, and the declarations come
+from the node (`GET /_ext/favourites.json`, read by
+`apps/web/src/favourites.rs` `listing`, each with the extension that
+declared it, held to the same rule); any view the declaring extension's
+island lists opens in a frame of its own as a tab of the workspace
+(`apps/web/src/app/vault.rs` `open_frame`), handed the open note and its
+playhead source as a claimed view is
+([a view by a note's type](@/architecture/extensions.md#views-that-follow-playback)), `browse`
+opens the navigator, and a browser knows no state yet (the first face).
 
 The person orders the tabs (Task's Customize: drag to move, hide, bring
 back), per device. The first four are the bar; the rest are in the left

@@ -80,6 +80,10 @@ pub struct SiteIsland {
     progress: Option<String>,
     transport: Option<String>,
     lyrics: Option<String>,
+    /// Its note embeds ([`Self::embed`], [`Self::embed_note`]).
+    embeds: Vec<NoteClaim>,
+    /// What its extension declares it reads ([`Self::reads`]).
+    reads: Vec<String>,
     stylesheet: Option<String>,
     web: Option<String>,
     /// The operator's grant of WebRTC ([`Self::grant_webrtc`]).
@@ -149,6 +153,8 @@ impl SiteIsland {
             progress: None,
             transport: None,
             lyrics: None,
+            embeds: Vec::new(),
+            reads: Vec::new(),
             stylesheet: None,
             web,
             webrtc_granted: false,
@@ -242,6 +248,86 @@ impl SiteIsland {
     #[must_use]
     pub fn lyrics(mut self, view: impl Into<String>) -> Self {
         self.lyrics = Some(view.into());
+        self
+    }
+
+    /// Its view `view` drawn at the head of a note whose `type` is one of
+    /// `note_types` (its manifest's `[[embeds]] view = … claims = {
+    /// note_type = […] }`), in the web app's frame host. Drawn only from
+    /// its web bundle ([`Self::web`]), handed where its playhead source is
+    /// and no note (`note: null`): a view that reads the note it is drawn
+    /// on is claimed with [`Self::embed_note`].
+    ///
+    /// The first island listed that claims a type draws it, and within an
+    /// island its first claim. A view is 1 to 64 of `[A-Za-z0-9._-]`, a
+    /// type 1 to 64 characters and not blank; at most 16 types and 16
+    /// claims are kept, anything else is left out. Matched without regard
+    /// to case.
+    #[must_use]
+    pub fn embed<S: Into<String>>(
+        self,
+        view: impl Into<String>,
+        note_types: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.claim(view.into(), note_types, None)
+    }
+
+    /// [`Self::embed`], its view handed the note it is drawn on: the claim
+    /// names [`READS_NOTE`] as what it reads, which its extension must
+    /// declare too ([`Self::reads`]), and `properties` are the note's
+    /// frontmatter keys it declares for those types (at most 32), all of
+    /// them a share's guest's view is given. A member's view gets the note
+    /// whole but its `%%comments%%`.
+    #[must_use]
+    pub fn embed_note<S: Into<String>, P: Into<String>>(
+        self,
+        view: impl Into<String>,
+        note_types: impl IntoIterator<Item = S>,
+        properties: impl IntoIterator<Item = P>,
+    ) -> Self {
+        let properties = properties
+            .into_iter()
+            .map(Into::into)
+            .filter(|p| key_ok(p))
+            .take(32)
+            .collect();
+        self.claim(view.into(), note_types, Some(properties))
+    }
+
+    fn claim<S: Into<String>>(
+        mut self,
+        view: String,
+        note_types: impl IntoIterator<Item = S>,
+        properties: Option<Vec<String>>,
+    ) -> Self {
+        let note_types: Vec<String> = note_types
+            .into_iter()
+            .map(Into::into)
+            .filter(|t| key_ok(t))
+            .take(16)
+            .collect();
+        if name_ok(&view) && !note_types.is_empty() && self.embeds.len() < 16 {
+            self.embeds.push(NoteClaim {
+                view,
+                note_types,
+                properties,
+            });
+        }
+        self
+    }
+
+    /// What its extension declares it reads, its manifest's
+    /// `[capabilities] reads` (`documents`, [`READS_NOTE`]): listed for
+    /// the app, which hands a claimed view the note only when both the
+    /// claim and this name it.
+    #[must_use]
+    pub fn reads<S: Into<String>>(mut self, reads: impl IntoIterator<Item = S>) -> Self {
+        self.reads = reads
+            .into_iter()
+            .map(Into::into)
+            .filter(|r| name_ok(r))
+            .take(8)
+            .collect();
         self
     }
 
@@ -656,6 +742,47 @@ fn content_type(path: &str) -> &'static str {
     }
 }
 
+/// The read capability a claim that hands its view the note names, and
+/// its extension declares (`[capabilities] reads`).
+pub const READS_NOTE: &str = "documents";
+
+/// One of an island's claims on note types ([`SiteIsland::embed`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NoteClaim {
+    view: String,
+    note_types: Vec<String>,
+    /// The properties it declares, when it reads the note.
+    properties: Option<Vec<String>>,
+}
+
+impl NoteClaim {
+    fn listed(&self) -> serde_json::Value {
+        self.properties.as_ref().map_or_else(
+            || serde_json::json!({"view": self.view, "note_type": self.note_types}),
+            |props| {
+                serde_json::json!({
+                    "view": self.view, "note_type": self.note_types,
+                    "reads": [READS_NOTE], "properties": props,
+                })
+            },
+        )
+    }
+}
+
+/// A view's or a capability's name: 1 to 64 of `[A-Za-z0-9._-]`.
+fn name_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// A note type or a property's name: 1 to 64 characters, not blank, no
+/// control character.
+fn key_ok(s: &str) -> bool {
+    !s.trim().is_empty() && s.chars().count() <= 64 && !s.chars().any(char::is_control)
+}
+
 /// What a share page carries for its player (`player.js`): the runtime,
 /// the sandbox, and each island's folder and views, as JSON for
 /// `<script type="application/json" id="site-islands">`.
@@ -673,6 +800,14 @@ pub fn page_json(islands: &[SiteIsland]) -> serde_json::Value {
                 "transport": i.transport,
                 // Its lyrics view: a web bundle's only.
                 "lyrics": i.web.as_ref().and(i.lyrics.as_ref()),
+                // Its note embeds, each with what it reads: a web bundle's
+                // only.
+                "embeds": i
+                    .web
+                    .as_ref()
+                    .map(|_| i.embeds.iter().map(NoteClaim::listed).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+                "reads": i.reads,
                 // Only with its digest: the player pins it as it pins the
                 // component's files.
                 "stylesheet": i.stylesheet_integrity().and(i.stylesheet.as_deref()),
@@ -1025,6 +1160,41 @@ mod tests {
             page_json(std::slice::from_ref(&web))["islands"][0]["lyrics"],
             "words"
         );
+        // A note embed is a web bundle's too, and lists the types it claims.
+        let listed = page_json(std::slice::from_ref(
+            &web.clone().embed("list", ["playlist", ""]),
+        ));
+        assert_eq!(
+            listed["islands"][0]["embeds"],
+            serde_json::json!([{"view": "list", "note_type": ["playlist"]}])
+        );
+        // One that reads the note names it, and the properties a guest gets;
+        // the extension's declared reads are listed beside.
+        let reading = web
+            .clone()
+            .reads(["documents", "bad name"])
+            .embed_note("list", ["playlist"], ["date", "", "venue"])
+            .embed("../x", ["a"])
+            .embed("v".repeat(65), ["a"])
+            .embed("none", ["", " "]);
+        let listed = page_json(std::slice::from_ref(&reading));
+        assert_eq!(
+            listed["islands"][0]["embeds"],
+            serde_json::json!([{"view": "list", "note_type": ["playlist"], "reads": ["documents"], "properties": ["date", "venue"]}])
+        );
+        assert_eq!(
+            listed["islands"][0]["reads"],
+            serde_json::json!(["documents"])
+        );
+        let many = (0..20).fold(web, |i, n| {
+            i.embed(format!("v{n}"), (0..20).map(|t| format!("t{t}")))
+        });
+        let listed = page_json(std::slice::from_ref(&many));
+        let embeds = listed["islands"][0]["embeds"].as_array().unwrap();
+        assert_eq!(embeds.len(), 16);
+        assert_eq!(embeds[0]["note_type"].as_array().unwrap().len(), 16);
+        let bare = page_json(std::slice::from_ref(&words.embed("list", ["playlist"])));
+        assert_eq!(bare["islands"][0]["embeds"], serde_json::json!([]));
         // No stylesheet without a valid name and its digest.
         let files = vec![("a.css".to_owned(), Cow::Borrowed(b".a{}".as_slice()))];
         let sheet = SiteIsland::new("x", files.clone()).stylesheet("a.css");

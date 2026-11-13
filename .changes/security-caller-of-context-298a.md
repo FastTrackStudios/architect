@@ -1,0 +1,5 @@
+---
+"architect-playhead" = "minor"
+---
+
+Security: `Caller::of_context` fails closed (a hook, a script or a context naming no one is refused; `deck::APP_SOURCES`); `PLAYHEAD_SOURCES` answers an extension only its own entry and whether it is active (`Deck::listing_for`); `playhead.changed` goes per owner (`heard_by`, `raise_changed`); an extension whose id is `vault`, `app` or `playhead`, or outside the id grammar, holds no source (`deck::reserved`); `model::vault_path` is the one strict rule for `media` and `art` (refuses `?`, `#`, `%`, `:`, look-alike slashes and dots, invisible characters, segments ending in a dot or a space). Changed: a seek is refused while the item's length is unknown and clamped past its end; an item with media nobody hears and no length is passed over (state `unplayable`, `unheard`; the bar says so); a length comes only from resolved media (`Reading::resolved`); `on_change` takes a key and keeps one listener per key. Added `press_as` and accessible bar controls (44 px targets, a keyboard slider).
