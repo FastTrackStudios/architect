@@ -50,6 +50,9 @@ mod browser;
 pub mod demo;
 pub mod keys;
 
+#[cfg(target_arch = "wasm32")]
+pub use browser::start;
+
 use std::fmt::Write as _;
 
 use serde::Deserialize;

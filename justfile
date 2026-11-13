@@ -13,7 +13,7 @@ default:
 # seed, no Studio). Arguments go to Studio's `just dev` (keyflow=local,
 # desktop=on, watch=off).
 
-# Everything locally, rebuilt on save: Studio's node with this Architect, issuer, web app, site (`plain`: Architect's own stack)
+# Everything locally, rebuilt on save: Studio's node with this Architect, issuer, web app, site (`plain`: Architect's own stack, the desktop app and the web app under dx serve, and the site)
 dev *ARGS:
     @bash scripts/run-it.sh dev {{ARGS}}
 

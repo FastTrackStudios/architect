@@ -128,12 +128,21 @@ in
       failure_threshold = 2;
     };
   };
-  # Off by default: `devenv up web` (the web app, its issuer the local
-  # one) and `devenv up site` (apps/site's dev server).
+  # Off by default (`just dev plain` starts both): `devenv up web`, the
+  # web app (apps/web) under `dx serve --platform web`, rebuilt on a save,
+  # its issuer the local one, `/app/?demo` the app on the demo vault; and
+  # `devenv up site`, apps/site's dev server, whose `/app/…` links lead to
+  # the web app's.
   processes.web = {
     exec = "${xdev} web";
     after = [ "devenv:processes:auth" ];
     start.enable = false;
+    # Up once dx serves the built app's page (while it builds, dx answers
+    # with its own "building" page, which names no `id="app"`).
+    ready = {
+      exec = "${curl} -sf ${url "web"}/app/ | ${pkgs.gnugrep}/bin/grep -q 'id=\"app\"'";
+      period = 2;
+    };
   };
   processes.site = {
     exec = "${xdev} site";

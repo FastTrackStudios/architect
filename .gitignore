@@ -16,3 +16,8 @@ result-*
 # Local git worktrees created by tooling.
 /.claude/worktrees/
 apps/sandbox/media/tests/golden/*.got.html
+
+# The web app's dev page and public folder for `dx serve`, written by
+# `cargo xtask dev run web` (xtask/src/dev/mod.rs `prepare_web`).
+/apps/web/index.html
+/apps/web/dev/
