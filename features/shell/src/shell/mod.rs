@@ -1597,6 +1597,14 @@ pub fn AppShell(
     } else {
         0.0
     };
+    // The floating button's room under it, inside the page: the window's
+    // inset and a corner badge only when nothing (a status bar, the Now
+    // Playing bar) is at the page's foot below it already.
+    let page_foot_room = if show_status_bar || (now_playing.is_some() && !in_bar) {
+        20.0
+    } else {
+        20.0 + screen.insets.bottom + badge_room
+    };
     let (left_edge, left_pad_top) = if desk {
         (String::new(), 0.0)
     } else {
@@ -1705,7 +1713,21 @@ pub fn AppShell(
             div {
                 style: "position: relative; left: {page_shift}px; flex: 1; min-width: 0; min-height: 0; \
                         display: flex; flex-direction: column;",
-                {children}
+                // The page itself, and the floating button over its corner:
+                // above the Now Playing bar and the status bar, never
+                // under them (#660: the bar's source chip covered it).
+                div { style: "position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;",
+                    {children}
+                    if float_separate {
+                        if let Some(sep) = separate.clone() {
+                            div {
+                                style: "position: absolute; right: {20.0 + screen.insets.right}px; \
+                                        bottom: {page_foot_room}px;",
+                                RoundButton { action: sep }
+                            }
+                        }
+                    }
+                }
                 if !in_bar {
                     if let Some(np) = now_playing.clone() {
                         div { style: "position: relative; z-index: {layer::FOOT}; flex-shrink: 0;", {np} }
@@ -1717,15 +1739,6 @@ pub fn AppShell(
                 if show_status_bar {
                     SlotView { slot: Slot::Status,
                         StatusBar { items: all_status.clone() }
-                    }
-                }
-                if float_separate {
-                    if let Some(sep) = separate.clone() {
-                        div {
-                            style: "position: absolute; right: {20.0 + screen.insets.right}px; \
-                                    bottom: {20.0 + screen.insets.bottom + badge_room}px;",
-                            RoundButton { action: sep }
-                        }
                     }
                 }
             }
