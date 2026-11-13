@@ -3833,7 +3833,7 @@ mod tests {
             HeaderValue::from_str(&format!("{SIGNIN_COOKIE}={nonce}")).unwrap(),
         );
         let (viewer, started, polled) = tokio::join!(
-            tokio::time::timeout(bound, shares.viewer(&signed_in)),
+            tokio::time::timeout(bound, shares.viewer_of(bearer(&signed_in))),
             tokio::time::timeout(bound, start_signin(&shares, "/s/x/".into(), false)),
             tokio::time::timeout(bound, wait_signin(&shares, &waiting, false)),
         );
