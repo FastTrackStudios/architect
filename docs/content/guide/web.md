@@ -112,18 +112,50 @@ and extensions (#495) are not in the browser.
 
 **Signed in**, when this host's node hosts the account's org (its status
 names the org), the app is the same app on the org's vaults: it dials the
-node's org lane, `/org/{slug}/vox` on this origin, with the session as
-the WebSocket's `vox.bearer.<token>` subprotocol (never in a URL), lists
-the vaults' notes (`vault_proto::notes` `Notes`, each vault a folder),
-reads them in the background so the navigator fills its previews, and
-keeps an open note live with the node (`crdt::sync::SyncedDoc` on
+node's org lane, `/org/{slug}/vox` on this origin, with its session as the
+WebSocket's `vox.bearer.<token>` subprotocol (never in a URL), lists the
+vaults' notes (`vault_proto::notes` `Notes`, each vault a folder), reads
+them in the background so the navigator fills its previews, and keeps an
+open note live with the node (`crdt::sync::SyncedDoc` on
 `vault_proto::collab_doc_id`): typing reaches the node's document and
-file, and another's typing shows as it comes. A new note is written with
-`Notes::write`. Nothing is kept in the browser between visits: a reload
-lists and reads again (no IndexedDB or OPFS copy yet), and with the node
-out of reach the app says why. A node that names no org, or a lane that
-refuses the session (not a member), leaves the status page: who is
-signed in, the node's status over same-origin HTTP (`POST /node/status`,
+file, and another's typing shows as it comes.
+
+- **The bearer** is the issuer's short-lived access token: the web app is
+  the public client `architect`, which gets no issuer session. The node
+  hands it to the issuer's `whoami` and org list, which take a
+  first-party client's access token (one registered with `skip_consent`,
+  with `openid`, the default audience) as well as a session; the node
+  verifies no JWT itself. Before the token runs out the app renews it and
+  dials the lane again (`apps/web/src/browser.rs` `keep_lane_signed_in`,
+  `apps/web/src/app/org.rs` `OrgVaults::redial`); every open note's
+  session attaches on the new lane.
+- **A note may be typed in once its session has attached**, when the
+  node's copy is in the document; until then the text area is read-only
+  and says it is connecting. The text area is not a controlled input:
+  another's edit is written into it with the caret kept, never during an
+  IME composition, and typing is moved past edits that arrived meanwhile
+  (`apps/web/src/live_text.rs`).
+- **A new note** goes in a vault (the open note's, else the first) and is
+  written with `Notes::write` before it opens. Renaming, moving and
+  deleting notes, and their tags and properties, are read-only in the
+  browser for now (`apps/web/src/app/org.rs` `NodeLayout`): the navigator
+  says so when they are tried.
+- **What fails is shown**: a note that cannot be read says why, and a
+  failed background read, new note, lost session or ended sign-in is in
+  the status line.
+- **The proxy's access log must not record the bearer.** A WebSocket has
+  no other header to carry it in, and a reverse proxy logs
+  `Sec-WebSocket-Protocol` unless told not to (Caddy redacts
+  `Authorization` and cookies by default, not this header). Delete or
+  redact that request header in the proxy's log format. The node itself
+  never logs it (`crates/architect/tests/host_mounts.rs`
+  `the_host_never_logs_a_browser_bearer`).
+
+Nothing is kept in the browser between visits: a reload lists and reads
+again (no IndexedDB or OPFS copy yet), and with the node out of reach the
+app says why. A node that names no org, or a lane that refuses the
+session (not a member), leaves the status page: who is signed in, the
+node's status over same-origin HTTP (`POST /node/status`,
 `apps/desktop/src/node/service.rs` `Node`), why the vaults did not open,
 and links to the demo, the docs and the desktop download.
 

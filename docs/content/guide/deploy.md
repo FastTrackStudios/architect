@@ -258,9 +258,10 @@ An org's other members' devices are enrolled at the node that hosts the org
 - **Hosting.** With `ARCHITECT_HOST_ORG = "<slug>"` the node asks the issuer
   for that org's id (and keeps it in its data dir, so it starts with the issuer
   down) and serves `architect_devices::server::EnrolmentHost` at
-  `/org/<slug>/vox`. A caller presents an issuer session as its bearer: the node
-  resolves it with the issuer's `whoami` (`apps/desktop/src/node/org.rs`
-  `IssuerSessions`) and learns the person's orgs and role from the issuer
+  `/org/<slug>/vox`. A caller presents an issuer session as its bearer, or (the
+  web app) the issuer's access token of a first-party client: the node resolves
+  it with the issuer's `whoami` (`apps/desktop/src/node/org.rs`
+  `IssuerSessions`), which takes either, and verifies no JWT itself and learns the person's orgs and role from the issuer
   (`architect_orgs::server::MembersResolver`). A member enrols a device with a
   role no higher than their own, an owner or admin lists them all and anyone
   lists their own, and the one who enrolled it or an owner or admin revokes it.
@@ -838,7 +839,9 @@ the controller (the share sign-in cookie is `Secure` behind `https`).
 prefix reaches the node and `/` the web front end (`pr.yml` runs it with
 `helm lint`). With a proxy of your own (Caddy, Traefik, nginx), route the
 same prefixes. The web front end has no single-page fallback, so a prefix
-you forget answers `404` instead of the app's page.
+you forget answers `404` instead of the app's page. Keep the
+`Sec-WebSocket-Protocol` request header out of the proxy's access log: a
+browser's bearer travels in it on `/org/<slug>/vox` and `/vox`.
 
 ## Without Kubernetes: systemd
 

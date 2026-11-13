@@ -113,6 +113,8 @@ architect-accounts = { workspace = true, features = ["actions"] }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# tests/node.rs: a browser's redirect sign-in (PKCE), as apps/web runs it.
+auth-client = { workspace = true }
 # The A2UI surface the parity test renders (tests/actions.rs).
 architect-a2ui = { workspace = true }
 architect-mcp = { workspace = true, features = ["parity"] }

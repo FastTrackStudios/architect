@@ -1167,6 +1167,7 @@ dependencies = [
  "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
+ "auth-client",
  "auth-proto",
  "auth-server",
  "clap",

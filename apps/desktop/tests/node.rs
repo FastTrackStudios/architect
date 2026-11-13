@@ -62,12 +62,18 @@ const ORG: &str = "test-org";
 const MCP_TOKEN: &str = "test-mcp-bearer";
 
 async fn issuer() -> String {
+    issuer_with(Vec::new()).await
+}
+
+/// The issuer with OIDC `clients` registered.
+async fn issuer_with(clients: Vec<architect_auth::OidcClientConfig>) -> String {
     let db = Database::connect("sqlite::memory:").await.unwrap();
     Migrator::up(&db, None).await.unwrap();
     let config = ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
         database_url: "sqlite::memory:".into(),
         session_ttl_seconds: 3600,
+        oidc_clients: clients,
         ..ServerConfig::local()
     };
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db.clone())).unwrap();
@@ -675,6 +681,156 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
         format!("{refused:?}").contains("not a member"),
         "{refused:?}"
     );
+
+    host.stop().await;
+}
+
+/// Where a browser's sign-in comes back to, in these tests.
+const WEB_CALLBACK: &str = "http://127.0.0.1:9/auth/callback";
+
+/// A web app the issuer knows: `first_party` as the browser app
+/// (`architect`, registered with `skip_consent`).
+fn web_client(id: &str, first_party: bool) -> architect_auth::OidcClientConfig {
+    architect_auth::OidcClientConfig {
+        client_id: id.to_owned(),
+        client_secret: None,
+        name: id.to_owned(),
+        redirect_uris: vec![WEB_CALLBACK.to_owned()],
+        scopes: vec!["openid".into(), "email".into(), "profile".into()],
+        public_client: true,
+        skip_consent: first_party,
+        disabled: false,
+    }
+}
+
+/// The browser's redirect sign-in as `client` for the person holding
+/// `session` (`apps/web`'s, with PKCE): its token response.
+async fn signed_in_by_redirect(
+    origin: &str,
+    client: &str,
+    session: &str,
+) -> auth_client::oidc::TokenResponse {
+    use auth_client::oidc;
+    let pkce = oidc::Pkce::from_entropy([7; 32], [9; 16]);
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let authorize =
+        oidc::authorize_url(origin, client, WEB_CALLBACK, &pkce, "openid email profile");
+    let answer = http
+        .get(authorize)
+        .bearer_auth(session)
+        .send()
+        .await
+        .unwrap();
+    let back = answer
+        .headers()
+        .get("location")
+        .and_then(|l| l.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let code = back
+        .split(['?', '&'])
+        .find_map(|kv| kv.strip_prefix("code="))
+        .unwrap_or_else(|| panic!("no code in the redirect ({})", answer.status()))
+        .to_owned();
+    let body = oidc::token_request_body(client, WEB_CALLBACK, &code, &pkce);
+    let text = http
+        .post(format!("{origin}{}", oidc::TOKEN_PATH))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    oidc::token_response_from(&text).unwrap()
+}
+
+/// #628: a browser signed in by redirect holds only the issuer's access
+/// token (client `architect`, no issuer session). The node relays it to
+/// the issuer's `whoami` and org list, which take a first party's access
+/// token, so the org lane serves it, live; the node verifies no JWT
+/// itself. A third party's access token and an id token stay anonymous.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_browser_signed_in_by_redirect_reaches_the_org_lane_with_its_access_token() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::{DocSyncClient, SyncedDoc};
+
+    let origin = issuer_with(vec![
+        web_client("architect", true),
+        web_client("elsewhere", false),
+    ])
+    .await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host_dir = tmp.path().join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        host_dir.join("data/vaults/notes/hello.md"),
+        "# Hello\n\nThe org's note.\n",
+    )
+    .unwrap();
+    let mut host = config(
+        "indie-host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    let host = node::start(host).await.unwrap();
+
+    // Alan, a member, signs in to the web app by redirect.
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let alan = token_in(&alan_dir);
+    let web_app = signed_in_by_redirect(&origin, "architect", &alan).await;
+    let notes: NotesClient = web(&host, Some(web_app.access_token.clone())).await;
+    let listed = notes.list().await.unwrap();
+    assert!(listed.iter().any(|n| n.path == "hello.md"), "{listed:?}");
+
+    let sync: DocSyncClient = web(&host, Some(web_app.access_token.clone())).await;
+    let replica = crdt::CrdtDoc::ephemeral();
+    let mut synced = SyncedDoc::new(
+        vault_proto::collab_doc_id("notes", "hello.md"),
+        replica.clone(),
+    );
+    let session = tokio::spawn(async move {
+        let _ = synced.run(&sync).await;
+    });
+    let body = || {
+        replica
+            .loro()
+            .get_text(vault_proto::COLLAB_BODY_CONTAINER)
+            .to_string()
+    };
+    until("the note reaches the browser", || {
+        body().contains("The org's note.")
+    })
+    .await;
+    let text = replica.loro().get_text(vault_proto::COLLAB_BODY_CONTAINER);
+    text.insert(text.len_unicode(), "\nTyped by redirect.\n")
+        .unwrap();
+    replica.loro().commit();
+    until("the host's file has it", || {
+        reads(&note(&host), "Typed by redirect.")
+    })
+    .await;
+    session.abort();
+    // Once, not twice: the browser's replica had the node's text first.
+    let file = std::fs::read_to_string(note(&host)).unwrap();
+    assert_eq!(file.matches("The org's note.").count(), 1, "{file}");
+
+    // A third party's access token, and the browser's id token: anonymous.
+    let other = signed_in_by_redirect(&origin, "elsewhere", &alan).await;
+    for (label, token) in [
+        ("a third party's access token", other.access_token),
+        ("an id token", web_app.id_token.clone().unwrap_or_default()),
+    ] {
+        let refused: NotesClient = web(&host, Some(token)).await;
+        assert!(refused.list().await.is_err(), "{label} was let in");
+    }
 
     host.stop().await;
 }
