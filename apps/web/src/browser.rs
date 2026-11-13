@@ -131,6 +131,8 @@ async fn token_post(config: &Config, body: String) -> Result<String, String> {
 }
 
 thread_local! {
+    /// The app's config, once read: what Sign out needs to revoke.
+    static CONFIG: RefCell<Option<Config>> = const { RefCell::new(None) };
     /// Which distribution this bundle is (`/app/distribution.json`), read
     /// once at start.
     static DIST: RefCell<Distribution> = RefCell::new(Distribution::default());
@@ -205,6 +207,7 @@ async fn run() -> Result<(), String> {
         return Err(format!("{APP}config.json answered {status}"));
     }
     let config = Rc::new(Config::parse(&text)?);
+    CONFIG.with(|c| *c.borrow_mut() = Some((*config).clone()));
     wire(Rc::clone(&config))?;
     let problem = match route {
         Route::App | Route::Demo => None,
@@ -243,8 +246,11 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
                 }
             }
             Some("sign-out") => {
-                let _ = LocalStore.clear();
-                draw(&Screen::SignedOut { problem: None });
+                let config = Rc::clone(&config);
+                spawn_local(async move {
+                    revoke(&config).await;
+                    draw(&Screen::SignedOut { problem: None });
+                });
             }
             _ => {}
         }
@@ -255,13 +261,38 @@ fn wire(config: Rc<Config>) -> Result<(), String> {
     Ok(())
 }
 
-/// Forgets the session and shows the app signed out (the account menu's
-/// Sign out, in the app).
+/// Ends the session at the issuer and here, then shows the app signed
+/// out (the account menu's Sign out, in the app).
 pub fn sign_out() {
-    let _ = LocalStore.clear();
-    if let Ok(w) = window() {
-        let _ = w.location().assign(APP);
+    spawn_local(async {
+        if let Some(config) = CONFIG.with(|c| c.borrow().clone()) {
+            revoke(&config).await;
+        } else {
+            let _ = LocalStore.clear();
+        }
+        if let Ok(w) = window() {
+            let _ = w.location().assign(APP);
+        }
+    });
+}
+
+/// Revokes the stored sign-in's grant at the issuer (RFC 7009: its
+/// refresh token and access tokens stop working, so a copy of either is
+/// dead too), then forgets it here. Forgotten here even when the issuer
+/// cannot be reached: the person asked to be signed out.
+async fn revoke(config: &Config) {
+    if let Ok(Some(session)) = LocalStore.load() {
+        let token = session.refresh_token.as_deref().unwrap_or(&session.token);
+        let body = oidc::revoke_request_body(&config.client_id, token);
+        let _ = fetch(
+            "POST",
+            &format!("{}{}", config.issuer, oidc::REVOKE_PATH),
+            Some(&body),
+            &[("content-type", "application/x-www-form-urlencoded")],
+        )
+        .await;
     }
+    let _ = LocalStore.clear();
 }
 
 /// Send the browser to the issuer, its verifier parked in this tab.
@@ -320,6 +351,7 @@ async fn redeem(config: &Config, code: &str, state: &str) -> Result<(), String> 
 
 /// The stored session, renewed first when it is about to run out.
 async fn session(config: &Config) -> Option<StoredSession> {
+    let presented = LocalStore.load().ok().flatten();
     let refreshed = oidc::refresh_if_needed(&LocalStore, &config.client_id, now(), |body| {
         token_post(config, body)
     })
@@ -328,6 +360,14 @@ async fn session(config: &Config) -> Option<StoredSession> {
         Ok(Refresh::Fresh(s) | Refresh::Refreshed(s) | Refresh::NoRefreshToken(s)) => Some(s),
         Ok(Refresh::SignedOut) => None,
         Err(_) => {
+            // A refresh token is single use: another tab that renewed
+            // first left a newer session here. Not signed out then.
+            let stored = LocalStore.load().ok().flatten();
+            if let Some(stored) = stored
+                .filter(|s| presented.as_ref().map(|p| &p.refresh_token) != Some(&s.refresh_token))
+            {
+                return Some(stored);
+            }
             let _ = LocalStore.clear();
             None
         }

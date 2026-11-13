@@ -27,8 +27,7 @@ use std::sync::Arc;
 
 use architect::connect::{Endpoint, Pool};
 use architect_navigator::markdown::note_from_markdown;
-use architect_navigator::source::{FileOp, FolderMeta, Listener, Subscription};
-use architect_navigator::{MemorySource, Millis, NavigatorSource, NoteFile};
+use architect_navigator::{MemorySource, Millis, NavigatorSource as _, NoteFile};
 use crdt::CrdtDoc;
 use crdt::sync::{DocSyncClient, SyncedDoc};
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -36,8 +35,6 @@ use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
 use vault_proto::notes::{NoteRef, NotesClient};
 use wasm_bindgen_futures::spawn_local;
-
-use crate::live_text::Splice;
 
 /// How long a dropped note session waits before it attaches again, ms.
 const RETRY_MS: u32 = 2_000;
@@ -230,22 +227,36 @@ impl OrgVaults {
             .map_err(|e| e.to_string())
     }
 
-    /// Makes the note at `path` (`<vault>/<path in it>`), empty, on the
-    /// node: done before it opens, so its live document starts from the
-    /// file.
+    /// Makes a new empty note on the node, at the first of `paths`
+    /// (`<vault>/<path in it>`) that no note holds: one made by someone
+    /// else since the listing is never written over (`Notes::create`
+    /// refuses it, and the next name is tried). Done before it opens, so
+    /// its live document starts from the file. The path made.
     ///
     /// # Errors
     ///
     /// Not inside a vault, or the node refused the write.
-    pub async fn create(&self, path: &str) -> Result<(), String> {
-        let (vault, rest) = path
-            .split_once('/')
-            .filter(|(v, r)| !v.is_empty() && !r.is_empty())
-            .ok_or_else(|| format!("{path} is in no vault"))?;
-        self.notes()
-            .write(vault.to_owned(), rest.to_owned(), String::new())
-            .await
-            .map_err(|e| e.to_string())
+    pub async fn create(&self, paths: impl IntoIterator<Item = String>) -> Result<String, String> {
+        crate::create_first(paths, |path| async move {
+            let (vault, rest) = path
+                .split_once('/')
+                .filter(|(v, r)| !v.is_empty() && !r.is_empty())
+                .ok_or_else(|| format!("{path} is in no vault"))?;
+            match self
+                .notes()
+                .create(vault.to_owned(), rest.to_owned(), String::new())
+                .await
+            {
+                Ok(()) => Ok(true),
+                Err(architect::vox::VoxError::User(e))
+                    if matches!(*e, vault_proto::notes::NotesError::Exists(_)) =>
+                {
+                    Ok(false)
+                }
+                Err(e) => Err(e.to_string()),
+            }
+        })
+        .await
     }
 
     /// The note at `path` kept live with the node while the returned
@@ -264,6 +275,7 @@ impl OrgVaults {
             .on_attached(Arc::new(move || {
                 let _ = attached.unbounded_send(Heard::Attached);
             }));
+        let outbox = synced.outbox();
         let (stop, mut stopped) = futures_channel::oneshot::channel::<()>();
         let (redial_tx, mut redialled) = unbounded::<()>();
         self.0.redialled.borrow_mut().push(redial_tx);
@@ -301,6 +313,7 @@ impl OrgVaults {
         Some((
             LiveNote {
                 replica,
+                outbox,
                 _stop: stop,
             },
             rx,
@@ -323,94 +336,24 @@ pub enum Heard {
 /// An open note's body, live with the node; dropped, its session ends.
 pub struct LiveNote {
     replica: CrdtDoc,
+    /// The session's outbox: what reaches the replica by import (a merge,
+    /// `crate::live_text::merge_at`) is sent up through it.
+    outbox: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
     _stop: futures_channel::oneshot::Sender<()>,
 }
 
 impl LiveNote {
-    /// The body as it is now (the markdown after the frontmatter).
+    /// The replica's Loro document (`crate::live_text::LiveText` edits it).
     #[must_use]
-    pub fn body(&self) -> String {
-        self.replica
-            .loro()
-            .get_text(vault_proto::COLLAB_BODY_CONTAINER)
-            .to_string()
+    pub fn doc(&self) -> crdt::loro::LoroDoc {
+        self.replica.loro().clone()
     }
 
-    /// Applies `ops` (`crate::live_text::rebase`'s) to the body, one
-    /// commit, sent to the node.
-    pub fn apply(&self, ops: &[Splice]) {
-        if ops.is_empty() {
-            return;
-        }
-        let text = self
-            .replica
-            .loro()
-            .get_text(vault_proto::COLLAB_BODY_CONTAINER);
-        for op in ops {
-            if op.removed > 0 {
-                let _ = text.delete(op.start, op.removed);
-            }
-            if !op.added.is_empty() {
-                let _ = text.insert(op.start, &op.added);
-            }
-        }
-        self.replica.loro().commit();
+    /// Sends `update` to the node: a merged edit, which reached the
+    /// replica by import, so no local-update subscription sent it.
+    pub fn relay(&self, update: Vec<u8>) {
+        let _ = self.outbox.send(update);
     }
 }
 
-/// The navigator's view of the org's vaults: the notes as listed and
-/// read, read-only. Renames, moves, deletes, tags and properties change
-/// files the node does not take from the browser yet; doing them in the
-/// tab's memory alone would look saved and not be. New notes go through
-/// the app ([`OrgVaults::create`]).
-pub struct NodeLayout(pub MemorySource);
-
-/// Why the navigator does nothing, said where it tried.
-pub const READ_ONLY: &str = "Renaming, moving, deleting, tags and properties are read-only in the \
-                             browser for now: do them in the desktop app. Editing a note's text \
-                             and new notes are saved.";
-
-impl NavigatorSource for NodeLayout {
-    fn name(&self) -> String {
-        self.0.name()
-    }
-    fn folders(&self) -> Vec<String> {
-        self.0.folders()
-    }
-    fn child_order(&self) -> std::collections::BTreeMap<String, Vec<String>> {
-        self.0.child_order()
-    }
-    fn files(&self) -> Vec<NoteFile> {
-        self.0.files()
-    }
-    fn browses_properties(&self) -> bool {
-        self.0.browses_properties()
-    }
-    fn mounts(&self) -> Vec<architect_navigator::Mount> {
-        self.0.mounts()
-    }
-    fn folder_meta(&self) -> std::collections::BTreeMap<String, FolderMeta> {
-        self.0.folder_meta()
-    }
-    fn subscribe(&self, listener: Listener) -> Subscription {
-        self.0.subscribe(listener)
-    }
-    fn resource_url(&self, path: &str) -> Option<String> {
-        self.0.resource_url(path)
-    }
-    fn can_write(&self) -> bool {
-        false
-    }
-    fn write(&self, _ops: &[FileOp]) -> Result<(), String> {
-        Err(READ_ONLY.to_owned())
-    }
-    fn search_text(&self, query: &str) -> Option<Vec<String>> {
-        self.0.search_text(query)
-    }
-    fn search_excerpts(&self, query: &str) -> Option<Vec<(String, String)>> {
-        self.0.search_excerpts(query)
-    }
-    fn read_text(&self, path: &str) -> Option<String> {
-        self.0.read_text(path)
-    }
-}
+pub use crate::read_only::NodeLayout;

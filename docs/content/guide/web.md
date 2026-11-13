@@ -73,7 +73,16 @@ desktop app uses the same client id, over the device grant
    session in `localStorage`, and moves to `/app/`.
 3. Before each start the session is renewed with its refresh token when it
    is about to run out (`oidc::refresh_if_needed`). A token the issuer
-   refuses is renewed once, then the person signs in again.
+   refuses is renewed once, then the person signs in again. The refresh
+   token is single use: each renewal answers a new one, and the old one
+   presented again later revokes the whole sign-in (a copy was taken). Two
+   tabs renewing at the same moment are allowed for a few seconds: the
+   one that loses picks up the other's new session.
+4. **Sign out** revokes the sign-in at the issuer (`/oauth2/revoke`,
+   RFC 7009; `apps/web/src/browser.rs` `revoke`), then forgets it here. Its
+   refresh token mints nothing more and its access tokens are refused
+   where the issuer takes them; the issuer session the person signed in
+   with stays, so other apps signed in from it are not signed out.
 
 The issuer must know the client. For architect.fasttrackstudio.app that is
 fts-auth's `appDomains` entry `architect.fasttrackstudio.app`, which
@@ -129,17 +138,33 @@ file, and another's typing shows as it comes.
   dials the lane again (`apps/web/src/browser.rs` `keep_lane_signed_in`,
   `apps/web/src/app/org.rs` `OrgVaults::redial`); every open note's
   session attaches on the new lane.
+- **The node trusts a bearer for 30 seconds** (`lane_recheck_secs`,
+  `ARCHITECT_LANE_RECHECK_SECS`; `apps/desktop/src/node/org.rs`
+  `IssuerSessions`), then asks the issuer again. An open note's live
+  session checks its bearer as often and ends once it is refused: signed
+  out, revoked, expired or no longer a member, it ends within about a
+  minute, not when the connection happens to drop (`VaultSync`).
+- **Only the app's own origin opens the lane from a browser.** A WebSocket
+  upgrade with any other `Origin` is refused (403); one without `Origin`
+  (another node, the desktop app) goes on to the bearer check. A web app
+  served from another origin is listed in `ARCHITECT_LANE_ORIGINS`
+  (`apps/desktop/src/node/org.rs` `origin_allowed`).
 - **A note may be typed in once its session has attached**, when the
   node's copy is in the document; until then the text area is read-only
   and says it is connecting. The text area is not a controlled input:
   another's edit is written into it with the caret kept, never during an
-  IME composition, and typing is moved past edits that arrived meanwhile
-  (`apps/web/src/live_text.rs`).
+  IME composition. Typing is read back as a splice of the text the text
+  area last showed and handed to Loro at the document version it showed,
+  so Loro merges it with whatever arrived since, as it merges any two
+  peers (`apps/web/src/live_text.rs` `LiveText`, `merge_at`). An edit that
+  does not apply is said in the note.
 - **A new note** goes in a vault (the open note's, else the first) and is
-  written with `Notes::write` before it opens. Renaming, moving and
-  deleting notes, and their tags and properties, are read-only in the
-  browser for now (`apps/web/src/app/org.rs` `NodeLayout`): the navigator
-  says so when they are tried.
+  made with `Notes::create` before it opens. That refuses a path a note
+  holds already, so a note someone else made since the listing is never
+  emptied: the next `Untitled N` is tried. Renaming, moving and deleting
+  notes, and their tags and properties, are read-only in the browser for
+  now (`apps/web/src/read_only.rs` `NodeLayout`): the navigator says so
+  when they are tried, from its menu, its keys, the palette or a drag.
 - **What fails is shown**: a note that cannot be read says why, and a
   failed background read, new note, lost session or ended sign-in is in
   the status line.
@@ -158,6 +183,9 @@ session (not a member), leaves the status page: who is signed in, the
 node's status over same-origin HTTP (`POST /node/status`,
 `apps/desktop/src/node/service.rs` `Node`), why the vaults did not open,
 and links to the demo, the docs and the desktop download.
+
+`just web-org-test` drives all of this in a headless Firefox against the
+running local stack (`apps/web/test/org-vaults.test.mjs`).
 
 The sandbox's browser demo, which used to be `apps/web`, is
 `apps/sandbox/web` (`just sandbox-web`).

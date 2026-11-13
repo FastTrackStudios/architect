@@ -136,6 +136,19 @@ fn open_in_main(mut workspace: Signal<Workspace>, pane: Pane, target: Target) {
     if let Some(doc) = w.current_document().cloned() {
         let _ = w.activate(&doc);
     }
+    // No document yet (the org's vaults have no `Welcome.md` at their
+    // root to open first), so the navigator's pane is the active one:
+    // opened from there, the note would go into its dock group and leave
+    // the dock showing nothing. With nothing active it opens in the main
+    // area.
+    let docked_active = w
+        .active
+        .as_ref()
+        .and_then(|a| w.locate(a))
+        .is_some_and(|l| l.window != 0 || matches!(l.area, architect_workspace::Area::Dock(_)));
+    if docked_active {
+        w.active = None;
+    }
     let Ok(id) = w.open(pane, target) else {
         return;
     };
@@ -198,17 +211,17 @@ fn new_note(workspace: Signal<Workspace>, web: &WebVault, folder: &str) {
         org.report("There is no vault to put a new note in.");
         return;
     };
-    let Some(path) = crate::untitled_path(&folder, taken) else {
-        return;
-    };
+    let paths: Vec<String> = crate::untitled_paths(&folder)
+        .filter(|p| !taken(p))
+        .collect();
     spawn(async move {
-        match org.create(&path).await {
-            Ok(()) => {
+        match org.create(paths).await {
+            Ok(path) => {
                 let now = now();
                 vault.set_text(note_from_markdown(&path, "", now, now), String::new());
                 show_note(workspace, &path, Target::Tab);
             }
-            Err(e) => org.report(format!("{} was not made: {e}", title_of(&path))),
+            Err(e) => org.report(format!("A new note was not made: {e}")),
         }
     });
 }
@@ -293,11 +306,18 @@ pub fn VaultPage() -> Element {
     };
     {
         let web = vault.clone();
+        // The palette and the shortcut run this outside any scope: back
+        // into this one, or the org's `spawn` finds no runtime and the app
+        // stops.
+        let (runtime, scope) = (
+            dioxus::core::Runtime::current(),
+            dioxus::core::current_scope_id(),
+        );
         architect_commands::use_command(
             architect_commands::Command::new(NEW_NOTE, "New note")
                 .group("Vault")
                 .shortcut("⌃⌘N"),
-            move || new_note(workspace, &web, ""),
+            move || runtime.in_scope(scope, || new_note(workspace, &web, "")),
         );
     }
     // The navigator in a phone's drawer, from its bar.
@@ -537,12 +557,17 @@ fn WebNote(path: String) -> Element {
 /// a text area's value moves its caret to the end and ends a composition.
 struct Editor {
     id: String,
-    /// What the text area showed when it was last read or written.
+    /// What the text area showed when it was last read or written (the
+    /// demo's; on the org's vaults `text` keeps it, with its version).
     shown: std::cell::RefCell<String>,
     composing: std::cell::Cell<bool>,
     live: Option<std::rc::Rc<super::org::LiveNote>>,
+    /// The live note's text against the document (`live`'s).
+    text: Option<std::cell::RefCell<crate::live_text::LiveText>>,
     /// The note's text into the vault (the navigator's preview follows).
     keep: Box<dyn Fn(&str)>,
+    /// Why typing did not reach the document, said in the note.
+    failed: Signal<Option<String>>,
 }
 
 impl Editor {
@@ -555,56 +580,79 @@ impl Editor {
             .ok()
     }
 
-    /// What was typed since the text area was last read, into the
-    /// document (moved past what the document received meanwhile), or
-    /// into the vault in the demo.
+    /// What was typed since the text area was last read: into the live
+    /// document, merged by Loro at the version the text area showed
+    /// (`crate::live_text::LiveText::typed`), or into the vault in the
+    /// demo.
     fn absorb(&self) {
         let Some(area) = self.area() else { return };
         let typed = area.value();
-        let shown = self.shown.borrow().clone();
-        let Some(user) = crate::live_text::splice(&shown, &typed) else {
-            return;
-        };
-        if let Some(live) = &self.live {
-            let remote = crate::live_text::splice(&shown, &live.body());
-            live.apply(&crate::live_text::rebase(&user, remote.as_ref()));
-        } else {
-            edited();
-            (self.keep)(&typed);
+        match (&self.live, &self.text) {
+            (Some(live), Some(text)) => match text.borrow_mut().typed(&typed) {
+                Ok(crate::live_text::Typed::Merged { relay }) => {
+                    if let Some(update) = relay {
+                        live.relay(update);
+                    }
+                }
+                Ok(crate::live_text::Typed::NotLive | crate::live_text::Typed::Nothing) => {}
+                Err(why) => {
+                    let mut failed = self.failed;
+                    failed.set(Some(why));
+                }
+            },
+            _ => {
+                if *self.shown.borrow() != typed {
+                    edited();
+                    (self.keep)(&typed);
+                    *self.shown.borrow_mut() = typed;
+                }
+            }
         }
-        *self.shown.borrow_mut() = typed;
+    }
+
+    /// `body` into the text area, the caret kept with its text.
+    fn write(&self, body: &str) {
+        if let Some(area) = self.area() {
+            let now = area.value();
+            if now != body {
+                let caret =
+                    |at: Option<u32>| at.map(|at| crate::live_text::caret_after(at, &now, body));
+                let (start, end) = (
+                    caret(area.selection_start().ok().flatten()),
+                    caret(area.selection_end().ok().flatten()),
+                );
+                area.set_value(body);
+                if let (Some(start), Some(end)) = (start, end) {
+                    let _ = area.set_selection_range(start, end);
+                }
+            }
+        }
+        (self.keep)(body);
+    }
+
+    /// The session attached: the text area shows the document, and is
+    /// typed into from now on (what it held before is dropped: it was
+    /// read-only).
+    fn attached(&self) {
+        let Some(text) = &self.text else { return };
+        let body = text.borrow_mut().attach();
+        self.write(&body);
     }
 
     /// The text area brought to the live document: typing first taken
     /// in, then the document's text shown with the caret where its text
     /// went. Not while an IME composes (after it ends).
     fn show_document(&self) {
-        let Some(live) = &self.live else {
-            self.absorb();
-            return;
-        };
         if self.composing.get() {
             return;
         }
         self.absorb();
-        let body = live.body();
-        if let Some(area) = self.area() {
-            let now = area.value();
-            if now != body {
-                let caret =
-                    |at: Option<u32>| at.map(|at| crate::live_text::caret_after(at, &now, &body));
-                let (start, end) = (
-                    caret(area.selection_start().ok().flatten()),
-                    caret(area.selection_end().ok().flatten()),
-                );
-                area.set_value(&body);
-                if let (Some(start), Some(end)) = (start, end) {
-                    let _ = area.set_selection_range(start, end);
-                }
-            }
+        let Some(text) = &self.text else { return };
+        if !text.borrow().is_live() {
+            return;
         }
-        (self.keep)(&body);
-        *self.shown.borrow_mut() = body;
+        let body = text.borrow_mut().show();
+        self.write(&body);
     }
 }
 
@@ -626,6 +674,7 @@ fn NoteText(path: String, text: String) -> Element {
     let initial = use_hook(|| body0.to_owned());
     let mut ready = use_signal(|| vault.org.is_none());
     let mut lost = use_signal(|| None::<String>);
+    let failed = use_signal(|| None::<String>);
     let created = use_hook(|| {
         source
             .files()
@@ -646,12 +695,21 @@ fn NoteText(path: String, text: String) -> Element {
             Some((live, changes)) => (Some(std::rc::Rc::new(live)), Some(changes)),
             None => (None, None),
         };
+        let text = live.as_ref().map(|live| {
+            std::cell::RefCell::new(crate::live_text::LiveText::new(
+                live.doc(),
+                vault_proto::COLLAB_BODY_CONTAINER,
+                body0,
+            ))
+        });
         let editor = std::rc::Rc::new(Editor {
             id: format!("note-text-{}", NEXT.fetch_add(1, Ordering::Relaxed)),
             shown: std::cell::RefCell::new(body0.to_owned()),
             composing: std::cell::Cell::new(false),
             live,
+            text,
             keep,
+            failed,
         });
         if let Some(mut changes) = changes {
             let heard = std::rc::Rc::clone(&editor);
@@ -661,11 +719,15 @@ fn NoteText(path: String, text: String) -> Element {
                 while let Some(h) = changes.next().await {
                     match h {
                         Heard::Attached => {
-                            heard.show_document();
-                            lost.set(None);
-                            if !*ready.peek() {
+                            // The first attach makes it editable; a later
+                            // one (after a drop or a re-dial) catches up.
+                            if *ready.peek() {
+                                heard.show_document();
+                            } else {
+                                heard.attached();
                                 ready.set(true);
                             }
+                            lost.set(None);
                         }
                         Heard::Changed => {
                             if *ready.peek() {
@@ -717,6 +779,12 @@ fn NoteText(path: String, text: String) -> Element {
                 if read_only {
                     p { "data-testid": "note-connecting", style: "margin: 0 0 12px; font-size: 13px; color: {t.ink_3};",
                         "Connecting to the node… The note can be edited once it is live."
+                    }
+                }
+                if let Some(why) = failed() {
+                    p { "data-testid": "note-failed-edit", role: "alert",
+                        style: "margin: 0 0 12px; font-size: 13px; color: {t.ink};",
+                        "An edit did not reach the note ({why}). Copy what you typed before reloading."
                     }
                 }
                 if let Some(why) = lost() {

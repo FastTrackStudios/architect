@@ -50,6 +50,8 @@ mod browser;
 pub mod demo;
 pub mod keys;
 pub mod live_text;
+#[cfg(any(target_arch = "wasm32", test))]
+mod read_only;
 
 #[cfg(target_arch = "wasm32")]
 pub use browser::start;
@@ -244,24 +246,53 @@ pub fn org_note_folder(folder: &str, vaults: &[String], active: Option<&str>) ->
         .map(str::to_owned)
 }
 
+/// `Untitled.md`, `Untitled 2.md`, … `Untitled 999.md` in `folder` (the
+/// vault's root when empty).
+pub fn untitled_paths(folder: &str) -> impl Iterator<Item = String> + '_ {
+    (1..=999_u32).map(move |n| {
+        let name = if n == 1 {
+            "Untitled.md".to_owned()
+        } else {
+            format!("Untitled {n}.md")
+        };
+        if folder.is_empty() {
+            name
+        } else {
+            format!("{folder}/{name}")
+        }
+    })
+}
+
 /// The first free `Untitled.md`, `Untitled 2.md`, … in `folder` (the
 /// vault's root when empty).
 #[must_use]
 pub fn untitled_path(folder: &str, taken: impl Fn(&str) -> bool) -> Option<String> {
-    (1..=999_u32)
-        .map(|n| {
-            let name = if n == 1 {
-                "Untitled.md".to_owned()
-            } else {
-                format!("Untitled {n}.md")
-            };
-            if folder.is_empty() {
-                name
-            } else {
-                format!("{folder}/{name}")
-            }
-        })
-        .find(|p| !taken(p))
+    untitled_paths(folder).find(|p| !taken(p))
+}
+
+/// Makes the first of `paths` that `create` can make; the path made.
+///
+/// `create` answers `Ok(true)` when it made the note, `Ok(false)` when a
+/// note is there already (made by someone else since this tab listed the
+/// vault), so the next name is tried.
+///
+/// # Errors
+///
+/// `create` failed otherwise, or every path was taken.
+pub async fn create_first<F, Fut>(
+    paths: impl IntoIterator<Item = String>,
+    mut create: F,
+) -> Result<String, String>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<bool, String>>,
+{
+    for path in paths {
+        if create(path.clone()).await? {
+            return Ok(path);
+        }
+    }
+    Err("every Untitled name there is taken".to_owned())
 }
 
 /// Percent-decode a query value (`+` is a space).
@@ -539,6 +570,44 @@ mod tests {
         let path = untitled_path("demo", |p| p == "demo/Untitled.md").unwrap();
         assert_eq!(path, "demo/Untitled 2.md");
         assert_eq!(untitled_path("", |_| false).as_deref(), Some("Untitled.md"));
+    }
+
+    /// Polls a future that never waits (the fakes below answer at once).
+    fn ready<T>(f: impl std::future::Future<Output = T>) -> T {
+        let mut f = std::pin::pin!(f);
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        match f.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(v) => v,
+            std::task::Poll::Pending => panic!("the fake waited"),
+        }
+    }
+
+    /// #628 H1: `Untitled.md` was made by someone else after this tab
+    /// listed the vault. The node refuses to make it again (it would be
+    /// emptied), and the next name is made instead.
+    #[test]
+    fn a_new_note_never_takes_a_name_made_since_the_listing() {
+        let on_node = std::cell::RefCell::new(vec!["demo/Untitled.md".to_owned()]);
+        let create = |path: String| {
+            let made = !on_node.borrow().contains(&path);
+            if made {
+                on_node.borrow_mut().push(path);
+            }
+            std::future::ready(Ok::<bool, String>(made))
+        };
+        // The tab's listing does not know `Untitled.md`.
+        let listed = |_: &str| false;
+        let tried = untitled_paths("demo").filter(|p| !listed(p));
+        assert_eq!(
+            ready(create_first(tried, create)).as_deref(),
+            Ok("demo/Untitled 2.md")
+        );
+        // A refusal for another reason is said, not skipped past.
+        let failing = |_: String| std::future::ready(Err::<bool, String>("offline".into()));
+        assert_eq!(
+            ready(create_first(untitled_paths("demo"), failing)),
+            Err("offline".to_owned())
+        );
     }
 
     #[test]

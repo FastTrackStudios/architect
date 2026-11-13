@@ -401,6 +401,14 @@ web-test PORT="18080":
     for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:{{PORT}}/" && break; sleep 0.1; done
     ARCHITECT_WEB_ORIGIN="http://127.0.0.1:{{PORT}}" node --test apps/web/test/web.test.mjs
 
+# The app on the org's vaults, signed in, in a real browser
+# (apps/web/test/org-vaults.test.mjs): read-only until a note is live, the
+# navigator changing nothing, a new note never emptying another, the lane
+# dialled again with a renewed token, Sign out revoking the sign-in.
+# Against the running local stack (`just dev`); WEB is its web app.
+web-org-test WEB="http://127.0.0.1:7413":
+    ARCHITECT_ORG_WEB="{{WEB}}" ARCHITECT_ORG_VAULT="${DEVENV_STATE:-$PWD/.devenv/state}/stack/node/data/vaults/demo" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/org-vaults.test.mjs
+
 # A share link's player in a real browser (#511): the headless node
 # (`architect-desktop serve`, built without the window) on a vault of its
 # own with a link share of a two-song gig, in a headless Firefox

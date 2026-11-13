@@ -14,6 +14,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # The demo vault (`apps/ui/demo-vault`), built in: `/app/?demo` (src/demo.rs).
 include_dir = { workspace = true }
+# An open note's typing merged into its live document by Loro, at the
+# version its text area showed (src/live_text.rs).
+loro = { workspace = true }
 
 # The browser half runs on wasm32-unknown-unknown only; natively the crate
 # is its pure part (routes, config, views), which its tests cover.
@@ -33,6 +36,8 @@ gloo-timers = { version = "0.3", default-features = false, features = ["futures"
 # An open note kept live with the node: its body on DocSync (src/app/org.rs).
 crdt = { workspace = true, features = ["vox"] }
 futures-channel = "0.3"
+# The note session's outbox (`crdt::sync::SyncedDoc::outbox`).
+tokio = { version = "1", default-features = false, features = ["sync"] }
 futures-util = { version = "0.3", default-features = false }
 architect-shell = { workspace = true, features = ["ui"] }
 architect-workspace = { workspace = true, features = ["ui"] }
@@ -46,6 +51,10 @@ architect-ui = { workspace = true }
 lucide-dioxus = { workspace = true }
 base64 = { workspace = true }
 futures-timer = { workspace = true, features = ["wasm-bindgen"] }
+
+[dev-dependencies]
+# src/read_only.rs's tests: the navigator's source, natively (no UI).
+architect-navigator = { workspace = true }
 
 [lints]
 workspace = true
