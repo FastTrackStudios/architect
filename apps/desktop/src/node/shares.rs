@@ -1258,10 +1258,18 @@ impl Shares {
         let Some(issuer) = &self.0.issuer else {
             return Viewer::Anonymous;
         };
-        let user = match issuer.client::<auth_proto::AuthServiceClient>().await {
-            Ok(auth) => auth.whoami(token.clone()).await.map_err(|e| e.to_string()),
-            Err(e) => Err(e),
-        };
+        // Every issuer call is bounded (`IssuerLane::within`, which also
+        // drops a stalled connection): an issuer that never answers makes
+        // the viewer anonymous promptly instead of hanging the page.
+        let user = issuer
+            .within(async {
+                match issuer.client::<auth_proto::AuthServiceClient>().await {
+                    Ok(auth) => auth.whoami(token.clone()).await.map_err(|e| e.to_string()),
+                    Err(e) => Err(e),
+                }
+            })
+            .await
+            .unwrap_or_else(|| Err(ISSUER_SILENT.to_owned()));
         let user = match user {
             Ok(user) => user,
             Err(why) => {
@@ -1272,17 +1280,33 @@ impl Shares {
                 return Viewer::Anonymous;
             }
         };
-        let member = match (
-            &self.0.org,
-            issuer
-                .client::<auth_proto::OrganizationServiceClient>()
-                .await,
-        ) {
-            (Some(org), Ok(client)) => IdentityServer(client)
-                .orgs(&token)
-                .await
-                .is_ok_and(|orgs| orgs.iter().any(|o| o.id == org.id)),
-            _ => false,
+        let member = match &self.0.org {
+            Some(org) => {
+                issuer
+                    .within(async {
+                        match issuer
+                            .client::<auth_proto::OrganizationServiceClient>()
+                            .await
+                        {
+                            Ok(client) => IdentityServer(client)
+                                .orgs(&token)
+                                .await
+                                .is_ok_and(|orgs| orgs.iter().any(|o| o.id == org.id)),
+                            Err(_) => false,
+                        }
+                    })
+                    .await
+            }
+            None => Some(false),
+        };
+        // No answer: not a member this time, and not remembered as one
+        // who is not.
+        let Some(member) = member else {
+            return Viewer::Person {
+                user_id: user.id.to_string(),
+                email: user.email.map(|e| e.to_lowercase()),
+                member: false,
+            };
         };
         let who = Viewer::Person {
             user_id: user.id.to_string(),
@@ -3044,6 +3068,10 @@ fn own_origin(headers: &HeaderMap, secure: bool) -> bool {
     origin.eq_ignore_ascii_case(&format!("{scheme}://{host}"))
 }
 
+/// Why an issuer call failed when it got no answer within the lane's
+/// timeout (`IssuerLane::within`).
+const ISSUER_SILENT: &str = "the issuer did not answer in time";
+
 async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
     let (Some(issuer), Some(origin)) = (&shares.0.issuer, &shares.0.issuer_origin) else {
         return page(
@@ -3052,13 +3080,18 @@ async fn start_signin(shares: &Shares, to: String, secure: bool) -> Response {
             "<p>This node signs nobody in.</p>",
         );
     };
-    let started = match issuer.client::<auth_proto::AuthServiceClient>().await {
-        Ok(auth) => auth
-            .start_device_sign_in("architect-share".to_owned())
-            .await
-            .map_err(|e| e.to_string()),
-        Err(e) => Err(e),
-    };
+    let started = issuer
+        .within(async {
+            match issuer.client::<auth_proto::AuthServiceClient>().await {
+                Ok(auth) => auth
+                    .start_device_sign_in("architect-share".to_owned())
+                    .await
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(e),
+            }
+        })
+        .await
+        .unwrap_or_else(|| Err(ISSUER_SILENT.to_owned()));
     let started = match started {
         Ok(s) => s,
         Err(why) => {
@@ -3155,13 +3188,18 @@ async fn wait_signin(shares: &Shares, headers: &HeaderMap, secure: bool) -> Resp
             "<p>That sign-in ran out. Open the link again to start over.</p>",
         );
     };
-    let polled = match issuer.client::<auth_proto::AuthServiceClient>().await {
-        Ok(auth) => auth
-            .poll_device_sign_in(device_code, Some("architect-share".to_owned()))
-            .await
-            .map_err(|e| format!("{e:?}")),
-        Err(e) => Err(e),
-    };
+    let polled = issuer
+        .within(async {
+            match issuer.client::<auth_proto::AuthServiceClient>().await {
+                Ok(auth) => auth
+                    .poll_device_sign_in(device_code, Some("architect-share".to_owned()))
+                    .await
+                    .map_err(|e| format!("{e:?}")),
+                Err(e) => Err(e),
+            }
+        })
+        .await
+        .unwrap_or_else(|| Err(ISSUER_SILENT.to_owned()));
     match polled {
         Ok(bundle) => {
             shares
@@ -3197,6 +3235,21 @@ async fn wait_signin(shares: &Shares, headers: &HeaderMap, secure: bool) -> Resp
             response.headers_mut().insert(
                 "refresh",
                 HeaderValue::from_static("3; url=/s/_signin/wait"),
+            );
+            response
+        }
+        // No answer is not a refusal: the sign-in stays pending and the
+        // page asks again.
+        Err(why) if why == ISSUER_SILENT => {
+            tracing::warn!("a share sign-in's poll got no answer from the issuer");
+            let mut response = page(
+                StatusCode::BAD_GATEWAY,
+                "Sign-in unavailable",
+                "<p>The sign-in server did not answer. This page tries again by itself.</p>",
+            );
+            response.headers_mut().insert(
+                "refresh",
+                HeaderValue::from_static("5; url=/s/_signin/wait"),
             );
             response
         }
@@ -3346,6 +3399,88 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An issuer that takes connections and never answers.
+    async fn stalled_issuer() -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let held = tokio::spawn(async move {
+            // Each connection held open, unanswered, until the test ends.
+            while let Ok((socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let _held = socket;
+                    std::future::pending::<()>().await;
+                });
+            }
+        });
+        (url, held)
+    }
+
+    /// A stalled issuer fails share sign-ins closed, promptly: a signed-in
+    /// viewer is anonymous, and starting or polling a sign-in answers that
+    /// the sign-in server did not answer, each within the lane's timeout
+    /// rather than never.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_stalled_issuer_fails_share_sign_ins_closed_within_the_timeout() {
+        let (issuer, held) = stalled_issuer().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let backend = Backend::single("notes", tmp.path().join("vault")).unwrap();
+        let shares = Shares::new(
+            backend,
+            tmp.path(),
+            None,
+            Some(&issuer),
+            architect_sites::Blocks::default(),
+            LayerRules::default(),
+        );
+        let bound = super::super::org::ISSUER_TIMEOUT + Duration::from_secs(5);
+
+        let nonce = "stalled-test".to_owned();
+        shares
+            .0
+            .signins
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                nonce.clone(),
+                Pending {
+                    device_code: "device".into(),
+                    to: "/s/x/".into(),
+                    until: Instant::now() + Duration::from_secs(60),
+                },
+            );
+        let mut signed_in = HeaderMap::new();
+        signed_in.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer not-a-real-token"),
+        );
+        let mut waiting = HeaderMap::new();
+        waiting.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{SIGNIN_COOKIE}={nonce}")).unwrap(),
+        );
+        let (viewer, started, polled) = tokio::join!(
+            tokio::time::timeout(bound, shares.viewer(&signed_in)),
+            tokio::time::timeout(bound, start_signin(&shares, "/s/x/".into(), false)),
+            tokio::time::timeout(bound, wait_signin(&shares, &waiting, false)),
+        );
+        let viewer = viewer.expect("a viewer's sign-in hung on a stalled issuer");
+        assert!(matches!(viewer, Viewer::Anonymous));
+        let started = started.expect("starting a share sign-in hung on a stalled issuer");
+        assert_eq!(started.status(), StatusCode::BAD_GATEWAY);
+        let polled = polled.expect("polling a share sign-in hung on a stalled issuer");
+        assert_eq!(polled.status(), StatusCode::BAD_GATEWAY);
+        assert!(
+            shares
+                .0
+                .signins
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(&nonce),
+            "no answer is not a refusal: the sign-in stays pending"
+        );
+        held.abort();
+    }
 
     /// Signing in is not something a share page's frame, or another site,
     /// can make a visitor start by sending them there.

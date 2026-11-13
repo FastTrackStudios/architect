@@ -39,6 +39,7 @@ mod embed;
 mod favourites;
 mod frames;
 mod keys;
+pub mod org;
 mod page;
 mod recording;
 mod screen;
@@ -53,13 +54,22 @@ use architect::action::ActionList;
 use architect_commands::{Command, Overlay, PaletteView};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
-use lucide_dioxus::{Command as CommandIcon, Files, LogIn, Search, Settings2, SquarePen};
+use lucide_dioxus::{Command as CommandIcon, Files, LogIn, LogOut, Search, Settings2, SquarePen};
 
 /// Which app the page is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub enum Mode {
     /// The demo vault in the tab's memory: nothing signed in, nothing sent.
     Demo,
+    /// The signed-in account's org vaults, over the node (`org`).
+    Org {
+        /// The vaults, listed, and the lane they came over.
+        vault: vault::WebVault,
+        /// Who is signed in (their name, else their email).
+        person: String,
+        /// The org's slug.
+        org: String,
+    },
 }
 
 /// Mounts the app in `#app`, over what the page showed while it loaded.
@@ -100,10 +110,12 @@ fn WebApp() -> Element {
     // Before anything that evaluates: the page allows no `eval`.
     page::use_safe_document();
     page::use_keyboard_feed();
-    let web_vault = use_context_provider(|| match mode {
+    let web_vault = use_context_provider(|| match &mode {
         Mode::Demo => vault::WebVault {
             source: vault::demo_vault(),
+            org: None,
         },
+        Mode::Org { vault, .. } => vault.clone(),
     });
     let workspace = vault::use_vault_workspace(&web_vault.source).signal();
     let screen = screen::use_browser_screen();
@@ -156,8 +168,14 @@ fn WebApp() -> Element {
             .shortcut("⌘,"),
         move || settings.show(None),
     );
-    let demo = mode == Mode::Demo;
-    architect_commands::use_command(Command::new("WEB_SIGN_IN", "Sign in").group("App"), sign_in);
+    let demo = matches!(mode, Mode::Demo);
+    // The demo's way out; signed in, the account's menu signs out.
+    if demo {
+        architect_commands::use_command(
+            Command::new("WEB_SIGN_IN", "Sign in").group("App"),
+            sign_in,
+        );
+    }
     // The Now Playing bar's presses on ⌘K, and a favourite's round button
     // (`PLAYHEAD_TOGGLE`, #607): the app's own, on the active source.
     for (id, name) in [
@@ -171,7 +189,7 @@ fn WebApp() -> Element {
     }
     // The bottom slots: the open note's type's favourites, else the
     // web app's own.
-    let slots = favourites::use_web_favourites(workspace, &web_vault.source, commands);
+    let slots = favourites::use_web_favourites(workspace, &web_vault.source, &commands);
     let set = slots.set.clone();
     let tabs = set.slots().to_vec();
     let separate = set.primary.clone();
@@ -183,13 +201,25 @@ fn WebApp() -> Element {
             settings.show(None);
         },
     )];
-    let menu = shell::Menu::new()
-        .item("Sign in", icon!(LogIn), move |()| sign_in())
-        .item("Settings", icon!(Settings2), move |()| settings.show(None));
-    let account = shell::Account::new("Demo")
-        .detail("Nothing leaves this tab")
-        .color("#b45309")
-        .menu(menu);
+    let account = match &mode {
+        Mode::Demo => shell::Account::new("Demo")
+            .detail("Nothing leaves this tab")
+            .color("#b45309")
+            .menu(
+                shell::Menu::new()
+                    .item("Sign in", icon!(LogIn), move |()| sign_in())
+                    .item("Settings", icon!(Settings2), move |()| settings.show(None)),
+            ),
+        Mode::Org { person, org, .. } => shell::Account::new(person.clone())
+            .detail(org.clone())
+            .menu(
+                shell::Menu::new()
+                    .item("Settings", icon!(Settings2), move |()| settings.show(None))
+                    .item("Sign out", icon!(LogOut), move |()| {
+                        crate::browser::sign_out();
+                    }),
+            ),
+    };
     let mut status = vec![
         shell::StatusItem::new("demo", "Demo: nothing is saved")
             .hint("Sign in to keep your notes")
@@ -198,8 +228,40 @@ fn WebApp() -> Element {
             .hint("Every command")
             .on_press(move |()| commands.show(Overlay::Palette)),
     ];
-    if !demo {
-        status.retain(|s| s.id != "demo");
+    // What failed on the org's vaults (a read, a new note, the session):
+    // the latest, in the status line, until pressed.
+    let mut problem = use_signal(|| None::<String>);
+    use_hook(|| {
+        if let Some(org) = &web_vault.org {
+            let mut problems = org.problems();
+            spawn(async move {
+                use futures_util::StreamExt as _;
+                while let Some(p) = problems.next().await {
+                    problem.set(Some(p));
+                }
+            });
+        }
+    });
+    match &mode {
+        Mode::Demo => {}
+        Mode::Org { org, .. } => {
+            status.retain(|s| s.id != "demo");
+            status.insert(
+                0,
+                shell::StatusItem::new("org", format!("{org} · on the node")).hint(
+                    "Your org's vaults: a note's text and new notes are written to the node; \
+                     renaming, moving and deleting are in the desktop app",
+                ),
+            );
+            if let Some(p) = problem() {
+                status.insert(
+                    1,
+                    shell::StatusItem::new("problem", format!("⚠ {p}"))
+                        .hint("Press to dismiss")
+                        .on_press(move |()| problem.set(None)),
+                );
+            }
+        }
     }
     // A phone's demo: a strip over the top says so, the shell laid out
     // under it (as under a notch).
@@ -228,7 +290,7 @@ fn WebApp() -> Element {
                         current,
                         on_tab: move |id: &'static str| {
                             if !set.press(id) {
-                                favourites::own_tab(id, workspace, commands);
+                                favourites::own_tab(id, workspace, &commands);
                             }
                         },
                         separate,
@@ -245,8 +307,10 @@ fn WebApp() -> Element {
                             shell::BarAction::new(vault::NEW_NOTE, "New note", icon!(SquarePen)),
                             shell::BarAction::new(architect_command_palette::OPEN_ACTION, "Commands", icon!(CommandIcon)),
                             shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
-                            shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn)),
-                        ],
+                        ]
+                        .into_iter()
+                        .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
+                        .collect::<Vec<_>>(),
                         now_playing: rsx! { architect_playhead::ui::NowPlayingBar {} },
                         vault::VaultPage {}
                     }

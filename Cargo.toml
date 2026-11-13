@@ -184,7 +184,7 @@ architect-calendar = { path = "extensions/calendar" }
 architect-dayplan = { path = "extensions/dayplan" }
 # Threads (#348): comments on any entity, a built-in extension.
 architect-threads = { path = "features/threads" }
-architect-playhead = { path = "features/playhead" }
+architect-playhead = { path = "features/playhead", default-features = false }
 # Notify (#348): notifications and the centre, a built-in extension.
 architect-notify = { path = "features/notify" }
 architect-updates = { path = "features/updates" }
@@ -303,6 +303,7 @@ jsonwebtoken = "9"
 rand = "0.8"
 sha1 = "0.10"
 sha2 = "0.10"
+subtle = "2.6"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 # WebAuthn. `danger-allow-state-serialisation` lets the challenge state be
 # held in the verification table between the two halves of a ceremony —

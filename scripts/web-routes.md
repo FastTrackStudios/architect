@@ -60,7 +60,21 @@ What the server adds around them, as before this bundle carried the site:
   to the node, before the static files;
 - `/auth/callback` (and `/auth/callback/`) is served `app/index.html`, the
   sign-in's way back;
-- `app/config.json` is the server's own.
+- `app/config.json` is the server's own;
+- its access log keeps the `Sec-WebSocket-Protocol` request header out:
+  the web app's bearer travels in it (`vox.bearer.<token>`) on the node's
+  `/org/<slug>/vox`. Caddy redacts `Authorization` and cookies by default
+  but logs this header (Go's spelling, `Sec-Websocket-Protocol`):
+
+  ```
+  log {
+      format filter {
+          fields {
+              request>headers>Sec-Websocket-Protocol delete
+          }
+      }
+  }
+  ```
 
 The web app's page (`/app/`, `/app/index.html` and `/auth/callback`)
 carries a Content-Security-Policy `<meta>`, and a server sends this one

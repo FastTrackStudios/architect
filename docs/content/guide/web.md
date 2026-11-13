@@ -73,7 +73,18 @@ desktop app uses the same client id, over the device grant
    session in `localStorage`, and moves to `/app/`.
 3. Before each start the session is renewed with its refresh token when it
    is about to run out (`oidc::refresh_if_needed`). A token the issuer
-   refuses is renewed once, then the person signs in again.
+   refuses is renewed once, then the person signs in again. The refresh
+   token is single use (the client `architect` is registered with
+   `rotate_refresh_tokens`): each renewal answers a new one, and the old
+   one presented again more than 10 seconds later revokes the whole
+   sign-in (a copy was taken). Within those seconds (two tabs renewing at
+   once, a response lost on the way) it answers the same new one, so the
+   sign-in never splits in two.
+4. **Sign out** revokes the sign-in at the issuer (`/oauth2/revoke`,
+   RFC 7009; `apps/web/src/browser.rs` `revoke`), then forgets it here. Its
+   refresh token mints nothing more and its access tokens are refused
+   where the issuer takes them; the issuer session the person signed in
+   with stays, so other apps signed in from it are not signed out.
 
 The issuer must know the client. For architect.fasttrackstudio.app that is
 fts-auth's `appDomains` entry `architect.fasttrackstudio.app`, which
@@ -110,10 +121,87 @@ inline styles, the components' own; `script-src` is `'self'
 `localStorage`. Pop-out windows, folders on the device, the files agent
 and extensions (#495) are not in the browser.
 
-Signed in, the app shows who is signed in, the node's status over
-same-origin HTTP (`POST /node/status`,
-`apps/desktop/src/node/service.rs` `Node`), and links to the demo, the
-docs and the desktop download.
+**Signed in**, when this host's node hosts the account's org (its status
+names the org), the app is the same app on the org's vaults: it dials the
+node's org lane, `/org/{slug}/vox` on this origin, with its session as the
+WebSocket's `vox.bearer.<token>` subprotocol (never in a URL), lists the
+vaults' notes (`vault_proto::notes` `Notes`, each vault a folder), reads
+them in the background so the navigator fills its previews, and keeps an
+open note live with the node (`crdt::sync::SyncedDoc` on
+`vault_proto::collab_doc_id`): typing reaches the node's document and
+file, and another's typing shows as it comes.
+
+- **The bearer** is the issuer's short-lived access token: the web app is
+  the public client `architect`, which gets no issuer session. The node
+  hands it to the issuer's `whoami` and org list, which take a
+  first-party client's access token (one registered `first_party`, with
+  `openid`, the default audience; `skip_consent` alone is not enough) as
+  well as a session; the node
+  verifies no JWT itself. Before the token runs out the app renews it and
+  dials the lane again (`apps/web/src/browser.rs` `keep_lane_signed_in`,
+  `apps/web/src/app/org.rs` `OrgVaults::redial`); every open note's
+  session attaches on the new lane.
+- **The node trusts a bearer for 30 seconds** (`lane_recheck_secs`,
+  `ARCHITECT_LANE_RECHECK_SECS`; `apps/desktop/src/node/org.rs`
+  `IssuerSessions`), then asks the issuer again. An open note's live
+  session checks its bearer as often and ends once it is refused: signed
+  out, revoked, expired or no longer a member, it ends within about a
+  minute, not when the connection happens to drop (`VaultSync`). The
+  bearer checked is the one the session's call was admitted with, sent on
+  the connection or with the call. When the issuer cannot be reached an
+  open note is kept for 5 minutes after its last good check
+  (`lane_issuer_grace_secs`, `ARCHITECT_LANE_ISSUER_GRACE_SECS`), then
+  ends; a new call is refused meanwhile. An issuer that holds a call
+  without answering counts as unreachable after 10 seconds, or the
+  re-check interval if that is shorter (`apps/desktop/src/node/org.rs`
+  `ISSUER_TIMEOUT`).
+- **Only the app's own origin opens the lane from a browser.** A WebSocket
+  upgrade with any other `Origin` is refused (403); one without `Origin`
+  (another node, the desktop app) goes on to the bearer check. A web app
+  served from another origin is listed in `ARCHITECT_LANE_ORIGINS`
+  (`apps/desktop/src/node/org.rs` `origin_allowed`).
+- **A note may be typed in once its session has attached**, when the
+  node's copy is in the document; until then the text area is read-only
+  and says it is connecting. The text area is not a controlled input:
+  another's edit is written into it with the caret kept, never during an
+  IME composition. Typing is read back as a splice of the text the text
+  area last showed and handed to Loro at the document version it showed,
+  so Loro merges it with whatever arrived since, as it merges any two
+  peers (`apps/web/src/live_text.rs` `LiveText`, `merge_at`). An edit that
+  does not apply is said in the note.
+- **A new note** goes in a vault (the open note's, else the first) and is
+  made with `Notes::create` before it opens. That refuses a path a note
+  holds already, so a note someone else made since the listing is never
+  emptied: the next `Untitled N` is tried. Renaming, moving and deleting
+  notes, and their tags and properties, are read-only in the browser for
+  now (`apps/web/src/read_only.rs` `NodeLayout`): the navigator says so
+  when they are tried, from its menu, its keys, the palette or a drag.
+- **What fails is shown**: a note that cannot be read says why, and a
+  failed background read, new note, lost session or ended sign-in is in
+  the status line.
+- **The proxy's access log must not record the bearer.** A WebSocket has
+  no other header to carry it in, and a reverse proxy logs
+  `Sec-WebSocket-Protocol` unless told not to (Caddy redacts
+  `Authorization` and cookies by default, not this header). Delete or
+  redact that request header in the proxy's log format. The node itself
+  never logs it, not even at `RUST_LOG=trace`: every host's log filter
+  holds the WebSocket library, which dumps frames, at INFO, as a second
+  filter no `RUST_LOG` directive can widen
+  (`crates/architect/src/host.rs` `log_filter`;
+  `crates/architect/tests/host_mounts.rs`
+  `the_host_never_logs_a_browser_bearer`, `apps/desktop/tests/node.rs`
+  `the_node_never_logs_a_browser_bearer_even_at_trace`).
+
+Nothing is kept in the browser between visits: a reload lists and reads
+again (no IndexedDB or OPFS copy yet), and with the node out of reach the
+app says why. A node that names no org, or a lane that refuses the
+session (not a member), leaves the status page: who is signed in, the
+node's status over same-origin HTTP (`POST /node/status`,
+`apps/desktop/src/node/service.rs` `Node`), why the vaults did not open,
+and links to the demo, the docs and the desktop download.
+
+`just web-org-test` drives all of this in a headless Firefox against the
+running local stack (`apps/web/test/org-vaults.test.mjs`).
 
 The sandbox's browser demo, which used to be `apps/web`, is
 `apps/sandbox/web` (`just sandbox-web`).

@@ -309,6 +309,7 @@ where
             get(authorize::<S>).post(authorize::<S>),
         )
         .route("/oauth2/token", post(token::<S>))
+        .route("/oauth2/revoke", post(revoke::<S>))
         .route("/oauth2/userinfo", get(userinfo::<S>).post(userinfo::<S>))
         // ── Social sign-in and account linking ───────────────────────
         .route("/auth/social/{provider}/start", get(social_start::<S>))
@@ -345,6 +346,7 @@ where
         "userinfo_endpoint": discovery.userinfo_endpoint,
         "jwks_uri": discovery.jwks_uri,
         "registration_endpoint": discovery.registration_endpoint,
+        "revocation_endpoint": discovery.revocation_endpoint,
         "scopes_supported": discovery.scopes_supported,
         "response_types_supported": discovery.response_types_supported,
         "grant_types_supported": discovery.grant_types_supported,
@@ -550,6 +552,38 @@ where
         "expires_in": response.expires_in,
         "scope": response.scope,
     })))
+}
+
+/// RFC 7009 revocation: the grant of `token` (a refresh token or an
+/// access token) ends, whatever kind it is; 200 with an empty body, also
+/// for a token that is unknown or already revoked. What a browser app's
+/// Sign out calls, so a copied refresh token is dead with it.
+async fn revoke<S>(
+    State(state): State<HttpState<S>>,
+    axum::extract::Form(form): axum::extract::Form<RevokeForm>,
+) -> Result<Json<Value>, ApiError>
+where
+    S: AuthStorage,
+{
+    state
+        .auth
+        .revoke_oidc_token(architect_auth::RevokeOidcToken {
+            token: form.token,
+            client_id: form.client_id,
+            client_secret: form.client_secret,
+        })
+        .await?;
+    Ok(Json(json!({})))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RevokeForm {
+    pub token: String,
+    pub client_id: String,
+    /// A confidential client's; RFC 7009's `token_type_hint` is not read
+    /// (every kind is looked up).
+    #[serde(default)]
+    pub client_secret: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1359,9 +1393,10 @@ where
         outcome("no_bearer");
         return Err(ApiError::from(AuthFlowError::InvalidCredentials));
     };
+    // Its sign-in still in force too: a signed-out app's token is refused.
     let claims = if let Ok(verification) = state
         .auth
-        .verify_jwt(VerifyJwt {
+        .verify_signed_in_jwt(VerifyJwt {
             token: access_token,
             audience: None,
         })

@@ -372,6 +372,12 @@ impl Stack {
                     "ARCHITECT_HOST_ORG",
                     fill.map_or_else(|| fill::DEMO_NODE_ORG.to_owned(), |f| f.node_org.clone()),
                 ),
+                // The web app's origin (`dx serve`'s proxy may not keep the
+                // `Host` the browser asked): it opens the org lane.
+                pair(
+                    "ARCHITECT_LANE_ORIGINS",
+                    format!("http://127.0.0.1:{0},http://localhost:{0}", p.web),
+                ),
                 // No relays and no lookup: it cannot find or be found by a
                 // peer anywhere but this machine.
                 pair("ARCHITECT_IROH", "local".to_owned()),
@@ -970,6 +976,10 @@ pub fn auth_env(run: &AuthRun) -> Vec<(String, String)> {
             "scopes": WEB_SCOPES,
             "public_client": true,
             "skip_consent": true,
+            // The issuer's own app: its access token answers `whoami` and
+            // the org list (a node asks the issuer for a browser's bearer).
+            "first_party": true,
+            "rotate_refresh_tokens": true,
         }]);
         vars.push(("AUTH_OIDC_CLIENTS".to_owned(), clients.to_string()));
         // Its page is another origin than the issuer's here (in production
