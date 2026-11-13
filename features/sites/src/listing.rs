@@ -19,6 +19,9 @@ use vault::obsidian::LinkIndex;
 /// A vault read from its folder: what [`select`] lists from.
 pub use vault::obsidian::Vault;
 use vault::obsidian::base_query::vault_to_rows;
+/// A vault file opened never through a symlink: what a share's archive
+/// reads.
+pub use vault::obsidian::open_own;
 
 use crate::frontmatter::Meta;
 use crate::scope::Scope;

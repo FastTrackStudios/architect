@@ -22,9 +22,16 @@ fn press(owner: &str, action: &str, mut args: Value) {
     let _ = architect_playhead::ask(&Caller::App, action, &args);
 }
 /// A note's recording (its `recording` property) on the app's own
-/// source: one item, played from the note.
+/// source: one item, played from the note, under its `artist` (else
+/// "Recording") and with its `cover` as its art.
 #[component]
-pub fn RecordingRow(path: String, title: String, recording: String) -> Element {
+pub fn RecordingRow(
+    path: String,
+    title: String,
+    recording: String,
+    #[props(default)] artist: Option<String>,
+    #[props(default)] cover: Option<String>,
+) -> Element {
     let t = use_shell().theme;
     let mine = architect_playhead::ui::use_playhead();
     let on = mine().active.as_ref().is_some_and(|a| {
@@ -35,8 +42,20 @@ pub fn RecordingRow(path: String, title: String, recording: String) -> Element {
             press(OWN, "PLAYHEAD_PAUSE", json!({}));
             return;
         }
-        let item =
-            json!({ "id": path, "title": title, "subtitle": "Recording", "media": recording });
+        let subtitle = artist
+            .clone()
+            .filter(|a| !a.trim().is_empty())
+            .unwrap_or_else(|| "Recording".to_owned());
+        let mut item =
+            json!({ "id": path, "title": title, "subtitle": subtitle, "media": recording });
+        if let (Some(c), Some(o)) = (
+            cover
+                .as_deref()
+                .filter(|c| architect_playhead::model::vault_path(c)),
+            item.as_object_mut(),
+        ) {
+            o.insert("art".to_owned(), Value::from(c));
+        }
         let current = architect_playhead::with(|d| {
             d.source(OWN)
                 .and_then(|s| s.item().map(|i| i.id == path))

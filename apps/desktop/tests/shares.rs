@@ -3878,3 +3878,145 @@ async fn a_view_that_did_not_declare_the_read_gets_nothing() {
         w.host.stop().await;
     }
 }
+
+// ── Symlinks ─────────────────────────────────────────────────────────
+
+/// A link follows no symlink: not one to a file outside the vault, not
+/// one inside it naming a private folder's file or `.git`, not a
+/// symlinked folder, not a file swapped for a symlink after the build,
+/// not a symlink planted in the link's built output; on its pages, its
+/// `_files.json`, its zip and its byte route alike.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_serves_nothing_through_a_symlink() {
+    use std::os::unix::fs::symlink;
+    const SECRET: &str = "outside secret";
+    const GIT: &str = "[remote] token";
+    // The world's private note and picture, and `.git`'s config.
+    let secrets = [SECRET, GIT, "The secret plan.", "private png"];
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    let outside = w.tmp.path().join("outside");
+    touch(&outside, "secret.png", SECRET);
+    touch(
+        &outside,
+        "secret.md",
+        &format!("---\ntitle: Leaked\n---\n{SECRET}\n"),
+    );
+    touch(&vault, ".git/config", GIT);
+    std::fs::write(vault.join("Private/.fts-private"), "").unwrap();
+    touch(
+        &vault,
+        "Shared/leak.md",
+        "---\ntitle: Leak\n---\n![[evil.png]]\n\n![[out/secret.png]]\n\n![[x.png]]\n\n![[priv/cover.png]]\n\n[[evil]] [[notes]]\n",
+    );
+    // Out of the vault.
+    symlink(outside.join("secret.png"), vault.join("Shared/evil.png")).unwrap();
+    symlink(outside.join("secret.md"), vault.join("Shared/evil.md")).unwrap();
+    symlink(&outside, vault.join("Shared/out")).unwrap();
+    // Inside it, to what it never shares.
+    symlink("../Private/plan.md", vault.join("Shared/notes.md")).unwrap();
+    symlink("../.git/config", vault.join("Shared/x.png")).unwrap();
+    symlink("../Private", vault.join("Shared/priv")).unwrap();
+    let share = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let link = format!("/s/{}/", share.code);
+    page_with(&w.url(&format!("{link}leak/")), None, "Leak").await;
+
+    let leaks = |what: &str, status: StatusCode, body: &[u8]| {
+        let text = String::from_utf8_lossy(body);
+        for secret in secrets {
+            assert!(
+                !text.contains(secret),
+                "{what}: {status} hands out `{secret}` through a symlink"
+            );
+        }
+    };
+    for path in [
+        "leak/",
+        "Shared/evil.png",
+        "Shared/out/secret.png",
+        "Shared/x.png",
+        "Shared/priv/cover.png",
+        "Shared/notes.md",
+        "Shared/evil.md",
+        "evil/",
+        "notes/",
+        "out/secret.png",
+    ] {
+        let (status, _, body) = get_bytes(&w.url(&format!("{link}{path}"))).await;
+        leaks(path, status, &body);
+    }
+    let files = json_at(&w.url(&format!("{link}_files.json"))).await;
+    leaks("_files.json", StatusCode::OK, files.to_string().as_bytes());
+    let listed = listed_paths(&files);
+    assert!(listed.iter().any(|f| f == "Shared/art.png"), "{listed:?}");
+    for link in ["evil.png", "x.png", "out", "priv", "notes.md", "evil.md"] {
+        assert!(
+            !listed
+                .iter()
+                .any(|f| f.starts_with(&format!("Shared/{link}"))),
+            "{link} listed: {listed:?}"
+        );
+    }
+    let zip = zip_at(&w.url(&format!("{link}_archive.zip"))).await;
+    assert!(
+        zip.iter().any(|(name, _)| name.ends_with("art.png")),
+        "{zip:?}"
+    );
+    for (name, text) in &zip {
+        leaks(name, StatusCode::OK, text.as_bytes());
+    }
+
+    // Swapped after the build: the zip reads the vault as it is now and
+    // follows no symlink.
+    std::fs::remove_file(vault.join("Shared/art.png")).unwrap();
+    symlink(outside.join("secret.png"), vault.join("Shared/art.png")).unwrap();
+    let (status, _, body) = get_bytes(&w.url(&format!("{link}_archive.zip"))).await;
+    leaks("the zip after a swap", status, &body);
+    let (status, _, body) = get_bytes(&w.url(&format!("{link}Shared/art.png"))).await;
+    leaks("Shared/art.png after a swap", status, &body);
+
+    // Planted in the link's built output: never followed out of it.
+    let built = w
+        .tmp
+        .path()
+        .join(format!("host/data/shares/{}/site", share.code));
+    assert!(built.is_dir(), "{}", built.display());
+    symlink(outside.join("secret.png"), built.join("planted.png")).unwrap();
+    symlink(&outside, built.join("planted")).unwrap();
+    for path in ["planted.png", "planted/secret.png", "planted/"] {
+        let (status, _, body) = get_bytes(&w.url(&format!("{link}{path}"))).await;
+        leaks(path, status, &body);
+    }
+
+    // A guest's read of a note: the page's `_note.json` swapped for a
+    // symlink (here to a forged one outside) is refused, never followed.
+    let client = guest(&w);
+    let read = || {
+        client.read(
+            share.code.clone(),
+            String::new(),
+            "Shared/leak.md".to_owned(),
+        )
+    };
+    assert_eq!(read().await.unwrap().title, "Leak");
+    let note = built.join("leak").join(architect_sites::plain::NOTE_FILE);
+    let forged = std::fs::read_to_string(&note)
+        .unwrap()
+        .replacen("\"Leak\"", &format!("\"{SECRET}\""), 1);
+    assert!(forged.contains(SECRET), "{forged}");
+    std::fs::write(outside.join("note.json"), forged).unwrap();
+    std::fs::remove_file(&note).unwrap();
+    symlink(outside.join("note.json"), &note).unwrap();
+    match read().await {
+        Err(architect::ClientError::App(architect_spaces::GuestFault::Building)) => {}
+        other => panic!("a guest read through a symlink: {other:?}"),
+    }
+    w.host.stop().await;
+}

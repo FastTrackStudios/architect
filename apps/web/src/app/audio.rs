@@ -34,6 +34,13 @@ use web_sys::HtmlAudioElement;
 const DEMO: &[&str] = &[
     "Recordings/Amazing Grace.mp3",
     "Recordings/Voice memo chorus melody.mp3",
+    // The Christmas setlist's songs that have a recording
+    // (`Setlists/Merry & Bright.md`, `apps/ui/demo-vault.py`).
+    "Recordings/Christmas/Sleigh Ride.mp3",
+    "Recordings/Christmas/Silent Night.mp3",
+    "Recordings/Christmas/Joy to the World (Unspeakable Joy).mp3",
+    "Recordings/Christmas/This Christmas.mp3",
+    "Recordings/Christmas/All I Want for Christmas Is You.mp3",
 ];
 
 /// This origin's URL for an item's media at vault path `path`, where the

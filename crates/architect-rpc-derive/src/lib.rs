@@ -4089,6 +4089,16 @@ fn emit_http_block(
          body of named arguments. Nest it wherever the app wants \
          (`Router::nest(\"/api\", router)`)."
     );
+    // A service with a vox face serves HTTP through its vox host, whose
+    // futures are `Send` only under `vox` (`#[vox::service]` rewrites the
+    // mirror trait). So its handlers, `mount` and `router` need `vox`, as
+    // its `BindHttp` and its streams do; the typed client does not. An
+    // HTTP-only service's handlers hold the backend and need nothing.
+    let serve_gate = if http_only {
+        quote! {}
+    } else {
+        quote! { #[cfg(feature = "vox")] }
+    };
 
     let trait_impls = if all_fallible && !http_only && matches!(shape, Shape::AllAsync) {
         let doc = format!(
@@ -4123,9 +4133,10 @@ fn emit_http_block(
             /// `(method, path)` for every route `router` / `stream_router` mounts.
             pub const PATHS: &[(&str, &str)] = &[#(#path_pairs),*];
 
-            #(#handlers)*
+            #(#serve_gate #handlers)*
 
             /// Bind every method into a route table — see `router`.
+            #serve_gate
             pub fn mount<S>(backend: S, routes: &mut ::architect::http::HttpRoutes)
             where
                 #backend_bounds,
@@ -4135,6 +4146,7 @@ fn emit_http_block(
             }
 
             #[doc = #router_doc]
+            #serve_gate
             pub fn router<S>(backend: S) -> ::architect::http::Router
             where
                 #backend_bounds,

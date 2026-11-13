@@ -201,6 +201,7 @@ def main():
     scroll_test()
     originals()
     navigator_samples()
+    christmas()
     with open(os.path.join(ROOT, ".empty-folders"), "w") as f:
         f.write("\n".join(EMPTY_FOLDERS) + "\n")
     for e in EMPTY_FOLDERS:
@@ -954,6 +955,140 @@ The songs live in [[Songs/Amazing Grace]]. #lab/sample
       "The chord shapes the songs share: G, C, D and Em.")
 
 
+# ---------------------------------------------------------------- christmas
+
+# A Christmas setlist for the web demo (`/app/?demo`): two sets, nine songs.
+# Its order, set names, titles, artists, keys, tempos, meters and lengths are
+# facts of a real set; nothing else of it is here. No recording, lyric, chart
+# or cover of anyone's: every song plays the demo's silent recording
+# (apps/web/src/app/audio.rs `DEMO`), and its cover is drawn below, abstract
+# and new. Four songs have no recording yet, as in the real set: their rows
+# cannot be played. Run alone with `python3 -I apps/ui/demo-vault.py
+# --christmas` (pure Python, no ImageMagick).
+
+SETLIST = "Merry & Bright"
+SETS = [
+    ("Opening Set", [
+        ("Sleigh Ride", "Tori Kelly", "B", 86, "4/4", 186.0),
+        ("Silent Night", "for KING & COUNTRY", "A", 83, "3/4", 300.0),
+        ("Joy to the World (Unspeakable Joy)", "Chris Tomlin", "D", 128, "4/4", 230.8),
+    ]),
+    ("Concert Set", [
+        ("Feliz Navidad", None, None, None, None, None),
+        ("What Christmas Means", None, None, None, None, None),
+        ("This Christmas", "Donny Hathaway", "F", 93, "4/4", 249.6),
+        ("Rockin' Around the Christmas Tree", None, None, None, None, None),
+        ("Last Christmas", None, None, None, None, None),
+        ("All I Want for Christmas Is You", "Mariah Carey", "G", 150, "4/4", 235.0),
+    ]),
+]
+
+# Night skies, each with a light: one palette a cover, the set's together.
+PALETTES = [
+    ("#0f2a3d", "#1d5a6e", "#f4d58d"),
+    ("#1b1f3b", "#3b3f7a", "#e9eef7"),
+    ("#2a1530", "#6b2346", "#f6c453"),
+    ("#123524", "#2f6b45", "#f2e6c9"),
+    ("#301818", "#8c2f2f", "#ffd9a0"),
+    ("#14213d", "#2c4a7a", "#fca311"),
+    ("#2b1d0e", "#7a4b1c", "#fbe7c6"),
+    ("#0b2b26", "#1f6f5c", "#e8f1c4"),
+    ("#26133a", "#5b2a86", "#ffcfe1"),
+]
+
+
+def song_dir(title):
+    return f"Songs/Christmas/{title}"
+
+
+def cover_svg(seed, palette):
+    """A square cover: a sky, a light (a moon, an ornament or a star), snow
+    falling and hills, drawn from `seed` alone (no text, no likeness)."""
+    rng = random.Random(seed)
+    dark, mid, light = palette
+    out = ["<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'>",
+           f"<defs><linearGradient id='s' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='{dark}'/>"
+           f"<stop offset='1' stop-color='{mid}'/></linearGradient></defs>",
+           "<rect width='120' height='120' fill='url(#s)'/>"]
+    cx, cy = rng.randint(34, 86), rng.randint(26, 50)
+    motif = seed % 3
+    if motif == 0:
+        r = rng.randint(14, 20)
+        out.append(f"<circle cx='{cx}' cy='{cy}' r='{r + 8}' fill='{light}' opacity='.15'/>")
+        out.append(f"<circle cx='{cx}' cy='{cy}' r='{r}' fill='{light}'/>")
+    elif motif == 1:
+        r = rng.randint(12, 17)
+        out.append(f"<circle cx='{cx}' cy='{cy}' r='{r}' fill='none' stroke='{light}' stroke-width='3'/>")
+        out.append(f"<rect x='{cx - 3}' y='{cy - r - 5}' width='6' height='5' fill='{light}'/>")
+        out.append(f"<path d='M{cx - r} {cy}h{2 * r}' stroke='{light}' stroke-width='2' opacity='.6'/>")
+    else:
+        r = rng.randint(14, 19)
+        out.append(f"<path d='M{cx} {cy - r}L{cx + 3} {cy - 3}L{cx + r} {cy}L{cx + 3} {cy + 3}L{cx} {cy + r}"
+                   f"L{cx - 3} {cy + 3}L{cx - r} {cy}L{cx - 3} {cy - 3}Z' fill='{light}'/>")
+    for _ in range(18):
+        x, y, d = rng.randint(4, 116), rng.randint(4, 92), rng.choice((1, 1, 1.5, 2))
+        out.append(f"<circle cx='{x}' cy='{y}' r='{d}' fill='#fff' opacity='.{rng.randint(4, 9)}'/>")
+    for layer, (base, op) in enumerate(((92, ".55"), (104, "1"))):
+        pts = " ".join(f"L{x} {base + rng.randint(-8, 6)}" for x in range(0, 121, 20))
+        fill = mid if layer == 0 else dark
+        out.append(f"<path d='M0 120{pts[1:] and ' ' + pts}L120 120Z' fill='{fill}' opacity='{op}'/>")
+    out.append("</svg>")
+    return "".join(out) + "\n"
+
+
+def mmss(seconds):
+    s = int(round(seconds))
+    return f'"{s // 60}:{s % 60:02d}"'
+
+
+def christmas():
+    lines = []
+    links = []
+    n = 0
+    for set_name, songs in SETS:
+        lines.append(f"## {set_name}")
+        for title, artist, key, tempo, meter, length in songs:
+            n += 1
+            folder = song_dir(title)
+            note = f"{folder}/{title}.md"
+            cover = f"{folder}/cover.svg"
+            raw(cover, cover_svg(n * 7919, PALETTES[(n - 1) % len(PALETTES)]))
+            props = {"title": title, "type": "song"}
+            recording = None
+            if artist:
+                recording = f"Recordings/Christmas/{title}.mp3"
+                props.update({"artist": artist, "key": key, "tempo": tempo, "meter": meter,
+                              "duration": mmss(length), "recording": recording})
+            props.update({"cover": cover, "setlist": f"[[Setlists/{SETLIST}|{SETLIST}]]",
+                          "tags": ["music/christmas"]})
+            body = (f"Song {n} of [[Setlists/{SETLIST}|{SETLIST}]]."
+                    + ("" if recording else " No recording yet."))
+            W(note, props, body)
+            links.append(f'  - "[[{note[:-3]}|{title}]]"')
+            if recording:
+                summary = f"{key} · {tempo} bpm · {meter}"
+                lines.append(f"{n} | {title} | {note} | {summary} | {recording} | {artist} | {length:.1f} | | | {cover}")
+            else:
+                lines.append(f"{n} | {title} | {note} | | | | | | | {cover}")
+    fm_lines = ["---", f"title: {SETLIST}", "type: setlist", "sets:"]
+    i = 0
+    for set_name, songs in SETS:
+        fm_lines.append(f"  - name: {set_name}")
+        fm_lines.append("    songs:")
+        for _ in songs:
+            fm_lines.append("  " + links[i])
+            i += 1
+    fm_lines.append("songs:")
+    fm_lines += links
+    fm_lines.append("tags: [music/christmas, setlist]")
+    fm_lines.append("---")
+    body = (f"# {SETLIST}\n\nA Christmas set in two parts. Its songs' covers are drawn for this demo "
+            "(`apps/ui/demo-vault.py`), and every recording is the demo's silent one. "
+            "Four songs have no recording yet.\n\n"
+            "```studio-setlist\n" + "\n".join(lines) + "\n```\n")
+    raw(f"Setlists/{SETLIST}.md", "\n".join(fm_lines) + "\n" + body)
+
+
 LOGO_SVG = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='#4f7cff'/><circle cx='32' cy='32' r='16' fill='white'/></svg>
 """
 SKETCH_SVG = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='#fff7e0'/><path d='M8 48 L24 20 L36 40 L44 28 L56 48 Z' fill='none' stroke='#d9822b' stroke-width='3'/></svg>
@@ -1016,5 +1151,8 @@ def navigator_samples():
 if __name__ == "__main__":
     if "--navigator-samples" in sys.argv:
         navigator_samples()
+        sys.exit(0)
+    if "--christmas" in sys.argv:
+        christmas()
         sys.exit(0)
     sys.exit(main())
