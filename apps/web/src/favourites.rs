@@ -2,15 +2,18 @@
 //! read, and what each declared target opens in the web app.
 //!
 //! The node lists its extensions' `[[favourites]]` at [`LISTING`]
-//! (`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`); the app
-//! believes a declaration only whole and only when it keeps the
-//! manifest's rules ([`listing`]). The shell turns each into its bar
-//! (`architect_shell::declare`), each target read by [`opens`]: a tab the
-//! web app cannot open is left out, never shown dead.
+//! (`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`), each with the
+//! extension that declared it and what its capabilities let it run
+//! (`architect_favourites::Listed`); the app believes a declaration only
+//! whole and only when it keeps the manifest's rules ([`listing`]). The
+//! shell turns each into its bar (`architect_shell::declare`), each target
+//! read by [`opens`]: a tab the web app cannot open, or that names what
+//! its extension may not (another extension's view, an action outside its
+//! reach, a destructive one), is left out, never shown dead.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
-use architect_favourites::{Target, TypeFavourites, place_path};
+use architect_favourites::{Declarer, Effect, Listed, Target, TypeFavourites, place_path};
 use serde_json::Value;
 
 /// Where the node lists the note types' favourites.
@@ -19,19 +22,56 @@ pub const LISTING: &str = "/_ext/favourites.json";
 /// The most declarations the app reads from a listing.
 pub const MAX_DECLARATIONS: usize = 64;
 
-/// The declarations of the node's listing this app believes: each read
-/// alone, one of the wrong shape or that breaks the manifest's rules
-/// (`TypeFavourites::check`) left out, never trusted in part.
+/// The largest listing the app reads, in bytes; a larger one is none.
+pub const MAX_LISTING_BYTES: usize = 256 * 1024;
+
+/// The declarations of the node's listing this app believes.
+///
+/// Each is read alone: one of the wrong shape, with no declaring
+/// extension, or that breaks the manifest's rules
+/// (`TypeFavourites::check`) is left out, never trusted in part.
 #[must_use]
-pub fn listing(v: &Value) -> Vec<TypeFavourites> {
+pub fn listing(v: &Value) -> Vec<Listed> {
     v.get("favourites")
         .and_then(Value::as_array)
         .map(|list| {
             list.iter()
                 .take(MAX_DECLARATIONS)
-                .filter_map(|d| serde_json::from_value::<TypeFavourites>(d.clone()).ok())
-                .filter(|d| d.check().is_ok())
+                .filter_map(|d| serde_json::from_value::<Listed>(d.clone()).ok())
+                .filter(|d| !d.by.extension.is_empty() && d.favourites.check().is_ok())
                 .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// [`listing`] of the node's answer, `bytes`: none when it is larger than
+/// [`MAX_LISTING_BYTES`] or not JSON.
+#[must_use]
+pub fn listing_bytes(bytes: &[u8]) -> Vec<Listed> {
+    if bytes.len() > MAX_LISTING_BYTES {
+        return Vec::new();
+    }
+    serde_json::from_slice::<Value>(bytes)
+        .map(|v| listing(&v))
+        .unwrap_or_default()
+}
+
+/// The label a frame opened by `target` of `decl` is titled with: its
+/// tab's, else its primary's (either face).
+#[must_use]
+pub fn label_for(decl: &TypeFavourites, target: &Target) -> String {
+    if let Some(tab) = decl.tabs.iter().find(|f| &f.target == target) {
+        return tab.label.clone();
+    }
+    decl.primary
+        .as_ref()
+        .and_then(|p| {
+            if &p.target == target {
+                return Some(p.label.clone());
+            }
+            p.on.as_ref()
+                .filter(|on| on.target.as_ref() == Some(target))
+                .map(|on| on.label.clone())
         })
         .unwrap_or_default()
 }
@@ -53,12 +93,14 @@ pub enum Opens {
     Path(String),
 }
 
-/// What the web app has to open a target with: the node's islands and
-/// their views (`(id, views)`), the commands it has, the open note's path,
-/// and whether a path is a file of the vault.
+/// What the web app has to open a target with.
+///
+/// The node's islands and their views (`(id, views)`), the commands it has
+/// and how much each changes, the open note's path, and whether a path is
+/// a file of the vault.
 pub struct Reach<'a> {
     pub islands: &'a [(String, Vec<String>)],
-    pub actions: &'a BTreeSet<String>,
+    pub actions: &'a BTreeMap<String, Effect>,
     pub note: &'a str,
     pub exists: &'a dyn Fn(&str) -> bool,
 }
@@ -66,39 +108,42 @@ pub struct Reach<'a> {
 /// Quick open, as the Command Palette's views run it.
 pub const QUICK_OPEN: &str = "COMMAND_PALETTE_OPEN_ANYTHING";
 
-/// What `target` opens here; `None` for what the web app cannot open (a
-/// share page's `player.*` views, a view no island of the node's has, a
-/// command the app has not, a heading or a folder).
+/// What `target`, declared by `by`, opens here.
+///
+/// `None` for what the web app cannot open (a share page's `player.*`
+/// views, a view no island of the node's lists, a command the app has
+/// not, a heading or a folder) or `by` may not name (another extension's
+/// view, an action outside its reach or a destructive one: `Declarer`).
 #[must_use]
-pub fn opens(target: &Target, reach: &Reach<'_>) -> Option<Opens> {
+pub fn opens(by: &Declarer, target: &Target, reach: &Reach<'_>) -> Option<Opens> {
     match target {
         Target::View(v) => match v.as_str() {
             "page" => Some(Opens::Note),
             "search" => reach
                 .actions
-                .contains(QUICK_OPEN)
+                .contains_key(QUICK_OPEN)
                 .then_some(Opens::QuickOpen),
             "browse" => Some(Opens::Files),
             _ => {
-                // `<extension id>/<view>`, or a view of any island's (the
-                // listing names no declaring extension).
-                let (island, view) = match v.split_once('/') {
-                    Some((i, w)) => (Some(i), w),
-                    None => (None, v.as_str()),
-                };
+                // `<its own id>/<view>`, or a bare view of its own.
+                let (island, view) = v.split_once('/').unwrap_or((&by.extension, v));
+                if !by.may_open_view_of(island) {
+                    return None;
+                }
                 reach
                     .islands
                     .iter()
-                    .find(|(id, views)| {
-                        island.is_none_or(|i| i == id) && views.iter().any(|w| w == view)
-                    })
+                    .find(|(id, views)| id == island && views.iter().any(|w| w == view))
                     .map(|(id, _)| Opens::View {
                         island: id.clone(),
                         view: view.to_owned(),
                     })
             }
         },
-        Target::Action(a) => reach.actions.contains(a).then(|| Opens::Action(a.clone())),
+        Target::Action(a) => {
+            let effect = *reach.actions.get(a)?;
+            by.may_target(a, effect).then(|| Opens::Action(a.clone()))
+        }
         Target::Place(p) => {
             let path = place_path(reach.note, p)?;
             let md = format!("{path}.md");
@@ -145,31 +190,45 @@ mod tests {
                 {"id": "other", "label": "Other", "icon": "list", "target": {"view": "lab.other/steps"}},
                 {"id": "shop", "label": "Shopping", "icon": "list", "target": {"place": "Shopping"}},
                 {"id": "go", "label": "Go", "icon": "play", "target": {"action": "COOK_GO"}}
-            ]
+            ],
+            "primary": {"id": "timer", "label": "Timer", "icon": "timer", "target": {"view": "timer"}}
         })
     }
 
-    /// A declaration a manifest may make (five tabs at most).
-    fn ok_decl() -> Value {
+    fn by() -> Declarer {
+        Declarer {
+            extension: "lab.cook".into(),
+            ..Declarer::default()
+        }
+    }
+
+    /// A declaration a manifest may make (five tabs at most), as listed.
+    fn ok_listed() -> Value {
         let mut d = decl();
         d["tabs"].as_array_mut().unwrap().truncate(2);
-        d
+        json!({"by": {"extension": "lab.cook"}, "favourites": d})
     }
 
     #[test]
     fn a_listing_is_believed_one_declaration_at_a_time() {
-        let decl = ok_decl;
-        let mut bad = decl();
-        bad["note_type"] = json!("bad");
-        bad["tabs"][0]["target"] = json!({"place": "https://evil.example/"});
-        let mut unknown = decl();
-        unknown["sneaky"] = json!(1);
-        let got = listing(&json!({"favourites": [decl(), bad, unknown, "x"]}));
+        let mut bad = ok_listed();
+        bad["favourites"]["note_type"] = json!("bad");
+        bad["favourites"]["tabs"][0]["target"] = json!({"place": "https://evil.example/"});
+        let mut unknown = ok_listed();
+        unknown["favourites"]["sneaky"] = json!(1);
+        let mut nobody = ok_listed();
+        nobody["by"] = json!({});
+        let bare = ok_listed()["favourites"].clone();
+        let mut long = ok_listed();
+        long["favourites"]["note_type"] = json!("x".repeat(architect_favourites::MAX_TYPE + 1));
+        let got =
+            listing(&json!({"favourites": [ok_listed(), bad, unknown, nobody, bare, long, "x"]}));
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].note_type, "recipe");
+        assert_eq!(got[0].favourites.note_type, "recipe");
+        assert_eq!(got[0].by.extension, "lab.cook");
         assert!(listing(&json!({})).is_empty());
         assert!(listing(&json!({"favourites": {}})).is_empty());
-        let flood: Vec<Value> = (0..200).map(|_| decl()).collect();
+        let flood: Vec<Value> = (0..200).map(|_| ok_listed()).collect();
         assert_eq!(
             listing(&json!({ "favourites": flood })).len(),
             MAX_DECLARATIONS
@@ -177,25 +236,73 @@ mod tests {
     }
 
     #[test]
+    fn a_listing_larger_than_the_limit_is_none() {
+        let one = serde_json::to_vec(&json!({"favourites": [ok_listed()]})).unwrap();
+        assert_eq!(listing_bytes(&one).len(), 1);
+        // The same declaration, padded past the limit: not read at all.
+        let mut padded = json!({"favourites": [ok_listed()]});
+        padded["pad"] = json!("x".repeat(MAX_LISTING_BYTES));
+        let big = serde_json::to_vec(&padded).unwrap();
+        assert!(big.len() > MAX_LISTING_BYTES);
+        assert!(listing_bytes(&big).is_empty());
+        assert!(listing_bytes(b"not json").is_empty());
+    }
+
+    fn reach_with<'a>(
+        islands: &'a [(String, Vec<String>)],
+        actions: &'a BTreeMap<String, Effect>,
+        exists: &'a dyn Fn(&str) -> bool,
+    ) -> Reach<'a> {
+        Reach {
+            islands,
+            actions,
+            note: "Food/Soup.md",
+            exists,
+        }
+    }
+
+    fn islands() -> Vec<(String, Vec<String>)> {
+        vec![
+            (
+                "lab.cook".to_owned(),
+                vec![
+                    "progress".to_owned(),
+                    "steps".to_owned(),
+                    "lyrics".to_owned(),
+                ],
+            ),
+            (
+                "lab.other".to_owned(),
+                vec!["steps".to_owned(), "board".to_owned()],
+            ),
+        ]
+    }
+
+    fn actions() -> BTreeMap<String, Effect> {
+        [
+            (QUICK_OPEN, Effect::ReadOnly),
+            ("LAB_COOK_GO", Effect::Mutating),
+            ("LAB_COOK_BURN", Effect::Destructive),
+            ("COOK_GO", Effect::ReadOnly),
+            ("VAULT_NEW_NOTE", Effect::Mutating),
+            ("APP_SETTINGS", Effect::ReadOnly),
+        ]
+        .into_iter()
+        .map(|(a, e)| (a.to_owned(), e))
+        .collect()
+    }
+
+    #[test]
     fn each_target_opens_what_the_web_app_has_and_nothing_else() {
         let d: TypeFavourites = serde_json::from_value(decl()).unwrap();
-        let islands = vec![(
-            "lab.cook".to_owned(),
-            vec![
-                "progress".to_owned(),
-                "steps".to_owned(),
-                "lyrics".to_owned(),
-            ],
-        )];
-        let actions: BTreeSet<String> = [QUICK_OPEN.to_owned()].into();
+        let (islands, actions) = (islands(), actions());
         let exists = |p: &str| p == "Food/Shopping.md";
-        let reach = Reach {
-            islands: &islands,
-            actions: &actions,
-            note: "Food/Soup.md",
-            exists: &exists,
-        };
-        let got: Vec<Option<Opens>> = d.tabs.iter().map(|t| opens(&t.target, &reach)).collect();
+        let reach = reach_with(&islands, &actions, &exists);
+        let got: Vec<Option<Opens>> = d
+            .tabs
+            .iter()
+            .map(|t| opens(&by(), &t.target, &reach))
+            .collect();
         let view = |v: &str| {
             Some(Opens::View {
                 island: "lab.cook".into(),
@@ -208,20 +315,66 @@ mod tests {
                 Some(Opens::Note),
                 None,
                 view("steps"),
+                // A bare view: its own island's.
                 view("lyrics"),
+                // Another extension's view, though the node lists it.
                 None,
                 Some(Opens::Path("Food/Shopping.md".into())),
+                // An action of the app's outside its namespace.
                 None,
             ]
         );
         assert_eq!(
-            opens(&Target::View("search".into()), &reach),
+            opens(&by(), &Target::View("search".into()), &reach),
             Some(Opens::QuickOpen)
         );
         assert_eq!(
-            opens(&Target::View("browse".into()), &reach),
+            opens(&by(), &Target::View("browse".into()), &reach),
             Some(Opens::Files)
         );
+        // A bare view only its own island has, never another's.
+        assert_eq!(opens(&by(), &Target::View("board".into()), &reach), None);
+    }
+
+    #[test]
+    fn an_action_is_one_its_extension_may_run_and_never_destructive() {
+        let (islands, actions) = (islands(), actions());
+        let exists = |_: &str| false;
+        let reach = reach_with(&islands, &actions, &exists);
+        let act = |by: &Declarer, a: &str| opens(by, &Target::Action(a.into()), &reach);
+        assert_eq!(
+            act(&by(), "LAB_COOK_GO"),
+            Some(Opens::Action("LAB_COOK_GO".into()))
+        );
+        assert_eq!(act(&by(), "VAULT_NEW_NOTE"), None);
+        assert_eq!(act(&by(), "APP_SETTINGS"), None);
+        assert_eq!(act(&by(), "LAB_COOK_BURN"), None, "destructive");
+        assert_eq!(act(&by(), "NOT_HERE"), None);
+        let vault = Declarer {
+            actions: vec!["VAULT_".into()],
+            effect: Effect::ReadOnly,
+            ..by()
+        };
+        assert_eq!(act(&vault, "VAULT_NEW_NOTE"), None, "past its effect");
+        let vault = Declarer {
+            effect: Effect::Mutating,
+            ..vault
+        };
+        assert_eq!(
+            act(&vault, "VAULT_NEW_NOTE"),
+            Some(Opens::Action("VAULT_NEW_NOTE".into()))
+        );
+    }
+
+    #[test]
+    fn a_frame_is_titled_by_its_tab_or_its_primary() {
+        let d: TypeFavourites = serde_json::from_value(decl()).unwrap();
+        assert_eq!(
+            label_for(&d, &Target::View("lab.cook/steps".into())),
+            "Steps"
+        );
+        assert_eq!(label_for(&d, &Target::View("timer".into())), "Timer");
+        assert_eq!(label_for(&d, &Target::View("nothing".into())), "");
     }
 
     #[test]

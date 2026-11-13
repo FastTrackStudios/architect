@@ -36,7 +36,10 @@ use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
 pub use busy::BusyBadge;
 pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
-pub use favourites::{Declared, Favourites, SLOTS, declare, declared_tab_id, resolve_favourites};
+pub use favourites::{
+    Declared, Favourites, PlaceOpened, SLOTS, Shows, declare, declared_tab_id, resolve_favourites,
+    set_note,
+};
 pub use input_debug::{foot_bottom, input_debug, set_input_debug};
 pub use keyboard::{
     Foot, Keyboard, KeyboardTaps, TAP_SLOP, TapStroke, hide_keyboard, install_keyboard, keyboard,
@@ -2510,6 +2513,8 @@ fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element 
         button {
             class: "lp tip-host",
             "aria-label": tab.label,
+            "data-tab": id,
+            "aria-current": if on { "page" } else { "false" },
             style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; \
                     background: {fill}; display: flex; align-items: center; justify-content: center;",
             onclick: move |_| on_tab.call(id),

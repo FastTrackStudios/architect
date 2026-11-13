@@ -610,4 +610,51 @@ mod tests {
         assert!(!may.may_use("clipboard"), "not granted");
         assert_eq!(asks.grows_from(&granted).len(), 1);
     }
+
+    /// A favourite's action rule in a browser
+    /// (`architect_favourites::Declarer::may_target`, which cannot reach
+    /// this crate) is `may_run`'s, a destructive action never.
+    #[test]
+    fn a_favourites_action_rule_is_may_runs() {
+        use architect_favourites::{Declarer, Effect};
+        let effect = |r: Reach| match r {
+            Reach::ReadOnly => Effect::ReadOnly,
+            Reach::Mutating => Effect::Mutating,
+            Reach::Destructive => Effect::Destructive,
+        };
+        let ids = [
+            "ACME_CHARTS_OPEN",
+            "ACME_CHARTSX_OPEN",
+            "PLAYER_TOGGLE",
+            "VAULT_DELETE",
+            "APP_SETTINGS",
+        ];
+        let reaches = [Reach::ReadOnly, Reach::Mutating, Reach::Destructive];
+        for named in [&[][..], &["PLAYER_"][..], &["*"][..]] {
+            for most in reaches {
+                let c = caps(named, most, &[]);
+                let d = Declarer {
+                    extension: "acme.charts".into(),
+                    actions: c.actions.clone(),
+                    effect: effect(most),
+                };
+                assert_eq!(
+                    crate::manifest::action_prefix("acme.charts"),
+                    architect_favourites::action_prefix("acme.charts")
+                );
+                for id in ids {
+                    for e in reaches {
+                        let may_run = c
+                            .may_run(&crate::manifest::action_prefix(&d.extension), id, e)
+                            .is_ok();
+                        assert_eq!(
+                            d.may_target(id, effect(e)),
+                            may_run && e != Reach::Destructive,
+                            "{id} {e:?} with {named:?} up to {most:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

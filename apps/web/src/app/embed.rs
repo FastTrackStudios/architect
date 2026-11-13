@@ -15,15 +15,85 @@
 //! stand-in: `architect-playhead`'s deck and the Now Playing bar (#589's
 //! implementation) take their place, with the same asks and props. Nothing
 //! here knows what kind of note it is: the claim chooses the view.
+//!
+//! A favourite's `{view}` (#607) opens any view its extension's island
+//! lists the same way, in a pane of its own ([`Embedded`] with `pane`),
+//! with the same props: the note, and its source's playhead state.
 
 use std::rc::Rc;
 
 use dioxus::prelude::*;
 use serde_json::{Map, Value, json};
 
-use super::frames::{Bundle, ExtensionFrame, use_island};
-use super::song::{Clock, frame_theme, now_ms};
+use architect_shell::use_shell;
+
+use super::frames::{Bundle, ExtensionFrame, FrameTheme, use_island_of};
 use crate::ext_host::{Intent, QueueItem};
+
+fn now_ms() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map_or(0.0, |p| p.now())
+}
+
+/// Where the current item is: `time` seconds at `at` (ms), playing or not.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Clock {
+    time: f64,
+    at: f64,
+    playing: bool,
+}
+
+impl Clock {
+    fn time(self, duration: f64) -> f64 {
+        if self.playing {
+            (self.time + (now_ms() - self.at) / 1000.0).min(duration)
+        } else {
+            self.time
+        }
+    }
+}
+
+/// The theme a frame is handed: the shell's colours and its font.
+fn frame_theme() -> FrameTheme {
+    let t = use_shell().theme;
+    let dark = architect_theme::use_resolved().scheme().is_dark();
+    FrameTheme {
+        vars: [
+            ("--foreground", &t.ink),
+            ("--muted-foreground", &t.ink_3),
+            ("--background", &t.sheet),
+            ("--accent", &t.accent),
+            ("--accent-foreground", &t.accent_ink),
+            ("--border", &t.rule),
+            ("--font", &t.font),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_string()))
+        .collect(),
+        dark,
+    }
+}
+
+/// The note a view is handed, as data: `{path, title, type, properties,
+/// body}`.
+#[must_use]
+pub fn note_props(
+    path: &str,
+    title: &str,
+    note_type: &str,
+    properties: Vec<(String, String)>,
+    body: &str,
+) -> Value {
+    let mut props = Map::new();
+    for (k, v) in properties {
+        props.insert(k, Value::String(v));
+    }
+    json!({
+        "path": path, "title": title, "type": note_type,
+        "properties": props, "body": body,
+    })
+}
 
 /// What is played over again from its start rather than the one before,
 /// once this many seconds of it have played.
@@ -61,7 +131,7 @@ pub fn NoteEmbed(
     properties: Vec<(String, String)>,
     body: String,
 ) -> Element {
-    let island = use_island();
+    let island = use_island_of(None);
     let bundle: Option<Rc<Bundle>> = island
         .read()
         .as_ref()
@@ -76,19 +146,20 @@ pub fn NoteEmbed(
     else {
         return rsx! {};
     };
-    let mut props = Map::new();
-    for (k, v) in properties {
-        props.insert(k, Value::String(v));
-    }
-    let note = json!({
-        "path": path, "title": title, "type": note_type,
-        "properties": props, "body": body,
-    });
+    let note = note_props(&path, &title, &note_type, properties, &body);
     rsx! { Embedded { bundle, view, note } }
 }
 
+/// View `view` of `bundle`'s island on `note`, its playhead source kept
+/// here: at a note's head, or filling a pane of its own (`pane`, a
+/// favourite's `{view}`).
 #[component]
-fn Embedded(bundle: Rc<Bundle>, view: String, note: Value) -> Element {
+pub fn Embedded(
+    bundle: Rc<Bundle>,
+    view: String,
+    note: Value,
+    #[props(default)] pane: bool,
+) -> Element {
     let note = use_memo(use_reactive((&note,), |(n,)| n));
     let mut queue = use_signal(Queue::default);
     let mut clock = use_signal(|| Clock {
@@ -97,7 +168,7 @@ fn Embedded(bundle: Rc<Bundle>, view: String, note: Value) -> Element {
         playing: false,
     });
     let mut time = use_signal(|| 0.0_f64);
-    // The clock: a tick while it plays; at a song's end, the next.
+    // The clock: a tick while it plays; at an item's end, the next.
     use_future(move || async move {
         loop {
             futures_timer::Delay::new(std::time::Duration::from_millis(250)).await;
@@ -231,14 +302,26 @@ fn Embedded(bundle: Rc<Bundle>, view: String, note: Value) -> Element {
     let duration = queue.read().length();
     let q = queue.read();
     let current = q.current.and_then(|c| q.items.get(c));
+    let (testid, style) = if pane {
+        (
+            "ext-view-pane",
+            "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px;",
+        )
+    } else {
+        ("note-embed", "")
+    };
     rsx! {
-        section { class: "web-note-embed", "data-testid": "note-embed", "data-view": "{view}",
+        section { class: "web-note-embed", "data-testid": testid, "data-view": "{view}",
+            "data-ext-view-of": "{view}", style,
             "data-queue": "{q.items.len()}",
             "data-current": current.map_or(String::new(), |i| i.id.clone()),
             "data-playing": "{clock().playing}",
-            ExtensionFrame {
-                bundle, view: view.clone(), props, duration, theme,
-                on_ask: act, fallback: rsx! {},
+            "data-time": "{time():.1}",
+            div { style: if pane { "flex: 1 1 0; min-height: 0; border-radius: 10px; overflow: hidden;" } else { "" },
+                ExtensionFrame {
+                    bundle, view: view.clone(), props, duration, theme, fill: pane,
+                    on_ask: act, fallback: rsx! {},
+                }
             }
         }
     }

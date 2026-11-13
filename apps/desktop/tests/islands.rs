@@ -135,9 +135,10 @@ async fn a_node_without_islands_lists_none() {
 }
 
 /// `GET /_ext/favourites.json` (#607): the note types' `[[favourites]]`
-/// the node was started with, as declared, never cached, `nosniff`,
-/// read-only, nothing else in it; a declaration that breaks the
-/// manifest's rules is left out.
+/// the node was started with, as declared, each with the extension that
+/// declared it and what it may run, never cached, `nosniff`, read-only,
+/// nothing else in it; a declaration that breaks the manifest's rules is
+/// left out.
 #[tokio::test]
 async fn the_favourites_listing_is_the_declarations_alone_and_never_cached() {
     use architect_desktop::node::shares::FAVOURITES_LISTING;
@@ -155,6 +156,19 @@ target = { view = "lab.cook/steps" }
     let mut bad = good.clone();
     bad.note_type = "other".to_owned();
     bad.tabs[0].target = architect_favourites::Target::Place("https://evil.example/".to_owned());
+    let by = architect_favourites::Declarer {
+        extension: "lab.cook".to_owned(),
+        actions: vec!["PLAYER_".to_owned()],
+        effect: architect_favourites::Effect::Mutating,
+    };
+    let good = architect_favourites::Listed {
+        by: by.clone(),
+        favourites: good,
+    };
+    let bad = architect_favourites::Listed {
+        by,
+        favourites: bad,
+    };
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("host");
     std::fs::create_dir_all(dir.join("data/vaults/notes")).unwrap();
@@ -187,6 +201,8 @@ target = { view = "lab.cook/steps" }
     assert!(h.get("set-cookie").is_none());
     let json: serde_json::Value = r.json().await.unwrap();
     assert_eq!(json, serde_json::json!({ "favourites": [good] }));
+    assert_eq!(json["favourites"][0]["by"]["extension"], "lab.cook");
+    assert_eq!(json["favourites"][0]["by"]["effect"], "mutating");
     assert_eq!(client.post(&url).send().await.unwrap().status(), 405);
     // A node that declares none lists none.
     let (bare, _bare_tmp) = start(Vec::new()).await;

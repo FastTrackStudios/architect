@@ -5,8 +5,10 @@
 // apps/web/sws.toml, `/_ext/` to the node), a node with an island
 // (`island_node`, ARCHITECT_ISLAND_NODE) whose `web-*` bundle is written
 // here, an attacker's HTTP and UDP listener on localhost. `/app/?demo`,
-// the song note "Amazing Grace": its progress, transport and lyrics views
-// each in a frame of the island's bundle.
+// the demo vault's note "Amazing Grace" (`type: song`, a fixture): the view
+// the island claims that type with (`ARCHITECT_ISLAND_EMBEDS`, an island's
+// `[[embeds]]`) in a frame of the island's bundle at the note's head,
+// handed the note and its playhead source as data.
 //
 // The share page's probes (apps/web/test/share-webview.test.mjs), now in
 // the app, and the app's own rules (#495 Constraints):
@@ -15,7 +17,7 @@
 //   links, `<a ping>`, popups, top navigation, WebRTC/STUN, child frames
 //   of every kind, workers, `document.open`) reaches nothing; the app's
 //   URL never changes and no window opens; a frame that leaves its
-//   document is taken down and the app's own control comes back;
+//   document is taken down and the note stays;
 // - the frame's origin is opaque: it reads no cookie, no storage, nothing
 //   of the app's document, and its props never carry the session the app
 //   keeps (a token planted in the app's storage and cookie first);
@@ -97,10 +99,11 @@ const OUT = (a, port) => `
   setTimeout(() => { location.href = "/app/?demo"; }, 4500);
 `;
 
-/// What the transport view's frame can find of the app: its origin, the
-/// app's cookie and storage, the app's document, what it was handed; its
-/// asks for what is not an intent, then a flood of intents. Written to its
-/// own body for the test to read.
+/// What a claimed view's frame can find of the app: its origin, the app's
+/// cookie and storage, the app's document, what it was handed; its asks
+/// for what is not an intent, a source of one 10-second item, a seek past
+/// it, then a flood of intents. Written to its own body for the test to
+/// read.
 const LOOK = `
   const r = { origin: self.origin, props: [] };
   const g = (k, fn) => { try { r[k] = fn(); } catch (e) { r[k] = "threw"; } };
@@ -115,15 +118,18 @@ const LOOK = `
   globalThis.architectPage.subscribe((p) => { r.props.push(JSON.stringify(p)); document.body.dataset.report = JSON.stringify(r); });
   globalThis.architectPage.ask("VAULT_READ", { path: "Welcome.md" });
   globalThis.architectPage.ask("SHARE_CREATE", { vault: "notes" });
-  globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 999 });
-  setTimeout(() => { for (let i = 0; i < 200; i++) globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: (i % 10) + 1 }); }, 500);
+  globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Look", queue: [{ id: "a", title: "A", duration: 10 }] });
+  setTimeout(() => globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 999 }), 300);
+  setTimeout(() => { for (let i = 0; i < 200; i++) globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: (i % 10) + 1 }); }, 800);
   document.body.dataset.report = JSON.stringify(r);
 `;
 
-/// The share suite's FLOOD: the frame's port captured, then hellos,
-/// readies, sizes and asks by the thousand; after the rate limit refills
-/// it asks for 20 + how many times it was booted again.
+/// The share suite's FLOOD: a source of one minute-long item, the frame's
+/// port captured, then hellos, readies, sizes and asks by the thousand;
+/// after the rate limit refills it asks for 20 + how many times it was
+/// booted again.
 const FLOOD = `
+  globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Flood", queue: [{ id: "a", title: "A", duration: 60 }] });
   let port = null; const orig = MessagePort.prototype.postMessage;
   MessagePort.prototype.postMessage = function () { port = this; return orig.apply(this, arguments); };
   globalThis.architectPage.ask("nothing");
@@ -164,7 +170,9 @@ export function mount(view) {
 
 // ── The node, the front, the attacker ───────────────────────────────
 
-async function node(bundle) {
+/// A node whose island's bundle is `bundle`, claiming the demo's song notes
+/// with view `claim`.
+async function node(bundle, claim) {
   const dir = mkdtempSync(join(tmpdir(), 'app-ext-'));
   const vault = join(dir, 'vault');
   put(vault, 'Welcome.md', '# Welcome\n');
@@ -179,6 +187,7 @@ async function node(bundle) {
       ...process.env, ARCHITECT_BIND: `127.0.0.1:${port}`, ARCHITECT_DATA_DIR: join(dir, 'data'), ARCHITECT_VAULTS: `notes=${vault}`,
       ARCHITECT_IROH: 'local', ARCHITECT_NAME: 'app-ext-test', ARCHITECT_ISLAND_FOLDER: folder, ARCHITECT_ISLAND_ID: 'demo.view',
       ARCHITECT_ISLAND_VIEW: 'progress', ARCHITECT_ISLAND_TRANSPORT: 'transport', ARCHITECT_ISLAND_LYRICS: 'lyrics',
+      ARCHITECT_ISLAND_EMBEDS: `${claim}=song`,
     },
   });
   const origin = `http://127.0.0.1:${port}`;
@@ -296,7 +305,7 @@ const marks = async (b) => JSON.parse(await b.eval(MARKS));
 const mark = async (b, view) => (await marks(b)).find((m) => m.view === view);
 
 /// `/app/?demo`, a session planted in the app's storage and cookie, then
-/// the song note.
+/// the demo's song note, the view claiming its type at its head.
 async function openSong(b, origin) {
   await b.go(`${origin}/app/?demo`);
   await b.eval(`localStorage.setItem("architect.session", ${JSON.stringify(SECRET)}); document.cookie = "session=${SECRET}; path=/; SameSite=Lax"; true`);
@@ -305,8 +314,10 @@ async function openSong(b, origin) {
   await until(() => click('Songs'), 10000, 'the Songs folder');
   await sleep(300);
   await until(() => click('Amazing Grace'), 10000, 'the song note');
-  await until(() => b.eval(`!!document.querySelector('[data-testid=song-views]')`), 15000, 'the song views');
+  await until(() => b.eval(`!!document.querySelector('[data-testid=note-embed]')`), 15000, 'the claimed view');
 }
+
+const timeOf = async (b) => Number(await b.eval(`document.querySelector('[data-testid=note-embed]').dataset.time`));
 
 async function frameOf(b, view) {
   for (const c of await b.frames()) {
@@ -315,15 +326,15 @@ async function frameOf(b, view) {
   return null;
 }
 
-async function world(views, opts) {
-  const n = await node(glue(views));
+async function world(views, claim, opts) {
+  const n = await node(glue(views), claim);
   const f = await front(n.origin, opts);
   const b = await firefox();
   return { n, f, b, close: async () => { await b.close(); f.close(); n.close(); } };
 }
 
 test('the app page frames only its own origin', { skip }, async () => {
-  const w = await world({ progress: QUIET, transport: QUIET, lyrics: QUIET });
+  const w = await world({ progress: QUIET, transport: QUIET, lyrics: QUIET }, 'lyrics');
   try {
     const r = await fetch(`${w.f.origin}/app/`);
     const header = r.headers.get('content-security-policy');
@@ -332,10 +343,10 @@ test('the app page frames only its own origin', { skip }, async () => {
     const html = await r.text();
     assert.match(html, /http-equiv="Content-Security-Policy" content="[^"]*frame-src 'self'/);
     await openSong(w.b, w.f.origin);
-    await until(async () => (await marks(w.b)).filter((m) => m.state === 'ready').length === 3, 20000, 'three frames ready');
-    // Each frame is the node's web view document on this origin, sandboxed.
+    await until(async () => (await marks(w.b)).filter((m) => m.state === 'ready').length === 1, 20000, 'the claimed frame ready');
+    // The frame is the node's web view document on this origin, sandboxed.
     const frames = JSON.parse(await w.b.eval(`JSON.stringify([...document.querySelectorAll('iframe')].map((f) => [f.getAttribute('sandbox'), new URL(f.src).origin === location.origin, new URL(f.src).pathname]))`));
-    assert.equal(frames.length, 3);
+    assert.equal(frames.length, 1);
     for (const [sandbox, same, path] of frames) {
       assert.equal(sandbox, 'allow-scripts');
       assert.ok(same);
@@ -346,52 +357,57 @@ test('the app page frames only its own origin', { skip }, async () => {
   } finally { await w.close(); }
 });
 
-test('a hostile bundle in the app reaches nothing, takes nothing and is taken down', { skip }, async () => {
+test('a hostile bundle in the app reaches nothing and is taken down', { skip }, async () => {
   const a = attacker();
-  const w = await world({ progress: OUT(a.url, a.port), transport: LOOK, lyrics: QUIET });
+  const w = await world({ progress: OUT(a.url, a.port), transport: QUIET, lyrics: QUIET }, 'progress');
   try {
     const windows = await w.b.tops();
     await openSong(w.b, w.f.origin);
     const app = await w.b.eval('location.href');
-    // The progress frame leaves its document: taken down, for good.
+    // The frame leaves its document: taken down, for good.
     const gone = await until(async () => { const m = await mark(w.b, 'progress'); return m && m.state === 'gone' && m; }, 20000, 'the progress frame taken down');
     assert.equal(gone.why, 'it left its document');
     await sleep(3000);
     assert.deepEqual(a.hits, [], `the attacker heard: ${a.hits.join(', ')}`);
     assert.equal(await w.b.eval('location.href'), app, 'the app was never navigated');
     assert.equal(await w.b.tops(), windows, 'no window opened');
-    // Nothing of the app reached the transport frame.
-    const c = await frameOf(w.b, 'transport');
-    assert.ok(c, 'the transport frame is there');
+    assert.equal(await w.b.eval(`!!document.querySelector('[data-testid=note-text]')`), true, 'the note stays');
+  } finally { a.close(); await w.close(); }
+});
+
+test('a frame takes nothing of the app and its asks are only rate-limited intents', { skip }, async () => {
+  const w = await world({ progress: QUIET, transport: LOOK, lyrics: QUIET }, 'transport');
+  try {
+    await openSong(w.b, w.f.origin);
+    // Nothing of the app reached the frame.
+    const c = await until(() => frameOf(w.b, 'transport'), 15000, 'the transport frame');
     const report = JSON.parse(await until(() => w.b.evalIn(c, 'document.body.dataset.report'), 10000, 'its report'));
     assert.equal(report.origin, 'null');
     // An opaque origin's `document.cookie` throws (Firefox) or is empty.
     assert.ok(report.cookie === 'threw' || report.cookie === '', `cookie: ${report.cookie}`);
     assert.ok(!JSON.stringify(report).includes(SECRET), 'the session never reached it');
     for (const k of ['storage', 'session', 'parentStorage', 'parentDocument', 'topHref', 'indexedDB']) assert.equal(report[k], 'threw', k);
-    assert.ok(report.props.length > 0, 'it was given props');
-    for (const p of report.props) {
-      assert.ok(!p.includes(SECRET), 'no session in its props');
-      assert.deepEqual(Object.keys(JSON.parse(p)).sort(), ['duration', 'index', 'playing', 'sections', 'time', 'title', 'tracks']);
-    }
-    // Its flood of asks was rate-limited; a seek outside the song, a vault
+    const last = JSON.parse(await until(async () => { const r = JSON.parse(await w.b.evalIn(c, 'document.body.dataset.report')); return r.props.length > 1 && r.props[r.props.length - 1]; }, 10000, 'its props'));
+    // The note as data and its source's playhead state, nothing else.
+    assert.deepEqual(Object.keys(last).sort(), ['active', 'artist', 'at', 'clock', 'duration', 'index', 'item', 'name', 'note', 'playing', 'queue', 'rate', 'sections', 'source', 'subtitle', 'time', 'title', 'tracks']);
+    assert.equal(last.note.path, 'Songs/Amazing Grace.md');
+    for (const p of JSON.parse(await w.b.evalIn(c, 'document.body.dataset.report')).props) assert.ok(!p.includes(SECRET), 'no session in its props');
+    // Its flood of asks was rate-limited; a seek past its item, a vault
     // read and a share were not answered.
-    const t = await mark(w.b, 'transport');
-    assert.equal(t.refused, 'too many requests');
-    const time = Number(await w.b.eval(`document.querySelector('[data-testid=song-views]').dataset.songTime`));
-    assert.ok(time >= 0 && time <= 10, `the playhead stayed in the song: ${time}`);
-    // The app's own control is back where the progress frame was not (its
-    // fallback is empty); the transport frame and lyrics stayed.
-    assert.equal((await mark(w.b, 'lyrics')).state, 'ready');
-  } finally { a.close(); await w.close(); }
+    await until(async () => (await mark(w.b, 'transport')).refused === 'too many requests', 10000, 'the flood refused');
+    await sleep(500);
+    const time = await timeOf(w.b);
+    assert.ok(time >= 0 && time <= 10, `the playhead stayed in the item: ${time}`);
+    assert.equal(await w.b.eval(`document.querySelector('[data-testid=note-embed]').dataset.queue`), '1');
+  } finally { await w.close(); }
 });
 
 test('a frame that floods its port is booted once and its height held', { skip }, async () => {
-  const w = await world({ progress: QUIET, transport: FLOOD, lyrics: QUIET });
+  const w = await world({ progress: QUIET, transport: FLOOD, lyrics: QUIET }, 'transport');
   try {
     await openSong(w.b, w.f.origin);
     const at = await until(async () => {
-      const t = Number(await w.b.eval(`document.querySelector('[data-testid=song-views]').dataset.songTime`));
+      const t = await timeOf(w.b);
       return t >= 20 && t;
     }, 20000, 'the flood to report its boots');
     assert.equal(Math.round(at), 20, `booted again ${Math.round(at) - 20} times`);
@@ -406,24 +422,35 @@ test('a frame that floods its port is booted once and its height held', { skip }
   } finally { await w.close(); }
 });
 
-test('a frame that stops answering is taken down and the app\'s own control comes back', { skip }, async () => {
-  const w = await world({ progress: QUIET, transport: SILENT, lyrics: QUIET });
+test('a frame that stops answering is taken down and the note stays', { skip }, async () => {
+  const w = await world({ progress: QUIET, transport: SILENT, lyrics: QUIET }, 'transport');
   try {
     await openSong(w.b, w.f.origin);
     await until(async () => (await mark(w.b, 'transport'))?.state === 'ready', 15000, 'the transport frame ready');
     const gone = await until(async () => { const m = await mark(w.b, 'transport'); return m.state === 'gone' && m; }, 15000, 'the silent frame taken down');
     assert.equal(gone.why, 'it stopped answering');
-    assert.equal(await w.b.eval(`!!document.querySelector('[data-testid=song-own-controls]')`), true);
-    assert.equal((await mark(w.b, 'lyrics')).state, 'ready');
+    assert.equal(await w.b.eval(`!!document.querySelector('[data-testid=note-text]')`), true);
   } finally { await w.close(); }
 });
 
 test('a file that is not the one pinned is never handed to a frame', { skip }, async () => {
-  const w = await world({ progress: QUIET, transport: QUIET, lyrics: QUIET }, { tamper: true });
+  const w = await world({ progress: QUIET, transport: QUIET, lyrics: QUIET }, 'lyrics', { tamper: true });
   try {
-    await openSong(w.b, w.f.origin);
+    await openNoteOnly(w);
     await sleep(3000);
     assert.equal(await w.b.eval(`document.querySelectorAll('iframe').length`), 0, 'no frame');
-    assert.equal(await w.b.eval(`!!document.querySelector('[data-testid=song-own-controls]')`), true, "the app's own controls");
+    assert.equal(await w.b.eval(`!!document.querySelector('[data-testid=note-text]')`), true, 'the note');
   } finally { await w.close(); }
 });
+
+/// The song note without waiting for its view (a tampered bundle draws none).
+async function openNoteOnly(w) {
+  const b = w.b;
+  await b.go(`${w.f.origin}/app/?demo`);
+  await until(() => b.eval(`!!document.querySelector('[data-testid=note-text]')`), 60000, 'the demo');
+  const click = (txt) => b.eval(`(() => { const all = [...document.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(txt)}); const e = all[all.length - 1]; if (!e) return false; (e.closest('button,[role=treeitem],[role=button],a,li,div') || e).click(); return true; })()`);
+  await until(() => click('Songs'), 10000, 'the Songs folder');
+  await sleep(300);
+  await until(() => click('Amazing Grace'), 10000, 'the song note');
+  await until(() => b.eval(`!!document.querySelector('[data-note="Songs/Amazing Grace.md"]')`), 15000, 'the song note open');
+}

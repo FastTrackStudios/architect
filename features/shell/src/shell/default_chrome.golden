@@ -104,6 +104,8 @@ id 17
 pop
 push 15
 attr aria-label None "Inbox"
+attr data-tab None "inbox"
+attr aria-current None "page"
 attr style None "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: rgba(45,212,191,0.14); display: flex; align-items: center; justify-content: center;"
 listen click
 pop
@@ -160,6 +162,8 @@ id 24
 pop
 push 23
 attr aria-label None "Tasks"
+attr data-tab None "tasks"
+attr aria-current None "false"
 attr style None "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;"
 listen click
 pop

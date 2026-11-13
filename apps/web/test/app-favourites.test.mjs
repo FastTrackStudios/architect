@@ -1,12 +1,16 @@
 // The bottom slots as favourites in the web app (#607), in a real
 // browser at a phone's 390 px: `/app/?demo` shows the web app's own set
 // (Vault, Files, Search, New note); opening the demo vault's song note
-// (`type: song`) switches the slots to what a demo extension declares for
-// that type (`[[favourites]]`, served by the node at
-// `/_ext/favourites.json`, here `island_node`'s ARCHITECT_FAVOURITES), a
-// tab the app cannot open (a share page's `player.now`) left out; a tab
-// opens its island view in a frame of its own; a note of no declared type
-// brings the default back.
+// (`type: song`, a fixture) switches the slots to what a demo extension
+// declares for that type (`[[favourites]]`, served by the node at
+// `/_ext/favourites.json` with the extension that declared them, here
+// `island_node`'s ARCHITECT_FAVOURITES), a tab the app cannot open (a share
+// page's `player.now`) left out; a tab opens its island's view in a frame
+// of its own, handed the note; a `{place}` keeps the set while its note is
+// on show; a note of no declared type brings the default back; on a desk
+// the sidebar's tabs are the same set, the current one marked. A
+// declaration by an extension that names only what it may not (another
+// extension's views, an action outside its capabilities) is no set at all.
 //
 // The release bundle (scripts/web-bundle.sh, ARCHITECT_WEB_BUNDLE) behind
 // a front that does what production's proxy does, `island_node`
@@ -38,30 +42,37 @@ const put = (root, rel, body) => { const p = join(root, rel); mkdirSync(dirname(
 const freePort = () => new Promise((ok) => { const srv = createNetServer(); srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => ok(port)); }); });
 const WASM = Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
 
-/// Each view draws its name and what it is handed (the lyrics' words).
+/// Each view draws its name and what it is handed: the note's title and
+/// body, and its playhead's time.
 const glue = `
 export default async function init() {}
 export function mount(view) {
   document.body.dataset.view = view;
   document.body.style.cssText = "margin:0;font:15px system-ui;color:var(--foreground, #222);background:var(--background, #fff)";
   globalThis.architectPage.subscribe((p) => {
+    const note = p.note || {};
+    document.body.dataset.note = note.path || "";
+    document.body.dataset.keys = Object.keys(p).sort().join(",");
     const box = document.createElement("div");
     box.style.cssText = "padding:12px 16px";
     const h = document.createElement("h2");
     h.style.cssText = "margin:0 0 8px;font-size:17px";
     h.textContent = "Demo extension: " + view;
     box.appendChild(h);
-    for (const l of (p.lyrics || []).slice(0, 12)) { const q = document.createElement("p"); q.style.margin = "4px 0"; q.textContent = l.text; box.appendChild(q); }
-    const t = document.createElement("p"); t.style.cssText = "margin:10px 0 0;opacity:.7"; t.textContent = (p.title || "") + " at " + Number(p.time || 0).toFixed(1) + "s"; box.appendChild(t);
+    const b = document.createElement("p"); b.style.margin = "4px 0"; b.textContent = (note.title || "") + ": " + (note.body || "").slice(0, 120); box.appendChild(b);
+    const t = document.createElement("p"); t.style.cssText = "margin:10px 0 0;opacity:.7"; t.textContent = "at " + Number(p.time || 0).toFixed(1) + "s"; box.appendChild(t);
     document.body.replaceChildren(box);
   });
 }`;
 
-/// What the demo extension declares for the demo vault's song notes: the
-/// note, two of its island's views, a share page's player view this app
-/// does not have (left out), and the navigator; its primary action is
-/// quick open.
+/// What the demo extension (the island's own, `demo.view`) declares for
+/// the demo vault's song notes: the note, a view of its island's, a share
+/// page's player view this app does not have (left out), a note beside
+/// the song, and the navigator; its primary action is quick open.
 const FAVOURITES = `
+[by]
+extension = "demo.view"
+
 [[favourites]]
 note_type = "song"
 
@@ -81,13 +92,13 @@ target = { view = "player.now" }
 id = "lyrics"
 label = "Lyrics"
 icon = "mic-vocal"
-target = { view = "demo.view/lyrics" }
+target = { view = "lyrics" }
 
 [[favourites.tabs]]
-id = "transport"
-label = "Transport"
-icon = "sliders-horizontal"
-target = { view = "demo.view/transport" }
+id = "chords"
+label = "Chords"
+icon = "guitar"
+target = { place = "Chords" }
 
 [[favourites.tabs]]
 id = "files"
@@ -104,7 +115,42 @@ state = "playing"
 on = { label = "Pause", icon = "pause" }
 `;
 
-async function node() {
+/// Another extension's declaration for the same type: the island's views
+/// (bare, and by the island's id), an app action its capabilities do not
+/// reach. None of it is its own to name, so it is no set at all.
+const FOREIGN = `
+[by]
+extension = "acme.other"
+
+[[favourites]]
+note_type = "song"
+
+[[favourites.tabs]]
+id = "words"
+label = "Words"
+icon = "mic-vocal"
+target = { view = "lyrics" }
+
+[[favourites.tabs]]
+id = "deck"
+label = "Deck"
+icon = "sliders-horizontal"
+target = { view = "demo.view/transport" }
+
+[[favourites.tabs]]
+id = "write"
+label = "Write"
+icon = "square-pen"
+target = { action = "VAULT_NEW_NOTE" }
+
+[favourites.primary]
+id = "settings"
+label = "Settings"
+icon = "settings"
+target = { action = "APP_SETTINGS" }
+`;
+
+async function node(favourites = FAVOURITES) {
   const dir = mkdtempSync(join(tmpdir(), 'app-fav-'));
   const vault = join(dir, 'vault');
   put(vault, 'Welcome.md', '# Welcome\n');
@@ -112,7 +158,7 @@ async function node() {
   put(folder, 'web-view.js', glue);
   put(folder, 'web-view_bg.wasm', WASM);
   put(folder, 'architect.json', JSON.stringify({ module: 'web-view.js', manifest: { id: 'demo.view', capabilities: {} } }));
-  put(dir, 'favourites.toml', FAVOURITES);
+  put(dir, 'favourites.toml', favourites);
   const port = await freePort();
   const proc = spawn(NODE, [], {
     stdio: 'ignore',
@@ -120,7 +166,7 @@ async function node() {
       ...process.env, ARCHITECT_BIND: `127.0.0.1:${port}`, ARCHITECT_DATA_DIR: join(dir, 'data'), ARCHITECT_VAULTS: `notes=${vault}`,
       ARCHITECT_IROH: 'local', ARCHITECT_NAME: 'app-favourites-test', ARCHITECT_ISLAND_FOLDER: folder, ARCHITECT_ISLAND_ID: 'demo.view',
       ARCHITECT_ISLAND_VIEW: 'progress', ARCHITECT_ISLAND_TRANSPORT: 'transport', ARCHITECT_ISLAND_LYRICS: 'lyrics',
-      ARCHITECT_FAVOURITES: join(dir, 'favourites.toml'),
+      ARCHITECT_ISLAND_EMBEDS: 'progress=song', ARCHITECT_FAVOURITES: join(dir, 'favourites.toml'),
     },
   });
   const origin = `http://127.0.0.1:${port}`;
@@ -265,18 +311,27 @@ test('the slots follow the open note\'s type at 390 px, and a tab opens its view
     await until(async () => same(await slots(b), own), 10000, 'the default slots');
     await b.shot('phone-default');
 
-    // The song note: the type's declared set, `player.now` left out.
+    // The song note: the type's declared set, `player.now` left out; the
+    // view its island claims the type with at the note's head.
     await openNote(b, 'Songs', 'Amazing Grace');
-    const declared = { tabs: ['Song', 'Lyrics', 'Transport', 'Songs'], current: 'song:song', primary: 'Find' };
+    const declared = { tabs: ['Song', 'Lyrics', 'Chords', 'Songs'], current: 'song:song', primary: 'Find' };
     await until(async () => same(await slots(b), declared), 15000, 'the declared slots');
+    await until(() => b.eval(`!!document.querySelector('[data-testid=note-embed][data-view=progress] [data-testid=ext-frame][data-ext-state=ready]')`), 20000, 'the claimed view at the note\'s head');
     await b.shot('phone-declared');
 
-    // Lyrics: the island's lyrics view in a frame of its own, on the note;
-    // the slots stay the type's, Lyrics current.
+    // Lyrics: the island's lyrics view in a frame of its own, handed the
+    // note and its playhead as data; the slots stay the type's, Lyrics
+    // current.
     assert.ok(await tab(b, 'Lyrics'));
     await until(() => b.eval(`!!document.querySelector('[data-testid=ext-view-pane][data-ext-view-of=lyrics] [data-testid=ext-frame][data-ext-state=ready]')`), 20000, 'the lyrics frame ready');
     await until(async () => (await slots(b)).current === 'song:lyrics', 10000, 'Lyrics current');
     assert.deepEqual((await slots(b)).tabs, declared.tabs);
+    const lyrics = await until(async () => { for (const c of await b.frames()) { if ((await b.evalIn(c, 'document.body && document.body.dataset.view').catch(() => null)) === 'lyrics') return c; } return null; }, 10000, 'the lyrics frame');
+    const handed = await until(() => b.evalIn(lyrics, 'document.body.dataset.note && JSON.stringify([document.body.dataset.note, document.body.dataset.keys])'), 10000, 'its props');
+    const [notePath, keys] = JSON.parse(handed);
+    assert.equal(notePath, 'Songs/Amazing Grace.md');
+    for (const k of ['note', 'playing', 'time', 'queue', 'source']) assert.ok(keys.split(',').includes(k), `${k} in ${keys}`);
+    assert.ok(!keys.split(',').includes('lyrics'), 'no song-shaped props');
     const frames = JSON.parse(await b.eval(`JSON.stringify([...document.querySelectorAll('iframe')].map((f) => [f.getAttribute('sandbox'), new URL(f.src).pathname]))`));
     assert.ok(frames.length >= 1);
     for (const [sandbox, path] of frames) {
@@ -289,6 +344,15 @@ test('the slots follow the open note\'s type at 390 px, and a tab opens its view
     // Song: back to the note itself.
     assert.ok(await tab(b, 'Song'));
     await until(async () => (await slots(b)).current === 'song:song', 10000, 'Song current');
+
+    // Chords, a note beside the song with no type: it opens, and the set
+    // stays the song's while it is on show, Chords current.
+    assert.ok(await tab(b, 'Chords'));
+    await until(() => b.eval(`!!document.querySelector('[data-note="Songs/Chords.md"]')`), 10000, 'the Chords note');
+    await until(async () => same(await slots(b), { ...declared, current: 'song:chords' }), 10000, 'the song\'s set kept, Chords current');
+    await b.shot('phone-place');
+    assert.ok(await tab(b, 'Song'));
+    await until(async () => same(await slots(b), declared), 10000, 'back on the song');
 
     // The primary action: quick open.
     assert.ok(await b.eval(`(() => { const p = document.querySelector('button[data-primary]'); p.click(); return true; })()`));
@@ -313,8 +377,38 @@ test('the slots follow the open note\'s type at 390 px, and a tab opens its view
     await until(() => click(b, 'Songs'), 10000, 'the Songs folder on a desk');
     await sleep(300);
     await until(() => click(b, 'Amazing Grace'), 10000, 'the song note on a desk');
-    await until(() => b.eval(`!!document.querySelector('[data-testid=song-views]')`), 15000, 'the song note on a desk');
+    await until(() => b.eval(`!!document.querySelector('[data-testid=note-embed]')`), 15000, 'the song note on a desk');
+    // The sidebar's tabs are the declared set, the note's tab current.
+    await until(async () => { const s = await slots(b); return s.tabs.includes('Lyrics') && s.current === 'song:song'; }, 15000, 'the declared set on a desk, Song current');
     await sleep(1500);
     await b.shot('desk-declared');
+  } finally { await b.close(); f.close(); n.close(); }
+});
+
+test('a set naming only what its extension may not is no set, and the listing is read-only', { skip }, async () => {
+  const n = await node(FOREIGN);
+  const f = await front(n.origin);
+  const b = await firefox();
+  try {
+    // The node lists it, with who declared it; HEAD answers, POST does not.
+    const listed = await fetch(`${n.origin}/_ext/favourites.json`).then((r) => r.json());
+    assert.equal(listed.favourites[0].by.extension, 'acme.other');
+    const head = await fetch(`${n.origin}/_ext/favourites.json`, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get('content-type'), 'application/json');
+    assert.equal((await head.text()).length, 0);
+    assert.equal((await fetch(`${n.origin}/_ext/favourites.json`, { method: 'POST' })).status, 405);
+
+    await b.go(`${f.origin}/app/?demo`);
+    await until(() => b.eval(`!!document.querySelector('[data-testid=note-text]')`), 60000, 'the demo');
+    const own = { tabs: ['Vault', 'Files', 'Search'], current: 'vault', primary: 'New note' };
+    await until(async () => same(await slots(b), own), 10000, 'the default slots');
+    await openNote(b, 'Songs', 'Amazing Grace');
+    await until(() => b.eval(`!!document.querySelector('[data-note="Songs/Amazing Grace.md"]')`), 10000, 'the song note');
+    // Another extension's views and an action it may not run: every tab
+    // left out, so the song keeps the default set and its round button.
+    await sleep(1500);
+    assert.deepEqual(await slots(b), own);
+    await b.shot('phone-foreign');
   } finally { await b.close(); f.close(); n.close(); }
 });

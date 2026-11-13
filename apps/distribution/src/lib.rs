@@ -593,15 +593,24 @@ impl Distribution {
             .collect()
     }
 
-    /// Its compiled-in extensions' `[[favourites]]`: the tabs a share
-    /// page's phone shell (and the app's shell) shows while a note of
-    /// their types is open.
+    /// Its compiled-in extensions' `[[favourites]]`, each with the
+    /// extension that declared it and what its capabilities let it run:
+    /// the tabs a share page's phone shell (and the app's shell) shows
+    /// while a note of their types is open.
     #[must_use]
-    pub fn favourites(&self) -> Vec<architect_extensions::favourites::TypeFavourites> {
+    pub fn favourites(&self) -> Vec<architect_extensions::favourites::Listed> {
         self.extensions()
             .into_iter()
             .filter_map(|e| Manifest::parse(e.manifest()).ok())
-            .flat_map(|m| m.favourites)
+            .flat_map(|m| {
+                let by = m.declarer();
+                m.favourites.into_iter().map(move |favourites| {
+                    architect_extensions::favourites::Listed {
+                        by: by.clone(),
+                        favourites,
+                    }
+                })
+            })
             .collect()
     }
 

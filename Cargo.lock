@@ -2318,6 +2318,7 @@ dependencies = [
  "auth-client",
  "base64 0.22.1",
  "dioxus",
+ "futures-channel",
  "futures-timer",
  "futures-util",
  "include_dir",
