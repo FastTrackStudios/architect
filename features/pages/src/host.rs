@@ -390,6 +390,14 @@ impl PageHost for AppHost {
             return Err(why);
         }
         let (list, mut caller) = (self.list.clone(), self.caller.clone());
+        // A page's run is a script's, never the person's own door (⌘K, a
+        // key, the menu): an action that asks who ran it (`SHARE_OPEN`)
+        // asks the person first, as for an agent's.
+        if caller.invocation().is_none() {
+            caller = caller.with_invocation(architect::action::Invocation::new(
+                architect::action::InvocationSource::Script,
+            ));
+        }
         // A service call and a host call are the page's extension's own.
         if (id == SERVICE_CALL || id == PAGE_CALL)
             && let Some(ext) = &self.extension

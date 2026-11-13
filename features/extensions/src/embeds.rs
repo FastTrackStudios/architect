@@ -198,7 +198,7 @@ impl Host {
 }
 
 #[cfg(feature = "ui")]
-pub use view::{BaseViewEmbed, EmbedAsk, EmbedPages, EmbedView, WidgetView};
+pub use view::{BaseViewEmbed, EmbedAsk, EmbedPages, EmbedView, GuestEmbedView, WidgetView};
 
 #[cfg(feature = "ui")]
 mod view {
@@ -248,18 +248,42 @@ mod view {
     /// string); the view is drawn again when either changes. The
     /// `ExtensionUi` in context says what is loaded.
     ///
-    /// `guest`: the block is a guest's content (a share link's note,
-    /// #629), never drawn with the person's reach. Only a page embed
-    /// draws it, on a host with no action, no host-service call and no
-    /// vault; a linked or process view, which runs with the person's own
-    /// session, does not, and `fallback` shows.
+    /// The person's own content only: a guest's (a share link's note) is
+    /// [`GuestEmbedView`]'s, which never draws with the person's reach.
     #[component]
     pub fn EmbedView(
         claim: Claim,
         source: String,
         #[props(default)] props: Value,
         #[props(default)] fallback: Option<Element>,
-        #[props(default)] guest: bool,
+    ) -> Element {
+        embed_view(&claim, source, props, fallback, false)
+    }
+
+    /// A guest's content (a share link's note, #629) that `claim` claims:
+    /// as [`EmbedView`], but never drawn with the person's reach. Only a
+    /// page embed draws it, on a host with no action, no host-service
+    /// call and no vault (`architect_pages::host::AppHost::guest`); a
+    /// linked or process view, which runs with the person's own session,
+    /// does not, and `fallback` shows. A component of its own, not a
+    /// prop, so no caller can forget to say so.
+    #[component]
+    pub fn GuestEmbedView(
+        claim: Claim,
+        source: String,
+        #[props(default)] props: Value,
+        #[props(default)] fallback: Option<Element>,
+    ) -> Element {
+        embed_view(&claim, source, props, fallback, true)
+    }
+
+    // A component's body: its hooks run in the component that calls it.
+    fn embed_view(
+        claim: &Claim,
+        source: String,
+        props: Value,
+        fallback: Option<Element>,
+        guest: bool,
     ) -> Element {
         let now = EmbedInput {
             claim: claim.to_string(),
@@ -278,7 +302,7 @@ mod view {
         };
         let _ = ui.revision();
         let host = ui.host();
-        let Some(spec) = Embeds::new(host.clone()).resolve(&claim) else {
+        let Some(spec) = Embeds::new(host.clone()).resolve(claim) else {
             return plain();
         };
         if guest {
