@@ -24,9 +24,11 @@
 //!
 //! Besides its slots by a song (progress, transport, lyrics), an island
 //! may claim note types ([`Embed`]): its view is drawn at the head of a
-//! note of that `type`, given the note, and may set its source in the
-//! app's playhead (`PLAYHEAD_SET`) and make one of its items current
-//! (`PLAYHEAD_ITEM`), as `architect.playhead` v0.1 has them (#589).
+//! note of that `type` ([`claimed`]: the first island listed that claims
+//! it), given what [`note_props`] lets through of the note for who is
+//! viewing, and may set its source in the app's playhead (`PLAYHEAD_SET`)
+//! and make one of its items current (`PLAYHEAD_ITEM`), as
+//! `architect.playhead` v0.1 has them (#589).
 //!
 //! The frame dies (taken out, the app's own control back) on a second
 //! `load` (it left its document), on `error`, when not ready within
@@ -53,8 +55,9 @@ pub const MAX_HEIGHT: f64 = 4_000.0;
 /// At most this many asks a second, with a burst of twice that.
 pub const ASKS_PER_SECOND: f64 = 8.0;
 /// The most bytes a message from a frame may take as JSON; larger is
-/// dropped unread.
-pub const MAX_MESSAGE: usize = 16 * 1024;
+/// dropped unread (`architect.playhead` v0.1: a whole queue fits one
+/// `PLAYHEAD_SET`).
+pub const MAX_MESSAGE: usize = 64 * 1024;
 
 /// What a frame may ask the app: the playhead's intents, nothing else
 /// (what an island's `capabilities.actions` holds; host calls into a
@@ -72,6 +75,15 @@ pub const INTENTS: &[&str] = &[
 
 /// The most items a source's queue may hold (#589).
 pub const QUEUE_MAX: usize = 500;
+/// The most sections an item may hold (#589).
+pub const SECTIONS_MAX: usize = 200;
+/// The most marks an item may hold (#589).
+pub const MARKS_MAX: usize = 2000;
+
+/// The read capability a claim names, and its extension declares
+/// (`[capabilities] reads`), for its view to be handed the note it is
+/// drawn on: the app's documents.
+pub const READS_NOTE: &str = "documents";
 
 /// A view of an island drawn at the head of a note whose `type` it claims.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,21 +92,142 @@ pub struct Embed {
     pub view: String,
     /// The note types it claims, as listed.
     pub note_types: Vec<String>,
+    /// Whether the claim names the note as what it reads (its listing's
+    /// `reads` holds [`READS_NOTE`]).
+    pub reads_note: bool,
+    /// The note's properties it declares for those types: all of them a
+    /// share's guest's view is given.
+    pub properties: Vec<String>,
 }
 
 impl Island {
-    /// The view it draws at the head of a note of type `note_type`, if it
-    /// claims it (without regard to case).
+    /// Its claim on notes of type `note_type` (without regard to case):
+    /// the first of its embeds listed that claims it.
     #[must_use]
-    pub fn embed_for(&self, note_type: &str) -> Option<&str> {
+    pub fn claim_for(&self, note_type: &str) -> Option<&Embed> {
         let t = note_type.trim();
         if t.is_empty() {
             return None;
         }
-        self.embeds
-            .iter()
-            .find(|e| e.note_types.iter().any(|n| n.eq_ignore_ascii_case(t)))
-            .map(|e| e.view.as_str())
+        self.embeds.iter().find(|e| {
+            e.note_types
+                .iter()
+                .any(|n| n.trim().eq_ignore_ascii_case(t))
+        })
+    }
+
+    /// The view it draws at the head of a note of type `note_type`, if it
+    /// claims it.
+    #[must_use]
+    pub fn embed_for(&self, note_type: &str) -> Option<&str> {
+        self.claim_for(note_type).map(|e| e.view.as_str())
+    }
+
+    /// Whether its extension declares reading notes ([`READS_NOTE`]).
+    #[must_use]
+    pub fn declares_reading_notes(&self) -> bool {
+        self.reads.iter().any(|r| r == READS_NOTE)
+    }
+}
+
+/// The island that draws a note of type `note_type`, and its claim.
+///
+/// The first island in the listing's order that claims the type, and
+/// within it the first of its embeds that does. Chosen from the listing alone,
+/// before any bundle is fetched; `None` when no island claims it.
+#[must_use]
+pub fn claimed<'a>(islands: &'a [Island], note_type: &str) -> Option<(&'a Island, &'a Embed)> {
+    islands
+        .iter()
+        .find_map(|i| i.claim_for(note_type).map(|e| (i, e)))
+}
+
+/// Who is viewing the note a view is handed: what [`note_props`] lets
+/// through depends on it, and every caller has to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Audience {
+    /// A signed-in member of the vault's organization, or the demo
+    /// (`/app/?demo`, the person's own vault in memory): the note, its
+    /// `%%comments%%` removed.
+    Member,
+    /// A share link's guest (#629). What a guest gets of a note's text is
+    /// the owner's decision, still open (#648); until it is made, the
+    /// conservative answer: its title, its type and the properties the
+    /// claim declares for that type. No body, no vault path.
+    Guest,
+}
+
+/// A note as the app read it from the vault, before the gate.
+#[derive(Debug, Clone, Copy)]
+pub struct Note<'a> {
+    /// Its vault-relative path.
+    pub path: &'a str,
+    /// Its title.
+    pub title: &'a str,
+    /// Its frontmatter `type`.
+    pub note_type: &'a str,
+    /// Its frontmatter, each value as text.
+    pub properties: &'a [(String, String)],
+    /// Its markdown after the frontmatter.
+    pub body: &'a str,
+}
+
+/// What `island`'s views are handed of `note` for `audience`.
+///
+/// The one gate between a vault's note and a frame, wherever a view is
+/// mounted on a note. `null` unless the island claims the note's type with a claim
+/// that names [`READS_NOTE`] and its extension declares it too.
+///
+/// - [`Audience::Member`]: `{path, title, type, properties, body}`, the
+///   body without its `%%comments%%`;
+/// - [`Audience::Guest`]: `{title, type, properties}`, only the properties
+///   the claim declares.
+#[must_use]
+pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value {
+    let Some(claim) = island.claim_for(note.note_type) else {
+        return Value::Null;
+    };
+    if !claim.reads_note || !island.declares_reading_notes() {
+        return Value::Null;
+    }
+    let mut properties = serde_json::Map::new();
+    for (k, v) in note.properties {
+        if audience == Audience::Member || claim.properties.iter().any(|p| p == k) {
+            properties.insert(k.clone(), Value::String(v.clone()));
+        }
+    }
+    match audience {
+        Audience::Member => serde_json::json!({
+            "path": note.path,
+            "title": note.title,
+            "type": note.note_type,
+            "properties": properties,
+            "body": without_comments(note.body),
+        }),
+        Audience::Guest => serde_json::json!({
+            "title": note.title,
+            "type": note.note_type,
+            "properties": properties,
+        }),
+    }
+}
+
+/// `body` without its `%%comments%%`, which may span lines; a `%%` never
+/// closed hides the rest.
+#[must_use]
+pub fn without_comments(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    loop {
+        let Some((before, after)) = rest.split_once("%%") else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(before);
+        let Some((_, tail)) = after.split_once("%%") else {
+            return out;
+        };
+        rest = tail;
     }
 }
 
@@ -123,6 +256,9 @@ pub struct Island {
     pub lyrics: Option<String>,
     /// Its views drawn at the head of a note by its type.
     pub embeds: Vec<Embed>,
+    /// What its extension declares it reads (its manifest's
+    /// `[capabilities] reads`), as listed.
+    pub reads: Vec<String>,
 }
 
 /// Whether `name`'s extension is exactly `ext` (as the node checks it,
@@ -264,36 +400,57 @@ fn island_of(v: &Value) -> Option<Island> {
         transport: text(v, "transport"),
         lyrics: text(v, "lyrics"),
         embeds: embeds_of(v),
+        reads: names_of(v.get("reads"), 8, name_ok),
     })
 }
 
-/// An island's listed note embeds: each a view name and one to 16 note
-/// types, at most 16 of them; a malformed one is left out.
+/// A view's or a capability's name: 1 to 64 of `[A-Za-z0-9._-]`.
+fn name_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// A note type or a property's name as a claim lists it: 1 to 64
+/// characters, not blank, no control character (the rule a type's
+/// favourites have: anything a frontmatter `type:` can say).
+fn key_ok(s: &str) -> bool {
+    !s.trim().is_empty() && s.chars().count() <= 64 && !s.chars().any(char::is_control)
+}
+
+/// The strings of the array `v` that pass `ok`, at most `max`.
+fn names_of(v: Option<&Value>, max: usize, ok: fn(&str) -> bool) -> Vec<String> {
+    v.and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .filter(|s| ok(s))
+                .map(str::to_owned)
+                .take(max)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// An island's listed note embeds, at most 16: each a view name, one to
+/// 16 note types, what it reads and up to 32 properties it declares; a
+/// malformed one is left out.
 fn embeds_of(v: &Value) -> Vec<Embed> {
-    let name = |s: &str| {
-        !s.is_empty()
-            && s.len() <= 64
-            && s.chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-    };
     v.get("embeds")
         .and_then(Value::as_array)
         .map(|list| {
             list.iter()
                 .filter_map(|e| {
-                    let view = e.get("view")?.as_str().filter(|s| name(s))?;
-                    let types: Vec<String> = e
-                        .get("note_type")?
-                        .as_array()?
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .filter(|s| name(s))
-                        .map(str::to_owned)
-                        .take(16)
-                        .collect();
+                    let view = e.get("view")?.as_str().filter(|s| name_ok(s))?;
+                    let types = names_of(e.get("note_type"), 16, key_ok);
                     (!types.is_empty()).then(|| Embed {
                         view: view.to_owned(),
                         note_types: types,
+                        reads_note: names_of(e.get("reads"), 8, name_ok)
+                            .iter()
+                            .any(|r| r == READS_NOTE),
+                        properties: names_of(e.get("properties"), 32, key_ok),
                     })
                 })
                 .take(16)
@@ -370,6 +527,20 @@ impl Bucket {
     }
 }
 
+/// Why a frame's ask is not heard now, if it is not: before its view is
+/// mounted (`ready`) or while the page is hidden, no ask is taken, so a
+/// frame starts nothing the person cannot see it start.
+#[must_use]
+pub const fn ask_refused(ready: bool, hidden: bool) -> Option<&'static str> {
+    if !ready {
+        Some("not ready")
+    } else if hidden {
+        Some("the page is hidden")
+    } else {
+        None
+    }
+}
+
 /// An ask the app answers: one of [`INTENTS`], with its arguments.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
@@ -383,16 +554,39 @@ pub enum Intent {
     Next,
     /// The previous song (or this one's start).
     Previous,
-    /// Its source: `name` and its queue (`PLAYHEAD_SET`; an empty queue
-    /// removes it).
-    Set(String, Vec<QueueItem>),
-    /// Make the item of this id current, at 0, and play it if `play`
+    /// Its source (`PLAYHEAD_SET`; an empty queue removes it).
+    Set(Source),
+    /// Make this item current, at 0, and play it if `play`
     /// (`PLAYHEAD_ITEM`).
-    Item(String, bool),
+    Item(Pick, bool),
+}
+
+/// Which item a `PLAYHEAD_ITEM` makes current.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pick {
+    /// The item of this id.
+    Id(String),
+    /// The item at this place in the queue.
+    Index(usize),
+}
+
+/// A source as `PLAYHEAD_SET` gives it (#589).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Source {
+    /// Its name, shown as the source's (empty: the extension's).
+    pub name: String,
+    /// Its items.
+    pub queue: Vec<QueueItem>,
+    /// The item to make current (clamped to the queue), if given.
+    pub index: Option<usize>,
+    /// Where in it to start, seconds, if given.
+    pub time: Option<f64>,
+    /// Whether to start playing now.
+    pub play: bool,
 }
 
 /// An item of a source's queue (#589), what this host keeps of it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct QueueItem {
     /// The extension's own id for it.
     pub id: String,
@@ -402,86 +596,297 @@ pub struct QueueItem {
     pub duration: Option<f64>,
     /// A vault path to its audio.
     pub media: Option<String>,
+    /// A vault path to its image.
+    pub art: Option<String>,
+    /// Its sections, checked against the contract's limits.
+    pub sections: Vec<ItemSection>,
+    /// Its marks (timed lyric lines and cues), checked likewise.
+    pub marks: Vec<ItemMark>,
+}
+
+/// A section of a queue's item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemSection {
+    /// 1 to 40 characters.
+    pub name: String,
+    /// Its start, seconds.
+    pub start: f64,
+    /// Its end, seconds, not before its start.
+    pub end: f64,
+    /// `#rrggbb`.
+    pub color: Option<String>,
+}
+
+/// A mark of a queue's item.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemMark {
+    /// When, seconds.
+    pub at: f64,
+    /// 1 to 300 characters.
+    pub text: String,
+    /// At most 32 characters (`line`, `cue`).
+    pub kind: Option<String>,
+}
+
+impl QueueItem {
+    /// The item as a view's props carry it: what was given, checked.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let sections: Vec<Value> = self
+            .sections
+            .iter()
+            .map(|s| {
+                serde_json::json!({"name": s.name, "start": s.start, "end": s.end, "color": s.color})
+            })
+            .collect();
+        let marks: Vec<Value> = self
+            .marks
+            .iter()
+            .map(|m| serde_json::json!({"at": m.at, "text": m.text, "kind": m.kind}))
+            .collect();
+        serde_json::json!({
+            "id": self.id,
+            "title": self.title,
+            "subtitle": self.subtitle,
+            "duration": self.duration,
+            "media": self.media,
+            "art": self.art,
+            "sections": sections,
+            "marks": marks,
+        })
+    }
+
+    /// Its sections as a view's props carry them.
+    #[must_use]
+    pub fn sections_json(&self) -> Value {
+        self.to_json()
+            .get("sections")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()))
+    }
 }
 
 /// `v[k]` as a string of 1 to `max` characters; `Err` for one too long or
 /// not a string, `Ok(None)` for none.
-fn field(v: &Value, k: &str, max: usize) -> Result<Option<String>, ()> {
+fn field(v: &Value, k: &str, max: usize) -> Result<Option<String>, String> {
     match v.get(k) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) if s.chars().count() <= max => {
             Ok(Some(s.clone()).filter(|s| !s.is_empty()))
         }
-        Some(_) => Err(()),
+        Some(_) => Err(format!("{k} is at most {max} characters")),
     }
 }
 
-/// A vault path: no scheme, not absolute, no `\`, no `..` segment.
-fn vault_path(p: &str) -> bool {
-    !p.contains(':') && !p.starts_with('/') && !p.contains('\\') && !p.split('/').any(|s| s == "..")
+/// `v[k]` as a required string of 1 to `max` characters.
+fn required(v: &Value, k: &str, max: usize) -> Result<String, String> {
+    field(v, k, max)?.ok_or_else(|| format!("{k} is required"))
+}
+
+/// `v[k]` as seconds (finite, not negative), if given.
+fn seconds(v: &Value, k: &str) -> Result<Option<f64>, String> {
+    match v.get(k) {
+        None | Some(Value::Null) => Ok(None),
+        Some(n) => n
+            .as_f64()
+            .filter(|d| d.is_finite() && *d >= 0.0)
+            .map(Some)
+            .ok_or_else(|| format!("{k} is not a time in seconds")),
+    }
+}
+
+/// A vault-relative path, as `architect.playhead` v0.1 takes `media` and
+/// `art`.
+///
+/// 1 to 1024 bytes; no scheme or drive (`:`), not absolute (a
+/// leading `/`), no `\`, no `?` or `#` (a query or fragment once it is a
+/// URL), no `%` (percent-encoding), no control character, no empty, `.`
+/// or `..` segment.
+///
+/// Whether it is a path the note references is the deck's to enforce
+/// when it resolves the media (#589).
+#[must_use]
+pub fn vault_path(p: &str) -> bool {
+    !p.is_empty()
+        && p.len() <= 1024
+        && !p
+            .chars()
+            .any(|c| matches!(c, ':' | '\\' | '?' | '#' | '%') || c.is_control())
+        && p.split('/').all(|s| !s.is_empty() && s != "." && s != "..")
+}
+
+fn color_ok(c: &str) -> bool {
+    c.len() == 7
+        && c.strip_prefix('#')
+            .is_some_and(|h| h.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+fn section_of(v: &Value) -> Result<ItemSection, String> {
+    let start = seconds(v, "start")?.ok_or("a section's start is required")?;
+    let end = seconds(v, "end")?.ok_or("a section's end is required")?;
+    let color = field(v, "color", 7)?;
+    if end < start {
+        return Err("a section ends before it starts".to_owned());
+    }
+    if color.as_deref().is_some_and(|c| !color_ok(c)) {
+        return Err("a section's color is #rrggbb".to_owned());
+    }
+    Ok(ItemSection {
+        name: required(v, "name", 40)?,
+        start,
+        end,
+        color,
+    })
+}
+
+fn mark_of(v: &Value) -> Result<ItemMark, String> {
+    Ok(ItemMark {
+        at: seconds(v, "at")?.ok_or("a mark's at is required")?,
+        text: required(v, "text", 300)?,
+        kind: field(v, "kind", 32)?,
+    })
+}
+
+/// `v[k]`, an array of at most `max`, each read by `one`.
+fn list_of<T>(
+    v: &Value,
+    k: &str,
+    max: usize,
+    one: fn(&Value) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    match v.get(k) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(list)) if list.len() <= max => list.iter().map(one).collect(),
+        Some(Value::Array(_)) => Err(format!("{k}: at most {max}")),
+        Some(_) => Err(format!("{k} is a list")),
+    }
+}
+
+fn item_of(i: &Value) -> Result<QueueItem, String> {
+    let id = field(i, "id", 256)?.ok_or("an item's id is 1 to 256 characters")?;
+    let media = field(i, "media", 1024)?;
+    let art = field(i, "art", 1024)?;
+    if media.as_deref().is_some_and(|m| !vault_path(m)) {
+        return Err("media must be a vault path".to_owned());
+    }
+    if art.as_deref().is_some_and(|a| !vault_path(a)) {
+        return Err("art must be a vault path".to_owned());
+    }
+    let duration = match i.get("duration") {
+        None | Some(Value::Null) => None,
+        Some(d) => Some(
+            d.as_f64()
+                .filter(|d| d.is_finite() && *d > 0.0)
+                .ok_or("duration is a length in seconds")?,
+        ),
+    };
+    if media.is_none() && duration.is_none() {
+        return Err("an item without media needs a duration".to_owned());
+    }
+    Ok(QueueItem {
+        title: required(i, "title", 200)?,
+        subtitle: field(i, "subtitle", 200)?.unwrap_or_default(),
+        sections: list_of(i, "sections", SECTIONS_MAX, section_of)?,
+        marks: list_of(i, "marks", MARKS_MAX, mark_of)?,
+        id,
+        duration,
+        media,
+        art,
+    })
 }
 
 /// A `PLAYHEAD_SET`'s source, as #589 v0.1 bounds it: a `name` of at most
 /// 64 characters, at most [`QUEUE_MAX`] items, each with a unique `id` (1
-/// to 256), a `title` (1 to 200), a `subtitle` (at most 200), `media` a
-/// vault path, and a `duration` when it has no `media`. Anything else
-/// refuses the whole source.
-fn source_of(args: &Value) -> Option<(String, Vec<QueueItem>)> {
-    let name = field(args, "name", 64).ok()?.unwrap_or_default();
-    let items = args.get("queue")?.as_array()?;
+/// to 256), a `title` (1 to 200), a `subtitle` (at most 200), `media` and
+/// `art` vault paths ([`vault_path`]), a `duration` when it has no
+/// `media`, at most [`SECTIONS_MAX`] sections and [`MARKS_MAX`] marks;
+/// `index`, `time` and `play` as given. Anything else refuses the whole
+/// source, with why.
+fn source_of(args: &Value) -> Result<Source, String> {
+    let name = field(args, "name", 64)?.unwrap_or_default();
+    let items = args
+        .get("queue")
+        .and_then(Value::as_array)
+        .ok_or("queue is required")?;
     if items.len() > QUEUE_MAX {
-        return None;
+        return Err(format!("queue: at most {QUEUE_MAX} items"));
     }
     let mut ids = std::collections::BTreeSet::new();
-    let queue = items
-        .iter()
-        .map(|i| {
-            let id = field(i, "id", 256).ok()??;
-            let media = field(i, "media", 1024).ok()?;
-            let duration = match i.get("duration") {
-                None | Some(Value::Null) => None,
-                Some(d) => Some(d.as_f64().filter(|d| d.is_finite() && *d > 0.0)?),
-            };
-            if !ids.insert(id.clone())
-                || media.as_deref().is_some_and(|m| !vault_path(m))
-                || (media.is_none() && duration.is_none())
-            {
-                return None;
-            }
-            Some(QueueItem {
-                id,
-                title: field(i, "title", 200).ok()??,
-                subtitle: field(i, "subtitle", 200).ok()?.unwrap_or_default(),
-                duration,
-                media,
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some((name, queue))
+    let mut queue = Vec::with_capacity(items.len());
+    for i in items {
+        let item = item_of(i)?;
+        if !ids.insert(item.id.clone()) {
+            return Err(format!("item {} is in the queue twice", item.id));
+        }
+        queue.push(item);
+    }
+    let index = match args.get("index") {
+        None | Some(Value::Null) => None,
+        Some(n) => Some(
+            n.as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or("index is a place in the queue")?,
+        ),
+    };
+    Ok(Source {
+        name,
+        queue,
+        index,
+        time: seconds(args, "time")?,
+        play: args.get("play").and_then(Value::as_bool).unwrap_or(false),
+    })
 }
 
 /// `action` with `args` as an [`Intent`], if it is one and its arguments
-/// are what it takes (a seek within `0..=duration`).
-#[must_use]
-pub fn intent(action: &str, args: &Value, duration: f64) -> Option<Intent> {
+/// are what it takes (a seek within `0..=duration`), asked by a frame of
+/// the extension `caller`.
+///
+/// # Errors
+///
+/// Why it is refused, as `architect.playhead` v0.1 words it: not one of
+/// [`INTENTS`], `"not your source"` for a `source` naming another
+/// extension, `"t is outside 0..=duration"`, a field's limit.
+pub fn intent(action: &str, args: &Value, duration: f64, caller: &str) -> Result<Intent, String> {
+    if !INTENTS.contains(&action) {
+        return Err(format!("{action} is not something a view may ask"));
+    }
+    // A frame acts on its own extension's source only.
+    match args.get("source") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(s)) if s == caller => {}
+        Some(_) => return Err("not your source".to_owned()),
+    }
     match action {
         "PLAYHEAD_SEEK" => {
-            let t = args.get("t").and_then(Value::as_f64)?;
+            let t = args
+                .get("t")
+                .and_then(Value::as_f64)
+                .ok_or("t is required")?;
             (t.is_finite() && t >= 0.0 && duration > 0.0 && t <= duration)
                 .then_some(Intent::Seek(t))
+                .ok_or_else(|| "t is outside 0..=duration".to_owned())
         }
-        "PLAYHEAD_PLAY" => Some(Intent::Play),
-        "PLAYHEAD_PAUSE" => Some(Intent::Pause),
-        "PLAYHEAD_NEXT" => Some(Intent::Next),
-        "PLAYHEAD_PREVIOUS" => Some(Intent::Previous),
-        "PLAYHEAD_SET" => source_of(args).map(|(n, q)| Intent::Set(n, q)),
-        "PLAYHEAD_ITEM" => field(args, "id", 256).ok().flatten().map(|id| {
-            Intent::Item(
-                id,
+        "PLAYHEAD_PLAY" => Ok(Intent::Play),
+        "PLAYHEAD_PAUSE" => Ok(Intent::Pause),
+        "PLAYHEAD_NEXT" => Ok(Intent::Next),
+        "PLAYHEAD_PREVIOUS" => Ok(Intent::Previous),
+        "PLAYHEAD_SET" => source_of(args).map(Intent::Set),
+        "PLAYHEAD_ITEM" => {
+            let pick = match (field(args, "id", 256)?, args.get("index")) {
+                (Some(id), _) => Pick::Id(id),
+                (None, Some(n)) => Pick::Index(
+                    n.as_u64()
+                        .and_then(|n| usize::try_from(n).ok())
+                        .ok_or("index is a place in the queue")?,
+                ),
+                (None, None) => return Err("an id or an index is required".to_owned()),
+            };
+            Ok(Intent::Item(
+                pick,
                 args.get("play").and_then(Value::as_bool).unwrap_or(false),
-            )
-        }),
-        _ => None,
+            ))
+        }
+        _ => Err(format!("{action} is not something a view may ask")),
     }
 }
 
@@ -711,7 +1116,12 @@ pub fn duration(property: Option<&str>, lines: &[Line]) -> f64 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::indexing_slicing)]
+// The helpers take JSON by value so a case reads as a literal.
+#[allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::needless_pass_by_value
+)]
 mod tests {
     use serde_json::json;
 
@@ -746,18 +1156,151 @@ mod tests {
     fn a_note_type_draws_the_view_that_claims_it() {
         let mut l = listing();
         l["islands"][0]["embeds"] = json!([
-            {"view": "list", "note_type": ["Playlist", "bad type"]},
+            {"view": "list", "note_type": ["Playlist", "", "bad\ntype"]},
             {"view": "../x", "note_type": ["other"]},
             {"view": "none", "note_type": []},
+            {"view": "second", "note_type": ["playlist", "a type with spaces"]},
         ]);
         let it = &islands(&l)[0];
-        assert_eq!(it.embeds.len(), 1);
+        assert_eq!(it.embeds.len(), 2);
+        assert_eq!(it.embeds[0].note_types, ["Playlist"]);
+        // Within an island, the first claim listed wins.
         assert_eq!(it.embed_for("playlist"), Some("list"));
         assert_eq!(it.embed_for(" PLAYLIST "), Some("list"));
+        // A type with a space is a type, as a type's favourites have it.
+        assert_eq!(it.embed_for("a type with spaces"), Some("second"));
         assert_eq!(it.embed_for("other"), None);
         assert_eq!(it.embed_for(""), None);
         // An island that lists none claims none.
         assert!(islands(&listing())[0].embeds.is_empty());
+    }
+
+    /// Two islands: `first`, listed first, and `second`, with their claims.
+    fn two(first: Value, second: Value) -> Vec<Island> {
+        let mut l = listing();
+        let mut b = l["islands"][0].clone();
+        b["id"] = json!("other.ext");
+        b["folder"] = json!("/_ext/island/other.ext.01234567/");
+        l["islands"][0]["embeds"] = first;
+        b["embeds"] = second;
+        l["islands"].as_array_mut().unwrap().push(b);
+        islands(&l)
+    }
+
+    #[test]
+    fn the_island_that_draws_a_type_is_chosen_from_the_listing() {
+        // The first island claims nothing: the second's claim is found.
+        let list = two(
+            json!([]),
+            json!([{"view": "list", "note_type": ["playlist"]}]),
+        );
+        let (island, claim) = claimed(&list, "playlist").unwrap();
+        assert_eq!(island.id, "other.ext");
+        assert_eq!(claim.view, "list");
+        // Both claim it: the first island listed wins, whatever the
+        // second's claim says.
+        let list = two(
+            json!([{"view": "a", "note_type": ["poem"]}, {"view": "b", "note_type": ["playlist"]}]),
+            json!([{"view": "c", "note_type": ["playlist"]}]),
+        );
+        let (island, claim) = claimed(&list, "Playlist").unwrap();
+        assert_eq!(
+            (island.id.as_str(), claim.view.as_str()),
+            ("studio.transport", "b")
+        );
+        // A type nobody claims: no island, so nothing is fetched.
+        assert!(claimed(&list, "song").is_none());
+        assert!(claimed(&list, "").is_none());
+        assert!(claimed(&[], "playlist").is_none());
+    }
+
+    #[test]
+    fn a_listing_holds_at_most_sixteen_claims_of_sixteen_types() {
+        let mut l = listing();
+        let types: Vec<String> = (0..20).map(|n| format!("t{n}")).collect();
+        let claims: Vec<Value> = (0..20)
+            .map(|n| json!({"view": format!("v{n}"), "note_type": types, "properties": (0..40).map(|p| format!("p{p}")).collect::<Vec<_>>()}))
+            .collect();
+        l["islands"][0]["embeds"] = Value::Array(claims);
+        l["islands"][0]["reads"] =
+            json!(["documents", "a", "b", "c", "d", "e", "f", "g", "h", "i"]);
+        let it = &islands(&l)[0];
+        assert_eq!(it.embeds.len(), 16);
+        assert_eq!(it.embeds[0].note_types.len(), 16);
+        assert_eq!(it.embed_for("t15"), Some("v0"));
+        assert_eq!(it.embed_for("t16"), None);
+        assert_eq!(it.embeds[0].properties.len(), 32);
+        assert_eq!(it.reads.len(), 8);
+        // A view or a type past 64 characters is no claim.
+        l["islands"][0]["embeds"] = json!([
+            {"view": "v".repeat(65), "note_type": ["a"]},
+            {"view": "v", "note_type": ["t".repeat(65)]},
+        ]);
+        assert!(islands(&l)[0].embeds.is_empty());
+    }
+
+    fn note_world(reads: &[&str], claim: Value) -> Island {
+        let mut l = listing();
+        l["islands"][0]["reads"] = json!(reads);
+        l["islands"][0]["embeds"] = json!([claim]);
+        islands(&l).remove(0)
+    }
+
+    const PROPS: &[(&str, &str)] = &[
+        ("type", "playlist"),
+        ("date", "2026-12-24"),
+        ("private", "the alarm code"),
+    ];
+
+    fn the_note(properties: &[(String, String)]) -> Note<'_> {
+        Note {
+            path: "Private/Folders/Merry.md",
+            title: "Merry",
+            note_type: "playlist",
+            properties,
+            body: "One %%a private comment%% two\n%%across\nlines%%three %%never closed",
+        }
+    }
+
+    #[test]
+    fn a_view_is_handed_only_what_the_gate_lets_through_for_who_is_viewing() {
+        let properties: Vec<(String, String)> = PROPS
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        let note = the_note(&properties);
+        let reading = json!({"view": "list", "note_type": ["playlist"], "reads": ["documents"], "properties": ["date"]});
+        let island = note_world(&["documents"], reading.clone());
+        // A member: the note, its comments gone.
+        let member = note_props(Audience::Member, &island, &note);
+        assert_eq!(member["path"], "Private/Folders/Merry.md");
+        assert_eq!(member["body"], "One  two\nthree ");
+        assert_eq!(member["properties"]["private"], "the alarm code");
+        assert!(!member.to_string().contains("comment"));
+        // A guest: title, type and the declared properties; no body, no
+        // path, nothing undeclared.
+        let guest = note_props(Audience::Guest, &island, &note);
+        assert_eq!(
+            guest,
+            json!({"title": "Merry", "type": "playlist", "properties": {"date": "2026-12-24"}})
+        );
+        // The claim names no read, or the extension does not declare it,
+        // or nothing claims the type: no note at all.
+        let silent = json!({"view": "list", "note_type": ["playlist"], "properties": ["date"]});
+        for island in [
+            note_world(&["documents"], silent),
+            note_world(&[], reading.clone()),
+            note_world(&["selection"], reading),
+            note_world(
+                &["documents"],
+                json!({"view": "list", "note_type": ["poem"], "reads": ["documents"]}),
+            ),
+        ] {
+            assert_eq!(note_props(Audience::Member, &island, &note), Value::Null);
+            assert_eq!(note_props(Audience::Guest, &island, &note), Value::Null);
+        }
+        assert_eq!(without_comments("no comments"), "no comments");
+        assert_eq!(without_comments("%%all%%"), "");
     }
 
     #[test]
@@ -835,6 +1378,18 @@ mod tests {
         );
     }
 
+    fn ask(action: &str, args: Value) -> Result<Intent, String> {
+        intent(action, &args, 10.0, "studio.transport")
+    }
+
+    fn set(queue: Value) -> Result<Intent, String> {
+        ask("PLAYHEAD_SET", json!({"name": "N", "queue": queue}))
+    }
+
+    fn one(item: Value) -> Result<Intent, String> {
+        set(json!([item]))
+    }
+
     #[test]
     fn asks_are_the_playheads_intents_and_rate_limited() {
         let mut b = Bucket::new(0.0);
@@ -845,60 +1400,194 @@ mod tests {
         let more = (0..100).filter(|_| b.take(1000.0)).count();
         assert_eq!(more, 8);
         assert_eq!(
-            intent("PLAYHEAD_SEEK", &json!({"t": 3.5}), 10.0),
-            Some(Intent::Seek(3.5))
+            ask("PLAYHEAD_SEEK", json!({"t": 3.5})),
+            Ok(Intent::Seek(3.5))
         );
-        assert_eq!(intent("PLAYHEAD_SEEK", &json!({"t": 30}), 10.0), None);
-        assert_eq!(intent("PLAYHEAD_SEEK", &json!({"t": -1}), 10.0), None);
-        assert_eq!(intent("PLAYHEAD_SEEK", &json!({}), 10.0), None);
+        for t in [json!(30), json!(-1)] {
+            assert_eq!(
+                ask("PLAYHEAD_SEEK", json!({ "t": t })).unwrap_err(),
+                "t is outside 0..=duration"
+            );
+        }
+        assert!(ask("PLAYHEAD_SEEK", json!({})).is_err());
+        assert_eq!(ask("PLAYHEAD_PLAY", Value::Null), Ok(Intent::Play));
+        assert!(ask("VAULT_READ", json!({"path": "a"})).is_err());
+        assert!(ask("SHARE_CREATE", Value::Null).is_err());
+        // Only its own source (#589).
         assert_eq!(
-            intent("PLAYHEAD_PLAY", &Value::Null, 10.0),
-            Some(Intent::Play)
+            ask("PLAYHEAD_PLAY", json!({"source": "other.ext"})).unwrap_err(),
+            "not your source"
         );
-        assert_eq!(intent("VAULT_READ", &json!({"path": "a"}), 10.0), None);
-        assert_eq!(intent("SHARE_CREATE", &Value::Null, 10.0), None);
+        assert_eq!(
+            ask("PLAYHEAD_PLAY", json!({"source": "studio.transport"})),
+            Ok(Intent::Play)
+        );
         let args = json!({"t": 1, "id": "a", "queue": [{"id": "a", "title": "A", "duration": 2}]});
-        assert!(INTENTS.iter().all(|a| intent(a, &args, 10.0).is_some()));
-        // A source (#589): items with an id and a title, media a vault path,
-        // a duration when there is no media.
-        let set = |queue: Value| intent("PLAYHEAD_SET", &json!({"name": "N", "queue": queue}), 0.0);
+        assert!(INTENTS.iter().all(|a| intent(a, &args, 10.0, "x").is_ok()));
+        // Not before the view is mounted, not while the page is hidden.
+        assert_eq!(ask_refused(false, false), Some("not ready"));
+        assert_eq!(ask_refused(true, true), Some("the page is hidden"));
+        assert_eq!(ask_refused(false, true), Some("not ready"));
+        assert_eq!(ask_refused(true, false), None);
+    }
+
+    #[test]
+    fn a_source_is_what_the_contract_bounds_or_refused_whole() {
+        let item = |extra: Value| {
+            let mut i = json!({"id": "a", "title": "A", "duration": 2});
+            for (k, v) in extra.as_object().unwrap() {
+                i[k] = v.clone();
+            }
+            one(i)
+        };
+        let Ok(Intent::Set(source)) = ask(
+            "PLAYHEAD_SET",
+            json!({"name": "N", "index": 1, "time": 4.5, "play": true, "queue": [
+                {"id": "a", "title": "A", "subtitle": "S", "media": "Media/a.ogg", "art": "Art/a b.jpg",
+                 "sections": [{"name": "Verse 1", "start": 0, "end": 20.5, "color": "#2563eb"}],
+                 "marks": [{"at": 1.5, "text": "Amazing grace", "kind": "line"}]},
+                {"id": "b", "title": "B", "duration": 3},
+            ]}),
+        ) else {
+            panic!("a good source")
+        };
         assert_eq!(
-            set(json!([{"id": "a", "title": "A", "subtitle": "S", "media": "Media/a.ogg"}])),
-            Some(Intent::Set(
-                "N".to_owned(),
-                vec![QueueItem {
-                    id: "a".to_owned(),
-                    title: "A".to_owned(),
-                    subtitle: "S".to_owned(),
-                    duration: None,
-                    media: Some("Media/a.ogg".to_owned()),
-                }]
-            ))
+            (source.index, source.time, source.play),
+            (Some(1), Some(4.5), true)
         );
+        let a = &source.queue[0];
+        assert_eq!(a.media.as_deref(), Some("Media/a.ogg"));
+        assert_eq!(a.to_json()["art"], "Art/a b.jpg");
+        assert_eq!(a.to_json()["sections"][0]["color"], "#2563eb");
+        assert_eq!(a.to_json()["marks"][0]["kind"], "line");
+        assert_eq!(a.sections_json()[0]["name"], "Verse 1");
         assert_eq!(
             set(json!([])),
-            Some(Intent::Set("N".to_owned(), Vec::new()))
+            Ok(Intent::Set(Source {
+                name: "N".to_owned(),
+                ..Source::default()
+            }))
         );
+        // Each limit holds at its edge and refuses one past it.
+        let at = |n: usize| "x".repeat(n);
+        for (k, max) in [("id", 256), ("title", 200), ("subtitle", 200)] {
+            assert!(item(json!({ k: at(max) })).is_ok(), "{k} of {max}");
+            assert!(
+                item(json!({ k: at(max + 1) })).is_err(),
+                "{k} of {}",
+                max + 1
+            );
+        }
+        assert!(ask("PLAYHEAD_SET", json!({"name": at(64), "queue": []})).is_ok());
+        assert!(ask("PLAYHEAD_SET", json!({"name": at(65), "queue": []})).is_err());
+        let sections = |n: usize| Value::Array(vec![json!({"name": "S", "start": 0, "end": 1}); n]);
+        assert!(item(json!({"sections": sections(SECTIONS_MAX)})).is_ok());
+        assert!(item(json!({"sections": sections(SECTIONS_MAX + 1)})).is_err());
+        let marks = |n: usize| Value::Array(vec![json!({"at": 0, "text": "t"}); n]);
+        assert!(item(json!({"marks": marks(MARKS_MAX)})).is_ok());
+        assert!(item(json!({"marks": marks(MARKS_MAX + 1)})).is_err());
+        for bad in [
+            json!({"sections": [{"name": at(41), "start": 0, "end": 1}]}),
+            json!({"sections": [{"name": "S", "start": 2, "end": 1}]}),
+            json!({"sections": [{"name": "S", "start": 0, "end": 1, "color": "red"}]}),
+            json!({"sections": [{"start": 0, "end": 1}]}),
+            json!({"marks": [{"at": 0, "text": at(301)}]}),
+            json!({"marks": [{"at": 0, "text": "t", "kind": at(33)}]}),
+            json!({"marks": [{"at": -1, "text": "t"}]}),
+            json!({"art": "https://evil.test/a.jpg"}),
+        ] {
+            assert!(item(bad.clone()).is_err(), "{bad}");
+        }
         for bad in [
             json!([{"title": "no id", "duration": 1}]),
             json!([{"id": "a", "duration": 1}]),
             json!([{"id": "a", "title": "A"}]),
-            json!([{"id": "a", "title": "A", "media": "https://x/a.ogg"}]),
-            json!([{"id": "a", "title": "A", "media": "../a.ogg"}]),
-            json!([{"id": "a", "title": "A", "media": "/a.ogg"}]),
             json!([{"id": "a", "title": "A", "duration": 1}, {"id": "a", "title": "B", "duration": 1}]),
         ] {
-            assert_eq!(set(bad.clone()), None, "{bad}");
+            assert!(set(bad.clone()).is_err(), "{bad}");
         }
-        let many: Vec<Value> = (0..=QUEUE_MAX)
-            .map(|n| json!({"id": n.to_string(), "title": "t", "duration": 1}))
-            .collect();
-        assert_eq!(set(Value::Array(many)), None);
+        let many = |n: usize| -> Value {
+            (0..n)
+                .map(|n| json!({"id": n.to_string(), "title": "t", "duration": 1}))
+                .collect()
+        };
+        assert!(set(many(QUEUE_MAX)).is_ok());
+        assert!(set(many(QUEUE_MAX + 1)).is_err());
         assert_eq!(
-            intent("PLAYHEAD_ITEM", &json!({"id": "a", "play": true}), 0.0),
-            Some(Intent::Item("a".to_owned(), true))
+            ask("PLAYHEAD_ITEM", json!({"id": "a", "play": true})),
+            Ok(Intent::Item(Pick::Id("a".to_owned()), true))
         );
-        assert_eq!(intent("PLAYHEAD_ITEM", &json!({}), 0.0), None);
+        assert_eq!(
+            ask("PLAYHEAD_ITEM", json!({"index": 3})),
+            Ok(Intent::Item(Pick::Index(3), false))
+        );
+        assert!(ask("PLAYHEAD_ITEM", json!({})).is_err());
+        assert!(ask("PLAYHEAD_ITEM", json!({"index": -1})).is_err());
+    }
+
+    #[test]
+    fn media_is_a_vault_relative_path_and_nothing_else() {
+        for good in [
+            "Media/a.ogg",
+            "Recordings/Amazing Grace.m4a",
+            "a",
+            "Songs/Merry & Bright/01 – Joy.flac",
+        ] {
+            assert!(vault_path(good), "{good}");
+            assert!(
+                one(json!({"id": "a", "title": "A", "media": good})).is_ok(),
+                "{good}"
+            );
+        }
+        for bad in [
+            "",
+            "https://evil.test/a.ogg",
+            "data:audio/ogg;base64,AAAA",
+            "C:/a.ogg",
+            "/a.ogg",
+            "Media\\a.ogg",
+            "../a.ogg",
+            "Media/../../a.ogg",
+            "Media/./a.ogg",
+            "Media//a.ogg",
+            "Media/",
+            "Media/a.ogg?x=1",
+            "Media/a.ogg#t=10",
+            "%2e%2e/a.ogg",
+            "Media/a%20b.ogg",
+            "Media/a\u{0}.ogg",
+            "Media/a\n.ogg",
+            "Media/a\u{7f}.ogg",
+        ] {
+            assert!(!vault_path(bad), "{bad:?}");
+            assert_eq!(
+                one(json!({"id": "a", "title": "A", "media": bad})).unwrap_err(),
+                if bad.is_empty() {
+                    "an item without media needs a duration"
+                } else {
+                    "media must be a vault path"
+                },
+                "{bad:?}"
+            );
+        }
+        assert!(!vault_path(&"a".repeat(1025)));
+    }
+
+    #[test]
+    fn a_whole_queue_fits_one_message() {
+        let queue: Vec<Value> = (0..QUEUE_MAX)
+            .map(|n| json!({"id": format!("Setlists/Merry.md#{n}"), "title": format!("Song number {n}"), "subtitle": "Traditional", "duration": 192.5}))
+            .collect();
+        let message = json!({"t": "ask", "action": "PLAYHEAD_SET", "args": {"name": "Studio", "queue": queue}}).to_string();
+        assert!(
+            message.len() > 16 * 1024 && message.len() <= MAX_MESSAGE,
+            "{}",
+            message.len()
+        );
+        let Said::Ask(action, args) = said(&message) else {
+            panic!("a whole queue is heard")
+        };
+        assert!(intent(&action, &args, 0.0, "studio").is_ok());
     }
 
     #[test]

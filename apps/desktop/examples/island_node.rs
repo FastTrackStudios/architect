@@ -10,9 +10,13 @@
 //! it: `progress`, `transport`, `lyrics`, for the web app's frame host on
 //! the local stack, #495), note embeds from `ARCHITECT_ISLAND_EMBEDS`
 //! (`view=type,type;view=type`: a view drawn at the head of a note of
-//! those types in the web app), WebRTC granted when
+//! those types in the web app; `view=type,type=prop,prop`: one handed the
+//! note, a guest only those properties), its extension's declared reads
+//! `ARCHITECT_ISLAND_READS` (`documents`), WebRTC granted when
 //! `ARCHITECT_ISLAND_WEBRTC=1` (and declared); with no
-//! `ARCHITECT_ISLAND_FOLDER`, no island. `ARCHITECT_FAVOURITES` names a
+//! `ARCHITECT_ISLAND_FOLDER`, no island. A second island, listed after
+//! the first, from the same variables with `ARCHITECT_ISLAND2_` (its
+//! folder `ARCHITECT_ISLAND2_FOLDER`). `ARCHITECT_FAVOURITES` names a
 //! TOML file of `[[favourites]]` (a distribution's compiled-in extensions'
 //! declarations: a share page's phone shell, `apps/web/test/share-layout.test.mjs`).
 //! An island or favourites are otherwise only what a distribution links
@@ -46,31 +50,45 @@ fn files(root: &Path, dir: &Path, out: &mut Vec<(String, Cow<'static, [u8]>)>) {
     }
 }
 
-fn island(folder: &str) -> SiteIsland {
-    let view = std::env::var("ARCHITECT_ISLAND_VIEW").unwrap_or_else(|_| "counter".to_owned());
+fn island(prefix: &str, folder: &str) -> SiteIsland {
+    let var = |name: &str| std::env::var(format!("{prefix}_{name}"));
+    let view = var("VIEW").unwrap_or_else(|_| "counter".to_owned());
     let mut list = Vec::new();
     files(Path::new(folder), Path::new(folder), &mut list);
-    let id = std::env::var("ARCHITECT_ISLAND_ID").unwrap_or_else(|_| "lab.wasi-counter".to_owned());
-    let transport = std::env::var("ARCHITECT_ISLAND_TRANSPORT").unwrap_or_else(|_| view.clone());
+    let id = var("ID").unwrap_or_else(|_| "lab.wasi-counter".to_owned());
+    let transport = var("TRANSPORT").unwrap_or_else(|_| view.clone());
     let mut island = SiteIsland::new(id, list)
         .progress(view)
         .transport(transport);
-    if let Ok(lyrics) = std::env::var("ARCHITECT_ISLAND_LYRICS") {
+    if let Ok(lyrics) = var("LYRICS") {
         island = island.lyrics(lyrics);
     }
-    if let Ok(embeds) = std::env::var("ARCHITECT_ISLAND_EMBEDS") {
+    if let Ok(embeds) = var("EMBEDS") {
         for one in embeds.split(';') {
-            if let Some((view, types)) = one.split_once('=') {
-                island = island.embed(view.trim(), types.split(',').map(str::trim));
-            }
+            let mut parts = one.splitn(3, '=');
+            let (Some(view), Some(types)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            let types = types.split(',').map(str::trim);
+            island = match parts.next() {
+                Some(props) => island.embed_note(
+                    view.trim(),
+                    types,
+                    props.split(',').map(str::trim).filter(|p| !p.is_empty()),
+                ),
+                None => island.embed(view.trim(), types),
+            };
         }
     }
-    if let Ok(sheet) = std::env::var("ARCHITECT_ISLAND_SHEET") {
+    if let Ok(reads) = var("READS") {
+        island = island.reads(reads.split(',').map(str::trim));
+    }
+    if let Ok(sheet) = var("SHEET") {
         island = island.stylesheet(sheet);
     }
     // The operator's grant of WebRTC (`share-webview.test.mjs`): it takes
     // effect only when the island's manifest declares it too.
-    if std::env::var("ARCHITECT_ISLAND_WEBRTC").is_ok_and(|v| v == "1") {
+    if var("WEBRTC").is_ok_and(|v| v == "1") {
         island = island.grant_webrtc();
     }
     island
@@ -88,10 +106,13 @@ fn favourites(path: &str) -> Vec<architect_favourites::TypeFavourites> {
 }
 
 fn main() {
-    let islands: Vec<SiteIsland> = std::env::var("ARCHITECT_ISLAND_FOLDER")
-        .ok()
-        .map(|f| island(&f))
+    let islands: Vec<SiteIsland> = ["ARCHITECT_ISLAND", "ARCHITECT_ISLAND2"]
         .into_iter()
+        .filter_map(|p| {
+            std::env::var(format!("{p}_FOLDER"))
+                .ok()
+                .map(|f| island(p, &f))
+        })
         .collect();
     let favourites = std::env::var("ARCHITECT_FAVOURITES")
         .ok()

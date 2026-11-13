@@ -384,6 +384,8 @@ Walking bass in the verse, see [[Voice leading]]. Mix notes live in [[Mixing]].
 ```
 
 Fingerstyle: [[Fingerstyle patterns]].
+
+%%Capo 2 when the room is cold; a note to myself.%%
 """)
 
 

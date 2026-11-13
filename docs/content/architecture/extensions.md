@@ -1898,18 +1898,55 @@ bundle's only; listed as `embeds: [{view, note_type}]`). The web app draws
 that view at the head of a note whose `type` property it claims (without
 regard to case; `apps/web/src/app/embed.rs` `NoteEmbed`), in a frame like
 the others. Nothing in the app knows what kind of note it is: the claim
-chooses the view. The view is given `note` (`{path, title, type,
-properties, body}`, as data) beside the playhead's state of its
-extension's source, flat, as `architect.playhead` v0.1 gives a frame
-(#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source: a
-`name` and a `queue` of at most 500 items, each with a unique `id`, a
-`title`, `media` only as a vault path, a `duration` when it has no media;
-anything else refuses the whole source) and `PLAYHEAD_ITEM` (`{id,
-play}`). Until the playhead's deck and the Now Playing bar land, the
-source and its silent clock are kept per view in `embed.rs`; they take its
-place with the same asks and props.
+chooses the view.
 
-||||||| cc3c1c7a
+- **Which island.** The first island in the listing's order that claims
+  the type draws it, with its first claim of it (`apps/web/src/ext_host.rs`
+  `claimed`). The choice is made from the listing alone: only that
+  island's bundle is fetched and checked, and a note whose type nobody
+  claims fetches nothing.
+- **What of the note it is handed.** `note_props` in
+  `apps/web/src/ext_host.rs` is the one gate between a vault's note and a
+  frame, wherever a view is mounted on a note, and it takes who is
+  viewing (`Audience`; no caller can leave it out). A view gets the note
+  only when its claim names reading it (`SiteIsland::embed_note(view,
+  note_types, properties)`, listed with `reads: ["documents"]` and the
+  `properties` it declares) and its extension declares it too
+  (`SiteIsland::reads`, its manifest's `[capabilities] reads`, listed as
+  the island's `reads`); otherwise `note` is `null`. A signed-in member
+  (and the demo) gets `{path, title, type, properties, body}`, the body
+  without its `%%comments%%`. A share's guest gets `{title, type,
+  properties}` with only the declared properties: no body, no vault path.
+  What a guest gets of a note's text is the owner's decision, still open
+  (#648); this is the conservative answer until then, and the web app has
+  no guest path yet.
+- **What it may ask.** Beside the note, the playhead's state of its
+  extension's source, flat, as `architect.playhead` v0.1 gives a frame
+  (#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source,
+  checked against the contract's limits: a `name`, a `queue` of at most
+  500 items, each with a unique `id`, a `title`, `media` and `art` only as
+  vault-relative paths (`vault_path`: no scheme, no leading `/`, no `\`,
+  `?`, `#`, `%` or control character, no empty, `.` or `..` segment),
+  a `duration` when it has no media, sections and marks within their
+  limits; `index`, `time` and `play`; anything else refuses the whole
+  source) and `PLAYHEAD_ITEM` (`{id}` or `{index}`, and `play`). A
+  `source` naming another extension is refused (`not your source`). No
+  ask is taken before the frame is ready or while the page is hidden. A
+  refusal's reason, in the contract's words, is on the frame's holder
+  (`data-ext-refused`); the protocol has no answer to an ask. A message
+  may be 64 KiB, checked before it is copied out of the browser.
+- **The stand-in deck.** Until the playhead's deck and the Now Playing bar
+  land, the source and its silent clock are kept per view in `embed.rs`;
+  they take its place with the same asks and props. Where it differs from
+  v0.1, for the deck to pick up: it is per frame, so two frames of one
+  extension keep two sources (the contract has one per extension); a
+  source's `name` is not defaulted to the manifest's; `media` is never
+  played or resolved, so a media item's `duration` is only what it was
+  given; there is no `PLAYHEAD_STATE`, `PLAYHEAD_SOURCES` or active-source
+  switching; a remount starts the source fresh. Whether `media` must also
+  be a path the note references is the deck's to enforce when it
+  resolves it (#589).
+
 What reaches the network from a web view, and what stops it:
 
 - **By its policy** (`sandbox allow-scripts`, an opaque origin): every

@@ -3,13 +3,20 @@
 //! manifest's `[[embeds]] claims = { note_type = […] }`) draws that view
 //! in a frame at the head of the note.
 //!
-//! The view is given the note as data (`note`: `{path, title, type,
-//! properties, body}`) beside the playhead's state of its extension's
+//! The island is chosen from the listing alone (`ext_host::claimed`: the
+//! first island listed that claims the type, its first claim of it), and
+//! only that island's bundle is fetched; a note whose type nobody claims
+//! fetches nothing.
+//!
+//! The view is given what `ext_host::note_props` lets through of the note
+//! for who is viewing (`note`; `null` unless its claim and its extension
+//! both name reading it) beside the playhead's state of its extension's
 //! source, flat, as `architect.playhead` v0.1 gives a frame (#589:
-//! `source`, `name`, `playing`, `time`, `at`, `rate`, `duration`, `index`,
-//! `tracks`, `clock`, `item`, `queue`, `title`, `subtitle`, `artist`,
-//! `sections`). It may set its source (`PLAYHEAD_SET`), make one item
-//! current (`PLAYHEAD_ITEM`) and use the playhead's intents on it.
+//! `source`, `name`, `active`, `playing`, `time`, `at`, `rate`,
+//! `duration`, `index`, `tracks`, `clock`, `item`, `queue`, `title`,
+//! `subtitle`, `artist`, `sections`). It may set its source
+//! (`PLAYHEAD_SET`), make one item current (`PLAYHEAD_ITEM`) and use the
+//! playhead's intents on it.
 //!
 //! The source and its clock are kept here, silent and per view, as a
 //! stand-in: `architect-playhead`'s deck and the Now Playing bar (#589's
@@ -19,11 +26,11 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-use super::frames::{Bundle, ExtensionFrame, use_island};
+use super::frames::{Bundle, ExtensionFrame, use_bundle, use_listing};
 use super::song::{Clock, frame_theme, now_ms};
-use crate::ext_host::{Intent, QueueItem};
+use crate::ext_host::{self, Audience, Intent, Island, Note, Pick, QueueItem};
 
 /// What is played over again from its start rather than the one before,
 /// once this many seconds of it have played.
@@ -47,43 +54,58 @@ impl Queue {
     }
 }
 
-fn item_json(i: &QueueItem) -> Value {
-    json!({"id": i.id, "title": i.title, "subtitle": i.subtitle, "duration": i.duration, "media": i.media})
-}
-
 /// The view that claims a note of type `note_type`, at the note's head;
 /// nothing when no island claims it, or until its bundle is checked.
+/// `audience` is who is viewing: what of the note the view is handed
+/// depends on it (`ext_host::note_props`).
 #[component]
 pub fn NoteEmbed(
+    audience: Audience,
     path: String,
     title: String,
     note_type: String,
     properties: Vec<(String, String)>,
     body: String,
 ) -> Element {
-    let island = use_island();
-    let bundle: Option<Rc<Bundle>> = island
+    let listing = use_listing();
+    let Some(list) = listing.read().clone() else {
+        return rsx! {};
+    };
+    let Some((island, claim)) = ext_host::claimed(&list, &note_type) else {
+        return rsx! {};
+    };
+    let note = ext_host::note_props(
+        audience,
+        island,
+        &Note {
+            path: &path,
+            title: &title,
+            note_type: &note_type,
+            properties: &properties,
+            body: &body,
+        },
+    );
+    rsx! {
+        Claimed {
+            key: "{island.folder}/{claim.view}",
+            island: island.clone(),
+            view: claim.view.clone(),
+            note,
+        }
+    }
+}
+
+/// `island`'s view `view`, once its bundle is fetched and checked.
+#[component]
+fn Claimed(island: Island, view: String, note: Value) -> Element {
+    let bundle = use_bundle(island);
+    let checked: Option<Rc<Bundle>> = bundle
         .read()
         .as_ref()
         .and_then(|r| r.as_ref().ok().cloned());
-    let Some(bundle) = bundle else {
+    let Some(bundle) = checked else {
         return rsx! {};
     };
-    let Some(view) = bundle
-        .island
-        .embed_for(note_type.as_str())
-        .map(str::to_owned)
-    else {
-        return rsx! {};
-    };
-    let mut props = Map::new();
-    for (k, v) in properties {
-        props.insert(k, Value::String(v));
-    }
-    let note = json!({
-        "path": path, "title": title, "type": note_type,
-        "properties": props, "body": body,
-    });
     rsx! { Embedded { bundle, view, note } }
 }
 
@@ -97,13 +119,17 @@ fn Embedded(bundle: Rc<Bundle>, view: String, note: Value) -> Element {
         playing: false,
     });
     let mut time = use_signal(|| 0.0_f64);
-    // The clock: a tick while it plays; at a song's end, the next.
-    use_future(move || async move {
+    // The clock: a tick while it plays (and only then: it is started again
+    // whenever the clock changes); at an item's end, the next.
+    use_resource(move || async move {
+        if !clock().playing {
+            return;
+        }
         loop {
             futures_timer::Delay::new(std::time::Duration::from_millis(250)).await;
             let c = *clock.peek();
             if !c.playing {
-                continue;
+                return;
             }
             let length = queue.peek().length();
             let now = c.time(if length > 0.0 { length } else { f64::INFINITY });
@@ -120,6 +146,7 @@ fn Embedded(bundle: Rc<Bundle>, view: String, note: Value) -> Element {
                     playing: more,
                 });
                 time.set(if more { 0.0 } else { length });
+                return;
             }
         }
     });
@@ -139,23 +166,49 @@ fn Embedded(bundle: Rc<Bundle>, view: String, note: Value) -> Element {
         let current = queue.peek().current;
         let count = queue.peek().items.len();
         match i {
-            Intent::Set(name, items) => {
-                // #589: the item current stays current, where it was and
-                // playing or not, if it is still queued; else the first,
-                // paused at 0. An empty queue removes the source.
+            Intent::Set(source) => {
+                // #589: given no index or time, the item current stays
+                // current, where it was and playing or not, if it is still
+                // queued; else the given index (clamped) or the first, at
+                // the given time or 0. An empty queue removes the source.
                 let id = current.and_then(|n| queue.peek().items.get(n).map(|i| i.id.clone()));
-                let kept = id.and_then(|id| items.iter().position(|i| i.id == id));
-                let first = (!items.is_empty()).then_some(0);
-                queue.write().name = name;
-                queue.write().items = items;
-                if kept.is_some() {
-                    queue.write().current = kept;
-                } else {
-                    start(first, false);
+                let kept = id.and_then(|id| source.queue.iter().position(|i| i.id == id));
+                let last = source.queue.len().checked_sub(1);
+                let wanted = last.and_then(|l| source.index.map(|n| n.min(l)));
+                let first = last.map(|_| 0);
+                queue.write().name = source.name;
+                queue.write().items = source.queue;
+                match (kept, wanted, source.time) {
+                    (Some(k), None, None) => {
+                        queue.write().current = Some(k);
+                        if source.play && !c.playing {
+                            clock.set(Clock {
+                                time: at,
+                                at: now_ms(),
+                                playing: true,
+                            });
+                        }
+                    }
+                    _ => {
+                        start(wanted.or(first), source.play);
+                        let t = source.time.unwrap_or(0.0);
+                        let length = queue.peek().length();
+                        let t = if length > 0.0 { t.min(length) } else { 0.0 };
+                        let playing = clock.peek().playing;
+                        clock.set(Clock {
+                            time: t,
+                            at: now_ms(),
+                            playing,
+                        });
+                        time.set(t);
+                    }
                 }
             }
-            Intent::Item(id, play) => {
-                let n = queue.peek().items.iter().position(|i| i.id == id);
+            Intent::Item(pick, play) => {
+                let n = match pick {
+                    Pick::Id(id) => queue.peek().items.iter().position(|i| i.id == id),
+                    Pick::Index(n) => (n < count).then_some(n),
+                };
                 if n.is_some() {
                     start(n, play);
                 }
@@ -219,12 +272,12 @@ fn Embedded(bundle: Rc<Bundle>, view: String, note: Value) -> Element {
             "index": q.current,
             "tracks": q.items.len(),
             "clock": "silent",
-            "item": item.map(item_json),
-            "queue": q.items.iter().map(item_json).collect::<Vec<_>>(),
+            "item": item.map(QueueItem::to_json),
+            "queue": q.items.iter().map(QueueItem::to_json).collect::<Vec<_>>(),
             "title": item.map(|i| i.title.clone()),
             "subtitle": item.map(|i| i.subtitle.clone()),
             "artist": item.map(|i| i.subtitle.clone()),
-            "sections": [],
+            "sections": item.map_or_else(|| json!([]), QueueItem::sections_json),
         })
     });
     let theme = frame_theme();

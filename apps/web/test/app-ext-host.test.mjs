@@ -23,7 +23,13 @@
 //   (`VAULT_READ`, `SHARE_CREATE`) is not answered;
 // - its port captured and flooded, it is booted once and its height held;
 // - a frame that stops answering the heartbeat is taken down;
-// - a file that is not the one the node pinned is never handed to a frame.
+// - a file that is not the one the node pinned is never handed to a frame;
+// - a note's type picks its view from the listing before anything is
+//   fetched (two islands: only the claiming one's bundle is fetched, none
+//   for a type nobody claims); the view gets the note through the gate
+//   (no `%%comments%%`; no note at all without a declared read); asks
+//   before ready and while the page is hidden are refused; a hostile
+//   `PLAYHEAD_SET` is refused whole and a full 500-item queue fits.
 //
 // Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the PATH), in a
 // mount namespace whose runtime dir and /run/pipewire are empty (`unshare
@@ -164,27 +170,38 @@ export function mount(view) {
 
 // ── The node, the front, the attacker ───────────────────────────────
 
-async function node(bundle) {
+/// A node with an island of `bundle` (`demo.view`); with `islands`, those
+/// instead (`[{id, bundle, embeds, reads}]`, listed in that order, at most
+/// two: `ARCHITECT_ISLAND_*` and `ARCHITECT_ISLAND2_*`).
+async function node(bundle, islands) {
   const dir = mkdtempSync(join(tmpdir(), 'app-ext-'));
   const vault = join(dir, 'vault');
   put(vault, 'Welcome.md', '# Welcome\n');
-  const folder = join(dir, 'island');
-  put(folder, 'web-view.js', bundle);
-  put(folder, 'web-view_bg.wasm', WASM);
-  put(folder, 'architect.json', JSON.stringify({ module: 'web-view.js', manifest: { id: 'demo.view', capabilities: {} } }));
-  const port = await freePort();
-  const proc = spawn(NODE, [], {
-    stdio: 'ignore',
-    env: {
-      ...process.env, ARCHITECT_BIND: `127.0.0.1:${port}`, ARCHITECT_DATA_DIR: join(dir, 'data'), ARCHITECT_VAULTS: `notes=${vault}`,
-      ARCHITECT_IROH: 'local', ARCHITECT_NAME: 'app-ext-test', ARCHITECT_ISLAND_FOLDER: folder, ARCHITECT_ISLAND_ID: 'demo.view',
-      ARCHITECT_ISLAND_VIEW: 'progress', ARCHITECT_ISLAND_TRANSPORT: 'transport', ARCHITECT_ISLAND_LYRICS: 'lyrics',
-    },
+  const env = {
+    ...process.env, ARCHITECT_DATA_DIR: join(dir, 'data'), ARCHITECT_VAULTS: `notes=${vault}`,
+    ARCHITECT_IROH: 'local', ARCHITECT_NAME: 'app-ext-test',
+  };
+  const list = islands || [{ id: 'demo.view', bundle }];
+  list.forEach((one, n) => {
+    const prefix = n === 0 ? 'ARCHITECT_ISLAND' : 'ARCHITECT_ISLAND2';
+    const folder = join(dir, `island-${n}`);
+    put(folder, 'web-view.js', one.bundle);
+    put(folder, 'web-view_bg.wasm', WASM);
+    put(folder, 'architect.json', JSON.stringify({ module: 'web-view.js', manifest: { id: one.id, capabilities: {} } }));
+    Object.assign(env, {
+      [`${prefix}_FOLDER`]: folder, [`${prefix}_ID`]: one.id,
+      [`${prefix}_VIEW`]: 'progress', [`${prefix}_TRANSPORT`]: 'transport', [`${prefix}_LYRICS`]: 'lyrics',
+    });
+    if (one.embeds) env[`${prefix}_EMBEDS`] = one.embeds;
+    if (one.reads) env[`${prefix}_READS`] = one.reads;
   });
+  const port = await freePort();
+  env.ARCHITECT_BIND = `127.0.0.1:${port}`;
+  const proc = spawn(NODE, [], { stdio: 'ignore', env });
   const origin = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 160; i++) {
     await sleep(250);
-    const ok = await fetch(`${origin}/_ext/islands.json`).then((r) => r.ok && r.json()).then((j) => j && j.islands.length === 1, () => false);
+    const ok = await fetch(`${origin}/_ext/islands.json`).then((r) => r.ok && r.json()).then((j) => j && j.islands.length === list.length, () => false);
     if (ok) return { origin, close: () => { proc.kill(); rmSync(dir, { recursive: true, force: true }); } };
   }
   proc.kill();
@@ -207,9 +224,11 @@ async function front(nodeOrigin, { tamper = false } = {}) {
   const policy = appPolicy();
   const port = await freePort();
   const target = new URL(nodeOrigin);
+  const fetched = [];
   const srv = createServer((req, res) => {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (path.startsWith('/_ext/')) {
+      fetched.push(path);
       const up = request({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers: { ...req.headers, host: target.host } }, (r) => {
         if (tamper && path.endsWith('.wasm')) {
           const chunks = [];
@@ -231,7 +250,7 @@ async function front(nodeOrigin, { tamper = false } = {}) {
     res.end(readFileSync(file));
   });
   await new Promise((ok) => srv.listen(port, '127.0.0.1', ok));
-  return { origin: `http://127.0.0.1:${port}`, policy, close: () => srv.close() };
+  return { origin: `http://127.0.0.1:${port}`, policy, fetched, close: () => srv.close() };
 }
 
 function attacker() {
@@ -275,6 +294,9 @@ async function firefox() {
     return r.result.value;
   };
   return {
+    // Another tab in front (this one hidden), and this one back.
+    hide: async () => { const other = (await send('browsingContext.create', { type: 'tab' })).context; await send('browsingContext.activate', { context: other }); return other; },
+    show: async (other) => { await send('browsingContext.close', { context: other }); await send('browsingContext.activate', { context }); },
     go: (url) => send('browsingContext.navigate', { context, url, wait: 'complete' }),
     eval: (e) => evalIn(context, e),
     evalIn,
@@ -426,4 +448,101 @@ test('a file that is not the one pinned is never handed to a frame', { skip }, a
     assert.equal(await w.b.eval(`document.querySelectorAll('iframe').length`), 0, 'no frame');
     assert.equal(await w.b.eval(`!!document.querySelector('[data-testid=song-own-controls]')`), true, "the app's own controls");
   } finally { await w.close(); }
+});
+
+/// A claimed view: what it is handed, written to its body; a source asked
+/// before it is ready (refused), a hostile source (a URL for media, then
+/// one item too many), then a whole queue of 500 (past the old 16 KiB, an
+/// HTML title among them), then the next item every 700 ms.
+const CLAIM = `
+  const r = { props: [] };
+  const ask = (a, args) => globalThis.architectPage.ask(a, args);
+  ask("PLAYHEAD_SET", { name: "Early", queue: [{ id: "early", title: "Early", duration: 5 }] });
+  globalThis.architectPage.subscribe((p) => { r.props.push(p); if (r.props.length > 5) r.props.shift(); document.body.dataset.report = JSON.stringify(r); });
+  setTimeout(() => ask("PLAYHEAD_SET", { queue: [{ id: "x", title: "X", media: "https://evil.test/a.ogg" }] }), 800);
+  setTimeout(() => ask("PLAYHEAD_SET", { queue: Array.from({ length: 501 }, (_, i) => ({ id: "i" + i, title: "t", duration: 1 })) }), 1100);
+  setTimeout(() => {
+    const queue = Array.from({ length: 500 }, (_, i) => ({ id: "Setlists/Merry.md#" + i, title: i === 0 ? "<img src=x data-pwned=1>Opener" : "Song number " + i, subtitle: "Traditional", duration: 192.5 }));
+    ask("PLAYHEAD_SET", { name: "Big", queue });
+  }, 1400);
+  setTimeout(() => setInterval(() => ask("PLAYHEAD_NEXT"), 700), 2500);
+`;
+
+/// What a view is handed, written to its body.
+const REPORT = `
+  globalThis.architectPage.subscribe((p) => { document.body.dataset.report = JSON.stringify(p); });
+`;
+
+/// Opens the note `name` under the folders `path` in `/app/?demo`, with
+/// every frame's refusal recorded on the page (`window.__refused`).
+async function openNote(b, origin, path, name, fresh = true) {
+  if (fresh) {
+    await b.go(`${origin}/app/?demo`);
+    await until(() => b.eval(`!!document.querySelector('[data-testid=note-text]')`), 60000, 'the demo');
+    await b.eval(`window.__refused = []; new MutationObserver((ms) => { for (const m of ms) window.__refused.push(m.target.getAttribute('data-ext-refused')); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-ext-refused'] }); true`);
+  }
+  const click = (txt) => b.eval(`(() => { const all = [...document.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.textContent.trim() === ${JSON.stringify(txt)}); const e = all[all.length - 1]; if (!e) return false; (e.closest('button,[role=treeitem],[role=button],a,li,div') || e).click(); return true; })()`);
+  for (const folder of path) { await until(() => click(folder), 10000, `the folder ${folder}`); await sleep(300); }
+  await until(() => click(name), 10000, `the note ${name}`);
+  await until(() => b.eval(`document.querySelector('[data-note]')?.dataset.note?.endsWith(${JSON.stringify(`${name}.md`)})`), 10000, `${name} open`);
+}
+
+const embed = async (b) => JSON.parse(await b.eval(`JSON.stringify((() => { const e = document.querySelector('[data-testid=note-embed]'); return e && { view: e.dataset.view, queue: Number(e.dataset.queue), current: e.dataset.current, island: e.querySelector('[data-testid=ext-frame]')?.dataset.extIsland }; })())`));
+
+test('a note\'s type picks its island from the listing; the view gets the note through the gate, and only asks it may', { skip }, async () => {
+  const n = await node(null, [
+    // Listed first: claims captures, reads nothing.
+    { id: 'demo.first', bundle: glue({ first: REPORT }), embeds: 'first=capture' },
+    // Listed second: claims songs, reads the note, declares `artist`.
+    { id: 'demo.second', bundle: glue({ second: CLAIM }), embeds: 'second=song=artist', reads: 'documents' },
+  ]);
+  const f = await front(n.origin);
+  const b = await firefox();
+  try {
+    const listing = await (await fetch(`${n.origin}/_ext/islands.json`)).json();
+    const folder = (id) => listing.islands.find((i) => i.id === id).folder;
+    const bundles = () => f.fetched.filter((p) => p.startsWith('/_ext/island/'));
+    // A typed note nobody claims: nothing fetched, nothing drawn.
+    await openNote(b, f.origin, ['Tasks'], 'Book mastering');
+    await sleep(2000);
+    assert.deepEqual(bundles(), [], 'no bundle for a type nobody claims');
+    assert.equal(await embed(b), null);
+    // A song: the second island's view; the first's bundle never fetched.
+    await openNote(b, f.origin, ['Songs'], 'Slow River', false);
+    await until(async () => (await mark(b, 'second'))?.state === 'ready', 20000, 'the claimed view ready');
+    const e = await embed(b);
+    assert.equal(e.view, 'second');
+    assert.equal(e.island, 'demo.second');
+    assert.ok(bundles().length > 0 && bundles().every((p) => p.startsWith(folder('demo.second'))), `fetched: ${bundles().join(', ')}`);
+    // The whole queue came through; what was refused, with why.
+    const full = await until(async () => { const x = await embed(b); return x.queue === 500 && x; }, 20000, 'the 500-item queue');
+    assert.match(full.current, /^Setlists\/Merry\.md#\d+$/);
+    const refused = JSON.parse(await b.eval('JSON.stringify(window.__refused)'));
+    for (const why of ['not ready', 'media must be a vault path', 'queue: at most 500 items']) assert.ok(refused.includes(why), `${why} in ${JSON.stringify(refused)}`);
+    assert.equal(await b.eval(`document.querySelectorAll('[data-pwned]').length`), 0, 'a title is never markup');
+    // What it was handed: the note, without its comments.
+    const c = await frameOf(b, 'second');
+    const report = JSON.parse(await until(() => b.evalIn(c, 'document.body.dataset.report'), 10000, 'its report'));
+    const note = report.props[report.props.length - 1].note;
+    assert.equal(note.path, 'Songs/Slow River.md');
+    assert.equal(note.properties.artist, 'Traditional');
+    assert.ok(note.body.includes('Fingerstyle'), 'the body');
+    assert.ok(!note.body.includes('Capo 2') && !note.body.includes('%%'), 'no comment');
+    // Hidden, it takes no ask: its NEXTs are refused and the item stays.
+    await until(async () => Number((await embed(b)).current.split('#')[1]) >= 2, 10000, 'NEXT heard while shown');
+    const other = await b.hide();
+    try {
+      await until(() => b.eval(`document.hidden`), 5000, 'the page hidden');
+      await until(async () => JSON.parse(await b.eval('JSON.stringify(window.__refused)')).includes('the page is hidden'), 10000, 'an ask refused while hidden');
+      const held = (await embed(b)).current;
+      await sleep(2500);
+      assert.equal((await embed(b)).current, held, 'no ask moved it while hidden');
+    } finally { await b.show(other); }
+    // A capture: the first island's view, whose claim names no read: no note.
+    await openNote(b, f.origin, ['Inbox'], 'Gift idea', false);
+    await until(async () => (await mark(b, 'first'))?.state === 'ready', 20000, 'the first island\'s view ready');
+    const fc = await frameOf(b, 'first');
+    const handed = JSON.parse(await until(() => b.evalIn(fc, 'document.body.dataset.report'), 10000, 'its props'));
+    assert.equal(handed.note, null, 'no note without a declared read');
+  } finally { await b.close(); f.close(); n.close(); }
 });

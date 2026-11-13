@@ -162,6 +162,22 @@ async fn bundle(island: &Island) -> Result<Rc<Bundle>, String> {
     Ok(b)
 }
 
+/// The node's islands this app believes, read once a page: `None` while it
+/// loads. Nothing of any bundle is fetched for it.
+pub fn use_listing() -> Resource<Rc<Vec<Island>>> {
+    use_resource(listing)
+}
+
+/// `island`'s bundle, fetched and checked (once a page): `None` while it
+/// loads, `Some(Err)` when it failed. Fetched only when called, so only the
+/// island whose view mounts is ever fetched.
+pub fn use_bundle(island: Island) -> Resource<Result<Rc<Bundle>, String>> {
+    use_resource(move || {
+        let island = island.clone();
+        async move { bundle(&island).await }
+    })
+}
+
 /// The first listed island with a web bundle, fetched and checked: `None`
 /// while it loads, `Some(Err)` when there is none or it failed.
 pub fn use_island() -> Resource<Result<Rc<Bundle>, String>> {
@@ -342,10 +358,18 @@ impl Frame {
 
 /// What a frame said, acted on.
 fn heard(shared: &Shared, data: &JsValue) {
-    let Some(text) = js_sys::JSON::stringify(data)
-        .ok()
-        .and_then(|s| s.as_string())
-    else {
+    let Ok(json) = js_sys::JSON::stringify(data) else {
+        return;
+    };
+    // Its length first, before it is copied out of the browser: a UTF-16
+    // length past the limit is a UTF-8 one past it too.
+    if usize::try_from(json.length()).unwrap_or(usize::MAX) > ext_host::MAX_MESSAGE {
+        shared
+            .borrow()
+            .mark("data-ext-refused", "message too large");
+        return;
+    }
+    let Some(text) = json.as_string() else {
         return;
     };
     let mut f = shared.borrow_mut();
@@ -412,6 +436,12 @@ fn heard(shared: &Shared, data: &JsValue) {
             }
         }
         Said::Ask(action, args) => {
+            // Nothing before its view is mounted, nothing while the page is
+            // hidden, whatever it asks.
+            if let Some(why) = ext_host::ask_refused(f.ready, hidden()) {
+                f.mark("data-ext-refused", why);
+                return;
+            }
             let allowed = BUCKET.with(|b| {
                 let mut b = b.borrow_mut();
                 b.get_or_insert_with(|| Bucket::new(now())).take(now())
@@ -420,10 +450,13 @@ fn heard(shared: &Shared, data: &JsValue) {
                 f.mark("data-ext-refused", "too many requests");
                 return;
             }
-            if let (Some(i), Some(events)) =
-                (ext_host::intent(&action, &args, f.duration), f.events)
-            {
-                events.send(Event::Ask(i));
+            match ext_host::intent(&action, &args, f.duration, &f.bundle.island.id) {
+                Ok(i) => {
+                    if let Some(events) = f.events {
+                        events.send(Event::Ask(i));
+                    }
+                }
+                Err(why) => f.mark("data-ext-refused", &why),
             }
         }
         Said::Error(why) => f.die(&why),

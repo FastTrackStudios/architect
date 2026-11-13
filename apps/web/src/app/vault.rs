@@ -522,6 +522,9 @@ fn WebNote(path: String) -> Element {
             div { class: "web-note", "data-note": "{path}",
                 if !note_type.is_empty() {
                     super::embed::NoteEmbed {
+                        // The signed-in person's own vault, or the demo; a
+                        // share's guest is `Audience::Guest` (#629, #648).
+                        audience: crate::ext_host::Audience::Member,
                         path: path.clone(),
                         title: prop("title").unwrap_or_else(|| title_of(&path)),
                         note_type: note_type.clone(),
