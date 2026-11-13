@@ -945,7 +945,7 @@ The songs live in [[Songs/Amazing Grace]]. #lab/sample
       "The shell holds the tabs, the sidebar and the toolbars. See [[Welcome]]\nand [[The workspace]].")
     W("Notes/The workspace.md", {"title": "The workspace", "tags": ["shell", "workspace"], "status": "active"},
       "Panes, docks and screensets. Back to [[The app shell]]. A link to\n[[A note nobody wrote]] resolves to nothing.")
-    W("Songs/Amazing Grace.md", {"title": "Amazing Grace", "key": "G", "bpm": 72, "tags": ["song"],
+    W("Songs/Amazing Grace.md", {"title": "Amazing Grace", "key": "G", "bpm": 72, "tags": ["song"], "type": "song",
                                  "album": "[[Projects/Album/project|Album]]", "sort_index": 3},
       "A hymn, in [[Welcome]]'s sample. Verse one in G.")
 

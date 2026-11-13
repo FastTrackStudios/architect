@@ -203,6 +203,28 @@ pub fn place_ok(place: &str) -> bool {
                 .all(|(i, seg)| *seg != ".." && *seg != "." && (!seg.is_empty() || i == last)))
 }
 
+/// Place `place` beside the note at `note`, as the path of a file.
+///
+/// `Charts/Joy` or `Joy#bar-1` beside `Songs/A.md` is `Songs/Charts/Joy`
+/// or `Songs/Joy`; a heading alone (`#notes`), a folder (`Charts/`) or
+/// anything a manifest may not declare ([`TypeFavourites::check`]) is
+/// `None`. A shell that opens a file from a tab looks for it as given,
+/// then with `.md`.
+#[must_use]
+pub fn place_path(note: &str, place: &str) -> Option<String> {
+    if !place_ok(place) {
+        return None;
+    }
+    let path = place.split_once('#').map_or(place, |(p, _)| p);
+    if path.is_empty() || path.ends_with('/') {
+        return None;
+    }
+    Some(match note.rsplit_once('/') {
+        Some((folder, _)) => format!("{folder}/{path}"),
+        None => path.to_owned(),
+    })
+}
+
 /// `a-z`, `0-9`, `-` (and `.` for a state such as `player.playing`).
 fn is_id(s: &str) -> bool {
     !s.is_empty()
@@ -324,6 +346,15 @@ on = { label = "Pause", icon = "pause" }
             bad(&|f| f.tabs[0].target = Target::Place(evil.into()));
         }
         assert!(place_ok("#notes") && place_ok("Charts/") && place_ok("Charts/Joy#bar-1"));
+        // As a file beside the note: a heading alone or a folder is none.
+        assert_eq!(
+            place_path("Food/Soup.md", "Charts/Joy#bar-1").as_deref(),
+            Some("Food/Charts/Joy")
+        );
+        assert_eq!(place_path("Soup.md", "Joy").as_deref(), Some("Joy"));
+        assert_eq!(place_path("Food/Soup.md", "#notes"), None);
+        assert_eq!(place_path("Food/Soup.md", "Charts/"), None);
+        assert_eq!(place_path("Food/Soup.md", "../secret"), None);
         bad(&|f| f.tabs[0].target = Target::Action("rm -rf".into()));
         bad(&|f| f.tabs = vec![f.tabs[0].clone(); MAX_TABS + 1]);
         bad(&|f| f.primary.as_mut().unwrap().state = None);

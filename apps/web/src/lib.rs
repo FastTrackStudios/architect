@@ -49,6 +49,7 @@ mod app;
 mod browser;
 pub mod demo;
 pub mod ext_host;
+pub mod favourites;
 pub mod keys;
 
 #[cfg(target_arch = "wasm32")]

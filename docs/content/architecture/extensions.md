@@ -2223,6 +2223,17 @@ note's page), `search`, `browse`, `player.now` (the now-playing view, as
 a tab) and `player.lyrics`, runs `PLAYER_TOGGLE` and knows the state
 `playing`; its own tabs are Home, Search and Browse.
 
+The app's shell (desktop, phone and browser) opens `page` (the open
+note), `search` (quick open), an extension's view as
+`<extension id>/<view id>` (or a bare view id of the declaring extension's
+own) showing the open note, an action it has, and a `place` that names a
+note beside the open one; `player.*` is a share page's and is left out
+there ([the app shell](@/architecture/app-shell.md#favourites-the-slots-follow-what-is-open)).
+The node lists every declaration of its extensions, read-only and never
+cached, at `GET /_ext/favourites.json` for the app in a browser
+(`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`). A `place` takes
+no spaces, so a note whose name has one is out of a place's reach.
+
 ### Share layers
 
 A share link plays to a layer its sharer sets (page, reference, full;

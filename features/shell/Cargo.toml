@@ -13,6 +13,7 @@ description = "The app shell: a page's title and actions at the top, tabs and a 
 [features]
 default = []
 ui = [
+    "dep:architect-favourites",
     "dep:dioxus",
     "dep:lucide-dioxus",
     "dep:futures-timer",
@@ -30,6 +31,9 @@ ui = [
 ]
 
 [dependencies]
+# A note type's declared favourites, turned into the bar's tabs
+# (src/shell/favourites.rs).
+architect-favourites = { workspace = true, optional = true }
 # The shell's colours from a theme (`ShellTheme::from_resolved`); its
 # model is wasm-clean, `ui` follows the store live.
 architect-theme = { workspace = true }
@@ -100,6 +104,8 @@ futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"]
 [dev-dependencies]
 # The theme test drives a VirtualDom's futures (src/shell/mod.rs tests).
 futures = "0.3"
+# A declaration as a manifest writes it (src/shell/favourites.rs tests).
+toml = { workspace = true }
 
 [lib]
 doctest = false

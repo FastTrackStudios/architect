@@ -1487,6 +1487,38 @@ fn islands_listing(shares: &Shares) -> Response {
     response
 }
 
+/// Where the web app (`/app/`, #607) reads the note types' favourites:
+/// the distribution's extensions' `[[favourites]]`, the same for everyone
+/// who asks.
+pub const FAVOURITES_LISTING: &str = "/_ext/favourites.json";
+
+/// [`FAVOURITES_LISTING`]: every `[[favourites]]` declaration that keeps
+/// the manifest's rules (`TypeFavourites::check`), as JSON
+/// (`{"favourites": [...]}`), and nothing else: no vault, no share, no
+/// extension's other parts. Never cached (`no-cache`): a new release
+/// declares again under the same name.
+fn favourites_listing(shares: &Shares) -> Response {
+    let list: Vec<&architect_favourites::TypeFavourites> = shares
+        .favourites()
+        .iter()
+        .filter(|f| f.check().is_ok())
+        .collect();
+    let body = serde_json::json!({ "favourites": list }).to_string();
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::CONTENT_SECURITY_POLICY, content_security_policy());
+    response
+}
+
 /// What the node answers under `/_ext/`: an island's file, the runtime or
 /// the sandbox document (`architect_sites::island::serve`), `404` for
 /// anything else. Every answer is `nosniff` and cached for good (each
@@ -1495,6 +1527,9 @@ fn islands_listing(shares: &Shares) -> Response {
 fn islands(shares: &Shares, path: &str) -> Response {
     if path == ISLANDS_LISTING {
         return islands_listing(shares);
+    }
+    if path == FAVOURITES_LISTING {
+        return favourites_listing(shares);
     }
     let Some((body, kind)) = architect_sites::island::serve(shares.islands(), path) else {
         let mut response = page(StatusCode::NOT_FOUND, "Not found", "<p>No such file.</p>");

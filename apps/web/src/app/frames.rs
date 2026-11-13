@@ -178,16 +178,61 @@ pub fn use_bundle(island: Island) -> Resource<Result<Rc<Bundle>, String>> {
     })
 }
 
-/// The first listed island with a web bundle, fetched and checked: `None`
-/// while it loads, `Some(Err)` when there is none or it failed.
-pub fn use_island() -> Resource<Result<Rc<Bundle>, String>> {
-    use_resource(|| async {
-        let list = listing().await;
-        let island = list
-            .first()
-            .ok_or_else(|| "no island on this node".to_owned())?;
-        bundle(island).await
+/// Island `id`'s bundle (the first listed one's when `None`), fetched and
+/// checked: `None` while it loads, `Some(Err)` when there is none or it
+/// failed.
+pub fn use_island_of(id: Option<String>) -> Resource<Result<Rc<Bundle>, String>> {
+    use_resource(move || {
+        let id = id.clone();
+        async move {
+            let list = listing().await;
+            let island = list
+                .iter()
+                .find(|i| id.as_ref().is_none_or(|id| *id == i.id))
+                .ok_or_else(|| "no such island on this node".to_owned())?;
+            bundle(island).await
+        }
     })
+}
+
+/// The node's islands this app believes, each with its views' names
+/// (`(id, views)`): what a favourite's `{view}` may open.
+pub async fn island_views() -> Vec<(String, Vec<String>)> {
+    listing()
+        .await
+        .iter()
+        .map(|i| {
+            let views = [&i.progress, &i.transport, &i.lyrics]
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect();
+            (i.id.clone(), views)
+        })
+        .collect()
+}
+
+thread_local! {
+    /// The node's favourites listing, read once a page.
+    static FAVOURITES: RefCell<Option<Rc<Vec<architect_favourites::TypeFavourites>>>> =
+        const { RefCell::new(None) };
+}
+
+/// The note types' favourites the node lists and this app believes
+/// (`crate::favourites::listing`): none without a node.
+pub async fn favourites() -> Rc<Vec<architect_favourites::TypeFavourites>> {
+    if let Some(l) = FAVOURITES.with(|l| l.borrow().clone()) {
+        return l;
+    }
+    let list = get(crate::favourites::LISTING, RequestCache::NoCache)
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .map(|v| crate::favourites::listing(&v))
+        .unwrap_or_default();
+    let list = Rc::new(list);
+    FAVOURITES.with(|l| *l.borrow_mut() = Some(list.clone()));
+    list
 }
 
 /// The colours a frame is handed (`--name: value`) and its scheme.

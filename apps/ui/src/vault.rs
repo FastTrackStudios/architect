@@ -466,6 +466,50 @@ fn first_workspace() -> Workspace {
     w
 }
 
+/// Tells the app's root (`crate::favourites::VaultFocus`) the note on
+/// show: the document on show's file when it is a note of the vault on
+/// disk (a note's pane, or an extension's view opened on one), and its
+/// `type`; nothing once the page goes.
+fn use_vault_focus(workspace: Signal<Workspace>) {
+    let focus = try_use_context::<crate::favourites::VaultFocus>();
+    let on_show: Option<String> = {
+        let w = workspace.read();
+        w.current_document()
+            .and_then(|id| w.pane(id))
+            .map(|p| p.state.clone())
+            .filter(|s| {
+                std::path::Path::new(s)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+            })
+    };
+    use_effect(use_reactive!(|on_show| {
+        let Some(mut focus) = focus else { return };
+        if focus.workspace.peek().is_none() {
+            focus.workspace.set(Some(workspace));
+        }
+        let text = on_show.as_ref().and_then(|path| {
+            crate::notes::open_vault()
+                .and_then(|v| std::fs::read_to_string(v.root().join(path)).ok())
+        });
+        let note = on_show
+            .zip(text)
+            .map(|(path, text)| crate::favourites::OpenNote {
+                path,
+                note_type: crate::favourites::note_type(&text),
+            });
+        if *focus.note.peek() != note {
+            focus.note.set(note);
+        }
+    }));
+    use_drop(move || {
+        if let Some(mut focus) = focus {
+            focus.workspace.set(None);
+            focus.note.set(None);
+        }
+    });
+}
+
 /// Shows the vault's notes: the last note pane opened, else the files.
 fn show_notes(mut workspace: Signal<Workspace>) {
     let mut w = workspace.write();
@@ -599,6 +643,7 @@ pub fn VaultPage() -> Element {
     architect_workspace::use_tab_kinds(crate::decks::tab_kinds(), Some(actions.clone()));
     // A phone's action bar: the workspace's tabs button, counted.
     architect_workspace::use_tabs_button(workspace);
+    use_vault_focus(workspace);
     // The Vault tab's surface (`crate::favourites`): back to the notes from
     // the projects list or the calendar.
     architect_commands::use_command(
