@@ -25,6 +25,9 @@ base64 = { workspace = true }
 architect-favourites = { workspace = true }
 # The playhead's deck (#589): what a frame's ask moves (src/ext_host.rs).
 architect-playhead = { workspace = true }
+# What a view on a note is handed of it (`architect_spaces::view`, the
+# node's rules too), and a share link's guest service (`ShareGuest`, #669).
+architect-spaces = { workspace = true }
 
 # The browser half runs on wasm32-unknown-unknown only; natively the crate
 # is its pure part (routes, config, views), which its tests cover.
@@ -37,7 +40,7 @@ web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Docum
 # The app (src/app): the same components as the desktop and phone apps
 # (apps/ui), on dioxus-web.
 dioxus = { workspace = true, features = ["web"] }
-architect = { workspace = true, features = ["action-list", "connect"] }
+architect = { workspace = true, features = ["action-list", "connect", "http-client"] }
 # The org lane's `Notes` (src/app/org.rs).
 vault-proto = { workspace = true, features = ["vox"] }
 gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }

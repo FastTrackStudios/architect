@@ -124,6 +124,15 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
             continue;
         }
         let from = site.root.join(rel);
+        // Only the vault's own file, as it is now: a symlink swapped in
+        // since the vault was read is not followed out of it (#669).
+        let own = site
+            .root
+            .canonicalize()
+            .is_ok_and(|root| crate::listing::is_inside(&root, &from));
+        if !own {
+            continue;
+        }
         if let Some(to) = inside(dir, rel) {
             if let Some(parent) = to.parent() {
                 create(parent)?;

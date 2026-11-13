@@ -2033,11 +2033,31 @@ chooses the view.
   (`SiteIsland::reads`, its manifest's `[capabilities] reads`, listed as
   the island's `reads`); otherwise `note` is `null`. A signed-in member
   (and the demo) gets `{path, title, type, properties, body}`, the body
-  without its `%%comments%%`. A share's guest gets `{title, type,
-  properties}` with only the declared properties: no body, no vault path.
-  What a guest gets of a note's text is the owner's decision, still open
-  (#648); this is the conservative answer until then, and the web app has
-  no guest path yet.
+  without its `%%comments%%`. A share link's guest gets what the sharer
+  shared (#648, #669): `{title, type, properties, body}`, only the
+  declared properties, never a vault path, and the body as the link's
+  node gave it (`GuestNote::source`, below), again without its
+  `%%comments%%` (both through `architect_spaces::view::without_comments`,
+  `features/spaces/src/view.rs`). A guest's note always comes from the
+  node (`ShareGuest::read`), never from a vault file.
+- **The note's files.** A view whose extension declares `reads =
+  ["files"]` too is handed `files: [{path, kind, size, data | text}]`:
+  images (`png`, `jpeg`, `webp`, `gif`) as `data:` URLs, which the app
+  page and the frame already allow (`img-src data:`), and synced lyrics
+  (`.lrc`) as text (`apps/web/src/ext_host.rs` `ViewFile`,
+  `Island::reads_files_of`). Nothing else: audio and video stream through
+  the app's player. At most 2 MiB a file, 8 MiB and 32 files a note
+  (`architect_spaces::view` `VIEW_FILE_MAX`, `VIEW_FILES_TOTAL_MAX`,
+  `VIEW_FILES_MAX`, `within_caps`), each at a vault path
+  (`architect_playhead::model::vault_path`); a file over the cap is left
+  out, never cut short. A member's are what the note and the notes it
+  links reference in their own vault (`apps/web/src/view_files.rs`
+  `member_files`: link and embed targets and frontmatter values, found
+  as the vault finds a name, one step into linked notes so a setlist
+  gets its songs' art). A guest's are only those the link's node listed
+  for the note (`GuestNote::files`), each fetched below the link on the
+  app's own origin (no credentials, no redirect) and checked against its
+  size and `sha256` before it is handed in (`apps/web/src/app/guest.rs`).
 - **What it may ask.** Beside the note, the playhead's state of its
   extension's source, flat, as `architect.playhead` v0.1 gives a frame
   (#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source,
@@ -2970,7 +2990,8 @@ An extension's manifest names what it needs in `[capabilities]`: the
 action namespaces it may run past its own (`actions`) and the most they
 may change (`effect`: read-only, mutating, destructive), what of the
 app's state it may read (`reads`: `org`, `selection`, `documents`,
-`editor`) and change (`writes`: `documents`, `editor`, below), the
+`editor`, `files`: the images and lyrics of a note its view draws, #669)
+and change (`writes`: `documents`, `editor`, below), the
 app's interface it may use (`ui`: below), the folders past its own,
 the network hosts, the MIDI ports and OSC endpoints (`ports`: "MIDI,
 OSC and control surfaces", below), and what the host may do with its

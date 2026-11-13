@@ -24,6 +24,12 @@
 //! so a view and the bar drive each other. Nothing here knows what kind
 //! of note it is: the claim chooses the view.
 //!
+//! A view whose extension declares `reads = ["files"]` is handed the
+//! note's files too (#669, `ext_host::note_props`): a member's from their
+//! own vault ([`member_files`]: what the note and the notes it links
+//! reference), a guest's only those the link's node gave for the note
+//! (`super::guest`), fetched and checked there.
+//!
 //! A favourite's `{view}` (#607) opens any view its extension's island
 //! lists the same way, in a pane of its own ([`Embedded`] with `pane`),
 //! with the same props: the note, and its source's playhead state.
@@ -40,7 +46,7 @@ use serde_json::{Value, json};
 use architect_shell::use_shell;
 
 use super::frames::{Bundle, ExtensionFrame, FrameTheme, use_bundle, use_listing};
-use crate::ext_host::{self, Audience, Island, Note};
+use crate::ext_host::{self, Audience, Island, Note, ViewFile};
 
 /// The theme a frame is handed: the shell's colours and its font.
 fn frame_theme() -> FrameTheme {
@@ -82,10 +88,50 @@ fn props_of(source: &str, note: &Value) -> Value {
     s
 }
 
+/// The files a member's view of `island` on the note at `path` (of type
+/// `note_type`) may read in `vault`: nothing unless its extension declares
+/// reading files (`Island::reads_files_of`), else what the note and the
+/// notes it links reference (`crate::view_files`).
+#[must_use]
+pub fn member_files(
+    vault: &super::vault::WebVault,
+    island: &Island,
+    note_type: &str,
+    path: &str,
+) -> Vec<ViewFile> {
+    use architect_navigator::NavigatorSource as _;
+    if !island.reads_files_of(note_type) {
+        return Vec::new();
+    }
+    let source = &vault.source;
+    let Some(text) = source.read_text(path) else {
+        return Vec::new();
+    };
+    let paths: Vec<String> = source.files().into_iter().map(|f| f.path).collect();
+    let text_of = |p: &str| source.read_text(p);
+    let bytes = |p: &str| {
+        source
+            .resource_url(p)
+            .and_then(|u| crate::view_files::data_bytes(&u))
+            .or_else(|| source.read_text(p).map(String::into_bytes))
+    };
+    crate::view_files::member_files(
+        &crate::view_files::Vault {
+            paths: &paths,
+            text: &text_of,
+            bytes: &bytes,
+        },
+        path,
+        &text,
+    )
+}
+
 /// The view that claims a note of type `note_type`, at the note's head;
 /// nothing when no island claims it, or until its bundle is checked.
 /// `audience` is who is viewing: what of the note the view is handed
-/// depends on it (`ext_host::note_props`).
+/// depends on it (`ext_host::note_props`). `files` are a guest's, as the
+/// link's node gave them and the app checked them; a member's are read
+/// here from their vault.
 #[component]
 pub fn NoteEmbed(
     audience: Audience,
@@ -94,14 +140,31 @@ pub fn NoteEmbed(
     note_type: String,
     properties: Vec<(String, String)>,
     body: String,
+    #[props(default)] files: Vec<ViewFile>,
 ) -> Element {
     let listing = use_listing();
+    let vault = try_consume_context::<super::vault::WebVault>();
+    let files = use_memo(use_reactive(
+        (&audience, &path, &note_type, &body, &files),
+        move |(audience, path, note_type, _body, given)| {
+            if audience == Audience::Guest {
+                return Rc::new(given);
+            }
+            let list = listing.read().clone();
+            let found = list.as_ref().and_then(|l| ext_host::claimed(l, &note_type));
+            Rc::new(match (found, vault.as_ref()) {
+                (Some((island, _)), Some(v)) => member_files(v, island, &note_type, &path),
+                _ => Vec::new(),
+            })
+        },
+    ));
     let Some(list) = listing.read().clone() else {
         return rsx! {};
     };
     let Some((island, claim)) = ext_host::claimed(&list, &note_type) else {
         return rsx! {};
     };
+    let files = files();
     let note = ext_host::note_props(
         audience,
         island,
@@ -111,6 +174,7 @@ pub fn NoteEmbed(
             note_type: &note_type,
             properties: &properties,
             body: &body,
+            files: &files,
         },
     );
     rsx! {

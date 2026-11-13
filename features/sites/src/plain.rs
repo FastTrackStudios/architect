@@ -32,7 +32,10 @@ pub fn note(site: &Site, page: &Page) -> GuestNote {
         page: page.url.clone(),
         tags: page.tags.clone(),
         blocks: blocks(&page.html, &site.base),
-        source: None,
+        // Written by the build; the node hands it on only to the view that
+        // reads the note (`GuestNote::source`).
+        source: page.source.clone(),
+        files: Vec::new(),
     }
 }
 

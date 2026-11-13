@@ -337,11 +337,28 @@ page.
   link's layer). Each call is checked by the same two functions as
   every request for the link's pages and files
   (`apps/desktop/src/node/shares.rs` `Shares::open`, `admit`): live,
-  the audience, the audience's filter now, the layer. A guest never
-  gets a note's markdown (`GuestNote::source` is empty): only what the
-  page says, built from the page's own sanitised prose
-  (`features/sites/src/plain.rs` `blocks`, written beside each page as
-  `_note.json`). Its answers are `private, no-store`, `no-referrer`, and
+  the audience, the audience's filter now, the layer. A note always
+  comes as what its page says, built from the page's own sanitised
+  prose (`features/sites/src/plain.rs` `blocks`, written beside each
+  page as `_note.json`, which is read only through the service: the
+  file itself is 404).
+- **What a guest's view reads (#648, #669).** A guest gets what the
+  sharer shared. `read` hands a note's text (`GuestNote::source`) only
+  when the island this node draws its type with reads the note (its
+  claim names `documents` and its extension declares it,
+  `features/sites/src/island.rs` `note_reads`), and the link's images
+  and lyrics (`GuestNote::files`: the note's own first, then the rest of
+  the link's, within `architect_spaces::view::within_caps`) only when
+  that extension declares `files` too. The node decides it, never the
+  caller. The text is the one the share's build wrote for that link
+  (`features/sites/src/guest_text.rs`), from the same link resolution as
+  the page: `%%comments%%` and raw HTML gone, a link to anything outside
+  the link reduced to its words, an embed of it or of a held-back file
+  gone, a reference definition that points outside gone, frontmatter
+  never. A share's build reads only the vault's own files: a note or
+  attachment that resolves outside the vault's folder (a symlink out of
+  it) is left out and never copied (`features/sites/src/listing.rs`
+  `within_root`). Its answers are `private, no-store`, `no-referrer`, and
   any origin may call it without credentials (`Access-Control-Allow-Origin: *`):
   the code is the credential, and a session travels in the body, never a
   cookie. It is the one way an app, the web app or an extension's view

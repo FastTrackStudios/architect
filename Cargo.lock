@@ -2339,6 +2339,7 @@ dependencies = [
  "architect-playhead",
  "architect-settings",
  "architect-shell",
+ "architect-spaces",
  "architect-theme",
  "architect-ui",
  "architect-workspace",

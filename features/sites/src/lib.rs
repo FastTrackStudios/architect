@@ -45,6 +45,7 @@ mod blocks;
 mod component_blocks;
 mod element_html;
 mod frontmatter;
+mod guest_text;
 mod installed;
 pub mod island;
 pub mod listing;

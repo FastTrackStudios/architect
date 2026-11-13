@@ -1902,6 +1902,10 @@ async fn serve(
         "/_comment" if method == architect::http::axum::http::Method::POST => {
             comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
         }
+        // A page's guest data (its text for a view that reads it, #669) is
+        // read only through the guest service, which asks the islands
+        // first (`GuestLane::read`); never as a file of the link.
+        _ if is_note_file(rest) => private(&share, not_found(&dir).await),
         _ => {
             match admit(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
                 Admit::Open => {}
@@ -2053,6 +2057,17 @@ async fn needs_layer(
     blocking(move || shares.above(&share, audience.as_ref(), &dir, &rest, cap))
         .await
         .unwrap_or(Hold::Held(Listen::Full))
+}
+
+/// Whether `rest` (a path below a link, as asked) names a page's guest
+/// data, [`architect_sites::plain::NOTE_FILE`], however it is spelled.
+fn is_note_file(rest: &str) -> bool {
+    let decoded = decode(rest);
+    decoded
+        .trim_end_matches('/')
+        .rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case(architect_sites::plain::NOTE_FILE))
 }
 
 /// `503`: the link's pages are being built (or a file of it cannot be
@@ -2937,7 +2952,7 @@ impl ShareGuest for GuestLane {
             listen: share.listen_for(audience.as_ref()),
         };
         // A note the link lists now, with a page of the link's.
-        let (notes, _) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
+        let (notes, files) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
         let listed = notes
             .into_iter()
             .find(|n| n.path == path)
@@ -2961,11 +2976,26 @@ impl ShareGuest for GuestLane {
             .await
             .map_err(|_| GuestFault::Building)?;
         let mut note: GuestNote = facet_json::from_str(&text).map_err(|_| GuestFault::Building)?;
+        // What the view that draws its type may read of it (#648, #669),
+        // decided here, by this node's islands, never by the caller: its
+        // text (as the build wrote it for this link) only to a view that
+        // reads the note, and the link's files only to one that reads
+        // files too.
+        let reads = architect_sites::island::note_reads(
+            self.0.islands(),
+            listed.kind.as_deref().unwrap_or_default(),
+        );
+        if !reads.text {
+            note.source = None;
+        }
+        note.files = if reads.files {
+            view_files(&listed, files)
+        } else {
+            Vec::new()
+        };
         note.path = listed.path;
         note.kind = listed.kind;
         note.page = page;
-        // Its text is not given to guests: it can say more than the page.
-        note.source = None;
         Ok(note)
     }
 
@@ -2992,6 +3022,23 @@ impl ShareGuest for GuestLane {
         let (_, files) = listing(&self.0, &link, asked).await.map_err(shut)?;
         Ok(files)
     }
+}
+
+/// The files of the link a view on `note` may read
+/// ([`GuestNote::files`]): the note's own first, then the rest of the
+/// link's in list order (a setlist's view draws its songs' art), only
+/// images and synced lyrics, within the caps of
+/// [`architect_spaces::view::within_caps`]. `files` is the link's listing
+/// at its layer: nothing past what the link serves its guest.
+fn view_files(note: &ListedNote, files: Vec<ListedFile>) -> Vec<ListedFile> {
+    let (own, rest): (Vec<ListedFile>, Vec<ListedFile>) = files
+        .into_iter()
+        .partition(|f| note.files.contains(&f.path));
+    architect_spaces::view::within_caps(
+        own.into_iter().chain(rest),
+        |f| f.path.as_str(),
+        |f| f.size,
+    )
 }
 
 /// A page of the link, with a bar to its files page and its archive
