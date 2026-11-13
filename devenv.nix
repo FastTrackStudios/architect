@@ -109,8 +109,9 @@ in
     ready.exec = "${curl} -sf -o /dev/null ${url "node"}/health";
   };
   # The Architect app (apps/desktop) under the fleet's dx, its issuer the
-  # local auth server and its orgs' node the local node, with a folder and
-  # keychain service of its own, on a scratch copy of the demo vault
+  # local auth server and its orgs' node the local node, with a folder of
+  # its own (its sessions a file there, never the keychain), on a scratch
+  # copy of the demo vault
   # (`just vault-reset`). Without Rust hot-patching: it builds a different
   # ("fat") binary from `dx build`, and dx calls it experimental. rsx hot
   # reload stays.
