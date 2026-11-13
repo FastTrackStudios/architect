@@ -51,5 +51,18 @@ case "$images" in
     *"ghcr.io/fasttrackstudios/architect-web:"*"ghcr.io/x/architect:1.2.3 "*) echo "ok    images: $images" ;;
     *) echo "FAIL  images: $images"; fail=1 ;;
 esac
+# A share link opens Architect (#629): unset, neither variable is in the
+# node's environment; set, each is, as given.
+nodeenv() { yq 'select(.kind == "Deployment" and .metadata.name == "t-architect-node") | .spec.template.spec.containers[0].env[] | select(.name == "'"$1"'") | .value'; }
+plain="$(helm template t "$chart")"
+for v in ARCHITECT_PUBLIC_ORIGIN ARCHITECT_APPLE_APP_IDS; do
+    got="$(printf '%s\n' "$plain" | nodeenv "$v")"
+    if [ -z "$got" ]; then echo "ok    $v unset by default"; else echo "FAIL  $v is '$got' by default"; fail=1; fi
+done
+set_out="$(helm template t "$chart" --set node.publicOrigin=https://n.test --set node.appleAppIds=TEAM.app.example)"
+got="$(printf '%s\n' "$set_out" | nodeenv ARCHITECT_PUBLIC_ORIGIN)"
+[ "$got" = "https://n.test" ] && echo "ok    ARCHITECT_PUBLIC_ORIGIN=$got" || { echo "FAIL  ARCHITECT_PUBLIC_ORIGIN is '$got'"; fail=1; }
+got="$(printf '%s\n' "$set_out" | nodeenv ARCHITECT_APPLE_APP_IDS)"
+[ "$got" = "TEAM.app.example" ] && echo "ok    ARCHITECT_APPLE_APP_IDS=$got" || { echo "FAIL  ARCHITECT_APPLE_APP_IDS is '$got'"; fail=1; }
 [ "$fail" = 0 ] && echo "routes: all good"
 exit "$fail"

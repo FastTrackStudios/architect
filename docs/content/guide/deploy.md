@@ -880,6 +880,7 @@ helm install architect deploy/chart/architect \
 | `host` | the hostname both sides share |
 | `web.replicaCount`, `web.config.issuer`, `web.config.clientId` | the static front end; its `/app/config.json` comes from a ConfigMap (the issuer defaults to `node.issuer`) |
 | `node.issuer`, `node.org`, `node.hostOrg`, `node.vaults`, `node.sites`, `node.env` | the node's settings ([Configure it](#configure-it)) |
+| `node.publicOrigin`, `node.appleAppIds` | `ARCHITECT_PUBLIC_ORIGIN` and `ARCHITECT_APPLE_APP_IDS` ([A link opens Architect](#a-link-opens-architect)): where people reach the node, so its share pages offer "Open in Architect", and the iOS apps its links open in as universal links. Both empty by default: no such link, no `apple-app-site-association` |
 | `node.existingSecret` | a Secret mounted as files: `session` (`ARCHITECT_SESSION_FILE`) and, with `node.mcp`, `mcp-token` |
 | `node.persistence` | the data PVC at `/data` (its iroh key and documents). A node is one device, so `node.replicaCount` above 1 needs persistence off, and the chart refuses otherwise. With it off, `/data` is an `emptyDir` of at most `emptyDirSizeLimit` (10Gi) |
 | `node.store` | the blob store's budget: `max` (`ARCHITECT_FILES_STORE_MAX`; empty is 75% of the data volume; a size such as `8Gi` or `1.5Gi`, checked against the volume), `keepFree` (`ARCHITECT_FILES_KEEP_FREE`, `15%`) and `historyMax` (`ARCHITECT_FILES_HISTORY_MAX`, empty keeps every replaced version) |

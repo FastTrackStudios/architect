@@ -73,6 +73,12 @@ spec:
             {{- with $n.sites }}
             - { name: ARCHITECT_SITES, value: {{ . | quote }} }
             {{- end }}
+            {{- with $n.publicOrigin }}
+            - { name: ARCHITECT_PUBLIC_ORIGIN, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $n.appleAppIds }}
+            - { name: ARCHITECT_APPLE_APP_IDS, value: {{ . | quote }} }
+            {{- end }}
             {{- if $n.existingSecret }}
             - { name: ARCHITECT_SESSION_FILE, value: /run/secrets/architect/session }
             {{- if $n.mcp }}

@@ -52,6 +52,9 @@ node:
   hostOrg: ""                        # ARCHITECT_HOST_ORG: serves /org/<slug>/vox
   vaults: ""                         # ARCHITECT_VAULTS: id=path,…
   sites: ""                          # ARCHITECT_SITES: /mount=vault,… (add each mount to node.extraPaths)
+  # A share link opens Architect (#629). Both empty: nothing changes.
+  publicOrigin: ""                   # ARCHITECT_PUBLIC_ORIGIN: https://<where people reach the node>; its pages offer "Open in Architect"
+  appleAppIds: ""                    # ARCHITECT_APPLE_APP_IDS: <team id>.<bundle id>,…; serves apple-app-site-association (universal links)
   # Plain env, name -> value (RUST_LOG, ARCHITECT_SWEEP_SECS, …).
   env: {}
 
