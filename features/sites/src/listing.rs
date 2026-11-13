@@ -51,10 +51,11 @@ pub fn open(root: &std::path::Path) -> Result<Vault, String> {
         .map_err(|e| e.to_string())
 }
 
-/// `vault` without a note or attachment that is not its own file: one
-/// whose path resolves outside the vault's folder (a symlink out of it,
-/// #669). A site, a share link and its listing never read or copy what
-/// is not the vault's.
+/// `vault` without a note or attachment that is not its own file.
+///
+/// One whose path resolves outside the vault's folder (a symlink out of
+/// it, #669) is dropped. A site, a share link and its listing never read
+/// or copy what is not the vault's.
 #[must_use]
 pub fn within_root(mut vault: Vault) -> Vault {
     let Ok(root) = vault.root.canonicalize() else {
