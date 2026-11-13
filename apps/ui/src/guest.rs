@@ -779,9 +779,21 @@ impl Guest {
         self.lab.jump(Route::Tab(TAB));
     }
 
+    /// Which opening is shown now: what a button drawn for it carries, so
+    /// a press acts on that opening and no other ([`Self::retry`]).
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        *self.generation.peek()
+    }
+
     /// The person said yes to a link that asked first; or read the open
-    /// link again.
-    pub fn retry(self) {
+    /// link again. `at` is the opening the button was drawn for
+    /// ([`Self::generation`]): a link opened since (an agent's, the OS's)
+    /// is never what the press says yes to.
+    pub fn retry(self, at: u64) {
+        if *self.generation.peek() != at {
+            return;
+        }
         let Some(opened) = self.opened() else {
             return;
         };
@@ -943,18 +955,19 @@ impl Guest {
 
     /// Show the note at `path` of the open link.
     pub fn show(mut self, path: String) {
-        let Some(Opened { url: Some(url), .. }) = self.opened() else {
+        let Some(Opened { url: Some(_), .. }) = self.opened() else {
             return;
         };
         if let Some(o) = self.open.write().as_mut() {
             o.note = Some(NoteView::Loading(path.clone()));
         }
         let at = *self.generation.peek();
-        let session = self
-            .current
-            .peek()
-            .clone()
-            .unwrap_or_else(|| self.session(url));
+        // Only the open link's own session, pinned when it was read: a
+        // click from a view of a link since replaced (or still asking
+        // first) reads nothing.
+        let Some(session) = self.current.peek().clone() else {
+            return;
+        };
         dioxus::core::spawn_forever(async move {
             self.load_note(&session, path, at).await;
         });
@@ -1163,6 +1176,8 @@ pub fn GuestPage(guest: Guest) -> Element {
         format!("{host} · {whom} · Read only")
     };
     let button = button_style(&t);
+    // The opening these buttons are drawn for ([`Guest::retry`]).
+    let drawn_at = guest.generation();
     rsx! {
         div { class: "guest-page",
             style: "display: flex; flex-direction: column; height: 100%; min-height: 0; background: {t.sheet}; color: {t.ink};",
@@ -1197,7 +1212,7 @@ pub fn GuestPage(guest: Guest) -> Element {
                             format!("This link points at this computer or one on your own network: {host}. Open it only if you expected it.")
                         },
                         div { style: "display: flex; gap: 8px;",
-                            button { style: "{button}", onclick: move |_| guest.retry(), "Open it" }
+                            button { style: "{button}", onclick: move |_| guest.retry(drawn_at), "Open it" }
                             button { style: "{button}", onclick: move |_| guest.close(), "Cancel" }
                         }
                     }
@@ -1214,7 +1229,7 @@ pub fn GuestPage(guest: Guest) -> Element {
                         Notice { title, line,
                             div { style: "display: flex; gap: 8px;",
                                 if retry {
-                                    button { style: "{button}", onclick: move |_| guest.retry(),
+                                    button { style: "{button}", onclick: move |_| guest.retry(drawn_at),
                                         RefreshCw { size: 14, color: t.ink_2.to_string() }
                                         "Try again"
                                     }
