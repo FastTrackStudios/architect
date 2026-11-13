@@ -17,7 +17,7 @@ pub(super) fn BottomBar(
     let shell = use_shell();
     let t = shell.theme.clone();
     let ins = screen.insets;
-    let tabs: Vec<Tab> = tabs.into_iter().take(4).collect();
+    let tabs: Vec<Tab> = super::phone_tabs(tabs);
     if shell.style == ShellStyle::TabBar {
         let bottom = ins.bottom.max(4.0);
         return rsx! {

@@ -250,6 +250,27 @@ impl AppHost {
         self
     }
 
+    /// This host for a page drawing a guest's content (a share link's
+    /// note, #629): it reaches nothing of the person's. No action runs,
+    /// none is listed, no host-service call is made (documents, the
+    /// network, the interface: those are its extension's, and a guest's
+    /// content has no extension's grants), and its settings and shared
+    /// state are its own, in memory. The theme and its notices stay.
+    #[must_use]
+    pub fn guest(mut self) -> Self {
+        self.caller = ActionCaller::new(architect::action::Principal::Guest {
+            link_id: String::new(),
+            display: None,
+        });
+        self.extension = None;
+        self.gate = Some(Arc::new(|_| {
+            Err("a guest's content runs no action of the person's".to_owned())
+        }));
+        self.shared = SharedState::new();
+        self.settings = Arc::new(MemorySettings::default());
+        self
+    }
+
     #[must_use]
     pub const fn shared_state(&self) -> &SharedState {
         &self.shared
