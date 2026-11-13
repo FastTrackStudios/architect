@@ -205,9 +205,25 @@ fn build_ignore(cfg: &ObsidianConfig) -> IgnoreMatcher {
 /// # Errors
 ///
 /// The file could not be opened, or it is not the vault's own plain
-/// file now (`InvalidData`).
+/// file now (`InvalidData`), or `rel` is not a plain relative path:
+/// absolute, or with `..`, `.` or a prefix (`InvalidInput`).
+///
+/// Unix only in full: elsewhere the opened file is compared with the path
+/// by size and modification time, a weaker check.
 pub fn open_own(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
     use std::io::{Error, ErrorKind};
+    use std::path::Component;
+    // `root.join` of an absolute path replaces the root.
+    if rel.is_empty()
+        || !Path::new(rel)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "not a path in the vault",
+        ));
+    }
     let path = root.join(rel);
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -368,6 +384,18 @@ mod tests {
             "missing.md",
         ] {
             assert!(open_own(&root, rel).is_err(), "{rel} opened");
+        }
+        // Not a plain relative path: `root.join` would leave the vault.
+        let outside = tmp.path().join("outside/x.md");
+        for rel in [
+            outside.to_str().unwrap(),
+            "../outside/x.md",
+            "a/../a/note.md",
+            "./a/note.md",
+            "",
+        ] {
+            let e = open_own(&root, rel).expect_err(rel);
+            assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput, "{rel}");
         }
     }
 }

@@ -429,7 +429,15 @@ impl Site {
                             && opts.scope.holds_file(t)
                             && !opts.hold_back.contains(*t)
                     })?;
-                std::fs::read_to_string(opts.vault.join(target)).ok()
+                // Through the vault's own open: a lyrics file swapped for a
+                // symlink since the walk is left out, as every other read.
+                let mut text = String::new();
+                std::io::Read::read_to_string(
+                    &mut vault::obsidian::open_own(&opts.vault, target).ok()?,
+                    &mut text,
+                )
+                .ok()?;
+                Some(text)
             };
             let rendered = markdown::render(&Input {
                 body: frontmatter::body(&note.page.raw),
