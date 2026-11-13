@@ -12,7 +12,10 @@
 //   gutter, nothing scrolling sideways; a set's label on the same gutter;
 // - the card 8 px above the tab bar, on its gutters, nothing loaded or
 //   playing, with or without the round button; scrolled to the end, the
-//   last row and the "Files" line clear of the card.
+//   last row and the "Files" line clear of the card;
+// - contrast: a song with no recording's title, artist and number on the
+//   page, and a key's white on its tile, at 4.5:1 or more.
+// At 844×390 with a finger (a phone turned): the shell, and Charts a tab.
 //
 // Run: `just share-layout-test`. Prints PASS or FAIL per check, with what
 // it measured.
@@ -80,6 +83,9 @@ async function node({ shell }) {
   const vault = join(dir, 'vault');
   const rows = Array.from({ length: 101 }, (_, i) => row(i + 1));
   rows.splice(3, 0, '<li data-playlist-section="">Tree Lighting Concert Set</li>');
+  // A song with no recording, and a key on a tile of the lightest hue.
+  rows.splice(4, 0, `<li data-page="${L}/list/" data-title="Feliz Navidad"><span data-track-mark="">4</span><span data-track-art="" data-hue="60" aria-hidden="true" style="background:hsl(60 42% 32%)">♪</span><span data-track-text=""><span data-track-title="">Feliz Navidad</span><span data-track-meta="">No recording</span></span><button type="button" data-track-more="" aria-label="More: Feliz Navidad">${MORE}</button></li>`);
+  rows[0] = rows[0].replace('style="background:hsl(200 42% 40%)">1</span>', 'data-key="" data-key-size="xs" role="img" aria-label="Starts in E flat, ends in F sharp minor" style="background:hsl(60 42% 32%)"><span data-track-key="" aria-hidden="true">Eb→F#m</span></span>');
   rows.unshift('<li data-playlist-section="">Presidents Songs</li>');
   put(vault, 'Gig/list.md', `---\ntitle: ${TITLE}\ntype: setlist\n---\n<div class="studio-setlist" data-playlist="" data-playlist-join=""><ol style="list-style:none;margin:0;padding:0">${rows.join('')}</ol><p data-playlist-files=""><a href="${L}/_files/">Files</a> · <a href="${L}/_archive.zip">Download all</a></p></div>\n`);
   put(vault, 'Gig/media/song.wav', wav(30));
@@ -101,9 +107,11 @@ async function node({ shell }) {
   throw new Error('the node never served the list');
 }
 
-async function firefox() {
+async function firefox({ coarse = false } = {}) {
   const profile = mkdtempSync(join(tmpdir(), 'layout-ff-'));
-  writeFileSync(join(profile, 'user.js'), 'user_pref("media.autoplay.default", 0);\nuser_pref("media.autoplay.blocking_policy", 0);\n');
+  // A finger (pointer: coarse), as a phone, when asked.
+  const finger = coarse ? 'user_pref("ui.primaryPointerCapabilities", 1);\nuser_pref("ui.allPointerCapabilities", 1);\n' : '';
+  writeFileSync(join(profile, 'user.js'), 'user_pref("media.autoplay.default", 0);\nuser_pref("media.autoplay.blocking_policy", 0);\n' + finger);
   const port = await freePort();
   const proc = spawn(browser, ['--headless', '--no-remote', '--profile', profile, '--remote-debugging-port', String(port)], { stdio: 'ignore' });
   let ws;
@@ -139,8 +147,10 @@ const MEASURE = `JSON.stringify((() => {
   // off it, moved aside, until its tab opens it).
   const shown = (e) => { if (!e || !e.getClientRects().length) return false; const s = getComputedStyle(e); const b = e.getBoundingClientRect(); return s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0 && b.right > 0 && b.left < innerWidth && b.width > 0; };
   const title = ${JSON.stringify(TITLE)};
-  // Every element whose own text is the title, shown.
-  const showing = [...document.querySelectorAll('body *')].filter((e) => shown(e) && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim() === title)).map((e) => e.tagName + '.' + e.className);
+  // Every element whose own text is the title, shown: one title at the top
+  // (the player's card naming the setlist with nothing loaded is the
+  // player, not a second title).
+  const showing = [...document.querySelectorAll('body *')].filter((e) => shown(e) && !e.closest('.site-player') && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim() === title)).map((e) => e.tagName + '.' + e.className);
   const first = document.querySelector('[data-track]');
   const hundred = [...document.querySelectorAll('[data-track-mark]')].find((m) => m.textContent.trim() === '100');
   const more = first.querySelector('[data-track-more]');
@@ -148,6 +158,22 @@ const MEASURE = `JSON.stringify((() => {
   const g = glyph.getBoundingClientRect();
   const rows = [...document.querySelectorAll('[data-playlist] li')];
   const card = document.querySelector('.site-player');
+  // WCAG contrast of two computed colours (rgb()/rgba(), alpha on the page).
+  // Any CSS colour (the theme's are oklch) as sRGB [r, g, b, a], by a
+  // canvas: it says a colour back as #rrggbb, or rgba() when see-through.
+  const ctx = document.createElement('canvas').getContext('2d');
+  const rgb = (c) => {
+    ctx.fillStyle = '#000'; ctx.fillStyle = c;
+    const v = String(ctx.fillStyle);
+    if (v.startsWith('#')) return [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16)).concat([1]);
+    return (v.match(/[\d.]+/g) || []).map(Number);
+  };
+  const lum = ([r, g, b]) => { const ch = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b); };
+  const over = (fg, bg) => { const [r, g, b, a = 1] = rgb(fg); const [R, G, B] = rgb(bg); return [r * a + R * (1 - a), g * a + G * (1 - a), b * a + B * (1 - a)]; };
+  const ratio = (fg, bg) => { const l1 = lum(over(fg, bg)), l2 = lum(rgb(bg)); return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100; };
+  const page = getComputedStyle(document.body).backgroundColor.startsWith('rgba(0, 0, 0, 0') ? getComputedStyle(document.documentElement).backgroundColor : getComputedStyle(document.body).backgroundColor;
+  const quiet = document.querySelector('[data-playlist] li[data-page]:not([data-track])');
+  const keyed = document.querySelector('[data-track-art][data-key]');
   return {
     vw: document.documentElement.clientWidth, vh: window.innerHeight,
     scrollWidth: document.documentElement.scrollWidth,
@@ -168,6 +194,12 @@ const MEASURE = `JSON.stringify((() => {
     round: shown(document.querySelector('.site-tabs-round')),
     last: r(rows[rows.length - 1]),
     files: r(document.querySelector('[data-playlist-files]')),
+    contrast: {
+      quietTitle: ratio(getComputedStyle(quiet.querySelector('[data-track-title]')).color, page),
+      quietMeta: ratio(getComputedStyle(quiet.querySelector('[data-track-meta]')).color, page),
+      quietMark: ratio(getComputedStyle(quiet.querySelector('[data-track-mark]')).color, page),
+      key: ratio(getComputedStyle(keyed.querySelector('[data-track-key]')).color, getComputedStyle(keyed).backgroundColor),
+    },
   };
 })())`;
 
@@ -178,14 +210,16 @@ function check(name, fn) {
 }
 const near = (a, b, tol, what, m) => assert.ok(Math.abs(a - b) <= tol, `${what}: ${a} vs ${b} (±${tol}) in ${JSON.stringify(m)}`);
 
-for (const shell of [true, false]) {
-  for (const [w, h] of [[390, 844], [360, 740]]) {
-    const name = `${w}×${h}, ${shell ? 'a setlist\'s tabs and the round button' : 'the share\'s own tabs'}`;
+for (const [shell, w, h, theme] of [[true, 390, 844, 'light'], [true, 360, 740, 'light'], [false, 390, 844, 'light'], [false, 360, 740, 'light'], [true, 390, 844, 'dark']]) {
+  {
+    const name = `${w}×${h}, ${shell ? 'a setlist\'s tabs and the round button' : 'the share\'s own tabs'}, ${theme}`;
     test(name, { skip, timeout: 120000 }, check(name, async () => {
       const { origin, close } = await node({ shell });
       const tab = await firefox();
       try {
         await tab.size(w, h);
+        await tab.go(`${origin}${L}/list/`);
+        await tab.eval(`try { localStorage.setItem("site-theme", "${theme}"); } catch (e) {} true`);
         await tab.go(`${origin}${L}/list/`);
         await sleep(500);
         let m = JSON.parse(await tab.eval(MEASURE));
@@ -204,6 +238,9 @@ for (const shell of [true, false]) {
         assert.equal(m.hundredFits, true, 'three digits fit their column');
         near(m.section[0], 16, 0.6, 'a set\'s label on the gutter', m);
         assert.equal(m.round, shell, 'the round button when the type has one');
+        // Contrast: the quiet row's words and a key on its tile.
+        console.log(`contrast ${theme}: ${JSON.stringify(m.contrast)}`);
+        for (const [what, value] of Object.entries(m.contrast)) assert.ok(value >= 4.5, `${what} at ${value}:1 (4.5 wanted): ${JSON.stringify(m.contrast)}`);
         // The card: nothing loaded, then playing.
         assert.ok(m.card, `the card shows: ${JSON.stringify(m)}`);
         near(m.card[3] + 8, m.pill[1], 1, 'the card 8 px above the tab bar', m);
@@ -226,3 +263,26 @@ for (const shell of [true, false]) {
     }));
   }
 }
+
+const turned = '844×390 with a finger: a phone turned keeps the shell, and Charts is a tab';
+test(turned, { skip, timeout: 120000 }, check(turned, async () => {
+  const { origin, close } = await node({ shell: true });
+  const tab = await firefox({ coarse: true });
+  try {
+    await tab.size(844, 390);
+    await tab.go(`${origin}${L}/list/`);
+    await sleep(500);
+    const seen = JSON.parse(await tab.eval('JSON.stringify({ coarse: matchMedia("(pointer: coarse)").matches, tabs: getComputedStyle(document.querySelector(".site-tabs")).display })'));
+    assert.equal(seen.coarse, true, 'the browser has a finger');
+    assert.equal(seen.tabs, 'flex', `the tab bar shows: ${JSON.stringify(seen)}`);
+    await tab.eval('document.querySelector("[data-track] [data-track-title]").click(), true');
+    await sleep(400);
+    await tab.eval('document.querySelector("[data-tab=charts]").click(), true');
+    await sleep(600);
+    const sheet = JSON.parse(await tab.eval('JSON.stringify((() => { const s = document.querySelector(".site-now"); return { shown: !!s && !s.hidden, tab: !!s && s.classList.contains("site-now-tab") }; })())'));
+    assert.deepEqual(sheet, { shown: true, tab: true }, 'Charts a tab, not the desk\'s side panel');
+  } finally {
+    tab.close();
+    close();
+  }
+}));
