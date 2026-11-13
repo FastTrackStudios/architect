@@ -33,6 +33,13 @@ r[auth.jwt.rotation]
 JWT key rotation MUST sign with the active key and verify with configured
 fallback keys by key id.
 
+r[auth.jwt.first-party-access]
+The issuer MUST accept its own OIDC access token in place of a session token
+at `whoami` and `list_organizations` only, and only when it verifies with
+the default audience, names an enabled first-party client (registered with
+`skip_consent`) and carries the `openid` scope. The refresh, issue,
+sign-out and device calls MUST take a session token alone.
+
 r[auth.jwt.jwks]
 JWT key-set metadata MUST expose key ids, algorithms, and active status
 without exposing symmetric signing secrets.

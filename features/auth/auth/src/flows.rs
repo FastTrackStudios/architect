@@ -2335,10 +2335,9 @@ pub mod email_password {
             Self::refresh_session(self, RefreshSession { token }).await
         }
 
+        // r[impl auth.jwt.first-party-access]
         async fn whoami(&self, token: String) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            Self::current_session(self, CurrentSession { token })
-                .await
-                .map(|bundle| bundle.user)
+            self.organization_caller(&token).await
         }
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {
@@ -4536,6 +4535,165 @@ pub mod email_password {
                 .claims;
             let scope = claims.extra.as_ref().and_then(|e| e.get("scope")).cloned();
             assert_eq!(scope, Some(serde_json::json!("openid email forge:github")));
+        }
+
+        /// The web app's access token (client `architect`, first party)
+        /// answers `whoami` and `list_organizations` only (what an org's
+        /// node asks the issuer for a browser's bearer, #628); a third
+        /// party's token, an id token and a token without `openid` are
+        /// refused there, and no access token is taken at the device,
+        /// refresh or sign-out calls. Signing the session out ends its
+        /// access token too.
+        // r[verify auth.jwt.first-party-access]
+        #[tokio::test]
+        async fn only_a_first_party_access_token_answers_whoami_and_the_org_list() {
+            let client = |id: &str, first_party: bool| OidcClientConfig {
+                client_id: id.into(),
+                client_secret: None,
+                name: id.into(),
+                redirect_uris: vec![format!("https://{id}.example.com/callback")],
+                scopes: vec!["openid".into(), "email".into(), "profile".into()],
+                public_client: true,
+                skip_consent: first_party,
+                disabled: false,
+            };
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .oidc_client(client("architect", true))
+                .oidc_client(client("elsewhere", false))
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let bundle = auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: "ada@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    name: None,
+                    username: None,
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("create user");
+            let verifier = "correct-horse-battery-staple-verifier";
+            let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(sha2::Sha256::digest(verifier.as_bytes()));
+            let tokens = |client_id: &'static str, scope: &'static str| {
+                let (auth, session, challenge) = (&auth, bundle.token.clone(), challenge.clone());
+                async move {
+                    let redirect = format!("https://{client_id}.example.com/callback");
+                    let authorization = auth
+                        .authorize_oidc(AuthorizeOidc {
+                            session_token: session,
+                            client_id: client_id.into(),
+                            redirect_uri: redirect.clone(),
+                            response_type: "code".into(),
+                            scope: Some(scope.into()),
+                            state: None,
+                            nonce: None,
+                            code_challenge: Some(challenge),
+                            code_challenge_method: Some("S256".into()),
+                            prompt: None,
+                        })
+                        .await
+                        .expect("authorize");
+                    auth.exchange_oidc_token(ExchangeOidcToken {
+                        grant_type: "authorization_code".into(),
+                        code: Some(authorization.code),
+                        redirect_uri: Some(redirect),
+                        client_id: client_id.into(),
+                        client_secret: None,
+                        code_verifier: Some(verifier.into()),
+                        refresh_token: None,
+                    })
+                    .await
+                    .expect("exchange")
+                }
+            };
+            let web = tokens("architect", "openid email profile").await;
+            let other = tokens("elsewhere", "openid email").await;
+            let whoami = |token: &str| auth_proto::AuthService::whoami(&auth, token.to_owned());
+            let orgs = |token: &str| {
+                auth.list_organizations(ListOrganizations {
+                    session_token: token.to_owned(),
+                })
+            };
+
+            // The session token, as before; the web app's access token too.
+            assert_eq!(
+                whoami(&bundle.token).await.expect("session").id,
+                bundle.user.id
+            );
+            assert_eq!(
+                whoami(&web.access_token).await.expect("access").id,
+                bundle.user.id
+            );
+            assert!(orgs(&web.access_token).await.is_ok());
+
+            // Refused: a third party's access token, an id token (its
+            // audience is the client), and a JWT from outside the code flow
+            // (no client, no scope).
+            let bare = auth
+                .issue_jwt(IssueJwt {
+                    session_token: bundle.token.clone(),
+                    audience: None,
+                    expires_in_seconds: None,
+                    claims_json: Some(r#"{"client_id":"architect","scope":"email"}"#.into()),
+                })
+                .await
+                .expect("issue")
+                .token;
+            let plain = auth
+                .issue_jwt(IssueJwt {
+                    session_token: bundle.token.clone(),
+                    audience: None,
+                    expires_in_seconds: None,
+                    claims_json: None,
+                })
+                .await
+                .expect("issue")
+                .token;
+            for (label, token) in [
+                ("third party", &other.access_token),
+                ("id token", &web.id_token),
+                ("no openid scope", &bare),
+                ("no client", &plain),
+            ] {
+                assert!(whoami(token).await.is_err(), "whoami takes the {label}");
+                assert!(orgs(token).await.is_err(), "the org list takes the {label}");
+            }
+
+            // Never at the device, refresh or sign-out calls.
+            assert!(auth.list_devices(&web.access_token).await.is_err());
+            assert!(auth.list_devices(&bundle.token).await.is_ok());
+            assert!(
+                auth.refresh_session(crate::RefreshSession {
+                    token: web.access_token.clone(),
+                })
+                .await
+                .is_err()
+            );
+            auth.sign_out(SignOut {
+                token: web.access_token.clone(),
+            })
+            .await
+            .expect("signing out a non-session is a no-op");
+            assert!(
+                whoami(&bundle.token).await.is_ok(),
+                "the access token signed nothing out"
+            );
+
+            // The session signed out, its access token is dead too.
+            auth.sign_out(SignOut {
+                token: bundle.token.clone(),
+            })
+            .await
+            .expect("sign out");
+            assert!(whoami(&web.access_token).await.is_err());
+            assert!(orgs(&web.access_token).await.is_err());
         }
 
         fn auth_with_oauth_proxy() -> ArchitectAuth<MemoryStorage> {
@@ -15162,59 +15320,106 @@ pub mod organizations {
             Ok(out)
         }
 
-        /// The account behind a credential presented to the *read* side of
-        /// the organization surface.
+        /// The account behind a credential presented to `whoami` or
+        /// `list_organizations`, the only two calls that take one of this
+        /// issuer's own access tokens as well as a session token.
         ///
-        /// Two kinds of caller reach it. The issuer's own pages and the
-        /// desktop clients hold a **session token**. An OIDC client — a
-        /// web app that signed the person in through `/oauth2/authorize`,
-        /// Keyflow say — holds only the **access token** `/oauth2/token`
-        /// minted, a JWT, and has no session token to present. Both name
-        /// the same account, and "which organizations am I in" is a
-        /// question either has every right to ask; refusing the JWT meant
-        /// every OIDC client saw an empty organization list, and a
-        /// downstream server mirroring memberships from here learned
-        /// nothing about the person.
+        /// Two kinds of caller reach it. The issuer's own pages, the
+        /// desktop clients and an org's node relaying a person's bearer
+        /// hold a **session token**. A first-party web app that signed the
+        /// person in through `/oauth2/authorize` (the browser app, client
+        /// `architect`) holds only the short-lived **access token**
+        /// `/oauth2/token` minted, a JWT, and no session.
         ///
         /// The session is tried first because it is the common case and
-        /// the cheaper check. A JWT is only verified when the token is
-        /// shaped like one, so a bad session token still fails as a bad
-        /// session token, and the verification is the same one
-        /// `/oauth2/userinfo` performs — this server's own keys, its own
-        /// issuer, expiry honoured.
+        /// the cheaper check. A JWT is only tried when the token is shaped
+        /// like one, so a bad session token still fails as a bad session
+        /// token; it is then held to [`Self::access_token_caller`]. The
+        /// refresh, issue, sign-out and device calls never come here: they
+        /// take a session token alone ([`Self::session_caller`]).
         pub(crate) async fn organization_caller(
             &self,
             token: &str,
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            let by_session = self
-                .current_session(CurrentSession {
-                    token: token.to_owned(),
-                })
-                .await;
-            match by_session {
-                Ok(bundle) => Ok(bundle.user),
+            match self.session_caller(token).await {
+                Ok(user) => Ok(user),
                 Err(error) => {
                     let is_jwt = token.split('.').filter(|part| !part.is_empty()).count() == 3;
                     if !is_jwt {
                         return Err(error);
                     }
-                    let verification = self
-                        .verify_jwt(crate::VerifyJwt {
-                            token: token.to_owned(),
-                            audience: None,
-                        })
-                        .await?;
-                    let user_id: uuid::Uuid = verification
-                        .claims
-                        .sub
-                        .parse()
-                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
-                    self.storage
-                        .find_user_by_id(user_id)
-                        .await?
-                        .ok_or(AuthFlowError::InvalidCredentials)
+                    self.access_token_caller(token).await
                 }
             }
+        }
+
+        /// The account behind a session token, and nothing else.
+        pub(crate) async fn session_caller(
+            &self,
+            token: &str,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            self.current_session(CurrentSession {
+                token: token.to_owned(),
+            })
+            .await
+            .map(|bundle| bundle.user)
+        }
+
+        /// The account behind one of this issuer's own OIDC access tokens:
+        /// the same verification `/oauth2/userinfo` performs (this
+        /// server's keys and issuer, the **default audience**, expiry, the
+        /// session it was minted from still active), and the token must
+        /// name a **registered first-party client** (enabled, and
+        /// registered with `skip_consent`: the person signed in to the
+        /// issuer's own app, they granted no third party anything) and
+        /// carry the **`openid`** scope. An id token (its audience is the
+        /// client) or a JWT minted outside the code flow (no client) is
+        /// refused.
+        // r[impl auth.jwt.first-party-access]
+        pub(crate) async fn access_token_caller(
+            &self,
+            token: &str,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            let verification = self
+                .verify_jwt(crate::VerifyJwt {
+                    token: token.to_owned(),
+                    audience: None,
+                })
+                .await?;
+            let extra = verification
+                .claims
+                .extra
+                .as_ref()
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            let client_id = extra
+                .get("client_id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            let first_party = self
+                .config
+                .oidc
+                .clients
+                .iter()
+                .any(|c| c.client_id == client_id && !c.disabled && c.skip_consent);
+            if !first_party {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let openid = extra
+                .get("scope")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|scope| scope.split_whitespace().any(|s| s == "openid"));
+            if !openid {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let user_id: uuid::Uuid = verification
+                .claims
+                .sub
+                .parse()
+                .map_err(|_| AuthFlowError::InvalidCredentials)?;
+            self.storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)
         }
 
         async fn require_member(

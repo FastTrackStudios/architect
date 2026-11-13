@@ -3,9 +3,10 @@
 //! keeps this address book.
 //!
 //! Every call resolves its token through
-//! [`ArchitectAuth::organization_caller`], so a native app holding the
-//! OAuth access token from `/oauth2/token` is served the same as a page
-//! holding a session token — and every call is scoped to that account.
+//! [`ArchitectAuth::session_caller`]: a session token only. An OAuth
+//! access token is refused here (the issuer takes its own access token at
+//! `whoami` and `list_organizations` alone); a native app gets its session
+//! from its own client. Every call is scoped to that account.
 
 use auth_proto::{
     AccountOrg, AuthAccountOrg, AuthDevice, AuthFlowError, DeviceDirectory, DeviceRegistration,
@@ -130,7 +131,7 @@ where
         token: &str,
         registration: DeviceRegistration,
     ) -> Result<DeviceDirectory, AuthFlowError> {
-        let user = self.organization_caller(token).await?;
+        let user = self.session_caller(token).await?;
         if registration.device_id.is_nil() {
             return Err(invalid("a device needs its id"));
         }
@@ -186,13 +187,13 @@ where
 
     /// The caller's shared org and devices.
     pub async fn list_devices(&self, token: &str) -> Result<DeviceDirectory, AuthFlowError> {
-        let user = self.organization_caller(token).await?;
+        let user = self.session_caller(token).await?;
         self.directory_for(user.id).await
     }
 
     /// Take one of the caller's devices off the account.
     pub async fn forget_device(&self, token: &str, device_id: Uuid) -> Result<(), AuthFlowError> {
-        let user = self.organization_caller(token).await?;
+        let user = self.session_caller(token).await?;
         if self.storage.delete_device(device_id, user.id).await? {
             Ok(())
         } else {
