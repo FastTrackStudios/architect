@@ -37,8 +37,8 @@ use bars::{Rail, RoundButton, SideTab};
 pub use busy::BusyBadge;
 pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
 pub use favourites::{
-    Declared, Favourites, PlaceOpened, SLOTS, Shows, declare, declared_tab_id, resolve_favourites,
-    set_note,
+    Declared, Favourites, PlaceOpened, Presses, SLOTS, Shows, declare, declared_tab_id, place_kept,
+    resolve_favourites, set_note, use_presses,
 };
 pub use input_debug::{foot_bottom, input_debug, set_input_debug};
 pub use keyboard::{

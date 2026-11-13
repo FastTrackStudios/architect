@@ -218,12 +218,14 @@ impl Declarer {
         if effect == Effect::Destructive || self.extension.is_empty() {
             return false;
         }
-        id.starts_with(&action_prefix(&self.extension))
-            || (self
-                .actions
-                .iter()
-                .any(|p| p == "*" || id.starts_with(p.as_str()))
-                && effect <= self.effect)
+        may_run(
+            &action_prefix(&self.extension),
+            &self.actions,
+            self.effect,
+            id,
+            effect,
+        )
+        .is_ok()
     }
 
     /// Whether a favourite of its may open a view of `extension`'s: its own
@@ -243,9 +245,49 @@ pub struct Listed {
     pub favourites: TypeFavourites,
 }
 
+/// Why an extension may not run an action ([`may_run`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refused {
+    /// Not its own namespace, nor one its `capabilities.actions` names.
+    Namespace,
+    /// More than its `capabilities.effect` lets it change.
+    Effect,
+}
+
+/// The one rule for which actions an extension may run.
+///
+/// Action `id`, which does `effect`, is its own (it starts with `own`,
+/// its [`action_prefix`]), or in a namespace `named` lists (`*`: every
+/// action) and no more than `most`. `architect-extensions`'
+/// `Capabilities::may_run` (and so `host::gate`) and
+/// [`Declarer::may_target`] are both this function, so the browser's rule
+/// and the app's cannot drift. `E` is either side's effect scale.
+///
+/// # Errors
+///
+/// Which half of the rule it fails.
+pub fn may_run<E: PartialOrd + Copy>(
+    own: &str,
+    named: &[String],
+    most: E,
+    id: &str,
+    effect: E,
+) -> Result<(), Refused> {
+    if id.starts_with(own) {
+        return Ok(());
+    }
+    if !named.iter().any(|p| p == "*" || id.starts_with(p.as_str())) {
+        return Err(Refused::Namespace);
+    }
+    if effect > most {
+        return Err(Refused::Effect);
+    }
+    Ok(())
+}
+
 /// The action namespace of extension `id`: its id upper-cased, each run of
-/// other characters one `_` (`fts.metronome` → `FTS_METRONOME_`), as
-/// `architect-extensions`' `manifest::action_prefix` makes it.
+/// other characters one `_` (`fts.metronome` → `FTS_METRONOME_`); the one
+/// `architect-extensions`' `manifest::action_prefix` is.
 #[must_use]
 pub fn action_prefix(id: &str) -> String {
     let mut out = String::with_capacity(id.len().saturating_add(1));

@@ -82,7 +82,9 @@ pub fn use_web_favourites(
     // A place a tab opened, the note whose set it keeps and that note's
     // type.
     let mut opened = use_signal(|| None::<(PlaceOpened, Option<String>)>);
-    let revision = use_file_changes(source, workspace);
+    // The declared tabs' presses, made once each (`shell::Presses`).
+    let presses = shell::use_presses();
+    let revision = use_file_changes(source, workspace, opened);
     let on_show = {
         let source = source.clone();
         use_memo(move || {
@@ -91,17 +93,26 @@ pub fn use_web_favourites(
         })
     };
     let framed = use_memo(move || vault::frame_on_show(&workspace.read()));
-    // A place's set lasts while it or its note is on show.
-    use_effect(move || {
-        let path = on_show().map(|(p, _)| p);
-        let stale = opened
-            .peek()
-            .as_ref()
-            .is_some_and(|(o, _)| path.as_deref().is_none_or(|p| p != o.place && p != o.from));
-        if stale {
-            opened.set(None);
-        }
-    });
+    // A place's set lasts while it or its note is on show, and its note
+    // is still there with that type (`shell::place_kept`).
+    {
+        let source = source.clone();
+        use_effect(move || {
+            let path = on_show().map(|(p, _)| p);
+            let stale = opened.peek().as_ref().is_some_and(|(o, ty)| {
+                let now = vault::type_of(&source, &o.from);
+                !shell::place_kept(
+                    o,
+                    ty.as_deref(),
+                    path.as_deref(),
+                    now.as_ref().map(Option::as_deref),
+                )
+            });
+            if stale {
+                opened.set(None);
+            }
+        });
+    }
     let default = own_set(commands);
     let vault_slots = |set| Slots {
         set,
@@ -145,18 +156,21 @@ pub fn use_web_favourites(
                 let what = opens(&d.by, target, &reach)?;
                 let shows = shows(&what, &path);
                 let label = label_for(&d.favourites, target);
+                let key = format!("{path}\0{ty}\0{}\0{label}\0{what:?}", d.by.extension);
                 let (path, ty) = (path.clone(), ty.clone());
-                let press = Callback::new(move |()| {
-                    if let Opens::Path(place) = &what {
-                        opened.set(Some((
-                            PlaceOpened {
-                                place: place.clone(),
-                                from: path.clone(),
-                            },
-                            Some(ty.clone()),
-                        )));
-                    }
-                    run(&what, &label, &path, workspace, commands);
+                let press = presses.get(key, || {
+                    Callback::new(move |()| {
+                        if let Opens::Path(place) = &what {
+                            opened.set(Some((
+                                PlaceOpened {
+                                    place: place.clone(),
+                                    from: path.clone(),
+                                },
+                                Some(ty.clone()),
+                            )));
+                        }
+                        run(&what, &label, &path, workspace, commands);
+                    })
                 });
                 Some((press, shows))
             },
@@ -207,9 +221,14 @@ const fn effect(e: architect_commands::Effect) -> Effect {
     }
 }
 
-/// A count bumped whenever the vault says the note on show's file changed
-/// (`SourceEvent::touches`): its `type` is read again then.
-fn use_file_changes(source: &MemorySource, workspace: Signal<Workspace>) -> Signal<u64> {
+/// A count bumped whenever the vault says the note on show's file, or the
+/// note a place on show was opened from, changed (`SourceEvent::touches`):
+/// their `type` is read again then.
+fn use_file_changes(
+    source: &MemorySource,
+    workspace: Signal<Workspace>,
+    opened: Signal<Option<(PlaceOpened, Option<String>)>>,
+) -> Signal<u64> {
     let mut changed = use_signal(|| 0_u64);
     let source = source.clone();
     use_hook(move || {
@@ -222,7 +241,10 @@ fn use_file_changes(source: &MemorySource, workspace: Signal<Workspace>) -> Sign
             use futures_util::StreamExt as _;
             while let Some(event) = rx.next().await {
                 let on_show = vault::note_on_show(&workspace.peek(), &source).map(|(p, _)| p);
-                if on_show.is_some_and(|p| event.touches(&p)) {
+                let from = opened.peek().as_ref().map(|(o, _)| o.from.clone());
+                if on_show.is_some_and(|p| event.touches(&p))
+                    || from.is_some_and(|p| event.touches(&p))
+                {
                     let n = changed.peek().wrapping_add(1);
                     changed.set(n);
                 }

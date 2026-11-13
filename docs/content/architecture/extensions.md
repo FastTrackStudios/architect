@@ -2257,9 +2257,11 @@ cached, at `GET /_ext/favourites.json` for the app in a browser
 (`apps/desktop/src/node/shares.rs` `FAVOURITES_LISTING`), each with the
 extension that declared it and what its capabilities let it run
 (`features/favourites/src/lib.rs` `Listed`, `Declarer`), so the browser
-applies the same rule (`Declarer::may_target`, `may_open_view_of`; it
-cannot reach `architect-extensions`, so a test there holds it to
-`Capabilities::may_run`). The browser reads at most 256 KiB of the
+applies the same rule (`Declarer::may_target`, `may_open_view_of`). The
+rule is one function, `architect_favourites::may_run`, which
+`Capabilities::may_run` calls too, and `manifest::action_prefix` is
+`architect_favourites::action_prefix`: `architect-favourites` is serde
+only, so the browser bundle takes it, and nothing is copied to drift. The browser reads at most 256 KiB of the
 listing and 64 declarations. A note type is at most 64 characters. A
 `place` takes no spaces, so a note whose name has one is out of a place's
 reach.

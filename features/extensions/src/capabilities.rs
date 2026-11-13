@@ -449,26 +449,23 @@ impl Capabilities {
         id: &str,
         effect: Reach,
     ) -> Result<(), (&'static str, String)> {
-        if id.starts_with(own) {
-            return Ok(());
-        }
-        if !prefix_in(id, &self.actions) {
-            return Err((
+        // The rule itself is `architect_favourites::may_run`, which a
+        // browser's favourites use too: one rule, nothing to drift.
+        match architect_favourites::may_run(own, &self.actions, self.effect, id, effect) {
+            Ok(()) => Ok(()),
+            Err(architect_favourites::Refused::Namespace) => Err((
                 "actions",
                 format!("{id} is not in a namespace this extension may run"),
-            ));
-        }
-        if effect > self.effect {
-            return Err((
+            )),
+            Err(architect_favourites::Refused::Effect) => Err((
                 "effect",
                 format!(
                     "{id} is {}: this extension may run {} actions at most",
                     effect.name(),
                     self.effect.name()
                 ),
-            ));
+            )),
         }
-        Ok(())
     }
 
     /// Whether it may read `what` ([`READS`]).
@@ -612,8 +609,9 @@ mod tests {
     }
 
     /// A favourite's action rule in a browser
-    /// (`architect_favourites::Declarer::may_target`, which cannot reach
-    /// this crate) is `may_run`'s, a destructive action never.
+    /// (`architect_favourites::Declarer::may_target`) is `may_run`'s, a
+    /// destructive action never: both are `architect_favourites::may_run`,
+    /// and this holds the two effect scales and the mapping between them.
     #[test]
     fn a_favourites_action_rule_is_may_runs() {
         use architect_favourites::{Declarer, Effect};

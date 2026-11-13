@@ -30,6 +30,43 @@ use dioxus::prelude::*;
 
 use super::{Action, Tab, intern, named_icon};
 
+/// The presses of declared tabs, made once each and kept across renders
+/// ([`use_presses`]).
+///
+/// An app builds its declared sets on every render of its root; a
+/// `Callback` made there each time would be one more owned by the root
+/// until it unmounts. A press is made the first time its `key` (the note,
+/// its type and what it opens) is asked for and the same one handed back
+/// after, so a root makes one per tab it ever shows, not one per render.
+#[derive(Clone, Default)]
+pub struct Presses(
+    std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, Callback<()>>>>,
+);
+
+impl Presses {
+    /// The press for `key`, made by `make` only the first time.
+    pub fn get(&self, key: String, make: impl FnOnce() -> Callback<()>) -> Callback<()> {
+        *self.0.borrow_mut().entry(key).or_insert_with(make)
+    }
+
+    /// How many presses it holds.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.borrow().len()
+    }
+
+    /// Whether it holds none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.borrow().is_empty()
+    }
+}
+
+/// The calling component's [`Presses`], kept for its life.
+pub fn use_presses() -> Presses {
+    use_hook(Presses::default)
+}
+
 /// How many tabs a phone's bar holds; a set's tabs past it are dropped.
 pub const SLOTS: usize = 4;
 
@@ -81,6 +118,29 @@ pub fn set_note<'a>(on_show: &'a str, opened: Option<&'a PlaceOpened>) -> &'a st
         Some(o) if o.place == on_show => &o.from,
         _ => on_show,
     }
+}
+
+/// Whether a `{place}`'s kept set still holds.
+///
+/// It holds while the place or the note it was opened from is on show
+/// (`on_show`), and the note it was opened from is still in the vault
+/// with the type the set was for (`kept_type`): `from_now` is that note's
+/// type as the vault has it now, `None` once it is gone. Deleted or
+/// retyped elsewhere, the slots go back to the note on show's own.
+#[must_use]
+pub fn place_kept(
+    opened: &PlaceOpened,
+    kept_type: Option<&str>,
+    on_show: Option<&str>,
+    from_now: Option<Option<&str>>,
+) -> bool {
+    let shown = on_show.is_some_and(|p| p == opened.place || p == opened.from);
+    let same = |a: Option<&str>, b: Option<&str>| match (a, b) {
+        (Some(a), Some(b)) => a.trim().eq_ignore_ascii_case(b.trim()),
+        (None, None) => true,
+        _ => false,
+    };
+    shown && from_now.is_some_and(|now| same(now, kept_type))
 }
 
 impl Favourites {
@@ -264,8 +324,8 @@ mod tests {
 
     // Named, so the prelude's own `Action` does not shadow the shell's.
     use super::{
-        Action, Declared, Favourites, PlaceOpened, SLOTS, Shows, Tab, declare, resolve_favourites,
-        set_note,
+        Action, Declared, Favourites, PlaceOpened, Presses, SLOTS, Shows, Tab, declare, place_kept,
+        resolve_favourites, set_note,
     };
     use crate::icon;
     use dioxus::prelude::*;
@@ -495,6 +555,47 @@ on = { label = "Stop", icon = "pause" }
             set_note("Food/Charts/Opener.md", None),
             "Food/Charts/Opener.md"
         );
+    }
+
+    #[test]
+    fn a_press_is_made_once_for_its_key_however_often_the_root_renders() {
+        in_runtime(|| {
+            let presses = Presses::default();
+            let count = std::cell::Cell::new(0_u32);
+            let make = || {
+                count.set(count.get() + 1);
+                Callback::new(|()| {})
+            };
+            // Three renders of a root showing two tabs on one note.
+            let mut first = None;
+            for _ in 0..3 {
+                let a = presses.get("Soup.md\0recipe\0page".into(), make);
+                let _ = presses.get("Soup.md\0recipe\0charts".into(), make);
+                assert_eq!(*first.get_or_insert(a), a, "the same press");
+            }
+            assert_eq!(count.get(), 2);
+            // Another note: its own.
+            let _ = presses.get("Stew.md\0recipe\0page".into(), make);
+            assert_eq!((count.get(), presses.len()), (3, 3));
+        });
+    }
+
+    #[test]
+    fn a_places_set_ends_with_its_note() {
+        let opened = PlaceOpened {
+            place: "Food/Charts/Opener.md".into(),
+            from: "Food/Soup.md".into(),
+        };
+        let kept = |on_show, from_now| place_kept(&opened, Some("recipe"), on_show, from_now);
+        assert!(kept(Some("Food/Charts/Opener.md"), Some(Some("recipe"))));
+        assert!(kept(Some("Food/Soup.md"), Some(Some(" Recipe "))));
+        // Deleted, or its type changed, on another device: gone.
+        assert!(!kept(Some("Food/Charts/Opener.md"), None));
+        assert!(!kept(Some("Food/Charts/Opener.md"), Some(Some("song"))));
+        assert!(!kept(Some("Food/Charts/Opener.md"), Some(None)));
+        // Neither it nor its note on show: gone, as before.
+        assert!(!kept(Some("Other.md"), Some(Some("recipe"))));
+        assert!(!kept(None, Some(Some("recipe"))));
     }
 
     #[test]

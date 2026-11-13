@@ -124,18 +124,19 @@ const LOOK = `
   globalThis.architectPage.subscribe((p) => { r.props.push(JSON.stringify(p)); document.body.dataset.report = JSON.stringify(r); });
   globalThis.architectPage.ask("VAULT_READ", { path: "Welcome.md" });
   globalThis.architectPage.ask("SHARE_CREATE", { vault: "notes" });
-  globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Look", queue: [{ id: "a", title: "A", duration: 10 }] });
-  setTimeout(() => globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 999 }), 300);
-  setTimeout(() => { for (let i = 0; i < 200; i++) globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: (i % 10) + 1 }); }, 800);
+  // Once ready (asks before it are refused): its source, a seek past it,
+  // then the flood.
+  setTimeout(() => globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Look", queue: [{ id: "a", title: "A", duration: 10 }] }), 300);
+  setTimeout(() => globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: 999 }), 600);
+  setTimeout(() => { for (let i = 0; i < 200; i++) globalThis.architectPage.ask("PLAYHEAD_SEEK", { t: (i % 10) + 1 }); }, 1100);
   document.body.dataset.report = JSON.stringify(r);
 `;
 
-/// The share suite's FLOOD: a source of one minute-long item, the frame's
-/// port captured, then hellos, readies, sizes and asks by the thousand;
+/// The share suite's FLOOD: the frame's port captured, then hellos and
+/// readies, a source of one minute-long item, sizes and asks by the thousand;
 /// after the rate limit refills it asks for 20 + how many times it was
 /// booted again.
 const FLOOD = `
-  globalThis.architectPage.ask("PLAYHEAD_SET", { name: "Flood", queue: [{ id: "a", title: "A", duration: 60 }] });
   let port = null; const orig = MessagePort.prototype.postMessage;
   MessagePort.prototype.postMessage = function () { port = this; return orig.apply(this, arguments); };
   globalThis.architectPage.ask("nothing");
@@ -145,6 +146,8 @@ const FLOOD = `
   port.addEventListener("message", (m) => { if ((m.data || {}).t === "boot") boots++; });
   for (let i = 0; i < 500; i++) orig.call(port, { t: "hello" });
   for (let i = 0; i < 500; i++) orig.call(port, { t: "ready" });
+  // Its source, once it says it is ready (asks before it are refused).
+  orig.call(port, { t: "ask", action: "PLAYHEAD_SET", args: { name: "Flood", queue: [{ id: "a", title: "A", duration: 60 }] } });
   for (let i = 0; i < 5000; i++) orig.call(port, { t: "size", height: (i % 2) ? 100 : 99999 });
   for (let i = 0; i < 1000; i++) orig.call(port, { t: "ask", action: "PLAYHEAD_SEEK", args: { t: (i % 10) + 1 } });
   // The last word on its height is far over the cap, so the height the

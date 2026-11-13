@@ -500,7 +500,13 @@ fn use_vault_focus(workspace: Signal<Workspace>) {
         spawn(async move {
             use futures_util::StreamExt as _;
             while let Some(event) = rx.next().await {
-                if at.peek().as_deref().is_some_and(|p| event.touches(p)) {
+                // The note on show, or the note a place on show was opened
+                // from (its set ends once that is gone or retyped).
+                let from =
+                    focus.and_then(|f| f.opened.peek().as_ref().map(|(o, _)| o.from.clone()));
+                if at.peek().as_deref().is_some_and(|p| event.touches(p))
+                    || from.is_some_and(|p| event.touches(&p))
+                {
                     let n = changed.peek().wrapping_add(1);
                     changed.set(n);
                 }
@@ -532,10 +538,24 @@ fn use_vault_focus(workspace: Signal<Workspace>) {
                 // An extension's view's kind is `<extension>/<view>`.
                 view: view.contains('/').then_some(view),
             });
-        // A place's set lasts while it or its note is on show.
-        let kept = focus.opened.peek().as_ref().is_some_and(|(o, _)| {
-            note.as_ref()
-                .is_some_and(|n| n.path == o.place || n.path == o.from)
+        // A place's set lasts while it or its note is on show, and its note
+        // is still there with that type (`architect_shell::place_kept`).
+        let kept = focus.opened.peek().as_ref().is_some_and(|(o, ty)| {
+            // No vault to read it from: nothing says it changed.
+            let now = crate::notes::open_vault().map_or_else(
+                || Some(ty.clone()),
+                |v| {
+                    std::fs::read_to_string(v.root().join(&o.from))
+                        .ok()
+                        .map(|t| crate::favourites::note_type(&t))
+                },
+            );
+            architect_shell::place_kept(
+                o,
+                ty.as_deref(),
+                note.as_ref().map(|n| n.path.as_str()),
+                now.as_ref().map(Option::as_deref),
+            )
         });
         if !kept && focus.opened.peek().is_some() {
             focus.opened.set(None);
