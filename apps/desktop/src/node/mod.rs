@@ -300,7 +300,7 @@ pub async fn start_with_shell(
     given: architect_sites::Blocks,
     layers: Vec<architect_sites::ShareLayersDecl>,
     islands: Vec<architect_sites::SiteIsland>,
-    favourites: Vec<architect_favourites::TypeFavourites>,
+    favourites: Vec<architect_favourites::Listed>,
 ) -> Result<Running, StartError> {
     let data = &config.data_dir;
     // An installed extension draws over a compiled-in one claiming the

@@ -2,29 +2,45 @@
 //! and phone apps (`apps/ui`, on Blitz there), from the same Dioxus
 //! components, here on dioxus-web.
 //!
-//! - the shell (`architect_shell::AppShell`): the Vault tab, the account,
-//!   the foot's buttons, the status line, a phone's action bar;
+//! - the shell (`architect_shell::AppShell`): the bottom slots as
+//!   favourites (`favourites`: Vault, Files, Search and New note, or the
+//!   open note's type's own from the node's extensions, #607), the
+//!   account, the foot's buttons, the status line, a phone's action bar;
 //! - the Vault (`vault`): the workspace (`architect_workspace::WorkspaceView`:
 //!   tabs, splits, docks, a phone's tab switcher), the navigator
 //!   (`architect_navigator`) in its left dock, notes as their markdown
 //!   (the editor's web view needs `eval`, which the page refuses: `page`);
 //! - ⌘K and ⌘O: the commands (`architect_commands`) drawn by the Command
 //!   Palette's views (`architect_command_palette::views`, without its
-//!   extension: a browser has no extension host yet, #495);
+//!   extension: the browser runs no linked extension, #495);
+//! - extensions' views in sandboxed frames of their own (`frames`, route A
+//!   of #495): the view an island claims a note's type with, at the
+//!   note's head (`embed`), and any view a favourite of its extension
+//!   opens, in a pane, handed the note and its extension's playhead source;
+//! - the Now Playing bar (`architect_playhead::ui::NowPlayingBar`, #589)
+//!   in the shell's `now_playing` slot, over the deck every frame and the
+//!   note views move, heard through the app's own audio element
+//!   (`audio`);
 //! - settings (`architect_settings::SettingsPage`): Appearance and the
 //!   navigator's sections, kept in this browser (`localStorage`);
 //! - the theme store (`architect_theme`), the system's light or dark.
 //!
 //! What a browser has no way to do yet is left out, not shown dead: pop-out
-//! windows, a folder on this device, the files agent, extensions (linked
-//! ones need the Luau host, #495), capture's system-wide key, the menu bar.
+//! windows, a folder on this device, the files agent, linked extensions
+//! (they need the Luau host, #495) and host calls from a frame into a vault
+//! (#495's next step), capture's system-wide key, the menu bar.
 
 // Nothing is `Send` in a browser.
 #![allow(clippy::future_not_send)]
 
+mod audio;
+mod embed;
+mod favourites;
+mod frames;
 mod keys;
 pub mod org;
 mod page;
+mod recording;
 mod screen;
 mod settings;
 mod theme;
@@ -37,9 +53,7 @@ use architect::action::ActionList;
 use architect_commands::{Command, Overlay, PaletteView};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
-use lucide_dioxus::{
-    Command as CommandIcon, Files, LogIn, LogOut, NotebookText, Search, Settings2, SquarePen,
-};
+use lucide_dioxus::{Command as CommandIcon, Files, LogIn, LogOut, Search, Settings2, SquarePen};
 
 /// Which app the page is.
 #[derive(Clone)]
@@ -102,13 +116,15 @@ fn WebApp() -> Element {
         },
         Mode::Org { vault, .. } => vault.clone(),
     });
-    vault::use_vault_workspace(&web_vault.source);
+    let workspace = vault::use_vault_workspace(&web_vault.source).signal();
     let screen = screen::use_browser_screen();
     let list = use_hook(|| Arc::new(ActionList::new()));
     use_context_provider(|| list.clone());
     use_hook(|| {
         let _ = architect::action::app_status::register(&list);
     });
+    // The app's audio element, following the playhead (#589).
+    use_hook(audio::start);
     let theme = theme::use_web_theme(&list);
     let assets = use_hook(theme::assets);
     let settings = settings::use_web_settings();
@@ -158,7 +174,24 @@ fn WebApp() -> Element {
             sign_in,
         );
     }
-    let tabs = vec![shell::Tab::new("vault", "Vault", icon!(NotebookText))];
+    // The Now Playing bar's presses on ⌘K, and a favourite's round button
+    // (`PLAYHEAD_TOGGLE`, #607): the app's own, on the active source.
+    for (id, name) in [
+        ("PLAYHEAD_TOGGLE", "Play or pause"),
+        ("PLAYHEAD_NEXT", "Next"),
+        ("PLAYHEAD_PREVIOUS", "Previous"),
+    ] {
+        architect_commands::use_command(Command::new(id, name).group("Now Playing"), move || {
+            architect_playhead::ui::press(id, &serde_json::json!({}));
+        });
+    }
+    // The bottom slots: the open note's type's favourites, else the
+    // web app's own.
+    let slots = favourites::use_web_favourites(workspace, &web_vault.source, &commands);
+    let set = slots.set.clone();
+    let tabs = set.slots().to_vec();
+    let separate = set.primary.clone();
+    let current = slots.current;
     let foot = vec![shell::Action::new(
         "Settings",
         icon!(Settings2),
@@ -252,8 +285,13 @@ fn WebApp() -> Element {
                         screen: shown,
                         title: crate::browser::app_name(),
                         tabs,
-                        current: Some("vault"),
-                        on_tab: move |_: &'static str| {},
+                        current,
+                        on_tab: move |id: &'static str| {
+                            if !set.press(id) {
+                                favourites::own_tab(id, workspace, &commands);
+                            }
+                        },
+                        separate,
                         brand: rsx! { Brand {} },
                         account,
                         foot,
@@ -271,6 +309,7 @@ fn WebApp() -> Element {
                         .into_iter()
                         .chain(demo.then(|| shell::BarAction::new("WEB_SIGN_IN", "Sign in", icon!(LogIn))))
                         .collect::<Vec<_>>(),
+                        now_playing: rsx! { architect_playhead::ui::NowPlayingBar {} },
                         vault::VaultPage {}
                     }
                 }

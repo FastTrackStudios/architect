@@ -119,6 +119,9 @@ auth-client = { workspace = true }
 # tests/node.rs: the web app's text area against a live note
 # (`architect_web::live_text`), on the real lane.
 architect-web = { path = "../web" }
+# tests/islands.rs: each listed file checked against its digest.
+sha2 = { workspace = true }
+base64 = { workspace = true }
 # The A2UI surface the parity test renders (tests/actions.rs).
 architect-a2ui = { workspace = true }
 architect-mcp = { workspace = true, features = ["parity"] }

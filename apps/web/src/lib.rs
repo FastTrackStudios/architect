@@ -48,6 +48,8 @@ mod app;
 #[cfg(target_arch = "wasm32")]
 mod browser;
 pub mod demo;
+pub mod ext_host;
+pub mod favourites;
 pub mod keys;
 pub mod live_text;
 #[cfg(any(target_arch = "wasm32", test))]

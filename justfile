@@ -435,6 +435,23 @@ share-webview-test:
     devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" env -u LD_LIBRARY_PATH node --test apps/web/test/share-webview.test.mjs
 
+# The web app's extension frames (#495) against hostile bundles in a real
+# browser: the release bundle (scripts/web-bundle.sh) behind a front that
+# sends `/_ext/` to a node with an island (island_node), Firefox headless
+# over BiDi, kept off the audio graph (`unshare -r -m`).
+app-ext-host-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-ext-host.test.mjs
+
+# The web app's bottom slots as favourites (#607) at 390 px: the default
+# set, a note type's declared set from the node's `/_ext/favourites.json`,
+# a tab opening its island view; `ARCHITECT_SHOTS=<dir>` keeps screenshots.
+app-favourites-test:
+    devenv shell -- cargo build -q -p architect-desktop --no-default-features --features vox --example island_node
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-favourites.test.mjs
+
 # The suite on the classic-WebDriver path Safari takes, in Firefox
 # (geckodriver from nixpkgs): what keeps that path from rotting without a Mac.
 share-webview-test-classic:
