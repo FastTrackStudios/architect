@@ -98,6 +98,10 @@ pub fn use_web_favourites(
     {
         let source = source.clone();
         use_effect(move || {
+            // The memo tells only of a changed value, and the note a set
+            // came from can go or be retyped with the same note on show:
+            // the vault's own changes run this too.
+            let _ = revision();
             let path = on_show().map(|(p, _)| p);
             let stale = opened.peek().as_ref().is_some_and(|(o, ty)| {
                 let now = vault::type_of(&source, &o.from);
