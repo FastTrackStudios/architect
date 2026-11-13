@@ -105,12 +105,19 @@ fn wake() {
         if m.ctx.is_none() {
             m.ctx = AudioContext::new().ok();
         }
-        if let Some(c) = &m.ctx
-            && c.state() == AudioContextState::Suspended
-        {
-            let _ = c.resume();
+        // Made inside the press, so the browser lets it sound later; woken
+        // only when something plays, so typing with nothing playing does not
+        // switch the output on and off each key. Resting, it is woken by
+        // `tick` when play starts.
+        let Some(c) = &m.ctx else { return };
+        if playing_now().is_some() {
+            if c.state() == AudioContextState::Suspended {
+                let _ = c.resume();
+            }
+            m.rested = false;
+        } else {
+            m.rested = true;
         }
-        m.rested = false;
     });
 }
 

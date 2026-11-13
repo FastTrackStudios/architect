@@ -101,12 +101,13 @@ impl Tempo {
         let count = |t: f64| ((t - self.at) / every).ceil().max(0.0) as u32;
         let first = count(from);
         let end = if sane { count(to).max(first) } else { first };
-        (first..end)
-            .map(move |n| {
-                let t = f64::from(n).mul_add(every, self.at);
-                (t, n.is_multiple_of(meter))
-            })
-            .take_while(move |(t, _)| *t < to)
+        // The integer range alone bounds the beats: a cut on the beat's
+        // time would drop one landing a rounding step past `to`, which the
+        // next window (starting at `count(to)`) would not give again.
+        (first..end).map(move |n| {
+            let t = f64::from(n).mul_add(every, self.at);
+            (t, n.is_multiple_of(meter))
+        })
     }
 }
 
