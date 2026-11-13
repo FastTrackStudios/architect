@@ -18,7 +18,7 @@ Keyflow (`scripts/run-it.sh` here):
 
 | Recipe | What it runs |
 | --- | --- |
-| `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below (`devenv up mock-oauth auth node app web site`). |
+| `just dev` | Everything, rebuilt on save. With a Studio checkout beside this one (`../studio`, or `LOCAL_STACK_STUDIO_PATH`), **Studio's stack** with this checkout as its Architect: Studio's node with Studio's extensions linked in, on a copy of a real setlist vault and its share link, the issuer, the web app and the site (`studio:docs/local-stack.md`). Arguments go to Studio's (`keyflow=local`, `desktop=on`, `watch=off`). `just dev plain`: this repo's own stack below, all of it at once (`devenv up mock-oauth auth node app web site`): the desktop app's window and the web app, both under `dx serve` and rebuilt on a save, and the site with hot reload. |
 | `just demo` | The quickest look, nothing watched: the issuer and a node with a share link (Studio's when it is beside this one, else the demo seed's, `/s/ksqx75iaaaaaaaae/`). Sign in as `ada@local.test`, password `development-password`. |
 | `just website` | The public site alone (`apps/site`: landing, download, changelog, extensions, docs) with hot reload, on 7414. `just docs-serve` still serves `docs/content` alone. |
 | `just phone` | Studio's running stack's node on this tailnet over HTTPS (`tailscale serve`, never funnel), for a phone. |
@@ -47,9 +47,9 @@ in this order, each waiting for the one before it to answer:
 | `mock-oauth` | 7410 | | The stand-in for GitHub, Google and TONE3000 (`apps/mock-oauth`): the auth server's social buttons work with nobody's credentials. |
 | `auth` | 7411 | `mock-oauth` | The auth server (`apps/auth-server`): SQLite on disk under the stack's state, a secret of its own generated on its first start, filled as below. |
 | `node` | 7412 | `auth` | `architect-desktop serve`, built without the window: signed in to the local auth server, hosting the fill's org and a vault of the demo's content, `ARCHITECT_IROH=local`, files in a local folder. |
-| `app` | (a window) | `node` | The Architect app under `dx serve`: its issuer the local auth server, its orgs' node the local node (`ARCHITECT_ORG_HOST`), a folder and a keychain service of its own, a scratch copy of the demo vault. |
-| `web` | 7413 | `auth` | Off by default (`devenv up web`): the web front end (`scripts/web-bundle.sh`), its `config.json` pointed at the local issuer. |
-| `site` | 7414 | | Off by default (`devenv up site`): `apps/site`'s dev server. |
+| `app` | (a window) | `node` | The Architect app under `dx serve`: its issuer the local auth server, its orgs' node the local node (`ARCHITECT_ORG_HOST`), a folder of its own with its sessions in a file there (never the keychain), a scratch copy of the demo vault. |
+| `web` | 7413 | `auth` | Off by default (`devenv up web`; `just dev plain` starts it): the web app (`apps/web`) under `dx serve --platform web`, at `/app/` (`/app/?demo`: the app on the demo vault), its `config.json` naming the local issuer. Below. |
+| `site` | 7414 | | Off by default (`devenv up site`; `just dev plain` starts it): `apps/site`'s dev server, hot-reloaded; its `/app/…` links go to the web app's server. |
 
 The ports are `dev-stack.toml`'s, the one place to change them
 (`devenv.nix` reads them from there too). They stay clear of what a fleet
@@ -65,6 +65,49 @@ secret, the snapshot, the node's identity and data, the app's folder, and
 
 `just dev-status` says what is running, the fill and why, the snapshot's
 age, the URLs to open and the development password.
+
+### The web app, rebuilt on save
+
+`just dev plain` (or `devenv up web`) serves the web app at
+`http://127.0.0.1:7413/app/`, the demo at `/app/?demo`. dx builds
+`apps/web`'s program (`apps/web/src/main.rs`, which calls the same
+`start` the bundle's library does) in a debug profile, so the first
+build takes a couple of minutes, not the release bundle's; after that an
+`rsx!` edit shows without a reload and any other save in `apps/web` or a
+crate it uses is rebuilt in seconds and the page reloads.
+
+- **The page** is the bundle's. `cargo xtask dev run web` writes
+  an `index.html` beside `apps/web/Dioxus.toml` from `apps/web/app/index.html` at every start
+  (`xtask/src/dev/mod.rs` `dev_page`; git-ignored): without its
+  Content-Security-Policy (dx loads the app and its hot reload with inline
+  scripts, and the local issuer is plain http) and without `start.js` (dx
+  puts its own loader in). The policy is the bundle's to prove: `just web`
+  and `just web-test` serve the real page with the real headers. Start
+  `dx serve` through the stack, never bare in `apps/web`: without that
+  page the app has nothing to mount in.
+- **Its files** are the folder `apps/web/Dioxus.toml` names as
+  `public_dir` (`dev/public` there; written at the same moment, git-ignored): the page's
+  `style.css`, a `config.json` naming the local issuer, the site's icon
+  and the app's face. An edit to `apps/web/app/style.css` or
+  `apps/web/app/index.html` shows after the `web` process starts again.
+- **Signing in** works as `ada@local.test`: the local issuer registers
+  the client `architect` with this origin's `/auth/callback`, the scopes
+  the app asks for and this origin for CORS (`auth_env`).
+- **The node's paths** (`/node`, `/org`, `/vox`, `/s`, `/_ext`) are sent
+  to the stack's node by dx's dev server (`apps/web/Dioxus.toml`
+  `[[web.proxy]]`), WebSockets too, as production's reverse proxy does:
+  the signed-in page shows the node's status. The port there is
+  `dev-stack.toml`'s, kept equal by a test; a run that moves the node
+  with `DEV_STACK_PORT_NODE` has no node behind the web app.
+- **The release bundle is not built this way**: `scripts/web-bundle.sh`
+  builds the library with the `web` profile and its own wasm-bindgen
+  (`just web`), as before.
+
+The desktop app the stack opens is an instance of its own: an app run on
+a folder of its own (`ARCHITECT_CONFIG_DIR`) claims its one instance
+under that folder too (`apps/distribution/src/lib.rs`
+`Distribution::instance_id`), so it opens beside an installed Architect
+that is running instead of handing its launch to it and ending.
 
 ## Two ways to fill it
 
@@ -162,7 +205,7 @@ Every guarantee is code, run before any process starts, and tested:
 | The node cannot find or be found by a production peer: no relay, no lookup, loopback only. | `ARCHITECT_IROH=local` (`apps/desktop/src/node/mod.rs` `bind_iroh`); its status reports `relays` and `iroh_addrs` | `apps/desktop/tests/node.rs` `a_local_node_has_no_relay_and_listens_on_loopback_only`; `xtask/tests/dev_stack.rs` reads them from the running node |
 | The node is never an enrolled peer of production: a local edit cannot reach it. | It signs in only to the local auth server and enrols nowhere (`ARCHITECT_ENROL_AT` and `ARCHITECT_PEERS` are never set, and stripped if inherited) | `xtask/src/dev/mod.rs` `the_node_runs_local_iroh_and_signs_in_locally` |
 | Mirrored data at rest is the developer's alone. | Folders `0700`, files `0600` (`write_private`, `private_dir`); `.devenv/` is git-ignored | `state_files_are_private`; `xtask/tests/dev_stack.rs` checks the modes of the running stack |
-| The app's local sessions never meet real ones. | Its keychain service is `app.fasttrackstudio.architect.dev-stack` and its folder is the stack's (`ARCHITECT_CONFIG_DIR`) | `xtask/src/dev/mod.rs` `the_stack_as_configured_passes_its_own_guard` |
+| The app's local sessions never meet real ones, and the stack never opens the platform keychain. | Its sessions are a file in its own folder, the stack's (`ARCHITECT_SECRET_STORE=file:…`, `ARCHITECT_CONFIG_DIR`), with `ARCHITECT_FORBID_KEYCHAIN=1` | `xtask/src/dev/mod.rs` `the_stacks_app_never_opens_the_platform_keychain` |
 
 `just dev-guard` runs the guard alone. The production hostnames are a
 constant (`guard::PRODUCTION_DOMAIN`); only the stack's own test can add
@@ -194,6 +237,25 @@ does not have today:
 What the stack must never do instead is join production's sync: an
 enrolled or paired dev node would carry local edits back. Until the
 export exists, `just dev-refresh --vault <name>` says so and stops.
+
+## Sessions, and the keychain
+
+No development run or test touches the platform keychain. A binary rebuilt
+again and again is unsigned, a new code identity to macOS each time, so
+reading a keychain entry an earlier build wrote makes the system ask the
+person at the screen ("wants to use your confidential information stored
+in …"), on every launch, and "Always Allow" cannot stick. So the stack's
+app keeps its sessions in `secrets.json` in its own folder
+(`ARCHITECT_SECRET_STORE=file:<path>`), any debug build on macOS or the
+iOS simulator does the same in its app folder unless told otherwise, and
+every `cargo test`, `cargo nextest` and `cargo run` in the repo runs with
+`ARCHITECT_FORBID_KEYCHAIN=1` (`.cargo/config.toml`), under which
+`architect_accounts::Keychain` panics rather than open it
+(`features/accounts/src/keychain.rs` `secret_store`, `FileSecrets` in
+`features/accounts/src/secrets.rs`). A release build keeps its sessions in
+the keychain, under `ARCHITECT_KEYCHAIN_SERVICE` when set, and ignores
+`ARCHITECT_SECRET_STORE` (except `memory`) and `ARCHITECT_FORBID_KEYCHAIN`:
+whoever can set its environment cannot move its sessions into a file.
 
 ## Running the pieces alone
 

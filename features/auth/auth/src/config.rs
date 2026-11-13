@@ -98,7 +98,21 @@ pub struct OidcClientConfig {
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
     pub public_client: bool,
+    /// Skip the consent screen. A convenience only: it grants nothing
+    /// (see [`Self::first_party`]).
     pub skip_consent: bool,
+    /// The issuer's own app (the Architect web app): its OIDC access
+    /// tokens are taken in place of a session at `whoami` and
+    /// `list_organizations`, and nowhere else. Default `false`; set it
+    /// only on a client the issuer's operator ships.
+    pub first_party: bool,
+    /// Its refresh tokens are single use (RFC 9700 4.14.2): each refresh
+    /// answers the next one, the old one presented again within a few
+    /// seconds answers the same next one, and later revokes the sign-in.
+    /// Takes effect on a public client only. Default `false`: a client
+    /// that treats any refused refresh as a sign-out (Task's `task`)
+    /// keeps reusable refresh tokens.
+    pub rotate_refresh_tokens: bool,
     pub disabled: bool,
 }
 
@@ -517,6 +531,17 @@ impl<S> ArchitectAuthBuilder<S> {
             });
         }
 
+        let jwt_audience = self.jwt_audience.unwrap_or_else(|| "architect-auth".into());
+        // A client named like the JWT audience would get id tokens that
+        // verify as access tokens (an id token's audience is its client).
+        if let Some(client) = self
+            .oidc_clients
+            .iter()
+            .find(|client| client.client_id == jwt_audience)
+        {
+            return Err(ConfigError::ClientIsJwtAudience(client.client_id.clone()));
+        }
+
         let base_url = self
             .base_url
             .unwrap_or_else(|| "http://localhost:3000".into());
@@ -548,7 +573,7 @@ impl<S> ArchitectAuthBuilder<S> {
                 sms: self.sms,
                 jwt: JwtConfig {
                     issuer: self.jwt_issuer.unwrap_or_else(|| "architect-auth".into()),
-                    audience: self.jwt_audience.unwrap_or_else(|| "architect-auth".into()),
+                    audience: jwt_audience,
                     active_key_id: jwt_active_key_id,
                     keys: jwt_keys,
                 },
@@ -593,4 +618,8 @@ pub enum ConfigError {
     MissingSecret,
     #[error("auth secret must be at least 32 bytes")]
     SecretTooShort,
+    #[error(
+        "OIDC client `{0}` has the JWT audience as its id: its id tokens would pass for access tokens"
+    )]
+    ClientIsJwtAudience(String),
 }

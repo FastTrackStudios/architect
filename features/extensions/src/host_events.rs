@@ -166,6 +166,28 @@ impl Host {
         Ok(self.emit_value(&format!("{}{name}", crate::events::APP_PREFIX), detail))
     }
 
+    /// Raises app-defined event `name` with a detail made for each
+    /// extension that hears it (`detail_for(<its id>)`), so what one
+    /// extension hears need not be what another does: the playhead's
+    /// `playhead.changed` gives a source's state to its own extension
+    /// only (`architect_playhead::heard_by`). How many hooks started.
+    ///
+    /// # Errors
+    ///
+    /// No event `name` was defined.
+    pub fn raise_app_each(
+        &self,
+        name: &str,
+        detail_for: &dyn Fn(&str) -> Value,
+    ) -> Result<usize, String> {
+        if !lock(&self.event_state().defined).contains_key(name) {
+            return Err(format!(
+                "no app event {name} is defined (Host::define_event)"
+            ));
+        }
+        Ok(self.emit_each(&format!("{}{name}", crate::events::APP_PREFIX), detail_for))
+    }
+
     /// Raises extension `id`'s own event `<id>.<name>` with `detail`
     /// (`HostRequest::Raise`), defined the first time it is raised. How
     /// many hooks started.

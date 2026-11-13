@@ -31,6 +31,10 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
+# `notes::Notes` as an Action List service too (`NOTES_*`): the node's
+# (`apps/desktop`), natively. Off everywhere else, so a crate that reads
+# the vault's types does not pull in the native dispatcher.
+actions = ["vox", "architect/action-list", "architect/dispatch-tokio"]
 fake = ["dep:fake", "architect/fake"]
 full = ["vox", "server", "fake"]
 

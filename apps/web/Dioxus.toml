@@ -1,0 +1,34 @@
+# dx config: `dx serve --platform web` from this folder, which
+# `cargo xtask dev run web` (`devenv up web`, `just dev plain`) runs after
+# it wrote the dev page (`index.html`, made from `app/index.html`) and the
+# public folder below (`xtask/src/dev/mod.rs` `prepare_web`); both are
+# git-ignored. The release bundle is not built from here:
+# `scripts/web-bundle.sh`.
+[application]
+# Served at the root: `app/style.css`, `app/config.json` (the local
+# issuer), `favicon.svg`, the app's face.
+public_dir = "dev/public"
+
+[web.app]
+# The page has its title; dx would add this one to it.
+title = ""
+
+# The node's paths, on this origin as they are behind production's reverse
+# proxy (`scripts/web-routes.md`): the local stack's node, `dev-stack.toml`
+# `[ports] node` (a test in `xtask/src/dev/mod.rs` keeps these equal to
+# it; a run that moves the node with `DEV_STACK_PORT_NODE` has no node
+# here). WebSockets too (`/org/<slug>/vox`).
+[[web.proxy]]
+backend = "http://127.0.0.1:7412/node"
+
+[[web.proxy]]
+backend = "http://127.0.0.1:7412/org"
+
+[[web.proxy]]
+backend = "http://127.0.0.1:7412/vox"
+
+[[web.proxy]]
+backend = "http://127.0.0.1:7412/s"
+
+[[web.proxy]]
+backend = "http://127.0.0.1:7412/_ext"

@@ -56,7 +56,7 @@ static GO: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Go to a tab",
-    description: "Shows tab `tab` (inbox, tasks, schedule or vault), as ⌃⌘1–4 do. The Vault's workspace actions (WORKSPACE_*) are on the list while it shows.",
+    description: "Shows tab `tab` as ⌃⌘1–4 do: the Architect app's inbox, vault, project or schedule (each opening its surface: the inbox deck, the last note, the projects list, the calendar's day), the sandbox's inbox, tasks, schedule or vault. The Vault's workspace actions (WORKSPACE_*) are on the list while it shows.",
     category: "Lab",
     group: "Go",
     shortcut: "",
@@ -67,20 +67,22 @@ static GO: ActionMeta = ActionMeta {
 /// What `LAB_GO` takes.
 #[derive(Debug, Clone, Facet)]
 pub struct GoArgs {
-    /// `inbox`, `tasks`, `schedule` or `vault`.
+    /// The Architect app's `inbox`, `vault`, `project` or `schedule`; the
+    /// sandbox's `inbox`, `tasks`, `schedule` or `vault`.
     pub tab: String,
 }
 
 /// Puts `LAB_STATE` and `LAB_GO` on `list`, and tells it (`lab`) when
 /// the lab moves.
-pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab) {
+pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab, opener: &crate::favourites::Opener) {
+    let opener = *opener;
     let lab = *lab;
     // `LAB_GO` runs on the window's thread, where the route lives.
     let goes = use_coroutine(
         move |mut asks: UnboundedReceiver<&'static str>| async move {
             use futures_util::StreamExt as _;
             while let Some(tab) = asks.next().await {
-                lab.jump(Route::Tab(tab));
+                lab.go_tab(tab, &opener);
             }
         },
     );
@@ -94,7 +96,15 @@ pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab) {
                     .map(|(_, _, t)| *t)
                     .find(|t| *t == a.tab)
                     .ok_or_else(|| {
-                        format!("no tab {:?}: inbox, tasks, schedule or vault", a.tab)
+                        format!(
+                            "no tab {:?}: {}",
+                            a.tab,
+                            crate::tabs()
+                                .iter()
+                                .map(|(_, _, t)| *t)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
                     })?;
                 tx.unbounded_send(tab)
                     .map_err(|_| "the lab is gone".to_owned())?;

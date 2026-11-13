@@ -5,7 +5,9 @@ use architect::action::{ActionList, Effect, EventKind};
 
 use crate::{Check, Wake, contains, to_json};
 
-/// Why the checks did not pass: not yet (try again), or never.
+/// Why the checks did not pass: not yet (try again), or never. A tour
+/// only asks whether they passed; the runner (`run`) reads why.
+#[cfg_attr(not(feature = "run"), allow(dead_code))]
 pub enum Failed {
     /// A check's action gave something else (what it gave, as JSON).
     Not(String, Option<String>),
@@ -31,6 +33,7 @@ pub fn checks(list: &ActionList, checks: &[Check]) -> Result<(), Failed> {
 
 /// [`checks`], an async action (an extension's, its work on a thread of
 /// its own) waited for up to `wait`: what the headless runner does.
+#[cfg_attr(not(feature = "run"), allow(dead_code))]
 pub fn checks_waiting(
     list: &ActionList,
     checks: &[Check],

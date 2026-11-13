@@ -294,6 +294,7 @@ pub(super) fn KeyboardBar(
         div {
             "data-bar": "editing",
             "data-editing": "{context}",
+            onpointerdown: move |e: PointerEvent| super::input_debug::hit("the editing bar", &e),
             style: "position: relative; flex-shrink: 0; display: flex; align-items: center; gap: {EDGE}px; \
                     padding: 6px {EDGE + ins.right}px {EDGE}px {EDGE + ins.left}px;",
             if let Some(above) = above {
@@ -437,6 +438,7 @@ pub(super) fn KeyboardBar(
                         box-sizing: border-box; padding: 0; \
                         border-radius: {PILL / 2.0}px; display: flex; align-items: center; justify-content: center; \
                         background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_lift};",
+                onpointerdown: move |e: PointerEvent| super::input_debug::hit("Hide the keyboard", &e),
                 onclick: move |_| {
                     open.set(None);
                     let _ = document::eval("document.activeElement && document.activeElement.blur();");

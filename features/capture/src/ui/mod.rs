@@ -85,6 +85,9 @@ impl CaptureUi {
     /// Opens the composer over the window, filled with `text`.
     pub fn compose(mut self, text: &str) {
         self.sheet.set(Some((text.to_owned(), None)));
+        // Asked for: its field takes the keyboard as it opens, where the
+        // keyboard is the screen's (on a tap alone otherwise).
+        architect_shell::show_keyboard();
     }
 
     /// Opens the floating capture window (the global shortcut's).

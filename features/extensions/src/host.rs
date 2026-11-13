@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use architect::action::{
     ActionCaller, ActionError, ActionFuture, ActionInfo, ActionList, CallerAsyncHandler, Effect,
-    EventKind, Invocation, InvocationSource,
+    EventKind, Invocation, InvocationSource, Principal,
 };
 use architect_scripting::Transactions;
 use architect_scripting::luau::{Gate, Limits, Runtime};
@@ -1622,7 +1622,7 @@ impl Host {
         let mut actions = Vec::with_capacity(manifest.actions.len());
         for decl in &manifest.actions {
             let handler = match (&decl.preset, manifest.window_opened_by(&decl.id)) {
-                (Some(_), _) => preset(list, self.live_gate(manifest, origin), decl),
+                (Some(_), _) => preset(list, self.live_gate(manifest, origin), &manifest.id, decl),
                 (None, Some(window)) => self.window_opener(&manifest.id, window),
                 (None, None) => instance.action(decl).map_err(|why| LoadError::Action {
                     id: decl.id.clone(),
@@ -1841,6 +1841,19 @@ impl Host {
             .count()
     }
 
+    /// [`Self::emit_to`] for every extension, each hook with the detail
+    /// `detail_for` makes for its owner.
+    pub(crate) fn emit_each(&self, on: &str, detail_for: &dyn Fn(&str) -> Value) -> usize {
+        self.inner
+            .contributions
+            .hooks(on)
+            .into_iter()
+            .map(|by| (by.owner, by.item))
+            .chain(self.subscribed(on))
+            .filter(|(owner, hook)| self.fire(owner, hook, on, &detail_for(owner)))
+            .count()
+    }
+
     /// Starts `owner`'s hook `hook` for event `on` with `detail`, unless a
     /// run of it has not ended, or it may not hear `on` (an `app:` event
     /// its grant lacks: a line in its log). Whether it started.
@@ -1948,7 +1961,9 @@ impl Host {
             .unwrap_or_else(PoisonError::into_inner);
         let running = loaded.get(owner)?;
         if decl.script.is_some() {
-            return running.instance.hook(decl, caller, args);
+            return running
+                .instance
+                .hook(decl, &as_extension(owner, caller), args);
         }
         let action = decl.action.clone()?;
         let gate = self.live_gate(&running.loaded.manifest, running.loaded.origin);
@@ -1965,7 +1980,9 @@ impl Host {
             );
             return None;
         }
-        let caller = caller.clone();
+        // As its extension, for nobody (a hook is no one's press): a
+        // service it reaches sees the extension, never the app (#660 H2).
+        let caller = as_extension(owner, caller);
         // The event is the invocation's (`ctx.event`, `ctx.detail`); it
         // goes in the arguments too only to an action that takes some.
         let args = if info.params_schema.is_some() {
@@ -2446,10 +2463,29 @@ fn info(manifest: &Manifest, decl: &ActionDecl) -> ActionInfo {
     }
 }
 
+/// `caller` made as extension `owner`, for whoever `caller` is (an
+/// extension's caller: whoever that one acted for).
+///
+/// What an extension's declared work runs as when the app starts it (a
+/// preset's target, a hook's action): its own principal, so a service
+/// that checks whose call it is (`architect.playhead`'s own-source rule)
+/// sees the extension, never the app (#660 H2).
+pub(crate) fn as_extension(owner: &str, caller: &ActionCaller) -> ActionCaller {
+    let who = caller.principal().cloned().and_then(|w| match w {
+        Principal::Extension { on_behalf_of, .. } => on_behalf_of.map(|b| *b),
+        other => Some(other),
+    });
+    caller
+        .clone()
+        .with_principal(Principal::extension(owner, who))
+}
+
 /// A preset: the action it names, with its fixed arguments (or the ones
-/// it is given), inside the extension's capabilities.
-fn preset(list: &ActionList, gate: Gate, decl: &ActionDecl) -> CallerAsyncHandler {
+/// it is given), inside the extension's capabilities, run as extension
+/// `owner` ([`as_extension`]) for whoever pressed it.
+fn preset(list: &ActionList, gate: Gate, owner: &str, decl: &ActionDecl) -> CallerAsyncHandler {
     let list = list.clone();
+    let owner = owner.to_owned();
     let (id, target, fixed) = (
         decl.id.clone(),
         decl.preset
@@ -2470,7 +2506,7 @@ fn preset(list: &ActionList, gate: Gate, decl: &ActionDecl) -> CallerAsyncHandle
             reason: format!("{target}: {reason}"),
         })?;
         let args = fixed.clone().unwrap_or_else(|| args.to_vec());
-        let (list, caller, target) = (list.clone(), caller.clone(), target.clone());
+        let (list, caller, target) = (list.clone(), as_extension(&owner, caller), target.clone());
         let run: ActionFuture =
             Box::pin(async move { list.run_json_async_with(&caller, &target, &args).await });
         Ok(run)
@@ -2484,7 +2520,7 @@ mod linked {
 
     use architect::action::{ActionCaller, ActionError, ActionFuture, CallerAsyncHandler};
 
-    use super::{Context, Instance, invocation_json, json_args, now_ms};
+    use super::{Context, Instance, json_args, now_ms};
     use crate::contrib::{Contribution, Contributions, StateWrite};
     use crate::linked::Builder;
     use crate::manifest::{ActionDecl, Kind, Manifest};
@@ -2571,7 +2607,7 @@ mod linked {
             let id = decl.id.clone();
             Ok(Arc::new(move |caller: &ActionCaller, args: &[u8]| {
                 let args = json_args(&id, args)?;
-                let cx = invocation_json(caller.invocation());
+                let cx = crate::invocation::caller_json(caller);
                 let (work, id) = (run(args, cx), id.clone());
                 let out: ActionFuture = Box::pin(async move {
                     work.await

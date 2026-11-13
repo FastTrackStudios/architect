@@ -423,6 +423,18 @@ impl Distribution {
         &self.bundle_id
     }
 
+    /// What its one instance is claimed under
+    /// (`architect_presence::single_instance`): its bundle identifier, and
+    /// for a copy run on a folder of its own (`$<FOLDER>_CONFIG_DIR` set:
+    /// the local stack's app, a test's) that folder too, so it opens beside
+    /// the installed app rather than handing its launch to it and ending.
+    #[must_use]
+    pub fn instance_id(&self) -> String {
+        let moved = std::env::var_os(architect::settings::env_var(&self.folder))
+            .filter(|dir| !dir.is_empty());
+        instance_id(&self.bundle_id, moved.as_deref().map(Path::new))
+    }
+
     /// Its version.
     #[must_use]
     pub fn version_str(&self) -> &str {
@@ -581,15 +593,24 @@ impl Distribution {
             .collect()
     }
 
-    /// Its compiled-in extensions' `[[favourites]]`: the tabs a share
-    /// page's phone shell (and the app's shell) shows while a note of
-    /// their types is open.
+    /// Its compiled-in extensions' `[[favourites]]`, each with the
+    /// extension that declared it and what its capabilities let it run:
+    /// the tabs a share page's phone shell (and the app's shell) shows
+    /// while a note of their types is open.
     #[must_use]
-    pub fn favourites(&self) -> Vec<architect_extensions::favourites::TypeFavourites> {
+    pub fn favourites(&self) -> Vec<architect_extensions::favourites::Listed> {
         self.extensions()
             .into_iter()
             .filter_map(|e| Manifest::parse(e.manifest()).ok())
-            .flat_map(|m| m.favourites)
+            .flat_map(|m| {
+                let by = m.declarer();
+                m.favourites.into_iter().map(move |favourites| {
+                    architect_extensions::favourites::Listed {
+                        by: by.clone(),
+                        favourites,
+                    }
+                })
+            })
             .collect()
     }
 
@@ -672,6 +693,23 @@ pub fn store() -> Registry {
 pub const LAB_FOLDER: &str = "architect-lab";
 
 /// The lab's override of its folder.
+/// [`Distribution::instance_id`]: `bundle_id`, with `folder` (the moved app
+/// folder) as a suffix of sixteen hex digits, the same for the same path
+/// in every build (FNV-1a).
+fn instance_id(bundle_id: &str, folder: Option<&Path>) -> String {
+    let Some(folder) = folder else {
+        return bundle_id.to_owned();
+    };
+    let hash = folder
+        .as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3)
+        });
+    format!("{bundle_id}.{hash:016x}")
+}
+
 pub const LAB_CONFIG_ENV: &str = "ARCHITECT_LAB_CONFIG_DIR";
 
 /// The Architect app, with architect's first-party extensions compiled in.
@@ -780,4 +818,22 @@ pub fn copy_once(from: &Path, to: &Path) -> std::io::Result<bool> {
         }
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::instance_id;
+
+    #[test]
+    fn a_copy_on_a_folder_of_its_own_is_an_instance_of_its_own() {
+        let id = "app.fasttrackstudio.architect";
+        assert_eq!(instance_id(id, None), id);
+        let dev = instance_id(id, Some(Path::new("/tmp/stack/app")));
+        assert!(dev.starts_with("app.fasttrackstudio.architect."));
+        assert_eq!(dev.len(), id.len() + 17);
+        assert_eq!(dev, instance_id(id, Some(Path::new("/tmp/stack/app"))));
+        assert_ne!(dev, instance_id(id, Some(Path::new("/tmp/other/app"))));
+    }
 }

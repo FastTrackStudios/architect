@@ -46,9 +46,21 @@ const DEMO_VAULT: &str = "apps/ui/demo-vault";
 /// a share link per audience kind.
 const SEED_OVERLAY: &str = "scripts/dev-stack/seed-vault";
 
-/// The keychain service the stack's app keeps its sessions under: never the
-/// app's own, so a local session and a real one never meet.
-const DEV_KEYCHAIN: &str = "app.fasttrackstudio.architect.dev-stack";
+/// Where the stack's app keeps its sessions: a file in its own folder
+/// (`ARCHITECT_SECRET_STORE`), never the platform keychain, which would ask
+/// the person at the screen on every rebuild (an unsigned binary is a new
+/// identity to macOS each time); `ARCHITECT_FORBID_KEYCHAIN` makes sure.
+const APP_SECRETS: &str = "secrets.json";
+/// The web app's crate: where `dx serve` runs, and where its dev page and
+/// public folder are written (`Stack::prepare_web`).
+const WEB_APP: &str = "apps/web";
+/// The scopes the web app asks its issuer for (`apps/web/src/lib.rs`
+/// `SCOPE`; a test here keeps the two equal).
+const WEB_SCOPES: [&str; 4] = ["openid", "email", "profile", "offline_access"];
+/// Where the dev page finds the app's face (`<html data-assets>`,
+/// `apps/web/src/app/theme.rs` `assets`): the bundle's is
+/// `/assets/app-<sha12>/`.
+const DEV_ASSETS: &str = "/assets/app-dev/";
 
 /// Inherited variables no process of the stack sees: each is given exactly
 /// what the stack decides, and nothing a shell happened to export (a peer,
@@ -360,6 +372,12 @@ impl Stack {
                     "ARCHITECT_HOST_ORG",
                     fill.map_or_else(|| fill::DEMO_NODE_ORG.to_owned(), |f| f.node_org.clone()),
                 ),
+                // The web app's origin (`dx serve`'s proxy may not keep the
+                // `Host` the browser asked): it opens the org lane.
+                pair(
+                    "ARCHITECT_LANE_ORIGINS",
+                    format!("http://127.0.0.1:{0},http://localhost:{0}", p.web),
+                ),
                 // No relays and no lookup: it cannot find or be found by a
                 // peer anywhere but this machine.
                 pair("ARCHITECT_IROH", "local".to_owned()),
@@ -372,7 +390,14 @@ impl Stack {
             Process::App => vec![
                 pair("ARCHITECT_AUTH_ISSUER", auth),
                 pair("ARCHITECT_ORG_HOST", Self::url(p.node)),
-                pair("ARCHITECT_KEYCHAIN_SERVICE", DEV_KEYCHAIN.to_owned()),
+                pair(
+                    "ARCHITECT_SECRET_STORE",
+                    format!(
+                        "file:{}",
+                        self.state.join("app").join(APP_SECRETS).display()
+                    ),
+                ),
+                pair("ARCHITECT_FORBID_KEYCHAIN", "1".to_owned()),
                 pair(
                     "ARCHITECT_CONFIG_DIR",
                     self.state.join("app").display().to_string(),
@@ -383,8 +408,10 @@ impl Stack {
                     self.root.join(DEMO_VAULT).display().to_string(),
                 ),
             ],
-            Process::Web => vec![pair("ARCHITECT_WEB_URL", Self::url(p.web))],
-            Process::Site => Vec::new(),
+            Process::Web => Vec::new(),
+            // The site's dev server sends `/app/…` (its Demo and "Open the
+            // web app" links) to the web app's (apps/site/vite.config.ts).
+            Process::Site => vec![pair("ARCHITECT_WEB_DEV", Self::url(p.web))],
         }
     }
 
@@ -457,14 +484,22 @@ impl Stack {
                 .current_dir(self.root.join("apps/desktop"));
                 c
             }
+            // The web app under dx (apps/web/Dioxus.toml): rebuilt on a
+            // save, rsx hot-reloaded, its page the one `prepare_web` wrote.
+            // No Rust hot-patching, as the app's (devenv.nix).
             Process::Web => {
-                let mut c = Command::new("nix");
-                c.args(["run", "nixpkgs#static-web-server", "--", "--config-file"])
-                    .arg(self.root.join("apps/web/sws.toml"))
-                    .arg("--root")
-                    .arg(self.state.join("web"))
-                    .args(["--host", "127.0.0.1", "--port"])
-                    .arg(self.ports.web.to_string());
+                let mut c = Command::new("dx");
+                c.args([
+                    "serve",
+                    "--platform",
+                    "web",
+                    "--addr",
+                    "127.0.0.1",
+                    "--port",
+                ])
+                .arg(self.ports.web.to_string())
+                .args(["--open", "false", "--hot-patch", "false"])
+                .current_dir(self.root.join(WEB_APP));
                 c
             }
             Process::Site => {
@@ -643,25 +678,66 @@ impl Stack {
         Ok(fill)
     }
 
+    /// What `dx serve` needs in `apps/web`, written at every start (all
+    /// git-ignored): its page, `index.html`, made from the bundle's
+    /// (`app/index.html`, [`dev_page`]), and its public folder,
+    /// `dev/public` (`Dioxus.toml`): the page's stylesheet, a `config.json`
+    /// naming the local issuer, the site's icon and the app's face.
     fn prepare_web(&self) -> Result<(), String> {
-        let out = self.state.join("web");
-        let status = Command::new("bash")
-            .arg(self.root.join("scripts/web-bundle.sh"))
-            .arg(&out)
-            .env("ARCHITECT_WEB_URL", Self::url(self.ports.web))
-            .current_dir(&self.root)
-            .status()
-            .map_err(|e| format!("running scripts/web-bundle.sh: {e}"))?;
-        if !status.success() {
-            return Err(format!("scripts/web-bundle.sh: {status}"));
-        }
+        let web = self.root.join(WEB_APP);
+        let read = |path: &Path| {
+            std::fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))
+        };
+        let write = |path: &Path, bytes: &[u8]| {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("creating {}: {e}", dir.display()))?;
+            }
+            std::fs::write(path, bytes).map_err(|e| format!("writing {}: {e}", path.display()))
+        };
+        let page = String::from_utf8(read(&web.join("app/index.html"))?)
+            .map_err(|e| format!("apps/web/app/index.html: {e}"))?;
+        write(
+            &web.join("index.html"),
+            dev_page(&page, &Self::url(self.ports.site))?.as_bytes(),
+        )?;
+        let public = web.join("dev/public");
+        remove_if_exists(&public)?;
+        write(
+            &public.join("app/style.css"),
+            &read(&web.join("app/style.css"))?,
+        )?;
         // The bundle's config names production's issuer: the local one here.
         let config = serde_json::json!({
             "issuer": Self::url(self.ports.auth),
             "client_id": "architect",
         });
-        std::fs::write(out.join("app/config.json"), config.to_string())
-            .map_err(|e| format!("writing the web app's config.json: {e}"))
+        write(
+            &public.join("app/config.json"),
+            config.to_string().as_bytes(),
+        )?;
+        // The demo's recording (silent), which the Now Playing bar plays.
+        write(
+            &public.join("app/demo-recording.mp3"),
+            &read(&web.join("app/demo-recording.mp3"))?,
+        )?;
+        write(
+            &public.join("favicon.svg"),
+            &read(&self.root.join("apps/site/public/favicon.svg"))?,
+        )?;
+        for face in ["Inter-Variable.woff2", "Inter-OFL.txt"] {
+            write(
+                &public.join(DEV_ASSETS.trim_start_matches('/')).join(face),
+                &read(&web.join("assets").join(face))?,
+            )?;
+        }
+        println!(
+            "dev web: {web}{app} (the demo: {web}{app}?demo), issuer {auth}; rebuilt on a save",
+            web = Self::url(self.ports.web),
+            app = "/app/",
+            auth = Self::url(self.ports.auth),
+        );
+        Ok(())
     }
 
     fn read_fill(&self) -> Result<Fill, String> {
@@ -729,10 +805,13 @@ impl Stack {
              owner of indie), alan@local.test (indie member)."
         );
         println!(
-            "\nOpen:\n  the auth server's pages   {auth}/login\n  the node's status         \
+            "\nOpen:\n  the web app               {web}/app/ (the demo: {web}/app/?demo)\n  \
+             the site                  {site}/\n  the auth server's pages   {auth}/login\n  the node's status         \
              {node}/node/status (POST)\n  share links               {node}/s/<code>/ \
              (docs/content/guide/local-stack.md lists the seeded ones)\n  the app's Action List     \
              ARCHITECT_CONFIG_DIR={app} just app actions list",
+            web = Self::url(self.ports.web),
+            site = Self::url(self.ports.site),
             auth = Self::url(self.ports.auth),
             node = Self::url(self.ports.node),
             app = self.state.join("app").display(),
@@ -887,15 +966,28 @@ pub fn auth_env(run: &AuthRun) -> Vec<(String, String)> {
     }
     if let Some(web) = run.web_port {
         // The web app signs in as the public client `architect`, as it does
-        // at production's issuer.
+        // at production's issuer, with the scopes it asks for
+        // (`apps/web/src/lib.rs` `SCOPE`): without `offline_access` here
+        // the issuer refuses its sign-in.
         let clients = serde_json::json!([{
             "client_id": "architect",
             "name": "Architect (local)",
             "redirect_uris": [format!("http://127.0.0.1:{web}/auth/callback")],
+            "scopes": WEB_SCOPES,
             "public_client": true,
             "skip_consent": true,
+            // The issuer's own app: its access token answers `whoami` and
+            // the org list (a node asks the issuer for a browser's bearer).
+            "first_party": true,
+            "rotate_refresh_tokens": true,
         }]);
         vars.push(("AUTH_OIDC_CLIENTS".to_owned(), clients.to_string()));
+        // Its page is another origin than the issuer's here (in production
+        // too): the browser asks the issuer for its token from there.
+        vars.push((
+            "AUTH_CORS_ORIGINS".to_owned(),
+            format!("http://127.0.0.1:{web}"),
+        ));
     }
     if run.seed {
         vars.push(("AUTH_DEV_SEED".to_owned(), "1".to_owned()));
@@ -1103,6 +1195,46 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
+/// The web app's page for `dx serve`, from the bundle's
+/// (`apps/web/app/index.html`), so the two cannot drift: without its
+/// Content-Security-Policy (dx's dev page loads the app and its hot reload
+/// with inline scripts, and the local issuer is plain http; the policy is
+/// the bundle's to prove, `just web-test`), without `start.js` (dx puts
+/// its own loader in), the app's face at [`DEV_ASSETS`], and the header's
+/// links at the site's dev server, `site`.
+///
+/// # Errors
+///
+/// A part it rewrites is not in `page`: the page changed, and so must this.
+fn dev_page(page: &str, site: &str) -> Result<String, String> {
+    const POLICY: &str = "<meta http-equiv=\"Content-Security-Policy\"";
+    const START: &str = "<script type=\"module\" src=\"/app/start.js\"></script>";
+    const HTML: &str = "<html lang=\"en\">";
+    let missing = |what: &str| format!("apps/web/app/index.html has no {what} to rewrite");
+    let (before, policy) = page.split_once(POLICY).ok_or_else(|| missing(POLICY))?;
+    let (_, after) = policy
+        .split_once('>')
+        .ok_or_else(|| missing("end of its policy"))?;
+    let page = format!("{before}{after}");
+    for part in [START, HTML] {
+        if !page.contains(part) {
+            return Err(missing(part));
+        }
+    }
+    let page = page.replace(START, "").replace(
+        HTML,
+        &format!("<html lang=\"en\" data-assets=\"{DEV_ASSETS}\">"),
+    );
+    let (before, header) = page
+        .split_once("<header")
+        .ok_or_else(|| missing("<header>"))?;
+    let (header, after) = header
+        .split_once("</header>")
+        .ok_or_else(|| missing("</header>"))?;
+    let header = header.replace("href=\"/", &format!("href=\"{site}/"));
+    Ok(format!("{before}<header{header}</header>{after}"))
+}
+
 fn remove_if_exists(path: &Path) -> Result<(), String> {
     let result = if path.is_dir() {
         std::fs::remove_dir_all(path)
@@ -1181,12 +1313,122 @@ mod tests {
     }
 
     #[test]
+    fn the_web_apps_dev_page_is_the_bundles_page_without_its_policy_and_start() {
+        let stack = stack();
+        let page =
+            std::fs::read_to_string(stack.root.join(WEB_APP).join("app/index.html")).unwrap();
+        let dev = dev_page(&page, "http://127.0.0.1:7414").unwrap();
+        assert!(!dev.contains("Content-Security-Policy\" content"));
+        assert!(!dev.contains("start.js\""));
+        assert!(dev.contains("<html lang=\"en\" data-assets=\"/assets/app-dev/\">"));
+        // What the app mounts in and the page's own stylesheet are kept.
+        assert!(dev.contains("<main id=\"app\">"));
+        assert!(dev.contains("href=\"/app/style.css\""));
+        // The header leads to the site's dev server; nothing else moves.
+        assert!(dev.contains("<a class=\"brand\" href=\"http://127.0.0.1:7414/\">"));
+        assert!(dev.contains("href=\"http://127.0.0.1:7414/download\""));
+        assert!(dev.contains("href=\"/favicon.svg\""));
+        // A page that lost a part this rewrites is refused, not served.
+        assert!(dev_page(&page.replace("/app/start.js", "/app/go.js"), "").is_err());
+        assert!(dev_page("<html lang=\"en\"><body></body></html>", "").is_err());
+    }
+
+    #[test]
+    fn the_local_issuer_grants_the_web_app_its_scopes_and_answers_its_origin() {
+        let stack = stack();
+        let lib = std::fs::read_to_string(stack.root.join(WEB_APP).join("src/lib.rs")).unwrap();
+        assert!(
+            lib.contains(&format!(
+                "pub const SCOPE: &str = \"{}\";",
+                WEB_SCOPES.join(" ")
+            )),
+            "apps/web/src/lib.rs SCOPE is not {WEB_SCOPES:?}"
+        );
+        let env = stack.env_for(Process::Auth, None);
+        let clients = &env
+            .iter()
+            .find(|(k, _)| k == "AUTH_OIDC_CLIENTS")
+            .unwrap()
+            .1;
+        let clients: serde_json::Value = serde_json::from_str(clients).unwrap();
+        assert_eq!(clients[0]["client_id"], "architect");
+        assert_eq!(clients[0]["scopes"], serde_json::json!(WEB_SCOPES));
+        // And answers its page's origin, where the token is asked from.
+        let cors = &env
+            .iter()
+            .find(|(k, _)| k == "AUTH_CORS_ORIGINS")
+            .unwrap()
+            .1;
+        assert_eq!(*cors, Stack::url(stack.ports.web));
+    }
+
+    #[test]
+    fn the_web_apps_dev_server_sends_the_nodes_paths_to_the_stacks_node() {
+        let stack = stack();
+        let config = std::fs::read_to_string(stack.root.join(WEB_APP).join("Dioxus.toml")).unwrap();
+        let config: toml::Value = toml::from_str(&config).unwrap();
+        let backends: Vec<&str> = config["web"]["proxy"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["backend"].as_str().unwrap())
+            .collect();
+        let node = Stack::url(stack.ports.node);
+        for path in ["/node", "/org", "/vox", "/s", "/_ext"] {
+            assert!(
+                backends.contains(&format!("{node}{path}").as_str()),
+                "apps/web/Dioxus.toml has no proxy to {node}{path}: {backends:?}"
+            );
+        }
+        assert!(backends.iter().all(|b| b.starts_with(&node)));
+    }
+
+    #[test]
+    fn the_web_app_runs_under_dx_on_the_stacks_port_and_the_site_leads_to_it() {
+        let stack = stack();
+        let command = stack.command(Process::Web);
+        assert_eq!(command.get_program(), "dx");
+        let args: Vec<_> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(&args[..3], ["serve", "--platform", "web"]);
+        let port = args.iter().position(|a| a == "--port").unwrap();
+        assert_eq!(args[port + 1], stack.ports.web.to_string());
+        let addr = args.iter().position(|a| a == "--addr").unwrap();
+        assert_eq!(args[addr + 1], "127.0.0.1");
+        assert_eq!(
+            command.get_current_dir(),
+            Some(stack.root.join(WEB_APP).as_path())
+        );
+        assert_eq!(
+            stack.env_for(Process::Site, None),
+            [("ARCHITECT_WEB_DEV".to_owned(), Stack::url(stack.ports.web))]
+        );
+    }
+
+    #[test]
     fn the_stack_as_configured_passes_its_own_guard() {
         let stack = stack();
         for process in Process::ALL {
             let refused = guard::check_settings(&stack.env_for(process, None), &stack.production);
             assert!(refused.is_empty(), "{process:?}: {refused:?}");
         }
+    }
+
+    #[test]
+    fn the_stacks_app_never_opens_the_platform_keychain() {
+        let stack = stack();
+        let env = stack.env_for(Process::App, None);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("ARCHITECT_FORBID_KEYCHAIN"), Some("1"));
+        assert!(get("ARCHITECT_KEYCHAIN_SERVICE").is_none());
+        let store = get("ARCHITECT_SECRET_STORE").unwrap();
+        let path = store.strip_prefix("file:").unwrap();
+        assert!(
+            std::path::Path::new(path).starts_with(&stack.state),
+            "the sessions live in the stack's own state: {path}"
+        );
     }
 
     #[test]

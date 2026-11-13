@@ -442,6 +442,25 @@ enum GateOutcome {
 tokio::task_local! {
     /// The principal the gate resolved for the call running on this task.
     static CALLER: Principal;
+    /// The bearer the gate admitted that call with: the call's own
+    /// `authorization` metadata, else the connection's.
+    static CALLER_BEARER: Option<Arc<str>>;
+}
+
+/// The bearer the gate admitted the running call with.
+///
+/// The call's own `authorization` metadata when it carried one, else the
+/// connection's establish-time bearer. `None` when the call presented
+/// none (an anonymous call, a transport-proved caller) or no gate
+/// dispatched it.
+///
+/// For a call held open (a live session): what it re-checks while it
+/// runs, since the gate checked it once, on the way in. It is a
+/// credential: never log it.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn caller_bearer() -> Option<Arc<str>> {
+    CALLER_BEARER.try_with(Clone::clone).ok().flatten()
 }
 
 /// WHO is asking, inside a handler the gate dispatched.
@@ -562,14 +581,18 @@ where
         // Kept for the observe-only arm below, which has to resolve the
         // same identity `decide` did.
         let presented = token.clone();
+        let bearer: Option<Arc<str>> = token.as_deref().map(Arc::from);
         let outcome = self
             .gate
             .decide(method_id, token, self.proved.as_ref())
             .await;
         match outcome {
             GateOutcome::Pass(who) => {
-                CALLER
-                    .scope(who, self.inner.handle(call, reply, schemas))
+                CALLER_BEARER
+                    .scope(
+                        bearer,
+                        CALLER.scope(who, self.inner.handle(call, reply, schemas)),
+                    )
                     .await;
             }
             GateOutcome::Deny(reason) if self.gate.observe_only => {
@@ -590,8 +613,11 @@ where
                     .gate
                     .who(presented.as_deref(), self.proved.as_ref())
                     .await;
-                CALLER
-                    .scope(who, self.inner.handle(call, reply, schemas))
+                CALLER_BEARER
+                    .scope(
+                        bearer,
+                        CALLER.scope(who, self.inner.handle(call, reply, schemas)),
+                    )
                     .await;
             }
             GateOutcome::Deny(reason) => {
