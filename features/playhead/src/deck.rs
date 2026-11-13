@@ -525,7 +525,8 @@ impl Deck {
         let length = reading
             .duration
             .filter(|_| reading.resolved)
-            .filter(|d| d.is_finite() && *d > 0.0)
+            // Past the contract's 24 h it is not a length taken (#667 H1).
+            .filter(|d| d.is_finite() && *d > 0.0 && *d <= crate::model::MAX_SECONDS)
             .filter(|d| s.media_duration.is_none_or(|m| (m - d).abs() > 0.01));
         let changed = length.is_some();
         if length.is_some() {

@@ -361,7 +361,26 @@ impl Frame {
         }
     }
 
-    fn boot(&self) {
+    /// `dark` or `light`: the scheme the frame's document is handed, and
+    /// its element's, always the same one.
+    const fn scheme(&self) -> &'static str {
+        if self.theme.dark { "dark" } else { "light" }
+    }
+
+    /// The element's style: its size, and the frame's own scheme. Not the
+    /// page's (`style.css` follows the system's) nor `normal`: an element
+    /// whose scheme differs from its document's gets an opaque backdrop
+    /// from the browser (CSS Color Adjust), a box behind a view meant to
+    /// sit in the note as its own text does, whenever the person's
+    /// theme is not the system's (#667 M3).
+    fn style_scheme(&self) {
+        if let Some(iframe) = &self.iframe {
+            let _ = iframe.style().set_property("color-scheme", self.scheme());
+        }
+    }
+
+    /// The theme a new one, or one whose theme changed, is handed.
+    fn send_theme(&self) {
         let vars = js_sys::Object::new();
         for (k, v) in ext_host::theme_vars(
             self.theme
@@ -371,12 +390,15 @@ impl Frame {
         ) {
             let _ = js_sys::Reflect::set(&vars, &JsValue::from_str(&k), &JsValue::from_str(&v));
         }
-        let scheme = if self.theme.dark { "dark" } else { "light" };
         self.post(&obj(&[
             ("t", "theme".into()),
             ("vars", vars.into()),
-            ("scheme", scheme.into()),
+            ("scheme", self.scheme().into()),
         ]));
+    }
+
+    fn boot(&self) {
+        self.send_theme();
         // Copies: each frame gets bytes of its own, the checked ones kept.
         let files = js_sys::Object::new();
         for (name, bytes) in &self.bundle.files {
@@ -570,14 +592,12 @@ fn start(shared: &Shared, holder: &web_sys::Element) {
         let _ = iframe.set_attribute("referrerpolicy", "no-referrer");
         let _ = iframe.set_attribute("data-ext-frame", &f.view);
         let height = if f.fill { "100%" } else { "0px" };
-        // The page's colour scheme, not `normal`: a frame whose document's
-        // scheme differs from its element's gets an opaque backdrop from
-        // the browser (CSS Color Adjust), a box behind a view meant to sit
-        // in the note as its own text does.
+        // Its scheme is the one its document is handed (`style_scheme`).
         let _ = iframe.set_attribute(
             "style",
             &format!(
-                "display: block; width: 100%; height: {height}; border: 0; background: transparent;"
+                "display: block; width: 100%; height: {height}; border: 0; background: transparent; color-scheme: {};",
+                f.scheme()
             ),
         );
         let weak = Rc::downgrade(shared);
@@ -755,6 +775,19 @@ pub fn ExtensionFrame(
             on_visible: None,
         }))
     });
+    // The theme as it changes (the person picks another): the element's
+    // scheme and the document's together.
+    {
+        let shared = shared.clone();
+        use_effect(use_reactive((&theme,), move |(theme,)| {
+            let mut f = shared.borrow_mut();
+            if f.theme != theme {
+                f.theme = theme;
+                f.style_scheme();
+                f.send_theme();
+            }
+        }));
+    }
     // The props as they change, data only.
     {
         let shared = shared.clone();

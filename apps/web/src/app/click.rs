@@ -22,6 +22,9 @@ use web_sys::{AudioContext, AudioContextState, OscillatorNode};
 const AHEAD: f64 = 0.15;
 const EVERY_MS: u64 = 25;
 const JUMP: f64 = 0.25;
+/// The most beats one look schedules: a window is 150 ms, so even 400
+/// bpm needs one or two; never a loop an extension's item can stretch.
+const MOST: usize = 16;
 
 #[derive(Default)]
 struct Metro {
@@ -33,6 +36,9 @@ struct Metro {
     /// Where the item was and when (song seconds, context seconds, rate).
     at: Option<(f64, f64, f64)>,
     voices: Vec<OscillatorNode>,
+    /// Suspended by `rest`, not by the browser: resumed when there is a
+    /// beat to sound again (the page already had its press).
+    rested: bool,
 }
 
 impl Metro {
@@ -45,6 +51,22 @@ impl Metro {
         self.at = None;
     }
 
+    /// Nothing to sound (Click off, or nothing plays): hushed, and the
+    /// context suspended so it holds no audio device awake. A press while
+    /// Click is on resumes it (`wake`).
+    fn rest(&mut self) {
+        if !self.voices.is_empty() || self.at.is_some() {
+            self.hush();
+        }
+        self.key = None;
+        if let Some(c) = &self.ctx
+            && c.state() == AudioContextState::Running
+        {
+            let _ = c.suspend();
+            self.rested = true;
+        }
+    }
+
     fn voice(&mut self, when: f64, accent: bool) {
         let Some(c) = &self.ctx else { return };
         let (Ok(o), Ok(g)) = (c.create_oscillator(), c.create_gain()) else {
@@ -53,14 +75,14 @@ impl Metro {
         o.frequency()
             .set_value(if accent { 1760.0 } else { 1175.0 });
         let gain = g.gain();
+        let (rise, fall, end) = (when + 0.002, when + 0.045, when + 0.05);
         let _ = gain.set_value_at_time(0.0001, when);
-        let _ =
-            gain.exponential_ramp_to_value_at_time(if accent { 0.5 } else { 0.3 }, when + 0.002);
-        let _ = gain.exponential_ramp_to_value_at_time(0.0001, when + 0.045);
+        let _ = gain.exponential_ramp_to_value_at_time(if accent { 0.5 } else { 0.3 }, rise);
+        let _ = gain.exponential_ramp_to_value_at_time(0.0001, fall);
         let _ = o.connect_with_audio_node(&g);
         let _ = g.connect_with_audio_node(&c.destination());
         let _ = o.start_with_when(when);
-        let _ = o.stop_with_when(when + 0.05);
+        let _ = o.stop_with_when(end);
         // Kept to be silenced on a jump: only the last few are still ahead.
         if self.voices.len() >= 16 {
             self.voices.drain(..8);
@@ -88,6 +110,7 @@ fn wake() {
         {
             let _ = c.resume();
         }
+        m.rested = false;
     });
 }
 
@@ -122,13 +145,23 @@ fn tick() {
             .ctx
             .as_ref()
             .is_some_and(|c| c.state() == AudioContextState::Running);
-        let (Some((key, time, rate, tempo)), true, true) = (now, on, running) else {
+        let Some((key, time, rate, tempo)) = now.filter(|_| on) else {
+            m.rest();
+            return;
+        };
+        if !running {
+            if m.rested
+                && let Some(c) = &m.ctx
+            {
+                let _ = c.resume();
+                m.rested = false;
+            }
             if !m.voices.is_empty() || m.at.is_some() {
                 m.hush();
             }
             m.key = None;
             return;
-        };
+        }
         let Some(ctx_now) = m.ctx.as_ref().map(AudioContext::current_time) else {
             return;
         };
@@ -138,15 +171,15 @@ fn tick() {
             m.key = Some(key);
         }
         if let Some((t0, c0, r0)) = m.at {
-            let expect = t0 + (ctx_now - c0) * r0;
+            let expect = (ctx_now - c0).mul_add(r0, t0);
             if (time - expect).abs() > JUMP || (rate - r0).abs() > f64::EPSILON {
                 m.hush();
             }
         }
         // A beat just passed still sounds (30 ms late at most).
         let from = m.upto.unwrap_or(time - 0.03);
-        let to = time + AHEAD * rate;
-        for (at, accent) in tempo.beats(from, to) {
+        let to = AHEAD.mul_add(rate, time);
+        for (at, accent) in tempo.beats(from, to).take(MOST) {
             let dt = (at - time) / rate;
             if dt >= -0.03 {
                 m.voice(ctx_now + dt.max(0.0), accent);

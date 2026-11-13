@@ -136,8 +136,13 @@ pub fn clock_text(t: f64) -> String {
     format!("{m}:{:02}", m.mul_add(-60.0, t))
 }
 
-/// The slots the bar draws for `asked`: as asked (Click only where the app
-/// sounds one), else `^` alone.
+/// The slots the bar draws for `asked`, and `^` always.
+///
+/// As asked (Click only where the app sounds one), `^` last when not
+/// asked for. The detail
+/// (previous, next, the position, the sources) is then always one focus
+/// away, whatever a source asks (#667 M2): the song area's press is the
+/// pointer's shortcut, not the only way in.
 #[must_use]
 pub fn slots_drawn(asked: &[Slot], clicks: bool) -> Vec<Slot> {
     let mut v: Vec<Slot> = asked
@@ -145,7 +150,7 @@ pub fn slots_drawn(asked: &[Slot], clicks: bool) -> Vec<Slot> {
         .copied()
         .filter(|s| *s != Slot::Click || clicks)
         .collect();
-    if asked.is_empty() {
+    if !v.contains(&Slot::Open) {
         v.push(Slot::Open);
     }
     v
@@ -509,6 +514,13 @@ mod tests {
             [Slot::Click, Slot::Open]
         );
         assert_eq!(slots_drawn(&[Slot::Click, Slot::Open], false), [Slot::Open]);
-        assert_eq!(slots_drawn(&[Slot::Click], false), Vec::<Slot>::new());
+        assert_eq!(
+            slots_drawn(&[Slot::Open, Slot::Click], true),
+            [Slot::Open, Slot::Click]
+        );
+        // #667 M2: `^` is always there, so the detail is reachable from
+        // the keyboard whatever a source asks.
+        assert_eq!(slots_drawn(&[Slot::Click], false), [Slot::Open]);
+        assert_eq!(slots_drawn(&[Slot::Click], true), [Slot::Click, Slot::Open]);
     }
 }

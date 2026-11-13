@@ -13,6 +13,17 @@ pub const MAX_QUEUE: usize = 500;
 pub const MAX_SECTIONS: usize = 200;
 /// The most timed marks an item has.
 pub const MAX_MARKS: usize = 2000;
+/// The longest time the contract takes, seconds: 24 h.
+///
+/// An item's `duration`, a `time`, a section's `start` and `end`, a mark's
+/// `at`, a tempo's `at`, and a length the media reports. Above it a `SET`
+/// is refused, as other invalid values are, and a media length is not
+/// taken.
+pub const MAX_SECONDS: f64 = 86_400.0;
+/// The slowest and fastest `bpm` a tempo has.
+pub const BPM: std::ops::RangeInclusive<f64> = 20.0..=400.0;
+/// The fewest and most beats a bar a tempo has.
+pub const METER: std::ops::RangeInclusive<u8> = 1..=16;
 
 /// A part of an item (a verse, a chorus): `start` to `end` seconds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,12 +58,12 @@ pub struct Mark {
 /// the whole item: a song whose tempo changes gives the one it starts in.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Tempo {
-    /// Beats a minute, 20 to 400.
+    /// Beats a minute, 20 to 400 ([`BPM`]).
     pub bpm: f64,
-    /// Where its first downbeat is, seconds.
+    /// Where its first downbeat is, seconds, 0 to [`MAX_SECONDS`].
     #[serde(default)]
     pub at: f64,
-    /// Beats a bar, 1 to 16.
+    /// Beats a bar, 1 to 16 ([`METER`]).
     #[serde(default = "four")]
     pub meter: u8,
 }
@@ -64,19 +75,46 @@ const fn four() -> u8 {
 impl Tempo {
     /// The beats from `from` to `to` seconds: each beat's time, and
     /// whether it is a bar's first.
+    ///
+    /// Counted with a whole-number beat counter from the first downbeat,
+    /// never by adding to a float: past 2^53 beats `n + 1.0 == n`, and a
+    /// float count would never reach `to` (#667 H1). It always ends, and
+    /// gives nothing for a tempo the contract refuses or a window that is
+    /// not a number.
     pub fn beats(self, from: f64, to: f64) -> impl Iterator<Item = (f64, bool)> {
-        let every = 60.0 / self.bpm;
-        let meter = f64::from(self.meter.max(1));
-        // Counted in beats from the first downbeat (a whole number each).
-        let first = ((from - self.at) / every).ceil().max(0.0);
-        std::iter::successors(Some(first), |n| Some(n + 1.0))
-            .map(move |n| (n.mul_add(every, self.at), n.rem_euclid(meter) < 0.5))
+        let sane = self.bpm.is_finite()
+            && self.bpm > 0.0
+            && self.at.is_finite()
+            && from.is_finite()
+            && to.is_finite();
+        let every = if sane { 60.0 / self.bpm } else { 1.0 };
+        let meter = u32::from(self.meter.max(1));
+        // The first whole beat at or after `from`, and the first at or
+        // after `to`: the count is known before a beat is given. A `u32`
+        // holds 24 h at 400 bpm many times over; the float-to-int `as`
+        // saturates (and a NaN is 0), which is what is wanted here.
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let count = |t: f64| ((t - self.at) / every).ceil().max(0.0) as u32;
+        let first = count(from);
+        let end = if sane { count(to).max(first) } else { first };
+        (first..end)
+            .map(move |n| {
+                let t = f64::from(n).mul_add(every, self.at);
+                (t, n.is_multiple_of(meter))
+            })
             .take_while(move |(t, _)| *t < to)
     }
 }
 
-/// What a source asks the bar to draw beside its play button: at most
-/// two, in its order (#589). Without any, the bar draws `open`.
+/// What a source asks the bar to draw beside its play button (#589).
+///
+/// At most two, each once, in its order. The bar always draws `open`,
+/// after the others when it is not asked for, so the detail stays
+/// reachable from the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Slot {
@@ -188,9 +226,9 @@ fn seconds(v: &Value, key: &str, what: &str) -> Result<Option<f64>, String> {
         None | Some(Value::Null) => Ok(None),
         Some(n) => n
             .as_f64()
-            .filter(|t| t.is_finite() && *t >= 0.0)
+            .filter(|t| t.is_finite() && (0.0..=MAX_SECONDS).contains(t))
             .map(Some)
-            .ok_or_else(|| format!("{what}: {key} must be seconds (0 or more)")),
+            .ok_or_else(|| format!("{what}: {key} must be seconds (0 to {MAX_SECONDS})")),
     }
 }
 
@@ -233,6 +271,7 @@ fn item(v: &Value) -> Result<Item, String> {
             || !s.end.is_finite()
             || s.start < 0.0
             || s.end < s.start
+            || s.end > MAX_SECONDS
             || s.color.as_deref().is_some_and(|c| !color(c))
         {
             return Err(format!("{what}: section {:?} is not one", s.name));
@@ -247,7 +286,7 @@ fn item(v: &Value) -> Result<Item, String> {
     }
     if marks.iter().any(|m| {
         !m.at.is_finite()
-            || m.at < 0.0
+            || !(0.0..=MAX_SECONDS).contains(&m.at)
             || m.text.chars().count() > 300
             || m.kind.as_deref().is_some_and(|k| k.chars().count() > 32)
     }) {
@@ -261,13 +300,13 @@ fn item(v: &Value) -> Result<Item, String> {
     };
     if tempo.is_some_and(|t| {
         !t.bpm.is_finite()
-            || !(20.0..=400.0).contains(&t.bpm)
+            || !BPM.contains(&t.bpm)
             || !t.at.is_finite()
-            || t.at < 0.0
-            || !(1..=16).contains(&t.meter)
+            || !(0.0..=MAX_SECONDS).contains(&t.at)
+            || !METER.contains(&t.meter)
     }) {
         return Err(format!(
-            "{what}: tempo is not one (bpm 20 to 400, at 0 or more, meter 1 to 16)"
+            "{what}: tempo is not one (bpm 20 to 400, at 0 to {MAX_SECONDS}, meter 1 to 16)"
         ));
     }
     Ok(Item {
@@ -496,5 +535,55 @@ mod tests {
         );
         let later: Vec<(f64, bool)> = t.beats(1.2, 2.1).collect();
         assert_eq!(later, [(1.5, false), (2.0, true)]);
+        assert_eq!(t.beats(f64::NAN, 2.0).count(), 0);
+        assert_eq!(t.beats(0.0, f64::INFINITY).count(), 0);
+    }
+
+    /// #667 H1: an extension's item 2e15 s long, playing at 1.36e15 s at
+    /// 400 bpm. Past 2^53 beats a float count stood still and Click's
+    /// scheduler never left its loop; the `SET` is refused now, and the
+    /// beats end whatever they are asked.
+    #[test]
+    fn a_far_time_is_refused_and_its_beats_still_end() {
+        let probe = json!({"queue": [{"id": "x", "title": "X", "duration": 2e15,
+            "tempo": {"bpm": 400}}], "time": 1.36e15, "play": true});
+        assert!(Spec::parse(&probe).unwrap_err().contains("seconds"));
+        let at = json!({"queue": [{"id": "x", "title": "X", "duration": 60}], "time": 1.36e15});
+        assert!(Spec::parse(&at).unwrap_err().contains("time"));
+        for (key, item) in [
+            (
+                "tempo",
+                json!({"id": "x", "title": "X", "duration": 9, "tempo": {"bpm": 120, "at": 1e9}}),
+            ),
+            (
+                "mark",
+                json!({"id": "x", "title": "X", "duration": 9, "marks": [{"at": 1e9, "text": "t"}]}),
+            ),
+            (
+                "section",
+                json!({"id": "x", "title": "X", "duration": 9,
+                "sections": [{"name": "s", "start": 0, "end": 1e9}]}),
+            ),
+        ] {
+            assert!(
+                Spec::parse(&json!({"queue": [item]}))
+                    .unwrap_err()
+                    .contains(key),
+                "{key}"
+            );
+        }
+        let day = json!({"queue": [{"id": "x", "title": "X", "duration": MAX_SECONDS}], "time": MAX_SECONDS});
+        assert!(Spec::parse(&day).is_ok(), "24 h is still taken");
+        let t = Tempo {
+            bpm: 400.0,
+            at: 0.0,
+            meter: 4,
+        };
+        let from = 1.36e15;
+        let beats: Vec<(f64, bool)> = t.beats(from - 0.03, from + 0.15).collect();
+        assert!(beats.len() <= 4, "{}", beats.len());
+        assert!(beats.iter().all(|(b, _)| *b < from + 0.15));
+        // Far past 2^53 beats, where `n + 1.0 == n`.
+        assert!(t.beats(1e17, 1e17 + 1.0).count() < 10);
     }
 }

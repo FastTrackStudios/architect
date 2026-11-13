@@ -42,7 +42,9 @@ pub use crate::clock::{Clock, Follower, Reading, Silent};
 pub use crate::deck::{Caller, Control, Deck, Pick, Source};
 #[cfg(feature = "extension")]
 pub use crate::extension::{Playhead, raise_changed};
-pub use crate::model::{Item, Mark, Section, Slot, Spec, Tempo};
+pub use crate::model::{
+    BPM, Item, MAX_SECONDS, MAX_SLOTS, METER, Mark, Section, Slot, Spec, Tempo,
+};
 
 /// Its id: its actions are `PLAYHEAD_*`.
 pub const ID: &str = "playhead";
