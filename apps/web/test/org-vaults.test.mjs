@@ -164,14 +164,11 @@ const DEMO = '[...document.querySelectorAll("[data-drop-zone=folder]")].find((e)
 async function openWelcome(t) {
   await t.until(`!!(${DEMO})`, 'the vault in the navigator');
   const row = 'document.querySelector(\'[data-file="demo/Welcome.md"]\')';
-  // While the vault's notes are still being read the tree and the list
-  // redraw: a click can land on a row that is gone, so each click (the
-  // folder's, then the note's) is tried again.
-  for (let i = 0; !(await t.eval(`!!${row}`)); i++) {
-    if (i > 10) throw new Error('Welcome is not in the list');
-    await t.click(DEMO).catch(() => {});
-    await t.until(`!!${row}`, 'Welcome in the list', 3000).catch(() => {});
-  }
+  // One click on the folder the moment it shows, as a person would: it
+  // must take (the sidebar is in place as the app shows, never sliding
+  // open under the click).
+  await t.click(DEMO);
+  await t.until(`!!${row}`, 'Welcome in the list after one click on the folder', 15000);
   const open = `!!document.querySelector(${JSON.stringify(TEXT)})`;
   for (let i = 0; !(await t.eval(open)); i++) {
     if (i > 20) throw new Error('the note did not open');
