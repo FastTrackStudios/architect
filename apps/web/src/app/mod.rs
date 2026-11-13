@@ -34,6 +34,7 @@
 #![allow(clippy::future_not_send)]
 
 mod audio;
+mod click;
 mod embed;
 mod favourites;
 mod frames;
@@ -113,6 +114,7 @@ fn WebApp() -> Element {
     });
     // The app's audio element, following the playhead (#589).
     use_hook(audio::start);
+    use_hook(click::start);
     let theme = theme::use_web_theme(&list);
     let assets = use_hook(theme::assets);
     let settings = settings::use_web_settings();

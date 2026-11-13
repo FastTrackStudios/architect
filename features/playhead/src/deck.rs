@@ -9,7 +9,7 @@
 
 use serde_json::{Value, json};
 
-use crate::model::{Item, Spec};
+use crate::model::{Item, Slot, Spec};
 
 /// Who asks: the app itself (its bar, its Action List, the person), or
 /// an extension, named by the host, never by its own arguments.
@@ -171,6 +171,8 @@ pub struct Source {
     /// Items it skipped or stopped at: media nobody can hear here and no
     /// known length (#660 M4). Cleared when its queue is set again.
     pub unplayable: Vec<String>,
+    /// What the bar draws beside its play button, as it asked.
+    pub slots: Vec<Slot>,
 }
 
 impl Source {
@@ -446,17 +448,26 @@ impl Deck {
             return;
         }
         let name = spec.name.clone().unwrap_or_else(|| id.to_owned());
-        let new_current = spec.queue.get(spec.index).map(|i| i.id.clone());
+        // No index given: the item that is current, where it still is.
+        let index = spec
+            .index
+            .or_else(|| {
+                let cur = self.source(id)?.item()?;
+                spec.queue.iter().position(|i| i.id == cur.id)
+            })
+            .unwrap_or(0);
+        let new_current = spec.queue.get(index).map(|i| i.id.clone());
         match self.source_mut(id) {
             Some(s) => {
                 let carry = spec.time.is_none() && s.item().map(|i| &i.id) == new_current.as_ref();
                 s.name = name;
+                s.slots = spec.slots;
                 s.queue = spec.queue;
                 s.unplayable.clear();
                 if carry {
-                    s.index = spec.index;
+                    s.index = index;
                 } else {
-                    s.index = spec.index;
+                    s.index = index;
                     s.media_duration = None;
                     s.transport = Transport::still(spec.time.unwrap_or(0.0), now);
                     s.epoch = s.epoch.wrapping_add(1);
@@ -470,12 +481,13 @@ impl Deck {
                 id: id.to_owned(),
                 name,
                 queue: spec.queue,
-                index: spec.index,
+                index,
                 transport: Transport::still(spec.time.unwrap_or(0.0), now),
                 media_duration: None,
                 epoch: 0,
                 active_seq: 0,
                 unplayable: Vec::new(),
+                slots: spec.slots,
             }),
         }
         if self.active.is_none() {
@@ -637,6 +649,7 @@ impl Deck {
             "subtitle": item.and_then(|i| i.subtitle.clone()),
             "artist": item.and_then(|i| i.subtitle.clone()),
             "sections": item.map_or_else(Vec::new, |i| i.sections.clone()),
+            "slots": s.slots,
         }))
     }
 
@@ -709,6 +722,40 @@ mod tests {
 
     fn ext(id: &str) -> Caller {
         Caller::Extension(id.to_owned())
+    }
+
+    #[test]
+    fn the_same_list_set_again_without_an_index_keeps_the_song_playing() {
+        let mut d = Deck::default();
+        d.apply(&ext("studio"), spec(&two()), None, 0.0).unwrap();
+        d.apply(
+            &ext("studio"),
+            Control::Item(Pick::Index(1), true),
+            None,
+            0.0,
+        )
+        .unwrap();
+        // A view mounted again sends the list it draws, no index.
+        d.apply(&ext("studio"), spec(&two()), None, 1_000.0)
+            .unwrap();
+        let s = d.source("studio").unwrap();
+        assert_eq!((s.index, s.transport.playing), (1, true));
+        // One given still picks; a list without the song starts at its first.
+        let mut at_a = two();
+        at_a["index"] = json!(0);
+        d.apply(&ext("studio"), spec(&at_a), None, 2_000.0).unwrap();
+        assert_eq!(d.source("studio").unwrap().index, 0);
+        d.apply(
+            &ext("studio"),
+            Control::Item(Pick::Index(1), false),
+            None,
+            2_000.0,
+        )
+        .unwrap();
+        let other = json!({"queue": [{"id": "c", "title": "C", "duration": 9}, {"id": "a", "title": "A", "duration": 9}]});
+        d.apply(&ext("studio"), spec(&other), None, 3_000.0)
+            .unwrap();
+        assert_eq!(d.source("studio").unwrap().index, 0);
     }
 
     #[test]

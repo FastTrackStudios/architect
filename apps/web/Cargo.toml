@@ -30,7 +30,7 @@ auth-client = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Document", "Element", "Event", "EventTarget", "Headers", "History", "HtmlAudioElement", "HtmlElement", "HtmlIFrameElement", "HtmlMediaElement", "MediaError", "KeyboardEvent", "MessageChannel", "MessageEvent", "MessagePort", "Navigator", "Performance", "VisualViewport", "Location", "MediaQueryList", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestRedirect", "Response", "Storage", "Window"] }
+web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Document", "Element", "Event", "EventTarget", "Headers", "History", "AudioContext", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioParam", "AudioScheduledSourceNode", "BaseAudioContext", "GainNode", "OscillatorNode", "HtmlAudioElement", "HtmlElement", "HtmlIFrameElement", "HtmlMediaElement", "MediaError", "KeyboardEvent", "MessageChannel", "MessageEvent", "MessagePort", "Navigator", "Performance", "VisualViewport", "Location", "MediaQueryList", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestRedirect", "Response", "Storage", "Window"] }
 # The app (src/app): the same components as the desktop and phone apps
 # (apps/ui), on dioxus-web.
 dioxus = { workspace = true, features = ["web"] }

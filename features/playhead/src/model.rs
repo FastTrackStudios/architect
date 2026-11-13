@@ -40,6 +40,56 @@ pub struct Mark {
     pub kind: Option<String>,
 }
 
+/// An item's beat: what the bar's Click sounds on.
+///
+/// Its first bar's downbeat at `at` seconds, `bpm` beats a minute from
+/// there, `meter` beats a bar (the first of each accented). One tempo for
+/// the whole item: a song whose tempo changes gives the one it starts in.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Tempo {
+    /// Beats a minute, 20 to 400.
+    pub bpm: f64,
+    /// Where its first downbeat is, seconds.
+    #[serde(default)]
+    pub at: f64,
+    /// Beats a bar, 1 to 16.
+    #[serde(default = "four")]
+    pub meter: u8,
+}
+
+const fn four() -> u8 {
+    4
+}
+
+impl Tempo {
+    /// The beats from `from` to `to` seconds: each beat's time, and
+    /// whether it is a bar's first.
+    pub fn beats(self, from: f64, to: f64) -> impl Iterator<Item = (f64, bool)> {
+        let every = 60.0 / self.bpm;
+        let meter = f64::from(self.meter.max(1));
+        // Counted in beats from the first downbeat (a whole number each).
+        let first = ((from - self.at) / every).ceil().max(0.0);
+        std::iter::successors(Some(first), |n| Some(n + 1.0))
+            .map(move |n| (n.mul_add(every, self.at), n.rem_euclid(meter) < 0.5))
+            .take_while(move |(t, _)| *t < to)
+    }
+}
+
+/// What a source asks the bar to draw beside its play button: at most
+/// two, in its order (#589). Without any, the bar draws `open`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Slot {
+    /// Click on and off: a tick on each beat of the item's `tempo`, where
+    /// the app can sound one.
+    Click,
+    /// The bar's detail: previous and next, the position, the sources.
+    Open,
+}
+
+/// The most slots a source asks for.
+pub const MAX_SLOTS: usize = 2;
+
 /// One item of a queue: what plays, and what the bar and the views show.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
@@ -66,6 +116,9 @@ pub struct Item {
     /// Its timed marks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub marks: Vec<Mark>,
+    /// Its beat, for Click.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tempo: Option<Tempo>,
 }
 
 /// What `PLAYHEAD_SET` gives: a source's whole queue.
@@ -75,13 +128,17 @@ pub struct Spec {
     pub name: Option<String>,
     /// Its items; none removes the source.
     pub queue: Vec<Item>,
-    /// The current item.
-    pub index: usize,
+    /// The current item; none keeps the one that is current when it is
+    /// still in the queue (a view setting the same list again does not
+    /// send the source back to its first item), else the first.
+    pub index: Option<usize>,
     /// Where in it to start, seconds (else where it was, when it is the
     /// item that was current, or its start).
     pub time: Option<f64>,
     /// Play now (and take the bar).
     pub play: bool,
+    /// What the bar draws beside its play button.
+    pub slots: Vec<Slot>,
 }
 
 /// Whether `path` is a path in a vault, as `media` and `art` must be.
@@ -196,6 +253,23 @@ fn item(v: &Value) -> Result<Item, String> {
     }) {
         return Err(format!("{what}: a mark is not one"));
     }
+    let tempo: Option<Tempo> = match v.get("tempo") {
+        None | Some(Value::Null) => None,
+        Some(t) => {
+            Some(serde_json::from_value(t.clone()).map_err(|e| format!("{what}: tempo: {e}"))?)
+        }
+    };
+    if tempo.is_some_and(|t| {
+        !t.bpm.is_finite()
+            || !(20.0..=400.0).contains(&t.bpm)
+            || !t.at.is_finite()
+            || t.at < 0.0
+            || !(1..=16).contains(&t.meter)
+    }) {
+        return Err(format!(
+            "{what}: tempo is not one (bpm 20 to 400, at 0 or more, meter 1 to 16)"
+        ));
+    }
     Ok(Item {
         id,
         title,
@@ -205,6 +279,7 @@ fn item(v: &Value) -> Result<Item, String> {
         media,
         sections,
         marks,
+        tempo,
     })
 }
 
@@ -233,17 +308,27 @@ impl Spec {
             return Err(format!("item {} is in the queue twice", dup.id));
         }
         let index = match v.get("index") {
-            None | Some(Value::Null) => 0,
-            Some(n) => n
-                .as_u64()
-                .and_then(|n| usize::try_from(n).ok())
-                .ok_or("index must be a whole number")?,
+            None | Some(Value::Null) => None,
+            Some(n) => Some(
+                n.as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .ok_or("index must be a whole number")?,
+            ),
         };
         let time = seconds(v, "time", "the source")?;
         let play = v.get("play").and_then(Value::as_bool).unwrap_or(false);
+        let slots: Vec<Slot> = match v.get("slots") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(s) => serde_json::from_value(s.clone())
+                .map_err(|_| "slots: a list of \"click\" and \"open\"".to_owned())?,
+        };
+        if slots.len() > MAX_SLOTS || matches!(slots.as_slice(), [a, b] if a == b) {
+            return Err(format!("slots: at most {MAX_SLOTS}, each once"));
+        }
         Ok(Self {
+            slots,
             name,
-            index: index.min(queue.len().saturating_sub(1)),
+            index: index.map(|i| i.min(queue.len().saturating_sub(1))),
             queue,
             time,
             play,
@@ -332,9 +417,21 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(ok.queue.len(), 2);
-        assert_eq!(ok.index, 1, "clamped to the queue");
+        assert_eq!(ok.index, Some(1), "clamped to the queue");
         assert!(ok.play);
         assert!(Spec::parse(&json!({"queue": []})).unwrap().queue.is_empty());
+        let tempo = Spec::parse(&json!({"queue": [{"id": "a", "title": "A", "duration": 9,
+            "tempo": {"bpm": 120, "at": 0.5, "meter": 3}}], "slots": ["click", "open"]}))
+        .unwrap();
+        assert_eq!(tempo.slots, [Slot::Click, Slot::Open]);
+        assert_eq!(
+            tempo.queue[0].tempo,
+            Some(Tempo {
+                bpm: 120.0,
+                at: 0.5,
+                meter: 3
+            })
+        );
         let refused = |v: Value| Spec::parse(&v).unwrap_err();
         assert!(refused(json!({})).contains("queue"));
         assert!(
@@ -362,9 +459,42 @@ mod tests {
                 "sections": [{"name": "x", "start": 0, "end": 1, "color": "red;}"}]}]}))
             .contains("section")
         );
+        assert!(
+            refused(
+                json!({"queue": [{"id": "a", "title": "A", "duration": 1, "tempo": {"bpm": 9000}}]})
+            )
+            .contains("tempo")
+        );
+        assert!(refused(json!({"queue": [], "slots": ["loop"]})).contains("slots"));
+        assert!(refused(json!({"queue": [], "slots": ["click", "click"]})).contains("slots"));
+        assert!(
+            refused(json!({"queue": [], "slots": ["click", "open", "open"]})).contains("slots")
+        );
         let many: Vec<Value> = (0..=MAX_QUEUE)
             .map(|n| json!({"id": n.to_string(), "title": "t", "duration": 1}))
             .collect();
         assert!(refused(json!({ "queue": many })).contains("at most"));
+    }
+
+    #[test]
+    fn a_tempo_gives_its_beats_and_accents_each_bar_s_first() {
+        let t = Tempo {
+            bpm: 120.0,
+            at: 0.5,
+            meter: 3,
+        };
+        let beats: Vec<(f64, bool)> = t.beats(0.0, 2.6).collect();
+        assert_eq!(
+            beats,
+            [
+                (0.5, true),
+                (1.0, false),
+                (1.5, false),
+                (2.0, true),
+                (2.5, false)
+            ]
+        );
+        let later: Vec<(f64, bool)> = t.beats(1.2, 2.1).collect();
+        assert_eq!(later, [(1.5, false), (2.0, true)]);
     }
 }

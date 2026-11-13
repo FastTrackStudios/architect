@@ -570,9 +570,15 @@ fn start(shared: &Shared, holder: &web_sys::Element) {
         let _ = iframe.set_attribute("referrerpolicy", "no-referrer");
         let _ = iframe.set_attribute("data-ext-frame", &f.view);
         let height = if f.fill { "100%" } else { "0px" };
+        // The page's colour scheme, not `normal`: a frame whose document's
+        // scheme differs from its element's gets an opaque backdrop from
+        // the browser (CSS Color Adjust), a box behind a view meant to sit
+        // in the note as its own text does.
         let _ = iframe.set_attribute(
             "style",
-            &format!("display: block; width: 100%; height: {height}; border: 0; background: transparent; color-scheme: normal;"),
+            &format!(
+                "display: block; width: 100%; height: {height}; border: 0; background: transparent;"
+            ),
         );
         let weak = Rc::downgrade(shared);
         f.on_message = Some(Closure::new(move |m: MessageEvent| {

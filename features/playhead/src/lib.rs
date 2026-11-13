@@ -42,7 +42,7 @@ pub use crate::clock::{Clock, Follower, Reading, Silent};
 pub use crate::deck::{Caller, Control, Deck, Pick, Source};
 #[cfg(feature = "extension")]
 pub use crate::extension::{Playhead, raise_changed};
-pub use crate::model::{Item, Mark, Section, Spec};
+pub use crate::model::{Item, Mark, Section, Slot, Spec, Tempo};
 
 /// Its id: its actions are `PLAYHEAD_*`.
 pub const ID: &str = "playhead";
@@ -91,6 +91,33 @@ pub const FRAME_ASKS: &[&str] = &[
 /// extension's own (`ext:<id>`, this key, `true` or `false`): what a
 /// favourite's primary (`state = "playing"`, #607) shows its Pause face by.
 pub const PLAYING_STATE: &str = "playing";
+
+/// Click: whether the bar's Click is on (the app's, for every source).
+static CLICK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether this app sounds a click (the web app's audio does).
+static CLICK_SOUNDS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether Click is on.
+#[must_use]
+pub fn click() -> bool {
+    CLICK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Click on or off (the bar's slot).
+pub fn set_click(on: bool) {
+    CLICK.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether the app sounds a click: without, the bar does not offer one.
+#[must_use]
+pub fn clicks() -> bool {
+    CLICK_SOUNDS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Said once by an app that sounds Click on the active item's beats.
+pub fn sounds_click() {
+    CLICK_SOUNDS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// Whether source `id` (an extension's id) is playing now.
 #[must_use]
