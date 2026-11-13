@@ -7,7 +7,9 @@ name: browser
 # a phone, measured (apps/web/test/share-layout.test.mjs), and the web
 # app's extension frame host against hostile bundles
 # (apps/web/test/app-ext-host.test.mjs, #495: the release bundle behind a
-# front that sends `/_ext/` to the node). After a merge to main, nightly,
+# front that sends `/_ext/` to the node), and the web app's bottom slots
+# following the open note's type (apps/web/test/app-favourites.test.mjs,
+# #607). After a merge to main, nightly,
 # and by hand on any branch.
 #
 # On the THEBATTLESHIP pool, in the repo's dev shell (they build the
@@ -73,3 +75,9 @@ jobs:
           bash scripts/web-bundle.sh target/web-bundle
           ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
             env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-ext-host.test.mjs
+      - name: the web app's bottom slots following the open note's type
+        if: ${{ !cancelled() }}
+        run: |
+          test -d target/web-bundle/app || bash scripts/web-bundle.sh target/web-bundle
+          ARCHITECT_ISLAND_NODE="$CARGO_TARGET_DIR/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" \
+            env -u LD_LIBRARY_PATH "$NODE" --test --test-concurrency=1 apps/web/test/app-favourites.test.mjs

@@ -477,7 +477,7 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                     style: "position: relative; height: {side}px; {pad} {frame} flex-shrink: 0; display: flex; align-items: center; justify-content: center; \
                             gap: 6px; color: {t.ink}; font-family: {t.font}; font-size: {size.font}px; font-weight: 650;",
                     onclick: move |_| press.call(()),
-                    {(action.icon)(Icon { size: size.icon, color: t.ink.clone() })}
+                    {action.draw(Icon { size: size.icon, color: t.ink.clone() })}
                     if action.show_label {
                         span { "{action.label}" }
                     } else {

@@ -16,7 +16,7 @@ use architect_shell::use_shell;
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
-use super::frames::{Bundle, ExtensionFrame, FrameTheme, use_island};
+use super::frames::{Bundle, ExtensionFrame, FrameTheme, use_island_of};
 use crate::ext_host::{self, Intent, Line, Section};
 
 pub(super) fn now_ms() -> f64 {
@@ -92,9 +92,18 @@ pub(super) fn frame_theme() -> FrameTheme {
 }
 
 /// A song note's views: `title`, by `artist`, its `body`'s timed lyrics,
-/// `duration` its `duration` property.
+/// `duration` its `duration` property. With `only`, that one view of
+/// island `island` (a favourite's `{view}`, #607) filling its pane, the
+/// app's own control or lyrics in its place until it is ready.
 #[component]
-pub fn SongViews(title: String, artist: String, body: String, duration: Option<String>) -> Element {
+pub fn SongViews(
+    title: String,
+    artist: String,
+    body: String,
+    duration: Option<String>,
+    #[props(default)] island: Option<String>,
+    #[props(default)] only: Option<String>,
+) -> Element {
     let t = use_shell().theme;
     let (lines, sections) = use_hook(|| {
         let (lines, _) = ext_host::lyrics(&body, 0.0);
@@ -179,7 +188,7 @@ pub fn SongViews(title: String, artist: String, body: String, duration: Option<S
         .map(|l: &Line| json!({"at": l.at, "text": l.text}))
         .collect();
     let props = use_memo({
-        let (title, sections_json) = (title, sections_json);
+        let (title, sections_json) = (title.clone(), sections_json);
         move || {
             json!({
                 "time": time(),
@@ -203,7 +212,7 @@ pub fn SongViews(title: String, artist: String, body: String, duration: Option<S
             p
         }
     });
-    let island = use_island();
+    let island = use_island_of(island);
     let theme = frame_theme();
     let bundle: Option<Rc<Bundle>> = island
         .read()
@@ -253,6 +262,34 @@ pub fn SongViews(title: String, artist: String, body: String, duration: Option<S
         }
     };
     let on_ask = move |i: Intent| act(i);
+    if let Some(view) = only {
+        let of = view.clone();
+        // One view, filling the pane: the lyrics' words, any other the
+        // playhead's props; the app's own in its place.
+        let lyrics = bundle
+            .as_ref()
+            .is_some_and(|b| b.island.lyrics.as_ref() == Some(&view));
+        let fallback = if lyrics { own_words } else { own_controls };
+        return rsx! {
+            section { class: "web-song-one", "data-testid": "ext-view-pane", "data-ext-view-of": "{of}",
+                "aria-label": "{title}",
+                style: "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px;",
+                "data-song-time": "{now:.1}", "data-song-playing": "{playing}",
+                div { style: "flex: 1 1 0; min-height: 0; border-radius: 10px; overflow: hidden;",
+                    match bundle {
+                        Some(b) => rsx! {
+                            ExtensionFrame {
+                                bundle: b, view, fill: true,
+                                props: if lyrics { words } else { props },
+                                duration: length, theme, on_ask, fallback,
+                            }
+                        },
+                        None => fallback,
+                    }
+                }
+            }
+        };
+    }
     rsx! {
         section { class: "web-song", "data-testid": "song-views", "aria-label": "Song",
             "data-song-time": "{now:.1}", "data-song-playing": "{playing}",

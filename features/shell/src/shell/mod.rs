@@ -36,7 +36,7 @@ use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
 pub use busy::BusyBadge;
 pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
-pub use favourites::{Declared, Favourites, SLOTS, resolve_favourites};
+pub use favourites::{Declared, Favourites, SLOTS, declare, declared_tab_id, resolve_favourites};
 pub use input_debug::{foot_bottom, input_debug, set_input_debug};
 pub use keyboard::{
     Foot, Keyboard, KeyboardTaps, TAP_SLOP, TapStroke, hide_keyboard, install_keyboard, keyboard,
@@ -89,6 +89,9 @@ pub struct Tab {
     pub id: &'static str,
     pub label: &'static str,
     pub icon: IconFn,
+    /// A Lucide icon by its name (`list-music`), drawn in place of
+    /// `icon`: a tab named in data (a manifest's favourites).
+    pub glyph: Option<&'static str>,
     /// Something waiting there ("3"); `None` for nothing.
     pub badge: Option<String>,
 }
@@ -100,8 +103,25 @@ impl Tab {
             id,
             label,
             icon,
+            glyph: None,
             badge: None,
         }
+    }
+
+    /// A tab whose icon is Lucide's `glyph` (`list-music`), by name: one
+    /// named in data. A name Lucide has not draws [`named_icon`]'s puzzle.
+    #[must_use]
+    pub fn named(id: &'static str, label: &'static str, glyph: &'static str) -> Self {
+        Self {
+            glyph: Some(glyph),
+            ..Self::new(id, label, named_icon(glyph))
+        }
+    }
+
+    /// Its icon, drawn at `icon`'s size and colour.
+    #[must_use]
+    pub fn draw(&self, icon: Icon) -> Element {
+        draw_icon(self.icon, self.glyph, icon)
     }
 
     /// Mark the tab with what is waiting there.
@@ -119,6 +139,9 @@ impl Tab {
 pub struct Action {
     pub label: String,
     pub icon: IconFn,
+    /// A Lucide icon by its name, drawn in place of `icon` (as
+    /// [`Tab::glyph`]).
+    pub glyph: Option<&'static str>,
     pub on_press: Callback<()>,
     /// Say the label beside the icon ("Process 5"), not just show it.
     pub show_label: bool,
@@ -147,6 +170,7 @@ impl Action {
         Self {
             label: label.into(),
             icon,
+            glyph: None,
             on_press: Callback::new(on_press),
             show_label: false,
             swipe_up: None,
@@ -188,6 +212,34 @@ impl Action {
     pub const fn with_label(mut self) -> Self {
         self.show_label = true;
         self
+    }
+
+    /// Its icon Lucide's `glyph` (`play`), by name (as [`Tab::named`]).
+    #[must_use]
+    pub fn glyph(mut self, glyph: &'static str) -> Self {
+        self.icon = named_icon(glyph);
+        self.glyph = Some(glyph);
+        self
+    }
+
+    /// Its icon, drawn at `icon`'s size and colour.
+    #[must_use]
+    pub fn draw(&self, icon: Icon) -> Element {
+        draw_icon(self.icon, self.glyph, icon)
+    }
+}
+
+/// `glyph` by name from Lucide's table when it has it, else `fallback`.
+fn draw_icon(fallback: IconFn, glyph: Option<&'static str>, icon: Icon) -> Element {
+    match glyph.filter(|g| crate::lucide::glyphs(g).is_some()) {
+        Some(name) => rsx! {
+            crate::lucide::LucideIcon {
+                name: name.to_owned(),
+                size: u32::try_from(icon.size).unwrap_or(16),
+                color: icon.color.to_string(),
+            }
+        },
+        None => fallback(icon),
     }
 }
 
@@ -2418,7 +2470,7 @@ fn FootRow(action: Action) -> Element {
                     border-radius: 7px; background: transparent; color: {t.ink_2}; font-family: {t.font}; \
                     font-size: 13px; font-weight: 550; text-align: left;",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: 16, color: t.ink_3.clone() })}
+            {action.draw(Icon { size: 16, color: t.ink_3.clone() })}
             span { "{action.label}" }
         }
     }
@@ -2437,7 +2489,7 @@ pub(super) fn FootIcon(action: Action) -> Element {
             style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; align-self: center; border: none; \
                     border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: 18, color: t.ink_3 })}
+            {action.draw(Icon { size: 18, color: t.ink_3 })}
             span { class: "tip", style: "left: 40px; top: 5px;", "{action.label}" }
         }
     }
@@ -2461,7 +2513,7 @@ fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element 
             style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; \
                     background: {fill}; display: flex; align-items: center; justify-content: center;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 18, color: colour.into() })}
+            {tab.draw(Icon { size: 18, color: colour.into() })}
             span { class: "tip", style: "left: 40px; top: 5px;", "{tab.label}" }
             if tab.badge.is_some() {
                 span { style: "position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 3px; \

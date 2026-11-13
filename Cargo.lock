@@ -878,6 +878,7 @@ dependencies = [
  "tag",
  "tempfile",
  "tokio",
+ "toml 0.8.2",
  "tracing",
  "vault",
  "vault-doc",
@@ -1960,6 +1961,7 @@ dependencies = [
 name = "architect-shell"
 version = "0.1.0"
 dependencies = [
+ "architect-favourites",
  "architect-theme",
  "architect-workspace-hack",
  "block2 0.6.2",
@@ -1974,6 +1976,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-ui-kit",
  "raw-window-handle 0.6.2",
+ "toml 0.8.2",
  "tracing",
  "web-time",
 ]
@@ -2304,6 +2307,7 @@ dependencies = [
  "architect",
  "architect-command-palette",
  "architect-commands",
+ "architect-favourites",
  "architect-navigator",
  "architect-settings",
  "architect-shell",

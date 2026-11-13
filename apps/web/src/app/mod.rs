@@ -2,8 +2,10 @@
 //! and phone apps (`apps/ui`, on Blitz there), from the same Dioxus
 //! components, here on dioxus-web.
 //!
-//! - the shell (`architect_shell::AppShell`): the Vault tab, the account,
-//!   the foot's buttons, the status line, a phone's action bar;
+//! - the shell (`architect_shell::AppShell`): the bottom slots as
+//!   favourites (`favourites`: Vault, Files, Search and New note, or the
+//!   open note's type's own from the node's extensions, #607), the
+//!   account, the foot's buttons, the status line, a phone's action bar;
 //! - the Vault (`vault`): the workspace (`architect_workspace::WorkspaceView`:
 //!   tabs, splits, docks, a phone's tab switcher), the navigator
 //!   (`architect_navigator`) in its left dock, notes as their markdown
@@ -27,6 +29,7 @@
 #![allow(clippy::future_not_send)]
 
 mod embed;
+mod favourites;
 mod frames;
 mod keys;
 mod page;
@@ -43,9 +46,7 @@ use architect::action::ActionList;
 use architect_commands::{Command, Overlay, PaletteView};
 use architect_shell::{self as shell, AppShell, icon};
 use dioxus::prelude::*;
-use lucide_dioxus::{
-    Command as CommandIcon, Files, LogIn, NotebookText, Search, Settings2, SquarePen,
-};
+use lucide_dioxus::{Command as CommandIcon, Files, LogIn, Search, Settings2, SquarePen};
 
 /// Which app the page is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +98,7 @@ fn WebApp() -> Element {
             source: vault::demo_vault(),
         },
     });
-    vault::use_vault_workspace(&web_vault.source);
+    let workspace = vault::use_vault_workspace(&web_vault.source).signal();
     let screen = screen::use_browser_screen();
     let list = use_hook(|| Arc::new(ActionList::new()));
     use_context_provider(|| list.clone());
@@ -147,7 +148,13 @@ fn WebApp() -> Element {
     );
     let demo = mode == Mode::Demo;
     architect_commands::use_command(Command::new("WEB_SIGN_IN", "Sign in").group("App"), sign_in);
-    let tabs = vec![shell::Tab::new("vault", "Vault", icon!(NotebookText))];
+    // The bottom slots: the open note's type's favourites, else the
+    // web app's own.
+    let slots = favourites::use_web_favourites(workspace, &web_vault.source, commands);
+    let set = slots.set.clone();
+    let tabs = set.slots().to_vec();
+    let separate = set.primary.clone();
+    let current = slots.current;
     let foot = vec![shell::Action::new(
         "Settings",
         icon!(Settings2),
@@ -197,8 +204,13 @@ fn WebApp() -> Element {
                         screen: shown,
                         title: crate::browser::app_name(),
                         tabs,
-                        current: Some("vault"),
-                        on_tab: move |_: &'static str| {},
+                        current,
+                        on_tab: move |id: &'static str| {
+                            if !set.press(id) {
+                                favourites::own_tab(id, workspace, commands);
+                            }
+                        },
+                        separate,
                         brand: rsx! { Brand {} },
                         account,
                         foot,
