@@ -2971,12 +2971,21 @@ impl ShareGuest for GuestLane {
             Admit::Open => {}
             other => return Err(shut(other)),
         }
-        let file = dir
-            .join(below.trim_start_matches('/'))
-            .join(architect_sites::plain::NOTE_FILE);
-        let text = tokio::fs::read_to_string(&file)
-            .await
-            .map_err(|_| GuestFault::Building)?;
+        // The built output's own file, never through a symlink (#674): one
+        // planted in the output, or swapped in since the build, is refused.
+        let rel = format!(
+            "{}{}",
+            below.trim_start_matches('/'),
+            architect_sites::plain::NOTE_FILE
+        );
+        let text = blocking(move || {
+            let mut file = architect_sites::listing::open_own(&dir, &rel)?;
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut file, &mut text).map(|_| text)
+        })
+        .await
+        .and_then(Result::ok)
+        .ok_or(GuestFault::Building)?;
         let mut note: GuestNote = facet_json::from_str(&text).map_err(|_| GuestFault::Building)?;
         note.path = listed.path;
         note.kind = listed.kind;

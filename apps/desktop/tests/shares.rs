@@ -3729,5 +3729,28 @@ async fn a_link_serves_nothing_through_a_symlink() {
         leaks(path, status, &body);
     }
 
+    // A guest's read of a note: the page's `_note.json` swapped for a
+    // symlink (here to a forged one outside) is refused, never followed.
+    let client = guest(&w);
+    let read = || {
+        client.read(
+            share.code.clone(),
+            String::new(),
+            "Shared/leak.md".to_owned(),
+        )
+    };
+    assert_eq!(read().await.unwrap().title, "Leak");
+    let note = built.join("leak").join(architect_sites::plain::NOTE_FILE);
+    let forged = std::fs::read_to_string(&note)
+        .unwrap()
+        .replacen("\"Leak\"", &format!("\"{SECRET}\""), 1);
+    assert!(forged.contains(SECRET), "{forged}");
+    std::fs::write(outside.join("note.json"), forged).unwrap();
+    std::fs::remove_file(&note).unwrap();
+    symlink(outside.join("note.json"), &note).unwrap();
+    match read().await {
+        Err(architect::ClientError::App(architect_spaces::GuestFault::Building)) => {}
+        other => panic!("a guest read through a symlink: {other:?}"),
+    }
     w.host.stop().await;
 }
