@@ -65,6 +65,7 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_ENROL_ORG` | none | the issuer org (slug) it enrols in at `ARCHITECT_ENROL_AT` |
 | `ARCHITECT_ENROL_ROLE` | `member` | the role it asks for, at most the session's own in the org |
 | `ARCHITECT_PEERS` | none | `endpoint@host:port,…`: nodes it dials directly |
+| `ARCHITECT_PUBLIC_ORIGIN` | none | `https://architect.fasttrackstudio.app`: where people reach the node; a share link's pages name it in "Open in Architect" ([below](#a-link-opens-architect)); none: no such link |
 | `ARCHITECT_APPLE_APP_IDS` | none | `<team id>.<bundle id>,…`: the iOS apps its share links open in as universal links ([below](#a-link-opens-architect)); none: no `apple-app-site-association` |
 | `ARCHITECT_IROH` | `n0` | `n0` (relays and lookup) or `local` (loopback only, for tests) |
 | `ARCHITECT_IROH_BIND` | any port (`0.0.0.0:7777` in the image) | the iroh UDP socket |
@@ -388,11 +389,15 @@ page.
   from a folder registers itself with `architect-desktop links register`
   (`apps/desktop/src/links.rs` `register`). A second launch hands its
   link to the running app (`architect_presence::single_instance`).
-- **Open in Architect.** Every page of a link ends with a plain link
-  to itself in the app (`architect://open?url=<the page>`) and where to
-  get the app (`apps/desktop/src/node/shares.rs` `open_in_app`): nothing
-  runs, nothing is in the way of a visitor without the app. Not on a
-  share's own domain, which has no `/s/<code>/` path.
+- **Open in Architect.** With `ARCHITECT_PUBLIC_ORIGIN` set, every page
+  of a link ends with a plain link to itself in the app
+  (`architect://open?url=<the page>`) and where to get the app
+  (`apps/desktop/src/node/shares.rs` `open_in_app`, `page_address`):
+  nothing runs, nothing is in the way of a visitor without the app. The
+  address is that origin's, never one a request's `Host` names (pages
+  are sent `no-cache`, so a shared cache may keep one). Not on a share's
+  own domain, which has no `/s/<code>/` path, and not without the
+  origin.
 - **What the app opens.** `ShareUrl::parse`: `https:` only, or `http:`
   to this machine; no credentials; a share link's path. A link the OS
   hands the app, or an agent's `SHARE_OPEN`, asks the person first

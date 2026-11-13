@@ -145,6 +145,9 @@ struct World {
 }
 
 /// Grace's node hosting `indie`, its vault seeded; Alan's and Ada's sessions.
+/// Where people reach the test node: its pages' "Open in Architect".
+const PUBLIC: &str = "https://node.example.test";
+
 async fn world() -> World {
     world_with(architect_sites::Blocks::new()).await
 }
@@ -215,6 +218,7 @@ async fn world_with(blocks: architect_sites::Blocks) -> World {
         host_org: Some("indie".to_owned()),
         iroh: IrohMode::Local,
         sweep_secs: 3600,
+        public_origin: Some(PUBLIC.to_owned()),
         ..Config::default()
     };
     let host = node::start_with(config, blocks).await.unwrap();
@@ -626,6 +630,10 @@ async fn a_share_expires_takes_comments_when_asked_and_has_its_own_domain() {
     }
     assert!(body.contains("Mix notes."), "{body}");
     assert!(body.contains("href=\"/\""), "rooted at the domain: {body}");
+    // On a share's own domain there is no `/s/<code>/` for the app to
+    // open: no Open in Architect.
+    assert!(!body.contains("Open in Architect"), "{body}");
+    assert!(!body.contains("architect://"), "{body}");
 
     // Expiry: open until then, 404 from then on.
     let soon = links
@@ -3459,20 +3467,35 @@ async fn a_guest_reads_a_link_as_its_notes_and_a_note_as_its_pages_words() {
     // Every medium a guest is pointed at is served by the link.
     assert_eq!(get(&w.url(images[0]), None).await.0, StatusCode::OK);
 
-    // The page hands itself to the app: a plain link, nothing that runs.
+    // The page hands itself to the app: a plain link, nothing that runs,
+    // at the node's configured origin.
     let page = page_with(
         &w.url(&format!("/s/{}/track/", share.code)),
         None,
         "Mix notes.",
     )
     .await;
-    let app = architect_spaces::guest::app_link(&w.url(&format!("/s/{}/track/", share.code)));
+    let app = architect_spaces::guest::app_link(&format!("{PUBLIC}/s/{}/track/", share.code));
     let href = format!("href=\"{}\"", app.replace('&', "&amp;"));
     assert!(page.contains(&href), "no Open in Architect: {page}");
     assert!(page.contains(">Open in Architect<"));
     let opened = architect_spaces::ShareUrl::parse(&app).unwrap();
     assert_eq!(opened.code(), share.code);
     assert_eq!(opened.rest(), "/track/");
+    // A request's `Host` never moves it: the page (sent `no-cache`, so a
+    // shared cache may keep it) names the configured origin alone.
+    let forged = reqwest::Client::new()
+        .get(w.url(&format!("/s/{}/track/", share.code)))
+        .header("host", "evil.example")
+        .header("x-forwarded-host", "evil.example")
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(forged.contains(&href), "{forged}");
+    assert!(!forged.contains("evil.example"), "{forged}");
 
     // A note outside the link: the same answer as one that is nowhere.
     let outside = client

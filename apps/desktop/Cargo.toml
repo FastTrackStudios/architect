@@ -103,6 +103,8 @@ iroh = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
+# ARCHITECT_PUBLIC_ORIGIN checked as an origin (src/node/config.rs).
+url = "2"
 uuid = { workspace = true }
 vox = { workspace = true }
 

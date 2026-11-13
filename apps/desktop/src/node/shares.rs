@@ -268,6 +268,9 @@ struct Inner {
     org: Option<NodeOrg>,
     issuer: Option<IssuerLane>,
     issuer_origin: Option<String>,
+    /// Where people reach the node (`ARCHITECT_PUBLIC_ORIGIN`): the
+    /// address "Open in Architect" names ([`Shares::with_public_origin`]).
+    public_origin: std::sync::OnceLock<String>,
     table: RwLock<HashMap<String, Held>>,
     viewers: Mutex<HashMap<String, (Viewer, Instant)>>,
     signins: Mutex<HashMap<String, Pending>>,
@@ -320,6 +323,7 @@ impl Shares {
             org,
             issuer: issuer.map(IssuerLane::new),
             issuer_origin: issuer.map(|i| i.trim_end_matches('/').to_owned()),
+            public_origin: std::sync::OnceLock::new(),
             table: RwLock::new(HashMap::new()),
             viewers: Mutex::new(HashMap::new()),
             signins: Mutex::new(HashMap::new()),
@@ -338,6 +342,20 @@ impl Shares {
     #[must_use]
     pub fn with_islands(self, islands: Vec<architect_sites::SiteIsland>) -> Self {
         let _ = self.0.islands.set(islands.into());
+        self
+    }
+
+    /// Where people reach the node (`ARCHITECT_PUBLIC_ORIGIN`, checked as
+    /// an origin): a share link's pages name it in "Open in Architect".
+    /// None: they offer no such link. The first call holds.
+    #[must_use]
+    pub fn with_public_origin(self, origin: Option<&str>) -> Self {
+        if let Some(origin) = origin {
+            let _ = self
+                .0
+                .public_origin
+                .set(origin.trim_end_matches('/').to_owned());
+        }
         self
     }
 
@@ -1932,11 +1950,15 @@ async fn serve(
                 response = with_comments(shares, &share, rest, mount, response).await;
             }
             if response.status() == StatusCode::OK && is_html(&response) {
-                // The link as the app opens it (#629): this page on this
-                // node, never on a share's own domain (no `/s/<code>/`).
-                let here = (mount != "/")
-                    .then(|| page_address(&headers, shares.0.issuer_origin.as_deref(), mount, rest))
-                    .flatten();
+                // The link as the app opens it (#629): this page at the
+                // node's configured origin, never one a request's `Host`
+                // names (a shared cache would hand that on), and never on
+                // a share's own domain (no `/s/<code>/`).
+                let here = page_address(
+                    shares.0.public_origin.get().map(String::as_str),
+                    mount,
+                    rest,
+                );
                 response = with_files_bar(shares, &link, response, here.as_deref()).await;
             }
             private(&share, response)
@@ -3034,30 +3056,19 @@ impl ShareGuest for GuestLane {
 /// A page of the link, with a bar to its files page and its archive
 /// when it lists any file, and its queue ([`queue`]) when any of them
 /// plays.
-/// This page's address as its visitor asked for it (`Host`, and https
-/// behind a proxy that says so): what "Open in Architect" hands the app.
-/// None for a host that does not read as one.
-fn page_address(
-    headers: &HeaderMap,
-    issuer: Option<&str>,
-    mount: &str,
-    rest: &str,
-) -> Option<String> {
-    let host = headers.get(header::HOST)?.to_str().ok()?;
-    let ok = !host.is_empty()
-        && host
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-.:[]".contains(c));
-    if !ok {
+/// This page's address at the node's public origin (`ARCHITECT_PUBLIC_ORIGIN`,
+/// already checked as an origin): what "Open in Architect" hands the app.
+/// None with no origin configured, and on a share's own domain (`mount`
+/// `/`), where the page has no `/s/<code>/` path for the app to open.
+#[must_use]
+pub fn page_address(origin: Option<&str>, mount: &str, rest: &str) -> Option<String> {
+    let origin = origin?;
+    if mount == "/" || mount.is_empty() {
         return None;
     }
-    let scheme = if is_https(headers, issuer) {
-        "https"
-    } else {
-        "http"
-    };
     Some(format!(
-        "{scheme}://{host}{}{rest}",
+        "{}{}{rest}",
+        origin.trim_end_matches('/'),
         mount.trim_end_matches('/')
     ))
 }

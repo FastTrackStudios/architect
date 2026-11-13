@@ -559,7 +559,8 @@ pub async fn start_with_shell(
         share_layers,
     )
     .with_islands(islands)
-    .with_favourites(favourites);
+    .with_favourites(favourites)
+    .with_public_origin(config.public_origin.as_deref());
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
     }

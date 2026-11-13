@@ -25,6 +25,7 @@
 //! | `ARCHITECT_ENROL_ORG` | `enrol_org` | none | the issuer org (slug) to enrol in there; its vaults are that org's |
 //! | `ARCHITECT_ENROL_ROLE` | `enrol_role` | `member` | the role it asks for: at most the session's own in the org |
 //! | `ARCHITECT_APPLE_APP_IDS` | `apple_app_ids` | none | `<team id>.<bundle id>,…` (`28C2G63DA7.app.fasttrackstudio.architect`): the iOS apps that open this node's share links (`/s/*`) as universal links, named in `/.well-known/apple-app-site-association`; none: that file is not served (#629) |
+//! | `ARCHITECT_PUBLIC_ORIGIN` | `public_origin` | none | `https://architect.fasttrackstudio.app`: the origin people reach this node at; a share link's pages offer "Open in Architect" with their address on it (never one a request's `Host` names); none: they offer no such link (#629) |
 //! | `ARCHITECT_PEERS` | `peers` | none | `endpoint@host:port,…`: nodes dialled directly (no lookup) |
 //! | `ARCHITECT_IROH` | `iroh` | `n0` | `n0` (relays and lookup) or `local` (loopback, no relay: tests) |
 //! | `ARCHITECT_IROH_BIND` | `iroh_bind` | any port | the iroh UDP socket (`0.0.0.0:7777`, for a fixed port) |
@@ -97,6 +98,7 @@ pub struct Config {
     pub enrol_role: String,
     pub peers: Vec<String>,
     pub apple_app_ids: Vec<String>,
+    pub public_origin: Option<String>,
     pub iroh: IrohMode,
     pub iroh_bind: Option<String>,
     pub mcp_token_file: Option<PathBuf>,
@@ -241,6 +243,7 @@ impl Default for Config {
             enrol_role: "member".to_owned(),
             peers: Vec::new(),
             apple_app_ids: Vec::new(),
+            public_origin: None,
             iroh: IrohMode::N0,
             iroh_bind: None,
             mcp_token_file: None,
@@ -305,6 +308,12 @@ impl Config {
         };
         config.apply_env(env)?;
         config.check_store()?;
+        if let Some(origin) = &config.public_origin {
+            config.public_origin = Some(public_origin(origin).map_err(|why| ConfigError::Env {
+                var: "ARCHITECT_PUBLIC_ORIGIN",
+                why,
+            })?);
+        }
         Ok(config)
     }
 
@@ -396,6 +405,9 @@ impl Config {
         }
         if let Some(v) = get("ARCHITECT_APPLE_APP_IDS") {
             self.apple_app_ids = list(&v);
+        }
+        if let Some(v) = get("ARCHITECT_PUBLIC_ORIGIN") {
+            self.public_origin = Some(v);
         }
         if let Some(v) = get("ARCHITECT_IROH") {
             self.iroh = match v.trim() {
@@ -580,9 +592,53 @@ fn pairs(var: &'static str, v: &str) -> Result<Vec<(String, String)>, ConfigErro
         .collect()
 }
 
+/// `text` as an origin (`https://host[:port]`, no trailing `/`): http or
+/// https, a host, no credentials, path, query or fragment.
+///
+/// # Errors
+///
+/// Anything else, in words.
+pub fn public_origin(text: &str) -> Result<String, String> {
+    let url = url::Url::parse(text.trim()).map_err(|e| format!("not a URL: {e}"))?;
+    let plain = matches!(url.scheme(), "https" | "http")
+        && url.host_str().is_some_and(|h| !h.is_empty())
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    if !plain {
+        return Err("an origin is http(s)://host[:port], nothing after it".to_owned());
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_public_origin_is_an_origin_and_nothing_more() {
+        assert_eq!(
+            public_origin("https://Architect.FastTrackStudio.app/").unwrap(),
+            "https://architect.fasttrackstudio.app"
+        );
+        assert_eq!(
+            public_origin("http://127.0.0.1:7410").unwrap(),
+            "http://127.0.0.1:7410"
+        );
+        for bad in [
+            "architect.fasttrackstudio.app",
+            "ftp://n.example",
+            "https://n.example/s/",
+            "https://u:p@n.example",
+            "https://n.example/?x=1",
+            "https://n.example/#x",
+            "javascript:alert(1)",
+        ] {
+            assert!(public_origin(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn the_environment_wins_over_the_file() {
