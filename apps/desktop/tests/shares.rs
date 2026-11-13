@@ -3756,9 +3756,10 @@ async fn a_link_serves_nothing_through_a_symlink() {
     };
     assert_eq!(read().await.unwrap().title, "Leak");
     let note = built.join("leak").join(architect_sites::plain::NOTE_FILE);
-    let forged = std::fs::read_to_string(&note)
-        .unwrap()
-        .replacen("\"Leak\"", &format!("\"{SECRET}\""), 1);
+    let forged =
+        std::fs::read_to_string(&note)
+            .unwrap()
+            .replacen("\"Leak\"", &format!("\"{SECRET}\""), 1);
     assert!(forged.contains(SECRET), "{forged}");
     std::fs::write(outside.join("note.json"), forged).unwrap();
     std::fs::remove_file(&note).unwrap();
