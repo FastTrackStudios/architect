@@ -18,6 +18,8 @@ include_dir = { workspace = true }
 # island's bundle checked against the node's digest before a frame gets it.
 sha2 = { workspace = true }
 base64 = { workspace = true }
+# The note types' favourites from the node (src/favourites.rs, #607).
+architect-favourites = { workspace = true }
 
 # The browser half runs on wasm32-unknown-unknown only; natively the crate
 # is its pure part (routes, config, views), which its tests cover.

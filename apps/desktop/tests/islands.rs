@@ -133,3 +133,69 @@ async fn a_node_without_islands_lists_none() {
             .starts_with("/_ext/webview.")
     );
 }
+
+/// `GET /_ext/favourites.json` (#607): the note types' `[[favourites]]`
+/// the node was started with, as declared, never cached, `nosniff`,
+/// read-only, nothing else in it; a declaration that breaks the
+/// manifest's rules is left out.
+#[tokio::test]
+async fn the_favourites_listing_is_the_declarations_alone_and_never_cached() {
+    use architect_desktop::node::shares::FAVOURITES_LISTING;
+    let good: architect_favourites::TypeFavourites = toml::from_str(
+        r#"
+note_type = "recipe"
+[[tabs]]
+id = "steps"
+label = "Steps"
+icon = "list"
+target = { view = "lab.cook/steps" }
+"#,
+    )
+    .unwrap();
+    let mut bad = good.clone();
+    bad.note_type = "other".to_owned();
+    bad.tabs[0].target = architect_favourites::Target::Place("https://evil.example/".to_owned());
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("host");
+    std::fs::create_dir_all(dir.join("data/vaults/notes")).unwrap();
+    let config = Config {
+        name: "favourites".to_owned(),
+        bind: "127.0.0.1:0".to_owned(),
+        data_dir: dir.join("data"),
+        vaults: [("notes".to_owned(), PathBuf::from("vaults/notes"))].into(),
+        iroh: IrohMode::Local,
+        sweep_secs: 3600,
+        ..Config::default()
+    };
+    let node = node::start_with_shell(
+        config,
+        architect_sites::Blocks::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![good.clone(), bad],
+    )
+    .await
+    .unwrap();
+    let url = format!("http://{}{FAVOURITES_LISTING}", node.http);
+    let client = reqwest::Client::new();
+    let r = client.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let h = r.headers().clone();
+    assert_eq!(h["content-type"], "application/json");
+    assert_eq!(h["cache-control"], "no-cache");
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    assert!(h.get("set-cookie").is_none());
+    let json: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(json, serde_json::json!({ "favourites": [good] }));
+    assert_eq!(client.post(&url).send().await.unwrap().status(), 405);
+    // A node that declares none lists none.
+    let (bare, _bare_tmp) = start(Vec::new()).await;
+    let json: serde_json::Value = reqwest::get(format!("http://{}{FAVOURITES_LISTING}", bare.http))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(json, serde_json::json!({ "favourites": [] }));
+    drop(tmp);
+}
