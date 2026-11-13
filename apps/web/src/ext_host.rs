@@ -212,22 +212,102 @@ pub fn note_props(audience: Audience, island: &Island, note: &Note<'_>) -> Value
     }
 }
 
-/// `body` without its `%%comments%%`, which may span lines; a `%%` never
-/// closed hides the rest.
+/// `body` without its `%%comments%%`.
+///
+/// A comment may span lines, and a `%%` never closed hides the rest. A
+/// `%%` inside code is text, not a comment's edge: a fenced block (three
+/// or more backticks or tildes, closed by as many) is kept whole, and so
+/// is an inline code span on one line.
 #[must_use]
 pub fn without_comments(body: &str) -> String {
     let mut out = String::with_capacity(body.len());
-    let mut rest = body;
+    let mut fence: Option<(char, usize)> = None;
+    let mut hidden = false;
+    for line in body.split_inclusive('\n') {
+        if !hidden {
+            if let Some((mark, len)) = fence {
+                out.push_str(line);
+                if fence_of(line).is_some_and(|(c, n, bare)| c == mark && n >= len && bare) {
+                    fence = None;
+                }
+                continue;
+            }
+            if let Some((mark, len, _)) = fence_of(line) {
+                fence = Some((mark, len));
+                out.push_str(line);
+                continue;
+            }
+        }
+        hidden = uncommented(line, hidden, &mut out);
+    }
+    out
+}
+
+/// A line's code fence: its mark, how many, and whether nothing follows
+/// them (what a closing fence is).
+fn fence_of(line: &str) -> Option<(char, usize, bool)> {
+    let text = line.trim_start_matches(' ');
+    if line.len().saturating_sub(text.len()) > 3 {
+        return None;
+    }
+    let mark = text.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let len = text.chars().take_while(|c| *c == mark).count();
+    (len >= 3).then(|| (mark, len, text.trim_start_matches(mark).trim().is_empty()))
+}
+
+/// One line outside a fence onto `out` without its comments, given
+/// whether it starts inside one; whether it ends inside one.
+fn uncommented(line: &str, mut hidden: bool, out: &mut String) -> bool {
+    let mut rest = line;
     loop {
-        let Some((before, after)) = rest.split_once("%%") else {
+        if hidden {
+            let Some((_, tail)) = rest.split_once("%%") else {
+                return true;
+            };
+            hidden = false;
+            rest = tail;
+            continue;
+        }
+        let Some(comment) = rest.find("%%") else {
             out.push_str(rest);
-            return out;
+            return false;
         };
-        out.push_str(before);
-        let Some((_, tail)) = after.split_once("%%") else {
-            return out;
-        };
-        rest = tail;
+        if let Some(tick) = rest.find('`').filter(|tick| *tick < comment) {
+            let (before, from) = rest.split_at_checked(tick).unwrap_or((rest, ""));
+            out.push_str(before);
+            let len = from.chars().take_while(|c| *c == '`').count();
+            let (run, after) = from.split_at_checked(len).unwrap_or((from, ""));
+            out.push_str(run);
+            // A span is kept whole; a run never closed is only text.
+            let (span, tail) = code_span_end(after, len)
+                .and_then(|end| after.split_at_checked(end))
+                .unwrap_or(("", after));
+            out.push_str(span);
+            rest = tail;
+        } else {
+            let (before, from) = rest.split_at_checked(comment).unwrap_or((rest, ""));
+            out.push_str(before);
+            rest = from.strip_prefix("%%").unwrap_or(from);
+            hidden = true;
+        }
+    }
+}
+
+/// Where the code span opened by `len` backticks ends in `after`: just
+/// past the next run of exactly `len`.
+fn code_span_end(after: &str, len: usize) -> Option<usize> {
+    let mut seen = 0_usize;
+    let mut rest = after;
+    loop {
+        let tick = rest.find('`')?;
+        let from = rest.get(tick..)?;
+        let run = from.chars().take_while(|c| *c == '`').count();
+        let next = tick.checked_add(run)?;
+        seen = seen.checked_add(next)?;
+        if run == len {
+            return Some(seen);
+        }
+        rest = rest.get(next..)?;
     }
 }
 
@@ -1301,6 +1381,23 @@ mod tests {
         }
         assert_eq!(without_comments("no comments"), "no comments");
         assert_eq!(without_comments("%%all%%"), "");
+        // A `%%` in code is text (#659 re-check N1): the comment after it
+        // is still hidden, and what is shown is not dropped.
+        assert_eq!(
+            without_comments("Type `%%` to start a comment. %%private plan%% Done."),
+            "Type `%%` to start a comment.  Done."
+        );
+        assert_eq!(without_comments("``a ` %% b`` %%x%%y"), "``a ` %% b`` y");
+        assert_eq!(without_comments("a ` %%x%% b"), "a `  b");
+        assert_eq!(
+            without_comments("```\n%% kept\n```\n%%gone%%after\n"),
+            "```\n%% kept\n```\nafter\n"
+        );
+        assert_eq!(
+            without_comments("~~~~md\n%%\n~~~\n%%\n~~~~\nz%%q"),
+            "~~~~md\n%%\n~~~\n%%\n~~~~\nz"
+        );
+        assert_eq!(without_comments("a %%b\n```\nc\n```\nd%% e"), "a  e");
     }
 
     #[test]
