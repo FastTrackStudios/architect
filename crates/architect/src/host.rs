@@ -82,15 +82,35 @@ pub fn block_on<F: Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
+/// Libraries whose verbose logging writes credentials.
+///
+/// At DEBUG and TRACE `tungstenite` dumps every WebSocket frame, and a vox
+/// call's frames carry its bearer (a node asking the issuer `whoami` for a
+/// browser's token, #628). [`log_filter`] holds them at INFO whatever
+/// `RUST_LOG` says.
+pub const CREDENTIAL_LOGGING_TARGETS: &[&str] = &["tungstenite", "tokio_tungstenite"];
+
+/// `filter` with [`CREDENTIAL_LOGGING_TARGETS`] held at INFO: what every
+/// host logs through ([`init_tracing`]), so `RUST_LOG=trace` cannot write
+/// a bearer.
+#[must_use]
+pub fn log_filter(filter: tracing_subscriber::EnvFilter) -> tracing_subscriber::EnvFilter {
+    CREDENTIAL_LOGGING_TARGETS
+        .iter()
+        .filter_map(|target| format!("{target}=info").parse().ok())
+        .fold(filter, tracing_subscriber::EnvFilter::add_directive)
+}
+
 /// Initialize the global tracing subscriber from `RUST_LOG`, falling back to
-/// `default_filter` (e.g. `"info"`).
+/// `default_filter` (e.g. `"info"`); never below INFO for the
+/// [`CREDENTIAL_LOGGING_TARGETS`].
 pub fn init_tracing(default_filter: &str) {
     let default = default_filter.to_string();
     tracing_subscriber::fmt()
-        .with_env_filter(
+        .with_env_filter(log_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| default.into()),
-        )
+        ))
         .init();
 }
 

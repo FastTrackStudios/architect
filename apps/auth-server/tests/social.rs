@@ -54,6 +54,11 @@ fn test_config() -> ServerConfig {
             ],
             public_client: true,
             skip_consent: true,
+            // The issuer's own app: its access token lists the person's
+            // orgs (`an_access_token_can_list_the_organizations_it_belongs_to`).
+            first_party: true,
+            // Task treats a refused refresh as a sign-out: no rotation.
+            rotate_refresh_tokens: false,
             disabled: false,
         }],
         ..ServerConfig::local()
@@ -969,9 +974,10 @@ async fn the_account_page_needs_a_session_and_unlinking_an_unlinked_provider_is_
     assert_eq!(body_json(response).await["error"], "not_linked");
 }
 
-/// An OIDC client holds only the access token `/oauth2/token` minted —
-/// no session token — and "which organizations am I in" is a question
-/// it has every right to ask. Task mirrors memberships from exactly this
+/// A first-party OIDC client (`first_party`, as `task` is registered
+/// here) holds only the access token `/oauth2/token` minted — no session
+/// token — and "which organizations am I in" is a question it has every
+/// right to ask. Task mirrors memberships from exactly this
 /// call, so a refusal here meant a person signed in through Keyflow was
 /// a member of nothing downstream. The session token keeps working, and
 /// junk is still refused.

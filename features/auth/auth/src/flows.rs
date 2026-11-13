@@ -2470,6 +2470,20 @@ pub mod email_password {
         }
 
         impl MemoryStorage {
+            /// Moves every rotated refresh token's exchange into the
+            /// past, past the reuse grace. Stands in for waiting.
+            fn lapse_refresh_grace(&self) {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                for v in inner.verifications.values_mut() {
+                    if v.value_hash.contains("sealed_successor") {
+                        let mut marker: serde_json::Value =
+                            serde_json::from_str(&v.value_hash).expect("json");
+                        marker["at"] = serde_json::json!(0);
+                        v.value_hash = marker.to_string();
+                    }
+                }
+            }
+
             /// Push the second-factor attempt run into the past, so the
             /// next attempt starts a fresh window. Stands in for waiting
             /// fifteen minutes.
@@ -3164,6 +3178,23 @@ pub mod email_password {
                     .verifications
                     .remove(&id);
                 Ok(())
+            }
+
+            async fn swap_verification_value(
+                &self,
+                id: Uuid,
+                expected_value_hash: &str,
+                new_value_hash: &str,
+            ) -> Result<bool, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                match inner.verifications.get_mut(&id) {
+                    Some(record) if record.value_hash == expected_value_hash => {
+                        new_value_hash.clone_into(&mut record.value_hash);
+                        record.updated_at = Utc::now();
+                        Ok(true)
+                    }
+                    _ => Ok(false),
+                }
             }
 
             async fn mark_email_verified(&self, user_id: Uuid) -> Result<(), AuthFlowError> {
@@ -4411,6 +4442,8 @@ pub mod email_password {
                     ],
                     public_client: false,
                     skip_consent: true,
+                    first_party: false,
+                    rotate_refresh_tokens: false,
                     disabled: false,
                 })
                 .storage(MemoryStorage::default())
@@ -4433,6 +4466,8 @@ pub mod email_password {
                 scopes: vec!["openid".into(), "email".into(), "forge:github".into()],
                 public_client: true,
                 skip_consent: true,
+                first_party: false,
+                rotate_refresh_tokens: false,
                 disabled: false,
             };
             let without = ArchitectAuth::builder()
@@ -4554,7 +4589,9 @@ pub mod email_password {
                 redirect_uris: vec![format!("https://{id}.example.com/callback")],
                 scopes: vec!["openid".into(), "email".into(), "profile".into()],
                 public_client: true,
-                skip_consent: first_party,
+                skip_consent: true,
+                first_party,
+                rotate_refresh_tokens: false,
                 disabled: false,
             };
             let auth = ArchitectAuth::builder()
@@ -4828,6 +4865,8 @@ pub mod email_password {
                     scopes: vec!["openid".into()],
                     public_client: true,
                     skip_consent: true,
+                    first_party: true,
+                    rotate_refresh_tokens: false,
                     disabled: false,
                 })
                 .storage(MemoryStorage::default())
@@ -4846,6 +4885,17 @@ pub mod email_password {
             AuthSessionBundle,
             crate::OidcTokenResponse,
         ) {
+            signed_in_with_refresh_on(MemoryStorage::default()).await
+        }
+
+        /// [`signed_in_with_refresh`] on `storage`.
+        async fn signed_in_with_refresh_on<S: AuthStorage>(
+            storage: S,
+        ) -> (
+            ArchitectAuth<S>,
+            AuthSessionBundle,
+            crate::OidcTokenResponse,
+        ) {
             let auth = ArchitectAuth::builder()
                 .secret("a-secret-at-least-32-bytes-long!!")
                 .base_url("https://auth.example.com")
@@ -4857,9 +4907,11 @@ pub mod email_password {
                     scopes: vec!["openid".into(), "email".into(), "offline_access".into()],
                     public_client: true,
                     skip_consent: true,
+                    first_party: true,
+                    rotate_refresh_tokens: true,
                     disabled: false,
                 })
-                .storage(MemoryStorage::default())
+                .storage(storage)
                 .build()
                 .expect("build auth");
             let bundle = auth
@@ -4910,8 +4962,8 @@ pub mod email_password {
             (auth, bundle, tokens)
         }
 
-        async fn refreshed(
-            auth: &ArchitectAuth<MemoryStorage>,
+        async fn refreshed<S: AuthStorage>(
+            auth: &ArchitectAuth<S>,
             refresh_token: &str,
         ) -> Result<crate::OidcTokenResponse, AuthFlowError> {
             auth.exchange_oidc_token(ExchangeOidcToken {
@@ -5010,10 +5062,12 @@ pub mod email_password {
             );
         }
 
-        /// #628 M2: a public client's refresh token is single use. Used
-        /// again within a few seconds (two tabs renewing together) it is
-        /// refused and nothing else happens; used again later, someone
-        /// holds a copy, and the whole grant is revoked.
+        /// #628 M2, N1: a rotating client's refresh token is single use.
+        /// Presented again within a few seconds (two tabs renewing
+        /// together, a response lost on the way) it answers the same
+        /// successor, so the chain does not fork and no one is signed out;
+        /// presented again later, someone holds a copy, and the whole
+        /// sign-in is revoked.
         // r[verify auth.oidc.refresh-rotation]
         #[tokio::test]
         async fn a_refresh_token_rotates_and_a_reused_one_revokes_its_grant() {
@@ -5022,10 +5076,14 @@ pub mod email_password {
             let second = refreshed(&auth, &first).await.expect("refresh");
             let second_refresh = second.refresh_token.clone().expect("rotated");
             assert_ne!(second_refresh, first);
-            // Within the grace: refused, the grant untouched.
-            assert!(
-                refreshed(&auth, &first).await.is_err(),
-                "the old token minted again"
+            // Within the grace: the same successor, nothing revoked.
+            let again = refreshed(&auth, &first)
+                .await
+                .expect("a retry within the grace");
+            assert_eq!(
+                again.refresh_token.as_deref(),
+                Some(second_refresh.as_str()),
+                "a retry forked the chain"
             );
             let third = refreshed(&auth, &second_refresh)
                 .await
@@ -5037,31 +5095,214 @@ pub mod email_password {
             );
 
             // The used token presented again, past the grace.
-            {
-                let mut inner = auth.storage.inner.lock().expect("lock");
-                for v in inner.verifications.values_mut() {
-                    if v.value_hash.contains("rotated_grant") {
-                        let mut marker: serde_json::Value =
-                            serde_json::from_str(&v.value_hash).expect("json");
-                        marker["at"] = serde_json::json!(0);
-                        v.value_hash = marker.to_string();
-                    }
-                }
-            }
+            auth.storage.lapse_refresh_grace();
             assert!(refreshed(&auth, &first).await.is_err());
-            // Every token of the grant is dead: the newest refresh token
-            // and the access token minted with it.
+            // Every token of the sign-in is dead: the newest refresh token
+            // and the access token minted with it, at userinfo too (N6).
             assert!(
                 refreshed(&auth, &third.refresh_token.expect("rotated"))
                     .await
                     .is_err(),
-                "the grant survived a reused refresh token"
+                "the sign-in survived a reused refresh token"
             );
             assert!(
-                auth_proto::AuthService::whoami(&auth, third.access_token)
+                auth_proto::AuthService::whoami(&auth, third.access_token.clone())
                     .await
                     .is_err()
             );
+            assert!(
+                auth.get_oidc_user_info(GetOidcUserInfo {
+                    access_token: third.access_token,
+                })
+                .await
+                .is_err(),
+                "userinfo answered a revoked sign-in's access token"
+            );
+        }
+
+        /// N7: a client that has not opted in to rotation (Task's `task`,
+        /// which treats any refused refresh as a sign-out) keeps a
+        /// reusable refresh token, as before.
+        #[tokio::test]
+        async fn a_client_without_rotation_keeps_its_refresh_token() {
+            let (mut auth, _, web) = signed_in_with_refresh().await;
+            auth.config.oidc.clients[0].rotate_refresh_tokens = false;
+            let token = web.refresh_token.expect("offline_access");
+            for _ in 0..3 {
+                refreshed(&auth, &token)
+                    .await
+                    .expect("the same refresh token, again");
+                // Presented again past any reuse grace: still taken.
+                auth.storage.lapse_refresh_grace();
+            }
+        }
+
+        /// `n` refreshes of `token` at once, released together.
+        async fn refresh_in_parallel<S: AuthStorage>(
+            auth: &Arc<ArchitectAuth<S>>,
+            token: &str,
+            n: usize,
+        ) -> Vec<Result<crate::OidcTokenResponse, AuthFlowError>> {
+            let start = Arc::new(tokio::sync::Barrier::new(n));
+            let tasks: Vec<_> = (0..n)
+                .map(|_| {
+                    let (auth, token, start) = (auth.clone(), token.to_owned(), start.clone());
+                    tokio::spawn(async move {
+                        start.wait().await;
+                        refreshed(&auth, &token).await
+                    })
+                })
+                .collect();
+            let mut answers = Vec::with_capacity(n);
+            for task in tasks {
+                answers.push(task.await.expect("refresh task"));
+            }
+            answers
+        }
+
+        /// The distinct refresh tokens `answers` gave.
+        fn successors(
+            answers: &[Result<crate::OidcTokenResponse, AuthFlowError>],
+        ) -> std::collections::HashSet<String> {
+            answers
+                .iter()
+                .filter_map(|answer| answer.as_ref().ok())
+                .map(|tokens| tokens.refresh_token.clone().expect("rotated"))
+                .collect()
+        }
+
+        /// N1: one refresh token refreshed 32 times at once (the review's
+        /// scenario: a thief racing the owner, or many tabs). Every answer
+        /// is the same successor: the chain never forks.
+        async fn one_token_refreshed_in_parallel_answers_one_successor<S: AuthStorage>(storage: S) {
+            let (auth, _, web) = signed_in_with_refresh_on(storage).await;
+            let auth = Arc::new(auth);
+            let first = web.refresh_token.expect("offline_access");
+            let answers = refresh_in_parallel(&auth, &first, 32).await;
+            let refused: Vec<_> = answers.iter().filter_map(|a| a.as_ref().err()).collect();
+            assert!(refused.is_empty(), "refused within the grace: {refused:?}");
+            let successors = successors(&answers);
+            assert_eq!(
+                successors.len(),
+                1,
+                "the chain forked: {}",
+                successors.len()
+            );
+            let successor = successors.into_iter().next().expect("one");
+            refreshed(&auth, &successor)
+                .await
+                .expect("the successor refreshes");
+        }
+
+        /// N1: many rounds of parallel refreshes, then a revoke while yet
+        /// another round is in flight: every refresh token and every
+        /// access token the sign-in ever answered is dead, at refresh,
+        /// `whoami`, the org list and userinfo. The issuer session stays.
+        async fn every_chain_dies_with_its_sign_in<S: AuthStorage>(storage: S) {
+            let (auth, bundle, web) = signed_in_with_refresh_on(storage).await;
+            let auth = Arc::new(auth);
+            let first = web.refresh_token.clone().expect("offline_access");
+            let mut refresh_tokens = vec![first.clone()];
+            let mut access_tokens = vec![web.access_token.clone()];
+            let mut newest = first.clone();
+            for round in 0..6 {
+                let answers = refresh_in_parallel(&auth, &newest, 8).await;
+                let successors = successors(&answers);
+                assert_eq!(successors.len(), 1, "round {round} forked the chain");
+                access_tokens.extend(answers.into_iter().flatten().map(|t| t.access_token));
+                newest = successors.into_iter().next().expect("one");
+                refresh_tokens.push(newest.clone());
+            }
+
+            let racing = tokio::spawn({
+                let (auth, newest) = (auth.clone(), newest.clone());
+                async move { refresh_in_parallel(&auth, &newest, 8).await }
+            });
+            auth.revoke_oidc_token(crate::RevokeOidcToken {
+                token: first,
+                client_id: "architect".into(),
+                client_secret: None,
+            })
+            .await
+            .expect("revoke");
+            for tokens in racing.await.expect("racing round").into_iter().flatten() {
+                refresh_tokens.extend(tokens.refresh_token);
+                access_tokens.push(tokens.access_token);
+            }
+
+            for token in &refresh_tokens {
+                assert!(
+                    refreshed(&auth, token).await.is_err(),
+                    "a chain outlived the revoke"
+                );
+            }
+            for token in &access_tokens {
+                assert!(
+                    auth_proto::AuthService::whoami(&*auth, token.clone())
+                        .await
+                        .is_err(),
+                    "an access token outlived the revoke"
+                );
+                assert!(
+                    auth.list_organizations(ListOrganizations {
+                        session_token: token.clone(),
+                    })
+                    .await
+                    .is_err()
+                );
+                assert!(
+                    auth.get_oidc_user_info(GetOidcUserInfo {
+                        access_token: token.clone(),
+                    })
+                    .await
+                    .is_err(),
+                    "userinfo answered a revoked sign-in"
+                );
+            }
+            assert!(
+                auth_proto::AuthService::whoami(&*auth, bundle.token)
+                    .await
+                    .is_ok(),
+                "the issuer session stays"
+            );
+        }
+
+        // r[verify auth.oidc.refresh-rotation]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+        async fn parallel_refreshes_answer_one_successor_in_memory() {
+            one_token_refreshed_in_parallel_answers_one_successor(MemoryStorage::default()).await;
+        }
+
+        // r[verify auth.oidc.revocation]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+        async fn a_revoke_ends_every_chain_in_memory() {
+            every_chain_dies_with_its_sign_in(MemoryStorage::default()).await;
+        }
+
+        #[cfg(feature = "backend-db")]
+        async fn sqlite_storage() -> crate::backend_db::AuthSeaOrmStorage {
+            use sea_orm_migration::MigratorTrait;
+            let db = sea_orm::Database::connect("sqlite::memory:")
+                .await
+                .expect("sqlite");
+            crate::backend_db::Migrator::up(&db, None)
+                .await
+                .expect("migrate");
+            crate::backend_db::AuthSeaOrmStorage::new(db)
+        }
+
+        // r[verify auth.oidc.refresh-rotation]
+        #[cfg(feature = "backend-db")]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+        async fn parallel_refreshes_answer_one_successor_in_sql() {
+            one_token_refreshed_in_parallel_answers_one_successor(sqlite_storage().await).await;
+        }
+
+        // r[verify auth.oidc.revocation]
+        #[cfg(feature = "backend-db")]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+        async fn a_revoke_ends_every_chain_in_sql() {
+            every_chain_dies_with_its_sign_in(sqlite_storage().await).await;
         }
 
         fn auth_with_oauth_proxy() -> ArchitectAuth<MemoryStorage> {
@@ -7220,6 +7461,8 @@ pub mod email_password {
                     scopes: vec!["openid".into(), "profile".into(), "email".into()],
                     public_client: false,
                     skip_consent: true,
+                    first_party: false,
+                    rotate_refresh_tokens: false,
                     disabled: false,
                 })
                 .oidc_client(OidcClientConfig {
@@ -7230,6 +7473,8 @@ pub mod email_password {
                     scopes: vec!["openid".into(), "profile".into(), "email".into()],
                     public_client: true,
                     skip_consent: true,
+                    first_party: false,
+                    rotate_refresh_tokens: false,
                     disabled: false,
                 })
                 .storage(MemoryStorage::default())
@@ -12899,15 +13144,16 @@ pub mod oidc_provider {
             RegisterOidcClient, RevokeOidcToken,
         },
         config::OidcClientConfig,
-        crypto::{generate_token, hash_token},
+        crypto::{decrypt_secret, encrypt_secret, generate_token, hash_token},
     };
 
     const SUPPORTED_SCOPES: &[&str] = &["openid", "profile", "email", "offline_access"];
 
-    /// How long a refresh token already exchanged may be presented again
-    /// without its grant being revoked: two tabs of one app renewing at
-    /// the same moment. Past it, a second use means the token was copied.
-    const REFRESH_REUSE_GRACE_SECONDS: i64 = 30;
+    /// How long a rotated refresh token, presented again, still answers
+    /// the token it was exchanged for: two tabs of one app renewing at
+    /// the same moment, or a response lost on the way. Past it, a second
+    /// use means the token was copied, and the sign-in is revoked.
+    pub(crate) const REFRESH_REUSE_GRACE_SECONDS: i64 = 10;
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
     struct OidcCodeState {
@@ -12925,13 +13171,18 @@ pub mod oidc_provider {
         grant: Option<String>,
     }
 
-    /// What a public client's refresh token becomes once exchanged
-    /// (rotated): presented again, it is refused, and past
-    /// [`REFRESH_REUSE_GRACE_SECONDS`] its grant is revoked.
+    /// What a rotating client's refresh token becomes once exchanged, in
+    /// the same record (one conditional write, [`AuthStorage::swap_verification_value`]):
+    /// presented again within [`REFRESH_REUSE_GRACE_SECONDS`] it answers
+    /// the same successor; later, the sign-in is revoked.
     #[derive(Clone, Debug, Serialize, Deserialize)]
     struct RotatedRefresh {
-        rotated_grant: String,
-        client_id: String,
+        /// The sign-in, as it was when exchanged (always with a grant).
+        rotated: OidcCodeState,
+        /// The successor refresh token, sealed with a key only the
+        /// presented token derives ([`successor_key`]): the store alone
+        /// cannot open it.
+        sealed_successor: String,
         at: i64,
     }
 
@@ -13145,6 +13396,23 @@ pub mod oidc_provider {
                     audience: None,
                 })
                 .await?;
+            // A token of a sign-in (every access token the code flow
+            // mints) answers only while that sign-in is in force: after
+            // the app's Sign out, userinfo refuses it too.
+            if let Some(grant) = verification
+                .claims
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("grant"))
+            {
+                let live = match grant.as_str() {
+                    Some(grant) => self.oidc_grant_live(grant).await?,
+                    None => false,
+                };
+                if !live {
+                    return Err(AuthFlowError::InvalidCredentials);
+                }
+            }
             let user_id = verification
                 .claims
                 .sub
@@ -13207,9 +13475,7 @@ pub mod oidc_provider {
             }
             validate_pkce(&state, input.code_verifier.as_deref())?;
             self.storage.delete_verification(verification.id).await?;
-            self.issue_oidc_tokens(state)
-                .await
-                .map(|(tokens, _)| tokens)
+            self.issue_oidc_tokens(state).await
         }
 
         // r[impl auth.oidc.refresh-rotation]
@@ -13231,18 +13497,12 @@ pub mod oidc_provider {
             if verification.expires_at <= Utc::now() {
                 return Err(AuthFlowError::InvalidCredentials);
             }
-            let state = match refresh_entry(&verification.value_hash)? {
+            let mut state = match refresh_entry(&verification.value_hash)? {
                 RefreshEntry::Live(state) => state,
-                // Used before. Within the grace another tab of the same
-                // app renewed first; past it, someone holds a copy.
                 RefreshEntry::Rotated(rotated) => {
-                    if rotated.client_id == input.client_id
-                        && Utc::now().timestamp().saturating_sub(rotated.at)
-                            > REFRESH_REUSE_GRACE_SECONDS
-                    {
-                        self.revoke_oidc_grant(&rotated.rotated_grant).await?;
-                    }
-                    return Err(AuthFlowError::InvalidCredentials);
+                    return self
+                        .reuse_rotated_refresh(rotated, refresh_token, &input.client_id)
+                        .await;
                 }
             };
             if state.client_id != input.client_id {
@@ -13253,37 +13513,107 @@ pub mod oidc_provider {
             {
                 return Err(AuthFlowError::InvalidCredentials);
             }
-            // A public client's refresh token is single-use (RFC 9700
-            // 4.14.2): the next one replaces it. A confidential client
-            // proves itself with its secret and keeps the old behaviour.
-            let rotates = self.oidc_client(&input.client_id)?.public_client;
-            if rotates {
-                self.storage.delete_verification(verification.id).await?;
+            let client = self.oidc_client(&input.client_id)?;
+            // A confidential client proves itself with its secret, and a
+            // client that has not opted in keeps reusable refresh tokens
+            // (Task's `task` treats any refused refresh as a sign-out).
+            if !(client.public_client && client.rotate_refresh_tokens) {
+                return self.issue_oidc_tokens(state).await;
             }
-            let (response, grant) = self.issue_oidc_tokens(state).await?;
-            if rotates {
-                self.storage
-                    .create_verification(AuthVerificationCreate {
-                        identifier,
-                        value_hash: serde_json::to_string(&RotatedRefresh {
-                            rotated_grant: grant,
-                            client_id: input.client_id,
-                            at: Utc::now().timestamp(),
-                        })
+
+            // Rotation (RFC 9700 4.14.2). The successor is made first,
+            // then the presented token is consumed by one conditional
+            // write that exactly one caller wins; a caller that loses
+            // answers the winner's successor, so two tabs or a retried
+            // request never fork the chain.
+            let grant = state
+                .grant
+                .get_or_insert_with(|| new_grant_id(&self.config.secret))
+                .clone();
+            let successor =
+                generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+            let successor_entry = self.create_refresh_entry(&state, &successor).await?;
+            let rotated = RotatedRefresh {
+                rotated: state.clone(),
+                sealed_successor: encrypt_secret(
+                    &successor_key(&self.config.secret, refresh_token),
+                    &successor,
+                )
+                .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
+                at: Utc::now().timestamp(),
+            };
+            let consumed = self
+                .storage
+                .swap_verification_value(
+                    verification.id,
+                    &verification.value_hash,
+                    &serde_json::to_string(&rotated)
                         .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
-                        expires_at: verification.expires_at,
-                    })
-                    .await?;
+                )
+                .await?;
+            if !consumed {
+                self.storage.delete_verification(successor_entry).await?;
+                let now = self
+                    .storage
+                    .find_latest_verification_by_identifier(&identifier)
+                    .await?
+                    .ok_or(AuthFlowError::InvalidCredentials)?;
+                return match refresh_entry(&now.value_hash)? {
+                    RefreshEntry::Rotated(rotated) => {
+                        self.reuse_rotated_refresh(rotated, refresh_token, &input.client_id)
+                            .await
+                    }
+                    RefreshEntry::Live(_) => Err(AuthFlowError::InvalidCredentials),
+                };
             }
-            Ok(response)
+            // Revoked while this request was in flight: nothing it made
+            // survives, and nothing is answered.
+            if !self.oidc_grant_live(&grant).await? {
+                self.storage.delete_verification(successor_entry).await?;
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            self.oidc_response(&state, &grant, Some(successor)).await
         }
 
-        /// RFC 7009: ends the grant `input.token` belongs to (a refresh
-        /// token, used or not, or an access token), so neither its refresh
-        /// tokens nor its access tokens are taken any more. The issuer
-        /// session the person signed in with stays: other apps signed in
-        /// from it are not signed out. A token that is unknown, expired or
-        /// already revoked is not an error.
+        /// A rotated refresh token presented again: within
+        /// [`REFRESH_REUSE_GRACE_SECONDS`] of its exchange it answers the
+        /// same successor (and fresh access tokens of the same sign-in);
+        /// later, someone holds a copy, and the sign-in is revoked.
+        async fn reuse_rotated_refresh(
+            &self,
+            rotated: RotatedRefresh,
+            presented: &str,
+            client_id: &str,
+        ) -> Result<OidcTokenResponse, AuthFlowError> {
+            let state = rotated.rotated;
+            if state.client_id != client_id {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let grant = state
+                .grant
+                .clone()
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if Utc::now().timestamp().saturating_sub(rotated.at) > REFRESH_REUSE_GRACE_SECONDS {
+                self.revoke_oidc_grant(&grant).await?;
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            if !self.oidc_grant_live(&grant).await? {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let successor = decrypt_secret(
+                &successor_key(&self.config.secret, presented),
+                &rotated.sealed_successor,
+            )
+            .map_err(|_| AuthFlowError::InvalidCredentials)?;
+            self.oidc_response(&state, &grant, Some(successor)).await
+        }
+
+        /// RFC 7009: ends the sign-in (grant) `input.token` belongs to (a
+        /// refresh token, used or not, or an access token), so neither its
+        /// refresh tokens nor its access tokens are taken any more. The
+        /// issuer session the person signed in with stays: other apps
+        /// signed in from it are not signed out. A token that is unknown,
+        /// expired or already revoked is not an error.
         ///
         /// # Errors
         ///
@@ -13298,17 +13628,16 @@ pub mod oidc_provider {
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
             {
-                let (client_id, grant) = match refresh_entry(&entry.value_hash)? {
-                    RefreshEntry::Live(state) => (state.client_id, state.grant),
-                    RefreshEntry::Rotated(rotated) => {
-                        (rotated.client_id, Some(rotated.rotated_grant))
-                    }
+                let state = match refresh_entry(&entry.value_hash)? {
+                    RefreshEntry::Live(state) => state,
+                    RefreshEntry::Rotated(rotated) => rotated.rotated,
                 };
-                if client_id != input.client_id {
+                if state.client_id != input.client_id {
                     return Err(AuthFlowError::PermissionDenied);
                 }
+                // A token minted before sign-ins had an id: it alone.
                 self.storage.delete_verification(entry.id).await?;
-                if let Some(grant) = grant {
+                if let Some(grant) = state.grant {
                     self.revoke_oidc_grant(&grant).await?;
                 }
                 return Ok(());
@@ -13342,59 +13671,43 @@ pub mod oidc_provider {
             Ok(())
         }
 
-        /// Whether grant `grant` is still in force: not revoked, and used
-        /// within the refresh token's lifetime.
+        /// Whether sign-in `grant` is in force: one this issuer made, and
+        /// not revoked. Every use of any of its tokens asks this.
         pub(crate) async fn oidc_grant_live(&self, grant: &str) -> Result<bool, AuthFlowError> {
-            Ok(self
+            if !grant_is_ours(&self.config.secret, grant) {
+                return Ok(false);
+            }
+            Ok(!self
                 .storage
-                .find_latest_verification_by_identifier(&oidc_grant_identifier(
+                .find_latest_verification_by_identifier(&oidc_revoked_grant_identifier(
                     &self.config.secret,
                     grant,
                 ))
                 .await?
-                .is_some_and(|record| record.expires_at > Utc::now()))
+                .is_some_and(|mark| mark.expires_at > Utc::now()))
         }
 
-        /// Keeps grant `grant` in force for another refresh token's (or,
-        /// longer, access token's) lifetime from now.
-        async fn keep_oidc_grant(&self, grant: &str) -> Result<(), AuthFlowError> {
-            let identifier = oidc_grant_identifier(&self.config.secret, grant);
-            let previous = self
-                .storage
-                .find_latest_verification_by_identifier(&identifier)
-                .await?;
+        /// Revokes sign-in `grant`: ONE record, its revocation mark, which
+        /// every use of its tokens checks ([`Self::oidc_grant_live`]), so
+        /// it cannot miss a token however many the sign-in minted. The
+        /// mark outlives every token the sign-in has: a refresh token
+        /// lives `refresh_token_ttl_seconds` from its minting (none is
+        /// minted once the mark is written: a refresh in flight checks
+        /// again before it answers), and an access token less.
+        async fn revoke_oidc_grant(&self, grant: &str) -> Result<(), AuthFlowError> {
             self.storage
                 .create_verification(AuthVerificationCreate {
-                    identifier,
+                    identifier: oidc_revoked_grant_identifier(&self.config.secret, grant),
                     value_hash: String::new(),
                     expires_at: crate::expiry::expires_in(
                         self.config
                             .oidc
                             .refresh_token_ttl_seconds
-                            .max(self.config.oidc.access_token_ttl_seconds),
+                            .saturating_add(self.config.oidc.access_token_ttl_seconds)
+                            .saturating_add(300),
                     ),
                 })
                 .await?;
-            if let Some(previous) = previous {
-                self.storage.delete_verification(previous.id).await?;
-            }
-            Ok(())
-        }
-
-        async fn revoke_oidc_grant(&self, grant: &str) -> Result<(), AuthFlowError> {
-            let identifier = oidc_grant_identifier(&self.config.secret, grant);
-            // `keep_oidc_grant` leaves one record; a few more if two
-            // renewals raced.
-            for _ in 0..8 {
-                let Some(record) = self
-                    .storage
-                    .find_latest_verification_by_identifier(&identifier)
-                    .await?
-                else {
-                    break;
-                };
-                self.storage.delete_verification(record.id).await?;
-            }
             Ok(())
         }
 
@@ -13413,25 +13726,67 @@ pub mod oidc_provider {
             Ok(())
         }
 
-        /// The tokens of grant `state.grant` (a new grant on a code
-        /// exchange): an access token and an id token, told apart by
-        /// `token_use`, and a refresh token with `offline_access`. Also
-        /// the grant's id.
+        /// The tokens of sign-in `state.grant` (a new one on a code
+        /// exchange, or for an entry stored before sign-ins had ids): an
+        /// access token and an id token, told apart by `token_use`, and a
+        /// new refresh token with `offline_access`.
         async fn issue_oidc_tokens(
             &self,
             mut state: OidcCodeState,
-        ) -> Result<(OidcTokenResponse, String), AuthFlowError> {
+        ) -> Result<OidcTokenResponse, AuthFlowError> {
             let grant = state
                 .grant
-                .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
+                .get_or_insert_with(|| new_grant_id(&self.config.secret))
                 .clone();
-            self.keep_oidc_grant(&grant).await?;
+            let refresh_token = if state
+                .scope
+                .split_whitespace()
+                .any(|scope| scope == "offline_access")
+            {
+                let token =
+                    generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+                self.create_refresh_entry(&state, &token).await?;
+                Some(token)
+            } else {
+                None
+            };
+            self.oidc_response(&state, &grant, refresh_token).await
+        }
+
+        /// Stores refresh token `token` of `state`, live for
+        /// `refresh_token_ttl_seconds`; the record's id.
+        async fn create_refresh_entry(
+            &self,
+            state: &OidcCodeState,
+            token: &str,
+        ) -> Result<uuid::Uuid, AuthFlowError> {
+            self.storage
+                .create_verification(AuthVerificationCreate {
+                    identifier: oidc_refresh_identifier(&self.config.secret, token),
+                    value_hash: serde_json::to_string(state)
+                        .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
+                    expires_at: crate::expiry::expires_in(
+                        self.config.oidc.refresh_token_ttl_seconds,
+                    ),
+                })
+                .await
+                .map(|record| record.id)
+        }
+
+        /// A token response for sign-in `grant`: a new access token and
+        /// id token, and `refresh_token` as given.
+        async fn oidc_response(
+            &self,
+            state: &OidcCodeState,
+            grant: &str,
+            refresh_token: Option<String>,
+        ) -> Result<OidcTokenResponse, AuthFlowError> {
             let claims = |token_use: &str| {
                 json!({
                     "scope": state.scope.clone(),
                     "client_id": state.client_id.clone(),
                     "nonce": state.nonce.clone(),
-                    "grant": grant.clone(),
+                    "grant": grant,
                     "token_use": token_use,
                 })
             };
@@ -13451,38 +13806,14 @@ pub mod oidc_provider {
                     Some(claims("id")),
                 )
                 .await?;
-            let refresh_token = if state
-                .scope
-                .split_whitespace()
-                .any(|scope| scope == "offline_access")
-            {
-                let token =
-                    generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
-                self.storage
-                    .create_verification(AuthVerificationCreate {
-                        identifier: oidc_refresh_identifier(&self.config.secret, &token),
-                        value_hash: serde_json::to_string(&state)
-                            .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
-                        expires_at: crate::expiry::expires_in(
-                            self.config.oidc.refresh_token_ttl_seconds,
-                        ),
-                    })
-                    .await?;
-                Some(token)
-            } else {
-                None
-            };
-            Ok((
-                OidcTokenResponse {
-                    access_token: access_token.token,
-                    id_token: id_token.token,
-                    refresh_token,
-                    token_type: "Bearer".into(),
-                    expires_in: self.config.oidc.access_token_ttl_seconds,
-                    scope: state.scope,
-                },
-                grant,
-            ))
+            Ok(OidcTokenResponse {
+                access_token: access_token.token,
+                id_token: id_token.token,
+                refresh_token,
+                token_type: "Bearer".into(),
+                expires_in: self.config.oidc.access_token_ttl_seconds,
+                scope: state.scope.clone(),
+            })
         }
     }
 
@@ -13545,8 +13876,35 @@ pub mod oidc_provider {
         format!("oidc-refresh:{}", hash_token(secret, refresh_token))
     }
 
-    fn oidc_grant_identifier(secret: &str, grant: &str) -> String {
-        format!("oidc-grant:{}", hash_token(secret, grant))
+    /// The record that marks sign-in `grant` revoked: one per sign-in,
+    /// however many tokens it minted.
+    fn oidc_revoked_grant_identifier(secret: &str, grant: &str) -> String {
+        format!("oidc-grant-revoked:{}", hash_token(secret, grant))
+    }
+
+    /// A new sign-in's id: random, tagged with the issuer's secret so an
+    /// id the issuer never made is told by its tag alone.
+    fn new_grant_id(secret: &str) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let tag = grant_tag(secret, &id);
+        format!("{id}.{tag}")
+    }
+
+    fn grant_tag(secret: &str, id: &str) -> String {
+        hash_token(secret, &format!("oidc-grant-id:{id}"))
+    }
+
+    fn grant_is_ours(secret: &str, grant: &str) -> bool {
+        grant
+            .split_once('.')
+            .is_some_and(|(id, tag)| grant_tag(secret, id) == tag)
+    }
+
+    /// The key a rotated refresh token's successor is sealed with:
+    /// derived from the presented (old) refresh token, which the store
+    /// holds only as a hash, so only its holder can open the successor.
+    fn successor_key(secret: &str, refresh_token: &str) -> String {
+        hash_token(secret, &format!("oidc-refresh-successor:{refresh_token}"))
     }
 }
 pub mod anonymous {
@@ -15995,8 +16353,9 @@ pub mod organizations {
         /// server's keys and issuer, the **default audience**, expiry, the
         /// session it was minted from still active), and the token must
         /// name a **registered first-party client** (enabled, and
-        /// registered with `skip_consent`: the person signed in to the
-        /// issuer's own app, they granted no third party anything) and
+        /// registered with `first_party`: the issuer's own app, which the
+        /// person signed in to and granted no third party anything;
+        /// `skip_consent` alone grants nothing here) and
         /// carry the **`openid`** scope. An id token (its audience is the
         /// client) or a JWT minted outside the code flow (no client) is
         /// refused.
@@ -16025,7 +16384,7 @@ pub mod organizations {
                 .oidc
                 .clients
                 .iter()
-                .any(|c| c.client_id == client_id && !c.disabled && c.skip_consent);
+                .any(|c| c.client_id == client_id && !c.disabled && c.first_party);
             if !first_party {
                 return Err(AuthFlowError::InvalidCredentials);
             }

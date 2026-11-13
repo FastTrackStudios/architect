@@ -98,7 +98,21 @@ pub struct OidcClientConfig {
     pub redirect_uris: Vec<String>,
     pub scopes: Vec<String>,
     pub public_client: bool,
+    /// Skip the consent screen. A convenience only: it grants nothing
+    /// (see [`Self::first_party`]).
     pub skip_consent: bool,
+    /// The issuer's own app (the Architect web app): its OIDC access
+    /// tokens are taken in place of a session at `whoami` and
+    /// `list_organizations`, and nowhere else. Default `false`; set it
+    /// only on a client the issuer's operator ships.
+    pub first_party: bool,
+    /// Its refresh tokens are single use (RFC 9700 4.14.2): each refresh
+    /// answers the next one, the old one presented again within a few
+    /// seconds answers the same next one, and later revokes the sign-in.
+    /// Takes effect on a public client only. Default `false`: a client
+    /// that treats any refused refresh as a sign-out (Task's `task`)
+    /// keeps reusable refresh tokens.
+    pub rotate_refresh_tokens: bool,
     pub disabled: bool,
 }
 

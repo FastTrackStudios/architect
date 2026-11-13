@@ -59,6 +59,13 @@ use super::service::node::NodeHttpClient;
 /// (`Config::lane_recheck_secs`; this is its default).
 pub const RECHECK: Duration = Duration::from_secs(30);
 
+/// How long an open live note outlives an issuer that cannot be reached.
+///
+/// Counted from the last check the issuer answered
+/// (`Config::lane_issuer_grace_secs`; this is its default). Past it the
+/// session ends. A new call is never admitted on an old answer.
+pub const ISSUER_GRACE: Duration = Duration::from_secs(300);
+
 /// What each role of the org may do on this node, org-relative: the
 /// gate's rules for the enrolment lane and the documents' for the
 /// devices enrolled in it.
@@ -106,6 +113,9 @@ pub struct OrgLane {
     pub members: Members,
     pub engine: Arc<ConfinedEngine>,
     gate: Arc<PermissionsGate>,
+    /// The gate's sessions resolver, which a live note's watch also asks
+    /// (it tells a refusal from an issuer it cannot reach).
+    sessions: Arc<IssuerSessions>,
     router: LayerRouter,
     issuer: IssuerLane,
     /// The vaults' live notes (`DocSync`), added per connection: each
@@ -113,6 +123,7 @@ pub struct OrgLane {
     vaults: Option<(crdt::DocRegistry, super::VaultCatalog)>,
     shares: bool,
     recheck: Duration,
+    issuer_grace: Duration,
     /// Browser origins besides the node's own that may open the lane.
     origins: Arc<[String]>,
 }
@@ -130,30 +141,35 @@ impl OrgLane {
             device_enrolment_service_descriptor(),
             DeviceEnrolmentDispatcher::new(EnrolmentHost::new(admission.clone(), members.clone())),
         );
-        let gate = gate(&engine, &members, &issuer, false, false, RECHECK);
+        let sessions = Arc::new(IssuerSessions::new(issuer.clone()).with_ttl(RECHECK));
+        let gate = gate(&engine, &members, &issuer, &sessions, false, false, RECHECK);
         Self {
             org,
             members,
             engine,
             gate,
+            sessions,
             router,
             issuer,
             vaults: None,
             shares: false,
             recheck: RECHECK,
+            issuer_grace: ISSUER_GRACE,
             origins: Arc::from(Vec::new()),
         }
     }
 
-    fn make_gate(&self) -> Arc<PermissionsGate> {
-        gate(
+    fn rebuild_gate(&mut self) {
+        self.sessions = Arc::new(IssuerSessions::new(self.issuer.clone()).with_ttl(self.recheck));
+        self.gate = gate(
             &self.engine,
             &self.members,
             &self.issuer,
+            &self.sessions,
             self.vaults.is_some(),
             self.shares,
             self.recheck,
-        )
+        );
     }
 
     /// Trust a resolved bearer for `every` (default [`RECHECK`]) and check
@@ -162,7 +178,17 @@ impl OrgLane {
     #[must_use]
     pub fn with_recheck(mut self, every: Duration) -> Self {
         self.recheck = every.max(Duration::from_millis(100));
-        self.gate = self.make_gate();
+        self.rebuild_gate();
+        self
+    }
+
+    /// Keep an open live note for `grace` (default [`ISSUER_GRACE`]) after
+    /// the issuer last answered for its bearer, while the issuer cannot be
+    /// reached; then end it. A refusal ends it at once, and a new call is
+    /// refused while the issuer is unreachable.
+    #[must_use]
+    pub const fn with_issuer_grace(mut self, grace: Duration) -> Self {
+        self.issuer_grace = grace;
         self
     }
 
@@ -176,7 +202,7 @@ impl OrgLane {
             architect_spaces::ShareLinksDispatcher::new(super::shares::SharesLane(shares)),
         );
         self.shares = true;
-        self.gate = self.make_gate();
+        self.rebuild_gate();
         self
     }
 
@@ -192,7 +218,7 @@ impl OrgLane {
     ) -> Self {
         self.router = self.router.merge_router(notes);
         self.vaults = Some((registry, catalog));
-        self.gate = self.make_gate();
+        self.rebuild_gate();
         self
     }
 
@@ -204,9 +230,9 @@ impl OrgLane {
         self
     }
 
-    /// The lane's services for one connection, whose bearer is `bearer`:
-    /// its live notes watch that bearer ([`VaultSync`]).
-    fn connection_router(&self, bearer: Option<&str>) -> LayerRouter {
+    /// The lane's services for one connection: each live note watches the
+    /// bearer its own call was admitted with ([`VaultSync`]).
+    fn connection_router(&self) -> LayerRouter {
         let Some((registry, catalog)) = &self.vaults else {
             return self.router.clone();
         };
@@ -215,10 +241,7 @@ impl OrgLane {
             crdt::sync::DocSyncDispatcher::new(VaultSync {
                 registry: registry.clone(),
                 catalog: catalog.clone(),
-                watch: bearer.map(|bearer| Watch {
-                    bearer: bearer.to_owned(),
-                    lane: self.clone(),
-                }),
+                lane: self.clone(),
             }),
         )
     }
@@ -255,7 +278,7 @@ impl OrgLane {
                 }
                 Ok(PermissionsGate::wrap_shared_with_bearer(
                     Arc::clone(&lane.gate),
-                    lane.connection_router(head.bearer()),
+                    lane.connection_router(),
                     head.bearer().map(str::to_owned),
                 )
                 .scoped(lane.org.id.clone()))
@@ -303,12 +326,13 @@ fn gate(
     engine: &Arc<ConfinedEngine>,
     members: &Members,
     issuer: &IssuerLane,
+    sessions: &Arc<IssuerSessions>,
     vaults: bool,
     shares: bool,
     recheck: Duration,
 ) -> Arc<PermissionsGate> {
     let identity = MembersResolver::new(
-        IssuerSessions::new(issuer.clone()).with_ttl(recheck),
+        SharedSessions(Arc::clone(sessions)),
         IssuerOrgs(issuer.clone()),
         members.clone(),
     )
@@ -338,37 +362,71 @@ fn gate(
 /// name), then the registry serves the session.
 ///
 /// The gate admits a session once, when it attaches; the session is then
-/// one call held open for as long as the note is. So it `watch`es the
-/// connection's bearer: every [`OrgLane::with_recheck`] interval the bearer
-/// is resolved again (the issuer asked once the cache has run out), and
-/// once it no longer opens the note (signed out, its grant revoked,
-/// expired, no longer a member) the session ends. A connection with no
-/// bearer of its own has nothing to watch: its calls carried theirs.
+/// one call held open for as long as the note is. So it watches the
+/// credential that call was admitted with
+/// ([`architect::permissions_gate::caller_bearer`]: the call's own
+/// `authorization`, else the connection's bearer), whichever way it came:
+/// every [`OrgLane::with_recheck`] interval it is resolved again (the
+/// issuer asked once the cache has run out), and once it no longer opens
+/// the note (signed out, its grant revoked, expired, no longer a member)
+/// the session ends. A session admitted with no credential ends at once:
+/// an anonymous caller opens no note.
 #[derive(Clone)]
 struct VaultSync {
     registry: crdt::DocRegistry,
     catalog: super::VaultCatalog,
-    watch: Option<Watch>,
-}
-
-#[derive(Clone)]
-struct Watch {
-    bearer: String,
     lane: OrgLane,
 }
 
-impl Watch {
-    /// Returns once the bearer no longer opens `doc_id`.
-    async fn until_refused(&self, doc_id: Uuid) {
-        let identity = self.lane.gate.identity_resolver();
+/// Whether to keep a live note after one re-check of its bearer.
+#[derive(Debug, PartialEq, Eq)]
+enum Recheck {
+    Keep,
+    End,
+}
+
+impl OrgLane {
+    /// Returns once `bearer` no longer opens `doc_id` (at once without
+    /// one). An issuer that cannot be reached keeps the session until
+    /// [`Self::with_issuer_grace`] after it last answered.
+    async fn watch(&self, bearer: Option<&str>, doc_id: Uuid) {
+        let Some(bearer) = bearer.filter(|b| !b.is_empty()) else {
+            tracing::info!(%doc_id, "org lane: a live note with no credential; its session ends");
+            return;
+        };
+        let identity = self.gate.identity_resolver();
+        let mut answered = Instant::now();
         loop {
-            tokio::time::sleep(self.lane.recheck).await;
-            let who = identity.resolve(Some(&self.bearer)).await;
-            if !self.lane.opens(&who, doc_id) {
+            tokio::time::sleep(self.recheck).await;
+            let checked = self.sessions.check(bearer).await;
+            let verdict = match checked {
+                Checked::User(_) => {
+                    // Membership too (the issuer's org list), then the note.
+                    let who = identity.resolve(Some(bearer)).await;
+                    if self.opens(&who, doc_id) {
+                        answered = Instant::now();
+                        Recheck::Keep
+                    } else {
+                        Recheck::End
+                    }
+                }
+                other => after_failed_check(&other, answered.elapsed(), self.issuer_grace),
+            };
+            if verdict == Recheck::End {
                 tracing::info!(%doc_id, "org lane: a live note's sign-in ended; its session ends");
                 return;
             }
         }
+    }
+}
+
+/// A re-check the issuer did not answer with a person: refused, the
+/// session ends; unreachable, it is kept while the last answer is younger
+/// than `grace`.
+fn after_failed_check(checked: &Checked, since_answered: Duration, grace: Duration) -> Recheck {
+    match checked {
+        Checked::Unreachable if since_answered < grace => Recheck::Keep,
+        _ => Recheck::End,
     }
 }
 
@@ -380,6 +438,8 @@ impl crdt::sync::DocSync for VaultSync {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<crdt::sync::SyncDown>,
     ) -> Result<(), crdt::sync::SyncError> {
+        // Read before the first await: the call's task-local.
+        let bearer = architect::permissions_gate::caller_bearer();
         let held = self
             .catalog
             .notes()
@@ -391,12 +451,9 @@ impl crdt::sync::DocSync for VaultSync {
             name: at.name,
         })?;
         let session = crdt::sync::DocSync::sync(&self.registry, doc_id, from, up, down);
-        let Some(watch) = &self.watch else {
-            return session.await;
-        };
         tokio::select! {
             ended = session => ended,
-            () = watch.until_refused(doc_id) => Err(crdt::sync::SyncError::Internal(
+            () = self.lane.watch(bearer.as_deref(), doc_id) => Err(crdt::sync::SyncError::Internal(
                 "the sign-in ended: sign in again".to_owned(),
             )),
         }
@@ -405,8 +462,34 @@ impl crdt::sync::DocSync for VaultSync {
 
 #[cfg(test)]
 mod tests {
-    use super::origin_allowed;
+    use super::{Checked, Recheck, after_failed_check, origin_allowed};
     use architect::http::axum::http::HeaderMap;
+    use std::time::Duration;
+
+    /// N4: an issuer that cannot be reached keeps a live note for the
+    /// grace after its last answer, then ends it; a refusal ends it at
+    /// once, however recent the last answer.
+    #[test]
+    fn an_unreachable_issuer_keeps_a_live_note_for_the_grace_only() {
+        let grace = Duration::from_secs(300);
+        let at = |secs| Duration::from_secs(secs);
+        assert_eq!(
+            after_failed_check(&Checked::Unreachable, at(10), grace),
+            Recheck::Keep
+        );
+        assert_eq!(
+            after_failed_check(&Checked::Unreachable, at(299), grace),
+            Recheck::Keep
+        );
+        assert_eq!(
+            after_failed_check(&Checked::Unreachable, at(300), grace),
+            Recheck::End
+        );
+        assert_eq!(
+            after_failed_check(&Checked::Refused, at(0), grace),
+            Recheck::End
+        );
+    }
 
     fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
         let mut h = HeaderMap::new();
@@ -491,13 +574,25 @@ impl IssuerLane {
 /// gate's caller.
 ///
 /// `Principal::User` of the person it is (the issuer's `whoami`), cached
-/// for [`RECHECK`] (`with_ttl`); anything else is anonymous. A bearer
+/// for [`RECHECK`] (`with_ttl`); anything else is anonymous, including an
+/// issuer that cannot be reached (a new call fails closed). A bearer
 /// signed out at the issuer keeps working here until its cache entry runs
 /// out.
 pub struct IssuerSessions {
     issuer: IssuerLane,
     ttl: Duration,
     seen: Mutex<HashMap<String, (Principal, Instant)>>,
+}
+
+/// What the issuer said of a bearer.
+#[derive(Debug)]
+pub(crate) enum Checked {
+    /// This person (answered now, or within the cache's lifetime).
+    User(Principal),
+    /// The issuer answered: not a sign-in it honours.
+    Refused,
+    /// No answer: the issuer could not be reached, or the call broke.
+    Unreachable,
 }
 
 impl IssuerSessions {
@@ -523,6 +618,50 @@ impl IssuerSessions {
             .filter(|(_, at)| at.elapsed() < self.ttl)
             .map(|(who, _)| who.clone())
     }
+
+    /// Asks the issuer who `token` is (or the cache, while fresh). The
+    /// token is a credential: nothing here logs it.
+    pub(crate) async fn check(&self, token: &str) -> Checked {
+        if let Some(who) = self.cached(token) {
+            return Checked::User(who);
+        }
+        let answer = match self.issuer.client::<auth_proto::AuthServiceClient>().await {
+            Ok(auth) => auth.whoami(token.to_owned()).await.map_err(|e| {
+                // A refusal is the issuer's answer; a broken or timed-out
+                // call is no answer at all.
+                let refused = matches!(
+                    e,
+                    vox::VoxError::User(_)
+                        | vox::VoxError::InvalidPayload(_)
+                        | vox::VoxError::UnknownMethod
+                );
+                (refused, e.to_string())
+            }),
+            Err(e) => Err((false, e)),
+        };
+        match answer {
+            Ok(user) => {
+                let who = Principal::User {
+                    user_id: user.id.to_string(),
+                };
+                {
+                    let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+                    seen.retain(|_, (_, at)| at.elapsed() < self.ttl);
+                    seen.insert(token.to_owned(), (who.clone(), Instant::now()));
+                }
+                Checked::User(who)
+            }
+            Err((true, why)) => {
+                tracing::debug!(%why, "org lane: a bearer the issuer refused");
+                Checked::Refused
+            }
+            Err((false, why)) => {
+                tracing::debug!(%why, "org lane: the issuer did not answer");
+                self.issuer.evict();
+                Checked::Unreachable
+            }
+        }
+    }
 }
 
 impl IdentityResolver for IssuerSessions {
@@ -531,33 +670,21 @@ impl IdentityResolver for IssuerSessions {
             let Some(token) = bearer_token.filter(|t| !t.is_empty()) else {
                 return Principal::Anonymous;
             };
-            if let Some(who) = self.cached(token) {
-                return who;
+            match self.check(token).await {
+                Checked::User(who) => who,
+                Checked::Refused | Checked::Unreachable => Principal::Anonymous,
             }
-            let answer = match self.issuer.client::<auth_proto::AuthServiceClient>().await {
-                Ok(auth) => auth
-                    .whoami(token.to_owned())
-                    .await
-                    .map_err(|e| e.to_string()),
-                Err(e) => Err(e),
-            };
-            let who = match answer {
-                Ok(user) => Principal::User {
-                    user_id: user.id.to_string(),
-                },
-                Err(why) => {
-                    tracing::debug!(%why, "org lane: a session the issuer did not resolve");
-                    if why.contains("connect") || why.contains("closed") {
-                        self.issuer.evict();
-                    }
-                    return Principal::Anonymous;
-                }
-            };
-            let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-            seen.retain(|_, (_, at)| at.elapsed() < self.ttl);
-            seen.insert(token.to_owned(), (who.clone(), Instant::now()));
-            who
         })
+    }
+}
+
+/// The lane's one [`IssuerSessions`] as the gate's resolver, shared with
+/// its live notes' watches.
+struct SharedSessions(Arc<IssuerSessions>);
+
+impl IdentityResolver for SharedSessions {
+    fn resolve<'a>(&'a self, bearer_token: Option<&'a str>) -> BoxIdentityFuture<'a> {
+        self.0.resolve(bearer_token)
     }
 }
 

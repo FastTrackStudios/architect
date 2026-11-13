@@ -19,6 +19,7 @@
 //! | `ARCHITECT_ORG` | `org` | none | the org (slug) it offers the account when the account shares none yet |
 //! | `ARCHITECT_HOST_ORG` | `host_org` | none | an issuer org (slug) of the session's: the node serves its enrolment lane, `/org/{slug}/vox`, and its vaults are that org's |
 //! | `ARCHITECT_LANE_RECHECK_SECS` | `lane_recheck_secs` | `30` | on the org lane, how long a person's bearer is trusted before the issuer is asked again, and how often an open note's live session checks it still is: signed out, expired or removed from the org, the session ends within about twice this |
+//! | `ARCHITECT_LANE_ISSUER_GRACE_SECS` | `lane_issuer_grace_secs` | `300` | on the org lane, how long an open note's live session is kept while the issuer cannot be reached, counted from the issuer's last answer for its bearer; then it ends (a refusal ends it at once, and new calls are refused while the issuer is unreachable) |
 //! | `ARCHITECT_LANE_ORIGINS` | `lane_origins` | none | `https://app.example,…`: browser origins besides the node's own that may open its org lane (a WebSocket upgrade from any other `Origin` is refused; one with no `Origin`, a native client's, is let through to the bearer check) |
 //! | `ARCHITECT_ENROL_AT` | `enrol_at` | none | another node's HTTP origin: this node enrols itself in `enrol_org` there, once |
 //! | `ARCHITECT_ENROL_ORG` | `enrol_org` | none | the issuer org (slug) to enrol in there; its vaults are that org's |
@@ -100,6 +101,7 @@ pub struct Config {
     pub sweep_secs: u64,
     pub live_max: usize,
     pub lane_recheck_secs: u64,
+    pub lane_issuer_grace_secs: u64,
     pub lane_origins: Vec<String>,
     pub files_dir: Option<PathBuf>,
     pub files_hold: bool,
@@ -242,6 +244,7 @@ impl Default for Config {
             sweep_secs: 30,
             live_max: 256,
             lane_recheck_secs: 30,
+            lane_issuer_grace_secs: 300,
             lane_origins: Vec::new(),
             files_dir: None,
             files_hold: false,
@@ -415,6 +418,12 @@ impl Config {
         if let Some(v) = get("ARCHITECT_LANE_RECHECK_SECS") {
             self.lane_recheck_secs = v.trim().parse().map_err(|e| ConfigError::Env {
                 var: "ARCHITECT_LANE_RECHECK_SECS",
+                why: format!("{e}"),
+            })?;
+        }
+        if let Some(v) = get("ARCHITECT_LANE_ISSUER_GRACE_SECS") {
+            self.lane_issuer_grace_secs = v.trim().parse().map_err(|e| ConfigError::Env {
+                var: "ARCHITECT_LANE_ISSUER_GRACE_SECS",
                 why: format!("{e}"),
             })?;
         }

@@ -346,6 +346,7 @@ pub async fn start_with_shell(
         (Some(org), Some(issuer)) => Some(
             org::OrgLane::new(org.clone(), &admission, issuer)
                 .with_recheck(Duration::from_secs(config.lane_recheck_secs.max(1)))
+                .with_issuer_grace(Duration::from_secs(config.lane_issuer_grace_secs))
                 .with_origins(config.lane_origins.clone()),
         ),
         _ => None,

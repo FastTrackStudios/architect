@@ -247,6 +247,13 @@ struct OidcClientJson {
     /// granting a third party access, they are just signing in.
     #[serde(default)]
     skip_consent: bool,
+    /// The issuer's own app: its access tokens answer `whoami` and
+    /// `list_organizations`. Never set it for a third party.
+    #[serde(default)]
+    first_party: bool,
+    /// Single-use refresh tokens (public clients only).
+    #[serde(default)]
+    rotate_refresh_tokens: bool,
     #[serde(default)]
     disabled: bool,
 }
@@ -266,6 +273,8 @@ impl From<OidcClientJson> for OidcClientConfig {
             scopes: value.scopes,
             public_client: value.public_client,
             skip_consent: value.skip_consent,
+            first_party: value.first_party,
+            rotate_refresh_tokens: value.rotate_refresh_tokens,
             disabled: value.disabled,
         }
     }

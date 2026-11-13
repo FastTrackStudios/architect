@@ -83,7 +83,8 @@ auth-proto = { workspace = true, features = ["vox"] }
 # lanes that move those between nodes.
 crdt = { workspace = true, features = ["vox"] }
 vault-live = { workspace = true }
-vault-proto = { workspace = true, features = ["vox"] }
+# `actions`: `Notes` on the node's Action List (`NOTES_*`).
+vault-proto = { workspace = true, features = ["vox", "actions"] }
 vault-collab = { workspace = true }
 # Sites (#364): a vault published, rebuilt when it changes.
 architect-sites = { workspace = true }
@@ -129,6 +130,8 @@ architect-settings = { workspace = true }
 architect-workspace = { workspace = true, features = ["home"] }
 futures = "0.3"
 tempfile = "3"
+# tests/node.rs: the node's logs captured at TRACE, with its own filter.
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

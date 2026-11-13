@@ -37,16 +37,21 @@ The token endpoint MUST issue refresh tokens only for `offline_access` and
 MUST accept valid refresh tokens for access and ID token renewal.
 
 r[auth.oidc.refresh-rotation]
-A public client's refresh token MUST be single use: each refresh answers a new
-one. The old one presented again MUST be refused; past a short grace (two
-tabs renewing together) its whole grant MUST be revoked. A confidential
-client's refresh tokens are not rotated.
+A public client registered with `rotate_refresh_tokens` MUST get single-use
+refresh tokens: each refresh answers a new one. Using a refresh token MUST be
+atomic in the storage: of concurrent uses exactly one consumes it. Every other
+use within a short grace (two tabs renewing together, a lost response) MUST
+answer the same successor, so a sign-in's chain never forks; a use after the
+grace MUST revoke the whole sign-in and be refused. A revoked or expired
+sign-in MUST NOT be renewed. Other clients' refresh tokens are not rotated.
 
 r[auth.oidc.revocation]
-The revocation endpoint (`/oauth2/revoke`, RFC 7009) MUST end the grant of the
-refresh or access token it is given, when the token was issued to the calling
-client: no refresh token of the grant is accepted and its access tokens are
-refused where the issuer takes them in place of a session. The issuer session
+The revocation endpoint (`/oauth2/revoke`, RFC 7009) MUST end the sign-in
+(grant) of the refresh or access token it is given, when the token was issued
+to the calling client, by one revocation mark that every use of the sign-in's
+tokens checks, however many it minted: no refresh token of the sign-in is
+accepted, and its access tokens are refused where the issuer takes them in
+place of a session and at `/oauth2/userinfo`. The issuer session
 the person signed in with MUST stay. An unknown or already revoked token MUST
 NOT be an error.
 

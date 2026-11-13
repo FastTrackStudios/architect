@@ -249,6 +249,18 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
 
     async fn delete_verification(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
 
+    /// Replaces verification `id`'s value with `new_value_hash` only if
+    /// it is still `expected_value_hash`, atomically: of callers racing
+    /// with the same expected value, exactly one gets `true`. `false` when
+    /// the value changed or the record is gone. Single-use tokens (a
+    /// rotating OIDC refresh token) are consumed with it.
+    async fn swap_verification_value(
+        &self,
+        id: uuid::Uuid,
+        expected_value_hash: &str,
+        new_value_hash: &str,
+    ) -> Result<bool, AuthFlowError>;
+
     async fn mark_email_verified(&self, user_id: uuid::Uuid) -> Result<(), AuthFlowError>;
 
     async fn create_api_key(&self, input: AuthApiKeyCreate) -> Result<AuthApiKey, AuthFlowError>;

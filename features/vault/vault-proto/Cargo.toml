@@ -27,15 +27,14 @@ vox-types = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
 fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
 
-# `notes::Notes` natively is an Action List service too (`NOTES_*`, the
-# node's); in a browser it is the client alone.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-architect = { workspace = true, features = ["action-list", "dispatch-tokio"] }
-
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
+# `notes::Notes` as an Action List service too (`NOTES_*`): the node's
+# (`apps/desktop`), natively. Off everywhere else, so a crate that reads
+# the vault's types does not pull in the native dispatcher.
+actions = ["vox", "architect/action-list", "architect/dispatch-tokio"]
 fake = ["dep:fake", "architect/fake"]
 full = ["vox", "server", "fake"]
 

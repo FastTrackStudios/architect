@@ -36,10 +36,11 @@ fallback keys by key id.
 r[auth.jwt.first-party-access]
 The issuer MUST accept its own OIDC access token in place of a session token
 at `whoami` and `list_organizations` only, and only when it verifies with
-the default audience, names an enabled first-party client (registered with
-`skip_consent`), carries the `openid` scope, is an access token
-(`token_use: "access"`, which only the code flow sets) and belongs to a grant
-still in force (not revoked). The refresh, issue, sign-out and device calls
+the default audience, names an enabled client registered `first_party`
+(`skip_consent` alone MUST NOT be enough: it is a consent convenience),
+carries the `openid` scope, is an access token (`token_use: "access"`, which
+only the code flow sets) and belongs to a sign-in (grant) the issuer made
+and has not revoked. The refresh, issue, sign-out and device calls
 MUST take a session token alone. `issue_jwt` MUST refuse the code flow's
 claims (`client_id`, `token_use`, `grant`) and MUST NOT mint a token that
 outlives its session.

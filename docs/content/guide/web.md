@@ -74,10 +74,12 @@ desktop app uses the same client id, over the device grant
 3. Before each start the session is renewed with its refresh token when it
    is about to run out (`oidc::refresh_if_needed`). A token the issuer
    refuses is renewed once, then the person signs in again. The refresh
-   token is single use: each renewal answers a new one, and the old one
-   presented again later revokes the whole sign-in (a copy was taken). Two
-   tabs renewing at the same moment are allowed for a few seconds: the
-   one that loses picks up the other's new session.
+   token is single use (the client `architect` is registered with
+   `rotate_refresh_tokens`): each renewal answers a new one, and the old
+   one presented again more than 10 seconds later revokes the whole
+   sign-in (a copy was taken). Within those seconds (two tabs renewing at
+   once, a response lost on the way) it answers the same new one, so the
+   sign-in never splits in two.
 4. **Sign out** revokes the sign-in at the issuer (`/oauth2/revoke`,
    RFC 7009; `apps/web/src/browser.rs` `revoke`), then forgets it here. Its
    refresh token mints nothing more and its access tokens are refused
@@ -132,8 +134,9 @@ file, and another's typing shows as it comes.
 - **The bearer** is the issuer's short-lived access token: the web app is
   the public client `architect`, which gets no issuer session. The node
   hands it to the issuer's `whoami` and org list, which take a
-  first-party client's access token (one registered with `skip_consent`,
-  with `openid`, the default audience) as well as a session; the node
+  first-party client's access token (one registered `first_party`, with
+  `openid`, the default audience; `skip_consent` alone is not enough) as
+  well as a session; the node
   verifies no JWT itself. Before the token runs out the app renews it and
   dials the lane again (`apps/web/src/browser.rs` `keep_lane_signed_in`,
   `apps/web/src/app/org.rs` `OrgVaults::redial`); every open note's
@@ -143,7 +146,12 @@ file, and another's typing shows as it comes.
   `IssuerSessions`), then asks the issuer again. An open note's live
   session checks its bearer as often and ends once it is refused: signed
   out, revoked, expired or no longer a member, it ends within about a
-  minute, not when the connection happens to drop (`VaultSync`).
+  minute, not when the connection happens to drop (`VaultSync`). The
+  bearer checked is the one the session's call was admitted with, sent on
+  the connection or with the call. When the issuer cannot be reached an
+  open note is kept for 5 minutes after its last good check
+  (`lane_issuer_grace_secs`, `ARCHITECT_LANE_ISSUER_GRACE_SECS`), then
+  ends; a new call is refused meanwhile.
 - **Only the app's own origin opens the lane from a browser.** A WebSocket
   upgrade with any other `Origin` is refused (403); one without `Origin`
   (another node, the desktop app) goes on to the bearer check. A web app
@@ -173,8 +181,12 @@ file, and another's typing shows as it comes.
   `Sec-WebSocket-Protocol` unless told not to (Caddy redacts
   `Authorization` and cookies by default, not this header). Delete or
   redact that request header in the proxy's log format. The node itself
-  never logs it (`crates/architect/tests/host_mounts.rs`
-  `the_host_never_logs_a_browser_bearer`).
+  never logs it, not even at `RUST_LOG=trace`: every host's log filter
+  holds the WebSocket library, which dumps frames, at INFO
+  (`crates/architect/src/host.rs` `log_filter`;
+  `crates/architect/tests/host_mounts.rs`
+  `the_host_never_logs_a_browser_bearer`, `apps/desktop/tests/node.rs`
+  `the_node_never_logs_a_browser_bearer_even_at_trace`).
 
 Nothing is kept in the browser between visits: a reload lists and reads
 again (no IndexedDB or OPFS copy yet), and with the node out of reach the

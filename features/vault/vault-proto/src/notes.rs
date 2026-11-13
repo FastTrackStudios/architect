@@ -40,18 +40,20 @@ impl From<VaultSyncError> for NotesError {
     }
 }
 
-/// The notes of the vaults this node holds. Its actions (`NOTES_*`, on the
-/// node's Action List) natively; a browser has the client alone.
-#[cfg_attr(not(target_arch = "wasm32"), architect::service(actions))]
-#[cfg_attr(target_arch = "wasm32", architect::service)]
-// On wasm the trait is the client's alone: nothing implements it there.
-#[cfg_attr(target_arch = "wasm32", allow(async_fn_in_trait))]
+/// The notes of the vaults this node holds. With the `actions` feature
+/// (the node's) its actions too (`NOTES_*`, on the node's Action List);
+/// otherwise the service and its client alone.
+#[cfg_attr(feature = "actions", architect::service(actions))]
+#[cfg_attr(not(feature = "actions"), architect::service)]
+// Without `actions` the trait is mostly a client's: nothing implements it
+// outside the node.
+#[cfg_attr(not(feature = "actions"), allow(async_fn_in_trait))]
 pub trait Notes {
     /// Every note this node holds.
-    #[cfg_attr(not(target_arch = "wasm32"), action(effect = read_only))]
+    #[cfg_attr(feature = "actions", action(effect = read_only))]
     async fn list(&self) -> Result<Vec<NoteRef>, NotesError>;
     /// A note's markdown.
-    #[cfg_attr(not(target_arch = "wasm32"), action(effect = read_only))]
+    #[cfg_attr(feature = "actions", action(effect = read_only))]
     async fn read(&self, vault: String, path: String) -> Result<String, NotesError>;
     /// Write a note's markdown; it reaches every peer on the next sweep.
     async fn write(&self, vault: String, path: String, text: String) -> Result<(), NotesError>;
