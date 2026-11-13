@@ -301,6 +301,7 @@ jsonwebtoken = "9"
 rand = "0.8"
 sha1 = "0.10"
 sha2 = "0.10"
+subtle = "2.6"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 # WebAuthn. `danger-allow-state-serialisation` lets the challenge state be
 # held in the verification table between the two halves of a ceremony —

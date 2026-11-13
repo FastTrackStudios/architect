@@ -13996,7 +13996,7 @@ pub mod oidc_provider {
     fn grant_is_ours(secret: &str, grant: &str) -> bool {
         grant
             .split_once('.')
-            .is_some_and(|(id, tag)| grant_tag(secret, id) == tag)
+            .is_some_and(|(id, tag)| crate::crypto::tags_match(&grant_tag(secret, id), tag))
     }
 
     /// The key a rotated refresh token's successor is sealed with:

@@ -126,6 +126,15 @@ pub fn hmac_token(secret: &str, message: &str) -> String {
     URL_SAFE_NO_PAD.encode(tag)
 }
 
+/// Whether two tags (an [`hmac_token`] and one presented) are the same, in
+/// time that does not depend on where they first differ. Their lengths are
+/// not secret.
+#[must_use]
+pub(crate) fn tags_match(ours: &str, presented: &str) -> bool {
+    use subtle::ConstantTimeEq as _;
+    bool::from(ours.as_bytes().ct_eq(presented.as_bytes()))
+}
+
 // r[impl auth.oauth.token-encryption]
 // r[impl auth.twofactor.secret-encryption]
 // r[impl auth.core.secret-aead]
@@ -305,7 +314,7 @@ mod tests {
     use super::{
         SecretKeyRing, decrypt_secret, decrypt_secret_with_keyring, encrypt_secret,
         encrypt_secret_with_keyring, generate_token, hash_password, hash_token, hmac_token,
-        verify_password,
+        tags_match, verify_password,
     };
 
     /// RFC 4231 test case 2 (its tag
@@ -317,6 +326,20 @@ mod tests {
             hmac_token("Jefe", "what do ya want for nothing?"),
             "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM"
         );
+    }
+
+    /// Grant tags compare whole (`subtle`), by value: equal matches; a
+    /// change anywhere, a prefix or an empty tag does not.
+    #[test]
+    fn tags_match_only_the_same_tag() {
+        let tag = hmac_token("secret", "oidc-grant-id:abc");
+        assert!(tags_match(&tag, &tag.clone()));
+        let mut last = tag.clone();
+        last.pop();
+        last.push(if tag.ends_with('A') { 'B' } else { 'A' });
+        assert!(!tags_match(&tag, &last));
+        assert!(!tags_match(&tag, &tag[..tag.len() - 1]));
+        assert!(!tags_match(&tag, ""));
     }
 
     // r[verify auth.email.password-hash]
