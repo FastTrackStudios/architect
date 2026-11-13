@@ -15,7 +15,7 @@
 //   (an image as a `data:` URL, `.lrc` as text), nothing outside the link;
 // - with `documents` alone: the text, no files;
 // - declaring nothing: no note at all;
-// - the build's `_note.json` is never a file of the link.
+// - the build's `_note.json` is never a file of the link, by any spelling.
 //
 // Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the PATH), in a
 // mount namespace whose runtime dir and /run/pipewire are empty (`unshare
@@ -275,8 +275,13 @@ async function asGuest(reads, shot) {
     if ((got.r?.files || []).length) await sleep(500);
     if (SHOTS && shot) { mkdirSync(SHOTS, { recursive: true }); await b.shot(join(SHOTS, shot)); }
     const page = await b.eval(`JSON.stringify({ files: document.querySelector('[data-testid=guest-note]').dataset.files, text: document.querySelector('[data-testid=guest-note]').dataset.text, title: (document.querySelector('[data-testid=guest-title]') || {}).textContent })`);
-    const note = await fetch(`${f.origin}/s/${CODE}/set/_note.json`);
-    return { note: got.r, page: JSON.parse(page), noteFile: note.status, proxied: f.proxied };
+    // The build's page data under every spelling a filesystem might fold
+    // to its name (case, `ſ`, trailing dots and spaces): none reaches it.
+    const noteFile = {};
+    for (const name of ['_note.json', '%5Fnote.json', '_NOTE.JSON', '_note.j%C5%BFon', '_note.json.', '_note.json%20', '_note.json::$DATA']) {
+      for (const at of [`/s/${CODE}/set/${name}`, `/s/${CODE}/${name}`]) noteFile[at] = (await fetch(`${f.origin}${at}`)).status;
+    }
+    return { note: got.r, page: JSON.parse(page), noteFile, proxied: f.proxied };
   } finally { await b.close(); f.close(); n.close(); }
 }
 
@@ -296,7 +301,7 @@ test('a guest\'s setlist view is handed its text and the link\'s art and lyrics'
   assert.equal(files['Gig/art/joy.png'].data, `data:image/png;base64,${PNG.toString('base64')}`);
   assert.equal(files['Gig/joy.lrc'].text, '[00:01.00]Joy to the world');
   assert.equal(page.files, '2');
-  assert.equal(noteFile, 404, 'the build\'s _note.json is no file of the link');
+  for (const [at, status] of Object.entries(noteFile)) assert.equal(status, 404, `the build's _note.json is no file of the link: ${at}`);
   // Read through the guest service and the link's own files, same origin.
   assert.ok(proxied.some((p) => p.startsWith(`POST /s/${CODE}/_guest/read`)), proxied.join('\n'));
   assert.ok(proxied.some((p) => p === `GET /s/${CODE}/Gig/art/joy.png`), proxied.join('\n'));

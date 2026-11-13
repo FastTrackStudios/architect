@@ -59,7 +59,8 @@ pub struct Options {
     /// link to one is dropped with its text. Nothing held back is ever on
     /// disk under the site, so no request can reach its bytes there.
     pub hold_back: BTreeSet<String>,
-    /// Write each page's prose as plain blocks too (`<page>/_note.json`,
+    /// Write each page's prose as plain blocks too (`<page>/_note.json`
+    /// in the data folder beside the site, [`crate::data_dir`],
     /// [`crate::plain`]): what a share link's guest reads in the app
     /// (#629). Off by default.
     pub page_data: bool,
@@ -225,7 +226,6 @@ impl Site {
             return Err(SiteError::Missing(opts.vault.clone()));
         }
         let vault = Vault::open(&opts.vault)
-            .map(crate::listing::within_root)
             .map_err(|e| SiteError::Unreadable(opts.vault.clone(), e.to_string()))?;
         let notes: Vec<Note<'_>> = vault
             .pages

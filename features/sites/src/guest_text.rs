@@ -47,28 +47,32 @@ pub fn guest_text(body: &str, resolve: &dyn Fn(&str, bool) -> Target) -> String 
             cuts.push((def.span.clone(), String::new()));
         }
     }
-    // A link being reduced to its words: where it is and the words so far.
-    let mut words: Option<(Range<usize>, String)> = None;
+    // A link being reduced to its words: where it is, the words so far,
+    // and how deep in an image inside it (never its text) the walk is.
+    let mut words: Option<(Range<usize>, String, usize)> = None;
     // Everything before this is already cut.
     let mut cut_to = 0_usize;
     for (event, range) in parser {
-        if range.start < cut_to {
-            continue;
-        }
-        if let Some((_, text)) = words.as_mut() {
+        // Inside a link being reduced, every event is its own, whatever
+        // was cut inside it: the link ends as one cut, its words once.
+        if let Some((at, text, images)) = words.as_mut() {
             match event {
-                Event::Text(t) | Event::Code(t) => text.push_str(&t),
-                Event::SoftBreak | Event::HardBreak => text.push(' '),
+                Event::Start(Tag::Image { .. }) => *images = images.saturating_add(1),
+                Event::End(TagEnd::Image) => *images = images.saturating_sub(1),
+                Event::Text(t) | Event::Code(t) if *images == 0 => text.push_str(&t),
+                Event::SoftBreak | Event::HardBreak if *images == 0 => text.push(' '),
                 Event::End(TagEnd::Link) => {
-                    if let Some((at, text)) = words.take() {
-                        cut_to = at.end;
-                        cuts.push((at, text));
-                    }
+                    let at = at.clone();
+                    let text = one_line(text);
+                    words = None;
+                    cut_to = at.end;
+                    cuts.push((at, text));
                 }
-                // An image inside the words: never its text.
-                Event::Start(Tag::Image { .. }) => cut_to = range.end,
                 _ => {}
             }
+            continue;
+        }
+        if range.start < cut_to {
             continue;
         }
         match event {
@@ -84,7 +88,9 @@ pub fn guest_text(body: &str, resolve: &dyn Fn(&str, bool) -> Target) -> String 
                         cut_to = range.end;
                         cuts.push((range, String::new()));
                     }
-                    Some(Target::Outside | Target::Broken) => words = Some((range, String::new())),
+                    Some(Target::Outside | Target::Broken) => {
+                        words = Some((range, String::new(), 0));
+                    }
                 }
             }
             Event::Start(Tag::Image {
@@ -105,7 +111,31 @@ pub fn guest_text(body: &str, resolve: &dyn Fn(&str, bool) -> Target) -> String 
             _ => {}
         }
     }
+    // A link left open (it never is) is gone whole, never kept as written.
+    if let Some((at, _, _)) = words {
+        cuts.push((at, String::new()));
+    }
     splice(&body, cuts)
+}
+
+/// A link's words on one line, as the page draws them: a wikilink's
+/// text is its source, so a line break in it (and a quote's or list's
+/// marker on the next line) is a space.
+fn one_line(words: &str) -> String {
+    words
+        .lines()
+        .enumerate()
+        .map(|(i, line)| {
+            if i == 0 {
+                line.trim()
+            } else {
+                line.trim_start_matches(|c: char| c == '>' || c.is_whitespace())
+                    .trim()
+            }
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// How `dest` resolves; `None` for a link within the page (`#below`).
@@ -201,5 +231,42 @@ mod tests {
     fn plain_text_is_kept_byte_for_byte() {
         let body = "Verse one\n\nChorus: *joy* to the world\n";
         assert_eq!(guest_text(body, &resolve), body);
+    }
+
+    /// A link reduced to its words comes out once, on one line, however
+    /// it is broken across lines or wrapped around an image; its target
+    /// never.
+    #[test]
+    fn a_reduced_link_comes_out_once_whatever_its_shape() {
+        for (body, want) in [
+            ("a [[Private/Plans\n]] b\n", "a Private/Plans b\n"),
+            ("a [[Private/Plans\r\n]] b\r\n", "a Private/Plans b\r\n"),
+            ("a [[\nPrivate/Plans]] b\n", "a Private/Plans b\n"),
+            ("x\n[[Private/Plans\n]]\ny\n", "x\nPrivate/Plans\ny\n"),
+            ("> a [[Private/Plans\n> ]] b\n", "> a Private/Plans b\n"),
+            ("- a [[Private/Plans\n  ]] b\n", "- a Private/Plans b\n"),
+            ("a [[Private/Plans|the\nplan]] b\n", "a the plan b\n"),
+            ("a [[Private/Plans|the  \nplan]] b\n", "a the plan b\n"),
+            ("a [the\nplan](Private/Plans.md) b\n", "a the plan b\n"),
+            ("a [![x](Art/joy.png)](Private/Plans.md) b\n", "a  b\n"),
+            // Read as an embed whose `[`…`]` holds the rest: gone whole.
+            ("a [![[plans.png]]](Private/Plans.md) b\n", "a [ b\n"),
+            (
+                "a [see ![[plans.png]] it](Private/Plans.md) b\n",
+                "a [see  b\n",
+            ),
+            (
+                "a [see [x](Private/Plans.md) it](Joy) b\n",
+                "a [see x it](Joy) b\n",
+            ),
+        ] {
+            let got = guest_text(body, &resolve);
+            assert_eq!(got, want, "{body:?}");
+            assert!(
+                !got.contains("Plans.md") && !got.contains("plans.png"),
+                "{got:?}"
+            );
+            assert!(got.matches("Plans").count() <= 1, "{got:?}");
+        }
     }
 }

@@ -3657,7 +3657,8 @@ fn setlist_island(reads_note: bool, reads: &[&str]) -> architect_sites::SiteIsla
 
 /// A gig's folder: a setlist that links its song, a note outside the
 /// link and its picture, a comment, art, lyrics, audio, a file over the
-/// cap, and a symlink out of the vault.
+/// cap, a symlink out of the vault and one inside it to the private
+/// picture: no symlink is ever shared.
 fn seed_gig(vault: &Path) {
     touch(
         vault,
@@ -3666,7 +3667,7 @@ fn seed_gig(vault: &Path) {
          1. [[Gig/joy|Joy]]\n2. [[Private/plan|the plan]] and [[Private/plan]]\n\
          %%a private note%%\n<!-- an html note -->\n\n\
          ![[Gig/art/joy.png]]\n\n![[Private/cover.png]]\n\n![[Gig/joy.lrc]]\n\n\
-         ![[Gig/joy.mp3]]\n\n![[Gig/big.png]]\n\n![[Gig/evil.png]]\n",
+         ![[Gig/joy.mp3]]\n\n![[Gig/big.png]]\n\n![[Gig/evil.png]]\n\n![[Gig/inner.png]]\n",
     );
     touch(
         vault,
@@ -3689,6 +3690,7 @@ fn seed_gig(vault: &Path) {
     let outside = vault.parent().unwrap().join("outside.png");
     std::fs::write(&outside, "outside secret").unwrap();
     std::os::unix::fs::symlink(&outside, vault.join("Gig/evil.png")).unwrap();
+    std::os::unix::fs::symlink("../Private/cover.png", vault.join("Gig/inner.png")).unwrap();
 }
 
 /// A link to the gig, its pages built.
@@ -3754,7 +3756,8 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
     }
 
     // Its files: the link's images and lyrics, its own first; never audio,
-    // a file over the cap, one outside the link or out of the vault.
+    // a file over the cap, one outside the link or a symlink, out of the
+    // vault or inside it.
     let paths: Vec<&str> = set.files.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(paths, ["Gig/art/joy.png", "Gig/joy.lrc"], "{:?}", set.files);
     for f in &set.files {
@@ -3762,9 +3765,8 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
         let (status, _, bytes) = get_bytes(&w.url(&f.url)).await;
         assert_eq!(status, StatusCode::OK, "{}", f.url);
         assert_eq!(u64::try_from(bytes.len()).unwrap(), f.size, "{}", f.path);
-        if let Some(sha) = &f.sha256 {
-            assert_eq!(*sha, hex_sha256(&bytes), "{}", f.path);
-        }
+        let sha = f.sha256.as_deref().expect("a guest's file is hashed");
+        assert_eq!(sha, hex_sha256(&bytes), "{}", f.path);
     }
 
     // A note of the link whose type no island reads: its words only.
@@ -3788,6 +3790,7 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
         "./Gig/set.md",
         abs.to_str().unwrap(),
         "Gig/evil.png",
+        "Gig/inner.png",
     ] {
         let read = client
             .read(code.clone(), String::new(), path.to_owned())
@@ -3796,12 +3799,41 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
     }
 
     // The build's guest data is read only through the guest service,
-    // which asks the islands first: never as a file of the link.
+    // which asks the islands first: it is written beside the served
+    // folder, never in it, so no spelling of a URL reaches it, not even
+    // on a filesystem that folds case (`ſ`) or trailing dots and spaces.
+    let served = w.tmp.path().join(format!("host/data/shares/{code}/site"));
+    let data = architect_sites::data_dir(&served);
+    assert!(
+        data.join("set")
+            .join(architect_sites::plain::NOTE_FILE)
+            .is_file(),
+        "{}",
+        data.display()
+    );
+    assert!(!data.starts_with(&served), "{}", data.display());
+    let mut walk = vec![served.clone()];
+    while let Some(dir) = walk.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            assert!(!name.contains("_note"), "{}", entry.path().display());
+            if entry.file_type().unwrap().is_dir() {
+                walk.push(entry.path());
+            }
+        }
+    }
     for path in [
         format!("/s/{code}/set/_note.json"),
         format!("/s/{code}/set/%5Fnote.json"),
         format!("/s/{code}/set/_NOTE.JSON"),
+        format!("/s/{code}/set/_note.j%C5%BFon"),
+        format!("/s/{code}/set/_note.json."),
+        format!("/s/{code}/set/_note.json%20"),
+        format!("/s/{code}/set/_note.json::$DATA"),
         format!("/s/{code}/set/_note.json/"),
+        format!("/s/{code}/_note.json"),
+        format!("/s/{code}/../site.data/set/_note.json"),
+        format!("/s/{code}/%2e%2e/site.data/set/_note.json"),
     ] {
         let (status, body) = raw_get(w.host.http, &path, "127.0.0.1").await;
         assert_eq!(status, 404, "{path}");
@@ -3838,9 +3870,9 @@ async fn a_guests_view_reads_the_shared_text_and_files_and_nothing_past_the_link
         .await
         .unwrap();
     assert!(
-        !listed
-            .iter()
-            .any(|f| f.path.contains("evil") || f.path.starts_with("Private/")),
+        !listed.iter().any(|f| f.path.contains("evil")
+            || f.path.contains("inner")
+            || f.path.starts_with("Private/")),
         "{listed:?}"
     );
     w.host.stop().await;
@@ -4006,7 +4038,9 @@ async fn a_link_serves_nothing_through_a_symlink() {
         )
     };
     assert_eq!(read().await.unwrap().title, "Leak");
-    let note = built.join("leak").join(architect_sites::plain::NOTE_FILE);
+    let note = architect_sites::data_dir(&built)
+        .join("leak")
+        .join(architect_sites::plain::NOTE_FILE);
     let forged =
         std::fs::read_to_string(&note)
             .unwrap()

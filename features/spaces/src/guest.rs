@@ -387,9 +387,10 @@ pub struct GuestNote {
     /// The link's files the view that draws its type may read (#669): only
     /// when that island declares `reads = ["files"]` too; images and
     /// synced lyrics the link serves at its layer, the note's own first,
-    /// within [`crate::view::within_caps`]. Each is fetched from its
-    /// `url` (below the link, checked as every request for it is) and
-    /// checked against its `sha256`.
+    /// within [`crate::view::within_caps`]; never one the vault has not
+    /// hashed yet. Each is fetched from its `url` (below the link, checked
+    /// as every request for it is) and checked against its `sha256`; the
+    /// app takes none without one.
     #[facet(default)]
     pub files: Vec<ListedFile>,
 }

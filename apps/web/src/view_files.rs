@@ -186,6 +186,38 @@ pub fn resolve(name: &str, from: &str, paths: &[String]) -> Option<String> {
         })
 }
 
+/// Where to fetch a file a share link's node listed for a guest's view.
+///
+/// `url` (as the node gave it) parsed against `origin` (this page's) and
+/// normalised as the browser would before it fetches it. `None` unless it is on `origin`, below link `code` (`/s/<code>/…`), names a
+/// file there, and carries no query, fragment, credentials, empty
+/// segment or encoded dot, slash, backslash or NUL a server could decode
+/// into another path.
+#[must_use]
+pub fn guest_file_url(origin: &str, code: &str, url: &str) -> Option<String> {
+    if !architect_spaces::share::is_code(code) {
+        return None;
+    }
+    let base = url::Url::parse(origin).ok()?;
+    let parsed = base.join(url).ok()?;
+    let below = architect_spaces::share::link_path(code);
+    let path = parsed.path();
+    let rest = path.strip_prefix(&below)?;
+    let lower = path.to_ascii_lowercase();
+    let plain = parsed.origin() == base.origin()
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+        && !rest.is_empty()
+        && !rest.ends_with('/')
+        && !rest.split('/').any(str::is_empty)
+        && !["%2e", "%2f", "%5c", "%00"]
+            .iter()
+            .any(|e| lower.contains(e));
+    plain.then(|| parsed.to_string())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -274,5 +306,51 @@ mod tests {
             ),
             ["a.png", "b.lrc", "c", "e.png"]
         );
+    }
+
+    /// A guest file's URL is fetched only as the browser normalises it, on
+    /// this origin and below this link: no spelling of `..`, another
+    /// origin or a decodable separator gets past.
+    #[test]
+    fn a_guest_file_url_is_on_this_origin_below_the_link() {
+        let (origin, code) = ("https://node.test", "merrybrightstack");
+        assert_eq!(
+            guest_file_url(origin, code, "/s/merrybrightstack/Gig/art/joy.png").as_deref(),
+            Some("https://node.test/s/merrybrightstack/Gig/art/joy.png")
+        );
+        assert_eq!(
+            guest_file_url(origin, code, "/s/merrybrightstack/Gig/My%20Song.lrc").as_deref(),
+            Some("https://node.test/s/merrybrightstack/Gig/My%20Song.lrc")
+        );
+        for url in [
+            "/s/merrybrightstack/../other/x.png",
+            "/s/merrybrightstack/%2e%2e/other/x.png",
+            "/s/merrybrightstack/%2E%2E/x.png",
+            "/s/merrybrightstack/.%2e/x.png",
+            "/s/merrybrightstack/Gig/..",
+            "/s/merrybrightstack/Gig/%2e%2e",
+            "/s/merrybrightstack\\..\\other\\x.png",
+            "/s/merrybrightstack/..\\x.png",
+            "/s/merrybrightstack/Gig%2f..%2f..%2fx.png",
+            "/s/merrybrightstack/Gig%5cx.png",
+            "/s/merrybrightstack/x.png%00",
+            "/s/merrybrightstack//etc/passwd",
+            "/s/merrybrightstack/",
+            "/s/merrybrightstack/Gig/",
+            "/s/merrybrightstack/x.png?a=1",
+            "/s/merrybrightstack/x.png#a",
+            "/s/merrybrightstacks/x.png",
+            "/s/other0000000000/x.png",
+            "https://evil.test/s/merrybrightstack/x.png",
+            "//evil.test/s/merrybrightstack/x.png",
+            "\\\\evil.test/s/merrybrightstack/x.png",
+            "http://node.test/s/merrybrightstack/x.png",
+            "https://u:p@node.test/s/merrybrightstack/x.png",
+            "javascript:alert(1)",
+            "data:image/png;base64,AAAA",
+        ] {
+            assert_eq!(guest_file_url(origin, code, url), None, "{url}");
+        }
+        assert_eq!(guest_file_url(origin, "../x", "/s/../x/y.png"), None);
     }
 }

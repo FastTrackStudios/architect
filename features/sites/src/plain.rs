@@ -17,9 +17,9 @@ use architect_spaces::{BlockKind, GuestNote, PlainBlock};
 use crate::sanitize::decode;
 use crate::site::{Page, Site};
 
-/// The file beside a page's `index.html` its plain blocks are written to
-/// ([`crate::Options::page_data`]); a vault file of this name is never
-/// published.
+/// The file a page's plain blocks are written to
+/// ([`crate::Options::page_data`]), at the page's folder in the build's
+/// data folder ([`crate::data_dir`]), never in the served one.
 pub const NOTE_FILE: &str = "_note.json";
 
 /// The note `page` of `site` as its guest reads it.

@@ -13,10 +13,13 @@
 //! view reads the note), and only the files the node listed for it
 //! (`GuestNote::files`). Each file is fetched below the link on this
 //! origin (no credentials, no redirect), then checked here before it is
-//! handed in: its URL is below this link, its size within the caps, its
-//! bytes match its `sha256` when the node has one, and it is a kind a
-//! view reads at a vault path (`ext_host::ViewFile::of`). A file that
-//! fails any of it is left out.
+//! handed in: its URL, parsed and normalised as the browser fetches it,
+//! is on this origin below this link (`view_files::guest_file_url`); it
+//! is never read past the cap (a larger `Content-Length` is refused
+//! unread, the body read with a limit); its bytes match the `sha256` the
+//! node listed (a file without one is refused); and it is a kind a view
+//! reads at a vault path (`ext_host::ViewFile::of`). A file that fails
+//! any of it is left out.
 
 use std::fmt::Write as _;
 use std::rc::Rc;
@@ -50,8 +53,10 @@ fn said(e: &architect::ClientError<GuestFault>) -> String {
 }
 
 /// GET `url` on this origin's link: no credentials, no redirect followed,
-/// at most `max` bytes.
+/// at most `max` bytes, never more read: a larger `Content-Length` is
+/// refused before the body, and the body is read a chunk at a time.
 async fn bytes_of(url: &str, max: u64) -> Result<Vec<u8>, String> {
+    const TOO_LARGE: &str = "larger than a view is handed";
     let init = RequestInit::new();
     init.set_method("GET");
     init.set_credentials(RequestCredentials::Omit);
@@ -65,12 +70,50 @@ async fn bytes_of(url: &str, max: u64) -> Result<Vec<u8>, String> {
     if !response.ok() {
         return Err(format!("the file answered {}", response.status()));
     }
-    let buffer = JsFuture::from(response.array_buffer().map_err(|_| "no body")?)
-        .await
+    let declared = response
+        .headers()
+        .get("content-length")
+        .ok()
+        .flatten()
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    if declared.is_some_and(|n| n > max) {
+        return Err(TOO_LARGE.to_owned());
+    }
+    let body = response.body().ok_or("no body")?;
+    let reader: web_sys::ReadableStreamDefaultReader = body
+        .get_reader()
+        .dyn_into()
         .map_err(|_| "no body".to_owned())?;
-    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > max {
-        return Err("larger than a view is handed".to_owned());
+    let mut bytes: Vec<u8> = Vec::new();
+    loop {
+        let chunk = JsFuture::from(reader.read())
+            .await
+            .map_err(|_| "the file did not load".to_owned())?;
+        let done = js_sys::Reflect::get(&chunk, &"done".into())
+            .ok()
+            .and_then(|d| d.as_bool())
+            .unwrap_or(true);
+        if done {
+            break;
+        }
+        let value: js_sys::Uint8Array = js_sys::Reflect::get(&chunk, &"value".into())
+            .ok()
+            .and_then(|v| v.dyn_into().ok())
+            .ok_or("the file did not load")?;
+        let total = u64::try_from(bytes.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(u64::from(value.length()));
+        if total > max {
+            // Stop the download; nothing more of it is read.
+            let _ = reader.cancel();
+            return Err(TOO_LARGE.to_owned());
+        }
+        let start = bytes.len();
+        let len = usize::try_from(value.length()).map_err(|_| TOO_LARGE.to_owned())?;
+        bytes.resize(start.saturating_add(len), 0);
+        if let Some(into) = bytes.get_mut(start..) {
+            value.copy_to(into);
+        }
     }
     Ok(bytes)
 }
@@ -78,28 +121,28 @@ async fn bytes_of(url: &str, max: u64) -> Result<Vec<u8>, String> {
 /// `file` of link `code`, fetched and checked as the module says.
 async fn checked(code: &str, file: &ListedFile) -> Result<ViewFile, String> {
     use sha2::Digest as _;
-    let below = format!(
-        "{}/",
-        architect_spaces::share::link_path(code).trim_end_matches('/')
-    );
-    let url = &file.url;
-    if !url.starts_with(&below) || url.contains("/../") || url.contains('?') || url.contains('#') {
-        return Err(format!("{}: not a file of this link", file.path));
-    }
+    let url = origin()
+        .and_then(|o| crate::view_files::guest_file_url(&o, code, &file.url))
+        .ok_or_else(|| format!("{}: not a file of this link", file.path))?;
+    // Only a file the node vouched for: a listed one with no hash is
+    // never fetched.
+    let want = file
+        .sha256
+        .as_deref()
+        .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or_else(|| format!("{}: listed without its sha256", file.path))?;
     if file.size > architect_spaces::view::VIEW_FILE_MAX {
         return Err(format!("{}: too large", file.path));
     }
-    let bytes = bytes_of(url, architect_spaces::view::VIEW_FILE_MAX).await?;
-    if let Some(want) = &file.sha256 {
-        let got = sha2::Sha256::digest(&bytes)
-            .iter()
-            .fold(String::new(), |mut s, b| {
-                let _ = write!(s, "{b:02x}");
-                s
-            });
-        if !got.eq_ignore_ascii_case(want) {
-            return Err(format!("{}: not the file the link listed", file.path));
-        }
+    let bytes = bytes_of(&url, file.size).await?;
+    let got = sha2::Sha256::digest(&bytes)
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        });
+    if !got.eq_ignore_ascii_case(want) {
+        return Err(format!("{}: not the file the link listed", file.path));
     }
     ViewFile::of(&file.path, &bytes)
 }

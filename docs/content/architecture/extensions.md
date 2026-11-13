@@ -2086,9 +2086,13 @@ chooses the view.
   `member_files`: link and embed targets and frontmatter values, found
   as the vault finds a name, one step into linked notes so a setlist
   gets its songs' art). A guest's are only those the link's node listed
-  for the note (`GuestNote::files`), each fetched below the link on the
-  app's own origin (no credentials, no redirect) and checked against its
-  size and `sha256` before it is handed in (`apps/web/src/app/guest.rs`).
+  for the note (`GuestNote::files`, never one the vault has not hashed),
+  each at a URL parsed and normalised as the browser fetches it, on the
+  app's own origin and below the link (`apps/web/src/view_files.rs`
+  `guest_file_url`), fetched with no credentials and no redirect, never
+  read past its listed size, and checked against its `sha256` (a file
+  without one is refused) before it is handed in
+  (`apps/web/src/app/guest.rs`).
 - **What it may ask.** Beside the note, the playhead's state of its
   extension's source, flat, as `architect.playhead` v0.1 gives a frame
   (#589). Besides the five intents it may ask `PLAYHEAD_SET` (its source,

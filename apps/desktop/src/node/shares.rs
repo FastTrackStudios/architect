@@ -515,6 +515,7 @@ impl Shares {
             self.build_one(share, &domain, &at.join("domain"));
         } else {
             let _ = std::fs::remove_dir_all(at.join("domain"));
+            let _ = std::fs::remove_dir_all(architect_sites::data_dir(&at.join("domain")));
         }
         // Each audience: the notes its filter holds for, and no others.
         for audience in &share.audiences {
@@ -565,6 +566,7 @@ impl Shares {
             Err(error) => {
                 tracing::warn!(code = %share.code, base = %opts.base, %error, "a share did not build");
                 let _ = std::fs::remove_dir_all(out);
+                let _ = std::fs::remove_dir_all(architect_sites::data_dir(out));
                 None
             }
         }
@@ -834,11 +836,9 @@ impl Shares {
             return Guard::Building;
         };
         let decoded = decode(rest);
-        // A page's own files (its HTML, its plain blocks for a guest)
-        // are the page: checked as its note.
+        // A page's own file (its HTML) is the page: checked as its note.
         let key = decoded
             .strip_suffix("index.html")
-            .or_else(|| decoded.strip_suffix(architect_sites::plain::NOTE_FILE))
             .filter(|dir| dir.ends_with('/'))
             .unwrap_or(&decoded);
         let dir = format!("{}/", key.trim_end_matches('/'));
@@ -1902,10 +1902,6 @@ async fn serve(
         "/_comment" if method == architect::http::axum::http::Method::POST => {
             comment(shares, &share, audience.as_ref(), &viewer, mount, request).await
         }
-        // A page's guest data (its text for a view that reads it, #669) is
-        // read only through the guest service, which asks the islands
-        // first (`GuestLane::read`); never as a file of the link.
-        _ if is_note_file(rest) => private(&share, not_found(&dir).await),
         _ => {
             match admit(shares, &share, audience.as_ref(), &dir, rest, link.listen).await {
                 Admit::Open => {}
@@ -2057,17 +2053,6 @@ async fn needs_layer(
     blocking(move || shares.above(&share, audience.as_ref(), &dir, &rest, cap))
         .await
         .unwrap_or(Hold::Held(Listen::Full))
-}
-
-/// Whether `rest` (a path below a link, as asked) names a page's guest
-/// data, [`architect_sites::plain::NOTE_FILE`], however it is spelled.
-fn is_note_file(rest: &str) -> bool {
-    let decoded = decode(rest);
-    decoded
-        .trim_end_matches('/')
-        .rsplit(['/', '\\'])
-        .next()
-        .is_some_and(|name| name.eq_ignore_ascii_case(architect_sites::plain::NOTE_FILE))
 }
 
 /// `503`: the link's pages are being built (or a file of it cannot be
@@ -2980,14 +2965,18 @@ impl ShareGuest for GuestLane {
             .filter(|b| b.starts_with('/') && b.ends_with('/'))
             .ok_or(GuestFault::Gone)?
             .to_owned();
-        let rest = format!("{below}{}", architect_sites::plain::NOTE_FILE);
+        // Admitted as its page is.
+        let rest = format!("{below}index.html");
         let dir = self.dir(&share, audience.as_ref());
         match admit(&self.0, &share, audience.as_ref(), &dir, &rest, link.listen).await {
             Admit::Open => {}
             other => return Err(shut(other)),
         }
-        // The built output's own file, never through a symlink (#674): one
-        // planted in the output, or swapped in since the build, is refused.
+        // The page's data, from the build's data folder beside the served
+        // one (no URL of the link reaches it), never through a symlink
+        // (#674): one planted there, or swapped in since the build, is
+        // refused.
+        let dir = architect_sites::data_dir(&dir);
         let rel = format!(
             "{}{}",
             below.trim_start_matches('/'),
@@ -3055,10 +3044,13 @@ impl ShareGuest for GuestLane {
 /// link's in list order (a setlist's view draws its songs' art), only
 /// images and synced lyrics, within the caps of
 /// [`architect_spaces::view::within_caps`]. `files` is the link's listing
-/// at its layer: nothing past what the link serves its guest.
+/// at its layer: nothing past what the link serves its guest. A file the
+/// vault has not hashed yet is left out: the app checks every file it is
+/// handed against its `sha256`, and takes none without one.
 fn view_files(note: &ListedNote, files: Vec<ListedFile>) -> Vec<ListedFile> {
     let (own, rest): (Vec<ListedFile>, Vec<ListedFile>) = files
         .into_iter()
+        .filter(|f| f.sha256.is_some())
         .partition(|f| note.files.contains(&f.path));
     architect_spaces::view::within_caps(
         own.into_iter().chain(rest),

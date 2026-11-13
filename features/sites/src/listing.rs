@@ -46,43 +46,7 @@ pub fn parse_filter(src: &str) -> Result<FilterNode, String> {
 ///
 /// The folder could not be read.
 pub fn open(root: &std::path::Path) -> Result<Vault, String> {
-    Vault::open(root)
-        .map(within_root)
-        .map_err(|e| e.to_string())
-}
-
-/// `vault` without a note or attachment that is not its own file.
-///
-/// One whose path resolves outside the vault's folder (a symlink out of
-/// it, #669) is dropped. A site, a share link and its listing never read
-/// or copy what is not the vault's.
-#[must_use]
-pub fn within_root(mut vault: Vault) -> Vault {
-    let Ok(root) = vault.root.canonicalize() else {
-        vault.pages.clear();
-        vault.attachments.clear();
-        return vault;
-    };
-    let inside = |rel: &str| is_inside(&root, &vault.root.join(rel));
-    let pages: Vec<_> = std::mem::take(&mut vault.pages)
-        .into_iter()
-        .filter(|p| inside(&p.rel_path))
-        .collect();
-    let attachments: Vec<_> = std::mem::take(&mut vault.attachments)
-        .into_iter()
-        .filter(|a| inside(&a.rel_path))
-        .collect();
-    vault.pages = pages;
-    vault.attachments = attachments;
-    vault
-}
-
-/// Whether `path` resolves (symlinks followed) to a file under `root`,
-/// itself already resolved.
-#[must_use]
-pub fn is_inside(root: &std::path::Path, path: &std::path::Path) -> bool {
-    path.canonicalize()
-        .is_ok_and(|p| p.starts_with(root) && p != root)
+    Vault::open(root).map_err(|e| e.to_string())
 }
 
 /// [`open`], and what of the vault could not be read (notes that did not
@@ -92,9 +56,7 @@ pub fn is_inside(root: &std::path::Path, path: &std::path::Path) -> bool {
 ///
 /// The folder could not be read.
 pub fn open_reporting(root: &std::path::Path) -> Result<(Vault, Vec<String>), String> {
-    Vault::open_reporting(root)
-        .map(|(vault, unread)| (within_root(vault), unread))
-        .map_err(|e| e.to_string())
+    Vault::open_reporting(root).map_err(|e| e.to_string())
 }
 
 /// One listed note.

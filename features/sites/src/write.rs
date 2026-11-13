@@ -59,21 +59,32 @@ pub fn set_swap_hook(hook: Option<SwapHook>) {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = hook;
 }
 
-/// Write `site` to `out`.
+/// Where [`write()`] puts each page's guest data: `<out>.data`.
+///
+/// Beside `out`, never in it ([`crate::Options::page_data`],
+/// [`crate::plain::NOTE_FILE`]), so no URL of the served folder, however
+/// it is spelled on a filesystem that folds names, reaches it.
+#[must_use]
+pub fn data_dir(out: &Path) -> PathBuf {
+    out.with_file_name(format!("{}.data", folder_name(out)))
+}
+
+fn folder_name(out: &Path) -> String {
+    out.file_name()
+        .map_or_else(|| "site".to_owned(), |n| n.to_string_lossy().into_owned())
+}
+
+/// Write `site` to `out`, and its page data, if any, to [`data_dir`].
 ///
 /// # Errors
 ///
-/// `out` holds something else, or a file could not be written.
+/// `out` (or its data folder) holds something else, or a file could not
+/// be written.
 pub fn write(site: &Site, out: &Path) -> Result<Report, WriteError> {
     ensure_replaceable(out)?;
-    let name = out
-        .file_name()
-        .map_or_else(|| "site".to_owned(), |n| n.to_string_lossy().into_owned());
-    let staging = out.with_file_name(format!("{name}.next"));
-    if staging.exists() {
-        ensure_replaceable(&staging)?;
-        remove(&staging)?;
-    }
+    let data = data_dir(out);
+    ensure_replaceable(&data)?;
+    let staging = fresh_staging(out)?;
     let mut report = Report {
         out: out.to_path_buf(),
         pages: 0,
@@ -82,26 +93,68 @@ pub fn write(site: &Site, out: &Path) -> Result<Report, WriteError> {
         problems: site.problems.clone(),
     };
     write_into(site, &staging, &mut report)?;
+    if site.page_data {
+        let data_staging = fresh_staging(&data)?;
+        write_data(site, &data_staging)?;
+        swap(&data_staging, &data, false)?;
+    } else if data.exists() {
+        remove(&data)?;
+    }
+    swap(&staging, out, true)?;
+    Ok(report)
+}
 
+/// `<out>.next`, empty.
+fn fresh_staging(out: &Path) -> Result<PathBuf, WriteError> {
+    let staging = out.with_file_name(format!("{}.next", folder_name(out)));
+    if staging.exists() {
+        ensure_replaceable(&staging)?;
+        remove(&staging)?;
+    }
+    Ok(staging)
+}
+
+/// Swap the written `staging` in as `out` whole.
+fn swap(staging: &Path, out: &Path, hook: bool) -> Result<(), WriteError> {
     if out.exists() {
-        let previous = out.with_file_name(format!("{name}.prev"));
+        let previous = out.with_file_name(format!("{}.prev", folder_name(out)));
         if previous.exists() {
             remove(&previous)?;
         }
         rename(out, &previous)?;
-        let hook = SWAP_HOOK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let hook = hook
+            .then(|| {
+                SWAP_HOOK
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+            })
+            .flatten();
         if let Some(hook) = hook {
             hook(out);
         }
-        rename(&staging, out)?;
+        rename(staging, out)?;
         remove(&previous)?;
     } else {
-        rename(&staging, out)?;
+        rename(staging, out)?;
     }
-    Ok(report)
+    Ok(())
+}
+
+/// Each page's guest data ([`crate::plain::note`]) under `dir`, at its
+/// page's folder: `<dir>/<page>/_note.json`.
+fn write_data(site: &Site, dir: &Path) -> Result<(), WriteError> {
+    create(dir)?;
+    for page in site.pages.iter().filter(|p| p.rel_path.is_some()) {
+        let Some(at) = page_dir(dir, &site.base, &page.url) else {
+            continue;
+        };
+        let file = at.join(crate::plain::NOTE_FILE);
+        let json = facet_json::to_string(&crate::plain::note(site, page))
+            .map_err(|e| WriteError::Io(file.clone(), std::io::Error::other(e.to_string())))?;
+        put(&file, &json)?;
+    }
+    put(&dir.join(MARKER), "written by architect site build\n")
 }
 
 fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteError> {
@@ -116,7 +169,7 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
         // (`architect::host::BUILT_PAGE`): a vault file is never copied
         // under that name.
         let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
-        if name == "index.html" || name == "404.html" || name == crate::plain::NOTE_FILE {
+        if name == "index.html" || name == "404.html" {
             report.problems.push(crate::site::Problem {
                 page: rel.clone(),
                 message: "not published: a file named index.html or 404.html would be served as one of the site's own pages".to_owned(),
@@ -164,16 +217,6 @@ fn write_into(site: &Site, dir: &Path, report: &mut Report) -> Result<(), WriteE
             &at.join("index.html"),
             &ui::render(&shared, View::Page(i), &assets),
         )?;
-        if site.page_data && page.rel_path.is_some() {
-            let note = crate::plain::note(site, page);
-            let json = facet_json::to_string(&note).map_err(|e| {
-                WriteError::Io(
-                    at.join(crate::plain::NOTE_FILE),
-                    std::io::Error::other(e.to_string()),
-                )
-            })?;
-            put(&at.join(crate::plain::NOTE_FILE), &json)?;
-        }
         report.pages = report.pages.saturating_add(1);
     }
     let tags_dir = dir.join("tags");
