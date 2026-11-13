@@ -51,9 +51,10 @@ The revocation endpoint (`/oauth2/revoke`, RFC 7009) MUST end the sign-in
 to the calling client, by one revocation mark that every use of the sign-in's
 tokens checks, however many it minted: no refresh token of the sign-in is
 accepted, and its access tokens are refused where the issuer takes them in
-place of a session and at `/oauth2/userinfo`. The issuer session
-the person signed in with MUST stay. An unknown or already revoked token MUST
-NOT be an error.
+place of a session, at `/oauth2/userinfo` and at `/oauth2/linked-token`.
+The issuer session the person signed in with MUST stay. An unknown or already
+revoked token MUST NOT be an error, and revoking a sign-in already revoked MUST
+NOT store anything new.
 
 r[auth.oidc.userinfo]
 The userinfo endpoint MUST validate the access token and return claims

@@ -2472,6 +2472,24 @@ pub mod email_password {
         impl MemoryStorage {
             /// Moves every rotated refresh token's exchange into the
             /// past, past the reuse grace. Stands in for waiting.
+            /// How many verifications have an identifier starting `prefix`.
+            fn verifications_named(&self, prefix: &str) -> usize {
+                let inner = self.inner.lock().expect("lock memory storage");
+                inner
+                    .verifications
+                    .values()
+                    .filter(|v| v.identifier.starts_with(prefix))
+                    .count()
+            }
+
+            /// Moves every verification's expiry into the past.
+            fn expire_verifications(&self) {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                for v in inner.verifications.values_mut() {
+                    v.expires_at = Utc::now() - chrono::Duration::seconds(1);
+                }
+            }
+
             fn lapse_refresh_grace(&self) {
                 let mut inner = self.inner.lock().expect("lock memory storage");
                 for v in inner.verifications.values_mut() {
@@ -3178,6 +3196,16 @@ pub mod email_password {
                     .verifications
                     .remove(&id);
                 Ok(())
+            }
+
+            async fn delete_expired_verifications(
+                &self,
+                now: chrono::DateTime<Utc>,
+            ) -> Result<u64, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let before = inner.verifications.len();
+                inner.verifications.retain(|_, v| v.expires_at > now);
+                Ok((before - inner.verifications.len()) as u64)
             }
 
             async fn swap_verification_value(
@@ -5117,6 +5145,49 @@ pub mod email_password {
                 .await
                 .is_err(),
                 "userinfo answered a revoked sign-in's access token"
+            );
+        }
+
+        /// #628 R4: revoking a sign-in that is revoked already, and reusing
+        /// one of its rotated refresh tokens past the grace, write no new
+        /// record: one mark per sign-in, however often it is asked. A mark
+        /// written sweeps the verifications that have expired.
+        #[tokio::test]
+        async fn a_revoked_sign_in_writes_one_mark_and_expired_records_are_swept() {
+            let (auth, _, web) = signed_in_with_refresh().await;
+            let first = web.refresh_token.clone().expect("offline_access");
+            refreshed(&auth, &first).await.expect("rotated once");
+            let revoke = |token: String| {
+                auth.revoke_oidc_token(crate::RevokeOidcToken {
+                    token,
+                    client_id: "architect".into(),
+                    client_secret: None,
+                })
+            };
+            let marks = || auth.storage.verifications_named("oidc-grant-revoked:");
+            revoke(web.access_token.clone()).await.expect("revoke");
+            assert_eq!(marks(), 1);
+            for _ in 0..3 {
+                revoke(web.access_token.clone())
+                    .await
+                    .expect("revoke again");
+            }
+            auth.storage.lapse_refresh_grace();
+            for _ in 0..3 {
+                assert!(refreshed(&auth, &first).await.is_err());
+            }
+            assert_eq!(marks(), 1, "a revoked sign-in wrote another mark");
+
+            // Once everything has expired (the mark too), the next mark
+            // written sweeps it all: what is left is that mark alone.
+            auth.storage.expire_verifications();
+            assert!(auth.storage.verifications_named("") > 1);
+            revoke(first).await.expect("revoke once its mark expired");
+            assert_eq!(marks(), 1);
+            assert_eq!(
+                auth.storage.verifications_named(""),
+                1,
+                "expired records were not swept"
             );
         }
 
@@ -13391,28 +13462,11 @@ pub mod oidc_provider {
             input: GetOidcUserInfo,
         ) -> Result<OidcUserInfo, AuthFlowError> {
             let verification = self
-                .verify_jwt(VerifyJwt {
+                .verify_signed_in_jwt(VerifyJwt {
                     token: input.access_token,
                     audience: None,
                 })
                 .await?;
-            // A token of a sign-in (every access token the code flow
-            // mints) answers only while that sign-in is in force: after
-            // the app's Sign out, userinfo refuses it too.
-            if let Some(grant) = verification
-                .claims
-                .extra
-                .as_ref()
-                .and_then(|extra| extra.get("grant"))
-            {
-                let live = match grant.as_str() {
-                    Some(grant) => self.oidc_grant_live(grant).await?,
-                    None => false,
-                };
-                if !live {
-                    return Err(AuthFlowError::InvalidCredentials);
-                }
-            }
             let user_id = verification
                 .claims
                 .sub
@@ -13671,6 +13725,39 @@ pub mod oidc_provider {
             Ok(())
         }
 
+        /// [`Self::verify_jwt`], and the sign-in the token belongs to still
+        /// in force: a token that names a sign-in (every token the code
+        /// flow mints) is refused once that sign-in is revoked (the app's
+        /// Sign out, a reused refresh token). What every endpoint that
+        /// takes an access token verifies it with (userinfo, the linked
+        /// provider token, …).
+        ///
+        /// # Errors
+        ///
+        /// [`AuthFlowError::InvalidCredentials`] for a token that does not
+        /// verify or whose sign-in has ended.
+        pub async fn verify_signed_in_jwt(
+            &self,
+            input: VerifyJwt,
+        ) -> Result<crate::JwtVerification, AuthFlowError> {
+            let verification = self.verify_jwt(input).await?;
+            if let Some(grant) = verification
+                .claims
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("grant"))
+            {
+                let live = match grant.as_str() {
+                    Some(grant) => self.oidc_grant_live(grant).await?,
+                    None => false,
+                };
+                if !live {
+                    return Err(AuthFlowError::InvalidCredentials);
+                }
+            }
+            Ok(verification)
+        }
+
         /// Whether sign-in `grant` is in force: one this issuer made, and
         /// not revoked. Every use of any of its tokens asks this.
         pub(crate) async fn oidc_grant_live(&self, grant: &str) -> Result<bool, AuthFlowError> {
@@ -13694,7 +13781,18 @@ pub mod oidc_provider {
         /// lives `refresh_token_ttl_seconds` from its minting (none is
         /// minted once the mark is written: a refresh in flight checks
         /// again before it answers), and an access token less.
+        ///
+        /// A sign-in revoked already writes nothing new: a second Sign out,
+        /// or a stolen token reused again, adds no record. Writing a mark
+        /// also deletes the verifications that have expired (marks, refresh
+        /// tokens, codes, links), so they do not pile up.
         async fn revoke_oidc_grant(&self, grant: &str) -> Result<(), AuthFlowError> {
+            if !self.oidc_grant_live(grant).await? {
+                return Ok(());
+            }
+            self.storage
+                .delete_expired_verifications(Utc::now())
+                .await?;
             self.storage
                 .create_verification(AuthVerificationCreate {
                     identifier: oidc_revoked_grant_identifier(&self.config.secret, grant),
@@ -13890,8 +13988,9 @@ pub mod oidc_provider {
         format!("{id}.{tag}")
     }
 
+    /// HMAC-SHA256 under the issuer's secret ([`crate::crypto::hmac_token`]).
     fn grant_tag(secret: &str, id: &str) -> String {
-        hash_token(secret, &format!("oidc-grant-id:{id}"))
+        crate::crypto::hmac_token(secret, &format!("oidc-grant-id:{id}"))
     }
 
     fn grant_is_ours(secret: &str, grant: &str) -> bool {

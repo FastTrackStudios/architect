@@ -228,8 +228,10 @@ pub enum ConfigError {
 ///
 /// A separate type from [`OidcClientConfig`] because the engine's config
 /// struct derives no serde — and because the JSON form gets defaults for
-/// the fields a deployment rarely sets.
+/// the fields a deployment rarely sets. A key it does not know is an error
+/// at start-up: a misspelled `first_party` must not quietly read `false`.
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OidcClientJson {
     client_id: String,
     #[serde(default)]
@@ -464,4 +466,21 @@ fn optional_secret(var: &'static str) -> Result<Option<String>, ConfigError> {
 
 fn optional(var: &str) -> Option<String> {
     architect::config::var(var)
+}
+
+#[cfg(test)]
+mod oidc_client_json_tests {
+    use super::OidcClientJson;
+
+    /// A misspelled field is refused, not read as its default.
+    #[test]
+    fn an_unknown_client_field_is_an_error() {
+        let ok = r#"[{"client_id":"architect","redirect_uris":["https://a.example/cb"],"first_party":true}]"#;
+        let parsed: Vec<OidcClientJson> = serde_json::from_str(ok).expect("known fields");
+        assert!(parsed[0].first_party);
+        let misspelled = r#"[{"client_id":"architect","redirect_uris":["https://a.example/cb"],"first_pary":true}]"#;
+        let refused = serde_json::from_str::<Vec<OidcClientJson>>(misspelled)
+            .expect_err("a misspelled field");
+        assert!(refused.to_string().contains("first_pary"), "{refused}");
+    }
 }

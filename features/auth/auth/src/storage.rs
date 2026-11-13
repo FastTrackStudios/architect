@@ -249,6 +249,11 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
 
     async fn delete_verification(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
 
+    /// Deletes every verification that expired at or before `now`; how
+    /// many. An expired verification is refused wherever it is read, so
+    /// dropping it changes no answer.
+    async fn delete_expired_verifications(&self, now: DateTime<Utc>) -> Result<u64, AuthFlowError>;
+
     /// Replaces verification `id`'s value with `new_value_hash` only if
     /// it is still `expected_value_hash`, atomically: of callers racing
     /// with the same expected value, exactly one gets `true`. `false` when

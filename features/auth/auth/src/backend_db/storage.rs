@@ -762,6 +762,18 @@ impl AuthStorage for AuthSeaOrmStorage {
             .map_err(map_db_err)
     }
 
+    async fn delete_expired_verifications(
+        &self,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<u64, AuthFlowError> {
+        AuthVerificationEntity::delete_many()
+            .filter(AuthVerificationColumn::ExpiresAt.lte(now))
+            .exec(&self.db)
+            .await
+            .map(|result| result.rows_affected)
+            .map_err(map_db_err)
+    }
+
     async fn swap_verification_value(
         &self,
         id: Uuid,

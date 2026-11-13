@@ -66,6 +66,15 @@ pub const RECHECK: Duration = Duration::from_secs(30);
 /// session ends. A new call is never admitted on an old answer.
 pub const ISSUER_GRACE: Duration = Duration::from_secs(300);
 
+/// The longest the org lane waits for the issuer to answer one call.
+///
+/// `whoami` or the org list, its connection included; never longer than
+/// the re-check interval. An issuer that holds a call without answering
+/// is then unreachable, as one that refuses the connection is: an open
+/// live note falls under [`ISSUER_GRACE`], and a new call is refused
+/// rather than left hanging.
+pub const ISSUER_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// What each role of the org may do on this node, org-relative: the
 /// gate's rules for the enrolment lane and the documents' for the
 /// devices enrolled in it.
@@ -160,6 +169,10 @@ impl OrgLane {
     }
 
     fn rebuild_gate(&mut self) {
+        self.issuer = self
+            .issuer
+            .clone()
+            .with_timeout(self.recheck.min(ISSUER_TIMEOUT));
         self.sessions = Arc::new(IssuerSessions::new(self.issuer.clone()).with_ttl(self.recheck));
         self.gate = gate(
             &self.engine,
@@ -544,6 +557,7 @@ mod tests {
 pub struct IssuerLane {
     pool: Arc<architect::connect::Pool>,
     target: architect::connect::Endpoint,
+    timeout: Duration,
 }
 
 impl IssuerLane {
@@ -552,7 +566,26 @@ impl IssuerLane {
         Self {
             pool: Arc::new(architect::connect::Pool::new()),
             target: architect::connect::Endpoint::url(super::vox_url(issuer)),
+            timeout: ISSUER_TIMEOUT,
         }
+    }
+
+    /// Give up on a call ([`Self::within`]) after `timeout`.
+    #[must_use]
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// `call` (a connection and what it asks), or `None` once the lane's
+    /// timeout has passed without an answer; the connection is then
+    /// dropped, so the next call dials again.
+    pub(super) async fn within<T>(&self, call: impl Future<Output = T>) -> Option<T> {
+        let answered = tokio::time::timeout(self.timeout, call).await.ok();
+        if answered.is_none() {
+            self.evict();
+        }
+        answered
     }
 
     pub(super) async fn client<C>(&self) -> Result<C, String>
@@ -625,20 +658,25 @@ impl IssuerSessions {
         if let Some(who) = self.cached(token) {
             return Checked::User(who);
         }
-        let answer = match self.issuer.client::<auth_proto::AuthServiceClient>().await {
-            Ok(auth) => auth.whoami(token.to_owned()).await.map_err(|e| {
-                // A refusal is the issuer's answer; a broken or timed-out
-                // call is no answer at all.
-                let refused = matches!(
-                    e,
-                    vox::VoxError::User(_)
-                        | vox::VoxError::InvalidPayload(_)
-                        | vox::VoxError::UnknownMethod
-                );
-                (refused, e.to_string())
-            }),
-            Err(e) => Err((false, e)),
-        };
+        let asked = self.issuer.within(async {
+            match self.issuer.client::<auth_proto::AuthServiceClient>().await {
+                Ok(auth) => auth.whoami(token.to_owned()).await.map_err(|e| {
+                    // A refusal is the issuer's answer; a broken or
+                    // timed-out call is no answer at all.
+                    let refused = matches!(
+                        e,
+                        vox::VoxError::User(_)
+                            | vox::VoxError::InvalidPayload(_)
+                            | vox::VoxError::UnknownMethod
+                    );
+                    (refused, e.to_string())
+                }),
+                Err(e) => Err((false, e)),
+            }
+        });
+        let answer = asked
+            .await
+            .unwrap_or_else(|| Err((false, "the issuer did not answer in time".to_owned())));
         match answer {
             Ok(user) => {
                 let who = Principal::User {
@@ -694,11 +732,16 @@ struct IssuerOrgs(IssuerLane);
 impl Directory for IssuerOrgs {
     fn orgs<'a>(&'a self, token: &'a str) -> BoxOrgsFuture<'a> {
         Box::pin(async move {
-            let client = self
-                .0
-                .client::<auth_proto::OrganizationServiceClient>()
-                .await?;
-            IdentityServer(client).orgs(token).await
+            self.0
+                .within(async {
+                    let client = self
+                        .0
+                        .client::<auth_proto::OrganizationServiceClient>()
+                        .await?;
+                    IdentityServer(client).orgs(token).await
+                })
+                .await
+                .unwrap_or_else(|| Err("the issuer did not answer in time".to_owned()))
         })
     }
 }

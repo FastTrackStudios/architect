@@ -151,7 +151,10 @@ file, and another's typing shows as it comes.
   the connection or with the call. When the issuer cannot be reached an
   open note is kept for 5 minutes after its last good check
   (`lane_issuer_grace_secs`, `ARCHITECT_LANE_ISSUER_GRACE_SECS`), then
-  ends; a new call is refused meanwhile.
+  ends; a new call is refused meanwhile. An issuer that holds a call
+  without answering counts as unreachable after 10 seconds, or the
+  re-check interval if that is shorter (`apps/desktop/src/node/org.rs`
+  `ISSUER_TIMEOUT`).
 - **Only the app's own origin opens the lane from a browser.** A WebSocket
   upgrade with any other `Origin` is refused (403); one without `Origin`
   (another node, the desktop app) goes on to the bearer check. A web app
@@ -182,7 +185,8 @@ file, and another's typing shows as it comes.
   `Authorization` and cookies by default, not this header). Delete or
   redact that request header in the proxy's log format. The node itself
   never logs it, not even at `RUST_LOG=trace`: every host's log filter
-  holds the WebSocket library, which dumps frames, at INFO
+  holds the WebSocket library, which dumps frames, at INFO, as a second
+  filter no `RUST_LOG` directive can widen
   (`crates/architect/src/host.rs` `log_filter`;
   `crates/architect/tests/host_mounts.rs`
   `the_host_never_logs_a_browser_bearer`, `apps/desktop/tests/node.rs`

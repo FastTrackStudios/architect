@@ -1393,9 +1393,10 @@ where
         outcome("no_bearer");
         return Err(ApiError::from(AuthFlowError::InvalidCredentials));
     };
+    // Its sign-in still in force too: a signed-out app's token is refused.
     let claims = if let Ok(verification) = state
         .auth
-        .verify_jwt(VerifyJwt {
+        .verify_signed_in_jwt(VerifyJwt {
             token: access_token,
             audience: None,
         })

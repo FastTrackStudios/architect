@@ -610,14 +610,18 @@ async fn apply_delete(shared: &Arc<Shared>, registry: &DocRegistry, vault_id: &s
             return;
         }
     }
+    // Opened before its lock is taken, never under it: opening a closed
+    // document runs `open_doc`, which takes this same lock, while the
+    // registry holds its creation lock. Under the lock, that wedged the
+    // document, this vault's listener and every attach on the registry.
+    let Ok(doc) = registry.doc(doc_id).await else {
+        return;
+    };
     let lock = doc_lock(shared, doc_id);
     let _g = lock.lock().await;
     if shared.backend.get_file(vault_id, path).is_ok() {
         return; // written again since the event
     }
-    let Ok(doc) = registry.doc(doc_id).await else {
-        return;
-    };
     if vault_doc::is_deleted(doc.loro()) {
         return;
     }
@@ -669,6 +673,11 @@ async fn apply_inbound(
     if !registry.is_open(doc_id).await {
         return; // closed/evicted — the next open re-seeds from disk
     }
+    // Fetched before its lock is taken, as in `apply_delete`: evicted
+    // since `is_open`, it opens here, and opening takes this lock.
+    let Ok(doc) = registry.doc(doc_id).await else {
+        return;
+    };
 
     let lock = doc_lock(shared, doc_id);
     let _g = lock.lock().await;
@@ -683,9 +692,6 @@ async fn apply_inbound(
     if is_echo(shared, doc_id, &file_sha) {
         return;
     }
-    let Ok(doc) = registry.doc(doc_id).await else {
-        return;
-    };
 
     let base = {
         let flushed = shared.flushed.lock().expect("flushed lock poisoned");
@@ -990,6 +996,57 @@ mod tests {
         vault_doc::commit_as(doc.loro(), "deleted elsewhere");
         let b = backend.clone();
         eventually("the mirror removed", async || !exists(&b, "n.md")).await;
+    }
+
+    /// A note's file deleted while its document is closed (registered,
+    /// never opened this run, or evicted): the document learns it is
+    /// deleted, and every other document still opens. Opening it under its
+    /// own reconcile lock deadlocked the registry's creation lock, so no
+    /// note on the node attached again until a restart. Run on a runtime
+    /// of its own, so a wedged registry fails the test instead of hanging
+    /// it.
+    #[test]
+    fn a_delete_of_a_closed_document_leaves_the_registry_open() {
+        let (done_tx, done) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(delete_of_a_closed_document());
+            let _ = done_tx.send(());
+        });
+        done.recv_timeout(Duration::from_secs(30))
+            .expect("the registry wedged after a closed document's file was deleted");
+    }
+
+    async fn delete_of_a_closed_document() {
+        let (_tmp, backend, collab) = setup();
+        collab.watch_vault("v1");
+        put(&backend, "gone.md", "about to go").await;
+        put(&backend, "other.md", "still here").await;
+        let gone = backend.open_collab("v1", "gone.md").unwrap().doc_id;
+        let other = backend.open_collab("v1", "other.md").unwrap().doc_id;
+        assert!(!collab.registry().is_open(gone).await);
+
+        remove(&backend, "gone.md").await;
+        let r = collab.registry().clone();
+        eventually("the closed document opened for the delete", async || {
+            r.is_open(gone).await
+        })
+        .await;
+        let opened = collab.registry().doc(other).await.unwrap();
+        assert_eq!(
+            opened.loro().get_text(COLLAB_BODY_CONTAINER).to_string(),
+            "still here"
+        );
+        let doc = collab.registry().doc(gone).await.unwrap();
+        eventually("the tombstone", async || vault_doc::is_deleted(doc.loro())).await;
+        tokio::time::sleep(DEBOUNCE * 4).await;
+        assert!(
+            !exists(&backend, "gone.md"),
+            "a flush recreated a deleted file"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

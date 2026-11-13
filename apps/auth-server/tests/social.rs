@@ -794,6 +794,47 @@ async fn linking_stores_ciphertext_and_linked_token_returns_the_plaintext() {
     );
 }
 
+/// R3 (#628): an access token whose sign-in was revoked (the app's Sign
+/// out) no longer fetches the linked provider token, as it no longer
+/// answers userinfo.
+#[tokio::test]
+async fn linked_token_refuses_a_token_whose_sign_in_was_revoked() {
+    let h = harness(with_providers).await;
+    let session = sign_up(&h.app, "cody@fasttrackstudio.app").await;
+    let state = start(&h.app, "github", "link", Some(&session)).await;
+    let response = callback(&h.app, "github", &format!("code=good&state={state}")).await;
+    assert_eq!(location(&response), "/account?linked=github");
+    let rp_token = oidc_access_token(&h.app, &session, "openid email forge:github").await;
+    let linked = |token: String| {
+        h.app.clone().oneshot(
+            Request::get("/oauth2/linked-token?provider=github")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+    assert_eq!(
+        linked(rp_token.clone()).await.unwrap().status(),
+        StatusCode::OK
+    );
+
+    let response = h
+        .app
+        .clone()
+        .oneshot(
+            Request::post("/oauth2/revoke")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("token={rp_token}&client_id=task")))
+                .unwrap(),
+        )
+        .await
+        .expect("revoke");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = linked(rp_token).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(!body_text(response).await.contains(GITHUB_TOKEN));
+}
+
 #[tokio::test]
 async fn linked_token_refuses_a_token_without_the_scope_and_a_bad_bearer() {
     let h = harness(with_providers).await;

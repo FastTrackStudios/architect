@@ -1058,6 +1058,17 @@ async fn live_note_ends_on_revoke(bearer: Bearer) {
 /// every connection through it drops and no new one is accepted, as when
 /// the issuer goes away. Its origin, and the switch.
 async fn cuttable(to: &str) -> (String, tokio::sync::watch::Sender<bool>) {
+    forwarder(to, false).await
+}
+
+/// A TCP forwarder to `to` that can stall: then it relays nothing more,
+/// yet holds every connection open and accepts new ones, as an issuer
+/// that hangs (or a path that blackholes) does. Its origin, and the switch.
+async fn stallable(to: &str) -> (String, tokio::sync::watch::Sender<bool>) {
+    forwarder(to, true).await
+}
+
+async fn forwarder(to: &str, stall: bool) -> (String, tokio::sync::watch::Sender<bool>) {
     let target = to.trim_start_matches("http://").to_owned();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -1066,17 +1077,26 @@ async fn cuttable(to: &str) -> (String, tokio::sync::watch::Sender<bool>) {
         let mut stop = cut_rx.clone();
         loop {
             tokio::select! {
-                _ = stop.changed() => return,
+                _ = stop.changed(), if !stall => return,
                 accepted = listener.accept() => {
                     let Ok((mut inbound, _)) = accepted else { return };
                     let (target, mut stop) = (target.clone(), cut_rx.clone());
                     tokio::spawn(async move {
+                        if *stop.borrow() {
+                            // Stalled: held open (in scope), never answered.
+                            std::future::pending::<()>().await;
+                        }
                         let Ok(mut outbound) = tokio::net::TcpStream::connect(&target).await else {
                             return;
                         };
                         tokio::select! {
                             _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound) => {}
-                            _ = stop.changed() => {}
+                            _ = stop.changed() => {
+                                if stall {
+                                    // Both ends stay open in scope.
+                                    std::future::pending::<()>().await;
+                                }
+                            }
                         }
                     });
                 }
@@ -1138,6 +1158,61 @@ async fn an_unreachable_issuer_ends_a_live_note_after_the_grace_and_refuses_new_
     host.stop().await;
 }
 
+/// R1: the issuer stalls (holds every call, answers none), then the
+/// person's sign-in is revoked there. The open live note still ends once
+/// the grace is over, and a new call is refused, not left hanging: a call
+/// to the issuer that gets no answer in time is no answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stalled_issuer_ends_a_live_note_after_the_grace_and_refuses_new_calls() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::DocSyncClient;
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let (via, stall) = stallable(&origin).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host = indie_host(tmp.path(), &origin, &via, 6).await;
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let token = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir))
+        .await
+        .access_token;
+    let sync: DocSyncClient = web(&host, Some(token.clone())).await;
+    let session = attached(sync).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!session.is_finished(), "the session ended while signed in");
+
+    stall.send(true).unwrap();
+    let stalled_at = std::time::Instant::now();
+    // Signed out at the issuer itself, which the node cannot hear now.
+    let revoked = reqwest::Client::new()
+        .post(format!("{origin}/oauth2/revoke"))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(auth_client::oidc::revoke_request_body("architect", &token))
+        .send()
+        .await
+        .unwrap();
+    assert!(revoked.status().is_success(), "{}", revoked.status());
+
+    // Past the bearer's cache: a new call is refused, promptly.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let fresh: NotesClient = web(&host, Some(token)).await;
+    let listed = tokio::time::timeout(Duration::from_secs(10), fresh.list()).await;
+    assert!(
+        matches!(listed, Ok(Err(_))),
+        "a new call was not refused while the issuer stalled: {listed:?}"
+    );
+    // The live note ends once the grace is over.
+    let ended = tokio::time::timeout(Duration::from_secs(20), session).await;
+    assert!(ended.is_ok(), "the live session outlived the grace");
+    assert!(
+        stalled_at.elapsed() >= Duration::from_secs(5),
+        "ended before the grace ran out ({:?})",
+        stalled_at.elapsed()
+    );
+
+    host.stop().await;
+}
+
 /// Everything logged, for [`the_node_never_logs_a_browser_bearer_even_at_trace`].
 #[derive(Clone, Default)]
 struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -1152,7 +1227,8 @@ impl std::io::Write for Captured {
     }
 }
 
-/// #628 N5: a node logging at TRACE (`RUST_LOG=trace` through the filter
+/// #628 N5, R2: a node logging at TRACE (`RUST_LOG=trace`, even with a
+/// directive naming the WebSocket library's module, through the filter
 /// every host logs with, `architect::host::log_filter`) writes no
 /// credential: not a browser's access token sent on the connection or
 /// with a call, not as the gated org lane resolves it at the issuer and
@@ -1167,17 +1243,25 @@ impl std::io::Write for Captured {
 async fn the_node_never_logs_a_browser_bearer_even_at_trace() {
     use architect_desktop::node::service::notes::NotesClient;
     use crdt::sync::DocSyncClient;
+    use tracing_subscriber::Layer as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
 
     let captured = Captured::default();
     let writer = captured.clone();
-    tracing_subscriber::fmt()
-        .with_env_filter(architect::host::log_filter(
-            tracing_subscriber::EnvFilter::new("trace"),
-        ))
-        .with_ansi(false)
-        .with_writer(move || writer.clone())
-        .finish()
+    // A more specific directive for the WebSocket library too (R2): the
+    // cap holds against it.
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(move || writer.clone())
+                .with_filter(architect::host::log_filter(
+                    tracing_subscriber::EnvFilter::new(
+                        "trace,tungstenite::protocol=trace,tokio_tungstenite=trace",
+                    ),
+                )),
+        )
         .try_init()
         .expect("the only subscriber in this process");
     tracing::trace!("capture-check");
@@ -1263,4 +1347,57 @@ async fn a_local_node_has_no_relay_and_listens_on_loopback_only() {
         "{:?}",
         shown.iroh_addrs
     );
+}
+
+/// Whether `path` in `notes` opens live over `sync` within `within`.
+async fn attaches_within(sync: crdt::sync::DocSyncClient, path: &str, within: Duration) -> bool {
+    use crdt::sync::SyncedDoc;
+    let (attached_tx, mut attached) = tokio::sync::mpsc::unbounded_channel();
+    let mut synced = SyncedDoc::new(
+        vault_proto::collab_doc_id("notes", path),
+        crdt::CrdtDoc::ephemeral(),
+    )
+    .on_attached(std::sync::Arc::new(move || {
+        let _ = attached_tx.send(());
+    }));
+    let session = tokio::spawn(async move { synced.run(&sync).await });
+    let opened = tokio::time::timeout(within, attached.recv()).await.is_ok();
+    session.abort();
+    opened
+}
+
+/// A note made over the org lane (as the web app's New note does), its
+/// file then deleted on disk while its document is closed: every other
+/// note still opens live. The node used to open that document under its
+/// own reconcile lock while the registry held its creation lock, and no
+/// note on the node attached again until a restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_note_deleted_on_disk_leaves_every_other_note_live() {
+    use architect_desktop::node::service::notes::NotesClient;
+    use crdt::sync::DocSyncClient;
+
+    let origin = issuer_with(vec![web_client("architect", true)]).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host = indie_host(tmp.path(), &origin, &origin, 300).await;
+    let alan_dir = tmp.path().join("alan");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let web_app = signed_in_by_redirect(&origin, "architect", &token_in(&alan_dir)).await;
+    let token = web_app.access_token.clone();
+
+    let notes: NotesClient = web(&host, Some(token.clone())).await;
+    notes
+        .create("notes".into(), "Untitled.md".into(), String::new())
+        .await
+        .unwrap();
+    // Its file deleted on disk; its document is not open.
+    let file = host.state.vault_root("notes").unwrap().join("Untitled.md");
+    std::fs::remove_file(&file).unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let sync: DocSyncClient = web(&host, Some(token)).await;
+    assert!(
+        attaches_within(sync, "hello.md", Duration::from_secs(20)).await,
+        "another note no longer opens live"
+    );
+    host.stop().await;
 }

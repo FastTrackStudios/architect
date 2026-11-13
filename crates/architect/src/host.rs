@@ -90,27 +90,48 @@ pub fn block_on<F: Future>(fut: F) -> F::Output {
 /// `RUST_LOG` says.
 pub const CREDENTIAL_LOGGING_TARGETS: &[&str] = &["tungstenite", "tokio_tungstenite"];
 
-/// `filter` with [`CREDENTIAL_LOGGING_TARGETS`] held at INFO: what every
-/// host logs through ([`init_tracing`]), so `RUST_LOG=trace` cannot write
-/// a bearer.
+/// Whether `meta` is a record [`log_filter`] never lets through: DEBUG or
+/// TRACE from one of the [`CREDENTIAL_LOGGING_TARGETS`] or a module of one.
 #[must_use]
-pub fn log_filter(filter: tracing_subscriber::EnvFilter) -> tracing_subscriber::EnvFilter {
-    CREDENTIAL_LOGGING_TARGETS
-        .iter()
-        .filter_map(|target| format!("{target}=info").parse().ok())
-        .fold(filter, tracing_subscriber::EnvFilter::add_directive)
+pub fn writes_credentials(meta: &tracing::Metadata<'_>) -> bool {
+    *meta.level() > tracing::Level::INFO
+        && CREDENTIAL_LOGGING_TARGETS.iter().any(|t| {
+            meta.target()
+                .strip_prefix(t)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+        })
+}
+
+/// `filter`, and never a record that [`writes_credentials`].
+///
+/// What every host logs through ([`init_tracing`]). The cap is a second
+/// filter both must pass, not a directive inside `filter`, so no
+/// `RUST_LOG` directive (`trace`, `tungstenite::protocol=trace`, …) can
+/// write a bearer.
+pub fn log_filter<S>(
+    filter: tracing_subscriber::EnvFilter,
+) -> impl tracing_subscriber::layer::Filter<S> + Send + Sync + 'static
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    use tracing_subscriber::filter::FilterExt as _;
+    filter.and(tracing_subscriber::filter::filter_fn(|meta| {
+        !writes_credentials(meta)
+    }))
 }
 
 /// Initialize the global tracing subscriber from `RUST_LOG`, falling back to
 /// `default_filter` (e.g. `"info"`); never below INFO for the
 /// [`CREDENTIAL_LOGGING_TARGETS`].
 pub fn init_tracing(default_filter: &str) {
+    use tracing_subscriber::Layer as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
     let default = default_filter.to_string();
-    tracing_subscriber::fmt()
-        .with_env_filter(log_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| default.into()),
-        ))
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| default.into());
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(log_filter(filter)))
         .init();
 }
 

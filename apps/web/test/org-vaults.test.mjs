@@ -163,11 +163,15 @@ const DEMO = '[...document.querySelectorAll("[data-drop-zone=folder]")].find((e)
 
 async function openWelcome(t) {
   await t.until(`!!(${DEMO})`, 'the vault in the navigator');
-  await t.click(DEMO);
   const row = 'document.querySelector(\'[data-file="demo/Welcome.md"]\')';
-  await t.until(`!!${row}`, 'Welcome in the list');
-  // While the vault's notes are still being read the list redraws: a
-  // click can land on a row that is gone, so it is tried again.
+  // While the vault's notes are still being read the tree and the list
+  // redraw: a click can land on a row that is gone, so each click (the
+  // folder's, then the note's) is tried again.
+  for (let i = 0; !(await t.eval(`!!${row}`)); i++) {
+    if (i > 10) throw new Error('Welcome is not in the list');
+    await t.click(DEMO).catch(() => {});
+    await t.until(`!!${row}`, 'Welcome in the list', 3000).catch(() => {});
+  }
   const open = `!!document.querySelector(${JSON.stringify(TEXT)})`;
   for (let i = 0; !(await t.eval(open)); i++) {
     if (i > 20) throw new Error('the note did not open');
