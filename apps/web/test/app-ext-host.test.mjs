@@ -675,7 +675,12 @@ test('the Now Playing bar shows the queue, its presses reach the frames and a fr
     await until(() => b.eval(`(() => { const a = document.querySelector('[data-testid=now-playing-audio]'); return !!a && a.src.endsWith('/app/demo-recording.mp3') && !a.paused && a.currentTime > 0.3; })()`), 10000, 'the recording to play');
     assert.ok(w.f.media.some((m) => m.startsWith('206 /app/demo-recording.mp3')), `ranged: ${w.f.media.join(', ')}`);
     assert.equal(await b.eval('navigator.mediaSession && navigator.mediaSession.metadata ? navigator.mediaSession.metadata.title : null'), 'Amazing Grace');
-    assert.equal((await propsOf(b, 'transport')).clock, 'media');
+    // What keeps time: the media element where the browser has a sound
+    // output (macOS), the app's silent clock where the suite's isolation
+    // leaves Firefox none (Linux: the sink fails and the app says the
+    // song is not heard here, which is right).
+    const clock = process.platform === 'linux' ? 'silent' : 'media';
+    await until(async () => (await propsOf(b, 'transport')).clock === clock, 5000, `the ${clock} clock`);
     // Only the page's own element plays: no frame has one.
     for (const c of await b.frames()) assert.equal(await b.evalIn(c, 'document.querySelectorAll("audio,video").length'), 0);
 
