@@ -70,7 +70,7 @@ pub use graph::{GraphBackend, page_tags};
 pub use guard::SelfWriteGuard;
 pub use links::{LinkIndex, OutgoingLink, UnresolvedLink};
 pub use vault::{LoadError, SaveError, Vault, VaultBase, VaultEntryRef, VaultPage};
-pub use walker::{VaultEntry, VaultEntryKind, walk_vault};
+pub use walker::{VaultEntry, VaultEntryKind, open_own, walk_vault};
 pub use watcher::{VaultEvent, WatchError, watch};
 
 pub mod aliases;

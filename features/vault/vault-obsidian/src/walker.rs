@@ -71,6 +71,15 @@ pub fn walk_vault_reporting(root: &Path, cfg: &ObsidianConfig) -> (Vec<VaultEntr
         if entry.file_type().is_dir() {
             continue;
         }
+        // A symlink is never the vault's own entry: inside or outside the
+        // vault, it can name what the walk skips (a private or ignored
+        // folder, `.git`, a file elsewhere), so it is not listed, built
+        // or shared. A symlinked folder is not walked into either
+        // (`follow_links(false)`).
+        if entry.path_is_symlink() {
+            tracing::debug!(path = %entry.path().display(), "a symlink in the vault; skipped");
+            continue;
+        }
         let rel = match entry.path().strip_prefix(root) {
             Ok(r) => vault_live::walker::rel_string(r),
             Err(_) => continue,
@@ -182,6 +191,61 @@ fn build_ignore(cfg: &ObsidianConfig) -> IgnoreMatcher {
     }
 }
 
+/// The vault file at `rel` (forward-slash separated, below `root`)
+/// opened for reading, never through a symlink.
+///
+/// Opened without following a link at its last component
+/// (`O_NOFOLLOW`), then checked to be a plain file that `rel` names
+/// with no symlink anywhere on the way: its resolved path is exactly the
+/// root's joined with `rel`, and that path is the very file opened. A
+/// file or a folder above it swapped for a symlink (out of the vault,
+/// or to a private or ignored folder in it) between a walk and a read is
+/// refused, never followed.
+///
+/// # Errors
+///
+/// The file could not be opened, or it is not the vault's own plain
+/// file now (`InvalidData`).
+pub fn open_own(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
+    use std::io::{Error, ErrorKind};
+    let path = root.join(rel);
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // Non-blocking too: a link swapped to a FIFO never hangs a read.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(&path)?;
+    let opened = file.metadata()?;
+    let not_own = || Error::new(ErrorKind::InvalidData, "not a plain file of the vault");
+    if !opened.is_file() {
+        return Err(not_own());
+    }
+    let expected = root.canonicalize()?.join(rel);
+    let resolved = path.canonicalize()?;
+    if resolved != expected {
+        return Err(not_own());
+    }
+    let now = std::fs::symlink_metadata(&resolved)?;
+    if now.file_type().is_symlink() || !same_file(&opened, &now) {
+        return Err(not_own());
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    b.is_file() && a.len() == b.len() && a.modified().ok() == b.modified().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +321,53 @@ mod tests {
         assert!(rels.contains(&"Notes/keep.md".into()));
         assert!(!rels.iter().any(|r| r.starts_with("Drafts/")));
         assert!(!rels.iter().any(|r| r.ends_with(".tmp.md")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_lists_no_symlink_inside_or_outside_the_vault() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        touch(&root.join("Note.md"));
+        touch(&root.join("Private/plans.md"));
+        touch(&tmp.path().join("outside/secret.md"));
+        symlink("Note.md", root.join("Alias.md")).unwrap();
+        symlink("../outside/secret.md", root.join("Out.md")).unwrap();
+        symlink("Private", root.join("Linked")).unwrap();
+        let rels: Vec<String> = walk_vault(&root, &ObsidianConfig::default())
+            .into_iter()
+            .map(|e| e.rel_path)
+            .collect();
+        assert!(rels.contains(&"Note.md".to_owned()), "{rels:?}");
+        for link in ["Alias.md", "Out.md", "Linked", "Linked/plans.md"] {
+            assert!(!rels.contains(&link.to_owned()), "{link} listed: {rels:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_own_opens_a_plain_file_and_refuses_any_symlink_on_the_way() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        touch(&root.join("a/note.md"));
+        touch(&tmp.path().join("outside/b/note.md"));
+        touch(&tmp.path().join("outside/x.md"));
+        assert!(open_own(&root, "a/note.md").is_ok());
+        symlink("a/note.md", root.join("alias.md")).unwrap();
+        symlink(tmp.path().join("outside/x.md"), root.join("out.md")).unwrap();
+        symlink(tmp.path().join("outside/b"), root.join("b")).unwrap();
+        symlink("a", root.join("c")).unwrap();
+        for rel in [
+            "alias.md",
+            "out.md",
+            "b/note.md",
+            "c/note.md",
+            "a",
+            "missing.md",
+        ] {
+            assert!(open_own(&root, rel).is_err(), "{rel} opened");
+        }
     }
 }
