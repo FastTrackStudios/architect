@@ -4052,6 +4052,18 @@ those, the extension is kept and listed, never started:
 better than its build, or a test (`features/extensions/tests/platforms.rs`).
 It comes before `Extensions::new`.
 
+- A value this build does not know (`visionos`) is kept, with a warning
+  (`Manifest::warnings`, `EXT_CHECK`'s `warnings`): a newer platform's name
+  stays forward compatible, and a typo of a known one cannot be told from
+  it.
+- "Not here" is worked out when it loads: one that tried and could not is
+  not tried again while its copy is the same, so a change of platform
+  (`Host::set_platform` after start) shows after a restart.
+- A copy that cannot run here still counts as the copy of its id: an
+  installed or development copy for another platform shadows a built-in
+  that could run, and the page says so ("Can't run here"); remove it, or
+  "Use the built-in", to run the built-in again.
+
 ### Updates
 
 `EXT_UPDATE {check: true}` (`Extensions::updates`) installs nothing: for

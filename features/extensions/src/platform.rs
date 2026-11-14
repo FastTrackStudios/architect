@@ -4,7 +4,9 @@
 //! `platforms = ["linux"]` in `extension.toml` names the operating systems
 //! an extension runs on, for every kind: Rust's `target_os` values
 //! (`linux`, `macos`, `windows`, `ios`, `android`) and `web` for a browser.
-//! Absent (or empty) means everywhere. One that cannot run here is kept,
+//! Absent (or empty) means everywhere. A value this build does not know is
+//! kept with a warning (`Manifest::warnings`): a newer platform's name
+//! stays forward compatible. One that cannot run here is kept,
 //! listed as "Linux only", never loaded, its data untouched
 //! ([`crate::host::LoadError::NotHere`]); the store refuses to install it
 //! here with the same words ([`crate::install::InstallError::NotHere`]).
@@ -60,12 +62,14 @@ pub fn not_here(platforms: &[String], platform: &str) -> Option<String> {
     Some(format!("{list} only"))
 }
 
-/// The unknown values in `platforms`, for the manifest's check.
-pub(crate) fn unknown(platforms: &[String]) -> Option<&str> {
+/// The values in `platforms` this build does not know, for the
+/// manifest's warnings (kept: forward compatible).
+pub(crate) fn unknown(platforms: &[String]) -> Vec<&str> {
     platforms
         .iter()
         .map(String::as_str)
-        .find(|p| !PLATFORMS.contains(p))
+        .filter(|p| !PLATFORMS.contains(p))
+        .collect()
 }
 
 #[cfg(test)]
@@ -97,7 +101,7 @@ mod tests {
 
     #[test]
     fn an_unknown_platform_is_named() {
-        assert_eq!(unknown(&v(&["linux", "darwin"])), Some("darwin"));
-        assert_eq!(unknown(&v(&["web"])), None);
+        assert_eq!(unknown(&v(&["linux", "darwin"])), ["darwin"]);
+        assert!(unknown(&v(&["web"])).is_empty());
     }
 }

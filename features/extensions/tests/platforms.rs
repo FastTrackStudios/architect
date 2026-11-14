@@ -148,7 +148,7 @@ fn a_linux_only_linked_extension_says_so_on_macos_and_its_build_never_runs() {
         .find(|p| p.starts_with("lab.patchbay:"))
         .unwrap_or_else(|| panic!("{problems:?}"));
     assert!(
-        patchbay.contains("PipeWire is Linux only: not on macOS"),
+        patchbay.contains("PipeWire: Linux only: not on macOS"),
         "{patchbay}"
     );
     // `APP_STATUS`'s extensions source says it too.
@@ -239,6 +239,25 @@ fn the_store_refuses_to_install_an_extension_not_for_this_platform() {
         "nothing written"
     );
 
+    // Through the consent path (a person's install), the same refusal.
+    let tmp3 = tempfile::tempdir().unwrap();
+    let host = Host::new(ActionList::new(), SharedSections::new(Registry::new())).with_grants(
+        architect_extensions::consent::Grants::open(tmp3.path().join("g.json")),
+    );
+    host.set_platform("windows");
+    let ext = Extensions::new(host, Installs::new(tmp3.path().join("installs")))
+        .with_source(FolderRegistry::new(&registry));
+    let err = ext
+        .install_with(
+            "lab.linux-tool",
+            &VersionReq::STAR,
+            Some(architect_extensions::consent::Scope::Device),
+            "person",
+            false,
+        )
+        .unwrap_err();
+    assert!(matches!(err, InstallError::NotHere { .. }), "{err:?}");
+
     // Where it runs, it installs.
     let tmp2 = tempfile::tempdir().unwrap();
     let list = ActionList::new();
@@ -250,11 +269,24 @@ fn the_store_refuses_to_install_an_extension_not_for_this_platform() {
 }
 
 #[test]
-fn an_unknown_platform_is_refused_by_the_manifest_check() {
-    let e = architect_extensions::manifest::Manifest::parse(
-        "id = \"x\"\nname = \"X\"\nversion = \"0.1.0\"\nkind = \"data\"\nplatforms = [\"darwin\"]\n",
+fn an_unknown_platform_loads_where_a_known_one_matches_and_is_warned() {
+    // Forward compatible: a newer platform's name does not stop it here.
+    let m = architect_extensions::manifest::Manifest::parse(
+        "id = \"x\"\nname = \"X\"\nversion = \"0.1.0\"\nkind = \"data\"\nplatforms = [\"linux\", \"visionos\"]\n",
     )
-    .unwrap_err()
-    .to_string();
-    assert!(e.contains("darwin") && e.contains("macos"), "{e}");
+    .unwrap();
+    let w = m.warnings();
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(
+        w[0].contains("visionos") && w[0].contains("spelling"),
+        "{w:?}"
+    );
+    assert!(architect_extensions::platform::runs_on(
+        &m.platforms,
+        "linux"
+    ));
+    assert_eq!(
+        architect_extensions::platform::not_here(&m.platforms, "macos").as_deref(),
+        Some("Linux and visionos only")
+    );
 }

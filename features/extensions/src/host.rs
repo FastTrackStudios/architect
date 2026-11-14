@@ -2475,7 +2475,7 @@ fn check_requires(
             let elsewhere: Vec<String> = not_here
                 .iter()
                 .filter(|(m, _)| m.provides.contains_key(service))
-                .map(|(m, why)| format!("{} is {why}", m.name))
+                .map(|(m, why)| format!("{}: {why}", m.name))
                 .collect();
             let why = if providers.is_empty() && !elsewhere.is_empty() {
                 format!("its provider cannot run here: {}", elsewhere.join("; "))

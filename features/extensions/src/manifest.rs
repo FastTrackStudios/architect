@@ -699,8 +699,6 @@ pub enum ManifestError {
     BadId(String),
     /// It needs a newer extension API than this build's.
     Api { wants: String, have: &'static str },
-    /// A `platforms` value that is not one of [`crate::platform::PLATFORMS`].
-    BadPlatform(String),
     /// An action outside its namespace (`expected` is the prefix).
     ActionNamespace { action: String, expected: String },
     /// A setting key outside its namespace (`<id>.`).
@@ -756,11 +754,6 @@ impl std::fmt::Display for ManifestError {
             Self::BadPath(p) => write!(f, "{p} is outside the package"),
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
-            Self::BadPlatform(p) => write!(
-                f,
-                "platforms {p:?}: not one of {}",
-                crate::platform::PLATFORMS.join(", ")
-            ),
             Self::BadToken { token, why } => write!(f, "theme token {token}: {why}"),
             Self::BadWorker { worker, why } => write!(f, "worker {worker}: {why}"),
             Self::Contribution(r) => r.fmt(f),
@@ -780,6 +773,24 @@ impl std::fmt::Display for ManifestError {
 impl std::error::Error for ManifestError {}
 
 impl Manifest {
+    /// What loads but may be a mistake, each in a line (`EXT_CHECK`'s
+    /// warnings): a `platforms` value this build does not know. It is
+    /// kept (a newer platform's name stays forward compatible: `["linux",
+    /// "visionos"]` loads on Linux), and a typo of a known one cannot be
+    /// told from it, so it is said.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        crate::platform::unknown(&self.platforms)
+            .into_iter()
+            .map(|p| {
+                format!(
+                    "platforms {p:?} is not one this build knows ({}): kept, but check its spelling",
+                    crate::platform::PLATFORMS.join(", ")
+                )
+            })
+            .collect()
+    }
+
     /// Each worker: a unique id, and one way to run that its kind has.
     fn check_workers(&self) -> Result<(), ManifestError> {
         let mut seen = std::collections::BTreeSet::new();
@@ -885,9 +896,6 @@ impl Manifest {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || ".-_".contains(c))
         {
             return Err(ManifestError::BadId(self.id.clone()));
-        }
-        if let Some(bad) = crate::platform::unknown(&self.platforms) {
-            return Err(ManifestError::BadPlatform(bad.to_owned()));
         }
         if !api_ok(&self.api) {
             return Err(ManifestError::Api {

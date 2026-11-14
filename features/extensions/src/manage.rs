@@ -360,6 +360,11 @@ impl Extensions {
         let mut granted = None;
         if let Some(grants) = self.host().grants() {
             let preview = self.preview(id, req)?;
+            // Not for this platform: the same refusal as the store's.
+            let platform = self.host().platform();
+            if let Some(why) = crate::platform::not_here(&preview.runs_on, &platform) {
+                return Err(InstallError::NotHere { platform, why });
+            }
             if let Some(why) = preview.cannot_run {
                 return Err(InstallError::NotFound(format!(
                     "{id} {}: {why}",
