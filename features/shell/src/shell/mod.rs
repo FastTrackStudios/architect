@@ -1236,8 +1236,8 @@ pub fn AppShell(
         .into_iter()
         .chain(chrome.status.iter().cloned())
         .collect();
-    // The extensions' bar buttons apart from the app's: past six, the
-    // app's give way first, as they do for a page's (#726).
+    // The extensions' bar buttons, kept apart from the app's: they come
+    // after the app's and the pages' six and take no one's place (#726).
     let bar_contributed: Vec<BarAction> = chrome.bar.clone();
     let mut drawer = use_signal(|| None::<Side>);
     let fold = use_signal(|| None::<bool>);
