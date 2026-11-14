@@ -1,10 +1,14 @@
-//! The vault index and what queries read it with, wasm-clean (`docs/content/architecture/extensions.md`,
+//! The vault's query service, wasm-clean (`docs/content/architecture/extensions.md`,
 //! "The vault's query service").
 //!
 //! - [`index`]: the vault index, a compact entry per note (title,
 //!   properties, tags, links, headings, task lines; no body) and per
 //!   `.base` file, kept a note at a time by [`index::Builder`] wherever
 //!   the vault lives, synced to browsers as a snapshot and deltas.
+//! - [`engine`]: [`engine::QueryEngine`], filters, formulas, sort and
+//!   group-by over the index, the one implementation of
+//!   `vault_proto::query::VaultQuery`, served in process
+//!   (`architect::serve_local`) on every client.
 //! - [`bases`]: the `.base` parser and evaluator; [`obsidian_parse`]: a
 //!   note parsed; [`rows`]: a parsed note as a base's row;
 //!   [`base_json`]: a base as JSON.
@@ -55,6 +59,8 @@ mod moved {
 pub use moved::{bases, obsidian_parse, refs, rows};
 
 pub mod base_json;
+pub mod engine;
 pub mod index;
 
+pub use engine::{IndexFeed, QueryEngine, Replica};
 pub use index::{Builder, Built, Entry, IndexDelta, Note, NoteSource, Text, VaultIndex};

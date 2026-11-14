@@ -51,6 +51,10 @@ mod manifest;
 /// service on the wire: with `vox`).
 #[cfg(feature = "vox")]
 pub mod notes;
+/// The `VaultQuery` service: a base's view run over the vault index (a
+/// service on the wire: with `vox`).
+#[cfg(feature = "vox")]
+pub mod query;
 mod page;
 mod page_meta;
 mod service;

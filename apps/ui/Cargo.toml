@@ -100,6 +100,9 @@ crdt = { workspace = true }
 # The lab's vault: a folder of markdown and its VAULT_* actions
 # (src/notes.rs, the sample in apps/sandbox/vault).
 vault = { workspace = true, features = ["actions"] }
+# The vault's query service's client, which the extension host holds
+# (`notes::vault_query`).
+vault-proto = { workspace = true, features = ["vox"] }
 # `PUBLISH_EXPORT` (src/publish.rs): a part of the vault as a static site (#374).
 architect-sites = { workspace = true }
 # An outside edit merged into an open note's typing (`vault_doc::merge3`).
@@ -112,7 +115,7 @@ tag = { workspace = true, features = ["actions"] }
 # BASES_* actions (src/notes.rs, src/vault.rs).
 architect-bases = { workspace = true, features = ["ui"] }
 # `connect`: an extension's node actions on the org's node (`src/accounts.rs` `OrgNode`).
-architect = { workspace = true, features = ["action-list", "settings", "http-client", "connect"] }
+architect = { workspace = true, features = ["action-list", "settings", "http-client", "connect", "local"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
 dioxus-native = { workspace = true }

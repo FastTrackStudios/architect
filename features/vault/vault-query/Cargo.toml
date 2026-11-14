@@ -1,6 +1,6 @@
 [package]
 name = "vault-query"
-description = "The vault's query service, wasm-clean: a note parsed (frontmatter, blocks, tags, links), a note as a base's row, the `.base` parser and evaluator (filters, formulas, sort, group-by), the rows kept per note between queries (`Index`), kept a note at a time from any `NoteSource` and synced as deltas."
+description = "The vault's query service, wasm-clean: a note parsed (frontmatter, blocks, tags, links), a note as a base's row, the `.base` parser and evaluator (filters, formulas, sort, group-by), the rows kept per note between queries (`Index`), kept a note at a time from any `NoteSource` and synced as deltas, and `QueryEngine`, the one implementation of `vault_proto::query::VaultQuery`, over it."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

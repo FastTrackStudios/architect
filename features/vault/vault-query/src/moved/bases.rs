@@ -1847,7 +1847,9 @@ pub struct BaseRow {
     pub links: Vec<String>,
     /// Top-level frontmatter map. Empty if the page has no
     /// frontmatter or it failed to decode.
-    pub frontmatter: indexmap::IndexMap<String, serde_json::Value>,
+    /// Shared with the vault index's entry it was made from
+    /// (`crate::index::Entry::props`), not a copy of it.
+    pub frontmatter: std::sync::Arc<indexmap::IndexMap<String, serde_json::Value>>,
 }
 
 impl BaseRow {
@@ -1872,7 +1874,7 @@ impl BaseRow {
             ext: String::new(),
             tags,
             links,
-            frontmatter,
+            frontmatter: std::sync::Arc::new(frontmatter),
         }
     }
 
@@ -1916,6 +1918,28 @@ impl BaseRow {
         folder: impl Into<String>,
         ext: impl Into<String>,
         frontmatter: indexmap::IndexMap<String, serde_json::Value>,
+        extra_tags: &[String],
+    ) -> Self {
+        Self::from_shared(
+            page_id,
+            basename,
+            rel_path,
+            folder,
+            ext,
+            std::sync::Arc::new(frontmatter),
+            extra_tags,
+        )
+    }
+
+    /// [`Self::from_frontmatter`] over a frontmatter map shared with
+    /// whatever holds it (the vault index's entry): no copy of it.
+    pub fn from_shared(
+        page_id: uuid::Uuid,
+        basename: impl Into<String>,
+        rel_path: impl Into<String>,
+        folder: impl Into<String>,
+        ext: impl Into<String>,
+        frontmatter: std::sync::Arc<indexmap::IndexMap<String, serde_json::Value>>,
         extra_tags: &[String],
     ) -> Self {
         let mut tags = tags_from_frontmatter(&frontmatter);
@@ -2130,14 +2154,34 @@ pub struct TableRow {
 /// Run `view` over `rows` and project it into a [`ViewTable`].
 #[must_use]
 pub fn view_table(base: &ParsedBase, view: &ViewSpec, rows: &[BaseRow]) -> ViewTable {
+    view_table_at_most(base, view, rows, usize::MAX).0
+}
+
+/// [`view_table`] with at most `limit` rows over every group (the view's
+/// own `limit` first), and how many there were in all: the rows past
+/// `limit` are never drawn into the table.
+#[must_use]
+pub fn view_table_at_most(
+    base: &ParsedBase,
+    view: &ViewSpec,
+    rows: &[BaseRow],
+    limit: usize,
+) -> (ViewTable, usize) {
     let cx = BaseEval::new(base, rows);
+    let mut found = cx.run(view);
+    let total = found.iter().map(|(_, v)| v.len()).sum();
+    let mut left = limit;
+    for (_, v) in &mut found {
+        v.truncate(left);
+        left = left.saturating_sub(v.len());
+    }
+    found.retain(|(_, v)| !v.is_empty());
     let columns = if view.order.is_empty() {
         vec!["file.name".to_string()]
     } else {
         view.order.clone()
     };
-    let groups = cx
-        .run(view)
+    let groups = found
         .into_iter()
         .map(|(label, idx)| TableGroup {
             label,
@@ -2162,12 +2206,15 @@ pub fn view_table(base: &ParsedBase, view: &ViewSpec, rows: &[BaseRow]) -> ViewT
                 .collect(),
         })
         .collect();
-    ViewTable {
-        name: view.name.clone(),
-        kind: view.kind.as_str().to_string(),
-        columns,
-        groups,
-    }
+    (
+        ViewTable {
+            name: view.name.clone(),
+            kind: view.kind.as_str().to_string(),
+            columns,
+            groups,
+        },
+        total,
+    )
 }
 
 fn is_truthy(v: &serde_json::Value) -> bool {
@@ -2386,7 +2433,33 @@ impl<'a> BaseEval<'a> {
         let mut keep: Vec<usize> = (0..self.rows.len())
             .filter(|&i| self.filter_matches(&combined, &self.rows[i]))
             .collect();
-        keep.sort_by(|&a, &b| self.compare_rows(&self.rows[a], &self.rows[b], &view.sort));
+        // Each row's sort keys once, not per comparison (a 10k-row sort
+        // made ~26 evaluations a row).
+        if view.sort.is_empty() {
+            keep.sort_by(|&a, &b| self.rows[a].basename.cmp(&self.rows[b].basename));
+        } else {
+            let mut keyed: Vec<(Vec<serde_json::Value>, usize)> = keep
+                .iter()
+                .map(|&i| {
+                    let row = &self.rows[i];
+                    (view.sort.iter().map(|k| self.column(row, &k.property)).collect(), i)
+                })
+                .collect();
+            keyed.sort_by(|(ka, a), (kb, b)| {
+                for ((va, vb), key) in ka.iter().zip(kb).zip(&view.sort) {
+                    let ord = compare_values(va, vb);
+                    let ord = match key.direction {
+                        SortDir::Asc => ord,
+                        SortDir::Desc => ord.reverse(),
+                    };
+                    if ord != std::cmp::Ordering::Equal {
+                        return ord;
+                    }
+                }
+                self.rows[*a].basename.cmp(&self.rows[*b].basename)
+            });
+            keep = keyed.into_iter().map(|(_, i)| i).collect();
+        }
 
         let mut groups: Vec<(String, Vec<usize>)> = if let Some(key) = view.group_by.as_deref() {
             // Stable: the order labels were first seen in (the shared
@@ -2865,23 +2938,6 @@ impl<'a> BaseEval<'a> {
             return Some(row);
         }
         target_of(recv_v).and_then(|t| self.resolve(&t))
-    }
-
-    fn compare_rows(&self, a: &BaseRow, b: &BaseRow, sort: &[SortKey]) -> std::cmp::Ordering {
-        for key in sort {
-            let ord = compare_values(
-                &self.column(a, &key.property),
-                &self.column(b, &key.property),
-            );
-            let ord = match key.direction {
-                SortDir::Asc => ord,
-                SortDir::Desc => ord.reverse(),
-            };
-            if ord != std::cmp::Ordering::Equal {
-                return ord;
-            }
-        }
-        a.basename.cmp(&b.basename)
     }
 }
 
