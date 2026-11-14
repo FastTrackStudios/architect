@@ -56,7 +56,7 @@ frames, nothing an extension author can target. Every web cell below is
 | L1 | Install from a registry: a signed archive, a consent prompt listing capabilities | ⚠️ not shown | ❌ #495 | ⚠️ not shown; Luau, pages and data only | - | `features/extensions/tests/distribution.rs`, `features/extensions/tests/registries.rs` |
 | L2 | Install on open: a vault, project or share link that needs extensions prompts once | ❌ #578 | ❌ #578, #495 | ❌ #578 | - | - |
 | L3 | Disable, enable, remove, pin, update; a development copy with hot reload | ⚠️ not shown | ❌ #495 | ⚠️ not shown | - | `features/extensions/tests/check.rs`, `features/extensions/tests/metronome.rs` |
-| L4 | An extension that cannot run here says why, and its data is kept | ❌ #578 | ❌ #578 | ❌ #578 | - | - |
+| L4 | An extension that cannot run here says why, and its data is kept | ⚠️ the extensions page and `EXT_LIST` say "macOS only: not on Linux" and the store refuses it; not shown at 390 px | ⚠️ the model is the same (`platform::here` is `web`); the page waits on #495 | ⚠️ the model is the same (`ios`); not shown | `showcase.mac-only` | `features/extensions/tests/platforms.rs`; [1280 dark](https://github.com/FastTrackStudios/architect/blob/pr-media/install-lifecycle/710-install/l4-desktop-1280-dark-manager.png?raw=true), [1280 light](https://github.com/FastTrackStudios/architect/blob/pr-media/install-lifecycle/710-install/l4-desktop-1280-light-manager.png?raw=true) |
 
 ## C: contributions
 
