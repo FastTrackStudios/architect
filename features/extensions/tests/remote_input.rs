@@ -19,7 +19,8 @@
     clippy::significant_drop_tightening,
     clippy::print_stdout,
     clippy::cast_precision_loss,
-    clippy::as_conversions
+    clippy::as_conversions,
+    clippy::suboptimal_flops
 )]
 
 use std::path::Path;
