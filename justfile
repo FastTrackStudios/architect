@@ -21,6 +21,12 @@ dev *ARGS:
 demo *ARGS:
     @bash scripts/run-it.sh demo {{ARGS}}
 
+# The web view showcase (#222): build examples/extension/webview-board's app (Vite + npm) into its dist/, pack it as an .archext and sign it with KEY (a minisign secret key file; `cargo xtask ext-keygen` makes a throwaway one)
+webview-example KEY="":
+    cd examples/extension/webview-board/app && npm ci --no-audit --no-fund && npm run build
+    cargo xtask ext-pack examples/extension/webview-board/package --out target/webview-board.archext
+    @if [ -n "{{KEY}}" ]; then cargo xtask ext-sign target/webview-board.archext --key "{{KEY}}"; else echo "unsigned: pass KEY=<secret key file> to sign it"; fi
+
 # The public website (apps/site: landing, download, changelog, extensions, docs), hot reload
 website:
     devenv up site

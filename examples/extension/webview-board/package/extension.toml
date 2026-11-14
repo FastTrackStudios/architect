@@ -1,0 +1,25 @@
+# The web view showcase (#222, architect#710 R6): a full TypeScript/npm app
+# in a pane. Its code runs only inside its web view (a wry child on a desk,
+# a sandboxed iframe in a browser); it reaches the app through the bridge,
+# within the capabilities below. Build its `dist/` with `just webview-example`.
+id = "demo.webview-board"
+name = "Web view board"
+version = "0.1.0"
+kind = "data"
+description = "A Vite + TypeScript app in a pane: a uPlot chart and a SortableJS board, saved as the extension's data, themed by the app."
+
+[capabilities]
+actions = ["EXT_VIEW_OPEN"]
+effect = "mutating"
+ui = ["notify"]
+
+[[actions]]
+id = "DEMO_WEBVIEW_BOARD_OPEN"
+name = "Open the web view board"
+preset = { action = "EXT_VIEW_OPEN", args = '{"extension": "demo.webview-board", "view": "board"}' }
+
+[[views]]
+id = "board"
+title = "Board (web view)"
+kind = "web"
+src = "dist/index.html"

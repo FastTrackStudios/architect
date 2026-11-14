@@ -332,3 +332,17 @@ fn a_paused_view_hears_nothing() {
         .collect();
     assert_eq!(heard, vec!["back.md".to_owned()]);
 }
+
+#[test]
+fn the_showcase_example_loads() {
+    // examples/extension/webview-board: its manifest, as it ships (its
+    // dist/ is built by `just webview-example`, so only the manifest here).
+    let text = include_str!("../../../examples/extension/webview-board/package/extension.toml");
+    let package = Package::embedded(text, &[("dist/index.html", "<main></main>")]).unwrap();
+    let host = host();
+    host.load(&package, Origin::Installed).unwrap();
+    let manifest = &host.get("demo.webview-board").unwrap().manifest;
+    let view = manifest.views.iter().find(|v| v.id == "board").unwrap();
+    assert_eq!(view.kind, "web");
+    assert_eq!(view.src.as_deref(), Some("dist/index.html"));
+}

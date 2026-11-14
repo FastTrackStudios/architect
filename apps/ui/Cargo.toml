@@ -7,6 +7,10 @@ license.workspace = true
 publish = false
 
 [features]
+# The web view kind's native host (#222): extensions' `kind = "web"` views
+# in a wry child web view (WebKitGTK on Linux: needs X11/XWayland). Without
+# it such a view says the app has no web view host; the kind still loads.
+webview = ["dep:architect-webview", "architect-webview/desk"]
 keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
 # WASI component extensions (Wasmtime): the WASI Counter
 # (`apps/sandbox/wasi-counter`) when its component was built.
@@ -147,6 +151,7 @@ architect-extensions = { workspace = true, features = ["lsp"] }
 architect-editor = { workspace = true, features = ["lsp"] }
 architect-presence = { workspace = true, features = ["native"] }
 architect-capture = { workspace = true, features = ["native"] }
+architect-webview = { workspace = true, optional = true }
 # The first run's folder picker (`src/first_run.rs`).
 rfd = { workspace = true }
 
