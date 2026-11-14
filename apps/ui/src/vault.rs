@@ -2745,3 +2745,54 @@ mod start_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod path_opener_tests {
+    use super::{open_by_path, path_receivers};
+
+    /// An open by path goes to the newest Vault page still open; one whose
+    /// page went is skipped and forgotten; with none, it says so; and only
+    /// a Markdown note opens this way (#739, #725).
+    #[test]
+    fn an_open_goes_to_the_newest_vault_page_still_open() {
+        path_receivers().clear();
+        assert_eq!(
+            open_by_path("Notes/a.txt").unwrap_err(),
+            "nothing opens Notes/a.txt"
+        );
+        assert_eq!(
+            open_by_path("Notes/a.md").unwrap_err(),
+            "no Vault view is open"
+        );
+
+        let (older, mut older_rx) = futures_channel::mpsc::unbounded::<String>();
+        let (newer, newer_rx) = futures_channel::mpsc::unbounded::<String>();
+        path_receivers().push(older);
+        path_receivers().push(newer);
+        // The newest page went: its receiver is skipped, the older one gets it.
+        drop(newer_rx);
+        let answer = open_by_path("Notes/a.md").unwrap();
+        assert_eq!(answer["path"], "Notes/a.md");
+        assert_eq!(older_rx.try_recv().ok().as_deref(), Some("Notes/a.md"));
+        assert_eq!(path_receivers().len(), 1, "the closed one is forgotten");
+
+        // A page opened since is the newest: it gets the next.
+        let (newest, mut newest_rx) = futures_channel::mpsc::unbounded::<String>();
+        path_receivers().push(newest);
+        open_by_path("Songs/b.MD").unwrap();
+        assert_eq!(newest_rx.try_recv().ok().as_deref(), Some("Songs/b.MD"));
+        assert!(
+            older_rx.try_recv().is_err(),
+            "nothing more for the older page"
+        );
+
+        // Every page gone: it says so.
+        drop(older_rx);
+        drop(newest_rx);
+        assert_eq!(
+            open_by_path("Notes/c.md").unwrap_err(),
+            "no Vault view is open"
+        );
+        path_receivers().clear();
+    }
+}
