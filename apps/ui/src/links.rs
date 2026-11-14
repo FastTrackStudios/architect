@@ -35,8 +35,27 @@ pub const SCHEME: &str = architect_spaces::guest::APP_SCHEME;
 /// The path a universal link's route is under (`https://<domain>/a/<route>`).
 pub const UNIVERSAL_PREFIX: &str = "/a/";
 
-/// The caller a link runs as.
+/// The caller a link runs as (`link:<scheme or domain>`).
 pub const LINK_CALLER: &str = "link";
+
+/// The domains a universal link (`https://<domain>/a/<route>`) may come
+/// from: the app's own (`Architect.entitlements`' associated domains). A
+/// distribution on a node of its own adds its with [`declare_domain`].
+pub const DOMAINS: [&str; 1] = ["architect.fasttrackstudio.app"];
+
+fn domains() -> &'static Mutex<Vec<String>> {
+    static D: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    D.get_or_init(|| Mutex::new(DOMAINS.iter().map(|d| (*d).to_owned()).collect()))
+}
+
+/// Adds `host` to the domains a universal link may come from.
+pub fn declare_domain(host: &str) {
+    let host = host.trim().to_ascii_lowercase();
+    let mut d = domains().lock().unwrap_or_else(PoisonError::into_inner);
+    if !d.contains(&host) {
+        d.push(host);
+    }
+}
 
 /// One declared route: the link's path, the action it runs and the
 /// arguments it fixes (a link's query never overrides them).
@@ -114,6 +133,8 @@ pub enum Refused {
     /// Not a link of the app's (another scheme, or a web link outside
     /// `/a/`), or a share link (the Shared tab's).
     NotARoute,
+    /// A web link from a domain that is not the app's.
+    Domain(String),
     /// No route is declared at that path.
     Unknown(String),
     /// `args=` is not a JSON object.
@@ -126,10 +147,27 @@ pub enum Refused {
     Failed(String),
 }
 
+impl Refused {
+    /// Its kind, for a log line: never the link's words.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::NotARoute => "not_a_route",
+            Self::Domain(_) => "domain",
+            Self::Unknown(_) => "unknown",
+            Self::BadArgs(_) => "bad_args",
+            Self::NoAction(_) => "no_action",
+            Self::Destructive(_) => "destructive",
+            Self::Failed(_) => "failed",
+        }
+    }
+}
+
 impl std::fmt::Display for Refused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotARoute => write!(f, "not a link to one of the app's routes"),
+            Self::Domain(d) => write!(f, "{d} is not one of the app's domains"),
             Self::Unknown(p) => write!(f, "no route {p:?}"),
             Self::BadArgs(why) => write!(f, "args is not a JSON object: {why}"),
             Self::NoAction(a) => write!(f, "no action {a}"),
@@ -144,6 +182,9 @@ impl std::fmt::Display for Refused {
 pub struct Followed {
     pub route: Route,
     pub args: Value,
+    /// Where it came from: the app's scheme, or the domain of a
+    /// universal link (the confirmation sheet's caller says it).
+    pub from: String,
 }
 
 /// The route `raw` names, its arguments merged (the route's own win).
@@ -153,8 +194,10 @@ pub struct Followed {
 /// Why it names none.
 pub fn resolve(raw: &str) -> Result<Followed, Refused> {
     let url = url::Url::parse(raw.trim()).map_err(|_| Refused::NotARoute)?;
+    let from;
     let path = match url.scheme() {
         s if s == SCHEME => {
+            from = SCHEME.to_owned();
             let host = url.host_str().unwrap_or_default();
             let rest = url.path().trim_matches('/');
             if rest.is_empty() {
@@ -163,11 +206,23 @@ pub fn resolve(raw: &str) -> Result<Followed, Refused> {
                 format!("{host}/{rest}")
             }
         }
-        "https" => url
-            .path()
-            .strip_prefix(UNIVERSAL_PREFIX)
-            .map(|p| p.trim_matches('/').to_owned())
-            .ok_or(Refused::NotARoute)?,
+        "https" => {
+            let rest = url
+                .path()
+                .strip_prefix(UNIVERSAL_PREFIX)
+                .map(|p| p.trim_matches('/').to_owned())
+                .ok_or(Refused::NotARoute)?;
+            let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+            let ours = domains()
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains(&host);
+            if !ours {
+                return Err(Refused::Domain(host));
+            }
+            from = host;
+            rest
+        }
         _ => return Err(Refused::NotARoute),
     };
     // A share link (`architect://open?url=…`) is the Shared tab's.
@@ -196,14 +251,17 @@ pub fn resolve(raw: &str) -> Result<Followed, Refused> {
     Ok(Followed {
         route,
         args: Value::Object(args),
+        from,
     })
 }
 
-/// The caller a link runs as: from outside, asking before any write.
+/// The caller a link from `from` runs as (`link:architect`,
+/// `link:<domain>`): from outside, asking before any write; the
+/// confirmation sheet shows it.
 #[must_use]
-pub fn caller() -> ActionCaller {
+pub fn caller(from: &str) -> ActionCaller {
     ActionCaller::new(Principal::Service {
-        name: LINK_CALLER.to_owned(),
+        name: format!("{LINK_CALLER}:{from}"),
     })
     .confirming_writes()
 }
@@ -227,7 +285,7 @@ pub async fn follow(list: &ActionList, raw: &str) -> Result<Value, Refused> {
         return Err(Refused::Destructive(action.clone()));
     }
     let args = followed.args.to_string();
-    let caller = caller();
+    let caller = caller(&followed.from);
     let first = list
         .run_json_async_with(&caller, action, args.as_bytes())
         .await;
@@ -278,6 +336,39 @@ pub fn incoming(raw: impl Into<String>) -> bool {
     true
 }
 
+/// How many links may wait for the person at once: past it, a link is
+/// dropped (said in the log), so a pile of them cannot stack up sheets.
+pub const MAX_WAITING: usize = 4;
+
+/// The links being followed now (each may wait up to two minutes for the
+/// person): a duplicate of one is dropped, and at most [`MAX_WAITING`].
+#[derive(Debug, Default)]
+pub struct Waiting(std::collections::HashSet<String>);
+
+impl Waiting {
+    /// Whether `raw` may be followed now: not one already waiting, and
+    /// room for it.
+    pub fn admit(&mut self, raw: &str) -> bool {
+        if self.0.contains(raw) || self.0.len() >= MAX_WAITING {
+            return false;
+        }
+        self.0.insert(raw.to_owned());
+        true
+    }
+
+    /// `raw` was followed (or refused).
+    pub fn done(&mut self, raw: &str) {
+        self.0.remove(raw);
+    }
+}
+
+/// What a log line says of a link: its route, never its text or
+/// arguments (they can be a note's words).
+#[must_use]
+pub fn route_of(raw: &str) -> String {
+    resolve(raw).map_or_else(|_| "-".to_owned(), |f| f.route.path)
+}
+
 /// The window follows the links the OS hands it, on its Action List.
 pub fn use_links(list: &std::sync::Arc<ActionList>) {
     let list = list.clone();
@@ -288,13 +379,35 @@ pub fn use_links(list: &std::sync::Arc<ActionList>) {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         if let Some(mut links) = taken {
+            let waiting = std::sync::Arc::new(Mutex::new(Waiting::default()));
             dioxus::core::spawn_forever(async move {
                 use futures_util::StreamExt as _;
                 while let Some(raw) = links.next().await {
-                    match follow(&list, &raw).await {
-                        Ok(_) => tracing::info!(link = %raw, "link: followed"),
-                        Err(why) => tracing::warn!(link = %raw, %why, "link: refused"),
+                    let route = route_of(&raw);
+                    if !waiting
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .admit(&raw)
+                    {
+                        tracing::warn!(link.route = %route, "link: dropped (the same one, or too many, waiting)");
+                        continue;
                     }
+                    // Each on its own: one waiting for the person does
+                    // not hold the others up.
+                    let list = list.clone();
+                    let waiting = waiting.clone();
+                    dioxus::core::spawn_forever(async move {
+                        match follow(&list, &raw).await {
+                            Ok(_) => tracing::info!(link.route = %route, "link: followed"),
+                            Err(why) => {
+                                tracing::warn!(link.route = %route, link.refused = why.kind(), "link: refused");
+                            }
+                        }
+                        waiting
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .done(&raw);
+                    });
                 }
             });
         }
@@ -359,7 +472,8 @@ mod tests {
         assert_eq!(f.route.action, "LINK_TEST_OPEN");
         // The route's own arguments win over the link's.
         assert_eq!(f.args, serde_json::json!({ "text": "hi", "fixed": "yes" }));
-        let u = resolve("https://architect.example/a/t/open?args=%7B%22n%22%3A2%7D").unwrap();
+        let u = resolve("https://architect.fasttrackstudio.app/a/t/open?args=%7B%22n%22%3A2%7D")
+            .unwrap();
         assert_eq!(u.args["n"], 2);
         assert_eq!(
             resolve("architect://LINK_TEST_OPEN"),
@@ -378,6 +492,52 @@ mod tests {
             Err(Refused::BadArgs(_))
         ));
         assert!(resolve("architect://capture?text=milk").is_ok());
+        // A web link only from the app's own domains (L4).
+        assert_eq!(
+            resolve("https://evil.example/a/t/open"),
+            Err(Refused::Domain("evil.example".to_owned()))
+        );
+        let ours = resolve("https://architect.fasttrackstudio.app/a/t/open").unwrap();
+        assert_eq!(ours.from, "architect.fasttrackstudio.app");
+        assert_eq!(resolve("architect://t/open").unwrap().from, "architect");
+        declare_domain("architect.example");
+        assert!(resolve("https://architect.example/a/t/open").is_ok());
+        // The sheet's caller says where it came from.
+        assert_eq!(
+            caller("architect.example").principal().cloned(),
+            Some(Principal::Service {
+                name: "link:architect.example".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn a_log_line_names_the_route_never_the_link() {
+        let _ = list();
+        let raw = "architect://t/open?text=my%20secret%20note&args=%7B%22n%22%3A2%7D";
+        let route = route_of(raw);
+        assert_eq!(route, "t/open");
+        assert!(
+            !route.contains("secret") && !route.contains("args") && !route.contains("text"),
+            "{route}"
+        );
+        assert_eq!(route_of("https://evil.example/a/t/open?text=x"), "-");
+        assert_eq!(Refused::Failed("my secret".to_owned()).kind(), "failed");
+    }
+
+    #[test]
+    fn a_link_waiting_holds_its_duplicates_and_the_queue_is_capped() {
+        let mut w = Waiting::default();
+        assert!(w.admit("architect://capture?text=a"));
+        // The same link again while it waits: dropped.
+        assert!(!w.admit("architect://capture?text=a"));
+        for i in 1..MAX_WAITING {
+            assert!(w.admit(&format!("architect://capture?text={i}")));
+        }
+        // Full: the next waits for one to finish.
+        assert!(!w.admit("architect://capture?text=more"));
+        w.done("architect://capture?text=a");
+        assert!(w.admit("architect://capture?text=more"));
     }
 
     #[test]
