@@ -67,6 +67,10 @@ pub struct Options {
     /// Features of the distribution crate to turn on (`--manifest-path`
     /// only): the standard distribution's node takes `node-wasi`.
     pub features: Vec<String>,
+    /// WASI component extensions in the desktop and iOS apps (#707): the
+    /// crate's `wasi` feature (Wasmtime; Cranelift on the desk, Pulley on
+    /// iOS), when it has one. `--no-wasi` leaves it out.
+    pub wasi: bool,
 }
 
 /// The build-time env `architect-updates` reads as the app's release
@@ -155,8 +159,13 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
     } else {
         cmd.env_remove(RELEASE_VERSION_ENV);
     }
-    if opts.manifest_path.is_some() && !opts.features.is_empty() {
-        cmd.args(["--features", &opts.features.join(",")]);
+    let features = if node {
+        given_features(opts)
+    } else {
+        app_features(opts)?
+    };
+    if !features.is_empty() {
+        cmd.args(["--features", &features.join(",")]);
     }
     if node {
         // Without the window (no Blitz, wgpu or wayland), and without the
@@ -318,27 +327,7 @@ fn ios_bin(opts: &Options) -> Result<Option<String>, String> {
     let manifest = manifest
         .canonicalize()
         .map_err(|e| format!("{}: {e}", manifest.display()))?;
-    let out = Command::new(cargo())
-        .current_dir(root())
-        .args([
-            "metadata",
-            "--no-deps",
-            "--format-version",
-            "1",
-            "--manifest-path",
-        ])
-        .arg(&manifest)
-        .output()
-        .map_err(|e| format!("cargo metadata: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "cargo metadata --manifest-path {}: {}",
-            manifest.display(),
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    let meta: serde_json::Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
+    let meta = metadata(&manifest)?;
     let bins = only_bins(&meta, &manifest);
     match bins.as_slice() {
         [one] => Ok(Some(one.clone())),
@@ -349,6 +338,80 @@ fn ios_bin(opts: &Options) -> Result<Option<String>, String> {
             bins.join(", ")
         )),
     }
+}
+
+/// The features `--features` named, for a distribution crate
+/// (`--manifest-path`); this repo's own crates take none.
+fn given_features(opts: &Options) -> Vec<String> {
+    if opts.manifest_path.is_some() {
+        opts.features.clone()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The features of the app's build, the desk's window or iOS: those
+/// given, and `wasi` (#707) unless `--no-wasi`, when the crate has it
+/// (this repo's `architect-desktop` and `architect-mobile` do).
+fn app_features(opts: &Options) -> Result<Vec<String>, String> {
+    let mut features = given_features(opts);
+    if !opts.wasi || features.iter().any(|f| f == "wasi") {
+        return Ok(features);
+    }
+    let has = match &opts.manifest_path {
+        None => true,
+        Some(m) => {
+            let m = m
+                .canonicalize()
+                .map_err(|e| format!("{}: {e}", m.display()))?;
+            declares_feature(&metadata(&m)?, &m, "wasi")
+        }
+    };
+    if has {
+        features.push("wasi".to_owned());
+    } else {
+        eprintln!("dist: the crate has no `wasi` feature: installed WASI extensions will not run");
+    }
+    Ok(features)
+}
+
+/// Whether the package whose manifest is `manifest` declares `feature`,
+/// in `cargo metadata`'s answer.
+fn declares_feature(meta: &serde_json::Value, manifest: &Path, feature: &str) -> bool {
+    meta.get("packages")
+        .and_then(|p| p.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|p| {
+            p.get("manifest_path")
+                .and_then(|m| m.as_str())
+                .is_some_and(|m| Path::new(m) == manifest)
+        })
+        .any(|p| p.get("features").and_then(|f| f.get(feature)).is_some())
+}
+
+/// `cargo metadata --no-deps` of the crate at `manifest`.
+fn metadata(manifest: &Path) -> Result<serde_json::Value, String> {
+    let out = Command::new(cargo())
+        .current_dir(root())
+        .args([
+            "metadata",
+            "--no-deps",
+            "--format-version",
+            "1",
+            "--manifest-path",
+        ])
+        .arg(manifest)
+        .output()
+        .map_err(|e| format!("cargo metadata: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "cargo metadata --manifest-path {}: {}",
+            manifest.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: {e}"))
 }
 
 /// The bin targets of the package whose manifest is `manifest`, in
@@ -400,8 +463,9 @@ fn ios(opts: &Options, device: bool, out: &Path) -> Result<PathBuf, String> {
     if let Some(bin) = ios_bin(opts)? {
         cmd.args(["--bin", &bin]);
     }
-    if opts.manifest_path.is_some() && !opts.features.is_empty() {
-        cmd.args(["--features", &opts.features.join(",")]);
+    let features = app_features(opts)?;
+    if !features.is_empty() {
+        cmd.args(["--features", &features.join(",")]);
     }
     if let Some(dir) = &opts.target_dir {
         cmd.env("CARGO_TARGET_DIR", dir);

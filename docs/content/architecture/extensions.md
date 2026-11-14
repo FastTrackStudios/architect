@@ -290,6 +290,10 @@ rendered by the app.
 > runner, workers too, on Wasmtime's Pulley interpreter. **The web
 > (2026-11-04, the rest of part 3)** behind the `web` feature: the same
 > components, transpiled by jco, in Web Workers ("On the web" below).
+> **In the release builds (#707):** `cargo xtask dist desktop` and
+> `dist ios` build the app with `wasi` (Cranelift on the desk, Pulley
+> on iOS), so an installed component runs in the shipped app;
+> `--no-wasi` leaves Wasmtime out.
 
 A `kind = "wasm"` extension is a WebAssembly component against the
 `architect:extension` world (`features/extensions/wit/extension.wit`),

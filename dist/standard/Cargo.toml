@@ -35,6 +35,9 @@ gui = ["architect-desktop/gui", "dep:studio-views"]
 # The node draws the fences installed WASI components claim, as the
 # release's node does (`cargo xtask dist node --features node-wasi`).
 node-wasi = ["architect-desktop/node-wasi"]
+# WASI component extensions in the app: Wasmtime, Cranelift on the desk,
+# Pulley on iOS (`cargo xtask dist desktop` and `dist ios` turn it on).
+wasi = ["architect-desktop/wasi", "architect-mobile/wasi"]
 
 [dependencies]
 architect-distribution = { path = "../../apps/distribution" }

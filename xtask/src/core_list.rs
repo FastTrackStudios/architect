@@ -783,6 +783,9 @@ fn manifest(list: &List, root: &Root, patched: &BTreeSet<String>) -> Result<Stri
     line("# The node draws the fences installed WASI components claim, as the");
     line("# release's node does (`cargo xtask dist node --features node-wasi`).");
     line("node-wasi = [\"architect-desktop/node-wasi\"]");
+    line("# WASI component extensions in the app: Wasmtime, Cranelift on the desk,");
+    line("# Pulley on iOS (`cargo xtask dist desktop` and `dist ios` turn it on).");
+    line("wasi = [\"architect-desktop/wasi\", \"architect-mobile/wasi\"]");
     line("");
     line("[dependencies]");
     line(&format!(
