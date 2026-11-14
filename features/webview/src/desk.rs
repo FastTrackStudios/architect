@@ -170,12 +170,7 @@ fn why_not(e: &wry::Error) -> String {
 }
 
 /// Makes the native view for `ask` in `window`.
-fn create(
-    host: &Host,
-    ask: &WebAsk,
-    window: &dyn OsWindow,
-    rect: Rect,
-) -> Result<Native, String> {
+fn create(host: &Host, ask: &WebAsk, window: &dyn OsWindow, rect: Rect) -> Result<Native, String> {
     pump();
     let dir = ask
         .dir
@@ -271,7 +266,10 @@ fn theme_now() -> (String, String) {
             };
             let css = webview::theme_css(
                 scheme,
-                resolved.tokens().iter().map(|(k, v)| (k.as_str(), v.as_str())),
+                resolved
+                    .tokens()
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_str())),
             );
             (scheme.to_owned(), css)
         },
@@ -347,7 +345,9 @@ pub fn DeskWebPane(ask: WebAsk, host: HostRef) -> Element {
                     let mut views = views.borrow_mut();
                     if !views.contains_key(&key) {
                         let Some(window) = window.as_ref() else {
-                            return Err("This window has no OS window to put a web view in.".to_owned());
+                            return Err(
+                                "This window has no OS window to put a web view in.".to_owned()
+                            );
                         };
                         if !sized {
                             return Ok(());
@@ -375,7 +375,10 @@ pub fn DeskWebPane(ask: WebAsk, host: HostRef) -> Element {
                     }
                     let (scheme, css) = theme.peek().clone();
                     if n.theme != css {
-                        n.bridge.send(Outbound::Theme { scheme, css: css.clone() });
+                        n.bridge.send(Outbound::Theme {
+                            scheme,
+                            css: css.clone(),
+                        });
                         n.theme = css;
                     }
                     while let Ok(text) = n.inbox.try_recv() {
