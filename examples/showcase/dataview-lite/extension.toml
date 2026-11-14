@@ -1,0 +1,29 @@
+# The showcase's Dataview-lite (#710: C10, H3): a ```showcase-query fence
+# drawn as a table, from the vault's own queries: a base's rows
+# (BASES_ROWS), the notes with a tag (TAGS_NOTES) or the notes that link
+# to one (LINKS_BACK).
+id = "showcase.dataview"
+name = "Dataview-lite"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "A ```showcase-query fence drawn as a table: `base: <path>`, `tag: <tag>` or `backlinks: <path>`, answered by the vault's own queries. Stands in for Dataview, Tasks' query blocks and Bases embeds."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+actions = ["BASES_ROWS", "TAGS_NOTES", "LINKS_BACK"]
+
+[[actions]]
+id = "SHOWCASE_DATAVIEW_QUERY"
+name = "Dataview-lite: query"
+description = "Runs a showcase-query fence's text (`source`): {kind, columns, rows: [{path, name, values}]}."
+group = "Showcase"
+params = '{"type":"object","properties":{"source":{"type":"string"}},"required":["source"]}'
+script = "query.luau"
+
+[[embeds]]
+id = "query"
+title = "Showcase query"
+page = "pages/query.tsx"
+claims = { fence = ["showcase-query"] }
+max_height = 360

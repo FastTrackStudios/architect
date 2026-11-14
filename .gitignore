@@ -25,3 +25,6 @@ apps/sandbox/media/tests/golden/*.got.html
 # `cargo xtask dev run web` (xtask/src/dev/mod.rs `prepare_web`).
 /apps/web/index.html
 /apps/web/dev/
+
+# A development copy of an example page writes why it failed beside it.
+examples/showcase/**/*.error
