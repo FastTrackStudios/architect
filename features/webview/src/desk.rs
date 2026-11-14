@@ -334,16 +334,18 @@ pub const REAP: Duration = Duration::from_secs(5);
 
 /// Where a pane is probed for anything of the app's over it: a 5×5 grid,
 /// [`INSET`] in from its edges.
-fn probes(x: f64, y: f64, w: f64, h: f64) -> Vec<(f64, f64)> {
+fn probes(left: f64, top: f64, width: f64, height: f64) -> Vec<(f64, f64)> {
     let inset = |len: f64| INSET.min(len / 2.0);
     let along = |start: f64, len: f64| -> Vec<f64> {
-        let (a, b) = (start + inset(len), start + len - inset(len));
-        (0..5).map(|i| a + (b - a) * f64::from(i) / 4.0).collect()
+        let (first, last) = (start + inset(len), start + len - inset(len));
+        (0..5)
+            .map(|i| first + (last - first) * f64::from(i) / 4.0)
+            .collect()
     };
-    let ys = along(y, h);
-    along(x, w)
+    let rows = along(top, height);
+    along(left, width)
         .into_iter()
-        .flat_map(|px| ys.iter().map(move |py| (px, *py)))
+        .flat_map(|px| rows.iter().map(move |py| (px, *py)))
         .collect()
 }
 
