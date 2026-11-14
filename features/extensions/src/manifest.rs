@@ -278,6 +278,13 @@ pub struct ViewDecl {
     /// that does not draws the extension's own view.
     #[serde(default)]
     pub page: Option<String>,
+    /// The HTML file in the package a `web` view opens (`src =
+    /// "dist/index.html"`; #222, `crate::webview`): its own HTML, CSS and
+    /// JS in a web view, served from the package under a strict policy,
+    /// reaching the app through the host bridge only. A `web` view needs
+    /// one, and only a `web` view has one.
+    #[serde(default)]
+    pub src: Option<String>,
     /// Where it lives: the main area or a dock (`left`, `right`,
     /// `bottom`).
     #[serde(default)]
@@ -1025,6 +1032,25 @@ impl Manifest {
             }
             if let Some(page) = &view.page {
                 inside(page)?;
+            }
+            match (&view.src, view.kind == architect_workspace::WEB) {
+                (Some(src), true) => inside(src)?,
+                (None, true) => {
+                    return Err(ManifestError::Interop {
+                        field: format!("views.{}.src", view.id),
+                        why: "a web view names the HTML file it opens (src)".to_owned(),
+                    });
+                }
+                (Some(_), false) => {
+                    return Err(ManifestError::Interop {
+                        field: format!("views.{}.src", view.id),
+                        why: format!(
+                            "only a web view opens an HTML file (kind = \"web\"; this one is {})",
+                            view.kind
+                        ),
+                    });
+                }
+                (None, false) => {}
             }
         }
         for overlay in &self.overlays {

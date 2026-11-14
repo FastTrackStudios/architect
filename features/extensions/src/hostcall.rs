@@ -46,6 +46,7 @@
 //! | `fetch {url, method?, headers?, body?, timeout_ms?, max_bytes?, stream?, binary?}` | an HTTP request ([`Fetch`]), redirects followed by the host: `{status, url, headers, body}` (`stream`: `{…, stream}`, its body read with `read_body`) | the URL's host, and every redirect's, in `capabilities.hosts` |
 //! | `read_body {stream, max?}` / `close_body {stream}` | the next part of a streamed response's body (`{chunk, done}`), or stops reading it | its own stream |
 //! | `secret {name}` / `ask_secret {name}` | whether the person has set one of its `[[secrets]]` (never its value), or asks them for it | declaring it |
+//! | `store_secret {name, value}` | keeps a value as one of its `[[secrets]]`, insert-only: nothing reads it back but the host's `{{secret:…}}` | declaring it |
 //! | `ports {kind?}` | the MIDI ports the app has (`[{kind, name, direction}]`; OSC endpoints are not listed) | any `capabilities.ports` |
 //! | `open_port {kind, name, listen?}` | opens a MIDI port by name, or an OSC endpoint (`host:port`, hearing on `listen`): `{port, kind, name}`; what it hears is a `port.message` event to it | `capabilities.ports` naming it (`midi:<name>`, `osc:<host>:<port>`, `osc:listen:<port>`) |
 //! | `port_send {port, message}` / `port_receive {port, max?}` / `close_port {port}` | sends a message (`crate::ports`' JSON), takes what it heard and has not taken, closes it | its own port |
@@ -276,6 +277,14 @@ pub enum HostRequest {
     /// whether they gave one.
     AskSecret {
         name: String,
+    },
+    /// Keeps `value` as its secret `name` (`[[secrets]]`), in place of
+    /// the one set before: insert-only, so a web view that got a token
+    /// (a bank link's) hands it to the host and never reads it back.
+    /// Whether it was kept.
+    StoreSecret {
+        name: String,
+        value: String,
     },
     /// The ports the app has, of kind `kind` (`midi`, `osc`) or every
     /// one: `[{kind, name, direction}]`.
@@ -668,6 +677,7 @@ impl HostRequest {
             Self::CloseBody { .. } => "close_body",
             Self::Secret { .. } => "secret",
             Self::AskSecret { .. } => "ask_secret",
+            Self::StoreSecret { .. } => "store_secret",
             Self::Ports { .. } => "ports",
             Self::OpenPort { .. } => "open_port",
             Self::PortSend { .. } => "port_send",
@@ -915,7 +925,9 @@ pub fn check(
         HostRequest::Fetch(fetch) => ("hosts", fetch_check(manifest, may, fetch)),
         // Its own streams: the host that keeps them checks whose they are.
         HostRequest::ReadBody { .. } | HostRequest::CloseBody { .. } => ("hosts", Ok(())),
-        HostRequest::Secret { name } | HostRequest::AskSecret { name } => (
+        HostRequest::Secret { name }
+        | HostRequest::AskSecret { name }
+        | HostRequest::StoreSecret { name, .. } => (
             "secrets",
             if manifest.secret(name).is_some() {
                 Ok(())

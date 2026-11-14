@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- The browser host of the web view kind (test/webview.test.mjs). -->
+<meta charset="utf-8" />
+<title>webview host</title>
+<div id="pane" style="width: 390px; height: 300px"></div>
+<script type="module">
+  import { mountWebView } from '../webview-host.js';
+  const calls = [];
+  window.calls = calls;
+  window.escapes = 0;
+  let view;
+  // As hostcall::check would: its own actions only, the network to api.example.com.
+  const call = async (req) => {
+    calls.push(req.op);
+    if (req.op === 'run') {
+      return req.action.startsWith('DEMO_BOARD_')
+        ? { ok: 'ran' }
+        : { error: { kind: 'refused', capability: 'actions', why: 'outside its namespace' } };
+    }
+    if (req.op === 'fetch') {
+      return new URL(req.url).host === 'api.example.com'
+        ? { ok: { status: 200, url: req.url, headers: {}, body: '' } }
+        : { error: { kind: 'refused', capability: 'hosts', why: 'not in capabilities.hosts' } };
+    }
+    if (req.op === 'log') {
+      if (req.text === 'listening') setTimeout(() => view.emit('doc.saved', { path: 'a.md' }), 50);
+      else window.report = JSON.parse(req.text);
+      return { ok: null };
+    }
+    return { error: { kind: 'unsupported', what: req.op } };
+  };
+  view = mountWebView(document.getElementById('pane'), {
+    src: './webview-app/index.html',
+    call,
+    theme: { scheme: 'light', tokens: { brand: '#6c5ce7', 'bad name': 'x', evil: 'red;}body{display:none' } },
+    onEscape: () => { window.escapes += 1; },
+  });
+  window.view = view;
+</script>
