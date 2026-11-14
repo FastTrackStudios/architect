@@ -37,6 +37,18 @@ group = "Showcase"
 params = '{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}}}'
 script = "menu.luau"
 
+[[actions]]
+id = "SHOWCASE_TOOLBAR_RESTORE"
+name = "Toolbar sampler: restore"
+description = "Puts the toggle's tick and the status item back as focus mode was kept (its startup hook)."
+group = "Showcase"
+script = "restore.luau"
+
+# Focus mode is kept in its data: on start, its tick and status follow.
+[[hooks]]
+on = "startup"
+action = "SHOWCASE_TOOLBAR_RESTORE"
+
 [[toolbars]]
 id = "showcase"
 title = "Showcase"

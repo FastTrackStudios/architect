@@ -22,7 +22,8 @@ end
 if clear then
   host.decorate({ kind = "file", id = "Showcase.md" }, nil)
 else
-  host.decorate({ kind = "file", id = "Showcase.md" }, { icon = "star", badge = "51", color = "primary" })
+  -- The badge: how many folders it decorated.
+  host.decorate({ kind = "file", id = "Showcase.md" }, { icon = "star", badge = tostring(#done), color = "primary" })
   host.notify("Decorated " .. #done .. " folders", "success", "Iconize-lite")
 end
 return done

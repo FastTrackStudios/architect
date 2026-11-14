@@ -144,6 +144,43 @@ fn the_toolbar_samplers_toggle_toolbars_status_and_context_rows() {
     assert_eq!(chosen, "bold");
 }
 
+#[test]
+fn the_toolbar_samplers_focus_mode_comes_back_after_a_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let host_on = |list: &ActionList| {
+        let host = Host::new(list.clone(), SharedSections::new(Registry::new()))
+            .with_ui(FakeUi::new())
+            .with_data_root(tmp.path().join("data"));
+        load(&host, "toolbar-sampler");
+        host
+    };
+    let list = ActionList::new();
+    let host = host_on(&list);
+    run(&list, "SHOWCASE_TOOLBAR_FOCUS", &Value::Null).unwrap();
+    drop(host);
+
+    // A new host on the same data (a restart): its startup hook puts the
+    // tick and the status item back.
+    let list = ActionList::new();
+    let host = host_on(&list);
+    // Hooks run off the loader's thread: give it a moment.
+    let started = std::time::Instant::now();
+    while list.info("SHOWCASE_TOOLBAR_FOCUS").unwrap().checked != Some(true) {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "the tick did not come back"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let status = host
+        .contributions()
+        .status(architect_extensions::host::now_ms())
+        .into_iter()
+        .find(|s| s.item.id == "focus")
+        .unwrap();
+    assert_eq!(status.item.text, "Focus on");
+}
+
 // ---- Settings and theme -------------------------------------------------
 
 /// The settings page's values: a greeting, said loudly.
@@ -187,8 +224,25 @@ fn settings_and_theme_adds_a_section_a_theme_and_tokens_and_keeps_its_data() {
         .expect("Showcase Dusk");
     assert_eq!(dusk["source"], "extension:showcase.dusk");
     assert_eq!(dusk["appearance"], "dark");
-    // Its tokens resolve in whatever theme shows.
+    // Its tokens resolve in whatever theme shows, and a theme may set
+    // them: Showcase Dusk's own `dusk.card` wins over the extension's
+    // default while it shows.
     assert!(store.current().get("dusk.radius").is_some());
+    let default_card = store.current().get("dusk.card").map(ToString::to_string);
+    assert!(default_card.is_some());
+    block_on(list.run_json_async("THEME_SET", br#"{"one":"showcase-dusk","layer":"pick"}"#))
+        .unwrap();
+    let dusk = store.current();
+    assert_eq!(
+        dusk.get("background").map(ToString::to_string).as_deref(),
+        Some("#14111f")
+    );
+    let dusk_card = dusk.get("dusk.card").map(ToString::to_string);
+    assert!(dusk_card.is_some());
+    assert_ne!(
+        dusk_card, default_card,
+        "the theme's override, not the default"
+    );
 
     // It reads the settings page's values.
     let out = run(&list, "SHOWCASE_DUSK_GREET", &Value::Null).unwrap();
@@ -288,7 +342,11 @@ fn iconize_lite_colours_and_badges_through_the_navigators_actions() {
     assert_eq!(calls.len(), 12);
     let badge = host.decorations_of(&Target::file("Showcase.md"));
     assert_eq!(badge[0].from, "showcase.iconize");
-    assert_eq!(badge[0].decoration.badge.as_deref(), Some("51"));
+    assert_eq!(
+        badge[0].decoration.badge.as_deref(),
+        Some("6"),
+        "the folders it decorated"
+    );
 
     // Taken off again: empty icons and colours, no badge.
     run(
