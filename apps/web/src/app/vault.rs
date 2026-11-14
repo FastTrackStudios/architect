@@ -876,7 +876,7 @@ fn NoteText(path: String, text: String) -> Element {
     let (front, body0) = architect_navigator::markdown::split_block(&text);
     let front = front.into_owned();
     let properties = note_from_markdown(&path, &text, 0, 0).properties;
-    // Set once: the text area's value is the DOM's from then on.
+    // The text area's first value; the DOM's from then on.
     let initial = use_hook(|| body0.to_owned());
     let mut ready = use_signal(|| vault.org.is_none());
     let mut lost = use_signal(|| None::<String>);
@@ -968,6 +968,13 @@ fn NoteText(path: String, text: String) -> Element {
         }
     };
     let id = editor.id.clone();
+    // What the text area holds now, else the note as it opened: Dioxus
+    // writes a `value` on every render (it is volatile), so a render for
+    // anything else (the extension listing arriving, a signal) writes back
+    // what the person sees, never the note as it was when it opened.
+    let current = editor
+        .area()
+        .map_or_else(|| initial.clone(), |area| area.value());
     let read_only = !ready();
     let prop = |name: &str| {
         properties
@@ -1066,38 +1073,34 @@ fn NoteText(path: String, text: String) -> Element {
                 }
                 if core_list {
                     super::collection::ReadingBody { body: body0.to_owned() }
-                    details { "data-testid": "note-text-fold",
-                        summary { style: "cursor: pointer; font-size: 13px; color: {t.ink_3}; margin: 0 0 10px;", "Edit the note's text" }
-                textarea {
-                    id: "{id}",
-                    "data-testid": "note-text",
-                    "data-live": if read_only { "connecting" } else { "ready" },
-                    "aria-label": "{title_of(&path)}",
-                    spellcheck: "true",
-                    readonly: read_only,
-                    value: "{initial}",
-                    oninput: on_input,
-                    oncompositionstart: on_compose,
-                    oncompositionend: on_composed,
-                    onfocusin: move |_| editing.focus(),
-                    onfocusout: move |_| editing.blur(),
                 }
+                // One text area whatever `core_list` is (the extension
+                // listing can load after the note opens): folded under
+                // its summary for a list, open otherwise, never rebuilt,
+                // so what was typed, the caret and focus stay.
+                details { "data-testid": "note-text-fold", open: !core_list,
+                    summary {
+                        style: if core_list {
+                            "cursor: pointer; font-size: 13px; color: {t.ink_3}; margin: 0 0 10px;"
+                        } else {
+                            "display: none;"
+                        },
+                        "Edit the note's text"
                     }
-                } else {
-                textarea {
-                    id: "{id}",
-                    "data-testid": "note-text",
-                    "data-live": if read_only { "connecting" } else { "ready" },
-                    "aria-label": "{title_of(&path)}",
-                    spellcheck: "true",
-                    readonly: read_only,
-                    value: "{initial}",
-                    oninput: on_input,
-                    oncompositionstart: on_compose,
-                    oncompositionend: on_composed,
-                    onfocusin: move |_| editing.focus(),
-                    onfocusout: move |_| editing.blur(),
-                }
+                    textarea {
+                        id: "{id}",
+                        "data-testid": "note-text",
+                        "data-live": if read_only { "connecting" } else { "ready" },
+                        "aria-label": "{title_of(&path)}",
+                        spellcheck: "true",
+                        readonly: read_only,
+                        value: "{current}",
+                        oninput: on_input,
+                        oncompositionstart: on_compose,
+                        oncompositionend: on_composed,
+                        onfocusin: move |_| editing.focus(),
+                        onfocusout: move |_| editing.blur(),
+                    }
                 }
             }
         }

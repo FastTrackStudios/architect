@@ -531,10 +531,9 @@ impl LayerRules {
         }
         PLACEMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut out: HashMap<String, Listen> = HashMap::new();
-        if current.rules.is_empty() {
-            return Some(out);
-        }
-        for entry in entries {
+        // Files some rule places, at whatever layer (the page too).
+        let mut placed_by_rule: BTreeSet<&str> = BTreeSet::new();
+        for entry in entries.iter().filter(|_| !current.rules.is_empty()) {
             // `type: song`, or a list of types (`type: [song, live]`).
             let kinds: Vec<&str> = match entry.properties.get("type") {
                 Some(serde_json::Value::String(kind)) => vec![kind.as_str()],
@@ -556,11 +555,38 @@ impl LayerRules {
                     .iter()
                     .filter_map(|r| r.layer_of(&entry.path, file))
                     .filter_map(|l| Listen::parse(l).ok())
-                    .max()
-                    .filter(|l| *l > Listen::Page);
-                if let Some(layer) = layer {
+                    .max();
+                if layer.is_some() {
+                    placed_by_rule.insert(file);
+                }
+                if let Some(layer) = layer.filter(|l| *l > Listen::Page) {
                     let held = out.entry(file.clone()).or_insert(layer);
                     *held = (*held).max(layer);
+                }
+            }
+        }
+        // A recording or cover a note attaches only through its media
+        // properties (`Entry::listening`, #668), and no note links in its
+        // body, is a listening layer's when no rule places it: the
+        // reference (what an engine plays the song's mix from), never the
+        // page, so a page-only link serves none it did not serve before.
+        let linked: BTreeSet<&str> = entries
+            .iter()
+            .flat_map(|e| {
+                e.files
+                    .iter()
+                    .filter(|f| !e.listening.contains(f))
+                    .map(String::as_str)
+            })
+            .collect();
+        for entry in entries {
+            for file in &entry.listening {
+                if entry.files.contains(file)
+                    && !linked.contains(file.as_str())
+                    && !placed_by_rule.contains(file.as_str())
+                {
+                    let held = out.entry(file.clone()).or_insert(Listen::Reference);
+                    *held = (*held).max(Listen::Reference);
                 }
             }
         }
@@ -625,6 +651,7 @@ mod tests {
             properties,
             files: files.iter().map(|f| (*f).to_owned()).collect(),
             art: None,
+            listening: Vec::new(),
         }
     }
 
@@ -635,6 +662,43 @@ mod tests {
             full: vec!["Media/**".into()],
             ..ShareLayersDecl::default()
         }
+    }
+
+    #[test]
+    fn a_file_only_a_media_property_attaches_is_the_references_unless_a_rule_places_it() {
+        let listening = |mut e: Entry, files: &[&str]| {
+            e.listening = files.iter().map(|f| (*f).to_owned()).collect();
+            e
+        };
+        let entries = [
+            // Its recording and cover named only by `recording:`/`cover:`.
+            listening(
+                entry("Joy/Joy.md", Some("song"), &["Joy/take.mp3", "Joy/cover.png", "Joy/a.png"]),
+                &["Joy/take.mp3", "Joy/cover.png"],
+            ),
+            // Another note's recording a third note links in its body.
+            listening(entry("Eve/Eve.md", None, &["Eve/take.mp3"]), &["Eve/take.mp3"]),
+            entry("Notes.md", None, &["Eve/take.mp3"]),
+        ];
+        let none = LayerRules::default();
+        let placed = LayerRules::place(&none.current(), &entries).unwrap();
+        assert_eq!(placed.get("Joy/take.mp3"), Some(&Listen::Reference));
+        assert_eq!(placed.get("Joy/cover.png"), Some(&Listen::Reference));
+        assert_eq!(placed.get("Joy/a.png"), None, "linked in the body: the page's");
+        assert_eq!(placed.get("Eve/take.mp3"), None, "linked in a body: the page's");
+        assert_eq!(within(&entries, &placed, Listen::Page)[0].files, ["Joy/a.png"]);
+
+        // A rule that places it, at any layer, wins: the page too.
+        let page = ShareLayersDecl {
+            note_type: "song".into(),
+            page: vec!["cover.png".into()],
+            full: vec!["*.mp3".into()],
+            ..ShareLayersDecl::default()
+        };
+        let rules = LayerRules::new(None, vec![page], None);
+        let placed = LayerRules::place(&rules.current(), &entries).unwrap();
+        assert_eq!(placed.get("Joy/take.mp3"), Some(&Listen::Full));
+        assert_eq!(placed.get("Joy/cover.png"), None);
     }
 
     #[test]

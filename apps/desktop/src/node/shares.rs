@@ -650,9 +650,8 @@ impl Shares {
     /// ([`Self::view`]).
     fn placed(&self, share: &Share) -> Option<Arc<HashMap<String, Listen>>> {
         let current = self.0.layers.current();
-        if current.is_empty() {
-            return Some(Arc::default());
-        }
+        // Placed with no rules too: a file only a media item's properties
+        // attach is the reference's by default (#668).
         let view = self.view(&share.vault)?;
         let mut slot = view.placed.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some((generation, placed)) = slot.as_ref() {
@@ -2848,6 +2847,13 @@ impl ShareGuest for GuestLane {
         };
         // A note the link lists now, with a page of the link's.
         let (notes, files) = listing(&self.0, &link, link.listen).await.map_err(shut)?;
+        // What a listing fence may name (#668): the notes the link lists
+        // and the files it serves at this layer.
+        let readable: std::collections::HashSet<String> = notes
+            .iter()
+            .map(|n| n.path.clone())
+            .chain(files.iter().map(|f| f.path.clone()))
+            .collect();
         let listed = notes
             .into_iter()
             .find(|n| n.path == path)
@@ -2884,6 +2890,7 @@ impl ShareGuest for GuestLane {
         .and_then(Result::ok)
         .ok_or(GuestFault::Building)?;
         let mut note: GuestNote = facet_json::from_str(&text).map_err(|_| GuestFault::Building)?;
+        within_listing(&mut note, &|p| readable.contains(p));
         // What the view that draws its type may read of it (#648, #669),
         // decided here, by this node's islands, never by the caller: its
         // text (as the build wrote it for this link) only to a view that
@@ -2929,6 +2936,33 @@ impl ShareGuest for GuestLane {
         };
         let (_, files) = listing(&self.0, &link, asked).await.map_err(shut)?;
         Ok(files)
+    }
+}
+
+/// `note` with every listing fence (`architect_media::is_listing_fence`,
+/// a collection's rows as an extension writes them, #668) cut to what
+/// the guest may read (`readable`: the link's notes and the files it
+/// serves), in its words and in its text alike
+/// (`architect_media::fence::within`): a row naming a note outside the
+/// link is gone, title and all; a file the link holds back is emptied
+/// from a row kept. A block an extension drew from such a fence at the
+/// build is gone whole: its words are the extension's, not cut by row.
+fn within_listing(note: &mut GuestNote, readable: &dyn Fn(&str) -> bool) {
+    let listing = |b: &architect_spaces::PlainBlock| {
+        b.info.as_deref().is_some_and(|i| {
+            architect_media::is_listing_fence(i.strip_prefix("fence:").unwrap_or(i))
+        })
+    };
+    note.blocks.retain_mut(|b| match b.kind {
+        architect_spaces::BlockKind::Code if listing(b) => {
+            b.text = architect_media::fence::rows_within(&b.text, readable, readable);
+            !b.text.trim().is_empty()
+        }
+        architect_spaces::BlockKind::Drawn => !listing(b),
+        _ => true,
+    });
+    if let Some(source) = note.source.as_mut() {
+        *source = architect_media::fence::within(source, readable, readable);
     }
 }
 

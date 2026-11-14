@@ -18,9 +18,11 @@
 //! Key, tempo, meter and anything else music-specific are an extension's
 //! (Studio's), never read here. An extension that claims the note's type
 //! draws over the core view; [`is_listing_fence`] names the fences such an
-//! extension writes as its richer layer of the same list.
+//! extension writes as its richer layer of the same list, and
+//! [`fence::within`] cuts one to the rows a reader may see.
 
 pub mod collection;
+pub mod fence;
 pub mod front;
 pub mod item;
 pub mod link;
