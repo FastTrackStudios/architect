@@ -46,8 +46,8 @@ mod share_service;
 pub mod view;
 
 pub use guest::{
-    BlockKind, GUEST_PERMITS, GuestFault, GuestLink, GuestNote, ListedFile, ListedNote, PlainBlock,
-    Refused, ShareGuest, ShareUrl,
+    BlockKind, GUEST_PERMITS, GuestFault, GuestLink, GuestNote, ListedFile, ListedNote, ListedSet,
+    PlainBlock, Refused, ShareGuest, ShareUrl,
 };
 pub use model::{
     COMMENTER, EDITOR, FILES_PREFIX, Holding, MANAGER, Member, NewSpace, OrgSpaces, SPACES_PREFIX,

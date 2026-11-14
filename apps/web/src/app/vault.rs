@@ -59,7 +59,7 @@ pub struct WebVault {
 
 /// Unix milliseconds now.
 #[allow(clippy::as_conversions, clippy::cast_possible_truncation)] // a time in ms, well inside i64
-fn now() -> Millis {
+pub fn now() -> Millis {
     js_sys::Date::now() as Millis
 }
 
@@ -876,11 +876,14 @@ fn NoteText(path: String, text: String) -> Element {
     let (front, body0) = architect_navigator::markdown::split_block(&text);
     let front = front.into_owned();
     let properties = note_from_markdown(&path, &text, 0, 0).properties;
-    // Set once: the text area's value is the DOM's from then on.
+    // The text area's first value; the DOM's from then on.
     let initial = use_hook(|| body0.to_owned());
     let mut ready = use_signal(|| vault.org.is_none());
     let mut lost = use_signal(|| None::<String>);
     let failed = use_signal(|| None::<String>);
+    // The text area's fold, held from the person's first focus in it: a
+    // list made or unmade by what they type never folds it under them.
+    let mut fold_held = use_signal(|| None::<bool>);
     let created = use_hook(|| {
         source
             .files()
@@ -968,6 +971,13 @@ fn NoteText(path: String, text: String) -> Element {
         }
     };
     let id = editor.id.clone();
+    // What the text area holds now, else the note as it opened: Dioxus
+    // writes a `value` on every render (it is volatile), so a render for
+    // anything else (the extension listing arriving, a signal) writes back
+    // what the person sees, never the note as it was when it opened.
+    let current = editor
+        .area()
+        .map_or_else(|| initial.clone(), |area| area.value());
     let read_only = !ready();
     let prop = |name: &str| {
         properties
@@ -981,6 +991,27 @@ fn NoteText(path: String, text: String) -> Element {
         .iter()
         .map(|(k, v)| (k.clone(), shown(v)))
         .collect();
+    // A collection (#668) draws as the core list at its head, unless an
+    // island claims its type: then the island's view draws instead. The
+    // list's own rows (`sets`, `songs`, …) leave the property table, and
+    // its words are read with the fences that repeat the list folded out.
+    let fields = architect_media::front::fields(&text);
+    let listing = super::frames::use_listing();
+    let claimed = listing
+        .read()
+        .as_ref()
+        .is_some_and(|l| crate::ext_host::claimed(l, &note_type).is_some());
+    let core_list = !claimed && super::collection::is_collection(&fields);
+    let listed_keys = if core_list {
+        architect_media::Collection::fields_in(&fields)
+    } else {
+        Vec::new()
+    };
+    let table: Vec<(String, PropertyValue)> = properties
+        .iter()
+        .filter(|(k, _)| !listed_keys.contains(&k.as_str()))
+        .cloned()
+        .collect();
     // A note's recording (its `recording` property, a vault path) plays on
     // the app's own source in the Now Playing bar (#589).
     let recording = prop("recording");
@@ -992,6 +1023,13 @@ fn NoteText(path: String, text: String) -> Element {
         document::Style { {LAYOUT} }
         div { style: "flex: 1 1 0; min-height: 0; overflow: auto; padding: 24px 28px 96px; color: {t.ink};",
             div { class: "web-note", "data-note": "{path}",
+                if core_list {
+                    super::collection::CollectionHead {
+                        path: path.clone(),
+                        title: note_title.clone(),
+                        text: text.clone(),
+                    }
+                }
                 if !note_type.is_empty() {
                     super::embed::NoteEmbed {
                         // The signed-in person's own vault, or the demo; a
@@ -1010,11 +1048,11 @@ fn NoteText(path: String, text: String) -> Element {
                         artist: prop("artist"), cover: prop("cover"),
                     }
                 }
-                if !properties.is_empty() {
+                if !table.is_empty() {
                     dl { "data-testid": "note-properties",
                         style: "display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 16px; \
                                 font-size: 13px; color: {t.ink_3};",
-                        for (k, v) in properties {
+                        for (k, v) in table {
                             Property { key: "{k}", value: shown(&v), name: k }
                         }
                     }
@@ -1036,19 +1074,42 @@ fn NoteText(path: String, text: String) -> Element {
                         "Not live ({why}). Reconnecting; what you type is kept and sent then."
                     }
                 }
-                textarea {
-                    id: "{id}",
-                    "data-testid": "note-text",
-                    "data-live": if read_only { "connecting" } else { "ready" },
-                    "aria-label": "{title_of(&path)}",
-                    spellcheck: "true",
-                    readonly: read_only,
-                    value: "{initial}",
-                    oninput: on_input,
-                    oncompositionstart: on_compose,
-                    oncompositionend: on_composed,
-                    onfocusin: move |_| editing.focus(),
-                    onfocusout: move |_| editing.blur(),
+                if core_list {
+                    super::collection::ReadingBody { body: body0.to_owned() }
+                }
+                // One text area whatever `core_list` is (the extension
+                // listing can load after the note opens): folded under
+                // its summary for a list, open otherwise, until the person
+                // first focuses it (then as it was), never rebuilt, so
+                // what was typed, the caret and focus stay.
+                details { "data-testid": "note-text-fold", open: fold_held().unwrap_or(!core_list),
+                    summary {
+                        style: if core_list {
+                            "cursor: pointer; font-size: 13px; color: {t.ink_3}; margin: 0 0 10px;"
+                        } else {
+                            "display: none;"
+                        },
+                        "Edit the note's text"
+                    }
+                    textarea {
+                        id: "{id}",
+                        "data-testid": "note-text",
+                        "data-live": if read_only { "connecting" } else { "ready" },
+                        "aria-label": "{title_of(&path)}",
+                        spellcheck: "true",
+                        readonly: read_only,
+                        value: "{current}",
+                        oninput: on_input,
+                        oncompositionstart: on_compose,
+                        oncompositionend: on_composed,
+                        onfocusin: move |_| {
+                            if fold_held.peek().is_none() {
+                                fold_held.set(Some(!core_list));
+                            }
+                            editing.focus();
+                        },
+                        onfocusout: move |_| editing.blur(),
+                    }
                 }
             }
         }

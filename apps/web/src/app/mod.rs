@@ -35,6 +35,7 @@
 
 mod audio;
 mod click;
+mod collection;
 mod embed;
 mod favourites;
 mod frames;

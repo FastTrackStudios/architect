@@ -836,6 +836,7 @@ dependencies = [
  "architect-files",
  "architect-guide",
  "architect-input",
+ "architect-media",
  "architect-navigator",
  "architect-navigator-api",
  "architect-navigator-extension",
@@ -1166,6 +1167,7 @@ dependencies = [
  "architect-files",
  "architect-guide",
  "architect-mcp",
+ "architect-media",
  "architect-orgs",
  "architect-permissions",
  "architect-presence",
@@ -1556,6 +1558,21 @@ dependencies = [
  "futures",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "architect-media"
+version = "0.1.0"
+dependencies = [
+ "architect-playhead",
+ "architect-shell",
+ "architect-workspace-hack",
+ "dioxus",
+ "lucide-dioxus",
+ "pulldown-cmark",
+ "serde_json",
+ "serde_yaml",
+ "tracing",
 ]
 
 [[package]]
@@ -2020,6 +2037,7 @@ dependencies = [
  "architect",
  "architect-extensions",
  "architect-favourites",
+ "architect-media",
  "architect-pages",
  "architect-scripting",
  "architect-settings",
@@ -2343,6 +2361,7 @@ dependencies = [
  "architect-command-palette",
  "architect-commands",
  "architect-favourites",
+ "architect-media",
  "architect-navigator",
  "architect-playhead",
  "architect-settings",

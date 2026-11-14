@@ -709,3 +709,59 @@ fn a_notes_art_is_its_file_and_never_reaches_past_the_scope() {
         "a pdf is no art"
     );
 }
+
+/// A listing fence (#668: a collection's rows as an extension writes
+/// them) is cut at the build, so every page a site or a share's own
+/// domain serves reads the cut rows: a row naming a note outside the
+/// scope is gone, title and all, from the page, its plain blocks, its
+/// source and a block an extension draws from it; a file the build holds
+/// back is emptied from a row kept.
+#[test]
+fn a_listing_fences_rows_outside_the_scope_are_cut_at_the_build() {
+    let dir = tempfile::tempdir().unwrap();
+    let v = dir.path();
+    touch(
+        v,
+        "Set/list.md",
+        "---\ntitle: The list\n---\nThe list.\n\n```studio-setlist\n## Opening\n\
+         1 | Joy | Set/joy.md | E · 99 bpm · 3/4 | Set/joy.mp3 | Choir | 186.0\n\
+         2 | Secret Song | Private/Secret Song.md | E · 99 bpm | Private/secret-take.mp3 | Unreleased Artist\n\
+         ## Encore\n3 | Hidden | [[Private/Two]] | | |\n```\n\n\
+         > ```playlist\n> 4 | Quoted Secret | Private/Q.md\n> ```\n",
+    );
+    touch(v, "Set/joy.md", "---\ntitle: Joy\n---\nJoy.\n");
+    touch(v, "Set/joy.mp3", "mp3");
+    touch(v, "Private/Secret Song.md", "Not shared.\n");
+    touch(v, "Private/Two.md", "Not shared.\n");
+    touch(v, "Private/Q.md", "Not shared.\n");
+    let drawn = Blocks::new().with(FnBlock::new("demo", &["studio-setlist"], |b| {
+        Ok(Drawn::Html(format!(
+            "<pre class=\"drawn\">{}</pre>",
+            b.source
+        )))
+    }));
+    for held in [false, true] {
+        let out = tempfile::tempdir().unwrap();
+        let mut opts = Options::new(v, "");
+        opts.scope = Scope::Folder("Set".to_owned());
+        opts.page_data = true;
+        if held {
+            opts.hold_back.insert("Set/joy.mp3".to_owned());
+        }
+        build(&opts, &drawn, &out.path().join("site")).unwrap();
+        let all = all_html(&out.path().join("site"));
+        assert!(all.contains("1 | Joy | Set/joy.md |"), "{all}");
+        for never in [
+            "Secret",
+            "Private/",
+            "secret-take",
+            "Unreleased",
+            "Encore",
+            "Hidden",
+            "Quoted",
+        ] {
+            assert!(!all.contains(never), "{never:?} in {all}");
+        }
+        assert_eq!(all.contains("Set/joy.mp3"), !held, "held {held}: {all}");
+    }
+}

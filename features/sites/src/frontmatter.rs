@@ -19,8 +19,16 @@ pub struct Meta {
     pub tags: Vec<String>,
     /// `draft: true` or `publish: false`: left out of the site.
     pub hidden: bool,
-    /// `art:`, as written: the link to its image ([`crate::art`]).
+    /// `art:` (else `cover:`), as written: the link to its image
+    /// ([`crate::art`]).
     pub art: Option<String>,
+    /// Whether [`Meta::art`] is its `cover:` (a media item's picture,
+    /// #668), not its `art:`.
+    pub art_is_cover: bool,
+    /// `media:` (else `recording:`; the first that names a vault path),
+    /// as written: the link to what it plays (a media item's,
+    /// `architect_media::Item`).
+    pub media: Option<String>,
 }
 
 impl Meta {
@@ -71,6 +79,7 @@ impl Meta {
         }
         tags.retain(|t| !t.is_empty());
         let flag = |key: &str| fields.get(key).and_then(Value::as_bool);
+        let art = crate::art::art_of(fields);
         Self {
             title: text("title"),
             description: text("description")
@@ -79,7 +88,11 @@ impl Meta {
             weight,
             tags,
             hidden: flag("draft") == Some(true) || flag("publish") == Some(false),
-            art: crate::art::art_link(fields),
+            art: art.as_ref().map(|(_, link)| link.clone()),
+            art_is_cover: art.is_some_and(|(key, _)| key == crate::art::COVER_PROPERTY),
+            media: architect_media::item::MEDIA
+                .iter()
+                .find_map(|k| text(k).filter(|m| architect_media::link::target(m).is_some())),
         }
     }
 }

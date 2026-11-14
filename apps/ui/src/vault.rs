@@ -921,6 +921,18 @@ impl LabVault {
     }
 }
 
+/// How the Now Playing card shows an item's art (a vault path): the
+/// app's vault's image as a `data:` URL (`crate::collection::art_url`).
+pub fn use_now_playing_art() -> Callback<String, Option<String>> {
+    let lab = use_lab_vault();
+    use_callback(move |p: String| {
+        lab.disk
+            .peek()
+            .as_ref()
+            .and_then(|d| crate::collection::art_url(&d.vault().root(), &p))
+    })
+}
+
 /// A vault on disk as the navigator reads it, watched.
 fn watched(open: vault::actions::OpenVault, name: String) -> VaultSource {
     let source = VaultSource::named(open, name);
@@ -2521,6 +2533,61 @@ fn VaultNote(path: String) -> Element {
             None => tracing::info!(link = %name, "lab.vault.link_unresolved"),
         }
     };
+    // A collection (#668) draws as the core list at its head, as the
+    // fallback of its type's embed: an extension that claims the type
+    // draws instead. While the list draws, its own rows (`sets`, `songs`,
+    // …) leave the Properties bar and its listing fences fold.
+    let fields = architect_media::front::fields(&block());
+    let note_type = fields
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let is_list = architect_media::Collection::read(&fields).is_some();
+    let claimed = !note_type.is_empty()
+        && try_consume_context::<architect_extensions::interface::ExtensionUi>().is_some_and(
+            |ui| {
+                let _ = ui.revision();
+                ui.host()
+                    .embeds()
+                    .resolve(&architect_extensions::contrib::Claim::NoteType(
+                        note_type.clone(),
+                    ))
+                    .is_some()
+            },
+        );
+    let core_list = is_list && !claimed;
+    let hidden: Vec<String> = if core_list {
+        architect_media::Collection::fields_in(&fields)
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let head = is_list.then(|| disk.peek().clone()).flatten().map(|d| {
+        let list = rsx! {
+            crate::collection::CollectionHead {
+                vault: crate::collection::VaultHandle(d),
+                path: here.clone(),
+                title: shown.clone(),
+                text: block(),
+                on_open: move |p: String| show_vault_note(workspace, &state_of(&p), Target::Tab),
+            }
+        };
+        if note_type.is_empty() {
+            list
+        } else {
+            rsx! {
+                architect_extensions::embeds::EmbedView {
+                    claim: architect_extensions::contrib::Claim::NoteType(note_type.clone()),
+                    source: body.cloned(),
+                    props: serde_json::Value::Object(fields.clone()),
+                    fallback: list,
+                }
+            }
+        }
+    });
     rsx! {
         div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 24px 36px; overflow-y: scroll;",
             "data-vault-note": "{here}",
@@ -2540,9 +2607,11 @@ fn VaultNote(path: String) -> Element {
             if gone() {
                 div { style: "color: {t.ink_3}; font-size: 13px;", "This note's file was deleted." }
             }
+            {head}
             crate::properties::PropertiesBar {
                 block: block(),
                 types,
+                hidden,
                 on_change: move |b: String| {
                     let mut ours = ours;
                     ours.set(format!("{b}{}", body.peek()));
@@ -2557,6 +2626,7 @@ fn VaultNote(path: String) -> Element {
                 incoming: incoming(),
                 vault: disk.peek().clone().map(crate::note_editor::NoteVault),
                 on_link: move |href: String| open_link(href),
+                fold_listing: core_list,
                 on_change: move |value: String| {
                     let (mut ours, mut body) = (ours, body);
                     ours.set(format!("{}{value}", block.peek()));

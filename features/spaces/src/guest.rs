@@ -373,6 +373,30 @@ pub struct ListedNote {
     /// link does not serve it.
     #[facet(default)]
     pub art: Option<String>,
+    /// Its subtitle as a media item (`subtitle:`, else `artist:`; #668).
+    #[facet(default)]
+    pub subtitle: Option<String>,
+    /// Its length as a media item (`duration:`), in milliseconds.
+    #[facet(default)]
+    pub duration_ms: Option<u64>,
+    /// What it plays as a media item (`media:`, else `recording:`): one of
+    /// `files`. None when it names none the link serves.
+    #[facet(default)]
+    pub media: Option<String>,
+    /// Its list when it is a collection (#668: `sets`/`songs` or
+    /// `sections`/`items`), in order: each section's name and the notes it
+    /// names, by vault path, only notes this link lists (a link to any
+    /// other is left out). Empty when it is none.
+    #[facet(default)]
+    pub sets: Vec<ListedSet>,
+}
+
+/// One section of a listed collection: its name, and its notes' paths,
+/// each a note the link lists.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct ListedSet {
+    pub name: Option<String>,
+    pub notes: Vec<String>,
 }
 
 /// One file a link serves, at the layer asked for.

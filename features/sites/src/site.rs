@@ -404,11 +404,28 @@ impl Site {
             .filter_map(|(i, n)| Some((notes.get((*n)?)?.page.rel_path.as_str(), i)))
             .collect();
         let mut linked: Vec<(usize, Vec<String>)> = Vec::new();
+        // The notes with a page: what a listing fence's row may name.
+        let published: Vec<&str> = url_of.keys().copied().collect();
         for (i, note_index) in note_of.iter().enumerate() {
             let Some(note) = note_index.and_then(|n| notes.get(n)) else {
                 continue;
             };
             let rel = note.page.rel_path.as_str();
+            // Its listing fences (a collection's rows, #668) cut before
+            // anything is drawn from them: a row naming a note outside
+            // the site is gone, a file the site holds back is emptied
+            // from a row kept (`architect_media::fence::within`). The
+            // page, its source, its plain blocks and an extension's drawn
+            // block all read the cut text.
+            let folder = architect_media::link::folder_of(rel);
+            let body = architect_media::fence::within(
+                frontmatter::body(&note.page.raw),
+                &|p| architect_media::link::resolve(p, folder, published.iter().copied()).is_some(),
+                &|p| {
+                    architect_media::link::resolve(p, folder, attachments.iter().copied())
+                        .is_some_and(|t| opts.scope.holds_file(t) && !opts.hold_back.contains(t))
+                },
+            );
             let outgoing = index.outgoing(rel);
             let resolve = |dest: &str, wiki: bool| match resolve_link(
                 dest,
@@ -455,11 +472,11 @@ impl Site {
             };
             // The text a guest's view is handed, from the same resolution
             // the page is drawn with: nothing the page does not show.
-            let source = opts.page_data.then(|| {
-                crate::guest_text::guest_text(frontmatter::body(&note.page.raw), &resolve)
-            });
+            let source = opts
+                .page_data
+                .then(|| crate::guest_text::guest_text(&body, &resolve));
             let rendered = markdown::render(&Input {
-                body: frontmatter::body(&note.page.raw),
+                body: &body,
                 page: rel,
                 title: &note.title,
                 resolve: &resolve,
@@ -502,6 +519,29 @@ impl Site {
                 .filter(|t| opts.scope.holds_file(t) && !opts.hold_back.contains(*t))
             {
                 used_attachments.insert(art.to_owned());
+            }
+            // So is the file it plays as a media item (`media:`, else
+            // `recording:`; #668), as the listing names it
+            // (`crate::listing::Entry::files`): held back, as any file, from
+            // a link below its layer.
+            if let Some(media) = note
+                .meta
+                .media
+                .as_deref()
+                .and_then(|link| {
+                    architect_media::link::resolve(
+                        link,
+                        architect_media::link::folder_of(rel),
+                        attachments.iter().copied(),
+                    )
+                })
+                .filter(|t| {
+                    crate::media::media_kind(t).is_some()
+                        && opts.scope.holds_file(t)
+                        && !opts.hold_back.contains(*t)
+                })
+            {
+                used_attachments.insert(media.to_owned());
             }
             let mut tags: BTreeSet<String> = page_tags(note.page)
                 .into_iter()
@@ -786,12 +826,35 @@ pub fn title_of(page: &VaultPage, meta: &Meta) -> String {
         .unwrap_or_else(|| deslug(&page.basename))
 }
 
-/// A note's first `# heading`, as its title when it names none.
+/// A note's first `# heading`, as its title when it names none. A line
+/// inside fenced code is no heading: a listing fence's `# ` row (a private
+/// set's name, cut from the page) must not become the page's title.
 fn first_h1(body: &str) -> Option<String> {
-    body.lines()
-        .find_map(|line| line.strip_prefix("# "))
-        .map(|t| t.trim().to_owned())
-        .filter(|t| !t.is_empty())
+    // The open fence's character and length, while inside one.
+    let mut fence: Option<(char, usize)> = None;
+    for line in body.lines() {
+        let trimmed = line.trim_start_matches(' ');
+        let marker = (line.len().saturating_sub(trimmed.len()) <= 3)
+            .then(|| trimmed.chars().next())
+            .flatten()
+            .filter(|c| *c == '`' || *c == '~')
+            .map(|c| (c, trimmed.chars().take_while(|x| *x == c).count()))
+            .filter(|(_, n)| *n >= 3);
+        match (fence, marker) {
+            (None, Some(open)) => fence = Some(open),
+            (Some((c, n)), Some((m, k))) if c == m && k >= n => fence = None,
+            (Some(_), _) => {}
+            (None, None) => {
+                if let Some(t) = line.strip_prefix("# ") {
+                    let t = t.trim();
+                    if !t.is_empty() {
+                        return Some(t.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// A file or folder name as a title: `getting-started` → `Getting started`.
@@ -811,5 +874,14 @@ mod tests {
     fn titles_from_names() {
         assert_eq!(deslug("getting-started"), "Getting started");
         assert_eq!(first_h1("Intro\n# The UI\n"), Some("The UI".to_owned()));
+        // A heading inside fenced code is not the title.
+        assert_eq!(
+            first_h1("```studio-setlist\n# Secret Encore\n1 | x\n```\n"),
+            None
+        );
+        assert_eq!(
+            first_h1("~~~~\n# Hidden\n~~~\n# Not yet\n~~~~\n# Shown\n"),
+            Some("Shown".to_owned())
+        );
     }
 }

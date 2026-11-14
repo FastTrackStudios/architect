@@ -48,6 +48,8 @@ serde_json = { workspace = true }
 # A page's prose as a share link's guest reads it (`plain`, #629): the
 # wire types are the guest service's, written as its JSON.
 architect-spaces = { workspace = true }
+# A media item's fields and links (#668): its `media`/`recording` file.
+architect-media = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
 thiserror = { workspace = true }
 # The checksum of each file of a streamed archive (`archive`, #510).
