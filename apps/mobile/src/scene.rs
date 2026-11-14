@@ -85,14 +85,23 @@ define_class!(
 );
 
 /// Hand `url` to the window, as a link the OS gave the app: a share link
-/// or `architect://open?url=<one>`. Any other URL (`architect://vault`,
-/// the app's own) is not a share link and is left alone, as the desktop
-/// leaves it to the tabs: it never reaches the Shared tab.
+/// or `architect://open?url=<one>` to the Shared tab; a deep link into an
+/// action (`architect://<route>`, `https://<domain>/a/<route>`, #186) to
+/// its declared route (`architect_app::links`). Anything else is left
+/// alone: it never reaches the Shared tab or runs anything.
 fn open_url(url: &NSURL) {
     let Some(text) = url.absoluteString() else {
         return;
     };
-    for link in architect_app::guest::links_in([text.to_string()]) {
+    let text = text.to_string();
+    let shares = architect_app::guest::links_in([text.clone()]);
+    if shares.is_empty() {
+        // A deep link into an action (#186): `architect://capture?text=…`,
+        // or a universal link under `/a/`.
+        let _ = architect_app::links::incoming(text);
+        return;
+    }
+    for link in shares {
         architect_app::guest::incoming(link, architect_app::guest::Source::Os);
     }
 }

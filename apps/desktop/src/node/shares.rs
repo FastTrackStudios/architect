@@ -1707,6 +1707,7 @@ pub fn apple_app_site_association(app_ids: &[String]) -> Option<String> {
                 "components": [
                     { "/": format!("{LINKS}/_*"), "exclude": true, "comment": "the node's sign-in" },
                     { "/": format!("{LINKS}/*/_*"), "exclude": true, "comment": "a link's reserved names: its guest service, files, archive, news" },
+                    { "/": "/a/*", "comment": "deep links into the app's actions (#186): architect_app::links" },
                     { "/": format!("{LINKS}/*/"), "comment": "a share link's pages" }
                 ]
             }]
