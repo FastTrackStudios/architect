@@ -13,7 +13,9 @@ weight = 68
 > pages in a Web Worker on the browser's own engine, the same file and
 > types ("On the web" below). A framework's own DOM (#326):
 > `architect/dom`, so Preact runs in a page's runtime, natively and in a
-> browser ("A framework's own DOM" below).
+> browser ("A framework's own DOM" below). Actions as files (#536): a
+> `typescript` extension's actions and hooks as `.ts` modules on the same
+> runtime ("Actions as files" below).
 
 ## The model
 
@@ -284,6 +286,124 @@ handlers and worker run, the Preact page answers clicks and typing, a
 runaway is stopped while the main thread
 keeps drawing, a host outside the page's capabilities is refused, and a
 broken save keeps the last good page.
+
+## Actions as files
+
+> **Status: landed on the desk and iOS (2026-11, #536)** in
+> `architect-pages` (feature `actions`). In a browser: the next layer of
+> this stack (#536, with the web host's #495).
+
+An extension with any logic of its own once needed a compiled part: a
+page could call actions, but an action ran as Rust, a process or a WASI
+component. A **`typescript` extension** writes them as files beside its
+pages, on the same runtime, so a light extension is a manifest and some
+`.ts` files — no Rust, no WASM toolchain. Most of what we build stays
+Rust; this is the option for light ones.
+
+```toml
+id = "showcase.recipes"
+kind = "typescript"
+
+[capabilities]
+actions = ["VAULT_READ", "VAULT_CREATE"]
+effect = "mutating"
+ui = ["prompts", "notify"]
+
+[[actions]]
+id = "SHOWCASE_RECIPES_SCALE"
+name = "Recipe scaler: scale"
+params = '{"type":"object","properties":{"path":{"type":"string"},"servings":{"type":"number"}}}'
+script = "actions/scale.ts"
+
+[[hooks]]
+on = "app:recipes.cooked"
+script = "hooks/cooked.ts"   # or one export of it: function = "cooked"
+
+[[views]]
+id = "scaler"
+page = "pages/scaler.tsx"
+```
+
+```ts
+import { defineAction, actions, ui } from "architect";
+import { scale } from "../lib/scale";
+
+type Args = { path?: string; servings?: number };
+
+export default defineAction<Args>(async (args, ctx) => {
+  const servings = args.servings ?? Number(await ui.input("Servings"));
+  const note = await actions.run<{ properties: Record<string, unknown> }>("VAULT_READ", { path: args.path });
+  return scale(note.properties, servings); // the run's answer, as JSON
+});
+```
+
+**The manifest** (`features/extensions/src/manifest.rs` `Kind`,
+`is_ts_script`): `kind = "typescript"`, and each `[[actions]] script`
+and `[[hooks]] script` a `.ts`, `.mts`, `.tsx`, `.js`, `.mjs` or `.jsx`
+module of the package. A Luau script in a `typescript` extension, or a
+TypeScript one in a `luau` extension, is refused and says which kind it
+needs. The action's id, name, `params` schema, `effect`, `shortcut` and
+`toggle` are the manifest's, as for any kind, so it is in ⌘K, keymaps,
+the CLI, MCP, the control socket, menus, toolbars and hooks like any
+action.
+
+**At load** (`features/pages/src/js/action.rs` `TsRunner`, the
+extensions host's runner for the kind): every script of the folder is
+transpiled by oxc (`features/pages/src/modules.rs` `prepare`), and each
+action's and hook's module, with every file it imports, must compile
+and resolve — a mistake fails the load with its file, line and column
+(`lib/scale.ts:1:24: …`), the last good copy staying, as for every
+kind. A module imports `"architect"` and files of its own folder; no
+packages (bundle one into a file: `esbuild src/x.ts --bundle
+--format=esm --outfile=actions/x.js`), no `fetch`, `fs`, `process` or
+Node globals.
+
+**A run** has a fresh `QuickJS` runtime of its own on a thread of its
+own (`features/pages/src/js/mod.rs` `JsEngine::bare`,
+`JsEngine::run_action`): the prelude every page gets, its module
+loaded, its default export (or the export a hook's `function` names)
+called with the arguments and a `ctx`, then its units of work — a host
+call's answer, a timer, a worker's news — until what it returned
+settles.
+
+- **The whole host service, typed**: the `"architect"` module is a
+  page's (`actions`, `documents`, `editor`, `net` and secrets, `ui`
+  prompts, pickers and menus, `clipboard`, `events`, `settings`,
+  `state`, `ports`, `worker`), through the same bridge
+  (`features/pages/src/host.rs` `AppHost`, `EXT_PAGE_CALL`), typed by
+  the same `architect.d.ts`. Its calls are made as its extension acting
+  for whoever ran it, through its gate and its granted capabilities:
+  what a page or a Luau script of it may do, no more.
+- **Typed end to end**: `defineAction<Args, Answer>(handler)` and
+  `ActionHandler`, `ActionContext` (`action`, `extension`, `source` —
+  the door it was run from — and a hook's `event` and `detail`) are in
+  `architect.d.ts`; `architect-ext types` writes each action's `Args`
+  from its manifest's `params` (#535), so the manifest and the code
+  cannot drift silently.
+- **Its answer** is what the handler returns, as JSON (a value that is
+  not JSON fails the run and says so). **What it throws** is the run's
+  error, at its `.ts` file's own line and column (its source maps), and
+  in its extension's log (`EXT_LOGS`) with its `console.log` lines.
+- **Limits** (`ActionLimits`): memory (64 MB); each unit of its work
+  within `unit` (1 s) before the interrupt stops it ("hand heavy work to
+  a worker"); its module's top level within `load` (5 s); the whole run
+  within `time` when the app sets one (none by default: a prompt waits
+  as long as the person does). A run whose promise nothing will ever
+  settle — no host call, timer or worker outstanding — is stopped and
+  says so.
+- **One undo step** per run when the runner has the document's
+  transactions (`TsRunner::with_transactions`), taken back when it
+  fails, as a Luau script's run is.
+- **On reload** a running action finishes on the old code; the next run
+  loads the module again.
+- **Where it stops**: an interpreter. Not for heavy computation
+  (engraving, parsing a DAW project, anything per frame) and never on
+  the audio path (#528): those are Rust, called from TypeScript as
+  actions.
+
+Tests: `features/pages/tests/ts_actions.rs` (typed answers through an
+import, line and column, capabilities, prompts and notices, `fetch`
+within its hosts, the limits, a hook, a broken module, `EXT_CHECK`).
 
 ## Safety and performance
 

@@ -31,7 +31,7 @@ use crate::tsx;
 /// `__architect.api`).
 pub const ARCHITECT: &str = "const a = globalThis.__architect.api;\n\
 export const { h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate, \
-theme, actions, settings, state, notify, ui, clipboard, events, documents, editor, net, ports, worker, Overlay, host } = a;\nexport default a;\n";
+theme, actions, settings, state, notify, ui, clipboard, events, documents, editor, net, ports, worker, Overlay, host, defineAction } = a;\nexport default a;\n";
 
 /// `import … from "architect/dom"`: a DOM in the page's runtime, for a
 /// framework that renders to one (`js/dom.js`); a page's only.

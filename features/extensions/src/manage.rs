@@ -152,6 +152,10 @@ fn runner_words(m: &Manifest) -> String {
     match m.kind {
         Kind::Data => "nothing runs: settings, presets, keys and views as data".to_owned(),
         Kind::Luau => "Luau scripts in the app's sandbox, over its actions".to_owned(),
+        Kind::TypeScript => {
+            "TypeScript actions and pages on the pages' runtime (QuickJS; a Web Worker in a browser)"
+                .to_owned()
+        }
         Kind::Wasm => "a WASM component in the app's sandbox".to_owned(),
         Kind::Process => format!(
             "its own program ({}), a process on this device",

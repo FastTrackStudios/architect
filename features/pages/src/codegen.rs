@@ -502,6 +502,55 @@ export function Overlay(props: {
 
 /** The raw host service, as vox describes it. */
 export const host: PageHostCaller;
+
+/**
+ * Where an action's run came from (#536): the second argument of a
+ * TypeScript action's handler. `source` is the door it was run from
+ * (`palette`, `keymap`, `cli`, `mcp`, `hook`, `script`, `page`, `app`…);
+ * a hook's run has the `event` and its `detail`.
+ */
+export interface ActionContext {
+  /** The action's id (`SHOWCASE_RECIPE_SCALE`). */
+  readonly action: string;
+  /** Its extension's id. */
+  readonly extension: string;
+  readonly source: string;
+  readonly target?: string;
+  readonly pane?: string;
+  readonly url?: string;
+  readonly event?: string;
+  readonly detail?: unknown;
+  readonly [key: string]: unknown;
+}
+/**
+ * A TypeScript action: its module's default export. It takes the
+ * action's arguments (its manifest's `params`; `architect-ext types`
+ * writes each action's `Args` from them) and answers JSON, or a promise
+ * of it. What it throws fails the run, said at its own line and column.
+ */
+export type ActionHandler<Args = any, Answer = unknown> = (
+  args: Args,
+  ctx: ActionContext,
+) => Answer | Promise<Answer>;
+/**
+ * Each action's arguments, by its id: empty here, filled from an
+ * extension's manifest (each action's `params` schema) by `architect-ext
+ * types`, which writes an augmentation of this module.
+ */
+export interface ActionArgs {}
+/**
+ * `handler`, typed by its action's id: its arguments are the manifest's
+ * (`ActionArgs`), and a run as any other action fails, saying so.
+ * `export default defineAction("SHOWCASE_RECIPES_SCALE", async (args, ctx) => …)`.
+ */
+export function defineAction<Id extends keyof ActionArgs, Answer = unknown>(
+  id: Id,
+  handler: ActionHandler<ActionArgs[Id], Answer>,
+): ActionHandler<ActionArgs[Id], Answer>;
+/** `handler`, typed: `export default defineAction<Args>(async (args, ctx) => …)`. */
+export function defineAction<Args = any, Answer = unknown>(
+  handler: ActionHandler<Args, Answer>,
+): ActionHandler<Args, Answer>;
 "#;
 
 /// Outside the module: JSX's namespace, the DOM's and a worker's modules,

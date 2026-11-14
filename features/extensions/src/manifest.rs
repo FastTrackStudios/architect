@@ -69,6 +69,11 @@ pub enum Kind {
     Data,
     /// Luau scripts over the Action List (`architect-scripting`'s runtime).
     Luau,
+    /// TypeScript (or JavaScript) actions as files beside its pages, on
+    /// the pages' runtime: `QuickJS` natively, a Web Worker in a browser
+    /// (`architect_pages`' `actions`, #536). No Rust, no WASM toolchain.
+    #[serde(rename = "typescript")]
+    TypeScript,
     /// A WebAssembly component against the `architect:extension` world.
     Wasm,
     /// A program speaking vox, as a remote client does. Desk only.
@@ -81,6 +86,7 @@ impl Kind {
         match self {
             Self::Data => "data",
             Self::Luau => "luau",
+            Self::TypeScript => "typescript",
             Self::Wasm => "wasm",
             Self::Process => "process",
         }
@@ -196,7 +202,9 @@ pub struct ActionDecl {
     /// What it takes, as JSON Schema text.
     #[serde(default)]
     pub params: Option<String>,
-    /// A Luau file in the package that runs it (a `luau` extension).
+    /// The file in the package that runs it: a `.luau` script (a `luau`
+    /// extension), or a `.ts`/`.js` module whose default export handles it
+    /// (a `typescript` extension, [`is_ts_script`]).
     #[serde(default)]
     pub script: Option<String>,
     /// Another action it runs with fixed arguments: a preset, for any
@@ -720,7 +728,8 @@ pub enum ManifestError {
     /// An action with no way to run: no script, no preset, and a kind
     /// that has no code of its own.
     NoRun(String),
-    /// A script in a kind that does not run Luau.
+    /// A script its kind does not run: Luau outside a `luau` extension,
+    /// TypeScript or JavaScript outside a `typescript` one.
     ScriptKind(String),
     /// A file outside its package (`..`, an absolute path).
     BadPath(String),
@@ -764,7 +773,10 @@ impl std::fmt::Display for ManifestError {
             }
             Self::SettingNamespace(key) => write!(f, "setting {key} is not in its namespace"),
             Self::NoRun(id) => write!(f, "action {id} has no script and no preset"),
-            Self::ScriptKind(id) => write!(f, "{id} has a script, but this is not Luau"),
+            Self::ScriptKind(id) => write!(
+                f,
+                "{id} has a script its kind does not run: .luau needs kind = \"luau\", .ts or .js kind = \"typescript\""
+            ),
             Self::BadPath(p) => write!(f, "{p} is outside the package"),
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
@@ -803,6 +815,18 @@ impl Manifest {
                 )
             })
             .collect()
+    }
+
+    /// That `path` (the script of `owner`, an action or a hook) is one its
+    /// kind runs: a TypeScript or JavaScript module in a `typescript`
+    /// extension, a Luau script in a `luau` one.
+    fn script_kind(&self, owner: &str, path: &str) -> Result<(), ManifestError> {
+        let ts = is_ts_script(path);
+        match self.kind {
+            Kind::TypeScript if ts => Ok(()),
+            Kind::Luau if !ts => Ok(()),
+            _ => Err(ManifestError::ScriptKind(owner.to_owned())),
+        }
     }
 
     /// Each worker: a unique id, and one way to run that its kind has.
@@ -1042,12 +1066,12 @@ impl Manifest {
                 return Err(ManifestError::Duplicate(a.id.clone()));
             }
             match (&a.script, &a.preset) {
-                (Some(_), _) if self.kind != Kind::Luau => {
-                    return Err(ManifestError::ScriptKind(a.id.clone()));
+                (Some(path), _) => {
+                    self.script_kind(&a.id, path)?;
+                    inside(path)?;
                 }
-                (Some(path), _) => inside(path)?,
                 (None, None)
-                    if matches!(self.kind, Kind::Data | Kind::Luau)
+                    if matches!(self.kind, Kind::Data | Kind::Luau | Kind::TypeScript)
                         && self.window_opened_by(&a.id).is_none() =>
                 {
                     return Err(ManifestError::NoRun(a.id.clone()));
@@ -1218,6 +1242,7 @@ impl Manifest {
             reach: &self.capabilities.actions,
             views,
             luau: self.kind == Kind::Luau,
+            typescript: self.kind == Kind::TypeScript,
             events: &self.capabilities.events,
             reads: &self.capabilities.reads,
             writes: &self.capabilities.writes,
@@ -1501,6 +1526,17 @@ fn api_ok(wants: &str) -> bool {
 }
 
 /// A relative path that stays in its package.
+/// Whether `path` is a TypeScript or JavaScript module (`.ts`, `.mts`,
+/// `.tsx`, `.js`, `.mjs`, `.jsx`): what a `typescript` extension's actions
+/// and hooks run.
+#[must_use]
+pub fn is_ts_script(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e, "ts" | "mts" | "tsx" | "js" | "mjs" | "jsx"))
+}
+
 fn inside(path: &str) -> Result<(), ManifestError> {
     let p = std::path::Path::new(path);
     let ok = !path.is_empty()
@@ -1789,6 +1825,43 @@ view = "section"
             bad("id = \"fts.metronome\"", "id = \"FTS\""),
             Err(ManifestError::BadId(_))
         ));
+    }
+
+    #[test]
+    fn a_typescript_extension_runs_ts_and_js_files_and_nothing_else() {
+        let ts = |action: &str, hook: &str| {
+            Manifest::parse(&format!(
+                "id = \"fts.recipes\"\nname = \"Recipes\"\nversion = \"0.1.0\"\nkind = \"typescript\"\n\
+                 [[actions]]\nid = \"FTS_RECIPES_SCALE\"\nname = \"Scale\"\nscript = \"{action}\"\n{hook}"
+            ))
+        };
+        let m = ts("actions/scale.ts", "").unwrap();
+        assert_eq!(m.kind, Kind::TypeScript);
+        assert_eq!(m.kind.name(), "typescript");
+        assert!(m.kind.runs_code());
+        for good in ["a.ts", "a.mts", "a.tsx", "a.js", "a.mjs", "a.jsx"] {
+            assert!(ts(good, "").is_ok(), "{good}");
+        }
+        assert!(matches!(
+            ts("scale.luau", ""),
+            Err(ManifestError::ScriptKind(_))
+        ));
+        assert!(matches!(
+            ts("../scale.ts", ""),
+            Err(ManifestError::BadPath(_))
+        ));
+        // A TypeScript file in a Luau extension is refused, and says how.
+        let luau = Manifest::parse(
+            "id = \"fts.recipes\"\nname = \"R\"\nversion = \"0.1.0\"\nkind = \"luau\"\n\
+             [[actions]]\nid = \"FTS_RECIPES_SCALE\"\nname = \"Scale\"\nscript = \"scale.ts\"\n",
+        );
+        let Err(e) = luau else { panic!("a .ts script in a luau extension loaded") };
+        assert!(e.to_string().contains("kind = \"typescript\""), "{e}");
+        // Its hooks run its modules too.
+        let hook = "[[hooks]]\non = \"startup\"\nscript = \"hooks/start.ts\"\n";
+        assert!(ts("a.ts", hook).is_ok());
+        let hook = "[[hooks]]\non = \"startup\"\nscript = \"hooks/start.luau\"\n";
+        assert!(ts("a.ts", hook).is_err());
     }
 
     #[test]

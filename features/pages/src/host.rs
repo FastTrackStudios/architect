@@ -398,9 +398,15 @@ impl PageHost for AppHost {
                 architect::action::InvocationSource::Script,
             ));
         }
-        // A service call and a host call are the page's extension's own.
+        // A service call and a host call are the page's extension's own
+        // (a TypeScript action's caller is already its extension, acting
+        // for whoever ran it: that stays).
         if (id == SERVICE_CALL || id == PAGE_CALL)
             && let Some(ext) = &self.extension
+            && !matches!(
+                caller.principal(),
+                Some(architect::action::Principal::Extension { id, .. }) if id == ext
+            )
         {
             caller = ActionCaller::new(architect::action::Principal::extension(ext.clone(), None));
         }

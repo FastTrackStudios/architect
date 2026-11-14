@@ -801,6 +801,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             problems: architect_extensions::views::ViewProblems::new(lab.problems().clone()),
         }))
     });
+    // Pages: a view drawn from a file — the Board's tab (its
+    // pages/board.tsx, a read-only built-in under the lab's folder), or
+    // an override saved as <lab dir>/pages/<extension>/<view>.tsx.
+    let pages = use_hook(|| lab_pages(&list, &lab, themes.as_ref()));
     let extensions = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host = Host::new((*list).clone(), sections.clone())
@@ -820,6 +824,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if let Some(store) = &themes {
             host = host.with_themes(store.clone());
         }
+        // TypeScript extensions (#536): their actions and hooks as `.ts`
+        // modules on the pages' QuickJS runtime, from the pages' host (the
+        // theme, settings and shared state its pages have).
+        host = host.with_runner(architect_pages::js::action::TsRunner::new(
+            pages.host().clone(),
+        ));
         if let Ok(mut runner) = ProcessRunner::new() {
             if let Some(store) = &themes {
                 runner = runner.with_theme(store.clone());
@@ -1146,10 +1156,6 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         manager.confirm_on(&lab);
     });
     architect_extensions::page::use_manager_page(manager.clone(), browse);
-    // Pages: a view drawn from a file — the Board's tab (its
-    // pages/board.tsx, a read-only built-in under the lab's folder), or
-    // an override saved as <lab dir>/pages/<extension>/<view>.tsx.
-    let pages = use_hook(|| lab_pages(&list, &lab, themes.as_ref()));
     // Their problems in `APP_STATUS`, `EXT_CHECK` renders an extension's
     // page files with them, and the manager lists them.
     use_hook(|| {

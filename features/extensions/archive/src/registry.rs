@@ -42,7 +42,7 @@ pub const KEYS: &[&str] = &[
 ];
 
 /// The kinds an entry may be.
-pub const KINDS: &[&str] = &["data", "luau", "wasm", "process"];
+pub const KINDS: &[&str] = &["data", "luau", "typescript", "wasm", "process"];
 
 /// What a check found.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

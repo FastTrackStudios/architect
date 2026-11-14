@@ -111,6 +111,7 @@ documents.
 | 1. **Data** | a manifest and files: themes, keymaps, screensets, settings defaults, frame views with no logic, action presets | everywhere, iOS included | most customisation |
 | 2. **WASM components** | code against `architect:extension`, a WIT world generated from the Action List and the services | Wasmtime: compiled on desk and Android, its interpreter (Pulley) on iOS; the browser's WebAssembly on the web | third-party features |
 | 3. **Scripts** | Luau (through mlua): query, branch, loop, run actions | everywhere (interpreted) | a person's own macros and conditional actions |
+| 3b. **TypeScript** | `kind = "typescript"`: actions and hooks as `.ts`/`.js` modules beside TSX pages, on the pages' runtime with the whole host service, typed by the generated `architect.d.ts` ([Pages as files](@/architecture/pages.md), "Actions as files") | `QuickJS` on desk and iOS (interpreted); a Web Worker on the browser's engine on the web | light extensions with no Rust and no WASM toolchain |
 | 4. **Processes** | a program speaking vox, registering actions as a client does | desk only | heavy or other-language tools (Python, a model, an MCP server) |
 | 5. **Native** | a dynamic library | first-party only | what must be native and is ours (CLAP/VST3 already covers audio) |
 
@@ -791,6 +792,7 @@ author's edit shows in the running app in the time it takes to build.
 |---|---|
 | Data (themes, keymaps, frame views) | re-read: instant |
 | Luau scripts | re-read on the next run; a running one finishes on the old code |
+| TypeScript actions | its folder transpiled again as it reloads (a mistake keeps the last good one, at its line); each run loads its module fresh, a running one finishes on the old code |
 | WASM components | rebuilt (`cargo component build`), re-instantiated: seconds, state kept |
 | WASM views' `rsx!` | Dioxus's own hot reload: the extension's `VirtualDom` takes template changes from the dev server, so markup and style edits apply without rebuilding the `.wasm` — instant |
 | Processes | rebuilt and restarted by the supervisor, state handed over; in development the extension can run under `dx serve` with Rust hot-patching (it is its own binary), so most code edits apply without a restart at all |
@@ -4135,8 +4137,8 @@ Linux x86_64 and aarch64 (`x86_64-unknown-linux-gnu`,
 `aarch64-unknown-linux-gnu`; Windows later); its manifest names the
 program once, `[entry] path = "bin/<program>"`. Installing extracts this
 platform's build to `bin/<program>` (executable) and leaves the others
-out, so the runner needs nothing new. A WASI component, Luau and data are
-platform-neutral: no `bin/`.
+out, so the runner needs nothing new. A WASI component, Luau, TypeScript
+and data are platform-neutral: no `bin/`.
 
 The registry's entry lists the platforms (`platforms`), so the answer
 comes before a download: a preview says `runs_here: false` and
