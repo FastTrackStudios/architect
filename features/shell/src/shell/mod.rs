@@ -606,6 +606,9 @@ pub struct Shell {
     pub status_style: StatusStyle,
     /// The app's buttons on a phone's action bar.
     bar_actions: Vec<BarAction>,
+    /// The extensions' (`Chrome::bar`): kept, as a page's are, when the
+    /// bar is full (#726).
+    bar_contributed: Vec<BarAction>,
     /// What the pages and editors put on the bar: [`use_bar_action`],
     /// [`use_editing_actions`], [`use_typing_scope`].
     bars: Signal<BarModel>,
@@ -1233,10 +1236,9 @@ pub fn AppShell(
         .into_iter()
         .chain(chrome.status.iter().cloned())
         .collect();
-    let actions: Vec<BarAction> = actions
-        .into_iter()
-        .chain(chrome.bar.iter().cloned())
-        .collect();
+    // The extensions' bar buttons apart from the app's: past six, the
+    // app's give way first, as they do for a page's (#726).
+    let bar_contributed: Vec<BarAction> = chrome.bar.clone();
     let mut drawer = use_signal(|| None::<Side>);
     let fold = use_signal(|| None::<bool>);
     let right_away = use_signal(|| false);
@@ -1298,6 +1300,7 @@ pub fn AppShell(
         page_status,
         status_style,
         bar_actions: actions,
+        bar_contributed,
         bars,
     };
     let form = screen.form();
