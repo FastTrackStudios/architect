@@ -489,11 +489,13 @@ mod tests {
     /// well inside a second, even unoptimised.
     #[test]
     fn a_large_note_parses_quickly() {
+        use std::fmt::Write as _;
         let mut note = String::from("---\ntitle: big\n---\n");
         for i in 0..2000 {
-            note.push_str(&format!(
+            let _ = write!(
+                note,
                 "## Day {i}\n- [ ] task {i} [due:: 2026-11-20] ^t{i}\n  - [x] sub {i}\nnote:: {i}\n```\n# not\n```\n\ntext text text\n"
-            ));
+            );
         }
         let started = std::time::Instant::now();
         let m = metadata(&note);
