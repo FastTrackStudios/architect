@@ -79,14 +79,22 @@ fn generate(root: &std::path::Path, n: usize, skewed: bool) {
         let folder = root.join(format!("Area {}", i % 20));
         std::fs::create_dir_all(&folder).unwrap();
         let heavy = skewed && i % 100 == 0;
-        let status = if skewed && i % 10 < 7 { "todo" } else { STATUSES[i % STATUSES.len()] };
+        let status = if skewed && i % 10 < 7 {
+            "todo"
+        } else {
+            STATUSES[i % STATUSES.len()]
+        };
         let mut extra = String::new();
         if heavy {
             for k in 0..120 {
                 let _ = writeln!(extra, "field{k}: value {k} of note {i}");
             }
         }
-        let body = if heavy { prose.repeat(20) } else { prose.clone() };
+        let body = if heavy {
+            prose.repeat(20)
+        } else {
+            prose.clone()
+        };
         let hot = if skewed { "[[Hot]] " } else { "" };
         let text = format!(
             "---\nstatus: {status}\npriority: {}\ndue: 2026-{:02}-{:02}\ntags: [note, t{}]\nproject: \"[[Project {}]]\"\n{extra}---\n# Note {i}\n\n{hot}{body}\n\n## Tasks\n- [ ] a task for {i}\n- [x] a done one\n",
@@ -110,7 +118,12 @@ fn ms(d: Duration) -> f64 {
 fn row(what: &str, v: &mut [Duration]) {
     v.sort();
     let at = |q: f64| ms(v[((v.len() - 1) as f64 * q) as usize]);
-    println!("| {what} | {} | {:.2} ms | {:.2} ms |", v.len(), at(0.5), at(0.99));
+    println!(
+        "| {what} | {} | {:.2} ms | {:.2} ms |",
+        v.len(),
+        at(0.5),
+        at(0.99)
+    );
 }
 
 fn time<R>(f: impl FnOnce() -> R) -> (Duration, R) {
@@ -136,12 +149,19 @@ fn the_index_and_queries_on_a_large_vault() {
         .build()
         .unwrap();
     for skewed in [false, true] {
-        println!("\n## {} vault, {n} notes\n", if skewed { "A skewed" } else { "An even" });
+        println!(
+            "\n## {} vault, {n} notes\n",
+            if skewed { "A skewed" } else { "An even" }
+        );
         let dir = tempfile::tempdir().unwrap();
         generate(dir.path(), n, skewed);
         let (open_t, open) = time(|| OpenVault::open(dir.path()).unwrap());
         let text_bytes: usize = open.with(|v| v.pages.iter().map(|p| p.raw.len()).sum());
-        println!("{:.1} MiB of markdown, opened in {:.0} ms\n", mib(text_bytes as isize), ms(open_t));
+        println!(
+            "{:.1} MiB of markdown, opened in {:.0} ms\n",
+            mib(text_bytes as isize),
+            ms(open_t)
+        );
 
         let before_index = live();
         let built = Arc::new(Built::new(open.clone()));
@@ -169,10 +189,14 @@ fn the_index_and_queries_on_a_large_vault() {
         let mut deltas = Vec::new();
         let mut syncs = Vec::new();
         let mut after = Vec::new();
-        let small = QueryRequest { limit: Some(50), ..q.clone() };
+        let small = QueryRequest {
+            limit: Some(50),
+            ..q.clone()
+        };
         for i in 0..20 {
             let path = format!("Area {}/Note {}.md", i % 20, i * 20 + i % 20);
-            open.set_property(&path, "status", json!(STATUSES[(i + 1) % 4])).unwrap();
+            open.set_property(&path, "status", json!(STATUSES[(i + 1) % 4]))
+                .unwrap();
             let (t, d) = time(|| built.sync());
             syncs.push(t);
             deltas.push(d.to_bytes().len());
@@ -181,23 +205,49 @@ fn the_index_and_queries_on_a_large_vault() {
         deltas.sort_unstable();
         println!("| the index | |\n|---|---:|");
         println!("| built from the open vault | {:.0} ms |", ms(build_t));
-        println!("| a snapshot on the wire (JSON) | {:.2} MiB ({} B a note) |", mib(wire.len() as isize), wire.len() / n);
-        println!("| in memory (entries, stamps) | {:.2} MiB ({} B a note) |", mib(index_mem), index_mem / n as isize);
-        println!("| a delta for one property set (wire) | {} B |\n", deltas[deltas.len() / 2]);
+        println!(
+            "| a snapshot on the wire (JSON) | {:.2} MiB ({} B a note) |",
+            mib(wire.len() as isize),
+            wire.len() / n
+        );
+        println!(
+            "| in memory (entries, stamps) | {:.2} MiB ({} B a note) |",
+            mib(index_mem),
+            index_mem / n as isize
+        );
+        println!(
+            "| a delta for one property set (wire) | {} B |\n",
+            deltas[deltas.len() / 2]
+        );
 
         println!("| query, through the client | n | p50 | p99 |\n|---|---:|---:|---:|");
         let (bytes, first) = ask(&q);
         let shown = first["total"].as_u64().unwrap();
         let mut all: Vec<_> = (0..20).map(|_| time(|| ask(&q)).0).collect();
-        row(&format!("every matching row ({shown} rows, {:.1} MiB answered)", mib(bytes as isize)), &mut all);
+        row(
+            &format!(
+                "every matching row ({shown} rows, {:.1} MiB answered)",
+                mib(bytes as isize)
+            ),
+            &mut all,
+        );
         let mut limited: Vec<_> = (0..50).map(|_| time(|| ask(&small)).0).collect();
-        row("`limit: 50` (an extension's page; 200 by default)", &mut limited);
+        row(
+            "`limit: 50` (an extension's page; 200 by default)",
+            &mut limited,
+        );
         let hash = ask(&small).1["hash"].as_str().unwrap().to_owned();
-        let same = QueryRequest { if_changed: Some(hash), ..small.clone() };
+        let same = QueryRequest {
+            if_changed: Some(hash),
+            ..small.clone()
+        };
         let mut unchanged: Vec<_> = (0..50).map(|_| time(|| ask(&same)).0).collect();
         row("`if_changed`, nothing moved", &mut unchanged);
         row("index sync after one edit", &mut syncs);
-        row("`limit: 50` after one edit (the whole view again)", &mut after);
+        row(
+            "`limit: 50` after one edit (the whole view again)",
+            &mut after,
+        );
 
         let writes = |label: &str| {
             let mut v = Vec::new();

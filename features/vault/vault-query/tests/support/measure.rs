@@ -3,7 +3,12 @@
 //! `examples/index_memory.mjs`): a generated vault, its index's snapshot,
 //! and a counting allocator's numbers.
 
-#![allow(dead_code, clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+#![allow(
+    dead_code,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects
+)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -19,7 +24,8 @@ static PEAK: AtomicIsize = AtomicIsize::new(0);
 // SAFETY: forwards to the system allocator, counting.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let now = LIVE.fetch_add(layout.size().cast_signed(), Ordering::Relaxed) + layout.size().cast_signed();
+        let now = LIVE.fetch_add(layout.size().cast_signed(), Ordering::Relaxed)
+            + layout.size().cast_signed();
         PEAK.fetch_max(now, Ordering::Relaxed);
         // SAFETY: the caller's contract, passed on.
         unsafe { System.alloc(layout) }
@@ -87,7 +93,9 @@ impl NoteSource for Markdown {
                 text: vault_query::Text::Here(text),
                 parsed: None,
                 mtime: 1_763_000_000_000,
-                is_base: std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("base")),
+                is_base: std::path::Path::new(path)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("base")),
             });
         }
         (0, self.0.len())

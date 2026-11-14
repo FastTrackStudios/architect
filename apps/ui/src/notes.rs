@@ -227,9 +227,18 @@ pub fn on_source(f: impl FnOnce(&architect_navigator::VaultSource) + Send + 'sta
 /// process (`architect::serve_local`) on a small runtime of its own. Its
 /// client is what the extension host holds (`Host::with_vault_query`).
 /// `None` until the app's vault is open, or when it cannot be served.
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))]
+#[cfg(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "ios"
+))]
 pub fn vault_query() -> Option<vault_proto::query::VaultQueryClient> {
-    type Served = (tokio::runtime::Runtime, Arc<architect::resource::Scope>, vault_proto::query::VaultQueryClient);
+    type Served = (
+        tokio::runtime::Runtime,
+        Arc<architect::resource::Scope>,
+        vault_proto::query::VaultQueryClient,
+    );
     static SERVED: OnceLock<Option<Served>> = OnceLock::new();
     let open = open_vault()?;
     SERVED
@@ -286,7 +295,12 @@ pub fn register(list: &Arc<ActionList>) {
     let _ = links::actions::register(list, &open);
     let _ = tag::actions::register(list, &open);
     // BASES_ROWS asks the same query service the extensions do.
-    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))]
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "ios"
+    ))]
     if let Some(queries) = vault_query() {
         let _ = architect_bases::actions::register(list, &open, view_types(), queries);
     }

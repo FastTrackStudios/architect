@@ -906,12 +906,9 @@ impl ExtensionApi {
                     // if it does.
                     limit: Some(limit.map_or(QUERY_LIMIT, |n| n.min(QUERY_LIMIT_MAX))),
                 };
-                let answer = client
-                    .query(request)
-                    .await
-                    .map_err(|e| HostError::Failed {
-                        message: e.to_string(),
-                    })?;
+                let answer = client.query(request).await.map_err(|e| HostError::Failed {
+                    message: e.to_string(),
+                })?;
                 serde_json::from_str(&answer).map_err(|e| HostError::Failed {
                     message: format!("the query service's answer: {e}"),
                 })

@@ -1989,7 +1989,9 @@ impl BaseRow {
 
 /// A frontmatter map with shared keys.
 fn props_of(map: indexmap::IndexMap<String, serde_json::Value>) -> crate::index::Props {
-    map.into_iter().map(|(k, v)| (std::sync::Arc::from(k), v)).collect()
+    map.into_iter()
+        .map(|(k, v)| (std::sync::Arc::from(k), v))
+        .collect()
 }
 
 fn tags_from_frontmatter(fm: &crate::index::Props) -> Vec<String> {
@@ -2458,7 +2460,13 @@ impl<'a> BaseEval<'a> {
                 .iter()
                 .map(|&i| {
                     let row = &self.rows[i];
-                    (view.sort.iter().map(|k| self.column(row, &k.property)).collect(), i)
+                    (
+                        view.sort
+                            .iter()
+                            .map(|k| self.column(row, &k.property))
+                            .collect(),
+                        i,
+                    )
                 })
                 .collect();
             keyed.sort_by(|(ka, a), (kb, b)| {

@@ -36,7 +36,8 @@ use serde_json::{Value, json};
 /// service's `BASES_ROWS`) would otherwise reach another test's vault.
 fn serial() -> std::sync::MutexGuard<'static, ()> {
     static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    ONE.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The app's side: its list with `VAULT_*` and `BASES_*` over `dir`.
@@ -46,7 +47,13 @@ fn app_list(dir: &Path) -> Arc<ActionList> {
     vault::actions::register(&list, &open).unwrap();
     let types: &'static architect_bases::model::ViewTypes =
         Box::leak(Box::new(architect_bases::model::ViewTypes::new()));
-    architect_bases::actions::register(&list, &open, types, architect_bases::actions::local_queries(&open)).unwrap();
+    architect_bases::actions::register(
+        &list,
+        &open,
+        types,
+        architect_bases::actions::local_queries(&open),
+    )
+    .unwrap();
     list
 }
 

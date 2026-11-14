@@ -768,9 +768,15 @@ mod tests {
         assert_eq!(run(&writer, "VAULT_CREATE", Reach::Mutating), None);
         // A base's rows are the notes it finds: the documents too.
         let other = caps(&["BASES_"], Reach::ReadOnly, &[]);
-        assert_eq!(run(&other, "BASES_ROWS", Reach::ReadOnly), Some("reads.documents"));
+        assert_eq!(
+            run(&other, "BASES_ROWS", Reach::ReadOnly),
+            Some("reads.documents")
+        );
         let base_reader = caps(&["BASES_"], Reach::Mutating, &["documents"]);
         assert_eq!(run(&base_reader, "BASES_ROWS", Reach::ReadOnly), None);
-        assert_eq!(run(&base_reader, "BASES_SET_SORT", Reach::Mutating), Some("writes.documents"));
+        assert_eq!(
+            run(&base_reader, "BASES_SET_SORT", Reach::Mutating),
+            Some("writes.documents")
+        );
     }
 }
