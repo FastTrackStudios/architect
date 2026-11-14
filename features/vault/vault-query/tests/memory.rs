@@ -2,7 +2,14 @@
 //! it with `cargo test -p vault-query --release --test memory -- --ignored
 //! --nocapture`). The same in a browser's engine: `examples/index_memory.mjs`.
 
-#![allow(clippy::unwrap_used, clippy::print_stdout, clippy::cast_precision_loss, clippy::cast_possible_wrap, clippy::as_conversions, clippy::arithmetic_side_effects)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::print_stdout,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::as_conversions,
+    clippy::arithmetic_side_effects
+)]
 
 mod support;
 
@@ -40,7 +47,16 @@ fn a_browsers_copy_of_the_index() {
     let t = Instant::now();
     let _ = engine.run(&q).unwrap();
     let second = t.elapsed();
-    println!("native, {n} notes: snapshot {} B ({} B a note); replica holds {} B ({} B a note); a query (limit 50, total {}) peaks at {} B, keeps {} B; first {:.1} ms, again {:.1} ms",
-        bytes.len(), bytes.len() / n, held, held / n as isize, answer["total"], peak, kept,
-        first.as_secs_f64() * 1e3, second.as_secs_f64() * 1e3);
+    println!(
+        "native, {n} notes: snapshot {} B ({} B a note); replica holds {} B ({} B a note); a query (limit 50, total {}) peaks at {} B, keeps {} B; first {:.1} ms, again {:.1} ms",
+        bytes.len(),
+        bytes.len() / n,
+        held,
+        held / n as isize,
+        answer["total"],
+        peak,
+        kept,
+        first.as_secs_f64() * 1e3,
+        second.as_secs_f64() * 1e3
+    );
 }

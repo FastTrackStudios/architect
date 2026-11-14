@@ -74,6 +74,14 @@ pub fn query(limit: u32) -> Vec<f64> {
         limit: Some(limit),
         ..QueryRequest::default()
     };
-    let total = ENGINE.with(|e| e.borrow().as_ref().unwrap().run(&q).unwrap()["total"].as_f64().unwrap_or(0.0));
-    vec![total, (measure::peak() - at) as f64, (measure::live() - at) as f64]
+    let total = ENGINE.with(|e| {
+        e.borrow().as_ref().unwrap().run(&q).unwrap()["total"]
+            .as_f64()
+            .unwrap_or(0.0)
+    });
+    vec![
+        total,
+        (measure::peak() - at) as f64,
+        (measure::live() - at) as f64,
+    ]
 }

@@ -112,7 +112,10 @@ impl QueryEngine {
     /// As [`Self::run`].
     pub fn run_text(&self, query: &QueryRequest) -> Result<String, String> {
         let index = self.feed.index();
-        let key = format!("{:?}|{:?}|{:?}|{:?}", query.path, query.source, query.view, query.limit);
+        let key = format!(
+            "{:?}|{:?}|{:?}|{:?}",
+            query.path, query.source, query.view, query.limit
+        );
         let unchanged = |revision: u64, hash: &str| {
             json!({ "unchanged": true, "revision": revision, "hash": hash }).to_string()
         };
@@ -127,12 +130,15 @@ impl QueryEngine {
         let path = query.path.as_deref().unwrap_or_default();
         let yaml = match query.source.as_deref() {
             Some(source) => source,
-            None if path.is_empty() => return Err("give a base's `path` or its `source`".to_owned()),
-            None => index.base(path).ok_or_else(|| format!("{path}: no such base"))?,
+            None if path.is_empty() => {
+                return Err("give a base's `path` or its `source`".to_owned());
+            }
+            None => index
+                .base(path)
+                .ok_or_else(|| format!("{path}: no such base"))?,
         };
-        let base: ParsedBase = base_json::with_a_view(
-            crate::bases::parse(yaml).map_err(|e| format!("{path}: {e}"))?,
-        );
+        let base: ParsedBase =
+            base_json::with_a_view(crate::bases::parse(yaml).map_err(|e| format!("{path}: {e}"))?);
         let i = base_json::view_index(&base, query.view.as_deref())?;
         let spec = base.views.get(i).ok_or("no such view")?;
         let revision = index.revision;
@@ -173,7 +179,9 @@ impl QueryEngine {
         }
         // `{"revision":…,"hash":"…",` and the answer's own fields after.
         let rest = answer.strip_prefix('{').unwrap_or(&answer);
-        Ok(format!("{{\"revision\":{revision},\"hash\":\"{hash}\",{rest}"))
+        Ok(format!(
+            "{{\"revision\":{revision},\"hash\":\"{hash}\",{rest}"
+        ))
     }
 }
 
@@ -283,7 +291,10 @@ mod tests {
     /// A row keeps its note's time: `file.mtime` sorts and shows as a date.
     #[test]
     fn a_row_has_its_notes_time() {
-        let e = engine(vec![("A.md", "# A", 1_700_000_000_000), ("B.md", "# B", 1_600_000_000_000)]);
+        let e = engine(vec![
+            ("A.md", "# A", 1_700_000_000_000),
+            ("B.md", "# B", 1_600_000_000_000),
+        ]);
         let q = QueryRequest {
             source: Some("views:\n  - type: table\n    name: T\n    order: [file.name, file.mtime]\n    sort:\n      - property: file.mtime\n        direction: ASC\n".to_owned()),
             ..QueryRequest::default()
@@ -291,7 +302,13 @@ mod tests {
         let a = e.run(&q).unwrap();
         let rows = &a["rows"]["groups"][0]["rows"];
         assert_eq!(rows[0]["name"], "B", "{a}");
-        assert!(rows[0]["values"]["file.mtime"].as_str().unwrap().starts_with("2020-09-13"), "{a}");
+        assert!(
+            rows[0]["values"]["file.mtime"]
+                .as_str()
+                .unwrap()
+                .starts_with("2020-09-13"),
+            "{a}"
+        );
     }
 
     /// One serialization: the text answer reads back as the value answer,

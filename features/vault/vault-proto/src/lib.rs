@@ -51,12 +51,12 @@ mod manifest;
 /// service on the wire: with `vox`).
 #[cfg(feature = "vox")]
 pub mod notes;
+mod page;
+mod page_meta;
 /// The `VaultQuery` service: a base's view run over the vault index (a
 /// service on the wire: with `vox`).
 #[cfg(feature = "vox")]
 pub mod query;
-mod page;
-mod page_meta;
 mod service;
 
 // Per-file CRDT collaboration identity: the uuid-v5 doc-id scheme,

@@ -17,8 +17,8 @@ use architect_extensions::hostcall::{HostError, HostRequest};
 use architect_extensions::{Origin, Package};
 use architect_settings::Registry;
 use vault_query::Built;
-use vault_query::index::{Note, NoteSource};
 use vault_query::QueryEngine;
+use vault_query::index::{Note, NoteSource};
 
 /// Notes held as markdown: an app's vault, as the index sees it.
 struct Markdown(Vec<(&'static str, &'static str)>);
@@ -35,7 +35,9 @@ impl NoteSource for Markdown {
                 text: vault_query::Text::Here(text),
                 parsed: None,
                 mtime: 0,
-                is_base: std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("base")),
+                is_base: std::path::Path::new(path)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("base")),
             });
         }
         (0, self.0.len())
@@ -63,7 +65,8 @@ api = "0.1"
 fn load(host: &Host, dir: &Path, manifest: &str) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("extension.toml"), manifest).unwrap();
-    host.load(&Package::read(dir).unwrap(), Origin::Dev).unwrap();
+    host.load(&Package::read(dir).unwrap(), Origin::Dev)
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -74,11 +77,16 @@ async fn an_extension_queries_the_vault_through_the_hosts_client() {
         ("Songs/A.md", "---\nstatus: todo\n---\n# A\n"),
         ("Songs/B.md", "---\nstatus: done\n---\n# B\n"),
         ("Notes/C.md", "# C\n"),
-        ("Songs.base", "filters:\n  and:\n    - status != null\nviews:\n  - type: table\n    name: All\n    order: [file.name, status]\n"),
+        (
+            "Songs.base",
+            "filters:\n  and:\n    - status != null\nviews:\n  - type: table\n    name: All\n    order: [file.name, status]\n",
+        ),
     ]);
     let engine = QueryEngine::new(Arc::new(Built::new(notes)));
-    let client: vault_proto::query::VaultQueryClient =
-        architect::serve_local(engine, &scope).establish().await.unwrap();
+    let client: vault_proto::query::VaultQueryClient = architect::serve_local(engine, &scope)
+        .establish()
+        .await
+        .unwrap();
 
     let docs = || -> Arc<dyn architect_extensions::documents::Documents> {
         Arc::new(CrdtDocuments::new().with_space("notes"))

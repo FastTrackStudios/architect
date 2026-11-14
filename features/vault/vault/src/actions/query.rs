@@ -298,7 +298,10 @@ mod tests {
             ("Songs/A.md", "---\nstatus: todo\n---\nA"),
             ("Songs/B.md", "---\nstatus: done\n---\nB"),
             ("Notes/C.md", "C"),
-            ("Songs.base", "filters:\n  and:\n    - status != null\nviews:\n  - type: table\n    name: All\n    order: [file.name, status]\n"),
+            (
+                "Songs.base",
+                "filters:\n  and:\n    - status != null\nviews:\n  - type: table\n    name: All\n    order: [file.name, status]\n",
+            ),
         ]);
         let engine = vault_query::QueryEngine::new(std::sync::Arc::new(Built::new(open.clone())));
         let ask = |if_changed: Option<String>| QueryRequest {
@@ -318,10 +321,20 @@ mod tests {
         let first = engine.run(&ask(None)).unwrap();
         assert_eq!(names(&first), ["A", "B"]);
         let hash = first["hash"].as_str().unwrap().to_owned();
-        assert_eq!(engine.run(&ask(Some(hash.clone()))).unwrap()["unchanged"], true);
-        open.set_property("Notes/C.md", "status", json!("todo")).unwrap();
-        assert_eq!(names(&engine.run(&ask(Some(hash))).unwrap()), ["A", "B", "C"]);
+        assert_eq!(
+            engine.run(&ask(Some(hash.clone()))).unwrap()["unchanged"],
+            true
+        );
+        open.set_property("Notes/C.md", "status", json!("todo"))
+            .unwrap();
+        assert_eq!(
+            names(&engine.run(&ask(Some(hash))).unwrap()),
+            ["A", "B", "C"]
+        );
         open.create("Songs/D.md", "---\nstatus: x\n---\n").unwrap();
-        assert_eq!(names(&engine.run(&ask(None)).unwrap()), ["A", "B", "C", "D"]);
+        assert_eq!(
+            names(&engine.run(&ask(None)).unwrap()),
+            ["A", "B", "C", "D"]
+        );
     }
 }

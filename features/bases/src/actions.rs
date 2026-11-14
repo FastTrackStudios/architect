@@ -26,9 +26,9 @@ use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effec
 use facet::Facet;
 use serde_json::{Value, json};
 use vault::actions::OpenVault;
-use vault_proto::query::{QueryRequest, VaultQueryClient};
 use vault::bases::{Conjunction, ParsedBase};
 use vault_obsidian::Vault;
+use vault_proto::query::{QueryRequest, VaultQueryClient};
 
 use crate::model::{self, Scope, ViewTypes, put};
 

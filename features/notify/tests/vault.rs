@@ -32,7 +32,13 @@ fn app(dir: &Path) -> Arc<ActionList> {
     vault::actions::register(&list, &open).unwrap();
     let types: &'static architect_bases::model::ViewTypes =
         Box::leak(Box::new(architect_bases::model::ViewTypes::new()));
-    architect_bases::actions::register(&list, &open, types, architect_bases::actions::local_queries(&open)).unwrap();
+    architect_bases::actions::register(
+        &list,
+        &open,
+        types,
+        architect_bases::actions::local_queries(&open),
+    )
+    .unwrap();
     list
 }
 

@@ -41,7 +41,13 @@ fn vault() -> (tempfile::TempDir, Arc<ActionList>, ViewTypes) {
     let open = vault::actions::OpenVault::open(dir).unwrap();
     vault::actions::register(&list, &open).unwrap();
     let types = ViewTypes::new();
-    architect_bases::actions::register(&list, &open, &types, architect_bases::actions::local_queries(&open)).unwrap();
+    architect_bases::actions::register(
+        &list,
+        &open,
+        &types,
+        architect_bases::actions::local_queries(&open),
+    )
+    .unwrap();
     (tmp, list, types)
 }
 
@@ -198,7 +204,13 @@ fn every_base_in_the_labs_demo_vault_runs_every_view() {
     copy_dir(&demo, tmp.path());
     let list = Arc::new(ActionList::new());
     let open = vault::actions::OpenVault::open(tmp.path()).unwrap();
-    architect_bases::actions::register(&list, &open, &ViewTypes::new(), architect_bases::actions::local_queries(&open)).unwrap();
+    architect_bases::actions::register(
+        &list,
+        &open,
+        &ViewTypes::new(),
+        architect_bases::actions::local_queries(&open),
+    )
+    .unwrap();
     let bases = run(&list, "BASES_LIST", &Value::Null);
     let bases = bases.as_array().unwrap();
     assert_eq!(bases.len(), 5, "{bases:?}");

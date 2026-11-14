@@ -929,7 +929,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                     Some(docs.raise_on(&app));
                 // Its documents and its index (`query_vault`), together:
                 // the person's whole vault.
-                #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))]
+                #[cfg(any(
+                    target_os = "macos",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "ios"
+                ))]
                 if let Some(queries) = crate::notes::vault_query() {
                     host.set_vault(
                         Arc::new(docs),
