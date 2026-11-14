@@ -1,0 +1,8 @@
+# A small extension the showcase vault carries in
+# .architect/extensions/ (#710 L2): installed through the same prompt.
+id = "showcase.tiny"
+name = "Tiny Theme Tokens"
+version = "0.1.0"
+kind = "data"
+api = "0.1"
+description = "Travels inside the vault: a signed archive in its .architect/extensions folder."
