@@ -139,10 +139,7 @@ impl App {
         let waker = futures::task::noop_waker();
         loop {
             for _ in 0..16 {
-                if !self
-                    .doc
-                    .poll(Some(std::task::Context::from_waker(&waker)))
-                {
+                if !self.doc.poll(Some(std::task::Context::from_waker(&waker))) {
                     break;
                 }
             }
@@ -158,7 +155,15 @@ impl App {
     /// The window's scene, as its renderer would get it.
     fn window_scene(&self) -> Vec<RenderCommand> {
         let mut scene = Scene::new();
-        blitz_paint::paint_scene(&mut scene, &mut self.doc.inner.borrow_mut(), 1.0, 800, 600, 0, 0);
+        blitz_paint::paint_scene(
+            &mut scene,
+            &mut self.doc.inner.borrow_mut(),
+            1.0,
+            800,
+            600,
+            0,
+            0,
+        );
         scene.commands
     }
 
@@ -227,7 +232,13 @@ fn strokes(commands: &[RenderCommand]) -> usize {
 fn a_stroke_drawn_in_the_process_is_in_the_windows_scene() {
     let mut app = open("sketch");
     assert_eq!(strokes(&app.window_scene()), 0);
-    drag(&mut app, (100.0, 100.0), (300.0, 200.0), 20, Modifiers::empty());
+    drag(
+        &mut app,
+        (100.0, 100.0),
+        (300.0, 200.0),
+        20,
+        Modifiers::empty(),
+    );
     app.pump("the stroke", |_| true);
     let deadline = Instant::now() + Duration::from_secs(10);
     while strokes(&app.window_scene()) == 0 {
@@ -239,11 +250,23 @@ fn a_stroke_drawn_in_the_process_is_in_the_windows_scene() {
 #[test]
 fn panning_and_zooming_send_the_transform_not_the_scene() {
     let mut app = open("sketch");
-    drag(&mut app, (100.0, 100.0), (300.0, 200.0), 10, Modifiers::empty());
+    drag(
+        &mut app,
+        (100.0, 100.0),
+        (300.0, 200.0),
+        10,
+        Modifiers::empty(),
+    );
     app.pump("drawn", |_| true);
     let before = bytes(&app.doc.inner.borrow());
     // 20 frames of Shift-drag panning.
-    drag(&mut app, (200.0, 200.0), (260.0, 240.0), 20, Modifiers::SHIFT);
+    drag(
+        &mut app,
+        (200.0, 200.0),
+        (260.0, 240.0),
+        20,
+        Modifiers::SHIFT,
+    );
     // A wheel's zoom.
     let at = (200.0_f32, 150.0_f32);
     app.send(UiEvent::Wheel(BlitzWheelEvent {
@@ -285,11 +308,20 @@ fn a_graph_node_drags_in_a_paint_view_served_by_its_process() {
     let node = (40.0 + 200.0 + r, 20.0 + 150.0);
     let deadline = Instant::now() + Duration::from_secs(10);
     while !fills_near(&app.window_scene(), node.0, node.1) {
-        assert!(Instant::now() < deadline, "the first node isn't where it was placed");
+        assert!(
+            Instant::now() < deadline,
+            "the first node isn't where it was placed"
+        );
         app.pump("the placed graph", |_| true);
     }
     let to = (120.0, 80.0);
-    drag(&mut app, (node.0 as f32, node.1 as f32), to, 15, Modifiers::empty());
+    drag(
+        &mut app,
+        (node.0 as f32, node.1 as f32),
+        to,
+        15,
+        Modifiers::empty(),
+    );
     let deadline = Instant::now() + Duration::from_secs(10);
     while !fills_near(&app.window_scene(), f64::from(to.0), f64::from(to.1)) {
         assert!(Instant::now() < deadline, "the node didn't follow the drag");
@@ -316,7 +348,10 @@ fn arrangement_budget() {
     let mut builds = Vec::new();
     for _ in 0..50 {
         let t = Instant::now();
-        let s = architect_extensions::scene::scene_of(&received, architect_extensions::scene::Affine::IDENTITY);
+        let s = architect_extensions::scene::scene_of(
+            &received,
+            architect_extensions::scene::Affine::IDENTITY,
+        );
         assert_eq!(s.commands.len(), 2000);
         builds.push(t.elapsed());
     }
@@ -327,8 +362,16 @@ fn arrangement_budget() {
     let before = first;
     let mut frames = Vec::new();
     let from = (200.0_f32, 150.0_f32);
-    app.send(UiEvent::PointerMove(pointer(from, FREE, Modifiers::empty())));
-    app.send(UiEvent::PointerDown(pointer(from, HELD, Modifiers::empty())));
+    app.send(UiEvent::PointerMove(pointer(
+        from,
+        FREE,
+        Modifiers::empty(),
+    )));
+    app.send(UiEvent::PointerDown(pointer(
+        from,
+        HELD,
+        Modifiers::empty(),
+    )));
     for i in 1..=100 {
         let at = (from.0 - i as f32, from.1);
         let t = Instant::now();
@@ -349,9 +392,23 @@ fn arrangement_budget() {
     println!("|---|---|");
     println!("| first scene | {first} bytes |");
     println!("| a frame of panning | {per_frame} bytes |");
-    println!("| host: the scene decoded | {:.2} ms |", decode.as_secs_f64() * 1e3);
-    println!("| host: the scene built (p50 / p99) | {:.2} / {:.2} ms |", p(&mut builds, 50), p(&mut builds, 99));
-    println!("| the window's scene recorded (p50 / p99) | {:.2} / {:.2} ms |", p(&mut paint, 50), p(&mut paint, 99));
-    println!("| a pan's round trip (p50 / p99) | {:.2} / {:.2} ms |", p(&mut frames, 50), p(&mut frames, 99));
+    println!(
+        "| host: the scene decoded | {:.2} ms |",
+        decode.as_secs_f64() * 1e3
+    );
+    println!(
+        "| host: the scene built (p50 / p99) | {:.2} / {:.2} ms |",
+        p(&mut builds, 50),
+        p(&mut builds, 99)
+    );
+    println!(
+        "| the window's scene recorded (p50 / p99) | {:.2} / {:.2} ms |",
+        p(&mut paint, 50),
+        p(&mut paint, 99)
+    );
+    println!(
+        "| a pan's round trip (p50 / p99) | {:.2} / {:.2} ms |",
+        p(&mut frames, 50),
+        p(&mut frames, 99)
+    );
 }
-

@@ -236,7 +236,13 @@ fn from_wire(w: Wire) -> RenderCommand {
             backdrop_filter: None,
         }),
         Wire::Pop => RenderCommand::PopLayer,
-        Wire::Shadow { t, r: [x0, y0, x1, y1], c, radius, sd } => RenderCommand::BoxShadow(BoxShadowCommand {
+        Wire::Shadow {
+            t,
+            r: [x0, y0, x1, y1],
+            c,
+            radius,
+            sd,
+        } => RenderCommand::BoxShadow(BoxShadowCommand {
             transform: Affine::new(t),
             rect: Rect::new(x0, y0, x1, y1),
             brush: color(c),
@@ -331,8 +337,8 @@ impl SceneCache {
     /// It names a scene not held, or its content is not a scene.
     pub fn receive(&mut self, value: &str) -> Result<Commands, String> {
         let (hash, json) = value.split_once('\n').unwrap_or((value, ""));
-        let hash = u64::from_str_radix(hash.trim(), 16)
-            .map_err(|_| "a scene with no hash".to_owned())?;
+        let hash =
+            u64::from_str_radix(hash.trim(), 16).map_err(|_| "a scene with no hash".to_owned())?;
         if json.is_empty() {
             return self
                 .held
