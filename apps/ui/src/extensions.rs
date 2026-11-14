@@ -897,7 +897,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             let app = Arc::clone(&lab);
             crate::notes::on_source(move |source| {
                 let docs = architect_navigator::documents::VaultDocuments::new(source.clone());
-                *lock(&DOC_EVENTS) = Some(docs.raise_on(&app));
+                *DOC_EVENTS.lock().unwrap_or_else(PoisonError::into_inner) = Some(docs.raise_on(&app));
                 host.set_documents(Arc::new(docs));
             });
         }

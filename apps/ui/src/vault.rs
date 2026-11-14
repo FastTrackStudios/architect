@@ -936,7 +936,7 @@ pub fn use_now_playing_art() -> Callback<String, Option<String>> {
 }
 
 /// A vault on disk as the navigator reads it, watched.
-pub(crate) fn watched(open: vault::actions::OpenVault, name: String) -> VaultSource {
+pub fn watched(open: vault::actions::OpenVault, name: String) -> VaultSource {
     let source = VaultSource::named(open, name);
     if let Err(e) = source.watch() {
         tracing::warn!(error = %e, "lab.vault.watch_failed");
