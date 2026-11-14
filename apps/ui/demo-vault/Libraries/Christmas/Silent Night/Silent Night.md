@@ -7,7 +7,7 @@ tempo: 83
 meter: 3/4
 duration: "5:00"
 recording: Recordings/Christmas/Silent Night.mp3
-cover: Songs/Christmas/Silent Night/cover.svg
+cover: Libraries/Christmas/Silent Night/cover.svg
 setlist: "[[Setlists/Merry & Bright|Merry & Bright]]"
 tags: [music/christmas]
 ---

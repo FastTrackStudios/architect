@@ -100,8 +100,8 @@ async function node() {
   const songs = [];
   let set = readFileSync(join(DEMO, SETLIST), 'utf8');
   // A song outside the share, linked from the setlist: never a guest's.
-  set = set.replace('    - "[[Songs/Christmas/Last Christmas/Last Christmas|Last Christmas]]"\n',
-    '    - "[[Songs/Christmas/Last Christmas/Last Christmas|Last Christmas]]"\n    - "[[Private/Secret Song|Secret Song]]"\n');
+  set = set.replace('    - "[[Libraries/Christmas/Last Christmas/Last Christmas|Last Christmas]]"\n',
+    '    - "[[Libraries/Christmas/Last Christmas/Last Christmas|Last Christmas]]"\n    - "[[Private/Secret Song|Secret Song]]"\n');
   // ... and its row in the setlist's fence, as Studio writes one.
   set = set.replace('## Concert Set\n', '## Concert Set\n10 | Secret Song | Private/Secret Song.md | E · 99 bpm | Private/secret-take.mp3 | Unreleased Artist\n');
   if (!set.includes('Private/Secret Song.md | E')) throw new Error('the fence row was not added');
@@ -109,7 +109,7 @@ async function node() {
   put(vault, 'Private/Secret Song.md', '---\ntitle: Secret Song\ntype: song\nrecording: Recordings/Christmas/Sleigh Ride.mp3\n---\nNot shared.\n');
   const colours = [[196, 40, 40], [30, 40, 110], [20, 110, 70], [110, 50, 140], [200, 120, 30], [40, 120, 160], [160, 40, 90], [70, 70, 70], [180, 150, 40]];
   SETS.flatMap(([, s]) => s).forEach((title, i) => {
-    const folder = `Songs/Christmas/${title}`;
+    const folder = `Libraries/Christmas/${title}`;
     const text = readFileSync(join(DEMO, folder, `${title}.md`), 'utf8').replace(/^cover: .*$/m, `cover: "${folder}/cover.png"`);
     put(vault, `${folder}/${title}.md`, text);
     put(vault, `${folder}/cover.png`, png(64, colours[i], [240, 230, 210]));
@@ -355,12 +355,12 @@ test('a share link\'s guest gets the same list from the link\'s notes, never one
     assert.equal(sleigh.media, 'Recordings/Christmas/Sleigh Ride.mp3');
     assert.equal(sleigh.subtitle, 'Tori Kelly');
     assert.equal(sleigh.duration_ms, 186000);
-    assert.equal(sleigh.art, 'Songs/Christmas/Sleigh Ride/cover.png');
+    assert.equal(sleigh.art, 'Libraries/Christmas/Sleigh Ride/cover.png');
     // The setlist's words as the node hands them: its fence keeps the
     // link's songs and names nothing outside it.
     const set = await n.read(SETLIST);
     assert.equal(set.status, 200, set.text);
-    assert.ok(set.text.includes('Songs/Christmas/Sleigh Ride/Sleigh Ride.md'), set.text.slice(0, 2000));
+    assert.ok(set.text.includes('Libraries/Christmas/Sleigh Ride/Sleigh Ride.md'), set.text.slice(0, 2000));
     for (const never of ['Secret', 'Private/', 'secret-take', 'Unreleased Artist']) {
       assert.ok(!set.text.includes(never), `${never} in ${set.text.slice(0, 4000)}`);
     }

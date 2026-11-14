@@ -998,7 +998,7 @@ PALETTES = [
 
 
 def song_dir(title):
-    return f"Songs/Christmas/{title}"
+    return f"Libraries/Christmas/{title}"
 
 
 def cover_svg(seed, palette):

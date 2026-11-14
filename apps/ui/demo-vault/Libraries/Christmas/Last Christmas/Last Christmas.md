@@ -1,7 +1,7 @@
 ---
 title: Last Christmas
 type: song
-cover: Songs/Christmas/Last Christmas/cover.svg
+cover: Libraries/Christmas/Last Christmas/cover.svg
 setlist: "[[Setlists/Merry & Bright|Merry & Bright]]"
 tags: [music/christmas]
 ---

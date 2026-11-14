@@ -25,9 +25,9 @@ type: setlist            # any type; `playlist` is the generic one
 sets:                    # or `sections`
   - name: Opening Set
     songs:               # or `items`
-      - "[[Songs/Christmas/Sleigh Ride/Sleigh Ride|Sleigh Ride]]"
+      - "[[Libraries/Christmas/Sleigh Ride/Sleigh Ride|Sleigh Ride]]"
 songs:                   # or `items`: a flat list
-  - "[[Songs/Christmas/Sleigh Ride/Sleigh Ride|Sleigh Ride]]"
+  - "[[Libraries/Christmas/Sleigh Ride/Sleigh Ride|Sleigh Ride]]"
 ---
 ```
 

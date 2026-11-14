@@ -901,7 +901,7 @@ test('the demo setlist: each song\'s cover reaches its frame as data and the car
     // (#668), and the list's own rows stay in the property table.
     assert.equal(await b.eval(`!!document.querySelector('[data-testid=media-list]')`), false, 'no core list under a claim');
     assert.ok((await b.eval(`[...document.querySelectorAll('[data-testid=note-properties] dt')].map((d) => d.textContent).join(',')`)).includes('sets'));
-    await ask(b, 'transport', 'PLAYHEAD_ITEM', { id: 'Songs/Christmas/Silent Night/Silent Night.md', play: true });
+    await ask(b, 'transport', 'PLAYHEAD_ITEM', { id: 'Libraries/Christmas/Silent Night/Silent Night.md', play: true });
     const s = await until(async () => { const s = await bar(b); return s && s.title === 'Silent Night' && s; }, 10000, 'the card on Silent Night');
     assert.match(s.subtitle, /for KING & COUNTRY/);
     assert.match(await artSrc(b), /^data:image\/svg\+xml;base64,/);
