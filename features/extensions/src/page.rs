@@ -1131,45 +1131,100 @@ pub fn ConsentPrompt(
     }
 }
 
-/// A project's missing extensions: "This project uses …", each one, and
-/// "Install all" through the same consent prompt.
+/// A project's (or a vault's) missing extensions: "This project uses …",
+/// each one, "Install all" through one consent prompt for all of them,
+/// and what cannot be had here, each with why (kept, never dropped).
+/// `what` names what is opening ("vault"; "project" when not given);
+/// `on_done` hears what an install did (each one's outcome, `; `-joined),
+/// to plan again.
 #[component]
-pub fn MissingExtensions(browse: Browse, plan: Plan) -> Element {
+pub fn MissingExtensions(
+    browse: Browse,
+    plan: Plan,
+    #[props(default)] what: Option<String>,
+    #[props(default)] on_done: Option<EventHandler<String>>,
+) -> Element {
     let mut asking = use_signal(|| None::<Vec<Preview>>);
     let mut note = use_signal(|| None::<String>);
-    let Some(prompt) = plan.prompt() else {
+    if plan.install.is_empty() && plan.offer.is_empty() && plan.missing.is_empty() {
         return rsx! {};
-    };
+    }
+    let what = what.unwrap_or_else(|| "project".to_owned());
+    let prompt = plan.prompt_for(&what).unwrap_or_else(|| {
+        if plan.install.is_empty() && plan.offer.is_empty() {
+            format!("Some extensions this {what} uses cannot run here")
+        } else {
+            format!("Extensions this {what} works with")
+        }
+    });
+    let can_install = !plan.install.is_empty();
     let org = browse.extensions().host().grants().and_then(|g| g.org());
     let ext = browse.extensions().clone();
     let listings = plan.install.clone();
+    let mut rows: Vec<(String, String, &'static str, String)> = Vec::new();
+    for l in &plan.install {
+        rows.push((
+            l.id.clone(),
+            l.name.clone(),
+            "Required",
+            format!("{} {}", l.kind, l.version),
+        ));
+    }
+    for l in &plan.offer {
+        rows.push((
+            l.id.clone(),
+            l.name.clone(),
+            "Optional",
+            format!("{} {}", l.kind, l.version),
+        ));
+    }
+    for (r, why) in &plan.missing {
+        let name = if r.name.is_empty() {
+            r.id.clone()
+        } else {
+            r.name.clone()
+        };
+        let tag = if r.required {
+            "Can't install"
+        } else {
+            "Not found"
+        };
+        rows.push((r.id.clone(), name, tag, format!("{why}; kept as it is")));
+    }
+    // Inline styles over the theme's tokens, and no `style` node: one
+    // here made Blitz panic (`layout_parent … does not point at its layout
+    // container`) beside the workspace. The consent prompt's classes are
+    // the app's to load (`document::Style` of `architect_ui::UTILITIES_CSS`).
     rsx! {
-        style { {architect_ui::UTILITIES_CSS} }
-        Alert {
-            AlertTitle { "{prompt}" }
-            AlertDescription {
-                div { style: "display: flex; flex-direction: column; gap: 8px;",
-                    for l in plan.install.iter() {
-                        ListRow { key: "{l.id}", label: l.name.clone(), detail: format!("{} · {}", l.kind, l.version), tag: "Required".to_owned() }
-                    }
-                    for l in plan.offer.iter() {
-                        ListRow { key: "{l.id}", label: l.name.clone(), detail: format!("{} · {}", l.kind, l.version), tag: "Optional".to_owned() }
-                    }
-                    if let Some(n) = note() { div { style: "font-size: 12px;", "{n}" } }
-                    div {
-                        Button {
-                            on_click: move |_| {
-                                let previews: Vec<Preview> = listings
-                                    .iter()
-                                    .filter_map(|l| {
-                                        let exact = VersionReq::parse(&format!("={}", l.version)).ok()?;
-                                        ext.preview(&l.id, &exact).ok()
-                                    })
-                                    .collect();
-                                asking.set(Some(previews));
-                            },
-                            "Install all"
-                        }
+        div {
+            role: "alert",
+            style: "display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--card-foreground); font-size: 13px;",
+            div { style: "font-weight: 600;", "{prompt}" }
+            for (id, name, tag, detail) in rows {
+                div { key: "{id}", style: "display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px;",
+                    span { style: "font-weight: 500;", "{name}" }
+                    span { style: "font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted-foreground);", "{tag}" }
+                    span { style: "color: var(--muted-foreground);", "{detail}" }
+                }
+            }
+            if let Some(n) = note() {
+                div { style: "font-size: 12px; color: var(--muted-foreground);", "{n}" }
+            }
+            if can_install {
+                div { style: "display: flex; gap: 8px; padding-top: 2px;",
+                    button {
+                        style: "padding: 5px 12px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); font-size: 13px; font-weight: 600; cursor: pointer;",
+                        onclick: move |_| {
+                            let previews: Vec<Preview> = listings
+                                .iter()
+                                .filter_map(|l| {
+                                    let exact = VersionReq::parse(&format!("={}", l.version)).ok()?;
+                                    ext.preview(&l.id, &exact).ok()
+                                })
+                                .collect();
+                            asking.set(Some(previews));
+                        },
+                        "Install all"
                     }
                 }
             }
@@ -1191,7 +1246,11 @@ pub fn MissingExtensions(browse: Browse, plan: Plan) -> Element {
                             Err(e) => done.push(format!("{}: {e}", p.name)),
                         }
                     }
-                    note.set(Some(done.join("; ")));
+                    let done = done.join("; ");
+                    note.set(Some(done.clone()));
+                    if let Some(on_done) = on_done {
+                        on_done.call(done);
+                    }
                 },
             }
         }

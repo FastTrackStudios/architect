@@ -53,6 +53,8 @@ pub mod platform;
 pub mod project;
 pub mod reapack;
 pub mod share_layers;
+#[cfg(feature = "host")]
+pub mod vault_needs;
 /// `[[favourites]]`: a note type's tabs and primary action.
 pub use architect_favourites as favourites;
 pub mod toolbar;
