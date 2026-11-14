@@ -388,7 +388,7 @@ mod tests {
             assert!(
                 !c.borrow().kept.contains_key(&path),
                 "a racy read is not kept"
-            )
+            );
         });
         // Settled: kept.
         write_settled(&path, b"six");
