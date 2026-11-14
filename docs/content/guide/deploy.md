@@ -66,6 +66,7 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_ENROL_ROLE` | `member` | the role it asks for, at most the session's own in the org |
 | `ARCHITECT_PEERS` | none | `endpoint@host:port,…`: nodes it dials directly |
 | `ARCHITECT_APPLE_APP_IDS` | none | `<team id>.<bundle id>,…`: the iOS apps its share links open in as universal links ([below](#a-link-opens-architect)); none: no `apple-app-site-association` |
+| `ARCHITECT_WEB_APP` | none (`beside` with the chart's web front end) | whether the web app is served beside the node, on its origin: `beside` (a proxy serves the same release's web bundle at `/app/`), or that bundle's folder (checked at start). A share link's page is the web app's page, which loads it from there ([below](#routing)); none: a link's page says it opens in the web app, which this server does not serve |
 | `ARCHITECT_IROH` | `n0` | `n0` (relays and lookup) or `local` (loopback only, for tests) |
 | `ARCHITECT_IROH_BIND` | any port (`0.0.0.0:7777` in the image) | the iroh UDP socket |
 | `ARCHITECT_MCP_TOKEN_FILE` | none | `/mcp` is served only with this bearer |
@@ -521,9 +522,21 @@ layer, ahead of a Site mounted at `/`):
 - **Signing in** (`/s/_signin`) is the issuer's device sign-in. The node
   starts one and links to its approval page, the person approves it there
   (signed in at the issuer), and the node sets the session as an `HttpOnly`,
-  `SameSite=Lax` cookie (`Secure` behind `https`). The node never sees a
-  password. Signing out is a form on `/s/_signout` (a GET shows it): its
+  `SameSite=Lax` cookie, `Secure` when the request came over `https`. The
+  node reads that from `X-Forwarded-Proto`, and only when a request has
+  none from its issuer's scheme (an `https` issuer: `Secure`). **The proxy
+  in front of a production node must send `X-Forwarded-Proto: https`**: a
+  proxy that sends `http`, or none in front of a node whose issuer is
+  `http`, gets a cookie without `Secure`. The node never sees a password. Signing out is a form on `/s/_signout` (a GET shows it): its
   POST, from the node's own page (its `Origin` checked), clears the cookie.
+- **A link's own files never run on the node's origin.** It is the web
+  app's origin, so a page, an SVG, an XML document or a script a note
+  links (anything but a picture, a recording, a video, plain text or a
+  PDF) is answered as a download (`Content-Disposition: attachment`)
+  under `Content-Security-Policy: sandbox; default-src 'none'` and
+  `nosniff`: opened, it runs nothing and reads nothing of the app's
+  session (`apps/desktop/src/node/shares.rs` `inert`). A share with a
+  domain of its own is its own origin and serves its pages as a Site.
 - **Answers keep the code private:** `Referrer-Policy: no-referrer` on every
   response; `X-Robots-Tag: noindex` unless the share is public; `private,
   no-store` for a signed-in audience.
@@ -694,10 +707,9 @@ before the full file, #490; today the files are the vault's own, copied into
 the link), a gapless hand-over, and the same queue in the app's setlist pane.
 
 Tested on a headless node (`apps/desktop/tests/shares.rs`
-`media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order`)
-and in a headless Firefox (`apps/web/test/share-player.test.mjs`, `just
-share-player-test`): the lyric line advances while a song plays, a click
-seeks, and the queue goes on to the next song's page and plays it.
+`media_streams_with_ranges_lyrics_follow_and_the_queue_is_the_links_order`):
+a song's audio and video stream with ranges, its lyrics follow, and the
+queue is the link's order.
 
 ### How far a link plays
 
@@ -930,7 +942,8 @@ web front end:
 | `/blobs` | reserved for the node |
 
 The chart's Ingress writes exactly this, with `X-Forwarded-Proto` left to
-the controller (the share sign-in cookie is `Secure` behind `https`).
+the controller (the share sign-in cookie is `Secure` only when it says
+`https`: a proxy of your own must send it too).
 `deploy/chart/architect/tests/routes.sh` renders it and checks that each
 prefix reaches the node and `/` the web front end (`pr.yml` runs it with
 `helm lint`). With a proxy of your own (Caddy, Traefik, nginx), route the
@@ -941,6 +954,20 @@ browser's bearer travels in it on `/org/<slug>/vox` and `/vox`. The node
 opens its org lane to a browser on its own origin only (the request's
 `Host`, or `X-Forwarded-Host`): a proxy that rewrites both, or a web app on
 another origin, needs that origin in `ARCHITECT_LANE_ORIGINS`.
+
+A share link's page (`/s/<code>/`) is the node's copy of the web app's
+page, which loads the app from `/app/` on the same host: the web front
+end's. The chart tells the node so (`ARCHITECT_WEB_APP=beside`) whenever
+`web.enabled` is on. With `web.enabled=false`, a node of your own, the
+desktop's or Studio's, nothing serves `/app/`: leave `ARCHITECT_WEB_APP`
+unset (`node.webApp` in the chart) and a link's page says it opens in the
+web app, which this server does not serve, rather than waiting for a
+script that is not there; set it only when you serve the same release's
+web bundle at `/app/` beside the node. The page carries the node's share
+contract and version (`<meta name="architect-share-shell">`,
+`architect-node-version`): an app of another release says it is out of
+date, and a bundle too old to know share links leaves a line saying the
+two must be the same release.
 
 ## Without Kubernetes: systemd
 

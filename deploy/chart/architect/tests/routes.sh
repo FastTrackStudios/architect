@@ -48,6 +48,16 @@ fi
 if helm template t "$chart" --set node.s3.enabled=true --set node.s3.bucket=b >/dev/null 2>&1; then
     echo "FAIL  S3 without a credentials Secret was accepted"; fail=1
 fi
+# A share link's page is the web app's only when the web app is served on
+# this host (ARCHITECT_WEB_APP, #646): with the web front end, or when
+# node.webApp says something else serves it; otherwise none, and a link's
+# page says it needs the web app.
+webapp() { helm template t "$chart" "$@" | yq 'select(.kind == "Deployment" and .metadata.name == "t-architect-node") | .spec.template.spec.containers[0].env[] | select(.name == "ARCHITECT_WEB_APP") | .value'; }
+for case in "beside|" "|--set web.enabled=false" "beside|--set web.enabled=false --set node.webApp=beside"; do
+    want_web="${case%%|*}"; read -r -a args <<<"${case#*|}"
+    got_web="$(webapp "${args[@]}")"
+    if [ "$got_web" = "$want_web" ]; then echo "ok    ARCHITECT_WEB_APP '${got_web}' (${args[*]:-defaults})"; else echo "FAIL  ARCHITECT_WEB_APP '${got_web}', want '${want_web}' (${args[*]:-defaults})"; fail=1; fi
+done
 # Images: a bare repository gets image.registry; a full one (what
 # argocd-image-updater writes) is used as is.
 images="$(helm template t "$chart" --set node.image.repository=ghcr.io/x/architect --set node.image.tag=1.2.3 | yq 'select(.kind == "Deployment") | .spec.template.spec.containers[0].image' | grep -v '^---$' | sort | tr '\n' ' ')"

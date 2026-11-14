@@ -61,6 +61,9 @@ spec:
             {{- with $n.issuer }}
             - { name: ARCHITECT_ISSUER, value: {{ . | quote }} }
             {{- end }}
+            {{- with (ternary "beside" $n.webApp .Values.web.enabled) }}
+            - { name: ARCHITECT_WEB_APP, value: {{ . | quote }} }
+            {{- end }}
             {{- with $n.org }}
             - { name: ARCHITECT_ORG, value: {{ . | quote }} }
             {{- end }}

@@ -386,6 +386,9 @@ impl Stack {
                     self.node_dir().join("files").display().to_string(),
                 ),
                 pair("ARCHITECT_FILES_HOLD", "true".to_owned()),
+                // A share link's page is the web app's (#646): served at
+                // `/app/` by the web app's dev server, beside the node.
+                pair("ARCHITECT_WEB_APP", "beside".to_owned()),
             ],
             Process::App => vec![
                 pair("ARCHITECT_AUTH_ISSUER", auth),

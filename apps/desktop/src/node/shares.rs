@@ -282,6 +282,9 @@ struct Inner {
     /// Note types' favourites (`[[favourites]]`), each with the extension
     /// that declared it: the web app's listing.
     favourites: std::sync::OnceLock<Arc<[architect_favourites::Listed]>>,
+    /// Whether the web app is served beside the node: a link's page is
+    /// the app's, or says it needs it ([`share_shell::WebApp`]).
+    web_app: std::sync::OnceLock<share_shell::WebApp>,
 }
 
 /// A device sign-in a browser is waiting on.
@@ -320,7 +323,21 @@ impl Shares {
             views: Mutex::new(HashMap::new()),
             islands: std::sync::OnceLock::new(),
             favourites: std::sync::OnceLock::new(),
+            web_app: std::sync::OnceLock::new(),
         }))
+    }
+
+    /// With the web app beside it (`ARCHITECT_WEB_APP`): a link's pages
+    /// are the app's ([`share_shell`]); without, they say the link needs
+    /// the web app. The first call holds.
+    #[must_use]
+    pub fn with_web_app(self, web: share_shell::WebApp) -> Self {
+        let _ = self.0.web_app.set(web);
+        self
+    }
+
+    fn web_app(&self) -> share_shell::WebApp {
+        self.0.web_app.get().copied().unwrap_or_default()
     }
 
     /// With `islands` (studio#445): its pages' players may draw them; the
@@ -1455,8 +1472,13 @@ pub async fn gate(State(shares): State<Shares>, request: Request, next: Next) ->
     }
     let guest = is_guest_path(request.uri().path());
     // A web app on another origin calls a link's guest service too: the
-    // code is the credential and a session travels in the body, never a
-    // cookie, so any origin may, without credentials.
+    // code is the credential and a session travels in the body, so any
+    // origin may, without credentials: `Access-Control-Allow-Origin: *`
+    // and never `-Allow-Credentials`, so a browser never sends this node's
+    // cookie on another origin's call (nor lets it read the answer of one
+    // that carried it). The node's own sign-in cookie stands in for an
+    // empty token only on a same-site call, the app on this origin
+    // (`SameSite=Lax`, below).
     if guest && request.method() == Method::OPTIONS {
         let mut response = StatusCode::NO_CONTENT.into_response();
         let headers = response.headers_mut();
@@ -1786,20 +1808,18 @@ async fn answer(shares: Shares, request: Request) -> Result<Response, Box<Reques
     }
     let mut parts = below.splitn(2, '/');
     let first = parts.next().unwrap_or_default();
+    // Any code to its folder, known or not: a link that is nowhere, an
+    // expired or revoked one and one that never was answer alike.
+    if is_code(first) && !below.contains('/') {
+        return Ok(Redirect::permanent(&link_path(first)).into_response());
+    }
     let Some((share, audience)) = Some(first)
         .filter(|code| is_code(code))
         .and_then(|code| shares.link(code))
     else {
-        return Ok(page(
-            StatusCode::NOT_FOUND,
-            "Not found",
-            "<p>There is nothing at this link.</p>",
-        ));
+        return Ok(gone());
     };
     let mount = link_path(first);
-    if !below.contains('/') {
-        return Ok(Redirect::permanent(&mount).into_response());
-    }
     let rest = format!("/{}", parts.next().unwrap_or_default());
     Ok(serve(&shares, share, audience, &rest, &mount, request).await)
 }
@@ -1832,6 +1852,7 @@ async fn serve(
     let code = share.code.as_str();
     let domain = mount == "/";
     let issuer = shares.0.issuer_origin.as_deref();
+    let web = shares.web_app();
     let head = |open: bool| share_shell::Head {
         title: open.then(|| {
             Link {
@@ -1858,11 +1879,11 @@ async fn serve(
             // sign-in (`/s/_signin`): the page names nothing of the link.
             Closed::SignIn if page_path => private(
                 &share,
-                share_shell::answer(StatusCode::UNAUTHORIZED, &head(false), issuer),
+                share_shell::answer(StatusCode::UNAUTHORIZED, &head(false), issuer, web),
             ),
             Closed::Denied if page_path => private(
                 &share,
-                share_shell::answer(StatusCode::FORBIDDEN, &head(false), issuer),
+                share_shell::answer(StatusCode::FORBIDDEN, &head(false), issuer, web),
             ),
             Closed::SignIn => plain(StatusCode::UNAUTHORIZED, "Sign in to open this link."),
             Closed::Denied => plain(
@@ -1891,7 +1912,7 @@ async fn serve(
         // The files page is the app's Files view of the link.
         "/_files" | "/_files/" if !domain => private(
             &share,
-            share_shell::answer(StatusCode::OK, &head(true), issuer),
+            share_shell::answer(StatusCode::OK, &head(true), issuer, web),
         ),
         _ if page_path || (!domain && is_built_page(&dir, rest)) => {
             // Admitted as the page it opens is: a page another audience
@@ -1900,21 +1921,25 @@ async fn serve(
             match admit(shares, &share, audience.as_ref(), &dir, &page, link.listen).await {
                 Admit::Open if is_built_page(&dir, rest) => private(
                     &share,
-                    share_shell::answer(StatusCode::OK, &head(true), issuer),
+                    share_shell::answer(StatusCode::OK, &head(true), issuer, web),
                 ),
                 Admit::Open | Admit::Hidden | Admit::Held(_) => private(&share, gone()),
                 // The app hears the same from the guest service and
                 // waits; the page is the app all the same.
                 Admit::Building => private(&share, {
-                    let mut r =
-                        share_shell::answer(StatusCode::SERVICE_UNAVAILABLE, &head(true), issuer);
+                    let mut r = share_shell::answer(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        &head(true),
+                        issuer,
+                        web,
+                    );
                     r.headers_mut()
                         .insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
                     r
                 }),
                 Admit::Empty => private(
                     &share,
-                    share_shell::answer(StatusCode::NOT_FOUND, &head(true), issuer),
+                    share_shell::answer(StatusCode::NOT_FOUND, &head(true), issuer, web),
                 ),
             }
         }
@@ -1941,6 +1966,9 @@ async fn serve(
                 Admit::Empty => return private(&share, gone()),
             }
             let response = file(&dir, rest, &headers, domain).await;
+            // A link's own file never runs on this origin (a domain's Site
+            // is its own origin's, and keeps its pages).
+            let response = if domain { response } else { inert(response) };
             private(&share, response)
         }
     }
@@ -1978,10 +2006,78 @@ fn is_page_file(rest: &str) -> bool {
 }
 
 /// `404`: nothing at this link (expired, revoked, unknown, or a path
-/// that is nowhere on it: all one answer).
+/// that is nowhere on it: all one answer, its headers too: stored by
+/// nobody, no referrer, not indexed).
 fn gone() -> Response {
-    plain(StatusCode::NOT_FOUND, "There is nothing at this link.")
+    let mut response = plain(StatusCode::NOT_FOUND, "There is nothing at this link.");
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        "x-robots-tag",
+        HeaderValue::from_static("noindex, nofollow"),
+    );
+    response
 }
+
+/// What a browser may show of a link's own file, on this origin: a
+/// picture, a recording, a video, plain text or a PDF.
+fn shown_inline(kind: &str) -> bool {
+    let base = kind
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        base.as_str(),
+        "image/png"
+            | "image/jpeg"
+            | "image/gif"
+            | "image/webp"
+            | "image/avif"
+            | "text/plain"
+            | "application/pdf"
+    ) || base.starts_with("audio/")
+        || base.starts_with("video/")
+}
+
+/// A link's own file as it may leave this origin's node: anything a
+/// browser could run (HTML, SVG, XML, XHTML, script, and any type not
+/// [`shown_inline`]) is a download (`Content-Disposition: attachment`)
+/// under a sandbox with nothing allowed, so a page a note links runs
+/// nowhere near the web app's session on this origin. Pictures and
+/// recordings stay inline (the app shows and plays them).
+fn inert(mut response: Response) -> Response {
+    let kind = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if !shown_inline(&kind) {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(INERT_POLICY),
+        );
+        headers.insert(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_static("attachment"),
+        );
+    }
+    response
+}
+
+/// The policy on a link's file a browser could run ([`inert`]).
+const INERT_POLICY: &str = "sandbox; default-src 'none'";
 
 /// A plain-text answer of the node's own.
 fn plain(status: StatusCode, text: &'static str) -> Response {
@@ -3364,10 +3460,28 @@ fn is_https(headers: &HeaderMap, issuer: Option<&str>) -> bool {
         )
 }
 
-/// Only a path on this node: never another origin.
+/// Only a path on this node: never another origin. A path from `/`, its
+/// second character not another `/` or a backslash, and no control character
+/// (a browser drops a tab or a newline, so `/\t/evil` is `//evil`) or
+/// backslash (read as `/`) anywhere; anything else is `/`. What is kept
+/// goes out percent-encoded past ASCII, so it is always a header's value.
 fn safe_to(to: &str) -> String {
-    let ok = to.starts_with('/') && !to.starts_with("//") && !to.contains(['\\', '\r', '\n']);
-    if ok { to.to_owned() } else { "/".to_owned() }
+    let mut chars = to.chars();
+    let ok = chars.next() == Some('/')
+        && !matches!(chars.next(), Some('/' | '\\'))
+        && !to.chars().any(|c| c.is_control() || c == '\\');
+    if !ok {
+        return "/".to_owned();
+    }
+    to.bytes()
+        .map(|b| {
+            if b.is_ascii_graphic() {
+                char::from(b).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
 }
 
 fn serde_urlencoded_form<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
@@ -3630,6 +3744,23 @@ mod tests {
         assert_eq!(safe_to("//evil.example"), "/");
         assert_eq!(safe_to("https://evil.example"), "/");
         assert_eq!(safe_to("/abc/x/"), "/abc/x/");
+        assert_eq!(safe_to("/s/a b/é?x=1"), "/s/a%20b/%C3%A9?x=1");
+        // Every way to another origin a browser would follow.
+        for evil in [
+            "/\t/evil.example",
+            "/\n/evil.example",
+            "/\r/evil.example",
+            "/x\u{0}/y",
+            "\\/evil.example",
+            "//evil.example",
+            "/\\evil.example",
+            "https:evil.example",
+            "javascript:alert(1)",
+            " /evil",
+            "",
+        ] {
+            assert_eq!(safe_to(evil), "/", "{evil:?}");
+        }
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,

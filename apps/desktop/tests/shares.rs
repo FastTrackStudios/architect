@@ -227,6 +227,8 @@ async fn world_full(
         host_org: Some("indie".to_owned()),
         iroh: IrohMode::Local,
         sweep_secs: 3600,
+        // The web app beside it, as production's chart serves it.
+        web_app: Some("beside".to_owned()),
         ..Config::default()
     };
     let host = node::start_with_islands(config, blocks, Vec::new(), islands)
@@ -4259,6 +4261,266 @@ async fn a_link_serves_nothing_through_a_symlink() {
     match read().await {
         Err(architect::ClientError::App(architect_spaces::GuestFault::Building)) => {}
         other => panic!("a guest read through a symlink: {other:?}"),
+    }
+    w.host.stop().await;
+}
+
+/// A link's own files never run on the node's origin (the web app's,
+/// #646): a page, a picture that is a document (SVG) and a script a note
+/// links are downloads under a sandbox that allows nothing, never this
+/// origin's page; its pictures and recordings stay inline.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_links_own_page_svg_or_script_never_runs_on_the_origin() {
+    let w = world_full(architect_sites::Blocks::new(), Vec::new(), |vault| {
+        touch(
+            vault,
+            "Shared/run.md",
+            "---\ntitle: Run\n---\n![[x.html]]\n\n![[x.svg]]\n\n![[x.js]]\n\n![[x.xhtml]]\n\n![[x.xml]]\n\n![[take.mp3]]\n",
+        );
+        let script = "<script>fetch('/s/_signout')</script>";
+        touch(vault, "Shared/x.html", &format!("<!doctype html>{script}"));
+        touch(
+            vault,
+            "Shared/x.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(localStorage.length)</script></svg>",
+        );
+        touch(vault, "Shared/x.js", "alert(localStorage.length)");
+        touch(
+            vault,
+            "Shared/x.xhtml",
+            &format!("<html xmlns=\"http://www.w3.org/1999/xhtml\">{script}</html>"),
+        );
+        touch(vault, "Shared/x.xml", "<a>b</a>");
+        touch(vault, "Shared/take.mp3", "ID3 not really");
+    })
+    .await;
+    let share = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let link = format!("/s/{}/", share.code);
+    page_with(&w.url(&format!("{link}run/")), None, "Run").await;
+    for file in ["x.html", "x.svg", "x.js", "x.xhtml", "x.xml"] {
+        let (status, headers, body) = get(&w.url(&format!("{link}Shared/{file}")), None).await;
+        assert_eq!(status, StatusCode::OK, "{file}: {body}");
+        // The bytes as they are, but as a download in a sandbox that runs
+        // nothing: no script, no same origin, no storage, no cookie.
+        assert_eq!(
+            headers["content-security-policy"], "sandbox; default-src 'none'",
+            "{file}"
+        );
+        assert_eq!(headers["content-disposition"], "attachment", "{file}");
+        assert_eq!(headers["x-content-type-options"], "nosniff", "{file}");
+        assert_eq!(
+            headers.get_all("content-security-policy").iter().count(),
+            1,
+            "{file}: one policy, the sandbox"
+        );
+    }
+    // Pictures and recordings: inline, under the node's own policy (no
+    // script of theirs runs: they are not documents).
+    for (file, kind) in [
+        ("Shared/art.png", "image/png"),
+        ("Shared/take.mp3", "audio/mpeg"),
+    ] {
+        let (status, headers, _) = get(&w.url(&format!("{link}{file}")), None).await;
+        assert_eq!(status, StatusCode::OK, "{file}");
+        assert_eq!(headers["content-type"], kind, "{file}");
+        assert!(headers.get("content-disposition").is_none(), "{file}");
+        assert!(
+            !headers["content-security-policy"]
+                .to_str()
+                .unwrap()
+                .starts_with("sandbox"),
+            "{file}"
+        );
+        assert_eq!(headers["x-content-type-options"], "nosniff", "{file}");
+    }
+    w.host.stop().await;
+}
+
+/// Everything of an answer but its date.
+async fn answer_bytes(url: &str) -> (u16, Vec<(String, String)>, String) {
+    let res = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .get(url)
+        .send()
+        .await
+        .unwrap();
+    let status = res.status().as_u16();
+    let mut headers: Vec<(String, String)> = res
+        .headers()
+        .iter()
+        .filter(|(k, _)| k.as_str() != "date")
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_owned()))
+        .collect();
+    headers.sort();
+    (status, headers, res.text().await.unwrap())
+}
+
+/// A link that never was, an expired one and a revoked one answer byte
+/// for byte alike, at the link, a page below it, a file and without the
+/// link's slash: a code's answer never says whether it was ever a link.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_code_answers_exactly_as_a_revoked_or_expired_one() {
+    let w = world().await;
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    let revoked = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    let expired = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Link,
+            ShareAccess::Read,
+        )
+        .await;
+    page_with(&w.url(&format!("/s/{}/", revoked.code)), None, "The album").await;
+    links.revoke(revoked.code.clone()).await.unwrap();
+    links
+        .update(expired.code.clone(), ShareChange::Expires(Some(1)))
+        .await
+        .unwrap();
+    let unknown = "abcdefghjkmnpqrs";
+    assert_eq!(unknown.len(), revoked.code.len());
+    for rest in ["/", "/track/", "/Shared/art.png", "", "/_files/"] {
+        let never = answer_bytes(&w.url(&format!("/s/{unknown}{rest}"))).await;
+        let never = (never.0, never.1, never.2.replace(unknown, "CODE"));
+        for code in [&revoked.code, &expired.code] {
+            let (status, headers, body) = answer_bytes(&w.url(&format!("/s/{code}{rest}"))).await;
+            let body = body.replace(code.as_str(), "CODE");
+            let headers: Vec<_> = headers
+                .into_iter()
+                .map(|(k, v)| (k, v.replace(code.as_str(), unknown)))
+                .collect();
+            assert_eq!(
+                (status, &headers, &body),
+                (never.0, &never.1, &never.2),
+                "{rest}"
+            );
+        }
+        if rest.is_empty() {
+            assert_eq!(never.0, 308);
+        } else {
+            assert_eq!(never.0, 404, "{rest}");
+            assert!(
+                never
+                    .1
+                    .contains(&("cache-control".to_owned(), "no-store".to_owned()))
+            );
+        }
+    }
+    w.host.stop().await;
+}
+
+/// Sign-in and sign-out go back only to a path on this node: every way a
+/// browser would read `to` as another origin is `/`.
+#[tokio::test(flavor = "multi_thread")]
+async fn sign_out_goes_back_only_to_a_path_on_the_node() {
+    let w = world().await;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let origin = format!("http://{}", w.host.http);
+    for (to, want) in [
+        ("/%09/evil.example", "/"),
+        ("/%0a/evil.example", "/"),
+        ("/%0d/evil.example", "/"),
+        ("%5C/evil.example", "/"),
+        ("//evil.example", "/"),
+        ("/%2F/evil.example", "/"),
+        ("/%5Cevil.example", "/"),
+        ("https:evil.example", "/"),
+        ("https://evil.example/", "/"),
+        ("/s/abcdefghjkmnpqrs/joy/", "/s/abcdefghjkmnpqrs/joy/"),
+    ] {
+        let res = client
+            .post(w.url(&format!("/s/_signout?to={to}")))
+            .header("origin", &origin)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER, "{to}");
+        assert_eq!(res.headers()["location"], want, "{to}");
+    }
+    w.host.stop().await;
+}
+
+/// The guest service answers any origin without credentials: a call that
+/// carried the node's cookie (its own app's) and its preflight say
+/// `Access-Control-Allow-Origin: *`, never the caller's origin and never
+/// `Access-Control-Allow-Credentials`, so no other site reads an answer a
+/// browser sent the cookie with.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_guest_service_never_shares_a_cookies_answer_with_another_origin() {
+    let w = world().await;
+    let share = w
+        .share(
+            ShareScope::Folder("Shared".to_owned()),
+            Audience::Org,
+            ShareAccess::Read,
+        )
+        .await;
+    let call = w.url(&format!("/s/{}/_guest/link", share.code));
+    let evil = "https://evil.example";
+    let body = format!("{{\"code\":\"{}\",\"token\":\"\"}}", share.code);
+    let res = reqwest::Client::new()
+        .post(&call)
+        .header("origin", evil)
+        .header("content-type", "application/json")
+        .header("cookie", format!("architect_session={}", w.alan))
+        .body(body.clone())
+        .send()
+        .await
+        .unwrap();
+    let status = res.status();
+    let headers = res.headers().clone();
+    let text = res.text().await.unwrap();
+    // The cookie opened it (a member of the org).
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert!(
+        !text.contains("SignIn") && !text.contains("Denied"),
+        "{text}"
+    );
+    let preflight = reqwest::Client::new()
+        .request(reqwest::Method::OPTIONS, &call)
+        .header("origin", evil)
+        .header("access-control-request-method", "POST")
+        .header("access-control-request-headers", "content-type")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(preflight.status(), StatusCode::NO_CONTENT);
+    for (what, headers) in [("answer", &headers), ("preflight", preflight.headers())] {
+        assert_eq!(headers["access-control-allow-origin"], "*", "{what}");
+        assert_eq!(
+            headers
+                .get_all("access-control-allow-origin")
+                .iter()
+                .count(),
+            1,
+            "{what}"
+        );
+        assert!(
+            headers.get("access-control-allow-credentials").is_none(),
+            "{what}"
+        );
+        assert!(
+            !headers
+                .iter()
+                .any(|(_, v)| v.to_str().is_ok_and(|v| v.contains("evil.example"))),
+            "{what}: the origin is never reflected"
+        );
     }
     w.host.stop().await;
 }
