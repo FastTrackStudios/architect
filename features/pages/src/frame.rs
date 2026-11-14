@@ -80,12 +80,27 @@ pub fn page_event(mirror: &Mirror, e: &ViewEvent) -> Option<PageEvent> {
         ..PageEvent::default()
     };
     match &e.data {
-        EventData::Mouse(p) => {
-            out.x = p.element_x;
-            out.y = p.element_y;
-            (out.alt, out.ctrl, out.meta, out.shift) =
-                (p.mods.alt, p.mods.ctrl, p.mods.meta, p.mods.shift);
+        EventData::Mouse(p) => at(&mut out, p),
+        EventData::Pointer(p) => {
+            at(&mut out, &p.at);
+            out.pointer_id = p.pointer_id;
+            out.pointer_type = Some(p.pointer_type.clone());
         }
+        EventData::Wheel(w) => {
+            at(&mut out, &w.at);
+            (out.dx, out.dy) = (w.delta_x, w.delta_y);
+        }
+        EventData::Touch(t) => {
+            if let Some(first) = t.changed.first() {
+                (out.x, out.y) = (first.client_x, first.client_y);
+                out.pointer_id = first.id;
+            }
+            out.pointer_type = Some("touch".to_owned());
+            (out.alt, out.ctrl, out.meta, out.shift) =
+                (t.mods.alt, t.mods.ctrl, t.mods.meta, t.mods.shift);
+        }
+        EventData::Scroll(s) => (out.scroll_top, out.scroll_left) = (s.top, s.left),
+        EventData::Composition(text) => out.value = Some(text.clone()),
         EventData::Key(k) => {
             out.key = Some(k.key.clone());
             (out.alt, out.ctrl, out.meta, out.shift) =
@@ -95,4 +110,12 @@ pub fn page_event(mirror: &Mirror, e: &ViewEvent) -> Option<PageEvent> {
         EventData::Focus => {}
     }
     Some(out)
+}
+
+/// A pointer's place, buttons and modifiers, into `out`.
+const fn at(out: &mut PageEvent, p: &architect_extensions::wire::Pointer) {
+    out.x = p.element_x;
+    out.y = p.element_y;
+    out.buttons = p.buttons;
+    (out.alt, out.ctrl, out.meta, out.shift) = (p.mods.alt, p.mods.ctrl, p.mods.meta, p.mods.shift);
 }
