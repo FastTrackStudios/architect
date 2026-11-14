@@ -110,7 +110,7 @@ frames, nothing an extension author can target. Every web cell below is
 | H11 | Timers, cron hooks, background workers | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Timers sampler | `features/extensions/tests/events.rs`, `features/extensions/tests/workers.rs` |
 | H12 | Services between extensions (`[provides]` / `[requires]`) | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Services sampler | `features/extensions/tests/interop.rs` |
 | H13 | MIDI and OSC ports and control surfaces | ⚠️ not shown; a virtual MIDI port and UDP OSC, no system MIDI | ❌ #495 | ⚠️ not shown | Surface | `features/extensions/tests/ports.rs` |
-| H14 | Deep links into actions | ❌ #186 | ❌ #186 | ❌ #186 | - | - |
+| H14 | Deep links into actions | ⚠️ #186: `architect://<route>` on a launch's arguments and a second launch's hand-off, the same router as iOS; not shown | ❌ #186 (a web app's own URLs) | ⚠️ #186: `architect://capture?text=…` opens the composer and `capture/add` asks first, on the Simulator; universal links `/a/<route>` claimed by the node, not yet tried on a phone | - | `apps/ui/src/links.rs` (`links::tests`), `apps/desktop/tests/shares.rs` (`the_node_claims_its_links_for_the_configured_apps_alone`) |
 | H15 | Device APIs: camera, photos, HealthKit, location | ❌ #709 | ❌ #709 | ❌ #709 | - | - |
 | H16 | An extension's server-side code on the node | ❌ #583 | ❌ #583 | ❌ #583 | - | - |
 

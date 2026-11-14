@@ -86,6 +86,10 @@ pub fn LabPresence(presence: Presence, inbox: usize) -> Element {
                             crate::guest::incoming(url.clone(), crate::guest::Source::Os);
                             continue;
                         }
+                        // A deep link into an action (#186): its route's.
+                        if crate::links::incoming(url.clone()) {
+                            continue;
+                        }
                         let tab = url
                             .strip_prefix("architect://")
                             .or_else(|| url.strip_prefix("lab://"))
