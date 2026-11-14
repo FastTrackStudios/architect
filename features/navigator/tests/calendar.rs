@@ -389,7 +389,7 @@ fn a_day_opens_its_note_or_makes_it() {
         ops,
         [FileOp::CreateFile {
             path: "Journal/Yearly/2026.md".to_owned(),
-            text: "# 2026\n".to_owned()
+            text: String::new()
         }]
     );
     assert_eq!(

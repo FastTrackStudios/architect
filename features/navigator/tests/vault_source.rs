@@ -278,7 +278,7 @@ fn a_periodic_note_the_calendar_makes_lands_on_disk_with_its_folders() {
     };
     s.write(&ops).unwrap();
     let text = std::fs::read_to_string(tmp.path().join("Journal/Daily/2026-11-06.md")).unwrap();
-    assert_eq!(text, "# 2026-11-06\n");
+    assert_eq!(text, "", "no heading repeats the name (#710)");
     assert!(s.folders().contains(&"Journal/Daily".to_owned()));
     let events = events.lock().unwrap().clone();
     assert!(events.iter().any(

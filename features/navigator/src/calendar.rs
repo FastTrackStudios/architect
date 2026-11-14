@@ -230,12 +230,12 @@ impl PeriodicNotes {
         Some(period.within(kind, self.week_rules()))
     }
 
-    /// What a new note of `period` holds until templates come (#339): a
-    /// heading, its name.
+    /// What a new note of `period` holds until templates come (#339):
+    /// nothing. Its name is the file's, said in the bar at the top, never
+    /// repeated as a heading (#710).
     #[must_use]
-    pub fn new_note_text(&self, path: &str) -> String {
-        let name = path.rsplit('/').next().unwrap_or(path);
-        format!("# {}\n", name.strip_suffix(".md").unwrap_or(name))
+    pub const fn new_note_text(&self, _path: &str) -> String {
+        String::new()
     }
 }
 

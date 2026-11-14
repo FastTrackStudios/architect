@@ -49,7 +49,8 @@ pub struct NoteHead {
     /// A property's link followed.
     pub on_link: Callback<String>,
     /// Renamed to a name (not a path); `true` puts it on the undo list.
-    pub rename: Callback<(String, bool)>,
+    /// Refused with why: a name [`plan_rename`] refuses, or the vault's.
+    pub rename: Callback<(String, bool), Result<(), String>>,
 }
 
 impl NoteHead {
@@ -58,6 +59,84 @@ impl NoteHead {
     pub fn count(&self) -> usize {
         crate::properties::shown_count(&self.block, &self.hidden)
     }
+}
+
+/// How a note at `from` is renamed to `name`: where it goes, and the
+/// name it passes through on the way for a change of case alone (a
+/// case-insensitive disk would see the same file).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamePlan {
+    pub to: String,
+    pub via: Option<String>,
+}
+
+/// Plans renaming the note at `from` to `name`, as the navigator checks a
+/// name (`architect_navigator::state::check_name`: none, a leading
+/// period, `:` or `/` refused); `taken` says whether a path is a note
+/// already (any case). `None` when the name is the one it has.
+///
+/// # Errors
+///
+/// A name that cannot be, or another note's.
+pub fn plan_rename(
+    from: &str,
+    name: &str,
+    taken: impl Fn(&str) -> bool,
+) -> Result<Option<RenamePlan>, String> {
+    let name = name.trim();
+    if let Some(e) = architect_navigator::state::check_name(name).error {
+        return Err(e);
+    }
+    let folder = from.rsplit_once('/').map(|(f, _)| f);
+    let at = |stem: &str| folder.map_or_else(|| format!("{stem}.md"), |f| format!("{f}/{stem}.md"));
+    let to = at(name);
+    if to == from {
+        return Ok(None);
+    }
+    let case_only = to.eq_ignore_ascii_case(from);
+    if !case_only && taken(&to) {
+        return Err(format!("“{name}” is there already"));
+    }
+    let via = case_only.then(|| {
+        (1_u32..1000)
+            .map(|n| at(&format!("{name} (renaming {n})")))
+            .find(|p| !taken(p))
+            .unwrap_or_default()
+    });
+    Ok(Some(RenamePlan { to, via }))
+}
+
+/// Renames the note at `from` in `disk` to `name` ([`plan_rename`]): its
+/// new path, or `None` when it already had that name.
+///
+/// # Errors
+///
+/// What [`plan_rename`] refuses, or the vault's own error.
+pub fn rename_note(
+    disk: &architect_navigator::VaultSource,
+    from: &str,
+    name: &str,
+) -> Result<Option<String>, String> {
+    let taken = |p: &str| {
+        disk.vault().with(|v| {
+            v.pages
+                .iter()
+                .any(|page| page.rel_path.eq_ignore_ascii_case(p))
+        })
+    };
+    let Some(plan) = plan_rename(from, name, taken)? else {
+        return Ok(None);
+    };
+    if let Some(via) = &plan.via {
+        disk.rename(from, via)?;
+        if let Err(e) = disk.rename(via, &plan.to) {
+            let _ = disk.rename(via, from);
+            return Err(e);
+        }
+    } else {
+        disk.rename(from, &plan.to)?;
+    }
+    Ok(Some(plan.to))
 }
 
 /// A rename made in the bar: the note's state before and after.
@@ -232,7 +311,7 @@ pub fn use_note_commands(workspace: Signal<Workspace>, rename_closed: Callback<R
             let Some(r) = heads.pop_rename() else { return };
             // The note open: renamed by its pane, which follows its file.
             if let Some(head) = heads.by_state(&r.to) {
-                head.rename.call((name_of(&r.from), false));
+                let _ = head.rename.call((name_of(&r.from), false));
             } else {
                 rename_closed.call(r);
             }
@@ -289,16 +368,39 @@ pub fn NoteTitle(
         if large { "-0.02em" } else { "0" }
     );
     let rename = head.rename;
+    let mut error = use_signal(|| None::<String>);
+    // Enter: renamed, or the field stays open saying why not.
     let commit = move || {
-        let (mut editing, mut draft) = (heads.editing, draft);
-        editing.set(None);
-        if let Some(name) = draft.take() {
-            rename.call((name, true));
+        let (mut editing, mut draft, mut error) = (heads.editing, draft, error);
+        let Some(name) = draft.peek().clone() else {
+            editing.set(None);
+            return;
+        };
+        match rename.call((name, true)) {
+            Ok(()) => {
+                draft.set(None);
+                error.set(None);
+                editing.set(None);
+            }
+            Err(e) => error.set(Some(e)),
         }
+    };
+    // Away from the field: renamed when it can be, else left as it was.
+    let leave = move || {
+        let (mut editing, mut draft, mut error) = (heads.editing, draft, error);
+        if let Some(name) = draft.take() {
+            let _ = rename.call((name, true));
+        }
+        error.set(None);
+        editing.set(None);
     };
     if editing {
         let shown = draft().unwrap_or_else(|| head.title.clone());
+        // Said as it is typed, as the navigator says it; a taken name on Enter.
+        let why = error()
+            .or_else(|| draft().and_then(|d| architect_navigator::state::check_name(&d).error));
         return rsx! {
+            div { style: "position: relative; flex: 1 1 auto; min-width: 0; width: 100%; display: flex;",
             input {
                 "data-testid": "note-title-input",
                 "aria-label": "Note title",
@@ -309,7 +411,10 @@ pub fn NoteTitle(
                 onmounted: move |e| async move {
                     let _ = e.set_focus(true).await;
                 },
-                oninput: move |e| draft.set(Some(e.value())),
+                oninput: move |e| {
+                    error.set(None);
+                    draft.set(Some(e.value()));
+                },
                 onkeydown: move |e: KeyboardEvent| match e.key() {
                     Key::Named(NamedKey::Enter) => {
                         e.prevent_default();
@@ -319,12 +424,24 @@ pub fn NoteTitle(
                         e.prevent_default();
                         e.stop_propagation();
                         draft.set(None);
+                        error.set(None);
                         let mut editing = heads.editing;
                         editing.set(None);
                     }
                     _ => {}
                 },
-                onblur: move |_| commit(),
+                onblur: move |_| leave(),
+            }
+            if let Some(why) = why {
+                div {
+                    "data-testid": "note-title-error",
+                    role: "alert",
+                    style: "position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; z-index: {layer::MENU}; \
+                            padding: 4px 8px; border-radius: 6px; background: {t.pill}; border: 1px solid {t.rule}; \
+                            color: {t.ink}; font-size: 12px; font-weight: 500; text-align: left; white-space: normal;",
+                    "{why}"
+                }
+            }
             }
         };
     }
@@ -545,7 +662,13 @@ mod tests {
             let mut block = block;
             block.set(b);
         });
-        let rename = use_callback(|r: (String, bool)| RENAMED.with(|n| n.borrow_mut().push(r)));
+        // As the note does: a name the plan refuses, refused; "Taken" is
+        // another note's.
+        let rename = use_callback(|r: (String, bool)| -> Result<(), String> {
+            plan_rename("Showcase.md", &r.0, |p| p == "Taken.md")?;
+            RENAMED.with(|n| n.borrow_mut().push(r));
+            Ok(())
+        });
         use_note_head(
             "p1".to_owned(),
             NoteHead {
@@ -737,5 +860,99 @@ mod tests {
             name.contains('X') && name.replace('X', "") == "Showcase",
             "{name}"
         );
+    }
+
+    #[test]
+    fn a_rename_is_checked_as_the_navigator_checks_a_name() {
+        let none = |_: &str| false;
+        for bad in [".draft", "a:b", "a/b", "  "] {
+            assert!(
+                plan_rename("Notes/A.md", bad, none).is_err(),
+                "{bad:?} refused"
+            );
+        }
+        assert_eq!(
+            plan_rename("Notes/A.md", "B", |p| p == "Notes/B.md"),
+            Err("“B” is there already".to_owned())
+        );
+        assert_eq!(plan_rename("Notes/A.md", "A", none), Ok(None));
+        assert_eq!(
+            plan_rename("Notes/A.md", "B", none),
+            Ok(Some(RenamePlan {
+                to: "Notes/B.md".to_owned(),
+                via: None
+            }))
+        );
+        // A change of case alone passes through another name.
+        let plan = plan_rename("Notes/a.md", "A", |p| p.eq_ignore_ascii_case("Notes/a.md"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.to, "Notes/A.md");
+        assert_eq!(plan.via.as_deref(), Some("Notes/A (renaming 1).md"));
+    }
+
+    #[test]
+    fn a_note_on_disk_is_renamed_refused_and_renamed_back() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Notes")).unwrap();
+        std::fs::write(dir.path().join("Notes/Plan.md"), "body\n").unwrap();
+        std::fs::write(dir.path().join("Notes/Other.md"), "other\n").unwrap();
+        let disk = architect_navigator::VaultSource::new(
+            vault::actions::OpenVault::open(dir.path()).unwrap(),
+        );
+        // Refused: a leading period, a colon, another note's name.
+        assert!(rename_note(&disk, "Notes/Plan.md", ".draft").is_err());
+        assert!(rename_note(&disk, "Notes/Plan.md", "a:b").is_err());
+        assert!(
+            rename_note(&disk, "Notes/Plan.md", "other").is_err(),
+            "taken in any case"
+        );
+        assert!(dir.path().join("Notes/Plan.md").is_file());
+        // A change of case alone.
+        assert_eq!(
+            rename_note(&disk, "Notes/Plan.md", "PLAN")
+                .unwrap()
+                .as_deref(),
+            Some("Notes/PLAN.md")
+        );
+        let names: Vec<String> = std::fs::read_dir(dir.path().join("Notes"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"PLAN.md".to_owned()), "{names:?}");
+        assert!(!names.iter().any(|n| n.contains("renaming")), "{names:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("Notes/PLAN.md")).unwrap(),
+            "body\n"
+        );
+        // Renamed back, as NOTE_RENAME_UNDO renames a note no pane has open.
+        assert_eq!(
+            rename_note(&disk, "Notes/PLAN.md", &name_of("Notes/Plan.md"))
+                .unwrap()
+                .as_deref(),
+            Some("Notes/Plan.md")
+        );
+    }
+
+    #[test]
+    fn a_refused_name_keeps_the_title_open_saying_why() {
+        RENAMED.with(|n| n.borrow_mut().clear());
+        let mut doc = mount();
+        click(&mut doc, "[data-testid=note-title]");
+        // A colon is refused wherever the caret put it.
+        key(&mut doc, ":");
+        assert_eq!(
+            count(&doc, "[data-testid=note-title-error]"),
+            1,
+            "said as it is typed"
+        );
+        key(&mut doc, "Enter");
+        assert_eq!(
+            count(&doc, "[data-testid=note-title-input]"),
+            1,
+            "still open"
+        );
+        assert_eq!(count(&doc, "[data-testid=note-title-error]"), 1);
+        assert!(RENAMED.with(|n| n.borrow().is_empty()), "nothing renamed");
     }
 }

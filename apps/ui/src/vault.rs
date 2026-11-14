@@ -2550,26 +2550,36 @@ fn VaultNote(path: String) -> Element {
     // Renamed in the bar at the top (`crate::note_head`), or the inline
     // title when the setting shows it.
     let heads = crate::note_head::use_note_heads();
-    let rename = use_callback(move |(name, record): (String, bool)| {
-        let name = name.trim().replace('/', " ");
-        let from = at.peek().clone();
-        if name.is_empty() || name == title_of(&from) {
-            return;
-        }
-        save();
-        let folder = from.rsplit_once('/').map(|(f, _)| f.to_owned());
-        let to = folder.map_or_else(|| format!("{name}.md"), |f| format!("{f}/{name}.md"));
-        let Some(d) = disk.peek().clone() else { return };
-        match d.rename(&from, &to) {
-            Ok(_) if record => heads.renamed(state_of(&from), state_of(&to)),
-            Ok(_) => {}
-            Err(e) => tracing::warn!(from = %from, to = %to, error = %e, "lab.vault.rename_failed"),
-        }
-    });
+    let rename = use_callback(
+        move |(name, record): (String, bool)| -> Result<(), String> {
+            let from = at.peek().clone();
+            let Some(d) = disk.peek().clone() else {
+                return Err("No vault is open".to_owned());
+            };
+            save();
+            match crate::note_head::rename_note(&d, &from, &name) {
+                Ok(Some(to)) => {
+                    if record {
+                        heads.renamed(state_of(&from), state_of(&to));
+                    }
+                    Ok(())
+                }
+                Ok(None) => Ok(()),
+                Err(e) => {
+                    tracing::info!(from = %from, name = %name, error = %e, "lab.vault.rename_refused");
+                    Err(e)
+                }
+            }
+        },
+    );
     let mut draft = use_signal(|| None::<String>);
-    let inline_title = architect_settings::use_setting("editor.inline_title")
+    // Where no header takes the note's head (a window without
+    // `HeaderParts`), its title and Properties stay in its body.
+    let headerless = try_consume_context::<architect_workspace::HeaderParts>().is_none();
+    let shown_inline = architect_settings::use_setting("editor.inline_title")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let inline_title = headerless || shown_inline;
     let words = ours.cloned().split_whitespace().count();
     use_pane_status(vec![
         StatusItem::new("words", crate::count(words, "word")).left(),
@@ -2672,8 +2682,8 @@ fn VaultNote(path: String) -> Element {
             title,
             state: state_of(&here),
             block: block(),
-            types,
-            hidden,
+            types: types.clone(),
+            hidden: hidden.clone(),
             on_change: on_props,
             on_link: on_prop_link,
             rename,
@@ -2695,12 +2705,12 @@ fn VaultNote(path: String) -> Element {
                         if e.key() == Key::Named(NamedKey::Enter)
                             && let Some(name) = draft.take()
                         {
-                            rename.call((name, true));
+                            let _ = rename.call((name, true));
                         }
                     },
                     onblur: move |_| {
                         if let Some(name) = draft.take() {
-                            rename.call((name, true));
+                            let _ = rename.call((name, true));
                         }
                     },
                 }
@@ -2709,6 +2719,15 @@ fn VaultNote(path: String) -> Element {
                 div { style: "color: {t.ink_3}; font-size: 13px;", "This note's file was deleted." }
             }
             {head}
+            if headerless {
+                crate::properties::PropertiesBar {
+                    block: block(),
+                    types,
+                    hidden,
+                    on_change: on_props,
+                    on_link: on_prop_link,
+                }
+            }
             crate::note_editor::NoteEditor {
                 id: here.clone(),
                 text: body0,
