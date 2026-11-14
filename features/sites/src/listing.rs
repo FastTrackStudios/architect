@@ -140,7 +140,7 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
                 properties: row
                     .frontmatter
                     .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (k.to_string(), v.clone()))
                     .collect(),
                 path,
                 files,
@@ -239,7 +239,7 @@ pub fn every_note(vault: &Vault) -> Vec<Entry> {
                 properties: row
                     .frontmatter
                     .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (k.to_string(), v.clone()))
                     .collect(),
                 files,
             }

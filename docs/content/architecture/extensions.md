@@ -3709,8 +3709,92 @@ time (`index::TRIES`), and never holds the lock for more than a chunk.
   `IndexDelta::to_bytes`), at most `index::MAX_WIRE` bytes.
 - **Share guests** get no index yet; a guest's subset of it is #710 G1.
 
-The query engine over it, and how extensions ask it, is the next layer
-of #710's stack.
+**The engine** (`vault_query::QueryEngine`). It runs a base's view over
+the index: filters, formulas, sort and group-by (`vault_query::bases`,
+over `vault_proto::grouping`), never over a note's body. It is the one
+implementation of `vault_proto::query::VaultQuery`. Every client serves
+it in process (`architect::serve_local`) over its own index: a desk and a
+phone over their vault (`vault_query::Built`), a browser over its synced
+copy (`engine::Replica`). The node answers no queries, and full-text
+search over bodies is a separate service. `BASES_ROWS` is the same
+engine, through the same client (`architect_bases::actions::register`).
+
+- **It keeps no rows.** A query makes one per note from the index's
+  entries (sharing their properties), runs its view, builds the table
+  only for the rows its `limit` keeps (`bases::view_table_at_most`), and
+  lets the rest go. What a client holds between queries is its index.
+- **The answer is written once** (`QueryEngine::run_text`). Its hash is
+  that text's, and `revision` and `hash` go in front.
+- **Live:** a view hears the document events (`doc.saved`,
+  `doc.created`, `doc.renamed`, `doc.deleted`) and asks again with
+  `if_changed: <hash>`. When the index has not moved, the answer is
+  `{unchanged: true, revision, hash}`, with nothing run. After any edit,
+  even to a note the view does not show, the view runs again in full;
+  following each view's own notes is later work.
+
+**From an extension.** The host holds only the service's client, given
+with its documents in one call for one scope (`Host::set_vault`,
+`hostapi::VaultScope`): a share guest's host gets none, and
+`Host::set_documents` alone lets any client go. An extension asks with
+the host call `query_vault` (`HostRequest::QueryVault`: `{path? |
+source?, view?, if_changed?, limit?}`; `host.query_vault{…}` in Luau),
+which needs `reads = ["documents"]`, as the document calls and every
+`BASES_*` action do (`capabilities::BASES_ACTIONS`). Its answers are
+pages: `hostapi::QUERY_LIMIT` rows unless it asks for more, at most
+`hostapi::QUERY_LIMIT_MAX`. The answer has:
+
+- the base's views;
+- the view (`type`, `name`, `order`, `sort`, `groupBy`, `filters`,
+  `limit`, `options`);
+- its rows in groups (`{label, rows: [{path, name, values, formulas}]}`)
+  and `total`;
+- every column it could show, and its formulas and filters;
+- the index's `revision` and a `hash` of the answer.
+
+A row's `file.mtime` is its note's (RFC 3339). `file.ctime`, `file.size`
+and `file.backlinks` are not in the index yet.
+
+**The boundary.** The index, its builder, its sync and the engine are the
+core. Bases is an extension over them, using only what a third party
+could. It opens `.base` files, draws a base with its toolbar and view
+picker, adds table, cards and list as `[[base_views]]`, keeps the
+`BASES_*` actions, draws the fence, and provides `architect.bases` to
+other extensions. Reading and parsing a `.base` file, and writing one
+back, go through the document calls.
+
+**What it costs** on a generated vault of 10 000 notes, through the
+service's client, so each answer is serialized and read back as an
+extension gets it (`features/vault/vault/tests/query_bench.rs`, ignored:
+run it with `--release --ignored --nocapture`). The base has a filter, a
+formula, a sort and a group-by. The even vault is about a kilobyte a
+note; the skewed one has a note in a hundred with 120 properties and a
+long body, every note linking to one note, and most notes sharing one
+status.
+
+| | even | skewed |
+|---|---:|---:|
+| index built from an open vault | 66 ms | 96 ms |
+| a snapshot on the wire (JSON) | 257 B a note | 303 B a note |
+| a delta for one property set | 315 B | 320 B |
+| the index in memory, natively (entries and stamps) | 1059 B a note | 1190 B a note |
+| a browser's copy in memory, in V8 (wasm) | 611 B a note | |
+
+| query, through the client, p50 / p99 | even | skewed |
+|---|---:|---:|
+| every matching row (7 500 / 9 496 rows answered) | 97 / 129 ms | 159 / 428 ms |
+| `limit: 50`, an extension's page | 37 / 62 ms | 75 / 312 ms |
+| `if_changed`, nothing moved | 0.02 / 0.10 ms | 0.03 / 0.07 ms |
+| index sync after one edit | 10 / 13 ms | 13 / 17 ms |
+| `limit: 50` after one edit | 45 / 66 ms | 73 / 94 ms |
+| a save, with syncs and queries on two other threads | 0.02 / 0.04 ms | 0.02 / 0.45 ms |
+
+Measured 2026-11-14 on THEBATTLESHIP in release, beside other builds (the
+spread is theirs). A browser's copy is measured in V8 by
+`features/vault/vault-query/examples/index_memory.mjs` (built to wasm
+with `wasm-bindgen`). There a query over 10 000 notes peaks at about
+5 MiB while it runs and keeps nothing, at 41–57 ms. Before this, a query
+made every note a row under the vault's lock, every time; now a save
+waits on a sync for at most a chunk of notes, never on a query.
 
 ## The editor: commands, keys, decorations, slash rows
 

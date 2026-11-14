@@ -14,8 +14,8 @@ use architect_bases::model::{ViewType, ViewTypes};
 use serde_json::{Value, json};
 
 fn run(list: &ActionList, id: &str, args: &Value) -> Value {
-    let out = list
-        .run_json(id, args.to_string().as_bytes())
+    // BASES_ROWS is async (the query service's); the rest answer at once.
+    let out = futures::executor::block_on(list.run_json_async(id, args.to_string().as_bytes()))
         .unwrap_or_else(|e| panic!("{id}: {e}"));
     serde_json::from_slice(&out).unwrap()
 }
@@ -41,7 +41,7 @@ fn vault() -> (tempfile::TempDir, Arc<ActionList>, ViewTypes) {
     let open = vault::actions::OpenVault::open(dir).unwrap();
     vault::actions::register(&list, &open).unwrap();
     let types = ViewTypes::new();
-    architect_bases::actions::register(&list, &open, &types).unwrap();
+    architect_bases::actions::register(&list, &open, &types, architect_bases::actions::local_queries(&open)).unwrap();
     (tmp, list, types)
 }
 
@@ -198,7 +198,7 @@ fn every_base_in_the_labs_demo_vault_runs_every_view() {
     copy_dir(&demo, tmp.path());
     let list = Arc::new(ActionList::new());
     let open = vault::actions::OpenVault::open(tmp.path()).unwrap();
-    architect_bases::actions::register(&list, &open, &ViewTypes::new()).unwrap();
+    architect_bases::actions::register(&list, &open, &ViewTypes::new(), architect_bases::actions::local_queries(&open)).unwrap();
     let bases = run(&list, "BASES_LIST", &Value::Null);
     let bases = bases.as_array().unwrap();
     assert_eq!(bases.len(), 5, "{bases:?}");

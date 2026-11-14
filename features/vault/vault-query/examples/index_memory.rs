@@ -3,7 +3,16 @@
 //! by `examples/index_memory.mjs` under Node (V8). What it measures is
 //! `tests/memory.rs`'s, natively.
 
-#![allow(clippy::unwrap_used, clippy::cast_precision_loss, clippy::as_conversions, clippy::missing_panics_doc)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::as_conversions,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing
+)]
 
 #[path = "../tests/support/measure.rs"]
 mod measure;

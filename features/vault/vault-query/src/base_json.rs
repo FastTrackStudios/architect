@@ -103,7 +103,7 @@ pub const FILE_COLUMNS: &[&str] = &[
 pub fn property_keys(rows: &[BaseRow]) -> Vec<String> {
     let mut keys: Vec<String> = rows
         .iter()
-        .flat_map(|r| r.frontmatter.keys().cloned())
+        .flat_map(|r| r.frontmatter.keys().map(ToString::to_string))
         .collect();
     keys.sort_by(|a, b| {
         a.to_lowercase()

@@ -969,8 +969,10 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "vault",
  "vault-obsidian",
+ "vault-proto",
 ]
 
 [[package]]
