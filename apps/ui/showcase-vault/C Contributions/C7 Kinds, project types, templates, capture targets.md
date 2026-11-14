@@ -12,11 +12,11 @@ Note and document kinds, project types, templates and capture targets.
 
 ## Try
 
-1. Make a new note in `Inbox` and run `Templater-lite: apply template`.
+1. Run `Templater-lite: new from template` and pick Meeting.
 
 ## You should see
 
-The note filled from a template, its prompts answered.
+A note in Inbox/ filled from the template, its prompts answered.
 
 **Example:** Templater-lite, Openers sampler.
 
