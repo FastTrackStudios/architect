@@ -203,6 +203,15 @@ fn secrets_and_fetch_reaches_its_host_with_the_token_the_host_puts_in() {
         assert!(!text.contains("sk-showcase-1"), "{}", file.display());
     }
 
+    // Nor in anything it said to the person.
+    assert!(
+        ui.notices()
+            .iter()
+            .all(|n| !n.text.contains("sk-showcase-1")),
+        "{:?}",
+        ui.notices()
+    );
+
     // H6: a host it does not name is refused before anything is sent.
     let said = run(&list, "SHOWCASE_FETCH_ELSEWHERE", &Value::Null).unwrap();
     assert!(said.as_str().unwrap().contains("refused"), "{said}");
@@ -302,28 +311,60 @@ fn the_services_sampler_calls_calendar_day_plans_and_tasks_through_their_service
 // ---- Surface ------------------------------------------------------------
 
 #[test]
-fn surface_lists_midi_ports_sends_a_cc_and_hears_its_own_osc() {
+fn surface_sends_only_to_the_virtual_port_and_hears_its_own_osc() {
     use architect_input::{PortKind, PortMessage, Ports, UdpOsc, VirtualPorts};
+    // A port the test picks, in place of the example's 9031.
+    let free = std::net::UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = copy("surface", tmp.path(), "9031", &free.to_string());
     let midi = VirtualPorts::new(PortKind::Midi);
-    let device = midi.add("Showcase MIDI");
+    let virtual_port = midi.add("Lab Surface");
+    // A person's device beside it: never sent to.
+    let hardware = midi.add("A real keyboard");
     let list = ActionList::new();
     let ui = FakeUi::new();
     let host = Host::new(list.clone(), SharedSections::new(Registry::new()))
+        .with_spawn(|work| {
+            let _ = block_on(work);
+        })
+        .with_data_root(tmp.path().join("data"))
         .with_ports(Ports::new().with_midi(midi).with_osc(UdpOsc))
         .with_ui(ui.clone());
-    host.load(&Package::read(&example("surface")).unwrap(), Origin::Dev)
+    host.load(&Package::read(&dir).unwrap(), Origin::Dev)
         .unwrap();
 
     let out = run(&list, "SHOWCASE_SURFACE_PING", &Value::Null).unwrap();
-    assert_eq!(out["midi"], json!(["Showcase MIDI"]));
     assert_eq!(out["sent_midi"], true);
-    // CC 7 = 100 on channel 1, on the virtual port.
-    assert_eq!(device.take(), [PortMessage::Midi(vec![0xB0, 7, 100])]);
-    // Its own OSC, sent to and heard on localhost.
-    assert_eq!(out["heard"], json!(["/showcase/ping"]));
+    // CC 7 = 100 on channel 1, on the virtual port only.
+    assert_eq!(virtual_port.take(), [PortMessage::Midi(vec![0xB0, 7, 100])]);
     assert!(
-        ui.notices()
-            .iter()
-            .any(|n| n.text == "MIDI ports: Showcase MIDI; OSC heard: /showcase/ping")
+        hardware.take().is_empty(),
+        "the person's device heard nothing"
     );
+    // Its capability names only the virtual port: another is refused.
+    let request: architect_extensions::hostcall::HostRequest = serde_json::from_value(
+        json!({"op": "open_port", "kind": "midi", "name": "A real keyboard"}),
+    )
+    .unwrap();
+    let refused = block_on(host.api("showcase.surface").call(request));
+    assert!(refused.is_err(), "{refused:?}");
+
+    // Its own OSC, heard back by its port.message hook.
+    let started = std::time::Instant::now();
+    while !ui
+        .notices()
+        .iter()
+        .any(|n| n.text == "OSC heard: /showcase/ping")
+    {
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            ui.notices()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
