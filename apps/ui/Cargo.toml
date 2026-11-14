@@ -11,6 +11,9 @@ publish = false
 # in a wry child web view (WebKitGTK on Linux: needs X11/XWayland). Without
 # it such a view says the app has no web view host; the kind still loads.
 webview = ["dep:architect-webview", "architect-webview/desk"]
+# The same on native Wayland: WPE WebKit off-screen, drawn as a texture
+# (needs `devenv --profile wpe shell`, nix/wpewebkit.nix).
+webview-wpe = ["webview", "architect-webview/wpe"]
 keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
 # WASI component extensions (Wasmtime): the WASI Counter
 # (`apps/sandbox/wasi-counter`) when its component was built.

@@ -19,6 +19,9 @@
 //! - **`desk`** ([`desk::use_desk_web_views`]): a wry child web view of
 //!   the pane's window (`WebKitGTK` on Linux under X11 or `XWayland`,
 //!   `WKWebView` on macOS, `WebView2` on Windows), clipped to the pane.
+//! - **`wpe`** (Linux, native Wayland): WPE WebKit renders the page
+//!   off-screen and the pane draws its frames as a texture
+//!   (`wpe_pane::WpePane`); the desk host picks it for a Wayland window.
 //! - **a browser**: a sandboxed `<iframe>` on the same messages, from the
 //!   npm package (`features/extensions/web/webview-host.js` `mountWebView`),
 //!   which the web app mounts once it hosts extensions (#495).
@@ -32,6 +35,10 @@ use architect_workspace::{KindSpec, ViewKinds};
 
 #[cfg(feature = "desk")]
 pub mod desk;
+#[cfg(all(feature = "wpe", target_os = "linux"))]
+pub mod wpe;
+#[cfg(all(feature = "wpe", target_os = "linux"))]
+pub mod wpe_pane;
 
 /// Adds the `web` kind to `kinds` (an app that hosts it on a desk and in
 /// a browser): extensions whose views name it then load. A kind already

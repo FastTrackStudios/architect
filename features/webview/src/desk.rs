@@ -83,11 +83,55 @@ pub fn use_desk_web_views(host: Host) -> WebViews {
         WebViews(Rc::new(move |ask: &WebAsk| {
             let host = HostRef(host.clone());
             let ask = ask.clone();
-            rsx! { DeskWebPane { ask, host } }
+            match Backend::here() {
+                #[cfg(all(feature = "wpe", target_os = "linux"))]
+                Backend::Wpe => {
+                    let theme = theme_now();
+                    rsx! { crate::wpe_pane::WpePane { ask, host, theme } }
+                }
+                Backend::Child => rsx! { DeskWebPane { ask, host } },
+            }
         }))
     });
     use_context_provider(|| provided.clone());
     provided
+}
+
+/// What draws a web view in this window.
+///
+/// On Linux under Wayland: WPE WebKit off-screen, its frames a texture in
+/// the pane (feature `wpe`); a child web view is impossible there. Under
+/// X11 or XWayland, on macOS and on Windows: a wry child web view. A
+/// Wayland window without `wpe` gets the child, whose pane says it needs
+/// X11 (`ARCHITECT_WEBVIEW_X11=1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backend {
+    #[cfg(all(feature = "wpe", target_os = "linux"))]
+    Wpe,
+    Child,
+}
+
+impl Backend {
+    /// The backend for the window this is called in (the pane's pop-out's,
+    /// else the main one).
+    #[must_use]
+    pub fn here() -> Self {
+        #[cfg(all(feature = "wpe", target_os = "linux"))]
+        {
+            use wry::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+            let window: Option<Arc<dyn OsWindow>> = try_consume_context::<Arc<dyn OsWindow>>()
+                .or_else(|| try_consume_context::<MainWindow>().and_then(|m| m.window()));
+            let wayland = window.is_some_and(|w| {
+                w.rwh_06_window_handle()
+                    .window_handle()
+                    .is_ok_and(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(_)))
+            });
+            if wayland {
+                return Self::Wpe;
+            }
+        }
+        Self::Child
+    }
 }
 
 /// The extensions' host, as a prop (one per app: always equal).
@@ -222,8 +266,9 @@ const fn pump() {}
 /// Why a native view could not be made, in words for the pane.
 fn why_not(e: &wry::Error) -> String {
     if cfg!(target_os = "linux") && matches!(e, wry::Error::UnsupportedWindowHandle) {
-        "Web views need an X11 window on Linux: WebKitGTK cannot be a child of a Wayland \
-         window. Start Architect with ARCHITECT_WEBVIEW_X11=1 to run it under XWayland."
+        "Web views under Wayland need WPE WebKit (architect-desktop's feature `webview-wpe`): \
+         WebKitGTK cannot be a child of a Wayland window. Or start Architect with \
+         ARCHITECT_WEBVIEW_X11=1 to run it under XWayland."
             .to_owned()
     } else {
         format!("The web view could not start: {e}")
@@ -355,7 +400,7 @@ fn rect_of(x: f64, y: f64, w: f64, h: f64) -> Rect {
 }
 
 /// The theme a view sees now: its scheme and its tokens as CSS.
-fn theme_now() -> (String, String) {
+pub(crate) fn theme_now() -> (String, String) {
     architect_theme::try_use_theme().map_or_else(
         || ("dark".to_owned(), webview::theme_css("dark", [])),
         |store| {

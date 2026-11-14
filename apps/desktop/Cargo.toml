@@ -37,6 +37,8 @@ gui = [
 keyflow-lab = ["gui", "architect-app/keyflow-lab"]
 # Extensions' web views (#222) in a native child web view (wry).
 webview = ["gui", "architect-app/webview"]
+# On native Wayland too: WPE WebKit (`devenv --profile wpe shell`).
+webview-wpe = ["webview", "architect-app/webview-wpe"]
 # WASI component extensions: Wasmtime and Cranelift in the binary.
 wasi = ["gui", "architect-app/wasi", "node-wasi"]
 # The node draws the fences an installed WASI component's embed view

@@ -169,6 +169,14 @@ in
   # The current release, not 24: the transpiled components suspend through
   # JSPI (`WebAssembly.Suspending`), which nixpkgs' node 24 lacks
   # (features/extensions/tests/wasi_web.rs runs node from here).
+  # `devenv --profile wpe shell`: WPE WebKit for architect-webview's `wpe`
+  # feature, the web view kind on native Wayland (#222). Built from source
+  # (nix/wpewebkit.nix; nixpkgs has only the GTK port): about an hour the
+  # first time, then from the store.
+  profiles.wpe.module = {
+    packages = with pkgs; [ (import ./nix/wpewebkit.nix { inherit pkgs; }).dev libwpe libepoxy.dev libgbm ];
+  };
+
   profiles.wasi.module = {
     fleet.rust.extraTargets = [ "wasm32-wasip2" ];
     packages = [ pkgs.nodejs_latest ];

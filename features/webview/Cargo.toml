@@ -10,6 +10,10 @@ description = "The web view kind's hosts (#222): an extension's own HTML/CSS/JS 
 # the bridge's messages are architect-extensions' `webview` (wasm-clean);
 # this crate is the hosts. `desk` is the native one (wry: WebKitGTK on
 # Linux under X11 or XWayland, WKWebView on macOS, WebView2 on Windows).
+# `wpe` adds native Wayland on Linux: WPE WebKit renders the page off-screen
+# and the pane draws its frames as a texture (src/wpe.rs, src/wpe/glue.c).
+# It needs WPE WebKit at build time: `devenv --profile wpe shell`
+# (nix/wpewebkit.nix).
 
 [features]
 default = []
@@ -19,6 +23,19 @@ desk = [
     "dep:gtk",
     "architect-workspace/native",
     "architect-workspace/paint-ui",
+]
+wpe = [
+    "desk",
+    "dep:cc",
+    "dep:pkg-config",
+    "dep:blitz-dom",
+    "dep:blitz-traits",
+    "dep:dioxus-native-dom",
+    "dep:anyrender",
+    "dep:peniko",
+    "dep:kurbo",
+    "dep:wgpu",
+    "dep:wgpu_context",
 ]
 
 [dependencies]
@@ -32,8 +49,22 @@ tracing = { workspace = true }
 dioxus-native = { workspace = true, optional = true }
 wry = { version = "0.57.1", optional = true, default-features = false, features = ["os-webview", "x11"] }
 
+blitz-dom = { workspace = true, optional = true, features = ["custom-widget"] }
+blitz-traits = { workspace = true, optional = true }
+dioxus-native-dom = { workspace = true, optional = true }
+anyrender = { workspace = true, optional = true }
+peniko = { workspace = true, optional = true }
+kurbo = { workspace = true, optional = true }
+# The window renderer's: frames are uploaded and converted on its device.
+wgpu = { version = "30", optional = true }
+wgpu_context = { version = "0.10", optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18.2", optional = true }
+
+[build-dependencies]
+cc = { version = "1", optional = true }
+pkg-config = { version = "0.3", optional = true }
 
 [lib]
 doctest = false
