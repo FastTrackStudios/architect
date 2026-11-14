@@ -309,7 +309,10 @@ impl OrgLane {
     pub fn read_key(&self, who: &Principal) -> u64 {
         use std::hash::{Hash as _, Hasher as _};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.members.role(who, &self.org.id).map(|r| r.label()).hash(&mut h);
+        self.members
+            .role(who, &self.org.id)
+            .map(|r| r.label())
+            .hash(&mut h);
         h.finish()
     }
 

@@ -84,4 +84,3 @@ pub fn row_of(rel_path: &str, basename: &str, folder: &str, parsed: &ParsedPage)
     )
     .with_links(body_links)
 }
-

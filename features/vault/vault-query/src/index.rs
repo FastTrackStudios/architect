@@ -174,7 +174,10 @@ impl Entry {
         }
         let mut list = |set: IndexSet<&str>, names: &mut Interner| -> Box<[Arc<str>]> {
             truncated |= set.len() > MAX_LIST;
-            set.into_iter().take(MAX_LIST).map(|s| names.get(s)).collect()
+            set.into_iter()
+                .take(MAX_LIST)
+                .map(|s| names.get(s))
+                .collect()
         };
         let tags = list(tags, names);
         let links = list(links, names);
@@ -202,7 +205,11 @@ impl Entry {
             .iter()
             .find(|(level, _)| *level == 1)
             .map_or_else(Box::default, |(_, t)| t.clone());
-        let heading_title = if *heading_title == *name { Box::default() } else { heading_title };
+        let heading_title = if *heading_title == *name {
+            Box::default()
+        } else {
+            heading_title
+        };
         Self {
             path: Arc::from(path),
             heading_title,
@@ -283,7 +290,9 @@ pub struct VaultIndex {
 
 impl PartialEq for VaultIndex {
     fn eq(&self, other: &Self) -> bool {
-        self.epoch == other.epoch && self.revision == other.revision && self.entries == other.entries
+        self.epoch == other.epoch
+            && self.revision == other.revision
+            && self.entries == other.entries
     }
 }
 
@@ -319,7 +328,10 @@ struct Snapshot {
 
 fn wire_ok(bytes: &[u8]) -> Result<(), String> {
     if bytes.len() > MAX_WIRE {
-        return Err(format!("{} bytes: more than the {MAX_WIRE} an index may be", bytes.len()));
+        return Err(format!(
+            "{} bytes: more than the {MAX_WIRE} an index may be",
+            bytes.len()
+        ));
     }
     Ok(())
 }
@@ -461,7 +473,12 @@ impl IndexDelta {
             epoch: self.epoch,
             from: self.from,
             to: self.to,
-            put: self.put.iter().filter(|e| may_read(&e.path)).cloned().collect(),
+            put: self
+                .put
+                .iter()
+                .filter(|e| may_read(&e.path))
+                .cloned()
+                .collect(),
             gone: self.gone.iter().filter(|p| may_read(p)).cloned().collect(),
         }
     }
@@ -858,7 +875,9 @@ mod tests {
                     text: Text::Here(text),
                     parsed: None,
                     mtime: 0,
-                    is_base: std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("base")),
+                    is_base: std::path::Path::new(path)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("base")),
                 });
             }
             (self.0, self.1.len())
@@ -866,7 +885,12 @@ mod tests {
     }
 
     fn notes(rev: u64, v: &[(&str, &str, u64)]) -> Notes {
-        Notes(rev, v.iter().map(|(p, t, s)| ((*p).to_owned(), (*t).to_owned(), *s)).collect())
+        Notes(
+            rev,
+            v.iter()
+                .map(|(p, t, s)| ((*p).to_owned(), (*t).to_owned(), *s))
+                .collect(),
+        )
     }
 
     fn paths(d: &IndexDelta) -> Vec<&str> {
@@ -890,7 +914,10 @@ mod tests {
         assert_eq!(e.headings.len(), 2);
         assert_eq!(e.tasks.iter().map(|(m, _)| *m).collect::<String>(), " x");
         let wire = serde_json::to_string(&e).unwrap();
-        assert!(wire.contains("status") && wire.contains("learn it"), "{wire}");
+        assert!(
+            wire.contains("status") && wire.contains("learn it"),
+            "{wire}"
+        );
         assert!(!wire.contains("prose"), "{wire}");
         // A title that is the file's name is not sent twice.
         let plain = Entry::of_markdown("N.md", 0, "# N\n", &mut Interner::default());
@@ -905,7 +932,10 @@ mod tests {
         let e = Entry::of_markdown(
             "A.md",
             0,
-            &format!("---\nbig: {big}\nok: 1\n---\n{links}\n# {}\n", "h".repeat(MAX_TEXT * 2)),
+            &format!(
+                "---\nbig: {big}\nok: 1\n---\n{links}\n# {}\n",
+                "h".repeat(MAX_TEXT * 2)
+            ),
             &mut Interner::default(),
         );
         assert!(e.truncated);
@@ -921,12 +951,24 @@ mod tests {
     #[test]
     fn strings_are_shared() {
         let mut b = Builder::new();
-        let _ = b.sync(&notes(2, &[("A.md", "---\nstatus: a\n---\n#t [[X]]", 1), ("B.md", "---\nstatus: b\n---\n#t [[X]]", 1)]));
+        let _ = b.sync(&notes(
+            2,
+            &[
+                ("A.md", "---\nstatus: a\n---\n#t [[X]]", 1),
+                ("B.md", "---\nstatus: b\n---\n#t [[X]]", 1),
+            ],
+        ));
         let key = |i: &VaultIndex, p: &str| Arc::clone(i.entries[p].props.keys().next().unwrap());
-        assert!(Arc::ptr_eq(&key(b.index(), "A.md"), &key(b.index(), "B.md")));
+        assert!(Arc::ptr_eq(
+            &key(b.index(), "A.md"),
+            &key(b.index(), "B.md")
+        ));
         let replica = VaultIndex::from_bytes(&b.index().to_bytes()).unwrap();
         assert!(Arc::ptr_eq(&key(&replica, "A.md"), &key(&replica, "B.md")));
-        assert!(Arc::ptr_eq(&replica.entries["A.md"].links[0], &replica.entries["B.md"].links[0]));
+        assert!(Arc::ptr_eq(
+            &replica.entries["A.md"].links[0],
+            &replica.entries["B.md"].links[0]
+        ));
     }
 
     /// A sync makes entries for the notes that changed only, deltas carry
@@ -940,21 +982,35 @@ mod tests {
         assert_eq!(&replica, &**b.index());
 
         // Nothing moved: no delta.
-        assert!(b.sync(&notes(2, &[("A.md", "# A", 1), ("B.md", "# B", 1)])).is_empty());
+        assert!(
+            b.sync(&notes(2, &[("A.md", "# A", 1), ("B.md", "# B", 1)]))
+                .is_empty()
+        );
         // A's stamp moved but its text did not: no delta.
-        assert!(b.sync(&notes(4, &[("A.md", "# A", 2), ("B.md", "# B", 1)])).is_empty());
+        assert!(
+            b.sync(&notes(4, &[("A.md", "# A", 2), ("B.md", "# B", 1)]))
+                .is_empty()
+        );
         // B changed, C came, A went.
-        let d = b.sync(&notes(6, &[("B.md", "# Bee", 3), ("C.base", "views: []", 1)]));
+        let d = b.sync(&notes(
+            6,
+            &[("B.md", "# Bee", 3), ("C.base", "views: []", 1)],
+        ));
         assert_eq!(paths(&d), ["B.md", "C.base"]);
         assert_eq!(d.gone, [Arc::from("A.md")]);
-        replica.apply_interned(IndexDelta::from_bytes(&d.to_bytes()).unwrap()).unwrap();
+        replica
+            .apply_interned(IndexDelta::from_bytes(&d.to_bytes()).unwrap())
+            .unwrap();
         assert_eq!(&replica, &**b.index());
         assert_eq!(replica.base("C.base"), Some("views: []"));
         // A delta from elsewhere is refused.
         assert!(replica.apply(&first).is_err());
         // Since revision 1, as one delta; the first full build is none.
         assert_eq!(b.since(b.epoch(), 1).unwrap().gone, [Arc::from("A.md")]);
-        assert!(b.since(b.epoch(), 0).is_none(), "no delta of the first build");
+        assert!(
+            b.since(b.epoch(), 0).is_none(),
+            "no delta of the first build"
+        );
         assert!(b.since(b.epoch(), 99).is_none());
     }
 
@@ -970,7 +1026,11 @@ mod tests {
         let mut new = Builder::new();
         let _ = new.sync(&notes(2, v));
         let _ = new.sync(&notes(4, &[("A.md", "# A", 2), ("B.md", "# Bee", 2)]));
-        assert_eq!(new.index().revision, replica.revision, "the same revision, another history");
+        assert_eq!(
+            new.index().revision,
+            replica.revision,
+            "the same revision, another history"
+        );
         assert!(new.since(replica.epoch, replica.revision).is_none());
         let d = new.sync(&notes(6, &[("A.md", "# A", 2), ("B.md", "# B3", 3)]));
         assert!(replica.apply(&d).is_err());
@@ -986,12 +1046,20 @@ mod tests {
         let _missed = b.sync(&notes(4, &[("A.md", "# A2", 2)]));
         let next = b.sync(&notes(6, &[("A.md", "# A3", 3)]));
         assert!(replica.apply(&next).is_err());
-        replica.apply_interned(b.since(replica.epoch, replica.revision).unwrap()).unwrap();
+        replica
+            .apply_interned(b.since(replica.epoch, replica.revision).unwrap())
+            .unwrap();
         assert_eq!(&replica, &**b.index());
         for i in 0..=KEPT {
-            let _ = b.sync(&notes(8 + 2 * i as u64, &[("A.md", &format!("# A{i}x"), 10 + i as u64)]));
+            let _ = b.sync(&notes(
+                8 + 2 * i as u64,
+                &[("A.md", &format!("# A{i}x"), 10 + i as u64)],
+            ));
         }
-        assert!(b.since(replica.epoch, replica.revision).is_none(), "past the kept deltas");
+        assert!(
+            b.since(replica.epoch, replica.revision).is_none(),
+            "past the kept deltas"
+        );
         let fresh = VaultIndex::from_bytes(&b.index().to_bytes()).unwrap();
         assert_eq!(&fresh, &**b.index());
     }
@@ -1002,7 +1070,10 @@ mod tests {
         let mut b = Builder::new();
         let _ = b.sync(&notes(2, &[("A.md", "# A", 1)]));
         let text = String::from_utf8(b.index().to_bytes()).unwrap();
-        assert!(text.contains("\"v\":1") && text.contains("\"epoch\""), "{text}");
+        assert!(
+            text.contains("\"v\":1") && text.contains("\"epoch\""),
+            "{text}"
+        );
         assert!(VaultIndex::from_bytes(text.replace("\"v\":1", "\"v\":9").as_bytes()).is_err());
     }
 
@@ -1018,12 +1089,21 @@ mod tests {
             fn visit(&self, from: usize, n: usize, each: &mut dyn FnMut(Note<'_>)) -> (u64, usize) {
                 self.0.set(self.0.get() + 2);
                 for (path, text) in self.1.iter().skip(from).take(n) {
-                    each(Note { path, stamp: 1, text: Text::Here(text), parsed: None, mtime: 0, is_base: false });
+                    each(Note {
+                        path,
+                        stamp: 1,
+                        text: Text::Here(text),
+                        parsed: None,
+                        mtime: 0,
+                        is_base: false,
+                    });
                 }
                 (self.0.get(), self.1.len())
             }
         }
-        let many: Vec<(String, String)> = (0..CHUNK * 2).map(|i| (format!("N{i}.md"), format!("# {i}"))).collect();
+        let many: Vec<(String, String)> = (0..CHUNK * 2)
+            .map(|i| (format!("N{i}.md"), format!("# {i}")))
+            .collect();
         let mut b = Builder::new();
         let d = b.sync(&Moving(std::cell::Cell::new(0), many));
         assert_eq!(d.put.len(), CHUNK * 2, "everything read");
@@ -1034,12 +1114,28 @@ mod tests {
     #[test]
     fn a_reader_sees_what_it_may() {
         let mut b = Builder::new();
-        let _ = b.sync(&notes(2, &[("Public/A.md", "# A", 1), ("Private/B.md", "# B", 1)]));
+        let _ = b.sync(&notes(
+            2,
+            &[("Public/A.md", "# A", 1), ("Private/B.md", "# B", 1)],
+        ));
         let public = |p: &str| p.starts_with("Public/");
         assert_eq!(b.index().filtered(public).entries.len(), 1);
-        let d = b.sync(&notes(4, &[("Public/A.md", "# A", 1), ("Private/B.md", "# Bee", 2)]));
-        assert!(d.filtered(public).is_empty(), "a hidden note is never named");
-        let d = b.sync(&notes(6, &[("Private/A.md", "# A", 3), ("Private/B.md", "# Bee", 2)]));
-        assert_eq!(d.filtered(public).gone, [Arc::from("Public/A.md")], "moved out of view: gone");
+        let d = b.sync(&notes(
+            4,
+            &[("Public/A.md", "# A", 1), ("Private/B.md", "# Bee", 2)],
+        ));
+        assert!(
+            d.filtered(public).is_empty(),
+            "a hidden note is never named"
+        );
+        let d = b.sync(&notes(
+            6,
+            &[("Private/A.md", "# A", 3), ("Private/B.md", "# Bee", 2)],
+        ));
+        assert_eq!(
+            d.filtered(public).gone,
+            [Arc::from("Public/A.md")],
+            "moved out of view: gone"
+        );
     }
 }

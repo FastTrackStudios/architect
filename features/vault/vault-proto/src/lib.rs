@@ -42,15 +42,15 @@ mod event;
 mod file;
 mod graph;
 pub mod grouping;
+/// The `VaultIndexSync` service: the vault index, as a snapshot and
+/// deltas, for a client that does not hold the vault.
+#[cfg(feature = "vox")]
+pub mod index_sync;
 mod manifest;
 /// The `Notes` service: a node's notes, listed, read and written (a
 /// service on the wire: with `vox`).
 #[cfg(feature = "vox")]
 pub mod notes;
-/// The `VaultIndexSync` service: the vault index, as a snapshot and
-/// deltas, for a client that does not hold the vault.
-#[cfg(feature = "vox")]
-pub mod index_sync;
 mod page;
 mod page_meta;
 mod service;

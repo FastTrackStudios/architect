@@ -90,7 +90,9 @@ struct Listed {
 
 impl std::fmt::Debug for DiskSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DiskSource").field("root", &self.root).finish_non_exhaustive()
+        f.debug_struct("DiskSource")
+            .field("root", &self.root)
+            .finish_non_exhaustive()
     }
 }
 
@@ -99,7 +101,10 @@ impl DiskSource {
     #[must_use]
     pub fn open(root: &Path) -> Self {
         let revision = Arc::new(AtomicU64::new(1));
-        let watching = match vault_live::watcher::watch(root.to_path_buf(), std::time::Duration::from_millis(250)) {
+        let watching = match vault_live::watcher::watch(
+            root.to_path_buf(),
+            std::time::Duration::from_millis(250),
+        ) {
             Ok((events, guard)) => {
                 let moved = Arc::clone(&revision);
                 let _ = std::thread::Builder::new()
@@ -220,7 +225,10 @@ mod tests {
     #[test]
     fn the_index_follows_the_vault() {
         let (_dir, open) = vault(&[
-            ("Songs/A.md", "---\nstatus: todo\n---\n# A\n- [ ] learn it\n"),
+            (
+                "Songs/A.md",
+                "---\nstatus: todo\n---\n# A\n- [ ] learn it\n",
+            ),
             ("Notes/C.md", "C"),
             ("Songs.base", "views: []\n"),
         ]);
@@ -232,7 +240,8 @@ mod tests {
         assert_eq!(now.entries["Songs/A.md"].tasks.len(), 1);
         assert_eq!(now.base("Songs.base"), Some("views: []\n"));
 
-        open.set_property("Notes/C.md", "status", json!("todo")).unwrap();
+        open.set_property("Notes/C.md", "status", json!("todo"))
+            .unwrap();
         let delta = index.sync();
         assert_eq!(delta.put.len(), 1, "one note changed: {delta:?}");
         assert_eq!(&*delta.put[0].path, "Notes/C.md");
