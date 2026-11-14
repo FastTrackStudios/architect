@@ -514,9 +514,12 @@ mod desk {
             let message = match parse(text) {
                 Ok(m) => m,
                 Err((id, why)) => {
-                    self.host
-                        .logs()
-                        .push(self.id(), crate::logs::Level::Warn, "webview", why.clone());
+                    self.host.logs().push(
+                        self.id(),
+                        crate::logs::Level::Warn,
+                        "webview",
+                        why.clone(),
+                    );
                     if let Some(id) = id {
                         (self.post)(refusal(id, &why));
                     }
@@ -590,7 +593,12 @@ mod tests {
         let a = serve("demo.web", dir.path(), &url("demo.web", "dist/index.html")).unwrap();
         assert_eq!(a.body, b"<p>hi</p>");
         assert_eq!(a.mime, "text/html; charset=utf-8");
-        let policy = &a.headers.iter().find(|(k, _)| *k == "content-security-policy").unwrap().1;
+        let policy = &a
+            .headers
+            .iter()
+            .find(|(k, _)| *k == "content-security-policy")
+            .unwrap()
+            .1;
         assert!(policy.contains("connect-src 'none'"), "{policy}");
         assert!(policy.contains("default-src 'none'"), "{policy}");
         let js = serve("demo.web", dir.path(), "/dist/assets/app.js?v=3").unwrap();
@@ -603,14 +611,29 @@ mod tests {
         let dir = package();
         let outside = dir.path().parent().unwrap().join("secret.txt");
         let _ = std::fs::write(&outside, "no");
-        for path in ["/../secret.txt", "/dist/%2e%2e/%2e%2e/secret.txt", "/dist/..%2f..%2fsecret.txt", "/dist\\..\\..\\secret.txt"] {
+        for path in [
+            "/../secret.txt",
+            "/dist/%2e%2e/%2e%2e/secret.txt",
+            "/dist/..%2f..%2fsecret.txt",
+            "/dist\\..\\..\\secret.txt",
+        ] {
             let e = serve("demo.web", dir.path(), path).unwrap_err();
             assert!(matches!(e, AssetError::Outside(_)), "{path}: {e:?}");
             assert_eq!(e.status(), 403);
         }
-        assert_eq!(serve("demo.web", dir.path(), "/nope.js").unwrap_err().status(), 404);
+        assert_eq!(
+            serve("demo.web", dir.path(), "/nope.js")
+                .unwrap_err()
+                .status(),
+            404
+        );
         // A root is read inside the package, never the disk's.
-        assert_eq!(serve("demo.web", dir.path(), "//etc/passwd").unwrap_err().status(), 404);
+        assert_eq!(
+            serve("demo.web", dir.path(), "//etc/passwd")
+                .unwrap_err()
+                .status(),
+            404
+        );
         let e = serve("demo.web", dir.path(), &url("other.ext", "index.html")).unwrap_err();
         assert!(matches!(e, AssetError::Foreign { .. }), "{e:?}");
         let _ = std::fs::remove_file(outside);
@@ -636,8 +659,14 @@ mod tests {
         assert_eq!(id, Some(9), "{why}");
         let big = format!(r#"{{"t":"ready","pad":"{}"}}"#, "x".repeat(MAX_MESSAGE));
         assert!(parse(&big).unwrap_err().1.contains("over the bridge"));
-        let out = Outbound::Event { name: "doc.saved".into(), detail: serde_json::json!({"path": "a.md"}) };
-        assert_eq!(out.to_json(), r#"{"t":"event","name":"doc.saved","detail":{"path":"a.md"}}"#);
+        let out = Outbound::Event {
+            name: "doc.saved".into(),
+            detail: serde_json::json!({"path": "a.md"}),
+        };
+        assert_eq!(
+            out.to_json(),
+            r#"{"t":"event","name":"doc.saved","detail":{"path":"a.md"}}"#
+        );
     }
 
     #[test]
@@ -662,7 +691,10 @@ mod tests {
                 ("img", "url(https://x/y.png)"),
             ],
         );
-        assert_eq!(css, ":root{color-scheme:light;--brand:#6c5ce7;--ink:rgb(1 2 3);--studio-accent:red;}");
+        assert_eq!(
+            css,
+            ":root{color-scheme:light;--brand:#6c5ce7;--ink:rgb(1 2 3);--studio-accent:red;}"
+        );
         assert!(theme_css("dark", []).contains("color-scheme:dark"));
         assert!(RUNTIME_JS.contains(".arch-button"));
         assert!(RUNTIME_JS.contains("window.architect"));
@@ -687,7 +719,10 @@ mod tests {
             .collect();
         assert!(ops.len() > 40, "{ops:?}");
         for op in ops {
-            assert!(dts.contains(&format!("op: \"{op}\"")), "webview.d.ts has no {op}");
+            assert!(
+                dts.contains(&format!("op: \"{op}\"")),
+                "webview.d.ts has no {op}"
+            );
         }
     }
 
@@ -700,7 +735,11 @@ mod tests {
 
     #[test]
     fn an_overlay_hides_a_native_view() {
-        let s = Shown { front: true, sized: true, overlays: 0 };
+        let s = Shown {
+            front: true,
+            sized: true,
+            overlays: 0,
+        };
         assert!(s.shown());
         assert!(!Shown { overlays: 1, ..s }.shown());
         assert!(!Shown { front: false, ..s }.shown());
