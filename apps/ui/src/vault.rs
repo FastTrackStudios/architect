@@ -2568,7 +2568,7 @@ fn VaultNote(path: String) -> Element {
     let head = is_list.then(|| disk.peek().clone()).flatten().map(|d| {
         let list = rsx! {
             crate::collection::CollectionHead {
-                vault: crate::collection::VaultHandle(d.vault().clone()),
+                vault: crate::collection::VaultHandle(d),
                 path: here.clone(),
                 title: shown.clone(),
                 text: block(),

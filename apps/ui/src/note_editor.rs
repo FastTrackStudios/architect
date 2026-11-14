@@ -600,11 +600,14 @@ pub fn NoteEditor(
     fold_listing: bool,
 ) -> Element {
     let state = use_signal(|| EditorState::new(text.clone()));
-    let fold = use_hook(|| CopyValue::new(fold_listing));
-    if *fold.peek() != fold_listing {
-        let mut fold = fold;
-        fold.set(fold_listing);
-    }
+    // Read by the decorations, so they are drawn again when the core list
+    // comes or goes (the extension listing can load after the note opens).
+    let mut fold = use_signal(|| fold_listing);
+    use_effect(use_reactive!(|fold_listing| {
+        if *fold.peek() != fold_listing {
+            fold.set(fold_listing);
+        }
+    }));
     let history = use_signal(History::new);
     let applied = use_hook(|| CopyValue::new(0_u64));
     use_effect(use_reactive!(|incoming| {
@@ -719,7 +722,7 @@ pub fn NoteEditor(
                 |v| v.preview(s),
             );
             out.extend(ext::decorations(&specs, &text));
-            if *fold.peek() {
+            if *fold.read() {
                 out.extend(listing_folds(&text, s.selection.primary().head));
             }
             out.extend(

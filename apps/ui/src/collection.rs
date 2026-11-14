@@ -6,16 +6,19 @@
 //! draws instead (`architect_extensions::embeds::EmbedView`).
 //!
 //! Its rows come from the vault on disk: each link resolved among the
-//! vault's notes, each item's media and cover among its files. Covers are
-//! handed to the list (and to the Now Playing card) as `data:` URLs read
-//! from the vault ([`art_url`]), only for an image file inside it. The
-//! list is the app's own source on the playhead, [`SOURCE`].
+//! vault's notes, each item's media and cover among its files, read again
+//! when the note's text or the vault changes. Covers are handed to the
+//! list (and to the Now Playing card) as `data:` URLs read from the vault
+//! ([`art_url`]), only for an image file inside it. The list is the app's
+//! own source on the playhead, [`SOURCE`].
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use architect_media::{Collection, Item, Row, front};
+use architect_navigator::VaultSource;
 use dioxus::prelude::*;
 
 /// The app's own source for a collection's list: outside the
@@ -24,6 +27,9 @@ pub const SOURCE: &str = "app:list";
 
 /// The largest cover handed over as a `data:` URL.
 const ART_MAX: u64 = 4 * 1024 * 1024;
+/// The most covers kept read, and the most bytes of `data:` URLs.
+const ART_KEPT: usize = 64;
+const ART_KEPT_BYTES: usize = 32 * 1024 * 1024;
 
 /// The list collection note `path` (its text `text`) makes in `vault`:
 /// its sections and rows. `None` when it is no collection.
@@ -37,30 +43,96 @@ pub fn rows(
     vault.with(|v| {
         let notes: Vec<&str> = v.pages.iter().map(|p| p.rel_path.as_str()).collect();
         let files: Vec<&str> = v.attachments.iter().map(|a| a.rel_path.as_str()).collect();
+        let pages: HashMap<&str, &str> = v
+            .pages
+            .iter()
+            .map(|p| (p.rel_path.as_str(), p.raw.as_str()))
+            .collect();
         let resolved = list.resolve(path, notes.iter().copied());
         Some(resolved.rows(|p| {
-            let page = v.pages.iter().find(|page| page.rel_path == p)?;
+            let raw = pages.get(p)?;
             Some(Row::of(
-                Item::read(p, &front::fields(&page.raw)),
+                Item::read(p, &front::fields(raw)),
                 files.iter().copied(),
             ))
         }))
     })
 }
 
+/// A cover read: the file as it was (its modification time and size) and
+/// its `data:` URL.
+struct Art {
+    modified: Option<SystemTime>,
+    len: u64,
+    url: String,
+}
+
+/// Covers read so far, the least recently used dropped first: a list draws
+/// ten times a second while it plays. A file that changed is read again;
+/// a miss is never kept (the file may come).
+#[derive(Default)]
+struct ArtCache {
+    kept: HashMap<PathBuf, Art>,
+    /// Least recently used first.
+    order: VecDeque<PathBuf>,
+    bytes: usize,
+}
+
+impl ArtCache {
+    fn get(&mut self, key: &Path, modified: Option<SystemTime>, len: u64) -> Option<String> {
+        let hit = self
+            .kept
+            .get(key)
+            .filter(|a| a.modified == modified && a.len == len)?
+            .url
+            .clone();
+        self.touch(key);
+        Some(hit)
+    }
+
+    fn touch(&mut self, key: &Path) {
+        if let Some(at) = self.order.iter().position(|k| k == key) {
+            if let Some(k) = self.order.remove(at) {
+                self.order.push_back(k);
+            }
+        }
+    }
+
+    fn put(&mut self, key: PathBuf, art: Art) {
+        if let Some(old) = self.kept.remove(&key) {
+            self.bytes = self.bytes.saturating_sub(old.url.len());
+            self.order.retain(|k| *k != key);
+        }
+        self.bytes = self.bytes.saturating_add(art.url.len());
+        self.kept.insert(key.clone(), art);
+        self.order.push_back(key);
+        while self.kept.len() > ART_KEPT || self.bytes > ART_KEPT_BYTES {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(old) = self.kept.remove(&oldest) {
+                self.bytes = self.bytes.saturating_sub(old.url.len());
+            }
+        }
+    }
+}
+
 thread_local! {
-    /// Covers read so far: a list draws ten times a second while it plays.
-    static ART: RefCell<HashMap<PathBuf, Option<String>>> = RefCell::new(HashMap::new());
+    static ART: RefCell<ArtCache> = RefCell::new(ArtCache::default());
 }
 
 /// The image at vault path `path` in the vault at `root`, as a `data:`
-/// URL: only a vault path (`architect_playhead::model::vault_path`) to an
-/// image file inside the vault (not through a link out of it), at most
-/// [`ART_MAX`].
+/// URL: only a vault path (`architect_playhead::model::vault_path`, no
+/// `.` or `..` segment) to an image file of the vault's own, opened
+/// without following a link out of it (`vault::obsidian::open_own`), at
+/// most [`ART_MAX`]. Read again once the file changes.
 #[must_use]
 pub fn art_url(root: &Path, path: &str) -> Option<String> {
     use base64::Engine as _;
-    if !architect_playhead::model::vault_path(path) {
+    use std::io::Read as _;
+    if !architect_playhead::model::vault_path(path)
+        || path.split('/').any(|s| s.is_empty() || s == "." || s == "..")
+    {
         return None;
     }
     let mime = match path.rsplit_once('.')?.1.to_ascii_lowercase().as_str() {
@@ -71,32 +143,37 @@ pub fn art_url(root: &Path, path: &str) -> Option<String> {
         "svg" => "image/svg+xml",
         _ => return None,
     };
-    let file = root.join(path);
+    let file = vault::obsidian::open_own(root, path).ok()?;
+    // What was opened, not what the path names now.
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > ART_MAX {
+        return None;
+    }
+    let (modified, len) = (meta.modified().ok(), meta.len());
+    let key = root.join(path);
+    if let Some(hit) = ART.with(|cache| cache.borrow_mut().get(&key, modified, len)) {
+        return Some(hit);
+    }
+    let mut bytes = Vec::new();
+    file.take(ART_MAX).read_to_end(&mut bytes).ok()?;
+    let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let url = format!("data:{mime};base64,{data}");
     ART.with(|cache| {
-        if let Some(hit) = cache.borrow().get(&file) {
-            return hit.clone();
-        }
-        let read = (|| {
-            let real = file.canonicalize().ok()?;
-            let inside = root.canonicalize().ok()?;
-            if !real.starts_with(&inside) {
-                return None;
-            }
-            let meta = std::fs::metadata(&real).ok()?;
-            if !meta.is_file() || meta.len() > ART_MAX {
-                return None;
-            }
-            let bytes = std::fs::read(&real).ok()?;
-            let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-            Some(format!("data:{mime};base64,{data}"))
-        })();
-        cache.borrow_mut().insert(file, read.clone());
-        read
-    })
+        cache.borrow_mut().put(
+            key,
+            Art {
+                modified,
+                len,
+                url: url.clone(),
+            },
+        );
+    });
+    Some(url)
 }
 
 /// The core list of collection note `path` (its text `text`, its title
-/// `title`) in `vault`. `on_open` opens a row's note.
+/// `title`) in `vault`. `on_open` opens a row's note. Its rows are read
+/// once per text and per change to the vault, not per draw.
 #[component]
 pub fn CollectionHead(
     vault: VaultHandle,
@@ -105,10 +182,35 @@ pub fn CollectionHead(
     text: String,
     on_open: EventHandler<String>,
 ) -> Element {
-    let Some(sections) = rows(&vault.0, &path, &text) else {
+    // Bumped by every change the vault hears (a song's file edited, a
+    // recording added): the rows are read again.
+    let mut changed = use_signal(|| 0_u64);
+    let source = vault.0.clone();
+    use_hook(move || {
+        let (tx, mut rx) = futures_channel::mpsc::unbounded::<()>();
+        let sub = architect_navigator::source::NavigatorSource::subscribe(
+            &source,
+            Box::new(move |_| {
+                let _ = tx.unbounded_send(());
+            }),
+        );
+        spawn(async move {
+            use futures_util::StreamExt as _;
+            while rx.next().await.is_some() {
+                let n = changed.peek().wrapping_add(1);
+                changed.set(n);
+            }
+        });
+        std::rc::Rc::new(sub)
+    });
+    let sections = use_memo(use_reactive!(|vault, path, text| {
+        let _ = changed();
+        rows(vault.0.vault(), &path, &text)
+    }));
+    let Some(sections) = sections() else {
         return rsx! {};
     };
-    let root = vault.0.root();
+    let root = vault.0.vault().root();
     let art = use_callback(move |p: String| art_url(&root, &p));
     rsx! {
         architect_media::ui::MediaList {
@@ -121,13 +223,14 @@ pub fn CollectionHead(
     }
 }
 
-/// A vault on disk, as a prop.
+/// A vault on disk, as a prop: what the navigator reads, heard for
+/// changes.
 #[derive(Clone)]
-pub struct VaultHandle(pub vault::actions::OpenVault);
+pub struct VaultHandle(pub VaultSource);
 
 impl PartialEq for VaultHandle {
     fn eq(&self, other: &Self) -> bool {
-        self.0.root() == other.0.root()
+        self.0.vault().root() == other.0.vault().root()
     }
 }
 
@@ -168,5 +271,49 @@ mod tests {
         // Nothing outside the vault, nor a path that climbs out.
         assert_eq!(art_url(&open.root(), "../outside.png"), None);
         assert_eq!(art_url(&open.root(), "Setlists/Merry & Bright.md"), None);
+    }
+
+    #[test]
+    fn a_cover_is_read_again_once_it_changes_and_a_miss_is_never_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // A miss, then the file comes: found.
+        assert_eq!(art_url(root, "Art/a.png"), None);
+        std::fs::create_dir_all(root.join("Art")).unwrap();
+        std::fs::write(root.join("Art/a.png"), b"one").unwrap();
+        let one = art_url(root, "Art/a.png").unwrap();
+        assert!(one.ends_with(&base64_of(b"one")), "{one}");
+        // Changed: read again, not the old cover.
+        std::fs::write(root.join("Art/a.png"), b"two two").unwrap();
+        let two = art_url(root, "Art/a.png").unwrap();
+        assert!(two.ends_with(&base64_of(b"two two")), "{two}");
+        // A dot segment or a link out of the vault: nothing.
+        assert_eq!(art_url(root, "Art/./a.png"), None);
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("x.png"), b"outside").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("x.png"), root.join("Art/out.png")).unwrap();
+        assert_eq!(art_url(root, "Art/out.png"), None);
+    }
+
+    #[test]
+    fn the_cover_cache_keeps_the_most_recent_within_its_bounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for i in 0..ART_KEPT + 10 {
+            std::fs::write(root.join(format!("{i}.png")), format!("png {i}")).unwrap();
+            assert!(art_url(root, &format!("{i}.png")).is_some());
+        }
+        ART.with(|c| {
+            let c = c.borrow();
+            assert_eq!(c.kept.len(), ART_KEPT);
+            assert_eq!(c.order.len(), ART_KEPT);
+            assert!(!c.kept.contains_key(&root.join("0.png")), "the oldest dropped");
+            assert!(c.kept.contains_key(&root.join(format!("{}.png", ART_KEPT + 9))));
+        });
+    }
+
+    fn base64_of(bytes: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 }

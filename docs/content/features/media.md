@@ -94,11 +94,15 @@ Where it draws:
 - **The desktop and phone apps** (`apps/ui/src/collection.rs`
   `CollectionHead`): the list is the fallback of the note type's `EmbedView`,
   so an extension that claims the type draws instead. Rows come from the vault
-  on disk, and covers are `data:` URLs read from inside it (`art_url`, which
-  the Now Playing card uses too). The Properties bar leaves the list's rows
-  out (`PropertiesBar`'s `hidden`), and the editor folds a listing fence to one
-  line until the caret goes into it (`NoteEditor`'s `fold_listing`,
-  `architect_media::listing_fences`). The demo vault on disk gets the demo's
+  on disk, read again when the note's text or the vault changes, not per draw.
+  Covers are `data:` URLs read from inside it (`art_url`, which the Now Playing
+  card uses too): opened as the vault's own file (no `.` or `..` segment, no
+  link out of it), kept for the 64 most recent within 32 MiB, read again once
+  a file's modification time or size changes, a missing one never kept. The
+  Properties bar leaves the list's rows out (`PropertiesBar`'s `hidden`), and
+  the editor folds a listing fence to one line until the caret goes into it
+  (`NoteEditor`'s `fold_listing`, `architect_media::listing_fences`), and
+  unfolds it when the list gives way. The demo vault on disk gets the demo's
   silent recording at each song's `recording` (`apps/ui/src/vaults.rs`
   `write_demo`), so its setlist plays as the web demo's does. Playback is the
   native silent clock until audible native playback lands.
