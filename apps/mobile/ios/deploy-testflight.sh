@@ -209,6 +209,37 @@ if /usr/libexec/PlistBuddy -c "Print :com.apple.developer.associated-domains" "$
 else
     echo "note: the profile has no Associated Domains: this build claims no universal links" >&2
 fi
+# HealthKit: a profile for an App ID with HealthKit allows every HealthKit
+# key, clinical records included (healthkit.access = health-records), and
+# signing with all of them would claim access the app never asks for (App
+# Review then wants the clinical-records usage string). So the profile's
+# HealthKit keys go, and the app gets the ones Architect.entitlements
+# declares, and only when the profile allows HealthKit.
+HK_KEYS=(com.apple.developer.healthkit com.apple.developer.healthkit.access com.apple.developer.healthkit.background-delivery)
+PROFILE_HK=0
+/usr/libexec/PlistBuddy -c "Print :com.apple.developer.healthkit" "$WORK/entitlements.plist" >/dev/null 2>&1 && PROFILE_HK=1
+for k in "${HK_KEYS[@]}"; do
+    /usr/libexec/PlistBuddy -c "Delete :$k" "$WORK/entitlements.plist" >/dev/null 2>&1 || true
+done
+HK_SIGNED=()
+for k in "${HK_KEYS[@]}"; do
+    kp="${k//./\\.}"   # plutil key paths split on dots
+    # As XML (JSON cannot hold a bare boolean), the value inside <plist>.
+    v="$(plutil -extract "$kp" xml1 -o - "$SCRIPT_DIR/Architect.entitlements" 2>/dev/null \
+        | sed -e '1,/^<plist/d' -e '/^<\/plist>/,$d')" || continue
+    [ -n "$v" ] || continue
+    if [ "$PROFILE_HK" = 1 ]; then
+        plutil -insert "$kp" -xml "$v" "$WORK/entitlements.plist"
+        HK_SIGNED+=("${k#com.apple.developer.}")
+    else
+        echo "WARNING: Architect.entitlements declares $k but the profile has no HealthKit (the App ID's capability): not signed" >&2
+    fi
+done
+if [ ${#HK_SIGNED[@]} -gt 0 ]; then
+    echo "=== healthkit: ${HK_SIGNED[*]} ==="
+elif [ "$PROFILE_HK" = 1 ]; then
+    echo "note: the profile allows HealthKit, Architect.entitlements declares none: this build claims no HealthKit" >&2
+fi
 # Inside out: anything nested first, then the app.
 find "$APP" -mindepth 1 \( -name "*.dylib" -o -name "*.framework" \) -print0 \
     | while IFS= read -r -d '' f; do codesign --force --keychain "$KEYCHAIN" --sign "$SIGN_ID" --timestamp "$f"; done
