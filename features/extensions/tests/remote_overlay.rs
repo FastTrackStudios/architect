@@ -92,6 +92,9 @@ kind = "process"
 path = "guest"
 args = ["guest", "--exact", "--nocapture", "--test-threads=1"]
 
+[capabilities]
+over = ["{VIEW}"]
+
 [[views]]
 id = "marks"
 title = "Marks"
@@ -301,6 +304,8 @@ path = "o"
 [[views]]
 id = "marks"
 title = "Marks"
+[capabilities]
+over = ["v"]
 [[overlays]]
 id = "o"
 view = "v"
@@ -316,4 +321,54 @@ view = "v"
     assert!(both.contains("not both"), "{both}");
     let neither = parse("").unwrap_err().to_string();
     assert!(neither.contains("not both"), "{neither}");
+}
+
+/// The owner's rule for #762: drawing over another extension's or the
+/// app's own view is asked for, in words, and not mounted until granted.
+#[test]
+fn drawing_over_another_view_is_asked_for_and_not_mounted_without_the_grant() {
+    use architect_extensions::consent::{Grants, Scope};
+    let dir = tempfile::tempdir().unwrap();
+    let package = package(dir.path());
+    let asks: Vec<String> = package
+        .manifest
+        .capabilities
+        .asks()
+        .into_iter()
+        .map(|a| a.says)
+        .collect();
+    assert_eq!(asks, ["Draw over the arrangement"]);
+
+    // Installed, nothing granted: not mounted.
+    let grants = Grants::open(dir.path().join("grants.json"));
+    let runner = ProcessRunner::new()
+        .unwrap()
+        .with_socket_dir(dir.path())
+        .with_restart(Restart::never());
+    let host = Host::new(ActionList::new(), SharedSections::default())
+        .with_runner(runner)
+        .with_grants(grants.clone());
+    host.load(&package, Origin::Installed).unwrap();
+    assert!(
+        host.view_overlays(VIEW, "over").is_empty(),
+        "drawn without the grant"
+    );
+    // Granted: mounted.
+    grants.grant(
+        ID,
+        "1.0.0",
+        package.manifest.capabilities,
+        Scope::Device,
+        "test",
+    );
+    assert_eq!(host.view_overlays(VIEW, "over").len(), 1);
+
+    // Undeclared, it does not even load.
+    let undeclared = std::fs::read_to_string(dir.path().join("extension.toml"))
+        .unwrap()
+        .replace("over = [\"test.arrange\"]", "");
+    let why = architect_extensions::manifest::Manifest::parse(&undeclared)
+        .unwrap_err()
+        .to_string();
+    assert!(why.contains("capabilities.over"), "{why}");
 }

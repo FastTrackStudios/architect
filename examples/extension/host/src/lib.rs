@@ -140,7 +140,9 @@ pub fn overlays(host: &Host, view: &str) -> Vec<Overlay> {
                 .manifest
                 .overlays
                 .iter()
-                .filter(|o| o.view == view)
+                // Luau overlays only: one drawn by a view of its own
+                // (`draws`) has no script.
+                .filter(|o| o.view == view && o.draws.is_none())
                 .filter_map(|o| {
                     let source = std::fs::read_to_string(dir.as_ref()?.join(&o.script)).ok()?;
                     Some(Overlay {

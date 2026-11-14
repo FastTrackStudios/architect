@@ -1522,21 +1522,37 @@ impl Host {
 
     /// The overlays loaded extensions draw with a view of their own
     /// (`[[overlays]] draws`) over views of kind `view`, on `plane`
-    /// (`under`, `over`, `top`), in load order.
+    /// (`under`, `over`, `top`), in load order: over a view not its own
+    /// only when the extension was granted it (`capabilities.over`).
     #[must_use]
+    // Collected so the lock is let go before the grants are read.
+    #[allow(clippy::needless_collect)]
     pub fn view_overlays(&self, view: &str, plane: &str) -> Vec<crate::overlay::ViewOverlay> {
-        self.inner
+        let candidates: Vec<(String, Manifest, Origin)> = self
+            .inner
             .loaded
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .flat_map(|(extension, running)| {
-                running
-                    .loaded
+            .filter(|(_, r)| {
+                r.loaded
                     .manifest
                     .overlays
                     .iter()
+                    .any(|o| o.draws.is_some() && o.view == view && o.plane == plane)
+            })
+            .map(|(id, r)| (id.clone(), r.loaded.manifest.clone(), r.loaded.origin))
+            .collect();
+        candidates
+            .into_iter()
+            .flat_map(|(extension, manifest, origin)| {
+                // Over a view not its own only as granted.
+                let may = self.capabilities_of(&manifest, origin);
+                manifest
+                    .overlays
+                    .iter()
                     .filter(|o| o.view == view && o.plane == plane)
+                    .filter(|o| may.may_draw_over(&extension, &o.view))
                     .filter_map(|o| {
                         o.draws.as_ref().map(|draws| crate::overlay::ViewOverlay {
                             extension: extension.clone(),

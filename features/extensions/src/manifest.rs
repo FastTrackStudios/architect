@@ -177,6 +177,12 @@ pub struct Capabilities {
     /// (`health:read:steps`, `health:write:dietary_energy`; the types are
     /// `crate::device::HEALTH_TYPES`).
     pub device: Vec<String>,
+    /// The kinds of view, not its own, it may draw a layer over with a
+    /// view of its own (`[[overlays]] draws`, `crate::overlay`):
+    /// `lab.arrange`, `session.arrange`. Asked for in words ("Draw over
+    /// the arrangement"), and only as granted: an overlay over a view not
+    /// granted is not mounted.
+    pub over: Vec<String>,
 }
 
 /// One action it adds.
@@ -1089,6 +1095,14 @@ impl Manifest {
                     if !self.views.iter().any(|v| &v.id == view) {
                         return Err(bad(&format!(
                             "it draws {view}, which is not one of its [[views]]"
+                        )));
+                    }
+                    // Over a view not its own: asked for, in words.
+                    let own = overlay.view.starts_with(&format!("{}/", self.id));
+                    if !own && !self.capabilities.over.contains(&overlay.view) {
+                        return Err(bad(&format!(
+                            "it draws over {}, which is not its own: ask for it in capabilities.over",
+                            overlay.view
                         )));
                     }
                 }

@@ -1006,6 +1006,9 @@ a WASI component's, a linked one's) can instead name one of them
 (`draws`, #175):
 
 ```toml
+[capabilities]
+over = ["session.arrange"]  # drawing over a view not its own: asked for in words
+
 [[views]]
 id = "marks"
 title = "Marks"
@@ -1016,6 +1019,15 @@ view = "session.arrange"   # the kind of view it draws over
 plane = "over"             # under | over | top
 draws = "marks"            # one of its [[views]]; or script = "…" (Luau), never both
 ```
+
+Drawing over a view not its own (another extension's, or the app's own
+arrangement) is a capability: `capabilities.over` names the view kinds,
+the consent prompt says "Draw over the arrangement", the manifest is
+refused without it, and the host doesn't mount the layer until it is
+granted (`Host::view_overlays`, `Capabilities::may_draw_over`). An
+overlay's spaces reach it coalesced: a view scrolled or zoomed sends one
+update a frame, and only the latest waits while the overlay's view is
+busy.
 
 The view it draws over mounts `features/extensions/src/interface.rs`
 `ExtensionViewOverlays { view, plane, spaces }` at that plane, filling its
