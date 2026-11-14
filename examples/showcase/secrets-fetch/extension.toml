@@ -1,0 +1,43 @@
+# The showcase's Secrets and fetch (#710: H5, H6): a token the person
+# enters once, which the host puts into requests to the one host it is for
+# and never hands back, and fetch limited to the hosts in the manifest.
+id = "showcase.fetch"
+name = "Secrets and fetch"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Fetch to the hosts it names only (a local echo server here), with a token the host inserts and never shows. Stands in for Copilot's API key, Remotely Save and every API plugin."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+# The showcase's local echo server (examples/showcase/secrets-fetch/echo.py).
+hosts = ["127.0.0.1:8765"]
+ui = ["notify", "prompts"]
+
+[[secrets]]
+id = "token"
+title = "Showcase echo token"
+description = "Any text: the echo server only says whether one came."
+hosts = ["127.0.0.1:8765"]
+
+[[actions]]
+id = "SHOWCASE_FETCH_SET"
+name = "Secrets and fetch: set token"
+description = "Asks for the token (the host's own secret prompt), unless it is set. Answers whether one is."
+group = "Showcase"
+script = "set.luau"
+
+[[actions]]
+id = "SHOWCASE_FETCH_CALL"
+name = "Secrets and fetch: call"
+description = "Calls the echo server at `base` (http://127.0.0.1:8765 when left out), with the token when one is set, and says what it heard. Answers {status, body}."
+group = "Showcase"
+params = '{"type":"object","properties":{"base":{"type":"string"}}}'
+script = "call.luau"
+
+[[actions]]
+id = "SHOWCASE_FETCH_ELSEWHERE"
+name = "Secrets and fetch: call elsewhere"
+description = "Tries a host it does not name (https://example.com) and says why it was refused. Answers the refusal."
+group = "Showcase"
+script = "elsewhere.luau"

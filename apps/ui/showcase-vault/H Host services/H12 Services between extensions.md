@@ -12,7 +12,7 @@ example: "Services sampler"
 
 ## Try
 
-1. Run `Services sampler: plan today`.
+1. Run `Services sampler: today`, then `Services sampler: plan`.
 
 ## You should see
 

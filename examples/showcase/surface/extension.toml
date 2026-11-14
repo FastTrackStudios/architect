@@ -1,0 +1,22 @@
+# The showcase's Surface (#710: H13): MIDI and OSC ports by capability,
+# with no hardware and no audio. It lists the app's MIDI ports (a virtual
+# one in the Architect app), sends a control change to the first, and
+# loops an OSC message back to itself on localhost.
+id = "showcase.surface"
+name = "Surface"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "MIDI ports listed and a control change sent, and an OSC message looped back on localhost: no hardware, no audio. Stands in for CSI, ReaLearn and OSC controllers. A full control surface (banks, feedback) is the sandbox's lab.surface."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+ports = ["midi:*", "osc:127.0.0.1:9031", "osc:listen:9031"]
+ui = ["notify"]
+
+[[actions]]
+id = "SHOWCASE_SURFACE_PING"
+name = "Surface: ping"
+description = "Lists the MIDI ports, sends CC 7 = 100 on channel 1 to the first, sends /showcase/ping to 127.0.0.1:9031 while hearing on 9031, and says what it heard. Answers {midi, sent_midi, heard}."
+group = "Showcase"
+script = "ping.luau"
