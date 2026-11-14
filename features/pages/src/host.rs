@@ -384,8 +384,23 @@ const fn effect_name(effect: Effect) -> &'static str {
     }
 }
 
-impl PageHost for AppHost {
-    async fn run(&self, id: String, args: String) -> Result<String, PageError> {
+impl AppHost {
+    /// Whether its runs go through its extension's host service (`{op:
+    /// "run"}` over `EXT_PAGE_CALL`): an extension's page or action, in an
+    /// app whose extensions host answers that. Then an action of the app's
+    /// own list (`VAULT_READ`) is reached as a Luau script's and a browser
+    /// page's are, and checked by its capabilities there.
+    fn through_host(&self, id: &str) -> bool {
+        self.extension.is_some()
+            && id != SERVICE_CALL
+            && id != PAGE_CALL
+            && self.list.info(PAGE_CALL).is_some()
+    }
+}
+
+impl AppHost {
+    /// Runs `id` on its list, through its gate, as its caller.
+    async fn run_listed(&self, id: String, args: String) -> Result<String, PageError> {
         if let Some(why) = self.refused(&id) {
             return Err(why);
         }
@@ -427,6 +442,22 @@ impl PageHost for AppHost {
             return Ok("null".to_owned());
         }
         String::from_utf8(out).map_err(|e| PageError::Failed(e.to_string()))
+    }
+}
+
+impl PageHost for AppHost {
+    async fn run(&self, id: String, args: String) -> Result<String, PageError> {
+        if self.through_host(&id) {
+            let args: Value = if args.trim().is_empty() {
+                Value::Null
+            } else {
+                serde_json::from_str(&args)
+                    .map_err(|e| PageError::Failed(format!("{id}: not JSON: {e}")))?
+            };
+            let body = serde_json::json!({ "op": "run", "action": id, "args": args }).to_string();
+            return self.run_listed(PAGE_CALL.to_owned(), body).await;
+        }
+        self.run_listed(id, args).await
     }
 
     async fn actions(&self, filter: String) -> Result<Vec<ActionSummary>, PageError> {

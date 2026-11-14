@@ -301,8 +301,11 @@ fn package(dir: &Path) {
 fn lab_with(ui: FakeUi, edit: impl FnOnce(&Path)) -> Lab {
     let tmp = tempfile::tempdir().unwrap();
     let list = ActionList::new();
+    // The app's own actions are on its list, not the extensions host's
+    // (as `VAULT_*` are in the app): reached through the host service.
+    let app = ActionList::new();
     let pantry = Pantry::default();
-    pantry.install(&list);
+    pantry.install(&app);
     let steps = Arc::new(Steps::default());
     let host = Host::new(list.clone(), SharedSections::new(Registry::new())).with_ui(ui.clone());
     host.add_runner(
@@ -316,6 +319,7 @@ fn lab_with(ui: FakeUi, edit: impl FnOnce(&Path)) -> Lab {
                 ..ActionLimits::default()
             }),
     );
+    host.set_app_list(app);
     let ext = Extensions::new(host, Installs::new(tmp.path().join("installs")));
     // Its host-service calls (`EXT_PAGE_CALL`).
     ext.install_contribution_actions().unwrap();
