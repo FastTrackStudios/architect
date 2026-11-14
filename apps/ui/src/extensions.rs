@@ -1153,7 +1153,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     // Extensions' `web` views in a native web view clipped to their pane.
     #[cfg(all(
         feature = "webview",
-        any(target_os = "macos", target_os = "linux", target_os = "windows")
+        any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "windows",
+            target_os = "ios"
+        )
     ))]
     let _ = architect_webview::desk::use_desk_web_views(extensions.host().clone());
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
