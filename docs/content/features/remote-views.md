@@ -118,7 +118,9 @@ page (`features/pages/src/api.rs` `PageEvent`: `dx`, `dy`, `pointer_id`,
   drag-and-drop list works without knowing where the pointer went. A
   release outside the pane reaches the view as a `pointercancel` when the
   pointer comes back with no button held (Blitz holds the pointer for
-  custom widgets only, not for a sub-document).
+  custom widgets only, not for a sub-document). A view that listens for
+  `pointermove`, but not `mousemove` or `touchmove`, owns its held moves:
+  the document doesn't select the text under a drag.
 - **Fast events are coalesced.** While the view has not yet answered an
   event, the moves, wheels, scrolls and composition updates that follow
   wait; a run of them on one element keeps only the latest (a wheel's

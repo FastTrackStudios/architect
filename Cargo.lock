@@ -1902,14 +1902,20 @@ dependencies = [
 name = "architect-sandbox-kanban"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
  "architect",
  "architect-extensions",
+ "architect-theme",
  "architect-workspace-hack",
  "blitz-dom",
+ "blitz-paint",
  "blitz-traits",
  "dioxus",
  "dioxus-native-dom",
  "futures",
+ "peniko 0.6.1",
+ "png 0.17.16",
  "serde_json",
  "tempfile",
 ]

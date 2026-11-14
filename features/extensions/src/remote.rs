@@ -612,9 +612,21 @@ impl EventHandler for Forward<'_> {
         chain: &[NodeId],
         event: &mut DomEvent,
         doc: &mut dyn Document,
-        _: &mut EventState,
+        state: &mut EventState,
     ) {
         let name = event.name();
+        // A view that drags with pointer events owns its held moves: the
+        // document's own default (selecting the text under them) would
+        // fight it. Only when it hears no mouse or touch moves, which a
+        // cancelled pointer move would not send.
+        if name == "pointermove"
+            && self.held.is_some()
+            && self.listens("pointermove")
+            && !self.listens("mousemove")
+            && !self.listens("touchmove")
+        {
+            state.prevent_default();
+        }
         let target = {
             let doc = doc.inner();
             chain
