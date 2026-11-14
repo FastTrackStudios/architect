@@ -43,6 +43,7 @@ tsx = [
 web = [
     "tsx",
     "architect-extensions/web",
+    "dep:futures",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",
     "dep:js-sys",

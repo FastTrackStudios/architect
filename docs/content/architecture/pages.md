@@ -289,9 +289,11 @@ broken save keeps the last good page.
 
 ## Actions as files
 
-> **Status: landed on the desk and iOS (2026-11, #536)** in
-> `architect-pages` (feature `actions`). In a browser: the next layer of
-> this stack (#536, with the web host's #495).
+> **Status: landed (2026-11, #536)** in `architect-pages`: natively
+> (feature `actions`, desktop and iOS) and in a browser (feature `web`,
+> `WebPages::register_actions`; the web lab runs the showcase's Recipe
+> scaler, `apps/sandbox/web/test/actions.test.mjs`). The web app hosting
+> installed extensions at all is #495's.
 
 An extension with any logic of its own once needed a compiled part: a
 page could call actions, but an action ran as Rust, a process or a WASI
@@ -404,6 +406,17 @@ settles.
   (`VAULT_*`) write files and are not part of it.
 - **On reload** a running action finishes on the old code; the next run
   loads the module again.
+- **In a browser** (`features/pages/src/web/actions.rs`): each run is a
+  Web Worker of its own on the browser's engine — the worker a page
+  runs in (`web/page.js`, its action mode), with the same prelude and
+  bridge — its host calls answered by the extension's `WebHost`.
+  `WebPages::run_action` runs one; `WebPages::register_actions` puts a
+  manifest's TypeScript actions on an Action List. No `QuickJS` and no
+  JSPI, so Safari runs them. Its limits are a browser page's: each unit
+  within `Limits::frame` (the worker terminated past it), loading within
+  `Limits::load`; a browser cannot cap a worker's memory. What the
+  browser's host does not answer yet (prompts, pickers, `ui.notify`) is
+  refused there; the prelude's `notify` reaches the page's notify sink.
 - **Where it stops**: an interpreter. Not for heavy computation
   (engraving, parsing a DAW project, anything per frame) and never on
   the audio path (#528): those are Rust, called from TypeScript as

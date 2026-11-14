@@ -10,8 +10,9 @@
 //! the host service), and the Board's three the page runs (`board`: the
 //! Board's own are its Rust extension's, which is not built for a
 //! browser). It opens a page in the main pane — the Board, its Preact page
-//! (`?page=preact`), or one of the checks in `pages/` (`?page=runaway`,
-//! `?page=net`) — mounts the
+//! (`?page=preact`), one of the checks in `pages/` (`?page=runaway`,
+//! `?page=net`), or the showcase's Recipe scaler, an extension written
+//! only in TypeScript (`?page=recipes`, `src/recipes.rs`) — mounts the
 //! counter's `counter` view below it, and shows how the page keeps up:
 //! each animation frame's gap, the longest of the last second, while a
 //! worker counts primes. Built and served by `just sandbox-web`
@@ -43,6 +44,7 @@ const MANIFEST: &str = include_str!("../../wasi-counter/extension.toml");
 const THEMES: [&str; 3] = ["catppuccin-mocha", "catppuccin-latte", "zinc"];
 
 mod board;
+mod recipes;
 
 /// The Board: its manifest and its page files, the desktop lab's own.
 const BOARD: &str = include_str!("../../board/extension.toml");
@@ -88,6 +90,8 @@ fn folder(page: &str) -> Option<(PageFolder, &'static str)> {
             PageFolder::new(&format!("{page}.tsx"), CHECK_PAGES.iter().copied()),
             CHECKS,
         )),
+        // The showcase's Recipe scaler: TypeScript actions and its page.
+        "recipes" => Some((recipes::folder(), recipes::MANIFEST)),
         _ => None,
     }
 }
@@ -147,6 +151,14 @@ pub fn lab_status() -> String {
             },
         )
     })
+}
+
+/// A note of the Recipe scaler's stand-in vault, as JSON (`null` when
+/// there is none): what the lab's browser tests read.
+#[wasm_bindgen]
+#[must_use]
+pub fn lab_note(path: String) -> String {
+    recipes::note(&path).map_or_else(|| "null".to_owned(), |n| n.to_string())
 }
 
 /// A save of the open page's file: `text` in place of its entry's.
@@ -244,6 +256,10 @@ async fn run() -> Result<(), String> {
     board::register(&list, &board).map_err(|e| e.to_string())?;
     let pages = WebPages::new();
     pages.set_theme(theme());
+    // The Recipe scaler's TypeScript actions, each run in a Web Worker,
+    // over a vault of the tab's own (`?page=recipes`).
+    recipes::vault(&list).map_err(|e| e.to_string())?;
+    let _ = recipes::register(&pages, &list)?;
     let port = web_sys::window()
         .and_then(|w| w.location().port().ok())
         .unwrap_or_default();

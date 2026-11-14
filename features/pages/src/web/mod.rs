@@ -39,9 +39,14 @@
 //!   line and column ([`crate::tsx::remap`]). [`WebPage::reload`] is a
 //!   save: the page loads again in a fresh worker, swapped in once it
 //!   has rendered.
+//! - **TypeScript actions** (#536): a `typescript` extension's actions run
+//!   in the same worker, one per run ([`WebPages::run_action`],
+//!   [`WebPages::register_actions`], `web/actions.rs`).
 
 // Nothing is `Send` in a browser: everything here is on its one thread.
 #![allow(clippy::future_not_send)]
+
+mod actions;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
@@ -531,18 +536,7 @@ impl PageInner {
 
     fn script(&self) -> Result<String, String> {
         let app = self.app.upgrade().ok_or("its app is gone")?;
-        if let Some(url) = app.script.borrow().clone() {
-            return Ok(url);
-        }
-        let source = PAGE_JS.replacen(AT_PRELUDE, PRELUDE, 1);
-        let parts = js_sys::Array::of1(&JsValue::from_str(&source));
-        let options = web_sys::BlobPropertyBag::new();
-        options.set_type("text/javascript");
-        let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options)
-            .map_err(|e| format!("{e:?}"))?;
-        let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|e| format!("{e:?}"))?;
-        *app.script.borrow_mut() = Some(url.clone());
-        Ok(url)
+        script(&app)
     }
 
     fn start(&self) -> Result<Run, String> {
@@ -844,6 +838,23 @@ impl PageInner {
             });
         });
     }
+}
+
+/// The page worker's script (`page.js` around the prelude), as a `blob:`
+/// URL: made once per app. A TypeScript action's worker is the same.
+fn script(app: &App) -> Result<String, String> {
+    if let Some(url) = app.script.borrow().clone() {
+        return Ok(url);
+    }
+    let source = PAGE_JS.replacen(AT_PRELUDE, PRELUDE, 1);
+    let parts = js_sys::Array::of1(&JsValue::from_str(&source));
+    let options = web_sys::BlobPropertyBag::new();
+    options.set_type("text/javascript");
+    let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options)
+        .map_err(|e| format!("{e:?}"))?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(|e| format!("{e:?}"))?;
+    *app.script.borrow_mut() = Some(url.clone());
+    Ok(url)
 }
 
 /// A page's host call (the prelude's `call(kind, a, b)`), answered as its
