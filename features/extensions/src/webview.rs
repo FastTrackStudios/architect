@@ -601,12 +601,14 @@ mod tests {
         let dir = package();
         let outside = dir.path().parent().unwrap().join("secret.txt");
         let _ = std::fs::write(&outside, "no");
-        for path in ["/../secret.txt", "/dist/%2e%2e/%2e%2e/secret.txt", "/dist/..%2f..%2fsecret.txt", "//etc/passwd", "/dist\\..\\..\\secret.txt"] {
+        for path in ["/../secret.txt", "/dist/%2e%2e/%2e%2e/secret.txt", "/dist/..%2f..%2fsecret.txt", "/dist\\..\\..\\secret.txt"] {
             let e = serve("demo.web", dir.path(), path).unwrap_err();
             assert!(matches!(e, AssetError::Outside(_)), "{path}: {e:?}");
             assert_eq!(e.status(), 403);
         }
         assert_eq!(serve("demo.web", dir.path(), "/nope.js").unwrap_err().status(), 404);
+        // A root is read inside the package, never the disk's.
+        assert_eq!(serve("demo.web", dir.path(), "//etc/passwd").unwrap_err().status(), 404);
         let e = serve("demo.web", dir.path(), &url("other.ext", "index.html")).unwrap_err();
         assert!(matches!(e, AssetError::Foreign { .. }), "{e:?}");
         let _ = std::fs::remove_file(outside);
@@ -662,6 +664,27 @@ mod tests {
         assert!(theme_css("dark", []).contains("color-scheme:dark"));
         assert!(COMPONENTS_CSS.contains(".arch-button"));
         assert!(RUNTIME_JS.contains("window.architect"));
+    }
+
+    #[test]
+    fn the_sdk_names_every_host_call() {
+        // features/extensions/web/webview.d.ts types every op the host has.
+        let dts = include_str!("../web/webview.d.ts");
+        // Every name `HostRequest::op` gives, read from its match.
+        let source = include_str!("hostcall.rs");
+        let body = source
+            .split_once("pub const fn op(&self) -> &'static str {")
+            .and_then(|(_, rest)| rest.split_once("\n    }\n"))
+            .map_or("", |(body, _)| body);
+        let ops: Vec<&str> = body
+            .split("=> \"")
+            .skip(1)
+            .filter_map(|rest| rest.split_once('"').map(|(op, _)| op))
+            .collect();
+        assert!(ops.len() > 40, "{ops:?}");
+        for op in ops {
+            assert!(dts.contains(&format!("op: \"{op}\"")), "webview.d.ts has no {op}");
+        }
     }
 
     #[test]

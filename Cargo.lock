@@ -857,6 +857,7 @@ dependencies = [
  "architect-theme-picker",
  "architect-time-tracker",
  "architect-ui",
+ "architect-webview",
  "architect-workspace",
  "architect-workspace-hack",
  "base64 0.22.1",

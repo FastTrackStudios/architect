@@ -35,6 +35,10 @@
       "types": "./node.d.ts",
       "default": "./node.js"
     },
+    "./webview": {
+      "types": "./webview.d.ts",
+      "default": "./webview.js"
+    },
     "./package.json": "./package.json"
   },
   "types": "./index.d.ts",
@@ -54,6 +58,8 @@
     "sanitize.js",
     "view.js",
     "world.js",
+    "webview.js",
+    "webview.d.ts",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
