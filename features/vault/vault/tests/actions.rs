@@ -158,3 +158,62 @@ fn writes_land_on_disk_and_read_back() {
             .is_err()
     );
 }
+
+#[test]
+fn a_notes_metadata_reads_its_headings_tasks_blocks_and_fields() {
+    let (tmp, list) = lab();
+    std::fs::write(
+        tmp.path().join("Notes/Tasks.md"),
+        "---\nstatus: active\n---\n# Week\nowner:: Sam\n## Monday\n- [ ] Call Sam [due:: 2026-11-20] ^call\n  - [x] Find the number\n",
+    )
+    .unwrap();
+    run(&list, "VAULT_RELOAD", "");
+    let m = run(&list, "VAULT_METADATA", r#"{"path":"Notes/Tasks.md"}"#);
+    assert_eq!(m["headings"][1]["text"], "Monday", "{m}");
+    // Tasks are indices into the list items.
+    assert_eq!(m["tasks"], serde_json::json!([0, 1]), "{m}");
+    let items = &m["list_items"];
+    assert_eq!(items[0]["section"], "Monday", "{m}");
+    assert_eq!(items[0]["block"], "call", "{m}");
+    assert_eq!(items[1]["done"], true, "{m}");
+    assert_eq!(items[1]["parent"], 7, "{m}");
+    assert_eq!(m["blocks"][0]["id"], "call", "{m}");
+    assert_eq!(m["fields"][0]["key"], "owner", "{m}");
+    assert_eq!(m["fields"][1]["value"], "2026-11-20", "{m}");
+    // A second read is the same (from the cache), and a change is seen.
+    assert_eq!(run(&list, "VAULT_METADATA", r#"{"path":"Notes/Tasks.md"}"#), m);
+    std::fs::write(tmp.path().join("Notes/Tasks.md"), "# Changed\n").unwrap();
+    run(&list, "VAULT_RELOAD", "");
+    let changed = run(&list, "VAULT_METADATA", r#"{"path":"Notes/Tasks.md"}"#);
+    assert_eq!(changed["headings"][0]["text"], "Changed", "{changed}");
+
+    // Neither a note nor a folder: refused, never the whole vault unasked.
+    assert!(list.run_json("VAULT_METADATA", b"{}").is_err());
+    // A page at a time, in path order, with the next page's cursor.
+    let first = run(&list, "VAULT_METADATA", r#"{"folder":"","limit":2}"#);
+    let paths = |v: &Value| -> Vec<String> {
+        v["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|n| n["path"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(paths(&first).len(), 2, "{first}");
+    let next = first["next"].as_str().unwrap().to_owned();
+    let second = run(
+        &list,
+        "VAULT_METADATA",
+        &format!(r#"{{"folder":"","limit":100,"cursor":"{next}"}}"#),
+    );
+    assert!(second["next"].is_null(), "the last page");
+    let mut all = paths(&first);
+    all.extend(paths(&second));
+    let mut sorted = all.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(all, sorted, "in order, none twice");
+    assert_eq!(all.len(), 6, "{all:?}");
+    let notes = run(&list, "VAULT_METADATA", r#"{"folder":"Notes"}"#);
+    assert!(paths(&notes).iter().all(|p| p.starts_with("Notes/")));
+}

@@ -21,6 +21,10 @@ pub const SELECTION: &str = "selection";
 /// The app's documents: open them, read them (`reads`), and list and
 /// watch them; change them (`writes`).
 pub const DOCUMENTS: &str = "documents";
+/// The vault's actions (`VAULT_READ`, `VAULT_METADATA`, `VAULT_CREATE`,
+/// …): an extension runs them only with `reads` (read-only ones) or
+/// `writes` (the rest) `= ["documents"]`, as the document calls.
+pub const VAULT_ACTIONS: &str = "VAULT_";
 /// The images and lyrics files of a note its view draws (#669).
 ///
 /// Art, chart images and synced lyrics, read-only and size-capped
@@ -443,6 +447,41 @@ impl Capabilities {
         }
     }
 
+    /// [`Self::may_run`] for an action of the app's, run from the
+    /// extension (the host service's `run`, the actions it lists): past
+    /// that rule, a `VAULT_*` action ([`VAULT_ACTIONS`]) needs
+    /// `reads = ["documents"]` (read-only) or `writes` (the rest). Kept
+    /// apart from [`Self::may_run`], the rule a browser's favourites share.
+    ///
+    /// # Errors
+    ///
+    /// What [`Self::may_run`] refuses, or the documents it lacks.
+    pub fn may_run_app(
+        &self,
+        own: &str,
+        id: &str,
+        effect: Reach,
+    ) -> Result<(), (&'static str, String)> {
+        // The vault's actions read and change the person's notes: running
+        // them is reading (or, past read-only, changing) the documents, so
+        // they need what the document calls need, and the consent prompt
+        // says so ("Read your documents").
+        if id.starts_with(VAULT_ACTIONS) {
+            let (needs, have, cap) = if effect == Reach::ReadOnly {
+                ("reads", self.may_read(DOCUMENTS), "reads.documents")
+            } else {
+                ("writes", self.may_write(DOCUMENTS), "writes.documents")
+            };
+            if !have {
+                return Err((
+                    cap,
+                    format!("{id} is the vault's: it needs {needs} = [\"documents\"]"),
+                ));
+            }
+        }
+        self.may_run(own, id, effect)
+    }
+
     /// Whether it may run action `id` of `effect` (past its own
     /// namespace, `own`): the capability it lacks and why, when it may
     /// not.
@@ -662,5 +701,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The vault's actions are the documents: a read-only one needs
+    /// `reads = ["documents"]`, any other `writes`, past the actions
+    /// grant itself.
+    #[test]
+    fn the_vaults_actions_need_the_documents() {
+        let run = |c: &Capabilities, id: &str, e: Reach| c.may_run_app("ACME_", id, e).err().map(|(c, _)| c);
+        let only_actions = caps(&["VAULT_"], Reach::Mutating, &[]);
+        assert_eq!(run(&only_actions, "VAULT_METADATA", Reach::ReadOnly), Some("reads.documents"));
+        assert_eq!(run(&only_actions, "VAULT_READ", Reach::ReadOnly), Some("reads.documents"));
+        let reader = caps(&["VAULT_"], Reach::Mutating, &["documents"]);
+        assert_eq!(run(&reader, "VAULT_METADATA", Reach::ReadOnly), None);
+        assert_eq!(run(&reader, "VAULT_CREATE", Reach::Mutating), Some("writes.documents"));
+        let mut writer = reader.clone();
+        writer.writes = vec!["documents".to_owned()];
+        assert_eq!(run(&writer, "VAULT_CREATE", Reach::Mutating), None);
+        // Other actions are as they were.
+        let other = caps(&["BASES_"], Reach::ReadOnly, &[]);
+        assert_eq!(run(&other, "BASES_ROWS", Reach::ReadOnly), None);
     }
 }

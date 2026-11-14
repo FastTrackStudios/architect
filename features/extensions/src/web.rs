@@ -388,7 +388,7 @@ impl WebHost {
     pub fn may_run(&self, info: &ActionInfo) -> bool {
         let me = &self.inner;
         me.may
-            .may_run(&me.manifest.action_prefix(), &info.id, reach(info.effect))
+            .may_run_app(&me.manifest.action_prefix(), &info.id, reach(info.effect))
             .is_ok()
     }
 

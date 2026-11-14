@@ -49,6 +49,7 @@ A vault is a folder of markdown: notes, their properties (YAML frontmatter), the
 | `VAULT_STATUS` | read | folder, counts, bases that failed to parse, unresolved links |
 | `VAULT_LIST {folder?}` | read | notes in path order: path, title, folder |
 | `VAULT_READ {path}` | read | properties, body, tags, links out (and where each resolves), backlinks |
+| `VAULT_METADATA {path} \| {folder, limit?, cursor?}` | read | a note's parsed metadata by line: headings, list items (depth, parent, section), tasks (indices into the list items), block ids, inline fields (`key:: value`, `[k:: v]`, `(k:: v)`); or a page `{notes, next}` of the notes' under `folder` (`""` the whole vault, `limit` 100 up to 1000); neither is refused; parsed outside the lock, cached by mtime (`features/vault/vault-obsidian/src/metadata.rs` `metadata`). An extension runs any `VAULT_*` only with `reads`/`writes = ["documents"]` |
 | `VAULT_SEARCH {query, limit?}` | read | notes whose title or text holds the query, with the first matching line |
 | `VAULT_QUERY_BASE {path, view?}` | read | a `.base`'s views: columns and grouped rows |
 | `VAULT_CREATE {path, body?, properties?}` | mutating | a new note (`properties` a JSON object); a taken path is refused |

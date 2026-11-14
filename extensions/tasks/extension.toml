@@ -43,6 +43,9 @@ path = "extensions/tasks"
 [capabilities]
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "INBOX_LIST", "INBOX_PROCESS", "CAPTURE_ADD"]
 effect = "mutating"
+reads = ["documents"]
+# The vault's actions change notes: the documents (VAULT_*).
+writes = ["documents"]
 
 [[actions]]
 id = "TASKS_LIST"

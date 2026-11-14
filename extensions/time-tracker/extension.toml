@@ -41,6 +41,9 @@ path = "extensions/time-tracker"
 [capabilities]
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN"]
 effect = "mutating"
+reads = ["documents"]
+# The vault's actions change notes: the documents (VAULT_*).
+writes = ["documents"]
 
 [[actions]]
 id = "TIME_START"

@@ -396,7 +396,10 @@ fn templater_lite_declares_its_page_its_slash_row_its_key_and_its_reach() {
         m.capabilities.actions,
         ["VAULT_LIST", "VAULT_READ", "VAULT_CREATE", "EXT_VIEW_OPEN"]
     );
-    assert_eq!(m.capabilities.writes, ["editor"]);
+    // The vault's actions are the documents: it reads them and makes
+    // notes, so it asks for both (`capabilities::VAULT_ACTIONS`).
+    assert_eq!(m.capabilities.reads, ["documents"]);
+    assert_eq!(m.capabilities.writes, ["editor", "documents"]);
     // C11: a slash row for the date, and a key for it.
     let slash = &m.contributes.slash;
     assert_eq!(slash.len(), 1);
