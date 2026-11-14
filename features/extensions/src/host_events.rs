@@ -336,6 +336,10 @@ impl Host {
 
     /// Calls [`Self::tick`] every `every` on a thread of its own, for as
     /// long as the host lives (once: a second call does nothing).
+    ///
+    /// A browser has no threads: there the thread is not started (the
+    /// spawn fails) and the app calls [`Self::tick`] from a timer of its
+    /// own (`apps/web/src/app/extensions.rs`).
     pub fn run_clock(&self, every: Duration) {
         if self.event_state().ticking.swap(true, Ordering::AcqRel) {
             return;

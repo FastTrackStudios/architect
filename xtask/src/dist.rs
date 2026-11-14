@@ -209,7 +209,7 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
 
 /// Whether the distribution crate at `manifest` has a `web` feature: a
 /// web build of its own (`cargo metadata`).
-fn has_web_build(manifest: &Path) -> Result<bool, String> {
+fn has_web_build(manifest: &Path) -> Result<Option<PathBuf>, String> {
     let out = Command::new(cargo())
         .args([
             "metadata",
@@ -230,7 +230,13 @@ fn has_web_build(manifest: &Path) -> Result<bool, String> {
     let manifest = manifest
         .canonicalize()
         .unwrap_or_else(|_| manifest.to_path_buf());
-    Ok(meta
+    // Its workspace's lockfile: the wasm-bindgen its build links is the
+    // one whose CLI must bind it.
+    let lock = meta
+        .get("workspace_root")
+        .and_then(serde_json::Value::as_str)
+        .map(|r| Path::new(r).join("Cargo.lock"));
+    let web = meta
         .get("packages")
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -240,7 +246,26 @@ fn has_web_build(manifest: &Path) -> Result<bool, String> {
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|m| Path::new(m) == manifest)
         })
-        .any(|p| p.get("features").and_then(|f| f.get("web")).is_some()))
+        .any(|p| p.get("features").and_then(|f| f.get("web")).is_some());
+    Ok(lock.filter(|_| web))
+}
+
+/// Architect's `web` profile (its root `Cargo.toml`), handed to a
+/// distribution's build as `--config`, so a workspace of its own needs no
+/// `[profile.web]` (#495).
+const WEB_PROFILE: [&str; 5] = [
+    "profile.web.inherits=\"release\"",
+    "profile.web.opt-level=\"z\"",
+    "profile.web.lto=\"fat\"",
+    "profile.web.codegen-units=1",
+    "profile.web.strip=\"symbols\"",
+];
+
+/// A distribution's own web build: its wasm, and the lockfile whose
+/// wasm-bindgen binds it.
+struct WebBuild {
+    wasm: PathBuf,
+    lock: PathBuf,
 }
 
 /// The distribution's own web build (#495): its library for
@@ -248,17 +273,17 @@ fn has_web_build(manifest: &Path) -> Result<bool, String> {
 /// `<out>/architect_web.wasm` (the name the bundle's loader imports).
 /// `None`: this repo's distribution (`architect-web` is its build, which
 /// `scripts/web-bundle.sh` makes) or a crate with no `web` feature.
-fn build_web(opts: &Options, out: &Path) -> Result<Option<PathBuf>, String> {
+fn build_web(opts: &Options, out: &Path) -> Result<Option<WebBuild>, String> {
     let Some(manifest) = &opts.manifest_path else {
         return Ok(None);
     };
-    if !has_web_build(manifest)? {
+    let Some(lock) = has_web_build(manifest)? else {
         eprintln!(
             "dist: {} has no `web` feature: its web bundle is the Architect app's wasm, without its linked extensions (#495)",
             manifest.display()
         );
         return Ok(None);
-    }
+    };
     let mut cmd = Command::new(cargo());
     cmd.current_dir(root())
         .args(["build", "--message-format", "json-render-diagnostics"])
@@ -272,6 +297,9 @@ fn build_web(opts: &Options, out: &Path) -> Result<Option<PathBuf>, String> {
         .arg("--manifest-path")
         .arg(manifest)
         .args(["--no-default-features", "--features", "web"]);
+    for setting in WEB_PROFILE {
+        cmd.arg("--config").arg(setting);
+    }
     if let Some(dir) = &opts.target_dir {
         cmd.arg("--target-dir").arg(dir);
     }
@@ -302,7 +330,7 @@ fn build_web(opts: &Options, out: &Path) -> Result<Option<PathBuf>, String> {
         .ok_or_else(|| "the web build made no .wasm (is its lib a cdylib?)".to_owned())?;
     let to = out.join("architect_web.wasm");
     std::fs::copy(&wasm, &to).map_err(|e| format!("{} → {}: {e}", wasm.display(), to.display()))?;
-    Ok(Some(to))
+    Ok(Some(WebBuild { wasm: to, lock }))
 }
 
 /// What the binary says it is (`<bin> distribution`).
@@ -651,8 +679,10 @@ pub fn run_cli(opts: &Options) -> Result<(), String> {
             .arg(&web)
             .env("ARCHITECT_DISTRIBUTION", &json);
         // Its own wasm, its linked extensions in it (#495).
-        if let Some(wasm) = build_web(opts, &out)? {
-            script.env("ARCHITECT_WEB_WASM", &wasm);
+        if let Some(built) = build_web(opts, &out)? {
+            script
+                .env("ARCHITECT_WEB_WASM", &built.wasm)
+                .env("ARCHITECT_WEB_LOCK", &built.lock);
         }
         run_script(&mut script)?;
         made.push(("web", web.clone()));
