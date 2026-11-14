@@ -21,7 +21,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, extname, normalize } from 'node:path';
+import { join, extname, normalize, relative, isAbsolute } from 'node:path';
 
 const BUNDLE = process.env.ARCHITECT_WEB_BUNDLE;
 const SHOTS = process.env.ARCHITECT_SHOTS;
@@ -32,6 +32,8 @@ const browser = process.env.FIREFOX || which('firefox');
 const skip = BUNDLE && browser ? false : 'needs ARCHITECT_WEB_BUNDLE (just showcase-web-shots) and a Firefox (FIREFOX=…)';
 if (process.env.ARCHITECT_BROWSER_REQUIRED && skip) throw new Error(`ARCHITECT_BROWSER_REQUIRED: ${skip}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/// How long one WebDriver BiDi command may take.
+const SEND_MS = 60000;
 const freePort = () => new Promise((ok) => { const srv = createNetServer(); srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => ok(port)); }); });
 
 function appPolicy() {
@@ -50,7 +52,10 @@ async function front() {
   const srv = createServer((req, res) => {
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     let file = normalize(join(BUNDLE, path));
-    if (!file.startsWith(normalize(BUNDLE))) { res.statusCode = 403; res.end(); return; }
+    // Inside the bundle, not merely a path that starts like it
+    // (`/x/web-bundle-other`).
+    const rel = relative(normalize(BUNDLE), file);
+    if (rel.startsWith('..') || isAbsolute(rel)) { res.statusCode = 403; res.end(); return; }
     if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html');
     if (!existsSync(file)) { res.statusCode = 404; res.end(); return; }
     const headers = { 'content-type': TYPES[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' };
@@ -84,13 +89,28 @@ async function firefox(scheme) {
     await sleep(250);
     try { const s = new WebSocket(`ws://127.0.0.1:${port}/session`); await new Promise((ok, no) => { s.onopen = ok; s.onerror = no; }); ws = s; } catch {}
   }
-  if (!ws) { try { process.kill(-proc.pid, 'SIGKILL'); } catch {} throw new Error('firefox did not start (unshare -r -m needed)'); }
+  const kill = () => { try { process.kill(-proc.pid, 'SIGKILL'); } catch {} try { rmSync(profile, { recursive: true, force: true }); } catch {} };
+  if (!ws) { kill(); throw new Error('firefox did not start (unshare -r -m needed)'); }
   let id = 0;
   const waiting = new Map();
   ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); m.type === 'error' ? w.no(new Error(`${m.error}: ${m.message}`)) : w.ok(m.result); } };
-  const send = (method, params = {}) => new Promise((ok, no) => { const i = ++id; waiting.set(i, { ok, no }); ws.send(JSON.stringify({ id: i, method, params })); });
-  await send('session.new', { capabilities: {} });
-  const context = (await send('browsingContext.create', { type: 'tab' })).context;
+  // Every command answers in SEND_MS, or fails: a browser that stops
+  // answering ends the test rather than hangs it.
+  const send = (method, params = {}) => new Promise((ok, no) => {
+    const i = ++id;
+    const timer = setTimeout(() => { waiting.delete(i); no(new Error(`${method}: no answer in ${SEND_MS} ms`)); }, SEND_MS);
+    waiting.set(i, { ok: (v) => { clearTimeout(timer); ok(v); }, no: (e) => { clearTimeout(timer); no(e); } });
+    ws.send(JSON.stringify({ id: i, method, params }));
+  });
+  let context;
+  try {
+    await send('session.new', { capabilities: {} });
+    context = (await send('browsingContext.create', { type: 'tab' })).context;
+  } catch (e) {
+    try { ws.close(); } catch {}
+    kill();
+    throw e;
+  }
   return {
     go: (url) => send('browsingContext.navigate', { context, url, wait: 'complete' }),
     viewport: (width, height) => send('browsingContext.setViewport', { context, viewport: { width, height } }),
@@ -135,10 +155,11 @@ async function openNote(b, folder, name, phone) {
 const GROUPS = ['R Runtimes', 'L Install and lifecycle', 'C Contributions', 'H Host services', 'U Drawing and input', 'W The web app'];
 
 for (const scheme of ['light', 'dark']) {
-  test(`/app/?showcase opens the showcase vault (${scheme})`, { skip }, async () => {
+  test(`/app/?showcase opens the showcase vault (${scheme})`, { skip, timeout: 300000 }, async () => {
     const f = await front();
-    const b = await firefox(scheme);
+    let b;
     try {
+      b = await firefox(scheme);
       for (const [width, height, phone] of [[1280, 844, false], [390, 844, true]]) {
         await b.viewport(width, height);
         await b.go(`${f.origin}/app/?showcase`);
@@ -179,7 +200,7 @@ for (const scheme of ['light', 'dark']) {
         await b.shot(`c11-the-editor-${width}-${scheme}`);
       }
     } finally {
-      await b.close();
+      if (b) await b.close();
       f.close();
     }
   });
