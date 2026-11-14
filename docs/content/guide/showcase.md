@@ -22,6 +22,12 @@ each platform the row claims.
 | Web | `/app/?showcase`: the web app's demo mode on the same vault, in the tab's memory (`apps/web/src/demo.rs`) | - |
 | iOS | a TestFlight build (the iOS workstream) | the simulator on airlock |
 
+The desktop screenshots so far come from `just showcase-shots plain`
+(Architect's own app with the same vault and examples), while `just
+showcase` runs the standard distribution by default; the standard
+distribution's shots are `just showcase-shots standard`, after building
+it.
+
 `just showcase-publish PUSH=1` puts the screenshots on the `media` branch
 under `710-showcase/<platform>/`, where the cells below link them.
 
@@ -83,7 +89,7 @@ frames, nothing an extension author can target. Every web cell below is
 | C8 | Base view types | ⚠️ not shown; the Tasks extension's board is one | ❌ #495 | ⚠️ not shown | Openers sampler | - |
 | C9 | Navigator providers; file-tree icons and badges | ⚠️ icons and colours through `NAVIGATOR_ICON`; the generic file-row badge is drawn only in a test, not the app's tree | ❌ #495 | ⚠️ same as desktop | Iconize-lite | `features/extensions/tests/host_ui_view.rs` |
 | C10 | Embeds: fence renderers and inline embeds | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Dataview-lite | `features/pages/tests/embed.rs` |
-| C11 | The editor: commands on the selection, keymaps by node, decorations, slash rows | ✅ [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-1280-dark.png) | ❌ #495 | ⚠️ not shown; keys need a keyboard | Outline | `features/extensions/tests/editor.rs` |
+| C11 | The editor: commands on the selection, keymaps by node, decorations, slash rows | ⚠️ decorations and widgets shown (the outline example marking TODOs, gutter markers, the count widget): [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-1280-dark.png); keymaps by node, commands on the selection and slash rows tested only. The gutter markers overlap the list bullets | ❌ #495 | ⚠️ not shown; keys need a keyboard | Outline | `features/extensions/tests/editor.rs` |
 | C12 | Favourites and phone tabs | ⚠️ not shown | ❌ #495 for an extension's; the app's own favourites run | ⚠️ not shown | - | - |
 | C13 | Themes and tokens | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Settings and theme | `features/extensions/tests/themes.rs` |
 

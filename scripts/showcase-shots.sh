@@ -67,6 +67,12 @@ cleanup() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
     for s in "${started[@]}"; do
         (cd "$loft" && nix run .#dev -- --stop "$s" >/dev/null 2>&1) || true
+        # A compositor can outlive a failed stop: say so rather than leave
+        # it running unnoticed.
+        if (cd "$loft" && nix run .#dev -- --list 2>/dev/null) | awk -v s="$s" '$1 == s && $2 == "running" { found = 1 } END { exit !found }'; then
+            echo "showcase-shots: session $s is still listed after --stop; stop it with loft-dev --stop $s" >&2
+            continue
+        fi
         # A stopped session leaves its folder (about 200 MB) on the
         # runtime tmpfs: this script made it, so it goes too.
         rm -rf "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/loft-dev-$s"
@@ -77,10 +83,23 @@ trap cleanup EXIT
 for width in "${widths[@]}"; do
     session="showcase-$width-$$"
     envf="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/loft-dev-$session/session.env"
-    (cd "$loft" && setsid -f nix run .#dev -- --session "$session" "$loft" </dev/null >"$out/loft-$width.log" 2>&1)
+    # Recorded first, so a session that half-starts is still stopped.
     started+=("$session")
+    # Headless and isolated, said rather than left to the defaults: its own
+    # output, D-Bus and XDG_RUNTIME_DIR, so nothing here can reach the
+    # person's desktop or their running Architect.
+    (cd "$loft" && setsid -f nix run .#dev -- --session "$session" --headless --isolated "$loft" </dev/null >"$out/loft-$width.log" 2>&1)
     for _ in $(seq 1 240); do [ -f "$envf" ] && break; sleep 0.5; done
     [ -f "$envf" ] || { echo "showcase-shots: session $session did not start ($out/loft-$width.log)" >&2; exit 1; }
+    # Every action below reaches the app's control socket under the
+    # session's XDG_RUNTIME_DIR: refuse a session that would hand us the
+    # host's (the person's real app).
+    session_runtime="$(set -a; . "$envf"; printf '%s' "${XDG_RUNTIME_DIR:-}")"
+    host_runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -z "$session_runtime" ] || [ "$session_runtime" = "$host_runtime" ]; then
+        echo "showcase-shots: session $session is not isolated (XDG_RUNTIME_DIR $session_runtime)" >&2
+        exit 1
+    fi
     rules="$(dirname "$envf")/overrides/niri.kdl"
     for _ in $(seq 1 60); do [ -f "$rules" ] && break; sleep 0.5; done
     sleep 2

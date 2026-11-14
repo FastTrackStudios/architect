@@ -21,8 +21,9 @@ trap 'rm -f "$index"' EXIT
 export GIT_INDEX_FILE="$index"
 git read-tree origin/media
 added=0
-for dir in target/showcase/*/; do
-    platform="$(basename "$dir")"
+for platform in desktop web ios; do
+    dir="target/showcase/$platform/"
+    [ -d "$dir" ] || continue
     for f in "$dir"*.png; do
         [ -f "$f" ] || continue
         blob="$(git hash-object -w "$f")"
