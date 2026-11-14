@@ -39,7 +39,9 @@ use serde_json::{Value, json};
 const ID: &str = "showcase.recipes";
 
 fn repo(path: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(path)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(path)
 }
 
 // ---- the vault's actions, in memory -------------------------------------
@@ -121,14 +123,13 @@ fn vault(list: &ActionList, notes: &Notes) {
         Effect::ReadOnly,
         move |_: &ActionCaller, a: ListArgs| {
             let folder = a.folder.unwrap_or_default();
-            let out: Vec<Value> = n
-                .0
-                .lock()
-                .unwrap()
-                .keys()
-                .filter(|p| folder.is_empty() || p.starts_with(&format!("{folder}/")))
-                .map(|p| json!({ "path": p }))
-                .collect();
+            let out: Vec<Value> =
+                n.0.lock()
+                    .unwrap()
+                    .keys()
+                    .filter(|p| folder.is_empty() || p.starts_with(&format!("{folder}/")))
+                    .map(|p| json!({ "path": p }))
+                    .collect();
             Ok::<_, String>(raw(&Value::Array(out)))
         },
     )
