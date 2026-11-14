@@ -29,7 +29,9 @@ export default function Chart() {
       <div style={{ color: "$muted-foreground", fontSize: 12, paddingBottom: 4 }}>
         By {data.value?.by ?? "…"} ({theme.scheme})
       </div>
-      <svg width={w} height={h2} viewBox={`0 0 ${w} ${h2}`} role="img">
+      {/* The fence's width, whatever it is (a phone's too): the drawing
+          scales from its viewBox. */}
+      <svg width="100%" viewBox={`0 0 ${w} ${h2}`} style={{ maxWidth: 480, display: "block" }} role="img">
         {bars.map((b, i) => {
           const y = gap + i * (rowH + gap);
           const len = ((w - labelW - 40) * b.count) / max;
