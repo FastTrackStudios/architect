@@ -4,12 +4,9 @@ tags: [showcase, start]
 ---
 # Showcase
 
-One note per capability an extension needs (architect#710), each saying
-what to try and what you should see. The status of each on desktop, web
-and iOS is the matrix in the docs: `docs/content/guide/showcase.md`.
+One note per capability an extension needs (architect#710), each saying what to try and what you should see. The status of each on desktop, web and iOS is the matrix in the docs: `docs/content/guide/showcase.md`.
 
-The example extensions live in `examples/showcase/`. On the desk they
-run as development copies: edit one and save, and it reloads.
+The example extensions live in `examples/showcase/`. On the desk they run as development copies: edit one and save, and it reloads.
 
 ## R: Runtimes
 
