@@ -283,7 +283,10 @@ pub fn Embedded(
             "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 16px;",
         )
     } else {
-        ("note-embed", "")
+        // At a note's head: the same gap below it as the core list
+        // leaves (`architect_media::ui::MediaList`), so the property
+        // table does not butt against the view.
+        ("note-embed", "margin: 0 0 20px;")
     };
     let current = s["item"]["id"].as_str().unwrap_or_default().to_owned();
     let tracks = s["tracks"].as_u64().unwrap_or(0);
