@@ -1569,6 +1569,7 @@ dependencies = [
  "architect-workspace-hack",
  "dioxus",
  "lucide-dioxus",
+ "pulldown-cmark",
  "serde_json",
  "serde_yaml",
  "tracing",

@@ -114,9 +114,10 @@ where
 
 /// Whether `path` ends in one of `names` after a `/`.
 fn ends_in(path: &str, names: &[String; 2]) -> bool {
-    names
-        .iter()
-        .any(|n| path.strip_suffix(n.as_str()).is_some_and(|b| b.ends_with('/')))
+    names.iter().any(|n| {
+        path.strip_suffix(n.as_str())
+            .is_some_and(|b| b.ends_with('/'))
+    })
 }
 
 /// The last segment of a path.
@@ -253,7 +254,11 @@ mod tests {
             ("Recordings/Joy.mp3", ""),
             ("[[../x]]", ""),
         ] {
-            assert_eq!(index.resolve(link, folder), r(link, folder), "{link} in {folder}");
+            assert_eq!(
+                index.resolve(link, folder),
+                r(link, folder),
+                "{link} in {folder}"
+            );
         }
     }
 

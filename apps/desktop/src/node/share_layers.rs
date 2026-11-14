@@ -566,25 +566,15 @@ impl LayerRules {
             }
         }
         // A recording or cover a note attaches only through its media
-        // properties (`Entry::listening`, #668), and no note links in its
-        // body, is a listening layer's when no rule places it: the
-        // reference (what an engine plays the song's mix from), never the
-        // page, so a page-only link serves none it did not serve before.
-        let linked: BTreeSet<&str> = entries
-            .iter()
-            .flat_map(|e| {
-                e.files
-                    .iter()
-                    .filter(|f| !e.listening.contains(f))
-                    .map(String::as_str)
-            })
-            .collect();
+        // properties (`Entry::listening`, #668) is a listening layer's when
+        // no rule places it: the reference (what an engine plays the
+        // song's mix from), never the page, so a page-only link serves none
+        // it did not serve before. Another note linking it in its body
+        // never lowers it: that note may be outside the share, and a note
+        // outside never lowers a file.
         for entry in entries {
             for file in &entry.listening {
-                if entry.files.contains(file)
-                    && !linked.contains(file.as_str())
-                    && !placed_by_rule.contains(file.as_str())
-                {
+                if entry.files.contains(file) && !placed_by_rule.contains(file.as_str()) {
                     let held = out.entry(file.clone()).or_insert(Listen::Reference);
                     *held = (*held).max(Listen::Reference);
                 }
@@ -673,20 +663,39 @@ mod tests {
         let entries = [
             // Its recording and cover named only by `recording:`/`cover:`.
             listening(
-                entry("Joy/Joy.md", Some("song"), &["Joy/take.mp3", "Joy/cover.png", "Joy/a.png"]),
+                entry(
+                    "Joy/Joy.md",
+                    Some("song"),
+                    &["Joy/take.mp3", "Joy/cover.png", "Joy/a.png"],
+                ),
                 &["Joy/take.mp3", "Joy/cover.png"],
             ),
-            // Another note's recording a third note links in its body.
-            listening(entry("Eve/Eve.md", None, &["Eve/take.mp3"]), &["Eve/take.mp3"]),
+            // Another note's recording a third note (in the share or not)
+            // links in its body: still the reference's.
+            listening(
+                entry("Eve/Eve.md", None, &["Eve/take.mp3"]),
+                &["Eve/take.mp3"],
+            ),
             entry("Notes.md", None, &["Eve/take.mp3"]),
         ];
         let none = LayerRules::default();
         let placed = LayerRules::place(&none.current(), &entries).unwrap();
         assert_eq!(placed.get("Joy/take.mp3"), Some(&Listen::Reference));
         assert_eq!(placed.get("Joy/cover.png"), Some(&Listen::Reference));
-        assert_eq!(placed.get("Joy/a.png"), None, "linked in the body: the page's");
-        assert_eq!(placed.get("Eve/take.mp3"), None, "linked in a body: the page's");
-        assert_eq!(within(&entries, &placed, Listen::Page)[0].files, ["Joy/a.png"]);
+        assert_eq!(
+            placed.get("Joy/a.png"),
+            None,
+            "linked in the body: the page's"
+        );
+        assert_eq!(
+            placed.get("Eve/take.mp3"),
+            Some(&Listen::Reference),
+            "another note's body never lowers it"
+        );
+        assert_eq!(
+            within(&entries, &placed, Listen::Page)[0].files,
+            ["Joy/a.png"]
+        );
 
         // A rule that places it, at any layer, wins: the page too.
         let page = ShareLayersDecl {

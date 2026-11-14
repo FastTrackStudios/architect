@@ -659,8 +659,13 @@ impl Shares {
                 return placed.clone();
             }
         }
-        // A note the vault could not read may place files: unknown.
-        let placed = if view.unread.is_empty() {
+        // A note the vault could not read may place files: unknown, while
+        // there are rules. With none, a note only places its own
+        // property-attached files at the reference (#668), and one that
+        // does not read attaches none: the notes that read are placed, so
+        // one unreadable note never holds back every file of a default
+        // link.
+        let placed = if view.unread.is_empty() || current.is_empty() {
             let notes = view.notes.get_or_init(|| listing::every_note(&view.vault));
             LayerRules::place(&current, notes).map(Arc::new)
         } else {
