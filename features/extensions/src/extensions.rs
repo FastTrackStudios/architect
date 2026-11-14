@@ -675,7 +675,8 @@ impl Extensions {
                             .find(|r| r.id == l.id)
                             .cloned()
                             .unwrap_or_else(|| crate::project::Requirement::new(&l.id));
-                        plan.missing.push((r, crate::project::Missing::CannotRun(why)));
+                        plan.missing
+                            .push((r, crate::project::Missing::CannotRun(why)));
                     }
                     None => kept.push(l),
                 }
