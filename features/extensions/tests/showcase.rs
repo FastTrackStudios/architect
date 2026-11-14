@@ -124,44 +124,56 @@ fn raw(v: &Value) -> RawJson {
 /// and answering what the app's do.
 fn vault(list: &ActionList, notes: &Notes) {
     let n = notes.clone();
-    list.register_with(&LIST, Effect::ReadOnly, move |_: &ActionCaller, a: ListArgs| {
-        let folder = a.folder.unwrap_or_default();
-        let paths: Vec<String> = n.0.lock().unwrap().keys().cloned().collect();
-        let out: Vec<Value> = paths
-            .iter()
-            .filter(|p| folder.is_empty() || p.starts_with(&format!("{folder}/")))
-            .map(|p| {
-                let title = p.rsplit('/').next().unwrap().trim_end_matches(".md");
-                let parent = p.rsplit_once('/').map_or("", |(f, _)| f);
-                json!({ "path": p, "title": title, "folder": parent })
-            })
-            .collect();
-        Ok::<_, String>(raw(&Value::Array(out)))
-    })
+    list.register_with(
+        &LIST,
+        Effect::ReadOnly,
+        move |_: &ActionCaller, a: ListArgs| {
+            let folder = a.folder.unwrap_or_default();
+            let paths: Vec<String> = n.0.lock().unwrap().keys().cloned().collect();
+            let out: Vec<Value> = paths
+                .iter()
+                .filter(|p| folder.is_empty() || p.starts_with(&format!("{folder}/")))
+                .map(|p| {
+                    let title = p.rsplit('/').next().unwrap().trim_end_matches(".md");
+                    let parent = p.rsplit_once('/').map_or("", |(f, _)| f);
+                    json!({ "path": p, "title": title, "folder": parent })
+                })
+                .collect();
+            Ok::<_, String>(raw(&Value::Array(out)))
+        },
+    )
     .unwrap();
     let n = notes.clone();
-    list.register_with(&READ, Effect::ReadOnly, move |_: &ActionCaller, a: PathArgs| {
-        let (properties, body) = n
-            .get(&a.path)
-            .ok_or_else(|| format!("{}: no such note", a.path))?;
-        Ok::<_, String>(raw(&json!({
-            "path": a.path, "properties": properties, "body": body,
-            "tags": [], "links": [], "backlinks": [],
-        })))
-    })
+    list.register_with(
+        &READ,
+        Effect::ReadOnly,
+        move |_: &ActionCaller, a: PathArgs| {
+            let (properties, body) = n
+                .get(&a.path)
+                .ok_or_else(|| format!("{}: no such note", a.path))?;
+            Ok::<_, String>(raw(&json!({
+                "path": a.path, "properties": properties, "body": body,
+                "tags": [], "links": [], "backlinks": [],
+            })))
+        },
+    )
     .unwrap();
     let n = notes.clone();
-    list.register_with(&CREATE, Effect::Mutating, move |_: &ActionCaller, a: CreateArgs| {
-        if n.get(&a.path).is_some() {
-            return Err(format!("{}: already there", a.path));
-        }
-        let properties = match a.properties.as_deref() {
-            Some(text) => serde_json::from_str(text).map_err(|e| format!("properties: {e}"))?,
-            None => json!({}),
-        };
-        n.put(&a.path, properties, a.body.as_deref().unwrap_or(""));
-        Ok(raw(&json!({ "path": a.path })))
-    })
+    list.register_with(
+        &CREATE,
+        Effect::Mutating,
+        move |_: &ActionCaller, a: CreateArgs| {
+            if n.get(&a.path).is_some() {
+                return Err(format!("{}: already there", a.path));
+            }
+            let properties = match a.properties.as_deref() {
+                Some(text) => serde_json::from_str(text).map_err(|e| format!("properties: {e}"))?,
+                None => json!({}),
+            };
+            n.put(&a.path, properties, a.body.as_deref().unwrap_or(""));
+            Ok(raw(&json!({ "path": a.path })))
+        },
+    )
     .unwrap();
 }
 
@@ -196,7 +208,12 @@ fn the_notify_sampler_toasts_copies_picks_asks_and_opens_a_menu() {
     let _host = load(&list, &ui, "notify-sampler");
 
     // H7: a toast, said as the extension.
-    let out = run(&list, "SHOWCASE_NOTIFY_TOAST", &json!({ "text": "Hi", "kind": "success" })).unwrap();
+    let out = run(
+        &list,
+        "SHOWCASE_NOTIFY_TOAST",
+        &json!({ "text": "Hi", "kind": "success" }),
+    )
+    .unwrap();
     assert_eq!(out, "Hi");
     let n = ui.notices();
     assert_eq!((n[0].text.as_str(), n[0].kind.as_str()), ("Hi", "success"));
@@ -213,7 +230,10 @@ fn the_notify_sampler_toasts_copies_picks_asks_and_opens_a_menu() {
 
     // H10: a text prompt, a pick-one and a confirm.
     let out = run(&list, "SHOWCASE_NOTIFY_ASK", &Value::Null).unwrap();
-    assert_eq!(out, json!({ "name": "Grace", "colour": "amber", "sure": true }));
+    assert_eq!(
+        out,
+        json!({ "name": "Grace", "colour": "amber", "sure": true })
+    );
     assert!(
         ui.notices().iter().any(|n| n.text == "Grace likes amber"),
         "{:?}",
@@ -233,7 +253,10 @@ fn the_notify_sampler_asks_for_nothing_past_the_interface() {
     let package = Package::read(&example("notify-sampler")).unwrap();
     let caps = &package.manifest.capabilities;
     assert!(caps.actions.is_empty() && caps.hosts.is_empty() && caps.writes.is_empty());
-    assert_eq!(caps.ui, ["notify", "clipboard", "pickers", "prompts", "menus"]);
+    assert_eq!(
+        caps.ui,
+        ["notify", "clipboard", "pickers", "prompts", "menus"]
+    );
     // It says what it stands in for (#710).
     assert!(package.manifest.description.contains("Stands in for"));
 }
@@ -288,7 +311,12 @@ fn templater_lite_makes_a_note_from_a_template_asking_for_its_fields() {
         .answer(json!("the band"));
     let _host = load(&list, &ui, "templater-lite");
 
-    let out = run(&list, "SHOWCASE_TEMPLATER_NEW", &json!({ "date": "2026-11-14" })).unwrap();
+    let out = run(
+        &list,
+        "SHOWCASE_TEMPLATER_NEW",
+        &json!({ "date": "2026-11-14" }),
+    )
+    .unwrap();
     assert_eq!(out, "Inbox/Standup.md");
     let (properties, body) = notes.get("Inbox/Standup.md").expect("the note made");
     assert_eq!(body, "# Standup\n\nMet on 2026-11-14 with the band.\n");
@@ -298,7 +326,11 @@ fn templater_lite_makes_a_note_from_a_template_asking_for_its_fields() {
     );
     let asked: Vec<&str> = ui.asked().iter().map(|q| q.request.op()).collect();
     assert_eq!(asked, ["prompt", "prompt", "prompt"]);
-    assert!(ui.notices().iter().any(|n| n.text == "Made Inbox/Standup.md"));
+    assert!(
+        ui.notices()
+            .iter()
+            .any(|n| n.text == "Made Inbox/Standup.md")
+    );
 
     // Given everything, it asks nothing: what an agent or the CLI runs.
     let quiet = FakeUi::new();
@@ -331,7 +363,12 @@ fn templater_lite_inserts_the_date_at_the_cursor_as_one_undo_step() {
     host.set_editors(editor.clone());
     editor.put_caret("Due: ".len());
 
-    let out = run(&list, "SHOWCASE_TEMPLATER_DATE", &json!({ "date": "2026-11-14" })).unwrap();
+    let out = run(
+        &list,
+        "SHOWCASE_TEMPLATER_DATE",
+        &json!({ "date": "2026-11-14" }),
+    )
+    .unwrap();
     assert_eq!(out, "2026-11-14");
     assert_eq!(editor.text(), "Due: 2026-11-14\nnext");
     let _ = editor.undo();
@@ -342,11 +379,18 @@ fn templater_lite_inserts_the_date_at_the_cursor_as_one_undo_step() {
 fn templater_lite_declares_its_page_its_slash_row_and_its_reach() {
     let package = Package::read(&example("templater-lite")).unwrap();
     let m = &package.manifest;
-    assert!(m.description.contains("Stands in for Templater and QuickAdd"));
+    assert!(
+        m.description
+            .contains("Stands in for Templater and QuickAdd")
+    );
     // R3: its tab is a TSX page.
     let view = m.views.iter().find(|v| v.id == "templates").unwrap();
     assert_eq!(view.page.as_deref(), Some("pages/templates.tsx"));
-    assert!(example("templater-lite").join("pages/templates.tsx").is_file());
+    assert!(
+        example("templater-lite")
+            .join("pages/templates.tsx")
+            .is_file()
+    );
     // It reaches the vault only through these actions, and never deletes.
     assert_eq!(
         m.capabilities.actions,
