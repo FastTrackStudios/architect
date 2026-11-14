@@ -10,6 +10,9 @@ publish = false
 # WASI component extensions: Wasmtime in the app, on Pulley (iOS has no
 # JIT), the lab's WASI Counter when its component is found.
 wasi = ["architect-app/wasi"]
+# Extensions' `kind = "web"` views in a WKWebView in the pane (#222): the
+# desk host's wry child web view, on UIKit.
+webview = ["architect-app/webview"]
 
 [dependencies]
 architect-app = { workspace = true }
