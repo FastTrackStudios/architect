@@ -57,6 +57,7 @@ where the node reads them, never values in the environment.
 | `ARCHITECT_VAULTS` | none | `id=path,…`: the vaults it holds (a relative path is under the data dir) |
 | `ARCHITECT_SITES` | none | `/mount=vault,…`: vaults published as Sites |
 | `ARCHITECT_EXTENSIONS` | `<data dir>/extensions` | installed extensions, a package folder each (`<id>/extension.toml`): the fences they claim are drawn on share links and Sites ([below](#blocks-extensions-draw)) |
+| `ARCHITECT_EXTENSION_SECRETS` | none | its extensions' node secrets, set by its operator: a folder with a file each, `<ext id>/<secret id>`, as sops-nix writes them; none: an org admin sets them on the org lane, kept in `<data dir>/extension-secrets.json` ([below](#extensions-node-actions)) |
 | `ARCHITECT_ISSUER` | none | the account server, `https://auth.fasttrackstudio.app` |
 | `ARCHITECT_SESSION_FILE` | none | a file holding the account's session token |
 | `ARCHITECT_ORG` | none | the org it offers the account while the account shares none |
@@ -303,6 +304,40 @@ host_org = "fasttrackstudio"
 enrol_at = "https://architect.fasttrackstudio.app"
 enrol_org = "fasttrackstudio"
 ```
+
+## Extensions' node actions
+
+The node does sync, access control and only what truly needs a server.
+The one place extension code runs on it is a **node action** (#583): an
+installed extension's action with `runs = "node"`, which holds a secret
+the org's devices must never have, such as a bank-link token exchange
+with the provider's client secret
+(`docs/content/architecture/extensions.md`, "Server-side parts on the
+node").
+
+At start the node loads the node part of each package under
+`ARCHITECT_EXTENSIONS` (`apps/desktop/src/node/mod.rs` `node_actions`):
+- its node actions;
+- the secrets they hold;
+- the hosts it may `fetch`.
+
+Nothing else of the extension runs there. With `ARCHITECT_HOST_ORG`, it
+serves them on the org lane as `NodeActions`
+(`apps/desktop/src/node/org.rs` `OrgLane::with_node_actions`):
+- a member lists them and runs one;
+- an admin sees which secrets are set.
+
+The app on a person's device runs a node action like any other action,
+through its signed-in account's org lane.
+
+**Secrets.** With `ARCHITECT_EXTENSION_SECRETS`, they are the operator's:
+a file each, `<dir>/<ext id>/<secret id>` (a final newline is dropped),
+read at start. Nothing on the lane sets one. Without it, an org admin
+sets each through `NodeActions::set_secret`. That call is insert-only:
+no call reads a value back.
+
+**Changing them.** The folder is read at start, so a deployment that adds,
+removes or bumps an extension restarts the node.
 
 ## Share links
 

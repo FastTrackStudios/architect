@@ -14,6 +14,7 @@
 //! | `ARCHITECT_VAULTS` | `[vaults]` | none | `id=path,…`: the vaults it holds (a relative path is under the data dir) |
 //! | `ARCHITECT_SITES` | `[sites]` | none | `/mount=vault,…`: vaults published as Sites |
 //! | `ARCHITECT_EXTENSIONS` | `extensions` | `<data dir>/extensions` | installed extensions, a package folder each (`<id>/extension.toml`): the fences they claim are drawn on share links and Sites (a relative path is under the data dir) |
+//! | `ARCHITECT_EXTENSION_SECRETS` | `extension_secrets` | none | its extensions' node secrets, set by its operator: a folder with a file each, `<ext id>/<secret id>` (as sops-nix writes them); none: an org admin sets them on the org lane (`NodeActions::set_secret`), kept in `<data dir>/extension-secrets.json`. The node runs installed extensions' node actions (`runs = "node"`, #583) on its org lane with them |
 //! | `ARCHITECT_ISSUER` | `issuer` | none | the account server (`https://auth.fasttrackstudio.app`) |
 //! | `ARCHITECT_SESSION_FILE` | `session_file` | none | a file holding the account's session token |
 //! | `ARCHITECT_ORG` | `org` | none | the org (slug) it offers the account when the account shares none yet |
@@ -89,6 +90,7 @@ pub struct Config {
     pub vaults: BTreeMap<String, PathBuf>,
     pub sites: BTreeMap<String, String>,
     pub extensions: Option<PathBuf>,
+    pub extension_secrets: Option<PathBuf>,
     pub issuer: Option<String>,
     pub session_file: Option<PathBuf>,
     pub org: Option<String>,
@@ -234,6 +236,7 @@ impl Default for Config {
             vaults: BTreeMap::new(),
             sites: BTreeMap::new(),
             extensions: None,
+            extension_secrets: None,
             issuer: None,
             session_file: None,
             org: None,
@@ -454,6 +457,9 @@ impl Config {
         }
         if let Some(v) = get("ARCHITECT_EXTENSIONS") {
             self.extensions = Some(PathBuf::from(v));
+        }
+        if let Some(v) = get("ARCHITECT_EXTENSION_SECRETS") {
+            self.extension_secrets = Some(PathBuf::from(v));
         }
         if let Some(v) = get("ARCHITECT_FILES_DIR") {
             self.files_dir = Some(PathBuf::from(v));

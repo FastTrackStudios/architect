@@ -963,6 +963,17 @@ pub fn LabApp() -> Element {
     // Extensions, and what they add to the window: the shell's chrome
     // (above the shell), a pane's context menu, the menus, their views.
     let ext_ui = extensions::use_lab_extensions(metronome);
+    // Extensions' node actions run on the org's node, as the account
+    // (#583); with no accounts (the sandbox) they say where they run.
+    use_hook(|| {
+        if let Some(accounts) = accounts {
+            ext_ui
+                .host()
+                .set_node(Some(std::sync::Arc::new(accounts::OrgNode(
+                    accounts.accounts(),
+                ))));
+        }
+    });
     // The Now Playing card's art: an item's cover from the app's vault.
     let now_playing_art = vault::use_now_playing_art();
     use_context_provider(|| ext_ui);
