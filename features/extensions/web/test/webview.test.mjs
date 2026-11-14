@@ -42,6 +42,7 @@ test('a web view app reaches the page only through its bridge', { skip, timeout:
     assert.ok(r.storage.error, `no storage in an opaque origin: ${JSON.stringify(r.storage)}`);
     assert.ok(r['parent dom'].error, 'the page’s document is not its');
     assert.ok(r['top navigation'].error, `no navigating the page: ${JSON.stringify(r['top navigation'])}`);
+    assert.equal(r.webrtc, 'undefined', 'no WebRTC past the policy');
     assert.equal(r.brand, '#6c5ce7');
     assert.equal(r.scheme, 'light');
     assert.equal(r.components, 'solid', 'the component sheet is installed');
@@ -51,6 +52,35 @@ test('a web view app reaches the page only through its bridge', { skip, timeout:
     assert.ok(page.escapes >= 1, 'an Escape handed the focus back');
     assert.deepEqual([...new Set(page.calls)].sort(), ['fetch', 'log', 'run']);
     assert.ok(!requests.includes('/package.json'), 'its own fetch never reached the server');
+  } finally {
+    await close();
+    server.close();
+  }
+});
+
+test('a frame that navigates away is stopped and never handed the bridge again', { skip, timeout: 60000 }, async () => {
+  const requests = [];
+  const server = await serve(root, (req) => requests.push(req.url), (path) => ({
+    'access-control-allow-origin': '*',
+    ...(path === '/test/webview-nav/index.html' ? { 'content-security-policy': WEBVIEW_CSP } : {}),
+  }));
+  const { tab, close } = await open();
+  try {
+    await tab.go(`${server.origin}/test/webview-nav.html`);
+    await tab.until('window.view && window.view.stopped', 'the host to stop the frame');
+    // Its navigation happened: the document it reached loaded…
+    for (let i = 0; i < 40 && !requests.includes('/outside-loaded'); i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
+    // …and no port was posted to it.
+    assert.ok(!requests.includes('/got-port'), `the outside document got the bridge: ${requests.join(' ')}`);
+    const page = JSON.parse(await tab.eval(`JSON.stringify({
+      logs: window.logs,
+      frames: document.querySelectorAll('iframe').length,
+      note: document.querySelector('[data-webview-stopped]')?.textContent ?? null,
+    })`));
+    assert.deepEqual(page.logs, ['about to leave'], 'it had the bridge before it left');
+    assert.equal(page.frames, 0, 'the frame is gone');
+    assert.match(page.note ?? '', /tried to leave its package/);
   } finally {
     await close();
     server.close();

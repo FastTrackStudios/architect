@@ -28,6 +28,10 @@ export interface WebViewOptions {
 
 export interface MountedWebView {
   frame: HTMLIFrameElement;
+  /** Whether it was stopped for navigating away from its package (the pane then says so). */
+  readonly stopped: boolean;
+  /** Loads its document again, with a fresh port (the only load after the first that gets one). */
+  reload(): void;
   setTheme(theme: WebViewTheme): void;
   setShown(shown: boolean): void;
   /** Passes an event on when the view listens for it. */
