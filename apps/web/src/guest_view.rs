@@ -477,7 +477,10 @@ mod tests {
         let served: HashSet<&str> = ["Gig/joy.mp3", "Gig/joy-live.mp3"].into();
         let q = queue(&link, &served);
         assert_eq!(q.len(), 2);
-        assert!(q.iter().all(|i| i.get("duration").is_none() && i["subtitle"] == "Isaac Watts"));
+        assert!(
+            q.iter()
+                .all(|i| i.get("duration").is_none() && i["subtitle"] == "Isaac Watts")
+        );
     }
 
     #[test]
