@@ -88,7 +88,7 @@ frames, nothing an extension author can target. Every web cell below is
 | H6 | `fetch` limited to the manifest's hosts | ⚠️ not shown | ❌ #495; CORS applies | ⚠️ not shown | Secrets and fetch | `features/extensions/tests/net.rs` |
 | H7 | Notifications: in-app toasts; OS notifications | ⚠️ toasts only; OS notifications #709 | ❌ #495 | ⚠️ toasts only (#709) | Notify sampler | `features/extensions/tests/host_ui.rs` |
 | H8 | The clipboard | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Notify sampler | `features/extensions/tests/host_ui.rs` |
-| H9 | Pickers for files, folders, photos | ⚠️ not shown | ❌ #495 | ❌ a pick answers `unsupported` (#708) | - | `features/extensions/tests/host_ui.rs` |
+| H9 | Pickers for files, folders, photos | ⚠️ not shown (a photo pick is a file picker for images) | ❌ #495 | ⚠️ UIKit's document and photo pickers (#708): a file, a folder, a save and photos picked and read on the Simulator (iPhone 16e, iOS 27, 390 pt); not yet on TestFlight or in a showcase example; dark only, as the iOS app is | - | `features/extensions/tests/host_ui.rs` (`a_photo_picked_is_one_it_may_read_and_not_write`, `every_interface_call_is_refused_outside_its_capabilities`); iOS screenshots on the `media` branch, `710-ios/` |
 | H10 | Prompts, confirms, pick-one | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Templater-lite, Notify sampler | `features/extensions/tests/host_ui.rs` |
 | H11 | Timers, cron hooks, background workers | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Timers sampler | `features/extensions/tests/events.rs`, `features/extensions/tests/workers.rs` |
 | H12 | Services between extensions (`[provides]` / `[requires]`) | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Services sampler | `features/extensions/tests/interop.rs` |
