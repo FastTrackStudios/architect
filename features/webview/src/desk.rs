@@ -26,9 +26,9 @@
 //!   phone's switcher) draws a still placeholder, never a second view.
 //!   When its `src` file changes (a development copy rebuilt), it reloads.
 //!
-//! Linux: WebKitGTK embeds a child only in an X11 window. Under Wayland
+//! Linux: `WebKitGTK` embeds a child only in an X11 window. Under Wayland
 //! (the spike in `docs/content/architecture/embedded-views.md`, "Web
-//! views") the pane says so and how to run Architect under XWayland
+//! views") the pane says so and how to run Architect under `XWayland`
 //! (`ARCHITECT_WEBVIEW_X11=1`).
 
 use std::borrow::Cow;
@@ -68,6 +68,7 @@ const HOLDER: &str = "data-webview";
 /// Provides [`WebViews`] for the app's window, drawing every `web` view
 /// with a native web view over `host`'s extensions. Call it once, near
 /// the app's root.
+#[allow(clippy::must_use_candidate)]
 pub fn use_desk_web_views(host: Host) -> WebViews {
     let provided = use_hook(move || {
         WebViews(Rc::new(move |ask: &WebAsk| {
@@ -119,7 +120,7 @@ thread_local! {
     static VIEWS: RefCell<HashMap<String, Native>> = RefCell::new(HashMap::new());
 }
 
-/// The URL a view opens for `path` in extension `id`'s package (WebView2
+/// The URL a view opens for `path` in extension `id`'s package (`WebView2`
 /// serves a custom protocol as `http://<scheme>.<host>/`).
 fn view_url(id: &str, path: &str) -> String {
     if cfg!(windows) {

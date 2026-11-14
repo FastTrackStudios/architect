@@ -279,9 +279,9 @@ fn Window() -> Element {
     rsx! { LabApp {} }
 }
 
-/// `ARCHITECT_WEBVIEW_X11=1` on Linux: the window opens under XWayland
+/// `ARCHITECT_WEBVIEW_X11=1` on Linux: the window opens under `XWayland`
 /// (`WAYLAND_DISPLAY` is dropped while `DISPLAY` is there), the one way a
-/// web view pane can be a child of it today (#222: WebKitGTK embeds a child
+/// web view pane can be a child of it today (#222: `WebKitGTK` embeds a child
 /// only in an X11 window; `docs/content/architecture/embedded-views.md`,
 /// "Web views").
 fn xwayland_for_web_views() {
