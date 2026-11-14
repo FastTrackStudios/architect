@@ -143,6 +143,7 @@ toml = { workspace = true }
 futures = "0.3"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
+architect-webview = { workspace = true, optional = true }
 # FILES_* (src/files.rs): the agent's HTTP client runs on a runtime of its
 # own; the window's executor is not tokio.
 tokio = { workspace = true, features = ["rt-multi-thread"] }
@@ -151,11 +152,12 @@ architect-extensions = { workspace = true, features = ["lsp"] }
 architect-editor = { workspace = true, features = ["lsp"] }
 architect-presence = { workspace = true, features = ["native"] }
 architect-capture = { workspace = true, features = ["native"] }
-architect-webview = { workspace = true, optional = true }
 # The first run's folder picker (`src/first_run.rs`).
 rfd = { workspace = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+# The web view kind's host on iOS too (#222 spike): wry's WKWebView.
+architect-webview = { workspace = true, optional = true }
 # FILES_* (src/files.rs) on a phone: the agent ARCHITECT_FILES_AGENT names,
 # through the same client on its own runtime.
 tokio = { workspace = true, features = ["rt-multi-thread"] }
