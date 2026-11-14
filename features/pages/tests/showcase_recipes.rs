@@ -287,7 +287,13 @@ fn its_typescript_actions_list_scale_and_write_a_shopping_list() {
         body.contains("Scaled from 4 servings of [[Pancakes]]"),
         "{body}"
     );
-    // It said so, as its extension.
+    // It said so, as its extension (a toast goes off the run's thread:
+    // it may come just after the answer).
+    let started = Instant::now();
+    while lab.ui.notices().is_empty() {
+        assert!(started.elapsed() < Duration::from_secs(5), "no toast");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     let notices = lab.ui.notices();
     let last = notices.last().unwrap();
     assert_eq!(last.text, "Shopping list: Shopping/Pancakes for 6.md");
