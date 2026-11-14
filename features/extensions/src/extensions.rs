@@ -133,6 +133,44 @@ impl Extensions {
         lock(&self.inner.sources).push(Arc::new(source));
     }
 
+    /// Searches and installs from `source` in place of the source of the
+    /// same name (a vault's carried archives, when another vault opens).
+    pub fn set_source(&self, source: impl Source + 'static) {
+        let name = source.name();
+        let mut sources = lock(&self.inner.sources);
+        sources.retain(|s| s.name() != name);
+        sources.push(Arc::new(source));
+    }
+
+    /// What opening the vault at `root` takes ("What a project needs"):
+    /// the extensions its `.architect/extensions.toml` names, checked as a
+    /// project's are ([`Self::open`]), the small ones it carries in
+    /// `.architect/extensions/` searched beside the registries (and
+    /// installed from there through the same check and prompt).
+    #[must_use]
+    pub fn open_vault(&self, root: &Path) -> crate::vault_needs::VaultNeeds {
+        let carried =
+            crate::vault_needs::Carried::new(root, self.inner.installs.clone(), self.publishers());
+        let refused = carried
+            .refused()
+            .into_iter()
+            .map(|(file, e)| (file, e.to_string()))
+            .collect();
+        self.set_source(carried);
+        match crate::vault_needs::read(root) {
+            Ok(requirements) => crate::vault_needs::VaultNeeds {
+                plan: self.runnable(&requirements, self.open(&requirements)),
+                refused,
+                error: None,
+            },
+            Err(error) => crate::vault_needs::VaultNeeds {
+                plan: Plan::default(),
+                refused,
+                error: Some(error),
+            },
+        }
+    }
+
     /// Searches and installs from `registries` too (the store's index and
     /// the ones a person adds, each trusting its own publishers' keys),
     /// and puts `EXT_REGISTRY_*` and `EXT_DEV` on the list
@@ -616,6 +654,35 @@ impl Extensions {
             },
             policy.as_ref(),
         )
+    }
+
+    /// `plan` with each listing whose manifest cannot run here (its
+    /// `platforms`, read from its archive: a registry's listing names only
+    /// a process's builds) moved to what cannot be had, with why.
+    fn runnable(&self, requirements: &Requirements, mut plan: Plan) -> Plan {
+        let cannot = |l: &Listing| {
+            let exact = VersionReq::parse(&format!("={}", l.version)).ok()?;
+            self.preview(&l.id, &exact).ok()?.cannot_run
+        };
+        for list in [&mut plan.install, &mut plan.offer] {
+            let mut kept = Vec::new();
+            for l in std::mem::take(list) {
+                match cannot(&l) {
+                    Some(why) => {
+                        let r = requirements
+                            .extensions
+                            .iter()
+                            .find(|r| r.id == l.id)
+                            .cloned()
+                            .unwrap_or_else(|| crate::project::Requirement::new(&l.id));
+                        plan.missing.push((r, crate::project::Missing::CannotRun(why)));
+                    }
+                    None => kept.push(l),
+                }
+            }
+            *list = kept;
+        }
+        plan
     }
 
     /// Installs what `plan` says to (the person said yes, once, to all of

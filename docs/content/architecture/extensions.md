@@ -4256,6 +4256,48 @@ overlay, a panel).
   extension's data is kept untouched, its views say what they need, and
   a required effect is bypassed and marked — never dropped.
 
+### Where a vault and a project name them
+
+A vault names the extensions it needs in `.architect/extensions.toml`; a
+project, in its own folder's `.architect/extensions.toml` (beside its
+`deck.json`). Both are `Requirements`, the same a project document keeps
+in its `meta` (`features/extensions/src/doc.rs`):
+
+```toml
+[[extensions]]
+id = "fts.metronome"
+name = "Metronome"
+version = "^0.1"     # the versions it works with; "*" for any
+required = true      # false: offered, not asked
+```
+
+Small extensions travel in the folder as signed archives,
+`.architect/extensions/*.archext` (`vault_needs::Carried`): a source beside
+the registries, each archive opened by the same check as a registry's
+(the org key, or a publisher a registry here trusts). An archive that does
+not pass is listed as refused, with why, and never run.
+
+`Extensions::open_vault` plans it (`features/extensions/src/vault_needs.rs`
+`VaultNeeds`: the `Plan`, the refused archives, a file that does not
+read); `EXT_NEEDS {folder}` answers the same to an agent. The app draws it
+over the Vault for the vault, or for the project on show
+(`apps/ui/src/extensions.rs` `VaultNeedsBanner`, with `MissingExtensions`):
+each required one, each optional one, each that cannot be had with why
+("no registry here has it", "it cannot run here (process)"), and **Install
+all**: one consent prompt for all of them, installed and loaded without a
+restart, then planned again. "Not now" puts it away for the run.
+
+Why `.architect/`: it is the vault's own folder (the decks' layouts are
+there) and syncs with the vault's files to every device and to a share's
+guests. #683 narrows which top-level dot-folders sync; `.architect/` is
+one that must (`extensions.toml` and `extensions/`).
+
+A share link's guest plans the same from the share's copy of the folder
+(`Extensions::open_vault` on it, or `EXT_NEEDS`), drawn with the same
+component.
+
+Tests: `features/extensions/tests/vault_needs.rs`.
+
 ## On each platform
 
 | | Data | WASM | Scripts | Processes |
