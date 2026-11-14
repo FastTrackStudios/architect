@@ -94,3 +94,9 @@ Tests: `features/vault/vault/tests/actions.rs`, `features/links/links/tests/acti
 Task's own layers on the vault stay there: its task, goal and area types (entity types over `vault-entity`, their property schemas), `transpose_key`, its server wiring (which org's vault a lane reaches, the MCP tools such as `query_base` with their bounds), its vault UI (`task:features/links/links-ui`), the `sync_vault_links` example (scripture references) and the spec rules that are Task's (`task:docs/spec/storage.md`).
 
 Bases (the views over `.base` files, their toolbar, the `BASES_*` actions, view types extensions add) are `architect-bases`: `references/bases.md`.
+
+## The vault index (`vault-query`, wasm-clean)
+
+- **Index** (`vault_query::index`): an `Entry` per note (title, props, inline tags, body links, headings, task lines; no body) and per `.base` (YAML). `Builder::sync(&dyn NoteSource)` is incremental (stamp, then text hash) and returns an `IndexDelta {from, to, put, gone}`; `Builder::since(rev)`; `vault_query::Built` keeps a builder over a source. `OpenVault` is a `NoteSource` (`OpenVault::revision`). Wire: JSON (`VaultIndex::to_bytes`, `IndexDelta::to_bytes`). Filter per reader with `filtered(may_read)`; a delta never names a hidden path.
+- **Sync** (`vault_proto::index_sync::VaultIndexSync`): `snapshot(vault)`, `since(vault, from)`; the node serves it on the org lane (a `read` of `vaults/**`).
+- `vault_live::bases`, `vault_live::refs` and `vault_obsidian::obsidian_parse` live in `vault-query` now (re-exported where they were).

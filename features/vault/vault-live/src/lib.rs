@@ -73,7 +73,8 @@
     clippy::unwrap_used,
     clippy::use_self
 )]
-pub mod bases;
+/// The `.base` parser and evaluator: `vault_query`'s (wasm-clean).
+pub use vault_query::bases;
 pub mod blocks;
 pub mod cook;
 /// Grouping rows by a value, `vault_proto::grouping` (wasm-clean, so the
@@ -84,7 +85,8 @@ pub mod lookup;
 pub mod mutate;
 pub mod own;
 pub mod property_schema;
-pub mod refs;
+/// Wikilink, blockref and tag values: `vault_query`'s (wasm-clean).
+pub use vault_query::refs;
 /// Rewriting the wikilinks that named a page after it is renamed.
 pub mod relink;
 /// `VaultSync` backend — canonical filesystem impl of the

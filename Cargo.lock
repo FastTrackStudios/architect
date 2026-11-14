@@ -1204,6 +1204,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vault",
  "vault-collab",
  "vault-live",
  "vault-proto",
@@ -19261,6 +19262,7 @@ dependencies = [
  "vault-live",
  "vault-obsidian",
  "vault-proto",
+ "vault-query",
 ]
 
 [[package]]
@@ -19341,6 +19343,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -19367,6 +19370,7 @@ dependencies = [
  "uuid",
  "vault-live",
  "vault-proto",
+ "vault-query",
  "walkdir",
 ]
 
@@ -19387,6 +19391,26 @@ dependencies = [
  "uuid",
  "vox",
  "vox-types",
+]
+
+[[package]]
+name = "vault-query"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "chrono",
+ "facet",
+ "indexmap",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "vault-proto",
 ]
 
 [[package]]

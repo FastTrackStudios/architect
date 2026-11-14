@@ -8,10 +8,15 @@
 //!   agent writes a note on the always-on node and every device that
 //!   syncs with it gets it.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+use vault::actions::{OpenVault, Watch};
 
 use architect_devices::Admission;
 use vault_live::Backend;
+use vault::query::Built;
+use vault_proto::index_sync::{IndexBytes, IndexError, VaultIndexSync};
 use vault_proto::{IfMatch, VaultSync as _, VaultSyncError};
 
 use super::catalog::VaultCatalog;
@@ -144,6 +149,11 @@ pub mod notes {
     pub use vault_proto::notes::*;
 }
 
+/// [`VaultIndexSync`]'s declaration: `vault_proto::index_sync`.
+pub mod index_sync {
+    pub use vault_proto::index_sync::*;
+}
+
 pub use node::Node;
 pub use notes::{Notes, NotesError};
 
@@ -170,6 +180,47 @@ pub struct NodeState {
     pub(crate) layers: Option<super::share_layers::LayerRules>,
     /// The org it hosts on its org lane, if any.
     pub(crate) hosts: Option<String>,
+    /// Each vault's index, for clients that do not hold it.
+    pub(crate) indexed: Indexed,
+}
+
+/// Each vault's index, by id, for clients that do not hold the vault
+/// ([`VaultIndexSync`]).
+///
+/// The vault read once, kept current by its watcher,
+/// its index built a note at a time (`vault_query::index::Builder`). The
+/// node answers no queries: a client runs them over its own copy of the
+/// index (`vault_query::QueryEngine`).
+#[derive(Clone, Default)]
+pub struct Indexed(Arc<Mutex<HashMap<String, Arc<(Built<OpenVault>, Option<Watch>)>>>>);
+
+impl Indexed {
+    /// Vault `id`'s index at `root`, the vault opened and watched the first
+    /// time it is asked for.
+    fn of(&self, id: &str, root: &std::path::Path) -> Result<Arc<(Built<OpenVault>, Option<Watch>)>, String> {
+        if let Some(held) = architect::lock(&self.0).get(id) {
+            return Ok(Arc::clone(held));
+        }
+        // Read outside the map's lock: a large vault takes a while.
+        let open = OpenVault::open(root).map_err(|e| e.to_string())?;
+        let watch = open
+            .watch(|_| {})
+            .map_err(|e| tracing::warn!(vault = %id, error = %e, "its index will not see outside edits"))
+            .ok();
+        let mut map = architect::lock(&self.0);
+        Ok(Arc::clone(
+            map.entry(id.to_owned())
+                .or_insert_with(|| Arc::new((Built::new(open), watch))),
+        ))
+    }
+}
+
+/// Whether the caller may read the note at `path`: what it may read is
+/// filtered here before a snapshot or a delta leaves the node. The lane's
+/// gate admits only its members (`read` on `vaults/**`, as `Notes`), who
+/// read every note today; per-note rules plug in here.
+const fn may_read(_path: &str) -> bool {
+    true
 }
 
 impl NodeState {
@@ -275,6 +326,54 @@ impl Notes for NodeState {
 
     async fn create(&self, vault: String, path: String, text: String) -> Result<(), NotesError> {
         self.put_note(vault, path, text, IfMatch::CreateOnly).await
+    }
+}
+
+impl NodeState {
+    /// Runs `f` over vault `vault`'s index off the runtime's threads
+    /// (opening a vault reads every note).
+    async fn indexed<R: Send + 'static>(
+        &self,
+        vault: String,
+        f: impl FnOnce(&Built<OpenVault>) -> R + Send + 'static,
+    ) -> Result<R, IndexError> {
+        let root = self
+            .backend
+            .root(&vault)
+            .map_err(|_| IndexError::NotFound(vault.clone()))?;
+        let indexed = self.indexed.clone();
+        tokio::task::spawn_blocking(move || {
+            let held = indexed.of(&vault, &root).map_err(IndexError::Refused)?;
+            Ok(f(&held.0))
+        })
+        .await
+        .map_err(|e| IndexError::Refused(e.to_string()))?
+    }
+}
+
+impl VaultIndexSync for NodeState {
+    async fn snapshot(&self, vault: String) -> Result<IndexBytes, IndexError> {
+        self.indexed(vault, |built| {
+            let index = built.index().filtered(may_read);
+            IndexBytes {
+                revision: index.revision,
+                bytes: index.to_bytes(),
+            }
+        })
+        .await
+    }
+
+    async fn since(&self, vault: String, from: u64) -> Result<Option<IndexBytes>, IndexError> {
+        self.indexed(vault, move |built| {
+            built.since(from).map(|d| {
+                let d = d.filtered(may_read);
+                IndexBytes {
+                    revision: d.to,
+                    bytes: d.to_bytes(),
+                }
+            })
+        })
+        .await
     }
 }
 

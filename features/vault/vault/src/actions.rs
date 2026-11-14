@@ -24,6 +24,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effect, RawJson};
@@ -34,6 +35,7 @@ use vault_obsidian::obsidian_parse::{FrontmatterEntry, parse_frontmatter};
 use vault_obsidian::{LinkIndex, SelfWriteGuard, Vault, VaultPage, mutate};
 
 mod edit;
+pub mod query;
 pub use edit::{Changes, Renamed, Watch, folders_in};
 /// A change to a note's tags ([`OpenVault::edit_tags`], [`OpenVault::edit_tags_everywhere`]).
 pub use vault_obsidian::tag_edit::TagEdit;
@@ -64,6 +66,40 @@ pub struct OpenVault {
     /// Its folders as last read ([`Self::refresh`] says which came and
     /// went).
     folders: Arc<RwLock<BTreeSet<String>>>,
+    /// Moved on by every write, before it takes the lock and after it
+    /// lets it go: odd while one is under way ([`Self::revision`]).
+    revision: Arc<AtomicU64>,
+}
+
+/// The vault held for writing: its [`OpenVault::revision`] moves on again
+/// once it is let go.
+struct Writing<'a> {
+    /// `Some` until it is dropped.
+    vault: Option<std::sync::RwLockWriteGuard<'a, Vault>>,
+    revision: &'a AtomicU64,
+}
+
+impl std::ops::Deref for Writing<'_> {
+    type Target = Vault;
+    #[allow(clippy::expect_used)]
+    fn deref(&self) -> &Vault {
+        self.vault.as_ref().expect("held until dropped")
+    }
+}
+
+impl std::ops::DerefMut for Writing<'_> {
+    #[allow(clippy::expect_used)]
+    fn deref_mut(&mut self) -> &mut Vault {
+        self.vault.as_mut().expect("held until dropped")
+    }
+}
+
+impl Drop for Writing<'_> {
+    fn drop(&mut self) {
+        // Let the vault go first, then say the write is done.
+        drop(self.vault.take());
+        self.revision.fetch_add(1, Ordering::Release);
+    }
 }
 
 impl std::fmt::Debug for OpenVault {
@@ -86,7 +122,17 @@ impl OpenVault {
             vault: Arc::new(RwLock::new(Vault::open(root)?)),
             guard: Arc::new(SelfWriteGuard::new()),
             folders: Arc::new(RwLock::new(edit::folders_in(root))),
+            revision: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    /// Where the vault is in its writes: it moves on with each one (twice:
+    /// odd while it is under way), so a reader that saw the same even
+    /// revision before and after it read saw one state of the vault
+    /// (the vault index's builder reads it, [`query`]).
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
     }
 
     /// The folder.
@@ -108,10 +154,16 @@ impl OpenVault {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn write(&self) -> std::sync::RwLockWriteGuard<'_, Vault> {
-        self.vault
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn write(&self) -> Writing<'_> {
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        Writing {
+            vault: Some(
+                self.vault
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            ),
+            revision: &self.revision,
+        }
     }
 
     /// The notes with every word of `query` in their title or text, as

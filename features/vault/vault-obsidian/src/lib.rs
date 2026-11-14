@@ -56,7 +56,8 @@ pub mod links;
 // during migration — they depended on the deleted
 // `knowledge_proto::{Page, Block, Vault}` entity types. Add
 // them back against `vault_obsidian::Vault` if needed.
-pub mod obsidian_parse;
+/// A note parsed: `vault_query`'s (wasm-clean).
+pub use vault_query::obsidian_parse;
 pub mod vault;
 pub mod walker;
 pub mod watcher;
@@ -89,7 +90,8 @@ pub use wordcount::{WordCount, page_wordcount, vault_wordcount};
 
 pub mod base_query;
 pub use base_query::{
-    QueryError, find_base, query_all_views, query_view, rows_from_markdown, run_base, vault_to_rows,
+    QueryError, find_base, page_to_row, query_all_views, query_view, rows_from_markdown, run_base,
+    vault_to_rows,
 };
 
 pub mod mutate;
