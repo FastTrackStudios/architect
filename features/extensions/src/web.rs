@@ -1203,6 +1203,8 @@ pub struct Pane {
     stack: Vec<(web_sys::Node, Option<u64>)>,
     listening: HashMap<String, Closure<dyn FnMut(web_sys::Event)>>,
     on_event: Rc<dyn Fn(ViewEvent)>,
+    /// The elements it paints as scenes (`crate::scene`, #175).
+    scenes: crate::web_scene::Scenes,
 }
 
 impl std::fmt::Debug for Pane {
@@ -1222,6 +1224,7 @@ impl Pane {
             stack: Vec::new(),
             listening: HashMap::new(),
             on_event: Rc::new(on_event),
+            scenes: crate::web_scene::Scenes::default(),
         };
         p.reset();
         p
@@ -1247,7 +1250,15 @@ impl Pane {
     /// The first that could not be applied: it reached outside the pane,
     /// named a node that is not there, or set what a view may not.
     pub fn apply(&mut self, edits: impl IntoIterator<Item = Edit>) -> Result<(), String> {
-        edits.into_iter().try_for_each(|e| self.edit(e))
+        edits.into_iter().try_for_each(|e| self.edit(e))?;
+        self.redraw_scenes();
+        Ok(())
+    }
+
+    /// Draws its scenes again at their elements' sizes now: after a
+    /// frame, and when the page that holds it is laid out anew (a resize).
+    pub fn redraw_scenes(&self) {
+        self.scenes.redraw(&*self.on_event);
     }
 
     fn failed(&mut self, why: &str) {
@@ -1444,6 +1455,15 @@ impl Pane {
         };
         if name == "dangerous_inner_html" || name.starts_with("on") {
             return Err(format!("a view may not set {name}"));
+        }
+        // A scene (#175): drawn into a canvas in the element.
+        if name == crate::scene::SCENE_ATTR || name == crate::scene::TRANSFORM_ATTR {
+            let id = self.stack.last().and_then(|(_, id)| *id).unwrap_or(0);
+            let text = match &value {
+                Value::Text(t) => Some(t.as_str()),
+                _ => None,
+            };
+            return self.scenes.set(el, id, name, text, &*self.on_event);
         }
         // What the page forces on a link, a view neither changes nor
         // removes.

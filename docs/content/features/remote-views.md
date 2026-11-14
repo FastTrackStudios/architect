@@ -148,6 +148,70 @@ The budget is 16 ms from key to echo in a local pane (a frame at 60 Hz);
 the view answered any reach it as a handful
 (`moves_while_the_view_is_busy_are_coalesced_to_the_latest`).
 
+## Scenes: painting in a remote view
+
+A view can draw an element as an anyrender scene instead of DOM (#175):
+a drawing, a canvas, a graph, an arrangement. The scene is recorded in
+the extension's process, in content space, and the app draws it in its
+own window's scene (Vello through Blitz on the desk, a `<canvas>` in a
+browser).
+
+```rust
+use architect_extensions::scene::{RemoteScene, Affine};
+
+rsx! {
+    RemoteScene {
+        content: strokes(),                 // Rc<Vec<RenderCommand>>, in content space
+        transform: camera().transform(),    // pan and zoom
+        onpointermove: move |e| { /* draw, or pan */ },
+        onwheel: move |e| { /* zoom */ },
+        onresize: move |size| { /* its size in the pane */ },
+    }
+}
+```
+
+- **What crosses.** Two attributes of the element, so the wire needs
+  nothing new and Dioxus's diffing decides what is sent. The content goes
+  the first time as `<hash>\n<json>` (anyrender's own commands), and after
+  that as `<hash>` alone while both sides still hold it: each side keeps
+  the last 64 by the same rule (`SceneCache`). The transform is six
+  numbers. Panning and zooming change only the transform.
+- **Its size.** When the host lays the element out at a new size, it
+  sends `architect-resize`, which reaches the view as the element's
+  `input` (`RemoteScene`'s `onresize`).
+- **Input.** The element's handlers get pointer, wheel and key events in
+  its own coordinates, and a press holds the pointer (see Input above).
+- **A linked paint view as a process.** `linked::Builder::paint::<V>` (#591)
+  serves the same `PaintView` from a process copy: each frame it records
+  is a `RemoteScene`'s content, and the element's input comes back to it
+  as `ViewInput`s (`scene::remote_paint_root`).
+- **Limits.** Glyph runs don't cross, because a font's bytes would have
+  to go with them, so draw text as paths. Images and a backend's own
+  paints don't cross either, and a gradient crosses as its first stop's
+  colour. A browser replays the scene with Canvas 2D
+  (`features/extensions/src/web_scene.rs`). A paint view in a process
+  re-sends its whole scene for every frame it records; a view that pans
+  a lot should use `RemoteScene` with a transform.
+
+The example is `apps/sandbox/sketch`: freehand drawing with pan and zoom,
+a link graph whose nodes drag (a paint view through `Builder::paint`),
+and a 50-track arrangement. It stands in for Excalidraw, Canvas and the
+graph view.
+
+Measured (`cargo test -p architect-sandbox-sketch --test sketch
+arrangement_budget -- --ignored --nocapture`; debug build, THEBATTLESHIP;
+50 tracks of 40 clips, 2,000 fills):
+
+| | |
+|---|---|
+| the first scene | 236,124 bytes (JSON) |
+| a frame of panning | 12 bytes |
+| a frame of the sketch's Shift-drag pan and wheel zoom | 30 bytes |
+| host: the scene decoded | 3.35 ms, once |
+| host: the scene built at its transform (p50 / p99) | 0.47 / 0.56 ms |
+| the window's scene recorded (p50 / p99) | 0.62 / 0.86 ms |
+| a pan's round trip, pointer to new frame (p50 / p99) | 1.10 / 3.19 ms |
+
 ## Tests to read
 
 - `features/extensions/tests/remote_view.rs` (the test binary starts itself
@@ -165,6 +229,11 @@ the view answered any reach it as a handful
   composes into a field, the window's IME on and its caret area in window
   coordinates. `features/pages/tests/js.rs`
   `a_tsx_page_gets_pointer_wheel_and_composition_events`.
+- `apps/sandbox/sketch/tests/sketch.rs`: a stroke drawn in the process is
+  in the window's scene; panning and zooming send the transform, not the
+  scene; a graph node drags in a paint view served by its process.
+  `features/extensions/src/scene.rs` tests: a scene crosses once and then
+  by its hash, both sides forget the same scenes, transforms round-trip.
 
 ## Status
 

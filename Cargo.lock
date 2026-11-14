@@ -1327,6 +1327,7 @@ dependencies = [
 name = "architect-extensions"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
  "architect",
  "architect-commands",
  "architect-editor",
@@ -1360,6 +1361,7 @@ dependencies = [
  "futures-timer",
  "hex",
  "js-sys",
+ "peniko 0.6.1",
  "regex",
  "reqwest 0.12.28",
  "rfd",
@@ -1934,6 +1936,23 @@ dependencies = [
  "dioxus",
  "facet",
  "futures-util",
+ "tempfile",
+]
+
+[[package]]
+name = "architect-sandbox-sketch"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "futures",
  "tempfile",
 ]
 

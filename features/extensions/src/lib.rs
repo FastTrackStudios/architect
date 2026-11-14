@@ -103,6 +103,10 @@ pub mod interop_actions;
 mod invocation;
 #[cfg(any(feature = "linked", all(feature = "guest", unix)))]
 pub mod linked;
+#[cfg(feature = "scenes")]
+pub mod scene;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+mod web_scene;
 #[cfg(feature = "host")]
 pub mod logs;
 #[cfg(feature = "host")]

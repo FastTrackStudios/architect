@@ -64,10 +64,17 @@ crdt = ["dep:crdt"]
 # linked into the app as a built-in (its views Dioxus components in the
 # app's document), or served as a process by `guest`.
 linked = ["host", "dep:dioxus"]
-# A linked extension's paint views (`linked::Builder::paint`, #591): a
-# view that records an anyrender scene for its pane and takes the pane's
-# input, hosted as a Blitz widget (`architect_workspace::paint`).
-paint = ["linked", "architect-workspace/paint-ui"]
+# Scenes in remote views (`scene`, #175): an element a view paints as an
+# anyrender scene, carried by two attributes (content by hash, then a
+# transform). The guest's `RemoteScene`, the host's widget, the browser's
+# canvas.
+scenes = ["dep:anyrender", "dep:peniko"]
+# A paint view (`linked::Builder::paint`, #591): a `PaintView` that
+# records a scene for its pane and takes the pane's input. Linked in with
+# `paint-ui` it is a Blitz widget in the pane (`architect_workspace::paint`);
+# served by `guest` it is a `scene::RemoteScene`.
+paint = ["scenes", "architect-workspace/paint"]
+paint-ui = ["paint", "linked", "architect-workspace/paint-ui"]
 ui = [
     "host",
     "linked",
@@ -100,6 +107,7 @@ process = [
 ]
 guest = [
     "vox",
+    "scenes",
     "dep:vox-core",
     "dep:vox-stream",
     "dep:tokio",
@@ -140,6 +148,7 @@ pulley = ["wasi", "wasmtime/pulley"]
 # DOM (see docs/content/architecture/extensions.md, "On the web").
 web = [
     "vox",
+    "scenes",
     "dep:base64",
     "dep:architect",
     "architect/action-list",
@@ -154,7 +163,7 @@ web = [
 # inputs use (the portal on Linux, the system's panels on macOS and
 # Windows). Without it a pick is unsupported.
 pickers = ["ui", "dep:rfd"]
-remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
+remote = ["process", "ui", "scenes", "architect-theme/dioxus", "dep:blitz-dom", "blitz-dom/custom-widget", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
 # `[[share_layers]]` patterns and paths compared in one Unicode form (NFC).
@@ -220,6 +229,9 @@ tokio = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
+# A remote view's scenes (`scenes`): anyrender's commands as data.
+anyrender = { workspace = true, optional = true }
+peniko = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"], optional = true }
 futures-timer = { workspace = true, optional = true }
@@ -254,6 +266,11 @@ web-sys = { version = "0.3", optional = true, features = [
     "TouchList",
     "Touch",
     "CompositionEvent",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "CanvasWindingRule",
+    "Path2d",
+    "Window",
     "Node",
     "NodeList",
     "Text",
@@ -271,7 +288,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "paint"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net", "paint-ui"] }
 # tests/linked_paint.rs: a linked paint view's widget painted, as the
 # window's renderer does.
 blitz-paint = { workspace = true, features = ["custom-widget"] }
