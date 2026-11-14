@@ -800,11 +800,19 @@ mod tests {
 
     #[test]
     fn the_app_builds_with_wasi_unless_told_not_to() {
-        let never = |_: &std::path::Path| -> Result<bool, String> { Err("no manifest to read".to_owned()) };
+        let never =
+            |_: &std::path::Path| -> Result<bool, String> { Err("no manifest to read".to_owned()) };
         // This repo's app: wasi, the given features ignored (they are a
         // distribution crate's).
-        assert_eq!(with_wasi(&opts(None, &["x"], true), never).unwrap(), ["wasi"]);
-        assert!(with_wasi(&opts(None, &[], false), never).unwrap().is_empty());
+        assert_eq!(
+            with_wasi(&opts(None, &["x"], true), never).unwrap(),
+            ["wasi"]
+        );
+        assert!(
+            with_wasi(&opts(None, &[], false), never)
+                .unwrap()
+                .is_empty()
+        );
         // A crate that declares it: added once, given or not.
         let yes = |_: &std::path::Path| Ok(true);
         assert_eq!(
@@ -847,7 +855,11 @@ mod tests {
         let b = std::path::Path::new("/b/Cargo.toml");
         assert!(declares_feature(&meta, a, "wasi"));
         assert!(!declares_feature(&meta, b, "wasi"));
-        assert!(!declares_feature(&meta, std::path::Path::new("/c/Cargo.toml"), "gui"));
+        assert!(!declares_feature(
+            &meta,
+            std::path::Path::new("/c/Cargo.toml"),
+            "gui"
+        ));
     }
 
     #[test]
