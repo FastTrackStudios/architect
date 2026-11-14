@@ -1,0 +1,83 @@
+# The showcase's Toolbar sampler (#710: C2, C3): a toolbar docked on the
+# right and one on every note's header, a toggle whose tick follows its
+# state, a status item, a phone bar button, and rows in a file's and a
+# tab's context menus, each told where it was run from.
+id = "showcase.toolbar"
+name = "Toolbar sampler"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Toolbars with a toggle, a status item, a phone bar button and context-menu rows. Stands in for Editing Toolbar, Commander and Obsidian's status bar and file menu."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+ui = ["notify", "menus"]
+
+[[actions]]
+id = "SHOWCASE_TOOLBAR_FOCUS"
+name = "Toolbar sampler: focus mode"
+description = "Turns focus mode on or off: its buttons and menu row show a tick while it is on, and the status item says so."
+group = "Showcase"
+effect = "mutating"
+toggle = true
+script = "focus.luau"
+
+[[actions]]
+id = "SHOWCASE_TOOLBAR_WHERE"
+name = "Toolbar sampler: where am I"
+description = "Says in a toast where it was run from (a toolbar, a context menu, the palette) and on what. Answers {source, target, id, path}."
+group = "Showcase"
+script = "where.luau"
+
+[[actions]]
+id = "SHOWCASE_TOOLBAR_MENU"
+name = "Toolbar sampler: menu here"
+description = "Opens a menu at `x`, `y` and says which row was chosen."
+group = "Showcase"
+params = '{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}}}'
+script = "menu.luau"
+
+[[toolbars]]
+id = "showcase"
+title = "Showcase"
+where = "dock:right"
+
+[[toolbars.items]]
+action = "SHOWCASE_TOOLBAR_FOCUS"
+icon = "focus"
+label = "Focus"
+
+[[toolbars.items]]
+action = "SHOWCASE_TOOLBAR_WHERE"
+icon = "map-pin"
+label = "Where"
+
+[[toolbars]]
+id = "note"
+title = "Showcase (note)"
+where = "view:note"
+
+[[toolbars.items]]
+action = "SHOWCASE_TOOLBAR_FOCUS"
+icon = "focus"
+
+[[status]]
+id = "focus"
+text = "Focus off"
+icon = "focus"
+hint = "The Toolbar sampler's focus mode"
+
+[[bar]]
+action = "SHOWCASE_TOOLBAR_FOCUS"
+title = "Focus"
+icon = "focus"
+
+[[context]]
+target = "file:md"
+action = "SHOWCASE_TOOLBAR_WHERE"
+title = "Showcase: where is this note"
+
+[[context]]
+target = "tab"
+action = "SHOWCASE_TOOLBAR_WHERE"
+title = "Showcase: where is this tab"

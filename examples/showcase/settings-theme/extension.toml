@@ -1,0 +1,57 @@
+# The showcase's Settings and theme (#710: C5, C13, H4): a section on the
+# settings page whose values the extension reads, a theme in the theme
+# picker, and tokens of its own that follow whatever theme shows.
+id = "showcase.dusk"
+name = "Settings and theme"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "A settings section, a theme (Showcase Dusk) and tokens of its own; its settings and a count it keeps survive a restart. Stands in for Style Settings and Minimal Theme Settings."
+authors = ["FastTrackStudios"]
+
+[capabilities]
+ui = ["notify"]
+
+[[sections]]
+id = "showcase.dusk"
+title = "Showcase theme"
+icon = "palette"
+
+[[sections.settings]]
+key = "showcase.dusk.greeting"
+title = "Greeting"
+description = "What `Settings and theme: greet` says."
+control = "text"
+default = "Hello from the showcase"
+
+[[sections.settings]]
+key = "showcase.dusk.loud"
+title = "Say it loudly"
+control = "switch"
+default = false
+
+[[sections.settings]]
+key = "showcase.dusk.size"
+title = "Card radius"
+control = "slider"
+min = 0
+max = 24
+unit = "px"
+default = 10
+
+[[actions]]
+id = "SHOWCASE_DUSK_GREET"
+name = "Settings and theme: greet"
+description = "Says the greeting set on the settings page (in capitals when `Say it loudly` is on) and counts how often it has, in its data. Answers {text, times}."
+group = "Showcase"
+script = "greet.luau"
+
+[[themes]]
+path = "themes/showcase-dusk.json"
+
+# Its own tokens: defaults that follow the theme showing; a theme file,
+# the app or the person may set any of them (THEME_TOKEN_SET).
+[tokens]
+"dusk.card" = "mix($card, $primary, 0.12)"
+"dusk.edge" = "mix($border, $primary, 0.5)"
+"dusk.radius" = "10"
