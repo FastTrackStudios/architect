@@ -68,3 +68,11 @@ features = ["architect-editor/stories", "architect-editor/native"]
 name = "dev-stack"
 packages = ["xtask"]
 features = ["xtask/stack-test"]
+
+# The web view kind's desk host (#222): the package protocol's origin
+# check, navigation, host names and the overlay probes (src/desk.rs), in
+# the wry build (WebKitGTK from the dev shell).
+[[pass]]
+name = "webview-desk"
+packages = ["architect-webview"]
+features = ["architect-webview/desk"]
