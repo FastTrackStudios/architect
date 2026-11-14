@@ -42,8 +42,8 @@ frames, nothing an extension author can target. Every web cell below is
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
 | R1 | A linked extension, compiled into the distribution | ⚠️ not shown; the standard build links the first-party extensions and Studio's | ❌ listed, not compiled in (#495) | ⚠️ not shown; same host | Setlist viewer, Tasks, Calendar | `features/extensions/tests/linked.rs` |
-| R2 | A Luau script installed at run time; its actions and saved scripts | ⚠️ not shown | ❌ #495 | ⚠️ not shown; interpreted | Templater-lite | `features/extensions/tests/metronome.rs`, `features/extensions/tests/host_service.rs` |
-| R3 | A TSX/JS page installed at run time (QuickJS; a Web Worker in browsers) | ⚠️ not shown | ❌ the Worker runner exists, no host (#495) | ⚠️ not shown; QuickJS, no JIT | Templater-lite | `features/pages/tests/js.rs` |
+| R2 | A Luau script installed at run time; its actions and saved scripts | ✅ Templater-lite's actions made the note: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-dark.png) | ❌ #495 | ⚠️ not shown; interpreted | Templater-lite | `features/extensions/tests/showcase.rs`, `features/extensions/tests/metronome.rs`, `features/extensions/tests/host_service.rs` |
+| R3 | A TSX/JS page installed at run time (QuickJS; a Web Worker in browsers) | ✅ Templater-lite's Templates tab: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-1280-dark.png) | ❌ the Worker runner exists, no host (#495) | ⚠️ not shown; QuickJS, no JIT | Templater-lite | `features/extensions/tests/showcase.rs`, `features/pages/tests/js.rs` |
 | R4 | A WASI component installed at run time | ❌ the release build has no `wasi` feature (#707); runs in a `wasi` build | ❌ #495, and JSPI (no Safari before 27) | ❌ #707 (Pulley once on) | WASI Counter | `features/extensions/tests/wasi.rs`, `features/extensions/tests/wasi_web.rs` |
 | R5 | A process extension | ⚠️ not shown | ❌ by nature; no "desk only" state yet (#578) | ❌ by nature; no "desk only" state yet (#578) | Clicker | `features/extensions/tests/remote_view.rs` |
 | R6 | A web view app in a pane | ❌ #222 | ❌ #222 | ❌ #222 | Web app pane | - |
@@ -62,13 +62,13 @@ frames, nothing an extension author can target. Every web cell below is
 
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
-| C1 | Actions in ⌘K, keymaps, the CLI, MCP and the control socket | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Templater-lite | `features/extensions/tests/host_service.rs` |
+| C1 | Actions in ⌘K, keymaps, the CLI, MCP and the control socket | ✅ the shots' actions are run over the control socket: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-dark.png) | ❌ #495 | ⚠️ not shown | Templater-lite | `features/extensions/tests/showcase.rs`, `features/extensions/tests/host_service.rs` |
 | C2 | Toolbars with toggle state, status items, the phone bar | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Toolbar sampler, Outline | `features/extensions/tests/toolbars.rs`, `features/extensions/tests/contributions.rs` |
 | C3 | Context menus (file, editor, row) and a menu at a point | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Toolbar sampler | `features/extensions/tests/toolbars.rs`, `features/extensions/tests/host_ui.rs` |
-| C4 | Tabs, panes, slots, windows, popups | ⚠️ not shown | ❌ #495 | ⚠️ not shown | - | `features/extensions/tests/contributions.rs`, `features/extensions/tests/interop.rs` |
+| C4 | Tabs, panes, slots, windows, popups | ⚠️ a tab (slots, windows and popups not shown): [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-1280-dark.png) | ❌ #495 | ⚠️ not shown | Templater-lite | `features/extensions/tests/contributions.rs`, `features/extensions/tests/interop.rs` |
 | C5 | Settings sections | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Settings and theme | `features/extensions/tests/metronome.rs` |
 | C6 | Openers: ⌘O sources and URL claims | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Openers sampler | `features/extensions/tests/contributions.rs` |
-| C7 | Note and document kinds, project types, templates, capture targets | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Templater-lite, Openers sampler | - |
+| C7 | Note and document kinds, project types, templates, capture targets | ⚠️ templates shown ([390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-dark.png)); kinds, project types and capture targets not yet | ❌ #495 | ⚠️ not shown | Templater-lite, Openers sampler | `features/extensions/tests/showcase.rs` |
 | C8 | Base view types | ⚠️ not shown; the Tasks extension's board is one | ❌ #495 | ⚠️ not shown | Openers sampler | - |
 | C9 | Navigator providers; file-tree icons and badges | ⚠️ icons and colours through `NAVIGATOR_ICON`; the generic file-row badge is drawn only in a test, not the app's tree | ❌ #495 | ⚠️ same as desktop | Iconize-lite | `features/extensions/tests/host_ui_view.rs` |
 | C10 | Embeds: fence renderers and inline embeds | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Dataview-lite | `features/pages/tests/embed.rs` |
@@ -80,16 +80,16 @@ frames, nothing an extension author can target. Every web cell below is
 
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
-| H1 | The person's real vault through the document API | ⚠️ the API acts on an in-memory sample store (#706); `VAULT_*` actions reach the vault | ❌ #495 | ⚠️ same as desktop (#706) | Templater-lite | `features/extensions/tests/documents.rs` |
+| H1 | The person's real vault through the document API | ⚠️ the API acts on an in-memory sample store (#706, #713); `VAULT_*` actions reach the vault, shown by Templater-lite: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/standup-1280-dark.png) | ❌ #495 | ⚠️ same as desktop (#706) | Templater-lite | `features/extensions/tests/showcase.rs`, `features/extensions/tests/documents.rs` |
 | H2 | Document events for the person's own edits | ❌ the vault raises no `doc.*` events (#706); an extension's own edits do | ❌ #495 | ❌ #706 | Dataview-lite | `features/extensions/tests/events.rs` |
 | H3 | Vault queries (bases rows, links, tags, search); per-note parsed metadata | ⚠️ the queries run as actions; no per-note headings, list items or tasks (#706) | ❌ #495 | ⚠️ same as desktop | Dataview-lite | - |
 | H4 | Extension data and settings that persist | ⚠️ not shown | ❌ kept in memory (#495) | ⚠️ not shown | - | `features/extensions/tests/host_service.rs` |
 | H5 | Secrets | ⚠️ not shown | ❌ not in a browser yet (#495) | ⚠️ not shown | Secrets and fetch | `features/extensions/tests/net.rs` |
 | H6 | `fetch` limited to the manifest's hosts | ⚠️ not shown | ❌ #495; CORS applies | ⚠️ not shown | Secrets and fetch | `features/extensions/tests/net.rs` |
-| H7 | Notifications: in-app toasts; OS notifications | ⚠️ toasts only; OS notifications #709 | ❌ #495 | ⚠️ toasts only (#709) | Notify sampler | `features/extensions/tests/host_ui.rs` |
-| H8 | The clipboard | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Notify sampler | `features/extensions/tests/host_ui.rs` |
-| H9 | Pickers for files, folders, photos | ⚠️ not shown | ❌ #495 | ❌ a pick answers `unsupported` (#708) | - | `features/extensions/tests/host_ui.rs` |
-| H10 | Prompts, confirms, pick-one | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Templater-lite, Notify sampler | `features/extensions/tests/host_ui.rs` |
+| H7 | Notifications: in-app toasts; OS notifications | ⚠️ toasts only, tested, not shown (a toast fades before the shot); OS notifications #709 | ❌ #495 | ⚠️ toasts only (#709) | Notify sampler | `features/extensions/tests/showcase.rs`, `features/extensions/tests/host_ui.rs` |
+| H8 | The clipboard | ⚠️ tested, not shown | ❌ #495 | ⚠️ not shown | Notify sampler | `features/extensions/tests/showcase.rs`, `features/extensions/tests/host_ui.rs` |
+| H9 | Pickers for files, folders, photos | ⚠️ tested, not shown (a picker waits for an answer) | ❌ #495 | ❌ a pick answers `unsupported` (#708) | Notify sampler | `features/extensions/tests/showcase.rs`, `features/extensions/tests/host_ui.rs` |
+| H10 | Prompts, confirms, pick-one | ⚠️ tested, not shown (a prompt waits for an answer) | ❌ #495 | ⚠️ not shown | Templater-lite, Notify sampler | `features/extensions/tests/showcase.rs`, `features/extensions/tests/host_ui.rs` |
 | H11 | Timers, cron hooks, background workers | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Timers sampler | `features/extensions/tests/events.rs`, `features/extensions/tests/workers.rs` |
 | H12 | Services between extensions (`[provides]` / `[requires]`) | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Services sampler | `features/extensions/tests/interop.rs` |
 | H13 | MIDI and OSC ports and control surfaces | ⚠️ not shown; a virtual MIDI port and UDP OSC, no system MIDI | ❌ #495 | ⚠️ not shown | Surface | `features/extensions/tests/ports.rs` |
@@ -121,7 +121,7 @@ note in the showcase vault, which plugins or apps it stands in for.
 
 | Example | Stands in for | Proves | Status |
 |---|---|---|---|
-| Templater-lite | Templater, QuickAdd | R2, R3, C1, C7, C11, H1, H2, H10 | planned |
+| Templater-lite | Templater, QuickAdd | R2, R3, C1, C7, C11, H1, H2, H10 | `examples/showcase/templater-lite`; H2 (folder templates) waits on #713 |
 | Dataview-lite | Dataview, Tasks, Bases | C10, C8, H3, H2 | planned |
 | Kanban-lite | Kanban | U2, H1 | waits on #176 |
 | Outline (tables and outline keymaps) | Advanced Tables, Outliner, Editing Toolbar | C11, C2 | in the sandbox (`apps/sandbox/extensions/outline`) |
@@ -132,7 +132,7 @@ note in the showcase vault, which plugins or apps it stands in for.
 | Services sampler | Calendar, Day Planner, Tasks | H12 | planned |
 | Timers sampler | TaskNotes' pomodoro, Recent Files | H11 | planned |
 | Secrets and fetch | Copilot, Remotely Save | H5, H6 | planned |
-| Notify sampler | Notice, clipboard and modal users | H7, H8, H10 | planned |
+| Notify sampler | Notice, clipboard and modal users | H7, H8, H9, H10 | `examples/showcase/notify-sampler` |
 | Chart | Charts, Tracker | U4 | planned |
 | Surface | CSI, ReaLearn | H13 | in the sandbox (`apps/sandbox/extensions/surface`) |
 | Sketch | Excalidraw, Canvas, Graph | U3, U2, C6 | waits on #175, #176 |
