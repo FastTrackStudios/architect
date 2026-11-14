@@ -22,8 +22,8 @@
 //! - **a browser**: a sandboxed `<iframe>` on the same messages, from the
 //!   npm package (`features/extensions/web/webview-host.js` `mountWebView`),
 //!   which the web app mounts once it hosts extensions (#495).
-//! - **iOS** puts a `WKWebView` in the pane's `UIView` on the same messages
-//!   (the iOS host's, beside `apps/mobile`).
+//! - **iOS** (not built yet) is to put a `WKWebView` in the pane's `UIView`,
+//!   on the same messages (the iOS host's work, beside `apps/mobile`).
 //!
 //! An app registers the kind with [`register`] so extensions naming it
 //! load, and provides its host near its root.
