@@ -592,6 +592,11 @@ layer = "L1"
 note = "the filesystem vault, its sync backend (#333)"
 
 [[row]]
+package = "vault-query"
+layer = "L1"
+note = "the vault index and its query engine, wasm-clean (#710, #272)"
+
+[[row]]
 package = "vault-obsidian"
 layer = "L1"
 
