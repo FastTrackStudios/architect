@@ -30,8 +30,9 @@ const TYPES = {
 };
 
 /// Serves folder `root` on a free local port: `{ origin, close }`;
-/// `onRequest(req)` hears every request.
-export async function serve(root, onRequest = () => {}) {
+/// `onRequest(req)` hears every request; `headersFor(path)` adds headers
+/// to a file's response (a web view document's policy).
+export async function serve(root, onRequest = () => {}, headersFor = () => ({})) {
   const server = createServer((req, res) => {
     onRequest(req);
     let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -40,7 +41,7 @@ export async function serve(root, onRequest = () => {}) {
     if (!file.startsWith(normalize(root))) return res.writeHead(403).end();
     try {
       if (!statSync(file).isFile()) throw new Error('not a file');
-      res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
+      res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store', ...headersFor(path) });
       res.end(readFileSync(file));
     } catch {
       res.writeHead(404).end('not found');
