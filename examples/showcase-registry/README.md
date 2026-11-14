@@ -21,8 +21,10 @@ What each one shows:
 | `showcase.greeter` 0.1.0 | L1: installed through a consent prompt listing what it asks in words (the selection, notifications) |
 | `showcase.greeter` 0.2.0 | L3: an update, with its changelog, that asks for one more thing (the clipboard) and waits for a yes |
 | `showcase.word-count` | L2: required by the vault, installed by "Install all" |
-| `showcase.tiny` | L2: carried in the vault's `.architect/extensions/`, in no registry |
+| `showcase.tiny` | L2: carried in the vault's `.architect/extensions/`, in no registry, and **refused**: it is signed by the registry's key, and a vault's archive must be signed by the org key or by the key its installed copy is signed by. It shows the refusal and its reason. |
 | `showcase.mac-only` | L4: `platforms = ["macos"]`: refused here off macOS, with why, and listed as such by the vault |
+
+Further cases, made from the fixture in `features/extensions/tests/showcase_registry.rs`: a vault that wants an older greeter than the installed, pinned one (`WantsOlder`, nothing installed), and a link and an oversized archive in the vault (refused unread).
 
 ## In the app
 

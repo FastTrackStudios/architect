@@ -15,9 +15,11 @@ use std::path::{Path, PathBuf};
 
 use architect::action::ActionList;
 use architect_extensions::consent::Grants;
+use architect_extensions::consent::Scope;
 use architect_extensions::extensions::Extensions;
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::install::{FolderRegistry, Installs};
+use architect_extensions::manage::Installed;
 use architect_extensions::project::Missing;
 use architect_settings::Registry;
 use futures::executor::block_on;
@@ -166,12 +168,19 @@ fn l2_the_fixture_vault_plans_install_all() {
         v.sort();
         v
     };
-    assert_eq!(opened.refused, Vec::new());
-    assert_eq!(
-        ids(&opened.plan.install),
-        ["showcase.tiny", "showcase.word-count"]
-    );
+    assert_eq!(ids(&opened.plan.install), ["showcase.word-count"]);
     assert_eq!(ids(&opened.plan.offer), ["showcase.greeter"]);
+    // The wrong signer: the carried archive is signed by the registry's
+    // publisher key, which is not enough for a vault's archive (the org
+    // key, or its installed copy's signer).
+    assert!(
+        opened
+            .refused
+            .iter()
+            .any(|(f, why)| f.starts_with("showcase.tiny") && why.contains("does not trust")),
+        "{:?}",
+        opened.refused
+    );
     let missing: Vec<(String, Missing)> = opened
         .plan
         .missing
@@ -190,10 +199,96 @@ fn l2_the_fixture_vault_plans_install_all() {
         "{missing:?}"
     );
 
-    let done = ext.accept(&opened.plan);
+    // Nothing without the person's yes; everything at once with it.
+    let waiting = ext.accept_vault(&showcase().join("vault"), &opened.plan, None, "person");
+    assert!(
+        waiting
+            .iter()
+            .all(|r| matches!(r, Ok(Installed::NeedsConsent { .. })))
+    );
+    assert!(ext.host().get("showcase.word-count").is_none());
+    let done = ext.accept_vault(
+        &showcase().join("vault"),
+        &opened.plan,
+        Some(&Scope::Device),
+        "person",
+    );
     assert!(done.iter().all(Result::is_ok), "{done:?}");
     assert!(ext.host().get("showcase.word-count").is_some());
-    assert!(ext.host().get("showcase.tiny").is_some());
+}
+
+/// The fixture vault copied, for the cases that change it.
+fn vault_copy(tmp: &Path) -> PathBuf {
+    let to = tmp.join("vault");
+    let from = showcase().join("vault");
+    for entry in ["Welcome.md", ".architect/extensions.toml"] {
+        let at = to.join(entry);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::copy(from.join(entry), at).unwrap();
+    }
+    to
+}
+
+#[test]
+fn l2_a_vault_cannot_downgrade_the_greeter() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (list, ext) = app(tmp.path(), "linux");
+    run(
+        &list,
+        "EXT_INSTALL",
+        &json!({ "id": "showcase.greeter", "version": "=0.2.0", "grant": "device", "pin": true }),
+    );
+    let vault = vault_copy(tmp.path());
+    std::fs::write(
+        vault.join(".architect/extensions.toml"),
+        "[[extensions]]\nid = \"showcase.greeter\"\nversion = \"=0.1.0\"\n",
+    )
+    .unwrap();
+    let opened = ext.open_vault(&vault);
+    assert!(opened.plan.install.is_empty());
+    assert!(
+        matches!(&opened.plan.missing[0].1, Missing::WantsOlder { installed, .. } if installed == "0.2.0"),
+        "{opened:?}"
+    );
+}
+
+#[test]
+fn l2_a_link_and_an_oversized_archive_in_the_vault_are_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, ext) = app(tmp.path(), "linux");
+    let vault = vault_copy(tmp.path());
+    let carried = vault.join(".architect/extensions");
+    std::fs::create_dir_all(&carried).unwrap();
+    std::fs::File::create(carried.join("huge.archext"))
+        .unwrap()
+        .set_len(architect_extensions::vault_needs::MAX_ARCHIVE + 1)
+        .unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        showcase().join("archives/showcase.word-count-0.1.0.archext"),
+        carried.join("linked.archext"),
+    )
+    .unwrap();
+    let opened = ext.open_vault(&vault);
+    let why = |file: &str| {
+        opened
+            .refused
+            .iter()
+            .find(|(f, _)| f == file)
+            .map(|(_, w)| w.clone())
+            .unwrap_or_default()
+    };
+    assert!(
+        why("huge.archext").contains("more than"),
+        "{:?}",
+        opened.refused
+    );
+    #[cfg(unix)]
+    assert!(
+        why("linked.archext").contains("link"),
+        "{:?}",
+        opened.refused
+    );
 }
 
 #[test]
