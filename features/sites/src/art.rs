@@ -29,21 +29,29 @@ pub fn is_image(path: &str) -> bool {
 /// (`architect_media::Item`'s `cover`).
 pub const COVER_PROPERTY: &str = "cover";
 
-/// The link `fields` (a note's frontmatter) give as its art, as written:
-/// the property's text, or its list's first (`art:`, else `cover:`);
-/// `None` without one.
+/// The link `fields` (a note's frontmatter) give as its art, as written.
+///
+/// The property's text, or its list's first; `None` without one. `art:`,
+/// else `cover:` (`architect_media::item::COVER`, the one precedence a
+/// media item's art reads by): the first that names a vault path.
 #[must_use]
 pub fn art_link(fields: &Map<String, Value>) -> Option<String> {
-    let value = fields
-        .get(ART_PROPERTY)
-        .or_else(|| fields.get(COVER_PROPERTY))?;
-    let text = match value {
-        Value::String(s) => s.as_str(),
-        Value::Array(list) => list.iter().find_map(Value::as_str)?,
-        _ => return None,
-    };
-    let text = text.trim();
-    (!text.is_empty()).then(|| text.to_owned())
+    art_of(fields).map(|(_, link)| link)
+}
+
+/// [`art_link`], with the property it came from (`art` or `cover`).
+#[must_use]
+pub fn art_of(fields: &Map<String, Value>) -> Option<(&'static str, String)> {
+    architect_media::item::COVER.iter().find_map(|key| {
+        let text = match fields.get(*key)? {
+            Value::String(s) => s.as_str(),
+            Value::Array(list) => list.iter().find_map(Value::as_str)?,
+            _ => return None,
+        };
+        let text = text.trim();
+        (!text.is_empty() && architect_media::link::target(text).is_some())
+            .then(|| (*key, text.to_owned()))
+    })
 }
 
 /// What `link` (`[[cover.jpg]]`, `![[Art/cover.jpg|Cover]]`, a plain
@@ -188,5 +196,9 @@ mod tests {
         assert_eq!(art_link(&fields).as_deref(), Some("Songs/Joy/cover.png"));
         fields.insert("art".into(), Value::String("[[art.png]]".into()));
         assert_eq!(art_link(&fields).as_deref(), Some("[[art.png]]"));
+        assert_eq!(art_of(&fields).map(|(k, _)| k), Some("art"));
+        // An `art:` that names no vault file leaves `cover:` its turn.
+        fields.insert("art".into(), Value::String("https://example.com/a.png".into()));
+        assert_eq!(art_of(&fields), Some(("cover", "Songs/Joy/cover.png".to_owned())));
     }
 }

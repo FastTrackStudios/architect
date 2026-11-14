@@ -4524,3 +4524,98 @@ async fn the_guest_service_never_shares_a_cookies_answer_with_another_origin() {
     }
     w.host.stop().await;
 }
+
+/// A setlist's listing fence (#668: a collection's rows as Studio writes
+/// them) is cut by the node to the link's notes, in its words and in the
+/// text a view that reads the note gets: a row for a song outside the
+/// link is gone, its title, path, recording and artist with it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_guest_never_reads_a_listing_fences_row_for_a_note_outside_the_link() {
+    let w = world_full(
+        architect_sites::Blocks::new(),
+        vec![setlist_island(true, &["documents"])],
+        |vault| {
+            seed_gig(vault);
+            touch(
+                vault,
+                "Gig/list.md",
+                "---\ntitle: The list\ntype: setlist\nsongs: [\"[[Gig/joy]]\", \"[[Private/Secret Song]]\"]\n---\n\
+                 The list.\n\n```studio-setlist\n## Opening\n\
+                 1 | Joy | Gig/joy.md | B · 86 bpm | Gig/joy.mp3 | Choir | 186.0\n\
+                 2 | Secret Song | Private/Secret Song.md | E · 99 bpm | Private/secret-take.mp3 | Unreleased Artist\n```\n",
+            );
+            touch(vault, "Private/Secret Song.md", "---\ntitle: Secret Song\n---\nNot shared.\n");
+        },
+    )
+    .await;
+    let share = gig_link(&w).await;
+    let list = guest(&w)
+        .read(share.code.clone(), String::new(), "Gig/list.md".to_owned())
+        .await
+        .unwrap();
+    let text = list.source.clone().expect("the view reads the note");
+    assert!(text.contains("1 | Joy | Gig/joy.md |"), "{text}");
+    assert!(
+        list.blocks
+            .iter()
+            .any(|b| b.text.contains("1 | Joy | Gig/joy.md |")),
+        "{:?}",
+        list.blocks
+    );
+    let said = format!("{text}\n{:?}", list.blocks);
+    for never in ["Secret", "Private/", "secret-take", "Unreleased"] {
+        assert!(!said.contains(never), "{never:?} in {said}");
+    }
+    w.host.stop().await;
+}
+
+/// A recording and a cover a song names only by `recording:` and
+/// `cover:` (#668), linked in no note's body, are the reference layer's
+/// when no rule places them: a link that serves only the page never
+/// serves them, as it never did before; a reference link does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recording_named_only_by_a_property_is_the_references_never_the_pages() {
+    let w = world().await;
+    let vault = w.tmp.path().join("host/data/vaults/notes");
+    touch(
+        &vault,
+        "Songs/Joy.md",
+        "---\ntitle: Joy\ntype: song\nrecording: take.mp3\ncover: cover.png\n---\nJoy to the world.\n",
+    );
+    touch(&vault, "Songs/take.mp3", "MP3 JOY");
+    touch(&vault, "Songs/cover.png", "PNG JOY");
+    let links: ShareLinksClient = w.lane(&w.grace).await;
+    for listen in [Listen::Page, Listen::Reference] {
+        let share = links
+            .create(NewShare {
+                vault: "notes".to_owned(),
+                scope: ShareScope::Folder("Songs".to_owned()),
+                title: None,
+                audience: Audience::Link,
+                access: ShareAccess::Read,
+                expires_at: None,
+                domain: None,
+                listen,
+            })
+            .await
+            .unwrap();
+        let url = w.url(&format!("/s/{}/", share.code));
+        page_with(&url, None, "<!DOCTYPE html>").await;
+        for (file, bytes) in [("Songs/take.mp3", "MP3 JOY"), ("Songs/cover.png", "PNG JOY")] {
+            if listen == Listen::Page {
+                let (status, headers, body) = get(&format!("{url}{file}"), None).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{file}: {body}");
+                assert_eq!(headers["x-architect-layer"], "reference", "{file}");
+            } else {
+                page_with(&format!("{url}{file}"), None, bytes).await;
+            }
+            let listed = listed_paths(&json_at(&format!("{url}_files.json")).await);
+            assert_eq!(
+                listed.iter().any(|p| p == file),
+                listen == Listen::Reference,
+                "{listen:?} {file}: {listed:?}"
+            );
+        }
+    }
+    w.host.stop().await;
+}

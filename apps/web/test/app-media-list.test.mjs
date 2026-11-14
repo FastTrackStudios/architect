@@ -19,6 +19,16 @@
 // links a song outside the share): the same list from the link's listed
 // notes, the outside song never listed, a row plays, the end advances.
 //
+// What the node hands a guest of the setlist's words (`_guest/read`)
+// names no song outside the link: the setlist's ```studio-setlist fence
+// carries a row for the outside song, as Studio writes it, and the node
+// cuts it (#687 review).
+//
+// The text area of a collection note is one element whether the list is
+// drawn or not: typed into, then the extension listing arriving late
+// (claiming the note's type, so the list gives way), then typed into
+// again, nothing typed is lost and it keeps its focus.
+//
 // At 390 px and 1280 px, light and dark; SHOTS=<dir> keeps the
 // screenshots. Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the
 // PATH), muted, in a mount namespace whose runtime dir and /run/pipewire
@@ -92,6 +102,9 @@ async function node() {
   // A song outside the share, linked from the setlist: never a guest's.
   set = set.replace('    - "[[Songs/Christmas/Last Christmas/Last Christmas|Last Christmas]]"\n',
     '    - "[[Songs/Christmas/Last Christmas/Last Christmas|Last Christmas]]"\n    - "[[Private/Secret Song|Secret Song]]"\n');
+  // ... and its row in the setlist's fence, as Studio writes one.
+  set = set.replace('## Concert Set\n', '## Concert Set\n10 | Secret Song | Private/Secret Song.md | E · 99 bpm | Private/secret-take.mp3 | Unreleased Artist\n');
+  if (!set.includes('Private/Secret Song.md | E')) throw new Error('the fence row was not added');
   put(vault, SETLIST, set);
   put(vault, 'Private/Secret Song.md', '---\ntitle: Secret Song\ntype: song\nrecording: Recordings/Christmas/Sleigh Ride.mp3\n---\nNot shared.\n');
   const colours = [[196, 40, 40], [30, 40, 110], [20, 110, 70], [110, 50, 140], [200, 120, 30], [40, 120, 160], [160, 40, 90], [70, 70, 70], [180, 150, 40]];
@@ -116,11 +129,12 @@ async function node() {
   const proc = spawn(NODE, [], { stdio: ['ignore', 'ignore', process.env.NODE_LOG ? 'inherit' : 'ignore'], env });
   const origin = `http://127.0.0.1:${port}`;
   const link = () => fetch(`${origin}/s/${CODE}/_guest/link`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: CODE, token: '' }) }).then((r) => (r.ok ? r.json() : null), () => null);
+  const read = (path) => fetch(`${origin}/s/${CODE}/_guest/read`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: CODE, token: '', path }) }).then(async (r) => ({ status: r.status, text: await r.text() }));
   let l;
   for (let i = 0; i < 160; i++) {
     await sleep(250);
     l = await link();
-    if (l && l.notes && l.notes.length === 10 && l.notes.every((n) => n.page)) return { origin, link, close: () => { proc.kill(); rmSync(dir, { recursive: true, force: true }); } };
+    if (l && l.notes && l.notes.length === 10 && l.notes.every((n) => n.page)) return { origin, link, read, close: () => { proc.kill(); rmSync(dir, { recursive: true, force: true }); } };
   }
   const raw = await fetch(`${origin}/s/${CODE}/_guest/link`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: CODE, token: '' }) }).then(async (r) => `${r.status} ${(await r.text()).slice(0, 300)}`, (e) => e.message);
   proc.kill();
@@ -140,11 +154,16 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '
 /// The front: `/_ext/` and `/s/` to the node (none: 404), the rest the
 /// bundle's files (ranged, as the release's server does), the app's page
 /// with its policy.
-async function front(nodeOrigin) {
+async function front(nodeOrigin, islands = null) {
   const policy = appPolicy();
   const port = await freePort();
   const srv = createServer((req, res) => {
     const path = new URL(req.url, 'http://x').pathname;
+    // A listing held until the test lets it go (`islands.held`).
+    if (islands && path === '/_ext/islands.json') {
+      islands.held.then(() => { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(islands.body)); });
+      return;
+    }
     if (path.startsWith('/_ext/') || path.startsWith('/s/')) {
       if (!nodeOrigin) { res.statusCode = 404; res.end(); return; }
       const target = new URL(nodeOrigin);
@@ -337,6 +356,14 @@ test('a share link\'s guest gets the same list from the link\'s notes, never one
     assert.equal(sleigh.subtitle, 'Tori Kelly');
     assert.equal(sleigh.duration_ms, 186000);
     assert.equal(sleigh.art, 'Songs/Christmas/Sleigh Ride/cover.png');
+    // The setlist's words as the node hands them: its fence keeps the
+    // link's songs and names nothing outside it.
+    const set = await n.read(SETLIST);
+    assert.equal(set.status, 200, set.text);
+    assert.ok(set.text.includes('Songs/Christmas/Sleigh Ride/Sleigh Ride.md'), set.text.slice(0, 2000));
+    for (const never of ['Secret', 'Private/', 'secret-take', 'Unreleased Artist']) {
+      assert.ok(!set.text.includes(never), `${never} in ${set.text.slice(0, 4000)}`);
+    }
     for (const dark of [false, true]) {
       const b = await firefox(dark);
       const theme = dark ? 'dark' : 'light';
@@ -359,4 +386,36 @@ test('a share link\'s guest gets the same list from the link\'s notes, never one
       } finally { await b.close(); }
     }
   } finally { f.close(); n.close(); }
+});
+
+test('a collection note\'s text area keeps what was typed when the extension listing arrives late', { skip }, async () => {
+  let release;
+  const held = new Promise((ok) => { release = ok; });
+  const pin = `sha256-${'A'.repeat(43)}=`;
+  // An island claiming `setlist`: once listed, the list gives way to it.
+  const body = { islands: [{ id: 'demo.late', folder: '/_ext/island/demo.late.abcdef12/', web: { entry: 'web-late.js', webview: '/_ext/webview.abcdef12.html', files: { 'web-late.js': pin, 'web-late.wasm': pin } }, embeds: [{ view: 'late', note_type: ['setlist'] }] }] };
+  const f = await front(null, { held, body });
+  const b = await firefox(false);
+  try {
+    await openSetlist(b, f.origin);
+    await until(async () => (await list(b))?.rows.length === 9, 20000, 'the list');
+    // Unfolded, typed into at its end.
+    assert.ok(await b.eval(`(() => { const d = document.querySelector('[data-testid=note-text-fold]'); d.querySelector('summary').click(); return d.open; })()`));
+    const type = (words) => b.eval(`(() => { const t = document.querySelector('[data-testid=note-text]'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return document.execCommand('insertText', false, ${JSON.stringify(words)}); })()`);
+    await until(() => b.eval(`document.querySelector('[data-testid=note-text]').dataset.live === 'ready'`), 20000, 'the text area live');
+    assert.ok(await type('\nfirst words'));
+    await b.eval(`window.__area = document.querySelector('[data-testid=note-text]'); true`);
+    await sleep(500);
+    // The listing arrives: the list gives way, the text area stays.
+    release();
+    await until(async () => !(await list(b)), 20000, 'the list giving way to the island');
+    assert.ok((await b.eval(`document.querySelector('[data-testid=note-text]').value`)).endsWith('\nfirst words'), 'what was typed, kept through the change');
+    assert.equal(await b.eval(`document.querySelector('[data-testid=note-text-fold]').open`), true);
+    assert.equal(await b.eval(`document.querySelector('[data-testid=note-text]') === window.__area`), true, 'the same text area');
+    assert.equal(await b.eval(`document.activeElement === window.__area`), true, 'it keeps its focus');
+    assert.ok(await type(' then more'));
+    await sleep(1500);
+    const value = await b.eval(`document.querySelector('[data-testid=note-text]').value`);
+    assert.ok(value.includes('first words then more'), value.slice(-300));
+  } finally { await b.close(); f.close(); }
 });

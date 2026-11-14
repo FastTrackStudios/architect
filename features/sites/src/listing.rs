@@ -72,6 +72,12 @@ pub struct Entry {
     pub files: Vec<String>,
     /// Its art, by vault path: one of `files` ([`crate::art`]).
     pub art: Option<String>,
+    /// Of `files`, those it attaches only through a media item's
+    /// properties (`media:`/`recording:`, `cover:`; #668), never linked in
+    /// its body: a listening layer's (`Listen::Reference`) unless a rule
+    /// places them, so a link that serves only the page never serves a
+    /// recording or a cover it did not serve before.
+    pub listening: Vec<String>,
 }
 
 impl Entry {
@@ -124,20 +130,12 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
                     }
                 }
             }
-            if let Some(media) =
-                media_file(&meta, &path, &attachments).filter(|m| scope.holds_file(m))
-                && !files.iter().any(|f| f == media)
-            {
-                files.insert(0, media.to_owned());
-            }
-            let art = art_file(&meta, &path, &attachments).filter(|a| scope.holds_file(a));
-            if let Some(art) = art {
-                if !files.iter().any(|f| f == art) {
-                    files.push(art.to_owned());
-                }
-            }
+            let (art, listening) = attach_properties(&meta, &path, &attachments, &mut files, |f| {
+                scope.holds_file(f)
+            });
             Some(Entry {
                 art: art.map(str::to_owned),
+                listening,
                 title: title_of(page, &meta),
                 properties: row
                     .frontmatter
@@ -149,6 +147,37 @@ pub fn select(vault: &Vault, scope: &Scope, filter: &FilterNode) -> Vec<Entry> {
             })
         })
         .collect()
+}
+
+/// The files note `path`'s properties attach, added to `files` (those its
+/// body links): its media first, its art last, each only when `holds`
+/// it. Its art, and the files it attaches only through a media item's
+/// properties ([`Entry::listening`]): its media and a `cover:` (an `art:`
+/// is served as it always was, with the page).
+fn attach_properties<'a>(
+    meta: &Meta,
+    path: &str,
+    attachments: &HashSet<&'a str>,
+    files: &mut Vec<String>,
+    holds: impl Fn(&str) -> bool,
+) -> (Option<&'a str>, Vec<String>) {
+    let mut listening = Vec::new();
+    if let Some(media) = media_file(meta, path, attachments).filter(|m| holds(m))
+        && !files.iter().any(|f| f == media)
+    {
+        files.insert(0, media.to_owned());
+        listening.push(media.to_owned());
+    }
+    let art = art_file(meta, path, attachments).filter(|a| holds(a));
+    if let Some(art) = art
+        && !files.iter().any(|f| f == art)
+    {
+        files.push(art.to_owned());
+        if meta.art_is_cover {
+            listening.push(art.to_owned());
+        }
+    }
+    (art, listening)
 }
 
 /// The attachment note `path`'s media (`media:`, else `recording:`, a
@@ -200,21 +229,13 @@ pub fn every_note(vault: &Vault) -> Vec<Entry> {
                 }
             }
             let meta = Meta::of(page);
-            if let Some(media) = media_file(&meta, &page.rel_path, &attachments)
-                && !files.iter().any(|f| f == media)
-            {
-                files.insert(0, media.to_owned());
-            }
-            let art = art_file(&meta, &page.rel_path, &attachments);
-            if let Some(art) = art {
-                if !files.iter().any(|f| f == art) {
-                    files.push(art.to_owned());
-                }
-            }
+            let (art, listening) =
+                attach_properties(&meta, &page.rel_path, &attachments, &mut files, |_| true);
             Entry {
                 path: page.rel_path.clone(),
                 title: title_of(page, &meta),
                 art: art.map(str::to_owned),
+                listening,
                 properties: row
                     .frontmatter
                     .iter()
@@ -494,6 +515,7 @@ mod tests {
             properties,
             files: files.iter().map(|f| (*f).to_owned()).collect(),
             art: None,
+            listening: Vec::new(),
         }
     }
 

@@ -3,7 +3,7 @@
 //!
 //! - A **media item** ([`Item`]) is a note with a `title`, a `subtitle`
 //!   (or `artist`), a `duration`, its media (`media`, or `recording`: an
-//!   audio or video file of the vault) and its `cover` (or `art`).
+//!   audio or video file of the vault) and its `art` (or `cover`).
 //! - A **collection** ([`Collection`]) is a note listing items in order,
 //!   in named sections: `sets: [{name, songs: [links]}]` and/or a flat
 //!   `songs: [links]` (the shape Studio's setlists write, studio#406), or
@@ -18,9 +18,11 @@
 //! Key, tempo, meter and anything else music-specific are an extension's
 //! (Studio's), never read here. An extension that claims the note's type
 //! draws over the core view; [`is_listing_fence`] names the fences such an
-//! extension writes as its richer layer of the same list.
+//! extension writes as its richer layer of the same list, and
+//! [`fence::within`] cuts one to the rows a reader may see.
 
 pub mod collection;
+pub mod fence;
 pub mod front;
 pub mod item;
 pub mod link;

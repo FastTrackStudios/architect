@@ -503,6 +503,29 @@ impl Site {
             {
                 used_attachments.insert(art.to_owned());
             }
+            // So is the file it plays as a media item (`media:`, else
+            // `recording:`; #668), as the listing names it
+            // (`crate::listing::Entry::files`): held back, as any file, from
+            // a link below its layer.
+            if let Some(media) = note
+                .meta
+                .media
+                .as_deref()
+                .and_then(|link| {
+                    architect_media::link::resolve(
+                        link,
+                        architect_media::link::folder_of(rel),
+                        attachments.iter().copied(),
+                    )
+                })
+                .filter(|t| {
+                    crate::media::media_kind(t).is_some()
+                        && opts.scope.holds_file(t)
+                        && !opts.hold_back.contains(*t)
+                })
+            {
+                used_attachments.insert(media.to_owned());
+            }
             let mut tags: BTreeSet<String> = page_tags(note.page)
                 .into_iter()
                 .map(|t| t.to_lowercase())

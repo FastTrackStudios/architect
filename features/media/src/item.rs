@@ -10,7 +10,9 @@ pub const TITLE: &str = "title";
 pub const SUBTITLE: [&str; 2] = ["subtitle", "artist"];
 pub const DURATION: &str = "duration";
 pub const MEDIA: [&str; 2] = ["media", "recording"];
-pub const COVER: [&str; 2] = ["cover", "art"];
+/// `art` before `cover`, as a share's art reads them
+/// (`architect_sites::art::art_link`).
+pub const COVER: [&str; 2] = ["art", "cover"];
 
 /// One media item, as its note's frontmatter gives it.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -24,9 +26,11 @@ pub struct Item {
     /// Its `duration` in seconds: a number, or `m:ss` / `h:mm:ss`.
     pub duration: Option<f64>,
     /// What it plays: its `media`, else its `recording`, as written (a
-    /// vault path or a link to one); see [`Item::media_in`].
+    /// vault path or a link to one; the first of the two that names one:
+    /// a URL in `media` leaves `recording` to play); see
+    /// [`Item::media_in`].
     pub media: Option<String>,
-    /// Its picture: its `cover`, else its `art`, as written.
+    /// Its picture: its `art`, else its `cover`, as written.
     pub cover: Option<String>,
 }
 
@@ -39,14 +43,8 @@ impl Item {
             title: text(fields.get(TITLE)).unwrap_or_else(|| stem(path).to_owned()),
             subtitle: SUBTITLE.iter().find_map(|k| text(fields.get(*k))),
             duration: fields.get(DURATION).and_then(seconds),
-            media: MEDIA
-                .iter()
-                .find_map(|k| text(fields.get(*k)))
-                .and_then(|m| link::target(&m)),
-            cover: COVER
-                .iter()
-                .find_map(|k| text(fields.get(*k)))
-                .and_then(|c| link::target(&c)),
+            media: first_target(fields, &MEDIA),
+            cover: first_target(fields, &COVER),
         }
     }
 
@@ -93,6 +91,14 @@ impl Item {
         }
         v
     }
+}
+
+/// The first of `keys` in `fields` whose text names a vault path
+/// ([`link::target`]): one that names none (a URL, a climb) leaves the
+/// next its turn.
+fn first_target(fields: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|k| text(fields.get(*k)).and_then(|t| link::target(&t)))
 }
 
 /// A file's name without its folder or extension.
@@ -199,7 +205,8 @@ mod tests {
         assert_eq!(i.title, "Take");
         assert_eq!(i.subtitle.as_deref(), Some("Live"));
         assert_eq!(i.media.as_deref(), Some("a.mp3"));
-        assert_eq!(i.cover.as_deref(), Some("y.png"));
+        // `art` before `cover`, as a share's art reads them.
+        assert_eq!(i.cover.as_deref(), Some("x.png"));
         let only_artist = front::fields("---\nartist: [A, B]\n---\n");
         assert_eq!(
             Item::read("x.md", &only_artist).subtitle.as_deref(),
@@ -219,6 +226,16 @@ mod tests {
         assert_eq!(clock(186.0), "3:06");
         assert_eq!(clock(230.8), "3:51");
         assert_eq!(clock(3723.0), "1:02:03");
+    }
+
+    #[test]
+    fn a_key_that_names_nothing_leaves_the_next_its_turn() {
+        let f = front::fields(
+            "---\nmedia: https://example.com/a.mp3\nrecording: Rec/a.mp3\nart: ../x.png\ncover: c.png\n---\n",
+        );
+        let i = Item::read("x.md", &f);
+        assert_eq!(i.media.as_deref(), Some("Rec/a.mp3"));
+        assert_eq!(i.cover.as_deref(), Some("c.png"));
     }
 
     #[test]
