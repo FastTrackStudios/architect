@@ -69,6 +69,9 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         if let Some(store) = &themes {
             host = host.with_themes(store.clone());
         }
+        // Consent in this tab, none given: an installed extension reaches
+        // nothing until a person grants it (built-ins are not narrowed).
+        host = host.with_grants(architect_extensions::consent::Grants::in_memory());
         host.set_app_list((**app).clone());
         host.forward_actions_to(app);
         let mut extensions = Extensions::new(host, Installs::new(INSTALLS));
@@ -91,6 +94,21 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
         mark_loaded(&extensions.host().ids());
         extensions
     });
+    // Scheduled hooks (`every`, `at`) and idle background extensions'
+    // stops: what `Host::run_clock`'s thread does on a desk, on the page's
+    // timer here.
+    {
+        let host = extensions.host().clone();
+        use_future(move || {
+            let host = host.clone();
+            async move {
+                loop {
+                    futures_timer::Delay::new(std::time::Duration::from_secs(1)).await;
+                    let _ = host.tick();
+                }
+            }
+        });
+    }
     // Each linked extension's root context, for its views below.
     use_hook(|| {
         for (_, built) in extensions.host().linked() {
