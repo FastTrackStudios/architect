@@ -60,6 +60,8 @@ pub mod virtualize;
 pub mod ui;
 #[cfg(feature = "vault")]
 pub mod vault_source;
+#[cfg(feature = "documents")]
+pub mod documents;
 
 pub use appearance::Appearance;
 pub use calendar::{CalendarDay, CalendarGrid, CalendarWeek, HeaderPeriod, PeriodicNotes};

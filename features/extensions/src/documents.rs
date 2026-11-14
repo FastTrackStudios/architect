@@ -228,7 +228,7 @@ mod host {
 #[cfg(all(feature = "host", feature = "crdt"))]
 mod crdt_docs;
 #[cfg(all(feature = "host", feature = "crdt"))]
-pub use crdt_docs::{CrdtDocuments, authors_of};
+pub use crdt_docs::{CrdtDocuments, apply_edits, authors_of};
 
 #[cfg(test)]
 mod tests {
