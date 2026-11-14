@@ -85,7 +85,10 @@ mod tests {
     #[test]
     fn a_linux_only_extension_says_so_elsewhere() {
         assert!(runs_on(&v(&["linux"]), "linux"));
-        assert_eq!(not_here(&v(&["linux"]), "macos").as_deref(), Some("Linux only"));
+        assert_eq!(
+            not_here(&v(&["linux"]), "macos").as_deref(),
+            Some("Linux only")
+        );
         assert_eq!(
             not_here(&v(&["linux", "macos", "windows"]), "ios").as_deref(),
             Some("Linux, macOS and Windows only")

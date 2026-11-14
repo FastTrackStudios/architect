@@ -110,7 +110,10 @@ fn a_linux_only_linked_extension_says_so_on_macos_and_its_build_never_runs() {
     assert!(ext.host().get("lab.pipewire").is_some());
     assert!(ext.host().get("lab.patchbay").is_some());
     assert!(PIPEWIRE_BUILDS.load(Ordering::SeqCst) > before);
-    assert_eq!(row(&ext_list(&list), "lab.pipewire")["not_here"], Value::Null);
+    assert_eq!(
+        row(&ext_list(&list), "lab.pipewire")["not_here"],
+        Value::Null
+    );
 
     // On macOS it is listed, not loaded, its build never run.
     let tmp = tempfile::tempdir().unwrap();
@@ -165,7 +168,10 @@ fn a_linux_only_linked_extension_says_so_on_macos_and_its_build_never_runs() {
         )),
         "{again:?}"
     );
-    assert_eq!(std::fs::read_to_string(data.join("routes.json")).unwrap(), "{}");
+    assert_eq!(
+        std::fs::read_to_string(data.join("routes.json")).unwrap(),
+        "{}"
+    );
 }
 
 #[test]
@@ -217,7 +223,9 @@ fn the_store_refuses_to_install_an_extension_not_for_this_platform() {
     host.set_platform("windows");
     let ext = Extensions::new(host, Installs::new(tmp.path().join("installs")))
         .with_source(FolderRegistry::new(&registry));
-    let err = ext.install("lab.linux-tool", &VersionReq::STAR).unwrap_err();
+    let err = ext
+        .install("lab.linux-tool", &VersionReq::STAR)
+        .unwrap_err();
     assert_eq!(
         err,
         InstallError::NotHere {
@@ -226,7 +234,10 @@ fn the_store_refuses_to_install_an_extension_not_for_this_platform() {
         }
     );
     assert_eq!(err.to_string(), "Linux only: not on Windows");
-    assert!(ext.installs().get("lab.linux-tool").is_none(), "nothing written");
+    assert!(
+        ext.installs().get("lab.linux-tool").is_none(),
+        "nothing written"
+    );
 
     // Where it runs, it installs.
     let tmp2 = tempfile::tempdir().unwrap();
