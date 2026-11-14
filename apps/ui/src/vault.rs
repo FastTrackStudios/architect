@@ -366,11 +366,14 @@ fn open_by_path(path: &str) -> Result<serde_json::Value, String> {
     if !markdown {
         return Err(format!("nothing opens {path}"));
     }
-    let mut receivers = path_receivers();
-    receivers.retain(|tx| !tx.is_closed());
-    let tx = receivers
-        .last()
-        .ok_or_else(|| "no Vault view is open".to_owned())?;
+    let tx = {
+        let mut receivers = path_receivers();
+        receivers.retain(|tx| !tx.is_closed());
+        receivers
+            .last()
+            .cloned()
+            .ok_or_else(|| "no Vault view is open".to_owned())?
+    };
     tx.unbounded_send(path.to_owned())
         .map_err(|_| "the window is gone".to_owned())?;
     Ok(serde_json::json!({ "opened_by": "app", "path": path }))
