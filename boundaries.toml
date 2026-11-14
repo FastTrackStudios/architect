@@ -416,6 +416,11 @@ features = ["ui"]
 layer = "L4"
 
 [[row]]
+package = "architect-webview"
+layer = "L4"
+note = "the web view kind's hosts (#222): the extensions' interface and the workspace's panes"
+
+[[row]]
 package = "architect-navigator"
 features = ["ui"]
 layer = "L4"
@@ -789,6 +794,12 @@ note = "examples/extension: a host app over architect-extensions (host, process,
 package = "example-extension-counter"
 layer = "L1"
 note = "examples/extension: a process extension's program (architect-extensions guest); desk only"
+
+[[row]]
+package = "architect-webview"
+features = ["desk"]
+layer = "L3"
+note = "host glue: a wry child web view in a desk window's pane, over dioxus-native's window (its net reaches tower-http)"
 
 [[row]]
 package = "architect-mcp"
