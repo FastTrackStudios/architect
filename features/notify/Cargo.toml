@@ -15,7 +15,9 @@ path = "src/main.rs"
 
 [dependencies]
 # The trait and the guest (its process copy); the app adds `linked`.
-architect-extensions = { workspace = true, features = ["guest"] }
+# The trait (`linked-core`): linked into an app, a browser's too (#495);
+# off the browser also its process copy (`guest`, vox and tokio).
+architect-extensions = { workspace = true, features = ["linked-core"] }
 chrono = { workspace = true }
 dioxus = { workspace = true }
 futures-timer = { workspace = true }
@@ -38,6 +40,9 @@ tempfile = "3"
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+architect-extensions = { workspace = true, features = ["guest"] }
 
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

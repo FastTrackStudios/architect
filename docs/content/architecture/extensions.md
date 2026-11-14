@@ -683,6 +683,42 @@ jco drop JSPI) and what a component adds at run time (`updates`). Its
 views' timers landed with #308 ("Timers, events and background
 extensions").
 
+### Linked extensions in the browser
+
+A distribution's web build compiles in the extensions it links, as its
+desktop and iOS builds do (#495). `architect_web::run(<its Distribution>)`
+(`apps/web/src/browser.rs` `run`) is the browser's counterpart of
+`architect_desktop::run` and `architect_mobile::run`; the Architect app's
+own web build starts with `run(architect())`. The app root runs the same
+host the desktop does (`apps/web/src/app/extensions.rs`
+`use_web_extensions`: `Host`, `Extensions::with_linked`,
+`use_extension_ui`) over the page's Action List, so a linked extension's
+actions are in ⌘K, its settings sections on the settings page and its
+views among the workspace's kinds, drawn as Dioxus components in the
+app's own document. A share link's guest runs none.
+
+What changes in a browser:
+
+- **No Luau.** Luau is C++, which `wasm32-unknown-unknown` has no
+  library for, so `host` builds there without its Luau runner
+  (`features/extensions/src/host.rs` `default_runners`): data and linked
+  extensions run, a `luau` one does not start.
+- **`linked-core`.** A linked extension's crate depends on
+  `architect-extensions` with `linked-core` (the trait and its `Builder`,
+  no host) and adds `guest` (vox, tokio: its process copy) only off the
+  browser, by target.
+- **Not `Send`.** In a browser architect's `ActionFuture` is local, so
+  the linked API's `HostFuture` and `ActionFuture` are too, and an
+  action's future is `MaybeSend` (`features/extensions/src/linked.rs`).
+  Work no one awaits runs on the page's thread (`Host::with_spawn`,
+  `spawn_local`).
+- **No threads or files.** The host's clock and event threads are not
+  started, nothing is installed from a folder, and secrets stay in
+  memory.
+
+`cargo xtask dist web` builds a distribution crate's own wasm when it has
+a `web` feature (`xtask/src/dist.rs` `build_web`).
+
 ## Processes over vox
 
 A process extension is a program the host starts and speaks
@@ -4233,7 +4269,7 @@ overlay, a panel).
 | macOS, Linux, Windows | yes | compiled | yes | yes |
 | Android | yes | compiled (Play allows code in a VM) | yes | no |
 | iOS | yes | interpreted (Pulley) | yes | no |
-| Web | yes | the browser's WebAssembly (components transpiled) | yes | no |
+| Web | yes, and linked ones compiled into the web build | the browser's WebAssembly (components transpiled) | not yet (Luau is C++, #495) | no |
 
 On iOS, a catalogue of third-party features is the App Store's §4.7
 case (an index, moderation, consent); themes, keymaps, frame views and a

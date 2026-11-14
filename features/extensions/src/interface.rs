@@ -819,7 +819,7 @@ fn asked<T: Clone + 'static>(
     action: String,
     parse: impl Fn(Option<Vec<u8>>) -> Vec<T> + 'static,
 ) -> impl Fn(&str) -> Vec<T> + 'static {
-    type Kept<T> = Rc<std::cell::RefCell<BTreeMap<String, (std::time::Instant, Vec<T>)>>>;
+    type Kept<T> = Rc<std::cell::RefCell<BTreeMap<String, (web_time::Instant, Vec<T>)>>>;
     let answers: Kept<T> = Rc::default();
     let pending: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>> = Rc::default();
     let shown_last: Rc<std::cell::RefCell<Vec<T>>> = Rc::default();
@@ -864,7 +864,7 @@ fn asked<T: Clone + 'static>(
             asked.borrow_mut().remove(&query);
             shown.borrow_mut().clone_from(&items);
             kept.borrow_mut()
-                .insert(query, (std::time::Instant::now(), items));
+                .insert(query, (web_time::Instant::now(), items));
             commands.refresh();
         });
         shown_last.borrow().clone()
@@ -1010,7 +1010,7 @@ pub struct PageAsk {
     /// The extension's folder, when it has one (a linked built-in has none).
     pub dir: Option<std::path::PathBuf>,
     /// What its runs may reach: the extension's capabilities.
-    pub gate: architect_scripting::luau::Gate,
+    pub gate: crate::host::Gate,
 }
 
 impl std::fmt::Debug for PageAsk {

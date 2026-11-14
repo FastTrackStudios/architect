@@ -207,6 +207,13 @@ impl Secrets {
             return Ok(());
         };
         let text = serde_json::to_string_pretty(kept).map_err(|e| e.to_string())?;
+        // A browser has no file to keep them in: in memory there.
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = (file, text);
+            Ok(())
+        }
+        #[cfg(not(target_family = "wasm"))]
         architect::settings::write_atomic(file, text.as_bytes(), true)
             .map(|_| ())
             .map_err(|e| format!("{}: {e}", file.display()))

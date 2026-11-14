@@ -59,6 +59,8 @@ pub mod reading;
 pub mod view_files;
 
 #[cfg(target_arch = "wasm32")]
+pub use browser::run;
+#[cfg(all(target_arch = "wasm32", feature = "start"))]
 pub use browser::start;
 
 use std::fmt::Write as _;

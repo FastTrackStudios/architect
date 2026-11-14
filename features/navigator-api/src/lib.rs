@@ -46,7 +46,12 @@ pub const PROJECT_ICON: &str = "box";
 pub type Millis = i64;
 
 /// What a provider's requests answer with.
+#[cfg(not(target_family = "wasm"))]
 pub type ProviderFuture<T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send>>;
+/// A provider's answer, to await: in a browser, where an extension's host
+/// calls are not `Send` (#495), it need not be.
+#[cfg(target_family = "wasm")]
+pub type ProviderFuture<T> = Pin<Box<dyn Future<Output = Result<T, String>>>>;
 
 /// A date written in a note (`2026-11-05`, `2026-11-05T09:30`,
 /// `2026-11-05T09:30:00Z`) as [`Millis`], read as UTC: what an item's

@@ -51,14 +51,23 @@ pub fn WebKeys() -> Element {
     use_hook(move || {
         let Some(commands) = commands else { return };
         let apple = apple();
+        // The listener runs outside Dioxus: back into this scope's runtime,
+        // or a command that is an async action (a linked extension's,
+        // #495) finds none to spawn on and the app stops.
+        let (runtime, scope) = (
+            dioxus::core::Runtime::current(),
+            dioxus::core::current_scope_id(),
+        );
         let on_key = Closure::<dyn Fn(KeyboardEvent)>::new(move |event: KeyboardEvent| {
             if event.is_composing() {
                 return;
             }
-            if chords(&event, apple)
-                .iter()
-                .any(|c| commands.handle_chord(c))
-            {
+            let handled = runtime.in_scope(scope, || {
+                chords(&event, apple)
+                    .iter()
+                    .any(|c| commands.handle_chord(c))
+            });
+            if handled {
                 event.prevent_default();
             }
         });

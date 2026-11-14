@@ -101,11 +101,11 @@ pub mod interface;
 pub mod interop_actions;
 #[cfg(any(feature = "host", feature = "web"))]
 mod invocation;
-#[cfg(any(feature = "linked", all(feature = "guest", unix)))]
+#[cfg(any(feature = "linked-core", all(feature = "guest", unix)))]
 pub mod linked;
 #[cfg(feature = "host")]
 pub mod logs;
-#[cfg(feature = "host")]
+#[cfg(all(feature = "host", not(target_family = "wasm")))]
 mod luau_host;
 #[cfg(feature = "host")]
 pub mod manage;

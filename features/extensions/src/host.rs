@@ -34,14 +34,20 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// `std`'s natively; a browser's clock on wasm, where `std`'s panics.
+use web_time::Instant;
 
 use architect::action::{
     ActionCaller, ActionError, ActionFuture, ActionInfo, ActionList, CallerAsyncHandler, Effect,
     EventKind, Invocation, InvocationSource, Principal,
 };
+#[cfg(not(target_family = "wasm"))]
 use architect_scripting::Transactions;
-use architect_scripting::luau::{Gate, Limits, Runtime};
+#[cfg(not(target_family = "wasm"))]
+use architect_scripting::luau::{Limits, Runtime};
+#[cfg(not(target_family = "wasm"))]
 use architect_scripting::worker::{WorkerGroup, Workers};
 use architect_settings::{Owner, Registry, Section};
 use architect_theme::{Contribution, Problem, Theme, ThemeStore};
@@ -123,6 +129,12 @@ pub fn with_sections(
     }
     Ok(next)
 }
+
+/// What an extension's code may run on the Action List: `Ok` or why
+/// not. The same type as `architect_scripting::luau::Gate`, so a Luau
+/// runtime takes it as it is; here too where Luau is not built (a
+/// browser).
+pub type Gate = Arc<dyn Fn(&ActionInfo) -> Result<(), String> + Send + Sync>;
 
 /// What a runner is given to start an instance.
 pub struct Context<'a> {
@@ -218,12 +230,14 @@ impl Runner for DataRunner {
 /// `architect-scripting`'s runtime as whoever ran the action, inside the
 /// extension's capabilities, as one undo step. Scripts are read when the
 /// extension starts; one running when it reloads finishes on the old code.
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone, Default)]
 pub struct LuauRunner {
     transactions: Option<Arc<dyn Transactions>>,
     limits: Limits,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl std::fmt::Debug for LuauRunner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LuauRunner")
@@ -233,6 +247,7 @@ impl std::fmt::Debug for LuauRunner {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl LuauRunner {
     #[must_use]
     pub fn new() -> Self {
@@ -253,6 +268,7 @@ impl LuauRunner {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 struct Luau {
     runtime: Runtime,
     /// Its workers, cancelled when it stops (unloaded or replaced).
@@ -269,6 +285,7 @@ struct Luau {
     logs: crate::logs::Logs,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Luau {
     /// The runtime for one run as `caller`: `ctx` says where it came from,
     /// `host` acts for whoever ran it; and the caller it runs as — the
@@ -285,6 +302,7 @@ impl Luau {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// A script run's prints, and the error it stopped with, into its log.
 fn log_report(
     logs: &crate::logs::Logs,
@@ -305,6 +323,7 @@ fn log_report(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Runner for LuauRunner {
     fn kind(&self) -> Kind {
         Kind::Luau
@@ -362,6 +381,7 @@ impl Runner for LuauRunner {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Instance for Luau {
     fn action(&self, decl: &ActionDecl) -> Result<CallerAsyncHandler, String> {
         let source = self
@@ -439,6 +459,7 @@ impl Instance for Luau {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 /// What a Luau extension reaches past the Action List: `ext` (its id,
 /// and what it adds at run time) and `ctx` (where the run came from).
 mod luau_ext {
@@ -546,8 +567,8 @@ mod luau_ext {
 /// The time now, ms since the epoch: the clock runtime state is kept on.
 #[must_use]
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
@@ -877,6 +898,35 @@ impl PartialEq for Host {
     }
 }
 
+/// Where a host runs work no one awaits (a hook's): a thread of its own,
+/// natively. A browser has no threads: there, the app gives the page's
+/// (`Host::with_spawn`, `wasm_bindgen_futures::spawn_local`), and without
+/// one the work is dropped and logged.
+fn default_spawn() -> Spawn {
+    #[cfg(not(target_family = "wasm"))]
+    return Arc::new(|work: ActionFuture| {
+        std::thread::spawn(move || {
+            let _ = futures::executor::block_on(work);
+        });
+    });
+    #[cfg(target_family = "wasm")]
+    return Arc::new(|work: ActionFuture| {
+        drop(work);
+        tracing::warn!("ext.spawn: no spawner in this browser host (Host::with_spawn)");
+    });
+}
+
+/// The runners every host starts with: data, and Luau where it is built
+/// (not in a browser: Luau is C++, which `wasm32-unknown-unknown` has no
+/// library for, #495).
+fn default_runners() -> Vec<Arc<dyn Runner>> {
+    vec![
+        Arc::new(DataRunner),
+        #[cfg(not(target_family = "wasm"))]
+        Arc::new(LuauRunner::new()),
+    ]
+}
+
 impl Host {
     /// A host over `list`, putting settings in `sections`, running data
     /// and Luau extensions.
@@ -885,7 +935,7 @@ impl Host {
             inner: Arc::new(Inner {
                 list,
                 sections: Arc::new(sections),
-                runners: Mutex::new(vec![Arc::new(DataRunner), Arc::new(LuauRunner::new())]),
+                runners: Mutex::new(default_runners()),
                 kinds: Mutex::new(ViewKinds::new()),
                 page_checker: Mutex::new(None),
                 loaded: Mutex::new(BTreeMap::new()),
@@ -898,11 +948,7 @@ impl Host {
                 contributions: Contributions::new(),
                 tour: Mutex::new(None),
                 toolbars: crate::toolbars::Toolbars::new(),
-                spawn: Mutex::new(Arc::new(|work: ActionFuture| {
-                    std::thread::spawn(move || {
-                        let _ = futures::executor::block_on(work);
-                    });
-                })),
+                spawn: Mutex::new(default_spawn()),
                 started: Mutex::new(BTreeSet::new()),
                 running: Arc::default(),
                 view_opener: Mutex::new(None),
