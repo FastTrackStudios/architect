@@ -390,7 +390,11 @@ fn an_extensions_data_is_written_whole_privately_and_never_wiped() {
     });
     let file = data_json(&tmp.path().join("data"));
     let kept: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert_eq!(kept.as_object().map(serde_json::Map::len), Some(8), "{kept}");
+    assert_eq!(
+        kept.as_object().map(serde_json::Map::len),
+        Some(8),
+        "{kept}"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
