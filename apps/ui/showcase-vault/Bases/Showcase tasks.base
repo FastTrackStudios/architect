@@ -11,3 +11,9 @@ views:
     groupBy:
       property: status
       direction: ASC
+  - type: checklist
+    name: Checklist
+    order:
+      - file.name
+      - status
+    doneWhen: done
