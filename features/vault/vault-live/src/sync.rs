@@ -1877,7 +1877,10 @@ fn forward_watcher_events(
                 if !is_synced_folder(&root, &rel) {
                     continue;
                 }
-                plain_markdown_under(&root, &abs)
+                // Walked as the root names it: the event's path may be the
+                // canonical one (macOS), which the walk's prefix strip
+                // would not match.
+                plain_markdown_under(&root, &root.join(&rel))
                     .into_iter()
                     .filter_map(|file| {
                         crate::snapshot::invalidate_path(&root.join(&file));
@@ -1892,6 +1895,13 @@ fn forward_watcher_events(
                 plain.forget(&vault_id, &rel);
                 continue;
             }
+            Err(e) if !is_gone(&e) => {
+                // There, but unreadable now (permissions, a sandbox taking
+                // the folder away): nothing is known to be deleted, so
+                // nothing is sent and the record is kept.
+                tracing::warn!(path = %rel, error = %e, "watcher: a path cannot be read; nothing sent");
+                continue;
+            }
             Err(_) => {
                 // Gone. A deletion only if this path was last seen as a
                 // plain file; otherwise it was a symlink (perhaps made
@@ -1902,8 +1912,14 @@ fn forward_watcher_events(
                 // gone too.
                 let mut gone = Vec::new();
                 for path in std::iter::once(rel.clone()).chain(plain.under(&vault_id, &rel)) {
-                    if path != rel && std::fs::symlink_metadata(root.join(&path)).is_ok() {
-                        continue;
+                    // Below a gone folder, a note counts as gone only when
+                    // its path is not found: one that cannot be read is
+                    // kept, never deleted on peers.
+                    if path != rel {
+                        match std::fs::symlink_metadata(root.join(&path)) {
+                            Err(e) if is_gone(&e) => {}
+                            _ => continue,
+                        }
                     }
                     seen.remove(&path);
                     if plain.remove(&vault_id, &path) {
@@ -1926,6 +1942,16 @@ fn forward_watcher_events(
             let _ = tx.send(payload);
         }
     }
+}
+
+/// Whether `e` says the path is not there: not found, or a parent that
+/// is no longer a folder. Any other error (permission denied, a sandbox's
+/// "operation not permitted") is not a deletion.
+fn is_gone(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
 }
 
 /// The `Put` for the plain note at `rel`, recorded as a plain file, or

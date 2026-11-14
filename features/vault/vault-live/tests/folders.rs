@@ -205,6 +205,35 @@ async fn a_folder_deleted_or_moved_out_deletes_its_notes() {
     assert_eq!(before, deleted.len(), "a Delete sent twice: {seen:?}");
 }
 
+/// A folder that can no longer be read (`chmod 000`, a sandbox taking it
+/// away) is not deleted: its notes stay on peers. Running as root reads
+/// it anyway, so the test proves nothing there and is skipped.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_folder_deletes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_tmp, b, mut rx, _watch) = watched().await;
+    let vault = b.root("v").unwrap();
+    fs::create_dir_all(vault.join("Lock/In")).unwrap();
+    fs::write(vault.join("Lock/A.md"), "a").unwrap();
+    fs::write(vault.join("Lock/In/B.md"), "b").unwrap();
+    until_all(&mut rx, &["Lock/A.md", "Lock/In/B.md"], "Put", put_path).await;
+
+    fs::set_permissions(vault.join("Lock/In"), fs::Permissions::from_mode(0o000)).unwrap();
+    fs::set_permissions(vault.join("Lock"), fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read_dir(vault.join("Lock")).is_ok() {
+        fs::set_permissions(vault.join("Lock"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(vault.join("Lock/In"), fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let seen = events_before_marker(&mut rx, &vault, "After.md").await;
+    fs::set_permissions(vault.join("Lock"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(vault.join("Lock/In"), fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        !seen.iter().any(|e| delete_path(e).is_some()),
+        "an unreadable folder sent Deletes: {seen:?}"
+    );
+}
+
 /// A folder renamed inside the vault: a peer applying the events in the
 /// order they come ends with every note, under its new path, and
 /// nothing under the old.
