@@ -193,9 +193,10 @@ pub fn plays(path: &str) -> bool {
 ///
 /// Every note's playing files, in the link's order (a note's own in the order it names them),
 /// each an item of the playhead's (`architect_playhead::model::Item`):
-/// the note's title (and the file's name when it has several), the
-/// note's art, the file's vault path as its media (the bar names the
-/// link, the source, under it). Only files the link serves (`served`).
+/// the note's title (and the file's name when it has several), its
+/// subtitle (an artist) and, with one recording, its length, the note's
+/// art, the file's vault path as its media (the bar names the link, the
+/// source, after the subtitle). Only files the link serves (`served`).
 #[must_use]
 pub fn queue<S: std::hash::BuildHasher>(link: &GuestLink, served: &HashSet<&str, S>) -> Vec<Value> {
     let mut items = Vec::new();
@@ -218,11 +219,19 @@ pub fn queue<S: std::hash::BuildHasher>(link: &GuestLink, served: &HashSet<&str,
                 "title": title,
                 "media": file,
             });
-            if let (Some(art), Some(o)) = (
-                note.art.as_deref().filter(|a| served.contains(a)),
-                item.as_object_mut(),
-            ) {
-                o.insert("art".to_owned(), Value::from(art));
+            if let Some(o) = item.as_object_mut() {
+                if let Some(art) = note.art.as_deref().filter(|a| served.contains(a)) {
+                    o.insert("art".to_owned(), Value::from(art));
+                }
+                // Its artist (the card shows it before the link's name)
+                // and, its one recording, its length.
+                if let Some(sub) = note.subtitle.as_deref().filter(|s| !s.is_empty()) {
+                    o.insert("subtitle".to_owned(), Value::from(sub));
+                }
+                if let (1, Some(ms)) = (media.len(), note.duration_ms.filter(|ms| *ms > 0)) {
+                    #[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+                    o.insert("duration".to_owned(), Value::from(ms as f64 / 1000.0));
+                }
             }
             items.push(item);
         }
@@ -448,6 +457,30 @@ mod tests {
         let less: HashSet<&str> = ["Gig/noel.wav"].into();
         assert_eq!(queue(&link, &less).len(), 1);
         assert!(queue(&link, &less)[0].get("art").is_none());
+    }
+
+    #[test]
+    fn a_queued_song_names_its_artist_and_its_one_recordings_length() {
+        let mut link = gig();
+        link.notes[1].subtitle = Some("Isaac Watts".into());
+        link.notes[1].duration_ms = Some(151_500);
+        link.notes[2].subtitle = Some("Traditional".into());
+        link.notes[2].duration_ms = Some(90_000);
+        let served: HashSet<&str> = ["Gig/joy.mp3", "Gig/noel.wav", "Gig/noel.pdf"].into();
+        let q = queue(&link, &served);
+        assert_eq!(q[0]["subtitle"], "Isaac Watts");
+        assert_eq!(q[0]["duration"], 151.5);
+        assert_eq!(q[1]["subtitle"], "Traditional");
+        assert_eq!(q[1]["duration"], 90.0);
+        // Two recordings of one note: whose length it is, nobody knows.
+        link.notes[1].files.push("Gig/joy-live.mp3".into());
+        let served: HashSet<&str> = ["Gig/joy.mp3", "Gig/joy-live.mp3"].into();
+        let q = queue(&link, &served);
+        assert_eq!(q.len(), 2);
+        assert!(
+            q.iter()
+                .all(|i| i.get("duration").is_none() && i["subtitle"] == "Isaac Watts")
+        );
     }
 
     #[test]

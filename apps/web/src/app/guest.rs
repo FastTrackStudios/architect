@@ -462,14 +462,18 @@ pub fn GuestPage(code: String, rest: String) -> Element {
     // The root note as the core list (#668): a collection whose type no
     // island claims (an island that does draws its own view instead).
     let listing = super::frames::use_listing();
-    let core_list = match &state {
-        Some(Ok(o)) => guest_view::root_note(&o.link).is_some_and(|r| {
-            !r.sets.is_empty()
-                && !listing.read().as_ref().is_some_and(|l| {
+    // A root collection an island claims: its view lists it, so it comes
+    // first and the link's notes follow under their own heading.
+    let (core_list, claimed_list) = match &state {
+        Some(Ok(o)) => guest_view::root_note(&o.link)
+            .filter(|r| !r.sets.is_empty())
+            .map_or((false, false), |r| {
+                let claimed = listing.read().as_ref().is_some_and(|l| {
                     crate::ext_host::claimed(l, r.kind.as_deref().unwrap_or_default()).is_some()
-                })
-        }),
-        _ => false,
+                });
+                (!claimed, claimed)
+            }),
+        _ => (false, false),
     };
     if let Some(Ok(o)) = &state {
         load_player(o, core_list);
@@ -489,6 +493,20 @@ pub fn GuestPage(code: String, rest: String) -> Element {
                         div { style: "display: flex; flex-direction: column; gap: 20px;",
                             GuestCollection { opened: o.clone(), on_open: choose }
                             GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone(), core_list: true }
+                        }
+                    },
+                    // The root collection an island claims: its view (the
+                    // list as its extension draws it) first, then the
+                    // link's notes to open, under their own heading.
+                    Open::Note(path) if claimed_list && guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {
+                        div { style: "display: flex; flex-direction: column; gap: 20px;",
+                            GuestNoteView { key: "{path}-{revision}", code: code.clone(), path: path.clone() }
+                            section { "data-testid": "guest-notes", style: "display: flex; flex-direction: column; gap: 4px;",
+                                h2 { style: "margin: 8px 0 0; font-size: 13px; font-weight: 650; letter-spacing: .01em; color: {t.ink_3};",
+                                    "Notes on this link"
+                                }
+                                NoteList { opened: o.clone(), chosen: path.clone(), on_open: choose }
+                            }
                         }
                     },
                     Open::Note(path) if guest_view::root_note(&o.link).is_some_and(|r| r.path == path) => rsx! {

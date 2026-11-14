@@ -345,8 +345,9 @@ to read.
   and draws the link from its guest service (`apps/web/src/app/guest.rs`
   `GuestPage`): the link's notes in their sets (headings over lists in
   the link's root note, `apps/web/src/guest_view.rs` `sections`), each
-  with its art and a play button for its recording; a note as the view
-  its type's island claims, handed what the node gives a guest, then its
+  with its art and a play button for its recording (a root setlist an
+  island claims: its view first, the notes after it under "Notes on this
+  link"); a note as the view its type's island claims, handed what the node gives a guest, then its
   page's words and images; the link's recordings on the Now Playing bar
   (streamed from the link's own file URLs); its files and "Download all";
   a rebuild or a revoke read again through `_live`. The page path and

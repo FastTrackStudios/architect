@@ -24,6 +24,9 @@
 // carries a row for the outside song, as Studio writes it, and the node
 // cuts it (#687 review).
 //
+// The same guest's setlist with an island claiming setlists: its view
+// first, then the link's notes to open, under "Notes on this link".
+//
 // The text area of a collection note is one element whether the list is
 // drawn or not: typed into, then the extension listing arriving late
 // (claiming the note's type, so the list gives way), then typed into
@@ -94,7 +97,7 @@ function png(size, a, b) {
 /// A node sharing a copy of the demo's setlist and its nine songs (and
 /// not a tenth song the setlist links), each cover a PNG, each recording
 /// the demo's silent one.
-async function node() {
+async function node(island = null) {
   const dir = mkdtempSync(join(tmpdir(), 'media-list-'));
   const vault = join(dir, 'vault');
   const songs = [];
@@ -124,6 +127,14 @@ async function node() {
   put(vault, `_architect/shares/${CODE}.md`, `---\npublish: false\n---\n# Share ${CODE}\n\n\`\`\`json\n${JSON.stringify(share)}\n\`\`\`\n`);
   const env = { ...process.env, ARCHITECT_DATA_DIR: join(dir, 'data'), ARCHITECT_VAULTS: `notes=${vault}`, ARCHITECT_IROH: 'local', ARCHITECT_NAME: 'media-list-test', ARCHITECT_WEB_APP: BUNDLE };
   for (const k of Object.keys(env)) if (k.startsWith('ARCHITECT_ISLAND') || k === 'ARCHITECT_FAVOURITES' || k === 'ARCHITECT_ISSUER') delete env[k];
+  // An island claiming setlists, when asked: a view that only says it drew.
+  if (island) {
+    const folder = join(dir, 'island');
+    put(folder, 'web-view.js', 'export default async function init() {}\nexport function mount(view) { document.body.textContent = "drawn: " + view; }\n');
+    put(folder, 'web-view_bg.wasm', Buffer.from([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
+    put(folder, 'architect.json', JSON.stringify({ module: 'web-view.js', manifest: { id: 'demo.setlist', capabilities: {} } }));
+    Object.assign(env, { ARCHITECT_ISLAND_FOLDER: folder, ARCHITECT_ISLAND_ID: 'demo.setlist', ARCHITECT_ISLAND_VIEW: 'progress', ARCHITECT_ISLAND_EMBEDS: 'list=setlist=date', ARCHITECT_ISLAND_READS: 'documents' });
+  }
   const port = await freePort();
   env.ARCHITECT_BIND = `127.0.0.1:${port}`;
   const proc = spawn(NODE, [], { stdio: ['ignore', 'ignore', process.env.NODE_LOG ? 'inherit' : 'ignore'], env });
@@ -386,6 +397,26 @@ test('a share link\'s guest gets the same list from the link\'s notes, never one
       } finally { await b.close(); }
     }
   } finally { f.close(); n.close(); }
+});
+
+test('a guest\'s setlist an island claims: its view first, then the link\'s notes under their heading', { skip: skipGuest }, async () => {
+  const n = await node(true);
+  const f = await front(n.origin);
+  const b = await firefox(false);
+  try {
+    for (const [w, h, tag] of [[390, 844, 'phone-390'], [1280, 900, 'desk-1280']]) {
+      await b.size(w, h);
+      await b.go(`${f.origin}/s/${CODE}/`);
+      await until(() => b.eval(`!!document.querySelector('[data-testid=ext-frame]') && !!document.querySelector('[data-testid=guest-list]')`), 60000, `${tag}: the view and the notes`);
+      // The island draws the list: no core list, and its view comes before
+      // the notes, which sit under their own heading.
+      assert.equal(await list(b), null, 'no core list under a claim');
+      assert.ok(await b.eval(`!!(document.querySelector('[data-testid=ext-frame]').compareDocumentPosition(document.querySelector('[data-testid=guest-list]')) & Node.DOCUMENT_POSITION_FOLLOWING)`), 'the view before the notes');
+      assert.equal(await b.eval(`document.querySelector('[data-testid=guest-notes] h2')?.textContent`), 'Notes on this link');
+      await sleep(800);
+      await b.shot(join(shotDir(), `guest-claimed-${tag}.png`));
+    }
+  } finally { await b.close(); f.close(); n.close(); }
 });
 
 test('a collection note\'s text area keeps what was typed when the extension listing arrives late', { skip }, async () => {
