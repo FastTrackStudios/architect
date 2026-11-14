@@ -221,7 +221,9 @@ fn read_scripts(root: &Path) -> Result<BTreeMap<String, String>, String> {
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().into_owned();
-            let Ok(kind) = entry.file_type() else { continue };
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
             if kind.is_symlink() || name.starts_with('.') || name == "node_modules" {
                 continue;
             }
@@ -323,12 +325,7 @@ impl Shared {
     /// One run of module `file`'s export `export` (`default`) as `caller`
     /// with `args`: off the calling thread, on a thread of its own, one
     /// undo step named `step`; `action` is what its `ctx.action` says.
-    fn run(
-        self: &Arc<Self>,
-        target: Target,
-        caller: &ActionCaller,
-        args: Value,
-    ) -> ActionFuture {
+    fn run(self: &Arc<Self>, target: Target, caller: &ActionCaller, args: Value) -> ActionFuture {
         let Target {
             file,
             export,
@@ -338,7 +335,11 @@ impl Shared {
         let me = Arc::clone(self);
         // As the extension, for whoever ran it; its inner calls are a
         // script's, never the person's own press.
-        let principal = me.api.clone().acting_for(caller.principal().cloned()).principal();
+        let principal = me
+            .api
+            .clone()
+            .acting_for(caller.principal().cloned())
+            .principal();
         let mut context = architect_extensions::host::invocation_json(caller.invocation());
         if let Value::Object(map) = &mut context {
             map.insert("action".to_owned(), Value::String(action));
@@ -473,7 +474,10 @@ impl Instance for TsInstance {
         let target = Target {
             file: path.clone(),
             // A hook may name one export of its module (`function`).
-            export: decl.function.clone().unwrap_or_else(|| "default".to_owned()),
+            export: decl
+                .function
+                .clone()
+                .unwrap_or_else(|| "default".to_owned()),
             action: format!("hook {}", decl.on),
             step: format!("{} hook {}", self.0.name, decl.on),
         };

@@ -219,10 +219,14 @@ struct NoArgs {}
 impl Pantry {
     fn install(&self, list: &ActionList) {
         let me = self.clone();
-        list.register_with(&ADD, Effect::Mutating, move |_: &ActionCaller, a: AddArgs| {
-            me.0.lock().unwrap().push(a.name.clone());
-            Ok::<_, String>(RawJson::from(json!({ "added": a.name }).to_string()))
-        })
+        list.register_with(
+            &ADD,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: AddArgs| {
+                me.0.lock().unwrap().push(a.name.clone());
+                Ok::<_, String>(RawJson::from(json!({ "added": a.name }).to_string()))
+            },
+        )
         .unwrap();
         list.register_with(&SECRET, Effect::ReadOnly, |_: &ActionCaller, _: NoArgs| {
             Ok::<_, String>(RawJson::from("\"leaked\"".to_owned()))
@@ -339,11 +343,7 @@ fn lab_with(ui: FakeUi, edit: impl FnOnce(&Path)) -> Lab {
 
 fn lab() -> Lab {
     let lab = lab_with(FakeUi::new(), |_| {});
-    assert!(
-        lab.ext.host().get(ID).is_some(),
-        "{:?}",
-        lab.ext.problems()
-    );
+    assert!(lab.ext.host().get(ID).is_some(), "{:?}", lab.ext.problems());
     lab
 }
 
@@ -483,13 +483,19 @@ fn a_hook_runs_its_module_as_its_extension() {
     }
     let items = lab.pantry.items();
     assert_eq!(items.len(), 1);
-    assert!(items[0].starts_with("from ") && items[0].contains("recipes.cooked"), "{items:?}");
+    assert!(
+        items[0].starts_with("from ") && items[0].contains("recipes.cooked"),
+        "{items:?}"
+    );
 }
 
 #[test]
 fn a_mistake_in_a_module_fails_the_load_at_its_place() {
     let lab = lab_with(FakeUi::new(), |dir| {
-        write(dir, &[("lib/scale.ts", "export function scale(: number {\n")]);
+        write(
+            dir,
+            &[("lib/scale.ts", "export function scale(: number {\n")],
+        );
     });
     assert!(lab.ext.host().get(ID).is_none());
     let problems = format!("{:?}", lab.ext.problems());

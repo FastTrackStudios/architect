@@ -1855,7 +1855,9 @@ view = "section"
             "id = \"fts.recipes\"\nname = \"R\"\nversion = \"0.1.0\"\nkind = \"luau\"\n\
              [[actions]]\nid = \"FTS_RECIPES_SCALE\"\nname = \"Scale\"\nscript = \"scale.ts\"\n",
         );
-        let Err(e) = luau else { panic!("a .ts script in a luau extension loaded") };
+        let Err(e) = luau else {
+            panic!("a .ts script in a luau extension loaded")
+        };
         assert!(e.to_string().contains("kind = \"typescript\""), "{e}");
         // Its hooks run its modules too.
         let hook = "[[hooks]]\non = \"startup\"\nscript = \"hooks/start.ts\"\n";

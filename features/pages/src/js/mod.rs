@@ -648,11 +648,13 @@ impl JsEngine {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("null")
             .to_owned();
-        Ok(Some(if v.get("ok") == Some(&serde_json::Value::Bool(true)) {
-            Ok(value)
-        } else {
-            Err(self.files.said(&value))
-        }))
+        Ok(Some(
+            if v.get("ok") == Some(&serde_json::Value::Bool(true)) {
+                Ok(value)
+            } else {
+                Err(self.files.said(&value))
+            },
+        ))
     }
 
     /// How many host calls and workers it still waits on.
