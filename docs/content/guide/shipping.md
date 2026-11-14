@@ -173,6 +173,13 @@ group: the job adds no tester and submits nothing for review.
 `apps/mobile/ios/app-icon.sh` redraws the icon from
 `apps/desktop/icons/architect.svg`.
 
+The standard distribution (#631, #640: Architect with Studio's setlists
+and studio-views linked in) builds the same way with
+`DIST_MANIFEST=dist/standard/Cargo.toml`. Add `--build-only` to stop before
+signing; it reads no secret, identity or profile. `ios.yml` still ships
+the plain app. It switches with one `DIST_MANIFEST` line once the core
+list pins a Studio release that builds for iOS (studio#492).
+
 ### The site
 
 `architect.fasttrackstudio.app` is served by one VPS: its static file

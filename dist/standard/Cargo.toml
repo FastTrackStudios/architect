@@ -27,16 +27,17 @@ name = "architect-desktop"
 path = "src/main.rs"
 
 [features]
-# The window, as the Architect app has it. Off (`--no-default-features`),
-# the binary is the headless node alone: no Blitz, wgpu or wayland.
+# The window, as the Architect app has it (on iOS, always). Off
+# (`--no-default-features`), the binary is the headless node alone: no
+# Blitz, wgpu or wayland.
 default = ["gui"]
-gui = ["architect-desktop/gui"]
+gui = ["architect-desktop/gui", "dep:studio-views"]
 # The node draws the fences installed WASI components claim, as the
 # release's node does (`cargo xtask dist node --features node-wasi`).
 node-wasi = ["architect-desktop/node-wasi"]
 
 [dependencies]
-architect-desktop = { path = "../../apps/desktop", default-features = false, features = ["vox"] }
+architect-distribution = { path = "../../apps/distribution" }
 architect-sites = { path = "../../features/sites" }
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
@@ -48,6 +49,16 @@ tracing = { version = "0.1", features = ["std"] }
 # The linked core extensions, each at the tag the list pins.
 # studio-setlists 26.11.4: https://github.com/FastTrackStudios/studio v26.11.4 (93a2d28a19852cff177ce268c38f5e5d4808bfa9)
 setlists = { git = "https://github.com/FastTrackStudios/studio", tag = "v26.11.4", features = ["extension", "share"] }
+# studio-views 26.11.4: https://github.com/FastTrackStudios/studio v26.11.4 (93a2d28a19852cff177ce268c38f5e5d4808bfa9)
+studio-views = { git = "https://github.com/FastTrackStudios/studio", tag = "v26.11.4", features = ["extension"], optional = true }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+# The desk's window and the node: everywhere but iOS.
+architect-desktop = { path = "../../apps/desktop", default-features = false, features = ["vox"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+# The iPhone and iPad app (`architect_mobile::run`, `cargo xtask dist ios`).
+architect-mobile = { path = "../../apps/mobile" }
 
 [dev-dependencies]
 tempfile = "3"
@@ -105,6 +116,7 @@ architect-files-extension = { path = "../../features/files/extension" }
 architect-guide = { path = "../../features/guide" }
 architect-input = { path = "../../features/input" }
 architect-mcp = { path = "../../features/mcp" }
+architect-mobile = { path = "../../apps/mobile" }
 architect-navigator = { path = "../../features/navigator" }
 architect-navigator-api = { path = "../../features/navigator-api" }
 architect-navigator-extension = { path = "../../features/navigator/extension" }
@@ -207,6 +219,7 @@ architect-files-extension = { path = "../../features/files/extension" }
 architect-guide = { path = "../../features/guide" }
 architect-input = { path = "../../features/input" }
 architect-mcp = { path = "../../features/mcp" }
+architect-mobile = { path = "../../apps/mobile" }
 architect-navigator = { path = "../../features/navigator" }
 architect-navigator-api = { path = "../../features/navigator-api" }
 architect-navigator-extension = { path = "../../features/navigator/extension" }

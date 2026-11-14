@@ -21,9 +21,10 @@
 # `dist/standard` does not match this file.
 
 # Studio's song libraries and setlists (studio `features/setlists`): its
-# navigator, setlist and song views and actions in the app, and its share
-# blocks (a song's chart as Keyflow's follow SVG, a set's playable list) on
-# the node's share links and Sites.
+# navigator, setlist and song views and actions in the app (on the desk and
+# in the iPhone and iPad app), and its share blocks (a song's chart as
+# Keyflow's follow SVG, a set's playable list) on the node's share links and
+# Sites.
 [[core]]
 id        = "studio-setlists"
 publisher = "FastTrackStudios"
@@ -41,11 +42,37 @@ comment = "studio v26.11.4 SHA256SUMS"
 [core.linked]
 crate     = "setlists"
 features  = ["extension", "share"]
-platforms = ["desktop", "node"]
+platforms = ["desktop", "node", "ios"]
 extension = "setlists::ext::Setlists"
 blocks    = "setlists::share::blocks"
 # Studio's own root `[patch]`: Keyflow still takes these from daw's old
 # repo; Studio gives it its copies, so there is one of each.
+patch."https://github.com/FastTrackStudios/daw" = ["daw", "dawfile-reaper", "fts-sample"]
+
+# Studio's views (studio `features/studio-views`): the Views bar at the
+# bottom of the window, as the Studio iPad app has it, each button an action
+# that opens or focuses its view (the Chart Editor among them), and a view
+# that needs Studio's engine shown with the reason it is not here. The
+# window's alone: the node draws no toolbar. Decided on #631 (2026-11-12).
+[[core]]
+id        = "studio-views"
+publisher = "FastTrackStudios"
+source    = "https://github.com/FastTrackStudios/studio"
+version   = "26.11.4"
+tag       = "v26.11.4"
+rev       = "93a2d28a19852cff177ce268c38f5e5d4808bfa9"
+
+[core.signature]
+key     = "org"
+sums    = "https://github.com/FastTrackStudios/studio/releases/download/v26.11.4/SHA256SUMS"
+minisig = "https://github.com/FastTrackStudios/studio/releases/download/v26.11.4/SHA256SUMS.minisig"
+comment = "studio v26.11.4 SHA256SUMS"
+
+[core.linked]
+crate     = "studio-views"
+features  = ["extension"]
+platforms = ["desktop", "ios"]
+extension = "studio_views::ext::StudioViews"
 patch."https://github.com/FastTrackStudios/daw" = ["daw", "dawfile-reaper", "fts-sample"]
 
 # Studio's island (studio `apps/architect/island`): Session's progress bar

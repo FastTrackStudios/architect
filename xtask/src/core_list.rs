@@ -87,7 +87,8 @@ pub enum Platform {
     Desktop,
     /// The headless node (`serve`): share links and Sites.
     Node,
-    /// The iPhone and iPad app (not built by `dist/standard` yet).
+    /// The iPhone and iPad app (`cargo xtask dist ios`): linked forms
+    /// only, as iOS runs no downloaded native code.
     Ios,
     /// The hosted web app (not built by `dist/standard` yet).
     Web,
@@ -103,8 +104,15 @@ impl Platform {
         }
     }
 
-    /// `dist/standard` builds it today.
+    /// `dist/standard` builds a linked form for it today.
     const fn built(self) -> bool {
+        matches!(self, Self::Desktop | Self::Node | Self::Ios)
+    }
+
+    /// `dist/standard` ships a packaged form for it today (`core fetch`
+    /// puts it beside the desktop or node binary; nothing fetches into
+    /// an iOS bundle yet).
+    const fn ships_packaged(self) -> bool {
         matches!(self, Self::Desktop | Self::Node)
     }
 }
@@ -192,7 +200,10 @@ impl Entry {
     fn folder(&self) -> Option<(&Packaged, &str)> {
         let p = self.packaged.as_ref()?;
         let folder = p.folder.as_deref()?;
-        p.platforms.iter().any(|x| x.built()).then_some((p, folder))
+        p.platforms
+            .iter()
+            .any(|x| x.ships_packaged())
+            .then_some((p, folder))
     }
 }
 
@@ -642,6 +653,71 @@ fn member_path(root: &Root, name: &str) -> Result<String, String> {
 }
 
 /// Who `e` is, for a comment.
+/// Where a linked crate is built: on the desk's window, the node, the
+/// iOS app.
+fn targets(l: &Linked) -> (bool, bool, bool) {
+    (
+        l.platforms.contains(&Platform::Desktop),
+        l.platforms.contains(&Platform::Node),
+        l.platforms.contains(&Platform::Ios),
+    )
+}
+
+/// The `#[cfg(..)]` that compiles a linked extension in where its
+/// platforms say: the window is `gui` off iOS, the node is no `gui`
+/// off iOS, the iOS app is iOS (always `gui`). None: everywhere.
+fn linked_cfg(l: &Linked) -> Option<&'static str> {
+    match targets(l) {
+        (true, true, true) => None,
+        (true, true, false) => Some("not(target_os = \"ios\")"),
+        (true, false, true) => Some("feature = \"gui\""),
+        (true, false, false) => Some("all(feature = \"gui\", not(target_os = \"ios\"))"),
+        (false, true, true) => Some("any(not(feature = \"gui\"), target_os = \"ios\")"),
+        (false, true, false) => Some("all(not(feature = \"gui\"), not(target_os = \"ios\"))"),
+        (false, false, true) => Some("all(feature = \"gui\", target_os = \"ios\")"),
+        (false, false, false) => Some("any()"),
+    }
+}
+
+/// The dependency table a linked crate goes in: every target when it is
+/// built for iOS and for the desk or the node, iOS's alone, or every
+/// target but iOS (a crate not listed for iOS is never built for it).
+const DEPS_ALL: &str = "[dependencies]";
+const DEPS_IOS: &str = "[target.'cfg(target_os = \"ios\")'.dependencies]";
+const DEPS_NOT_IOS: &str = "[target.'cfg(not(target_os = \"ios\"))'.dependencies]";
+
+fn deps_table(l: &Linked) -> &'static str {
+    match targets(l) {
+        (_, _, false) => DEPS_NOT_IOS,
+        (false, false, true) => DEPS_IOS,
+        _ => DEPS_ALL,
+    }
+}
+
+/// A linked crate's dependency line: its source at the tag the list
+/// pins, its features, optional (turned on by `gui`) where no node needs
+/// it.
+fn linked_dep(e: &Entry, l: &Linked) -> String {
+    let mut fields = vec![
+        format!("git = {}", quoted(&e.source)),
+        format!("tag = {}", quoted(&e.tag)),
+    ];
+    if !l.features.is_empty() {
+        fields.push(format!(
+            "features = [{}]",
+            l.features
+                .iter()
+                .map(|f| quoted(f))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !l.platforms.contains(&Platform::Node) {
+        fields.push("optional = true".to_owned());
+    }
+    format!("{} = {{ {} }}", key(&l.krate), fields.join(", "))
+}
+
 fn about(e: &Entry) -> String {
     format!("{} {}: {} {} ({})", e.id, e.version, e.source, e.tag, e.rev)
 }
@@ -690,16 +766,15 @@ fn manifest(list: &List, root: &Root, patched: &BTreeSet<String>) -> Result<Stri
     line("path = \"src/main.rs\"");
     line("");
     line("[features]");
-    line("# The window, as the Architect app has it. Off (`--no-default-features`),");
-    line("# the binary is the headless node alone: no Blitz, wgpu or wayland.");
+    line("# The window, as the Architect app has it (on iOS, always). Off");
+    line("# (`--no-default-features`), the binary is the headless node alone: no");
+    line("# Blitz, wgpu or wayland.");
     line("default = [\"gui\"]");
     let desktop_only: Vec<String> = list
         .core
         .iter()
         .filter_map(|e| e.linked.as_ref())
-        .filter(|l| {
-            l.platforms.contains(&Platform::Desktop) && !l.platforms.contains(&Platform::Node)
-        })
+        .filter(|l| l.platforms.iter().any(|p| p.built()) && !l.platforms.contains(&Platform::Node))
         .map(|l| quoted(&format!("dep:{}", l.krate)))
         .collect();
     let mut gui = vec![quoted("architect-desktop/gui")];
@@ -711,8 +786,8 @@ fn manifest(list: &List, root: &Root, patched: &BTreeSet<String>) -> Result<Stri
     line("");
     line("[dependencies]");
     line(&format!(
-        "architect-desktop = {{ path = {}, default-features = false, features = [\"vox\"] }}",
-        quoted(&member_path(root, "architect-desktop")?)
+        "architect-distribution = {{ path = {} }}",
+        quoted(&member_path(root, "architect-distribution")?)
     ));
     line(&format!(
         "architect-sites = {{ path = {} }}",
@@ -734,32 +809,60 @@ fn manifest(list: &List, root: &Root, patched: &BTreeSet<String>) -> Result<Stri
         .filter_map(|e| e.linked.as_ref().map(|l| (e, l)))
         .filter(|(_, l)| l.platforms.iter().any(|p| p.built()))
         .collect();
-    if !linked.is_empty() {
-        line("");
-        line("# The linked core extensions, each at the tag the list pins.");
+    let in_table = |table: &str| -> Vec<&(&Entry, &Linked)> {
+        linked
+            .iter()
+            .filter(|(_, l)| deps_table(l) == table)
+            .collect()
+    };
+    let mut tables_of_deps: Vec<(&str, Vec<String>)> = Vec::new();
+    for table in [DEPS_ALL, DEPS_NOT_IOS, DEPS_IOS] {
+        let mut lines = Vec::new();
+        match table {
+            DEPS_NOT_IOS => {
+                lines.push("# The desk's window and the node: everywhere but iOS.".to_owned());
+                lines.push(format!(
+                    "architect-desktop = {{ path = {}, default-features = false, features = [\"vox\"] }}",
+                    quoted(&member_path(root, "architect-desktop")?)
+                ));
+            }
+            DEPS_IOS => {
+                lines.push(
+                    "# The iPhone and iPad app (`architect_mobile::run`, `cargo xtask dist ios`)."
+                        .to_owned(),
+                );
+                lines.push(format!(
+                    "architect-mobile = {{ path = {} }}",
+                    quoted(&member_path(root, "architect-mobile")?)
+                ));
+            }
+            _ => {}
+        }
+        let these = in_table(table);
+        if !these.is_empty() {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push("# The linked core extensions, each at the tag the list pins.".to_owned());
+        }
+        for (e, l) in these {
+            lines.push(format!("# {}", about(e)));
+            lines.push(linked_dep(e, l));
+        }
+        tables_of_deps.push((table, lines));
     }
-    for (e, l) in &linked {
-        line(&format!("# {}", about(e)));
-        let mut fields = vec![
-            format!("git = {}", quoted(&e.source)),
-            format!("tag = {}", quoted(&e.tag)),
-        ];
-        if !l.features.is_empty() {
-            fields.push(format!(
-                "features = [{}]",
-                l.features
-                    .iter()
-                    .map(|f| quoted(f))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+    for (table, lines) in tables_of_deps {
+        if lines.is_empty() {
+            continue;
         }
-        let desktop_only =
-            l.platforms.contains(&Platform::Desktop) && !l.platforms.contains(&Platform::Node);
-        if desktop_only {
-            fields.push("optional = true".to_owned());
+        line("");
+        // `[dependencies]` is open already (the crate's own come first).
+        if table != DEPS_ALL {
+            line(table);
         }
-        line(&format!("{} = {{ {} }}", key(&l.krate), fields.join(", ")));
+        for l in lines {
+            line(&l);
+        }
     }
     line("");
     line("[dev-dependencies]");
@@ -868,7 +971,7 @@ fn list_rs(list: &List) -> String {
         .filter_map(|e| e.folder().map(|(p, _)| (e, p)))
         .collect();
     let island = packaged.iter().any(|(_, p)| p.island.is_some());
-    s.push_str("use architect_desktop::Distribution;\n\n");
+    s.push_str("use architect_distribution::Distribution;\n\n");
     s.push_str(if island {
         "use crate::packaged::{Island, Packaged};\n\n"
     } else {
@@ -876,8 +979,8 @@ fn list_rs(list: &List) -> String {
     });
     s.push_str(
         "/// `dist` with every linked core extension compiled in (on the node\n\
-         /// build, without `gui`, and the desktop one, with it, as each entry's\n\
-         /// platforms say).\n",
+         /// build, without `gui`, the desktop one, with it, and the iOS app, as\n\
+         /// each entry's platforms say).\n",
     );
     if linked.is_empty() {
         s.push_str("pub fn linked(dist: Distribution) -> Distribution {\n    dist\n}\n");
@@ -886,13 +989,7 @@ fn list_rs(list: &List) -> String {
             "pub fn linked(dist: Distribution) -> Distribution {\n    let mut dist = dist;\n",
         );
         for (e, l) in &linked {
-            let desktop = l.platforms.contains(&Platform::Desktop);
-            let node = l.platforms.contains(&Platform::Node);
-            let cfg = match (desktop, node) {
-                (true, false) => "    #[cfg(feature = \"gui\")]\n",
-                (false, true) => "    #[cfg(not(feature = \"gui\"))]\n",
-                _ => "",
-            };
+            let cfg = linked_cfg(l).map_or_else(String::new, |c| format!("    #[cfg({c})]\n"));
             let _ = writeln!(s, "    // {}", about(e));
             let _ = write!(
                 s,
@@ -1100,8 +1197,13 @@ fn report(list: &List) {
             .linked
             .iter()
             .flat_map(|l| l.platforms.iter())
-            .chain(e.packaged.iter().flat_map(|p| p.platforms.iter()))
             .filter(|p| !p.built())
+            .chain(
+                e.packaged
+                    .iter()
+                    .flat_map(|p| p.platforms.iter())
+                    .filter(|p| !p.ships_packaged()),
+            )
             .map(|p| p.name())
             .collect();
         if !unbuilt.is_empty() {
@@ -1592,13 +1694,44 @@ comment = "x v1.2.3 SHA256SUMS"
         let node_only = entry(LINKED).replace("[\"desktop\", \"node\"]", "[\"node\"]")
             + "blocks = \"x::share::blocks\"\n";
         let rs = list_rs(&parse(&node_only).unwrap());
-        assert!(rs.contains("#[cfg(not(feature = \"gui\"))]"), "{rs}");
+        assert!(
+            rs.contains("#[cfg(all(not(feature = \"gui\"), not(target_os = \"ios\")))]"),
+            "{rs}"
+        );
         assert!(rs.contains("dist.linked(&x::ext::X)"), "{rs}");
         assert!(rs.contains("dist.block(x::share::blocks())"), "{rs}");
         assert!(
             rs.contains("pub const PACKAGED: &[Packaged] = &[];"),
             "{rs}"
         );
+    }
+
+    #[test]
+    fn an_ios_entry_is_linked_into_the_ios_app() {
+        let everywhere = entry(LINKED).replace(
+            "[\"desktop\", \"node\"]",
+            "[\"desktop\", \"node\", \"ios\"]",
+        );
+        let list = parse(&everywhere).unwrap();
+        let rs = list_rs(&list);
+        assert!(!rs.contains("#[cfg("), "{rs}");
+        let l = list.core[0].linked.as_ref().unwrap();
+        assert_eq!(deps_table(l), DEPS_ALL);
+        assert!(!linked_dep(&list.core[0], l).contains("optional"));
+
+        // A window's extension: the desk and the phone, never the node.
+        let window = entry(LINKED).replace("[\"desktop\", \"node\"]", "[\"desktop\", \"ios\"]");
+        let list = parse(&window).unwrap();
+        let l = list.core[0].linked.as_ref().unwrap();
+        assert!(list_rs(&list).contains("#[cfg(feature = \"gui\")]"));
+        assert_eq!(deps_table(l), DEPS_ALL);
+        assert!(linked_dep(&list.core[0], l).contains("optional = true"));
+
+        // Not listed for iOS: never built for it.
+        let list = parse(&entry(LINKED)).unwrap();
+        let l = list.core[0].linked.as_ref().unwrap();
+        assert_eq!(deps_table(l), DEPS_NOT_IOS);
+        assert_eq!(linked_cfg(l), Some("not(target_os = \"ios\")"));
     }
 
     #[test]

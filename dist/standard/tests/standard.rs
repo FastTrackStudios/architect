@@ -7,7 +7,7 @@ use architect_standard::packaged::{self, Island, Packaged, PackagedError};
 use base64::Engine as _;
 use sha2::{Digest as _, Sha256};
 
-fn ids(dist: &architect_desktop::Distribution) -> Vec<String> {
+fn ids(dist: &architect_distribution::Distribution) -> Vec<String> {
     dist.describe()["extensions"]
         .as_array()
         .map(|a| {
@@ -29,6 +29,12 @@ fn it_is_the_architect_app_with_the_linked_core_extensions() {
     assert!(ids.iter().any(|i| i == "calendar"), "{ids:?}");
     // … and every linked core extension.
     assert!(ids.iter().any(|i| i == "studio-setlists"), "{ids:?}");
+    // The window's alone (the desk's and the iOS app's), never the node's.
+    assert_eq!(
+        ids.iter().any(|i| i == "studio-views"),
+        cfg!(feature = "gui"),
+        "{ids:?}"
+    );
     assert!(dist.islands().is_empty(), "no core folder, no island");
 }
 

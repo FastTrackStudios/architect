@@ -5,7 +5,7 @@ weight = 78
 +++
 
 Architect's standard release (the desktop app, the node a hosted
-Architect runs, later the iPhone app and the web app) includes a chosen set
+Architect runs, the iPhone and iPad app, later the web app) includes a chosen set
 of extensions: the **core extensions**. Each one lives in its **own** repo,
 Studio's setlists in Studio's, a community extension in its author's.
 Architect holds a reference to it, never its code (#631).
@@ -66,8 +66,16 @@ An entry has a **form per platform**, one form for each platform it names
   registry within their major) are the next step; the list can already
   name one (the commented community example in the file).
 
-`dist/standard` builds `desktop` and `node` today. An entry may name `ios`
-or `web` already; `cargo xtask core check` says it is not built yet.
+`dist/standard` builds `desktop`, `node` and (linked forms only)
+`ios` today: `src/main.rs` runs `architect_desktop::run` or, on iOS,
+`architect_mobile::run`. Each linked crate is compiled in only where its
+platforms say: a crate not listed for `ios` is a
+`cfg(not(target_os = "ios"))` dependency and is never built for the
+phone, and one the node doesn't need is optional, turned on by `gui`.
+Nothing fetches packaged forms into an iOS bundle yet, and `web` is not
+built. `cargo xtask core check` names what is not built.
+`cargo xtask dist ios --manifest-path dist/standard/Cargo.toml` builds
+the iOS app (#640; [your own Architect](@/guide/your-own-architect.md#ios)).
 
 ## The standard build: `dist/standard`
 

@@ -9,6 +9,9 @@
 #
 #   MARKETING_VER=0.12.0 apps/mobile/ios/deploy-testflight.sh             build, sign, upload
 #   MARKETING_VER=0.12.0 apps/mobile/ios/deploy-testflight.sh --dry-run   build, sign, validate; no upload
+#   MARKETING_VER=0.12.0 apps/mobile/ios/deploy-testflight.sh --build-only  build and stamp; stop before signing
+#   The standard distribution (#640), what TestFlight ships:
+#   DIST_MANIFEST=dist/standard/Cargo.toml MARKETING_VER=… apps/mobile/ios/deploy-testflight.sh
 #   Headless (airlock, the release job):
 #   KEYCHAIN=fts-build.keychain KEYCHAIN_PW=fts-build MARKETING_VER=… apps/mobile/ios/deploy-testflight.sh
 #
@@ -29,13 +32,23 @@
 #   XCODE_DIR      the Xcode to build with (…/Xcode.app/Contents/Developer); default xcode-select's.
 #   ACTOOL_DEVELOPER_DIR  an Xcode whose actool runs on this macOS, for the icon only.
 #   SKIP_BUILD=1   reuse the last release bundle (iterating on signing).
+#   DIST_MANIFEST  a distribution crate's Cargo.toml to build instead of architect-mobile
+#                  (dist/standard/Cargo.toml: the standard distribution, with its core
+#                  extensions); DIST_BIN its binary (default: architect-desktop, dist/standard's).
+#                  Built as `cargo xtask dist ios` builds it (build-app.sh --manifest-path).
+#
+# --build-only reads no secret, keychain, identity or profile: it builds the
+# release app, writes its version and SDK metadata, and stops where signing
+# starts, saying what remains.
 set -euo pipefail
 
 DRY_RUN=0
+BUILD_ONLY=0
 for a in "$@"; do
     case "$a" in
         --dry-run) DRY_RUN=1 ;;
-        *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
+        --build-only) BUILD_ONLY=1 ;;
+        *) echo "usage: $0 [--dry-run | --build-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -61,59 +74,70 @@ DX_BUNDLE_ID="${DX_BUNDLE_ID:-app.fasttrackstudio.architect}"
 PROFILE_NAME="${PROFILE_NAME:-FTS Architect App Store}"
 TEAM_ID="${TEAM_ID:-28C2G63DA7}"
 
-if [ -z "${ASC_KEY_ID:-}" ] || [ -z "${ASC_ISSUER_ID:-}" ]; then
-    # shellcheck disable=SC1090,SC1091 # this machine's own secrets file
-    source "${ASC_CONFIG:-$HOME/.appstoreconnect/config.env}"
-fi
-: "${ASC_KEY_ID:?no App Store Connect key (ASC_KEY_ID)}"
-: "${ASC_ISSUER_ID:?no App Store Connect issuer (ASC_ISSUER_ID)}"
-# altool looks for AuthKey_<id>.p8 in ~/.appstoreconnect/private_keys
-# (among others); ASC_KEY_PATH elsewhere is linked there.
-if [ -n "${ASC_KEY_PATH:-}" ] && [ ! -f "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" ]; then
-    mkdir -p "$HOME/.appstoreconnect/private_keys"
-    ln -sf "$ASC_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
-fi
+# The App Store Connect key, the signing identity and the profile: none of
+# them for --build-only.
+if [ "$BUILD_ONLY" = 0 ]; then
+    if [ -z "${ASC_KEY_ID:-}" ] || [ -z "${ASC_ISSUER_ID:-}" ]; then
+        # shellcheck disable=SC1090,SC1091 # this machine's own secrets file
+        source "${ASC_CONFIG:-$HOME/.appstoreconnect/config.env}"
+    fi
+    : "${ASC_KEY_ID:?no App Store Connect key (ASC_KEY_ID)}"
+    : "${ASC_ISSUER_ID:?no App Store Connect issuer (ASC_ISSUER_ID)}"
+    # altool looks for AuthKey_<id>.p8 in ~/.appstoreconnect/private_keys
+    # (among others); ASC_KEY_PATH elsewhere is linked there.
+    if [ -n "${ASC_KEY_PATH:-}" ] && [ ! -f "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" ]; then
+        mkdir -p "$HOME/.appstoreconnect/private_keys"
+        ln -sf "$ASC_KEY_PATH" "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+    fi
 
-# Signing keychain: a dedicated one on a headless box (codesign over SSH
-# or from a runner cannot use the login keychain).
-KEYCHAIN="${KEYCHAIN:-login.keychain-db}"
-KEYCHAIN_PW="${KEYCHAIN_PW:-}"
-if [ -n "$KEYCHAIN_PW" ]; then
-    security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
-    security list-keychains -d user -s "$KEYCHAIN" login.keychain-db >/dev/null 2>&1 || true
-fi
-SIGN_ID="$(security find-identity -v -p codesigning "$KEYCHAIN" \
-    | awk -F'"' '/Apple Distribution/{print $2; exit}')"
-[ -n "$SIGN_ID" ] || { echo "ERROR: no Apple Distribution identity in $KEYCHAIN (Studio's setup-keychain.sh imports it)." >&2; exit 1; }
-echo "=== distribution identity: $SIGN_ID (keychain: $KEYCHAIN) ==="
+    # Signing keychain: a dedicated one on a headless box (codesign over SSH
+    # or from a runner cannot use the login keychain).
+    KEYCHAIN="${KEYCHAIN:-login.keychain-db}"
+    KEYCHAIN_PW="${KEYCHAIN_PW:-}"
+    if [ -n "$KEYCHAIN_PW" ]; then
+        security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+        security list-keychains -d user -s "$KEYCHAIN" login.keychain-db >/dev/null 2>&1 || true
+    fi
+    SIGN_ID="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+        | awk -F'"' '/Apple Distribution/{print $2; exit}')"
+    [ -n "$SIGN_ID" ] || { echo "ERROR: no Apple Distribution identity in $KEYCHAIN (Studio's setup-keychain.sh imports it)." >&2; exit 1; }
+    echo "=== distribution identity: $SIGN_ID (keychain: $KEYCHAIN) ==="
 
-echo "=== App Store provisioning profile ($PROFILE_NAME) ==="
-PROFILE=""
-if [ -n "${MINT_PROFILE_RB:-}" ]; then
-    PROFILE="$(PROFILE_TYPE=IOS_APP_STORE CERT_TYPE=DISTRIBUTION \
-        ruby "$MINT_PROFILE_RB" - "$DX_BUNDLE_ID" "$PROFILE_NAME" | awk -F= '/PROFILE_PATH=/{print $2}')"
-else
-    # The installed profile of that name, for this team and bundle id, the
-    # latest to expire, still valid.
-    now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    best=""
-    for f in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision \
-             "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
-        [ -f "$f" ] || continue
-        security cms -D -i "$f" > "$WORK/p.plist" 2>/dev/null || continue
-        [ "$(plutil -extract Name raw -o - "$WORK/p.plist" 2>/dev/null)" = "$PROFILE_NAME" ] || continue
-        [ "$(plutil -extract Entitlements.application-identifier raw -o - "$WORK/p.plist" 2>/dev/null)" = "$TEAM_ID.$DX_BUNDLE_ID" ] || continue
-        exp="$(plutil -extract ExpirationDate raw -o - "$WORK/p.plist")"
-        [[ "$exp" > "$now" ]] || continue
-        if [ -z "$best" ] || [[ "$exp" > "$best" ]]; then best="$exp"; PROFILE="$f"; fi
-    done
+    echo "=== App Store provisioning profile ($PROFILE_NAME) ==="
+    PROFILE=""
+    if [ -n "${MINT_PROFILE_RB:-}" ]; then
+        PROFILE="$(PROFILE_TYPE=IOS_APP_STORE CERT_TYPE=DISTRIBUTION \
+            ruby "$MINT_PROFILE_RB" - "$DX_BUNDLE_ID" "$PROFILE_NAME" | awk -F= '/PROFILE_PATH=/{print $2}')"
+    else
+        # The installed profile of that name, for this team and bundle id, the
+        # latest to expire, still valid.
+        now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        best=""
+        for f in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision \
+                 "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision; do
+            [ -f "$f" ] || continue
+            security cms -D -i "$f" > "$WORK/p.plist" 2>/dev/null || continue
+            [ "$(plutil -extract Name raw -o - "$WORK/p.plist" 2>/dev/null)" = "$PROFILE_NAME" ] || continue
+            [ "$(plutil -extract Entitlements.application-identifier raw -o - "$WORK/p.plist" 2>/dev/null)" = "$TEAM_ID.$DX_BUNDLE_ID" ] || continue
+            exp="$(plutil -extract ExpirationDate raw -o - "$WORK/p.plist")"
+            [[ "$exp" > "$now" ]] || continue
+            if [ -z "$best" ] || [[ "$exp" > "$best" ]]; then best="$exp"; PROFILE="$f"; fi
+        done
+    fi
+    [ -n "$PROFILE" ] && [ -f "$PROFILE" ] || {
+        echo "ERROR: no valid '$PROFILE_NAME' profile for $TEAM_ID.$DX_BUNDLE_ID installed (MINT_PROFILE_RB=<studio>/apps/studio/desktop/ios/mint-dev-profile.rb mints one)." >&2
+        exit 1; }
+    echo "profile: $PROFILE"
 fi
-[ -n "$PROFILE" ] && [ -f "$PROFILE" ] || {
-    echo "ERROR: no valid '$PROFILE_NAME' profile for $TEAM_ID.$DX_BUNDLE_ID installed (MINT_PROFILE_RB=<studio>/apps/studio/desktop/ios/mint-dev-profile.rb mints one)." >&2
-    exit 1; }
-echo "profile: $PROFILE"
 
 echo "=== building release ==="
+BUILD_ARGS=(--device --release)
+if [ -n "${DIST_MANIFEST:-}" ]; then
+    MANIFEST="$(cd "$(dirname "$DIST_MANIFEST")" && pwd)/$(basename "$DIST_MANIFEST")"
+    BUILD_ARGS+=(--manifest-path "$MANIFEST" --bin "${DIST_BIN:-architect-desktop}")
+    # build-app.sh's own default: the crate's target/ beside its manifest.
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(dirname "$MANIFEST")/target}"
+fi
 APP="$TARGET_DIR/aarch64-apple-ios/release/ArchitectMobile.app"
 if [ "${SKIP_BUILD:-}" = "1" ] && [ -d "$APP" ]; then
     echo "SKIP_BUILD=1: reusing $APP"
@@ -121,9 +145,9 @@ else
     # build-app.sh needs the dev shell (cargo, the toolchain); inside one
     # already (IN_NIX_SHELL / DEVENV_ROOT), it runs as it is.
     if [ -n "${DEVENV_ROOT:-}${IN_NIX_SHELL:-}" ]; then
-        APP="$("$SCRIPT_DIR/build-app.sh" --device --release)"
+        APP="$("$SCRIPT_DIR/build-app.sh" "${BUILD_ARGS[@]}" | tail -1)"
     else
-        APP="$(cd "$ROOT" && devenv shell -- bash "$SCRIPT_DIR/build-app.sh" --device --release | tail -1)"
+        APP="$(cd "$ROOT" && devenv shell -- bash "$SCRIPT_DIR/build-app.sh" "${BUILD_ARGS[@]}" | tail -1)"
     fi
 fi
 [ -d "$APP" ] && [ -f "$APP/architect-mobile" ] || { echo "ERROR: the release build produced no app at $APP" >&2; exit 1; }
@@ -158,6 +182,14 @@ add_str DTCompiler "com.apple.compilers.llvm.clang.1_0"
 add_str BuildMachineOSBuild "$(sw_vers -buildVersion)"
 plutil -lint "$PL" >/dev/null
 echo "=== app: $APP ($BUNDLE) $MARKETING_VER ($BUILD_NO), iphoneos${SDK_VER} (${SDK_BUILD}), Xcode ${XCODE_VER} (${XCODE_BUILD}) ==="
+
+if [ "$BUILD_ONLY" = 1 ]; then
+    echo "=== BUILD ONLY: $APP is built and stamped, unsigned; stopping before signing ==="
+    echo "Left to ship it: an Apple Distribution identity (KEYCHAIN), the App Store profile"
+    echo "'$PROFILE_NAME' for $TEAM_ID.$DX_BUNDLE_ID, the App Store Connect key (ASC_KEY_ID,"
+    echo "ASC_ISSUER_ID), then this script without --build-only (--dry-run validates first)."
+    exit 0
+fi
 
 echo "=== signing (distribution) ==="
 cp "$PROFILE" "$APP/embedded.mobileprovision"

@@ -1,6 +1,6 @@
 +++
 title = "Your own Architect"
-description = "A distribution of Architect as code: its name, bundle id, icon and folder, and the extensions you choose compiled in, built for desktop, the web and the node with cargo xtask dist."
+description = "A distribution of Architect as code: its name, bundle id, icon and folder, and the extensions you choose compiled in, built for desktop, the web, the node and iOS with cargo xtask dist."
 weight = 77
 +++
 
@@ -60,6 +60,23 @@ Every face of the build reads this one list:
 | the node (`<bin> serve`) | draws each extension's `[[embeds]] page` that claims a fence on share links and Sites, and the distribution's own `block`s (`Distribution::blocks`; the page ships in the extension's `Extension::files`) |
 | the web bundle | `/app/distribution.json` (`Distribution::describe`): the web app takes its name and lists the extensions compiled in |
 
+On an iPhone or iPad the same distribution runs through
+`architect_mobile::run` (`apps/mobile/src/lib.rs` `run`), so one crate is
+both apps:
+
+```rust
+fn main() -> std::process::ExitCode {
+    #[cfg(not(target_os = "ios"))]
+    return architect_desktop::run(my_distribution());
+    #[cfg(target_os = "ios")]
+    return architect_mobile::run(my_distribution());
+}
+```
+
+`my_distribution()` builds the `Distribution` from `architect_distribution`
+(`architect_distribution::architect()`, or `Distribution::new`), which
+both apps re-export as `distribution`.
+
 `run` keeps everything the Architect app does: first run, vaults,
 accounts, the control socket, MCP, `--headless`, `serve` and its
 `files`/`agent` commands. `<bin> distribution` prints what the build is,
@@ -76,6 +93,12 @@ gui = ["architect-desktop/gui"]   # the window; off, the binary is the node
 architect-desktop = { git = "https://github.com/FastTrackStudios/architect", tag = "vX.Y.Z", default-features = false, features = ["vox"] }
 setlists = { git = "https://github.com/FastTrackStudios/studio", tag = "…", features = ["extension"] }
 ```
+
+For iOS, `architect-desktop` moves to
+`[target.'cfg(not(target_os = "ios"))'.dependencies]` and
+`architect-mobile` goes in `[target.'cfg(target_os = "ios")'.dependencies]`,
+with `architect-distribution` for everyone. `dist/standard/Cargo.toml` is
+a working example.
 
 `vox` is required: it is the node's services. Pin one architect tag, the
 one the extensions you link pin, so the lockfile has one architect source.
@@ -102,6 +125,8 @@ cargo xtask dist all           # no --manifest-path: the Architect app itself
 | `node-image` | the node in `flake.nix`'s `architect-image-prebuilt` | `<folder>-node.tar` |
 | `web` | `scripts/web-bundle.sh`, with the node's `distribution` as `/app/distribution.json` | `web/` |
 | `web-image` | the bundle in `flake.nix`'s `architect-web-image-prebuilt` | `<folder>-web.tar` |
+| `ios` | on a Mac with Xcode: `apps/mobile/ios/build-app.sh --device --manifest-path …`, the phone's app, unsigned | `ios/ArchitectMobile.app` |
+| `ios-sim` | the same for the iOS Simulator, signed ad hoc | `ios-sim/ArchitectMobile.app` |
 
 The scripts take who the app is from the built binary (its name, binary,
 bundle id and icon, as `APP_*` variables), so nothing is written twice. The
@@ -119,6 +144,40 @@ Architect app through the same command: `cargo xtask dist node`, `web` and
 components' blocks as the release's node does. The standard release's own
 distribution crate, `dist/standard`, is built this way from the
 [core extensions](@/guide/core-extensions.md) list.
+
+## iOS
+
+iOS allows no JIT and no native code downloaded after review (App Store
+rules 2.5.2 and 4.7). So the iPhone and iPad app runs what its
+distribution **links**: the extensions compiled in, and WASI components on
+Pulley with `architect-mobile`'s `wasi` feature. `cargo xtask dist ios`
+and `ios-sim` build it on a Mac (airlock), and are not part of `all`:
+
+```sh
+cargo xtask dist ios-sim --manifest-path dist/standard/Cargo.toml --profile dev   # the Simulator
+cargo xtask dist ios --manifest-path dist/standard/Cargo.toml                     # the phone, release, unsigned
+```
+
+The binary goes into the bundle as `architect-mobile`, with
+`apps/mobile/ios/Info.plist`: the Architect app's bundle id and name. A
+distribution with an identity of its own sets `INFO_PLIST` to its own
+plist (an iOS binary can't be asked who it is on the Mac that built
+it). `scripts/mac-live-check.sh ios <the .app>` runs it in a Simulator of
+its own.
+
+`apps/mobile/ios/deploy-testflight.sh` signs and uploads it
+([shipping](@/guide/shipping.md)). With
+`DIST_MANIFEST=dist/standard/Cargo.toml` it builds the standard
+distribution. `--build-only` stops before signing and reads no key,
+identity or profile.
+
+Every crate a distribution links must build for `aarch64-apple-ios` and
+`-sim`. Studio's `setlists` at v26.11.4 doesn't: it turns on Keyflow's
+`engraver/pdf`, whose `printpdf` → `azul-core 0.0.5` has no iOS
+platform options. studio#492 takes the PDF writer off iOS. Until a Studio
+release carries it, `dist ios` of `dist/standard` builds only with a local
+`[patch]` of Studio's crates (`--config`, as in the fleet's cross-repo
+testing).
 
 ## The web
 

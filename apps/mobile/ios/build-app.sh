@@ -9,6 +9,16 @@
 #   apps/mobile/ios/build-app.sh [--device] [cargo build flags…]   (in `devenv shell`)
 #   apps/mobile/ios/build-app.sh --features wasi
 #   apps/mobile/ios/build-app.sh --device --release
+#   apps/mobile/ios/build-app.sh --manifest-path dist/standard/Cargo.toml --bin architect-desktop
+#
+# `--manifest-path <Cargo.toml>` (and `--bin <name>`) build a distribution
+# crate's iOS app instead of `architect-mobile`: a crate whose `main` on
+# iOS is `architect_mobile::run(<its Distribution>)` (`cargo xtask dist
+# ios` runs this so; docs/content/guide/your-own-architect.md). Its binary
+# goes into the bundle as `architect-mobile`, the Info.plist's executable;
+# the Info.plist is this folder's (Architect's identity) unless
+# INFO_PLIST names another. Its target dir is CARGO_TARGET_DIR, else the
+# crate's own `target/` beside its manifest.
 #
 # By default the bundle is for the Simulator (aarch64-apple-ios-sim),
 # signed ad hoc, for `scripts/mac-live-check.sh ios <it>`. `--device`
@@ -42,16 +52,40 @@ min_ios=16.0
 triple=aarch64-apple-ios-sim
 sdk_name=iphonesimulator
 cargo_args=()
-for a in "$@"; do
-    if [[ "$a" == "--device" ]]; then
-        triple=aarch64-apple-ios
-        sdk_name=iphoneos
-    else
-        cargo_args+=("$a")
-    fi
-done
+manifest=""
+bin=architect-mobile
 profile=debug
-if [[ " ${cargo_args[*]-} " == *" --release "* ]]; then profile=release; fi
+want=""
+for a in "$@"; do
+    # The value of the flag before it.
+    case "$want" in
+        manifest) manifest="$a"; cargo_args+=("$a"); want=""; continue ;;
+        bin) bin="$a"; cargo_args+=("$a"); want=""; continue ;;
+        profile) profile="$a"; cargo_args+=("$a"); want=""; continue ;;
+    esac
+    case "$a" in
+        --device) triple=aarch64-apple-ios; sdk_name=iphoneos ;;
+        --manifest-path) want=manifest; cargo_args+=("$a") ;;
+        --manifest-path=*) manifest="${a#*=}"; cargo_args+=("$a") ;;
+        --bin) want=bin; cargo_args+=("$a") ;;
+        --bin=*) bin="${a#*=}"; cargo_args+=("$a") ;;
+        --profile) want=profile; cargo_args+=("$a") ;;
+        --profile=*) profile="${a#*=}"; cargo_args+=("$a") ;;
+        --release) profile=release; cargo_args+=("$a") ;;
+        *) cargo_args+=("$a") ;;
+    esac
+done
+[[ -z "$want" ]] || die "--$want needs a value"
+# cargo's folder for a profile: `dev` builds into `debug`.
+[[ "$profile" == dev ]] && profile=debug
+package=()
+if [[ -n "$manifest" ]]; then
+    [[ -f "$manifest" ]] || die "no $manifest"
+    manifest_dir="$(cd "$(dirname "$manifest")" && pwd)"
+    target_dir="${CARGO_TARGET_DIR:-$manifest_dir/target}"
+else
+    package=(-p architect-mobile)
+fi
 t="${triple//-/_}"
 T="$(echo "$t" | tr '[:lower:]' '[:upper:]')"
 
@@ -78,13 +112,14 @@ env -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS -u MACOSX_DEPLOYMENT_TARGET \
     "CXX_$t=/usr/bin/clang++" \
     "AR_$t=/usr/bin/ar" \
     "CARGO_TARGET_${T}_LINKER=/usr/bin/clang" \
-    cargo build -p architect-mobile --target "$triple" ${cargo_args[@]+"${cargo_args[@]}"} >&2
+    CARGO_TARGET_DIR="$target_dir" \
+    cargo build ${package[@]+"${package[@]}"} --target "$triple" ${cargo_args[@]+"${cargo_args[@]}"} >&2
 
 app="$target_dir/$triple/$profile/ArchitectMobile.app"
 rm -rf "$app"
 mkdir -p "$app"
-cp "$here/Info.plist" "$app/Info.plist"
-cp "$target_dir/$triple/$profile/architect-mobile" "$app/architect-mobile"
+cp "${INFO_PLIST:-$here/Info.plist}" "$app/Info.plist"
+cp "$target_dir/$triple/$profile/$bin" "$app/architect-mobile"
 if [[ " ${cargo_args[*]-} " == *" wasi "* || " ${cargo_args[*]-} " == *"--features=wasi"* || " ${cargo_args[*]-} " == *",wasi"* ]]; then
     wasm="${ARCHITECT_LAB_WASI_COUNTER:-$target_dir/wasi-guest/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm}"
     [[ -f "$wasm" ]] || die "no WASI Counter component at $wasm (build it in devenv --profile wasi shell)"

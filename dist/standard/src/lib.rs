@@ -1,15 +1,19 @@
 //! The standard distribution of Architect (#631,
 //! `docs/content/guide/core-extensions.md`).
 //!
-//! The Architect app (`architect_desktop::distribution::architect()`: its
-//! name, bundle id, folder and first-party extensions) with the **core
+//! The Architect app (`architect_distribution::architect()`: its name,
+//! bundle id, folder and first-party extensions) with the **core
 //! extensions** that `extensions/core-extensions.toml` lists:
 //! - each `linked` one compiled in from its own repo at the tag the list
-//!   pins (`list::linked`, generated from the list by
+//!   pins, on the platforms it names (the desk's window, the node, the
+//!   iOS app: `list::linked`, generated from the list by
 //!   `cargo xtask core sync`);
 //! - each `packaged` one read from `core/<id>/` beside the binary, where
 //!   `cargo xtask core fetch` puts what it fetched and checked from the
-//!   publisher's release ([`packaged`]).
+//!   publisher's release ([`packaged`]); none on iOS yet.
+//!
+//! `src/main.rs` runs it with `architect_desktop::run` on a desk or a
+//! server and with `architect_mobile::run` on an iPhone or iPad.
 //!
 //! This crate is outside architect's workspace: its own `Cargo.toml`
 //! (generated) and lock, with every architect crate in its graph patched
@@ -21,7 +25,7 @@ pub mod packaged;
 
 use std::path::Path;
 
-use architect_desktop::Distribution;
+use architect_distribution::Distribution;
 
 pub use crate::list::PACKAGED;
 
@@ -42,7 +46,7 @@ pub fn distribution() -> Distribution {
 /// (none: only the linked ones).
 #[must_use]
 pub fn distribution_in(core: Option<&Path>) -> Distribution {
-    let dist = crate::list::linked(architect_desktop::distribution::architect());
+    let dist = crate::list::linked(architect_distribution::architect());
     let Some(core) = core else {
         return dist;
     };

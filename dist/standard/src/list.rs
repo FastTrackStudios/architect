@@ -2,19 +2,24 @@
 //! `extensions/core-extensions.toml`: edit the list, not this file
 //! (`cargo xtask core check` fails while they differ).
 
-use architect_desktop::Distribution;
+use architect_distribution::Distribution;
 
 use crate::packaged::{Island, Packaged};
 
 /// `dist` with every linked core extension compiled in (on the node
-/// build, without `gui`, and the desktop one, with it, as each entry's
-/// platforms say).
+/// build, without `gui`, the desktop one, with it, and the iOS app, as
+/// each entry's platforms say).
 pub fn linked(dist: Distribution) -> Distribution {
     let mut dist = dist;
     // studio-setlists 26.11.4: https://github.com/FastTrackStudios/studio v26.11.4 (93a2d28a19852cff177ce268c38f5e5d4808bfa9)
     {
         dist = dist.linked(&setlists::ext::Setlists);
         dist = dist.block(setlists::share::blocks());
+    }
+    // studio-views 26.11.4: https://github.com/FastTrackStudios/studio v26.11.4 (93a2d28a19852cff177ce268c38f5e5d4808bfa9)
+    #[cfg(feature = "gui")]
+    {
+        dist = dist.linked(&studio_views::ext::StudioViews);
     }
     dist
 }
