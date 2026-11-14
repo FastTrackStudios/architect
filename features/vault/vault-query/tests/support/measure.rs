@@ -84,10 +84,10 @@ impl NoteSource for Markdown {
             each(Note {
                 path,
                 stamp: 1,
-                text,
+                text: vault_query::Text::Here(text),
                 parsed: None,
                 mtime: 1_763_000_000_000,
-                is_base: path.ends_with(".base"),
+                is_base: std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("base")),
             });
         }
         (0, self.0.len())

@@ -1849,7 +1849,10 @@ pub struct BaseRow {
     /// frontmatter or it failed to decode.
     /// Shared with the vault index's entry it was made from
     /// (`crate::index::Entry::props`), not a copy of it.
-    pub frontmatter: std::sync::Arc<indexmap::IndexMap<String, serde_json::Value>>,
+    pub frontmatter: std::sync::Arc<crate::index::Props>,
+    /// When it was last written, in milliseconds since 1970 (0: unknown):
+    /// `file.mtime`.
+    pub mtime: u64,
 }
 
 impl BaseRow {
@@ -1862,8 +1865,7 @@ impl BaseRow {
         basename: impl Into<String>,
         frontmatter_json: &str,
     ) -> Self {
-        let frontmatter: indexmap::IndexMap<String, serde_json::Value> =
-            serde_json::from_str(frontmatter_json).unwrap_or_default();
+        let frontmatter = props_of(serde_json::from_str(frontmatter_json).unwrap_or_default());
         let tags = tags_from_frontmatter(&frontmatter);
         let links = links_from_frontmatter(&frontmatter);
         Self {
@@ -1875,6 +1877,7 @@ impl BaseRow {
             tags,
             links,
             frontmatter: std::sync::Arc::new(frontmatter),
+            mtime: 0,
         }
     }
 
@@ -1926,7 +1929,7 @@ impl BaseRow {
             rel_path,
             folder,
             ext,
-            std::sync::Arc::new(frontmatter),
+            std::sync::Arc::new(props_of(frontmatter)),
             extra_tags,
         )
     }
@@ -1939,7 +1942,7 @@ impl BaseRow {
         rel_path: impl Into<String>,
         folder: impl Into<String>,
         ext: impl Into<String>,
-        frontmatter: std::sync::Arc<indexmap::IndexMap<String, serde_json::Value>>,
+        frontmatter: std::sync::Arc<crate::index::Props>,
         extra_tags: &[String],
     ) -> Self {
         let mut tags = tags_from_frontmatter(&frontmatter);
@@ -1958,7 +1961,15 @@ impl BaseRow {
             tags,
             links,
             frontmatter,
+            mtime: 0,
         }
+    }
+
+    /// The same row, written at `mtime` (milliseconds since 1970).
+    #[must_use]
+    pub fn at(mut self, mtime: u64) -> Self {
+        self.mtime = mtime;
+        self
     }
 
     /// Merge body wikilink targets into [`BaseRow::links`] (dedup,
@@ -1976,7 +1987,12 @@ impl BaseRow {
     }
 }
 
-fn tags_from_frontmatter(fm: &indexmap::IndexMap<String, serde_json::Value>) -> Vec<String> {
+/// A frontmatter map with shared keys.
+fn props_of(map: indexmap::IndexMap<String, serde_json::Value>) -> crate::index::Props {
+    map.into_iter().map(|(k, v)| (std::sync::Arc::from(k), v)).collect()
+}
+
+fn tags_from_frontmatter(fm: &crate::index::Props) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut push = |s: &str| {
         let t = s.trim().trim_start_matches('#').to_string();
@@ -2006,7 +2022,7 @@ fn tags_from_frontmatter(fm: &indexmap::IndexMap<String, serde_json::Value>) -> 
 
 /// Every `[[wikilink]]` anywhere in the frontmatter (strings, lists,
 /// nested maps, and YAML's unquoted `[[x]]` nested-list form).
-fn links_from_frontmatter(fm: &indexmap::IndexMap<String, serde_json::Value>) -> Vec<String> {
+fn links_from_frontmatter(fm: &crate::index::Props) -> Vec<String> {
     fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
         if let Some(t) = link_of(v) {
             if !out.iter().any(|x| x == &t) {
@@ -2734,8 +2750,14 @@ impl<'a> BaseEval<'a> {
                     .map(link_value)
                     .collect(),
             ),
-            // FUTURE: file.size / file.mtime / file.ctime /
-            // file.embeds — we don't carry that data on `BaseRow` yet.
+            // When it was last written (the vault index's), as RFC 3339
+            // text, so it sorts and compares as a date's.
+            "mtime" if row.mtime > 0 => i64::try_from(row.mtime)
+                .ok()
+                .and_then(chrono::DateTime::from_timestamp_millis)
+                .map_or(V::Null, |t| V::String(t.to_rfc3339())),
+            // FUTURE: file.size / file.ctime / file.backlinks /
+            // file.embeds: the index does not carry them yet.
             _ => V::Null,
         };
         self.walk(v, parts)

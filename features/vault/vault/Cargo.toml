@@ -48,9 +48,12 @@ actions = ["obsidian", "dep:architect", "dep:facet", "dep:serde_json", "dep:toki
 [dev-dependencies]
 # The tests run the actions: build them with it.
 vault = { path = ".", features = ["actions"] }
-architect = { workspace = true, features = ["action-list"] }
+architect = { workspace = true, features = ["action-list", "local"] }
 serde_json = { workspace = true }
 tempfile = "3"
+# tests/query_bench.rs: queries through the service's client, in process.
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+vault-proto = { workspace = true, features = ["vox"] }
 
 [lints]
 workspace = true

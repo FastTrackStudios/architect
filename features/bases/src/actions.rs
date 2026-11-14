@@ -26,10 +26,11 @@ use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effec
 use facet::Facet;
 use serde_json::{Value, json};
 use vault::actions::OpenVault;
+use vault_proto::query::{QueryRequest, VaultQueryClient};
 use vault::bases::{Conjunction, ParsedBase};
 use vault_obsidian::Vault;
 
-use crate::model::{self, At as _, Scope, ViewTypes, put};
+use crate::model::{self, Scope, ViewTypes, put};
 
 /// The action ids, to name them from code.
 pub mod ids {
@@ -260,44 +261,6 @@ fn list(vault: &Vault) -> Value {
     )
 }
 
-/// Runs view `view` of `base` over the vault's notes.
-pub(crate) fn rows(
-    vault: &Vault,
-    path: &str,
-    base: &ParsedBase,
-    view: Option<&str>,
-) -> Result<Value, String> {
-    let i = model::view_index(base, view)?;
-    let all = vault_obsidian::vault_to_rows(vault);
-    let spec = base.views.get(i).ok_or_else(|| "no such view".to_owned())?;
-    let table = vault::bases::view_table(base, spec, &all);
-    Ok(json!({
-        "base": path,
-        "views": base.views.iter().map(|v| json!({ "name": v.name, "type": v.kind.as_str() })).collect::<Vec<_>>(),
-        "view": model::view_json(spec),
-        "rows": table,
-        "columns": model::columns(base, &all),
-        "formulas": base.formulas.iter().map(|f| json!({ "name": f.name, "expression": f.expression })).collect::<Vec<_>>(),
-        "filters": model::base_json(path, base).at("filters"),
-    }))
-}
-
-fn rows_of(vault: &Vault, a: &RowsArgs) -> Result<Value, String> {
-    match (a.path.as_deref(), a.source.as_deref()) {
-        (_, Some(source)) => {
-            let base = vault::bases::parse(source).map_err(|e| e.to_string())?;
-            rows(
-                vault,
-                a.path.as_deref().unwrap_or_default(),
-                &model::with_a_view(base),
-                a.view.as_deref(),
-            )
-        }
-        (Some(path), None) => rows(vault, path, &base_at(vault, path)?, a.view.as_deref()),
-        (None, None) => Err("give a base's `path` or its `source`".to_owned()),
-    }
-}
-
 /// Changes the base at `path` with `edit` and saves it; the base after.
 fn edit(
     open: &OpenVault,
@@ -324,9 +287,12 @@ fn types_json(types: &ViewTypes) -> RawJson {
     raw(&serde_json::to_value(types.all()).unwrap_or_default())
 }
 
-/// Puts the `BASES_*` actions on `list`, over `vault`; `types` says which
-/// view types extensions add (`model::ViewTypes::set_source`).
-/// `BASES_OPEN` opens through the same list's `WORKSPACE_OPEN`.
+/// Puts the `BASES_*` actions on `list`, over `vault`.
+///
+/// `types` says which view types extensions add
+/// (`model::ViewTypes::set_source`). `BASES_ROWS` asks `queries`, the vault's query service (the app's own,
+/// or [`local_queries`]); `BASES_OPEN` opens through the same list's
+/// `WORKSPACE_OPEN`.
 ///
 /// # Errors
 ///
@@ -335,6 +301,7 @@ pub fn register(
     list: &Arc<ActionList>,
     vault: &OpenVault,
     types: &ViewTypes,
+    queries: VaultQueryClient,
 ) -> Result<(), ActionError> {
     let v = vault.clone();
     list.register_with(&LIST, Effect::ReadOnly, move |_: &ActionCaller, (): ()| {
@@ -348,11 +315,29 @@ pub fn register(
             v.with(|vault| base_at(vault, &a.path).map(|b| raw(&model::base_json(&a.path, &b))))
         },
     )?;
-    let v = vault.clone();
-    list.register_with(
+    // A base's rows are the vault's query service's: the one engine, over
+    // the vault's index (never a second evaluation here).
+    list.register_async_with(
         &ROWS,
         Effect::ReadOnly,
-        move |_: &ActionCaller, a: RowsArgs| v.with(|vault| rows_of(vault, &a)).map(|j| raw(&j)),
+        move |_: &ActionCaller, a: RowsArgs| {
+            let queries = queries.clone();
+            async move {
+                if a.path.is_none() && a.source.is_none() {
+                    return Err("give a base's `path` or its `source`".to_owned());
+                }
+                let answer = queries
+                    .query(QueryRequest {
+                        path: a.path,
+                        source: a.source,
+                        view: a.view,
+                        ..QueryRequest::default()
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<_, String>(RawJson::from(answer))
+            }
+        },
     )?;
     let (v, weak): (OpenVault, Weak<ActionList>) = (vault.clone(), Arc::downgrade(list));
     list.register_async_with(
@@ -508,4 +493,33 @@ async fn open_pane(list: &ActionList, path: &str, view: Option<&str>) -> Result<
         .map_err(|e| e.to_string())?;
     let out: Value = serde_json::from_slice(&out).unwrap_or(Value::Null);
     Ok(out.get("changed").and_then(Value::as_bool).unwrap_or(true))
+}
+
+/// The vault's query service over `vault`, served in process
+/// (`architect::serve_local`) on a runtime of its own: for an app or a
+/// test that has none of its own to give [`register`].
+///
+/// # Panics
+///
+/// The runtime or the in-process link cannot be made.
+#[must_use]
+#[allow(clippy::expect_used)]
+pub fn local_queries(vault: &OpenVault) -> VaultQueryClient {
+    static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+    let rt = RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("bases-queries")
+            .enable_all()
+            .build()
+            .expect("a runtime for the query service")
+    });
+    let scope = architect::resource::Scope::new();
+    let engine = vault::query::QueryEngine::new(Arc::new(vault::query::Built::new(vault.clone())));
+    let client = rt
+        .block_on(architect::serve_local(engine, &scope).establish())
+        .expect("the query service, in process");
+    // Served for as long as the process runs.
+    std::mem::forget(scope);
+    client
 }

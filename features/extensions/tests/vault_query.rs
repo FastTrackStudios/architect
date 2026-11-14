@@ -10,7 +10,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use architect::action::ActionList;
+use architect_extensions::documents::CrdtDocuments;
 use architect_extensions::host::{Host, SharedSections};
+use architect_extensions::hostapi::VaultScope;
 use architect_extensions::hostcall::{HostError, HostRequest};
 use architect_extensions::{Origin, Package};
 use architect_settings::Registry;
@@ -30,7 +32,7 @@ impl NoteSource for Markdown {
             each(Note {
                 path,
                 stamp: 1,
-                text,
+                text: vault_query::Text::Here(text),
                 parsed: None,
                 mtime: 0,
                 is_base: std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("base")),
@@ -75,10 +77,18 @@ async fn an_extension_queries_the_vault_through_the_hosts_client() {
         ("Songs.base", "filters:\n  and:\n    - status != null\nviews:\n  - type: table\n    name: All\n    order: [file.name, status]\n"),
     ]);
     let engine = QueryEngine::new(Arc::new(Built::new(notes)));
-    let client = architect::serve_local(engine, &scope).establish().await.unwrap();
+    let client: vault_proto::query::VaultQueryClient =
+        architect::serve_local(engine, &scope).establish().await.unwrap();
 
+    let docs = || -> Arc<dyn architect_extensions::documents::Documents> {
+        Arc::new(CrdtDocuments::new().with_space("notes"))
+    };
     let list = ActionList::new();
-    let host = Host::new(list, SharedSections::new(Registry::new())).with_vault_query(client);
+    let host = Host::new(list, SharedSections::new(Registry::new())).with_vault(
+        docs(),
+        client.clone(),
+        VaultScope::Person,
+    );
     load(&host, &tmp.path().join("reader"), READER);
     load(&host, &tmp.path().join("bare"), BARE);
 
@@ -115,6 +125,24 @@ async fn an_extension_queries_the_vault_through_the_hosts_client() {
     load(&none, &tmp.path().join("reader2"), READER);
     assert!(matches!(
         none.api("lab.reader").call(query()).await,
+        Err(HostError::Unsupported { .. })
+    ));
+    // A share guest's host, given the same client, never queries with it:
+    // its documents are the share's, and the index is the whole vault's.
+    let guest = Host::new(ActionList::new(), SharedSections::new(Registry::new())).with_vault(
+        docs(),
+        client.clone(),
+        VaultScope::Guest,
+    );
+    load(&guest, &tmp.path().join("reader3"), READER);
+    assert!(matches!(
+        guest.api("lab.reader").call(query()).await,
+        Err(HostError::Unsupported { .. })
+    ));
+    // Other documents in its place: the query service goes with the old.
+    host.set_documents(docs());
+    assert!(matches!(
+        host.api("lab.reader").call(query()).await,
         Err(HostError::Unsupported { .. })
     ));
     scope.close().await;

@@ -33,6 +33,14 @@ use serde_json::{Value, json};
 const PROJECT: &str = "Projects/Album/project.md";
 const TASK: &str = "Projects/Album/Tasks/Mix the album.md";
 
+/// The extension keeps its host's handle in a static (the copy built
+/// last), so its tests run one at a time: an action that waits (the query
+/// service's `BASES_ROWS`) would otherwise reach another test's vault.
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The app's side: its list with `VAULT_*` and `BASES_*` over `dir`.
 fn app(dir: &Path) -> Arc<ActionList> {
     let list = Arc::new(ActionList::new());
@@ -40,7 +48,7 @@ fn app(dir: &Path) -> Arc<ActionList> {
     vault::actions::register(&list, &open).unwrap();
     let types: &'static architect_bases::model::ViewTypes =
         Box::leak(Box::new(architect_bases::model::ViewTypes::new()));
-    architect_bases::actions::register(&list, &open, types).unwrap();
+    architect_bases::actions::register(&list, &open, types, architect_bases::actions::local_queries(&open)).unwrap();
     list
 }
 
@@ -235,12 +243,14 @@ fn exercise(dir: &Path, ext: &Extensions, list: &ActionList, app: &ActionList, o
 
 #[test]
 fn time_two_ways() {
+    let _one_at_a_time = serial();
     linked_in();
     as_a_process();
 }
 
 #[test]
 fn time_with_the_bundle() {
+    let _one_at_a_time = serial();
     with_tasks_and_projects();
 }
 

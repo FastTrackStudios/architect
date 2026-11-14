@@ -285,7 +285,11 @@ pub fn register(list: &Arc<ActionList>) {
     let _ = vault::actions::register(list, &open);
     let _ = links::actions::register(list, &open);
     let _ = tag::actions::register(list, &open);
-    let _ = architect_bases::actions::register(list, &open, view_types());
+    // BASES_ROWS asks the same query service the extensions do.
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))]
+    if let Some(queries) = vault_query() {
+        let _ = architect_bases::actions::register(list, &open, view_types(), queries);
+    }
     crate::publish::register(list, &open);
     let shown = open;
     let seeded = env_either("ARCHITECT_VAULT_SEED", "ARCHITECT_LAB_SEED")

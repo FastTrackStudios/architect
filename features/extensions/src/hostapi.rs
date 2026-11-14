@@ -210,6 +210,21 @@ impl Services {
     }
 }
 
+/// Whom a host's vault is for ([`Host::set_vault`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VaultScope {
+    /// The person whose vault it is: every note they may read, and the
+    /// vault's index.
+    Person,
+    /// A share link's guest: the share's documents, and no index yet.
+    Guest,
+}
+
+/// The rows a `query_vault` answers when the extension names no `limit`.
+pub const QUERY_LIMIT: u32 = 200;
+/// The most rows a `query_vault` answers.
+pub const QUERY_LIMIT_MAX: u32 = 5000;
+
 impl Default for Services {
     fn default() -> Self {
         Self {
@@ -296,9 +311,12 @@ impl Host {
         self
     }
 
-    /// [`Self::with_documents`] on a host already shared.
+    /// [`Self::with_documents`] on a host already shared. Documents with no
+    /// vault index: any query service given before is let go (a query
+    /// never reaches past the documents the host has now).
     pub fn set_documents(&self, documents: Arc<dyn Documents>) {
         *lock(&self.services().documents) = Some(documents);
+        *lock(&self.services().vault_query) = None;
     }
 
     /// The app's documents, when it gave them.
@@ -307,19 +325,36 @@ impl Host {
         lock(&self.services().documents).clone()
     }
 
-    /// The vault's query service (`vault_proto::query::VaultQuery`), for
-    /// extensions that may read the documents (`query_vault`): its client,
-    /// served wherever the app keeps its vault index (in process on a desk
-    /// and a phone, over a browser's synced index).
+    /// A vault for extensions: its `documents` and its query service's
+    /// client (`vault_proto::query::VaultQuery`, served wherever the app
+    /// keeps the vault's index: in process on a desk and a phone, over a
+    /// browser's synced index), given together, for one [`VaultScope`], so
+    /// a host never queries past the documents it gives. A share guest's
+    /// host gets no query service (a guest's subset of the index is #710
+    /// G1): `query_vault` answers `unsupported` there.
     #[must_use]
-    pub fn with_vault_query(self, client: vault_proto::query::VaultQueryClient) -> Self {
-        self.set_vault_query(client);
+    pub fn with_vault(
+        self,
+        documents: Arc<dyn Documents>,
+        queries: vault_proto::query::VaultQueryClient,
+        scope: VaultScope,
+    ) -> Self {
+        self.set_vault(documents, queries, scope);
         self
     }
 
-    /// [`Self::with_vault_query`] on a host already shared.
-    pub fn set_vault_query(&self, client: vault_proto::query::VaultQueryClient) {
-        *lock(&self.services().vault_query) = Some(client);
+    /// [`Self::with_vault`] on a host already shared.
+    pub fn set_vault(
+        &self,
+        documents: Arc<dyn Documents>,
+        queries: vault_proto::query::VaultQueryClient,
+        scope: VaultScope,
+    ) {
+        *lock(&self.services().documents) = Some(documents);
+        *lock(&self.services().vault_query) = match scope {
+            VaultScope::Person => Some(queries),
+            VaultScope::Guest => None,
+        };
     }
 
     /// The vault's query service's client, when the app gave one.
@@ -859,14 +894,17 @@ impl ExtensionApi {
                 limit,
             } => {
                 let client = host.vault_query().ok_or_else(|| HostError::Unsupported {
-                    what: "the vault's query service: this app keeps no vault index".to_owned(),
+                    what: "the vault's query service: this host has no vault index (none kept, or a share's guest)".to_owned(),
                 })?;
                 let request = vault_proto::query::QueryRequest {
                     path,
                     source,
                     view,
                     if_changed,
-                    limit,
+                    // An extension's answers are pages: at most
+                    // `QUERY_LIMIT` rows unless it asks, `QUERY_LIMIT_MAX`
+                    // if it does.
+                    limit: Some(limit.map_or(QUERY_LIMIT, |n| n.min(QUERY_LIMIT_MAX))),
                 };
                 let answer = client
                     .query(request)
