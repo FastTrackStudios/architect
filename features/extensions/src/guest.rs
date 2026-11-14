@@ -592,6 +592,14 @@ fn dispatch(vdom: &VirtualDom, event: ViewEvent) {
         EventData::Focus => Rc::new(PlatformEventData::new(Box::new(
             SerializedFocusData::default(),
         ))),
+        // A handler named for the mouse needs mouse data, whatever a
+        // host sent (a browser's `click` is a `PointerEvent`): a pointer's
+        // data there would panic dioxus-html's conversion.
+        EventData::Pointer(p)
+            if crate::wire::kind_of(&event.name) == crate::wire::DataKind::Mouse =>
+        {
+            Rc::new(PlatformEventData::new(Box::new(mouse(&p.at))))
+        }
         EventData::Pointer(p) => Rc::new(PlatformEventData::new(Box::new(rich::pointer(&p)))),
         EventData::Touch(t) => Rc::new(PlatformEventData::new(Box::new(rich::touch(&t)))),
         EventData::Wheel(w) => Rc::new(PlatformEventData::new(Box::new(rich::wheel(&w)))),
@@ -919,5 +927,55 @@ impl WriteMutations for WireWriter {
 
     fn remove(&mut self) {
         self.edits.push(Edit::Remove);
+    }
+}
+
+#[cfg(test)]
+mod click_tests {
+    use dioxus::html::{SerializedHtmlEventConverter, set_event_converter};
+    use dioxus::prelude::*;
+
+    use crate::wire::{Edit, EventData, Frame, PointerData as WirePointer, ViewEvent};
+
+    /// #720 H4: a browser sends `click` as a `PointerEvent`; a host
+    /// that passed it on as pointer data must not panic `onclick`.
+    #[test]
+    fn a_click_carrying_pointer_data_reaches_onclick() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static CLICKS: AtomicU32 = AtomicU32::new(0);
+        fn app() -> Element {
+            rsx! { button { onclick: move |e| {
+                let _ = e.client_coordinates();
+                CLICKS.fetch_add(1, Ordering::Relaxed);
+            }, "b" } }
+        }
+        set_event_converter(Box::new(SerializedHtmlEventConverter));
+        let mut vdom = VirtualDom::new(app);
+        let mut writer = super::WireWriter::default();
+        vdom.rebuild(&mut writer);
+        let id = match writer.take() {
+            // The node a handler was put on: the `PushId` before `Listen`.
+            Frame::Edits { edits } => edits
+                .windows(2)
+                .find_map(|w| match w {
+                    [Edit::PushId { id }, Edit::Listen { .. }] => Some(*id),
+                    _ => None,
+                })
+                .expect("the button's id"),
+            Frame::Failed(why) => panic!("{why}"),
+        };
+        super::dispatch(
+            &vdom,
+            ViewEvent {
+                element: id,
+                name: "click".to_owned(),
+                bubbles: true,
+                data: EventData::Pointer(WirePointer {
+                    pointer_type: "mouse".to_owned(),
+                    ..WirePointer::default()
+                }),
+            },
+        );
+        assert_eq!(CLICKS.load(Ordering::Relaxed), 1);
     }
 }

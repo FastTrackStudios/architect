@@ -115,21 +115,28 @@ page (`features/pages/src/api.rs` `PageEvent`: `dx`, `dy`, `pointer_id`,
 - **A press holds the pointer.** After a `pointerdown`, the moves and the
   release go to the element pressed, over it or not, as a touch is captured
   on the web (in a browser, `web::Pane` calls `setPointerCapture`). A
-  drag-and-drop list works without knowing where the pointer went. A
-  release outside the pane reaches the view as a `pointercancel` when the
-  pointer comes back with no button held (Blitz holds the pointer for
-  custom widgets only, not for a sub-document). A view that listens for
+  drag-and-drop list works without knowing where the pointer went. Blitz
+  holds the pointer for custom widgets only, not for a sub-document, so a
+  release can happen where the view can't see it. The host then lets go
+  for it (`RemoteDocument::let_go`): when the pointer comes back, or leaves
+  the window, with no button held, and when the pane loses the focus. The
+  view gets a `pointercancel`, or a `pointerup` if it listens for no
+  cancel, so a drag is never left grabbed. A view that listens for
   `pointermove`, but not `mousemove` or `touchmove`, owns its held moves:
   the document doesn't select the text under a drag.
 - **Fast events are coalesced.** While the view has not yet answered an
   event, the moves, wheels, scrolls and composition updates that follow
   wait; a run of them on one element keeps only the latest (a wheel's
-  deltas are summed), and any other event sends what waits first, in
-  order (`Coalescer`). A slow view gets the latest move, not a queue of
-  stale ones.
+  deltas are summed; a wheel in other units waits as its own), and any
+  other event sends what waits first, in order (`Coalescer`). At most 64
+  wait. A slow view gets the latest move, not a queue of stale ones.
+- **The data follows the event's name** (`wire::kind_of`): a browser
+  sends `click` and `contextmenu` as `PointerEvent`s, and they reach the
+  view as mouse data, as `onclick` needs.
 - **The input method.** A field in the view turns the window's IME on
   when it takes the focus, with the caret area moved to where the pane is
-  in the window, and its clipboard is the window's (`HostShell`).
+  in the window, and kept there as the pane moves; its clipboard is the
+  window's (`HostShell`). Focus leaving mid-composition ends it.
 - **Older processes.** A process at wire 6 or below is sent none of the
   new kinds (`EventData::since`); it never had them.
 
@@ -143,8 +150,10 @@ a debug build on THEBATTLESHIP, the host document headless):
 | a held move, to its echo | 200 | 1.15 ms | 2.23 ms |
 | 500 rows in, then out | 40 | 3.84 ms | 6.63 ms |
 
-The budget is 16 ms from key to echo in a local pane (a frame at 60 Hz);
-`REMOTE_BUDGET` marks a view busy past 33 ms. 200 held moves sent before
+The target is 16 ms from key to echo in a local pane (a frame at 60 Hz).
+`REMOTE_BUDGET` (33 ms) marks a view busy past it, and a test holds the
+p99 of a key's and a held move's round trip under it
+(`round_trips_stay_inside_the_remote_budget`). 200 held moves sent before
 the view answered any reach it as a handful
 (`moves_while_the_view_is_busy_are_coalesced_to_the_latest`).
 
@@ -166,12 +175,19 @@ the view answered any reach it as a handful
   view; `RemoteView` is keyed by extension and view, so a pane that goes on
   to another process view opens that one.
 - `features/extensions/tests/remote_input.rs`: a press holds the pointer
-  over another element; a release lost outside the pane is a cancel; 200
+  over another element; a release lost outside the pane is a cancel, or a
+  `pointerup` in a view with no cancel handler; a pointer that leaves with
+  no button held lets go; focus leaving mid-composition ends it; the round
+  trips stay inside `REMOTE_BUDGET`; 200
   moves are coalesced to the latest; a finger is a touch and a touch
   pointer; a wheel reaches the view and scrolls its list; an input method
   composes into a field, the window's IME on and its caret area in window
   coordinates. `features/pages/tests/js.rs`
   `a_tsx_page_gets_pointer_wheel_and_composition_events`.
+- `features/extensions/web/test/rust-pane.test.mjs` (`just ext-pane-browser`):
+  `web::Pane` in headless Firefox gets a `click` and a `contextmenu` sent
+  as `PointerEvent`s and passes them on as mouse data
+  (`apps/sandbox/pane-events`).
 
 ## Status
 

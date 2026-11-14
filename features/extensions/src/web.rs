@@ -45,8 +45,8 @@ use wasm_bindgen_futures::{JsFuture, future_to_promise, spawn_local};
 use crate::hostcall::{HostAnswer, HostError, HostRequest};
 use crate::manifest::{ActionDecl, Capabilities, Manifest, Reach};
 use crate::wire::{
-    Edit, EventData, KeyData, Mods, Pointer, PointerData, ScrollData, TouchData, TouchPoint, Value,
-    ViewEvent, WheelData,
+    DataKind, Edit, EventData, KeyData, Mods, Pointer, PointerData, ScrollData, TouchData,
+    TouchPoint, Value, ViewEvent, WheelData,
 };
 
 /// A body as an answer carries it: text, or (`binary`) base64.
@@ -1578,70 +1578,88 @@ fn event_data(e: &web_sys::Event) -> EventData {
         buttons: m.buttons(),
         mods: mods(m.alt_key(), m.ctrl_key(), m.meta_key(), m.shift_key()),
     };
-    if let Some(w) = e.dyn_ref::<web_sys::WheelEvent>() {
-        // Pages (2) are sent as lines.
-        let lines = w.delta_mode() != 0;
-        return EventData::Wheel(WheelData {
-            at: at(w),
-            delta_x: w.delta_x(),
-            delta_y: w.delta_y(),
-            delta_mode: u8::from(lines),
-        });
-    }
-    if let Some(p) = e.dyn_ref::<web_sys::PointerEvent>() {
-        #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-        return EventData::Pointer(PointerData {
-            at: at(p),
-            pointer_id: p.pointer_id(),
-            pointer_type: p.pointer_type(),
-            is_primary: p.is_primary(),
-            pressure: p.pressure(),
-            tilt_x: p.tilt_x(),
-            tilt_y: p.tilt_y(),
-            twist: p.twist(),
-        });
-    }
-    if let Some(m) = e.dyn_ref::<web_sys::MouseEvent>() {
-        return EventData::Mouse(at(m));
-    }
-    if let Some(t) = e.dyn_ref::<web_sys::TouchEvent>() {
-        let points = |list: web_sys::TouchList| -> Vec<TouchPoint> {
-            (0..list.length())
-                .filter_map(|i| list.get(i))
-                .map(|t| TouchPoint {
-                    id: t.identifier(),
-                    client_x: f64::from(t.client_x()),
-                    client_y: f64::from(t.client_y()),
-                    page_x: f64::from(t.page_x()),
-                    page_y: f64::from(t.page_y()),
-                    screen_x: f64::from(t.screen_x()),
-                    screen_y: f64::from(t.screen_y()),
-                    force: f64::from(t.force()),
-                })
-                .collect()
-        };
-        return EventData::Touch(TouchData {
-            touches: points(t.touches()),
-            changed: points(t.changed_touches()),
-            mods: mods(t.alt_key(), t.ctrl_key(), t.meta_key(), t.shift_key()),
-        });
-    }
-    if let Some(c) = e.dyn_ref::<web_sys::CompositionEvent>() {
-        return EventData::Composition(c.data().unwrap_or_default());
-    }
-    if e.type_() == "scroll"
-        && let Some(el) = e
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-    {
-        return EventData::Scroll(ScrollData {
-            top: f64::from(el.scroll_top()),
-            left: f64::from(el.scroll_left()),
-            width: el.scroll_width(),
-            height: el.scroll_height(),
-            client_width: el.client_width(),
-            client_height: el.client_height(),
-        });
+    // The data follows the event's name, not its class: a browser sends
+    // `click` and `contextmenu` as `PointerEvent`s, and `onclick` needs
+    // mouse data (`wire::kind_of`).
+    let kind = crate::wire::kind_of(&e.type_());
+    match kind {
+        DataKind::Wheel => {
+            if let Some(w) = e.dyn_ref::<web_sys::WheelEvent>() {
+                // Pages (2) are sent as lines.
+                let lines = w.delta_mode() != 0;
+                return EventData::Wheel(WheelData {
+                    at: at(w),
+                    delta_x: w.delta_x(),
+                    delta_y: w.delta_y(),
+                    delta_mode: u8::from(lines),
+                });
+            }
+        }
+        DataKind::Pointer => {
+            if let Some(p) = e.dyn_ref::<web_sys::PointerEvent>() {
+                return EventData::Pointer(PointerData {
+                    at: at(p),
+                    pointer_id: p.pointer_id(),
+                    pointer_type: p.pointer_type(),
+                    is_primary: p.is_primary(),
+                    pressure: p.pressure(),
+                    tilt_x: p.tilt_x(),
+                    tilt_y: p.tilt_y(),
+                    twist: p.twist(),
+                });
+            }
+        }
+        DataKind::Touch => {
+            if let Some(t) = e.dyn_ref::<web_sys::TouchEvent>() {
+                let points = |list: web_sys::TouchList| -> Vec<TouchPoint> {
+                    (0..list.length())
+                        .filter_map(|i| list.get(i))
+                        .map(|t| TouchPoint {
+                            id: t.identifier(),
+                            client_x: f64::from(t.client_x()),
+                            client_y: f64::from(t.client_y()),
+                            page_x: f64::from(t.page_x()),
+                            page_y: f64::from(t.page_y()),
+                            screen_x: f64::from(t.screen_x()),
+                            screen_y: f64::from(t.screen_y()),
+                            force: f64::from(t.force()),
+                        })
+                        .collect()
+                };
+                return EventData::Touch(TouchData {
+                    touches: points(t.touches()),
+                    changed: points(t.changed_touches()),
+                    mods: mods(t.alt_key(), t.ctrl_key(), t.meta_key(), t.shift_key()),
+                });
+            }
+        }
+        DataKind::Composition => {
+            let data = e
+                .dyn_ref::<web_sys::CompositionEvent>()
+                .and_then(web_sys::CompositionEvent::data);
+            return EventData::Composition(data.unwrap_or_default());
+        }
+        DataKind::Scroll => {
+            if let Some(el) = e
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            {
+                return EventData::Scroll(ScrollData {
+                    top: f64::from(el.scroll_top()),
+                    left: f64::from(el.scroll_left()),
+                    width: el.scroll_width(),
+                    height: el.scroll_height(),
+                    client_width: el.client_width(),
+                    client_height: el.client_height(),
+                });
+            }
+        }
+        DataKind::Mouse => {
+            if let Some(m) = e.dyn_ref::<web_sys::MouseEvent>() {
+                return EventData::Mouse(at(m));
+            }
+        }
+        DataKind::Key | DataKind::Form | DataKind::Focus => {}
     }
     if let Some(k) = e.dyn_ref::<web_sys::KeyboardEvent>() {
         return EventData::Key(KeyData {

@@ -1382,6 +1382,11 @@ fn dispatch(vdom: &VirtualDom, event: wit::ViewEvent) {
         wit::EventData::Focus => Rc::new(PlatformEventData::new(Box::new(
             SerializedFocusData::default(),
         ))),
+        // A handler named for the mouse needs mouse data, whatever the
+        // host sent (a browser's `click` is a `PointerEvent`).
+        wit::EventData::Pointer(p) if !event.name.starts_with("pointer") => {
+            Rc::new(PlatformEventData::new(Box::new(mouse(&p.at))))
+        }
         wit::EventData::Pointer(p) => serialised!(
             dioxus::html::SerializedPointerData,
             merged(

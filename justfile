@@ -545,6 +545,12 @@ sandbox-web PORT="8090":
 # The sandbox's browser demo in a real browser (apps/sandbox/web/test): the Board's page file,
 # a runaway page and a page's reach, in a headless Chrome of its own
 # (CHROME=… names one; screenshots in target/web-shots).
+# The Rust browser applier's events in headless Firefox (#720 H4):
+# features/extensions/web/test/rust-pane.test.mjs builds
+# apps/sandbox/pane-events for wasm32 and drives it.
+ext-pane-browser:
+    env -u LD_LIBRARY_PATH node --test features/extensions/web/test/rust-pane.test.mjs
+
 sandbox-web-test:
     just sandbox-web 0
     node --test apps/sandbox/web/test/pages.test.mjs
