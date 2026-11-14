@@ -1,6 +1,6 @@
 //! Walk a vault root, collecting `.md` files. Skips dotfile
 //! directories (`.git`, `.obsidian`, `.trash`, etc.) and any
-//! filename starting with `.`.
+//! filename starting with `.`, and every symlink (`crate::own`).
 //!
 //! Lighter than `vault-obsidian::walker` — we only care about
 //! pages here; Bases / canvas / attachments are someone else's
@@ -47,6 +47,14 @@ pub fn walk_vault(root: &Path) -> Vec<VaultEntry> {
             }
         };
         if entry.file_type().is_dir() {
+            continue;
+        }
+        // A symlink is never the vault's own page, inside the vault or
+        // out of it (`crate::own`): not listed, so never read or synced.
+        // A symlinked folder is not walked into either
+        // (`follow_links(false)`), and its link is dropped here.
+        if entry.path_is_symlink() {
+            tracing::debug!(path = %entry.path().display(), "a symlink in the vault; skipped");
             continue;
         }
         // Classified on the borrowed path: every file in the vault

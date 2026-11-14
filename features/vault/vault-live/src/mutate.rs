@@ -95,6 +95,7 @@ fn write_page(vault: &Vault, rel: &str, bytes: &[u8]) -> Result<(), String> {
     match sink_for(&vault.root) {
         Some(sink) => sink.write(&vault.root, rel, bytes),
         None => {
+            refuse_symlink(&vault.root, rel)?;
             let abs = vault.root.join(rel);
             if let Some(parent) = abs.parent() {
                 std::fs::create_dir_all(parent)
@@ -105,11 +106,24 @@ fn write_page(vault: &Vault, rel: &str, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
+/// Refuse a page path that is a symlink or under a symlinked folder: no
+/// write, move or delete goes through one (`crate::own`).
+fn refuse_symlink(root: &Path, rel: &str) -> Result<(), String> {
+    if crate::own::through_symlink(root, rel) {
+        return Err(format!(
+            "{rel} is a symlink, or under one: not a page of the vault"
+        ));
+    }
+    Ok(())
+}
+
 /// Remove one page: through the bound sink when there is one.
 fn remove_page(vault: &Vault, rel: &str) -> Result<(), String> {
     match sink_for(&vault.root) {
         Some(sink) => sink.remove(&vault.root, rel),
         None => {
+            // A symlink is never removed, nor what it points at.
+            refuse_symlink(&vault.root, rel)?;
             let abs = vault.root.join(rel);
             if abs.exists() {
                 std::fs::remove_file(&abs).map_err(|e| format!("rm {}: {e}", abs.display()))?;
@@ -150,6 +164,8 @@ pub fn move_page_at(root: &Path, from: &str, to: &str) -> Result<(), MutateError
     match sink_for(root) {
         Some(sink) => sink.rename(root, from, to).map_err(MutateError::Io),
         None => {
+            refuse_symlink(root, from).map_err(MutateError::Io)?;
+            refuse_symlink(root, to).map_err(MutateError::Io)?;
             let (src, dst) = (root.join(from), root.join(to));
             if let Some(parent) = dst.parent() {
                 std::fs::create_dir_all(parent)

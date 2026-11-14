@@ -33,7 +33,7 @@
 //! handle to detach. Caller is expected to start one watcher per
 //! registered vault; the backend itself doesn't auto-spawn.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,6 +63,18 @@ const WATCHER_DEBOUNCE: Duration = Duration::from_millis(500);
 /// disk events.
 pub struct WatcherHandle {
     _guard: watcher::WatcherGuard,
+    /// The plain-file sets this watcher keeps, by vault and generation:
+    /// dropped with it ([`PlainFiles::end`]).
+    sets: Vec<(String, u64)>,
+    plain: PlainFiles,
+}
+
+impl Drop for WatcherHandle {
+    fn drop(&mut self) {
+        for (vault_id, generation) in &self.sets {
+            self.plain.end(vault_id, *generation);
+        }
+    }
 }
 
 /// How the backend resolves `vault_id` → on-disk path.
@@ -140,6 +152,162 @@ pub struct Backend {
     /// this backend to the collab and shelf machinery before the wiki
     /// backend that answers for wikis exists.
     guard: Arc<std::sync::OnceLock<Arc<dyn WriteGuard>>>,
+    /// The paths each watched vault last saw as plain files: the only
+    /// paths whose disappearance the watcher reports as a `Delete`
+    /// (see [`PlainFiles`]). Shared across clones, so a `Put` this
+    /// backend emits counts as well as one the watcher finds.
+    plain_files: PlainFiles,
+}
+
+/// Per watched vault, the root-relative paths last seen as plain
+/// markdown files. The watcher sends `Delete` only for a gone path in
+/// this set: the debouncer folds a create and a remove inside one
+/// window into one event, so by the time it is handled a symlink made
+/// and removed in that window is just a gone path, and only a record
+/// of what was a plain file tells a deletion from a vanished link. A
+/// gone path never seen as a plain file sends nothing, which is safe:
+/// no peer was ever sent it.
+///
+/// Filled by the walk when a watcher starts, by every event that finds
+/// a plain file, by the walk of every folder an event finds (a folder
+/// made, moved in or checked out: inotify watches a new folder only
+/// once its own event is handled, so the files written into it before
+/// then make no event of their own), and by every `Put` the backend
+/// emits. A path leaves on its `Delete` (its own, or its folder's going),
+/// or when it, or a folder above it, turns out to be a symlink. Only
+/// vaults with a running watcher have a set, and a set goes when that
+/// watcher's handle drops, so a backend that watches nothing keeps
+/// nothing. It holds about what the manifest does.
+#[derive(Clone, Default)]
+struct PlainFiles(Arc<std::sync::Mutex<PlainState>>);
+
+#[derive(Default)]
+struct PlainState {
+    /// Bumped by every [`PlainFiles::start`]: which watcher a set
+    /// belongs to, so an old watcher's walk or handle never touches the
+    /// set of the one that replaced it.
+    generation: u64,
+    vaults: HashMap<String, WatchedSet>,
+}
+
+#[derive(Default)]
+struct WatchedSet {
+    generation: u64,
+    /// Ordered, so a folder's files are a range.
+    files: BTreeSet<String>,
+    /// While the start walk runs: the paths removed since it began. The
+    /// walk may have listed one before it went, and adding it back would
+    /// send its `Delete` a second time.
+    removed_while_walking: Option<HashSet<String>>,
+}
+
+impl PlainFiles {
+    fn lock(&self) -> std::sync::MutexGuard<'_, PlainState> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Start (or restart) `vault_id`'s set: empty, and from then on
+    /// recording every `Put`, so one emitted while the walk runs is
+    /// kept. What an earlier watcher recorded is dropped; only the walk
+    /// knows what the disk holds now. Returns this watcher's generation.
+    fn start(&self, vault_id: &str) -> u64 {
+        let mut state = self.lock();
+        state.generation = state.generation.wrapping_add(1);
+        let generation = state.generation;
+        state.vaults.insert(
+            vault_id.to_owned(),
+            WatchedSet {
+                generation,
+                files: BTreeSet::new(),
+                removed_while_walking: Some(HashSet::new()),
+            },
+        );
+        generation
+    }
+
+    /// Add what the start walk found, less what went while it ran.
+    fn extend(&self, vault_id: &str, generation: u64, found: HashSet<String>) {
+        let mut state = self.lock();
+        let Some(set) = state.vaults.get_mut(vault_id) else {
+            return;
+        };
+        if set.generation != generation {
+            return;
+        }
+        let removed = set.removed_while_walking.take().unwrap_or_default();
+        set.files
+            .extend(found.into_iter().filter(|rel| !removed.contains(rel)));
+    }
+
+    /// The watcher of `generation` stopped: drop its set, unless a
+    /// newer watcher of the vault has started since.
+    fn end(&self, vault_id: &str, generation: u64) {
+        let mut state = self.lock();
+        if state
+            .vaults
+            .get(vault_id)
+            .is_some_and(|set| set.generation == generation)
+        {
+            state.vaults.remove(vault_id);
+        }
+    }
+
+    /// `rel` is a plain file now. Ignored for a vault no watcher runs,
+    /// and for anything but markdown, which the watcher never reports.
+    fn insert(&self, vault_id: &str, rel: &str) {
+        if !watcher::is_markdown(Path::new(rel)) {
+            return;
+        }
+        let mut state = self.lock();
+        let Some(set) = state.vaults.get_mut(vault_id) else {
+            return;
+        };
+        if let Some(removed) = set.removed_while_walking.as_mut() {
+            removed.remove(rel);
+        }
+        if !set.files.contains(rel) {
+            set.files.insert(rel.to_owned());
+        }
+    }
+
+    /// `rel` is not (or no longer) a plain file; whether it was one.
+    fn remove(&self, vault_id: &str, rel: &str) -> bool {
+        let mut state = self.lock();
+        let Some(set) = state.vaults.get_mut(vault_id) else {
+            return false;
+        };
+        if let Some(removed) = set.removed_while_walking.as_mut() {
+            removed.insert(rel.to_owned());
+        }
+        set.files.remove(rel)
+    }
+
+    /// The recorded files below the folder `rel` (not `rel` itself).
+    fn under(&self, vault_id: &str, rel: &str) -> Vec<String> {
+        let prefix = format!("{rel}/");
+        self.lock()
+            .vaults
+            .get(vault_id)
+            .map_or_else(Vec::new, |set| {
+                set.files
+                    .range(prefix.clone()..)
+                    .take_while(|p| p.starts_with(&prefix))
+                    .cloned()
+                    .collect()
+            })
+    }
+
+    /// `rel` and everything recorded below it is no plain file of the
+    /// vault (it is, or is behind, a symlink): forgotten, with no
+    /// `Delete`, since hiding a link deletes nothing.
+    fn forget(&self, vault_id: &str, rel: &str) {
+        for below in self.under(vault_id, rel) {
+            self.remove(vault_id, &below);
+        }
+        self.remove(vault_id, rel);
+    }
 }
 
 impl Backend {
@@ -212,6 +380,7 @@ impl Backend {
             collab: Arc::new(std::sync::RwLock::new(HashMap::new())),
             recipe_roots: Arc::new(HashMap::new()),
             guard: Arc::new(std::sync::OnceLock::new()),
+            plain_files: PlainFiles::default(),
         }
     }
 
@@ -257,8 +426,13 @@ impl Backend {
             if !is_md(&entry.path) {
                 continue;
             }
-            let abs = self.file_path(vault_id, &entry.path)?;
-            let Ok(text) = std::fs::read_to_string(&abs) else {
+            let Ok(abs) = self.write_path(vault_id, &entry.path) else {
+                continue;
+            };
+            let Ok(text) = self
+                .read_own(vault_id, &entry.path)
+                .map(|b| String::from_utf8(b).unwrap_or_default())
+            else {
                 continue;
             };
             let Some(rewritten) = relink(&text, &old, &new) else {
@@ -275,8 +449,12 @@ impl Backend {
                 .lock()
                 .expect("vault::sync write_lock poisoned");
             // Written only if nobody changed it since it was read.
-            let current = std::fs::read_to_string(&abs).unwrap_or_default();
-            if current != text {
+            let current = self
+                .read_own(vault_id, &entry.path)
+                .ok()
+                .and_then(|b| String::from_utf8(b).ok())
+                .unwrap_or_default();
+            if current != text || crate::own::through_symlink(&self.root(vault_id)?, &entry.path) {
                 continue;
             }
             let bytes = rewritten.into_bytes();
@@ -324,6 +502,13 @@ impl Backend {
     /// fetched via `manifest` / `folder_index`, so a speculative
     /// event would desync them.
     fn emit(&self, vault_id: &str, event: VaultEvent) {
+        match &event {
+            VaultEvent::Put { path, .. } => self.plain_files.insert(vault_id, path),
+            VaultEvent::Delete { path } => {
+                self.plain_files.remove(vault_id, path);
+            }
+            VaultEvent::Resync => {}
+        }
         let _ = self.channel_blocking(vault_id).send(event.clone());
         self.changes.publish(VaultChange {
             vault_id: vault_id.to_string(),
@@ -460,6 +645,41 @@ impl Backend {
         Ok(root.join(rel))
     }
 
+    /// The vault file at `rel`'s bytes, never read through a symlink
+    /// ([`crate::own::read_own`]). A symlink, a path through a symlinked
+    /// folder, or a file swapped for one since it was listed reads as
+    /// [`VaultSyncError::NotFound`], as a file the manifest does not list.
+    fn read_own(&self, vault_id: &str, rel: &str) -> Result<Vec<u8>, VaultSyncError> {
+        self.file_path(vault_id, rel)?;
+        let root = self.root(vault_id)?;
+        if crate::own::through_symlink(&root, rel) {
+            return Err(VaultSyncError::NotFound);
+        }
+        crate::own::read_own(&root, rel).map_err(|e| {
+            if crate::own::is_not_own(&e) {
+                VaultSyncError::NotFound
+            } else {
+                io_err(e)
+            }
+        })
+    }
+
+    /// [`Self::file_path`] for a write, delete or move: refused when the
+    /// file or any folder on the way to it is a symlink, so no write
+    /// lands through one (out of the vault, or into a private or ignored
+    /// folder) and no delete removes one's target. A symlink is not the
+    /// vault's (`crate::own`); refusing it, rather than following or
+    /// removing it, is what keeps a hidden symlink from deleting anything.
+    fn write_path(&self, vault_id: &str, rel: &str) -> Result<PathBuf, VaultSyncError> {
+        let abs = self.file_path(vault_id, rel)?;
+        if crate::own::through_symlink(&self.root(vault_id)?, rel) {
+            return Err(VaultSyncError::Refused(format!(
+                "{rel} is a symlink, or under one: not a file of the vault"
+            )));
+        }
+        Ok(abs)
+    }
+
     /// Get-or-create the per-vault broadcast sender. Async —
     /// uses tokio's `RwLock` so it interoperates with the async
     /// `subscribe` impl.
@@ -517,7 +737,7 @@ impl Backend {
         std::thread::Builder::new()
             .name(format!("vault-watch-start:{vault_id}"))
             .spawn(move || {
-                let _ = done.send(watcher::watch(watched, WATCHER_DEBOUNCE));
+                let _ = done.send(watcher::watch_tree(watched, WATCHER_DEBOUNCE));
             })
             .map_err(|e| WatchError::Notify(format!("spawn watch thread: {e}")))?;
         let (rx, guard) = started
@@ -526,13 +746,20 @@ impl Backend {
 
         let thread_name = format!("vault-sync-watcher:{vault_id}");
         let hub = self.changes.clone();
+        let plain = self.plain_files.clone();
         let id = vault_id.to_string();
+        let generation = plain.start(&id);
+        let handle = WatcherHandle {
+            _guard: guard,
+            sets: vec![(id.clone(), generation)],
+            plain: plain.clone(),
+        };
         std::thread::Builder::new()
             .name(thread_name)
-            .spawn(move || forward_watcher_events(root, rx, tx, hub, id))
+            .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id, generation))
             .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
 
-        Ok(WatcherHandle { _guard: guard })
+        Ok(handle)
     }
 
     /// [`Self::start_watcher`] for several vaults at once, over **one**
@@ -558,24 +785,32 @@ impl Backend {
         std::thread::Builder::new()
             .name("vault-watch-start".into())
             .spawn(move || {
-                let _ = done.send(watcher::watch_many(roots, WATCHER_DEBOUNCE));
+                let _ = done.send(watcher::watch_trees(roots, WATCHER_DEBOUNCE));
             })
             .map_err(|e| WatchError::Notify(format!("spawn watch thread: {e}")))?;
         let (receivers, guard) = started
             .await
             .map_err(|e| WatchError::Notify(format!("watch thread: {e}")))??;
 
+        let mut handle = WatcherHandle {
+            _guard: guard,
+            sets: Vec::with_capacity(receivers.len()),
+            plain: self.plain_files.clone(),
+        };
         for (root, rx) in receivers {
             let Some((id, tx)) = channels.remove(&root) else {
                 continue;
             };
             let hub = self.changes.clone();
+            let plain = self.plain_files.clone();
+            let generation = plain.start(&id);
+            handle.sets.push((id.clone(), generation));
             std::thread::Builder::new()
                 .name(format!("vault-sync-watcher:{id}"))
-                .spawn(move || forward_watcher_events(root, rx, tx, hub, id))
+                .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id, generation))
                 .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
         }
-        Ok(WatcherHandle { _guard: guard })
+        Ok(handle)
     }
 
     /// Sync sibling of [`Self::channel`] for use inside the
@@ -614,12 +849,9 @@ impl VaultSync for Backend {
     }
 
     fn get_file(&self, vault_id: &str, path: &str) -> Result<FileBytes, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
-        if !abs.exists() {
-            return Err(VaultSyncError::NotFound);
-        }
-        let bytes = std::fs::read(&abs).map_err(io_err)?;
-        Ok(FileBytes(bytes))
+        // Never through a symlink: a link in the vault to a file outside
+        // it (or to a private folder in it) reads as no file at all.
+        Ok(FileBytes(self.read_own(vault_id, path)?))
     }
 
     fn put_file(
@@ -629,12 +861,15 @@ impl VaultSync for Backend {
         bytes: Vec<u8>,
         if_match: IfMatch,
     ) -> Result<PutAck, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        let abs = self.write_path(vault_id, path)?;
         self.guard_write(vault_id, path)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
+        // Again under the lock: a link swapped in since the check is
+        // refused, never written through.
+        self.write_path(vault_id, path)?;
         let existing_sha = if abs.exists() {
             Some(sha256_file(&abs).map_err(io_err)?.0)
         } else {
@@ -668,12 +903,15 @@ impl VaultSync for Backend {
         path: &str,
         if_match: IfMatch,
     ) -> Result<(), VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        let abs = self.write_path(vault_id, path)?;
         self.guard_write(vault_id, path)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
+        // A symlink is never removed (nor what it points at): refused
+        // again under the lock, for one swapped in since the check.
+        self.write_path(vault_id, path)?;
         if !abs.exists() {
             // Idempotent: missing path = success, no broadcast.
             return Ok(());
@@ -703,14 +941,16 @@ impl VaultSync for Backend {
         to: &str,
         if_match: IfMatch,
     ) -> Result<MoveAck, VaultSyncError> {
-        let src = self.file_path(vault_id, from)?;
-        let dst = self.file_path(vault_id, to)?;
+        let src = self.write_path(vault_id, from)?;
+        let dst = self.write_path(vault_id, to)?;
         self.guard_write(vault_id, from)?;
         self.guard_write(vault_id, to)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
+        self.write_path(vault_id, from)?;
+        self.write_path(vault_id, to)?;
         if !src.exists() {
             return Err(VaultSyncError::NotFound);
         }
@@ -954,16 +1194,13 @@ impl VaultSync for Backend {
         parent: Option<String>,
         if_match: IfMatch,
     ) -> Result<PutAck, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        let abs = self.write_path(vault_id, path)?;
         self.guard_write(vault_id, path)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
-        if !abs.exists() {
-            return Err(VaultSyncError::NotFound);
-        }
-        let bytes = std::fs::read(&abs).map_err(io_err)?;
+        let bytes = self.read_own(vault_id, path)?;
         let existing_sha = sha256_hex(&bytes);
         if let IfMatch::Sha(want) = &if_match {
             if *want != existing_sha {
@@ -1017,7 +1254,9 @@ impl VaultSync for Backend {
     }
 
     fn open_collab(&self, vault_id: &str, path: &str) -> Result<CollabAck, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        // A symlink has no live session: its document would read nothing
+        // and write nothing (`crate::own`).
+        let abs = self.write_path(vault_id, path)?;
         // Joining a file's live session is how the collaborative editor
         // writes, so it takes the same permission a save does.
         self.guard_write(vault_id, path)?;
@@ -1098,7 +1337,18 @@ fn walk_files(
         if is_root_internal(root, &path) {
             continue;
         }
-        if path.is_dir() {
+        // The entry's own type, never its target's: a symlink — to a
+        // file or a folder, in the vault or out of it — is not the
+        // vault's, so it is not listed, hashed or served, and a
+        // symlinked folder is not walked into (`crate::own`).
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_symlink() {
+            tracing::debug!(path = %path.display(), "a symlink in the vault; not in the manifest");
+            continue;
+        }
+        if kind.is_dir() {
             // A node-private directory never leaves this machine — not
             // in the manifest, so no replica or vault client ever asks
             // for what is under it (`vault.private.node-only`).
@@ -1133,7 +1383,7 @@ fn walk_files(
 /// Every file the manifest covers, hashed — the manifest's rows, for
 /// the files `keep` admits (by root-relative path).
 ///
-/// Each file is hashed by streaming it through [`sha256_file`], never
+/// Each file is hashed by streaming it through [`sha256_reader`], never
 /// read whole: a manifest is asked for on every replica poll and every
 /// doc-peer `list`, and a vault holds whatever its people drop into it.
 /// Reading each file into a `Vec` to hash it made the peak of one call
@@ -1149,9 +1399,20 @@ fn collect(
         if !keep(&rel) {
             return Ok(());
         }
-        let (sha256, size) = sha256_file(path).map_err(io_err)?;
-        let mtime_ms = std::fs::metadata(path)
-            .map_err(io_err)?
+        // Opened through `open_own`, never by path: a file swapped for a
+        // link since the walk saw its type is skipped, not hashed
+        // through the link.
+        let file = match crate::own::open_own(root, &rel) {
+            Ok(file) => file,
+            Err(e) if crate::own::is_not_own(&e) => {
+                tracing::debug!(path = %path.display(), ?e, "not the vault's own file now; not in the manifest");
+                return Ok(());
+            }
+            Err(e) => return Err(io_err(e)),
+        };
+        let meta = file.metadata().map_err(io_err)?;
+        let (sha256, size) = sha256_reader(file).map_err(io_err)?;
+        let mtime_ms = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -1530,14 +1791,36 @@ fn is_fresh(seen: &mut HashMap<String, Seen>, rel: &str, now: Seen) -> bool {
 /// external edit is indistinguishable from a PUT downstream. Runs
 /// on a dedicated OS thread spawned by [`Backend::start_watcher`];
 /// exits when the watcher guard drops (closing the sender).
+///
+/// Folders count as well as notes ([`watcher::watch_tree`]). A folder
+/// that appears (made, moved in, checked out, written by a sync client)
+/// is walked, and each plain note in it gets its `Put` and joins the
+/// plain-file set: the native watcher attaches to a new folder only once
+/// its event is handled, so a note written into it before then makes no
+/// event of its own, and without the walk its later deletion would send
+/// nothing. A folder that goes (deleted, or moved out of the vault)
+/// sends a `Delete` for each note recorded below it that is gone from
+/// disk. A folder renamed inside the vault is both — a `Delete` for each
+/// note under the old name and a `Put` under the new — so peers end up
+/// with every note, under its new path.
 fn forward_watcher_events(
     root: PathBuf,
     rx: std::sync::mpsc::Receiver<watcher::VaultEvent>,
     tx: broadcast::Sender<VaultEvent>,
     hub: architect::PubSub<VaultChange>,
+    plain: PlainFiles,
     vault_id: String,
+    generation: u64,
 ) {
     let mut seen: HashMap<String, Seen> = HashMap::new();
+    // Every plain markdown file there now: a later event that finds one
+    // of these gone is a real deletion (see `PlainFiles`). After a
+    // restart this walk is what rebuilds the record from disk.
+    plain.extend(
+        &vault_id,
+        generation,
+        plain_markdown_under(&root, &root).into_iter().collect(),
+    );
     // The watcher reports canonical paths (macOS's FSEvents: `/private/var`
     // for a root given as `/var`, a symlink), so an event is matched
     // against the root as given and as the filesystem names it — else
@@ -1561,49 +1844,198 @@ fn forward_watcher_events(
         if rel.is_empty() {
             continue;
         }
-        // `Changed` events from the debouncer cover both
-        // create+modify AND delete. Reload-or-classify by
-        // existence — cheaper than disambiguating the raw
-        // `notify::EventKind`.
-        let payload = if abs.exists() {
-            // Hashed by streaming: the event needs the digest and the
-            // size, never the bytes.
-            match sha256_file(&abs) {
-                Ok((sha256, size)) => {
-                    let mtime_ms = mtime_ms(&abs);
-                    let now = Seen {
-                        mtime_ms,
-                        sha256: sha256.clone(),
-                    };
-                    if !is_fresh(&mut seen, &rel, now) {
-                        continue;
-                    }
-                    VaultEvent::Put {
-                        path: rel,
-                        sha256,
-                        mtime_ms,
-                        size,
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(?abs, ?e, "watcher: failed to read changed file");
-                    continue;
-                }
-            }
-        } else {
-            seen.remove(&rel);
-            VaultEvent::Delete { path: rel }
-        };
-        hub.publish(VaultChange {
-            vault_id: vault_id.clone(),
-            event: payload.clone(),
-        });
-        if tx.send(payload).is_err() {
-            // No active subscribers — keep pumping; new
-            // subscribers attach later via the same channel.
+        // A symlink (or a path under a symlinked folder: notify follows
+        // links, so events arrive from behind one) is not the vault's:
+        // no `Put` for it, and never a `Delete` either. A file swapped
+        // for a link, or a dangling one, is hidden, not deleted — a
+        // `Delete` would tombstone the note's document and remove it on
+        // every peer (`crate::own`). It, and whatever was recorded below
+        // it, leaves the plain-file set, so removing the link later sends
+        // nothing either.
+        if crate::own::through_symlink(&root, &rel) {
+            tracing::debug!(path = %rel, "watcher: a symlink in the vault; ignored");
+            plain.forget(&vault_id, &rel);
             continue;
         }
+        // `Changed` events from the debouncer cover both create+modify
+        // AND delete. Classified by what is on disk now, never
+        // following a link — cheaper than disambiguating the raw
+        // `notify::EventKind`, which the debouncer has folded anyway.
+        let payloads = match std::fs::symlink_metadata(&abs) {
+            Ok(meta) if meta.is_file() => {
+                if !watcher::is_markdown(&abs) {
+                    continue;
+                }
+                match plain_file_put(&root, &rel, &mut seen, &plain, &vault_id) {
+                    Some(put) => vec![put],
+                    None => continue,
+                }
+            }
+            Ok(meta) if meta.is_dir() => {
+                // A folder named like a note is no note.
+                plain.remove(&vault_id, &rel);
+                if !is_synced_folder(&root, &rel) {
+                    continue;
+                }
+                // Walked as the root names it: the event's path may be the
+                // canonical one (macOS), which the walk's prefix strip
+                // would not match.
+                plain_markdown_under(&root, &root.join(&rel))
+                    .into_iter()
+                    .filter_map(|file| {
+                        crate::snapshot::invalidate_path(&root.join(&file));
+                        plain_file_put(&root, &file, &mut seen, &plain, &vault_id)
+                    })
+                    .collect()
+            }
+            Ok(_) => {
+                // A link swapped in since the check, or a socket or a
+                // FIFO: not a plain file of the vault.
+                tracing::debug!(path = %rel, "watcher: not a plain file; ignored");
+                plain.forget(&vault_id, &rel);
+                continue;
+            }
+            Err(e) if !is_gone(&e) => {
+                // There, but unreadable now (permissions, a sandbox taking
+                // the folder away): nothing is known to be deleted, so
+                // nothing is sent and the record is kept.
+                tracing::warn!(path = %rel, error = %e, "watcher: a path cannot be read; nothing sent");
+                continue;
+            }
+            Err(_) => {
+                // Gone. A deletion only if this path was last seen as a
+                // plain file; otherwise it was a symlink (perhaps made
+                // and removed inside one debounce window), or a file
+                // made and removed before anything saw it — no peer was
+                // sent either, so there is nothing to delete. A gone
+                // folder deletes the notes recorded below it that are
+                // gone too.
+                let mut gone = Vec::new();
+                for path in std::iter::once(rel.clone()).chain(plain.under(&vault_id, &rel)) {
+                    // Below a gone folder, a note counts as gone only when
+                    // its path is not found: one that cannot be read is
+                    // kept, never deleted on peers.
+                    if path != rel {
+                        match std::fs::symlink_metadata(root.join(&path)) {
+                            Err(e) if is_gone(&e) => {}
+                            _ => continue,
+                        }
+                    }
+                    seen.remove(&path);
+                    if plain.remove(&vault_id, &path) {
+                        gone.push(VaultEvent::Delete { path });
+                    }
+                }
+                if gone.is_empty() {
+                    tracing::debug!(path = %rel, "watcher: a path never seen as a plain file is gone; ignored");
+                }
+                gone
+            }
+        };
+        for payload in payloads {
+            hub.publish(VaultChange {
+                vault_id: vault_id.clone(),
+                event: payload.clone(),
+            });
+            // An error is no active subscribers — keep pumping; new
+            // subscribers attach later via the same channel.
+            let _ = tx.send(payload);
+        }
     }
+}
+
+/// Whether `e` says the path is not there: not found, or a parent that
+/// is no longer a folder. Any other error (permission denied, a sandbox's
+/// "operation not permitted") is not a deletion.
+fn is_gone(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
+}
+
+/// The `Put` for the plain note at `rel`, recorded as a plain file, or
+/// `None` when it brings nothing new (a read, not a write), is a link
+/// swapped in since it was checked, or cannot be read.
+fn plain_file_put(
+    root: &Path,
+    rel: &str,
+    seen: &mut HashMap<String, Seen>,
+    plain: &PlainFiles,
+    vault_id: &str,
+) -> Option<VaultEvent> {
+    // Hashed by streaming, through `open_own` (no link followed, even
+    // one swapped in since the check): the event needs the digest and
+    // the size, never the bytes.
+    match crate::own::open_own(root, rel).and_then(sha256_reader) {
+        Ok((sha256, size)) => {
+            // A plain file: its later disappearance is a deletion.
+            plain.insert(vault_id, rel);
+            let mtime_ms = mtime_ms(&root.join(rel));
+            let now = Seen {
+                mtime_ms,
+                sha256: sha256.clone(),
+            };
+            is_fresh(seen, rel, now).then(|| VaultEvent::Put {
+                path: rel.to_owned(),
+                sha256,
+                mtime_ms,
+                size,
+            })
+        }
+        Err(e) if crate::own::is_not_own(&e) => {
+            // A link swapped in since the check: no plain file now. But
+            // a file deleted since (a folder walked as its notes are
+            // removed) keeps its record, so the event of its removal
+            // still sends the `Delete`.
+            tracing::debug!(path = %rel, ?e, "watcher: not a plain file now; ignored");
+            if std::fs::symlink_metadata(root.join(rel)).is_ok() {
+                plain.remove(vault_id, rel);
+            }
+            None
+        }
+        Err(e) => {
+            tracing::warn!(path = %rel, ?e, "watcher: failed to read changed file");
+            None
+        }
+    }
+}
+
+/// Whether the folder at `rel` is one the manifest walks into: neither
+/// it nor a folder above it is node-private, a nested shelf or the
+/// server's own store. (Its symlinks are the caller's to have checked.)
+fn is_synced_folder(root: &Path, rel: &str) -> bool {
+    let mut at = root.to_path_buf();
+    for part in Path::new(rel).components() {
+        at.push(part);
+        if is_root_internal(root, &at)
+            || crate::private::is_private_dir(&at)
+            || crate::shelf_boundary::is_nested_shelf(root, &at)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// Every plain markdown file below `dir` (in the vault at `root`),
+/// root-relative and `/`-separated: the files the manifest walk
+/// ([`walk_files`]) covers, so it skips what that skips (symlinks,
+/// node-private folders, nested shelves) and reads no file. Only
+/// markdown, since the watcher reports nothing else. An unreadable
+/// folder gives what was walked so far.
+fn plain_markdown_under(root: &Path, dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let walked = walk_files(root, dir, &mut |path, rel| {
+        if watcher::is_markdown(path) {
+            out.push(rel);
+        }
+        Ok(())
+    });
+    if let Err(e) = walked {
+        tracing::warn!(dir = %dir.display(), ?e, "watcher: a vault walk stopped early");
+    }
+    out
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1620,8 +2052,13 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// allocated the whole file (and, for a vault holding a bounce or a
 /// PDF, made that the peak of the call).
 fn sha256_file(path: &Path) -> std::io::Result<(String, u64)> {
+    sha256_reader(std::fs::File::open(path)?)
+}
+
+/// [`sha256_file`] of a file already open (through
+/// [`crate::own::open_own`], so no link is followed).
+fn sha256_reader(mut file: std::fs::File) -> std::io::Result<(String, u64)> {
     use std::io::Read as _;
-    let mut file = std::fs::File::open(path)?;
     let mut h = Sha256::new();
     let mut buf = [0u8; 16 * 1024];
     let mut len = 0u64;
@@ -1750,6 +2187,69 @@ mod tests {
     }
 
     use super::*;
+
+    /// A path removed while the start walk runs is not added back by
+    /// the walk (whose listing may predate the removal), so its `Delete`
+    /// is never sent twice; one put back since is kept.
+    #[test]
+    fn the_start_walk_adds_back_nothing_removed_while_it_ran() {
+        let plain = PlainFiles::default();
+        let generation = plain.start("v");
+        plain.insert("v", "Gone.md");
+        assert!(plain.remove("v", "Gone.md"));
+        assert!(!plain.remove("v", "Back.md"));
+        plain.insert("v", "Back.md");
+        let walked: HashSet<String> = ["Gone.md", "Back.md", "Kept.md"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        plain.extend("v", generation, walked);
+        assert!(!plain.remove("v", "Gone.md"), "added back by the walk");
+        assert!(plain.remove("v", "Back.md"));
+        assert!(plain.remove("v", "Kept.md"));
+    }
+
+    /// A set goes with its watcher's handle, but never the set of a
+    /// watcher started since; an old walk never fills a new set.
+    #[test]
+    fn a_set_ends_with_its_own_watcher_only() {
+        let plain = PlainFiles::default();
+        let old = plain.start("v");
+        let new = plain.start("v");
+        plain.extend("v", old, HashSet::from(["Old.md".to_owned()]));
+        plain.extend("v", new, HashSet::from(["New.md".to_owned()]));
+        plain.end("v", old);
+        assert!(!plain.remove("v", "Old.md"));
+        assert!(plain.remove("v", "New.md"), "a newer watcher's set dropped");
+        plain.end("v", new);
+        assert!(
+            plain.lock().vaults.is_empty(),
+            "the set outlived its watcher"
+        );
+    }
+
+    /// The files under a folder are its own, not a sibling's that shares
+    /// the prefix (`A b/` is not under `A`).
+    #[test]
+    fn under_a_folder_is_only_that_folder() {
+        let plain = PlainFiles::default();
+        let generation = plain.start("v");
+        plain.extend(
+            "v",
+            generation,
+            ["A/x.md", "A/In/y.md", "A b/z.md", "A.md", "B/A/w.md"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        );
+        let mut under = plain.under("v", "A");
+        under.sort();
+        assert_eq!(under, ["A/In/y.md", "A/x.md"]);
+        plain.forget("v", "A");
+        assert!(plain.under("v", "A").is_empty());
+        assert!(plain.remove("v", "A b/z.md"));
+        assert!(plain.remove("v", "A.md"));
+    }
 
     fn make_backend() -> (tempfile::TempDir, Backend) {
         let tmp = tempfile::tempdir().unwrap();

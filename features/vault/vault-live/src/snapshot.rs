@@ -337,7 +337,7 @@ impl Slot {
             .into_par_iter()
             .filter_map(|(entry, stamp, prev)| {
                 let rel = entry.rel_path.clone();
-                let fresh = match crate::vault::load_entry(entry).ok()? {
+                let fresh = match crate::vault::load_entry(root, entry).ok()? {
                     LoadedEntry::Page(p) => CachedEntry::Page(p),
                     LoadedEntry::Base(b) => CachedEntry::Base(b),
                 };

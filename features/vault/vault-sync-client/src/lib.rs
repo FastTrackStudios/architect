@@ -238,11 +238,7 @@ pub fn apply_one<B: VaultSyncBackend>(
             write_file(vault_root, path, &bytes.0)
         }
         SyncOp::Push { path, .. } => {
-            let abs = vault_root.join(path);
-            let bytes = std::fs::read(&abs).map_err(|source| SyncError::Io {
-                path: abs.display().to_string(),
-                source,
-            })?;
+            let bytes = read_local(vault_root, path)?;
             backend.put_file(vault_id, path, bytes, IfMatch::CreateOnly)?;
             Ok(())
         }
@@ -254,11 +250,7 @@ pub fn apply_one<B: VaultSyncBackend>(
             ..
         } => match winning_side {
             Side::Local => {
-                let abs = vault_root.join(path);
-                let bytes = std::fs::read(&abs).map_err(|source| SyncError::Io {
-                    path: abs.display().to_string(),
-                    source,
-                })?;
+                let bytes = read_local(vault_root, path)?;
                 backend.put_file(vault_id, path, bytes, IfMatch::Sha(remote_sha.clone()))?;
                 Ok(())
             }
@@ -272,6 +264,46 @@ pub fn apply_one<B: VaultSyncBackend>(
             }
         },
     }
+}
+
+/// A local file's bytes for a push, never read through a symlink (the
+/// walk in [`index_local`] lists none; this refuses one swapped in since).
+fn read_local(vault_root: &Path, path: &str) -> Result<Vec<u8>, SyncError> {
+    if !is_plain_rel(path) || through_symlink(vault_root, path) {
+        return Err(SyncError::BadPath(path.to_owned()));
+    }
+    let abs = vault_root.join(path);
+    std::fs::read(&abs).map_err(|source| SyncError::Io {
+        path: abs.display().to_string(),
+        source,
+    })
+}
+
+/// Whether `path` is a plain relative path in a vault: non-empty, and
+/// made only of normal parts — no root (`/etc/x`, which `join` would take
+/// in place of the vault), prefix, `.` or `..`, whichever separator it
+/// uses. The rule `vault_live::own::is_plain_rel` keeps on the server.
+fn is_plain_rel(path: &str) -> bool {
+    !path.is_empty()
+        && !path.split(['/', '\\']).any(|seg| seg == ".." || seg == ".")
+        && Path::new(path)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Whether `path` below `vault_root` is a symlink or lies under one; a
+/// part that does not exist yet is none.
+fn through_symlink(vault_root: &Path, path: &str) -> bool {
+    let mut at = vault_root.to_path_buf();
+    for part in path.split(['/', '\\']).filter(|p| !p.is_empty()) {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => return true,
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// Aggregate counts for one sync pass — convenient for the
@@ -300,24 +332,30 @@ impl SyncSummary {
     }
 }
 
-/// Resolve and write `path` under `vault_root`, refusing `..`
-/// segments to keep the writer from escaping.
 /// Write one pulled file into a local copy, refusing a path that tries
-/// to climb out of it.
+/// to climb out of it: one with a `..` part, or an absolute one.
 ///
 /// Public because a subscription refresh pulls without being able to
 /// push (`wiki_live::materialize`), so it cannot go through
-/// [`apply_one`] — and the `..` check here is the one that matters most
+/// [`apply_one`] — and the path check here is the one that matters most
 /// in that case, since the manifest it is walking was written by
 /// another organisation. One copy of that check, called from both
 /// paths, rather than two that can drift apart.
 ///
 /// # Errors
 ///
-/// [`SyncError::BadPath`] for a path containing a `..` segment, or
+/// [`SyncError::BadPath`] for a path that is not plain and relative
+/// (absolute, or with a `..` or `.` part) or runs through a symlink, or
 /// [`SyncError::Io`] if the write or its parent directories fail.
 pub fn write_file(vault_root: &Path, path: &str, bytes: &[u8]) -> Result<(), SyncError> {
-    if path.split(['/', '\\']).any(|seg| seg == "..") {
+    // `vault_root.join("/etc/x")` is `/etc/x`: an absolute path is
+    // refused as surely as a `..` one.
+    if !is_plain_rel(path) {
+        return Err(SyncError::BadPath(path.to_owned()));
+    }
+    // Never written through a symlink in the local copy: not out of it,
+    // and not into a folder it keeps to itself.
+    if through_symlink(vault_root, path) {
         return Err(SyncError::BadPath(path.to_owned()));
     }
     let abs = vault_root.join(path);
@@ -430,5 +468,71 @@ mod tests {
         let entries = index_local(root).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path, "a.md");
+    }
+
+    /// A local copy follows no symlink: none is indexed (so none is
+    /// pushed, and none missing from the server is deleted — a sync
+    /// never deletes), and a pull is never written through one.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_neither_indexed_nor_written_through() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("a.md"), b"hello").unwrap();
+        std::fs::write(outside.join("secret.md"), b"secret").unwrap();
+        symlink(outside.join("secret.md"), root.join("out.md")).unwrap();
+        symlink(&outside, root.join("ext")).unwrap();
+
+        let entries = index_local(&root).unwrap();
+        let paths: Vec<_> = entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["a.md"]);
+        for path in ["out.md", "ext/secret.md", "ext/new.md"] {
+            assert!(
+                matches!(
+                    write_file(&root, path, b"pulled"),
+                    Err(SyncError::BadPath(_))
+                ),
+                "{path} written through a symlink"
+            );
+            assert!(matches!(
+                read_local(&root, path),
+                Err(SyncError::BadPath(_))
+            ));
+        }
+        assert_eq!(std::fs::read(outside.join("secret.md")).unwrap(), b"secret");
+        assert!(!outside.join("new.md").exists());
+        assert!(root.join("out.md").is_symlink());
+    }
+
+    /// A pulled path never lands outside the local copy: an absolute one
+    /// (which `join` would take in place of the root) or one with `..`
+    /// is refused, and neither is read for a push.
+    #[test]
+    fn an_absolute_or_climbing_path_is_neither_written_nor_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = tmp.path().join("abs.md");
+        let abs = target.to_str().unwrap();
+        for path in [abs, "../abs.md", "a/../../abs.md", "./a.md", ""] {
+            assert!(
+                matches!(
+                    write_file(&root, path, b"pulled"),
+                    Err(SyncError::BadPath(_))
+                ),
+                "{path:?} written"
+            );
+            assert!(
+                matches!(read_local(&root, path), Err(SyncError::BadPath(_))),
+                "{path:?} read"
+            );
+        }
+        assert!(!target.exists(), "written outside the local copy");
+        write_file(&root, "a/b.md", b"ok").unwrap();
+        assert_eq!(read_local(&root, "a/b.md").unwrap(), b"ok");
     }
 }

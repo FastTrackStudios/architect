@@ -181,7 +181,7 @@ impl Vault {
         // later.
         let loaded: Vec<LoadedEntry> = entries
             .into_par_iter()
-            .filter_map(|entry| load_entry(entry).ok())
+            .filter_map(|entry| load_entry(root, entry).ok())
             .collect();
         let (pages, bases) = split_by_kind(loaded);
         let property_types = read_property_types(root);
@@ -245,15 +245,14 @@ fn split_by_kind(entries: Vec<LoadedEntry>) -> (Vec<VaultPage>, Vec<VaultBase>) 
     (pages, bases)
 }
 
-pub(crate) fn load_entry(entry: VaultEntry) -> Result<LoadedEntry, std::io::Error> {
-    let VaultEntry {
-        abs_path,
-        rel_path,
-        kind,
-    } = entry;
+/// `entry` (a file the walk listed under `root`) read and parsed. Read
+/// through [`crate::own::open_own`]: a file swapped for a symlink since
+/// the walk is refused, never followed.
+pub(crate) fn load_entry(root: &Path, entry: VaultEntry) -> Result<LoadedEntry, std::io::Error> {
+    let VaultEntry { rel_path, kind, .. } = entry;
     // One open for the text and its mtime, where `read_to_string` and
     // `metadata` each resolved the path again.
-    let (raw, mtime) = read_with_mtime(&abs_path)?;
+    let (raw, mtime) = read_with_mtime(root, &rel_path)?;
     let (basename, folder) = name_parts(&rel_path);
     let (basename, folder) = (basename.to_owned(), folder.to_owned());
     Ok(match kind {
@@ -278,12 +277,13 @@ pub(crate) fn load_entry(entry: VaultEntry) -> Result<LoadedEntry, std::io::Erro
     })
 }
 
-/// Read a file's text and its mtime through one open handle. The
+/// Read the vault file at `rel`'s text and its mtime through one open
+/// handle, never through a symlink ([`crate::own::open_own`]). The
 /// buffer is sized from that handle's `fstat`, so the read does not
 /// grow it. An unreadable mtime is the epoch, as before.
-fn read_with_mtime(abs: &Path) -> Result<(String, SystemTime), std::io::Error> {
+fn read_with_mtime(root: &Path, rel: &str) -> Result<(String, SystemTime), std::io::Error> {
     use std::io::Read as _;
-    let mut file = std::fs::File::open(abs)?;
+    let mut file = crate::own::open_own(root, rel)?;
     let meta = file.metadata().ok();
     let mtime = meta
         .as_ref()
@@ -372,10 +372,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("n.md");
         std::fs::write(&file, "---\ntype: note\n---\nbody\n").unwrap();
-        let (raw, mtime) = read_with_mtime(&file).unwrap();
+        let (raw, mtime) = read_with_mtime(dir.path(), "n.md").unwrap();
         assert_eq!(raw, "---\ntype: note\n---\nbody\n");
         assert_eq!(mtime, std::fs::metadata(&file).unwrap().modified().unwrap());
-        assert!(read_with_mtime(&dir.path().join("missing.md")).is_err());
+        assert!(read_with_mtime(dir.path(), "missing.md").is_err());
     }
 
     /// `open` still loads pages and bases with their names and folders,
