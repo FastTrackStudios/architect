@@ -122,7 +122,15 @@ local properties = {}
 for k, v in read.properties or {} do
   properties[k] = if type(v) == "string" then fill(v, values) else v
 end
-local path = (a.folder or "Inbox") .. "/" .. values.title .. ".md"
+-- A title is a file name: no folders, no `..`, nothing a file system
+-- refuses.
+local name = string.gsub(tostring(values.title), '[/\\:%*%?"<>|%c]', "-")
+name = string.gsub(name, "%.%.+", ".")
+name = string.match(name, "^[%s%.]*(.-)[%s%.]*$")
+if name == "" then
+  name = "Untitled"
+end
+local path = (a.folder or "Inbox") .. "/" .. name .. ".md"
 host.run("VAULT_CREATE", {
   path = path,
   body = fill(read.body or "", values),

@@ -10,18 +10,6 @@ local function fields(text)
   return out
 end
 
--- `text` with each {{name}} replaced by `values[name]` (left as it is
--- when there is none).
-local function fill(text, values)
-  return (string.gsub(text, "{{%s*([%w_]+)%s*}}", function(name)
-    local v = values[name]
-    if v == nil then
-      return nil
-    end
-    return tostring(v)
-  end))
-end
-
 -- The templates: each note in `folder`, and the fields it asks for.
 local function templates(folder)
   local out = {}

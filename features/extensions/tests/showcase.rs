@@ -376,7 +376,7 @@ fn templater_lite_inserts_the_date_at_the_cursor_as_one_undo_step() {
 }
 
 #[test]
-fn templater_lite_declares_its_page_its_slash_row_and_its_reach() {
+fn templater_lite_declares_its_page_its_slash_row_its_key_and_its_reach() {
     let package = Package::read(&example("templater-lite")).unwrap();
     let m = &package.manifest;
     assert!(
@@ -397,4 +397,35 @@ fn templater_lite_declares_its_page_its_slash_row_and_its_reach() {
         ["VAULT_LIST", "VAULT_READ", "VAULT_CREATE", "EXT_VIEW_OPEN"]
     );
     assert_eq!(m.capabilities.writes, ["editor"]);
+    // C11: a slash row for the date, and a key for it.
+    let slash = &m.contributes.slash;
+    assert_eq!(slash.len(), 1);
+    assert_eq!(slash[0].action, "SHOWCASE_TEMPLATER_DATE");
+    assert_eq!(slash[0].label, "Today's date");
+    let date = m
+        .actions
+        .iter()
+        .find(|a| a.id == "SHOWCASE_TEMPLATER_DATE")
+        .unwrap();
+    assert_eq!(date.shortcut, "Mod-Alt-D");
+}
+
+#[test]
+fn templater_lite_makes_a_prompted_title_a_safe_file_name() {
+    let list = ActionList::new();
+    let notes = Notes::default();
+    vault(&list, &notes);
+    templates(&notes);
+    let ui = FakeUi::new()
+        .answer(json!("../../etc/pass:wd"))
+        .answer(json!("nobody"));
+    let _host = load(&list, &ui, "templater-lite");
+    let out = run(
+        &list,
+        "SHOWCASE_TEMPLATER_NEW",
+        &json!({ "template": "Templates/Meeting.md", "date": "2026-11-14" }),
+    )
+    .unwrap();
+    // No folder climbed out of, no `:`: one file in Inbox/.
+    assert_eq!(out, "Inbox/-.-etc-pass-wd.md");
 }
