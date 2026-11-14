@@ -3597,6 +3597,24 @@ is the vault's.
 prompt says "Read your documents" or "Change your documents" for it and
 an `actions = ["VAULT_"]` grant alone reads no note.
 
+**One service, through its client.** The document calls and an
+extension's data are one `#[architect::rpc]` service,
+`architect_documents::Documents` (`features/extensions/documents`,
+wasm-clean): `list`, `read`, `create`, `edit`, `rename`, `delete`,
+`metadata` (`VAULT_METADATA`'s answer), `data`, `set_data`, each naming
+the extension it is for. Its one implementation, `DocumentsServer`, has
+the gate in it (`Gate`: `reads` / `writes = ["documents"]`), so every
+transport gets the same check, and calls a `DocumentStore` and a
+`DataStore` below it. The host reaches it only through the generated
+`DocumentsClient` (`features/extensions/src/docs_service.rs`): it serves
+`DocumentsServer` over the app's `Documents` (`AsStore`), each
+extension's data (`FileData`) and its own gate (`HostGate`) with
+`architect::serve_local` on a runtime of its own, the same on the desk
+and iOS. A browser's host uses the same client over vox on the org
+lane, the node serving the same `DocumentsServer`; the demo serves it
+in wasm over `MemoryStore`. What is not wasm-clean is only below the
+stores: the vault on disk and the data files.
+
 **Extension data and settings persist.** `host.data`/`set_data` are a
 file per extension under the host's data root (the app's
 `<app dir>/extension-data`), written whole (a temporary file, synced,
