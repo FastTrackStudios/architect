@@ -1,0 +1,18 @@
+# The showcase registry's greeter (#710 L1, L3): installed from a signed
+# archive, through a consent prompt that says what it asks in words.
+id = "showcase.greeter"
+name = "Greeter"
+version = "0.2.0"
+kind = "luau"
+api = "0.1"
+description = "Greets you with a toast. Asks to read the selection, to show notifications and to use the clipboard."
+
+[capabilities]
+reads = ["selection"]
+ui = ["notify", "clipboard"]
+
+[[actions]]
+id = "SHOWCASE_GREETER_GREET"
+name = "Greeter: greet"
+description = "A greeting, as a toast."
+script = "greet.luau"
