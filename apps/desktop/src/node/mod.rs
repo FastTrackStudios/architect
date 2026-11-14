@@ -571,6 +571,23 @@ pub async fn start_with_shell(
     for id in config.vaults.keys() {
         tasks.push(tokio::spawn(shares.clone().keep_built(id.clone())));
     }
+    // Only a share's owner writes what its link runs (#710): its
+    // extensions file and packages, whoever else may write the vault.
+    {
+        let shares = shares.clone();
+        let _ = backend.set_write_guard(Arc::new(vault_live::ExtensionPaths::new(
+            move |vault, code| {
+                shares
+                    .list()
+                    .into_iter()
+                    .find(|s| {
+                        s.vault == vault
+                            && (s.code == code || s.audiences.iter().any(|a| a.code == code))
+                    })
+                    .map(|s| s.created_by)
+            },
+        )));
+    }
 
     // ── Sites ────────────────────────────────────────────────────────
     let mut sites = Vec::new();

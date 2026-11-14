@@ -4527,7 +4527,25 @@ model, which is wasm-clean (`verify_package` with feature `archive`):
    connections; `fetch` only to the approved hosts it also asks for. Refuse
    `[[secrets]]` outright.
 
-Tests: `features/extensions/tests/share_needs.rs`.
+**Who writes it.** Only the share's owner: the node's write guard
+(`features/vault/vault-live/src/write_guard.rs` `ExtensionPaths`, installed
+by the node over its shares) refuses any other account a write to
+`<code>.extensions.toml` or `<code>.extensions/`. Reads and writes on the
+owner's device follow no link and check sizes before reading
+(`vault_needs::real`).
+
+**What the guest host must hold to** (G1):
+
+- the `documents` a guest's extension reads are the share's, read-only
+  (`ShareGuest`), never the vault's;
+- it takes no trust from the vault's files: `trust` for `verify_package`
+  is the org key and the keys the guest host itself holds for the share's
+  owner, never a key named in the link's file or the vault;
+- the consent is the guest's own, per person; nothing from the owner's
+  grants carries over.
+
+Tests: `features/extensions/tests/share_needs.rs`,
+`features/vault/vault-live/src/write_guard.rs`.
 
 ## On each platform
 

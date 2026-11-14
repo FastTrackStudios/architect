@@ -34,14 +34,25 @@ impl Extensions {
     ///
     /// Its file is there and does not read.
     pub fn share_needs(&self, root: &Path, code: &str) -> Result<LinkNeeds, String> {
-        let path = root.join(file_path(code));
-        match std::fs::read_to_string(&path) {
-            Ok(text) => {
-                LinkNeeds::from_toml(&text).map_err(|e| format!("{}: {e}", file_path(code)))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(LinkNeeds::default()),
-            Err(e) => Err(format!("{}: {e}", path.display())),
+        if !crate::share_needs::is_code(code) {
+            return Err(format!("{code:?} is not a share code"));
         }
+        let rel = file_path(code);
+        // No link followed, and its size before it is read.
+        let Some(path) = crate::vault_needs::real(root, &rel, true)? else {
+            return Ok(LinkNeeds::default());
+        };
+        let size = std::fs::symlink_metadata(&path)
+            .map_err(|e| format!("{rel}: {e}"))?
+            .len();
+        if size > u64::try_from(crate::share_needs::MAX_FILE).unwrap_or(u64::MAX) {
+            return Err(format!(
+                "{rel}: {size} bytes, more than {}",
+                crate::share_needs::MAX_FILE
+            ));
+        }
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{rel}: {e}"))?;
+        LinkNeeds::from_toml(&text).map_err(|e| format!("{rel}: {e}"))
     }
 
     /// Makes `picks` what share link `code` of the vault at `root` runs:
@@ -65,7 +76,6 @@ impl Extensions {
         if !crate::share_needs::is_code(code) {
             return Err(format!("{code:?} is not a share code"));
         }
-        let dir = root.join(packages_dir(code));
         let mut needs = LinkNeeds::default();
         let mut archives: Vec<(String, Vec<u8>)> = Vec::new();
         for pick in picks {
@@ -119,28 +129,25 @@ impl Extensions {
             needs.requirements.extensions.push(requirement);
         }
         needs.check()?;
-        let file = root.join(file_path(code));
+        let rel = file_path(code);
+        let dir_rel = packages_dir(code);
         if needs.requirements.extensions.is_empty() {
-            let _ = std::fs::remove_file(&file);
-            let _ = std::fs::remove_dir_all(&dir);
+            // Removed only as what they are: never through a link.
+            if let Some(file) = crate::vault_needs::real(root, &rel, true)? {
+                std::fs::remove_file(&file).map_err(|e| format!("{rel}: {e}"))?;
+            }
+            if let Some(dir) = crate::vault_needs::real(root, &dir_rel, false)? {
+                std::fs::remove_dir_all(&dir).map_err(|e| format!("{dir_rel}: {e}"))?;
+            }
             return Ok(needs);
         }
-        let io = |p: &Path| {
-            let p = p.display().to_string();
-            move |e: std::io::Error| format!("{p}: {e}")
-        };
-        if let Some(parent) = file.parent() {
-            std::fs::create_dir_all(parent).map_err(io(parent))?;
-        }
-        if !archives.is_empty() {
-            std::fs::create_dir_all(&dir).map_err(io(&dir))?;
-        }
         for (name, bytes) in &archives {
-            let at = dir.join(name);
-            std::fs::write(&at, bytes).map_err(io(&at))?;
+            crate::vault_needs::real_write(root, &format!("{dir_rel}/{name}"), bytes)?;
         }
-        // What no pick needs any more goes.
-        if let Ok(entries) = std::fs::read_dir(&dir) {
+        // What no pick needs any more goes: each a plain file in a real
+        // folder, a link only unlinked (never what it points at).
+        if let Some(dir) = crate::vault_needs::real(root, &dir_rel, false)? {
+            let entries = std::fs::read_dir(&dir).map_err(|e| format!("{dir_rel}: {e}"))?;
             for e in entries.filter_map(Result::ok) {
                 let name = e.file_name().to_string_lossy().into_owned();
                 if !archives.iter().any(|(n, _)| *n == name) {
@@ -148,7 +155,7 @@ impl Extensions {
                 }
             }
         }
-        std::fs::write(&file, needs.to_toml()?).map_err(io(&file))?;
+        crate::vault_needs::real_write(root, &rel, needs.to_toml()?.as_bytes())?;
         Ok(needs)
     }
 

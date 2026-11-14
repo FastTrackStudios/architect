@@ -467,3 +467,36 @@ fn a_vault_that_names_nothing_needs_nothing() {
     let opened = ext.open_vault(&bad);
     assert!(opened.error.unwrap().contains(".architect/extensions.toml"));
 }
+
+#[test]
+fn on_a_version_tie_the_persons_registry_wins_over_the_vault() {
+    let tmp = tempfile::tempdir().unwrap();
+    let key = SecretKey::generate().unwrap();
+    let reg = registry(
+        &tmp.path().join("reg"),
+        &[(
+            "acme.greeter",
+            "0.1.0",
+            signed(tmp.path(), "acme.greeter", "0.1.0", &key),
+        )],
+    );
+    let ext = app(tmp.path(), &key, false).with_source(FolderRegistry::new(&reg));
+    let vault = tmp.path().join("vault");
+    carry(
+        &vault,
+        "greeter.archext",
+        &signed(&tmp.path().join("v"), "acme.greeter", "0.1.0", &key),
+    );
+    let mut needs = Requirements::default();
+    needs.need(Requirement::new("acme.greeter"));
+    vault_needs::write(&vault, &needs).unwrap();
+    let plan = ext.open_vault(&vault).plan;
+    assert_eq!(plan.install.len(), 1);
+    let done = ext.accept_vault(&vault, &plan, Some(&Scope::Device), "person");
+    assert!(done.iter().all(Result::is_ok), "{done:?}");
+    assert_eq!(
+        ext.installs().get("acme.greeter").unwrap().source,
+        "Test",
+        "the registry's copy"
+    );
+}

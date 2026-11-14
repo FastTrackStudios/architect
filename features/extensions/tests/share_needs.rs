@@ -150,3 +150,51 @@ fn the_owner_chooses_a_links_extensions_and_a_guest_checks_each_package() {
     assert!(!vault.join(file_path(CODE)).exists());
     assert!(!vault.join(packages_dir(CODE)).exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_links_files_are_never_read_or_removed_through_a_link() {
+    let tmp = tempfile::tempdir().unwrap();
+    let vault = tmp.path().join("vault");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(vault.join("_architect")).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("keep.archext"), b"not yours").unwrap();
+    std::fs::write(outside.join("big.toml"), vec![b'#'; 200 * 1024]).unwrap();
+    let list = ActionList::new();
+    let host = Host::new(list, SharedSections::new(Registry::new()));
+    let ext = Extensions::new(host, Installs::new(tmp.path().join("installs")));
+
+    // The shares folder a link elsewhere: refused, nothing read.
+    std::os::unix::fs::symlink(&outside, vault.join("_architect/shares")).unwrap();
+    let e = ext.share_needs(&vault, CODE).unwrap_err();
+    assert!(e.contains("link"), "{e}");
+    // Clearing a link's extensions removes nothing through it.
+    let e = ext.set_share_needs(&vault, CODE, &[]).unwrap_err();
+    assert!(e.contains("link"), "{e}");
+    assert!(outside.join("keep.archext").is_file());
+
+    // A real folder, its packages folder a link elsewhere: the same.
+    std::fs::remove_file(vault.join("_architect/shares")).unwrap();
+    std::fs::create_dir_all(vault.join("_architect/shares")).unwrap();
+    std::os::unix::fs::symlink(&outside, vault.join(packages_dir(CODE))).unwrap();
+    std::fs::write(vault.join(file_path(CODE)), "").unwrap();
+    assert!(
+        ext.set_share_needs(&vault, CODE, &[])
+            .unwrap_err()
+            .contains("link")
+    );
+    assert!(
+        outside.join("keep.archext").is_file(),
+        "deleted through a link"
+    );
+
+    // An oversized file: refused by its size, before it is read.
+    std::fs::remove_file(vault.join(packages_dir(CODE))).unwrap();
+    std::fs::copy(outside.join("big.toml"), vault.join(file_path(CODE))).unwrap();
+    assert!(
+        ext.share_needs(&vault, CODE)
+            .unwrap_err()
+            .contains("more than")
+    );
+}

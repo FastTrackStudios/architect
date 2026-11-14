@@ -115,7 +115,7 @@ pub use vault::{LoadError, SaveError, Vault, VaultPage};
 pub use vault::{PropertyTypes, VaultBase};
 pub use walker::{VaultEntry, VaultEntryKind, walk_vault};
 pub use watcher::{FsEvent, VaultEvent, WatchError, watch, watch_any};
-pub use write_guard::WriteGuard;
+pub use write_guard::{ExtensionPaths, WriteGuard};
 
 /// Node-private directories (`vault.private.node-only`): a directory
 /// holding [`private::PRIVATE_MARKER`] stays on this machine — out of

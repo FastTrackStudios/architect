@@ -130,3 +130,80 @@ mod tests {
         assert_eq!(current_caller(), None);
     }
 }
+
+/// Who may write what extensions keep in a vault (#710): a share link's
+/// extensions (`_architect/shares/<code>.extensions.toml` and the
+/// packages in `_architect/shares/<code>.extensions/`) only the share's
+/// owner. Every other path, and a call with no account (the server
+/// itself), is left to the rest of the rules.
+pub struct ExtensionPaths {
+    /// The account that owns share `code` (an audience's code: its
+    /// share's) in vault `vault`; `None` for no such share.
+    share_owner: Box<dyn Fn(&str, &str) -> Option<String> + Send + Sync>,
+}
+
+impl ExtensionPaths {
+    #[must_use]
+    pub fn new(share_owner: impl Fn(&str, &str) -> Option<String> + Send + Sync + 'static) -> Self {
+        Self {
+            share_owner: Box::new(share_owner),
+        }
+    }
+}
+
+/// The share code a path under `_architect/shares/` keeps extensions for.
+fn share_extensions_code(path: &str) -> Option<&str> {
+    let name = path.strip_prefix("_architect/shares/")?.split('/').next()?;
+    name.strip_suffix(".extensions.toml")
+        .or_else(|| name.strip_suffix(".extensions"))
+}
+
+impl WriteGuard for ExtensionPaths {
+    fn check(&self, vault_id: &str, path: &str, principal: Option<&str>) -> Result<(), String> {
+        let Some(who) = principal else {
+            return Ok(());
+        };
+        if let Some(code) = share_extensions_code(path) {
+            return match (self.share_owner)(vault_id, code) {
+                Some(owner) if owner == who => Ok(()),
+                Some(_) => Err(format!(
+                    "{path}: only the share's owner chooses what its link runs"
+                )),
+                None => Err(format!("{path}: there is no share {code}")),
+            };
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod extension_paths_tests {
+    use super::{ExtensionPaths, WriteGuard};
+
+    #[test]
+    fn only_a_shares_owner_writes_what_its_link_runs() {
+        let g = ExtensionPaths::new(|_, code| (code == "abc").then(|| "alice".to_owned()));
+        for path in [
+            "_architect/shares/abc.extensions.toml",
+            "_architect/shares/abc.extensions/x-1.0.0.archext",
+        ] {
+            assert!(g.check("v", path, Some("alice")).is_ok());
+            assert!(
+                g.check("v", path, Some("mallory"))
+                    .unwrap_err()
+                    .contains("owner")
+            );
+            assert!(g.check("v", path, None).is_ok(), "the server itself");
+        }
+        assert!(
+            g.check("v", "_architect/shares/zzz.extensions.toml", Some("alice"))
+                .is_err()
+        );
+        assert!(
+            g.check("v", "_architect/shares/abc.md", Some("mallory"))
+                .is_ok(),
+            "not this rule's"
+        );
+        assert!(g.check("v", "notes/a.md", Some("mallory")).is_ok());
+    }
+}
