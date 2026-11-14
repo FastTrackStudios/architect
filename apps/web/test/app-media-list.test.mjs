@@ -10,7 +10,8 @@
 //   its cover, title over artist and length;
 // - the `sets`/`songs` rows gone from the property table, the
 //   ```studio-setlist fence folded out of the reading;
-// - a row pressed plays on the Now Playing card, the row marked; the end
+// - a row pressed plays on the Now Playing card, the row marked (the
+//   bars while it plays, its number while paused); the end
 //   of a song moves on to the next song in the list.
 //
 // As a share link's guest (a node, `island_node` with no island, sharing
@@ -264,6 +265,9 @@ const LIST = `JSON.stringify((() => { const l = document.querySelector('[data-te
 const list = async (b) => JSON.parse(await b.eval(LIST));
 const bar = async (b) => JSON.parse(await b.eval(`JSON.stringify((() => { const t = document.querySelector('[data-testid=now-playing-title]'); return t && { title: t.textContent, subtitle: document.querySelector('[data-testid=now-playing-subtitle]')?.textContent, playing: document.querySelector('[data-testid=now-playing-toggle]')?.dataset.playing === 'true' }; })())`));
 const pressRow = (b, title) => b.eval(`(() => { const r = [...document.querySelectorAll('[data-media-row]')].find((r) => r.dataset.mediaRow === ${JSON.stringify(title)}); if (!r) return false; r.querySelector('.media-list-main').click(); return true; })()`);
+/// Row `title`'s mark as drawn: the equalizer bars (its `::after`), and
+/// whether its number shows (not transparent).
+const mark = async (b, title) => JSON.parse(await b.eval(`JSON.stringify((() => { const r = [...document.querySelectorAll('[data-media-row]')].find((r) => r.dataset.mediaRow === ${JSON.stringify(title)}); const m = r.querySelector('.media-list-mark'); return { bars: getComputedStyle(m, '::after').content !== 'none', number: getComputedStyle(m).color !== 'rgba(0, 0, 0, 0)' && m.textContent.trim() !== '' }; })())`));
 const press = (b, testid) => b.eval(`(() => { const e = document.querySelector('[data-testid=${testid}]'); if (!e) return false; e.click(); return true; })()`);
 
 /// The list's sets, its nine rows in order, four greyed, every cover.
@@ -287,6 +291,14 @@ async function checkPlays(b, what) {
   const s = await until(async () => { const s = await bar(b); return s && s.title === 'Silent Night' && s.playing && s; }, 10000, `${what}: the card playing Silent Night`);
   assert.match(s.subtitle, /for KING & COUNTRY/);
   await until(async () => (await list(b)).rows.find((r) => r.current)?.title === 'Silent Night', 5000, `${what}: its row marked`);
+  // Playing, its number gives way to the bars; paused, it keeps its
+  // number (nothing looks as if it plays), and the bars come back.
+  assert.deepEqual(await mark(b, 'Silent Night'), { bars: true, number: false }, `${what}: the bars while it plays`);
+  assert.ok(await press(b, 'now-playing-toggle'));
+  await until(async () => (await bar(b))?.playing === false, 5000, `${what}: paused`);
+  await until(async () => { const m = await mark(b, 'Silent Night'); return !m.bars && m.number; }, 5000, `${what}: its number while paused`);
+  assert.ok(await press(b, 'now-playing-toggle'));
+  await until(async () => (await mark(b, 'Silent Night')).bars, 5000, `${what}: the bars again`);
   // The end of the song: the next in the list.
   await until(() => press(b, 'now-playing-open'), 5000, 'the card opened');
   await until(() => b.eval(`(() => { const l = document.querySelector('[data-testid=now-playing-line]'); if (!l || l.getAttribute('aria-disabled') === 'true') return false; l.focus(); l.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })); return true; })()`), 10000, 'the position line');
@@ -372,6 +384,10 @@ test('a share link\'s guest gets the same list from the link\'s notes, never one
         await until(() => b.eval(`(document.querySelector('[data-testid=guest-title]') || {}).textContent === 'Merry & Bright'`), 60000, 'the link');
         await checkList(b, `guest (${theme})`);
         assert.equal((await list(b)).source, 'app:share');
+        // The link opens with its first song current, not playing: its
+        // row keeps its number, no bars.
+        assert.ok((await until(async () => (await list(b)).rows[0].current, 5000, 'the first song current')));
+        assert.deepEqual(await mark(b, 'Sleigh Ride'), { bars: false, number: true }, 'the first song, current and not playing');
         assert.equal(await b.eval(`document.body.textContent.includes('Secret Song')`), false);
         // The fence the list repeats is folded out of the guest's reading.
         assert.ok(!(await b.eval(`document.querySelector('[data-testid=guest-note]')?.textContent || ''`)).includes('Sleigh Ride.mp3'));
