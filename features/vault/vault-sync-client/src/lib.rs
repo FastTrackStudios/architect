@@ -238,11 +238,7 @@ pub fn apply_one<B: VaultSyncBackend>(
             write_file(vault_root, path, &bytes.0)
         }
         SyncOp::Push { path, .. } => {
-            let abs = vault_root.join(path);
-            let bytes = std::fs::read(&abs).map_err(|source| SyncError::Io {
-                path: abs.display().to_string(),
-                source,
-            })?;
+            let bytes = read_local(vault_root, path)?;
             backend.put_file(vault_id, path, bytes, IfMatch::CreateOnly)?;
             Ok(())
         }
@@ -254,11 +250,7 @@ pub fn apply_one<B: VaultSyncBackend>(
             ..
         } => match winning_side {
             Side::Local => {
-                let abs = vault_root.join(path);
-                let bytes = std::fs::read(&abs).map_err(|source| SyncError::Io {
-                    path: abs.display().to_string(),
-                    source,
-                })?;
+                let bytes = read_local(vault_root, path)?;
                 backend.put_file(vault_id, path, bytes, IfMatch::Sha(remote_sha.clone()))?;
                 Ok(())
             }
@@ -272,6 +264,34 @@ pub fn apply_one<B: VaultSyncBackend>(
             }
         },
     }
+}
+
+/// A local file's bytes for a push, never read through a symlink (the
+/// walk in [`index_local`] lists none; this refuses one swapped in since).
+fn read_local(vault_root: &Path, path: &str) -> Result<Vec<u8>, SyncError> {
+    if path.split(['/', '\\']).any(|seg| seg == "..") || through_symlink(vault_root, path) {
+        return Err(SyncError::BadPath(path.to_owned()));
+    }
+    let abs = vault_root.join(path);
+    std::fs::read(&abs).map_err(|source| SyncError::Io {
+        path: abs.display().to_string(),
+        source,
+    })
+}
+
+/// Whether `path` below `vault_root` is a symlink or lies under one; a
+/// part that does not exist yet is none.
+fn through_symlink(vault_root: &Path, path: &str) -> bool {
+    let mut at = vault_root.to_path_buf();
+    for part in path.split(['/', '\\']).filter(|p| !p.is_empty()) {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => return true,
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// Aggregate counts for one sync pass — convenient for the
@@ -318,6 +338,11 @@ impl SyncSummary {
 /// [`SyncError::Io`] if the write or its parent directories fail.
 pub fn write_file(vault_root: &Path, path: &str, bytes: &[u8]) -> Result<(), SyncError> {
     if path.split(['/', '\\']).any(|seg| seg == "..") {
+        return Err(SyncError::BadPath(path.to_owned()));
+    }
+    // Never written through a symlink in the local copy: not out of it,
+    // and not into a folder it keeps to itself.
+    if through_symlink(vault_root, path) {
         return Err(SyncError::BadPath(path.to_owned()));
     }
     let abs = vault_root.join(path);
@@ -430,5 +455,43 @@ mod tests {
         let entries = index_local(root).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path, "a.md");
+    }
+
+    /// A local copy follows no symlink: none is indexed (so none is
+    /// pushed, and none missing from the server is deleted — a sync
+    /// never deletes), and a pull is never written through one.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_neither_indexed_nor_written_through() {
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("vault");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(root.join("a.md"), b"hello").unwrap();
+        std::fs::write(outside.join("secret.md"), b"secret").unwrap();
+        symlink(outside.join("secret.md"), root.join("out.md")).unwrap();
+        symlink(&outside, root.join("ext")).unwrap();
+
+        let entries = index_local(&root).unwrap();
+        let paths: Vec<_> = entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, ["a.md"]);
+        for path in ["out.md", "ext/secret.md", "ext/new.md"] {
+            assert!(
+                matches!(
+                    write_file(&root, path, b"pulled"),
+                    Err(SyncError::BadPath(_))
+                ),
+                "{path} written through a symlink"
+            );
+            assert!(matches!(
+                read_local(&root, path),
+                Err(SyncError::BadPath(_))
+            ));
+        }
+        assert_eq!(std::fs::read(outside.join("secret.md")).unwrap(), b"secret");
+        assert!(!outside.join("new.md").exists());
+        assert!(root.join("out.md").is_symlink());
     }
 }

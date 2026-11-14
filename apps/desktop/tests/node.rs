@@ -597,6 +597,190 @@ async fn a_vault_seeded_on_two_nodes_becomes_one_document() {
     always.stop().await;
 }
 
+/// A symlink in a vault is not the vault's (#675): the node lists none
+/// (`NOTES_LIST`, the doc peer), reads none (`NOTES_READ`) and syncs
+/// none to the other node — and hiding one deletes nothing on either
+/// side. A note the laptop already holds as a plain file under a name
+/// that is a symlink on the always-on node keeps its file on both; a
+/// synced note swapped for a dangling symlink on the always-on node is
+/// not taken for a deletion, so the laptop keeps its copy.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_symlinked_note_is_neither_synced_nor_deleted_on_either_node() {
+    use std::os::unix::fs::symlink;
+    let secret = "outside the vault: never synced";
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(outside.join("dir")).unwrap();
+    std::fs::write(outside.join("secret.md"), secret).unwrap();
+    std::fs::write(outside.join("dir/secret.md"), secret).unwrap();
+
+    // The always-on node: a note, a note to hide later, and links.
+    let always_dir = tmp.path().join("always-on");
+    let always_vault = always_dir.join("data/vaults/notes");
+    std::fs::create_dir_all(&always_vault).unwrap();
+    std::fs::write(always_vault.join("hello.md"), "# Hello\n\nKept.\n").unwrap();
+    std::fs::write(
+        always_vault.join("Hidden.md"),
+        "# Hidden\n\nSynced first.\n",
+    )
+    .unwrap();
+    symlink("hello.md", always_vault.join("Alias.md")).unwrap();
+    symlink(outside.join("secret.md"), always_vault.join("Out.md")).unwrap();
+    symlink(outside.join("dir"), always_vault.join("Ext")).unwrap();
+    std::fs::write(always_dir.join("mcp-token"), MCP_TOKEN).unwrap();
+    let mut always = config(
+        "always-on",
+        &always_dir,
+        &origin,
+        session(&origin, &always_dir).await,
+    );
+    always.mcp_token_file = Some(always_dir.join("mcp-token"));
+    let always = node::start(always).await.unwrap();
+
+    // The laptop: its own plain `Alias.md`, as a copy synced before the
+    // always-on node stopped listing its symlink.
+    let laptop_dir = tmp.path().join("laptop");
+    let laptop_vault = laptop_dir.join("data/vaults/notes");
+    std::fs::create_dir_all(&laptop_vault).unwrap();
+    let alias = "# Alias\n\nThe laptop's own copy.\n";
+    std::fs::write(laptop_vault.join("Alias.md"), alias).unwrap();
+    let mut laptop = config(
+        "laptop",
+        &laptop_dir,
+        &origin,
+        session(&origin, &laptop_dir).await,
+    );
+    laptop.peers = vec![always.dial().unwrap()];
+    let laptop = node::start(laptop).await.unwrap();
+    let (a, l) = (always.endpoint_id(), laptop.endpoint_id());
+    until("each node lets the other in", || {
+        always.state.admits(&l) && laptop.state.admits(&a)
+    })
+    .await;
+    until("the notes reach the laptop", || {
+        reads(&laptop_vault.join("hello.md"), "Kept.")
+            && reads(&laptop_vault.join("Hidden.md"), "Synced first.")
+    })
+    .await;
+
+    // NOTES_LIST and NOTES_READ, over MCP as an agent calls them.
+    let listed = mcp(
+        &always,
+        "tools/call",
+        json!({"name": "run", "arguments": {"id": "NOTES_LIST", "args": {}}}),
+    )
+    .await;
+    let listed = listed.to_string();
+    for link in ["Alias.md", "Out.md", "Ext/"] {
+        assert!(!listed.contains(link), "{link} listed: {listed}");
+    }
+    for path in ["Out.md", "Ext/secret.md", "Alias.md"] {
+        let read = mcp(
+            &always,
+            "tools/call",
+            json!({"name": "run", "arguments": {"id": "NOTES_READ", "args": {
+                "vault": "notes", "path": path,
+            }}}),
+        )
+        .await;
+        assert_eq!(read["result"]["isError"], true, "{path} read: {read}");
+        assert!(!read.to_string().contains(secret), "{path} read: {read}");
+        let direct = always.state.read("notes".into(), path.into()).await;
+        assert!(direct.is_err(), "{path} read: {direct:?}");
+    }
+
+    // A synced note hidden on the always-on node: swapped for a dangling
+    // symlink, which is not a deletion. Then an edit, so the laptop is
+    // known to have caught up past the swap.
+    symlink("Gone.md", always_vault.join(".hidden")).unwrap();
+    std::fs::rename(always_vault.join(".hidden"), always_vault.join("Hidden.md")).unwrap();
+    always
+        .state
+        .write(
+            "notes".into(),
+            "hello.md".into(),
+            "# Hello\n\nKept.\n\nAfter the swap.\n".into(),
+        )
+        .await
+        .unwrap();
+    until("the edit after the swap reaches the laptop", || {
+        reads(&laptop_vault.join("hello.md"), "After the swap.")
+    })
+    .await;
+    // A few more sweeps, for anything still to arrive.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Nothing removed or written through on either side.
+    assert_eq!(
+        std::fs::read_to_string(laptop_vault.join("Hidden.md")).unwrap(),
+        "# Hidden\n\nSynced first.\n",
+        "the laptop's copy of the hidden note was removed or changed"
+    );
+    assert_ne!(laptop.note_deleted("notes", "Hidden.md").await, Some(true));
+    assert_eq!(
+        std::fs::read_to_string(laptop_vault.join("Alias.md")).unwrap(),
+        alias
+    );
+    for link in ["Alias.md", "Out.md", "Ext", "Hidden.md"] {
+        let meta = std::fs::symlink_metadata(always_vault.join(link)).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "{link} on the always-on node is no longer a link"
+        );
+    }
+    assert_eq!(
+        std::fs::read_link(always_vault.join("Alias.md")).unwrap(),
+        Path::new("hello.md")
+    );
+    assert!(reads(&always_vault.join("hello.md"), "After the swap."));
+    assert_eq!(
+        std::fs::read_to_string(outside.join("secret.md")).unwrap(),
+        secret
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.join("dir/secret.md")).unwrap(),
+        secret
+    );
+    assert_eq!(std::fs::read_dir(outside.join("dir")).unwrap().count(), 1);
+    for path in ["Out.md", "Ext"] {
+        assert!(
+            !laptop_vault.join(path).exists(),
+            "{path} reached the laptop"
+        );
+    }
+    for entry in walkdir_files(&laptop_vault) {
+        let text = std::fs::read_to_string(&entry).unwrap_or_default();
+        assert!(
+            !text.contains(secret),
+            "{} holds the outside file",
+            entry.display()
+        );
+    }
+
+    laptop.stop().await;
+    always.stop().await;
+}
+
+/// Every plain file under `dir`.
+#[cfg(unix)]
+fn walkdir_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let path = e.path();
+        match e.file_type() {
+            Ok(t) if t.is_dir() => out.extend(walkdir_files(&path)),
+            Ok(t) if t.is_file() => out.push(path),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The org lane at `node` as a browser reaches it: `/org/indie/vox` over
 /// WebSocket with `token` (if any) as the bearer.
 async fn web<C: vox::FromVoxLane>(node: &Running, token: Option<String>) -> C {

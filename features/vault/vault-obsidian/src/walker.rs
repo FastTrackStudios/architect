@@ -191,76 +191,10 @@ fn build_ignore(cfg: &ObsidianConfig) -> IgnoreMatcher {
     }
 }
 
-/// The vault file at `rel` (forward-slash separated, below `root`)
-/// opened for reading, never through a symlink.
-///
-/// Opened without following a link at its last component
-/// (`O_NOFOLLOW`), then checked to be a plain file that `rel` names
-/// with no symlink anywhere on the way: its resolved path is exactly the
-/// root's joined with `rel`, and that path is the very file opened. A
-/// file or a folder above it swapped for a symlink (out of the vault,
-/// or to a private or ignored folder in it) between a walk and a read is
-/// refused, never followed.
-///
-/// # Errors
-///
-/// The file could not be opened, or it is not the vault's own plain
-/// file now (`InvalidData`), or `rel` is not a plain relative path:
-/// absolute, or with `..`, `.` or a prefix (`InvalidInput`).
-///
-/// Unix only in full: elsewhere the opened file is compared with the path
-/// by size and modification time, a weaker check.
-pub fn open_own(root: &Path, rel: &str) -> std::io::Result<std::fs::File> {
-    use std::io::{Error, ErrorKind};
-    use std::path::Component;
-    // `root.join` of an absolute path replaces the root.
-    if rel.is_empty()
-        || !Path::new(rel)
-            .components()
-            .all(|c| matches!(c, Component::Normal(_)))
-    {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "not a path in the vault",
-        ));
-    }
-    let path = root.join(rel);
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        // Non-blocking too: a link swapped to a FIFO never hangs a read.
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    let file = options.open(&path)?;
-    let opened = file.metadata()?;
-    let not_own = || Error::new(ErrorKind::InvalidData, "not a plain file of the vault");
-    if !opened.is_file() {
-        return Err(not_own());
-    }
-    let expected = root.canonicalize()?.join(rel);
-    let resolved = path.canonicalize()?;
-    if resolved != expected {
-        return Err(not_own());
-    }
-    let now = std::fs::symlink_metadata(&resolved)?;
-    if now.file_type().is_symlink() || !same_file(&opened, &now) {
-        return Err(not_own());
-    }
-    Ok(file)
-}
-
-#[cfg(unix)]
-fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt as _;
-    a.dev() == b.dev() && a.ino() == b.ino()
-}
-
-#[cfg(not(unix))]
-fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    b.is_file() && a.len() == b.len() && a.modified().ok() == b.modified().ok()
-}
+/// The vault file at `rel` opened for reading, never through a symlink:
+/// `vault-live`'s [`vault_live::own::open_own`], the one opener every
+/// vault read goes through (the live walk and the sync backend too).
+pub use vault_live::own::open_own;
 
 #[cfg(test)]
 mod tests {

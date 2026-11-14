@@ -257,8 +257,13 @@ impl Backend {
             if !is_md(&entry.path) {
                 continue;
             }
-            let abs = self.file_path(vault_id, &entry.path)?;
-            let Ok(text) = std::fs::read_to_string(&abs) else {
+            let Ok(abs) = self.write_path(vault_id, &entry.path) else {
+                continue;
+            };
+            let Ok(text) = self
+                .read_own(vault_id, &entry.path)
+                .map(|b| String::from_utf8(b).unwrap_or_default())
+            else {
                 continue;
             };
             let Some(rewritten) = relink(&text, &old, &new) else {
@@ -275,8 +280,12 @@ impl Backend {
                 .lock()
                 .expect("vault::sync write_lock poisoned");
             // Written only if nobody changed it since it was read.
-            let current = std::fs::read_to_string(&abs).unwrap_or_default();
-            if current != text {
+            let current = self
+                .read_own(vault_id, &entry.path)
+                .ok()
+                .and_then(|b| String::from_utf8(b).ok())
+                .unwrap_or_default();
+            if current != text || crate::own::through_symlink(&self.root(vault_id)?, &entry.path) {
                 continue;
             }
             let bytes = rewritten.into_bytes();
@@ -460,6 +469,41 @@ impl Backend {
         Ok(root.join(rel))
     }
 
+    /// The vault file at `rel`'s bytes, never read through a symlink
+    /// ([`crate::own::read_own`]). A symlink, a path through a symlinked
+    /// folder, or a file swapped for one since it was listed reads as
+    /// [`VaultSyncError::NotFound`], as a file the manifest does not list.
+    fn read_own(&self, vault_id: &str, rel: &str) -> Result<Vec<u8>, VaultSyncError> {
+        self.file_path(vault_id, rel)?;
+        let root = self.root(vault_id)?;
+        if crate::own::through_symlink(&root, rel) {
+            return Err(VaultSyncError::NotFound);
+        }
+        crate::own::read_own(&root, rel).map_err(|e| {
+            if crate::own::is_not_own(&e) {
+                VaultSyncError::NotFound
+            } else {
+                io_err(e)
+            }
+        })
+    }
+
+    /// [`Self::file_path`] for a write, delete or move: refused when the
+    /// file or any folder on the way to it is a symlink, so no write
+    /// lands through one (out of the vault, or into a private or ignored
+    /// folder) and no delete removes one's target. A symlink is not the
+    /// vault's (`crate::own`); refusing it, rather than following or
+    /// removing it, is what keeps a hidden symlink from deleting anything.
+    fn write_path(&self, vault_id: &str, rel: &str) -> Result<PathBuf, VaultSyncError> {
+        let abs = self.file_path(vault_id, rel)?;
+        if crate::own::through_symlink(&self.root(vault_id)?, rel) {
+            return Err(VaultSyncError::Refused(format!(
+                "{rel} is a symlink, or under one: not a file of the vault"
+            )));
+        }
+        Ok(abs)
+    }
+
     /// Get-or-create the per-vault broadcast sender. Async —
     /// uses tokio's `RwLock` so it interoperates with the async
     /// `subscribe` impl.
@@ -614,12 +658,9 @@ impl VaultSync for Backend {
     }
 
     fn get_file(&self, vault_id: &str, path: &str) -> Result<FileBytes, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
-        if !abs.exists() {
-            return Err(VaultSyncError::NotFound);
-        }
-        let bytes = std::fs::read(&abs).map_err(io_err)?;
-        Ok(FileBytes(bytes))
+        // Never through a symlink: a link in the vault to a file outside
+        // it (or to a private folder in it) reads as no file at all.
+        Ok(FileBytes(self.read_own(vault_id, path)?))
     }
 
     fn put_file(
@@ -629,12 +670,15 @@ impl VaultSync for Backend {
         bytes: Vec<u8>,
         if_match: IfMatch,
     ) -> Result<PutAck, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        let abs = self.write_path(vault_id, path)?;
         self.guard_write(vault_id, path)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
+        // Again under the lock: a link swapped in since the check is
+        // refused, never written through.
+        self.write_path(vault_id, path)?;
         let existing_sha = if abs.exists() {
             Some(sha256_file(&abs).map_err(io_err)?.0)
         } else {
@@ -668,12 +712,15 @@ impl VaultSync for Backend {
         path: &str,
         if_match: IfMatch,
     ) -> Result<(), VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        let abs = self.write_path(vault_id, path)?;
         self.guard_write(vault_id, path)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
+        // A symlink is never removed (nor what it points at): refused
+        // again under the lock, for one swapped in since the check.
+        self.write_path(vault_id, path)?;
         if !abs.exists() {
             // Idempotent: missing path = success, no broadcast.
             return Ok(());
@@ -703,14 +750,16 @@ impl VaultSync for Backend {
         to: &str,
         if_match: IfMatch,
     ) -> Result<MoveAck, VaultSyncError> {
-        let src = self.file_path(vault_id, from)?;
-        let dst = self.file_path(vault_id, to)?;
+        let src = self.write_path(vault_id, from)?;
+        let dst = self.write_path(vault_id, to)?;
         self.guard_write(vault_id, from)?;
         self.guard_write(vault_id, to)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
+        self.write_path(vault_id, from)?;
+        self.write_path(vault_id, to)?;
         if !src.exists() {
             return Err(VaultSyncError::NotFound);
         }
@@ -954,16 +1003,13 @@ impl VaultSync for Backend {
         parent: Option<String>,
         if_match: IfMatch,
     ) -> Result<PutAck, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        let abs = self.write_path(vault_id, path)?;
         self.guard_write(vault_id, path)?;
         let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
-        if !abs.exists() {
-            return Err(VaultSyncError::NotFound);
-        }
-        let bytes = std::fs::read(&abs).map_err(io_err)?;
+        let bytes = self.read_own(vault_id, path)?;
         let existing_sha = sha256_hex(&bytes);
         if let IfMatch::Sha(want) = &if_match {
             if *want != existing_sha {
@@ -1017,7 +1063,9 @@ impl VaultSync for Backend {
     }
 
     fn open_collab(&self, vault_id: &str, path: &str) -> Result<CollabAck, VaultSyncError> {
-        let abs = self.file_path(vault_id, path)?;
+        // A symlink has no live session: its document would read nothing
+        // and write nothing (`crate::own`).
+        let abs = self.write_path(vault_id, path)?;
         // Joining a file's live session is how the collaborative editor
         // writes, so it takes the same permission a save does.
         self.guard_write(vault_id, path)?;
@@ -1098,7 +1146,18 @@ fn walk_files(
         if is_root_internal(root, &path) {
             continue;
         }
-        if path.is_dir() {
+        // The entry's own type, never its target's: a symlink — to a
+        // file or a folder, in the vault or out of it — is not the
+        // vault's, so it is not listed, hashed or served, and a
+        // symlinked folder is not walked into (`crate::own`).
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_symlink() {
+            tracing::debug!(path = %path.display(), "a symlink in the vault; not in the manifest");
+            continue;
+        }
+        if kind.is_dir() {
             // A node-private directory never leaves this machine — not
             // in the manifest, so no replica or vault client ever asks
             // for what is under it (`vault.private.node-only`).
@@ -1559,6 +1618,15 @@ fn forward_watcher_events(
         };
         let rel = rel_path.to_string_lossy().replace('\\', "/");
         if rel.is_empty() {
+            continue;
+        }
+        // A symlink (or a path under a symlinked folder) is not the
+        // vault's: no `Put` for it, and never a `Delete` either. A file
+        // swapped for a link, or a dangling one, is not a deletion — a
+        // `Delete` here would tombstone the note's document and remove
+        // it on every peer (`crate::own`).
+        if crate::own::through_symlink(&root, &rel) {
+            tracing::debug!(path = %rel, "watcher: a symlink in the vault; ignored");
             continue;
         }
         // `Changed` events from the debouncer cover both

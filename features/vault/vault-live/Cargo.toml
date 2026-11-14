@@ -51,6 +51,11 @@ architect-permissions = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "macros"] }
 sha2 = "0.10"
 
+[target.'cfg(unix)'.dependencies]
+# `O_NOFOLLOW` for `own::open_own`: a vault file is never read through
+# a symlink.
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "time"] }

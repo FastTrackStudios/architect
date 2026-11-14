@@ -62,11 +62,6 @@ indexmap = { workspace = true }
 serde_yaml = { workspace = true }
 facet.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-# `O_NOFOLLOW` for `walker::open_own`: a vault file is never read
-# through a symlink.
-libc = "0.2"
-
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros", "test-util"] }

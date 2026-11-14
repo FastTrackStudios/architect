@@ -82,6 +82,7 @@ pub use vault_proto::grouping;
 pub mod lexorank;
 pub mod lookup;
 pub mod mutate;
+pub mod own;
 pub mod property_schema;
 pub mod refs;
 /// Rewriting the wikilinks that named a page after it is renamed.
