@@ -524,6 +524,9 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         ManifestError::BadPlane { overlay, .. } => {
             (Some(format!("overlays[{overlay}].plane")), None)
         }
+        ManifestError::BadOverlay { overlay, .. } => {
+            (Some(format!("overlays[{overlay}].draws")), None)
+        }
         ManifestError::BadToken { token, .. } => (Some(format!("tokens[{token}]")), None),
         // `opener kf`, `hook startup`: what the contribution was.
         ManifestError::Contribution(refused) => (Some(refused.what.clone()), None),
@@ -593,6 +596,7 @@ fn scripts(package: &Package, report: &mut CheckReport) {
             manifest
                 .overlays
                 .iter()
+                .filter(|o| !o.script.is_empty())
                 .map(|o| (o.script.clone(), format!("overlays[{}].script", o.id))),
         );
     for (path, field) in named {

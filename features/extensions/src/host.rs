@@ -1672,6 +1672,36 @@ impl Host {
         }
     }
 
+    /// The overlays loaded extensions draw with a view of their own
+    /// (`[[overlays]] draws`) over views of kind `view`, on `plane`
+    /// (`under`, `over`, `top`), in load order.
+    #[must_use]
+    pub fn view_overlays(&self, view: &str, plane: &str) -> Vec<crate::overlay::ViewOverlay> {
+        self.inner
+            .loaded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .flat_map(|(extension, running)| {
+                running
+                    .loaded
+                    .manifest
+                    .overlays
+                    .iter()
+                    .filter(|o| o.view == view && o.plane == plane)
+                    .filter_map(|o| {
+                        o.draws.as_ref().map(|draws| crate::overlay::ViewOverlay {
+                            extension: extension.clone(),
+                            id: o.id.clone(),
+                            draws: draws.clone(),
+                            plane: o.plane.clone(),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     /// The loaded extensions' ids.
     #[must_use]
     pub fn ids(&self) -> Vec<String> {
