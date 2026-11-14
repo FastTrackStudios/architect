@@ -47,6 +47,10 @@ mod manifest;
 /// service on the wire: with `vox`).
 #[cfg(feature = "vox")]
 pub mod notes;
+/// The `VaultActions` service: a node's vaults' `VAULT_*`, `LINKS_*`,
+/// `TAGS_*` and `BASES_*` actions, run over the org lane (#495).
+#[cfg(feature = "vox")]
+pub mod vault_actions;
 mod page;
 mod page_meta;
 mod service;

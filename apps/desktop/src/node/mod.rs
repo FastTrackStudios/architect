@@ -56,6 +56,7 @@ pub mod service;
 pub mod share_layers;
 pub mod share_shell;
 pub mod shares;
+pub mod vault_actions;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -619,7 +620,13 @@ pub async fn start_with_shell(
         tasks.push(task);
     }
     if let (Some(lane), Some(_)) = (&lane, &config.host_org) {
-        let notes = architect::layers![service::notes::NotesService].provide(state.clone());
+        let notes = architect::layers![service::notes::NotesService]
+            .provide(state.clone())
+            // The vaults' actions for members' web apps (#495).
+            .merge_router(
+                architect::layers![vault_actions::service::VaultActionsService]
+                    .provide(vault_actions::VaultActionsState::new(backend.clone())),
+            );
         host = lane
             .clone()
             .with_vaults(registry.clone(), catalog.clone(), notes)

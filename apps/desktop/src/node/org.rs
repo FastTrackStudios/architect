@@ -102,6 +102,18 @@ const NOTES_PERMITS: ServicePermits = ServicePermits {
     ],
 };
 
+/// `VaultActions` on the org lane (#495): listing and reading need `read`
+/// on the vaults, a write `write` (audited); `run_read` refuses an action
+/// that changes the vault (`super::vault_actions`).
+const VAULT_ACTIONS_PERMITS: ServicePermits = ServicePermits {
+    service: "VaultActions",
+    methods: &[
+        MethodPermit::new("actions", "read", "vaults/**"),
+        MethodPermit::new("run_read", "read", "vaults/**"),
+        MethodPermit::new("run_write", "write", "vaults/**").audited(),
+    ],
+};
+
 /// `DocSync` on the org lane; which note is [`OrgLane::opens`]' call.
 const SYNC_PERMITS: ServicePermits = ServicePermits {
     service: "DocSync",
@@ -358,6 +370,10 @@ fn gate(
             .permit(
                 super::service::notes::notes_service_descriptor(),
                 &NOTES_PERMITS,
+            )
+            .permit(
+                super::vault_actions::service::vault_actions_service_descriptor(),
+                &VAULT_ACTIONS_PERMITS,
             )
             .permit(crdt::sync::doc_sync_service_descriptor(), &SYNC_PERMITS);
     }
