@@ -431,6 +431,9 @@ pub fn coalesces(name: &str) -> bool {
             // A scene's new size (`scene::RESIZE_EVENT`): a window dragged
             // larger sends one each frame; only the last matters.
             | "architect-resize"
+            // An embed's or an overlay's new input (`EMBED_EVENT`): a view
+            // scrolled or zoomed sends one a frame; only the last matters.
+            | "architect-embed"
     )
 }
 
@@ -753,6 +756,26 @@ mod coalescer_tests {
             })
             .collect();
         assert_eq!(dys, [(10.0, 0), (3.0, 1)]);
+    }
+
+    #[test]
+    fn an_overlays_spaces_are_coalesced_and_dont_flush_moves() {
+        let embed = |n: u32| {
+            ev(
+                0,
+                super::EMBED_EVENT,
+                EventData::Form(format!("{{\"n\":{n}}}")),
+            )
+        };
+        let mut c = Coalescer::new();
+        let _ = c.push(mv(1.0));
+        let _ = c.push(mv(2.0));
+        for n in 0..50 {
+            assert!(c.push(embed(n)).is_empty(), "an embed flushed the moves");
+        }
+        let sent = c.answered();
+        assert_eq!(sent.len(), 2, "one move and one embed");
+        assert_eq!(sent[1].data, EventData::Form("{\"n\":49}".to_owned()));
     }
 
     #[test]

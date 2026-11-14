@@ -217,6 +217,18 @@ const fn reach_words(r: Reach) -> &'static str {
     }
 }
 
+/// A kind of view as a person reads it: the arrangement, the editor, or
+/// its name.
+fn view_words(kind: &str) -> String {
+    let last = kind.rsplit(['.', '/']).next().unwrap_or(kind);
+    match last {
+        "arrange" | "arrangement" => "the arrangement".to_owned(),
+        "editor" => "the editor".to_owned(),
+        "mixer" => "the mixer".to_owned(),
+        _ => format!("the {kind} view"),
+    }
+}
+
 fn ui_words(u: &str) -> String {
     match u {
         NOTIFY => "Show you notifications".to_owned(),
@@ -264,6 +276,7 @@ impl Capabilities {
             && self.ports.is_empty()
             && self.languages.is_empty()
             && self.device.is_empty()
+            && self.over.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -360,6 +373,13 @@ impl Capabilities {
                 kind: "device",
                 what: d.clone(),
                 says: crate::device::words(d),
+            });
+        }
+        for v in self.over.iter().filter(|v| !granted.over.contains(v)) {
+            out.push(Ask {
+                kind: "over",
+                what: v.clone(),
+                says: format!("Draw over {}", view_words(v)),
             });
         }
         for f in self
@@ -480,6 +500,13 @@ impl Capabilities {
                 .filter(|d| granted.device.contains(d))
                 .cloned()
                 .collect(),
+            // Drawing over another's view only as declared and granted.
+            over: self
+                .over
+                .iter()
+                .filter(|v| granted.over.contains(v))
+                .cloned()
+                .collect(),
         }
     }
 
@@ -567,6 +594,14 @@ impl Capabilities {
     #[must_use]
     pub fn may_use(&self, what: &str) -> bool {
         self.ui.iter().any(|u| u == what)
+    }
+
+    /// Whether it may draw a layer over views of kind `view` with a view
+    /// of its own (`[[overlays]] draws`): its own views always, another's
+    /// only as granted (`capabilities.over`).
+    #[must_use]
+    pub fn may_draw_over(&self, extension: &str, view: &str) -> bool {
+        view.starts_with(&format!("{extension}/")) || self.over.iter().any(|v| v == view)
     }
 
     /// Whether it may use the device's `entry` (`capabilities.device`:

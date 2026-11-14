@@ -133,9 +133,9 @@ pub mod manager;
 pub mod net;
 #[cfg(any(feature = "host", feature = "vox"))]
 pub mod node;
+pub mod overlay;
 #[cfg(all(feature = "pickers", target_os = "ios"))]
 pub(crate) mod pickers_ios;
-pub mod overlay;
 #[cfg(feature = "scenes")]
 pub mod scene;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
