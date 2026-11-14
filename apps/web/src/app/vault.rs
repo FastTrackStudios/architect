@@ -362,8 +362,13 @@ fn first_workspace(vault: &MemorySource) -> Workspace {
     w
 }
 
-fn views() -> Views {
-    Views::new()
+/// The Vault's views, and the views the linked extensions add (`extra`,
+/// `ExtensionUi::views`: each `<extension>/<view>` kind, drawn by its
+/// component, #495).
+fn views(extra: Vec<View>) -> Views {
+    extra
+        .into_iter()
+        .fold(Views::new(), Views::view)
         .view(
             View::new("files", "Files", |_| rsx! { FilesView {} })
                 .icon(icon!(Files))
@@ -392,7 +397,8 @@ pub fn VaultPage() -> Element {
     let sets = use_signal(Screensets::default);
     let pane_status = use_signal(Vec::new);
     architect_shell::use_sidebar_layout(architect_shell::SidebarLayout::Two);
-    let views = use_hook(views);
+    let ext = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let views = use_memo(move || views(ext.map(|u| u.views()).unwrap_or_default()))();
     let actions = architect_workspace::WorkspaceActions::new(use_context::<
         Arc<architect::action::ActionList>,
     >());

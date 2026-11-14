@@ -5,7 +5,7 @@
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
-    architect_web::start();
+    architect_web::run(architect_distribution::architect());
     #[cfg(not(target_arch = "wasm32"))]
     eprintln!(
         "architect-web runs in a browser: `devenv up web` (dx serve), or `just web` (the bundle)"

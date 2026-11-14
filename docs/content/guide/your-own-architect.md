@@ -58,7 +58,7 @@ Every face of the build reads this one list:
 | --- | --- |
 | the window | links each extension (`apps/ui/src/extensions.rs` `use_lab_extensions`), beside the core every build has: Bases, the theme picker, the Command Palette, Navigator, the extensions manager, the settings page |
 | the node (`<bin> serve`) | draws each extension's `[[embeds]] page` that claims a fence on share links and Sites, and the distribution's own `block`s (`Distribution::blocks`; the page ships in the extension's `Extension::files`) |
-| the web bundle | `/app/distribution.json` (`Distribution::describe`): the web app takes its name and lists the extensions compiled in |
+| the web app | with a `web` feature, links each extension into the browser build (`architect_web::run`, below); `/app/distribution.json` (`Distribution::describe`) names it |
 
 On an iPhone or iPad the same distribution runs through
 `architect_mobile::run` (`apps/mobile/src/lib.rs` `run`), so one crate is
@@ -123,7 +123,7 @@ cargo xtask dist all           # no --manifest-path: the Architect app itself
 | `desktop` | the window's build, then `scripts/desktop/linux.sh` (an AppImage) or `scripts/desktop/macos.sh` (a signed dmg, on airlock) | `<Name>-linux-x86_64.AppImage` |
 | `node` | `--no-default-features` and `--cfg no_workspace_hack`, as the release's node | the binary |
 | `node-image` | the node in `flake.nix`'s `architect-image-prebuilt` | `<folder>-node.tar` |
-| `web` | `scripts/web-bundle.sh`, with the node's `distribution` as `/app/distribution.json` | `web/` |
+| `web` | with a `web` feature, the crate's own wasm (below); then `scripts/web-bundle.sh`, with the node's `distribution` as `/app/distribution.json` | `web/` |
 | `web-image` | the bundle in `flake.nix`'s `architect-web-image-prebuilt` | `<folder>-web.tar` |
 | `ios` | on a Mac with Xcode: `apps/mobile/ios/build-app.sh --device --manifest-path …`, the phone's app, unsigned | `ios/ArchitectMobile.app` |
 | `ios-sim` | the same for the iOS Simulator, signed ad hoc | `ios-sim/ArchitectMobile.app` |
@@ -181,13 +181,56 @@ testing).
 
 ## The web
 
-The web app (`apps/web`) is one wasm for every distribution: it reads
-`/app/distribution.json` for its name and lists what is compiled in. The
-deployment's node is the same binary running `serve`, so its share links
-and Sites draw the blocks those extensions claim. Their views and actions
-don't run in a browser yet: a linked extension needs the extension host,
-which is native only today, and Architect's shell on the web
-(#495).
+The web app runs a distribution's linked extensions in the browser, on
+the same host as the desktop app without Luau (#495): their actions in
+⌘K, their views as panes, their settings sections. The Architect app's own
+web build is `apps/web` (`architect_web::run(architect())`). A
+distribution of your own gets its own web build with a `web` feature and a
+library built for the browser:
+
+```toml
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["gui"]
+gui = ["architect-desktop/gui"]
+web = []
+
+# The desk's window and the node: everywhere but a browser.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+architect-desktop = { git = "…", default-features = false, features = ["vox"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+architect-web = { git = "…", default-features = false }
+wasm-bindgen = "0.2"
+```
+
+```rust
+// src/lib.rs
+#[cfg(target_family = "wasm")]
+#[wasm_bindgen::prelude::wasm_bindgen(start)]
+pub fn start() {
+    architect_web::run(my_architect::distribution());
+}
+```
+
+- **`architect-web` without its default features.** Its `start` is the
+  Architect app's; yours is the page's one start.
+- **Each linked extension's crate builds for `wasm32-unknown-unknown`.**
+  It depends on `architect-extensions` with `linked-core` and adds
+  `guest` only off the browser, by target (`extensions/calendar/Cargo.toml`
+  is one).
+- **`cargo xtask dist web --manifest-path …`** builds the library with
+  `--no-default-features --features web` for `wasm32-unknown-unknown`,
+  with Architect's `web` profile handed in as `--config` (your workspace
+  needs no `[profile.web]`). The wasm-bindgen CLI matches your
+  `Cargo.lock`'s.
+- **A crate with no `web` feature** gets the Architect app's wasm, which
+  shows only its name and its list (`dist` says so).
+
+The deployment's node is the same binary running `serve`, so its share
+links and Sites draw the blocks those extensions claim.
 
 ## Proving it
 

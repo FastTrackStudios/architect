@@ -172,22 +172,54 @@ async fn read_distribution() {
     DIST.with(|d| *d.borrow_mut() = dist);
 }
 
+/// The page's start: the Architect app ([`architect_distribution::architect`]),
+/// its first-party extensions linked in. A distribution crate's web build
+/// turns feature `start` off and calls [`run`] with its own.
+#[cfg(feature = "start")]
 #[wasm_bindgen(start)]
 pub fn start() {
+    run(architect_distribution::architect());
+}
+
+/// The whole of a distribution's web build (#495), its counterpart of
+/// `architect_desktop::run` and `architect_mobile::run`: `distribution`
+/// is installed (its name, and the extensions it links, which the app's
+/// host loads: `app::extensions`), then the app starts.
+///
+/// ```ignore
+/// #[wasm_bindgen::prelude::wasm_bindgen(start)]
+/// pub fn start() {
+///     architect_web::run(architect_distribution::architect().named("Studio"));
+/// }
+/// ```
+pub fn run(distribution: architect_distribution::Distribution) {
     // Once: the library's start (the bundle) and the program's `main`
     // (`dx serve`, src/main.rs) both come here in a dev build.
     thread_local!(static STARTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
     if STARTED.with(|s| s.replace(true)) {
         return;
     }
+    // A panic says why on the console (wasm's own trap says only
+    // "unreachable").
+    std::panic::set_hook(Box::new(|info| {
+        let stack = js_sys::Reflect::get(&js_sys::Error::new(""), &"stack".into())
+            .ok()
+            .and_then(|s| s.as_string())
+            .unwrap_or_default();
+        web_sys::console::error_1(&format!("architect-web panicked: {info}\n{stack}").into());
+    }));
+    let dist = distribution.install();
+    if let Ok(described) = serde_json::from_value::<Distribution>(dist.describe()) {
+        DIST.with(|d| *d.borrow_mut() = described);
+    }
     spawn_local(async {
-        if let Err(why) = run().await {
+        if let Err(why) = open().await {
             draw(&Screen::Broken(why));
         }
     });
 }
 
-async fn run() -> Result<(), String> {
+async fn open() -> Result<(), String> {
     let window = window()?;
     let location = window.location();
     let path = location.pathname().map_err(js)?;
