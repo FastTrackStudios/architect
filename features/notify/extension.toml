@@ -39,6 +39,8 @@ path = "features/notify"
 actions = ["VAULT_", "EXT_VIEW_OPEN", "EXT_VIEW_CLOSE"]
 effect = "mutating"
 reads = ["documents"]
+# The vault's actions change notes: the documents (VAULT_*).
+writes = ["documents"]
 ui = ["notify"]
 
 [[actions]]

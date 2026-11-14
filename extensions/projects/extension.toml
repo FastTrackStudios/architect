@@ -34,6 +34,9 @@ path = "extensions/projects"
 [capabilities]
 actions = ["VAULT_", "BASES_", "EXT_VIEW_OPEN", "EXT_PROJECT_TYPES"]
 effect = "mutating"
+reads = ["documents"]
+# The vault's actions change notes: the documents (VAULT_*).
+writes = ["documents"]
 
 [[actions]]
 id = "PROJECTS_LIST"
