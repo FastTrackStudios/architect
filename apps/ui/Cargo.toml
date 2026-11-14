@@ -32,7 +32,7 @@ architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home", 
 # The Vault tab's sidebar: the navigator (a port of Notebook Navigator) over
 # the lab's notes (src/vault.rs). GPL-3.0-or-later: linking it makes the
 # lab's binaries GPL (features/navigator/README.md).
-architect-navigator = { workspace = true, features = ["ui", "vault"] }
+architect-navigator = { workspace = true, features = ["ui", "vault", "documents"] }
 architect-commands = { workspace = true, features = ["native"] }
 # The settings page; the Appearance section, its layers kept (the
 # person's in a synced document, here a file).
