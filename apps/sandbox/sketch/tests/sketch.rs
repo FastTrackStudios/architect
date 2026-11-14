@@ -41,6 +41,7 @@ use architect_extensions::remote::{RemoteDocument, RemoteView, mounted_views};
 use architect_extensions::scene::{RenderCommand, Scene};
 use architect_extensions::{Origin, Package};
 use architect_sandbox_sketch::{ID, Sketch, arrangement_scene};
+use architect_workspace::paint::peniko::kurbo::Shape as _;
 use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
 use blitz_traits::events::{
     BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent, Modifiers,
@@ -78,6 +79,7 @@ fn package(dir: &Path) -> Package {
 struct PaneProps {
     processes: Processes,
     view: String,
+    overlay: bool,
 }
 
 /// One pane, 40 in and 20 down, 400 × 300.
@@ -85,7 +87,7 @@ struct PaneProps {
 fn Pane(props: PaneProps) -> Element {
     rsx! {
         div { style: "position: absolute; left: 40px; top: 20px; width: 400px; height: 300px;",
-            RemoteView { processes: props.processes, extension: ID, view: props.view }
+            RemoteView { processes: props.processes, extension: ID, view: props.view, overlay: props.overlay }
         }
     }
 }
@@ -97,6 +99,11 @@ struct App {
 }
 
 fn open(view: &str) -> App {
+    open_with(view, false)
+}
+
+/// View `view`, its scenes drawing over the whole app when `overlay`.
+fn open_with(view: &str, overlay: bool) -> App {
     let dir = tempfile::tempdir().unwrap();
     let runner = ProcessRunner::new()
         .unwrap()
@@ -110,6 +117,7 @@ fn open(view: &str) -> App {
         PaneProps {
             processes,
             view: view.to_owned(),
+            overlay,
         },
     );
     let mut doc = DioxusDocument::new(
@@ -259,6 +267,7 @@ fn panning_and_zooming_send_the_transform_not_the_scene() {
     );
     app.pump("drawn", |_| true);
     let before = bytes(&app.doc.inner.borrow());
+    let resizes = view(&app.doc.inner.borrow()).unwrap().scene_resizes();
     // 20 frames of Shift-drag panning.
     drag(
         &mut app,
@@ -279,7 +288,14 @@ fn panning_and_zooming_send_the_transform_not_the_scene() {
     app.pump("panned", |_| true);
     std::thread::sleep(Duration::from_millis(50));
     app.pump("zoomed", |_| true);
+    let _ = app.window_scene();
     let per_frame = (bytes(&app.doc.inner.borrow()) - before) / 21;
+    // A pan is not a resize: the widget kept its size (#729 M1).
+    assert_eq!(
+        view(&app.doc.inner.borrow()).unwrap().scene_resizes(),
+        resizes,
+        "panning told the view a new size"
+    );
     println!("panning and zooming: {per_frame} bytes a frame");
     assert!(
         per_frame < 120,
@@ -289,7 +305,6 @@ fn panning_and_zooming_send_the_transform_not_the_scene() {
 
 /// The middle of the node fills of `color`'s shapes in `commands`.
 fn fills_near(commands: &[RenderCommand], x: f64, y: f64) -> bool {
-    use architect_workspace::paint::peniko::kurbo::Shape as _;
     commands.iter().any(|c| match c {
         RenderCommand::Fill(f) => {
             let b = f.transform.transform_rect_bbox(f.shape.bounding_box());
@@ -410,5 +425,172 @@ fn arrangement_budget() {
         "| a pan's round trip (p50 / p99) | {:.2} / {:.2} ms |",
         p(&mut frames, 50),
         p(&mut frames, 99)
+    );
+}
+
+/// Whether every stroke in `commands` is drawn inside a clip to the
+/// pane's box (40, 20, 400 × 300); `None` when there is no stroke.
+fn strokes_clipped_to_the_pane(commands: &[RenderCommand]) -> Option<bool> {
+    let mut open: Vec<bool> = Vec::new();
+    let mut seen = None;
+    for c in commands {
+        match c {
+            RenderCommand::PushClipLayer(l) => {
+                let b = l.transform.transform_rect_bbox(l.clip.bounding_box());
+                open.push(
+                    (b.x0 - 40.0).abs() < 1.0
+                        && (b.y0 - 20.0).abs() < 1.0
+                        && (b.width() - 400.0).abs() < 1.0
+                        && (b.height() - 300.0).abs() < 1.0,
+                );
+            }
+            RenderCommand::PushLayer(_) => open.push(false),
+            RenderCommand::PopLayer => {
+                open.pop();
+            }
+            RenderCommand::Stroke(_) => {
+                let inside = open.iter().any(|&p| p);
+                seen = Some(seen.unwrap_or(true) && inside);
+            }
+            _ => {}
+        }
+    }
+    seen
+}
+
+#[test]
+fn a_scene_is_clipped_to_its_pane_unless_it_may_draw_over_the_app() {
+    let mut app = open_with("sketch", false);
+    drag(
+        &mut app,
+        (100.0, 100.0),
+        (300.0, 200.0),
+        5,
+        Modifiers::empty(),
+    );
+    app.pump("drawn", |_| true);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while strokes(&app.window_scene()) == 0 {
+        assert!(Instant::now() < deadline, "no stroke");
+        app.pump("the stroke", |_| true);
+    }
+    assert_eq!(
+        strokes_clipped_to_the_pane(&app.window_scene()),
+        Some(true),
+        "not clipped to its pane"
+    );
+
+    let mut app = open_with("sketch", true);
+    drag(
+        &mut app,
+        (100.0, 100.0),
+        (300.0, 200.0),
+        5,
+        Modifiers::empty(),
+    );
+    app.pump("drawn", |_| true);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while strokes(&app.window_scene()) == 0 {
+        assert!(Instant::now() < deadline, "no stroke");
+        app.pump("the stroke", |_| true);
+    }
+    assert_eq!(
+        strokes_clipped_to_the_pane(&app.window_scene()),
+        Some(false),
+        "clipped though it may draw over the app"
+    );
+    // Drawn over the window where the pointer drew it.
+    let stroke_at = |app: &App| {
+        app.window_scene().into_iter().find_map(|c| match c {
+            RenderCommand::Stroke(s) => {
+                Some(s.transform.transform_rect_bbox(s.shape.bounding_box()))
+            }
+            _ => None,
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let stroke = stroke_at(&app).unwrap();
+        if (stroke.x0 - 100.0).abs() < 3.0
+            && (stroke.y0 - 100.0).abs() < 3.0
+            && (stroke.x1 - 300.0).abs() < 3.0
+            && (stroke.y1 - 200.0).abs() < 3.0
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the overlay's stroke is at {stroke:?}"
+        );
+        app.pump("the whole stroke", |_| true);
+    }
+}
+
+/// A frame making an element with scene `value` on a fresh document.
+fn scene_frame(value: String) -> architect_extensions::wire::Frame {
+    use architect_extensions::wire::{Edit, Frame, Value};
+    Frame::Edits {
+        edits: vec![
+            Edit::PushId { id: 0 },
+            Edit::CreateElement {
+                tag: "object".to_owned(),
+                namespace: None,
+            },
+            Edit::SetId { id: 1 },
+            Edit::SetAttribute {
+                name: architect_extensions::scene::SCENE_ATTR.to_owned(),
+                namespace: None,
+                value: Value::Text(value),
+            },
+            Edit::AppendChildren { m: 1 },
+            Edit::Pop,
+        ],
+    }
+}
+
+#[test]
+fn an_oversized_or_unbalanced_scene_fails_the_view_not_the_app() {
+    let fresh = || RemoteDocument::new(futures::channel::mpsc::unbounded().0);
+    let huge = format!("ab\n[{}]", "{\"k\":\"o\"},".repeat(500_000));
+    let why = fresh().apply(scene_frame(huge)).unwrap_err();
+    assert!(why.contains("past its limit"), "{why}");
+    let stray = "ab\n[{\"k\":\"o\"}]".to_owned();
+    let why = fresh().apply(scene_frame(stray)).unwrap_err();
+    assert!(why.contains("popped"), "{why}");
+    let never = "abc".to_owned();
+    let why = fresh().apply(scene_frame(never)).unwrap_err();
+    assert!(why.contains("never sent"), "{why}");
+}
+
+/// #175's budget, enforced generously: a pan's round trip on the
+/// 2000-clip arrangement stays under `REMOTE_BUDGET` (33 ms) at p99.
+#[test]
+fn a_pans_round_trip_stays_inside_the_remote_budget() {
+    let mut app = open("arrangement");
+    let from = (200.0_f32, 150.0_f32);
+    app.send(UiEvent::PointerMove(pointer(
+        from,
+        FREE,
+        Modifiers::empty(),
+    )));
+    app.send(UiEvent::PointerDown(pointer(
+        from,
+        HELD,
+        Modifiers::empty(),
+    )));
+    let mut frames = Vec::new();
+    for i in 1..=40 {
+        let at = (from.0 - i as f32, from.1);
+        let was = bytes(&app.doc.inner.borrow());
+        let t = Instant::now();
+        app.send(UiEvent::PointerMove(pointer(at, HELD, Modifiers::empty())));
+        app.pump("the pan's frame", |d| bytes(d) > was);
+        frames.push(t.elapsed());
+    }
+    frames.sort();
+    let p99 = frames[(frames.len() - 1) * 99 / 100];
+    assert!(
+        p99 < architect_extensions::remote::REMOTE_BUDGET,
+        "a pan's p99 round trip is {p99:?}"
     );
 }

@@ -998,6 +998,14 @@ The same mechanism lets a first-party feature draw on the timeline (a
 lyrics lane, chord symbols over the sections) without the timeline
 knowing about it.
 
+**Status.** In-process Luau overlays exist
+(`features/canvas/src/layer.rs` `Overlays`, `OverlayDecl`). A remote
+extension's scene can't be an overlay layer in a view's coordinate
+spaces yet; that is the next piece of #175. Today, an installed
+extension that needs to draw outside its pane declares `overlay`
+(`capabilities.ui`, above): its scenes then draw over the whole window,
+in window coordinates, not tied to one view's spaces.
+
 ## What an extension costs
 
 Not everything should be one. Every extension pays for its boundary:
@@ -3128,7 +3136,7 @@ waiting (`Extensions::confirm_on`).
 | `EXT_DECORATIONS` | the icons and badges on rows and tabs, and who set each |
 | `EXT_INFO` | which copy runs, versions, pin, grants, what it may reach |
 
-## The app's interface: notifications, the clipboard, pickers, prompts, menus, badges
+## The app's interface: notifications, the clipboard, pickers, prompts, menus, badges, overlay
 
 What Templater, QuickAdd, Importer, Iconize and js_ReaScriptAPI need of
 the app's interface, as host-service calls
@@ -3139,7 +3147,7 @@ prompt says each in words):
 
 ```toml
 [capabilities]
-ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
+ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges", "overlay"]
 ```
 
 | call | what it does | answer | needs |
@@ -3150,6 +3158,26 @@ ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
 | `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text (`text`), a yes or no (`confirm`), one of a list (`pick_one`) | the text, `true`/`false`, the choice's id; `null` when cancelled | `prompts` |
 | `menu {items, x?, y?}` | a context menu of its own items (`{id, label, icon?, shortcut?, disabled?, separator?}`) at a point in the window (none: its middle) | the id chosen, `null` when dismissed | `menus` |
 | `decorate {target, decoration?}` | an icon or badge (`{icon?, badge?, color?, tooltip?}`) on a file-tree row (`{kind: "file", id: <path>}`) or a tab (`{kind: "tab", id: <view kind or pane id>}`); none takes it off | `null` | `badges` |
+
+**`overlay`: drawing over the whole app.** It is not a call. It changes
+how the extension's views draw: the scenes its remote views paint
+(`features/extensions/src/scene.rs`) are not clipped to their panes, and
+draw over the whole window, above the other panes, its toolbars and its
+dialogs. The consent prompt says "Draw over the whole app, outside its
+own panes". The owner accepts the risk that comes with it, so an
+extension granted it could paint something that looks like the app's
+own prompt. Without it, a scene is clipped to its pane, so a view that
+draws past its box can't smear over the app by mistake (`scene::framed`;
+a linked paint view is clipped the same way, `PaintWidget`).
+
+How it's drawn: the host adds a widget filling the window, above the
+panes and taking no input (`scene::OverlayLayer`, `OverlayWidget`, put
+there by `remote::RemoteView` given `overlay`, which `interface`'s
+extension view reads from `Host::capabilities`). It draws each of the
+view's scenes at its element's place in the window. The element in the
+pane keeps its size and its input. Test:
+`apps/sandbox/sketch/tests/sketch.rs`
+`a_scene_is_clipped_to_its_pane_unless_it_may_draw_over_the_app`.
 
 `pick`, `prompt` and `menu` wait for the person: the call answers when
 they do. A path picked is one the extension may then read for the run (a

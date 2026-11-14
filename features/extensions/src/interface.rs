@@ -1110,6 +1110,10 @@ pub fn ExtensionView(
     }
     #[cfg(all(feature = "remote", unix))]
     if let Some(processes) = try_use_context::<crate::process::Processes>() {
+        // Its scenes draw over the whole app only when it was granted that.
+        let overlay = host
+            .capabilities(&extension)
+            .is_some_and(|c| c.may_use(crate::capabilities::OVERLAY));
         // A remote document is sized by its box: a slot's is a bar's height.
         let remote = if fill {
             "flex: 1; min-height: 0; display: flex; flex-direction: column;"
@@ -1118,7 +1122,7 @@ pub fn ExtensionView(
         };
         return rsx! {
             div { style: "{remote}",
-                crate::remote::RemoteView { processes, extension, view }
+                crate::remote::RemoteView { processes, extension, view, overlay }
             }
         };
     }

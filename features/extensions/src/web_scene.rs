@@ -32,6 +32,8 @@ struct Painted {
     commands: Commands,
     transform: Affine,
     size: (u32, u32),
+    /// Its scene or transform changed since it was last drawn.
+    dirty: bool,
 }
 
 /// A pane's scenes: what it was sent, and the elements it paints.
@@ -78,6 +80,7 @@ impl Scenes {
                     commands: Commands::default(),
                     transform: Affine::IDENTITY,
                     size: (0, 0),
+                    dirty: true,
                 });
                 painted.len() - 1
             }
@@ -92,17 +95,24 @@ impl Scenes {
             p.transform = value.map_or(Affine::IDENTITY, parse_transform);
         }
         p.id = id;
+        p.dirty = true;
         draw(p, on_event);
         Ok(())
     }
 
-    /// Draws every painted element again (the page was laid out anew).
+    /// Draws again the painted elements whose scene changed or whose box
+    /// is a new size (the page was laid out anew); the rest keep their
+    /// canvas as it is.
     pub(crate) fn redraw(&self, on_event: &dyn Fn(ViewEvent)) {
         self.painted
             .borrow_mut()
             .retain(|p| p.element.is_connected());
         for p in self.painted.borrow_mut().iter_mut() {
-            draw(p, on_event);
+            let (w, h) = (p.canvas.client_width(), p.canvas.client_height());
+            let (w, h) = (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0));
+            if p.dirty || (w, h) != p.size {
+                draw(p, on_event);
+            }
         }
     }
 }
@@ -138,6 +148,7 @@ fn draw(p: &mut Painted, on_event: &dyn Fn(ViewEvent)) {
     let ratio = web_sys::window().map_or(1.0, |w| w.device_pixel_ratio());
     let (w, h) = (p.canvas.client_width(), p.canvas.client_height());
     let (w, h) = (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0));
+    p.dirty = false;
     if (w, h) != p.size && w > 0 && h > 0 {
         p.size = (w, h);
         let size = serde_json::json!({ "width": w, "height": h, "scale": ratio });
@@ -181,6 +192,16 @@ fn draw(p: &mut Painted, on_event: &dyn Fn(ViewEvent)) {
                 set(&cx, base * s.transform);
                 cx.set_stroke_style_str(&brush_css(&s.brush));
                 cx.set_line_width(s.style.width);
+                cx.set_line_join(match s.style.join {
+                    peniko::kurbo::Join::Bevel => "bevel",
+                    peniko::kurbo::Join::Miter => "miter",
+                    peniko::kurbo::Join::Round => "round",
+                });
+                cx.set_line_cap(match s.style.start_cap {
+                    peniko::kurbo::Cap::Butt => "butt",
+                    peniko::kurbo::Cap::Square => "square",
+                    peniko::kurbo::Cap::Round => "round",
+                });
                 if let Some(path) = path(&s.shape) {
                     cx.stroke_with_path(&path);
                 }
@@ -202,13 +223,18 @@ fn draw(p: &mut Painted, on_event: &dyn Fn(ViewEvent)) {
             }
             RenderCommand::PopLayer => cx.restore(),
             RenderCommand::BoxShadow(b) => {
-                set(&cx, base * b.transform);
+                // The shadow alone, as a renderer draws it: its box drawn
+                // far off the canvas, its shadow cast back into place.
+                const AWAY: f64 = 100_000.0;
+                let t = base * b.transform;
+                let [sx, _, _, sy, _, _] = t.as_coeffs();
                 cx.save();
-                cx.set_shadow_blur(b.std_dev * 2.0);
+                set(&cx, t * Affine::translate((-AWAY, 0.0)));
+                cx.set_shadow_blur(b.std_dev * 2.0 * sx.abs().max(sy.abs()));
                 cx.set_shadow_color(&css(b.brush));
+                cx.set_shadow_offset_x(AWAY * sx);
                 cx.set_fill_style_str(&css(b.brush));
-                let r = b.rect;
-                if let Some(path) = path(&r.to_rounded_rect(b.radius).to_path(0.1)) {
+                if let Some(path) = path(&b.rect.to_rounded_rect(b.radius).to_path(0.1)) {
                     cx.fill_with_path_2d(&path);
                 }
                 cx.restore();
