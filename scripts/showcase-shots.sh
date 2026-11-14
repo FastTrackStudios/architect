@@ -11,7 +11,7 @@
 #   <ACTION>[@<json args>]   runs the action, then shoots
 #   +<ACTION>[@<json args>]  runs the action, no shot
 #   ^<ACTION>[@<json args>]  runs it right before each shot, the earlier
-#                            toasts cleared, and shoots once its toast shows
+#                            toasts gone, and shoots once its toast shows
 #                            (one that changes data runs once, both schemes
 #                            shot from that run)
 #   &<ACTION>[@<json args>]  runs it in the background before each shot
@@ -145,12 +145,6 @@ for width in "${widths[@]}"; do
     act run LAB_GO --arg tab=vault >/dev/null 2>&1 || true
 
     last_toast=0
-    # How many toasts the app has shown this session (NOTIFY_LIST).
-    toasts() {
-        act run NOTIFY_LIST 2>/dev/null | python3 -I -c 'import json,sys
-try: print(len(json.load(sys.stdin).get("toasts", [])))
-except Exception: print(0)'
-    }
     # Waits until the last step's toast is gone (a toast stays TOAST_FOR,
     # 6 s, then goes), and past it: only this step's on screen. Clearing
     # them (NOTIFY_CLEAR), or a shot as one goes, crashed Blitz's painter
@@ -162,22 +156,18 @@ except Exception: print(0)'
         sleep "$wait_s"
     }
     # Runs a step's action (id and JSON args in $2 $3) and waits until what
-    # it shows is on screen: a new toast (^), or a prompt or menu still
+    # it shows is on screen: its toast (^), or a prompt or menu still
     # waiting for its answer (&).
     pre_shot() {
-        local before
         case "$1" in
             '^')
                 toasts_gone
-                before="$(toasts)"
                 act run "$2" --json "$3" >/dev/null || echo "showcase-shots: $2 failed" >&2
-                for _ in $(seq 1 30); do
-                    [ "$(toasts)" -gt "$before" ] && break
-                    sleep 0.1
-                done
                 last_toast="$(date +%s.%N)"
-                # The toast's arrival, drawn.
-                sleep 0.3
+                # Its toast, drawn: it is raised as the action runs, so it is
+                # in the next frames. (Polling NOTIFY_LIST for it instead
+                # crashed Blitz's painter in three runs of four.)
+                sleep 0.5
                 ;;
             '&')
                 toasts_gone
