@@ -8,7 +8,8 @@
     clippy::expect_used,
     clippy::panic,
     clippy::cast_precision_loss,
-    clippy::as_conversions
+    clippy::as_conversions,
+    clippy::suboptimal_flops
 )]
 
 use std::sync::Mutex;
