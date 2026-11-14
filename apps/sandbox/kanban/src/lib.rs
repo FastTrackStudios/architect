@@ -34,7 +34,11 @@ static BOARD: Mutex<Option<Board>> = Mutex::new(None);
 
 fn first_board() -> Board {
     [
-        vec!["Write the chart".into(), "Book the room".into(), "Print setlists".into()],
+        vec![
+            "Write the chart".into(),
+            "Book the room".into(),
+            "Print setlists".into(),
+        ],
         vec!["Rehearse".into()],
         Vec::new(),
     ]
@@ -57,9 +61,18 @@ fn store(b: &Board) {
 /// Where a drop at `(x, y)` on the board lands: its column and row.
 #[must_use]
 pub fn drop_at(board: &Board, x: f64, y: f64) -> (usize, usize) {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::as_conversions)]
-    let column = ((x / COLUMN_WIDTH).floor().max(0.0) as usize).min(COLUMNS.len().saturating_sub(1));
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::as_conversions)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::as_conversions
+    )]
+    let column =
+        ((x / COLUMN_WIDTH).floor().max(0.0) as usize).min(COLUMNS.len().saturating_sub(1));
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::as_conversions
+    )]
     let row = ((y - HEADER) / CARD_HEIGHT).round().max(0.0) as usize;
     let len = board.get(column).map_or(0, Vec::len);
     (column, row.min(len))
@@ -72,10 +85,18 @@ pub fn drop_at(board: &Board, x: f64, y: f64) -> (usize, usize) {
 pub fn moved(mut board: Board, from: (usize, usize), to: (usize, usize)) -> Board {
     let (fc, fr) = from;
     let (tc, tr) = to;
-    let Some(card) = board.get_mut(fc).filter(|c| fr < c.len()).map(|c| c.remove(fr)) else {
+    let Some(card) = board
+        .get_mut(fc)
+        .filter(|c| fr < c.len())
+        .map(|c| c.remove(fr))
+    else {
         return board;
     };
-    let tr = if fc == tc && tr > fr { tr.saturating_sub(1) } else { tr };
+    let tr = if fc == tc && tr > fr {
+        tr.saturating_sub(1)
+    } else {
+        tr
+    };
     match board.get_mut(tc) {
         Some(column) => column.insert(tr.min(column.len()), card),
         None => {
