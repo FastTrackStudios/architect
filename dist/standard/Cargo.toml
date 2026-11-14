@@ -39,11 +39,11 @@ node-wasi = ["architect-desktop/node-wasi"]
 architect-desktop = { path = "../../apps/desktop", default-features = false, features = ["vox"] }
 architect-sites = { path = "../../features/sites" }
 base64 = "0.22"
-serde = { features = ["derive"], version = "1.0" }
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "2.0"
-tracing = { features = ["std"], version = "0.1" }
+tracing = { version = "0.1", features = ["std"] }
 
 # The linked core extensions, each at the tag the list pins.
 # studio-setlists 26.11.4: https://github.com/FastTrackStudios/studio v26.11.4 (93a2d28a19852cff177ce268c38f5e5d4808bfa9)
@@ -113,6 +113,7 @@ architect-orgs = { path = "../../features/orgs" }
 architect-pages = { path = "../../features/pages" }
 architect-palette = { path = "../../features/palette" }
 architect-permissions = { path = "../../features/permissions" }
+architect-playhead = { path = "../../features/playhead" }
 architect-presence = { path = "../../features/presence" }
 architect-projects = { path = "../../extensions/projects" }
 architect-rpc-derive = { path = "../../crates/architect-rpc-derive" }
@@ -214,6 +215,7 @@ architect-orgs = { path = "../../features/orgs" }
 architect-pages = { path = "../../features/pages" }
 architect-palette = { path = "../../features/palette" }
 architect-permissions = { path = "../../features/permissions" }
+architect-playhead = { path = "../../features/playhead" }
 architect-presence = { path = "../../features/presence" }
 architect-projects = { path = "../../extensions/projects" }
 architect-rpc-derive = { path = "../../crates/architect-rpc-derive" }
@@ -255,25 +257,33 @@ vault-proto = { path = "../../features/vault/vault-proto" }
 
 # The root's profiles: a patch and a profile apply only from a workspace root.
 [profile.dev]
-debug = "line-tables-only"
 opt-level = 1
+debug = "line-tables-only"
 split-debuginfo = "unpacked"
 
-[profile.dev.build-override]
-debug = false
-opt-level = 3
-
 [profile.dev.package."*"]
-debug = false
 opt-level = 1
-
-[profile.dev.package.anyrender]
-opt-level = 3
-
-[profile.dev.package.anyrender_vello]
-opt-level = 3
+debug = false
 
 [profile.dev.package.blake3]
+opt-level = 3
+
+[profile.dev.package.phon]
+opt-level = 3
+
+[profile.dev.package.phon-engine]
+opt-level = 3
+
+[profile.dev.package.phon-jit]
+opt-level = 3
+
+[profile.dev.package.num-complex]
+opt-level = 3
+
+[profile.dev.package.dioxus-core]
+opt-level = 3
+
+[profile.dev.package.dioxus-native-dom]
 opt-level = 3
 
 [profile.dev.package.blitz-dom]
@@ -288,52 +298,10 @@ opt-level = 3
 [profile.dev.package.blitz-traits]
 opt-level = 3
 
-[profile.dev.package.dioxus-core]
+[profile.dev.package.anyrender]
 opt-level = 3
 
-[profile.dev.package.dioxus-native-dom]
-opt-level = 3
-
-[profile.dev.package.fontique]
-opt-level = 3
-
-[profile.dev.package.kurbo]
-opt-level = 3
-
-[profile.dev.package.naga]
-opt-level = 3
-
-[profile.dev.package.num-complex]
-opt-level = 3
-
-[profile.dev.package.parley]
-opt-level = 3
-
-[profile.dev.package.peniko]
-opt-level = 3
-
-[profile.dev.package.phon]
-opt-level = 3
-
-[profile.dev.package.phon-engine]
-opt-level = 3
-
-[profile.dev.package.phon-jit]
-opt-level = 3
-
-[profile.dev.package.read-fonts]
-opt-level = 3
-
-[profile.dev.package.selectors]
-opt-level = 3
-
-[profile.dev.package.skrifa]
-opt-level = 3
-
-[profile.dev.package.stylo]
-opt-level = 3
-
-[profile.dev.package.taffy]
+[profile.dev.package.anyrender_vello]
 opt-level = 3
 
 [profile.dev.package.vello]
@@ -351,18 +319,59 @@ opt-level = 3
 [profile.dev.package.wgpu-hal]
 opt-level = 3
 
+[profile.dev.package.naga]
+opt-level = 3
+
+[profile.dev.package.stylo]
+opt-level = 3
+
+[profile.dev.package.selectors]
+opt-level = 3
+
+[profile.dev.package.taffy]
+opt-level = 3
+
+[profile.dev.package.parley]
+opt-level = 3
+
+[profile.dev.package.skrifa]
+opt-level = 3
+
+[profile.dev.package.read-fonts]
+opt-level = 3
+
+[profile.dev.package.fontique]
+opt-level = 3
+
+[profile.dev.package.peniko]
+opt-level = 3
+
+[profile.dev.package.kurbo]
+opt-level = 3
+
+[profile.dev.build-override]
+opt-level = 3
+debug = false
+
 [profile.dev-dbg]
-debug = 2
 inherits = "dev"
+debug = 2
 split-debuginfo = "packed"
 
 [profile.dev-dbg.package."*"]
 debug = 2
 
 [profile.wasm-dev]
-debug = false
 inherits = "dev"
+debug = false
 strip = "debuginfo"
 
 [profile.wasm-dev.package."*"]
 opt-level = 3
+
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

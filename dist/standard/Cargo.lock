@@ -790,8 +790,10 @@ dependencies = [
  "keyring",
  "lucide-dioxus",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
  "uuid",
  "webbrowser",
 ]
@@ -829,6 +831,7 @@ dependencies = [
  "architect-navigator-extension",
  "architect-orgs",
  "architect-pages",
+ "architect-playhead",
  "architect-presence",
  "architect-projects",
  "architect-sandbox-board",
@@ -837,6 +840,7 @@ dependencies = [
  "architect-settings-sheet",
  "architect-shell",
  "architect-sites",
+ "architect-spaces",
  "architect-tasks",
  "architect-theme",
  "architect-theme-picker",
@@ -856,11 +860,16 @@ dependencies = [
  "links",
  "loro",
  "lucide-dioxus",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-ui-kit",
+ "reqwest 0.12.28",
  "rfd",
  "serde_json",
  "tag",
  "tokio",
  "tracing",
+ "url",
  "vault",
  "vault-doc",
 ]
@@ -1318,6 +1327,7 @@ dependencies = [
  "futures-util",
  "lucide-dioxus",
  "serde_json",
+ "serde_yaml",
  "unicode-normalization",
  "vault",
  "vault-proto",
@@ -1432,6 +1442,21 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "architect-playhead"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "architect-shell",
+ "architect-workspace-hack",
+ "dioxus",
+ "futures-timer",
+ "lucide-dioxus",
+ "serde",
+ "serde_json",
+ "web-time",
 ]
 
 [[package]]
@@ -1555,6 +1580,7 @@ dependencies = [
 name = "architect-shell"
 version = "0.1.0"
 dependencies = [
+ "architect-favourites",
  "architect-theme",
  "architect-workspace-hack",
  "block2 0.6.2",
@@ -1583,12 +1609,14 @@ dependencies = [
  "architect-scripting",
  "architect-settings",
  "architect-shell",
+ "architect-spaces",
  "architect-theme",
  "architect-workspace-hack",
  "base64 0.22.1",
  "crc32fast",
  "dioxus",
  "dioxus-ssr",
+ "facet-json",
  "futures",
  "pulldown-cmark",
  "serde",
@@ -1612,6 +1640,7 @@ dependencies = [
  "facet-json",
  "thiserror 2.0.20",
  "tokio",
+ "url",
  "uuid",
  "vox",
 ]
@@ -18621,6 +18650,7 @@ dependencies = [
  "facet",
  "futures",
  "indexmap",
+ "libc",
  "notify",
  "notify-debouncer-mini",
  "regex",
