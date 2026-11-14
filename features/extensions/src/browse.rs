@@ -66,6 +66,10 @@ pub struct Row {
     pub adds: Vec<String>,
     /// The registry that lists it, when one does.
     pub registry: Option<String>,
+    /// Why it cannot run on this platform, when it cannot ("Linux only:
+    /// not on macOS", "this app does not run process extensions", #578):
+    /// kept and listed, never started.
+    pub not_here: Option<String>,
 }
 
 /// The page's catalog: the extensions, and the previews read so far.
@@ -247,6 +251,12 @@ impl Browse {
                     changelog,
                     adds: preview.adds,
                     registry: sources.get(&m.id).cloned(),
+                    not_here: ext.host().why_not_here(&m.id).or_else(|| {
+                        let platform = ext.host().platform();
+                        crate::platform::not_here(&m.platforms, &platform).map(|why| {
+                            format!("{why}: not on {}", crate::platform::name(&platform))
+                        })
+                    }),
                 }
             })
             .collect();
@@ -259,7 +269,16 @@ impl Browse {
             }
             ids.push(l.id.clone());
             let Some(l) = newest(&l.id) else { continue };
-            let adds = self.preview(&l.id).map(|p| p.adds).unwrap_or_default();
+            // Read once, so the row says why it cannot run here (#578)
+            // before anyone opens it.
+            let preview = self.preview(&l.id).or_else(|| {
+                let exact = semver::VersionReq::parse(&format!("={}", l.version)).ok()?;
+                let p = self.extensions.preview(&l.id, &exact).ok()?;
+                self.remember(p.clone());
+                Some(p)
+            });
+            let not_here = preview.as_ref().and_then(|p| p.cannot_run.clone());
+            let adds = preview.map(|p| p.adds).unwrap_or_default();
             offered.push(Row {
                 id: l.id.clone(),
                 name: l.name.clone(),
@@ -275,6 +294,7 @@ impl Browse {
                 changelog: None,
                 adds,
                 registry: sources.get(&l.id).cloned(),
+                not_here,
             });
         }
         offered.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));

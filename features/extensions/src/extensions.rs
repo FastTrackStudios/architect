@@ -81,9 +81,11 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Extensions {
-    /// Extensions loaded by `host`, installed under `installs`.
+    /// Extensions loaded by `host`, installed under `installs` (for the
+    /// host's platform: [`Host::set_platform`] comes first).
     #[must_use]
     pub fn new(host: Host, installs: Installs) -> Self {
+        let installs = installs.with_platform(host.platform());
         let failed = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         {
             let failed = Arc::clone(&failed);
@@ -190,9 +192,14 @@ impl Extensions {
         extension: &dyn crate::linked::Extension,
     ) -> Result<Self, crate::ManifestError> {
         let package = Package::embedded(extension.manifest(), extension.files())?;
-        self.inner
-            .host
-            .link(&package.manifest, crate::linked::Builder::of(extension));
+        // Not for this platform (#578): listed, its `build` never run (the
+        // crate still compiles here, stubbing what it cannot do).
+        let platform = self.inner.host.platform();
+        if crate::platform::runs_on(&package.manifest.platforms, &platform) {
+            self.inner
+                .host
+                .link(&package.manifest, crate::linked::Builder::of(extension));
+        }
         Ok(self.with_builtin(package))
     }
 
@@ -495,8 +502,15 @@ impl Extensions {
                 });
             }
         }
+        // What cannot run here and is no longer chosen is forgotten.
+        for (m, _) in host.not_here() {
+            if !chosen.iter().any(|c| c.runs.id == m.id) {
+                host.forget_not_here(&m.id);
+            }
+        }
         // Providers before what requires them (`[requires]`).
         let chosen = by_requires(chosen);
+        let not_here = host.not_here();
         for c in &chosen {
             let runs = &c.runs;
             let same = host.get(&runs.id).is_some_and(|l| {
@@ -504,7 +518,11 @@ impl Extensions {
                     && l.manifest == runs.package.manifest
                     && l.dir.as_deref() == runs.package.dir()
             });
-            if same {
+            // Tried, and cannot run here (#578): listed, not retried.
+            let stays_out = not_here
+                .iter()
+                .any(|(m, _)| m == &runs.package.manifest);
+            if same || stays_out {
                 continue;
             }
             events.push(match host.load(&runs.package, runs.origin) {

@@ -4,7 +4,7 @@
 //!
 //! | action | what it does |
 //! |---|---|
-//! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs and what it adds |
+//! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs, what it adds, its `platforms` and why it cannot run here (`not_here`) |
 //! | `EXT_SEARCH` | searches every registry: `{query}` → the newest of each that matches |
 //! | `EXT_INSTALL` | installs one: `{id, version?}` (a semver range), loaded at once |
 //! | `EXT_UNINSTALL` | removes one: `{id}`; a built-in comes back |
@@ -289,6 +289,10 @@ impl Extensions {
                     "kind": m.kind.name(),
                     "runs": c.describe(),
                     "loaded": !actions.is_empty() || loaded.iter().any(|l| l.manifest.id == m.id),
+                    // Where it runs (#578): its `platforms` (empty: every
+                    // one), and why not here when it cannot.
+                    "platforms": m.platforms,
+                    "not_here": self.host().why_not_here(&m.id),
                     "actions": actions,
                     "settings": m.sections.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
                     "views": m.views.iter().map(|v| v.id.clone()).collect::<Vec<_>>(),

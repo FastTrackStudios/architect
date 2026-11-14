@@ -50,6 +50,9 @@ pub enum InstallError {
     /// Its archive was refused: unsigned, signed by a key not trusted
     /// here, changed after signing, or with no build for this platform.
     Archive(ArchiveError),
+    /// Its manifest's `platforms` leave this one out (#578): `why` is
+    /// "Linux only". Nothing was written.
+    NotHere { platform: String, why: String },
 }
 
 impl From<ArchiveError> for InstallError {
@@ -67,6 +70,9 @@ impl std::fmt::Display for InstallError {
             Self::Mismatch(e) => write!(f, "not what the registry listed: {e}"),
             Self::NotFound(e) => write!(f, "no registry has {e}"),
             Self::Archive(e) => write!(f, "the archive is refused: {e}"),
+            Self::NotHere { platform, why } => {
+                write!(f, "{why}: not on {}", crate::platform::name(platform))
+            }
         }
     }
 }
@@ -611,6 +617,8 @@ impl Install {
 pub struct Installs {
     root: PathBuf,
     trust: Trust,
+    /// The platform it installs for (`crate::platform`).
+    platform: String,
 }
 
 /// One archive, offered as a source: how a file's or a peer's archive is
@@ -669,7 +677,16 @@ impl Installs {
         Self {
             root: root.into(),
             trust: Trust::org(),
+            platform: crate::platform::here().to_owned(),
         }
+    }
+
+    /// Installs for `platform` (in place of this build's): refuses what
+    /// its manifest's `platforms` leave out.
+    #[must_use]
+    pub fn with_platform(mut self, platform: impl Into<String>) -> Self {
+        self.platform = platform.into();
+        self
     }
 
     /// Trusts `trust` (in place of the org key alone) for every archive,
@@ -870,6 +887,12 @@ impl Installs {
                     "listed {} {}, its manifest says {} {}",
                     listing.id, listing.version, manifest.id, manifest.version
                 )));
+            }
+            if let Some(why) = crate::platform::not_here(&manifest.platforms, &self.platform) {
+                return Err(InstallError::NotHere {
+                    platform: self.platform.clone(),
+                    why,
+                });
             }
         }
         std::fs::create_dir_all(incoming).map_err(io(incoming))?;

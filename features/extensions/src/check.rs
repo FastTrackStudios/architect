@@ -475,6 +475,7 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         ManifestError::Parse(text) => (toml_field(text), toml_line(text)),
         ManifestError::BadId(_) => (Some("id".to_owned()), None),
         ManifestError::Api { .. } => (Some("api".to_owned()), None),
+        ManifestError::BadPlatform(_) => (Some("platforms".to_owned()), None),
         ManifestError::ActionNamespace { action, .. } => {
             (Some(format!("actions[{action}].id")), None)
         }
@@ -582,6 +583,7 @@ fn load_problem(error: &LoadError, report: &mut CheckReport) {
         LoadError::ViewKind { view, .. } => Some(format!("views[{view}].kind")),
         LoadError::Sections(_) => Some("sections".to_owned()),
         LoadError::NoRunner(_) => Some("kind".to_owned()),
+        LoadError::NotHere { .. } => Some("platforms".to_owned()),
         LoadError::Start(_) => Some("entry".to_owned()),
         LoadError::Package(_) => None,
         LoadError::Reserved(id) => Some(format!("reserved[{id}]")),

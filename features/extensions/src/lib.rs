@@ -49,6 +49,7 @@ pub mod index;
 pub mod interop;
 pub mod manifest;
 pub mod package;
+pub mod platform;
 pub mod project;
 pub mod reapack;
 pub mod share_layers;

@@ -75,7 +75,11 @@ pub struct Preview {
     /// The target triples it has builds for (a process extension's
     /// archive); empty when it runs anywhere.
     pub platforms: Vec<String>,
-    /// Why it cannot run here when it cannot: no build for this platform
+    /// The operating systems its manifest says it runs on (`platforms`,
+    /// #578); empty for every one.
+    pub runs_on: Vec<String>,
+    /// Why it cannot run here when it cannot: its `platforms` leave this
+    /// one out ("Linux only: not on macOS"), or no build for this platform
     /// (`runs_here` is false then).
     pub cannot_run: Option<String>,
     /// The key its archive is signed by, when it is one.
@@ -279,7 +283,10 @@ impl Extensions {
             .grants()
             .map_or_else(Vec::new, |g| g.needs(&m.id, &caps));
         let installed = self.installs().get(&m.id);
-        let cannot_run = listing.no_build_for(crate::index::host_targets());
+        let platform = self.host().platform();
+        let cannot_run = crate::platform::not_here(&m.platforms, &platform)
+            .map(|why| format!("{why}: not on {}", crate::platform::name(&platform)))
+            .or_else(|| listing.no_build_for(crate::index::host_targets()));
         Preview {
             id: m.id.clone(),
             name: m.name.clone(),
@@ -288,6 +295,7 @@ impl Extensions {
             kind: m.kind.name().to_owned(),
             runner: runner_words(m),
             runs_here: self.host().runs(m.kind) && cannot_run.is_none(),
+            runs_on: m.platforms.clone(),
             source: source.to_owned(),
             location,
             git_ref,

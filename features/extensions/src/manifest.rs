@@ -554,6 +554,12 @@ pub struct Manifest {
     pub description: String,
     #[serde(default)]
     pub authors: Vec<String>,
+    /// The platforms it runs on (`platforms = ["linux"]`, #578): Rust's
+    /// `target_os` values and `web`; empty for everywhere
+    /// ([`crate::platform`]). Elsewhere it is listed as "Linux only" and
+    /// never loaded, its data kept.
+    #[serde(default)]
+    pub platforms: Vec<String>,
     #[serde(default)]
     pub capabilities: Capabilities,
     #[serde(default)]
@@ -693,6 +699,8 @@ pub enum ManifestError {
     BadId(String),
     /// It needs a newer extension API than this build's.
     Api { wants: String, have: &'static str },
+    /// A `platforms` value that is not one of [`crate::platform::PLATFORMS`].
+    BadPlatform(String),
     /// An action outside its namespace (`expected` is the prefix).
     ActionNamespace { action: String, expected: String },
     /// A setting key outside its namespace (`<id>.`).
@@ -748,6 +756,11 @@ impl std::fmt::Display for ManifestError {
             Self::BadPath(p) => write!(f, "{p} is outside the package"),
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
+            Self::BadPlatform(p) => write!(
+                f,
+                "platforms {p:?}: not one of {}",
+                crate::platform::PLATFORMS.join(", ")
+            ),
             Self::BadToken { token, why } => write!(f, "theme token {token}: {why}"),
             Self::BadWorker { worker, why } => write!(f, "worker {worker}: {why}"),
             Self::Contribution(r) => r.fmt(f),
@@ -872,6 +885,9 @@ impl Manifest {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || ".-_".contains(c))
         {
             return Err(ManifestError::BadId(self.id.clone()));
+        }
+        if let Some(bad) = crate::platform::unknown(&self.platforms) {
+            return Err(ManifestError::BadPlatform(bad.to_owned()));
         }
         if !api_ok(&self.api) {
             return Err(ManifestError::Api {

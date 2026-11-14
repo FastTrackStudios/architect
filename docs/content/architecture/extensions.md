@@ -4022,6 +4022,36 @@ comes before a download: a preview says `runs_here: false` and
 `Missing::CannotRun("process: no build for …")`, and an install is
 refused with `ArchiveError::NoBuild`.
 
+### Which operating systems: `platforms`
+
+Every kind can say which operating systems it runs on (#578):
+`platforms = ["linux"]` in `extension.toml`, Rust's `target_os` values
+(`linux`, `macos`, `windows`, `ios`, `android`) and `web` for a browser;
+absent means everywhere (`features/extensions/src/platform.rs`). Off
+those, the extension is kept and listed, never started:
+
+- a linked one is still a built-in member of the distribution (its crate
+  compiles everywhere, stubbing what it cannot do), but its `build` never
+  runs (`Extensions::with_linked`);
+- the host refuses to load it with `LoadError::NotHere` ("Linux only: not
+  on macOS"), and does not try again on the next sync; the same state as
+  a process extension in an app with no process runner (`NoRunner`), the
+  web's and iOS's (`LoadError::is_not_here`);
+- the extensions page shows "Can't run here" with why
+  (`browse::Row::not_here`), `EXT_LIST` its `platforms` and `not_here`,
+  `APP_STATUS` the reason;
+- its data (`<data root>/<id>/`) and install are left where they are;
+- a `[requires]` whose only provider cannot run here says so: "its
+  provider cannot run here: PipeWire is Linux only: not on macOS"
+  (`Host::not_here`, for other extensions too);
+- the store refuses to install it here, before writing anything, with the
+  same words (`InstallError::NotHere`), and its preview says why
+  (`Preview::cannot_run`, `Preview::runs_on`).
+
+`Host::set_platform` checks against another platform: a host that knows
+better than its build, or a test (`features/extensions/tests/platforms.rs`).
+It comes before `Extensions::new`.
+
 ### Updates
 
 `EXT_UPDATE {check: true}` (`Extensions::updates`) installs nothing: for
