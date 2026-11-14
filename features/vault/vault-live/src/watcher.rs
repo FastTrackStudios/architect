@@ -236,7 +236,7 @@ fn notify_config() -> notify::Config {
         .with_compare_contents(true)
 }
 
-fn is_markdown(path: &std::path::Path) -> bool {
+pub(crate) fn is_markdown(path: &std::path::Path) -> bool {
     // Compared case-insensitively in place: every raw filesystem event
     // under the vault passes through here, and lowering a copy of the
     // extension to compare it was an allocation per event.

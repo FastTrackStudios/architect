@@ -298,3 +298,256 @@ async fn the_watcher_reports_no_delete_for_a_hidden_symlink() {
     }
     assert_eq!(Vec::from_iter(deleted), ["Plain.md", "Swap.md"]);
 }
+
+/// Every event `rx` gets before the watcher reports `marker` (a file
+/// this writes once `rx` has had time to see everything before it).
+async fn events_before_marker(
+    rx: &mut tokio::sync::broadcast::Receiver<VaultEvent>,
+    vault: &Path,
+    marker: &str,
+) -> Vec<VaultEvent> {
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    fs::write(vault.join(marker), "marker").unwrap();
+    let mut seen = Vec::new();
+    let deadline = tokio::time::Instant::now()
+        .checked_add(Duration::from_secs(8))
+        .unwrap();
+    loop {
+        let evt = tokio::time::timeout_at(deadline, rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("{marker} never arrived; before it: {seen:?}"))
+            .expect("rx recv ok");
+        match evt {
+            VaultEvent::Put { ref path, .. } if path == marker => return seen,
+            other => seen.push(other),
+        }
+    }
+}
+
+/// The `Delete` for `path` arrives (other events are skipped).
+async fn delete_arrives(rx: &mut tokio::sync::broadcast::Receiver<VaultEvent>, path: &str) {
+    let deadline = tokio::time::Instant::now()
+        .checked_add(Duration::from_secs(8))
+        .unwrap();
+    loop {
+        let evt = tokio::time::timeout_at(deadline, rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("the delete of {path} never arrived"))
+            .expect("rx recv ok");
+        if matches!(evt, VaultEvent::Delete { path: ref p } if p == path) {
+            return;
+        }
+    }
+}
+
+fn deletes(events: &[VaultEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            VaultEvent::Delete { path } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A link made and removed inside one debounce window is, by the time
+/// its folded event is handled, just a gone path. The watcher sends a
+/// `Delete` only for a path it last saw as a plain file, so this sends
+/// nothing — once one link, then many in quick rounds (the re-check's
+/// probe sent 98 `Delete`s before the rule was flipped).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_made_and_removed_within_one_window_deletes_nothing() {
+    let (tmp, b) = setup();
+    let vault = b.root("v").unwrap();
+    let mut rx = b.channel("v").await.subscribe();
+    let _watch = b.start_watcher("v").await.expect("start watcher");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    symlink(
+        tmp.path().join("outside/secret.md"),
+        vault.join("Hidden.md"),
+    )
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    fs::remove_file(vault.join("Hidden.md")).unwrap();
+    let seen = events_before_marker(&mut rx, &vault, "Marker1.md").await;
+    assert!(seen.is_empty(), "one quick link reported: {seen:?}");
+
+    for round in 0..20 {
+        for i in 0..20 {
+            symlink(
+                tmp.path().join("outside/secret.md"),
+                vault.join(format!("L{i}.md")),
+            )
+            .unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(10 + round % 5 * 20)).await;
+        for i in 0..20 {
+            fs::remove_file(vault.join(format!("L{i}.md"))).unwrap();
+        }
+    }
+    let seen = events_before_marker(&mut rx, &vault, "Marker2.md").await;
+    assert_eq!(
+        deletes(&seen),
+        Vec::<&str>::new(),
+        "links deleted: {seen:?}"
+    );
+    assert!(seen.is_empty(), "a link was reported: {seen:?}");
+    assert_outside_untouched(tmp.path());
+}
+
+/// `stow` unfolding: a symlinked folder replaced by a real one. Before,
+/// a file written behind the link (notify follows links, so it reports
+/// one) gets no `Put`. After, a file made in the real folder gets its
+/// `Put`, and deleting it sends its `Delete` — no stale record of the
+/// old link swallows it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_symlinked_folder_unfolded_into_a_real_one_deletes_for_real() {
+    let (tmp, b) = setup();
+    let vault = b.root("v").unwrap();
+    let outside = tmp.path().join("outside");
+    symlink(outside.join("dir"), vault.join("Pkg")).unwrap();
+    let mut rx = b.channel("v").await.subscribe();
+    let _watch = b.start_watcher("v").await.expect("start watcher");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Behind the link: the vault's events must not carry it.
+    fs::write(outside.join("dir/behind.md"), "behind the link").unwrap();
+    let seen = events_before_marker(&mut rx, &vault, "Marker1.md").await;
+    assert!(
+        seen.is_empty(),
+        "a file behind a link was reported: {seen:?}"
+    );
+
+    // Unfold: the link goes, a real folder takes its place.
+    fs::remove_file(vault.join("Pkg")).unwrap();
+    fs::create_dir(vault.join("Pkg")).unwrap();
+    // inotify watches a new folder only once its own event is handled:
+    // a file written into it before then is missed, as for any new
+    // folder (not this PR's to fix).
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    fs::write(vault.join("Pkg/Mine.md"), "mine").unwrap();
+    let seen = events_before_marker(&mut rx, &vault, "Marker2.md").await;
+    assert!(
+        seen.iter()
+            .any(|e| matches!(e, VaultEvent::Put { path, .. } if path == "Pkg/Mine.md")),
+        "Pkg/Mine.md's Put never arrived: {seen:?}"
+    );
+    assert!(deletes(&seen).is_empty(), "unfolding deleted: {seen:?}");
+
+    fs::remove_file(vault.join("Pkg/Mine.md")).unwrap();
+    delete_arrives(&mut rx, "Pkg/Mine.md").await;
+    assert_eq!(
+        fs::read_to_string(outside.join("dir/behind.md")).unwrap(),
+        "behind the link"
+    );
+}
+
+/// Real files: one deleted, one renamed (a `Delete` for the old path and
+/// a `Put` for the new), and one made and deleted at once. The last was
+/// never seen as a plain file when its folded event is handled, so it
+/// sends no `Delete`; should the debouncer split the two, its `Put`
+/// came first, so a `Delete` then is a real one. Either is safe, and the
+/// test allows a `Delete` only after a `Put`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_real_file_deleted_or_renamed_still_deletes() {
+    let (_tmp, b) = setup();
+    let vault = b.root("v").unwrap();
+    fs::write(vault.join("Plain.md"), "deleted for real").unwrap();
+    fs::write(vault.join("Old.md"), "renamed").unwrap();
+    let mut rx = b.channel("v").await.subscribe();
+    let _watch = b.start_watcher("v").await.expect("start watcher");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    fs::remove_file(vault.join("Plain.md")).unwrap();
+    fs::rename(vault.join("Old.md"), vault.join("New.md")).unwrap();
+    fs::write(vault.join("Brief.md"), "here and gone").unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    fs::remove_file(vault.join("Brief.md")).unwrap();
+    let seen = events_before_marker(&mut rx, &vault, "Marker.md").await;
+    let mut gone = deletes(&seen);
+    gone.sort_unstable();
+    gone.dedup();
+    let brief_put = seen
+        .iter()
+        .any(|e| matches!(e, VaultEvent::Put { path, .. } if path == "Brief.md"));
+    if brief_put {
+        assert_eq!(gone, ["Brief.md", "Old.md", "Plain.md"], "{seen:?}");
+    } else {
+        assert_eq!(gone, ["Old.md", "Plain.md"], "{seen:?}");
+    }
+    assert!(
+        seen.iter()
+            .any(|e| matches!(e, VaultEvent::Put { path, .. } if path == "New.md")),
+        "the rename's Put never arrived: {seen:?}"
+    );
+}
+
+/// A file the backend itself writes is a plain file at once: deleting
+/// it right after (inside the window that folds the write's own event
+/// with the removal) still sends the `Delete` peers need, since they
+/// were sent its `Put`. Native watcher only: the poller can miss a
+/// file there for less than one poll, which then makes no event at all
+/// (as on main).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_put_through_the_backend_and_removed_at_once_deletes() {
+    if vault_live::watcher::polling() {
+        return;
+    }
+    let (_tmp, b) = setup();
+    let vault = b.root("v").unwrap();
+    let mut rx = b.channel("v").await.subscribe();
+    let _watch = b.start_watcher("v").await.expect("start watcher");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let bb = b.clone();
+    tokio::task::spawn_blocking(move || {
+        bb.put_file("v", "Shared.md", b"shared".to_vec(), IfMatch::Force)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    fs::remove_file(vault.join("Shared.md")).unwrap();
+    delete_arrives(&mut rx, "Shared.md").await;
+}
+
+/// After a restart the walk rebuilds the record from disk: a file there
+/// at start (or made while no watcher ran) deletes; a link there at
+/// start, or a file swapped for a link while no watcher ran, deletes
+/// nothing when removed.
+#[tokio::test(flavor = "multi_thread")]
+async fn after_a_restart_the_walk_rebuilds_what_was_a_plain_file() {
+    let (tmp, b) = setup();
+    let vault = b.root("v").unwrap();
+    fs::write(vault.join("Kept.md"), "kept").unwrap();
+    fs::write(vault.join("Swapped.md"), "swapped later").unwrap();
+    let mut rx = b.channel("v").await.subscribe();
+    let watch = b.start_watcher("v").await.expect("start watcher");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let _ = events_before_marker(&mut rx, &vault, "Marker1.md").await;
+    drop(watch);
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    // While no watcher runs.
+    fs::write(vault.join("Offline.md"), "made offline").unwrap();
+    fs::remove_file(vault.join("Swapped.md")).unwrap();
+    symlink(
+        tmp.path().join("outside/secret.md"),
+        vault.join("Swapped.md"),
+    )
+    .unwrap();
+    symlink("Note.md", vault.join("Link.md")).unwrap();
+
+    let _watch = b.start_watcher("v").await.expect("restart watcher");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    while rx.try_recv().is_ok() {}
+    fs::remove_file(vault.join("Swapped.md")).unwrap();
+    fs::remove_file(vault.join("Link.md")).unwrap();
+    let seen = events_before_marker(&mut rx, &vault, "Marker2.md").await;
+    assert!(deletes(&seen).is_empty(), "a link deleted: {seen:?}");
+
+    fs::remove_file(vault.join("Kept.md")).unwrap();
+    delete_arrives(&mut rx, "Kept.md").await;
+    fs::remove_file(vault.join("Offline.md")).unwrap();
+    delete_arrives(&mut rx, "Offline.md").await;
+    assert_outside_untouched(tmp.path());
+}

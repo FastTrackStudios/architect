@@ -140,6 +140,71 @@ pub struct Backend {
     /// this backend to the collab and shelf machinery before the wiki
     /// backend that answers for wikis exists.
     guard: Arc<std::sync::OnceLock<Arc<dyn WriteGuard>>>,
+    /// The paths each watched vault last saw as plain files: the only
+    /// paths whose disappearance the watcher reports as a `Delete`
+    /// (see [`PlainFiles`]). Shared across clones, so a `Put` this
+    /// backend emits counts as well as one the watcher finds.
+    plain_files: PlainFiles,
+}
+
+/// Per watched vault, the root-relative paths last seen as plain
+/// markdown files. The watcher sends `Delete` only for a gone path in
+/// this set: the debouncer folds a create and a remove inside one
+/// window into one event, so by the time it is handled a symlink made
+/// and removed in that window is just a gone path, and only a record
+/// of what was a plain file tells a deletion from a vanished link. A
+/// gone path never seen as a plain file sends nothing, which is safe:
+/// no peer was ever sent it.
+///
+/// Filled by the walk when a watcher starts, by every event that finds
+/// a plain file, and by every `Put` the backend emits; a path leaves on
+/// its `Delete`, or when it turns out to be a symlink. Only vaults with
+/// a running watcher have a set, so a backend that watches nothing
+/// keeps nothing. It holds about what the manifest does.
+#[derive(Clone, Default)]
+struct PlainFiles(Arc<std::sync::Mutex<HashMap<String, HashSet<String>>>>);
+
+impl PlainFiles {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, HashSet<String>>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Start (or restart) `vault_id`'s set: empty, and from then on
+    /// recording every `Put`, so one emitted while the walk runs is
+    /// kept. What an earlier watcher recorded is dropped; only the walk
+    /// knows what the disk holds now.
+    fn start(&self, vault_id: &str) {
+        self.lock().insert(vault_id.to_owned(), HashSet::new());
+    }
+
+    /// Add what the start walk found.
+    fn extend(&self, vault_id: &str, found: HashSet<String>) {
+        if let Some(set) = self.lock().get_mut(vault_id) {
+            set.extend(found);
+        }
+    }
+
+    /// `rel` is a plain file now. Ignored for a vault no watcher runs,
+    /// and for anything but markdown, which the watcher never reports.
+    fn insert(&self, vault_id: &str, rel: &str) {
+        if !watcher::is_markdown(Path::new(rel)) {
+            return;
+        }
+        if let Some(set) = self.lock().get_mut(vault_id)
+            && !set.contains(rel)
+        {
+            set.insert(rel.to_owned());
+        }
+    }
+
+    /// `rel` is not (or no longer) a plain file; whether it was one.
+    fn remove(&self, vault_id: &str, rel: &str) -> bool {
+        self.lock()
+            .get_mut(vault_id)
+            .is_some_and(|set| set.remove(rel))
+    }
 }
 
 impl Backend {
@@ -212,6 +277,7 @@ impl Backend {
             collab: Arc::new(std::sync::RwLock::new(HashMap::new())),
             recipe_roots: Arc::new(HashMap::new()),
             guard: Arc::new(std::sync::OnceLock::new()),
+            plain_files: PlainFiles::default(),
         }
     }
 
@@ -333,6 +399,13 @@ impl Backend {
     /// fetched via `manifest` / `folder_index`, so a speculative
     /// event would desync them.
     fn emit(&self, vault_id: &str, event: VaultEvent) {
+        match &event {
+            VaultEvent::Put { path, .. } => self.plain_files.insert(vault_id, path),
+            VaultEvent::Delete { path } => {
+                self.plain_files.remove(vault_id, path);
+            }
+            VaultEvent::Resync => {}
+        }
         let _ = self.channel_blocking(vault_id).send(event.clone());
         self.changes.publish(VaultChange {
             vault_id: vault_id.to_string(),
@@ -570,10 +643,11 @@ impl Backend {
 
         let thread_name = format!("vault-sync-watcher:{vault_id}");
         let hub = self.changes.clone();
+        let plain = self.plain_files.clone();
         let id = vault_id.to_string();
         std::thread::Builder::new()
             .name(thread_name)
-            .spawn(move || forward_watcher_events(root, rx, tx, hub, id))
+            .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id))
             .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
 
         Ok(WatcherHandle { _guard: guard })
@@ -614,9 +688,10 @@ impl Backend {
                 continue;
             };
             let hub = self.changes.clone();
+            let plain = self.plain_files.clone();
             std::thread::Builder::new()
                 .name(format!("vault-sync-watcher:{id}"))
-                .spawn(move || forward_watcher_events(root, rx, tx, hub, id))
+                .spawn(move || forward_watcher_events(root, rx, tx, hub, plain, id))
                 .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
         }
         Ok(WatcherHandle { _guard: guard })
@@ -1605,13 +1680,15 @@ fn forward_watcher_events(
     rx: std::sync::mpsc::Receiver<watcher::VaultEvent>,
     tx: broadcast::Sender<VaultEvent>,
     hub: architect::PubSub<VaultChange>,
+    plain: PlainFiles,
     vault_id: String,
 ) {
     let mut seen: HashMap<String, Seen> = HashMap::new();
-    // Every path known to be a symlink: those at start, and each an event
-    // finds is one. Once a link is removed its path is simply gone, which
-    // looks like a deleted file; this set is what tells the two apart.
-    let mut links = symlinks_under(&root);
+    // Every plain markdown file there now: a later event that finds one
+    // of these gone is a real deletion (see `PlainFiles`). After a
+    // restart this walk is what rebuilds the record from disk.
+    plain.start(&vault_id);
+    plain.extend(&vault_id, plain_markdown_under(&root));
     // The watcher reports canonical paths (macOS's FSEvents: `/private/var`
     // for a root given as `/var`, a symlink), so an event is matched
     // against the root as given and as the filesystem names it — else
@@ -1635,64 +1712,79 @@ fn forward_watcher_events(
         if rel.is_empty() {
             continue;
         }
-        // A symlink (or a path under a symlinked folder) is not the
-        // vault's: no `Put` for it, and never a `Delete` either. A file
-        // swapped for a link, or a dangling one, is not a deletion — a
-        // `Delete` here would tombstone the note's document and remove
-        // it on every peer (`crate::own`).
+        // A symlink (or a path under a symlinked folder: notify follows
+        // links, so events arrive from behind one) is not the vault's:
+        // no `Put` for it, and never a `Delete` either. A file swapped
+        // for a link, or a dangling one, is hidden, not deleted — a
+        // `Delete` would tombstone the note's document and remove it on
+        // every peer (`crate::own`). It leaves the plain-file set, so
+        // removing the link later sends nothing either.
         if crate::own::through_symlink(&root, &rel) {
             tracing::debug!(path = %rel, "watcher: a symlink in the vault; ignored");
-            links.insert(rel);
+            plain.remove(&vault_id, &rel);
             continue;
         }
-        // `Changed` events from the debouncer cover both
-        // create+modify AND delete. Reload-or-classify by
-        // existence (never following a link) — cheaper than
-        // disambiguating the raw `notify::EventKind`.
-        let payload = if std::fs::symlink_metadata(&abs).is_ok() {
-            // A plain file now, where a link may have been: its later
-            // removal is a real deletion.
-            links.remove(&rel);
-            // Hashed by streaming, through `open_own` (no link followed,
-            // even one swapped in since the check above): the event
-            // needs the digest and the size, never the bytes.
-            match crate::own::open_own(&root, &rel).and_then(sha256_reader) {
-                Ok((sha256, size)) => {
-                    let mtime_ms = mtime_ms(&abs);
-                    let now = Seen {
-                        mtime_ms,
-                        sha256: sha256.clone(),
-                    };
-                    if !is_fresh(&mut seen, &rel, now) {
+        // `Changed` events from the debouncer cover both create+modify
+        // AND delete. Classified by what is on disk now, never
+        // following a link — cheaper than disambiguating the raw
+        // `notify::EventKind`, which the debouncer has folded anyway.
+        let payload = match std::fs::symlink_metadata(&abs) {
+            Ok(meta) if meta.is_file() => {
+                // A plain file: its later disappearance is a deletion.
+                plain.insert(&vault_id, &rel);
+                // Hashed by streaming, through `open_own` (no link
+                // followed, even one swapped in since the check above):
+                // the event needs the digest and the size, never the
+                // bytes.
+                match crate::own::open_own(&root, &rel).and_then(sha256_reader) {
+                    Ok((sha256, size)) => {
+                        let mtime_ms = mtime_ms(&abs);
+                        let now = Seen {
+                            mtime_ms,
+                            sha256: sha256.clone(),
+                        };
+                        if !is_fresh(&mut seen, &rel, now) {
+                            continue;
+                        }
+                        VaultEvent::Put {
+                            path: rel,
+                            sha256,
+                            mtime_ms,
+                            size,
+                        }
+                    }
+                    Err(e) if crate::own::is_not_own(&e) => {
+                        // A link swapped in since the check.
+                        tracing::debug!(path = %rel, ?e, "watcher: not a plain file now; ignored");
+                        plain.remove(&vault_id, &rel);
                         continue;
                     }
-                    VaultEvent::Put {
-                        path: rel,
-                        sha256,
-                        mtime_ms,
-                        size,
+                    Err(e) => {
+                        tracing::warn!(?abs, ?e, "watcher: failed to read changed file");
+                        continue;
                     }
                 }
-                Err(e) if crate::own::is_not_own(&e) => {
-                    // A folder, or a link swapped in since the check.
-                    tracing::debug!(path = %rel, ?e, "watcher: not a plain file; ignored");
-                    continue;
-                }
-                Err(e) => {
-                    tracing::warn!(?abs, ?e, "watcher: failed to read changed file");
-                    continue;
-                }
             }
-        } else if was_link(&mut links, &rel) {
-            // A symlink removed (`stow -D`): the vault never had this
-            // file, so nothing was deleted. A `Delete` would tombstone
-            // the document of the note the link once hid and remove it
-            // on every peer.
-            tracing::debug!(path = %rel, "watcher: a symlink removed; ignored");
-            continue;
-        } else {
-            seen.remove(&rel);
-            VaultEvent::Delete { path: rel }
+            Ok(_) => {
+                // A folder named like a note, or a link swapped in since
+                // the check: not a plain file of the vault.
+                tracing::debug!(path = %rel, "watcher: not a plain file; ignored");
+                plain.remove(&vault_id, &rel);
+                continue;
+            }
+            Err(_) => {
+                seen.remove(&rel);
+                // Gone. A deletion only if this path was last seen as a
+                // plain file; otherwise it was a symlink (perhaps made
+                // and removed inside one debounce window), or a file
+                // made and removed before anything saw it — no peer was
+                // sent either, so there is nothing to delete.
+                if !plain.remove(&vault_id, &rel) {
+                    tracing::debug!(path = %rel, "watcher: a path never seen as a plain file is gone; ignored");
+                    continue;
+                }
+                VaultEvent::Delete { path: rel }
+            }
         };
         hub.publish(VaultChange {
             vault_id: vault_id.clone(),
@@ -1706,47 +1798,23 @@ fn forward_watcher_events(
     }
 }
 
-/// Every symlink below `root`, root-relative and `/`-separated, found by
-/// the entries' own types: a symlinked folder is recorded, never walked
-/// into. Unreadable folders are skipped.
-fn symlinks_under(root: &Path) -> HashSet<String> {
-    fn walk(root: &Path, dir: &Path, out: &mut HashSet<String>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            let path = entry.path();
-            if kind.is_symlink() {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    out.insert(rel.to_string_lossy().replace('\\', "/"));
-                }
-            } else if kind.is_dir() {
-                walk(root, &path, out);
-            }
-        }
-    }
+/// Every plain markdown file below `root`, root-relative and
+/// `/`-separated: the files the manifest walk ([`walk_files`]) covers,
+/// so it skips what that skips (symlinks, node-private folders, nested
+/// shelves) and reads no file. Only markdown, since the watcher reports
+/// nothing else. An unreadable vault gives what was walked so far.
+fn plain_markdown_under(root: &Path) -> HashSet<String> {
     let mut out = HashSet::new();
-    walk(root, root, &mut out);
-    out
-}
-
-/// Whether the gone path `rel` was a symlink, or under a symlinked
-/// folder, by `links`; a removed link leaves the set.
-fn was_link(links: &mut HashSet<String>, rel: &str) -> bool {
-    if links.remove(rel) {
-        return true;
-    }
-    let mut at = rel;
-    while let Some((parent, _)) = at.rsplit_once('/') {
-        if links.contains(parent) {
-            return true;
+    let walked = walk_files(root, root, &mut |path, rel| {
+        if watcher::is_markdown(path) {
+            out.insert(rel);
         }
-        at = parent;
+        Ok(())
+    });
+    if let Err(e) = walked {
+        tracing::warn!(root = %root.display(), ?e, "watcher: the vault walk stopped early");
     }
-    false
+    out
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
