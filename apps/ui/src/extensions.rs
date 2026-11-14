@@ -824,12 +824,19 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if let Some(store) = &themes {
             host = host.with_themes(store.clone());
         }
+        // A script's run, Luau or TypeScript, is one undo step across the
+        // app's documents: kept when it succeeds, taken back when it fails.
+        let undo: Arc<dyn architect_scripting::Transactions> = Arc::new(documents());
+        host = host.with_runner(
+            architect_extensions::host::LuauRunner::new().with_transactions(Arc::clone(&undo)),
+        );
         // TypeScript extensions (#536): their actions and hooks as `.ts`
         // modules on the pages' QuickJS runtime, from the pages' host (the
         // theme, settings and shared state its pages have).
-        host = host.with_runner(architect_pages::js::action::TsRunner::new(
-            pages.host().clone(),
-        ));
+        host = host.with_runner(
+            architect_pages::js::action::TsRunner::new(pages.host().clone())
+                .with_transactions(undo),
+        );
         if let Ok(mut runner) = ProcessRunner::new() {
             if let Some(store) = &themes {
                 runner = runner.with_theme(store.clone());

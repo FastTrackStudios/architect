@@ -30,6 +30,24 @@ struct Inner {
     /// None: any path is one.
     spaces: BTreeSet<String>,
     docs: BTreeMap<String, Entry>,
+    /// A script's run, while it is one undo step across documents
+    /// ([`architect_scripting::Transactions`]): what it changed, to keep
+    /// or take back as one.
+    step: Option<Step>,
+}
+
+/// One run's step across documents.
+#[derive(Default)]
+struct Step {
+    name: String,
+    /// Documents whose own history has the step open.
+    edited: BTreeSet<String>,
+    /// Documents it made: gone again if it is taken back.
+    created: Vec<String>,
+    /// Documents it deleted, as they were.
+    deleted: Vec<(String, Entry)>,
+    /// What it renamed, `(from, to)`, in order.
+    renamed: Vec<(String, String)>,
 }
 
 struct Entry {
@@ -262,6 +280,9 @@ impl Documents for CrdtDocuments {
         // Its undo starts after what it was made with.
         let history = History::new(doc.loro(), KEEP);
         inner.docs.insert(path.to_owned(), Entry { doc, history });
+        if let Some(step) = inner.step.as_mut() {
+            step.created.push(path.to_owned());
+        }
         drop(inner);
         Ok(DocInfo::of(path))
     }
@@ -274,10 +295,19 @@ impl Documents for CrdtDocuments {
         by: &Principal,
     ) -> Result<String, DocError> {
         let mut inner = self.lock();
-        let entry = inner
-            .docs
+        let Inner {
+            docs, step: run, ..
+        } = &mut *inner;
+        let entry = docs
             .get_mut(path)
             .ok_or_else(|| DocError::NotFound(format!("document {path}")))?;
+        // Inside a run's step: this document's history holds it open too.
+        if let Some(run) = run.as_mut()
+            && !run.edited.contains(path)
+        {
+            entry.history.begin(&run.name);
+            run.edited.insert(path.to_owned());
+        }
         let doc = entry.doc.loro();
         let text = Self::text_of(doc);
         check_edits(text.len_unicode(), edits)?;
@@ -302,16 +332,95 @@ impl Documents for CrdtDocuments {
         if let Some(entry) = inner.docs.remove(path) {
             inner.docs.insert(to.to_owned(), entry);
         }
+        if let Some(step) = inner.step.as_mut() {
+            if step.edited.remove(path) {
+                step.edited.insert(to.to_owned());
+            }
+            // One it made is simply made under its new name.
+            if let Some(made) = step.created.iter_mut().find(|p| *p == path) {
+                to.clone_into(made);
+            } else {
+                step.renamed.push((path.to_owned(), to.to_owned()));
+            }
+        }
         drop(inner);
         Ok(DocInfo::of(to))
     }
 
     fn delete(&self, path: &str, _by: &Principal) -> Result<(), DocError> {
-        self.lock()
+        let mut inner = self.lock();
+        let entry = inner
             .docs
             .remove(path)
-            .map(|_| ())
-            .ok_or_else(|| DocError::NotFound(format!("document {path}")))
+            .ok_or_else(|| DocError::NotFound(format!("document {path}")))?;
+        if let Some(step) = inner.step.as_mut() {
+            step.edited.remove(path);
+            if let Some(i) = step.created.iter().position(|p| p == path) {
+                step.created.remove(i);
+            } else {
+                step.deleted.push((path.to_owned(), entry));
+            }
+        }
+        drop(inner);
+        Ok(())
+    }
+}
+
+/// A script's run as one undo step across every document it changes
+/// (`LuauRunner`, `architect_pages`' `TsRunner`): each document's own
+/// history holds the step while it runs; taken back, its edits are
+/// undone, what it made is removed, what it deleted and renamed is put
+/// back.
+impl architect_scripting::Transactions for CrdtDocuments {
+    fn begin(&self, name: &str) -> bool {
+        let mut inner = self.lock();
+        if inner.step.is_some() {
+            return false;
+        }
+        inner.step = Some(Step {
+            name: name.to_owned(),
+            ..Step::default()
+        });
+        true
+    }
+
+    fn commit(&self) -> Option<String> {
+        let mut inner = self.lock();
+        let step = inner.step.take()?;
+        let mut changed =
+            !step.created.is_empty() || !step.deleted.is_empty() || !step.renamed.is_empty();
+        for path in &step.edited {
+            if let Some(entry) = inner.docs.get_mut(path) {
+                changed |= entry.history.commit(entry.doc.loro()).is_some();
+            }
+        }
+        changed.then_some(step.name)
+    }
+
+    fn abort(&self) -> Option<String> {
+        let mut inner = self.lock();
+        let step = inner.step.take()?;
+        let mut changed = false;
+        for path in &step.edited {
+            if let Some(entry) = inner.docs.get_mut(path) {
+                changed |= entry.history.abort(entry.doc.loro()).is_some();
+            }
+        }
+        for (from, to) in step.renamed.iter().rev() {
+            if let Some(entry) = inner.docs.remove(to) {
+                inner.docs.insert(from.clone(), entry);
+                changed = true;
+            }
+        }
+        for path in &step.created {
+            changed |= inner.docs.remove(path).is_some();
+        }
+        for (path, entry) in step.deleted {
+            inner.docs.insert(path, entry);
+            changed = true;
+        }
+        drop(inner);
+        changed.then_some(step.name)
     }
 }
 
@@ -406,5 +515,71 @@ mod tests {
             "Zero one two three"
         );
         assert!(authors_of(&person).contains(&"extension:lab.tidy for user:bob".to_owned()));
+    }
+
+    #[test]
+    fn a_run_is_one_step_across_documents_kept_or_taken_back() {
+        use architect_scripting::Transactions as _;
+        let docs = CrdtDocuments::new();
+        let by = ext();
+        docs.create("notes/a.md", "one", &by).unwrap();
+        docs.create("notes/gone.md", "bye", &by).unwrap();
+        docs.create("notes/old.md", "x", &by).unwrap();
+        // Taken back: the edit, the new document, the delete, the rename.
+        assert!(docs.begin("Recipes: Scale"));
+        assert!(
+            !docs.begin("inner"),
+            "a run inside a run is part of its step"
+        );
+        docs.edit(
+            "notes/a.md",
+            &[DocEdit::Append {
+                text: " two".to_owned(),
+            }],
+            "e",
+            &by,
+        )
+        .unwrap();
+        docs.create("notes/new.md", "made", &by).unwrap();
+        docs.delete("notes/gone.md", &by).unwrap();
+        docs.rename("notes/old.md", "notes/renamed.md", &by)
+            .unwrap();
+        assert_eq!(docs.abort().as_deref(), Some("Recipes: Scale"));
+        assert_eq!(docs.text("notes/a.md").as_deref(), Some("one"));
+        assert!(docs.text("notes/new.md").is_none());
+        assert_eq!(docs.text("notes/gone.md").as_deref(), Some("bye"));
+        assert_eq!(docs.text("notes/old.md").as_deref(), Some("x"));
+        assert!(docs.text("notes/renamed.md").is_none());
+        // Kept: one step in the document's history, named for the run.
+        assert!(docs.begin("Recipes: Scale"));
+        docs.edit(
+            "notes/a.md",
+            &[DocEdit::Append {
+                text: " two".to_owned(),
+            }],
+            "e1",
+            &by,
+        )
+        .unwrap();
+        docs.edit(
+            "notes/a.md",
+            &[DocEdit::Append {
+                text: " three".to_owned(),
+            }],
+            "e2",
+            &by,
+        )
+        .unwrap();
+        assert_eq!(docs.commit().as_deref(), Some("Recipes: Scale"));
+        assert_eq!(docs.text("notes/a.md").as_deref(), Some("one two three"));
+        assert_eq!(
+            docs.steps("notes/a.md").last().map(String::as_str),
+            Some("Recipes: Scale")
+        );
+        assert_eq!(docs.undo("notes/a.md").as_deref(), Some("Recipes: Scale"));
+        assert_eq!(docs.text("notes/a.md").as_deref(), Some("one"));
+        // A run that changed nothing is no step.
+        assert!(docs.begin("nothing"));
+        assert_eq!(docs.commit(), None);
     }
 }

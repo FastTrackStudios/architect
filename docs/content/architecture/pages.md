@@ -386,14 +386,22 @@ settles.
   in its extension's log (`EXT_LOGS`) with its `console.log` lines.
 - **Limits** (`ActionLimits`): memory (64 MB); each unit of its work
   within `unit` (1 s) before the interrupt stops it ("hand heavy work to
-  a worker"); its module's top level within `load` (5 s); the whole run
-  within `time` when the app sets one (none by default: a prompt waits
-  as long as the person does). A run whose promise nothing will ever
-  settle — no host call, timer or worker outstanding — is stopped and
-  says so.
-- **One undo step** per run when the runner has the document's
-  transactions (`TsRunner::with_transactions`), taken back when it
-  fails, as a Luau script's run is.
+  a worker"); its module's top level within `load` (5 s); its units in
+  all within `cpu` (20 s), so a timer that renews itself for ever is
+  stopped; the whole run, waits for the person included, within `time`
+  (10 min); at most `concurrent` (8) runs of one extension at once. A
+  run whose promise nothing will ever settle — no host call, timer or
+  worker outstanding — is stopped and says so. Its answer is capped at
+  1 MB and its error at 4 KB, as a Luau script's
+  (`features/extensions/src/host.rs` `MAX_ANSWER`, `MAX_ERROR`).
+- **One undo step** per run when the runner has transactions
+  (`TsRunner::with_transactions`), taken back when it fails, as a Luau
+  script's run is. The app gives both runners its documents
+  (`features/extensions/src/documents/crdt_docs.rs` `CrdtDocuments`
+  implements `Transactions`: what a run edited, made, renamed or deleted
+  through `documents.*` is kept or taken back as one step;
+  `features/pages/tests/script_undo.rs`). The vault's own actions
+  (`VAULT_*`) write files and are not part of it.
 - **On reload** a running action finishes on the old code; the next run
   loads the module again.
 - **Where it stops**: an interpreter. Not for heavy computation

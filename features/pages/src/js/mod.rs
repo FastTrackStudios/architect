@@ -553,7 +553,20 @@ impl JsEngine {
         context: &str,
         inbox: &mpsc::Receiver<Inbox>,
         until: Option<Instant>,
+        cpu: Option<Duration>,
     ) -> ActionOutcome {
+        // Its CPU time: every unit of its work, summed, waits for the app
+        // and the person left out.
+        let mut spent = Duration::ZERO;
+        let mut unit = Instant::now();
+        let past_cpu = |spent: Duration| {
+            cpu.filter(|limit| spent > *limit).map(|limit| {
+                format!(
+                    "ran past its CPU time of {} ms in all: hand heavy work to a worker (worker.spawn)",
+                    limit.as_millis()
+                )
+            })
+        };
         let path = file
             .canonicalize()
             .unwrap_or_else(|_| file.to_path_buf())
@@ -625,7 +638,13 @@ impl JsEngine {
             let wait = next.map_or(Duration::from_millis(100), |n| {
                 n.min(Duration::from_millis(100))
             });
-            match inbox.recv_timeout(wait) {
+            spent = spent.saturating_add(unit.elapsed());
+            if let Some(why) = past_cpu(spent) {
+                return Err(why);
+            }
+            let received = inbox.recv_timeout(wait);
+            unit = Instant::now();
+            match received {
                 Ok(Inbox::Answer { call, result }) => self.answer(call, result)?,
                 Ok(Inbox::Worker(message)) => self.worker(&message)?,
                 Ok(Inbox::Shared(event)) => self.shared(&event)?,

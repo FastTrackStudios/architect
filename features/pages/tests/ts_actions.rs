@@ -46,6 +46,8 @@ effect = "mutating"
 ui = ["notify", "prompts"]
 hosts = ["127.0.0.1"]
 events = ["recipes.*"]
+reads = ["documents"]
+writes = ["documents"]
 
 [[actions]]
 id = "LAB_RECIPES_SCALE"
@@ -100,6 +102,32 @@ script = "actions/bound.ts"
 id = "LAB_RECIPES_MISBOUND"
 name = "Misbound"
 script = "actions/bound.ts"
+
+[[actions]]
+id = "LAB_RECIPES_RENEW"
+name = "Renew"
+script = "actions/renew.ts"
+
+[[actions]]
+id = "LAB_RECIPES_NAP"
+name = "Nap"
+script = "actions/nap.ts"
+
+[[actions]]
+id = "LAB_RECIPES_HUGE"
+name = "Huge"
+script = "actions/huge.ts"
+
+[[actions]]
+id = "LAB_RECIPES_SHOUT"
+name = "Shout"
+script = "actions/shout.ts"
+
+[[actions]]
+id = "LAB_RECIPES_HALFWAY"
+name = "Halfway"
+effect = "mutating"
+script = "actions/halfway.ts"
 
 [[actions]]
 id = "LAB_RECIPES_TIMER"
@@ -174,6 +202,29 @@ const HOARD: &str = r"export default () => {
 
 const BOUND: &str = r#"import { defineAction } from "architect";
 export default defineAction("LAB_RECIPES_BOUND", (args: { n: number }) => args.n * 2);
+"#;
+
+// A timer that renews itself for ever, around an answer nothing settles.
+const RENEW: &str = r"export default () => {
+  const spin = () => { const t = Date.now(); while (Date.now() - t < 20) {} setTimeout(spin, 0); };
+  spin();
+  return new Promise(() => {});
+};
+";
+
+const NAP: &str =
+    "export default () => new Promise((done) => setTimeout(() => done(\"woke\"), 300));\n";
+
+const HUGE: &str = "export default () => \"x\".repeat(2 * 1024 * 1024);\n";
+
+const SHOUT: &str = "export default () => { throw new Error(\"y\".repeat(10000)); };\n";
+
+// Makes a note, then fails: the note goes with its step.
+const HALFWAY: &str = r#"import { documents } from "architect";
+export default async () => {
+  await documents.create("notes/half.md", "made");
+  throw new Error("halfway");
+};
 "#;
 
 const TIMER: &str = r#"export default () => new Promise((done) => setTimeout(() => done("rang"), 30));
@@ -297,6 +348,11 @@ fn package(dir: &Path) {
             ("actions/timer.ts", TIMER),
             ("actions/hoard.ts", HOARD),
             ("actions/bound.ts", BOUND),
+            ("actions/renew.ts", RENEW),
+            ("actions/nap.ts", NAP),
+            ("actions/huge.ts", HUGE),
+            ("actions/shout.ts", SHOUT),
+            ("actions/halfway.ts", HALFWAY),
             ("hooks/cooked.ts", COOKED),
         ],
     );
@@ -320,6 +376,8 @@ fn lab_with(ui: FakeUi, edit: impl FnOnce(&Path)) -> Lab {
             })
             .with_limits(ActionLimits {
                 unit: Duration::from_millis(300),
+                cpu: Some(Duration::from_millis(600)),
+                concurrent: 2,
                 ..ActionLimits::default()
             }),
     );
@@ -516,4 +574,48 @@ fn ext_check_loads_it_with_the_apps_typescript_runner() {
     assert!(!report.ok);
     let said = format!("{:?}", report.problems);
     assert!(said.contains("actions/fail.ts:"), "{said}");
+}
+
+#[test]
+fn a_timer_that_renews_itself_for_ever_runs_out_of_cpu_time() {
+    let lab = lab();
+    let started = std::time::Instant::now();
+    let why = failure(&lab, "LAB_RECIPES_RENEW");
+    assert!(why.contains("CPU time of 600 ms"), "{why}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    // Its undo step was taken back, not held open.
+    assert!(lab.steps.aborted.load(Ordering::Relaxed) >= 1);
+}
+
+#[test]
+fn an_extension_runs_so_many_at_once() {
+    let lab = lab();
+    let app = ActionCaller::app();
+    let run_one = || lab.list.run_json_async_with(&app, "LAB_RECIPES_NAP", b"");
+    // Waiting on a timer is no CPU: two nap; the third is refused.
+    let outs: [_; 3] = block_on(async { futures::join!(run_one(), run_one(), run_one()) }).into();
+    let refused: Vec<String> = outs
+        .iter()
+        .filter_map(|o| match o {
+            Err(ActionError::Failed { message, .. }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(refused.len(), 1, "{outs:?}");
+    assert!(refused[0].contains("may run 2 at once"), "{refused:?}");
+    // Once they are done, it runs again.
+    assert_eq!(
+        run(&lab, "LAB_RECIPES_NAP", &json!({})).unwrap(),
+        json!("woke")
+    );
+}
+
+#[test]
+fn its_answer_and_its_error_are_capped() {
+    let lab = lab();
+    let why = failure(&lab, "LAB_RECIPES_HUGE");
+    assert!(why.contains("past the 1048576"), "{why}");
+    let why = failure(&lab, "LAB_RECIPES_SHOUT");
+    assert!(why.len() < 4200, "{}", why.len());
+    assert!(why.ends_with("(cut at 4 KB)"), "{why}");
 }

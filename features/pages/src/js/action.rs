@@ -38,9 +38,13 @@
 //!   and a Luau script's are;
 //! - **within limits**: [`ActionLimits::memory`], each unit of its work
 //!   (its start, an answer's continuation, a timer) within
-//!   [`ActionLimits::unit`], the whole run within [`ActionLimits::time`]
-//!   when one is set; one that awaits nothing that will ever answer is
-//!   stopped and says so;
+//!   [`ActionLimits::unit`], its units in all within [`ActionLimits::cpu`]
+//!   (20 s), the whole run, waits included, within [`ActionLimits::time`]
+//!   (10 min), at most [`ActionLimits::concurrent`] runs of an extension
+//!   at once; one that awaits nothing that will ever answer is stopped
+//!   and says so; its answer within 1 MB and its error within 4 KB
+//!   (`architect_extensions::host::MAX_ANSWER`, `MAX_ERROR`), as a Luau
+//!   script's;
 //! - **one undo step** when the runner has the document's transactions,
 //!   taken back when it fails, as a Luau script's run is;
 //! - **its answer** is what its handler returns, as JSON; what it throws
@@ -49,6 +53,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
@@ -56,7 +61,7 @@ use architect::action::{
     ActionCaller, ActionError, ActionFuture, CallerAsyncHandler, InvocationSource,
 };
 use architect_extensions::contrib::HookDecl;
-use architect_extensions::host::{Context, Instance, Runner};
+use architect_extensions::host::{Context, Instance, Runner, capped_answer, capped_error};
 use architect_extensions::logs::{Level, Logs};
 use architect_extensions::manifest::{ActionDecl, Kind, is_ts_script};
 use architect_extensions::package::Package;
@@ -84,10 +89,17 @@ pub struct ActionLimits {
     pub unit: Duration,
     /// The longest its module's top level may take to load.
     pub load: Duration,
+    /// The CPU time its units may take in all (the sum of them, waits for
+    /// the app and the person left out): what stops a timer that renews
+    /// itself for ever. `None` for no limit.
+    pub cpu: Option<Duration>,
     /// The longest the whole run may take, waits for the app and the
-    /// person included; `None` for no limit (a prompt may wait as long as
-    /// the person does).
+    /// person included (a prompt left open): its undo step is held that
+    /// long at most. `None` for no limit.
     pub time: Option<Duration>,
+    /// How many runs of one extension's actions and hooks may be going at
+    /// once: one more fails at once, saying so.
+    pub concurrent: usize,
     /// Its workers' (`worker.spawn`): memory and their whole run's time.
     pub worker_memory: usize,
     pub worker_time: Duration,
@@ -100,7 +112,9 @@ impl Default for ActionLimits {
             memory: page.memory,
             unit: Duration::from_secs(1),
             load: page.load,
-            time: None,
+            cpu: Some(Duration::from_secs(20)),
+            time: Some(Duration::from_secs(600)),
+            concurrent: 8,
             worker_memory: page.worker_memory,
             worker_time: page.worker_time,
         }
@@ -207,6 +221,7 @@ impl Runner for TsRunner {
             limits: self.limits,
             transactions: self.transactions.clone(),
             stop: Cancel::default(),
+            running: Arc::default(),
         }))))
     }
 }
@@ -305,6 +320,17 @@ struct Shared {
     transactions: Option<Arc<dyn Transactions>>,
     /// Set when it is unloaded or replaced: its runs stop.
     stop: Cancel,
+    /// How many of its runs are going ([`ActionLimits::concurrent`]).
+    running: Arc<AtomicUsize>,
+}
+
+/// One run counted while it goes.
+struct Counted(Arc<AtomicUsize>);
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 struct TsInstance(Arc<Shared>);
@@ -353,9 +379,24 @@ impl Shared {
             .with_invocation(invocation);
         let (tx, rx) = futures::channel::oneshot::channel();
         let what = format!("{}: {file}", me.id);
+        let going = me.running.fetch_add(1, Ordering::AcqRel);
+        let counted = Counted(Arc::clone(&me.running));
+        if going >= me.limits.concurrent {
+            drop(counted);
+            let limit = me.limits.concurrent;
+            return Box::pin(async move {
+                Err(ActionError::Failed {
+                    id: what,
+                    message: format!(
+                        "{limit} of its runs are going already: it may run {limit} at once"
+                    ),
+                })
+            });
+        }
         let spawned = std::thread::Builder::new()
             .name(format!("ts action {file}"))
             .spawn(move || {
+                let _counted = counted;
                 let opened = me.transactions.as_ref().is_some_and(|t| t.begin(&step));
                 let out = me.run_here(&file, &export, &inner, &args, &context);
                 match (&me.transactions, opened, out.is_ok()) {
@@ -374,10 +415,16 @@ impl Shared {
                 id: what.clone(),
                 message: format!("its thread did not start: {e}"),
             })?;
-            rx.await
+            match rx
+                .await
                 .unwrap_or_else(|_| Err("its run stopped before it answered".to_owned()))
-                .map(String::into_bytes)
-                .map_err(|message| ActionError::Failed { id: what, message })
+            {
+                Ok(answer) => capped_answer(&what, answer.into_bytes()),
+                Err(message) => Err(ActionError::Failed {
+                    id: what,
+                    message: capped_error(message),
+                }),
+            }
         })
     }
 
@@ -425,6 +472,7 @@ impl Shared {
             &context.to_string(),
             &from,
             until,
+            self.limits.cpu,
         );
         if let Err(why) = &out {
             self.logs
