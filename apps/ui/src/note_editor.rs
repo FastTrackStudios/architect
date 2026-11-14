@@ -831,6 +831,12 @@ pub fn NoteEditor(
     }
 }
 
+/// A folded listing fence's line: a row of its own under the code block's
+/// header (the language and copy button the editor floats at the
+/// opener's top right, `.md-code-header`), which it would otherwise run
+/// under on a phone's width.
+const FOLD_STYLE: &str = "display: block; padding-top: 26px; opacity: .6; font-size: 12px;";
+
 /// The listing fences of `text` folded (#668): each hidden and shown as
 /// one quiet line, unless the caret at `caret` is in it.
 fn listing_folds(text: &str, caret: usize) -> Vec<DecoratedRange> {
@@ -851,7 +857,7 @@ fn listing_folds(text: &str, caret: usize) -> Vec<DecoratedRange> {
                 DecoratedRange::widget(
                     r.start,
                     format!(
-                        "<span class=\"media-fold\" data-media-fold=\"{name}\" style=\"opacity: .6; font-size: 12px;\">{name}: shown as the list above</span>"
+                        "<span class=\"media-fold\" data-media-fold=\"{name}\" style=\"{FOLD_STYLE}\">{name}: shown as the list above</span>"
                     ),
                 ),
             ]
