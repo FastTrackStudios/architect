@@ -485,11 +485,14 @@ nom = { version = "7.1.3" }
 objc2 = { version = "0.6.5", features = ["disable-encoding-assertions", "exception", "relax-sign-encoding"] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGFont", "CGImage", "CGPath", "objc2", "std"] }
+objc2-core-image = { version = "0.3.2", default-features = false, features = ["CIColor", "CIImage"] }
+objc2-core-location = { version = "0.3.2", default-features = false, features = ["CLLocation", "CLRegion"] }
 objc2-core-text = { version = "0.3.2", default-features = false, features = ["CTFont", "CTFontCollection", "CTFontDescriptor", "objc2"] }
 objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2" }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CADisplayLink", "CAFrameRateRange", "CALayer", "CAMediaTiming", "CAMetalLayer", "CATransform3D", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "std"] }
 objc2-ui-kit = { version = "0.3.2", features = ["objc2-uniform-type-identifiers"] }
 objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = ["UTCoreTypes", "UTType", "std"] }
+objc2-user-notifications = { version = "0.3.2" }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
 portable-atomic = { version = "1.15.0", features = ["serde"] }

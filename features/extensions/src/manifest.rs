@@ -169,6 +169,13 @@ pub struct Capabilities {
     /// visitor's IP to its peers and its STUN/TURN servers, and a data
     /// channel out of the sandbox no policy meters.
     pub webrtc: Vec<String>,
+    /// The device's own services it may use (`crate::device`, #709):
+    /// `notifications` (OS notifications, now or scheduled), `camera`
+    /// (ask the person to take a photo), `photos` (see the photo
+    /// library), and health data type by type, read and write apart
+    /// (`health:read:steps`, `health:write:dietary_energy`; the types are
+    /// `crate::device::HEALTH_TYPES`).
+    pub device: Vec<String>,
 }
 
 /// One action it adds.
@@ -944,6 +951,10 @@ impl Manifest {
         for entry in &self.capabilities.ports {
             crate::capabilities::check_port_entry(entry)
                 .map_err(|why| ManifestError::BadCapability(format!("ports {entry:?}: {why}")))?;
+        }
+        for entry in &self.capabilities.device {
+            crate::capabilities::check_device_entry(entry)
+                .map_err(|why| ManifestError::BadCapability(format!("device {entry:?}: {why}")))?;
         }
         for rule in &self.share_layers {
             rule.check().map_err(ManifestError::BadShareLayers)?;

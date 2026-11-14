@@ -535,6 +535,18 @@ impl WebHost {
             HostRequest::CloseBody { stream } => Ok(Json::Bool(
                 me.streams.borrow_mut().remove(&stream).is_some(),
             )),
+            // The device's services (`crate::device`, #709): a native
+            // platform's; a browser's own (Notifications, getUserMedia)
+            // are not wired.
+            HostRequest::OsNotify(_)
+            | HostRequest::CancelOsNotify { .. }
+            | HostRequest::Capture(_)
+            | HostRequest::Photos(_)
+            | HostRequest::PhotoFile { .. }
+            | HostRequest::HealthRead(_)
+            | HostRequest::HealthWrite(_) => Err(HostError::Unsupported {
+                what: format!("{request_op} is not in the browser"),
+            }),
             // Secrets are kept by the native host (`crate::net::Secrets`).
             HostRequest::Secret { .. } | HostRequest::AskSecret { .. } => {
                 Err(HostError::Unsupported {

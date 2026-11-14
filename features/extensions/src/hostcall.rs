@@ -36,6 +36,10 @@
 //! | `window {id, open, state?}` | opens or closes one of its own windows (`[[windows]]`) | nothing |
 //! | `notify {text, kind?, title?}` | a notification (a toast) | `ui = ["notify"]` |
 //! | `clipboard_read` / `clipboard_write {text}` | the clipboard's text, or sets it | `ui = ["clipboard"]` |
+//! | `os_notify {id?, title, body?, at_ms?, after_s?}` / `cancel_os_notify {id}` | an OS notification, now or scheduled (`crate::device`): `{id}`; whether it had one | `device = ["notifications"]` |
+//! | `capture {kind?}` | the camera: the photo's path, `null` when cancelled | `device = ["camera"]` |
+//! | `photos {limit?, since_ms?}` / `photo_file {id}` | the newest photos (`[{id, created_ms, width, height}]`); one as a file copied for it | `device = ["photos"]` |
+//! | `health_read {type, from_ms, to_ms, sum?}` / `health_write {type, value, start_ms?, end_ms?}` | health data of one type: its sum or samples; one sample written | `device = ["health:read:<type>"]`, `["health:write:<type>"]` |
 //! | `pick {kind, title?, filters?, folder?, name?}` | a file or folder picker, a save dialog, or a photo picker (`photo`, `photos`: images from the person's photos, copied for it): the path(s) picked, `null` when cancelled | `ui = ["pickers"]` |
 //! | `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text, a yes or no, or one of a list: the answer, `null` when cancelled | `ui = ["prompts"]` |
 //! | `menu {items, x?, y?}` | a context menu of its own items at a point: the id chosen, `null` when dismissed | `ui = ["menus"]` |
@@ -236,6 +240,25 @@ pub enum HostRequest {
         #[serde(default)]
         decoration: Option<Decoration>,
     },
+    /// An OS notification, now or scheduled (`crate::device`, #709):
+    /// `{id}`.
+    OsNotify(crate::device::OsNotification),
+    /// Takes back an OS notification it scheduled: whether it had one.
+    CancelOsNotify {
+        id: String,
+    },
+    /// The camera: the path of the photo taken, `null` when cancelled.
+    Capture(crate::device::Capture),
+    /// The newest photos in the library.
+    Photos(crate::device::PhotoQuery),
+    /// One photo of the library as a file copied for it: its path.
+    PhotoFile {
+        id: String,
+    },
+    /// Health data of one type over a span.
+    HealthRead(crate::device::HealthQuery),
+    /// One sample of health data.
+    HealthWrite(crate::device::HealthWrite),
     /// A hook made at run time (`crate::contrib::HookDecl`): one of its
     /// actions, or a Luau script, on an event or a schedule. Its answer is
     /// the hook's key.
@@ -692,6 +715,13 @@ impl HostRequest {
             Self::Prompt(_) => "prompt",
             Self::Menu(_) => "menu",
             Self::Decorate { .. } => "decorate",
+            Self::OsNotify(_) => "os_notify",
+            Self::CancelOsNotify { .. } => "cancel_os_notify",
+            Self::Capture(_) => "capture",
+            Self::Photos(_) => "photos",
+            Self::PhotoFile { .. } => "photo_file",
+            Self::HealthRead(_) => "health_read",
+            Self::HealthWrite(_) => "health_write",
             Self::Subscribe(_) => "subscribe",
             Self::Unsubscribe { .. } => "unsubscribe",
             Self::Events => "events",
@@ -835,6 +865,25 @@ pub fn check(
             ))
         }
     };
+    let device = |entry: String| {
+        if may.may_use_device(&entry) {
+            Ok(())
+        } else {
+            Err((
+                format!("device.{entry}"),
+                format!("this extension may not use the device's {entry} (capabilities.device)"),
+            ))
+        }
+    };
+    let health = |access, kind: &str| {
+        if crate::device::health_type(kind).is_none() {
+            return Err((
+                "device".to_owned(),
+                format!("no health type {kind:?} (crate::device::HEALTH_TYPES)"),
+            ));
+        }
+        device(crate::device::health_entry(access, kind))
+    };
     let reads = |what: &str| {
         if may.may_read(what) {
             Ok(())
@@ -926,6 +975,20 @@ pub fn check(
         HostRequest::Prompt(_) => ("ui", uses(PROMPTS)),
         HostRequest::Menu(_) => ("ui", uses(MENUS)),
         HostRequest::Decorate { .. } => ("ui", uses(BADGES)),
+        HostRequest::OsNotify(_) | HostRequest::CancelOsNotify { .. } => {
+            ("device", device(crate::device::NOTIFICATIONS.to_owned()))
+        }
+        HostRequest::Capture(_) => ("device", device(crate::device::CAMERA.to_owned())),
+        HostRequest::Photos(_) | HostRequest::PhotoFile { .. } => {
+            ("device", device(crate::device::PHOTOS.to_owned()))
+        }
+        HostRequest::HealthRead(q) => {
+            ("device", health(crate::device::HealthAccess::Read, &q.kind))
+        }
+        HostRequest::HealthWrite(w) => (
+            "device",
+            health(crate::device::HealthAccess::Write, &w.kind),
+        ),
         HostRequest::Subscribe(hook) => (
             "events",
             match crate::events::app_event(&hook.on) {

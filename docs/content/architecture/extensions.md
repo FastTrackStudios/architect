@@ -3190,6 +3190,58 @@ file, `EXT_PAGE_CALL`, a headless host), `features/extensions/tests/wasi.rs`
 `features/pages/tests/host_ui.rs` (a TSX page on `QuickJS` and a Luau
 page).
 
+## The device: OS notifications, the camera, photos, health (#709)
+
+An extension asks for the device's own services in `capabilities.device`,
+one entry each, shown one line each in the consent prompt and granted
+entry by entry:
+
+```toml
+[capabilities]
+device = ["notifications", "camera", "photos", "health:read:steps", "health:write:dietary_energy"]
+```
+
+Health data is an allow-list: each type is named, read and write apart,
+from `features/extensions/src/device.rs` `HEALTH_TYPES` (`steps`,
+`active_energy`, `dietary_energy`, `protein`, `carbohydrates`, `fat`,
+`water`, `distance`, `body_mass`, `heart_rate`); a manifest naming any
+other entry does not load.
+
+| call | what it does | answer | needs |
+|---|---|---|---|
+| `os_notify {id?, title, body?, at_ms?, after_s?}` | an OS notification: now, at a time (ms since the epoch) or after some seconds; the same `id` replaces it | `{id}` | `notifications` |
+| `cancel_os_notify {id}` | takes one it sent or scheduled back | whether it had one | `notifications` |
+| `capture {kind?}` | the camera: the person takes a photo | the image's path, `null` when cancelled | `camera` |
+| `photos {limit?, since_ms?}` | the newest photos in the library (20, at most 200) | `[{id, created_ms, width, height}]` | `photos` |
+| `photo_file {id}` | one of them as a file copied for it | its path, `null` when there is none | `photos` |
+| `health_read {type, from_ms, to_ms, sum?}` | one type over a span: its sum (a summed type's default) or its samples | `{type, unit, sum}` or `{type, unit, samples: [{value, start_ms, end_ms}]}` | `health:read:<type>` |
+| `health_write {type, value, start_ms?, end_ms?}` | one sample, in the type's unit | `null` | `health:write:<type>` |
+
+Every runtime reaches them through its generic call (Luau `host.call`,
+WIT `call`, a page's `EXT_PAGE_CALL`, `EXT_HOST_CALL`). A notification is
+kept under the extension's id (`<extension>/<id>`), so one extension never
+replaces or cancels another's. A capture or a photo's copy is a file the
+extension may read for the run, as one a person picked.
+
+The host answers them with its `Device`
+(`features/extensions/src/device.rs` `Device`; `Host::set_device`). On iOS
+it is `features/extensions/src/device_ios.rs` `IosDevice` (feature
+`device`): `UNUserNotificationCenter` (shown as a banner while the app is in
+front), `UIImagePickerController` with the camera (none on the Simulator:
+unsupported there), `PHAsset` and `PHImageManager`, and `HKHealthStore`.
+The OS asks the person too, the first time each is needed: its own
+prompts, after the manifest's consent. The app's Info.plist carries the
+usage strings (`NSCameraUsageDescription`, `NSPhotoLibraryUsageDescription`,
+`NSHealthShareUsageDescription`, `NSHealthUpdateUsageDescription`); the
+HealthKit entitlement comes from the App Store profile
+(`apps/mobile/ios/deploy-testflight.sh` signs with the profile's
+entitlements), so the App ID needs the HealthKit capability. A Simulator
+build is signed ad hoc with no entitlements, and HealthKit there answers
+`Missing com.apple.developer.healthkit entitlement`. A desk and a browser answer every device
+call `unsupported` until they have a `Device` of their own: the shape is
+the platform's business only inside it. Tests: `features/extensions/tests/host_device.rs`
+(`FakeDevice`).
+
 ## Timers, events and background extensions
 
 What Templater, Git's auto-commit, TaskNotes' pomodoro, Linter's format
