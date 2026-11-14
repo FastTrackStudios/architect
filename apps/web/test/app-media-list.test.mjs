@@ -28,6 +28,8 @@
 // drawn or not: typed into, then the extension listing arriving late
 // (claiming the note's type, so the list gives way), then typed into
 // again, nothing typed is lost and it keeps its focus.
+// Claimed, the note still shows none of the list raw: no `sets`/`songs`
+// in its property table, its listing fence folded out of the reading.
 //
 // At 390 px and 1280 px, light and dark; SHOTS=<dir> keeps the
 // screenshots. Firefox over WebDriver BiDi (FIREFOX=… or `firefox` on the
@@ -409,6 +411,12 @@ test('a collection note\'s text area keeps what was typed when the extension lis
     // The listing arrives: the list gives way, the text area stays.
     release();
     await until(async () => !(await list(b)), 20000, 'the list giving way to the island');
+    // The island draws the list now: the note still shows none of it raw,
+    // no `sets`/`songs` rows, the ```studio-setlist fence folded out.
+    const props = await b.eval(`[...document.querySelectorAll('[data-testid=note-properties] dt')].map((d) => d.textContent).join(',')`);
+    assert.ok(!/\b(sets|songs)\b/.test(props) && props.includes('title'), props);
+    const reading = await b.eval(`document.querySelector('[data-testid=note-reading]')?.textContent || ''`);
+    assert.ok(reading.includes('A Christmas set in two parts.') && !reading.includes(' | '), reading);
     assert.ok((await b.eval(`document.querySelector('[data-testid=note-text]').value`)).endsWith('\nfirst words'), 'what was typed, kept through the change');
     assert.equal(await b.eval(`document.querySelector('[data-testid=note-text-fold]').open`), true);
     assert.equal(await b.eval(`document.querySelector('[data-testid=note-text]') === window.__area`), true, 'the same text area');
