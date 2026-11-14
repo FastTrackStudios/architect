@@ -344,16 +344,16 @@ impl Listening {
 // ── Theme ───────────────────────────────────────────────────────────
 
 /// The app's theme as a style sheet for a view: each token a custom
-/// property on `:root` (`--brand: #6c5ce7`), and its `color-scheme`, so
-/// form controls and scroll bars follow light and dark. A token whose
-/// name is not `a-z 0-9 -`, or whose value could end the rule, is left
-/// out.
+/// property on `:root` (`--brand: #6c5ce7`; an app's dotted token
+/// `studio.accent` is `--studio-accent`), and its `color-scheme`, so form
+/// controls and scroll bars follow light and dark. A token whose name is
+/// not `a-z 0-9 - .`, or whose value could end the rule, is left out.
 #[must_use]
 pub fn theme_css<'a>(scheme: &str, tokens: impl IntoIterator<Item = (&'a str, &'a str)>) -> String {
     let scheme = if scheme == "light" { "light" } else { "dark" };
     let mut css = format!(":root{{color-scheme:{scheme};");
     for (name, value) in tokens {
-        let name = name.trim_start_matches("--");
+        let name = name.trim_start_matches("--").replace('.', "-");
         let ok_name = !name.is_empty()
             && name
                 .bytes()
@@ -363,7 +363,7 @@ pub fn theme_css<'a>(scheme: &str, tokens: impl IntoIterator<Item = (&'a str, &'
             && !value.to_ascii_lowercase().contains("url(");
         if ok_name && ok_value {
             css.push_str("--");
-            css.push_str(name);
+            css.push_str(&name);
             css.push(':');
             css.push_str(value.trim());
             css.push(';');
@@ -652,12 +652,13 @@ mod tests {
             [
                 ("brand", "#6c5ce7"),
                 ("--ink", "rgb(1 2 3)"),
+                ("studio.accent", "red"),
                 ("bad name", "red"),
                 ("evil", "red;}body{display:none"),
                 ("img", "url(https://x/y.png)"),
             ],
         );
-        assert_eq!(css, ":root{color-scheme:light;--brand:#6c5ce7;--ink:rgb(1 2 3);}");
+        assert_eq!(css, ":root{color-scheme:light;--brand:#6c5ce7;--ink:rgb(1 2 3);--studio-accent:red;}");
         assert!(theme_css("dark", []).contains("color-scheme:dark"));
         assert!(COMPONENTS_CSS.contains(".arch-button"));
         assert!(RUNTIME_JS.contains("window.architect"));

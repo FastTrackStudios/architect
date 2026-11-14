@@ -66,7 +66,25 @@ pub fn distribution_command(dist: &Distribution, verb: Option<&str>) -> ExitCode
 /// `distribution`.
 #[cfg(not(feature = "gui"))]
 #[must_use]
+/// `ARCHITECT_WEBVIEW_X11=1` on Linux: the window opens under XWayland
+/// (`WAYLAND_DISPLAY` is dropped while `DISPLAY` is there), the one way a
+/// web view pane can be a child of it today (#222: WebKitGTK embeds a child
+/// only in an X11 window; `docs/content/architecture/embedded-views.md`,
+/// "Web views").
+fn xwayland_for_web_views() {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("ARCHITECT_WEBVIEW_X11").is_some_and(|v| v != "0")
+        && std::env::var_os("DISPLAY").is_some()
+        && std::env::var_os("WAYLAND_DISPLAY").is_some()
+    {
+        // SAFETY: the first thing the program does, before any thread
+        // that could read the environment starts.
+        unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
+    }
+}
+
 pub fn run(distribution: Distribution) -> ExitCode {
+    xwayland_for_web_views();
     let dist = distribution.install();
     let mut args = std::env::args_os().skip(1).peekable();
     match args.peek().and_then(|a| a.to_str()) {

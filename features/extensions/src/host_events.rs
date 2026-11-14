@@ -260,7 +260,7 @@ impl Host {
 
     /// Tells the listeners event `on`, each with the detail for its owner,
     /// those of `only` alone when it names one.
-    pub(crate) fn tell(&self, only: Option<&str>, on: &str, detail_for: &dyn Fn(&str) -> Value) {
+    pub(crate) fn tell_heard(&self, only: Option<&str>, on: &str, detail_for: &dyn Fn(&str) -> Value) {
         let listeners: Vec<(String, Heard)> = lock(&self.event_state().heard)
             .values()
             .filter(|(owner, _)| only.is_none_or(|o| o == owner))
