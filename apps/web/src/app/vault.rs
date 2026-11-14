@@ -881,6 +881,9 @@ fn NoteText(path: String, text: String) -> Element {
     let mut ready = use_signal(|| vault.org.is_none());
     let mut lost = use_signal(|| None::<String>);
     let failed = use_signal(|| None::<String>);
+    // The text area's fold, held from the person's first focus in it: a
+    // list made or unmade by what they type never folds it under them.
+    let mut fold_held = use_signal(|| None::<bool>);
     let created = use_hook(|| {
         source
             .files()
@@ -1076,9 +1079,10 @@ fn NoteText(path: String, text: String) -> Element {
                 }
                 // One text area whatever `core_list` is (the extension
                 // listing can load after the note opens): folded under
-                // its summary for a list, open otherwise, never rebuilt,
-                // so what was typed, the caret and focus stay.
-                details { "data-testid": "note-text-fold", open: !core_list,
+                // its summary for a list, open otherwise, until the person
+                // first focuses it (then as it was), never rebuilt, so
+                // what was typed, the caret and focus stay.
+                details { "data-testid": "note-text-fold", open: fold_held().unwrap_or(!core_list),
                     summary {
                         style: if core_list {
                             "cursor: pointer; font-size: 13px; color: {t.ink_3}; margin: 0 0 10px;"
@@ -1098,7 +1102,12 @@ fn NoteText(path: String, text: String) -> Element {
                         oninput: on_input,
                         oncompositionstart: on_compose,
                         oncompositionend: on_composed,
-                        onfocusin: move |_| editing.focus(),
+                        onfocusin: move |_| {
+                            if fold_held.peek().is_none() {
+                                fold_held.set(Some(!core_list));
+                            }
+                            editing.focus();
+                        },
                         onfocusout: move |_| editing.blur(),
                     }
                 }

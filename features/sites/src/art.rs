@@ -198,7 +198,13 @@ mod tests {
         assert_eq!(art_link(&fields).as_deref(), Some("[[art.png]]"));
         assert_eq!(art_of(&fields).map(|(k, _)| k), Some("art"));
         // An `art:` that names no vault file leaves `cover:` its turn.
-        fields.insert("art".into(), Value::String("https://example.com/a.png".into()));
-        assert_eq!(art_of(&fields), Some(("cover", "Songs/Joy/cover.png".to_owned())));
+        fields.insert(
+            "art".into(),
+            Value::String("https://example.com/a.png".into()),
+        );
+        assert_eq!(
+            art_of(&fields),
+            Some(("cover", "Songs/Joy/cover.png".to_owned()))
+        );
     }
 }

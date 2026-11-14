@@ -404,11 +404,28 @@ impl Site {
             .filter_map(|(i, n)| Some((notes.get((*n)?)?.page.rel_path.as_str(), i)))
             .collect();
         let mut linked: Vec<(usize, Vec<String>)> = Vec::new();
+        // The notes with a page: what a listing fence's row may name.
+        let published: Vec<&str> = url_of.keys().copied().collect();
         for (i, note_index) in note_of.iter().enumerate() {
             let Some(note) = note_index.and_then(|n| notes.get(n)) else {
                 continue;
             };
             let rel = note.page.rel_path.as_str();
+            // Its listing fences (a collection's rows, #668) cut before
+            // anything is drawn from them: a row naming a note outside
+            // the site is gone, a file the site holds back is emptied
+            // from a row kept (`architect_media::fence::within`). The
+            // page, its source, its plain blocks and an extension's drawn
+            // block all read the cut text.
+            let folder = architect_media::link::folder_of(rel);
+            let body = architect_media::fence::within(
+                frontmatter::body(&note.page.raw),
+                &|p| architect_media::link::resolve(p, folder, published.iter().copied()).is_some(),
+                &|p| {
+                    architect_media::link::resolve(p, folder, attachments.iter().copied())
+                        .is_some_and(|t| opts.scope.holds_file(t) && !opts.hold_back.contains(t))
+                },
+            );
             let outgoing = index.outgoing(rel);
             let resolve = |dest: &str, wiki: bool| match resolve_link(
                 dest,
@@ -455,11 +472,11 @@ impl Site {
             };
             // The text a guest's view is handed, from the same resolution
             // the page is drawn with: nothing the page does not show.
-            let source = opts.page_data.then(|| {
-                crate::guest_text::guest_text(frontmatter::body(&note.page.raw), &resolve)
-            });
+            let source = opts
+                .page_data
+                .then(|| crate::guest_text::guest_text(&body, &resolve));
             let rendered = markdown::render(&Input {
-                body: frontmatter::body(&note.page.raw),
+                body: &body,
                 page: rel,
                 title: &note.title,
                 resolve: &resolve,

@@ -105,21 +105,32 @@ Where it draws:
   no `art` (`features/sites/src/art.rs` `art_link`). The list plays as the
   link's source `app:share`.
 - **Layers.** A recording or cover a note names only by `media:`,
-  `recording:` or `cover:` (linked in no note's body) is the Reference
+  `recording:` or `cover:` (not linked in its own body) is the Reference
   layer's unless a `[[share_layers]]` rule places it
   (`features/sites/src/listing.rs` `Entry` `listening`,
   `apps/desktop/src/node/share_layers.rs` `LayerRules::place`): Reference is
   where a link serves what an engine plays a song's mix from, so a Page link
   serves no recording or cover it did not serve before, and a Reference link
-  (the default) or a Full one serves them. An `art:` image and a file linked
-  in a body stay the page's.
-- **The words a guest reads.** What the node hands a guest of a note
-  (`ShareGuest::read`: its blocks, and its text for a view that reads the
-  note) has every listing fence cut to the link
-  (`features/media/src/fence.rs` `within`; `apps/desktop/src/node/shares.rs`
-  `within_listing`): a row naming no note the link lists is gone, title and
-  all, and a file the link does not serve is emptied from a row kept. A
-  block an extension drew from such a fence at the build is left out whole.
+  (the default) or a Full one serves them. Another note linking it in its
+  body never lowers it: that note may be outside the share. An `art:` image
+  and a file only bodies link stay the page's. With no rules installed, a
+  note the vault cannot read holds back nothing of the others' files: it
+  attaches none (`apps/desktop/src/node/shares.rs` `Shares::placed`).
+- **The words a reader gets.** Every listing fence is cut when a site or a
+  share link is built (`features/sites/src/site.rs`, through
+  `features/media/src/fence.rs` `within`), before anything is drawn from
+  it: the page (also on a share's own domain and a published Site), its
+  plain blocks, its text and a block an extension draws from the fence.
+  A row naming no note of the site is gone, title and all. In a row kept,
+  a field stays only when it is a readable note, a file the build serves,
+  or plain text (no `[`, `]`, no file name, and no `/` or `:` but between digits, so
+  `3/4` and `3:05` stay); a link, a path or a file held back is emptied.
+  `|` inside `[[…]]` is the link's, and only `#` and a space starts a
+  heading. Fences are found with the site's own parser (`pulldown_cmark`):
+  in a blockquote or a list, never one an HTML comment holds. The node cuts
+  what it hands a guest again (`ShareGuest::read`;
+  `apps/desktop/src/node/shares.rs` `within_listing`) to the notes the link
+  lists, and leaves out whole a block an extension drew from such a fence.
 
 ## Tests to read
 
@@ -132,10 +143,17 @@ Where it draws:
   was typed when the extension listing arrives late. At 390 px and 1280 px,
   light and dark.
 - `apps/desktop/tests/shares.rs`
-  `a_guest_never_reads_a_listing_fences_row_for_a_note_outside_the_link`,
-  `a_recording_named_only_by_a_property_is_the_references_never_the_pages`.
+  `a_guest_never_reads_a_listing_fences_row_for_a_note_outside_the_link`
+  (on the share's own domain too),
+  `a_recording_named_only_by_a_property_is_the_references_never_the_pages`,
+  `a_note_outside_the_share_never_lowers_a_songs_recording`,
+  `with_no_rules_an_unreadable_note_holds_back_no_other_notes_files`.
 - `features/media/src/fence.rs`: a row of a note outside is gone, a file
-  held back is emptied, a field is a file by its path.
+  held back is emptied; a link with no extension, an alias, a path with
+  `:`, a `#2 | …` row, a fence in a blockquote or after an HTML comment;
+  what Studio's island reads of a kept row stays.
+- `features/sites/tests/build.rs`
+  `a_listing_fences_rows_outside_the_scope_are_cut_at_the_build`.
 - `apps/web/test/app-ext-host.test.mjs`: an island that claims the setlist
   draws instead of the core list.
 - `apps/web/src/guest_view.rs` `collection_rows`: a guest's rows from the
