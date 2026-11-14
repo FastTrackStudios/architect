@@ -1,0 +1,41 @@
+#:schema ../registry/index.schema.json
+# The showcase registry (#710): signed showcase extensions, made by make.sh.
+# Its key is keys/showcase.pub; the secret half was thrown away.
+name = "Showcase"
+
+[[extensions]]
+id = "showcase.greeter"
+name = "Greeter"
+version = "0.1.0"
+kind = "luau"
+description = "Greets you with a toast. Asks to read the selection and to show notifications."
+archive = "archives/showcase.greeter-0.1.0.archext"
+sha256 = "8fc0cb7097181e5fb6e01e374b35e386b8c03ca58c645d63c3715400175cf964"
+
+[[extensions]]
+id = "showcase.greeter"
+name = "Greeter"
+version = "0.2.0"
+kind = "luau"
+description = "Greets you with a toast. Asks to read the selection, to show notifications and to use the clipboard."
+archive = "archives/showcase.greeter-0.2.0.archext"
+sha256 = "8d5071523d8dacd4c1b25dc42eb2536226c3726881cc4519a32541292813f399"
+changelog = "Copies the greeting to the clipboard (asks for the clipboard)."
+
+[[extensions]]
+id = "showcase.word-count"
+name = "Word Count"
+version = "0.1.0"
+kind = "luau"
+description = "Counts the words in the note being edited."
+archive = "archives/showcase.word-count-0.1.0.archext"
+sha256 = "c68e1662ee050e7955fe179e6974655c7fddeed0a321871782fc9952e49474a8"
+
+[[extensions]]
+id = "showcase.mac-only"
+name = "Core Audio Devices"
+version = "0.1.0"
+kind = "data"
+description = "Stands in for an extension that runs on macOS only (Patchbay's Core Audio engine)."
+archive = "archives/showcase.mac-only-0.1.0.archext"
+sha256 = "de6e219d22de0aad60539c52fffa550aad5bfe007dcdc29eee1948f93f3a2c6e"

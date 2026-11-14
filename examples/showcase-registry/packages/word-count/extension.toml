@@ -1,0 +1,16 @@
+# What the showcase vault needs (#710 L2): required in its
+# .architect/extensions.toml, installed by "Install all".
+id = "showcase.word-count"
+name = "Word Count"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "Counts the words in the note being edited."
+
+[capabilities]
+reads = ["editor"]
+
+[[actions]]
+id = "SHOWCASE_WORD_COUNT_COUNT"
+name = "Word Count: count"
+script = "count.luau"
