@@ -127,7 +127,7 @@ next steps: a web cell that says only "#495" waits on them.
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
 | U1 | Remote views: forms, lists, dialogs | ⚠️ not shown | ❌ #495 | ⚠️ not shown; pages only (no processes) | Clicker | `features/extensions/tests/remote_view.rs` |
-| U2 | Rich input in remote views: drag, pointer capture, touch, scroll, IME, focus | ⚠️ clicks only (#176) | ❌ #495, #176 | ⚠️ clicks only (#176) | Kanban-lite | - |
+| U2 | Rich input in remote views: drag, pointer capture, touch, scroll, IME, focus | ⚠️ every kind reaches a process view's handlers, tested; Kanban-lite's drag in the host's own document rendered headless, not yet the app in a Loft session: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/pr-media/ws4-remote-views/kanban-board-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/pr-media/ws4-remote-views/kanban-board-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/pr-media/ws4-remote-views/kanban-board-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/pr-media/ws4-remote-views/kanban-board-1280-dark.png) | ⚠️ the browser applier maps every kind and captures the pointer; its event mapping runs in headless Firefox (`just ext-pane-browser`), but no view has run in a browser: no extension host (#495) | ⚠️ not run; shares the desktop's host code | Kanban-lite | `features/extensions/tests/remote_input.rs`, `apps/sandbox/kanban/tests/drag.rs`, `features/extensions/web/test/rust-pane.test.mjs` |
 | U3 | GPU painting and canvas | ⚠️ linked views only (#591); none for installed (#175) | ❌ #495, #175 | ⚠️ linked only (#175) | Sketch | - |
 | U4 | Charts (SVG) | ✅ Chart's SVG bars in the theme's chart colours: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/chart-demo-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/chart-demo-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/chart-demo-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/chart-demo-1280-dark.png) | ❌ #495 | ⚠️ not shown | Chart | `features/extensions/tests/showcase_content.rs` |
 | U5 | Accessibility: names and roles for VoiceOver | ❌ #164 | ❌ #164 | ❌ #164 | - | - |
@@ -148,7 +148,7 @@ note in the showcase vault, which plugins or apps it stands in for.
 |---|---|---|---|
 | Templater-lite | Templater, QuickAdd | R2, R3, C1, C7, C11, H1, H2, H10 | `examples/showcase/templater-lite`; H2 (folder templates) waits on #713 |
 | Dataview-lite | Dataview, Tasks, Bases | C10, H3 | `examples/showcase/dataview-lite`; live refresh (H2) waits on #713 |
-| Kanban-lite | Kanban | U2, H1 | waits on #176 |
+| Kanban-lite | Kanban | U2, H1 | `apps/sandbox/kanban`: a process extension whose cards drag between columns (#720); H1 not yet (in-memory board) |
 | Outline (tables and outline keymaps) | Advanced Tables, Outliner, Editing Toolbar | C11, C2 | in the sandbox (`apps/sandbox/extensions/outline`), loaded by `just showcase`; C11 shown on the desk |
 | Iconize-lite | Iconize, File Color | C9 | `examples/showcase/iconize-lite` |
 | Toolbar sampler | Editing Toolbar, Commander | C2, C3 | `examples/showcase/toolbar-sampler` |

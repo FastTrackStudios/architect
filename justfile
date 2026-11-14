@@ -548,6 +548,12 @@ sandbox-web PORT="8090":
         python3 -m http.server -d "$out" -b 127.0.0.1 {{PORT}}
     fi
 
+# The Rust browser applier's events in headless Firefox (#720 H4):
+# features/extensions/web/test/rust-pane.test.mjs builds
+# apps/sandbox/pane-events for wasm32 and drives it.
+ext-pane-browser:
+    env -u LD_LIBRARY_PATH node --test features/extensions/web/test/rust-pane.test.mjs
+
 # The sandbox's browser demo in a real browser (apps/sandbox/web/test): the Board's page file,
 # a runaway page and a page's reach, in a headless Chrome of its own
 # (CHROME=… names one; screenshots in target/web-shots); the Recipe

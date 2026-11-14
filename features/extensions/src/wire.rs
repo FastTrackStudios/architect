@@ -319,6 +319,40 @@ impl EventData {
     }
 }
 
+/// What an event named `name` carries, by its name alone (#176 H4).
+///
+/// The kind follows the name, not the DOM event's class: a browser sends
+/// `click`, `auxclick` and `contextmenu` as `PointerEvent`s, and a Dioxus
+/// `onclick` must be given mouse data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataKind {
+    Mouse,
+    Pointer,
+    Touch,
+    Wheel,
+    Scroll,
+    Composition,
+    Key,
+    Form,
+    Focus,
+}
+
+/// The kind of data an event named `name` carries.
+#[must_use]
+pub fn kind_of(name: &str) -> DataKind {
+    match name {
+        "wheel" => DataKind::Wheel,
+        "scroll" => DataKind::Scroll,
+        "keydown" | "keyup" | "keypress" => DataKind::Key,
+        "input" | "change" => DataKind::Form,
+        "focus" | "blur" | "focusin" | "focusout" => DataKind::Focus,
+        n if n.starts_with("pointer") => DataKind::Pointer,
+        n if n.starts_with("touch") => DataKind::Touch,
+        n if n.starts_with("composition") => DataKind::Composition,
+        _ => DataKind::Mouse,
+    }
+}
+
 /// A pointer event: where, and which pointer (`PointerEvent`'s fields).
 #[derive(Clone, Debug, Default, PartialEq, Facet)]
 pub struct PointerData {
@@ -401,6 +435,9 @@ pub fn coalesces(name: &str) -> bool {
 /// run of fast events on one element under one name keeps only the last
 /// (a wheel's deltas are summed); any other event (a press, a key) sends
 /// what waits first, in order, so nothing is reordered or lost.
+/// The most fast events that wait for a busy view ([`Coalescer`]).
+pub const WAITING: usize = 64;
+
 #[derive(Debug, Default)]
 pub struct Coalescer {
     waiting: Vec<ViewEvent>,
@@ -429,23 +466,39 @@ impl Coalescer {
             self.in_flight = self.in_flight.saturating_add(1);
             return vec![event];
         }
-        match self.waiting.last_mut() {
-            Some(last) if last.element == event.element && last.name == event.name => {
-                let summed = match (&last.data, event.data) {
-                    (EventData::Wheel(was), EventData::Wheel(mut now))
-                        if was.delta_mode == now.delta_mode =>
-                    {
-                        now.delta_x += was.delta_x;
-                        now.delta_y += was.delta_y;
-                        EventData::Wheel(now)
-                    }
-                    (_, data) => data,
-                };
-                last.data = summed;
-                last.bubbles = event.bubbles;
-                self.merged = self.merged.saturating_add(1);
-            }
-            _ => self.waiting.push(event),
+        // The latest waiting entry for this element and event, if any: a
+        // run of `pointermove` and `mousemove` interleaved still merges.
+        let same = self
+            .waiting
+            .iter()
+            .rposition(|w| w.element == event.element && w.name == event.name);
+        if let Some(last) = same.and_then(|i| self.waiting.get_mut(i)) {
+            let summed = match (&last.data, event.data) {
+                (EventData::Wheel(was), EventData::Wheel(mut now))
+                    if was.delta_mode == now.delta_mode =>
+                {
+                    now.delta_x += was.delta_x;
+                    now.delta_y += was.delta_y;
+                    EventData::Wheel(now)
+                }
+                // A wheel in other units waits as its own: its deltas
+                // can't be added to these.
+                (EventData::Wheel(_), EventData::Wheel(now)) => {
+                    self.waiting.push(ViewEvent {
+                        data: EventData::Wheel(now),
+                        ..event
+                    });
+                    self.cap();
+                    return Vec::new();
+                }
+                (_, data) => data,
+            };
+            last.data = summed;
+            last.bubbles = event.bubbles;
+            self.merged = self.merged.saturating_add(1);
+        } else {
+            self.waiting.push(event);
+            self.cap();
         }
         Vec::new()
     }
@@ -459,6 +512,18 @@ impl Coalescer {
         let out = std::mem::take(&mut self.waiting);
         self.in_flight = self.in_flight.saturating_add(out.len());
         out
+    }
+
+    /// At most [`WAITING`] wait: the oldest go first (each is a stale
+    /// move of some element).
+    fn cap(&mut self) {
+        let over = self.waiting.len().saturating_sub(WAITING);
+        if over > 0 {
+            self.waiting.drain(..over);
+            self.merged = self
+                .merged
+                .saturating_add(u64::try_from(over).unwrap_or(u64::MAX));
+        }
     }
 
     /// The view went: nothing is in flight now.
@@ -531,6 +596,41 @@ mod forced_tests {
 }
 
 #[cfg(test)]
+mod kind_tests {
+    use super::{DataKind, kind_of};
+
+    #[test]
+    fn a_click_is_mouse_data_whatever_class_the_browser_sends() {
+        for name in [
+            "click",
+            "auxclick",
+            "contextmenu",
+            "dblclick",
+            "mousedown",
+            "mousemove",
+        ] {
+            assert_eq!(kind_of(name), DataKind::Mouse, "{name}");
+        }
+        for name in [
+            "pointerdown",
+            "pointermove",
+            "pointerup",
+            "pointercancel",
+            "pointerleave",
+        ] {
+            assert_eq!(kind_of(name), DataKind::Pointer, "{name}");
+        }
+        assert_eq!(kind_of("wheel"), DataKind::Wheel);
+        assert_eq!(kind_of("touchstart"), DataKind::Touch);
+        assert_eq!(kind_of("compositionend"), DataKind::Composition);
+        assert_eq!(kind_of("scroll"), DataKind::Scroll);
+        assert_eq!(kind_of("keydown"), DataKind::Key);
+        assert_eq!(kind_of("input"), DataKind::Form);
+        assert_eq!(kind_of("blur"), DataKind::Focus);
+    }
+}
+
+#[cfg(test)]
 mod coalescer_tests {
     use super::{Coalescer, EventData, Pointer, PointerData, ViewEvent, WheelData};
 
@@ -592,6 +692,59 @@ mod coalescer_tests {
             ["pointermove", "pointerup"]
         );
         assert!((x(&sent[0]) - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn interleaved_pointer_and_mouse_moves_merge_and_the_queue_is_capped() {
+        let mut c = Coalescer::new();
+        let _ = c.push(mv(0.0));
+        for i in 1..=1000 {
+            let _ = c.push(mv(f64::from(i)));
+            let _ = c.push(ev(1, "mousemove", EventData::Mouse(Pointer::default())));
+        }
+        // One pointermove and one mousemove wait, not 2000.
+        let sent = c.answered();
+        assert_eq!(sent.len(), 2);
+        assert!((x(&sent[0]) - 1000.0).abs() < f64::EPSILON);
+        // Many elements at once: no more than WAITING wait.
+        let mut c = Coalescer::new();
+        let _ = c.push(mv(0.0));
+        for e in 0..500 {
+            let _ = c.push(ev(
+                e,
+                "pointermove",
+                EventData::Pointer(PointerData::default()),
+            ));
+        }
+        assert_eq!(c.answered().len(), super::WAITING);
+    }
+
+    #[test]
+    fn a_wheel_in_other_units_waits_as_its_own() {
+        let wheel = |dy: f64, mode: u8| {
+            ev(
+                2,
+                "wheel",
+                EventData::Wheel(WheelData {
+                    delta_y: dy,
+                    delta_mode: mode,
+                    ..WheelData::default()
+                }),
+            )
+        };
+        let mut c = Coalescer::new();
+        let _ = c.push(wheel(1.0, 0));
+        let _ = c.push(wheel(10.0, 0));
+        let _ = c.push(wheel(3.0, 1));
+        let sent = c.answered();
+        let dys: Vec<(f64, u8)> = sent
+            .iter()
+            .map(|e| match &e.data {
+                EventData::Wheel(w) => (w.delta_y, w.delta_mode),
+                _ => (f64::NAN, 9),
+            })
+            .collect();
+        assert_eq!(dys, [(10.0, 0), (3.0, 1)]);
     }
 
     #[test]

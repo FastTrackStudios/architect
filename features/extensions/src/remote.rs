@@ -87,6 +87,10 @@ pub const REMOTE_BUDGET: Duration = Duration::from_millis(33);
 /// At most this many edits in one frame.
 const MAX_EDITS: usize = 200_000;
 
+/// How often a pane's place in the window is looked at, for an input
+/// method's caret.
+pub const PLACE_EVERY: Duration = Duration::from_millis(200);
+
 /// How often an embed's content height is looked at.
 pub const MEASURE_EVERY: Duration = Duration::from_millis(50);
 
@@ -189,6 +193,51 @@ impl RemoteDocument {
             fitted: false,
             held: None,
             composing: false,
+        }
+    }
+
+    /// Lets go of a held pointer the view will see no release for: a
+    /// `pointercancel` to the element held, or, when the view doesn't
+    /// listen for one, a `pointerup` (so a drag isn't left grabbed). An
+    /// input method's composition ends too. The host calls it when the
+    /// pane loses the focus or the window its pointer.
+    pub fn let_go(&mut self, at: Option<&BlitzPointerEvent>) {
+        if let Some(held) = self.held.take() {
+            let listens = |n: &str| self.listeners.get(n).copied().unwrap_or(0) > 0;
+            let name = if listens("pointercancel") {
+                Some("pointercancel")
+            } else if listens("pointerup") {
+                Some("pointerup")
+            } else {
+                None
+            };
+            if let Some(name) = name {
+                let data = at.map_or_else(PointerData::default, pointer_data);
+                let _ = self.events.unbounded_send(ViewEvent {
+                    element: held,
+                    name: name.to_owned(),
+                    bubbles: true,
+                    data: EventData::Pointer(data),
+                });
+            }
+        }
+        self.end_composition(None);
+    }
+
+    /// Ends an input method's composition the view heard start, at
+    /// `element` (or the root).
+    fn end_composition(&mut self, element: Option<u64>) {
+        if !self.composing {
+            return;
+        }
+        self.composing = false;
+        if self.listeners.get("compositionend").copied().unwrap_or(0) > 0 {
+            let _ = self.events.unbounded_send(ViewEvent {
+                element: element.unwrap_or(0),
+                name: "compositionend".to_owned(),
+                bubbles: true,
+                data: EventData::Composition(String::new()),
+            });
         }
     }
 
@@ -583,20 +632,15 @@ impl Document for RemoteDocument {
     }
 
     fn handle_ui_event(&mut self, event: UiEvent) {
-        // A pointer that comes back with no button held lost its release
-        // outside the pane: what it held is cancelled.
-        if let (Some(held), UiEvent::PointerMove(p)) = (self.held, &event)
+        // A pointer that comes back, or leaves, with no button held lost
+        // its release where the view couldn't see it: what it held is
+        // let go.
+        if let UiEvent::PointerMove(p) | UiEvent::PointerLeave(p) = &event
             && p.buttons.is_empty()
+            && self.held.is_some()
         {
-            self.held = None;
-            if self.listeners.get("pointercancel").copied().unwrap_or(0) > 0 {
-                let _ = self.events.unbounded_send(ViewEvent {
-                    element: held,
-                    name: "pointercancel".to_owned(),
-                    bubbles: true,
-                    data: EventData::Pointer(pointer_data(p)),
-                });
-            }
+            let p = p.clone();
+            self.let_go(Some(&p));
         }
         let releases = matches!(event, UiEvent::PointerUp(_) | UiEvent::PointerCancel(_));
         let forward = Forward {
@@ -697,6 +741,17 @@ impl EventHandler for Forward<'_> {
             self.composition(element, ime);
             return;
         }
+        // Focus leaving mid-composition ends it: the field won't hear the
+        // rest.
+        if matches!(name, "blur" | "focusout") && *self.composing {
+            *self.composing = false;
+            self.send(
+                element,
+                "compositionend",
+                true,
+                EventData::Composition(String::new()),
+            );
+        }
         if !self.listens(name) {
             return;
         }
@@ -765,8 +820,15 @@ impl Forward<'_> {
 #[derive(Clone)]
 pub struct HostShell {
     window: Arc<dyn ShellProvider>,
-    /// Where the pane's top left is in the window, CSS pixels.
-    at: Arc<Mutex<(f32, f32)>>,
+    /// Where the pane is in the window, CSS pixels, and the view's last
+    /// caret area while its input method is on (in its own pixels).
+    state: Arc<Mutex<ShellState>>,
+}
+
+#[derive(Default)]
+struct ShellState {
+    at: (f32, f32),
+    caret: Option<(f32, f32, f32, f32)>,
 }
 
 impl HostShell {
@@ -775,13 +837,24 @@ impl HostShell {
     pub fn new(window: Arc<dyn ShellProvider>, x: f32, y: f32) -> Self {
         Self {
             window,
-            at: Arc::new(Mutex::new((x, y))),
+            state: Arc::new(Mutex::new(ShellState {
+                at: (x, y),
+                caret: None,
+            })),
         }
     }
 
-    /// The pane moved.
+    /// The pane is at `x`, `y` now: a caret the input method shows moves
+    /// with it.
     pub fn moved(&self, x: f32, y: f32) {
-        *self.at.lock().unwrap_or_else(PoisonError::into_inner) = (x, y);
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.at == (x, y) {
+            return;
+        }
+        state.at = (x, y);
+        if let Some((cx, cy, w, h)) = state.caret {
+            self.window.set_ime_cursor_area(cx + x, cy + y, w, h);
+        }
     }
 }
 
@@ -791,11 +864,21 @@ impl ShellProvider for HostShell {
     }
 
     fn set_ime_enabled(&self, is_enabled: bool) {
+        if !is_enabled {
+            self.state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .caret = None;
+        }
         self.window.set_ime_enabled(is_enabled);
     }
 
     fn set_ime_cursor_area(&self, x: f32, y: f32, width: f32, height: f32) {
-        let (dx, dy) = *self.at.lock().unwrap_or_else(PoisonError::into_inner);
+        let (dx, dy) = {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            state.caret = Some((x, y, width, height));
+            state.at
+        };
         self.window
             .set_ime_cursor_area(x + dx, y + dy, width, height);
     }
@@ -1119,7 +1202,7 @@ async fn follow(
         };
         // The pane's events go through here, each one's time kept until
         // the frame that answers it.
-        let wire = process.hello().map_or(0, |h| h.wire);
+        let wire = process.hello().map_or(crate::wire::WIRE_MIN, |h| h.wire);
         let answered = wire >= ANSWERED_WIRE;
         let asked: Rc<RefCell<VecDeque<Instant>>> = Rc::default();
         let (events, mut proxied) = mpsc::unbounded::<ViewEvent>();
@@ -1171,6 +1254,18 @@ async fn follow(
             shell
         })
         .await;
+        // Where the pane is, now and then: an input method's caret moves
+        // with the pane, not only when a frame comes.
+        let placing = {
+            let (node, shell) = (node.clone(), shell.clone());
+            spawn(async move {
+                loop {
+                    futures_timer::Delay::new(PLACE_EVERY).await;
+                    let (x, y) = with_doc(&node, |doc, at| pane_at(doc, at)).await;
+                    shell.moved(x, y);
+                }
+            })
+        };
         // An embed's input: now, and whenever it changes.
         if let Some(fit) = &fit {
             let _ = to_view.unbounded_send(embed_event(&fit.latest.borrow()));
@@ -1219,6 +1314,7 @@ async fn follow(
             }
         }
         forwarding.cancel();
+        placing.cancel();
         if let Some(fit) = &fit {
             fit.live.borrow_mut().take();
         }
@@ -1515,6 +1611,20 @@ fn Mount(
         div { style: "position: relative; width: 100%; height: {tall}; overflow: hidden;",
             div {
                 style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0;",
+                // The pane lost the focus (another pane, the window):
+                // whatever the view held is let go.
+                onblur: move |_| {
+                    if let Some(node) = node_at.peek().clone() {
+                        spawn(async move {
+                            with_doc(&node, |doc, at| {
+                                if let Some(r) = remote(doc, at) {
+                                    r.let_go(None);
+                                }
+                            })
+                            .await;
+                        });
+                    }
+                },
                 onmounted: move |e: MountedEvent| {
                     if !mounted() && let Some(node) = e.data().downcast::<NodeHandle>() {
                         mounted.set(true);

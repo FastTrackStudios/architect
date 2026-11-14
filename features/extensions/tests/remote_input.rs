@@ -118,6 +118,26 @@ fn Input() -> Element {
     }
 }
 
+/// A card that drags with no `pointercancel` handler: a lost release
+/// must still end its drag (#720 M2).
+#[component]
+fn Grab() -> Element {
+    let mut grabbed = use_signal(|| false);
+    rsx! {
+        div { style: "position: relative; width: 400px; height: 300px;",
+            div {
+                id: "card",
+                style: "position: absolute; left: 0; top: 0; width: 100px; height: 40px;",
+                onpointerdown: move |_| grabbed.set(true),
+                onpointermove: move |_| {},
+                onpointerup: move |_| grabbed.set(false),
+                "card"
+            }
+            p { id: "grabbed", style: "position: absolute; top: 100px;", "{grabbed}" }
+        }
+    }
+}
+
 /// Not a test of its own: the extension, when a test starts this binary
 /// as one.
 #[test]
@@ -125,7 +145,11 @@ fn guest() {
     if std::env::var_os(SOCKET).is_none() {
         return;
     }
-    Guest::new().view("input", Input).serve().unwrap();
+    Guest::new()
+        .view("input", Input)
+        .view("grab", Grab)
+        .serve()
+        .unwrap();
 }
 
 fn package(dir: &Path) -> Package {
@@ -144,6 +168,10 @@ args = ["guest", "--exact", "--nocapture", "--test-threads=1"]
 [[views]]
 id = "input"
 title = "Input"
+
+[[views]]
+id = "grab"
+title = "Grab"
 "#
     );
     std::fs::write(dir.join("extension.toml"), manifest).unwrap();
@@ -182,6 +210,7 @@ impl ShellProvider for Shell {
 #[derive(Props, Clone, PartialEq)]
 struct PaneProps {
     processes: Processes,
+    view: String,
 }
 
 /// The app: one pane, 30 points down and 50 in, the view in it.
@@ -189,13 +218,19 @@ struct PaneProps {
 fn Pane(props: PaneProps) -> Element {
     rsx! {
         div { style: "position: absolute; left: 50px; top: 30px; width: 400px; height: 340px;",
-            RemoteView { processes: props.processes, extension: ID, view: "input" }
+            RemoteView { processes: props.processes, extension: ID, view: props.view }
         }
     }
 }
 
-fn app(processes: Processes, window: &Arc<Window>) -> DioxusDocument {
-    let vdom = VirtualDom::new_with_props(Pane, PaneProps { processes });
+fn app(processes: Processes, window: &Arc<Window>, view: &str) -> DioxusDocument {
+    let vdom = VirtualDom::new_with_props(
+        Pane,
+        PaneProps {
+            processes,
+            view: view.to_owned(),
+        },
+    );
     let mut doc = DioxusDocument::new(
         vdom,
         DocumentConfig {
@@ -293,12 +328,17 @@ fn click(doc: &mut DioxusDocument, at: (f32, f32)) {
 
 /// The extension loaded and its view showing.
 fn start() -> (tempfile::TempDir, Host, DioxusDocument, Arc<Window>) {
+    start_view("input", "#moves")
+}
+
+/// View `view` loaded and showing `ready`.
+fn start_view(view: &str, ready: &str) -> (tempfile::TempDir, Host, DioxusDocument, Arc<Window>) {
     let dir = tempfile::tempdir().unwrap();
     let (host, processes) = host(dir.path());
     host.load(&package(dir.path()), Origin::Installed).unwrap();
     let window = Arc::new(Window::default());
-    let mut doc = app(processes, &window);
-    pump(&mut doc, "the view", |d| in_view(d, "#moves").is_some());
+    let mut doc = app(processes, &window, view);
+    pump(&mut doc, "the view", |d| in_view(d, ready).is_some());
     (dir, host, doc, window)
 }
 
@@ -347,6 +387,99 @@ fn a_release_lost_outside_the_pane_cancels_the_press() {
     doc.handle_ui_event(UiEvent::PointerUp(pointer(MOUSE, (700.0, 500.0), FREE)));
     doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, card, FREE)));
     pump(&mut doc, "the cancel", |d| logged(d).contains("cancel"));
+}
+
+#[test]
+fn a_lost_release_ends_a_drag_in_a_view_that_hears_no_cancel() {
+    let (_dir, _host, mut doc, _) = start_view("grab", "#grabbed");
+    let card = view_point(&doc.inner.borrow(), "#card");
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, card, FREE)));
+    doc.handle_ui_event(UiEvent::PointerDown(pointer(MOUSE, card, HELD)));
+    pump(&mut doc, "grabbed", |d| {
+        in_view(d, "#grabbed").as_deref() == Some("true")
+    });
+    // Out, released there, back with no button: a `pointerup`, as it has
+    // no `pointercancel`.
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, (700.0, 500.0), HELD)));
+    doc.handle_ui_event(UiEvent::PointerUp(pointer(MOUSE, (700.0, 500.0), FREE)));
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, card, FREE)));
+    pump(&mut doc, "let go", |d| {
+        in_view(d, "#grabbed").as_deref() == Some("false")
+    });
+}
+
+#[test]
+fn a_pointer_that_leaves_with_no_button_held_lets_go() {
+    let (_dir, _host, mut doc, _) = start();
+    let card = view_point(&doc.inner.borrow(), "#card");
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, card, FREE)));
+    doc.handle_ui_event(UiEvent::PointerDown(pointer(MOUSE, card, HELD)));
+    pump(&mut doc, "the press", |d| logged(d).contains("down:mouse"));
+    // The window's pointer leaves it, its button already up.
+    doc.handle_ui_event(UiEvent::PointerLeave(pointer(MOUSE, (700.0, 500.0), FREE)));
+    pump(&mut doc, "the cancel", |d| logged(d).contains("cancel"));
+}
+
+#[test]
+fn focus_leaving_mid_composition_ends_it() {
+    let (_dir, _host, mut doc, _) = start();
+    let field = view_point(&doc.inner.borrow(), "#field");
+    click(&mut doc, field);
+    doc.handle_ui_event(UiEvent::Ime(BlitzImeEvent::Preedit(
+        "にほ".to_owned(),
+        Some((0, 6)),
+    )));
+    pump(&mut doc, "composing", |d| {
+        logged(d).contains("composing:にほ")
+    });
+    // A click elsewhere in the view takes the focus from the field.
+    let card = view_point(&doc.inner.borrow(), "#card");
+    click(&mut doc, card);
+    pump(&mut doc, "the composition's end", |d| {
+        logged(d).contains("composed:")
+    });
+}
+
+fn p99(mut samples: Vec<Duration>) -> Duration {
+    samples.sort();
+    samples[(samples.len() - 1) * 99 / 100]
+}
+
+/// #176's budget, enforced generously: a key to its echo and a held move
+/// to its echo stay under `REMOTE_BUDGET` (33 ms) at p99, even in a debug
+/// build on a busy machine. `round_trips` prints the measured numbers.
+#[test]
+fn round_trips_stay_inside_the_remote_budget() {
+    let (_dir, _host, mut doc, _) = start();
+    let field = view_point(&doc.inner.borrow(), "#field");
+    click(&mut doc, field);
+    let mut keys = Vec::new();
+    for i in 0..40 {
+        let t = Instant::now();
+        doc.handle_ui_event(UiEvent::KeyDown(key("a")));
+        pump(&mut doc, "the echo", |d| {
+            in_view(d, "#echo").is_some_and(|e| e.len() == i + 1)
+        });
+        keys.push(t.elapsed());
+    }
+    let card = view_point(&doc.inner.borrow(), "#card");
+    doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, card, FREE)));
+    doc.handle_ui_event(UiEvent::PointerDown(pointer(MOUSE, card, HELD)));
+    let mut moves = Vec::new();
+    for i in 1..=40 {
+        let t = Instant::now();
+        let x = card.0 + i as f32;
+        doc.handle_ui_event(UiEvent::PointerMove(pointer(MOUSE, (x, card.1), HELD)));
+        let want = format!("{}", x - 50.0);
+        pump(&mut doc, "the move's echo", |d| {
+            in_view(d, "#lastx").as_deref() == Some(want.as_str())
+        });
+        moves.push(t.elapsed());
+    }
+    let budget = architect_extensions::remote::REMOTE_BUDGET;
+    let (k, m) = (p99(keys), p99(moves));
+    assert!(k < budget, "a key's p99 round trip is {k:?}");
+    assert!(m < budget, "a move's p99 round trip is {m:?}");
 }
 
 #[test]

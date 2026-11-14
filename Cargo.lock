@@ -1974,6 +1974,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-sandbox-pane-events"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "architect-workspace-hack",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "architect-sandbox-wasi-counter"
 version = "0.1.0"
 dependencies = [
