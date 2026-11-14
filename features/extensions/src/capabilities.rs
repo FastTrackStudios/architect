@@ -708,13 +708,24 @@ mod tests {
     /// grant itself.
     #[test]
     fn the_vaults_actions_need_the_documents() {
-        let run = |c: &Capabilities, id: &str, e: Reach| c.may_run_app("ACME_", id, e).err().map(|(c, _)| c);
+        let run = |c: &Capabilities, id: &str, e: Reach| {
+            c.may_run_app("ACME_", id, e).err().map(|(c, _)| c)
+        };
         let only_actions = caps(&["VAULT_"], Reach::Mutating, &[]);
-        assert_eq!(run(&only_actions, "VAULT_METADATA", Reach::ReadOnly), Some("reads.documents"));
-        assert_eq!(run(&only_actions, "VAULT_READ", Reach::ReadOnly), Some("reads.documents"));
+        assert_eq!(
+            run(&only_actions, "VAULT_METADATA", Reach::ReadOnly),
+            Some("reads.documents")
+        );
+        assert_eq!(
+            run(&only_actions, "VAULT_READ", Reach::ReadOnly),
+            Some("reads.documents")
+        );
         let reader = caps(&["VAULT_"], Reach::Mutating, &["documents"]);
         assert_eq!(run(&reader, "VAULT_METADATA", Reach::ReadOnly), None);
-        assert_eq!(run(&reader, "VAULT_CREATE", Reach::Mutating), Some("writes.documents"));
+        assert_eq!(
+            run(&reader, "VAULT_CREATE", Reach::Mutating),
+            Some("writes.documents")
+        );
         let mut writer = reader.clone();
         writer.writes = vec!["documents".to_owned()];
         assert_eq!(run(&writer, "VAULT_CREATE", Reach::Mutating), None);
