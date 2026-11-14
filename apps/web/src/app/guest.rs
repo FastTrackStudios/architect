@@ -290,11 +290,22 @@ fn here() -> String {
         .unwrap_or_else(|| "/".to_owned())
 }
 
-/// The location shows `path` (a page of the link), without a reload.
+/// The location shows `path` (a page of the link), without a reload, as
+/// a step of its own: Back (a phone's swipe) comes back to where the
+/// guest was on the link, not out of it ([`guest_view::rest_of`]).
 fn show_path(path: &str) {
-    if let Some(h) = web_sys::window().and_then(|w| w.history().ok()) {
-        let _ = h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(path));
+    let Some(w) = web_sys::window() else { return };
+    if w.location().pathname().ok().as_deref() == Some(path) {
+        return;
     }
+    if let Ok(h) = w.history() {
+        let _ = h.push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(path));
+    }
+}
+
+/// The location's path, below the window.
+fn pathname() -> Option<String> {
+    web_sys::window()?.location().pathname().ok()
 }
 
 /// `to` as a query value.
@@ -439,6 +450,30 @@ pub fn GuestPage(code: String, rest: String) -> Element {
         }
     }));
     let mut open = use_signal(|| None::<Open>);
+    // Where on the link the location is: as opened, then each Back or
+    // Forward within it (the page the guest chose is a history step).
+    let mut at_path = use_signal(|| rest.clone());
+    use_hook({
+        let link = architect_spaces::share::link_path(&code);
+        move || {
+            let Some(w) = web_sys::window() else { return };
+            let on = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+                let Some(now) = pathname() else { return };
+                // Gone with the page (never, while the app shows a link):
+                // nothing to move.
+                if let (Some(rest), Ok(mut path), Ok(mut chosen)) = (
+                    guest_view::rest_of(&link, &now),
+                    at_path.try_write(),
+                    open.try_write(),
+                ) {
+                    rest.clone_into(&mut path);
+                    *chosen = None;
+                }
+            });
+            let _ = w.add_event_listener_with_callback("popstate", on.as_ref().unchecked_ref());
+            on.forget();
+        }
+    });
     // Open a note or the files: the location follows, without a reload.
     let choose = use_callback(move |next: Open| {
         if let Some(Ok(o)) = &*opened.peek() {
@@ -478,7 +513,7 @@ pub fn GuestPage(code: String, rest: String) -> Element {
         None => rsx! { p { style: "color: {t.ink_3};", "Opening the shared link…" } },
         Some(Err(shut)) => rsx! { Closed { shut } },
         Some(Ok(o)) => {
-            let at = open().unwrap_or_else(|| guest_view::open(&o.link, &rest));
+            let at = open().unwrap_or_else(|| guest_view::open(&o.link, &at_path()));
             rsx! {
                 LinkHead { opened: o.clone(), at: at.clone(), on_open: choose }
                 match at.clone() {
