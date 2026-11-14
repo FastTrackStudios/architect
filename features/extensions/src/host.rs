@@ -2026,14 +2026,15 @@ impl Host {
     #[allow(clippy::must_use_candidate)]
     pub fn emit_changed(&self, topic: &str, detail: &str) -> usize {
         // A document or focus event raised on the list (`DocEvent::raise_on`):
-        // its topic is its name, its detail JSON.
+        // its topic is its name, its detail JSON. Raised as itself only: a
+        // `changed:doc.saved` would hand a note's path to a hook its
+        // extension's `reads` never allowed.
         if crate::contrib::EVENTS.contains(&topic)
             && (topic.starts_with("doc.") || topic.starts_with("app."))
         {
-            let n = self.emit(&format!("changed:{topic}"), detail);
             let value =
                 serde_json::from_str(detail).unwrap_or_else(|_| Value::String(detail.to_owned()));
-            return n.saturating_add(self.emit_value(topic, &value));
+            return self.emit_value(topic, &value);
         }
         let named = match topic {
             "workspace" => Some("workspace.changed"),
