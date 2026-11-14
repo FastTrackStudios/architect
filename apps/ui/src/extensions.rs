@@ -898,7 +898,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         let sandbox = crate::distribution().is_sandbox();
         let clicker = clicker(&root).filter(|_| sandbox);
         let frame = frame_dev(&root).filter(|_| sandbox);
-        let wasi = wasi_counter(&root).filter(|_| sandbox);
+        // Made only in the sandbox: it writes `dev/lab.wasi-counter`, which
+        // has no place in the person's app folder.
+        let wasi = if sandbox { wasi_counter(&root) } else { None };
         // `EXT_CLONE` puts its copies beside the development ones.
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
             .with_dev_root(root.join("dev"));

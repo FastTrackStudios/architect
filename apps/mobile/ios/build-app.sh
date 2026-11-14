@@ -121,14 +121,18 @@ mkdir -p "$app"
 cp "${INFO_PLIST:-$here/Info.plist}" "$app/Info.plist"
 cp "$target_dir/$triple/$profile/$bin" "$app/architect-mobile"
 if [[ " ${cargo_args[*]-} " == *" wasi "* || " ${cargo_args[*]-} " == *"--features=wasi"* || " ${cargo_args[*]-} " == *",wasi"* ]]; then
-    # The sandbox's WASI Counter, when it was built (or named): a
-    # release's app (`cargo xtask dist ios`, #707) has `wasi` for what the
-    # person installs, and no example of its own.
-    wasm="${ARCHITECT_LAB_WASI_COUNTER:-$target_dir/wasi-guest/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm}"
-    if [[ -f "$wasm" && -z "$manifest" ]]; then
-        cp "$wasm" "$app/"
-    elif [[ -n "${ARCHITECT_LAB_WASI_COUNTER:-}" ]]; then
-        die "no WASI Counter component at $wasm"
+    # The sandbox's WASI Counter, for a lab build only: when it was built,
+    # or named (then it must be there). A release's app (`cargo xtask dist
+    # ios` sets ARCHITECT_DIST=1, #707) and a distribution crate's
+    # (`--manifest-path`) have `wasi` for what the person installs, and no
+    # example of their own.
+    if [[ -z "${ARCHITECT_DIST:-}" && -z "$manifest" ]]; then
+        wasm="${ARCHITECT_LAB_WASI_COUNTER:-$target_dir/wasi-guest/wasm32-wasip2/debug/architect_sandbox_wasi_counter.wasm}"
+        if [[ -f "$wasm" ]]; then
+            cp "$wasm" "$app/"
+        elif [[ -n "${ARCHITECT_LAB_WASI_COUNTER:-}" ]]; then
+            die "no WASI Counter component at $wasm"
+        fi
     fi
 fi
 

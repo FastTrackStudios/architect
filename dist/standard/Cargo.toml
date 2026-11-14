@@ -37,7 +37,11 @@ gui = ["architect-desktop/gui", "dep:studio-views"]
 node-wasi = ["architect-desktop/node-wasi"]
 # WASI component extensions in the app: Wasmtime, Cranelift on the desk,
 # Pulley on iOS (`cargo xtask dist desktop` and `dist ios` turn it on).
-wasi = ["architect-desktop/wasi", "architect-mobile/wasi"]
+# It is the window's: the extension host that runs them is the app's, so
+# it takes `gui` (architect-desktop's `wasi` does too); a node build takes
+# `node-wasi` instead. Not `dep?/wasi`: both are target-specific, not
+# optional, dependencies, and a weak feature needs an optional one.
+wasi = ["gui", "architect-desktop/wasi", "architect-mobile/wasi"]
 
 [dependencies]
 architect-distribution = { path = "../../apps/distribution" }

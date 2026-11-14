@@ -354,18 +354,28 @@ fn given_features(opts: &Options) -> Vec<String> {
 /// given, and `wasi` (#707) unless `--no-wasi`, when the crate has it
 /// (this repo's `architect-desktop` and `architect-mobile` do).
 fn app_features(opts: &Options) -> Result<Vec<String>, String> {
+    with_wasi(opts, |m| {
+        let m = m
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", m.display()))?;
+        Ok(declares_feature(&metadata(&m)?, &m, "wasi"))
+    })
+}
+
+/// [`app_features`]'s rule, with `declares` saying whether a
+/// distribution crate has a `wasi` feature: `wasi` added once, unless
+/// `--no-wasi`, for this repo's app or a crate that declares it.
+fn with_wasi(
+    opts: &Options,
+    declares: impl FnOnce(&Path) -> Result<bool, String>,
+) -> Result<Vec<String>, String> {
     let mut features = given_features(opts);
     if !opts.wasi || features.iter().any(|f| f == "wasi") {
         return Ok(features);
     }
     let has = match &opts.manifest_path {
         None => true,
-        Some(m) => {
-            let m = m
-                .canonicalize()
-                .map_err(|e| format!("{}: {e}", m.display()))?;
-            declares_feature(&metadata(&m)?, &m, "wasi")
-        }
+        Some(m) => declares(m)?,
     };
     if has {
         features.push("wasi".to_owned());
@@ -467,6 +477,8 @@ fn ios(opts: &Options, device: bool, out: &Path) -> Result<PathBuf, String> {
     if !features.is_empty() {
         cmd.args(["--features", &features.join(",")]);
     }
+    // A release's app: no sandbox example goes into its bundle.
+    cmd.env("ARCHITECT_DIST", "1");
     if let Some(dir) = &opts.target_dir {
         cmd.env("CARGO_TARGET_DIR", dir);
     }
@@ -627,6 +639,74 @@ pub fn run_cli(opts: &Options) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{Options, declares_feature, given_features, with_wasi};
+
+    fn opts(manifest: Option<&str>, features: &[&str], wasi: bool) -> Options {
+        Options {
+            targets: Vec::new(),
+            manifest_path: manifest.map(std::path::PathBuf::from),
+            bin: None,
+            out: std::path::PathBuf::from("target/dist"),
+            profile: "release".to_owned(),
+            target_dir: None,
+            version: None,
+            features: features.iter().map(|f| (*f).to_owned()).collect(),
+            wasi,
+        }
+    }
+
+    #[test]
+    fn the_app_builds_with_wasi_unless_told_not_to() {
+        let never = |_: &std::path::Path| -> Result<bool, String> { Err("no manifest to read".to_owned()) };
+        // This repo's app: wasi, the given features ignored (they are a
+        // distribution crate's).
+        assert_eq!(with_wasi(&opts(None, &["x"], true), never).unwrap(), ["wasi"]);
+        assert!(with_wasi(&opts(None, &[], false), never).unwrap().is_empty());
+        // A crate that declares it: added once, given or not.
+        let yes = |_: &std::path::Path| Ok(true);
+        assert_eq!(
+            with_wasi(&opts(Some("d/Cargo.toml"), &["node-wasi"], true), yes).unwrap(),
+            ["node-wasi", "wasi"]
+        );
+        assert_eq!(
+            with_wasi(&opts(Some("d/Cargo.toml"), &["wasi"], true), never).unwrap(),
+            ["wasi"]
+        );
+        // One that does not: left out, the build goes on.
+        let no = |_: &std::path::Path| Ok(false);
+        assert_eq!(
+            with_wasi(&opts(Some("d/Cargo.toml"), &["gui"], true), no).unwrap(),
+            ["gui"]
+        );
+        assert_eq!(
+            with_wasi(&opts(Some("d/Cargo.toml"), &["gui"], false), never).unwrap(),
+            ["gui"]
+        );
+    }
+
+    #[test]
+    fn the_node_takes_only_the_given_features() {
+        // `build(node = true)` uses `given_features`: never wasi.
+        assert!(given_features(&opts(None, &["x"], true)).is_empty());
+        assert_eq!(
+            given_features(&opts(Some("d/Cargo.toml"), &["node-wasi"], true)),
+            ["node-wasi"]
+        );
+    }
+
+    #[test]
+    fn a_feature_is_read_from_the_crates_own_package() {
+        let meta = serde_json::json!({ "packages": [
+            { "manifest_path": "/a/Cargo.toml", "features": { "wasi": ["x/wasi"] } },
+            { "manifest_path": "/b/Cargo.toml", "features": { "gui": [] } },
+        ]});
+        let a = std::path::Path::new("/a/Cargo.toml");
+        let b = std::path::Path::new("/b/Cargo.toml");
+        assert!(declares_feature(&meta, a, "wasi"));
+        assert!(!declares_feature(&meta, b, "wasi"));
+        assert!(!declares_feature(&meta, std::path::Path::new("/c/Cargo.toml"), "gui"));
+    }
+
     #[test]
     fn the_ios_binary_is_the_crate_s_own() {
         let meta = serde_json::json!({ "packages": [
