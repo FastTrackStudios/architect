@@ -467,12 +467,17 @@ const META_PAGE_MAX: usize = 1000;
 /// its modified time and length: a note parsed once until it changes.
 #[derive(Default)]
 pub struct MetadataCache {
-    notes: std::sync::Mutex<std::collections::HashMap<String, (std::time::SystemTime, usize, Arc<Value>)>>,
+    notes: std::sync::Mutex<
+        std::collections::HashMap<String, (std::time::SystemTime, usize, Arc<Value>)>,
+    >,
 }
 
 impl MetadataCache {
     fn get(&self, path: &str, mtime: std::time::SystemTime, len: usize) -> Option<Arc<Value>> {
-        let notes = self.notes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let notes = self
+            .notes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         notes
             .get(path)
             .filter(|(m, l, _)| *m == mtime && *l == len)
@@ -523,7 +528,12 @@ pub fn metadata_of(
     cursor: Option<&str>,
 ) -> Result<Value, String> {
     // (path, mtime, length, the cached answer or the text to parse)
-    type Want = (String, std::time::SystemTime, usize, Result<Arc<Value>, String>);
+    type Want = (
+        String,
+        std::time::SystemTime,
+        usize,
+        Result<Arc<Value>, String>,
+    );
     let want = |p: &VaultPage| -> Want {
         let len = p.raw.len();
         let got = cache
@@ -558,13 +568,22 @@ pub fn metadata_of(
             .collect();
         pages.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
         let more = pages.len() > limit;
-        (pages.into_iter().take(limit).map(want).collect::<Vec<_>>(), more)
+        (
+            pages.into_iter().take(limit).map(want).collect::<Vec<_>>(),
+            more,
+        )
     });
     let notes: Vec<Arc<Value>> = page.into_iter().map(parse).collect();
     let next = more
-        .then(|| notes.last().and_then(|n| n["path"].as_str().map(str::to_owned)))
+        .then(|| {
+            notes
+                .last()
+                .and_then(|n| n["path"].as_str().map(str::to_owned))
+        })
         .flatten();
-    Ok(json!({ "notes": notes.iter().map(|n| n.as_ref().clone()).collect::<Vec<_>>(), "next": next }))
+    Ok(
+        json!({ "notes": notes.iter().map(|n| n.as_ref().clone()).collect::<Vec<_>>(), "next": next }),
+    )
 }
 
 fn search(vault: &Vault, query: &str, limit: usize) -> Value {

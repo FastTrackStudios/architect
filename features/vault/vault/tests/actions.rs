@@ -186,7 +186,10 @@ fn a_notes_metadata_reads_its_headings_tasks_blocks_and_fields() {
     assert_eq!(m["fields"][0]["key"], "owner", "{m}");
     assert_eq!(m["fields"][1]["value"], "2026-11-20", "{m}");
     // A second read is the same (from the cache), and a change is seen.
-    assert_eq!(run(&list, "VAULT_METADATA", r#"{"path":"Notes/Tasks.md"}"#), m);
+    assert_eq!(
+        run(&list, "VAULT_METADATA", r#"{"path":"Notes/Tasks.md"}"#),
+        m
+    );
     std::fs::write(tmp.path().join("Notes/Tasks.md"), "# Changed\n").unwrap();
     run(&list, "VAULT_RELOAD", "");
     let changed = run(&list, "VAULT_METADATA", r#"{"path":"Notes/Tasks.md"}"#);

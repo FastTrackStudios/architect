@@ -286,7 +286,10 @@ fn heading(line: &str) -> Option<(u8, &str)> {
     if !(rest.is_empty() || rest.starts_with([' ', '\t'])) {
         return None;
     }
-    Some((u8::try_from(hashes).ok()?, rest.trim().trim_end_matches('#').trim_end()))
+    Some((
+        u8::try_from(hashes).ok()?,
+        rest.trim().trim_end_matches('#').trim_end(),
+    ))
 }
 
 struct Item<'a> {
@@ -315,10 +318,7 @@ fn list_item(line: &str) -> Option<Item<'_>> {
             return None;
         }
         let r = &rest[digits..];
-        (
-            true,
-            r.strip_prefix(". ").or_else(|| r.strip_prefix(") "))?,
-        )
+        (true, r.strip_prefix(". ").or_else(|| r.strip_prefix(") "))?)
     };
     let mut task = None;
     let mut text = after;
@@ -380,8 +380,7 @@ fn fields_in(text: &str, line: usize, out: &mut Vec<MetaField>) {
 fn is_key(key: &str) -> bool {
     let k = key.trim();
     !k.is_empty()
-        && k
-            .chars()
+        && k.chars()
             .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'))
 }
 
@@ -398,8 +397,16 @@ mod tests {
         assert_eq!(
             m.headings,
             [
-                MetaHeading { level: 1, text: "Plan".into(), line: 4 },
-                MetaHeading { level: 2, text: "Today".into(), line: 7 },
+                MetaHeading {
+                    level: 1,
+                    text: "Plan".into(),
+                    line: 4
+                },
+                MetaHeading {
+                    level: 2,
+                    text: "Today".into(),
+                    line: 7
+                },
             ]
         );
         let items = &m.list_items;
@@ -416,7 +423,10 @@ mod tests {
         assert_eq!((items[3].depth, items[3].parent), (0, None));
         assert_eq!(m.tasks().count(), 2);
         assert_eq!(
-            m.blocks.iter().map(|b| (b.id.as_str(), b.line)).collect::<Vec<_>>(),
+            m.blocks
+                .iter()
+                .map(|b| (b.id.as_str(), b.line))
+                .collect::<Vec<_>>(),
             [("top", 4), ("call", 8), ("here", 17)]
         );
         assert_eq!(
