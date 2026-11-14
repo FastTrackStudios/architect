@@ -218,8 +218,7 @@ impl HostUi for WindowUi {
     }
 
     fn pick(&self, from: &Asker, pick: Pick) -> Asked<Option<Vec<String>>> {
-        let _ = from;
-        native_pick(pick)
+        native_pick(&from.id, pick)
     }
 
     fn prompt(&self, from: &Asker, prompt: Prompt) -> Asked<Option<Value>> {
@@ -244,8 +243,9 @@ impl HostUi for WindowUi {
     feature = "pickers",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
-fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
+fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
     use crate::hostcall::PickKind;
+    let _ = owner;
     let (tx, rx) = oneshot::channel();
     std::thread::spawn(move || {
         let mut dialog = rfd::AsyncFileDialog::new();
@@ -286,8 +286,8 @@ fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
 /// `UIKit`'s pickers: the document picker (files, folders, a save as a
 /// folder and a name) and the photo picker.
 #[cfg(all(feature = "pickers", target_os = "ios"))]
-fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
-    crate::pickers_ios::pick(pick)
+fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
+    crate::pickers_ios::pick(owner, pick)
 }
 
 #[cfg(not(all(
@@ -299,8 +299,8 @@ fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
         target_os = "ios"
     )
 )))]
-fn native_pick(pick: Pick) -> Asked<Option<Vec<String>>> {
-    let _ = pick;
+fn native_pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
+    let _ = (owner, pick);
     Box::pin(async { Err(crate::hostui::unsupported("file pickers on this platform")) })
 }
 

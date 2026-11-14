@@ -184,6 +184,9 @@ impl Services {
             editors.withdraw(id);
         }
         lock(&self.picked).remove(id);
+        // The folders it was given on iOS are closed again.
+        #[cfg(all(feature = "pickers", target_os = "ios"))]
+        crate::pickers_ios::stop_scopes(id);
         #[cfg(feature = "net")]
         self.net.forget(id);
         self.ports.forget(id);

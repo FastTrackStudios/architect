@@ -48,14 +48,15 @@ type Picked = Result<Option<Vec<String>>, String>;
 type Reply = oneshot::Sender<Picked>;
 
 /// The person's pick, asked on the main thread.
-pub fn pick(pick: Pick) -> Asked<Option<Vec<String>>> {
+pub fn pick(owner: &str, pick: Pick) -> Asked<Option<Vec<String>>> {
+    let owner = owner.to_owned();
     let (tx, rx) = oneshot::channel::<Picked>();
     dispatch2::DispatchQueue::main().exec_async(move || {
         let Some(mtm) = MainThreadMarker::new() else {
             let _ = tx.send(Err("not on the main thread".to_owned()));
             return;
         };
-        if let Err((tx, why)) = present(mtm, &pick, tx) {
+        if let Err((tx, why)) = present(mtm, &pick, &owner, tx) {
             let _ = tx.send(Err(why));
         }
     });
@@ -84,7 +85,12 @@ fn top(mtm: MainThreadMarker) -> Option<Retained<UIViewController>> {
     Some(top)
 }
 
-fn present(mtm: MainThreadMarker, pick: &Pick, reply: Reply) -> Result<(), (Reply, String)> {
+fn present(
+    mtm: MainThreadMarker,
+    pick: &Pick,
+    owner: &str,
+    reply: Reply,
+) -> Result<(), (Reply, String)> {
     let Some(over) = top(mtm) else {
         return Err((
             reply,
@@ -94,7 +100,7 @@ fn present(mtm: MainThreadMarker, pick: &Pick, reply: Reply) -> Result<(), (Repl
     if pick.kind.photos() {
         present_photos(mtm, &over, pick, reply)
     } else {
-        present_documents(mtm, &over, pick, reply);
+        present_documents(mtm, &over, pick, owner, reply);
         Ok(())
     }
 }
@@ -116,6 +122,50 @@ fn release(delegate: &NSObject) {
         k.borrow_mut()
             .retain(|d| !std::ptr::eq(&raw const **d, delegate));
     });
+}
+
+// --- Security scopes ---------------------------------------------------------
+
+/// A folder's URL whose security scope is open for an extension.
+struct Scope {
+    owner: String,
+    url: Retained<NSURL>,
+}
+
+// SAFETY: NSURL is immutable and thread-safe; it is only messaged to stop
+// its scope, which may be done from any thread.
+unsafe impl Send for Scope {}
+
+fn scopes() -> &'static Mutex<Vec<Scope>> {
+    static SCOPES: std::sync::OnceLock<Mutex<Vec<Scope>>> = std::sync::OnceLock::new();
+    SCOPES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn keep_scope(owner: &str, url: &NSURL) {
+    scopes()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push(Scope {
+            owner: owner.to_owned(),
+            url: url.retain(),
+        });
+}
+
+/// Stops the security scopes opened for extension `owner`'s picks: it
+/// unloaded, and the folders it was given are closed again.
+pub fn stop_scopes(owner: &str) {
+    let gone: Vec<Scope> = {
+        let mut all = scopes().lock().unwrap_or_else(PoisonError::into_inner);
+        let (gone, kept) = std::mem::take(&mut *all)
+            .into_iter()
+            .partition(|s| s.owner == owner);
+        *all = kept;
+        gone
+    };
+    for s in gone {
+        // SAFETY: a URL whose scope this module opened.
+        unsafe { s.url.stopAccessingSecurityScopedResource() };
+    }
 }
 
 // --- The document picker ---------------------------------------------------
@@ -144,6 +194,8 @@ struct DocumentIvars {
     reply: RefCell<Option<Reply>>,
     kind: PickKind,
     name: Option<String>,
+    /// The extension asking (its scopes stop when it unloads).
+    owner: String,
 }
 
 define_class!(
@@ -172,11 +224,12 @@ define_class!(
 );
 
 impl DocumentDelegate {
-    fn new(mtm: MainThreadMarker, pick: &Pick, reply: Reply) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, pick: &Pick, owner: &str, reply: Reply) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(DocumentIvars {
             reply: RefCell::new(Some(reply)),
             kind: pick.kind,
             name: pick.name.clone(),
+            owner: owner.to_owned(),
         });
         // SAFETY: NSObject's `init`.
         unsafe { msg_send![super(this), init] }
@@ -188,17 +241,22 @@ impl DocumentDelegate {
             .filter_map(|url| {
                 if matches!(kind, PickKind::Folder | PickKind::Save) {
                     // Outside the app's container: its scope opened, and
-                    // kept for the run (the extension reads and writes in
-                    // it after this answers).
+                    // kept until the extension unloads ([`stop_scopes`]):
+                    // it reads and writes in it after this answers.
                     // SAFETY: a file URL the picker handed the app.
-                    let _ = unsafe { url.startAccessingSecurityScopedResource() };
+                    if unsafe { url.startAccessingSecurityScopedResource() } {
+                        keep_scope(&self.ivars().owner, &url);
+                    }
                 }
                 let path = PathBuf::from(url.path()?.to_string());
                 Some(match kind {
-                    PickKind::Save => path
-                        .join(self.ivars().name.as_deref().unwrap_or("Untitled"))
-                        .display()
-                        .to_string(),
+                    // One plain file name in the folder picked: an
+                    // extension's `name` never leaves it.
+                    PickKind::Save => {
+                        crate::hostcall::save_path(&path, self.ivars().name.as_deref())
+                            .display()
+                            .to_string()
+                    }
                     _ => path.display().to_string(),
                 })
             })
@@ -213,7 +271,13 @@ impl DocumentDelegate {
     }
 }
 
-fn present_documents(mtm: MainThreadMarker, over: &UIViewController, pick: &Pick, reply: Reply) {
+fn present_documents(
+    mtm: MainThreadMarker,
+    over: &UIViewController,
+    pick: &Pick,
+    owner: &str,
+    reply: Reply,
+) {
     let types = content_types(pick);
     // A file is the app's own copy; a folder (and a save's) the person's,
     // reached through its scope.
@@ -228,7 +292,7 @@ fn present_documents(mtm: MainThreadMarker, over: &UIViewController, pick: &Pick
         let url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(folder), true);
         picker.setDirectoryURL(Some(&url));
     }
-    let delegate = DocumentDelegate::new(mtm, pick, reply);
+    let delegate = DocumentDelegate::new(mtm, pick, owner, reply);
     picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
     keep(&delegate);
     over.presentViewController_animated_completion(&picker, true, None);
@@ -241,21 +305,31 @@ fn picks_dir() -> PathBuf {
     std::env::temp_dir().join("architect-picks")
 }
 
-/// Copies the provider's file (`from`, gone once its handler returns)
-/// into [`picks_dir`], keeping its extension.
+/// The provider's image (`from`, gone once its handler returns) as a
+/// plain JPEG in [`picks_dir`].
 fn copy_in(from: &Path) -> Option<String> {
-    let dir = picks_dir();
-    std::fs::create_dir_all(&dir).ok()?;
-    let ext = from.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
+    let image = objc2_ui_kit::UIImage::imageWithContentsOfFile(&NSString::from_str(
+        &from.display().to_string(),
+    ))?;
+    plain_jpeg(&image, &picks_dir())
+}
+
+/// `image` written as a JPEG in `dir`, its path: the pixels alone, drawn
+/// again, so none of the original's metadata goes with it (EXIF, the
+/// camera, the place it was taken: GPS). An extension is handed only
+/// these copies (`pick {kind: "photo"}`, `photo_file`).
+pub fn plain_jpeg(image: &objc2_ui_kit::UIImage, dir: &Path) -> Option<String> {
+    std::fs::create_dir_all(dir).ok()?;
+    let data = image.jpeg_representation(0.9)?;
     let name = format!(
-        "{}-{}.{ext}",
+        "{}-{}.jpg",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos()),
         std::process::id()
     );
     let to = dir.join(name);
-    std::fs::copy(from, &to).ok()?;
+    std::fs::write(&to, data.to_vec()).ok()?;
     Some(to.display().to_string())
 }
 

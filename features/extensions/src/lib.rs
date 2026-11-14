@@ -114,7 +114,7 @@ pub mod manager;
 #[cfg(feature = "host")]
 pub mod net;
 #[cfg(all(feature = "pickers", target_os = "ios"))]
-mod pickers_ios;
+pub(crate) mod pickers_ios;
 // Language servers through the host (#512): `Host::open_code`, the
 // `EDITOR_*` actions. Native only.
 #[cfg(all(feature = "lsp", not(target_family = "wasm")))]

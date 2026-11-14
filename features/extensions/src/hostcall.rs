@@ -507,6 +507,40 @@ pub fn image_filter() -> FileFilter {
     }
 }
 
+/// The file name a save picked as a folder writes: `name` when it is one
+/// plain file name, else `Untitled`.
+///
+/// A save's `name` comes from the extension, so it is never a path: not
+/// absolute, no `/` or `\\`, not empty, `.` or `..` (each would put the
+/// file outside the folder the person picked).
+#[must_use]
+pub fn save_name(name: Option<&str>) -> &str {
+    match name.map(str::trim) {
+        Some(n)
+            if !n.is_empty()
+                && n != "."
+                && n != ".."
+                && !n.contains(['/', '\\', '\0'])
+                && !std::path::Path::new(n).is_absolute() =>
+        {
+            n
+        }
+        _ => "Untitled",
+    }
+}
+
+/// Where a save picked as `folder` writes ([`save_name`] in it): always a
+/// file directly in `folder`.
+#[must_use]
+pub fn save_path(folder: &std::path::Path, name: Option<&str>) -> std::path::PathBuf {
+    let path = folder.join(save_name(name));
+    if path.parent() == Some(folder) {
+        path
+    } else {
+        folder.join("Untitled")
+    }
+}
+
 /// Files of one kind a picker shows (`Images`, `["png", "jpg"]`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileFilter {

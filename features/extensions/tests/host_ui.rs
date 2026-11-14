@@ -283,6 +283,35 @@ fn a_photo_picked_is_one_it_may_read_and_not_write() {
 }
 
 #[test]
+fn a_save_name_never_leaves_the_folder_picked() {
+    use architect_extensions::hostcall::{save_name, save_path};
+    let folder = std::path::Path::new("/picked/Finance");
+    // A plain name is written in the folder.
+    assert_eq!(
+        save_path(folder, Some("export.csv")),
+        folder.join("export.csv")
+    );
+    // An absolute name would replace the folder (`PathBuf::join`); a
+    // slash, `..` or `.` would walk out of it; none is a name.
+    for name in [
+        "/etc/passwd",
+        "/Users/me/vault/Notes/a.md",
+        "../config.toml",
+        "sub/a.md",
+        "..",
+        ".",
+        "",
+        "  ",
+        "a\\b.md",
+    ] {
+        let path = save_path(folder, Some(name));
+        assert_eq!(path, folder.join("Untitled"), "{name:?}");
+        assert_eq!(path.parent(), Some(folder), "{name:?}");
+    }
+    assert_eq!(save_name(None), "Untitled");
+}
+
+#[test]
 fn every_interface_call_is_refused_outside_its_capabilities() {
     let tmp = tempfile::tempdir().unwrap();
     let ui = FakeUi::new();

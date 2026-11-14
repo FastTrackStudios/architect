@@ -3126,8 +3126,12 @@ app's own copy and a folder through its security scope (kept for the
 run); a save is a folder picked and the suggested `name` in it (iOS saves
 by exporting a file that exists); `photo` and `photos` are
 `PHPickerViewController`, which runs outside the app, so no photo-library
-permission is asked, and each image picked is copied to the app's
-temporary folder and that copy's path answered.
+permission is asked, and each image picked is written to the app's
+temporary folder as a plain JPEG, without its metadata (EXIF, the camera,
+GPS), and that copy's path answered. A save's `name` is one plain file
+name in the folder picked (`features/extensions/src/hostcall.rs`
+`save_path`: an absolute name, a slash, `.` or `..` is `Untitled`), and
+the folder's security scope is closed when the extension unloads.
 Every runtime makes the same calls: Luau's `host.notify`,
 `host.clipboard_read`, `host.pick`, `host.prompt`, `host.menu`,
 `host.decorate` (`features/extensions/src/luau_host.rs`; a cancel is
