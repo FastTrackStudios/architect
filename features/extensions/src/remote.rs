@@ -80,6 +80,13 @@ pub const MEASURE_EVERY: Duration = Duration::from_millis(50);
 /// measure it.
 const FIT_CSS: &str = "html, body { margin: 0 !important; height: auto !important; }                        main { min-height: 0 !important; height: auto !important; display: flow-root !important; }";
 
+/// What a view's sub-document starts from: what a linked view inherits
+/// from the pane it is in (`architect_workspace`'s host: no margin, the
+/// pane's height, the theme's ink and font at 13px), in the theme's
+/// variables (`set_theme_css`). Without it a view that sets no colour of
+/// its own draws black in the user agent's serif on a dark theme.
+const BASE_CSS: &str = "html, body { margin: 0; padding: 0; }                         html, body, main { height: 100%; }                         body { color: var(--ink, var(--foreground)); font-size: 13px;                         font-family: var(--font, var(--default-font-family, var(--font-sans, system-ui, sans-serif))); }";
+
 /// The attribute that names a node's Dioxus element id, as Dioxus's own
 /// renderer marks it.
 const DIOXUS_ID: &str = "data-dioxus-id";
@@ -138,8 +145,13 @@ impl RemoteDocument {
         m.append_children(html, &[head, body]);
         let root = m.create_element(qual("main", None), Vec::new());
         m.append_children(body, &[root]);
-        // The host's theme (`set_theme_css`): the view's own sheets come
-        // after it, so a view still wins where it sets a colour itself.
+        // What a linked view inherits from its pane (`BASE_CSS`), then
+        // the host's theme (`set_theme_css`): the view's own sheets come
+        // after both, so a view still wins where it sets a colour itself.
+        let base = m.create_element(qual("style", None), Vec::new());
+        let base_text = m.create_text_node(BASE_CSS);
+        m.append_children(base, &[base_text]);
+        m.append_children(head, &[base]);
         let style = m.create_element(qual("style", None), Vec::new());
         let theme = m.create_text_node("");
         m.append_children(style, &[theme]);
@@ -339,6 +351,33 @@ impl RemoteDocument {
         }
     }
 
+    /// Whether `node` is a `<style>` element.
+    fn is_style(&self, node: NodeId) -> bool {
+        self.doc
+            .get_node(node)
+            .and_then(Node::element_data)
+            .is_some_and(|e| &*e.name.local == "style")
+    }
+
+    /// A `<style>`'s raw CSS (`dangerous_inner_html`, as a view writes
+    /// `style { dangerous_inner_html: CSS }`): its one text child, as
+    /// `style { "{CSS}" }` would make it. It is the view's own sheet in its
+    /// own document, never markup.
+    fn set_style_text(&mut self, node: NodeId, css: &str) {
+        let kids = self
+            .doc
+            .get_node(node)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+        for kid in kids {
+            self.forget(kid);
+        }
+        let mut m = self.doc.mutate();
+        m.remove_and_drop_all_children(node);
+        let text = m.create_text_node(css);
+        m.append_children(node, &[text]);
+    }
+
     /// Takes `node` (not the root) out of the document, its ids with it.
     fn drop_node(&mut self, node: NodeId) -> Result<(), String> {
         if self.within(self.root, node) {
@@ -436,6 +475,10 @@ impl RemoteDocument {
                     Value::Int(i) => Some(i.to_string()),
                     Value::Bool(b) => Some(b.to_string()),
                 };
+                if name == "dangerous_inner_html" && self.is_style(node) {
+                    self.set_style_text(node, value.as_deref().unwrap_or_default());
+                    return Ok(());
+                }
                 let mut m = self.doc.mutate();
                 set_attr(&mut m, node, &name, namespace.as_deref(), value.as_deref())?;
             }
@@ -916,8 +959,15 @@ async fn next_frame(
 /// busy.
 #[component]
 pub fn RemoteView(processes: Processes, extension: String, view: String) -> Element {
+    // Keyed by what it shows (a one-item list: a key on a lone node does
+    // not remount it): a pane that goes on to another process view (one
+    // tab replaced by the next in the same group) mounts that view, not
+    // the session the first one opened.
+    let key = format!("{extension}/{view}");
     rsx! {
-        Mount { processes, extension, view, input: None, max_height: None }
+        for key in [key] {
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: None, max_height: None }
+        }
     }
 }
 
@@ -933,8 +983,11 @@ pub fn RemoteEmbed(
     input: Signal<crate::contrib::EmbedInput>,
     #[props(default = crate::embeds::DEFAULT_MAX_HEIGHT)] max_height: u32,
 ) -> Element {
+    let key = format!("{extension}/{view}");
     rsx! {
-        Mount { processes, extension, view, input: Some(input), max_height: Some(max_height) }
+        for key in [key] {
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(input), max_height: Some(max_height) }
+        }
     }
 }
 
