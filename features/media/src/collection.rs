@@ -14,7 +14,10 @@
 //! `sets`/`songs` is what Studio's setlists write (studio#406);
 //! `sections`/`items` the generic names. With sections, the flat list's
 //! links that no section names follow them, unnamed (Studio writes the
-//! flat list as every section's songs together, so nothing repeats).
+//! flat list as every section's songs together, so nothing repeats): a
+//! flat link to a note a section already lists, however it is written,
+//! is left out once resolved ([`Collection::resolve`]). A list is read up
+//! to [`MAX_ROWS`] links.
 
 use serde_json::{Map, Value};
 
@@ -25,6 +28,9 @@ use crate::link;
 pub const SECTIONS: [&str; 2] = ["sets", "sections"];
 /// The fields that hold a flat list (and a section's list).
 pub const ITEMS: [&str; 2] = ["songs", "items"];
+
+/// The most links a collection is read with: the rest are cut.
+pub const MAX_ROWS: usize = 1_000;
 
 /// A collection's list, as its frontmatter writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -38,6 +44,9 @@ pub struct Collection {
 pub struct Section {
     pub name: Option<String>,
     pub links: Vec<String>,
+    /// The flat list's links that no section names, after the sections: a
+    /// link here to a note a section lists is left out once resolved.
+    pub rest: bool,
 }
 
 impl Collection {
@@ -67,7 +76,13 @@ impl Collection {
             sections.push(Section {
                 name: None,
                 links: rest,
+                rest: !sections.is_empty(),
             });
+        }
+        let mut room = MAX_ROWS;
+        for s in &mut sections {
+            s.links.truncate(room);
+            room = room.saturating_sub(s.links.len());
         }
         sections.retain(|s| !s.links.is_empty());
         (!sections.is_empty()).then_some(Self { sections })
@@ -105,23 +120,32 @@ impl Collection {
         I: IntoIterator<Item = &'a str>,
         I::IntoIter: Clone,
     {
-        let notes = notes.into_iter();
+        let index = link::Index::new(notes);
         let folder = link::folder_of(from);
+        let mut listed = std::collections::HashSet::new();
         let sections = self
             .sections
             .iter()
             .map(|s| {
-                let entries = s
+                let entries: Vec<Entry> = s
                     .links
                     .iter()
                     .map(|l| Entry {
                         link: l.clone(),
                         label: link::alias(l),
-                        path: link::resolve(l, folder, notes.clone()).map(str::to_owned),
+                        path: index.resolve(l, folder).map(str::to_owned),
                     })
+                    // The flat list's rest: a note a section lists, by
+                    // its path however the link is written, is not
+                    // listed again.
+                    .filter(|e| !(s.rest && e.path.as_ref().is_some_and(|p| listed.contains(p))))
                     .collect();
+                if !s.rest {
+                    listed.extend(entries.iter().filter_map(|e| e.path.clone()));
+                }
                 (s.name.clone(), entries)
             })
+            .filter(|(_, entries)| !entries.is_empty())
             .collect();
         Resolved {
             from: from.to_owned(),
@@ -154,10 +178,12 @@ fn section(v: &Value) -> Option<Section> {
                 .find_map(|k| o.get(*k))
                 .map(links)
                 .unwrap_or_default(),
+            rest: false,
         }),
         Value::Array(_) => Some(Section {
             name: None,
             links: links(v),
+            rest: false,
         }),
         _ => None,
     }
@@ -374,6 +400,41 @@ mod tests {
         assert_eq!(q.len(), 1);
         assert_eq!(q[0]["media"], "Rec/A.mp3");
         assert_eq!(q[0]["subtitle"], "X");
+    }
+
+    #[test]
+    fn a_flat_link_to_a_listed_note_is_left_out_however_it_is_written() {
+        // The flat list names A by its name alone, the set by its path:
+        // one note, listed once; E is the flat list's own.
+        let c = Collection::read(&front::fields(
+            "---\nsets:\n  - name: One\n    songs: [\"[[Songs/A/A|A]]\"]\nsongs:\n  - \"[[A]]\"\n  - \"[[E]]\"\n---\n",
+        ))
+        .unwrap();
+        let r = c.resolve("Setlists/M.md", ["Songs/A/A.md", "Songs/E/E.md"]);
+        let paths: Vec<Option<&str>> = r
+            .sections
+            .iter()
+            .flat_map(|(_, e)| e.iter().map(|e| e.path.as_deref()))
+            .collect();
+        assert_eq!(paths, vec![Some("Songs/A/A.md"), Some("Songs/E/E.md")]);
+        // A song a set lists twice (a reprise) stays twice.
+        let twice = Collection::read(&front::fields(
+            "---\nsets:\n  - name: One\n    songs: [\"[[A]]\", \"[[Songs/A/A]]\"]\n---\n",
+        ))
+        .unwrap();
+        assert_eq!(twice.resolve("M.md", ["Songs/A/A.md"]).sections[0].1.len(), 2);
+    }
+
+    #[test]
+    fn a_list_is_read_up_to_its_cap() {
+        let many: Vec<String> = (0..MAX_ROWS + 50).map(|i| format!("[[n{i}]]")).collect();
+        let mut fields = Map::new();
+        let first = many.get(..600).unwrap_or_default();
+        fields.insert("sets".into(), serde_json::json!([{"name": "A", "songs": first}]));
+        fields.insert("songs".into(), serde_json::json!(many));
+        let c = Collection::read(&fields).unwrap();
+        assert_eq!(c.len(), MAX_ROWS);
+        assert_eq!(c.sections[0].links.len(), 600);
     }
 
     #[test]

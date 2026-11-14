@@ -104,15 +104,69 @@ where
     {
         return Some(p);
     }
-    let ends = |p: &&str| {
-        names
-            .iter()
-            .any(|n| p.strip_suffix(n.as_str()).is_some_and(|b| b.ends_with('/')))
-    };
+    let ends = |p: &&str| ends_in(p, &names);
     let mut found = paths.filter(ends);
     match (found.next(), found.next()) {
         (Some(one), None) => Some(one),
         _ => None,
+    }
+}
+
+/// Whether `path` ends in one of `names` after a `/`.
+fn ends_in(path: &str, names: &[String; 2]) -> bool {
+    names
+        .iter()
+        .any(|n| path.strip_suffix(n.as_str()).is_some_and(|b| b.ends_with('/')))
+}
+
+/// The last segment of a path.
+fn file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// `paths` indexed for many links: [`resolve`]'s answer for each, without
+/// a walk of every path per link (a long list in a large vault).
+#[derive(Debug, Clone, Default)]
+pub struct Index<'a> {
+    exact: std::collections::HashSet<&'a str>,
+    by_name: std::collections::HashMap<&'a str, Vec<&'a str>>,
+}
+
+impl<'a> Index<'a> {
+    /// The index of `paths`.
+    pub fn new(paths: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut index = Self::default();
+        for p in paths {
+            if index.exact.insert(p) {
+                index.by_name.entry(file_name(p)).or_default().push(p);
+            }
+        }
+        index
+    }
+
+    /// [`resolve`] of `link`, written in a note in `folder`, among the
+    /// indexed paths.
+    #[must_use]
+    pub fn resolve(&self, link: &str, folder: &str) -> Option<&'a str> {
+        let want = target(link)?;
+        let names = [want.clone(), format!("{want}.md")];
+        let find = |name: &str| self.exact.get(name).copied();
+        if let Some(p) = names.iter().find_map(|n| find(n)) {
+            return Some(p);
+        }
+        if !folder.is_empty()
+            && let Some(p) = names.iter().find_map(|n| find(&format!("{folder}/{n}")))
+        {
+            return Some(p);
+        }
+        let mut found = names
+            .iter()
+            .filter_map(|n| self.by_name.get(file_name(n)))
+            .flatten()
+            .copied()
+            .filter(|p| ends_in(p, &names));
+        let one = found.next()?;
+        found.all(|p| p == one).then_some(one)
     }
 }
 
@@ -183,6 +237,24 @@ mod tests {
         // Beside the note first.
         assert_eq!(r("[[Noel]]", "Other"), Some("Other/Noel.md"));
         assert_eq!(r("[[Missing]]", ""), None);
+    }
+
+    #[test]
+    fn an_index_resolves_as_a_walk_does() {
+        let index = Index::new(PATHS.iter().copied());
+        for (link, folder) in [
+            ("[[Songs/Joy/Joy|Joy]]", ""),
+            ("[[Joy]]", "Setlists"),
+            ("[[cover.png]]", "Songs/Noel"),
+            ("[[Noel/Noel]]", ""),
+            ("[[Noel]]", "Setlists"),
+            ("[[Noel]]", "Other"),
+            ("[[Missing]]", ""),
+            ("Recordings/Joy.mp3", ""),
+            ("[[../x]]", ""),
+        ] {
+            assert_eq!(index.resolve(link, folder), r(link, folder), "{link} in {folder}");
+        }
     }
 
     #[test]

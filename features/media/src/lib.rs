@@ -3,7 +3,7 @@
 //!
 //! - A **media item** ([`Item`]) is a note with a `title`, a `subtitle`
 //!   (or `artist`), a `duration`, its media (`media`, or `recording`: an
-//!   audio or video file of the vault) and its `cover` (or `art`).
+//!   audio or video file of the vault) and its `art` (or `cover`).
 //! - A **collection** ([`Collection`]) is a note listing items in order,
 //!   in named sections: `sets: [{name, songs: [links]}]` and/or a flat
 //!   `songs: [links]` (the shape Studio's setlists write, studio#406), or

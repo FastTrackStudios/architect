@@ -12,7 +12,8 @@ extension's audio or video work builds on, with nothing music-specific in it.
 - A **media item** is a note that names something to play: its `title`, its
   `subtitle` (or `artist`), its `duration` (seconds, or `m:ss`), its media
   (`media`, or `recording`: an audio or video file in the vault) and its
-  `cover` (or `art`).
+  `art` (or `cover`). Of each pair, the first that names a vault file wins: a
+  URL in `media` leaves `recording` to play.
 - A **collection** is a note that lists items in order, in named sections.
   Any note carrying the fields below is one, whatever its `type`;
   `type: playlist` is the generic name.
