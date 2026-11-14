@@ -1,0 +1,7 @@
+<!doctype html>
+<!-- Where the frame navigated to: it reports whether it was handed a port. -->
+<meta charset="utf-8" />
+<script>
+  addEventListener('message', (e) => { if (e.ports && e.ports.length) fetch('/got-port').catch(() => {}); });
+  fetch('/outside-loaded').catch(() => {});
+</script>

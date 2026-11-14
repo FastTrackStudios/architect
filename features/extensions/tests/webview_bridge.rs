@@ -241,3 +241,94 @@ fn a_web_view_needs_the_kind_and_its_src() {
     let err = Package::embedded(&no_src, &[]).map(|_| ()).unwrap_err();
     assert!(err.to_string().contains("src"), "{err}");
 }
+
+#[test]
+fn a_secret_set_is_not_overwritten_and_a_long_one_is_refused() {
+    let host = host();
+    load(&host, "");
+    let (b, seen) = bridge(&host);
+    let first = call(
+        &b,
+        &seen,
+        1,
+        &json!({"op": "store_secret", "name": "token", "value": "one"}),
+    );
+    assert_eq!(first["ok"], true, "{first}");
+    // The person's (or the first) value stays: a view cannot replace it.
+    let again = call(
+        &b,
+        &seen,
+        2,
+        &json!({"op": "store_secret", "name": "token", "value": "two"}),
+    );
+    assert_eq!(again["error"]["kind"], "refused", "{again}");
+    let fresh = fresh_host();
+    let (b, seen) = bridge(&fresh);
+    let long = "x".repeat(architect_extensions::hostapi::MAX_SECRET + 1);
+    let too_long = call(
+        &b,
+        &seen,
+        3,
+        &json!({"op": "store_secret", "name": "token", "value": long}),
+    );
+    assert_eq!(too_long["error"]["kind"], "refused", "{too_long}");
+}
+
+fn fresh_host() -> Host {
+    let h = host();
+    load(&h, "");
+    h
+}
+
+#[test]
+fn a_flood_of_calls_is_refused_past_its_budget() {
+    let host = host();
+    load(&host, "");
+    let (b, seen) = bridge(&host);
+    let mut work = 0;
+    for id in 0..1500_u64 {
+        let text = json!({"t": "call", "id": id, "req": {"op": "data", "key": "k"}}).to_string();
+        if b.receive(&text).is_some() {
+            work += 1;
+        }
+    }
+    let refused = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|m| matches!(m, Outbound::Answer { answer, .. } if answer.to_string().contains("faster than the bridge allows")))
+        .count();
+    assert!(
+        refused >= 400,
+        "only {refused} refused of 1500 ({work} accepted)"
+    );
+    assert!(work <= 1000, "{work} accepted past the burst");
+}
+
+#[test]
+fn a_paused_view_hears_nothing() {
+    let reader = host();
+    load(&reader, r#""documents""#);
+    let (b, seen) = bridge(&reader);
+    assert!(b.receive(r#"{"t":"listen","events":["doc.*"]}"#).is_none());
+    b.set_paused(true);
+    reader.raise_doc(&DocEvent::Saved {
+        path: "while-away.md".into(),
+    });
+    b.set_paused(false);
+    reader.raise_doc(&DocEvent::Saved {
+        path: "back.md".into(),
+    });
+    let heard: Vec<_> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|m| match m {
+            Outbound::Event { detail, .. } => {
+                Some(detail["path"].as_str().unwrap_or("").to_owned())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(heard, vec!["back.md".to_owned()]);
+}
