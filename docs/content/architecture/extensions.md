@@ -552,9 +552,18 @@ serves its Action List on a control socket as the desk lab does
 (`FTS_CONTROL_DIR` puts it in a folder on the Mac), so
 `scripts/mac-live-check.sh` drives it ([A live check on a Mac](@/guide/live-check-mac.md)).
 
-**Size.** Wasmtime and Cranelift add about 19 MB to a stripped
-`architect-desktop` built with the dev profile (opt-level 1): behind the
-feature, off by default.
+**Size and memory.** Wasmtime and Cranelift add about 19 MB to a
+stripped `architect-desktop` built with the dev profile (opt-level 1).
+In a stripped release build (#707, measured 2026-11-14 on x86-64 Linux
+with a probe that links Wasmtime 50.0.1 with this crate's features, an
+engine, WASI p2 on a linker and a component compile) they add 15.9 MB;
+with Pulley as the target, as on iOS, 16.0 MB. Making the engine and
+the linker costs about 6 MB resident either way. Each running
+instance's linear memory then reserves address space: 4 GiB and a guard
+under Cranelift (virtual, not resident), `PULLEY_RESERVATION` (64 MiB)
+under Pulley; what it touches is what it uses, up to its limit. The
+release builds have the feature on (`cargo xtask dist`); the crate
+keeps it off by default.
 
 ### On the web
 
