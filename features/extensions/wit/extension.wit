@@ -94,12 +94,66 @@ interface types {
         mods: mods,
     }
 
+    /// A pointer event: where, and which pointer (`wire::PointerData`).
+    record pointer-data {
+        at: pointer,
+        pointer-id: s32,
+        pointer-type: string,
+        is-primary: bool,
+        pressure: f32,
+        tilt-x: s32,
+        tilt-y: s32,
+        twist: s32,
+    }
+
+    /// One finger, in CSS pixels (`wire::TouchPoint`).
+    record touch-point {
+        id: s32,
+        client-x: f64,
+        client-y: f64,
+        page-x: f64,
+        page-y: f64,
+        screen-x: f64,
+        screen-y: f64,
+        force: f64,
+    }
+
+    /// A touch event (`wire::TouchData`).
+    record touch-data {
+        touches: list<touch-point>,
+        changed: list<touch-point>,
+        mods: mods,
+    }
+
+    /// A wheel's turn (`wire::WheelData`): 0 pixels, 1 lines.
+    record wheel-data {
+        at: pointer,
+        delta-x: f64,
+        delta-y: f64,
+        delta-mode: u8,
+    }
+
+    /// Where an element is scrolled to (`wire::ScrollData`).
+    record scroll-data {
+        top: f64,
+        left: f64,
+        width: s32,
+        height: s32,
+        client-width: s32,
+        client-height: s32,
+    }
+
     /// What an event carries (`wire::EventData`).
     variant event-data {
         mouse(pointer),
         key(key-data),
         form(string),
         focus,
+        pointer(pointer-data),
+        touch(touch-data),
+        wheel(wheel-data),
+        scroll(scroll-data),
+        composition(string),
     }
 
     /// An event on one of a view's elements (`wire::ViewEvent`).
