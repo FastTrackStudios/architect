@@ -310,3 +310,107 @@ fn without_the_capability_it_is_refused() {
     .unwrap();
     assert!(docs.list(None).unwrap().is_empty());
 }
+
+/// A hook on a document event's list topic is a document event: without
+/// `reads = ["documents"]` it is refused as it loads, and a subscribe for
+/// it is refused, so no path reaches an extension that may not read them.
+#[test]
+fn a_hook_on_changed_doc_without_reads_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let docs = lab_documents();
+    let (_list, host) = host(&docs, tmp.path());
+    let dir = tmp.path().join("sneaky");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("x.luau"), "return 1\n").unwrap();
+    std::fs::write(
+        dir.join("extension.toml"),
+        r#"
+id = "lab.sneaky"
+name = "Sneaky"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+
+[[hooks]]
+on = "changed:doc.saved"
+script = "x.luau"
+"#,
+    )
+    .unwrap();
+    // Refused as its manifest is read, before it could load.
+    let err = match Package::read(&dir) {
+        Err(e) => e.to_string(),
+        Ok(p) => host
+            .load(&p, Origin::Dev)
+            .expect_err("refused as it loads")
+            .to_string(),
+    };
+    assert!(err.contains("reads"), "{err}");
+
+    load(&host, &tmp.path().join("bare"), BARE);
+    let r = block_on(host.api("lab.bare").call(HostRequest::Subscribe(
+        architect_extensions::contrib::HookDecl {
+            on: "changed:doc.saved".to_owned(),
+            action: Some("LAB_BARE_X".to_owned()),
+            ..Default::default()
+        },
+    )));
+    assert_eq!(refused(r), "reads.documents");
+}
+
+/// The `data.json` under `root` (the one extension's).
+fn data_json(root: &Path) -> PathBuf {
+    std::fs::read_dir(root)
+        .unwrap()
+        .map(|e| e.unwrap().path().join("data.json"))
+        .find(|p| p.exists())
+        .expect("a data.json")
+}
+
+/// An extension's data: written whole and private (0600), every key of
+/// two runs at once kept, and a file that does not parse refused, never
+/// read as empty and written over.
+#[test]
+fn an_extensions_data_is_written_whole_privately_and_never_wiped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let docs = lab_documents();
+    let (_list, host) = host(&docs, tmp.path());
+    let api = host.api(TIDY);
+    let set = |k: &str, v: Value| {
+        block_on(api.call(HostRequest::SetData {
+            key: k.to_owned(),
+            value: Some(v),
+        }))
+    };
+    std::thread::scope(|s| {
+        for i in 0..8 {
+            let set = &set;
+            s.spawn(move || set(&format!("k{i}"), json!(i)).unwrap());
+        }
+    });
+    let file = data_json(&tmp.path().join("data"));
+    let kept: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(kept.as_object().map(serde_json::Map::len), Some(8), "{kept}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+    // No temporary file left beside it.
+    let beside: Vec<_> = std::fs::read_dir(file.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(beside, ["data.json"], "{beside:?}");
+
+    std::fs::write(&file, "{ not json").unwrap();
+    assert!(set("k9", json!(9)).is_err(), "refused, not written over");
+    assert!(
+        block_on(api.call(HostRequest::Data {
+            key: "k1".to_owned()
+        }))
+        .is_err()
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+}

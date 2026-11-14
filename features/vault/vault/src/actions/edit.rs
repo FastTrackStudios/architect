@@ -144,6 +144,16 @@ fn check_note_path(to: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `rel` below `root` not through a symlink (`vault_live::own`): a move,
+/// copy or trash never reaches out of the vault through a linked folder.
+fn own(root: &Path, rel: &str) -> Result<(), String> {
+    if vault_live::own::through_symlink(root, rel) {
+        Err(format!("{rel}: through a symlink, not the vault's own"))
+    } else {
+        Ok(())
+    }
+}
+
 impl OpenVault {
     /// A note's text as the vault holds it (what was last read or saved).
     #[must_use]
@@ -188,6 +198,33 @@ impl OpenVault {
         self.write()
             .save_page(path, text, &guard)
             .map_err(|e| e.to_string())
+    }
+
+    /// Writes `text` as the note at `path` only if it holds `expected`
+    /// now: the compare and the write under the vault's write lock, so a
+    /// save made between a caller's read and its write is never lost.
+    /// Whether it wrote (`true` too when the note already holds `text`).
+    ///
+    /// # Errors
+    ///
+    /// No such note, or the file cannot be written.
+    pub fn save_if(&self, path: &str, expected: &str, text: &str) -> Result<bool, String> {
+        let guard = Arc::clone(&self.guard);
+        let mut vault = self.write();
+        let now = vault
+            .page(path)
+            .map(|p| p.raw.clone())
+            .ok_or_else(|| format!("{path}: no such note"))?;
+        if now == text {
+            return Ok(true);
+        }
+        if now != expected {
+            return Ok(false);
+        }
+        let saved = vault.save_page(path, text, &guard);
+        drop(vault);
+        saved.map_err(|e| e.to_string())?;
+        Ok(true)
     }
 
     /// Makes a note at `path` holding `text`.
@@ -288,6 +325,7 @@ impl OpenVault {
         if bad {
             return Err(format!("{folder:?} is not a folder's path in the vault"));
         }
+        own(&self.root(), folder)?;
         std::fs::create_dir_all(self.root().join(folder)).map_err(|e| e.to_string())?;
         self.learn_folders(&format!("{folder}/x"));
         Ok(())
@@ -319,17 +357,23 @@ impl OpenVault {
             return Err(format!("{to:?} is not a path inside the vault"));
         }
         let root = self.root();
+        own(&root, from)?;
+        own(&root, to)?;
         let (src, dst) = (root.join(from), root.join(to));
         if !src.is_file() {
             return Err(format!("no file at {from}"));
         }
-        if dst.exists() {
+        if dst.symlink_metadata().is_ok() {
             return Err(format!("{to} is there already"));
         }
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
+        self.guard.mark(&src);
+        self.guard.mark(&dst);
         std::fs::rename(&src, &dst).map_err(|e| e.to_string())?;
+        self.guard.mark(&src);
+        self.guard.mark(&dst);
         self.refresh().map_err(|e| e.to_string())
     }
 
@@ -343,6 +387,8 @@ impl OpenVault {
     pub fn copy_file(&self, from: &str, to: &str) -> Result<Changes, String> {
         check_inside(to)?;
         let root = self.root();
+        own(&root, from)?;
+        own(&root, to)?;
         let (src, dst) = (root.join(from), root.join(to));
         if !src.is_file() {
             return Err(format!("no file at {from}"));
@@ -369,6 +415,8 @@ impl OpenVault {
         check_inside(from)?;
         check_inside(to)?;
         let root = self.root();
+        own(&root, from)?;
+        own(&root, to)?;
         let (src, dst) = (root.join(from), root.join(to));
         if !src.is_dir() {
             return Err(format!("no folder {from}"));
@@ -431,6 +479,8 @@ impl OpenVault {
         check_inside(from)?;
         check_inside(to)?;
         let root = self.root();
+        own(&root, from)?;
+        own(&root, to)?;
         let (src, dst) = (root.join(from), root.join(to));
         if !src.is_dir() {
             return Err(format!("no folder {from}"));
@@ -455,6 +505,7 @@ impl OpenVault {
     pub fn trash(&self, path: &str) -> Result<(Changes, String), String> {
         check_inside(path)?;
         let root = self.root();
+        own(&root, path)?;
         let src = root.join(path);
         if !src.exists() {
             return Err(format!("nothing at {path}"));
@@ -478,7 +529,10 @@ impl OpenVault {
             }
             n = n.saturating_add(1);
         };
+        // The app's own change: the watcher does not hear it again.
+        self.guard.mark(&src);
         std::fs::rename(&src, trash.join(&dst)).map_err(|e| e.to_string())?;
+        self.guard.mark(&src);
         let changes = self.refresh().map_err(|e| e.to_string())?;
         Ok((changes, format!(".trash/{dst}")))
     }
