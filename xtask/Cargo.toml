@@ -12,7 +12,10 @@ publish = false
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-toml.workspace = true
+# Keys keep their order in the source: `core sync` writes dist/standard from
+# the root's tables, and the result must not depend on which other crate in
+# the build happens to turn this feature on (CI builds xtask alone).
+toml = { workspace = true, features = ["preserve_order"] }
 guppy.workspace = true
 # ext-pack / ext-sign / ext-verify / ext-index: the `.archext` format, signing included.
 architect-extension-archive = { workspace = true, features = ["sign"] }
