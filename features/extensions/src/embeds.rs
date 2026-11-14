@@ -409,6 +409,8 @@ mod view {
 
     /// `spec` drawn, given `input`: a page's sub-document, a linked view in
     /// the host's document, or a process's; `plain` when none can be.
+    // `spec` is consumed only with feature `remote` (a process's embed).
+    #[allow(clippy::needless_pass_by_value)]
     fn draw(
         host: &crate::host::Host,
         spec: EmbedSpec,
