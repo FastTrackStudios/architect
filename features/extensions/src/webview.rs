@@ -92,8 +92,8 @@ impl Budget {
     pub fn take(&mut self, len: usize, now: std::time::Instant) -> bool {
         let dt = now.saturating_duration_since(self.at).as_secs_f64();
         self.at = now;
-        self.messages = (self.messages + dt * MESSAGES_PER_SECOND).min(MESSAGE_BURST);
-        self.bytes = (self.bytes + dt * BYTES_PER_SECOND).min(BYTE_BURST);
+        self.messages = dt.mul_add(MESSAGES_PER_SECOND, self.messages).min(MESSAGE_BURST);
+        self.bytes = dt.mul_add(BYTES_PER_SECOND, self.bytes).min(BYTE_BURST);
         #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
         let len = len as f64;
         if self.messages < 1.0 || self.bytes < len {
