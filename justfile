@@ -353,6 +353,13 @@ sandbox *ARGS:
     fi
     exec devenv shell -- cargo run -q -p architect-sandbox -- {{ARGS}}
 
+# The extension showcase (#710, docs/content/guide/showcase.md): the app on
+# a fresh scratch copy of apps/ui/showcase-vault, every example in
+# examples/showcase loaded as a development copy. `plain` runs Architect's
+# own app instead of the standard distribution; ARGS go to the app.
+showcase *ARGS:
+    bash scripts/showcase.sh {{ARGS}}
+
 # Every edit a run made is thrown away.
 # The scratch vault (`just sandbox`, `devenv up`), seeded again from apps/ui/demo-vault.
 vault-reset:
