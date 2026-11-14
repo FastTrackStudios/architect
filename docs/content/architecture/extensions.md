@@ -3876,6 +3876,96 @@ and granted), `features/extensions/tests/wasi.rs`
 `a_component_makes_edits_lists_and_reads_a_document` for the document
 imports), `features/pages/tests/net.rs` (a TSX and a Luau page).
 
+## Server-side parts on the node
+
+The org's node does sync, access control and only what truly needs a
+server (#710). Extension code runs on the person's device or in their
+browser, against their own copy of the vault. The one exception is a
+**node action** (#583): code that holds a secret the person's devices
+must never have, such as a bank-link token exchange that needs the
+client secret (Finance, #370).
+
+```toml
+[capabilities]
+hosts = ["sandbox.plaid.com"]
+
+[[secrets]]
+id = "client_secret"
+title = "Plaid secret"
+hosts = ["sandbox.plaid.com"]
+
+[[actions]]
+id = "LEDGER_EXCHANGE"
+name = "Link a bank"
+script = "node/exchange.luau"
+runs = "node"                    # the default is "app"
+secrets = ["client_secret"]      # why it needs a server: at least one
+```
+
+**The bar.** `Manifest::check` keeps it high. A node action:
+- is a `luau` extension's action with a script;
+- holds at least one of its `[[secrets]]`;
+- is never a preset, a toggle or a window opener.
+
+An app action names no `secrets`. Anything else that seems to need a
+server (a webhook, a schedule that runs while every device sleeps) is an
+owner's decision first, not a new kind of node action.
+
+**What the node runs.** `Manifest::node_part` is all of the extension the
+node loads:
+- its node actions;
+- the secrets they hold;
+- of its capabilities, only `hosts` and `effect`.
+
+It gets no views, hooks, workers, background, settings, documents,
+interface or ports. On the node a script has `host.fetch` to its declared
+hosts (each redirect checked). Its secrets go into a request's headers
+(`{{secret:client_secret}}`), put in by the host, never readable by the
+script (["The network and secrets"](#the-network-and-secrets)). The
+deployment that names the extension, by pinned version, hash and
+signature through Nix, is the node's consent (`docs/content/guide/deploy.md`).
+
+**One implementation.** `NodeActions` (`features/extensions/src/node.rs`) is one
+`#[architect::rpc]` service:
+- `list`: any member;
+- `run`: a member (`write`), audited;
+- `secrets` and `set_secret`: an admin.
+
+`NodeHost` (feature `node`) is its one implementation. The node loads
+each installed extension's node part on a host of its own and serves it
+on the org lane (`/org/{slug}/vox`) behind the org's permissions gate
+(`node::PERMITS`).
+
+Every client holds the generated `NodeActionsClient`: the desktop, iOS
+and the browser. An app's host registers a node action as a forwarder to
+it (`Host::with_node`, a `node::NodeLane`), so ⌘K, the CLI, MCP and a
+script run it like any other action. With no node (signed out, or an org
+whose node doesn't run the extension), running it says where it runs.
+
+**Secrets are insert-only.** A node's secrets come from one of two places:
+- **its operator**: a folder of files, `<dir>/<ext id>/<secret id>`, as
+  sops-nix writes them (`NodeHost::with_operator_secrets`); the lane
+  then sets none;
+- **an org admin**: through `set_secret`, kept in the node's private file
+  (`NodeHost::new`).
+
+No call reads a value back: `secrets` says which are set.
+
+The example is the showcase's Bank link (`examples/showcase/bank-link`):
+a token exchange against a local mock of Plaid. Its test is
+`features/extensions/tests/node.rs`. It covers:
+- an app's host runs the exchange over vox behind a gate, through the
+  generated client;
+- the bank hears both secrets, and the app holds neither;
+- a viewer is refused, a missing secret is named, and secrets are
+  insert-only;
+- an operator's node takes no secret from the lane;
+- an undeclared host is refused;
+- the manifest's rules.
+
+**Not yet.** Node-kept data, so an access token stays on the node for
+later calls, is a follow-up. So are WASI components' node actions.
+
 ## MIDI, OSC and control surfaces
 
 CSI, DrivenByMoss, ReaLearn, LBX Stripper and Playtime talk to devices:

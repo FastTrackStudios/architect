@@ -880,6 +880,21 @@ struct Inner {
     /// The clock, app-defined events, hooks made at run time, schedules
     /// and background extensions (`crate::host_events`).
     events: crate::host_events::EventState,
+    /// Where its extensions' node actions run (`crate::node`).
+    node: Mutex<NodeSide>,
+}
+
+/// Where a host's node actions (`runs = "node"`) run.
+#[derive(Clone, Default)]
+enum NodeSide {
+    /// An app's host: each is forwarded to the org's node through this
+    /// lane, or answers that there is none.
+    #[default]
+    App,
+    AppWith(Arc<dyn crate::node::NodeLane>),
+    /// The node's own host (`crate::node::NodeHost`): it runs them.
+    #[cfg_attr(not(feature = "node"), allow(dead_code))]
+    Node,
 }
 
 /// A [`Host`] held weakly: what an extension's session keeps, so an
@@ -980,6 +995,7 @@ impl Host {
                 not_here: Mutex::new(BTreeMap::new()),
                 delivered: std::sync::atomic::AtomicU64::new(0),
                 events: crate::host_events::EventState::default(),
+                node: Mutex::new(NodeSide::App),
             }),
         };
         // Icons and badges on rows and tabs (`crate::hostui`).
@@ -1028,6 +1044,94 @@ impl Host {
             inner.contributions = contributions;
         }
         self
+    }
+
+    /// Runs its extensions' node actions (`runs = "node"`, #583) on the
+    /// org's node through `lane`: the org lane's `NodeActionsClient`. With
+    /// none, running one answers that it needs the org's node.
+    #[must_use]
+    pub fn with_node(self, lane: Arc<dyn crate::node::NodeLane>) -> Self {
+        self.set_node(Some(lane));
+        self
+    }
+
+    /// [`Self::with_node`] on a host already shared; `None` when the app
+    /// leaves the org (signs out, switches to one with no node). Loaded
+    /// extensions' node actions follow at once.
+    pub fn set_node(&self, lane: Option<Arc<dyn crate::node::NodeLane>>) {
+        let mut side = self
+            .inner
+            .node
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !matches!(*side, NodeSide::Node) {
+            *side = lane.map_or(NodeSide::App, NodeSide::AppWith);
+        }
+    }
+
+    /// The node's own host (`crate::node::NodeHost`): node actions run
+    /// here, never forwarded.
+    #[cfg(feature = "node")]
+    #[must_use]
+    pub(crate) fn serving_node(self) -> Self {
+        *self
+            .inner
+            .node
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = NodeSide::Node;
+        self
+    }
+
+    fn runs_node_actions(&self) -> bool {
+        matches!(
+            *self
+                .inner
+                .node
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+            NodeSide::Node
+        )
+    }
+
+    /// A node action's handler in an app: it runs on the org's node, with
+    /// the arguments it was given.
+    fn node_forwarder(&self, extension: &str, decl: &ActionDecl) -> CallerAsyncHandler {
+        let weak = self.downgrade();
+        let (extension, id) = (extension.to_owned(), decl.id.clone());
+        Arc::new(move |_caller: &ActionCaller, args: &[u8]| {
+            let lane = weak.upgrade().and_then(|host| {
+                match &*host
+                    .inner
+                    .node
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                {
+                    NodeSide::AppWith(lane) => Some(Arc::clone(lane)),
+                    NodeSide::App | NodeSide::Node => None,
+                }
+            });
+            let args = if args.is_empty() {
+                "{}".to_owned()
+            } else {
+                String::from_utf8_lossy(args).into_owned()
+            };
+            let id = id.clone();
+            let Some(lane) = lane else {
+                return Err(ActionError::Failed {
+                    message: format!(
+                        "{id} runs on the org's node: sign in to an org whose node runs {extension}"
+                    ),
+                    id,
+                });
+            };
+            let run = lane.run(&extension, &id, args);
+            let out: ActionFuture = Box::pin(async move {
+                run.await
+                    .map(String::into_bytes)
+                    .map_err(|message| ActionError::Failed { id, message })
+            });
+            Ok(out)
+        })
     }
 
     /// Runs hooks' work with `spawn` (the app's executor) in place of a
@@ -1693,6 +1797,10 @@ impl Host {
         let mut actions = Vec::with_capacity(manifest.actions.len());
         for decl in &manifest.actions {
             let handler = match (&decl.preset, manifest.window_opened_by(&decl.id)) {
+                // A node action, in an app: run on the org's node.
+                _ if decl.on_node() && !self.runs_node_actions() => {
+                    self.node_forwarder(&manifest.id, decl)
+                }
                 (Some(_), _) => preset(list, self.live_gate(manifest, origin), &manifest.id, decl),
                 (None, Some(window)) => self.window_opener(&manifest.id, window),
                 (None, None) => instance.action(decl).map_err(|why| LoadError::Action {

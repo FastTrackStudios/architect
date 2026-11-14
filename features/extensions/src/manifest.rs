@@ -209,6 +209,53 @@ pub struct ActionDecl {
     /// Its tick in a menu and ⌘K, and its toolbar buttons, follow it.
     #[serde(default)]
     pub toggle: bool,
+    /// Where it runs (`runs`): in the app (the default), or on the org's
+    /// node ([`Runs::Node`], #583).
+    #[serde(default)]
+    pub runs: Runs,
+    /// The `[[secrets]]` a node action holds (`secrets = ["client_secret"]`):
+    /// why it must run on a trusted server. Only a node action names them,
+    /// and it must name at least one.
+    #[serde(default)]
+    pub secrets: Vec<String>,
+}
+
+/// Where an action runs (`runs` on an `[[actions]]` entry).
+///
+/// The bar for the node is high: the node does sync, access control and
+/// only what truly needs a server (#710). A node action is code that holds
+/// a secret the person's devices must never have, such as a token
+/// exchange with a client secret. Everything else runs in the app, on the
+/// person's own copy of the vault.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Runs {
+    /// In the app: on the person's device, or in their browser.
+    #[default]
+    App,
+    /// On the org's node, the always-on trusted server (`runs = "node"`).
+    /// The app runs it there through `NodeActions` on the org lane
+    /// (`crate::node`); the node runs it with its node part's
+    /// capabilities only ([`Manifest::node_part`]).
+    Node,
+}
+
+impl Runs {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Node => "node",
+        }
+    }
+}
+
+impl ActionDecl {
+    /// Whether it runs on the org's node.
+    #[must_use]
+    pub fn on_node(&self) -> bool {
+        self.runs == Runs::Node
+    }
 }
 
 /// An action run with fixed arguments.
@@ -742,6 +789,9 @@ pub enum ManifestError {
     /// A `[[share_layers]]` rule with no note type or a pattern that is
     /// not a relative path.
     BadShareLayers(String),
+    /// A node action (`runs = "node"`) breaks a rule of the node's: the
+    /// action, and why.
+    NodeAction { action: String, why: String },
 }
 
 impl std::fmt::Display for ManifestError {
@@ -767,6 +817,7 @@ impl std::fmt::Display for ManifestError {
             Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::Interop { field, why } => write!(f, "{field}: {why}"),
             Self::BadShareLayers(why) => write!(f, "share_layers: {why}"),
+            Self::NodeAction { action, why } => write!(f, "node action {action}: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -796,6 +847,160 @@ impl Manifest {
                 )
             })
             .collect()
+    }
+
+    /// Its node actions (`runs = "node"`, #583): each a Luau script that
+    /// holds at least one of its `[[secrets]]`, and nothing that needs the
+    /// person's device (a toggle, a preset, a window). An app action names
+    /// no secrets.
+    fn check_node_actions(&self) -> Result<(), ManifestError> {
+        for a in &self.actions {
+            let bad = |why: &str| {
+                Err(ManifestError::NodeAction {
+                    action: a.id.clone(),
+                    why: why.to_owned(),
+                })
+            };
+            if !a.on_node() {
+                if !a.secrets.is_empty() {
+                    return bad("only an action that runs on the node names `secrets`");
+                }
+                continue;
+            }
+            if self.kind != Kind::Luau {
+                return bad("only a luau extension's action runs on the node");
+            }
+            if a.script.is_none() {
+                return bad("it names no script");
+            }
+            if a.preset.is_some() || a.toggle || self.window_opened_by(&a.id).is_some() {
+                return bad("a preset, a toggle or a window opener runs in the app");
+            }
+            if a.secrets.is_empty() {
+                return bad(
+                    "it holds none of its [[secrets]]: only code that needs a secret \
+                     the person's devices must never have runs on the node",
+                );
+            }
+            if let Some(s) = a
+                .secrets
+                .iter()
+                .find(|s| !self.secrets.iter().any(|d| d.id == **s))
+            {
+                return bad(&format!("secret {s:?} is not one of its [[secrets]]"));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether any of its actions runs on the org's node.
+    #[must_use]
+    pub fn has_node_part(&self) -> bool {
+        self.actions.iter().any(ActionDecl::on_node)
+    }
+
+    /// The `[[secrets]]` its node actions hold: kept by the node, never
+    /// asked for on a device.
+    #[must_use]
+    pub fn node_secrets(&self) -> Vec<&SecretDecl> {
+        self.secrets
+            .iter()
+            .filter(|s| {
+                self.actions
+                    .iter()
+                    .any(|a| a.on_node() && a.secrets.contains(&s.id))
+            })
+            .collect()
+    }
+
+    /// What of it the org's node runs (#583), or `None` when it has no
+    /// node action: its node actions, the secrets they hold, and of its
+    /// capabilities only the hosts it may reach and the most an action
+    /// may change. No views, hooks, workers, background, settings or
+    /// contributions: the node draws nothing and hears nothing. Every
+    /// field is named here, so one added later is decided on.
+    #[must_use]
+    pub fn node_part(&self) -> Option<Self> {
+        if !self.has_node_part() {
+            return None;
+        }
+        let Self {
+            id,
+            name,
+            version,
+            kind,
+            api,
+            description,
+            authors,
+            capabilities,
+            platforms,
+            entry: _,
+            wasm: _,
+            source: _,
+            actions,
+            sections: _,
+            views: _,
+            overlays: _,
+            workers: _,
+            data: _,
+            themes: _,
+            tokens: _,
+            windows: _,
+            points: _,
+            contribute: _,
+            provides: _,
+            requires: _,
+            uses: _,
+            reserved: _,
+            contributes: _,
+            background: _,
+            secrets: _,
+            share_layers: _,
+            favourites: _,
+            favourites_raw: _,
+            favourites_dropped: _,
+        } = self.clone();
+        Some(Self {
+            id,
+            name,
+            version,
+            kind,
+            api,
+            description,
+            authors,
+            capabilities: Capabilities {
+                hosts: capabilities.hosts,
+                effect: capabilities.effect,
+                ..Capabilities::default()
+            },
+            // A node runs only what may run on its platform.
+            platforms,
+            entry: Entry::default(),
+            wasm: WasmDecl::default(),
+            source: None,
+            actions: actions.into_iter().filter(ActionDecl::on_node).collect(),
+            sections: Vec::new(),
+            views: Vec::new(),
+            overlays: Vec::new(),
+            workers: Vec::new(),
+            data: Vec::new(),
+            themes: Vec::new(),
+            tokens: std::collections::BTreeMap::new(),
+            windows: Vec::new(),
+            points: Vec::new(),
+            contribute: std::collections::BTreeMap::new(),
+            provides: std::collections::BTreeMap::new(),
+            requires: std::collections::BTreeMap::new(),
+            uses: std::collections::BTreeMap::new(),
+            reserved: Vec::new(),
+            contributes: Contribution::default(),
+            background: None,
+            secrets: self.node_secrets().into_iter().cloned().collect(),
+            share_layers: Vec::new(),
+            favourites: Vec::new(),
+            favourites_raw: None,
+            favourites_dropped: Vec::new(),
+        })
     }
 
     /// Each worker: a unique id, and one way to run that its kind has.
@@ -1048,6 +1253,7 @@ impl Manifest {
                 _ => {}
             }
         }
+        self.check_node_actions()?;
         if !self.entry.path.is_empty() {
             inside(&self.entry.path)?;
         }
