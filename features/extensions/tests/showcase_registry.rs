@@ -62,7 +62,11 @@ fn l1_install_from_the_registry_asks_once_in_words() {
     assert_eq!(found["found"][0]["id"], "showcase.greeter", "{found}");
 
     // Without a person's yes: nothing installed, what it asks said.
-    let asked = run(&list, "EXT_INSTALL", &json!({ "id": "showcase.greeter", "version": "=0.1.0" }));
+    let asked = run(
+        &list,
+        "EXT_INSTALL",
+        &json!({ "id": "showcase.greeter", "version": "=0.1.0" }),
+    );
     assert_eq!(asked["needs_consent"], true, "{asked}");
     let says: Vec<&str> = asked["asks"]
         .as_array()
@@ -72,7 +76,10 @@ fn l1_install_from_the_registry_asks_once_in_words() {
         .collect();
     assert_eq!(
         says,
-        ["See what you have selected and focused", "Show you notifications"],
+        [
+            "See what you have selected and focused",
+            "Show you notifications"
+        ],
         "{asked}"
     );
     assert!(ext.host().get("showcase.greeter").is_none());
@@ -85,7 +92,9 @@ fn l1_install_from_the_registry_asks_once_in_words() {
     );
     assert_eq!(done["version"], "0.1.0", "{done}");
     assert_eq!(done["loaded"], true, "{done}");
-    let preview = ext.preview("showcase.greeter", &semver::VersionReq::STAR).unwrap();
+    let preview = ext
+        .preview("showcase.greeter", &semver::VersionReq::STAR)
+        .unwrap();
     assert_eq!(preview.signed_by.as_deref(), Some("Showcase"));
 }
 
@@ -104,21 +113,42 @@ fn l3_off_on_pin_update_and_remove() {
     assert!(ext.host().get("showcase.greeter").is_some());
 
     // Pinned, the update is past the pin and not taken.
-    run(&list, "EXT_PIN", &json!({ "id": "showcase.greeter", "version": "=0.1.0" }));
+    run(
+        &list,
+        "EXT_PIN",
+        &json!({ "id": "showcase.greeter", "version": "=0.1.0" }),
+    );
     let check = run(&list, "EXT_UPDATE", &json!({ "check": true }));
     assert_eq!(check["available"][0]["past_pin"], "0.2.0", "{check}");
 
     // Unpinned: 0.2.0, with its changelog, asks for the clipboard too, and
     // waits for a person's yes.
-    run(&list, "EXT_PIN", &json!({ "id": "showcase.greeter", "unpin": true }));
+    run(
+        &list,
+        "EXT_PIN",
+        &json!({ "id": "showcase.greeter", "unpin": true }),
+    );
     let check = run(&list, "EXT_UPDATE", &json!({ "check": true }));
     let a = &check["available"][0];
     assert_eq!(a["newest"], "0.2.0", "{check}");
-    assert!(a["changelog"].as_str().unwrap().contains("clipboard"), "{check}");
+    assert!(
+        a["changelog"].as_str().unwrap().contains("clipboard"),
+        "{check}"
+    );
     assert_eq!(a["asks_more"].as_array().unwrap().len(), 1, "{check}");
     let applied = run(&list, "EXT_UPDATE", &json!({ "id": "showcase.greeter" }));
-    assert_eq!(applied["needs_consent"][0]["id"], "showcase.greeter", "{applied}");
-    assert_eq!(ext.installs().get("showcase.greeter").unwrap().version.to_string(), "0.1.0");
+    assert_eq!(
+        applied["needs_consent"][0]["id"], "showcase.greeter",
+        "{applied}"
+    );
+    assert_eq!(
+        ext.installs()
+            .get("showcase.greeter")
+            .unwrap()
+            .version
+            .to_string(),
+        "0.1.0"
+    );
 
     // Removed: gone, unloaded.
     run(&list, "EXT_UNINSTALL", &json!({ "id": "showcase.greeter" }));
@@ -137,7 +167,10 @@ fn l2_the_fixture_vault_plans_install_all() {
         v
     };
     assert_eq!(opened.refused, Vec::new());
-    assert_eq!(ids(&opened.plan.install), ["showcase.tiny", "showcase.word-count"]);
+    assert_eq!(
+        ids(&opened.plan.install),
+        ["showcase.tiny", "showcase.word-count"]
+    );
     assert_eq!(ids(&opened.plan.offer), ["showcase.greeter"]);
     let missing: Vec<(String, Missing)> = opened
         .plan
@@ -152,7 +185,10 @@ fn l2_the_fixture_vault_plans_install_all() {
         )),
         "{missing:?}"
     );
-    assert!(missing.contains(&("showcase.gone".into(), Missing::NotFound)), "{missing:?}");
+    assert!(
+        missing.contains(&("showcase.gone".into(), Missing::NotFound)),
+        "{missing:?}"
+    );
 
     let done = ext.accept(&opened.plan);
     assert!(done.iter().all(Result::is_ok), "{done:?}");
@@ -165,7 +201,10 @@ fn l4_the_mac_only_extension_is_refused_here_and_installs_on_macos() {
     let tmp = tempfile::tempdir().unwrap();
     let (list, ext) = app(tmp.path(), "linux");
     let preview = run(&list, "EXT_PREVIEW", &json!({ "id": "showcase.mac-only" }));
-    assert_eq!(preview["cannot_run"], "macOS only: not on Linux", "{preview}");
+    assert_eq!(
+        preview["cannot_run"], "macOS only: not on Linux",
+        "{preview}"
+    );
     assert_eq!(preview["runs_here"], false, "{preview}");
     assert!(
         ext.install("showcase.mac-only", &semver::VersionReq::STAR)
@@ -176,6 +215,7 @@ fn l4_the_mac_only_extension_is_refused_here_and_installs_on_macos() {
 
     let tmp = tempfile::tempdir().unwrap();
     let (_, ext) = app(tmp.path(), "macos");
-    ext.install("showcase.mac-only", &semver::VersionReq::STAR).unwrap();
+    ext.install("showcase.mac-only", &semver::VersionReq::STAR)
+        .unwrap();
     assert!(ext.host().get("showcase.mac-only").is_some());
 }
