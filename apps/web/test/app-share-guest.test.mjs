@@ -269,6 +269,9 @@ test('a share link opens the web app as its guest: the list in sets, a note, its
         throw new Error(`${e.message}\n${page}\n${f.proxied.join('\n')}`);
       });
       await until(() => b.eval(`document.querySelectorAll('[data-guest-set]').length === 2`), 20000, 'two sets');
+      // A guest runs no extensions (#495): no host, so the page never marks
+      // which are running, and none of their actions is on ⌘K.
+      assert.equal(await b.eval(`document.documentElement.hasAttribute('data-extensions')`), false, 'no extension host for a guest');
       // The app is drawing the link: the node's "still opening?" line is gone.
       assert.equal(await b.eval(`!!document.getElementById('share-stall')`), false);
       const list = JSON.parse(await b.eval(`JSON.stringify([...document.querySelectorAll('[data-guest-set], [data-guest-note]')].map((e) => e.dataset.guestSet ? 'set:' + e.dataset.guestSet : e.dataset.guestNote))`));

@@ -1382,6 +1382,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "web-sys",
+ "web-time",
  "wit-parser 0.261.0",
 ]
 
@@ -2360,6 +2361,8 @@ dependencies = [
  "architect",
  "architect-command-palette",
  "architect-commands",
+ "architect-distribution",
+ "architect-extensions",
  "architect-favourites",
  "architect-media",
  "architect-navigator",
@@ -2368,6 +2371,7 @@ dependencies = [
  "architect-shell",
  "architect-spaces",
  "architect-theme",
+ "architect-theme-picker",
  "architect-ui",
  "architect-workspace",
  "architect-workspace-hack",

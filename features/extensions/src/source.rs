@@ -31,7 +31,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// `std`'s natively; a browser's clock on wasm, where `std`'s panics.
+use web_time::Instant;
 
 use architect::action::Problem;
 use serde::Serialize;
@@ -520,6 +523,7 @@ fn start(dir: &Path, c: &mut Crate, target: &Path) {
     );
     c.state = BuildState::Building { since_ms: now_ms() };
     c.running = Some(from);
+    // A browser has no threads (or cargo): the spawn fails and is logged.
     let spawned = std::thread::Builder::new()
         .name(format!("ext-build-{}", c.id))
         .spawn(move || {

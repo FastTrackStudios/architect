@@ -12,7 +12,10 @@
 //!   (the editor's web view needs `eval`, which the page refuses: `page`);
 //! - ⌘K and ⌘O: the commands (`architect_commands`) drawn by the Command
 //!   Palette's views (`architect_command_palette::views`, without its
-//!   extension: the browser runs no linked extension, #495);
+//!   extension: the app draws them itself);
+//! - the distribution's linked extensions (`extensions`, #495): their
+//!   actions in ⌘K, their settings sections, their views as workspace
+//!   panes, on the same host as a desk's (no Luau);
 //! - extensions' views in sandboxed frames of their own (`frames`, route A
 //!   of #495): the view an island claims a note's type with, at the
 //!   note's head (`embed`), and any view a favourite of its extension
@@ -26,9 +29,9 @@
 //! - the theme store (`architect_theme`), the system's light or dark.
 //!
 //! What a browser has no way to do yet is left out, not shown dead: pop-out
-//! windows, a folder on this device, the files agent, linked extensions
-//! (they need the Luau host, #495) and host calls from a frame into a vault
-//! (#495's next step), capture's system-wide key, the menu bar.
+//! windows, a folder on this device, the files agent, Luau extensions
+//! (#495) and host calls from a frame into a vault (#495's next step),
+//! capture's system-wide key, the menu bar.
 
 // Nothing is `Send` in a browser.
 #![allow(clippy::future_not_send)]
@@ -37,6 +40,7 @@ mod audio;
 mod click;
 mod collection;
 mod embed;
+pub mod extensions;
 mod favourites;
 mod frames;
 mod guest;
@@ -149,35 +153,22 @@ fn WebApp() -> Element {
     architect_settings::use_appearance_section();
     // Commands: the palette (⌘K), quick open (⌘O), every command's key.
     let commands = architect_commands::use_commands_provider();
-    architect_commands::use_command_actions(list);
-    // The Command Palette's views draw both overlays, as its extension
-    // does on a desk (`[[palette_views]]`).
-    use_hook(move || {
-        commands.set_palette_views(vec![
-            PaletteView {
-                overlay: Overlay::Palette,
-                owner: architect_command_palette::ID.to_owned(),
-                draw: Rc::new(|| rsx! { architect_command_palette::views::PaletteView {} }),
-            },
-            PaletteView {
-                overlay: Overlay::QuickOpen,
-                owner: architect_command_palette::ID.to_owned(),
-                draw: Rc::new(|| rsx! { architect_command_palette::views::QuickOpenView {} }),
-            },
-        ]);
+    // Under the commands (its actions are listed in ⌘K).
+    // The distribution's linked extensions (#495, W1), on the demo and
+    // the signed-in vaults; a share link's guest runs none (its views are
+    // the node's, in frames). The mode never changes while the app runs,
+    // so the hooks below keep their order.
+    let ext_ui = (!matches!(mode, Mode::Guest { .. })).then(|| {
+        let ui = extensions::use_web_extensions(&list);
+        use_context_provider(|| ui)
     });
-    architect_commands::use_command(
-        Command::new(architect_command_palette::OPEN_ACTION, "Commands")
-            .group("Help")
-            .shortcut("⌘K"),
-        move || commands.show(Overlay::Palette),
-    );
-    architect_commands::use_command(
-        Command::new(architect_command_palette::OPEN_ANYTHING_ACTION, "Open…")
-            .group("Go")
-            .shortcut("⌘O"),
-        move || commands.show(Overlay::QuickOpen),
-    );
+    architect_commands::use_command_actions(list);
+    // A share link's guest runs no extensions: the Command Palette's
+    // views drawn by the app itself, as its extension does elsewhere
+    // (`[[palette_views]]`).
+    if ext_ui.is_none() {
+        own_palette(commands);
+    }
     architect_commands::use_command(
         Command::new("APP_SETTINGS", "Settings")
             .group("App")
@@ -385,12 +376,48 @@ fn WebApp() -> Element {
                     DemoBadge {}
                 }
             }
+            if let Some(ui) = ext_ui {
+                architect_extensions::interface::ExtensionOverlays { ui }
+            }
             architect_commands::CommandLayer {}
             architect_commands::ConfirmSheet {}
             architect_settings::SettingsPage {}
             SettingsLayer { phone }
         }
     }
+}
+
+/// ⌘K and ⌘O without the Command Palette extension (a share link's guest):
+/// its views, drawn by the app.
+fn own_palette(commands: architect_commands::Commands) {
+    // The Command Palette's views draw both overlays, as its extension
+    // does on a desk (`[[palette_views]]`).
+    use_hook(move || {
+        commands.set_palette_views(vec![
+            PaletteView {
+                overlay: Overlay::Palette,
+                owner: architect_command_palette::ID.to_owned(),
+                draw: Rc::new(|| rsx! { architect_command_palette::views::PaletteView {} }),
+            },
+            PaletteView {
+                overlay: Overlay::QuickOpen,
+                owner: architect_command_palette::ID.to_owned(),
+                draw: Rc::new(|| rsx! { architect_command_palette::views::QuickOpenView {} }),
+            },
+        ]);
+    });
+    architect_commands::use_command(
+        Command::new(architect_command_palette::OPEN_ACTION, "Commands")
+            .group("Help")
+            .shortcut("⌘K"),
+        move || commands.show(Overlay::Palette),
+    );
+    architect_commands::use_command(
+        Command::new(architect_command_palette::OPEN_ANYTHING_ACTION, "Open…")
+            .group("Go")
+            .shortcut("⌘O"),
+        move || commands.show(Overlay::QuickOpen),
+    );
 }
 
 /// The settings page over the app while a section is open: a card on a

@@ -49,16 +49,17 @@ verdict read from code, nothing run) and the tests named in the evidence
 column. iOS cells marked "not shown" are what the shared `apps/ui` host
 should do there; nobody has run them on a phone for this page yet.
 
-**Web.** The web app links no extension host (#495): it lists the
-distribution's linked extensions and runs packaged islands in sandboxed
-frames, nothing an extension author can target. Every web cell below is
-❌ until #495 lands, unless it says otherwise.
+**Web.** The web app runs its distribution's linked extensions on the
+same host as the desktop app (#495, W1: `architect_web::run`,
+`apps/web/src/app/extensions.rs`), without Luau. Installed extensions
+(Luau, pages, WASI) and the document API over the web vault are #495's
+next steps: a web cell that says only "#495" waits on them.
 
 ## R: runtimes
 
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
-| R1 | A linked extension, compiled into the distribution | ⚠️ not shown; the standard build links the first-party extensions and Studio's | ❌ listed, not compiled in (#495) | ⚠️ not shown; same host | Setlist viewer, Tasks, Calendar | `features/extensions/tests/linked.rs` |
+| R1 | A linked extension, compiled into the distribution | ⚠️ not shown; the standard build links the first-party extensions and Studio's | ✅ the Architect app's (Projects, Tasks, Time, Calendar, Day Plans, the theme picker, the Command Palette) run in `/app/?demo` (and `?showcase`, the same mode); the signed-in `/app/` runs the same host, not tested signed in yet; Studio's need a `linked-core` build from Studio (#495) | ⚠️ not shown; same host | Setlist viewer, Tasks, Calendar | `features/extensions/tests/linked.rs`; web: `apps/web/test/app-linked-extensions.test.mjs`, [Calendar 1280](https://github.com/FastTrackStudios/architect/blob/pr-media/web-linked-extensions/calendar-1280-light.png?raw=true), [390 dark](https://github.com/FastTrackStudios/architect/blob/pr-media/web-linked-extensions/calendar-390-dark.png?raw=true) |
 | R2 | A Luau script installed at run time; its actions and saved scripts | ⚠️ not shown | ❌ #495 | ⚠️ not shown; interpreted | Templater-lite | `features/extensions/tests/metronome.rs`, `features/extensions/tests/host_service.rs` |
 | R3 | A TSX/JS page installed at run time (QuickJS; a Web Worker in browsers) | ⚠️ not shown | ❌ the Worker runner exists, no host (#495) | ⚠️ not shown; QuickJS, no JIT | Templater-lite | `features/pages/tests/js.rs` |
 | R4 | A WASI component installed at run time | ❌ the release build has no `wasi` feature (#707); runs in a `wasi` build | ❌ #495, and JSPI (no Safari before 27) | ❌ #707 (Pulley once on) | WASI Counter | `features/extensions/tests/wasi.rs`, `features/extensions/tests/wasi_web.rs` |
@@ -79,11 +80,11 @@ frames, nothing an extension author can target. Every web cell below is
 
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
-| C1 | Actions in ⌘K, keymaps, the CLI, MCP and the control socket | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Templater-lite | `features/extensions/tests/host_service.rs` |
+| C1 | Actions in ⌘K, keymaps, the CLI, MCP and the control socket | ⚠️ not shown | ⚠️ linked extensions' actions and views in ⌘K, their keys (⌘K is the Command Palette extension's); a browser has no CLI, MCP or socket; an action reading the vault waits on documents (#495) | ⚠️ not shown | Templater-lite | `features/extensions/tests/host_service.rs`; web: `apps/web/test/app-linked-extensions.test.mjs` |
 | C2 | Toolbars with toggle state, status items, the phone bar | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Toolbar sampler, Outline | `features/extensions/tests/toolbars.rs`, `features/extensions/tests/contributions.rs` |
 | C3 | Context menus (file, editor, row) and a menu at a point | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Toolbar sampler | `features/extensions/tests/toolbars.rs`, `features/extensions/tests/host_ui.rs` |
-| C4 | Tabs, panes, slots, windows, popups | ⚠️ not shown | ❌ #495 | ⚠️ not shown | - | `features/extensions/tests/contributions.rs`, `features/extensions/tests/interop.rs` |
-| C5 | Settings sections | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Settings and theme | `features/extensions/tests/metronome.rs` |
+| C4 | Tabs, panes, slots, windows, popups | ⚠️ not shown | ⚠️ a linked extension's views open as workspace panes; slots, windows and popups not shown | ⚠️ not shown | - | `features/extensions/tests/contributions.rs`, `features/extensions/tests/interop.rs`; web: `apps/web/test/app-linked-extensions.test.mjs`, [Projects](https://github.com/FastTrackStudios/architect/blob/pr-media/web-linked-extensions/projects-1280-dark.png?raw=true) |
+| C5 | Settings sections | ⚠️ not shown | ✅ linked extensions' sections (Calendar, Day plans, Tasks…) on the settings page; the host service reads their values from the page from #736 | ⚠️ not shown | Settings and theme | `features/extensions/tests/metronome.rs`; web: `apps/web/test/app-linked-extensions.test.mjs`, [settings](https://github.com/FastTrackStudios/architect/blob/pr-media/web-linked-extensions/settings-1280-light.png?raw=true) |
 | C6 | Openers: ⌘O sources and URL claims | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Openers sampler | `features/extensions/tests/contributions.rs` |
 | C7 | Note and document kinds, project types, templates, capture targets | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Templater-lite, Openers sampler | - |
 | C8 | Base view types | ⚠️ not shown; the Tasks extension's board is one | ❌ #495 | ⚠️ not shown | Openers sampler | - |
@@ -128,7 +129,7 @@ frames, nothing an extension author can target. Every web cell below is
 
 | Id | Capability | Desktop | Web | iOS | Example | Evidence |
 |---|---|---|---|---|---|---|
-| W1 | The web app runs its distribution's linked extensions | n/a | ❌ #495 | n/a | - | - |
+| W1 | The web app runs its distribution's linked extensions | n/a | ⚠️ `architect_web::run(<Distribution>)` runs the Architect app's own linked extensions (tested); `cargo xtask dist web`'s path for a distribution crate's own wasm (`web` feature) is not run by any test yet (studio#500 is its first) | n/a | Tasks, Calendar | `apps/web/test/app-linked-extensions.test.mjs` (light and dark, 390 and 1280 px) |
 | W2 | Installed Luau, pages and WASI run in the browser, with documents and storage | n/a | ❌ #495 | n/a | - | `features/extensions/tests/wasi_web.rs` (the runner, not the app) |
 
 ## The example extensions

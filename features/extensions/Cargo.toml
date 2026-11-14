@@ -63,7 +63,12 @@ crdt = ["dep:crdt"]
 # In-process extensions (`linked`): one trait a crate implements, run
 # linked into the app as a built-in (its views Dioxus components in the
 # app's document), or served as a process by `guest`.
-linked = ["host", "dep:dioxus"]
+linked = ["host", "linked-core"]
+# The trait and its `Builder` alone (`linked`), with no host: what a
+# linked extension's crate needs to build for a browser
+# (`wasm32-unknown-unknown`), where `guest` (vox, tokio) does not build
+# (#495). The web app's host links it (`architect-web`).
+linked-core = ["dep:dioxus"]
 ui = [
     "host",
     "linked",
@@ -188,6 +193,9 @@ facet = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 semver = "1"
+# `Instant` and `SystemTime` that work in a browser too (std's panic on
+# `wasm32-unknown-unknown`); std's own elsewhere.
+web-time = "1"
 roxmltree = "0.21"
 # URL openers' patterns (`[[openers]] urls`): wasm-clean.
 regex = "1"
@@ -198,7 +206,6 @@ url = "2"
 # the host follows each one and checks it.
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "stream"] }
 architect = { workspace = true, optional = true, features = ["action-list"] }
-architect-scripting = { workspace = true, optional = true }
 architect-extension-archive = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
@@ -284,6 +291,11 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 # iOS forbids JIT: Wasmtime interprets there (Pulley).
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 rfd = { workspace = true, optional = true }
+
+# Luau (C++) is not built for a browser: `host` there runs data and linked
+# extensions, with pages and WASI components beside it (`web`), #495.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+architect-scripting = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "ios")'.dependencies]
 wasmtime = { version = "50.0.1", optional = true, default-features = false, features = ["pulley"] }

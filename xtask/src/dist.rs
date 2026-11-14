@@ -13,7 +13,7 @@
 //! | `desktop` | the window's build, then `scripts/desktop/linux.sh` (an `AppImage`) or `scripts/desktop/macos.sh` (a dmg) | `<Name>-linux-x86_64.AppImage` |
 //! | `node` | `--no-default-features` and `--cfg no_workspace_hack`, as the release's node | the binary |
 //! | `node-image` | the node in `flake.nix`'s `architect-image-prebuilt` | `<folder>-node.tar` (docker-archive) |
-//! | `web` | `scripts/web-bundle.sh`, with the node's `distribution` as `/app/distribution.json` | `web/` |
+//! | `web` | the distribution's own web build (below), then `scripts/web-bundle.sh` with it and the node's `distribution` as `/app/distribution.json` | `web/` |
 //! | `web-image` | the bundle in `flake.nix`'s `architect-web-image-prebuilt` | `<folder>-web.tar` |
 //! | `ios` | `apps/mobile/ios/build-app.sh --device` on a Mac: the phone's app, unsigned (`apps/mobile/ios/deploy-testflight.sh` signs it) | `ios/<App>.app` |
 //! | `ios-sim` | the same for the Simulator, signed ad hoc | `ios-sim/<App>.app` |
@@ -24,6 +24,17 @@
 //! is `apps/mobile/ios/Info.plist`'s (the Architect app's) unless
 //! `INFO_PLIST` names another: an iOS binary cannot be asked who it is on
 //! the Mac that built it.
+//!
+//! **The web build** (#495) compiles the distribution's linked
+//! extensions into the browser app, as the desktop and iOS builds do:
+//! this repo's is `architect-web` itself (its start is
+//! `architect_web::run(architect())`); a distribution crate with a `web`
+//! feature has its own, its library built for `wasm32-unknown-unknown`
+//! (`--lib --no-default-features --features web`, profile `web`), whose
+//! `#[wasm_bindgen(start)]` calls `architect_web::run(<its Distribution>)`
+//! with `architect-web`'s `start` off. A crate without one gets the
+//! Architect app's wasm, and only its name and list from
+//! `/app/distribution.json` (a warning says so).
 //!
 //! Who the app is (its name, binary, bundle id, folder, icon) is asked
 //! of the built binary (`<bin> distribution`, `<bin> distribution icon`),
@@ -194,6 +205,132 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
         }
     }
     found.ok_or_else(|| "cargo built no binary".to_owned())
+}
+
+/// Whether the distribution crate at `manifest` has a `web` feature: a
+/// web build of its own (`cargo metadata`).
+fn has_web_build(manifest: &Path) -> Result<Option<PathBuf>, String> {
+    let out = Command::new(cargo())
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--manifest-path",
+        ])
+        .arg(manifest)
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("cargo metadata: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("cargo metadata {} failed", manifest.display()));
+    }
+    let meta: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
+    let manifest = manifest
+        .canonicalize()
+        .unwrap_or_else(|_| manifest.to_path_buf());
+    // Its workspace's lockfile: the wasm-bindgen its build links is the
+    // one whose CLI must bind it.
+    let lock = meta
+        .get("workspace_root")
+        .and_then(serde_json::Value::as_str)
+        .map(|r| Path::new(r).join("Cargo.lock"));
+    let web = meta
+        .get("packages")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|p| {
+            p.get("manifest_path")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|m| Path::new(m) == manifest)
+        })
+        .any(|p| p.get("features").and_then(|f| f.get("web")).is_some());
+    Ok(lock.filter(|_| web))
+}
+
+/// Architect's `web` profile (its root `Cargo.toml`), handed to a
+/// distribution's build as `--config`, so a workspace of its own needs no
+/// `[profile.web]` (#495).
+const WEB_PROFILE: [&str; 5] = [
+    "profile.web.inherits=\"release\"",
+    "profile.web.opt-level=\"z\"",
+    "profile.web.lto=\"fat\"",
+    "profile.web.codegen-units=1",
+    "profile.web.strip=\"symbols\"",
+];
+
+/// A distribution's own web build: its wasm, and the lockfile whose
+/// wasm-bindgen binds it.
+struct WebBuild {
+    wasm: PathBuf,
+    lock: PathBuf,
+}
+
+/// The distribution's own web build (#495): its library for
+/// `wasm32-unknown-unknown`, its linked extensions compiled in, copied to
+/// `<out>/architect_web.wasm` (the name the bundle's loader imports).
+/// `None`: this repo's distribution (`architect-web` is its build, which
+/// `scripts/web-bundle.sh` makes) or a crate with no `web` feature.
+fn build_web(opts: &Options, out: &Path) -> Result<Option<WebBuild>, String> {
+    let Some(manifest) = &opts.manifest_path else {
+        return Ok(None);
+    };
+    let Some(lock) = has_web_build(manifest)? else {
+        eprintln!(
+            "dist: {} has no `web` feature: its web bundle is the Architect app's wasm, without its linked extensions (#495)",
+            manifest.display()
+        );
+        return Ok(None);
+    };
+    let mut cmd = Command::new(cargo());
+    cmd.current_dir(root())
+        .args(["build", "--message-format", "json-render-diagnostics"])
+        .args([
+            "--profile",
+            "web",
+            "--lib",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .arg("--manifest-path")
+        .arg(manifest)
+        .args(["--no-default-features", "--features", "web"]);
+    for setting in WEB_PROFILE {
+        cmd.arg("--config").arg(setting);
+    }
+    if let Some(dir) = &opts.target_dir {
+        cmd.arg("--target-dir").arg(dir);
+    }
+    eprintln!("dist: {cmd:?}");
+    let built = cmd
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("cargo build: {e}"))?;
+    if !built.status.success() {
+        return Err("the web build failed".to_owned());
+    }
+    // The crate's own wasm: the last `.wasm` cargo reports.
+    let wasm = String::from_utf8_lossy(&built.stdout)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|m| {
+            m.get("reason").and_then(serde_json::Value::as_str) == Some("compiler-artifact")
+        })
+        .filter_map(|m| {
+            m.get("filenames")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+        })
+        .flatten()
+        .filter_map(|f| f.as_str().map(PathBuf::from))
+        .filter(|f| f.extension().is_some_and(|e| e == "wasm"))
+        .next_back()
+        .ok_or_else(|| "the web build made no .wasm (is its lib a cdylib?)".to_owned())?;
+    let to = out.join("architect_web.wasm");
+    std::fs::copy(&wasm, &to).map_err(|e| format!("{} → {}: {e}", wasm.display(), to.display()))?;
+    Ok(Some(WebBuild { wasm: to, lock }))
 }
 
 /// What the binary says it is (`<bin> distribution`).
@@ -536,12 +673,18 @@ pub fn run_cli(opts: &Options) -> Result<(), String> {
         let json = out.join("distribution.json");
         std::fs::write(&json, &d.json).map_err(|e| format!("{}: {e}", json.display()))?;
         let web = out.join("web");
-        run_script(
-            Command::new("bash")
-                .arg(root().join("scripts/web-bundle.sh"))
-                .arg(&web)
-                .env("ARCHITECT_DISTRIBUTION", &json),
-        )?;
+        let mut script = Command::new("bash");
+        script
+            .arg(root().join("scripts/web-bundle.sh"))
+            .arg(&web)
+            .env("ARCHITECT_DISTRIBUTION", &json);
+        // Its own wasm, its linked extensions in it (#495).
+        if let Some(built) = build_web(opts, &out)? {
+            script
+                .env("ARCHITECT_WEB_WASM", &built.wasm)
+                .env("ARCHITECT_WEB_LOCK", &built.lock);
+        }
+        run_script(&mut script)?;
         made.push(("web", web.clone()));
         if wants(Target::WebImage) {
             let tar = out.join(format!("{}-web.tar", d.folder));

@@ -473,6 +473,15 @@ app-media-list-test:
     devenv shell -- bash scripts/web-bundle.sh target/web-bundle
     ARCHITECT_ISLAND_NODE="$PWD/target/debug/examples/island_node" ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-media-list.test.mjs
 
+# A distribution's linked extensions in the web app (#495, W1): the
+# Architect app's in `/app/?demo`, their actions on ⌘K, the Calendar's and
+# Projects' views as panes, their settings sections; light and dark at
+# 390 px and 1280 px. Firefox headless over BiDi off the audio graph;
+# `SHOTS=<dir>` keeps screenshots.
+app-linked-extensions-test:
+    devenv shell -- bash scripts/web-bundle.sh target/web-bundle
+    ARCHITECT_WEB_BUNDLE="$PWD/target/web-bundle" env -u LD_LIBRARY_PATH node --test --test-concurrency=1 apps/web/test/app-linked-extensions.test.mjs
+
 # The web app's bottom slots as favourites (#607) at 390 px: the default
 # set, a note type's declared set from the node's `/_ext/favourites.json`,
 # a tab opening its island view; `ARCHITECT_SHOTS=<dir>` keeps screenshots.

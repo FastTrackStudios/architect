@@ -9,6 +9,13 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["start"]
+# The page's start (`#[wasm_bindgen(start)]`): the Architect app's
+# distribution. A distribution crate's web build turns it off and starts
+# with its own (`architect_web::run(<its Distribution>)`, #495).
+start = []
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -41,7 +48,7 @@ auth-client = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Crypto", "CssStyleDeclaration", "Document", "Element", "Event", "EventSource", "EventTarget", "Headers", "History", "AudioContext", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioParam", "AudioScheduledSourceNode", "BaseAudioContext", "GainNode", "OscillatorNode", "HtmlAudioElement", "HtmlElement", "HtmlIFrameElement", "HtmlMediaElement", "HtmlTextAreaElement", "MediaError", "KeyboardEvent", "MessageChannel", "MessageEvent", "MessagePort", "Navigator", "Performance", "VisualViewport", "Location", "MediaQueryList", "ReadableStream", "ReadableStreamDefaultReader", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestRedirect", "Response", "Storage", "Window"] }
+web-sys = { version = "0.3", features = ["Crypto", "console", "CssStyleDeclaration", "Document", "Element", "Event", "EventSource", "EventTarget", "Headers", "History", "AudioContext", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioParam", "AudioScheduledSourceNode", "BaseAudioContext", "GainNode", "OscillatorNode", "HtmlAudioElement", "HtmlElement", "HtmlIFrameElement", "HtmlMediaElement", "HtmlTextAreaElement", "MediaError", "KeyboardEvent", "MessageChannel", "MessageEvent", "MessagePort", "Navigator", "Performance", "VisualViewport", "Location", "MediaQueryList", "ReadableStream", "ReadableStreamDefaultReader", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestRedirect", "Response", "Storage", "Window"] }
 # The app (src/app): the same components as the desktop and phone apps
 # (apps/ui), on dioxus-web.
 dioxus = { workspace = true, features = ["web"] }
@@ -60,8 +67,8 @@ futures-util = { version = "0.3", default-features = false }
 architect-shell = { workspace = true, features = ["ui"] }
 architect-workspace = { workspace = true, features = ["ui"] }
 architect-commands = { workspace = true, features = ["ui"] }
-# ⌘K and ⌘O: the Command Palette's views, without its extension (#495).
-architect-command-palette = { workspace = true }
+# ⌘K and ⌘O: the Command Palette, linked in (#495); a share guest draws its views alone.
+architect-command-palette = { workspace = true, features = ["extension"] }
 architect-settings = { workspace = true, features = ["ui", "appearance"] }
 architect-navigator = { workspace = true, features = ["ui"] }
 architect-theme = { workspace = true, features = ["dioxus", "actions"] }
@@ -73,6 +80,12 @@ futures-timer = { workspace = true, features = ["wasm-bindgen"] }
 architect-playhead = { workspace = true, features = ["ui"] }
 # A collection note's native list (src/app/collection.rs, #668).
 architect-media = { workspace = true, features = ["ui"] }
+# The distribution's linked extensions (#495, W1): which ones
+# (`architect_distribution::current`, set by `run`), and the host that runs
+# them here as on a desk (src/app/extensions.rs; no Luau in a browser).
+architect-distribution = { workspace = true }
+architect-extensions = { workspace = true, features = ["ui", "linked"] }
+architect-theme-picker = { workspace = true }
 
 [dev-dependencies]
 # src/read_only.rs's tests: the navigator's source, natively (no UI).

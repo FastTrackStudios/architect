@@ -559,6 +559,8 @@ fn scripts(package: &Package, report: &mut CheckReport) {
         );
     for (path, field) in named {
         match package.text(&path) {
+            // Its syntax, where Luau is built (not in a browser).
+            #[cfg(not(target_family = "wasm"))]
             Ok(source) => {
                 if let Err(e) = architect_scripting::luau::Runtime::check(&source) {
                     let p = report.problem("script", e.message.clone());
@@ -566,6 +568,8 @@ fn scripts(package: &Package, report: &mut CheckReport) {
                     p.line = e.line;
                 }
             }
+            #[cfg(target_family = "wasm")]
+            Ok(_) => {}
             Err(e) => {
                 let p = report.problem("files", e.to_string());
                 p.file = Some(path);

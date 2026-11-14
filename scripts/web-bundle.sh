@@ -28,6 +28,8 @@
 #   ARCHITECT_WEB_WASM   architect_web.wasm (wasm32-unknown-unknown, profile `web`)
 #   ARCHITECT_CLI        the `architect` CLI binary (apps/cli)
 #   WASM_BINDGEN         a wasm-bindgen at Cargo.lock's version
+#   ARCHITECT_WEB_LOCK   the Cargo.lock that version is read from, when the wasm
+#                        is a distribution's own build (`cargo xtask dist web`)
 #   ARCHITECT_SITE       apps/site's prerendered output (its .output/public)
 # and two more for a check without Rust (site.yml: a release's bundle's):
 #   ARCHITECT_WEB_BOUND  a folder with wasm-bindgen's output (architect_web.js,
@@ -108,7 +110,9 @@ fi
 
 bindgen="${WASM_BINDGEN:-}"
 if [ -z "$bound" ] && [ -z "$bindgen" ]; then
-    want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/,""); print; exit}' "$root/Cargo.lock")
+    # The wasm-bindgen its wasm links: a distribution's own lockfile when
+    # it built the wasm (`cargo xtask dist web`), else this repo's.
+    want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/,""); print; exit}' "${ARCHITECT_WEB_LOCK:-$root/Cargo.lock}")
     bindgen="$root/target/tools/bin/wasm-bindgen"
     if ! "$bindgen" --version 2>/dev/null | grep -q "$want"; then
         cargo install -q wasm-bindgen-cli --version "$want" --locked --root "$root/target/tools"

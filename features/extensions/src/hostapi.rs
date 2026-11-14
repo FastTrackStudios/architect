@@ -55,13 +55,13 @@ use crate::catalog::Origin;
 use crate::consent::Grants;
 use crate::documents::{DocInfo, Documents};
 use crate::events::DocEvent;
+use crate::host::Gate;
 use crate::host::{Host, Opening, WeakHost};
 use crate::hostcall::{HostError, HostRequest, PickKind, Target};
 use crate::hostui::{Asker, Decorated, Decorations, HostUi, NoUi, Notification};
 use crate::logs::{Level, Logs};
 use crate::manifest::{Capabilities, Manifest, Reach};
 use crate::net::Secrets;
-use architect_scripting::luau::Gate;
 
 /// What the app knows that an extension may ask for (each only with the
 /// capability for it): every method has a default that knows nothing.
