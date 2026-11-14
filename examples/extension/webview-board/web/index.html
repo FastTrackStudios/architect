@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- The web view board in a browser (#222): its built package
+     (../package/dist) in a sandboxed iframe through the browser host
+     (features/extensions/web/webview-host.js), answered by an in-memory
+     host the way the web app answers with WebHost::call_json. Serve the
+     repository's root and open /examples/extension/webview-board/web/
+     (?scheme=light|dark); the package's files need the web view policy
+     and CORS (serve.mjs here does both). -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Web view board</title>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      body { display: flex; flex-direction: column; font: 14px/1.4 system-ui, sans-serif; }
+      body.dark { background: #111113; color: #ededef; }
+      body.light { background: #f4f4f2; color: #1b1b1d; }
+      header { padding: 10px 16px; border-bottom: 1px solid rgba(127, 127, 127, 0.25); font-weight: 600; }
+      #pane { flex: 1; min-height: 0; }
+      #toast { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; border-radius: 10px; display: none;
+        background: rgba(127, 127, 127, 0.18); }
+    </style>
+  </head>
+  <body>
+    <header>Board (web view)</header>
+    <div id="pane"></div>
+    <div id="toast" role="status"></div>
+    <script type="module">
+      import { mountWebView } from '../../../../features/extensions/web/webview-host.js';
+
+      const asked = new URLSearchParams(location.search).get('scheme');
+      const scheme = asked ?? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.body.className = scheme;
+      const tokens = scheme === 'light'
+        ? { background: '#f4f4f2', foreground: '#1b1b1d', 'muted-foreground': '#6b6b70', border: '#dcdcd8', primary: '#5b5bd6', 'primary-foreground': '#ffffff', accent: '#e8e8f6' }
+        : { background: '#111113', foreground: '#ededef', 'muted-foreground': '#8b8b92', border: '#2a2a2e', primary: '#7b7bf0', 'primary-foreground': '#0d0d10', accent: '#22223a' };
+      const data = new Map();
+      // What the extension may reach (its manifest's capabilities): its own
+      // data, notifications. Anything else is refused, as hostcall::check would.
+      const call = async (req) => {
+        switch (req.op) {
+          case 'data': return { ok: data.get(req.key) ?? null };
+          case 'set_data': data.set(req.key, req.value); return { ok: null };
+          case 'notify': {
+            const t = document.getElementById('toast');
+            t.textContent = req.text;
+            t.style.display = 'block';
+            setTimeout(() => (t.style.display = 'none'), 3000);
+            return { ok: null };
+          }
+          case 'log': return { ok: null };
+          default: return { error: { kind: 'refused', capability: req.op, why: `${req.op} is not in its capabilities` } };
+        }
+      };
+      window.view = mountWebView(document.getElementById('pane'), {
+        src: '../package/dist/index.html',
+        call,
+        theme: { scheme, tokens },
+        title: 'Board',
+      });
+    </script>
+  </body>
+</html>

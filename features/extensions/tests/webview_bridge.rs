@@ -192,3 +192,17 @@ fn a_web_view_needs_the_kind_and_its_src() {
     let err = Package::embedded(&no_src, &[]).map(|_| ()).unwrap_err();
     assert!(err.to_string().contains("src"), "{err}");
 }
+
+#[test]
+fn the_showcase_example_loads() {
+    // examples/extension/webview-board: its manifest, as it ships (its
+    // dist/ is built by `just webview-example`, so only the manifest here).
+    let text = include_str!("../../../examples/extension/webview-board/package/extension.toml");
+    let package = Package::embedded(text, &[("dist/index.html", "<main></main>")]).unwrap();
+    let host = host();
+    host.load(&package, Origin::Installed).unwrap();
+    let manifest = &host.get("demo.webview-board").unwrap().manifest;
+    let view = manifest.views.iter().find(|v| v.id == "board").unwrap();
+    assert_eq!(view.kind, "web");
+    assert_eq!(view.src.as_deref(), Some("dist/index.html"));
+}

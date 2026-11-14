@@ -647,7 +647,11 @@ impl App {
             proxy: self.own.clone(),
         };
         let os_window = Arc::clone(&window);
+        // Its own document, as the main window's is: what a native view in
+        // one of its panes hit-tests to hide under its overlays.
+        let live = crate::shot::LiveDocument::new(doc.inner.clone());
         doc.vdom.in_scope(ScopeId::ROOT, move || {
+            provide_context(live);
             if let Some(row) = popout_title_row(&os_window) {
                 provide_context(row);
             }

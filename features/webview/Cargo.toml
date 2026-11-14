@@ -1,0 +1,45 @@
+[package]
+name = "architect-webview"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The web view kind's hosts (#222): an extension's own HTML/CSS/JS app in a pane — a wry child web view clipped to the pane on a desk, a sandboxed iframe in a browser — reaching the app only through the host bridge"
+
+# docs/content/architecture/embedded-views.md ("Web views"). The model and
+# the bridge's messages are architect-extensions' `webview` (wasm-clean);
+# this crate is the hosts. `desk` is the native one (wry: WebKitGTK on
+# Linux under X11 or XWayland, WKWebView on macOS, WebView2 on Windows).
+
+[features]
+default = []
+desk = [
+    "dep:wry",
+    "dep:dioxus-native",
+    "dep:gtk",
+    "architect-workspace/native",
+    "architect-workspace/paint-ui",
+]
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["ui"] }
+architect-workspace = { workspace = true, features = ["ui"] }
+architect-theme = { workspace = true, features = ["dioxus"] }
+dioxus = { workspace = true }
+futures-timer = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+dioxus-native = { workspace = true, optional = true }
+wry = { version = "0.57.1", optional = true, default-features = false, features = ["os-webview", "x11"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18.2", optional = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

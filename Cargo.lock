@@ -857,6 +857,7 @@ dependencies = [
  "architect-theme-picker",
  "architect-time-tracker",
  "architect-ui",
+ "architect-webview",
  "architect-workspace",
  "architect-workspace-hack",
  "base64 0.22.1",
@@ -2395,6 +2396,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-webview"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "architect-theme",
+ "architect-workspace",
+ "architect-workspace-hack",
+ "dioxus",
+ "dioxus-native",
+ "futures-timer",
+ "gtk",
+ "serde_json",
+ "tracing",
+ "wry",
+]
+
+[[package]]
 name = "architect-workspace"
 version = "0.1.0"
 dependencies = [
@@ -2845,9 +2863,12 @@ dependencies = [
  "wayland-sys",
  "web-sys",
  "web-time",
+ "webkit2gtk",
+ "webkit2gtk-sys",
  "winnow 0.5.40",
  "winnow 1.0.4",
  "writeable 0.6.4",
+ "wry",
  "x11rb 0.13.2",
  "x11rb-protocol 0.13.2",
  "xterm-query",
@@ -8141,6 +8162,20 @@ dependencies = [
  "libc",
  "pkg-config",
  "system-deps",
+]
+
+[[package]]
+name = "gdkx11"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3caa00e14351bebbc8183b3c36690327eb77c49abc2268dd4bd36b856db3fbfe"
+dependencies = [
+ "gdk",
+ "gdkx11-sys",
+ "gio",
+ "glib",
+ "libc",
+ "x11",
 ]
 
 [[package]]
@@ -22114,6 +22149,7 @@ dependencies = [
  "dom_query",
  "dpi",
  "dunce",
+ "gdkx11",
  "gtk",
  "http",
  "javascriptcore-rs",
@@ -22139,6 +22175,7 @@ dependencies = [
  "windows 0.62.2",
  "windows-core 0.62.2",
  "windows-version",
+ "x11-dl",
 ]
 
 [[package]]
