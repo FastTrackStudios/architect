@@ -134,7 +134,8 @@ mod tests {
 /// Who may write what extensions keep in a vault (#710): a share link's
 /// extensions (`_architect/shares/<code>.extensions.toml` and the
 /// packages in `_architect/shares/<code>.extensions/`) only the share's
-/// owner. Every other path, and a call with no account (the server
+/// owner; a person's installs (`.architect/people/<id>/`) only that
+/// person. Every other path, and a call with no account (the server
 /// itself), is left to the rest of the rules.
 pub struct ExtensionPaths {
     /// The account that owns share `code` (an audience's code: its
@@ -163,6 +164,14 @@ impl WriteGuard for ExtensionPaths {
         let Some(who) = principal else {
             return Ok(());
         };
+        if let Some(rest) = path.strip_prefix(".architect/people/") {
+            let person = rest.split('/').next().unwrap_or_default();
+            return if person == who {
+                Ok(())
+            } else {
+                Err(format!("{path}: only {person} writes their installs"))
+            };
+        }
         if let Some(code) = share_extensions_code(path) {
             return match (self.share_owner)(vault_id, code) {
                 Some(owner) if owner == who => Ok(()),
@@ -205,5 +214,30 @@ mod extension_paths_tests {
             "not this rule's"
         );
         assert!(g.check("v", "notes/a.md", Some("mallory")).is_ok());
+    }
+
+    #[test]
+    fn only_a_person_writes_their_installs() {
+        let g = ExtensionPaths::new(|_, _| None);
+        let path = ".architect/people/alice/extensions.toml";
+        assert!(g.check("v", path, Some("alice")).is_ok());
+        assert!(
+            g.check("v", path, Some("mallory"))
+                .unwrap_err()
+                .contains("only alice")
+        );
+        assert!(
+            g.check(
+                "v",
+                ".architect/people/alice/extensions.toml.minisig",
+                Some("mallory")
+            )
+            .is_err()
+        );
+        assert!(
+            g.check("v", ".architect/extensions.toml", Some("mallory"))
+                .is_ok(),
+            "not this rule's"
+        );
     }
 }

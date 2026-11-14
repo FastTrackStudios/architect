@@ -877,7 +877,8 @@ fn GrantLine(ext: crate::extensions::Extensions, grant: crate::consent::Grant) -
             Button { variant: ButtonVariant::Outline, size: ButtonSize::Small,
                 on_click: move |_| {
                     if let Some(g) = ext.host().grants() {
-                        let n = g.revoke(&grant.id, Some(&grant.scope));
+                        let _ = g;
+                        let n = ext.revoke(&grant.id, Some(&grant.scope));
                         ext.host().grants_changed(&grant.id);
                         say(s, true, format!("Revoked {n} grant(s): it may no longer reach what it was granted."));
                     }

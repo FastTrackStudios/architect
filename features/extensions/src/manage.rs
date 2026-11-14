@@ -442,6 +442,8 @@ impl Extensions {
                 req.to_string()
             };
             self.installs().set_pin(id, Some(&range))?;
+            // Its pin is part of what a person's other devices take.
+            self.changed(id);
         }
         Ok(Installed::Done {
             loaded: self.host().get(&install.id).is_some(),

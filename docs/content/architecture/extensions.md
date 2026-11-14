@@ -4465,27 +4465,32 @@ Tests: `features/extensions/tests/vault_needs.rs`.
 ### A person's installs on all their devices
 
 What a person trusted and installed on one device installs on their
-others with the same grants and no new prompt (#683's decision). Their
-record is in the vault's own folder, which syncs:
-`.architect/people/<account id>/extensions.toml`
-(`features/extensions/src/person_sync.rs` `PersonInstalls`): each install's
-id, version, pin, signer (its name and key), its signed archive's file in
-`.architect/extensions/` and that file's SHA-256, and the person's grants.
-Every install keeps the archive it came as, so it can be shared
-(`Installs::archive_of`).
+others with the same grants and no new prompt, and what they removed or
+revoked goes there too (#683's decision). Their record is in the vault's
+own folder, which syncs: `.architect/people/<account id>/extensions.toml`
+(`features/extensions/src/person_sync.rs` `PersonInstalls`), **signed by
+the device that wrote it** (`extensions.toml.minisig`).
 
-- `Extensions::publish_installs(vault, person)` (`EXT_INSTALLS_PUBLISH`)
-  writes it and copies the archives in; the app does after "Install all".
-- `Extensions::apply_installs(vault, person)` (`EXT_INSTALLS_APPLY`)
-  installs from it on another device, the person's grants given first; the
-  app does when it plans the open vault for the signed-in account.
-
-The same rules hold on every device: the archive is the one the record
-pins, at most 16 MB, no link followed, signed by the key the record names,
-and that key must be one **this device already trusts** (the org key or a
-publisher of its own registries): a vault, which its other members can
-write, cannot bring a new key. No downgrade, no step past a pin; an
-installed copy signed by another key is kept (`SignerChanged`).
+- **Who it is from.** Each device has a key of its own (`DeviceKeys`:
+  `<app dir>/device-key`). A device applies a record only when it is
+  signed by its own key or by one of the person's devices it trusts; the
+  person says so once a device ("It's mine: trust it", `DeviceKeys::trust`).
+  A record anyone else wrote, or an unsigned one, is refused and nothing
+  of it applies (`RecordError`). A node also refuses anyone but the person a
+  write under `.architect/people/<id>/`
+  (`features/vault/vault-live/src/write_guard.rs` `ExtensionPaths`).
+- **What it says.** Each entry is the last word on its id (`at_ms`): its
+  version, pin, signer, archive (in `.architect/extensions/`, its SHA-256
+  pinned), grants, or that it was removed. Each install, removal or revoke
+  made here is published at once (`Extensions::sync_person`,
+  `on_installs_changed`); `Extensions::apply_installs` applies the entries
+  newer than this device's own last word.
+- **The same rules on every device.** The archive the entry pins, at most
+  16 MB, no link followed, signed by the key the person's own device named;
+  no downgrade, no step past a pin; grants written only once it installed.
+- **Actions.** `EXT_INSTALLS_APPLY` and `EXT_INSTALLS_PUBLISH` act for the
+  signed-in person only: the app's own call or that person's; anyone else
+  is refused.
 
 Other people (the vault's other members, a share's guests) are not in a
 person's record: grants never transfer. They get the vault's (or link's)

@@ -50,7 +50,7 @@ pub mod index;
 pub mod interop;
 pub mod manifest;
 pub mod package;
-#[cfg(feature = "host")]
+#[cfg(feature = "person-sync")]
 pub mod person_sync;
 pub mod platform;
 pub mod project;

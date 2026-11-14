@@ -1171,6 +1171,30 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
 const NEEDS_POLL: Duration = Duration::from_secs(15);
 const NEEDS_ROUNDS: u32 = 8;
 
+/// The signed-in person's installs kept in sync through the vault at
+/// `vault`, signed by this device's key (`<app dir>/device-key`).
+fn person_sync(
+    person: Option<&str>,
+    vault: Option<&Path>,
+) -> Option<architect_extensions::person_sync::PersonSync> {
+    let (person, vault) = (person?, vault?);
+    let name = std::env::var("HOSTNAME")
+        .ok()
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        .map(|n| n.trim().to_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "this device".to_owned());
+    let dir = crate::app_dir()?;
+    let keys = architect_extensions::person_sync::DeviceKeys::open(&dir, &name)
+        .map_err(|error| tracing::warn!(%error, "app.extensions.device_key"))
+        .ok()?;
+    Some(architect_extensions::person_sync::PersonSync {
+        root: vault.to_path_buf(),
+        person: person.to_owned(),
+        keys,
+    })
+}
+
 /// A project's folder under the vault, when it is one: relative, with no
 /// `..`, root or prefix (a deck's context comes from a session file).
 fn project_folder(root: &Path, folder: &str) -> Option<PathBuf> {
@@ -1217,6 +1241,14 @@ pub fn VaultNeedsBanner() -> Element {
         .map(|a| a.id);
     let vault_root = root;
     let mut planned = use_signal(VaultNeeds::default);
+    // A record from one of the person's devices this one does not trust
+    // yet: theirs to trust, once.
+    let mut unknown_device = use_signal(|| {
+        None::<(
+            architect_extensions::person_sync::DeviceKeys,
+            architect_extensions::person_sync::DeviceName,
+        )>
+    });
     use_effect(use_reactive!(|target, round, person| {
         let _ = round;
         let (Some(browse), Some(target)) = (planner.clone(), target) else {
@@ -1226,20 +1258,28 @@ pub fn VaultNeedsBanner() -> Element {
         let vault_root = vault_root.clone();
         spawn(async move {
             let (tx, rx) = futures_channel::oneshot::channel();
-            let spawned = std::thread::Builder::new()
-                .name("vault-needs".to_owned())
-                .spawn(move || {
-                    if let (Some(person), Some(vault)) = (person.as_deref(), vault_root.as_deref())
-                    {
-                        if let Err(error) = browse.extensions().apply_installs(vault, person) {
-                            tracing::warn!(%error, "app.extensions.sync");
+            let spawned =
+                std::thread::Builder::new()
+                    .name("vault-needs".to_owned())
+                    .spawn(move || {
+                        let mut untrusted = None;
+                        if let Some(sync) = person_sync(person.as_deref(), vault_root.as_deref()) {
+                            let ext = browse.extensions();
+                            ext.sync_person(sync.clone());
+                            match ext.apply_installs(&sync) {
+                            Ok(_) => {}
+                            Err(architect_extensions::person_sync::RecordError::UntrustedDevice {
+                                device: Some(device),
+                            }) => untrusted = Some((sync.keys.clone(), device)),
+                            Err(error) => tracing::warn!(%error, "app.extensions.sync"),
                         }
-                    }
-                    let _ = tx.send(browse.extensions().open_vault(&target));
-                });
+                        }
+                        let _ = tx.send((browse.extensions().open_vault(&target), untrusted));
+                    });
             if spawned.is_ok() {
-                if let Ok(needs) = rx.await {
+                if let Ok((needs, untrusted)) = rx.await {
                     planned.set(needs);
+                    unknown_device.set(untrusted);
                 }
             }
         });
@@ -1260,6 +1300,30 @@ pub fn VaultNeedsBanner() -> Element {
         return rsx! {};
     };
     let needs = planned();
+    if let Some((keys, device)) = unknown_device() {
+        return rsx! {
+            div { style: "padding: 8px 12px 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;",
+                span { "Your device \"{device.name}\" installed extensions in this vault. Is it yours? Its key is {device.key.chars().take(12).collect::<String>()}…" }
+                button {
+                    style: "padding: 4px 10px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); cursor: pointer;",
+                    onclick: move |_| {
+                        if let Err(error) = keys.trust(&device) {
+                            tracing::warn!(%error, "app.extensions.trust_device");
+                        }
+                        unknown_device.set(None);
+                        let next = again.peek().wrapping_add(1);
+                        again.set(next);
+                    },
+                    "It's mine: trust it"
+                }
+                button {
+                    style: "font-size: 12px; background: none; border: none; color: var(--muted-foreground); cursor: pointer;",
+                    onclick: move |_| unknown_device.set(None),
+                    "Not mine"
+                }
+            }
+        };
+    }
     if needs.is_empty() || dismissed.read().contains(&target) {
         return rsx! {};
     }
