@@ -1,0 +1,13 @@
+/* The board's own sheet, after the runtime's component sheet (.arch-…),
+   in the app's tokens. */
+#app { padding: 16px; max-width: 960px; margin: 0 auto; box-sizing: border-box; }
+#cards li { cursor: default; background: var(--arch-bg); }
+#cards .handle { cursor: grab; color: var(--arch-muted); padding: 0 4px; user-select: none; touch-action: none; }
+#cards .title { flex: 1; }
+#cards .sortable-ghost { opacity: 0.4; }
+#cards .sortable-chosen { background: var(--arch-soft); }
+.uplot, .uplot * { font-family: var(--arch-font); }
+@media (max-width: 480px) {
+  #app { padding: 12px; }
+  header { flex-direction: column; align-items: flex-start !important; }
+}

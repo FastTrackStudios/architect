@@ -57,6 +57,9 @@ pub fn kinds() -> ViewKinds {
             .capability(Capability::Actions),
     );
     let _ = kinds.register(KindSpec::paint());
+    // Extensions' web views (#222): drawn by the native host with feature
+    // `webview`, otherwise their panes say there is none.
+    let _ = kinds.register(KindSpec::web());
     kinds
 }
 
