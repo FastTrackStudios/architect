@@ -81,9 +81,11 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Extensions {
-    /// Extensions loaded by `host`, installed under `installs`.
+    /// Extensions loaded by `host`, installed under `installs` (for the
+    /// host's platform: [`Host::set_platform`] comes first).
     #[must_use]
     pub fn new(host: Host, installs: Installs) -> Self {
+        let installs = installs.with_platform(host.platform());
         let failed = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         {
             let failed = Arc::clone(&failed);
@@ -190,9 +192,14 @@ impl Extensions {
         extension: &dyn crate::linked::Extension,
     ) -> Result<Self, crate::ManifestError> {
         let package = Package::embedded(extension.manifest(), extension.files())?;
-        self.inner
-            .host
-            .link(&package.manifest, crate::linked::Builder::of(extension));
+        // Not for this platform (#578): listed, its `build` never run (the
+        // crate still compiles here, stubbing what it cannot do).
+        let platform = self.inner.host.platform();
+        if crate::platform::runs_on(&package.manifest.platforms, &platform) {
+            self.inner
+                .host
+                .link(&package.manifest, crate::linked::Builder::of(extension));
+        }
         Ok(self.with_builtin(package))
     }
 
@@ -262,8 +269,9 @@ impl Extensions {
         &self,
         id: &str,
         req: &VersionReq,
+        extra: &[Arc<dyn Source>],
     ) -> Result<(Arc<dyn Source>, Listing), InstallError> {
-        self.find(id, req)
+        self.find(id, req, extra)
     }
 
     /// Every listing of `id`, each with its source's name.
@@ -282,12 +290,19 @@ impl Extensions {
     }
 
     /// The newest listing of `id` that `req` takes and the policy
-    /// allows, and the registry it is in.
-    fn find(&self, id: &str, req: &VersionReq) -> Result<(Arc<dyn Source>, Listing), InstallError> {
+    /// allows, and the registry it is in: the person's registries first,
+    /// then `extra` (a vault's carried archives, for this call only); on a
+    /// tie the first wins, so a registry's copy beats a carried one.
+    pub(crate) fn find(
+        &self,
+        id: &str,
+        req: &VersionReq,
+        extra: &[Arc<dyn Source>],
+    ) -> Result<(Arc<dyn Source>, Listing), InstallError> {
         let policy = lock(&self.inner.policy).clone();
         let mut best: Option<(Arc<dyn Source>, Listing)> = None;
         let mut refused = None;
-        for source in self.sources() {
+        for source in self.sources().into_iter().chain(extra.iter().cloned()) {
             let Ok(index) = source.index() else { continue };
             for l in index
                 .listings
@@ -318,11 +333,56 @@ impl Extensions {
     ///
     /// No registry has it, the policy refuses it, or it cannot be fetched.
     pub fn install(&self, id: &str, req: &VersionReq) -> Result<Install, InstallError> {
-        let (source, listing) = self.find(id, req)?;
+        self.install_in(id, req, &[], false)
+    }
+
+    /// [`Self::install`], searching `extra` too, and taking an older
+    /// version or one past the pin only when `by_name` (a person asked for
+    /// that version).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::install`], and [`InstallError::Downgrade`].
+    pub(crate) fn install_in(
+        &self,
+        id: &str,
+        req: &VersionReq,
+        extra: &[Arc<dyn Source>],
+        by_name: bool,
+    ) -> Result<Install, InstallError> {
+        let (source, listing) = self.find(id, req, extra)?;
+        if !by_name {
+            self.no_downgrade(&listing)?;
+        }
         let install = self.inner.installs.install(source.as_ref(), &listing)?;
         let _ = self.sync();
         self.turned_on(&install.id);
         Ok(install)
+    }
+
+    /// Refuses `listing` when it is older than the install of its id, or
+    /// outside that install's pin.
+    pub(crate) fn no_downgrade(&self, listing: &Listing) -> Result<(), InstallError> {
+        let Some(installed) = self.inner.installs.get(&listing.id) else {
+            return Ok(());
+        };
+        let refuse = |why: String| {
+            Err(InstallError::Downgrade {
+                id: listing.id.clone(),
+                installed: installed.version.to_string(),
+                offered: listing.version.to_string(),
+                why,
+            })
+        };
+        if listing.version < installed.version {
+            return refuse("older".to_owned());
+        }
+        if let Some(pin) = installed.pin.as_deref() {
+            if VersionReq::parse(pin).is_ok_and(|p| !p.matches(&listing.version)) {
+                return refuse(format!("outside its pin {pin}"));
+            }
+        }
+        Ok(())
     }
 
     /// Removes `id`'s install and unloads it (the built-in, if there is
@@ -495,8 +555,15 @@ impl Extensions {
                 });
             }
         }
+        // What cannot run here and is no longer chosen is forgotten.
+        for (m, _) in host.not_here() {
+            if !chosen.iter().any(|c| c.runs.id == m.id) {
+                host.forget_not_here(&m.id);
+            }
+        }
         // Providers before what requires them (`[requires]`).
         let chosen = by_requires(chosen);
+        let not_here = host.not_here();
         for c in &chosen {
             let runs = &c.runs;
             let same = host.get(&runs.id).is_some_and(|l| {
@@ -504,7 +571,9 @@ impl Extensions {
                     && l.manifest == runs.package.manifest
                     && l.dir.as_deref() == runs.package.dir()
             });
-            if same {
+            // Tried, and cannot run here (#578): listed, not retried.
+            let stays_out = not_here.iter().any(|(m, _)| m == &runs.package.manifest);
+            if same || stays_out {
                 continue;
             }
             events.push(match host.load(&runs.package, runs.origin) {
@@ -574,22 +643,47 @@ impl Extensions {
 
     /// What opening (or joining) a project with `requirements` takes:
     /// checked against what is loaded, what the registries offer, the
-    /// kinds this app runs and the organization's policy.
+    /// kinds and platforms this app runs, each install's pin and the
+    /// organization's policy.
     #[must_use]
     pub fn open(&self, requirements: &Requirements) -> Plan {
+        self.open_in(requirements, &[])
+    }
+
+    /// [`Self::open`], offered `extra` too (a vault's carried archives).
+    fn open_in(&self, requirements: &Requirements, extra: &[Arc<dyn Source>]) -> Plan {
         let here: Vec<_> = self
             .inner
             .host
             .loaded()
             .into_iter()
             .map(|l| (l.manifest.id, l.manifest.version))
+            .chain(
+                // Installed and not loaded (off, or not here): still what
+                // a downgrade would replace.
+                self.inner
+                    .installs
+                    .list()
+                    .into_iter()
+                    .map(|i| (i.id, i.version)),
+            )
             .collect();
         let policy = lock(&self.inner.policy).clone();
         let host = self.inner.host.clone();
-        plan(
+        let offers: Vec<Listing> = self
+            .offers()
+            .into_iter()
+            .chain(
+                extra
+                    .iter()
+                    .filter_map(|s| s.index().ok())
+                    .flat_map(|i| i.listings),
+            )
+            .collect();
+        let planned = plan(
             requirements,
             &here,
-            &self.offers(),
+            &offers,
             move |kind| match kind {
                 "data" => host.runs(Kind::Data),
                 "luau" => host.runs(Kind::Luau),
@@ -599,35 +693,196 @@ impl Extensions {
                 _ => true,
             },
             policy.as_ref(),
-        )
+        );
+        self.settled(requirements, planned, extra)
     }
 
-    /// Installs what `plan` says to (the person said yes, once, to all of
-    /// it) and loads it: each install, or why it failed.
+    /// What opening the vault (or project folder) at `root` takes ("What a
+    /// project needs"): the extensions its `.architect/extensions.toml`
+    /// names, checked as a project's are ([`Self::open`]), with the small
+    /// ones it carries in `.architect/extensions/` offered for this plan
+    /// only (`crate::vault_needs::Carried`). It changes nothing: no
+    /// source is added, nothing is installed.
+    #[must_use]
+    pub fn open_vault(&self, root: &Path) -> crate::vault_needs::VaultNeeds {
+        match crate::vault_needs::read(root) {
+            Ok(requirements) => {
+                let carried = crate::vault_needs::Carried::new(
+                    root,
+                    self.inner.installs.clone(),
+                    &requirements,
+                );
+                let refused = carried.refused();
+                let extra: [Arc<dyn Source>; 1] = [Arc::new(carried)];
+                crate::vault_needs::VaultNeeds {
+                    plan: self.open_in(&requirements, &extra),
+                    refused,
+                    error: None,
+                }
+            }
+            Err(error) => crate::vault_needs::VaultNeeds {
+                plan: Plan::default(),
+                refused: Vec::new(),
+                error: Some(error),
+            },
+        }
+    }
+
+    /// `plan` with each listing that cannot be taken moved to what cannot
+    /// be had, with why: its manifest's `platforms` (read from its
+    /// archive: a registry's listing names only a process's builds), or
+    /// it is older than, or outside the pin of, the installed copy.
+    fn settled(
+        &self,
+        requirements: &Requirements,
+        mut plan: Plan,
+        extra: &[Arc<dyn Source>],
+    ) -> Plan {
+        let need = |id: &str| {
+            requirements
+                .extensions
+                .iter()
+                .find(|r| r.id == id)
+                .cloned()
+                .unwrap_or_else(|| crate::project::Requirement::new(id))
+        };
+        for list in [&mut plan.install, &mut plan.offer] {
+            let mut kept = Vec::new();
+            for l in std::mem::take(list) {
+                if let Err(InstallError::Downgrade {
+                    installed,
+                    why,
+                    offered,
+                    ..
+                }) = self.no_downgrade(&l)
+                {
+                    let missing = match why.strip_prefix("outside its pin ") {
+                        Some(pin) => crate::project::Missing::OutsidePin {
+                            installed,
+                            pin: pin.to_owned(),
+                            offered,
+                        },
+                        None => crate::project::Missing::WantsOlder {
+                            installed,
+                            range: need(&l.id).version,
+                        },
+                    };
+                    plan.missing.push((need(&l.id), missing));
+                    continue;
+                }
+                let cannot = VersionReq::parse(&format!("={}", l.version))
+                    .ok()
+                    .and_then(|exact| self.preview_in(&l.id, &exact, extra).ok())
+                    .and_then(|p| p.cannot_run);
+                match cannot {
+                    Some(why) => plan
+                        .missing
+                        .push((need(&l.id), crate::project::Missing::CannotRun(why))),
+                    None => kept.push(l),
+                }
+            }
+            *list = kept;
+        }
+        plan
+    }
+
+    /// Installs what `plan` says to, through the consent path: with no
+    /// `grant`, nothing is installed and each is answered
+    /// [`crate::manage::Installed::NeedsConsent`] (a project's or a vault's
+    /// extensions never install unasked, whatever they ask for); with
+    /// `grant` (the person said yes, once, to all of it) each is granted,
+    /// installed and loaded. Each outcome, or why it failed.
     #[must_use = "what happened"]
-    pub fn accept(&self, plan: &Plan) -> Vec<Result<Install, (String, InstallError)>> {
-        let sources = self.sources();
-        let out = plan
-            .install
+    pub fn accept(
+        &self,
+        plan: &Plan,
+        grant: Option<&crate::consent::Scope>,
+        by: &str,
+    ) -> Vec<Result<crate::manage::Installed, (String, InstallError)>> {
+        self.accept_in(plan, grant, by, &[])
+    }
+
+    /// [`Self::accept`] for the vault (or project folder) at `root`: its
+    /// carried archives searched too, for these installs only.
+    #[must_use = "what happened"]
+    pub fn accept_vault(
+        &self,
+        root: &Path,
+        plan: &Plan,
+        grant: Option<&crate::consent::Scope>,
+        by: &str,
+    ) -> Vec<Result<crate::manage::Installed, (String, InstallError)>> {
+        let requirements = crate::vault_needs::read(root).unwrap_or_default();
+        let extra = [crate::vault_needs::carried(
+            root,
+            &self.inner.installs,
+            &requirements,
+        )];
+        self.accept_in(plan, grant, by, &extra)
+    }
+
+    /// What `plan`'s installs would be, for the consent prompt: each
+    /// preview, or the listing's id and why it cannot be read (refused).
+    #[must_use]
+    pub fn previews_for(
+        &self,
+        root: Option<&Path>,
+        plan: &Plan,
+    ) -> Vec<Result<crate::manage::Preview, (String, String)>> {
+        let extra: Vec<Arc<dyn Source>> = root
+            .map(|root| {
+                let requirements = crate::vault_needs::read(root).unwrap_or_default();
+                crate::vault_needs::carried(root, &self.inner.installs, &requirements)
+            })
+            .into_iter()
+            .collect();
+        plan.install
+            .iter()
+            .map(|l| {
+                let exact = VersionReq::parse(&format!("={}", l.version))
+                    .map_err(|e| (l.id.clone(), e.to_string()))?;
+                self.preview_in(&l.id, &exact, &extra)
+                    .map_err(|e| (l.id.clone(), e.to_string()))
+            })
+            .collect()
+    }
+
+    fn accept_in(
+        &self,
+        plan: &Plan,
+        grant: Option<&crate::consent::Scope>,
+        by: &str,
+        extra: &[Arc<dyn Source>],
+    ) -> Vec<Result<crate::manage::Installed, (String, InstallError)>> {
+        plan.install
             .iter()
             .map(|listing| {
-                let source = sources
-                    .iter()
-                    .find(|s| s.index().is_ok_and(|i| i.listings.contains(listing)))
-                    .ok_or_else(|| {
-                        (
-                            listing.id.clone(),
-                            InstallError::NotFound(listing.id.clone()),
-                        )
-                    })?;
-                self.inner
-                    .installs
-                    .install(source.as_ref(), listing)
+                let exact = VersionReq::parse(&format!("={}", listing.version))
+                    .map_err(|e| (listing.id.clone(), InstallError::Mismatch(e.to_string())))?;
+                grant
+                    .map_or_else(
+                        || {
+                            self.preview_in(&listing.id, &exact, extra).map(|p| {
+                                crate::manage::Installed::NeedsConsent {
+                                    preview: Box::new(p),
+                                }
+                            })
+                        },
+                        |scope| {
+                            self.install_with_in(
+                                &listing.id,
+                                &exact,
+                                Some(scope.clone()),
+                                by,
+                                false,
+                                extra,
+                                false,
+                            )
+                        },
+                    )
                     .map_err(|e| (listing.id.clone(), e))
             })
-            .collect();
-        let _ = self.sync();
-        out
+            .collect()
     }
 }
 

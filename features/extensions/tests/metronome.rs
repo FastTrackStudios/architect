@@ -279,7 +279,11 @@ fn opening_a_project_installs_what_it_needs_if_the_organization_allows() {
         plan.prompt().as_deref(),
         Some("This project uses Metronome")
     );
-    let installed = ext.accept(&plan);
+    let installed = ext.accept(
+        &plan,
+        Some(&architect_extensions::consent::Scope::Device),
+        "person",
+    );
     assert!(installed.iter().all(Result::is_ok), "{installed:?}");
     let install = ext.installs().get(ID).unwrap();
     assert!(

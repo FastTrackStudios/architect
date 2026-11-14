@@ -356,3 +356,36 @@ rev = "v0.1.0"
     assert!(report.problems[0].contains("sha256"));
     assert!(report.problems[1].contains("unknown key `homepage`"));
 }
+
+#[test]
+fn a_peek_checks_the_signed_index_and_reads_only_the_manifest() {
+    let key = SecretKey::generate().unwrap();
+    let archive = signed(&key);
+    let p = architect_extension_archive::peek(&archive, &trusting(&key), 1 << 26).unwrap();
+    assert_eq!(p.index.id, "acme.tool");
+    assert_eq!(p.signer, "test key");
+    assert_eq!(p.signer_key, key.public().trim());
+    assert_eq!(p.manifest.as_deref(), Some(MANIFEST));
+    let v = open(&archive, &trusting(&key)).unwrap();
+    assert_eq!(v.signer_key, p.signer_key);
+
+    // Another key: refused before anything else is read.
+    let other = SecretKey::generate().unwrap();
+    assert!(matches!(
+        architect_extension_archive::peek(&archive, &trusting(&other), 1 << 26),
+        Err(ArchiveError::UntrustedKey { .. })
+    ));
+
+    // A manifest changed after signing: refused.
+    let mut files = entries(&archive).unwrap();
+    for (path, bytes) in &mut files {
+        if path == "extension.toml" {
+            *bytes = MANIFEST.replace("1.2.0", "9.9.9").into_bytes();
+        }
+    }
+    let changed = write_entries(&files).unwrap();
+    assert!(matches!(
+        architect_extension_archive::peek(&changed, &trusting(&key), 1 << 26),
+        Err(ArchiveError::FileTampered { .. })
+    ));
+}

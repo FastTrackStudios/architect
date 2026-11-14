@@ -589,6 +589,9 @@ pub struct Verified {
     pub index: ContentIndex,
     /// The name of the trusted key that signed it.
     pub signer: String,
+    /// That key (the base64 line of its minisign `.pub`): what an install
+    /// records, so an update by another key is refused.
+    pub signer_key: String,
     files: Vec<(String, Vec<u8>)>,
 }
 
@@ -671,7 +674,139 @@ pub fn open(archive: &[u8], trust: &Trust) -> Result<Verified, ArchiveError> {
     Ok(Verified {
         index,
         signer: signer.name.clone(),
+        signer_key: signer.key.clone(),
         files,
+    })
+}
+
+/// What [`peek`] reads of an archive: its signed index, who signed it,
+/// and its manifest (checked against the index), not its other files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Peeked {
+    pub index: ContentIndex,
+    /// The name of the trusted key that signed it.
+    pub signer: String,
+    /// That key's base64 line.
+    pub signer_key: String,
+    /// Its `extension.toml`, when it has one.
+    pub manifest: Option<String>,
+}
+
+/// Checks the signature over `archive`'s index and reads its manifest,
+/// without unpacking the rest.
+///
+/// A listing for a plan, before anyone says yes. It reads the stream in
+/// order and stops once it has the index, the signature and the manifest,
+/// or at `max_unpacked` bytes read, whatever comes. [`open`] still checks
+/// every file at install.
+///
+/// # Errors
+///
+/// It is not an archive, it is unsigned, its index is not the one
+/// signed, its key is not trusted, its manifest is not the one indexed,
+/// or `max_unpacked` bytes went by first.
+pub fn peek(archive: &[u8], trust: &Trust, max_unpacked: u64) -> Result<Peeked, ArchiveError> {
+    let bad = |e: std::io::Error| ArchiveError::NotAnArchive(e.to_string());
+    let gz = flate2::read::GzDecoder::new(archive).take(max_unpacked);
+    let mut tar = tar::Archive::new(gz);
+    let (mut index_bytes, mut sig_bytes, mut manifest) = (None, None, None);
+    for entry in tar.entries().map_err(bad)? {
+        let mut entry = entry.map_err(bad)?;
+        let path = entry
+            .path()
+            .map_err(bad)?
+            .to_string_lossy()
+            .trim_end_matches('/')
+            .to_owned();
+        let kind = entry.header().entry_type();
+        if kind.is_dir() {
+            continue;
+        }
+        if !kind.is_file() || !is_inside(&path) {
+            return Err(ArchiveError::Unsafe { path });
+        }
+        let slot = match path.as_str() {
+            INDEX => &mut index_bytes,
+            SIGNATURE => &mut sig_bytes,
+            MANIFEST => &mut manifest,
+            _ => continue,
+        };
+        let size = entry.header().size().map_err(bad)?;
+        if size > (1 << 20) {
+            return Err(ArchiveError::TooLarge(format!("{path}: more than 1 MiB")));
+        }
+        let mut bytes = Vec::new();
+        (&mut entry)
+            .take(size)
+            .read_to_end(&mut bytes)
+            .map_err(bad)?;
+        *slot = Some(bytes);
+        if index_bytes.is_some() && sig_bytes.is_some() && manifest.is_some() {
+            break;
+        }
+    }
+    let index_bytes = index_bytes.ok_or(ArchiveError::NoIndex)?;
+    let Some(sig_bytes) = sig_bytes else {
+        let index = parse_index(&index_bytes)?;
+        return Err(ArchiveError::Unsigned {
+            id: index.id,
+            version: index.version,
+        });
+    };
+    let sig_text =
+        String::from_utf8(sig_bytes).map_err(|e| ArchiveError::BadSignatureFile(e.to_string()))?;
+    let signature = minisign_verify::Signature::decode(&sig_text)
+        .map_err(|e| ArchiveError::BadSignatureFile(e.to_string()))?;
+    let signed_by = sig_text
+        .lines()
+        .find(|l| !l.trim().is_empty() && !l.starts_with("untrusted comment:"))
+        .and_then(key_id)
+        .unwrap_or_default();
+    let signer = trust
+        .keys()
+        .iter()
+        .find(|k| key_id(&k.key).as_deref() == Some(signed_by.as_str()))
+        .ok_or_else(|| ArchiveError::UntrustedKey {
+            key_id: signed_by.clone(),
+            trusted: trust
+                .keys()
+                .iter()
+                .map(|k| format!("{} ({})", k.name, key_id(&k.key).unwrap_or_default()))
+                .collect(),
+        })?;
+    let key = minisign_verify::PublicKey::from_base64(&signer.key)
+        .map_err(|e| ArchiveError::Key(format!("{}: {e}", signer.name)))?;
+    key.verify(&index_bytes, &signature, false)
+        .map_err(|_| ArchiveError::IndexTampered {
+            signer: signer.name.clone(),
+        })?;
+    let index = parse_index(&index_bytes)?;
+    let manifest = match manifest {
+        Some(bytes) => {
+            let listed = index
+                .files
+                .iter()
+                .find(|f| f.path == MANIFEST)
+                .ok_or_else(|| ArchiveError::Unlisted {
+                    path: MANIFEST.to_owned(),
+                })?;
+            let got = sha256_hex(&bytes);
+            if got != listed.sha256 {
+                return Err(ArchiveError::FileTampered {
+                    path: MANIFEST.to_owned(),
+                    want: listed.sha256.clone(),
+                    got,
+                });
+            }
+            Some(String::from_utf8(bytes).map_err(|e| ArchiveError::NotAnArchive(e.to_string()))?)
+        }
+        None => None,
+    };
+    Ok(Peeked {
+        index,
+        signer: signer.name.clone(),
+        signer_key: signer.key.clone(),
+        manifest,
     })
 }
 

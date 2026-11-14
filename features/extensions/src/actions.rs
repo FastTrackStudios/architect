@@ -4,7 +4,8 @@
 //!
 //! | action | what it does |
 //! |---|---|
-//! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs and what it adds |
+//! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs, what it adds, its `platforms` and why it cannot run here (`not_here`) |
+//! | `EXT_NEEDS` | what opening a vault or project folder takes: what is ready, to install, to offer, missing (with why) and refused |
 //! | `EXT_SEARCH` | searches every registry: `{query}` → the newest of each that matches |
 //! | `EXT_INSTALL` | installs one: `{id, version?}` (a semver range), loaded at once |
 //! | `EXT_UNINSTALL` | removes one: `{id}`; a built-in comes back |
@@ -51,6 +52,14 @@ static SEARCH: ActionMeta = meta(
     "Search for extensions",
     "Searches every registry (and ReaPack repository) for `query`: the newest of each that \
      matches, with where it is listed.",
+);
+static NEEDS: ActionMeta = meta(
+    "EXT_NEEDS",
+    "What a vault or project needs",
+    "What opening the vault or project folder `folder` takes: the extensions its \
+     .architect/extensions.toml names and the ones it carries in .architect/extensions/, as \
+     ready, install (required: one consent for all), offer (optional), missing (each with why) \
+     and refused (carried archives that are not signed by a key trusted here). Installs nothing.",
 );
 static INSTALL: ActionMeta = meta(
     "EXT_INSTALL",
@@ -116,6 +125,13 @@ pub struct SearchArgs {
     pub query: String,
 }
 
+/// `EXT_NEEDS`'s arguments.
+#[derive(Debug, Facet)]
+pub struct NeedsArgs {
+    /// The vault's or project's folder, absolute.
+    pub folder: String,
+}
+
 /// `EXT_INSTALL`'s arguments.
 #[derive(Debug, Facet)]
 pub struct InstallArgs {
@@ -128,6 +144,9 @@ pub struct InstallArgs {
     pub grant: Option<String>,
     /// Keep it at `version` (or the version installed) from now on.
     pub pin: Option<bool>,
+    /// Take `version` even when it is older than the one installed or
+    /// outside its pin (a person asked for it by name).
+    pub explicit: Option<bool>,
 }
 
 /// `EXT_UNINSTALL`'s arguments.
@@ -189,6 +208,28 @@ impl Extensions {
             },
         )?;
         let me = self.clone();
+        list.register_with(&NEEDS, Effect::ReadOnly, move |_: &ActionCaller, a: NeedsArgs| {
+            let n = me.open_vault(std::path::Path::new(&a.folder));
+            let listing = |l: &crate::index::Listing| {
+                json!({ "id": l.id, "name": l.name, "version": l.version.to_string(), "kind": l.kind })
+            };
+            Ok::<_, String>(RawJson::from(
+                json!({
+                    "ready": n.plan.ready,
+                    "install": n.plan.install.iter().map(listing).collect::<Vec<_>>(),
+                    "offer": n.plan.offer.iter().map(listing).collect::<Vec<_>>(),
+                    "missing": n.plan.missing.iter().map(|(r, m)| json!({
+                        "id": r.id, "name": r.name, "version": r.version,
+                        "required": r.required, "why": m.to_string(),
+                    })).collect::<Vec<_>>(),
+                    "refused": n.refused.iter().map(|(f, why)| json!({ "file": f, "why": why })).collect::<Vec<_>>(),
+                    "prompt": n.plan.prompt(),
+                    "error": n.error,
+                })
+                .to_string(),
+            ))
+        })?;
+        let me = self.clone();
         list.register_with(
             &INSTALL,
             Effect::Mutating,
@@ -208,7 +249,15 @@ impl Extensions {
                     architect::action::Principal::describe,
                 );
                 let installed = me
-                    .install_with(&a.id, &req, grant, &by, a.pin == Some(true))
+                    .install_with_in(
+                        &a.id,
+                        &req,
+                        grant,
+                        &by,
+                        a.pin == Some(true),
+                        &[],
+                        a.explicit == Some(true),
+                    )
                     .map_err(|e| e.to_string())?;
                 Ok::<_, String>(RawJson::from(Self::installed_json(&installed).to_string()))
             },
@@ -289,6 +338,10 @@ impl Extensions {
                     "kind": m.kind.name(),
                     "runs": c.describe(),
                     "loaded": !actions.is_empty() || loaded.iter().any(|l| l.manifest.id == m.id),
+                    // Where it runs (#578): its `platforms` (empty: every
+                    // one), and why not here when it cannot.
+                    "platforms": m.platforms,
+                    "not_here": self.host().why_not_here(&m.id),
                     "actions": actions,
                     "settings": m.sections.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
                     "views": m.views.iter().map(|v| v.id.clone()).collect::<Vec<_>>(),

@@ -204,6 +204,41 @@ pub enum Missing {
     /// It cannot run here: its kind (a process on a phone), or a process
     /// with builds, none for this platform (`process: no build for …`).
     CannotRun(String),
+    /// A newer version is installed than any the range takes: the project
+    /// wants an older one, and is not given it (the person's install
+    /// stays; installing that version by name is theirs to do).
+    WantsOlder { installed: String, range: String },
+    /// The version it would take is outside the installed copy's pin.
+    OutsidePin {
+        installed: String,
+        pin: String,
+        offered: String,
+    },
+}
+
+impl std::fmt::Display for Missing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => f.write_str("no registry here has it"),
+            Self::NoVersion { range } => write!(f, "no version here fits {range}"),
+            Self::NotApproved(why) => f.write_str(why),
+            Self::CannotRun(why) => write!(f, "it cannot run here ({why})"),
+            Self::WantsOlder { installed, range } => {
+                write!(
+                    f,
+                    "{installed} is installed; this wants an older one ({range})"
+                )
+            }
+            Self::OutsidePin {
+                installed,
+                pin,
+                offered,
+            } => write!(
+                f,
+                "{installed} is installed and pinned to {pin}; this wants {offered}"
+            ),
+        }
+    }
 }
 
 /// What opening (or joining) a project takes.
@@ -230,11 +265,17 @@ impl Plan {
     /// The prompt's line: "This project uses Saturation and Lyrics Lane".
     #[must_use]
     pub fn prompt(&self) -> Option<String> {
+        self.prompt_for("project")
+    }
+
+    /// [`Self::prompt`] for `what` opens: "This vault uses Word Count".
+    #[must_use]
+    pub fn prompt_for(&self, what: &str) -> Option<String> {
         let names: Vec<&str> = self.install.iter().map(|l| l.name.as_str()).collect();
         match names.as_slice() {
             [] => None,
-            [one] => Some(format!("This project uses {one}")),
-            [rest @ .., last] => Some(format!("This project uses {} and {last}", rest.join(", "))),
+            [one] => Some(format!("This {what} uses {one}")),
+            [rest @ .., last] => Some(format!("This {what} uses {} and {last}", rest.join(", "))),
         }
     }
 }
@@ -264,6 +305,20 @@ pub fn plan(
         }
         versions.retain(|l| req.matches(&l.version));
         versions.sort_by(|a, b| b.version.cmp(&a.version));
+        // Installed newer than the range takes: it wants an older one.
+        let installed = here.iter().find(|(id, _)| id == &r.id).map(|(_, v)| v);
+        if let Some(v) = installed {
+            if versions.first().is_none_or(|n| n.version < *v) && !req.matches(v) {
+                out.missing.push((
+                    r.clone(),
+                    Missing::WantsOlder {
+                        installed: v.to_string(),
+                        range: r.version.clone(),
+                    },
+                ));
+                continue;
+            }
+        }
         let Some(newest) = versions.first() else {
             out.missing.push((
                 r.clone(),
@@ -371,6 +426,30 @@ mod tests {
                 .iter()
                 .any(|(r, m)| r.id == "acme.saturation" && *m == Missing::CannotRun("wasm".into()))
         );
+    }
+
+    #[test]
+    fn a_project_that_wants_an_older_version_says_so_and_takes_nothing() {
+        let offer = vec![
+            listing("acme.greeter", "0.1.0", "luau"),
+            listing("acme.greeter", "0.2.0", "luau"),
+        ];
+        let mut needs = Requirements::default();
+        needs.need(Requirement::new("acme.greeter").versions("=0.1.0"));
+        let here = vec![("acme.greeter".to_owned(), Version::new(0, 2, 0))];
+        let p = plan(&needs, &here, &offer, |_| true, None);
+        assert!(p.install.is_empty());
+        assert_eq!(
+            p.missing[0].1,
+            Missing::WantsOlder {
+                installed: "0.2.0".into(),
+                range: "=0.1.0".into()
+            }
+        );
+        // An upgrade is fine.
+        let here = vec![("acme.greeter".to_owned(), Version::new(0, 0, 9))];
+        let p = plan(&needs, &here, &offer, |_| true, None);
+        assert_eq!(p.install.len(), 1);
     }
 
     #[test]

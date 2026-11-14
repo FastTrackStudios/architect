@@ -75,7 +75,11 @@ pub struct Preview {
     /// The target triples it has builds for (a process extension's
     /// archive); empty when it runs anywhere.
     pub platforms: Vec<String>,
-    /// Why it cannot run here when it cannot: no build for this platform
+    /// The operating systems its manifest says it runs on (`platforms`,
+    /// #578); empty for every one.
+    pub runs_on: Vec<String>,
+    /// Why it cannot run here when it cannot: its `platforms` leave this
+    /// one out ("Linux only: not on macOS"), or no build for this platform
     /// (`runs_here` is false then).
     pub cannot_run: Option<String>,
     /// The key its archive is signed by, when it is one.
@@ -222,8 +226,9 @@ impl Extensions {
         &self,
         id: &str,
         req: &VersionReq,
+        extra: &[std::sync::Arc<dyn crate::install::Source>],
     ) -> Result<(std::sync::Arc<dyn crate::install::Source>, Listing), InstallError> {
-        self.find_listed(id, req)
+        self.find_listed(id, req, extra)
     }
 
     /// Reads version `req` of `id` (the newest it allows) without
@@ -233,7 +238,22 @@ impl Extensions {
     ///
     /// No such listing, or it could not be fetched or read.
     pub fn preview(&self, id: &str, req: &VersionReq) -> Result<Preview, InstallError> {
-        let (source, listing) = self.pick(id, req)?;
+        self.preview_in(id, req, &[])
+    }
+
+    /// [`Self::preview`], searching `extra` too (a vault's carried
+    /// archives, for this call only).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::preview`].
+    pub fn preview_in(
+        &self,
+        id: &str,
+        req: &VersionReq,
+        extra: &[std::sync::Arc<dyn crate::install::Source>],
+    ) -> Result<Preview, InstallError> {
+        let (source, listing) = self.pick(id, req, extra)?;
         let root = self.installs().root().to_path_buf();
         std::fs::create_dir_all(&root).map_err(|e| InstallError::Io(e.to_string()))?;
         let staging = root.join(format!(".preview-{}", crate::install::slug(id)));
@@ -279,7 +299,10 @@ impl Extensions {
             .grants()
             .map_or_else(Vec::new, |g| g.needs(&m.id, &caps));
         let installed = self.installs().get(&m.id);
-        let cannot_run = listing.no_build_for(crate::index::host_targets());
+        let platform = self.host().platform();
+        let cannot_run = crate::platform::not_here(&m.platforms, &platform)
+            .map(|why| format!("{why}: not on {}", crate::platform::name(&platform)))
+            .or_else(|| listing.no_build_for(crate::index::host_targets()));
         Preview {
             id: m.id.clone(),
             name: m.name.clone(),
@@ -288,6 +311,7 @@ impl Extensions {
             kind: m.kind.name().to_owned(),
             runner: runner_words(m),
             runs_here: self.host().runs(m.kind) && cannot_run.is_none(),
+            runs_on: m.platforms.clone(),
             source: source.to_owned(),
             location,
             git_ref,
@@ -349,9 +373,41 @@ impl Extensions {
         by: &str,
         pin: bool,
     ) -> Result<Installed, InstallError> {
+        self.install_with_in(id, req, grant, by, pin, &[], false)
+    }
+
+    /// [`Self::install_with`], searching `extra` too (a vault's carried
+    /// archives, for this call only). An older version than the one
+    /// installed, or one outside its pin, is refused
+    /// ([`InstallError::Downgrade`]) unless `explicit`: a person asked for
+    /// that version by name.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::install_with`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn install_with_in(
+        &self,
+        id: &str,
+        req: &VersionReq,
+        grant: Option<Scope>,
+        by: &str,
+        pin: bool,
+        extra: &[std::sync::Arc<dyn crate::install::Source>],
+        explicit: bool,
+    ) -> Result<Installed, InstallError> {
+        if !explicit {
+            let (_, listing) = self.pick(id, req, extra)?;
+            self.no_downgrade(&listing)?;
+        }
         let mut granted = None;
         if let Some(grants) = self.host().grants() {
-            let preview = self.preview(id, req)?;
+            let preview = self.preview_in(id, req, extra)?;
+            // Not for this platform: the same refusal as the store's.
+            let platform = self.host().platform();
+            if let Some(why) = crate::platform::not_here(&preview.runs_on, &platform) {
+                return Err(InstallError::NotHere { platform, why });
+            }
             if let Some(why) = preview.cannot_run {
                 return Err(InstallError::NotFound(format!(
                     "{id} {}: {why}",
@@ -378,7 +434,7 @@ impl Extensions {
                 }
             }
         }
-        let install = self.install(id, req)?;
+        let install = self.install_in(id, req, extra, explicit)?;
         if pin {
             let range = if *req == VersionReq::STAR {
                 format!("={}", install.version)
@@ -418,7 +474,7 @@ impl Extensions {
                     continue;
                 }
             };
-            let newest = match self.pick(&install.id, &req) {
+            let newest = match self.pick(&install.id, &req, &[]) {
                 Ok((_, l)) => l,
                 Err(e) => {
                     out.failed
@@ -471,11 +527,11 @@ impl Extensions {
                 .as_deref()
                 .and_then(|p| VersionReq::parse(p).ok())
                 .unwrap_or(VersionReq::STAR);
-            let Ok((_, newest)) = self.pick(&install.id, &req) else {
+            let Ok((_, newest)) = self.pick(&install.id, &req, &[]) else {
                 continue;
             };
             let past_pin = self
-                .pick(&install.id, &VersionReq::STAR)
+                .pick(&install.id, &VersionReq::STAR, &[])
                 .ok()
                 .map(|(_, l)| l.version)
                 .filter(|v| *v > newest.version && install.pin.is_some())

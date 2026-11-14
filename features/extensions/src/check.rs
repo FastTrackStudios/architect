@@ -88,6 +88,10 @@ pub struct CheckReport {
     pub actions: Vec<String>,
     pub views: Vec<ViewCheck>,
     pub problems: Vec<CheckProblem>,
+    /// What loads but may be a mistake: a `platforms` value this build
+    /// does not know (a typo, or a platform newer than it).
+    #[facet(default)]
+    pub warnings: Vec<String>,
 }
 
 impl CheckReport {
@@ -101,6 +105,7 @@ impl CheckReport {
             actions: Vec::new(),
             views: Vec::new(),
             problems: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 
@@ -257,6 +262,7 @@ impl Checker {
         }
         // A `[[favourites]]` declaration the manifest left out: its author
         // hears of it here (the manifest itself still reads).
+        report.warnings.extend(manifest.warnings());
         for why in &manifest.favourites_dropped {
             report
                 .problem("manifest", format!("favourites: {why}"))
@@ -582,6 +588,7 @@ fn load_problem(error: &LoadError, report: &mut CheckReport) {
         LoadError::ViewKind { view, .. } => Some(format!("views[{view}].kind")),
         LoadError::Sections(_) => Some("sections".to_owned()),
         LoadError::NoRunner(_) => Some("kind".to_owned()),
+        LoadError::NotHere { .. } => Some("platforms".to_owned()),
         LoadError::Start(_) => Some("entry".to_owned()),
         LoadError::Package(_) => None,
         LoadError::Reserved(id) => Some(format!("reserved[{id}]")),

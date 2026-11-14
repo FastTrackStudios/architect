@@ -1,0 +1,9 @@
+# An extension for macOS only (#578, #710 L4): elsewhere the store refuses
+# it, and a vault that needs it says why.
+id = "showcase.mac-only"
+name = "Core Audio Devices"
+version = "0.1.0"
+kind = "data"
+api = "0.1"
+platforms = ["macos"]
+description = "Stands in for an extension that runs on macOS only (Patchbay's Core Audio engine)."

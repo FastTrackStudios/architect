@@ -561,6 +561,12 @@ pub struct Manifest {
     pub description: String,
     #[serde(default)]
     pub authors: Vec<String>,
+    /// The platforms it runs on (`platforms = ["linux"]`, #578): Rust's
+    /// `target_os` values and `web`; empty for everywhere
+    /// ([`crate::platform`]). Elsewhere it is listed as "Linux only" and
+    /// never loaded, its data kept.
+    #[serde(default)]
+    pub platforms: Vec<String>,
     #[serde(default)]
     pub capabilities: Capabilities,
     #[serde(default)]
@@ -774,6 +780,24 @@ impl std::fmt::Display for ManifestError {
 impl std::error::Error for ManifestError {}
 
 impl Manifest {
+    /// What loads but may be a mistake, each in a line (`EXT_CHECK`'s
+    /// warnings): a `platforms` value this build does not know. It is
+    /// kept (a newer platform's name stays forward compatible: `["linux",
+    /// "visionos"]` loads on Linux), and a typo of a known one cannot be
+    /// told from it, so it is said.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        crate::platform::unknown(&self.platforms)
+            .into_iter()
+            .map(|p| {
+                format!(
+                    "platforms {p:?} is not one this build knows ({}): kept, but check its spelling",
+                    crate::platform::PLATFORMS.join(", ")
+                )
+            })
+            .collect()
+    }
+
     /// Each worker: a unique id, and one way to run that its kind has.
     fn check_workers(&self) -> Result<(), ManifestError> {
         let mut seen = std::collections::BTreeSet::new();

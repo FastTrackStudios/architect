@@ -584,11 +584,23 @@ fn Detail(browse: Browse, row: Row) -> Element {
                         Badge { variant: BadgeVariant::Outline, "{row.at.label()}" }
                         if row.loaded { Badge { "Running" } }
                         if row.disabled { Badge { variant: BadgeVariant::Destructive, "Off" } }
+                        if row.not_here.is_some() { Badge { variant: BadgeVariant::Secondary, "Can't run here" } }
                         if let Some(p) = &pin { Badge { variant: BadgeVariant::Outline, "Pinned {p}" } }
                     }
                     KeyValueRow { label: "Id".to_owned(), value: row.id.clone() }
                     if let Some(runs) = &row.runs {
                         KeyValueRow { label: "Runs".to_owned(), value: runs.clone(), mono: false }
+                    }
+                    if let Some(why) = &row.not_here {
+                        KeyValueRow {
+                            label: "Here".to_owned(),
+                            value: if row.at == Where::Available {
+                                format!("{why}. It cannot be installed here.")
+                            } else {
+                                format!("{why}. It is kept, with its data; it runs where it can.")
+                            },
+                            mono: false,
+                        }
                     }
                     if let Some(a) = &about {
                         KeyValueRow { label: "Where it runs".to_owned(), value: a.runner.clone(), mono: false }
@@ -720,7 +732,7 @@ fn Actions(browse: Browse, row: Row, installed: Option<String>, about: Option<Pr
         }
     };
     rsx! {
-        if row.at == Where::Available {
+        if row.at == Where::Available && row.not_here.is_none() {
             Button { on_click: { let install = install.clone(); move |_| install(false) }, "Install" }
             Button { variant: ButtonVariant::Outline, on_click: move |_| install(true), "Install and pin" }
         }
@@ -1120,45 +1132,110 @@ pub fn ConsentPrompt(
     }
 }
 
-/// A project's missing extensions: "This project uses …", each one, and
-/// "Install all" through the same consent prompt.
+/// A project's (or a vault's) missing extensions: "This project uses …",
+/// each one, "Install all" through one consent prompt for all of them,
+/// and what cannot be had here, each with why (kept, never dropped).
+/// `what` names what is opening ("vault"; "project" when not given);
+/// `folder` is the vault's (or project's) folder, whose carried archives
+/// are searched for these installs only; `on_done` hears what an install
+/// did (each one's outcome, `; `-joined), to plan again.
 #[component]
-pub fn MissingExtensions(browse: Browse, plan: Plan) -> Element {
+pub fn MissingExtensions(
+    browse: Browse,
+    plan: Plan,
+    #[props(default)] what: Option<String>,
+    #[props(default)] folder: Option<std::path::PathBuf>,
+    #[props(default)] on_done: Option<EventHandler<String>>,
+) -> Element {
     let mut asking = use_signal(|| None::<Vec<Preview>>);
     let mut note = use_signal(|| None::<String>);
-    let Some(prompt) = plan.prompt() else {
+    if plan.install.is_empty() && plan.offer.is_empty() && plan.missing.is_empty() {
         return rsx! {};
-    };
+    }
+    let what = what.unwrap_or_else(|| "project".to_owned());
+    let prompt = plan.prompt_for(&what).unwrap_or_else(|| {
+        if plan.install.is_empty() && plan.offer.is_empty() {
+            format!("Some extensions this {what} uses cannot run here")
+        } else {
+            format!("Extensions this {what} works with")
+        }
+    });
+    let can_install = !plan.install.is_empty();
     let org = browse.extensions().host().grants().and_then(|g| g.org());
     let ext = browse.extensions().clone();
-    let listings = plan.install.clone();
+    let for_previews = plan.clone();
+    let preview_folder = folder.clone();
+    let mut rows: Vec<(String, String, &'static str, String)> = Vec::new();
+    for l in &plan.install {
+        rows.push((
+            l.id.clone(),
+            l.name.clone(),
+            "Required",
+            format!("{} {}", l.kind, l.version),
+        ));
+    }
+    for l in &plan.offer {
+        rows.push((
+            l.id.clone(),
+            l.name.clone(),
+            "Optional",
+            format!("{} {}", l.kind, l.version),
+        ));
+    }
+    for (r, why) in &plan.missing {
+        let name = if r.name.is_empty() {
+            r.id.clone()
+        } else {
+            r.name.clone()
+        };
+        let tag = if r.required {
+            "Can't install"
+        } else {
+            "Not found"
+        };
+        rows.push((r.id.clone(), name, tag, format!("{why}; kept as it is")));
+    }
+    // Inline styles over the theme's tokens, and no `style` node: one
+    // here made Blitz panic (`layout_parent … does not point at its layout
+    // container`) beside the workspace. The consent prompt's classes are
+    // the app's to load (`document::Style` of `architect_ui::UTILITIES_CSS`).
     rsx! {
-        style { {architect_ui::UTILITIES_CSS} }
-        Alert {
-            AlertTitle { "{prompt}" }
-            AlertDescription {
-                div { style: "display: flex; flex-direction: column; gap: 8px;",
-                    for l in plan.install.iter() {
-                        ListRow { key: "{l.id}", label: l.name.clone(), detail: format!("{} · {}", l.kind, l.version), tag: "Required".to_owned() }
-                    }
-                    for l in plan.offer.iter() {
-                        ListRow { key: "{l.id}", label: l.name.clone(), detail: format!("{} · {}", l.kind, l.version), tag: "Optional".to_owned() }
-                    }
-                    if let Some(n) = note() { div { style: "font-size: 12px;", "{n}" } }
-                    div {
-                        Button {
-                            on_click: move |_| {
-                                let previews: Vec<Preview> = listings
-                                    .iter()
-                                    .filter_map(|l| {
-                                        let exact = VersionReq::parse(&format!("={}", l.version)).ok()?;
-                                        ext.preview(&l.id, &exact).ok()
-                                    })
-                                    .collect();
+        div {
+            role: "alert",
+            style: "display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--card-foreground); font-size: 13px;",
+            div { style: "font-weight: 600;", "{prompt}" }
+            for (id, name, tag, detail) in rows {
+                div { key: "{id}", style: "display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 8px;",
+                    span { style: "font-weight: 500;", "{name}" }
+                    span { style: "font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted-foreground);", "{tag}" }
+                    span { style: "color: var(--muted-foreground);", "{detail}" }
+                }
+            }
+            if let Some(n) = note() {
+                div { style: "font-size: 12px; color: var(--muted-foreground);", "{n}" }
+            }
+            if can_install {
+                div { style: "display: flex; gap: 8px; padding-top: 2px;",
+                    button {
+                        style: "padding: 5px 12px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); font-size: 13px; font-weight: 600; cursor: pointer;",
+                        onclick: move |_| {
+                            let mut previews = Vec::new();
+                            let mut dropped = Vec::new();
+                            for p in ext.previews_for(preview_folder.as_deref(), &for_previews) {
+                                match p {
+                                    Ok(p) => previews.push(p),
+                                    Err((id, why)) => dropped.push(format!("{id} refused: {why}")),
+                                }
+                            }
+                            // What will not be in the prompt, and why.
+                            if !dropped.is_empty() {
+                                note.set(Some(dropped.join("; ")));
+                            }
+                            if !previews.is_empty() {
                                 asking.set(Some(previews));
-                            },
-                            "Install all"
-                        }
+                            }
+                        },
+                        "Install all"
                     }
                 }
             }
@@ -1172,15 +1249,38 @@ pub fn MissingExtensions(browse: Browse, plan: Plan) -> Element {
                     asking.set(None);
                     let Some(scope) = scope else { return };
                     let ext = browse.extensions();
+                    // Only what the prompt showed: one yes for those.
+                    let shown = Plan {
+                        install: plan
+                            .install
+                            .iter()
+                            .filter(|l| previews.iter().any(|p| p.id == l.id && p.version == l.version.to_string()))
+                            .cloned()
+                            .collect(),
+                        ..Plan::default()
+                    };
+                    let results = folder.as_deref().map_or_else(
+                        || ext.accept(&shown, Some(&scope), "person"),
+                        |root| ext.accept_vault(root, &shown, Some(&scope), "person"),
+                    );
                     let mut done = Vec::new();
-                    for p in &previews {
-                        let exact = VersionReq::parse(&format!("={}", p.version)).unwrap_or(VersionReq::STAR);
-                        match ext.install_with(&p.id, &exact, Some(scope.clone()), "person", false) {
-                            Ok(i) => done.push(outcome(&i, &p.name)),
-                            Err(e) => done.push(format!("{}: {e}", p.name)),
+                    for r in results {
+                        match r {
+                            Ok(i) => {
+                                let name = previews
+                                    .iter()
+                                    .find(|p| matches!(&i, crate::manage::Installed::Done { id, .. } if *id == p.id))
+                                    .map_or_else(String::new, |p| p.name.clone());
+                                done.push(outcome(&i, &name));
+                            }
+                            Err((id, e)) => done.push(format!("{id}: {e}")),
                         }
                     }
-                    note.set(Some(done.join("; ")));
+                    let done = done.join("; ");
+                    note.set(Some(done.clone()));
+                    if let Some(on_done) = on_done {
+                        on_done.call(done);
+                    }
                 },
             }
         }
