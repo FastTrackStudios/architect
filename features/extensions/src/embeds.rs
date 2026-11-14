@@ -217,7 +217,7 @@ mod view {
     pub struct EmbedAsk {
         pub spec: EmbedSpec,
         /// What its runs may reach: the extension's capabilities.
-        pub gate: architect_scripting::luau::Gate,
+        pub gate: crate::host::Gate,
         /// What it is given, live.
         pub input: Signal<EmbedInput>,
         /// A guest's content (a share link's note, #629): the page runs

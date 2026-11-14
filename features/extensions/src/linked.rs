@@ -47,9 +47,30 @@ use serde_json::Value as Json;
 
 use crate::contrib::{Contribution, StateWrite};
 
-/// A host-service call's answer, to await.
+/// A host-service call's answer, to await. `Send` natively; in a
+/// browser, where nothing is (architect's `ActionFuture` is local there),
+/// it need not be.
+#[cfg(not(target_family = "wasm"))]
 pub type HostFuture =
     Pin<Box<dyn Future<Output = Result<Json, crate::hostcall::HostError>> + Send>>;
+/// A host-service call's answer, to await. `Send` natively; in a
+/// browser, where nothing is (architect's `ActionFuture` is local there),
+/// it need not be.
+#[cfg(target_family = "wasm")]
+pub type HostFuture = Pin<Box<dyn Future<Output = Result<Json, crate::hostcall::HostError>>>>;
+
+/// `Send` natively; anything in a browser (#495), where an action's
+/// future awaits the page's host calls, which are not `Send`.
+#[cfg(not(target_family = "wasm"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_family = "wasm"))]
+impl<T: Send> MaybeSend for T {}
+/// `Send` natively; anything in a browser (#495), where an action's
+/// future awaits the page's host calls, which are not `Send`.
+#[cfg(target_family = "wasm")]
+pub trait MaybeSend {}
+#[cfg(target_family = "wasm")]
+impl<T> MaybeSend for T {}
 
 /// Where an extension's runtime additions go: the host's registry when it
 /// is linked in, the host over the wire when it runs as a process.
@@ -170,8 +191,14 @@ impl Handle {
     }
 }
 
-/// What an in-process action gives back.
+/// What an in-process action gives back (`Send` but in a browser:
+/// [`MaybeSend`]).
+#[cfg(not(target_family = "wasm"))]
 pub type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
+/// What an in-process action gives back (`Send` but in a browser:
+/// [`MaybeSend`]).
+#[cfg(target_family = "wasm")]
+pub type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>>>>;
 
 /// An action: JSON arguments (`null` for none) and where it was invoked
 /// from (`{source, target?, id?, pane?, url?, path?, event?, …}`), JSON
@@ -235,7 +262,7 @@ impl Builder {
     pub fn action<F, Fut>(&mut self, id: impl Into<String>, run: F) -> &mut Self
     where
         F: Fn(Json) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Json, String>> + Send + 'static,
+        Fut: Future<Output = Result<Json, String>> + MaybeSend + 'static,
     {
         self.actions
             .insert(id.into(), Arc::new(move |args, _| Box::pin(run(args))));
@@ -246,7 +273,7 @@ impl Builder {
     pub fn action_in<F, Fut>(&mut self, id: impl Into<String>, run: F) -> &mut Self
     where
         F: Fn(Json, Json) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<Json, String>> + Send + 'static,
+        Fut: Future<Output = Result<Json, String>> + MaybeSend + 'static,
     {
         self.actions
             .insert(id.into(), Arc::new(move |args, cx| Box::pin(run(args, cx))));

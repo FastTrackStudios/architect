@@ -15,7 +15,6 @@ pages = ["architect-sites/pages"]
 [dependencies]
 architect = { workspace = true, features = ["settings"] }
 architect-extensions = { workspace = true, features = ["linked"] }
-architect-sites = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 # The default Architect app's own extensions (#368): its list.
@@ -27,15 +26,20 @@ architect-dayplan = { workspace = true }
 architect-threads = { workspace = true }
 architect-notify = { workspace = true }
 architect-files-extension = { workspace = true }
-# Updates (#523): `release` is its network half (reqwest, a runtime),
-# turned on here in the app, not in a UI crate.
-architect-updates = { workspace = true, features = ["release"] }
 
 [dev-dependencies]
 tempfile = "3"
 
 [lints]
 workspace = true
+
+# Off the browser (#495): the node's share links and Sites (`blocks`,
+# `islands`), and Updates, whose `release` is its network half (reqwest, a
+# runtime), turned on here in the app, not in a UI crate. A browser's
+# build (`architect_web::run`) links the rest.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+architect-sites = { workspace = true }
+architect-updates = { workspace = true, features = ["release"] }
 
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

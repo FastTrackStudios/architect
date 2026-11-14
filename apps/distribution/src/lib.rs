@@ -29,11 +29,14 @@
 //! ([`Distribution::install`]); [`current`] reads it back.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+#[cfg(not(target_family = "wasm"))]
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 use architect_extensions::Manifest;
 use architect_extensions::linked::Extension;
 use architect_extensions::registries::Registry;
+#[cfg(not(target_family = "wasm"))]
 use architect_sites::{BlockRenderer, Blocks};
 use serde_json::json;
 
@@ -158,7 +161,9 @@ pub struct Distribution {
     sandbox: bool,
     linked: Vec<Linked>,
     bundles: Vec<Bundle>,
+    #[cfg(not(target_family = "wasm"))]
     blocks: Vec<Arc<dyn BlockRenderer>>,
+    #[cfg(not(target_family = "wasm"))]
     islands: Vec<architect_sites::SiteIsland>,
     adopts: Option<Adopted>,
     registries: Vec<Registry>,
@@ -175,7 +180,6 @@ impl std::fmt::Debug for Distribution {
             .field("sandbox", &self.sandbox)
             .field("linked", &ids(&self.linked))
             .field("bundles", &self.bundles)
-            .field("blocks", &self.blocks.len())
             .field(
                 "registries",
                 &self.registries.iter().map(|r| &r.name).collect::<Vec<_>>(),
@@ -233,7 +237,9 @@ impl Distribution {
             sandbox: false,
             linked: Vec::new(),
             bundles: Vec::new(),
+            #[cfg(not(target_family = "wasm"))]
             blocks: Vec::new(),
+            #[cfg(not(target_family = "wasm"))]
             islands: Vec::new(),
             adopts: None,
             registries: vec![store()],
@@ -335,6 +341,7 @@ impl Distribution {
     /// With `renderer` drawing the blocks it claims on the node's share
     /// links and Sites, before the linked extensions' embed pages: a Rust
     /// renderer such as Keyflow's engraver (`architect_sites::FnBlock`).
+    #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub fn block(mut self, renderer: impl BlockRenderer + 'static) -> Self {
         self.blocks.push(Arc::new(renderer));
@@ -345,6 +352,7 @@ impl Distribution {
     /// now-playing views (studio#445): a WASI component this distribution
     /// links in, its built web folder served by the node from a node-owned
     /// path (`architect_sites::island`), never from a vault.
+    #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub fn island(mut self, island: architect_sites::SiteIsland) -> Self {
         self.islands.push(island);
@@ -352,6 +360,7 @@ impl Distribution {
     }
 
     /// Its islands ([`island`](Self::island)).
+    #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub fn islands(&self) -> Vec<architect_sites::SiteIsland> {
         self.islands.clone()
@@ -491,7 +500,7 @@ impl Distribution {
     /// names. `None` where the platform has no config dir.
     #[must_use]
     pub fn app_dir(&self) -> Option<PathBuf> {
-        architect::settings::app_dir(&self.folder).ok()
+        config_dir(&self.folder)
     }
 
     /// [`app_dir`](Self::app_dir), or a folder of its name under the temp
@@ -540,8 +549,8 @@ impl Distribution {
         if overridden(&self.folder) || overridden(&old.folder) {
             return None;
         }
-        let from = architect::settings::app_dir(&old.folder).ok()?;
-        let to = architect::settings::app_dir(&self.folder).ok()?;
+        let from = config_dir(&old.folder)?;
+        let to = config_dir(&self.folder)?;
         match copy_once(&from, &to) {
             Ok(true) => {
                 tracing::info!(from = %from.display(), to = %to.display(), "app.config.migrated");
@@ -560,6 +569,7 @@ impl Distribution {
     /// `pages`, each compiled-in extension's `[[embeds]] page` that claims
     /// a fence, as the app draws it. Their packages are written under
     /// `dir` (`<dir>/<id>/`) for the page runner to read.
+    #[cfg(not(target_family = "wasm"))]
     #[must_use]
     pub fn blocks(&self, dir: &Path) -> Blocks {
         let mut blocks = Blocks::new();
@@ -660,6 +670,18 @@ impl Distribution {
     }
 }
 
+/// `<config dir>/<folder>`: none in a browser, which has no folders.
+#[cfg(not(target_family = "wasm"))]
+fn config_dir(folder: &str) -> Option<PathBuf> {
+    architect::settings::app_dir(folder).ok()
+}
+
+/// `<config dir>/<folder>`: none in a browser, which has no folders.
+#[cfg(target_family = "wasm")]
+const fn config_dir(_: &str) -> Option<PathBuf> {
+    None
+}
+
 static INSTALLED: OnceLock<Distribution> = OnceLock::new();
 
 /// The distribution this process runs, once it has said
@@ -740,9 +762,26 @@ pub fn architect() -> Distribution {
         .linked(&architect_notify::Notify)
         // Files (#347): projects and asset libraries, over FILES_*.
         .linked(&architect_files_extension::FilesExtension)
-        // Updates (#523): checks, installs on Install, restart to finish.
-        .linked(&architect_updates::Updates)
-        .release_version(architect_updates::release_version())
+        .with_updates()
+}
+
+trait WithUpdates {
+    fn with_updates(self) -> Self;
+}
+
+impl WithUpdates for Distribution {
+    /// Updates (#523): checks, installs on Install, restart to finish; an
+    /// app a browser loads is updated by its server, so none there.
+    #[cfg(not(target_family = "wasm"))]
+    fn with_updates(self) -> Self {
+        self.linked(&architect_updates::Updates)
+            .release_version(architect_updates::release_version())
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn with_updates(self) -> Self {
+        self
+    }
 }
 
 /// The Project Management bundle (#375): Projects, Tasks and the Time
