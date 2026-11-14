@@ -3,16 +3,69 @@
 //! `apps/ui/demo-vault` (made by `apps/ui/demo-vault.py`): what
 //! `/app/?demo` ([`crate::DEMO`]) opens in the tab's memory. The desktop app's first run offers the same vault
 //! (`apps/ui/src/vaults.rs` `demo`), written out to a folder there.
+//!
+//! `/app/?showcase` ([`crate::SHOWCASE`]) opens the extension showcase's
+//! vault (`apps/ui/showcase-vault`, #710) the same way instead: [`choose`]
+//! picks which one before the app mounts.
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use include_dir::{Dir, DirEntry, include_dir};
 
-static VAULT: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../ui/demo-vault");
+static DEMO: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../ui/demo-vault");
+static SHOWCASE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../ui/showcase-vault");
+
+/// Whether this tab opened the showcase's vault rather than the demo's.
+static SHOWING: AtomicBool = AtomicBool::new(false);
+
+/// Which built-in vault the demo opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Vault {
+    /// `apps/ui/demo-vault`.
+    Demo,
+    /// `apps/ui/showcase-vault`: one note per extension capability (#710).
+    Showcase,
+}
+
+/// Picks the vault the demo opens: once, before the app mounts.
+pub fn choose(vault: Vault) {
+    SHOWING.store(vault == Vault::Showcase, Ordering::Relaxed);
+}
+
+/// The vault the demo opens.
+#[must_use]
+pub fn chosen() -> Vault {
+    if SHOWING.load(Ordering::Relaxed) {
+        Vault::Showcase
+    } else {
+        Vault::Demo
+    }
+}
+
+fn dir(vault: Vault) -> &'static Dir<'static> {
+    match vault {
+        Vault::Demo => &DEMO,
+        Vault::Showcase => &SHOWCASE,
+    }
+}
 
 /// Lists the folders git keeps no file in (the vault's own list).
 const EMPTY_FOLDERS: &str = ".empty-folders";
 
 /// The demo vault's name, as the navigator shows its root.
 pub const NAME: &str = "Demo vault";
+
+/// The showcase vault's name, as the navigator shows its root.
+pub const SHOWCASE_NAME: &str = "Showcase";
+
+/// The chosen vault's name, as the navigator shows its root.
+#[must_use]
+pub fn name() -> &'static str {
+    match chosen() {
+        Vault::Demo => NAME,
+        Vault::Showcase => SHOWCASE_NAME,
+    }
+}
 
 /// One file of the demo vault: its path from the root (`/`-separated) and
 /// its bytes.
@@ -72,7 +125,7 @@ pub fn image_url(path: &str) -> Option<String> {
     if !crate::ext_host::vault_path(path) {
         return None;
     }
-    let file = VAULT.get_file(path)?;
+    let file = dir(chosen()).get_file(path)?;
     let f = File {
         path: file.path().to_str()?,
         bytes: file.contents(),
@@ -89,11 +142,17 @@ fn ext(path: &str) -> &str {
     path.rsplit_once('.').map_or("", |(_, e)| e)
 }
 
-/// Every file of the demo vault, by path.
+/// Every file of the chosen vault, by path.
 #[must_use]
 pub fn files() -> Vec<File> {
+    files_of(chosen())
+}
+
+/// Every file of `vault`, by path.
+#[must_use]
+pub fn files_of(vault: Vault) -> Vec<File> {
     let mut out = Vec::new();
-    walk(&VAULT, &mut out);
+    walk(dir(vault), &mut out);
     out.sort_by_key(|f| f.path);
     out
 }
@@ -118,13 +177,19 @@ fn walk(dir: &'static Dir<'static>, out: &mut Vec<File>) {
     }
 }
 
-/// Every folder of the demo vault, its empty ones too (which git keeps no
-/// file in: the vault lists them).
+/// Every folder of the chosen vault, its empty ones too (which git keeps
+/// no file in: the vault lists them).
 #[must_use]
 pub fn folders() -> Vec<&'static str> {
+    folders_of(chosen())
+}
+
+/// Every folder of `vault`, its empty ones too.
+#[must_use]
+pub fn folders_of(vault: Vault) -> Vec<&'static str> {
     let mut out = Vec::new();
-    collect_dirs(&VAULT, &mut out);
-    if let Some(list) = VAULT
+    collect_dirs(dir(vault), &mut out);
+    if let Some(list) = dir(vault)
         .get_file(EMPTY_FOLDERS)
         .and_then(|f| f.contents_utf8())
     {
@@ -215,6 +280,41 @@ mod tests {
                 assert!(!text.contains(bad), "{}: {bad}", f.path);
             }
         }
+    }
+
+    /// The showcase's vault (#710): a note per capability id, each named
+    /// without a colon, and the samples its notes point at.
+    #[test]
+    fn the_showcase_vault_has_a_note_per_capability() {
+        use super::{Vault, files_of, folders_of};
+        let files = files_of(Vault::Showcase);
+        let ids = (1..=7)
+            .map(|n| format!("R{n} "))
+            .chain((1..=4).map(|n| format!("L{n} ")))
+            .chain((1..=13).map(|n| format!("C{n} ")))
+            .chain((1..=16).map(|n| format!("H{n} ")))
+            .chain((1..=5).map(|n| format!("U{n} ")))
+            .chain((1..=2).map(|n| format!("W{n} ")));
+        for id in ids {
+            let note = files.iter().find(|f| {
+                f.path
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|n| n.starts_with(&id) && super::ext(n) == "md")
+            });
+            let text = note.and_then(super::File::text).unwrap_or_default();
+            assert!(text.contains("## Try"), "{id}: {note:?}");
+        }
+        assert!(!files.iter().any(|f| f.path.contains(':')));
+        for sample in [
+            "Showcase.md",
+            "Samples/Tables and lists.md",
+            "Samples/Dataview-lite demo.md",
+            "Bases/Showcase tasks.base",
+        ] {
+            assert!(files.iter().any(|f| f.path == sample), "{sample}");
+        }
+        assert!(folders_of(Vault::Showcase).contains(&"Inbox"));
     }
 
     #[test]

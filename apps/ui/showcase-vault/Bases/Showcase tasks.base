@@ -1,0 +1,19 @@
+filters:
+  and:
+    - 'type == "task"'
+views:
+  - type: table
+    name: Tasks
+    order:
+      - file.name
+      - status
+      - priority
+    groupBy:
+      property: status
+      direction: ASC
+  - type: checklist
+    name: Checklist
+    order:
+      - file.name
+      - status
+    doneWhen: done

@@ -14,6 +14,23 @@ The ids are #710's. The first column of evidence is an automated check;
 the second is screenshots at 390 px and 1280 px wide, light and dark, for
 each platform the row claims.
 
+## Run it and capture it
+
+| Platform | Run it | Capture it |
+|---|---|---|
+| Desktop | `just showcase` (the standard distribution; `just showcase plain` for Architect's own app): a fresh scratch copy of `apps/ui/showcase-vault`, with every folder in `examples/showcase` and the sandbox's outline and surface loaded as development copies (`scripts/showcase.sh`) | `just showcase-shots`: an isolated Loft session per width, 390 px and 1280 px, light and dark, drawn by the app itself (`APP_SHOT`) into `target/showcase/desktop/` (`scripts/showcase-shots.sh`; its steps open vault paths and run actions) |
+| Web | `/app/?showcase`: the web app's demo mode on the same vault, in the tab's memory (`apps/web/src/demo.rs`) | - |
+| iOS | a TestFlight build (the iOS workstream) | the simulator on airlock |
+
+The desktop screenshots so far come from `just showcase-shots plain`
+(Architect's own app with the same vault and examples), while `just
+showcase` runs the standard distribution by default; the standard
+distribution's shots are `just showcase-shots standard`, after building
+it.
+
+`just showcase-publish PUSH=1` puts the screenshots on the `media` branch
+under `710-showcase/<platform>/`, where the cells below link them.
+
 ## How to read a cell
 
 | Mark | Means |
@@ -72,7 +89,7 @@ frames, nothing an extension author can target. Every web cell below is
 | C8 | Base view types | ⚠️ not shown; the Tasks extension's board is one | ❌ #495 | ⚠️ not shown | Openers sampler | - |
 | C9 | Navigator providers; file-tree icons and badges | ⚠️ icons and colours through `NAVIGATOR_ICON`; the generic file-row badge is drawn only in a test, not the app's tree | ❌ #495 | ⚠️ same as desktop | Iconize-lite | `features/extensions/tests/host_ui_view.rs` |
 | C10 | Embeds: fence renderers and inline embeds | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Dataview-lite | `features/pages/tests/embed.rs` |
-| C11 | The editor: commands on the selection, keymaps by node, decorations, slash rows | ⚠️ not shown | ❌ #495 | ⚠️ not shown; keys need a keyboard | Outline | `features/extensions/tests/editor.rs` |
+| C11 | The editor: commands on the selection, keymaps by node, decorations, slash rows | ⚠️ decorations and widgets shown (the outline example marking TODOs, gutter markers, the count widget): [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/lab-outline-mark-1280-dark.png); keymaps by node, commands on the selection and slash rows tested only. The gutter markers overlap the list bullets | ❌ #495 | ⚠️ not shown; keys need a keyboard | Outline | `features/extensions/tests/editor.rs` |
 | C12 | Favourites and phone tabs | ⚠️ not shown | ❌ #495 for an extension's; the app's own favourites run | ⚠️ not shown | - | - |
 | C13 | Themes and tokens | ⚠️ not shown | ❌ #495 | ⚠️ not shown | Settings and theme | `features/extensions/tests/themes.rs` |
 
@@ -124,7 +141,7 @@ note in the showcase vault, which plugins or apps it stands in for.
 | Templater-lite | Templater, QuickAdd | R2, R3, C1, C7, C11, H1, H2, H10 | planned |
 | Dataview-lite | Dataview, Tasks, Bases | C10, C8, H3, H2 | planned |
 | Kanban-lite | Kanban | U2, H1 | waits on #176 |
-| Outline (tables and outline keymaps) | Advanced Tables, Outliner, Editing Toolbar | C11, C2 | in the sandbox (`apps/sandbox/extensions/outline`) |
+| Outline (tables and outline keymaps) | Advanced Tables, Outliner, Editing Toolbar | C11, C2 | in the sandbox (`apps/sandbox/extensions/outline`), loaded by `just showcase`; C11 shown on the desk |
 | Iconize-lite | Iconize | C9 | planned |
 | Toolbar sampler | Editing Toolbar, Commander | C2, C3 | planned |
 | Settings and theme | Style Settings, Minimal Theme Settings | C5, C13 | planned |

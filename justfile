@@ -353,6 +353,30 @@ sandbox *ARGS:
     fi
     exec devenv shell -- cargo run -q -p architect-sandbox -- {{ARGS}}
 
+# The extension showcase (#710, docs/content/guide/showcase.md): the app on
+# a fresh scratch copy of apps/ui/showcase-vault, every example in
+# examples/showcase loaded as a development copy. `plain` runs Architect's
+# own app instead of the standard distribution; ARGS go to the app.
+showcase *ARGS:
+    bash scripts/showcase.sh {{ARGS}}
+
+# The showcase's desktop screenshots: an isolated Loft session per width
+# (390, 1280), light and dark, into target/showcase/desktop. ARGS: `plain`
+# or `standard` (built first), then vault paths to open or actions to run
+# (scripts/showcase-shots.sh says how).
+showcase-shots *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${DEVENV_ROOT:-}" ]; then
+        exec bash scripts/showcase-shots.sh {{ARGS}}
+    fi
+    exec devenv shell -- bash scripts/showcase-shots.sh {{ARGS}}
+
+# The showcase's screenshots (target/showcase/<platform>) onto the media
+# branch under 710-showcase/, where the matrix links them; PUSH=1 pushes.
+showcase-publish PUSH="0":
+    bash scripts/showcase-publish.sh {{PUSH}}
+
 # Every edit a run made is thrown away.
 # The scratch vault (`just sandbox`, `devenv up`), seeded again from apps/ui/demo-vault.
 vault-reset:
