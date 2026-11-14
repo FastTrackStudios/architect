@@ -56,6 +56,19 @@ fn validate_rel(rel: &str) -> Result<(), MutateError> {
     Ok(())
 }
 
+/// `rel` checked ([`validate_rel`]) and not through a symlink: no write
+/// lands outside the vault through a linked folder, or replaces a link
+/// (`vault_live::own::through_symlink`).
+fn own_path(vault: &Vault, rel: &str) -> Result<PathBuf, MutateError> {
+    validate_rel(rel)?;
+    if vault_live::own::through_symlink(&vault.root, rel) {
+        return Err(MutateError::InvalidPath(format!(
+            "{rel}: through a symlink, not the vault's own"
+        )));
+    }
+    Ok(abs_path(vault, rel))
+}
+
 fn abs_path(vault: &Vault, rel: &str) -> PathBuf {
     vault.root.join(rel)
 }
@@ -89,9 +102,8 @@ pub fn create_page(
     body: &str,
     guard: &SelfWriteGuard,
 ) -> Result<(), MutateError> {
-    validate_rel(rel_path)?;
-    let abs = abs_path(vault, rel_path);
-    if abs.exists() {
+    let abs = own_path(vault, rel_path)?;
+    if abs.symlink_metadata().is_ok() {
         return Err(MutateError::AlreadyExists(rel_path.into()));
     }
     if let Some(parent) = abs.parent() {
@@ -100,7 +112,7 @@ pub fn create_page(
     let raw = format!("{}{}", serialize_frontmatter(frontmatter), body);
 
     guard.mark(&abs);
-    std::fs::write(&abs, &raw).map_err(|e| MutateError::Io(e.to_string()))?;
+    vault_live::mutate::write_atomic(&abs, raw.as_bytes()).map_err(MutateError::Io)?;
     guard.mark(&abs);
 
     let parsed = parse_page(&raw);
@@ -128,8 +140,7 @@ pub fn delete_page(
     rel_path: &str,
     guard: &SelfWriteGuard,
 ) -> Result<(), MutateError> {
-    validate_rel(rel_path)?;
-    let abs = abs_path(vault, rel_path);
+    let abs = own_path(vault, rel_path)?;
     if !abs.exists() {
         return Err(MutateError::NotFound(rel_path.into()));
     }
@@ -146,14 +157,12 @@ pub fn move_page(
     to_rel: &str,
     guard: &SelfWriteGuard,
 ) -> Result<(), MutateError> {
-    validate_rel(from_rel)?;
-    validate_rel(to_rel)?;
-    let from_abs = abs_path(vault, from_rel);
-    let to_abs = abs_path(vault, to_rel);
+    let from_abs = own_path(vault, from_rel)?;
+    let to_abs = own_path(vault, to_rel)?;
     if !from_abs.exists() {
         return Err(MutateError::NotFound(from_rel.into()));
     }
-    if to_abs.exists() {
+    if to_abs.symlink_metadata().is_ok() {
         return Err(MutateError::AlreadyExists(to_rel.into()));
     }
     if let Some(parent) = to_abs.parent() {
@@ -359,13 +368,12 @@ pub fn save_base(
     base: &vault_live::bases::ParsedBase,
     guard: &SelfWriteGuard,
 ) -> Result<(), MutateError> {
-    validate_rel(rel_path)?;
     if !rel_path.ends_with(".base") {
         return Err(MutateError::InvalidPath(format!("{rel_path}: not a .base")));
     }
+    let abs = own_path(vault, rel_path)?;
     let raw = vault_live::bases::serialize(base)
         .map_err(|e| MutateError::InvalidFrontmatter(e.to_string()))?;
-    let abs = abs_path(vault, rel_path);
     if let Some(parent) = abs.parent() {
         std::fs::create_dir_all(parent).map_err(|e| MutateError::Io(e.to_string()))?;
     }

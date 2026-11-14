@@ -44,7 +44,9 @@ fn vault(root: &Path) -> VaultSource {
 /// `lab.tidy` loaded, its data under `data`.
 struct App {
     list: ActionList,
-    _host: Host,
+    /// The app's own list, where the person's edits are raised.
+    app_list: ActionList,
+    host: Host,
     _events: Subscription,
 }
 
@@ -61,7 +63,8 @@ fn app(source: &VaultSource, data: &Path) -> App {
         .unwrap();
     App {
         list,
-        _host: host,
+        app_list,
+        host,
         _events: events,
     }
 }
@@ -227,8 +230,9 @@ fn an_extensions_edit_merges_into_an_open_notes_typing() {
             &by,
         )
         .unwrap();
-    assert!(after.ends_with("— tidied\n- [ ] call Sam\n"), "{after}");
-    assert_eq!(on_disk(&root, "notes/Welcome.md").as_deref(), Some(after.as_str()));
+    assert!(after.changed);
+    assert!(after.text.ends_with("— tidied\n- [ ] call Sam\n"), "{}", after.text);
+    assert_eq!(on_disk(&root, "notes/Welcome.md").as_deref(), Some(after.text.as_str()));
 }
 
 #[test]
@@ -277,4 +281,260 @@ fn a_path_that_is_not_a_note_is_refused_and_nothing_changes() {
         Err(DocError::Invalid(_))
     ));
     assert_eq!(on_disk(&root, "notes/Welcome.md").as_deref(), Some("# Welcome\n"));
+}
+
+fn ext() -> architect::action::Principal {
+    architect::action::Principal::extension("lab.tidy", None)
+}
+
+/// What `lab.tidy` heard, once `line` is among it and a moment more has
+/// passed (so a second copy of anything would be there too).
+fn settled(list: &ActionList, line: &str) -> Vec<String> {
+    heard(list, line);
+    std::thread::sleep(Duration::from_millis(1500));
+    lines(list)
+}
+
+/// With the vault's watcher on (as the app runs it), an extension's
+/// create, edit, rename and delete are each heard once: the host raised
+/// them, the bridge left them out, and the watcher did not hear the
+/// app's own writes as outside edits.
+#[test]
+fn on_a_watched_vault_each_extension_change_is_heard_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    let source = vault(&root);
+    source.watch().unwrap();
+    let app = app(&source, &tmp.path().join("data"));
+    let list = &app.list;
+    run(list, "LAB_TIDY_WATCH", &Value::Null);
+    // Each step heard before the next: `lab.tidy` keeps what it heard
+    // with a read and a write of its data, so two of its hooks at once
+    // would lose a line of its own.
+    run(list, "LAB_TIDY_NEW", &json!({ "title": "Inbox" }));
+    heard(list, "doc.created notes/Inbox.md");
+    run(list, "LAB_TIDY_TIDY", &json!({ "path": "notes/Inbox.md" }));
+    heard(list, "doc.saved notes/Inbox.md");
+    run(
+        list,
+        "LAB_TIDY_RENAME",
+        &json!({ "path": "notes/Inbox.md", "to": "notes/Today.md" }),
+    );
+    heard(list, "doc.renamed notes/Inbox.md -> notes/Today.md");
+    block_on(app.host.api("lab.tidy").call(
+        architect_extensions::hostcall::HostRequest::DeleteDocument {
+            path: "notes/Today.md".to_owned(),
+        },
+    ))
+    .unwrap();
+    assert_eq!(
+        settled(list, "doc.deleted notes/Today.md"),
+        [
+            "doc.created notes/Inbox.md",
+            "doc.saved notes/Inbox.md",
+            "doc.renamed notes/Inbox.md -> notes/Today.md",
+            "doc.deleted notes/Today.md",
+        ]
+    );
+}
+
+/// The document events raised on the app's list since `since`, as
+/// `<event> <path>` lines, once there are `n` of them.
+fn raised(list: &ActionList, since: u64, n: usize) -> Vec<String> {
+    let started = Instant::now();
+    let mut at = since;
+    let mut out = Vec::new();
+    while out.len() < n {
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "only {out:?} were raised"
+        );
+        let (events, next) = list.events_since(at, 64, Duration::from_millis(200));
+        at = next;
+        for e in events {
+            if let architect::action::EventKind::Changed { topic, detail } = e.kind
+                && topic.starts_with("doc.")
+            {
+                let d: Value = serde_json::from_str(&detail).unwrap();
+                out.push(match d["path"].as_str() {
+                    Some(p) => format!("{topic} {p}"),
+                    None => format!("{topic} {} -> {}", d["from"].as_str().unwrap(), d["to"].as_str().unwrap()),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// A folder moved or deleted in the navigator is each note's event.
+#[test]
+fn a_folders_move_and_delete_are_each_notes_events() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    std::fs::create_dir_all(root.join("notes")).unwrap();
+    std::fs::write(root.join("notes/Two.md"), "two\n").unwrap();
+    let source = vault(&root);
+    let app = app(&source, &tmp.path().join("data"));
+    let since = app.app_list.latest();
+    source
+        .write(&[FileOp::MoveFolder {
+            from: "notes".to_owned(),
+            to: "moved".to_owned(),
+        }])
+        .unwrap();
+    let mut moved = raised(&app.app_list, since, 2);
+    moved.sort();
+    assert_eq!(
+        moved,
+        [
+            "doc.renamed notes/Two.md -> moved/Two.md",
+            "doc.renamed notes/Welcome.md -> moved/Welcome.md",
+        ]
+    );
+    let since = app.app_list.latest();
+    source
+        .write(&[FileOp::Trash("moved".to_owned())])
+        .unwrap();
+    let mut gone = raised(&app.app_list, since, 2);
+    gone.sort();
+    assert_eq!(gone, ["doc.deleted moved/Two.md", "doc.deleted moved/Welcome.md"]);
+}
+
+/// An edit that changes nothing raises no `doc.saved`, so a
+/// format-on-save hook that finds nothing to do is not run again.
+#[test]
+fn an_edit_that_changes_nothing_raises_no_save() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = vault(&tmp.path().join("vault"));
+    let app = app(&source, &tmp.path().join("data"));
+    let list = &app.list;
+    run(list, "LAB_TIDY_WATCH", &Value::Null);
+    let out = block_on(app.host.api("lab.tidy").call(
+        architect_extensions::hostcall::HostRequest::EditDocument {
+            path: "notes/Welcome.md".to_owned(),
+            edits: vec![architect_extensions::hostcall::DocEdit::Replace {
+                text: "# Welcome\n".to_owned(),
+            }],
+            name: None,
+        },
+    ))
+    .unwrap();
+    assert_eq!(out, "# Welcome\n");
+    run(list, "LAB_TIDY_NEW", &json!({ "title": "After" }));
+    assert_eq!(settled(list, "doc.created notes/After.md"), ["doc.created notes/After.md"]);
+}
+
+/// Nothing is written through a symlinked folder: not a new note, not a
+/// note renamed into it, not an edit of a file behind it.
+#[cfg(unix)]
+#[test]
+fn nothing_is_written_through_a_symlinked_folder() {
+    use architect_extensions::documents::{DocEdit, Documents as _};
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("Theirs.md"), "theirs\n").unwrap();
+    let source = vault(&root);
+    std::os::unix::fs::symlink(&outside, root.join("linked")).unwrap();
+    source.vault().reload().unwrap();
+    let docs = VaultDocuments::new(source);
+    assert!(docs.create("linked/New.md", "x", &ext()).is_err());
+    assert!(docs.rename("notes/Welcome.md", "linked/Welcome.md", &ext()).is_err());
+    assert!(
+        docs.edit(
+            "linked/Theirs.md",
+            &[DocEdit::Append { text: "!".to_owned() }],
+            "x",
+            &ext()
+        )
+        .is_err()
+    );
+    assert!(docs.delete("linked/Theirs.md", &ext()).is_err());
+    let mut names: Vec<_> = std::fs::read_dir(&outside)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["Theirs.md"]);
+    assert_eq!(on_disk(&outside, "Theirs.md").as_deref(), Some("theirs\n"));
+    assert_eq!(on_disk(&root, "notes/Welcome.md").as_deref(), Some("# Welcome\n"));
+}
+
+/// An edit replaces the file whole (a new file renamed over it, nothing
+/// left beside it), so a crash mid-write never leaves half a note.
+#[cfg(unix)]
+#[test]
+fn an_edit_replaces_the_file_whole() {
+    use std::os::unix::fs::MetadataExt as _;
+    use architect_extensions::documents::{DocEdit, Documents as _};
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    let docs = VaultDocuments::new(vault(&root));
+    let before = std::fs::metadata(root.join("notes/Welcome.md")).unwrap().ino();
+    docs.edit(
+        "notes/Welcome.md",
+        &[DocEdit::Append { text: "more\n".to_owned() }],
+        "x",
+        &ext(),
+    )
+    .unwrap();
+    let after = std::fs::metadata(root.join("notes/Welcome.md")).unwrap().ino();
+    assert_ne!(before, after, "a new file, renamed over the old");
+    let names: Vec<_> = std::fs::read_dir(root.join("notes"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["Welcome.md"], "no temporary file left");
+}
+
+/// A write is compare-and-swap: one made against text that is no longer
+/// there writes nothing.
+#[test]
+fn a_save_against_stale_text_writes_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("vault");
+    let source = vault(&root);
+    source.save("notes/Welcome.md", "# Welcome\nnew typing\n").unwrap();
+    assert!(!source
+        .save_if("notes/Welcome.md", "# Welcome\n", "# Welcome\nextension\n")
+        .unwrap());
+    assert_eq!(
+        on_disk(&root, "notes/Welcome.md").as_deref(),
+        Some("# Welcome\nnew typing\n")
+    );
+    assert!(source
+        .save_if("notes/Welcome.md", "# Welcome\nnew typing\n", "# Welcome\nboth\n")
+        .unwrap());
+}
+
+/// Hidden parts and paths that are one file on a case- or
+/// normalisation-blind file system are refused.
+#[test]
+fn hidden_and_colliding_paths_are_refused() {
+    use architect_extensions::documents::{DocError, Documents as _};
+    let tmp = tempfile::tempdir().unwrap();
+    let docs = VaultDocuments::new(vault(&tmp.path().join("vault")));
+    for bad in [".obsidian/x.md", "notes/.hidden.md", ".trash/Welcome.md"] {
+        assert!(
+            matches!(docs.create(bad, "", &ext()), Err(DocError::Invalid(_))),
+            "{bad}"
+        );
+    }
+    assert!(matches!(
+        docs.create("notes/welcome.md", "", &ext()),
+        Err(DocError::Exists(_))
+    ));
+    docs.create("notes/Caf\u{e9}.md", "", &ext()).unwrap();
+    assert!(matches!(
+        docs.create("notes/cafe\u{301}.md", "", &ext()),
+        Err(DocError::Exists(_))
+    ));
+    assert!(matches!(
+        docs.rename("notes/Welcome.md", "notes/CAF\u{c9}.md", &ext()),
+        Err(DocError::Exists(_))
+    ));
+    // Its own name in another case is the same note: a rename.
+    docs.rename("notes/Welcome.md", "notes/WELCOME.md", &ext())
+        .unwrap();
 }

@@ -156,6 +156,13 @@ impl Vault {
         new_raw: &str,
         guard: &SelfWriteGuard,
     ) -> Result<(), SaveError> {
+        // Never through a symlink (a linked folder out of the vault),
+        // and atomically: a crash mid-write leaves the old text whole.
+        if vault_live::own::through_symlink(&self.root, rel_path) {
+            return Err(SaveError::Io(format!(
+                "{rel_path}: through a symlink, not the vault's own"
+            )));
+        }
         let abs = self.root.join(rel_path);
         let page = self
             .pages
@@ -167,7 +174,7 @@ impl Vault {
             std::fs::create_dir_all(parent).map_err(|e| SaveError::Io(e.to_string()))?;
         }
         guard.mark(&abs);
-        std::fs::write(&abs, new_raw).map_err(|e| SaveError::Io(e.to_string()))?;
+        vault_live::mutate::write_atomic(&abs, new_raw.as_bytes()).map_err(SaveError::Io)?;
         guard.mark(&abs);
 
         let mtime = std::fs::metadata(&abs)
