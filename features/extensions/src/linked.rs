@@ -201,7 +201,7 @@ pub trait Extension: Send + Sync + 'static {
 
 /// A paint view's pane: a `V`, hosted as a Blitz widget, its wake in
 /// its `ctx.extras`.
-#[cfg(feature = "paint")]
+#[cfg(feature = "paint-ui")]
 fn paint_root<V>() -> Element
 where
     V: architect_workspace::paint::PaintView + Default,
@@ -221,6 +221,10 @@ where
 pub struct Builder {
     pub(crate) actions: BTreeMap<String, Action>,
     pub(crate) views: BTreeMap<String, fn() -> Element>,
+    /// What draws a view in its process copy, where that differs from
+    /// `views` (a paint view: a `scene::RemoteScene`).
+    #[cfg(all(feature = "guest", feature = "paint"))]
+    pub(crate) remote_views: BTreeMap<String, fn() -> Element>,
     pub(crate) contribution: Contribution,
     pub(crate) context: Vec<Provide>,
     pub(crate) handle: Handle,
@@ -234,7 +238,7 @@ impl std::fmt::Debug for Builder {
             .field("contribution", &self.contribution)
             .field("context", &self.context.len())
             .field("handle", &self.handle)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -289,11 +293,19 @@ impl Builder {
     /// while it says it is `animating`, and when it asks: its
     /// `ctx.extras` holds the pane's `PaintWake`.
     #[cfg(feature = "paint")]
+    // Each of the two places it goes is behind a feature of its own.
+    #[allow(clippy::redundant_clone)]
     pub fn paint<V>(&mut self, id: impl Into<String>) -> &mut Self
     where
         V: architect_workspace::paint::PaintView + Default,
     {
-        self.views.insert(id.into(), paint_root::<V>);
+        let id = id.into();
+        #[cfg(feature = "paint-ui")]
+        self.views.insert(id.clone(), paint_root::<V>);
+        #[cfg(feature = "guest")]
+        self.remote_views
+            .insert(id.clone(), crate::scene::remote_paint_root::<V>);
+        let _ = id;
         self
     }
 
@@ -361,7 +373,15 @@ impl Builder {
     /// Its views' ids.
     #[must_use]
     pub fn view_ids(&self) -> Vec<String> {
-        self.views.keys().cloned().collect()
+        #[allow(unused_mut)]
+        let mut ids: Vec<String> = self.views.keys().cloned().collect();
+        #[cfg(all(feature = "guest", feature = "paint"))]
+        for id in self.remote_views.keys() {
+            if !ids.contains(id) {
+                ids.push(id.clone());
+            }
+        }
+        ids
     }
 
     /// What it adds past its manifest.
@@ -435,6 +455,10 @@ impl crate::guest::Guest {
         built.handle.connect(Arc::new(Wire));
         let mut guest = Self::new();
         for (id, root) in &built.views {
+            guest = guest.view(id.clone(), *root);
+        }
+        #[cfg(feature = "paint")]
+        for (id, root) in &built.remote_views {
             guest = guest.view(id.clone(), *root);
         }
         for (id, run) in built.actions {

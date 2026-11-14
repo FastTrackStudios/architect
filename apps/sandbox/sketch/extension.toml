@@ -1,0 +1,34 @@
+# Sketch: the showcase's drawing example (#175, #176; #710 U3). Every view
+# is an anyrender scene its own process records; the app draws it in the
+# pane. Panning and zooming send only a transform. Stands in for
+# Excalidraw, Canvas and the graph view.
+id = "lab.sketch"
+name = "Sketch"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Freehand drawing with pan and zoom, a link graph, and a 50-track arrangement, drawn in another process."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-sandbox-sketch"
+
+# Drag to draw; Shift-drag or the middle button pans; the wheel zooms.
+[[views]]
+id = "sketch"
+title = "Sketch"
+icon = "pencil"
+
+# A small link graph; drag a node. A paint view (`Builder::paint`), the
+# same code linked in or here in its process.
+[[views]]
+id = "graph"
+title = "Graph"
+icon = "share-2"
+kind = "paint"
+
+# 50 tracks of 40 clips: the arrangement-sized scene #175 measures.
+[[views]]
+id = "arrangement"
+title = "Arrangement"
+icon = "rows-3"
