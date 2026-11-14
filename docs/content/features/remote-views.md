@@ -102,14 +102,22 @@ placeholder, and follows the process when it restarts.
   unloading shows a placeholder; a declared view the process does not draw,
   or a program that never says hello, fails to load; nonsense frames (unknown
   ids, cycles, a pop past the root, a child that is not there, raw HTML) are
-  refused without a crash.
+  refused without a crash; a `<style>`'s raw CSS is taken as its text.
+- The same file: the view's document starts from
+  what a linked view inherits from its pane (`BASE_CSS`: no margin, the
+  pane's height, the theme's `--ink` and `--font` at 13px), so a view that
+  sets no colour is not black on a dark theme; a `<style>`'s
+  `dangerous_inner_html` is its sheet, any other element's still fails the
+  view; `RemoteView` is keyed by extension and view, so a pane that goes on
+  to another process view opens that one.
 
 ## Status
 
 Done in architect on Unix desks; the sandbox runs the clicker. Not yet: a stdio
 transport, starting lazily and stopping when idle, handing state over on a
 reload, a host service extensions call back into, Windows; pointer, touch,
-wheel and scroll events, IME, and an element and CSS allowlist (only raw HTML
-is refused today).
+wheel and scroll events, IME, images (the sub-document has no net provider,
+so not even a `data:` image loads), and an element and CSS allowlist (only raw
+HTML is refused today, except a `<style>`'s CSS).
 
 - **Task** and **Studio** do not use it yet.

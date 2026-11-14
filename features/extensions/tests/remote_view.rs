@@ -551,3 +551,105 @@ fn a_process_view_inline_as_an_embed_is_given_its_block_and_sized_to_it() {
         lines(d) == 12 && (embed_height(d) - 120.0).abs() < 0.5
     });
 }
+
+/// The view a [`Switching`] pane shows: the next tab of its group.
+static SHOWN: GlobalSignal<&'static str> = Signal::global(|| "counter");
+
+/// The app: one pane whose tab goes from one process view to another,
+/// in the same place, as a group's current tab does.
+#[allow(non_snake_case)]
+fn Switching(props: PaneProps) -> Element {
+    rsx! {
+        div { style: "width: 400px; height: 300px;",
+            RemoteView { processes: props.processes, extension: ID, view: SHOWN() }
+        }
+    }
+}
+
+#[test]
+fn a_pane_that_goes_on_to_another_process_view_shows_that_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, processes) = host(dir.path());
+    host.load(
+        &package(dir.path(), &["counter", "lines"]),
+        Origin::Installed,
+    )
+    .unwrap();
+    let vdom = VirtualDom::new_with_props(Switching, PaneProps { processes });
+    let mut doc = DioxusDocument::new(
+        vdom,
+        DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Dark)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    pump(&mut doc, "the counter", |d| {
+        in_view(d, "#count").as_deref() == Some("Clicked 0 times")
+    });
+    doc.vdom.in_runtime(|| *SHOWN.write() = "lines");
+    pump(&mut doc, "the lines view in its place", |d| {
+        in_view(d, "#lines").is_some() && in_view(d, "#count").is_none()
+    });
+}
+
+/// `node`'s computed `property` in `view`'s document, laid out.
+fn computed(view: &mut RemoteDocument, selector: &str, property: &str) -> String {
+    view.inner_mut().resolve(0.0);
+    let doc = view.inner();
+    let node = doc.query_selector(selector).unwrap().unwrap();
+    doc.resolved_style_value(node, property)
+}
+
+#[test]
+fn a_view_that_sets_no_colour_draws_in_the_panes_ink_and_font() {
+    let (events, _) = futures::channel::mpsc::unbounded();
+    let mut view = RemoteDocument::new(events);
+    view.set_theme_css(":root { --ink: rgb(1, 2, 3); --font: monospace; }");
+    view.apply(div()).unwrap();
+    assert_eq!(computed(&mut view, "#a", "color"), "rgb(1, 2, 3)");
+    assert_eq!(computed(&mut view, "#a", "font-size"), "13px");
+    assert_eq!(computed(&mut view, "#a", "font-family"), "monospace");
+    assert_eq!(computed(&mut view, "body", "margin-top"), "0px");
+}
+
+#[test]
+fn a_styles_raw_css_is_its_sheet_and_other_raw_html_still_fails() {
+    let (events, _) = futures::channel::mpsc::unbounded();
+    let mut view = RemoteDocument::new(events);
+    view.apply(div()).unwrap();
+    // `style { dangerous_inner_html: CSS }`, as an editor ships its sheet.
+    let sheet = |css: &str| Frame::Edits {
+        edits: vec![
+            Edit::PushId { id: 0 },
+            Edit::CreateElement {
+                tag: "style".to_owned(),
+                namespace: None,
+            },
+            Edit::SetAttribute {
+                name: "dangerous_inner_html".to_owned(),
+                namespace: None,
+                value: Value::Text(css.to_owned()),
+            },
+            Edit::AppendChildren { m: 1 },
+            Edit::Pop,
+        ],
+    };
+    view.apply(sheet("#a { color: rgb(4, 5, 6); }")).unwrap();
+    assert_eq!(computed(&mut view, "#a", "color"), "rgb(4, 5, 6)");
+    // Markup in it stays text: no element comes of it.
+    view.apply(sheet("</style><div id=\"b\"></div>")).unwrap();
+    assert!(view.inner().query_selector("#b").unwrap().is_none());
+    // Anywhere else, raw HTML still fails the view.
+    let markup = Frame::Edits {
+        edits: vec![
+            Edit::PushId { id: 1 },
+            Edit::SetAttribute {
+                name: "dangerous_inner_html".to_owned(),
+                namespace: None,
+                value: Value::Text("<span></span>".to_owned()),
+            },
+        ],
+    };
+    assert!(view.apply(markup).is_err());
+}
