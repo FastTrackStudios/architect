@@ -911,6 +911,11 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
                 *DOC_EVENTS.lock().unwrap_or_else(PoisonError::into_inner) =
                     Some(docs.raise_on(&app));
                 host.set_documents(Arc::new(docs));
+                // Its index, for extensions' queries (`query_vault`).
+                #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))]
+                if let Some(queries) = crate::notes::vault_query() {
+                    host.set_vault_query(queries);
+                }
             });
         }
         // MIDI ports and OSC endpoints for extensions (`capabilities.ports`),
