@@ -898,9 +898,12 @@ test('the demo setlist: each song\'s cover reaches its frame as data and the car
     const p = await until(async () => { const q = await propsOf(b, 'transport'); return q && q.tracks === 5 && q; }, 15000, 'the five songs queued');
     assert.equal(p.queueArt, 5, 'every queued song handed its cover');
     // The island claims the setlist's type: it draws, not the core list
-    // (#668), and the list's own rows stay in the property table.
+    // (#668). Its view draws the list, so the list's own rows leave the
+    // property table as they do for the core list (the view is still
+    // handed every property).
     assert.equal(await b.eval(`!!document.querySelector('[data-testid=media-list]')`), false, 'no core list under a claim');
-    assert.ok((await b.eval(`[...document.querySelectorAll('[data-testid=note-properties] dt')].map((d) => d.textContent).join(',')`)).includes('sets'));
+    const table = await b.eval(`[...document.querySelectorAll('[data-testid=note-properties] dt')].map((d) => d.textContent).join(',')`);
+    assert.ok(!/\b(sets|songs)\b/.test(table) && table.includes('title'), table);
     await ask(b, 'transport', 'PLAYHEAD_ITEM', { id: 'Songs/Christmas/Silent Night/Silent Night.md', play: true });
     const s = await until(async () => { const s = await bar(b); return s && s.title === 'Silent Night' && s; }, 10000, 'the card on Silent Night');
     assert.match(s.subtitle, /for KING & COUNTRY/);

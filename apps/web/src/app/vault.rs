@@ -992,17 +992,20 @@ fn NoteText(path: String, text: String) -> Element {
         .map(|(k, v)| (k.clone(), shown(v)))
         .collect();
     // A collection (#668) draws as the core list at its head, unless an
-    // island claims its type: then the island's view draws instead. The
-    // list's own rows (`sets`, `songs`, …) leave the property table, and
-    // its words are read with the fences that repeat the list folded out.
+    // island claims its type: then the island's view draws instead.
+    // Either way the list is drawn, so its own rows (`sets`, `songs`, …)
+    // leave the property table and its words are read with the fences
+    // that repeat the list folded out: whether the listing has come yet
+    // or an island claims it, the note never shows them raw.
     let fields = architect_media::front::fields(&text);
     let listing = super::frames::use_listing();
     let claimed = listing
         .read()
         .as_ref()
         .is_some_and(|l| crate::ext_host::claimed(l, &note_type).is_some());
-    let core_list = !claimed && super::collection::is_collection(&fields);
-    let listed_keys = if core_list {
+    let collection = super::collection::is_collection(&fields);
+    let core_list = !claimed && collection;
+    let listed_keys = if collection {
         architect_media::Collection::fields_in(&fields)
     } else {
         Vec::new()
@@ -1074,17 +1077,17 @@ fn NoteText(path: String, text: String) -> Element {
                         "Not live ({why}). Reconnecting; what you type is kept and sent then."
                     }
                 }
-                if core_list {
+                if collection {
                     super::collection::ReadingBody { body: body0.to_owned() }
                 }
-                // One text area whatever `core_list` is (the extension
+                // One text area whatever the listing says (the extension
                 // listing can load after the note opens): folded under
                 // its summary for a list, open otherwise, until the person
                 // first focuses it (then as it was), never rebuilt, so
                 // what was typed, the caret and focus stay.
-                details { "data-testid": "note-text-fold", open: fold_held().unwrap_or(!core_list),
+                details { "data-testid": "note-text-fold", open: fold_held().unwrap_or(!collection),
                     summary {
-                        style: if core_list {
+                        style: if collection {
                             "cursor: pointer; font-size: 13px; color: {t.ink_3}; margin: 0 0 10px;"
                         } else {
                             "display: none;"
@@ -1104,7 +1107,7 @@ fn NoteText(path: String, text: String) -> Element {
                         oncompositionend: on_composed,
                         onfocusin: move |_| {
                             if fold_held.peek().is_none() {
-                                fold_held.set(Some(!core_list));
+                                fold_held.set(Some(!collection));
                             }
                             editing.focus();
                         },

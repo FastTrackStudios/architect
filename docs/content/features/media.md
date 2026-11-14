@@ -79,8 +79,10 @@ on to the next.
 
 - An extension whose island claims the note's type (`SiteIsland::embed_note`,
   #659) draws instead of the core list.
-- While the core list is drawn, the property table leaves out the
-  `sets`/`sections`/`songs`/`items` rows. A reading view folds away a fence
+- Whichever draws the list (the core list or a claiming view, and in the web
+  app before the extension listing arrives), the property table leaves out
+  the `sets`/`sections`/`songs`/`items` rows; a claiming view is still handed
+  every property. A reading view folds away a fence
   that repeats the list (`is_listing_fence`: `playlist`, or a name ending
   `-playlist` or `-setlist`, such as Studio's ```` ```studio-setlist ````).
 
