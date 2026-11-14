@@ -50,8 +50,8 @@ fn package(tmp: &Path, id: &str, name: &str) -> PathBuf {
 fn app(tmp: &Path, key: &SecretKey) -> Extensions {
     let list = ActionList::new();
     let host = Host::new(list, SharedSections::new(Registry::new()));
-    let installs =
-        Installs::new(tmp.join("installs")).with_trust(Trust::org().with("the test key", key.public()));
+    let installs = Installs::new(tmp.join("installs"))
+        .with_trust(Trust::org().with("the test key", key.public()));
     Extensions::new(host, installs)
 }
 
@@ -71,7 +71,11 @@ fn opening_a_vault_installs_what_it_carries_and_needs_in_one_go() {
     std::fs::write(carried.join("show.rogue.archext"), unsigned).unwrap();
 
     let mut needs = Requirements::default();
-    needs.need(Requirement::new("show.lyrics").named("Lyrics Lane").versions("^0.1"));
+    needs.need(
+        Requirement::new("show.lyrics")
+            .named("Lyrics Lane")
+            .versions("^0.1"),
+    );
     needs.need(Requirement::new("show.tuner").named("Tuner").optional());
     needs.need(Requirement::new("show.rogue").named("Rogue"));
     needs.need(Requirement::new("show.gone").named("Gone"));
@@ -95,24 +99,36 @@ fn opening_a_vault_installs_what_it_carries_and_needs_in_one_go() {
     assert_eq!(opened.error, None);
     let plan = &opened.plan;
     assert_eq!(
-        plan.install.iter().map(|l| l.id.as_str()).collect::<Vec<_>>(),
+        plan.install
+            .iter()
+            .map(|l| l.id.as_str())
+            .collect::<Vec<_>>(),
         ["show.lyrics"]
     );
     assert_eq!(
         plan.offer.iter().map(|l| l.id.as_str()).collect::<Vec<_>>(),
         ["show.tuner"]
     );
-    assert_eq!(plan.prompt().as_deref(), Some("This project uses Lyrics Lane"));
+    assert_eq!(
+        plan.prompt().as_deref(),
+        Some("This project uses Lyrics Lane")
+    );
     // The unsigned one is refused, with why; it and the one no registry
     // has cannot be had, and say so.
     assert_eq!(opened.refused.len(), 1, "{:?}", opened.refused);
     assert_eq!(opened.refused[0].0, "show.rogue.archext");
     assert!(opened.refused[0].1.contains("unsigned") || opened.refused[0].1.contains("signed"));
-    let missing: Vec<(&str, &Missing)> =
-        plan.missing.iter().map(|(r, m)| (r.id.as_str(), m)).collect();
+    let missing: Vec<(&str, &Missing)> = plan
+        .missing
+        .iter()
+        .map(|(r, m)| (r.id.as_str(), m))
+        .collect();
     assert_eq!(
         missing,
-        [("show.rogue", &Missing::NotFound), ("show.gone", &Missing::NotFound)]
+        [
+            ("show.rogue", &Missing::NotFound),
+            ("show.gone", &Missing::NotFound)
+        ]
     );
     assert_eq!(Missing::NotFound.to_string(), "no registry here has it");
 
@@ -120,7 +136,10 @@ fn opening_a_vault_installs_what_it_carries_and_needs_in_one_go() {
     let done = ext.accept(plan);
     assert!(done.iter().all(Result::is_ok), "{done:?}");
     assert!(ext.host().get("show.lyrics").is_some(), "loaded at once");
-    assert!(ext.host().get("show.tuner").is_none(), "optional: offered, not installed");
+    assert!(
+        ext.host().get("show.tuner").is_none(),
+        "optional: offered, not installed"
+    );
     assert!(ext.host().get("show.rogue").is_none(), "never run");
 
     // Opened again, it is ready.

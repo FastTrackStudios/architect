@@ -1163,14 +1163,32 @@ pub fn MissingExtensions(
     let listings = plan.install.clone();
     let mut rows: Vec<(String, String, &'static str, String)> = Vec::new();
     for l in &plan.install {
-        rows.push((l.id.clone(), l.name.clone(), "Required", format!("{} {}", l.kind, l.version)));
+        rows.push((
+            l.id.clone(),
+            l.name.clone(),
+            "Required",
+            format!("{} {}", l.kind, l.version),
+        ));
     }
     for l in &plan.offer {
-        rows.push((l.id.clone(), l.name.clone(), "Optional", format!("{} {}", l.kind, l.version)));
+        rows.push((
+            l.id.clone(),
+            l.name.clone(),
+            "Optional",
+            format!("{} {}", l.kind, l.version),
+        ));
     }
     for (r, why) in &plan.missing {
-        let name = if r.name.is_empty() { r.id.clone() } else { r.name.clone() };
-        let tag = if r.required { "Can't install" } else { "Not found" };
+        let name = if r.name.is_empty() {
+            r.id.clone()
+        } else {
+            r.name.clone()
+        };
+        let tag = if r.required {
+            "Can't install"
+        } else {
+            "Not found"
+        };
         rows.push((r.id.clone(), name, tag, format!("{why}; kept as it is")));
     }
     // Inline styles over the theme's tokens, and no `style` node: one
