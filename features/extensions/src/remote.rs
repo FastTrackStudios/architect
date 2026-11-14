@@ -87,9 +87,10 @@ pub const REMOTE_BUDGET: Duration = Duration::from_millis(33);
 /// At most this many edits in one frame.
 const MAX_EDITS: usize = 200_000;
 
-/// How often a pane's place in the window is looked at, for an input
-/// method's caret.
-pub const PLACE_EVERY: Duration = Duration::from_millis(200);
+/// How often a pane's place in the window, and the boxes of the views
+/// it holds (`crate::embedded`), are looked at: an input method's caret
+/// and a held view follow a pane that moves or a view that scrolls.
+pub const PLACE_EVERY: Duration = Duration::from_millis(50);
 
 /// How often an embed's content height is looked at.
 pub const MEASURE_EVERY: Duration = Duration::from_millis(50);
@@ -105,6 +106,14 @@ const FIT_CSS: &str = "html, body { margin: 0 !important; height: auto !importan
 /// variables (`set_theme_css`). Without it a view that sets no colour of
 /// its own draws black in the user agent's serif on a dark theme.
 const BASE_CSS: &str = "html, body { margin: 0; padding: 0; }                         html, body, main { height: 100%; }                         body { color: var(--ink, var(--foreground)); font-size: 13px;                         font-family: var(--font, var(--default-font-family, var(--font-sans, system-ui, sans-serif))); }";
+
+/// Another extension's view a remote view holds, as its placeholder says.
+#[derive(Clone, Debug, Default)]
+struct Held {
+    key: u64,
+    view: Option<(String, String)>,
+    input: crate::contrib::EmbedInput,
+}
 
 /// The attribute that names a node's Dioxus element id, as Dioxus's own
 /// renderer marks it.
@@ -144,6 +153,10 @@ pub struct RemoteDocument {
     overlay: Option<crate::scene::OverlayLayer>,
     /// How many times its scenes told the view a new size.
     resizes: Arc<std::sync::atomic::AtomicU64>,
+    /// Other extensions' views it holds (`crate::embedded`), by placeholder.
+    holds: HashMap<NodeId, Held>,
+    /// The next held view's key.
+    next_held: u64,
     /// The elements it paints: their scene and transform now.
     painted: HashMap<NodeId, Arc<Mutex<crate::scene::Painted>>>,
     /// How many bytes of scenes and transforms it sent (for a benchmark).
@@ -209,6 +222,8 @@ impl RemoteDocument {
             composing: false,
             scenes: crate::scene::SceneCache::new(),
             predecoded: HashMap::new(),
+            holds: HashMap::new(),
+            next_held: 1,
             overlay: None,
             resizes: Arc::default(),
             painted: HashMap::new(),
@@ -265,6 +280,87 @@ impl RemoteDocument {
     #[must_use]
     pub const fn scene_bytes(&self) -> u64 {
         self.scene_bytes
+    }
+
+    /// A placeholder's held view or its input changed (`crate::embedded`).
+    fn held_attr(&mut self, node: NodeId, name: &str, value: Option<&str>) -> Result<(), String> {
+        use crate::embedded::{INPUT_ATTR, MAX_EMBEDDED, MAX_INPUT_BYTES, VIEW_ATTR, split_view};
+        if !self.holds.contains_key(&node) {
+            if value.is_none() {
+                return Ok(());
+            }
+            if self.holds.len() >= MAX_EMBEDDED {
+                return Err(format!("it holds more than {MAX_EMBEDDED} views"));
+            }
+            let key = self.next_held;
+            self.next_held = self.next_held.saturating_add(1);
+            self.holds.insert(
+                node,
+                Held {
+                    key,
+                    ..Held::default()
+                },
+            );
+        }
+        let Some(held) = self.holds.get_mut(&node) else {
+            return Ok(());
+        };
+        if name == VIEW_ATTR {
+            held.view = match value {
+                Some(v) => Some(
+                    split_view(v)
+                        .map(|(e, w)| (e.to_owned(), w.to_owned()))
+                        .ok_or_else(|| format!("{v:?} names no view (<extension>/<view>)"))?,
+                ),
+                None => None,
+            };
+        } else if name == INPUT_ATTR {
+            held.input = match value {
+                Some(v) if v.len() > MAX_INPUT_BYTES => {
+                    return Err(format!(
+                        "a held view's input of {} bytes: past its limit of {MAX_INPUT_BYTES}",
+                        v.len()
+                    ));
+                }
+                Some(v) => serde_json::from_str(v)
+                    .map_err(|e| format!("a held view's input that isn't one: {e}"))?,
+                None => crate::contrib::EmbedInput::default(),
+            };
+        }
+        if held.view.is_none() && held.input == crate::contrib::EmbedInput::default() {
+            self.holds.remove(&node);
+        }
+        Ok(())
+    }
+
+    /// The other extensions' views it holds now, and where: each
+    /// placeholder's box in its view, scrolled (`crate::embedded`).
+    #[must_use]
+    pub fn embedded(&self) -> Vec<crate::embedded::Slot> {
+        let scroll = self.doc.viewport_scroll();
+        let mut out: Vec<crate::embedded::Slot> = self
+            .holds
+            .iter()
+            .filter_map(|(node, held)| {
+                let (extension, view) = held.view.clone()?;
+                let n = self.doc.get_node(*node)?;
+                let at = n.absolute_position(0.0, 0.0);
+                let size = n.final_layout().size;
+                #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+                Some(crate::embedded::Slot {
+                    key: held.key,
+                    extension,
+                    view,
+                    input: held.input.clone(),
+                    x: at.x - scroll.x as f32,
+                    y: at.y - scroll.y as f32,
+                    width: size.width,
+                    height: size.height,
+                })
+            })
+            .collect();
+        out.sort_by_key(|s| s.key);
+        out
     }
 
     /// Lets its scenes draw over the whole app (an extension granted
@@ -578,6 +674,7 @@ impl RemoteDocument {
             if let Some(id) = self.elements.remove(&n) {
                 self.ids.remove(&id);
             }
+            self.holds.remove(&n);
             if let (Some(painted), Some(layer)) = (self.painted.remove(&n), &self.overlay) {
                 layer.remove(&painted);
             }
@@ -700,6 +797,13 @@ impl RemoteDocument {
                 value,
             } => {
                 let (node, _) = self.top()?;
+                if name == crate::embedded::VIEW_ATTR || name == crate::embedded::INPUT_ATTR {
+                    let text = match &value {
+                        Value::Text(t) => Some(t.as_str()),
+                        _ => None,
+                    };
+                    return self.held_attr(node, &name, text);
+                }
                 if name == crate::scene::SCENE_ATTR || name == crate::scene::TRANSFORM_ATTR {
                     let text = match &value {
                         Value::Text(t) => Some(t.as_str()),
@@ -1315,6 +1419,7 @@ async fn follow(
     mut timing: Timing,
     fit: Option<Fit>,
     overlay: Option<crate::scene::OverlayLayer>,
+    mut slots: Signal<Vec<crate::embedded::Slot>>,
 ) {
     loop {
         let Some(process) = processes.get(&extension) else {
@@ -1420,15 +1525,21 @@ async fn follow(
             spawn(async move {
                 loop {
                     futures_timer::Delay::new(PLACE_EVERY).await;
-                    let (x, y) = with_doc(&node, |doc, at| {
+                    let (pane, held) = with_doc(&node, |doc, at| {
                         let pane = pane_at(doc, at);
-                        if let Some(r) = remote(doc, at) {
+                        let held = remote(doc, at).map(|r| {
                             r.place_scenes(pane);
-                        }
-                        pane
+                            r.embedded()
+                        });
+                        (pane, held)
                     })
                     .await;
-                    shell.moved(x, y);
+                    shell.moved(pane.0, pane.1);
+                    if let Some(held) = held
+                        && *slots.peek() != held
+                    {
+                        slots.set(held);
+                    }
                 }
             })
         };
@@ -1458,12 +1569,21 @@ async fn follow(
                         applied
                     },
                 );
+                // The views it holds now (their boxes settle by the next
+                // look, `PLACE_EVERY`).
+                let held = remote(doc, at).map(|r| r.embedded());
                 // A frame no input asked for (a save, live data, a worker's
                 // news) still shows: the window is asked to draw again.
                 doc.shell_provider.request_redraw();
-                applied
+                (applied, held)
             })
             .await;
+            let (applied, held) = applied;
+            if let Some(held) = held
+                && *slots.peek() != held
+            {
+                slots.set(held);
+            }
             // From the event that asked; an older process's, its apply.
             match (answered, from) {
                 (true, Some(asked_at)) => {
@@ -1488,6 +1608,9 @@ async fn follow(
         }
         forwarding.cancel();
         placing.cancel();
+        if !slots.peek().is_empty() {
+            slots.set(Vec::new());
+        }
         if let Some(fit) = &fit {
             fit.live.borrow_mut().take();
         }
@@ -1691,6 +1814,34 @@ pub fn RemoteOverlay(
     }
 }
 
+/// Another extension's view held in a remote view (`crate::embedded`):
+/// linked in, drawn in the app's document; a process's or a component's,
+/// as a remote view of its own, filling the box, given its input.
+#[component]
+fn HeldView(processes: Processes, slot: crate::embedded::Slot) -> Element {
+    let crate::embedded::Slot {
+        extension,
+        view,
+        input,
+        ..
+    } = slot;
+    if let Some(ui) = try_use_context::<crate::interface::ExtensionUi>()
+        && let Some(root) = ui.host().linked_view(&extension, &view)
+    {
+        return rsx! { crate::interface::LinkedOverlay { root, input } };
+    }
+    let mut signal = use_signal(|| input.clone());
+    if *signal.peek() != input {
+        signal.set(input);
+    }
+    let key = format!("{extension}/{view}");
+    rsx! {
+        for key in [key] {
+            Mount { key: "{key}", processes: processes.clone(), extension: extension.clone(), view: view.clone(), input: Some(signal), max_height: None, overlay: false }
+        }
+    }
+}
+
 /// An embed's input, shared between its component and its view's
 /// session: the latest, and where to send it while a session is open.
 #[derive(Clone)]
@@ -1810,6 +1961,8 @@ fn Mount(
             .await;
         });
     });
+    // Other extensions' views it holds, where their placeholders are.
+    let slots = use_signal(Vec::<crate::embedded::Slot>::new);
     // A view that may draw over the whole app: its scenes' layer, drawn by
     // a widget filling the window (`scene::OverlayLayer`).
     let layer = use_hook(|| overlay.then(crate::scene::OverlayLayer::new));
@@ -1836,6 +1989,7 @@ fn Mount(
                     },
                     fit.clone(),
                     layer.clone(),
+                    slots,
                 ));
                 if fit.as_ref().is_some_and(|f| f.sized) {
                     spawn(measure(node, height));
@@ -1843,6 +1997,7 @@ fn Mount(
             }
         }
     };
+    let holding = processes.clone();
     let restart = {
         move |_| {
             if let Some(p) = processes.get(&extension)
@@ -1902,6 +2057,17 @@ fn Mount(
                         follow_with(node.clone());
                     }
                 },
+            }
+            // The views it holds, each over its placeholder's box, in front
+            // of the view so they take their own input.
+            for slot in slots() {
+                div {
+                    key: "{slot.key}",
+                    class: "remote-view-held",
+                    style: "position: absolute; left: {slot.x}px; top: {slot.y}px; \
+                            width: {slot.width}px; height: {slot.height}px; overflow: hidden;",
+                    HeldView { processes: holding.clone(), slot: slot.clone() }
+                }
             }
             if let Some(over) = over {
                 // Over the whole window, above the panes; no input.

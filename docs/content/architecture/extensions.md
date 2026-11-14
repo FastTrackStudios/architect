@@ -2582,7 +2582,10 @@ folder changes), then a distribution's compiled-in ones
 Bases (`features/bases`, [Bases](@/features/bases.md)) draws a base's
 table, cards and list itself; any other `type:` a base's view names is
 drawn by the extension that adds it, as an Obsidian plugin adds a Bases
-view. Task's calendar, kanban, gantt, heatmap and graph views become such
+view. A Bases running as a process (a development copy) holds that view
+inside its own remote view with `embedded::EmbeddedView`, its input the
+`BASE_VIEW_CLAIM` with the rows; the host draws it ([Remote
+views](@/features/remote-views.md), "Holding another extension's view"). Task's calendar, kanban, gantt, heatmap and graph views become such
 extensions (#350).
 
 ```toml
