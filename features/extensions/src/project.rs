@@ -206,6 +206,17 @@ pub enum Missing {
     CannotRun(String),
 }
 
+impl std::fmt::Display for Missing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound => f.write_str("no registry here has it"),
+            Self::NoVersion { range } => write!(f, "no version here fits {range}"),
+            Self::NotApproved(why) => f.write_str(why),
+            Self::CannotRun(why) => write!(f, "it cannot run here ({why})"),
+        }
+    }
+}
+
 /// What opening (or joining) a project takes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
@@ -230,11 +241,17 @@ impl Plan {
     /// The prompt's line: "This project uses Saturation and Lyrics Lane".
     #[must_use]
     pub fn prompt(&self) -> Option<String> {
+        self.prompt_for("project")
+    }
+
+    /// [`Self::prompt`] for `what` opens: "This vault uses Word Count".
+    #[must_use]
+    pub fn prompt_for(&self, what: &str) -> Option<String> {
         let names: Vec<&str> = self.install.iter().map(|l| l.name.as_str()).collect();
         match names.as_slice() {
             [] => None,
-            [one] => Some(format!("This project uses {one}")),
-            [rest @ .., last] => Some(format!("This project uses {} and {last}", rest.join(", "))),
+            [one] => Some(format!("This {what} uses {one}")),
+            [rest @ .., last] => Some(format!("This {what} uses {} and {last}", rest.join(", "))),
         }
     }
 }

@@ -856,6 +856,7 @@ pub fn VaultPage() -> Element {
         } else if title_row.is_none() {
             PageBar { title: "Vault" }
         }
+        crate::extensions::VaultNeedsBanner {}
         div { style: "flex: 1 1 0; min-height: 0; display: flex; position: relative;",
             WorkspaceView {
                 workspace,
