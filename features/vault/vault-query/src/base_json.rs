@@ -5,8 +5,8 @@
 //! views reads as one table of `file.name` ([`default_view`]), as
 //! Obsidian shows one.
 
-use serde_json::{Value, json};
 use crate::bases::{BaseRow, Conjunction, ParsedBase, SortDir, ViewKind, ViewSpec, filter_clauses};
+use serde_json::{Value, json};
 
 /// One table of `file.name`: the view a base with none reads as.
 #[must_use]
@@ -105,7 +105,11 @@ pub fn property_keys(rows: &[BaseRow]) -> Vec<String> {
         .iter()
         .flat_map(|r| r.frontmatter.keys().cloned())
         .collect();
-    keys.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)));
+    keys.sort_by(|a, b| {
+        a.to_lowercase()
+            .cmp(&b.to_lowercase())
+            .then_with(|| a.cmp(b))
+    });
     keys.dedup();
     keys
 }

@@ -140,9 +140,9 @@ pub fn page_to_row(page: &VaultPage) -> BaseRow {
 mod tests {
     use super::*;
     use crate::obsidian_parse::parse_page;
-    use vault_query::rows::row_of;
     use std::fs;
     use std::path::Path;
+    use vault_query::rows::row_of;
 
     fn touch(p: &Path, body: &str) {
         if let Some(parent) = p.parent() {

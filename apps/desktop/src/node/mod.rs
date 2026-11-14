@@ -645,8 +645,11 @@ pub async fn start_with_shell(
             reads: Arc::new(move |who, vault, path| reads.reads(who, vault, path)),
             key: Arc::new(move |who| key.read_key(who)),
         });
-        let notes = architect::layers![service::notes::NotesService, service::index_sync::VaultIndexSyncService]
-            .provide(state.clone());
+        let notes = architect::layers![
+            service::notes::NotesService,
+            service::index_sync::VaultIndexSyncService
+        ]
+        .provide(state.clone());
         host = lane
             .clone()
             .with_vaults(registry.clone(), catalog.clone(), notes)

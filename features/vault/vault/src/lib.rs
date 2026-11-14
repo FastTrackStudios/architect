@@ -61,13 +61,6 @@ pub use vault_obsidian::GraphBackend;
 /// The `.base` parser and evaluator (`parse`, `BaseEval`, `view_table`).
 #[cfg(feature = "live")]
 pub use vault_live::bases;
-/// A base as JSON: the shape the query service answers in.
-#[cfg(feature = "live")]
-pub use vault_query::base_json;
-/// The vault's query service: the index, its builder and the engine
-/// (wasm-clean).
-#[cfg(feature = "live")]
-pub use vault_query as query;
 /// Typed frontmatter schemas: the built-in kinds, schema pages, and
 /// the validation a write goes through.
 #[cfg(feature = "live")]
@@ -91,6 +84,13 @@ pub use vault_live::{
     WatchError, WriteGuard, append_to_page, bind_sink, create_page, delete_page, delete_page_at,
     move_page_at, save_page, save_page_at, sink_for, unbind_sink, walk_vault, watch, write_atomic,
 };
+/// The vault's query service: the index, its builder and the engine
+/// (wasm-clean).
+#[cfg(feature = "live")]
+pub use vault_query as query;
+/// A base as JSON: the shape the query service answers in.
+#[cfg(feature = "live")]
+pub use vault_query::base_json;
 
 // ── Obsidian translation layer ────────────────────────────────────
 /// Obsidian-aware helpers: parsed page reads (outline, tasks,

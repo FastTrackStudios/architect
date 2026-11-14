@@ -15,8 +15,8 @@ use architect_permissions::Principal;
 use vault::actions::query::DiskSource;
 
 use architect_devices::Admission;
-use vault_live::Backend;
 use vault::query::Built;
+use vault_live::Backend;
 use vault_proto::index_sync::{IndexBytes, IndexError, VaultIndexSync};
 use vault_proto::{IfMatch, VaultSync as _, VaultSyncError};
 
@@ -386,7 +386,8 @@ impl NodeState {
 impl VaultIndexSync for NodeState {
     async fn snapshot(&self, vault: String) -> Result<IndexBytes, IndexError> {
         let (reads, key) = self.reads(&vault)?;
-        self.indexed(vault, move |built| snapshot_for(built, &*reads, key)).await
+        self.indexed(vault, move |built| snapshot_for(built, &*reads, key))
+            .await
     }
 
     async fn since(
@@ -397,8 +398,10 @@ impl VaultIndexSync for NodeState {
         from: u64,
     ) -> Result<Option<IndexBytes>, IndexError> {
         let (reads, key) = self.reads(&vault)?;
-        self.indexed(vault, move |built| since_for(built, &*reads, key, epoch, access, from))
-            .await
+        self.indexed(vault, move |built| {
+            since_for(built, &*reads, key, epoch, access, from)
+        })
+        .await
     }
 }
 
@@ -455,7 +458,10 @@ impl NodeState {
     /// What the caller of this call may read in `vault`: a check of each
     /// note's path, through the org lane's rules ([`Access`]).
     #[allow(clippy::type_complexity)]
-    fn reads(&self, vault: &str) -> Result<(Arc<dyn Fn(&str) -> bool + Send + Sync>, u64), IndexError> {
+    fn reads(
+        &self,
+        vault: &str,
+    ) -> Result<(Arc<dyn Fn(&str) -> bool + Send + Sync>, u64), IndexError> {
         let who = architect::permissions_gate::caller()
             .ok_or_else(|| IndexError::Refused("no caller: the index is a member's".to_owned()))?;
         let access = self
@@ -464,7 +470,10 @@ impl NodeState {
             .ok_or_else(|| IndexError::Refused("this node hosts no org".to_owned()))?;
         let key = (access.key)(&who);
         let vault = vault.to_owned();
-        Ok((Arc::new(move |path: &str| (access.reads)(&who, &vault, path)), key))
+        Ok((
+            Arc::new(move |path: &str| (access.reads)(&who, &vault, path)),
+            key,
+        ))
     }
 }
 
@@ -547,7 +556,10 @@ mod tests {
         let mine = snapshot_for(&built, &public, 2);
         assert_eq!(VaultIndex::from_bytes(&all.bytes).unwrap().entries.len(), 2);
         let mine_index = VaultIndex::from_bytes(&mine.bytes).unwrap();
-        assert_eq!(mine_index.entries.keys().map(|k| &**k).collect::<Vec<_>>(), ["Public/A.md"]);
+        assert_eq!(
+            mine_index.entries.keys().map(|k| &**k).collect::<Vec<_>>(),
+            ["Public/A.md"]
+        );
         assert!(!String::from_utf8_lossy(&mine.bytes).contains("Private"));
 
         // A private edit: the public reader stays where it was.
@@ -563,7 +575,10 @@ mod tests {
         settled(&built, |i| i.entries.contains_key("Public/C.md"));
         let more = since_for(&built, &public, 2, mine.epoch, mine.access, mine.revision).unwrap();
         let more = IndexDelta::from_bytes(&more.bytes).unwrap();
-        assert_eq!(more.put.iter().map(|e| &*e.path).collect::<Vec<_>>(), ["Public/C.md"]);
+        assert_eq!(
+            more.put.iter().map(|e| &*e.path).collect::<Vec<_>>(),
+            ["Public/C.md"]
+        );
 
         // What the public reader may read changes: it takes a snapshot.
         assert!(since_for(&built, &public, 3, mine.epoch, mine.access, mine.revision).is_none());
