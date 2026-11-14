@@ -58,27 +58,32 @@ fn store(b: &Board) {
 #[must_use]
 pub fn drop_at(board: &Board, x: f64, y: f64) -> (usize, usize) {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::as_conversions)]
-    let column = ((x / COLUMN_WIDTH).floor().max(0.0) as usize).min(COLUMNS.len() - 1);
+    let column = ((x / COLUMN_WIDTH).floor().max(0.0) as usize).min(COLUMNS.len().saturating_sub(1));
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::as_conversions)]
     let row = ((y - HEADER) / CARD_HEIGHT).round().max(0.0) as usize;
-    (column, row.min(board[column].len()))
+    let len = board.get(column).map_or(0, Vec::len);
+    (column, row.min(len))
 }
 
 /// `board` with the card at `from` moved to `to` (`drop_at`'s place, as
-/// seen before the card left its own column).
+/// seen before the card left its own column). A place that isn't there
+/// leaves it as it was.
 #[must_use]
 pub fn moved(mut board: Board, from: (usize, usize), to: (usize, usize)) -> Board {
     let (fc, fr) = from;
-    let (tc, mut tr) = to;
-    if fr >= board[fc].len() {
+    let (tc, tr) = to;
+    let Some(card) = board.get_mut(fc).filter(|c| fr < c.len()).map(|c| c.remove(fr)) else {
         return board;
+    };
+    let tr = if fc == tc && tr > fr { tr.saturating_sub(1) } else { tr };
+    match board.get_mut(tc) {
+        Some(column) => column.insert(tr.min(column.len()), card),
+        None => {
+            if let Some(column) = board.get_mut(fc) {
+                column.insert(fr.min(column.len()), card);
+            }
+        }
     }
-    let card = board[fc].remove(fr);
-    if fc == tc && tr > fr {
-        tr -= 1;
-    }
-    let tr = tr.min(board[tc].len());
-    board[tc].insert(tr, card);
     board
 }
 
@@ -107,7 +112,7 @@ pub fn KanbanBoard() -> Element {
                     style: "position: relative; width: {COLUMN_WIDTH}px; padding: 0 4px; box-sizing: border-box; \
                             border-right: 1px solid var(--border, #3f3f46);",
                     div { style: "height: {HEADER}px; line-height: {HEADER}px; font-weight: 600;", "{title}" }
-                    for (r, card) in cards.read()[c].iter().enumerate() {
+                    for (r, card) in cards.read().get(c).cloned().unwrap_or_default().into_iter().enumerate() {
                         {
                             let lifted = drag().filter(|d| d.from == (c, r));
                             let shift = lifted.map_or((0.0, 0.0), |d| (d.now.0 - d.start.0, d.now.1 - d.start.1));

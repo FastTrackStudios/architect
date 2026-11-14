@@ -15,7 +15,9 @@
     clippy::future_not_send,
     clippy::arithmetic_side_effects,
     clippy::cast_precision_loss,
-    clippy::as_conversions
+    clippy::as_conversions,
+    clippy::significant_drop_tightening,
+    clippy::suboptimal_flops
 )]
 
 use std::path::Path;
