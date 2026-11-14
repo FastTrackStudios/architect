@@ -339,6 +339,63 @@ no call reads a value back.
 **Changing them.** The folder is read at start, so a deployment that adds,
 removes or bumps an extension restarts the node.
 
+### Extensions through Nix
+
+A NixOS deployment declares the extensions its node runs. Each is pinned by
+version, hash and signature, and fetched when the system is **built**. The
+server downloads nothing at run time, and an archive that is unsigned,
+unpinned or changed doesn't build.
+
+```nix
+# flake inputs: architect.url = "github:FastTrackStudios/architect/<rev>";
+{ architect, pkgs, ... }:
+{
+  imports = [ architect.nixosModules.architect-node ];
+  services.architect-node = {
+    enable = true;
+    environment.ARCHITECT_HOST_ORG = "fasttrackstudio";
+    extensions = [
+      (architect.lib.architectExtension {
+        inherit pkgs;
+        id = "showcase.bank-link";
+        version = "0.1.0";
+        registry = "https://example.org/registry"; # <registry>/archives/<id>-<version>.archext
+        hash = "sha256-…";                          # the archive's
+        publishers.Showcase = "RWQ…";               # minisign public keys
+        trustOrg = false;                           # true: also the FTS release key
+      })
+    ];
+    # Node actions' secrets, a file each: <dir>/<ext id>/<secret id>.
+    extensionSecrets = "/run/secrets/architect-extensions";
+  };
+}
+```
+
+- **`lib.architectExtension`** (`nix/node/extension.nix`) fetches the
+  archive. It takes `url`, or `registry` (`<registry>/archives/<id>-<version>.archext`),
+  or a path (`src`). It runs `archext install`
+  (`features/extensions/archive/src/bin/archext.rs`) on the archive. The
+  archive must match the pinned SHA-256. Its signature, index and files
+  are checked by the same `architect_extension_archive::open` every app
+  runs on an install, against `publishers` (and the FastTrackStudios key
+  with `trustOrg`). It must be the pinned id and version. Its files are
+  then unpacked into a store path, the package folder.
+- **`services.architect-node`** (`nix/node/module.nix`) runs the node.
+  Its extension folder (`ARCHITECT_EXTENSIONS`) is one store path linking
+  each extension by id: read-only, switched with the system's generation.
+  A change restarts the node. `package` and `binary` pick another
+  distribution's node (`studio-architect`).
+- **Checks** (`nix/tests/extensions.nix`, `nix flake check`):
+  - a node with the showcase's Bank link builds, its unit pointing at it;
+  - a wrong hash, a key not among the publishers, and an archive changed
+    after signing each fail the build, saying why.
+
+**The desktop.** `nix run github:FastTrackStudios/architect` (`nix/desktop`)
+installs nothing declared yet: a person installs extensions in the app,
+from a registry, with its consent prompt. The same store paths would
+serve a declared list once the app reads an extension folder from its
+environment. That isn't built.
+
 ## Share links
 
 A share link puts part of a vault on `https://<node>/s/<code>/`, the way you

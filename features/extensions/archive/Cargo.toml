@@ -44,5 +44,12 @@ workspace = true
 [lib]
 doctest = false
 
+# `archext install`: an archive checked against a pinned sha256 and
+# publisher keys, then unpacked: what the Nix function
+# `lib.architectExtension` builds with (flake.nix, #583).
+[[bin]]
+name = "archext"
+path = "src/bin/archext.rs"
+
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }
