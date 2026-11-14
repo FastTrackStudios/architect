@@ -760,7 +760,7 @@ mod tests {
             run(&reader, "VAULT_CREATE", Reach::Mutating),
             Some("writes.documents")
         );
-        let mut writer = reader.clone();
+        let mut writer = reader;
         writer.writes = vec!["documents".to_owned()];
         assert_eq!(run(&writer, "VAULT_CREATE", Reach::Mutating), None);
         // Other actions are as they were.
