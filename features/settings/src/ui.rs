@@ -432,8 +432,18 @@ fn theme() -> ShellTheme {
     )
 }
 
+/// Whether the window is a phone's: the shell's form, or, where the page
+/// is drawn outside the shell (an extension's sheet, over the window), the
+/// window's own [`Screen`](architect_shell::Screen) the app publishes at its
+/// root. Before, a sheet out of the shell's reach always laid out for a
+/// desk and was clipped at a phone's width (#727).
 fn phone() -> bool {
-    try_use_shell().is_some_and(|s| s.form() == architect_shell::FormFactor::Phone)
+    use architect_shell::FormFactor;
+    if let Some(shell) = try_use_shell() {
+        return shell.form() == FormFactor::Phone;
+    }
+    try_use_context::<Signal<architect_shell::Screen>>()
+        .is_some_and(|s| s().form() == FormFactor::Phone)
 }
 
 /// A section's icon, by its lucide name.
@@ -504,7 +514,13 @@ pub fn SettingsPage() -> Element {
 #[component]
 pub fn SettingsSheet() -> Element {
     if phone() {
-        rsx! { PhoneSettings {} }
+        // Its rows stack in a column of their own, whatever frame holds it
+        // (a phone's screen, or a sheet's card, which lays out in a row).
+        rsx! {
+            div { style: "flex: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column;",
+                PhoneSettings {}
+            }
+        }
     } else {
         rsx! { DeskSettings {} }
     }
