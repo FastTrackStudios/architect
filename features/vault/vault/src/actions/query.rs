@@ -38,11 +38,12 @@ impl NoteSource for OpenVault {
             // state the notes are in.
             let revision = Self::revision(self);
             let total = v.pages.len().saturating_add(v.bases.len());
-            // A note's stamp is a hash of its text: equal only when the
-            // text is (its time and length alone could miss an edit).
+            // A note's stamp is its generation, moved every time its text
+            // is set (its time and length alone could miss an edit); a
+            // base's, a hash of its YAML (bases are few and small).
             let pages = v.pages.iter().map(|p| Note {
                 path: &p.rel_path,
-                stamp: hash_of(&p.raw),
+                stamp: p.generation,
                 text: Text::Here(&p.raw),
                 parsed: Some(&p.parsed),
                 mtime: millis(p.mtime),

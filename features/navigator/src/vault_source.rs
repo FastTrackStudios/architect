@@ -553,6 +553,7 @@ pub fn note_from_text(path: &str, text: &str, created: Millis, modified: Millis)
         raw: text.to_owned(),
         parsed: vault::obsidian::obsidian_parse::parse_page(text),
         mtime: SystemTime::UNIX_EPOCH,
+        generation: vault::obsidian::next_generation(),
     };
     let mut file = derived(&page, created, modified);
     let named = FEATURE_IMAGE_PROPERTIES.iter().find_map(|key| {
