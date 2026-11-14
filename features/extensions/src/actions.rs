@@ -144,6 +144,9 @@ pub struct InstallArgs {
     pub grant: Option<String>,
     /// Keep it at `version` (or the version installed) from now on.
     pub pin: Option<bool>,
+    /// Take `version` even when it is older than the one installed or
+    /// outside its pin (a person asked for it by name).
+    pub explicit: Option<bool>,
 }
 
 /// `EXT_UNINSTALL`'s arguments.
@@ -246,7 +249,15 @@ impl Extensions {
                     architect::action::Principal::describe,
                 );
                 let installed = me
-                    .install_with(&a.id, &req, grant, &by, a.pin == Some(true))
+                    .install_with_in(
+                        &a.id,
+                        &req,
+                        grant,
+                        &by,
+                        a.pin == Some(true),
+                        &[],
+                        a.explicit == Some(true),
+                    )
                     .map_err(|e| e.to_string())?;
                 Ok::<_, String>(RawJson::from(Self::installed_json(&installed).to_string()))
             },

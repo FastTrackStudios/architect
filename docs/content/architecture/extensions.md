@@ -4284,29 +4284,58 @@ required = true      # false: offered, not asked
 ```
 
 Small extensions travel in the folder as signed archives,
-`.architect/extensions/*.archext` (`vault_needs::Carried`): a source beside
-the registries, each archive opened by the same check as a registry's
-(the org key, or a publisher a registry here trusts). An archive that does
-not pass is listed as refused, with why, and never run.
+`.architect/extensions/*.archext` (`vault_needs::Carried`). What a vault
+carries is held to more than a registry's archive:
+
+- **It is a source for that vault's plan only.** It is never one of the
+  app's registries: no update, search, preview or other install takes from
+  it, and only the ids the vault names are listed. `Extensions::open_vault`
+  and `EXT_NEEDS` change nothing; `Extensions::accept_vault` searches it
+  for those installs alone, after the person's registries (on a tie, a
+  registry's copy wins).
+- **Its signer must be the org key, or the key the installed copy of that
+  id is signed by.** A registry's publisher key is not enough: a vault
+  cannot bring a new publisher. Every install records its signer
+  (`Install::signer_key`), and an update signed by another key is refused
+  (`InstallError::SignerChanged`), from a vault or a registry.
+- **It is read cheaply and once.** An archive is at most 16 MB
+  (`vault_needs::MAX_ARCHIVE`) and the needs file 64 KB (`MAX_NEEDS`). A
+  plan reads only the signed index and the manifest
+  (`architect_extension_archive::peek`), cached by the file's path, size
+  and time; every file is checked when it is installed.
+- **No link is followed**, at any level (`.architect` itself included): a
+  link, or anything but a plain file, is refused with why.
+
+What cannot be installed is said, never forced:
+
+- a newer version installed than the range takes: "0.2.0 is installed;
+  this wants an older one" (`Missing::WantsOlder`);
+- a version outside the installed copy's pin (`Missing::OutsidePin`);
+- an install by id that would go older or past a pin is refused
+  (`InstallError::Downgrade`) unless a person names that version
+  (`EXT_INSTALL {explicit: true}`, `Extensions::install_with_in`).
 
 `Extensions::open_vault` plans it (`features/extensions/src/vault_needs.rs`
 `VaultNeeds`: the `Plan`, the refused archives, a file that does not
 read); `EXT_NEEDS {folder}` answers the same to an agent. The app draws it
 over the Vault for the vault, or for the project on show
-(`apps/ui/src/extensions.rs` `VaultNeedsBanner`, with `MissingExtensions`):
-each required one, each optional one, each that cannot be had with why
-("no registry here has it", "it cannot run here (process)"), and **Install
-all**: one consent prompt for all of them, installed and loaded without a
-restart, then planned again. "Not now" puts it away for the run.
+(`apps/ui/src/extensions.rs` `VaultNeedsBanner`, with `MissingExtensions`),
+planned on a thread of its own and again only while a registry's refresh
+could change it: each required one, each optional one, each that cannot be
+had with why, and **Install all**. Its previews (`Extensions::previews_for`)
+are one consent prompt, listing in words what each asks, and what was
+dropped and why; nothing installs before that one yes
+(`Extensions::accept_vault` with no grant answers `NeedsConsent` for each),
+and after it everything is installed and loaded without a restart.
+"Not now" puts it away for the run.
 
 Why `.architect/`: it is the vault's own folder (the decks' layouts are
-there) and syncs with the vault's files to every device and to a share's
-guests. #683 narrows which top-level dot-folders sync; `.architect/` is
-one that must (`extensions.toml` and `extensions/`).
+there) and syncs with the vault's files today. #683 narrows which
+top-level dot-folders sync, the owner's decision; this needs `.architect/`
+(`extensions.toml` and `extensions/`) to keep syncing.
 
-A share link's guest plans the same from the share's copy of the folder
-(`Extensions::open_vault` on it, or `EXT_NEEDS`), drawn with the same
-component.
+A share link names its own extensions with the share, not the vault's
+file (see "A share link's extensions").
 
 Tests: `features/extensions/tests/vault_needs.rs`.
 

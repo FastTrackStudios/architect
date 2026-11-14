@@ -77,6 +77,9 @@ pub struct Row {
 pub struct Browse {
     extensions: Extensions,
     previews: Arc<Mutex<BTreeMap<String, Preview>>>,
+    /// The versions whose preview could not be read (`id@version`): not
+    /// fetched again for every list.
+    failed: Arc<Mutex<std::collections::BTreeSet<String>>>,
 }
 
 impl PartialEq for Browse {
@@ -119,6 +122,7 @@ impl Browse {
         Self {
             extensions,
             previews: Arc::default(),
+            failed: Arc::default(),
         }
     }
 
@@ -272,10 +276,20 @@ impl Browse {
             // Read once, so the row says why it cannot run here (#578)
             // before anyone opens it.
             let preview = self.preview(&l.id).or_else(|| {
+                let key = format!("{}@{}", l.id, l.version);
+                let mut failed = self.failed.lock().unwrap_or_else(PoisonError::into_inner);
+                if failed.contains(&key) {
+                    return None;
+                }
                 let exact = semver::VersionReq::parse(&format!("={}", l.version)).ok()?;
-                let p = self.extensions.preview(&l.id, &exact).ok()?;
-                self.remember(p.clone());
-                Some(p)
+                if let Ok(p) = self.extensions.preview(&l.id, &exact) {
+                    drop(failed);
+                    self.remember(p.clone());
+                    Some(p)
+                } else {
+                    failed.insert(key);
+                    None
+                }
             });
             let not_here = preview.as_ref().and_then(|p| p.cannot_run.clone());
             let adds = preview.map(|p| p.adds).unwrap_or_default();

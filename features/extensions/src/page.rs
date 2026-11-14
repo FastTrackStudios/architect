@@ -1135,13 +1135,15 @@ pub fn ConsentPrompt(
 /// each one, "Install all" through one consent prompt for all of them,
 /// and what cannot be had here, each with why (kept, never dropped).
 /// `what` names what is opening ("vault"; "project" when not given);
-/// `on_done` hears what an install did (each one's outcome, `; `-joined),
-/// to plan again.
+/// `folder` is the vault's (or project's) folder, whose carried archives
+/// are searched for these installs only; `on_done` hears what an install
+/// did (each one's outcome, `; `-joined), to plan again.
 #[component]
 pub fn MissingExtensions(
     browse: Browse,
     plan: Plan,
     #[props(default)] what: Option<String>,
+    #[props(default)] folder: Option<std::path::PathBuf>,
     #[props(default)] on_done: Option<EventHandler<String>>,
 ) -> Element {
     let mut asking = use_signal(|| None::<Vec<Preview>>);
@@ -1160,7 +1162,8 @@ pub fn MissingExtensions(
     let can_install = !plan.install.is_empty();
     let org = browse.extensions().host().grants().and_then(|g| g.org());
     let ext = browse.extensions().clone();
-    let listings = plan.install.clone();
+    let for_previews = plan.clone();
+    let preview_folder = folder.clone();
     let mut rows: Vec<(String, String, &'static str, String)> = Vec::new();
     for l in &plan.install {
         rows.push((
@@ -1215,14 +1218,21 @@ pub fn MissingExtensions(
                     button {
                         style: "padding: 5px 12px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); font-size: 13px; font-weight: 600; cursor: pointer;",
                         onclick: move |_| {
-                            let previews: Vec<Preview> = listings
-                                .iter()
-                                .filter_map(|l| {
-                                    let exact = VersionReq::parse(&format!("={}", l.version)).ok()?;
-                                    ext.preview(&l.id, &exact).ok()
-                                })
-                                .collect();
-                            asking.set(Some(previews));
+                            let mut previews = Vec::new();
+                            let mut dropped = Vec::new();
+                            for p in ext.previews_for(preview_folder.as_deref(), &for_previews) {
+                                match p {
+                                    Ok(p) => previews.push(p),
+                                    Err((id, why)) => dropped.push(format!("{id} refused: {why}")),
+                                }
+                            }
+                            // What will not be in the prompt, and why.
+                            if !dropped.is_empty() {
+                                note.set(Some(dropped.join("; ")));
+                            }
+                            if !previews.is_empty() {
+                                asking.set(Some(previews));
+                            }
                         },
                         "Install all"
                     }
@@ -1238,12 +1248,31 @@ pub fn MissingExtensions(
                     asking.set(None);
                     let Some(scope) = scope else { return };
                     let ext = browse.extensions();
+                    // Only what the prompt showed: one yes for those.
+                    let shown = Plan {
+                        install: plan
+                            .install
+                            .iter()
+                            .filter(|l| previews.iter().any(|p| p.id == l.id && p.version == l.version.to_string()))
+                            .cloned()
+                            .collect(),
+                        ..Plan::default()
+                    };
+                    let results = folder.as_deref().map_or_else(
+                        || ext.accept(&shown, Some(&scope), "person"),
+                        |root| ext.accept_vault(root, &shown, Some(&scope), "person"),
+                    );
                     let mut done = Vec::new();
-                    for p in &previews {
-                        let exact = VersionReq::parse(&format!("={}", p.version)).unwrap_or(VersionReq::STAR);
-                        match ext.install_with(&p.id, &exact, Some(scope.clone()), "person", false) {
-                            Ok(i) => done.push(outcome(&i, &p.name)),
-                            Err(e) => done.push(format!("{}: {e}", p.name)),
+                    for r in results {
+                        match r {
+                            Ok(i) => {
+                                let name = previews
+                                    .iter()
+                                    .find(|p| matches!(&i, crate::manage::Installed::Done { id, .. } if *id == p.id))
+                                    .map_or_else(String::new, |p| p.name.clone());
+                                done.push(outcome(&i, &name));
+                            }
+                            Err((id, e)) => done.push(format!("{id}: {e}")),
                         }
                     }
                     let done = done.join("; ");

@@ -1157,9 +1157,19 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 
-/// How often an open vault's needs are planned again while something is
-/// missing: a registry refreshed at start may have it by then.
+/// How often an open vault's needs are planned again while a registry's
+/// refresh could still change them, and how many times at most.
 const NEEDS_POLL: Duration = Duration::from_secs(15);
+const NEEDS_ROUNDS: u32 = 8;
+
+/// A project's folder under the vault, when it is one: relative, with no
+/// `..`, root or prefix (a deck's context comes from a session file).
+fn project_folder(root: &Path, folder: &str) -> Option<PathBuf> {
+    let rel = Path::new(folder);
+    rel.components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)))
+        .then(|| root.join(rel))
+}
 
 /// What the open vault, or the project on show, needs ("What a project
 /// needs", #710 L2): the extensions its `.architect/extensions.toml` names
@@ -1179,30 +1189,49 @@ pub fn VaultNeedsBanner() -> Element {
         shown
             .as_ref()
             .filter(|c| c.kind == crate::decks::PROJECT)
-            .and_then(|c| c.folder.clone())
-            .map_or_else(|| root.clone(), |folder| root.join(folder))
+            .and_then(|c| c.folder.as_deref())
+            .and_then(|folder| project_folder(root, folder))
+            .unwrap_or_else(|| root.clone())
     });
     let mut again = use_signal(|| 0_u32);
     let mut dismissed = use_signal(std::collections::BTreeSet::<PathBuf>::new);
     // What the last "Install all" did, kept across the plan made again.
     let mut last = use_signal(|| None::<String>);
-    // Planned again when the folder changes, and each round.
+    // Planned again when the folder changes, and each round: on a thread
+    // of its own (reading carried archives, previews), never the window's.
     let planner = browse.clone();
     let round = again();
-    let planned = use_memo(use_reactive!(|target, round| {
+    let mut planned = use_signal(VaultNeeds::default);
+    use_effect(use_reactive!(|target, round| {
         let _ = round;
-        match (planner.as_ref(), target.as_ref()) {
-            (Some(browse), Some(target)) => browse.extensions().open_vault(target),
-            _ => VaultNeeds::default(),
-        }
-    }));
-    use_future(move || async move {
-        loop {
-            futures_timer::Delay::new(NEEDS_POLL).await;
-            if !planned.peek().plan.missing.is_empty() {
-                let next = again.peek().wrapping_add(1);
-                again.set(next);
+        let (Some(browse), Some(target)) = (planner.clone(), target) else {
+            planned.set(VaultNeeds::default());
+            return;
+        };
+        spawn(async move {
+            let (tx, rx) = futures_channel::oneshot::channel();
+            let spawned = std::thread::Builder::new()
+                .name("vault-needs".to_owned())
+                .spawn(move || {
+                    let _ = tx.send(browse.extensions().open_vault(&target));
+                });
+            if spawned.is_ok() {
+                if let Ok(needs) = rx.await {
+                    planned.set(needs);
+                }
             }
+        });
+    }));
+    // Again a few times while a registry's refresh could change it (what
+    // no registry had yet); never for a platform, a pin or a policy.
+    use_future(move || async move {
+        for _ in 0..NEEDS_ROUNDS {
+            futures_timer::Delay::new(NEEDS_POLL).await;
+            if !planned.peek().may_change() {
+                continue;
+            }
+            let next = again.peek().wrapping_add(1);
+            again.set(next);
         }
     });
     let (Some(browse), Some(target)) = (browse, target) else {
@@ -1225,6 +1254,7 @@ pub fn VaultNeedsBanner() -> Element {
                 architect_extensions::page::MissingExtensions {
                     browse: browse.clone(),
                     plan: needs.plan.clone(),
+                    folder: Some(target.clone()),
                     what: if is_project { "project".to_owned() } else { "vault".to_owned() },
                     on_done: move |done: String| {
                         last.set(Some(done));

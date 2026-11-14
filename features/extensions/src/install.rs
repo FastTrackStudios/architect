@@ -53,6 +53,21 @@ pub enum InstallError {
     /// Its manifest's `platforms` leave this one out (#578): `why` is
     /// "Linux only". Nothing was written.
     NotHere { platform: String, why: String },
+    /// It is installed signed by one key and this archive is signed by
+    /// another (`was`, `now`: the keys' names). Nothing was written.
+    SignerChanged {
+        id: String,
+        was: String,
+        now: String,
+    },
+    /// An older version than the one installed, or one outside its pin,
+    /// that no person asked for by name.
+    Downgrade {
+        id: String,
+        installed: String,
+        offered: String,
+        why: String,
+    },
 }
 
 impl From<ArchiveError> for InstallError {
@@ -73,6 +88,19 @@ impl std::fmt::Display for InstallError {
             Self::NotHere { platform, why } => {
                 write!(f, "{why}: not on {}", crate::platform::name(platform))
             }
+            Self::SignerChanged { id, was, now } => write!(
+                f,
+                "{id} is installed signed by {was}; this one is signed by {now}, so it is refused"
+            ),
+            Self::Downgrade {
+                id,
+                installed,
+                offered,
+                why,
+            } => write!(
+                f,
+                "{id} {installed} is installed and {offered} is {why}: install it by name to take it"
+            ),
         }
     }
 }
@@ -584,6 +612,13 @@ struct Record {
     /// The versions an update may take (a semver range), when pinned.
     #[serde(default)]
     pin: Option<String>,
+    /// The key its archive was signed by (a minisign `.pub`'s base64
+    /// line): an update signed by another is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signer_key: Option<String>,
+    /// That key's name where it was installed (`FastTrackStudios`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signer: Option<String>,
 }
 
 const RECORD: &str = "installed.toml";
@@ -601,6 +636,9 @@ pub struct Install {
     /// The versions an update may take (`=1.2.0`, `~1.2`), when pinned:
     /// `EXT_UPDATE` takes none past it.
     pub pin: Option<String>,
+    /// The key its archive was signed by, when it came as one: every
+    /// update must be signed by it ([`InstallError::SignerChanged`]).
+    pub signer_key: Option<String>,
 }
 
 impl Install {
@@ -860,11 +898,25 @@ impl Installs {
         slot: &Path,
     ) -> Result<Install, InstallError> {
         let fetched = source.fetch(listing, incoming)?;
+        let (mut signer_key, mut signer) = (None, None);
         let link = match fetched {
             Fetched::Copied => None,
             Fetched::Linked(dir) => Some(dir),
             Fetched::Archive(bytes) => {
                 let v = self.open_archive(&bytes, source)?;
+                if let Some((was, name)) = read_signer(slot) {
+                    if was.trim() != v.signer_key.trim() {
+                        return Err(InstallError::SignerChanged {
+                            id: listing.id.clone(),
+                            was: name.unwrap_or_else(|| {
+                                key_name(&was, &self.trust.and(&source.trust()))
+                            }),
+                            now: v.signer,
+                        });
+                    }
+                }
+                signer_key = Some(v.signer_key.clone());
+                signer = Some(v.signer.clone());
                 if v.index.id != listing.id || v.index.version != listing.version.to_string() {
                     return Err(InstallError::Mismatch(format!(
                         "listed {} {}, its archive is {} {}",
@@ -905,6 +957,8 @@ impl Installs {
             source: source.name(),
             link,
             pin,
+            signer_key,
+            signer,
         };
         let text = toml::to_string(&record).map_err(|e| InstallError::Io(e.to_string()))?;
         let at = incoming.join(RECORD);
@@ -970,6 +1024,30 @@ pub(crate) fn slug(id: &str) -> String {
         .collect()
 }
 
+/// What `key` is called in `trust`, else its key id: an error's words.
+fn key_name(key: &str, trust: &Trust) -> String {
+    trust
+        .keys()
+        .iter()
+        .find(|k| k.key.trim() == key.trim())
+        .map_or_else(
+            || {
+                format!(
+                    "the key {}",
+                    key.trim().chars().take(12).collect::<String>()
+                )
+            },
+            |k| k.name.clone(),
+        )
+}
+
+/// The key (and its name) the install in `slot` was signed by.
+fn read_signer(slot: &Path) -> Option<(String, Option<String>)> {
+    let text = std::fs::read_to_string(slot.join(RECORD)).ok()?;
+    let record: Record = toml::from_str(&text).ok()?;
+    Some((record.signer_key?, record.signer))
+}
+
 fn read_record(slot: &Path) -> Option<Install> {
     let text = std::fs::read_to_string(slot.join(RECORD)).ok()?;
     let record: Record = toml::from_str(&text).ok()?;
@@ -981,5 +1059,6 @@ fn read_record(slot: &Path) -> Option<Install> {
         kind: record.kind,
         source: record.source,
         pin: record.pin,
+        signer_key: record.signer_key,
     })
 }
