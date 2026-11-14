@@ -890,6 +890,106 @@ async fn a_signed_in_web_client_edits_a_note_live_on_the_org_lane() {
     host.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_runs_the_vault_s_actions_on_the_org_lane_and_others_are_refused() {
+    use architect_desktop::node::vault_actions::service::VaultActionsClient;
+
+    let origin = issuer().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let host_dir = tmp.path().join("host");
+    std::fs::create_dir_all(host_dir.join("data/vaults/notes")).unwrap();
+    std::fs::write(
+        host_dir.join("data/vaults/notes/hello.md"),
+        "---\ntags: [greeting]\n---\n# Hello\n\nThe org's note.\n",
+    )
+    .unwrap();
+    let mut host = config(
+        "indie-host",
+        &host_dir,
+        &origin,
+        session_of(&origin, &host_dir, "grace@local.test").await,
+    );
+    host.host_org = Some("indie".to_owned());
+    let host = node::start(host).await.unwrap();
+
+    let alan_dir = tmp.path().join("alan-web");
+    session_of(&origin, &alan_dir, "alan@local.test").await;
+    let alan: VaultActionsClient = web(&host, Some(token_in(&alan_dir))).await;
+    // The desktop app's own actions, over the vault's folder.
+    let ids: Vec<String> = alan
+        .actions("notes".to_owned())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|a| a.id)
+        .collect();
+    for id in ["VAULT_READ", "VAULT_CREATE", "VAULT_LIST", "VAULT_DELETE"] {
+        assert!(ids.iter().any(|i| i == id), "{id} in {ids:?}");
+    }
+    let read = alan
+        .run_read(
+            "notes".to_owned(),
+            "VAULT_READ".to_owned(),
+            r#"{"path":"hello.md"}"#.to_owned(),
+        )
+        .await
+        .unwrap();
+    assert!(read.contains("The org's note."), "{read}");
+    // A read never changes the vault.
+    let refused = alan
+        .run_read(
+            "notes".to_owned(),
+            "VAULT_CREATE".to_owned(),
+            r#"{"path":"sneaky.md","body":"no"}"#.to_owned(),
+        )
+        .await
+        .unwrap_err();
+    assert!(format!("{refused:?}").contains("NotRead"), "{refused:?}");
+    assert!(!host_dir.join("data/vaults/notes/sneaky.md").exists());
+    // A write lands in the vault's folder, which the node syncs.
+    alan.run_write(
+        "notes".to_owned(),
+        "VAULT_CREATE".to_owned(),
+        r##"{"path":"Projects/Plan.md","body":"# Plan\n\nFrom the web app.\n"}"##.to_owned(),
+    )
+    .await
+    .unwrap();
+    until("the new note is on disk", || {
+        reads(
+            &host_dir.join("data/vaults/notes/Projects/Plan.md"),
+            "From the web app.",
+        )
+    })
+    .await;
+    // Read again: the vault's index has it.
+    let listed = alan
+        .run_read("notes".to_owned(), "VAULT_LIST".to_owned(), "{}".to_owned())
+        .await
+        .unwrap();
+    assert!(listed.contains("Projects/Plan.md"), "{listed}");
+    // An unknown vault, and anyone not a member: refused.
+    assert!(alan.actions("nowhere".to_owned()).await.is_err());
+    let anonymous: VaultActionsClient = web(&host, None).await;
+    assert!(anonymous.actions("notes".to_owned()).await.is_err());
+    let ada_dir = tmp.path().join("ada-web");
+    session_of(&origin, &ada_dir, "ada@local.test").await;
+    let ada: VaultActionsClient = web(&host, Some(token_in(&ada_dir))).await;
+    let refused = ada
+        .run_read(
+            "notes".to_owned(),
+            "VAULT_READ".to_owned(),
+            r#"{"path":"hello.md"}"#.to_owned(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{refused:?}").contains("not a member"),
+        "{refused:?}"
+    );
+
+    host.stop().await;
+}
+
 /// The status line of a WebSocket upgrade to the org lane at `node`, from
 /// a browser page on `origin` (none: a native client).
 async fn upgrade_status(node: &Running, origin: Option<&str>) -> String {

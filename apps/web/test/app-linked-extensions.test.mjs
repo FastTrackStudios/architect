@@ -97,6 +97,10 @@ test("the Architect app's linked extensions run in /app/?demo: ⌘K, their views
         // Projects' list, the same way.
         await run(b, 'Open Projects');
         await until(() => shows(b, 'Projects'), 15000, 'the Projects pane');
+        // The demo has no node: its vault actions say to sign in, never
+        // "no action" (#495 H3).
+        await until(() => shows(b, 'Sign in to see your data'), 15000, 'the demo\'s sign-in state');
+        assert.ok(!(await shows(b, 'no action BASES_ROWS')), 'no missing-action error');
         await b.shot(join(shots, `linked-projects-desk-1280-${theme}.png`));
         // Their settings sections beside the app's.
         await run(b, 'Settings');

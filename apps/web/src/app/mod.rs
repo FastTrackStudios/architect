@@ -53,6 +53,7 @@ mod screen;
 mod settings;
 mod theme;
 pub mod vault;
+mod vault_actions;
 
 use std::rc::Rc;
 use std::sync::Arc;

@@ -1,9 +1,10 @@
 //! A node's vault actions, as a service (#495): what a signed-in client
 //! (the web app, `apps/web`) runs over the node's org lane
 //! (`/org/{slug}/vox`, the session as the bearer) to reach a vault's
-//! `VAULT_*`, `LINKS_*`, `TAGS_*` and `BASES_*` actions, the same ones the
-//! desktop app runs on its own vault. The node keeps one engine; the
-//! browser keeps no copy of it.
+//! `VAULT_*` actions, the same ones the
+//! desktop app runs on its own vault (queries, `BASES_*`, are the vault
+//! query service's, #272). The node keeps one engine; the browser keeps
+//! no copy of it.
 //!
 //! A read and a write are separate calls so the lane's gate decides each
 //! by the member's permission (`read` or `write` on the vault):
@@ -65,3 +66,4 @@ pub trait VaultActions {
         args: String,
     ) -> Result<String, VaultActionsError>;
 }
+pub use prelude::*;

@@ -1,7 +1,7 @@
 //! The org's vaults' actions on the org lane (#495): `VaultActions`
 //! (`vault_proto::vault_actions`), which a signed-in member's web app runs
-//! to reach a vault's `VAULT_*`, `LINKS_*`, `TAGS_*` and `BASES_*`
-//! actions. The node runs the desktop app's own actions over each vault's
+//! to reach a vault's `VAULT_*` actions (queries are the vault query
+//! service's, #272). The node runs the desktop app's own actions over each vault's
 //! folder (`vault::actions::OpenVault`): one engine, the browser keeps no
 //! copy.
 //!
@@ -69,8 +69,8 @@ impl VaultActionsState {
             .backend
             .root(id)
             .map_err(|_| VaultActionsError::NotFound(format!("vault {id}")))?;
-        let vault = OpenVault::open(&root)
-            .map_err(|e| VaultActionsError::Failed(format!("{id}: {e}")))?;
+        let vault =
+            OpenVault::open(&root).map_err(|e| VaultActionsError::Failed(format!("{id}: {e}")))?;
         let list = Arc::new(ActionList::new());
         register(&list, &vault).map_err(|e| VaultActionsError::Failed(e.to_string()))?;
         open.insert(
@@ -112,13 +112,14 @@ impl VaultActionsState {
     }
 }
 
-/// The actions a vault answers here: the desktop app's own over its vault
-/// (`apps/ui/src/notes.rs` `register`).
-fn register(list: &Arc<ActionList>, vault: &OpenVault) -> Result<(), architect::action::ActionError> {
-    vault::actions::register(list, vault)?;
-    links::actions::register(list, vault)?;
-    tag::actions::register(list, vault)?;
-    architect_bases::actions::register(list, vault, &architect_bases::model::ViewTypes::default())
+/// The actions a vault answers here: the desktop app's own `VAULT_*` over
+/// its vault (`vault::actions`). Queries (`BASES_*`, links, tags) are the
+/// vault query service's (#272), served beside it.
+fn register(
+    list: &Arc<ActionList>,
+    vault: &OpenVault,
+) -> Result<(), architect::action::ActionError> {
+    vault::actions::register(list, vault)
 }
 
 const fn effect_name(e: Effect) -> &'static str {

@@ -47,13 +47,13 @@ mod manifest;
 /// service on the wire: with `vox`).
 #[cfg(feature = "vox")]
 pub mod notes;
-/// The `VaultActions` service: a node's vaults' `VAULT_*`, `LINKS_*`,
-/// `TAGS_*` and `BASES_*` actions, run over the org lane (#495).
-#[cfg(feature = "vox")]
-pub mod vault_actions;
 mod page;
 mod page_meta;
 mod service;
+/// The `VaultActions` service: a node's vaults' `VAULT_*` actions, run over
+/// the org lane (#495).
+#[cfg(feature = "vox")]
+pub mod vault_actions;
 
 // Per-file CRDT collaboration identity: the uuid-v5 doc-id scheme,
 // the doc's container names, and the `open_collab` ack payload.

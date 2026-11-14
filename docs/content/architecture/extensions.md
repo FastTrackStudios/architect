@@ -742,6 +742,28 @@ a `web` feature (`xtask/src/dist.rs` `build_web`).
 `apps/web/test/app-documents.test.mjs` drives all of it through the
 demo's probe extension (`/app/?demo&probe` only).
 
+**The vault's actions in the browser** (#495 H3).
+
+- **Signed in, they are the node's.** Linked extensions read and change
+  the vault's notes with `VAULT_*`. The org lane serves them as
+  `VaultActions` (`vault_proto::vault_actions`,
+  `apps/desktop/src/node/vault_actions.rs`): the desktop app's own
+  actions over each vault's folder, read again when older than a
+  second. The browser keeps no copy of the engine.
+  - `run_read` needs `read` on the vaults and refuses an action that
+    changes them. `run_write` needs `write` and is audited.
+  - The web app puts each one on its list as a proxy
+    (`apps/web/src/app/vault_actions.rs`), on the org's first vault,
+    paths named inside it.
+  - An extension's call also needs `reads` (a read) or `writes` (a
+    change) of `documents`.
+- **Queries (`BASES_*`) are not here.** They come from the vault query
+  service (the Bases extension's workstream, #272).
+- **The demo has no node.** The vault's engine reads a folder and pulls
+  in tokio's networking (`mio`), so it doesn't build for a browser. The
+  demo's vault actions answer "Sign in to see your data here",
+  which the extensions' views show.
+
 ## Processes over vox
 
 A process extension is a program the host starts and speaks

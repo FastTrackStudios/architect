@@ -105,6 +105,10 @@ pub struct WebDocuments {
     source: MemorySource,
     /// On the org's vaults: where each change goes to be sent to the node.
     node: Option<UnboundedSender<NodeWrite>>,
+    /// On the org's vaults: the vault's folder in the source. Its
+    /// documents are named inside it (`Projects/Plan.md`), as on a desk
+    /// and as the vault's actions name them.
+    root: Option<String>,
 }
 
 impl std::fmt::Debug for WebDocuments {
@@ -119,15 +123,36 @@ impl WebDocuments {
     /// The demo's documents: `source` alone, in the tab's memory.
     #[must_use]
     pub const fn demo(source: MemorySource) -> Self {
-        Self { source, node: None }
+        Self {
+            source,
+            node: None,
+            root: None,
+        }
     }
 
-    /// The org's: `source`, each change also sent to `node`.
+    /// The org's vault `root` (its folder in `source`), each change also
+    /// sent to `node`.
     #[must_use]
-    pub const fn org(source: MemorySource, node: UnboundedSender<NodeWrite>) -> Self {
+    pub const fn org(source: MemorySource, node: UnboundedSender<NodeWrite>, root: String) -> Self {
         Self {
             source,
             node: Some(node),
+            root: Some(root),
+        }
+    }
+
+    /// A document's path in the source.
+    fn full(&self, path: &str) -> String {
+        self.root
+            .as_ref()
+            .map_or_else(|| path.to_owned(), |r| format!("{r}/{path}"))
+    }
+
+    /// A source path as a document's: none outside the vault.
+    fn short<'a>(root: Option<&str>, path: &'a str) -> Option<&'a str> {
+        match root {
+            None => Some(path),
+            Some(r) => path.strip_prefix(r)?.strip_prefix('/'),
         }
     }
 
@@ -137,8 +162,20 @@ impl WebDocuments {
     /// dropped.
     pub fn raise_on(&self, list: &ActionList) -> Subscription {
         let list = list.clone();
+        let root = self.root.clone();
         self.source.subscribe(Box::new(move |event| {
-            if let Some(ev) = doc_event(event) {
+            let Some(ev) = doc_event(event) else { return };
+            // Named inside the vault; nothing outside it.
+            let short = |p: &str| Self::short(root.as_deref(), p).map(str::to_owned);
+            let ev = match ev {
+                DocEvent::Created { path } => short(&path).map(|path| DocEvent::Created { path }),
+                DocEvent::Saved { path } => short(&path).map(|path| DocEvent::Saved { path }),
+                DocEvent::Deleted { path } => short(&path).map(|path| DocEvent::Deleted { path }),
+                DocEvent::Renamed { from, to } => short(&from)
+                    .zip(short(&to))
+                    .map(|(from, to)| DocEvent::Renamed { from, to }),
+            };
+            if let Some(ev) = ev {
                 ev.raise_on(&list);
             }
         }))
@@ -147,16 +184,18 @@ impl WebDocuments {
     /// Note `path`'s text, while the vault lists it (a removed note's
     /// text stays in the source's memory).
     fn text(&self, path: &str) -> Option<String> {
+        let path = &self.full(path);
         self.source
             .files()
             .iter()
-            .any(|f| f.path == path)
+            .any(|f| f.path == *path)
             .then(|| self.source.read_text(path))
             .flatten()
     }
 
     /// Keeps `text` as the note at `path`'s, here and on the node.
     fn keep(&self, path: &str, text: &str) -> Result<(), DocError> {
+        let path = &self.full(path);
         let now = super::vault::now();
         quietly(&[path], || {
             self.source
@@ -195,7 +234,7 @@ impl Documents for WebDocuments {
             .source
             .files()
             .iter()
-            .map(|f| f.path.as_str())
+            .filter_map(|f| Self::short(self.root.as_deref(), &f.path))
             .filter(|p| is_note(p) && is_under(p, under))
             .map(DocInfo::of)
             .collect())
@@ -244,10 +283,11 @@ impl Documents for WebDocuments {
                 "{to:?} is not a note's path (a vault path ending in .md)"
             )));
         }
-        quietly(&[path, to], || {
+        let (from_full, to_full) = (self.full(path), self.full(to));
+        quietly(&[&from_full, &to_full], || {
             self.source.write(&[FileOp::Move {
-                from: path.to_owned(),
-                to: to.to_owned(),
+                from: from_full.clone(),
+                to: to_full.clone(),
             }])
         })
         .map_err(DocError::Failed)?;
@@ -260,7 +300,8 @@ impl Documents for WebDocuments {
         if self.text(path).is_none() {
             return Err(not_found(path));
         }
-        quietly(&[path], || self.source.remove(path));
+        let full = self.full(path);
+        quietly(&[&full], || self.source.remove(&full));
         super::vault::mark_edited();
         Ok(())
     }

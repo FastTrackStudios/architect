@@ -34,6 +34,7 @@ use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
 use vault_proto::notes::{NoteRef, NotesClient};
+use vault_proto::vault_actions::{VaultActionInfo, VaultActionsClient};
 use wasm_bindgen_futures::spawn_local;
 
 /// How long a dropped note session waits before it attaches again, ms.
@@ -59,6 +60,8 @@ pub fn lane_url(slug: &str) -> Option<String> {
 struct Lane {
     notes: NotesClient,
     sync: DocSyncClient,
+    /// The vaults' actions (`VAULT_*`, `BASES_*`…), the node's (#495).
+    actions: VaultActionsClient,
 }
 
 async fn dial(slug: &str, token: String) -> Result<Lane, String> {
@@ -73,7 +76,15 @@ async fn dial(slug: &str, token: String) -> Result<Lane, String> {
         .client(&at)
         .await
         .map_err(|e| format!("the org's lane: {e}"))?;
-    Ok(Lane { notes, sync })
+    let actions: VaultActionsClient = pool
+        .client(&at)
+        .await
+        .map_err(|e| format!("the org's lane: {e}"))?;
+    Ok(Lane {
+        notes,
+        sync,
+        actions,
+    })
 }
 
 struct Inner {
@@ -225,6 +236,43 @@ impl OrgVaults {
             .read(vault.to_owned(), rest.to_owned())
             .await
             .map_err(|e| e.to_string())
+    }
+
+    /// The actions vault `vault` answers on the node (#495).
+    ///
+    /// # Errors
+    ///
+    /// The node refused (not a member, no such vault).
+    pub async fn vault_actions(&self, vault: &str) -> Result<Vec<VaultActionInfo>, String> {
+        let client = self.0.lane.borrow().actions.clone();
+        client
+            .actions(vault.to_owned())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Runs action `id` on vault `vault` on the node with `args` (JSON):
+    /// `read` as a read (the node refuses a change then), else as a write,
+    /// which the lane's gate allows only a member who may write.
+    ///
+    /// # Errors
+    ///
+    /// The node refused, or the action failed.
+    pub async fn run_vault_action(
+        &self,
+        vault: &str,
+        id: &str,
+        args: String,
+        read: bool,
+    ) -> Result<String, String> {
+        let client = self.0.lane.borrow().actions.clone();
+        let (vault, id) = (vault.to_owned(), id.to_owned());
+        let out = if read {
+            client.run_read(vault, id, args).await
+        } else {
+            client.run_write(vault, id, args).await
+        };
+        out.map_err(|e| e.to_string())
     }
 
     /// The org's slug.

@@ -139,6 +139,7 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
             Some(org) => {
                 let (tx, mut rx) =
                     futures_channel::mpsc::unbounded::<super::documents::NodeWrite>();
+                let root = org.vaults().first().cloned().unwrap_or_default();
                 let org = org.clone();
                 // In order, one at a time, from the page's thread.
                 wasm_bindgen_futures::spawn_local(async move {
@@ -149,9 +150,31 @@ pub fn use_web_extensions(app: &Arc<ActionList>) -> ExtensionUi {
                         }
                     }
                 });
-                super::documents::WebDocuments::org(web.source.clone(), tx)
+                super::documents::WebDocuments::org(web.source.clone(), tx, root)
             }
         };
+        // The vault's actions (#495 H3): the node's, signed in; the demo
+        // says to sign in.
+        match &web.org {
+            Some(org) => {
+                if let Some(vault) = org.vaults().first().cloned() {
+                    super::vault_actions::install_org(app, host.clone(), org.clone(), vault);
+                }
+            }
+            None => super::vault_actions::install_demo(app),
+        }
+        // A vault path an extension opens, in the workspace.
+        let root = web.org.as_ref().and_then(|o| o.vaults().first().cloned());
+        let mut opened = super::vault_actions::open_paths_in(&host, root);
+        if let Some(workspace) = try_consume_context::<super::vault::VaultWorkspace>() {
+            let workspace = workspace.signal();
+            spawn(async move {
+                use futures_util::StreamExt as _;
+                while let Some(path) = opened.next().await {
+                    super::vault::show(workspace, &path);
+                }
+            });
+        }
         let events = docs.raise_on(app);
         host.set_documents(std::sync::Arc::new(docs));
         // Kept for the app's life.

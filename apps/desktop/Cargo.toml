@@ -85,13 +85,9 @@ crdt = { workspace = true, features = ["vox"] }
 vault-live = { workspace = true }
 # `actions`: `Notes` on the node's Action List (`NOTES_*`).
 vault-proto = { workspace = true, features = ["vox", "actions"] }
-# The org lane's `VaultActions` (#495): the desktop app's own vault,
-# links, tags and Bases actions over each vault's folder, for members' web
-# apps (src/node/vault_actions.rs).
+# The org lane's `VaultActions` (#495): the desktop app's own `VAULT_*`
+# over each vault's folder, for members' web apps (src/node/vault_actions.rs).
 vault = { workspace = true, features = ["actions"] }
-links = { workspace = true, features = ["actions"] }
-tag = { workspace = true, features = ["actions"] }
-architect-bases = { workspace = true, features = ["actions"] }
 vault-collab = { workspace = true }
 # Sites (#364): a vault published, rebuilt when it changes.
 architect-sites = { workspace = true }
