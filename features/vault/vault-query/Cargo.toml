@@ -25,8 +25,13 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
-tokio = { workspace = true, features = ["rt", "macros"] }
+# examples/index_memory.rs: the index in a browser's engine (wasm + Node).
+wasm-bindgen = "0.2"
+
+# A browser's copy of the index, measured in V8 (examples/index_memory.mjs).
+[[example]]
+name = "index_memory"
+crate-type = ["cdylib"]
 
 [lints]
 workspace = true
