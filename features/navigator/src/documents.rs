@@ -176,6 +176,8 @@ pub struct VaultDocuments {
     source: VaultSource,
     /// One extension create, rename or delete at a time.
     writing: Arc<Mutex<()>>,
+    /// Each note's parsed metadata, by its modified time.
+    meta: Arc<vault::actions::MetadataCache>,
 }
 
 impl std::fmt::Debug for VaultDocuments {
@@ -194,6 +196,7 @@ impl VaultDocuments {
         Self {
             source,
             writing: Arc::new(Mutex::new(())),
+            meta: Arc::new(vault::actions::MetadataCache::default()),
         }
     }
 
@@ -388,6 +391,28 @@ impl Documents for VaultDocuments {
         }
         quietly(|| self.source.rename(path, to)).map_err(DocError::Failed)?;
         Ok(DocInfo::of(to))
+    }
+
+    fn metadata(&self, q: &architect_documents::MetaQuery) -> Result<String, DocError> {
+        if let Some(p) = &q.path {
+            note_path(p)?;
+        }
+        vault::actions::metadata_of(
+            self.source.vault(),
+            &self.meta,
+            q.path.as_deref(),
+            q.folder.as_deref(),
+            q.limit,
+            q.cursor.as_deref(),
+        )
+        .map(|v| v.to_string())
+        .map_err(|e| {
+            if e.contains("no such note") {
+                DocError::NotFound(e)
+            } else {
+                DocError::Invalid(e)
+            }
+        })
     }
 
     fn delete(&self, path: &str, _by: &Principal) -> Result<(), DocError> {

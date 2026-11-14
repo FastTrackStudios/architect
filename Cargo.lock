@@ -1342,6 +1342,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-documents",
  "architect-editor",
  "architect-extension-archive",
  "architect-extensions",
@@ -1623,6 +1624,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-documents",
  "architect-extensions",
  "architect-navigator",
  "architect-navigator-api",
@@ -1644,6 +1646,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "tokio",
  "unicode-normalization",
  "vault",
  "vault-doc",

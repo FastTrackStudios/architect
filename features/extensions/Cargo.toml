@@ -25,6 +25,12 @@ description = "Extensions: adding to an app at run time — data, Luau, WASM and
 default = []
 host = [
     "dep:architect",
+    # The documents service (`docs_service`): the host reaches the app's
+    # documents and extensions' data only through its client, served
+    # in-process on a runtime of its own.
+    "dep:architect-documents",
+    "architect/local",
+    "dep:tokio",
     "dep:architect-scripting",
     "architect-scripting/luau",
     "dep:tracing",
@@ -238,6 +244,7 @@ url = "2"
 # the host follows each one and checks it.
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "stream"] }
 architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-documents = { workspace = true, optional = true }
 architect-extension-archive = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }

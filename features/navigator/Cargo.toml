@@ -43,6 +43,7 @@ documents = [
     "dep:architect",
     "dep:architect-extensions",
     "architect-extensions/host",
+    "dep:architect-documents",
     "architect-extensions/crdt",
     "dep:vault-doc",
 ]
@@ -68,6 +69,8 @@ vault = { workspace = true, optional = true, features = ["actions"] }
 # `documents`: the extension host's document API (MIT) over the vault,
 # an edit's three-way merge, the app's Action List the events go on.
 architect-extensions = { workspace = true, optional = true }
+# The documents service's wire types (`metadata`'s query).
+architect-documents = { workspace = true, optional = true }
 vault-doc = { workspace = true, optional = true }
 architect = { workspace = true, optional = true, features = ["action-list"] }
 # Grouping the list by a property: Bases' `group_by` (MIT), the one
@@ -82,8 +85,10 @@ serde_yaml = { workspace = true }
 [dev-dependencies]
 architect-navigator = { path = ".", features = ["ui", "vault"] }
 tempfile = "3"
-# tests/documents.rs: the host's actions run to an end.
+# tests/documents.rs: the host's actions run to an end; the documents
+# service served in-process on a runtime.
 futures = "0.3"
+tokio = { workspace = true }
 # The view in a headless Blitz document (tests/view.rs).
 dioxus = { workspace = true }
 dioxus-native = { workspace = true }

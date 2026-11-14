@@ -316,6 +316,16 @@ impl DocumentsServer {
         }
     }
 
+    /// The service over stores already shared.
+    #[must_use]
+    pub fn from_arcs(
+        docs: Arc<dyn DocumentStore>,
+        data: Arc<dyn DataStore>,
+        gate: Arc<dyn Gate>,
+    ) -> Self {
+        Self { docs, data, gate }
+    }
+
     fn may(&self, extension: &str, access: Access) -> Result<(), DocsError> {
         if self.gate.allows(extension, access) {
             Ok(())

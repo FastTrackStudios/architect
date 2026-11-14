@@ -147,6 +147,8 @@ mod host {
         Exists(String),
         /// Not a path, or an edit outside the text.
         Invalid(String),
+        /// These documents do not do that (no metadata).
+        Unsupported(String),
         /// It was allowed and did not work.
         Failed(String),
     }
@@ -156,7 +158,7 @@ mod host {
             match self {
                 Self::NotFound(what) => write!(f, "no {what}"),
                 Self::Exists(path) => write!(f, "{path} exists already"),
-                Self::Invalid(why) | Self::Failed(why) => f.write_str(why),
+                Self::Invalid(why) | Self::Unsupported(why) | Self::Failed(why) => f.write_str(why),
             }
         }
     }
@@ -167,6 +169,7 @@ mod host {
         fn from(e: DocError) -> Self {
             match e {
                 DocError::NotFound(what) => Self::NotFound { what },
+                DocError::Unsupported(what) => Self::Unsupported { what },
                 other => Self::Failed {
                     message: other.to_string(),
                 },
@@ -233,6 +236,19 @@ mod host {
         ///
         /// No document at `path`.
         fn delete(&self, path: &str, by: &Principal) -> Result<(), DocError>;
+
+        /// The per-note metadata `VAULT_METADATA` answers, as its JSON:
+        /// what a vault has (`VaultDocuments`); none by default.
+        ///
+        /// # Errors
+        ///
+        /// [`DocError::Unsupported`] here; a vault's: no such note.
+        fn metadata(&self, query: &architect_documents::MetaQuery) -> Result<String, DocError> {
+            let _ = query;
+            Err(DocError::Unsupported(
+                "metadata: these documents have none".to_owned(),
+            ))
+        }
     }
 }
 
