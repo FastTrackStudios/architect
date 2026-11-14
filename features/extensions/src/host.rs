@@ -1901,6 +1901,7 @@ impl Host {
     /// [`Self::emit`] to `only` one extension's hooks: those its
     /// contributions declare and those it made at run time.
     pub(crate) fn emit_to(&self, only: Option<&str>, on: &str, detail: &Value) -> usize {
+        self.tell_heard(only, on, &|_| detail.clone());
         self.inner
             .contributions
             .hooks(on)
@@ -1915,6 +1916,7 @@ impl Host {
     /// [`Self::emit_to`] for every extension, each hook with the detail
     /// `detail_for` makes for its owner.
     pub(crate) fn emit_each(&self, on: &str, detail_for: &dyn Fn(&str) -> Value) -> usize {
+        self.tell_heard(None, on, detail_for);
         self.inner
             .contributions
             .hooks(on)

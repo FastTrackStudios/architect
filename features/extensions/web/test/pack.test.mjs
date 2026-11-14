@@ -11,7 +11,8 @@ const here = fileURLToPath(new URL('..', import.meta.url));
 export const PUBLISHED = [
   'LICENSE-APACHE', 'LICENSE-MIT', 'README.md', 'check.js', 'dist/instance-source.js', 'host.js', 'index.d.ts',
   'index.js', 'instance.js', 'node-worker.mjs', 'node.d.ts', 'node.js', 'package.json', 'react.d.ts', 'react.js',
-  'runner.js', 'sanitize.js', 'view.js', 'world.js',
+  'runner.js', 'sanitize.js', 'view.js', 'webview-host.d.ts', 'webview-host.js', 'webview-runtime.js', 'webview.d.ts', 'webview.js',
+  'world.js',
 ];
 
 test('npm pack lists exactly the package’s files', () => {
