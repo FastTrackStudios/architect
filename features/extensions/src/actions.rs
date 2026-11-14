@@ -4,6 +4,7 @@
 //!
 //! | action | what it does |
 //! |---|---|
+//! | `EXT_SHARE_NEEDS` / `EXT_SHARE_NEEDS_SET` | what a share link's guests run, and choosing it: `{folder, code}` (`+ extensions`) |
 //! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs, what it adds, its `platforms` and why it cannot run here (`not_here`) |
 //! | `EXT_NEEDS` | what opening a vault or project folder takes: what is ready, to install, to offer, missing (with why) and refused |
 //! | `EXT_SEARCH` | searches every registry: `{query}` → the newest of each that matches |
@@ -60,6 +61,23 @@ static NEEDS: ActionMeta = meta(
      .architect/extensions.toml names and the ones it carries in .architect/extensions/, as \
      ready, install (required: one consent for all), offer (optional), missing (each with why) \
      and refused (carried archives that are not signed by a key trusted here). Installs nothing.",
+);
+static SHARE_NEEDS: ActionMeta = meta(
+    "EXT_SHARE_NEEDS",
+    "What a share link's guests run",
+    "The extensions share link `code` of the vault at `folder` runs for its guests \
+     (_architect/shares/<code>.extensions.toml): each id, version range, required or not, from \
+     the linked core or a signed archive the link carries (its file and sha256), and the hosts \
+     the owner lets it fetch.",
+);
+static SHARE_NEEDS_SET: ActionMeta = meta(
+    "EXT_SHARE_NEEDS_SET",
+    "Choose a share link's extensions",
+    "Makes `extensions` (each `{id, required?, hosts?}`, running here) what share link `code` of \
+     the vault at `folder` runs for its guests: a built-in from the linked core, an installed one \
+     as its signed archive copied into the link (sha256 pinned). A development copy or an \
+     unsigned install is refused: guests take signed packages only. `hosts` must be ones its \
+     manifest asks for. Empty `extensions` clears it.",
 );
 static INSTALL: ActionMeta = meta(
     "EXT_INSTALL",
@@ -130,6 +148,23 @@ pub struct SearchArgs {
 pub struct NeedsArgs {
     /// The vault's or project's folder, absolute.
     pub folder: String,
+}
+
+/// `EXT_SHARE_NEEDS`'s arguments.
+#[derive(Debug, Facet)]
+pub struct ShareNeedsArgs {
+    /// The vault's folder, absolute.
+    pub folder: String,
+    /// The link's code.
+    pub code: String,
+}
+
+/// `EXT_SHARE_NEEDS_SET`'s arguments.
+#[derive(Debug, Facet)]
+pub struct ShareNeedsSetArgs {
+    pub folder: String,
+    pub code: String,
+    pub extensions: Vec<crate::share_pick::LinkPick>,
 }
 
 /// `EXT_INSTALL`'s arguments.
@@ -229,6 +264,29 @@ impl Extensions {
                 .to_string(),
             ))
         })?;
+        let me = self.clone();
+        list.register_with(
+            &SHARE_NEEDS,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, a: ShareNeedsArgs| {
+                let needs = me.share_needs(std::path::Path::new(&a.folder), &a.code)?;
+                Ok::<_, String>(RawJson::from(
+                    serde_json::to_string(&needs).map_err(|e| e.to_string())?,
+                ))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &SHARE_NEEDS_SET,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: ShareNeedsSetArgs| {
+                let needs =
+                    me.set_share_needs(std::path::Path::new(&a.folder), &a.code, &a.extensions)?;
+                Ok::<_, String>(RawJson::from(
+                    serde_json::to_string(&needs).map_err(|e| e.to_string())?,
+                ))
+            },
+        )?;
         let me = self.clone();
         list.register_with(
             &INSTALL,

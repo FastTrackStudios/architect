@@ -4462,6 +4462,73 @@ file (see "A share link's extensions").
 
 Tests: `features/extensions/tests/vault_needs.rs`.
 
+### A share link's extensions
+
+A share link's guests run what the owner chose for that link, not the
+vault's list: a shared recipe opens in the meal-plan extension's view. It
+is kept beside the share's note, as its comments are, in
+`_architect/shares/<code>.extensions.toml`
+(`features/extensions/src/share_needs.rs`), so it syncs with the share and
+the node serves it with it. The share's record (`architect-spaces`
+`Share`) is unchanged: that crate does not depend on this one, and the
+file reuses `Requirements` as it is.
+
+```toml
+[[extensions]]               # the link's Requirements
+id = "health.meal-plan"
+name = "Meal plan"
+version = "^1.2"
+
+[[extensions]]
+id = "setlist"               # no package: the distribution's linked core
+required = false
+
+[[packages]]                 # signed archives in _architect/shares/<code>.extensions/
+id = "health.meal-plan"
+version = "1.2.0"
+archive = "health.meal-plan-1.2.0.archext"
+sha256 = "…"
+
+[hosts]                      # what the owner lets each fetch, of what it asks
+"health.meal-plan" = ["api.example.com"]
+```
+
+An audience's link has a file of its own, or takes its share's
+(`share_needs::file_for`).
+
+**The owner** chooses when sharing: `EXT_SHARE_NEEDS_SET {folder, code,
+extensions: [{id, required?, hosts?}]}` (`Extensions::set_share_needs`).
+A built-in comes from the guest's linked core; an installed one is copied
+in as its signed archive from its registry, verified, its SHA-256 pinned.
+A development copy or an unsigned install is refused (guests take signed
+packages only), and so is a host its manifest does not ask for.
+`EXT_SHARE_NEEDS {folder, code}` reads it back.
+
+**The guest host** (the web app's, G1; iOS's; the desktop's) calls the
+model, which is wasm-clean (`verify_package` with feature `archive`):
+
+1. `LinkNeeds::from_toml(text)`: the link's file, checked (at most 64 KB,
+   each id once, packages only for named ids at a version their range
+   takes, plain `.archext` names, a SHA-256 each, no host `*`).
+2. `plan_link(&needs, &here)`, with `here` the guest's running ids and
+   versions (its linked core's among them): `ready`, `fetch` (each
+   requirement with its package), `missing` (`NotInCore`); `prompt()` is
+   "This link uses Meal plan". One consent for `fetch`, as for a vault.
+3. For each package, its bytes (from the node's `/s/<code>/…` route for
+   `packages_dir(code)/<archive>`, or a peer): `verify_package(&bytes,
+   &needs, &package, &trust, platform)`, with `trust` the org key and the
+   share owner's publishers. It checks the pinned SHA-256, the signature
+   and every file, the id and version, and `platforms`; it answers the
+   manifest, the verified files and the guest capabilities.
+4. Run it within `guest_capabilities(&manifest.capabilities,
+   needs.hosts_of(id))`: read-only `ShareGuest` documents of the share and
+   the selection, notifications, prompts, menus and badges; no writes, no
+   actions past its own, no folders, ports, language servers or peer
+   connections; `fetch` only to the approved hosts it also asks for. Refuse
+   `[[secrets]]` outright.
+
+Tests: `features/extensions/tests/share_needs.rs`.
+
 ## On each platform
 
 | | Data | WASM | Scripts | Processes |

@@ -695,6 +695,8 @@ const FORWARDED: &[&str] = &[
     "TOOLBAR_BACKUPS",
     "EXT_LIST",
     "EXT_NEEDS",
+    "EXT_SHARE_NEEDS",
+    "EXT_SHARE_NEEDS_SET",
     "EXT_VIEWS",
     "EXT_SEARCH",
     "EXT_INSTALL",

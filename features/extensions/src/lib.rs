@@ -54,6 +54,9 @@ pub mod platform;
 pub mod project;
 pub mod reapack;
 pub mod share_layers;
+pub mod share_needs;
+#[cfg(feature = "host")]
+pub mod share_pick;
 #[cfg(feature = "host")]
 pub mod vault_needs;
 /// `[[favourites]]`: a note type's tabs and primary action.
