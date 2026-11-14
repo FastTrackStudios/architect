@@ -19,7 +19,7 @@ each platform the row claims.
 | Platform | Run it | Capture it |
 |---|---|---|
 | Desktop | `just showcase` (the standard distribution; `just showcase plain` for Architect's own app): a fresh scratch copy of `apps/ui/showcase-vault`, with every folder in `examples/showcase` and the sandbox's outline and surface loaded as development copies (`scripts/showcase.sh`) | `just showcase-shots`: an isolated Loft session per width, 390 px and 1280 px, light and dark, drawn by the app itself (`APP_SHOT`) into `target/showcase/desktop/` (`scripts/showcase-shots.sh`; its steps open vault paths and run actions) |
-| Web | `/app/?showcase`: the web app's demo mode on the same vault, in the tab's memory (`apps/web/src/demo.rs`) | - |
+| Web | `/app/?showcase`: the web app's demo mode on the same vault, in the tab's memory (`apps/web/src/demo.rs`) | `just showcase-web-shots`: the release bundle in a headless Firefox over WebDriver BiDi, 390 px and 1280 px, light and dark (`apps/web/test/app-showcase.test.mjs`, which also checks the vault opens), into `target/showcase/web/` |
 | iOS | a TestFlight build (the iOS workstream) | the simulator on airlock |
 
 The desktop screenshots so far come from `just showcase-shots plain`
