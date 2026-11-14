@@ -5,9 +5,19 @@
 // MessagePort a sandboxed frame's parent hands it. Every call is a
 // host-service request; the host checks it against what the extension was
 // granted, so nothing here is a boundary.
+//
+// The same file is the npm package's `webview-runtime.js`
+// (`@fasttrackstudio/architect/webview` imports it): in a sandboxed frame,
+// where no host can put a script, the app's own bundle installs it.
 (function () {
   "use strict";
   if (window.architect) return;
+  // Only in a web view: a native host's (its transport is there before any
+  // script) or a frame's. A page opened on its own (a dev server's tab) has
+  // no `window.architect`.
+  var native = (window.ipc && window.ipc.postMessage) ||
+    (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.architect);
+  if (!native && window.parent === window) return;
   var next = 1;
   var waiting = new Map();
   var listeners = new Map();
@@ -16,6 +26,9 @@
   var queue = [];
   var port = null;
   var state = { scheme: "dark", shown: true };
+  // A few controls in the app's tokens, so a view looks like Architect with
+  // no framework; every token has a fallback for before the theme arrives.
+  var COMPONENTS = ":root {\n  --arch-bg: var(--background, var(--sheet, Canvas));\n  --arch-fg: var(--foreground, var(--ink, CanvasText));\n  --arch-muted: var(--muted-foreground, var(--ink-3, GrayText));\n  --arch-line: var(--border, var(--rule, rgba(127, 127, 127, 0.3)));\n  --arch-brand: var(--primary, var(--brand, #6c5ce7));\n  --arch-brand-ink: var(--primary-foreground, var(--brand-ink, #fff));\n  --arch-soft: var(--accent, var(--brand-soft, rgba(127, 127, 127, 0.12)));\n  --arch-danger: var(--destructive, var(--danger, #d33));\n  --arch-radius: 8px;\n  --arch-font: var(--font, system-ui, -apple-system, \"Segoe UI\", sans-serif);\n}\nhtml, body { margin: 0; background: var(--arch-bg); color: var(--arch-fg); font: 14px/1.4 var(--arch-font); }\n.arch-button {\n  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;\n  border: 1px solid var(--arch-line); border-radius: var(--arch-radius);\n  background: transparent; color: var(--arch-fg); font: inherit; cursor: pointer;\n}\n.arch-button:hover { background: var(--arch-soft); }\n.arch-button:focus-visible, .arch-input:focus-visible { outline: 2px solid var(--arch-brand); outline-offset: 1px; }\n.arch-button.primary { background: var(--arch-brand); border-color: var(--arch-brand); color: var(--arch-brand-ink); }\n.arch-button.danger { color: var(--arch-danger); }\n.arch-button:disabled { opacity: 0.5; cursor: default; }\n.arch-input {\n  height: 30px; padding: 0 10px; border: 1px solid var(--arch-line); border-radius: var(--arch-radius);\n  background: transparent; color: var(--arch-fg); font: inherit; min-width: 0;\n}\n.arch-card { border: 1px solid var(--arch-line); border-radius: calc(var(--arch-radius) + 4px); padding: 12px 14px; background: var(--arch-bg); }\n.arch-list { list-style: none; margin: 0; padding: 0; }\n.arch-list > li { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border-bottom: 1px solid var(--arch-line); }\n.arch-list > li:last-child { border-bottom: 0; }\n.arch-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--arch-soft); color: var(--arch-muted); font-size: 12px; }\n.arch-muted { color: var(--arch-muted); }\n.arch-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }\n.arch-stack { display: flex; flex-direction: column; gap: 12px; }";
 
   function transport() {
     if (window.ipc && typeof window.ipc.postMessage === "function") {
@@ -115,8 +128,11 @@
     }
   });
 
-  if (window.__architectComponents) {
-    var install = function () { styleSheet("architect-components", window.__architectComponents); };
+  // The component sheet (`.arch-…`), first in the head so the view's own
+  // sheets come after it; a view that wants none sets
+  // `window.__architectNoComponents` before this runs.
+  if (!window.__architectNoComponents) {
+    var install = function () { styleSheet("architect-components", COMPONENTS); };
     if (document.head) install(); else document.addEventListener("DOMContentLoaded", install);
   }
 

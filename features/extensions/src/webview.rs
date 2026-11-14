@@ -373,24 +373,19 @@ pub fn theme_css<'a>(scheme: &str, tokens: impl IntoIterator<Item = (&'a str, &'
     css
 }
 
-/// The small component sheet every view gets (`.arch-…`): a button, an
-/// input, a card, a list, a badge, in the theme's tokens, so a view looks
-/// like the app with no framework. A view's own sheet comes after it.
-pub const COMPONENTS_CSS: &str = include_str!("webview/components.css");
-
-/// The view's runtime: `window.architect`, put in every web view before
-/// its own scripts (wry's initialisation script; WKWebView's user script;
-/// the frame host's boot script).
+/// The view's runtime: `window.architect`, put in every native web view
+/// before its own scripts (wry's initialisation script; WKWebView's user
+/// script), and in a sandboxed frame by the app's own bundle (the npm
+/// package's `webview-runtime.js`, the same file). It installs the small
+/// component sheet every view gets (`.arch-button`, `.arch-input`,
+/// `.arch-card`, `.arch-list`, `.arch-badge`, in the theme's tokens) before
+/// the view's own.
 pub const RUNTIME_JS: &str = include_str!("webview/runtime.js");
 
-/// The script a host puts in a view before its own: [`RUNTIME_JS`], with
-/// [`COMPONENTS_CSS`] for it to install.
+/// The script a native host puts in a view before its own.
 #[must_use]
 pub fn boot_script() -> String {
-    format!(
-        "window.__architectComponents={};\n{RUNTIME_JS}",
-        serde_json::to_string(COMPONENTS_CSS).unwrap_or_else(|_| "\"\"".to_owned())
-    )
+    RUNTIME_JS.to_owned()
 }
 
 // ── Keys and overlays ───────────────────────────────────────────────
@@ -662,8 +657,10 @@ mod tests {
         );
         assert_eq!(css, ":root{color-scheme:light;--brand:#6c5ce7;--ink:rgb(1 2 3);--studio-accent:red;}");
         assert!(theme_css("dark", []).contains("color-scheme:dark"));
-        assert!(COMPONENTS_CSS.contains(".arch-button"));
+        assert!(RUNTIME_JS.contains(".arch-button"));
         assert!(RUNTIME_JS.contains("window.architect"));
+        // The npm package ships the same runtime.
+        assert_eq!(RUNTIME_JS, include_str!("../web/webview-runtime.js"));
     }
 
     #[test]
