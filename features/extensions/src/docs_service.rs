@@ -216,6 +216,9 @@ impl svc::Gate for HostGate {
 pub struct FileData {
     root: Option<PathBuf>,
     memory: Arc<Mutex<BTreeMap<String, BTreeMap<String, Value>>>>,
+    /// With no root: the app's store (a browser's `localStorage`, #495),
+    /// before memory.
+    store: Option<Arc<dyn crate::hostapi::DataStore>>,
 }
 
 impl FileData {
@@ -225,7 +228,19 @@ impl FileData {
         root: Option<PathBuf>,
         memory: Arc<Mutex<BTreeMap<String, BTreeMap<String, Value>>>>,
     ) -> Self {
-        Self { root, memory }
+        Self {
+            root,
+            memory,
+            store: None,
+        }
+    }
+
+    /// With no root, kept in `store` (`Host::with_data_store`) rather
+    /// than in memory.
+    #[must_use]
+    pub fn with_store(mut self, store: Option<Arc<dyn crate::hostapi::DataStore>>) -> Self {
+        self.store = store;
+        self
     }
 
     fn file(&self, ext: &str) -> Option<PathBuf> {
@@ -251,6 +266,9 @@ impl FileData {
     /// error, never read as empty, so no write wipes it.
     fn read(&self, ext: &str) -> Result<BTreeMap<String, Value>, svc::DocsError> {
         let Some(file) = self.file(ext) else {
+            if let Some(store) = &self.store {
+                return Ok(store.load(ext).unwrap_or_default());
+            }
             return Ok(lock(&self.memory).get(ext).cloned().unwrap_or_default());
         };
         let text = match std::fs::read_to_string(&file) {
@@ -268,6 +286,9 @@ impl FileData {
 
     fn write(&self, ext: &str, data: BTreeMap<String, Value>) -> Result<(), svc::DocsError> {
         let Some(file) = self.file(ext) else {
+            if let Some(store) = &self.store {
+                return store.keep(ext, &data).map_err(svc::DocsError::Failed);
+            }
             lock(&self.memory).insert(ext.to_owned(), data);
             return Ok(());
         };
@@ -381,7 +402,7 @@ impl Host {
             Some(d) => Arc::new(AsStore(d)),
             None => Arc::new(NoDocuments),
         };
-        let data = FileData::new(self.data_root(), self.memory_data());
+        let data = FileData::new(self.data_root(), self.memory_data()).with_store(self.data_store());
         let server = svc::DocumentsServer::from_arcs(
             docs,
             Arc::new(data),

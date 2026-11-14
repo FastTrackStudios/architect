@@ -84,7 +84,7 @@ architect-media = { workspace = true, features = ["ui"] }
 # (`architect_distribution::current`, set by `run`), and the host that runs
 # them here as on a desk (src/app/extensions.rs; no Luau in a browser).
 architect-distribution = { workspace = true }
-architect-extensions = { workspace = true, features = ["ui", "linked"] }
+architect-extensions = { workspace = true, features = ["ui", "linked", "crdt"] }
 architect-theme-picker = { workspace = true }
 
 [dev-dependencies]

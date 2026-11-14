@@ -1,0 +1,56 @@
+# The demo's probe extension (`?demo&probe` only, apps/web/src/app/extensions.rs
+# `install_probe`): what the browser tests make host-service calls as. It
+# may read and write the app's documents; it hears each document event.
+id = "web.probe"
+name = "Web probe"
+version = "0.1.0"
+# Linked in (its Rust is apps/web/src/app/extensions.rs `Probe`): a
+# process copy's kind, as every linked extension declares.
+kind = "process"
+api = "0.1"
+description = "The web app's test probe: the document API and extension data, driven from a browser test in the demo."
+authors = ["FastTrackStudios"]
+
+[entry]
+path = "web-probe"
+
+[capabilities]
+reads = ["documents"]
+writes = ["documents"]
+
+[[actions]]
+id = "WEB_PROBE_HEARD"
+name = "Probe: heard"
+description = "Records a document event it heard."
+group = "Probe"
+effect = "read_only"
+
+[[hooks]]
+on = "doc.created"
+action = "WEB_PROBE_HEARD"
+
+[[hooks]]
+on = "doc.saved"
+action = "WEB_PROBE_HEARD"
+
+[[hooks]]
+on = "doc.renamed"
+action = "WEB_PROBE_HEARD"
+
+[[hooks]]
+on = "doc.deleted"
+action = "WEB_PROBE_HEARD"
+
+# A setting of its own, kept as the settings page keeps any (this
+# browser's storage), for the persistence test.
+[[sections]]
+id = "probe"
+title = "Web probe"
+icon = "flask-conical"
+
+[[sections.settings]]
+key = "web.probe.word"
+title = "A word"
+description = "Set by the browser test through the host service."
+control = "text"
+default = ""

@@ -227,6 +227,29 @@ impl OrgVaults {
             .map_err(|e| e.to_string())
     }
 
+    /// The org's slug.
+    #[must_use]
+    pub fn slug(&self) -> String {
+        self.0.slug.clone()
+    }
+
+    /// Writes `text` as the note at `path` (`<vault>/<path in it>`) on the
+    /// node (`Notes::write`): an extension's document change (#495).
+    ///
+    /// # Errors
+    ///
+    /// Not inside a vault, or the node refused the write.
+    pub async fn write(&self, path: &str, text: String) -> Result<(), String> {
+        let (vault, rest) = path
+            .split_once('/')
+            .filter(|(v, r)| !v.is_empty() && !r.is_empty())
+            .ok_or_else(|| format!("{path} is in no vault"))?;
+        self.notes()
+            .write(vault.to_owned(), rest.to_owned(), text)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// Makes a new empty note on the node, at the first of `paths`
     /// (`<vault>/<path in it>`) that no note holds: one made by someone
     /// else since the listing is never written over (`Notes::create`
