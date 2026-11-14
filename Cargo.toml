@@ -8,6 +8,9 @@
 
 [workspace]
 resolver = "2"
+# The standard distribution (#631) is a workspace of its own: it links the
+# core extensions from their repos and patches architect back to this one.
+exclude = ["dist/standard"]
 members = [
     # ── the umbrella crate ────────────────────────────────────────────
     "crates/architect",

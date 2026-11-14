@@ -15,6 +15,15 @@
 //! | `node-image` | the node in `flake.nix`'s `architect-image-prebuilt` | `<folder>-node.tar` (docker-archive) |
 //! | `web` | `scripts/web-bundle.sh`, with the node's `distribution` as `/app/distribution.json` | `web/` |
 //! | `web-image` | the bundle in `flake.nix`'s `architect-web-image-prebuilt` | `<folder>-web.tar` |
+//! | `ios` | `apps/mobile/ios/build-app.sh --device` on a Mac: the phone's app, unsigned (`apps/mobile/ios/deploy-testflight.sh` signs it) | `ios/<App>.app` |
+//! | `ios-sim` | the same for the Simulator, signed ad hoc | `ios-sim/<App>.app` |
+//!
+//! `ios` and `ios-sim` take a crate whose `main` on iOS is
+//! `architect_mobile::run(<its Distribution>)` (`dist/standard`'s is), and
+//! are not part of `all`: they need a Mac with Xcode. The app's identity
+//! is `apps/mobile/ios/Info.plist`'s (the Architect app's) unless
+//! `INFO_PLIST` names another: an iOS binary cannot be asked who it is on
+//! the Mac that built it.
 //!
 //! Who the app is (its name, binary, bundle id, folder, icon) is asked
 //! of the built binary (`<bin> distribution`, `<bin> distribution icon`),
@@ -31,6 +40,11 @@ pub enum Target {
     NodeImage,
     Web,
     WebImage,
+    /// The iPhone and iPad app (a Mac only; not in `all`).
+    Ios,
+    /// The same for the iOS Simulator (a Mac only; not in `all`).
+    IosSim,
+    /// Every target but the iOS ones.
     All,
 }
 
@@ -50,6 +64,9 @@ pub struct Options {
     /// The version written into the desktop entry and Info.plist, and
     /// stamped into the binary (`ARCHITECT_RELEASE_VERSION`).
     pub version: Option<String>,
+    /// Features of the distribution crate to turn on (`--manifest-path`
+    /// only): the standard distribution's node takes `node-wasi`.
+    pub features: Vec<String>,
 }
 
 /// The build-time env `architect-updates` reads as the app's release
@@ -137,6 +154,9 @@ fn build(opts: &Options, node: bool) -> Result<PathBuf, String> {
         cmd.env(RELEASE_VERSION_ENV, stamp(v)?);
     } else {
         cmd.env_remove(RELEASE_VERSION_ENV);
+    }
+    if opts.manifest_path.is_some() && !opts.features.is_empty() {
+        cmd.args(["--features", &opts.features.join(",")]);
     }
     if node {
         // Without the window (no Blitz, wgpu or wayland), and without the
@@ -286,6 +306,137 @@ fn file_title(name: &str) -> String {
     name.chars().filter(char::is_ascii_alphanumeric).collect()
 }
 
+/// The distribution crate's binary for iOS: `--bin`, else the crate's
+/// only binary (`architect-mobile` for this repo).
+fn ios_bin(opts: &Options) -> Result<Option<String>, String> {
+    if let Some(bin) = &opts.bin {
+        return Ok(Some(bin.clone()));
+    }
+    let Some(manifest) = &opts.manifest_path else {
+        return Ok(None);
+    };
+    let manifest = manifest
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let out = Command::new(cargo())
+        .current_dir(root())
+        .args([
+            "metadata",
+            "--no-deps",
+            "--format-version",
+            "1",
+            "--manifest-path",
+        ])
+        .arg(&manifest)
+        .output()
+        .map_err(|e| format!("cargo metadata: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "cargo metadata --manifest-path {}: {}",
+            manifest.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let meta: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
+    let bins = only_bins(&meta, &manifest);
+    match bins.as_slice() {
+        [one] => Ok(Some(one.clone())),
+        [] => Err(format!("{} has no binary", manifest.display())),
+        _ => Err(format!(
+            "{} has several binaries ({}): name one with --bin",
+            manifest.display(),
+            bins.join(", ")
+        )),
+    }
+}
+
+/// The bin targets of the package whose manifest is `manifest`, in
+/// `cargo metadata`'s answer.
+fn only_bins(meta: &serde_json::Value, manifest: &Path) -> Vec<String> {
+    let packages = meta.get("packages").and_then(|p| p.as_array());
+    packages
+        .into_iter()
+        .flatten()
+        .filter(|p| {
+            p.get("manifest_path")
+                .and_then(|m| m.as_str())
+                .is_some_and(|m| Path::new(m) == manifest)
+        })
+        .flat_map(|p| {
+            p.get("targets")
+                .and_then(|t| t.as_array())
+                .into_iter()
+                .flatten()
+        })
+        .filter(|t| {
+            t.get("kind")
+                .and_then(|k| k.as_array())
+                .is_some_and(|k| k.iter().any(|k| k == "bin"))
+        })
+        .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_owned))
+        .collect()
+}
+
+/// The iOS app of the distribution (`device`: the phone's, unsigned;
+/// else the Simulator's, signed ad hoc), built by
+/// `apps/mobile/ios/build-app.sh` and copied into `out/<ios|ios-sim>/`.
+fn ios(opts: &Options, device: bool, out: &Path) -> Result<PathBuf, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("dist ios builds on a Mac with Xcode (airlock)".to_owned());
+    }
+    let mut cmd = Command::new("bash");
+    cmd.arg(root().join("apps/mobile/ios/build-app.sh"));
+    if device {
+        cmd.arg("--device");
+    }
+    cmd.args(["--profile", &opts.profile]);
+    if let Some(m) = &opts.manifest_path {
+        let m = m
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", m.display()))?;
+        cmd.arg("--manifest-path").arg(m);
+    }
+    if let Some(bin) = ios_bin(opts)? {
+        cmd.args(["--bin", &bin]);
+    }
+    if opts.manifest_path.is_some() && !opts.features.is_empty() {
+        cmd.args(["--features", &opts.features.join(",")]);
+    }
+    if let Some(dir) = &opts.target_dir {
+        cmd.env("CARGO_TARGET_DIR", dir);
+    }
+    if let Some(v) = &opts.version {
+        cmd.env(RELEASE_VERSION_ENV, stamp(v)?);
+    } else {
+        cmd.env_remove(RELEASE_VERSION_ENV);
+    }
+    eprintln!("dist: {cmd:?}");
+    let built = cmd
+        .current_dir(root())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("build-app.sh: {e}"))?;
+    if !built.status.success() {
+        return Err("apps/mobile/ios/build-app.sh failed".to_owned());
+    }
+    let app = String::from_utf8_lossy(&built.stdout)
+        .lines()
+        .last()
+        .map(|l| PathBuf::from(l.trim()))
+        .filter(|p| p.is_dir())
+        .ok_or_else(|| "build-app.sh named no app bundle".to_owned())?;
+    let dir = out.join(if device { "ios" } else { "ios-sim" });
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let copy = dir.join(app.file_name().unwrap_or_default());
+    if copy.exists() {
+        std::fs::remove_dir_all(&copy).map_err(|e| format!("{}: {e}", copy.display()))?;
+    }
+    // ditto: the bundle's symlinks and the ad hoc signature kept.
+    run_script(Command::new("ditto").arg(&app).arg(&copy))?;
+    Ok(copy)
+}
+
 /// `cargo xtask dist <targets…>`.
 ///
 /// # Errors
@@ -300,6 +451,14 @@ pub fn run_cli(opts: &Options) -> Result<(), String> {
         .canonicalize()
         .map_err(|e| format!("{}: {e}", opts.out.display()))?;
     let mut made: Vec<(&str, PathBuf)> = Vec::new();
+
+    // The iOS apps: never in `all` (a Mac with Xcode only).
+    if opts.targets.contains(&Target::IosSim) {
+        made.push(("ios_sim", ios(opts, false, &out)?));
+    }
+    if opts.targets.contains(&Target::Ios) {
+        made.push(("ios", ios(opts, true, &out)?));
+    }
 
     let node = if wants(Target::Node)
         || wants(Target::NodeImage)
@@ -404,6 +563,24 @@ pub fn run_cli(opts: &Options) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_ios_binary_is_the_crate_s_own() {
+        let meta = serde_json::json!({ "packages": [
+            { "manifest_path": "/a/Cargo.toml", "targets": [
+                { "name": "standard", "kind": ["lib"] },
+                { "name": "architect-desktop", "kind": ["bin"] },
+            ] },
+            { "manifest_path": "/b/Cargo.toml", "targets": [
+                { "name": "other", "kind": ["bin"] },
+            ] },
+        ] });
+        assert_eq!(
+            super::only_bins(&meta, std::path::Path::new("/a/Cargo.toml")),
+            ["architect-desktop"]
+        );
+        assert!(super::only_bins(&meta, std::path::Path::new("/c/Cargo.toml")).is_empty());
+    }
+
     #[test]
     fn a_title_makes_a_file_name_without_spaces() {
         assert_eq!(super::file_title("Architect Sandbox"), "ArchitectSandbox");

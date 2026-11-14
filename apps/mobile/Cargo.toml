@@ -1,6 +1,6 @@
 [package]
 name = "architect-mobile"
-description = "The Architect app on an iPhone or iPad (Blitz on UIKit); ARCHITECT_SANDBOX=1 runs the dev sandbox. `dx serve --ios` it for hot reload on the simulator."
+description = "The Architect app on an iPhone or iPad (Blitz on UIKit), and `architect_mobile::run(dist)`, the whole `main` of any distribution's iOS app; ARCHITECT_SANDBOX=1 runs the dev sandbox. `dx serve --ios` it for hot reload on the simulator."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,9 @@ wasi = ["architect-app/wasi"]
 
 [dependencies]
 architect-app = { workspace = true }
-# Its Action List on its control socket (src/main.rs `serve_control`).
+# `Distribution`, re-exported: what `run` is handed (#640).
+architect-distribution = { workspace = true }
+# Its Action List on its control socket (src/lib.rs `serve_control`).
 architect = { workspace = true, features = ["action-list"] }
 architect-control = { workspace = true, features = ["server"] }
 architect-shell = { workspace = true, features = ["ui"] }
