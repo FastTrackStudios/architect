@@ -10,6 +10,11 @@
 #   <vault path>             opens it (EXT_OPEN) and shoots it
 #   <ACTION>[@<json args>]   runs the action, then shoots
 #   +<ACTION>[@<json args>]  runs the action, no shot
+#   ^<ACTION>[@<json args>]  runs it again right before each shot (what
+#                            shows only for a moment: a toast)
+#   &<ACTION>[@<json args>]  runs it in the background before each shot
+#                            and shoots while it waits (a prompt, a
+#                            picker, a menu), then dismisses it with Esc
 # A shot is named for its step (the note's or the action's name). Writes
 # target/showcase/desktop/<name>-<width>-<light|dark>.png at the widths in
 # SHOWCASE_WIDTHS (default "390 1280"). Builds nothing: build the binary
@@ -137,8 +142,34 @@ for width in "${widths[@]}"; do
     act run CAPTURE_CLOSE >/dev/null 2>&1 || true
     act run LAB_GO --arg tab=vault >/dev/null 2>&1 || true
 
+    # Runs a step's action (id and JSON args in $2 $3) the way its mode
+    # ($1: ^ again, & in the background) wants, before one shot.
+    pre_shot() {
+        case "$1" in
+            '^')
+                act run "$2" --json "$3" >/dev/null || echo "showcase-shots: $2 failed" >&2
+                sleep 0.4
+                ;;
+            '&')
+                act run "$2" --json "$3" >/dev/null 2>&1 &
+                waiting=$!
+                sleep 1.5
+                ;;
+        esac
+    }
+    # Dismisses what a background step left open (Esc until its run ends).
+    post_shot() {
+        [ "$1" = '&' ] || return 0
+        for _ in 1 2 3 4 5 6; do
+            kill -0 "$waiting" 2>/dev/null || break
+            (cd "$loft" && nix run .#input -- -s "$session" key Escape >/dev/null 2>&1) || true
+            sleep 0.5
+        done
+        kill "$waiting" 2>/dev/null || true
+        wait "$waiting" 2>/dev/null || true
+    }
     shoot() {
-        local name="$1" scheme want
+        local name="$1" mode="${2:-}" id="${3:-}" json="${4:-}" scheme want
         for scheme in light dark; do
             act run THEME_SET --json "{\"appearance\":\"$scheme\",\"layer\":\"pick\"}" >/dev/null
             # The shot is the window as last laid out: wait for the scheme,
@@ -148,10 +179,18 @@ for width in "${widths[@]}"; do
                 [ "$want" = "$scheme" ] && break
                 sleep 0.25
             done
-            sleep 1
-            act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
-            sleep 1
-            act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+            if [ -n "$mode" ]; then
+                pre_shot "$mode" "$id" "$json"
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+                sleep 0.3
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+                post_shot "$mode"
+            else
+                sleep 1
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+                sleep 1
+                act run APP_SHOT --arg "path=$out/$name-$width-$scheme.png" >/dev/null
+            fi
             echo "showcase-shots: $out/$name-$width-$scheme.png"
         done
     }
@@ -159,11 +198,20 @@ for width in "${widths[@]}"; do
 
     for step in "${steps[@]}"; do
         quiet=0
-        case "$step" in +*) quiet=1; step="${step#+}" ;; esac
+        mode=""
+        case "$step" in
+            +*) quiet=1; step="${step#+}" ;;
+            '^'*) mode='^'; step="${step#^}" ;;
+            '&'*) mode='&'; step="${step#&}" ;;
+        esac
         if [[ "$step" =~ ^[A-Z][A-Z0-9_]*(@.*)?$ ]]; then
             id="${step%%@*}"
             json="{}"
             [ "$id" != "$step" ] && json="${step#*@}"
+            if [ -n "$mode" ]; then
+                shoot "$(slug "$id")" "$mode" "$id" "$json"
+                continue
+            fi
             act run "$id" --json "$json" >/dev/null || echo "showcase-shots: $id failed" >&2
             sleep 1.5
             [ "$quiet" = 1 ] || shoot "$(slug "$id")"
