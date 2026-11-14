@@ -6,7 +6,10 @@
 //! row plays it: the whole list becomes one queue on the playhead
 //! (`architect.playhead`, #589), as an app-owned source, so the Now Playing
 //! card shows it, next and previous follow the list, and an item's end
-//! moves on to the next. The playing row is marked.
+//! moves on to the next. The current row's title is the accent; while it
+//! plays its number gives way to the equalizer mark, and paused (or not yet
+//! started: a share link's guest opens with the first song current) it
+//! keeps its number, in the accent, so nothing looks as if it plays.
 //!
 //! After the share page's setlist (`features/sites/assets/site.css`,
 //! `[data-playlist]`) and the Now Playing card: the same grid, art tile,
@@ -57,8 +60,9 @@ const SHEET: &str = "
 .media-list-row[data-plays=\"false\"] .media-list-main > * { opacity: .5; }
 .media-list-row[data-plays=\"false\"] .media-list-main { cursor: default; }
 .media-list-row[aria-current=\"true\"] .media-list-title { color: var(--ml-accent); }
-.media-list-row[aria-current=\"true\"] .media-list-mark { color: transparent; position: relative; }
-.media-list-row[aria-current=\"true\"] .media-list-mark::after { content: \"\"; position: absolute; right: 0; top: 50%; width: 13px; height: 13px; margin-top: -6.5px;
+.media-list-row[data-state=\"paused\"] .media-list-mark { color: var(--ml-accent); font-weight: 600; }
+.media-list-row[data-state=\"playing\"] .media-list-mark { color: transparent; position: relative; }
+.media-list-row[data-state=\"playing\"] .media-list-mark::after { content: \"\"; position: absolute; right: 0; top: 50%; width: 13px; height: 13px; margin-top: -6.5px;
   background: linear-gradient(var(--ml-accent), var(--ml-accent)) 0 100% / 3px 60% no-repeat,
     linear-gradient(var(--ml-accent), var(--ml-accent)) 5px 100% / 3px 100% no-repeat,
     linear-gradient(var(--ml-accent), var(--ml-accent)) 10px 100% / 3px 40% no-repeat; }
