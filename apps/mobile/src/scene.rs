@@ -20,7 +20,7 @@ use std::ptr::NonNull;
 
 use objc2::rc::Retained;
 use objc2::runtime::NSObjectProtocol;
-use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class};
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_foundation::{NSSet, NSURL, NSUserActivity};
 use objc2_ui_kit::{
     UIApplication, UICoordinateSpace, UIOpenURLContext, UIResponder, UIScene,
@@ -48,8 +48,19 @@ define_class!(
         ) {
             join(MainThreadMarker::from(scene));
             // A cold start by a link: the scheme's, or a universal link.
-            open_contexts(&options.URLContexts());
-            for activity in options.userActivities().iter() {
+            // Both sets are nil on a launch without one, though the
+            // bindings declare them non-null (and would panic): read them
+            // as optional.
+            // SAFETY: `URLContexts` and `userActivities` take no arguments
+            // and return an `NSSet` of these element types, or nil.
+            let contexts: Option<Retained<NSSet<UIOpenURLContext>>> =
+                unsafe { msg_send![options, URLContexts] };
+            let activities: Option<Retained<NSSet<NSUserActivity>>> =
+                unsafe { msg_send![options, userActivities] };
+            if let Some(contexts) = contexts {
+                open_contexts(&contexts);
+            }
+            for activity in activities.iter().flat_map(|a| a.iter()) {
                 open_activity(&activity);
             }
         }
