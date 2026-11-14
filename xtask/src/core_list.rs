@@ -1232,7 +1232,8 @@ fn check(root: &Path) -> Result<(), String> {
         let have = std::fs::read_to_string(&path).unwrap_or_default();
         if have != want {
             problems.push(format!(
-                "{STANDARD}/{file} is not what the list makes: run `cargo xtask core sync`"
+                "{STANDARD}/{file} is not what the list makes: run `cargo xtask core sync`\n{}",
+                first_difference(&have, &want)
             ));
         }
     }
@@ -1334,6 +1335,27 @@ fn sync(root: &Path) -> Result<(), String> {
     } else {
         Err(problems.join("\n"))
     }
+}
+
+/// Where `have` and `want` first part, as two numbered lines: what a
+/// check on a machine of its own (a CI runner) needs to say, since it
+/// cannot be diffed there by hand.
+fn first_difference(have: &str, want: &str) -> String {
+    let (mut h, mut w) = (have.lines(), want.lines());
+    for n in 1_usize.. {
+        match (h.next(), w.next()) {
+            (Some(a), Some(b)) if a == b => {}
+            (None, None) => return "  (they differ only in line endings)".to_owned(),
+            (a, b) => {
+                return format!(
+                    "  line {n}: committed {:?}\n  line {n}: the list makes {:?}",
+                    a.unwrap_or("<end>"),
+                    b.unwrap_or("<end>")
+                );
+            }
+        }
+    }
+    String::new()
 }
 
 fn graph(root: &Path) -> Result<(), String> {
