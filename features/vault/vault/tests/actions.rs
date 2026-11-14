@@ -77,7 +77,12 @@ fn a_notes_properties_links_and_tags_read_back() {
             .any(|b| b == "Notes/The app shell.md"),
         "{note}"
     );
-    assert!(note["body"].as_str().unwrap().starts_with("# Welcome"));
+    assert!(
+        note["body"]
+            .as_str()
+            .unwrap()
+            .starts_with("This folder is the lab's vault")
+    );
 }
 
 #[test]

@@ -451,16 +451,17 @@ pub fn PropertiesSheet() -> Element {
             div { style: "display: flex; justify-content: center; padding-bottom: 6px;",
                 div { style: "width: 36px; height: 5px; border-radius: 3px; background: {t.rule};" }
             }
-            div { style: "display: flex; align-items: center; justify-content: flex-end;",
+            div { style: "display: flex; align-items: center; justify-content: space-between; padding: 0 2px 6px;",
+                span { style: "font-size: 17px; font-weight: 650; color: {t.ink};", "Properties" }
                 button {
                     class: "lp",
-                    style: "height: 32px; padding: 0 10px; border: none; background: transparent; color: {t.accent}; \
+                    style: "height: 32px; padding: 0 2px 0 10px; border: none; background: transparent; color: {t.accent}; \
                             font-size: 16px; font-weight: 650;",
                     onclick: move |_| heads.toggle(&done),
                     "Done"
                 }
             }
-            PropertiesPanel { pane, head }
+            PropertiesPanel { pane, head, heading: false }
         }
     }
 }
@@ -468,7 +469,13 @@ pub fn PropertiesSheet() -> Element {
 /// The Properties editor inside the popover or the sheet: focused as it
 /// opens, Escape closes it.
 #[component]
-fn PropertiesPanel(pane: String, head: NoteHead) -> Element {
+fn PropertiesPanel(
+    pane: String,
+    head: NoteHead,
+    /// Says "Properties" over the rows (the sheet says it in its bar).
+    #[props(default = true)]
+    heading: bool,
+) -> Element {
     let t = crate::properties::theme();
     let heads = use_note_heads();
     rsx! {
@@ -486,7 +493,9 @@ fn PropertiesPanel(pane: String, head: NoteHead) -> Element {
                     heads.toggle(&pane);
                 }
             },
-            div { style: "font-size: 12px; font-weight: 650; color: {t.ink_3}; padding: 0 2px 4px;", "Properties" }
+            if heading {
+                div { style: "font-size: 12px; font-weight: 650; color: {t.ink_3}; padding: 0 2px 4px;", "Properties" }
+            }
             PropertiesBar {
                 block: head.block,
                 types: head.types,
