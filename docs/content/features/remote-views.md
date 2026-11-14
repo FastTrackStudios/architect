@@ -172,7 +172,7 @@ rsx! {
 
 - **What crosses.** Two attributes of the element, so the wire needs
   nothing new and Dioxus's diffing decides what is sent. The content goes
-  the first time as `<hash>\n<json>` (anyrender's own commands), and after
+  the first time as `<hash>\n<json>` (a compact form of anyrender's commands: each path as SVG, each colour as RGBA bytes), and after
   that as `<hash>` alone while both sides still hold it: each side keeps
   the last 64 by the same rule (`SceneCache`). The transform is six
   numbers. Panning and zooming change only the transform.
