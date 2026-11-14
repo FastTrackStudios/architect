@@ -63,7 +63,7 @@ frames, nothing an extension author can target. Every web cell below is
 | R3 | A TSX/JS page installed at run time (QuickJS; a Web Worker in browsers) | ✅ Templater-lite's Templates tab, drawn and its New button run in `features/pages/tests/showcase_pages.rs`: [390 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-390-light.png), [390 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-390-dark.png), [1280 light](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-1280-light.png), [1280 dark](https://raw.githubusercontent.com/FastTrackStudios/architect/media/710-showcase/desktop/showcase-templater-open-1280-dark.png) | ❌ the Worker runner exists, no host (#495) | ⚠️ not shown; QuickJS, no JIT | Templater-lite | `features/extensions/tests/showcase.rs`, `features/pages/tests/showcase_pages.rs`, `features/pages/tests/js.rs` |
 | R4 | A WASI component installed at run time | ❌ the release build has no `wasi` feature (#707); runs in a `wasi` build | ❌ #495, and JSPI (no Safari before 27) | ❌ #707 (Pulley once on) | WASI Counter | `features/extensions/tests/wasi.rs`, `features/extensions/tests/wasi_web.rs` |
 | R5 | A process extension | ⚠️ not shown | ❌ by nature; no "desk only" state yet (#578) | ❌ by nature; no "desk only" state yet (#578) | Clicker | `features/extensions/tests/remote_view.rs` |
-| R6 | A web view app in a pane | ❌ #222 | ❌ #222 | ❌ #222 | Web app pane | - |
+| R6 | A web view app in a pane | ⚠️ works on Linux under X11 or XWayland (`ARCHITECT_WEBVIEW_X11=1` under Wayland) in `architect-desktop --features webview`, not in the release build yet; macOS not run | ⚠️ the browser host (`mountWebView`) runs it in a sandboxed iframe; the web app mounts it once it hosts extensions (#495) | ❌ the iOS host (a `WKWebView` in the pane's `UIView`) is not built | Web view board (`examples/extension/webview-board`) | `features/extensions/tests/webview_bridge.rs`, `features/extensions/web/test/webview.test.mjs`; screenshots on the `pr-media/webview-kind` branch |
 | R7 | TypeScript actions with no Rust | ❌ #536 | ❌ #536 | ❌ #536 | - | - |
 
 ## L: install and lifecycle
@@ -157,5 +157,5 @@ note in the showcase vault, which plugins or apps it stands in for.
 | Sync-to-URL | Remotely Save, Git | H6, H5, H11 | planned |
 | Meal plan | Health (#371) | C7, H12, U4, H9, H15, H7 | waits on #708, #709 |
 | Ledger | Finance (#370) | C8, U4, H9, H6, H5, H16, R6 | waits on #583, #222 |
-| Web app pane | third-party TypeScript apps | R6 | waits on #222 |
+| Web view board | third-party TypeScript apps | R6 | `examples/extension/webview-board`: desk under X11/XWayland and a browser frame; iOS waits on its host |
 | Setlist viewer | Studio | R1 | in the standard distribution |
