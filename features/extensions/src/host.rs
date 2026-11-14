@@ -646,7 +646,10 @@ pub enum LoadError {
     Reserved(String),
     /// It does not run on this platform (its manifest's `platforms`,
     /// #578): `why` is "Linux only". It is kept, listed, never started.
-    NotHere { platform: String, why: String },
+    NotHere {
+        platform: String,
+        why: String,
+    },
     /// A service it requires (`[requires]`) has no loaded provider whose
     /// version meets it.
     Requires {

@@ -519,9 +519,7 @@ impl Extensions {
                     && l.dir.as_deref() == runs.package.dir()
             });
             // Tried, and cannot run here (#578): listed, not retried.
-            let stays_out = not_here
-                .iter()
-                .any(|(m, _)| m == &runs.package.manifest);
+            let stays_out = not_here.iter().any(|(m, _)| m == &runs.package.manifest);
             if same || stays_out {
                 continue;
             }
